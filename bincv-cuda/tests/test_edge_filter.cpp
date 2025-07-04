@@ -2,6 +2,7 @@
 #include <opencv2/opencv.hpp>
 #include <filesystem>
 #include "bincv-cuda/edge_filter.hpp"
+#include "bincv-cuda/util.hpp"
 
 int main() {
     std::string imagePath = std::filesystem::path(__FILE__).parent_path().string()
@@ -18,18 +19,24 @@ int main() {
     int width = input.cols;
     int height = input.rows;
 
-    cv::Mat output(height, width, CV_8UC1, cv::Scalar(0));
+    cv::Mat horEdges(height, width, CV_8UC1, cv::Scalar(0));
+    cv::Mat verEdges(height, width, CV_8UC1, cv::Scalar(0));
 
-    // Run CUDA horizontal edge filter
-    bincv::runHorizontalEdgeFilter(input.data, output.data, width, height, threshold);
+    // Run CUDA edge filters
+    bincv::horizontalEdgeFilter8b(input.data, horEdges.data, width, height, threshold);
+    bincv::verticalEdgeFilter8b(input.data, verEdges.data, width, height, threshold);
+
+    // Normalize the output to 8-bit
+    cv::Mat normHorEdges(height, width, CV_8UC1, cv::Scalar(0));
+    cv::Mat normVerEdges(height, width, CV_8UC1, cv::Scalar(0));
+    bincv::util::norm_1b_to_uint8(horEdges.data, normHorEdges.data, width, height);
+    bincv::util::norm_1b_to_uint8(verEdges.data, normVerEdges.data, width, height);
 
     // Save or show result
-    std::string outputDir = std::filesystem::current_path().string() + "/tests/output";
-    std::filesystem::create_directories(outputDir);
-
-    std::string outputPath = outputDir + "/output_edge.png";
-    cv::imwrite(outputPath, output);
-    std::cout << "Saved output image to " << outputPath << std::endl;
+    bincv::util::save_test_image("horizontal_edges.png", normHorEdges.data, width, height);
+    bincv::util::save_test_image("vertical_edges.png", normVerEdges.data, width, height);
+    std::cout << "Saved output image: horizontal_edges.png" << std::endl;
+    std::cout << "Saved output image: vertical_edges.png" << std::endl;
 
     return 0;
 }

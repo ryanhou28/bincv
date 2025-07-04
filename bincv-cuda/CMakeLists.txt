@@ -36,5 +36,8 @@ find_package(OpenCV REQUIRED)
 message(STATUS "OpenCV version: ${OpenCV_VERSION}")
 message(STATUS "OpenCV include path: ${OpenCV_INCLUDE_DIRS}")
 
+target_include_directories(bincv_cuda PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(bincv_cuda PRIVATE ${OpenCV_LIBS})
+
 enable_testing()
 add_subdirectory(tests)
