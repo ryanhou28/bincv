@@ -171,9 +171,24 @@ public:
     // @note Prints in row-major order.
     void printInternalData(bool hex = false) const;
 
-    // @todo: add a function to determine the number of non-zero pixels
-    // @todo: add a function to determine the sparsity of the matrix
-    // @todo: add a function fill() to fill with a specific value
+    // fill
+    //
+    // @brief Fills the entire BinMat with the given binary value.
+    void fill(bool value);
+
+    // countNonZero
+    //
+    // @brief Counts the number of non-zero (set) pixels in the matrix.
+    // @return The total number of 1s in the matrix.
+    int countNonZero() const;
+
+    // sparsity
+    //
+    // @brief Returns the sparsity ratio (fraction of zero pixels).
+    // @return A float in [0.0, 1.0] representing how sparse the matrix is.
+    // @note Empty matrices have undefined sparsity and will throw an exception.
+    float sparsity() const;
+
     // @todo: add functions or representations for sparse formats e.g. CSR/CSC
 
 private:

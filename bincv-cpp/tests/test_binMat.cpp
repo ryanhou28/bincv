@@ -103,6 +103,48 @@ int main() {
         std::cout << "  (" << y << ", " << x << ")\n";
     });
 
+    // Fill
+    tmat.fill(false);
+    std::cout << "After fill(false):\n";
+    tmat.printMatrix();
+
+    // Count non-zero
+    int nonZeroCount = tmat.countNonZero();
+    std::cout << "Count of non-zero pixels: " << nonZeroCount << "\n";
+    if (nonZeroCount != 0) {
+        std::cerr << "CountNonZero test failed\n";
+    } else {
+        std::cout << "CountNonZero test passed\n";
+    }
+
+    // Sparsity
+    float sparsity = tmat.sparsity();
+    std::cout << "Sparsity of matrix: " << sparsity << "\n";
+    if (sparsity != 1.0f) {
+        std::cerr << "Sparsity test failed\n";
+    } else {
+        std::cout << "Sparsity test passed\n";
+    }
+
+    // Fill again with 1s
+    tmat.fill(true);
+    nonZeroCount = tmat.countNonZero();
+    std::cout << "Count of non-zero pixels after fill(true): " << nonZeroCount << "\n";
+    if (nonZeroCount != tmat.width() * tmat.height()) {
+        std::cerr << "CountNonZero after fill(true) test failed\n";
+    } else {
+        std::cout << "CountNonZero after fill(true) test passed\n";
+    }
+
+    // Sparsity after fill(true)
+    sparsity = tmat.sparsity();
+    std::cout << "Sparsity of matrix after fill(true): " << sparsity << "\n";
+    if (sparsity != 0.0f) {
+        std::cerr << "Sparsity after fill(true) test failed\n";
+    } else {
+        std::cout << "Sparsity after fill(true) test passed\n";
+    }
+
     std::cout << "\n--- Additional BinMat Case Tests ---\n";
 
     // Empty BinMat

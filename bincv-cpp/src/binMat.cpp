@@ -255,4 +255,43 @@ void BinMat::printInternalData(bool hex) const {
     std::cout << std::dec;  // Reset output stream to decimal
 }
 
+void BinMat::fill(bool value) {
+    if (width_ == 0 || height_ == 0)
+        return;
+
+    uint8_t fill_byte = value ? 0xFF : 0x00;
+
+    for (int y = 0; y < height_; ++y) {
+        uint8_t* row = mat_.ptr<uint8_t>(y);
+        std::fill(row, row + stride_bytes_, fill_byte);
+    }
+}
+
+// @todo: This could potentially be optimized
+int BinMat::countNonZero() const {
+    if (width_ == 0 || height_ == 0)
+        return 0;
+
+    int count = 0;
+    for (int y = 0; y < height_; ++y) {
+        const uint8_t* row = mat_.ptr<uint8_t>(y);
+        for (int x = 0; x < width_; ++x) {
+            if (row[detail::byte_index(x)] & detail::bit_mask(x)) {
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
+float BinMat::sparsity() const {
+    int total_pixels = width_ * height_;
+    if (total_pixels == 0)
+        throw std::runtime_error("Sparsity is undefined for empty BinMat");
+
+    int nonzero = countNonZero();
+    return 1.0f - static_cast<float>(nonzero) / total_pixels;
+}
+
+
 } // namespace bincv
