@@ -190,6 +190,7 @@ public:
     float sparsity() const;
 
     // @todo: add functions or representations for sparse formats e.g. CSR/CSC
+    // @todo: Consider adding "channels" support for multi-channel binary images
 
 private:
 

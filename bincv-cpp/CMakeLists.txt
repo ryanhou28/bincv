@@ -20,5 +20,8 @@ add_library(bincv_cpp STATIC ${BINCVC_SRC_FILES})
 target_link_libraries(bincv_cpp PUBLIC ${OpenCV_LIBS})
 target_include_directories(bincv_cpp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# Add tests
+# Add tests directory
 add_subdirectory(tests)
+
+# Add benchmarks directory
+add_subdirectory(benchmark)
