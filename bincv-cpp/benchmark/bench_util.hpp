@@ -1,41 +1,96 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <stdexcept>
 #include <opencv2/opencv.hpp>
 #include "bincv-cpp/binMat.hpp"
 
 namespace bench {
 
+struct Config {
+    int width = 640;
+    int height = 480;
+    int iterations = 100;
+    float sparsity = 1.0f;
+    std::string dtype = "uint8";  // "binary", "uint8", "float32"
+    // Note: "binary" is still uint8, except the values are 0 or 1
+};
+
+inline Config parseArgs(int argc, char* argv[]) {
+    Config cfg;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--width") cfg.width = std::stoi(argv[++i]);
+        else if (arg == "--height") cfg.height = std::stoi(argv[++i]);
+        else if (arg == "--iterations") cfg.iterations = std::stoi(argv[++i]);
+        else if (arg == "--dtype") cfg.dtype = argv[++i];
+        else if (arg == "--sparsity") cfg.sparsity = std::stof(argv[++i]);
+        else throw std::invalid_argument("Unknown argument: " + arg);
+    }
+
+    std::cout << "=== Benchmark Config ===\n";
+    std::cout << "Width: " << cfg.width << ", Height: " << cfg.height
+              << ", Iterations: " << cfg.iterations
+              << ", DType: " << cfg.dtype << ", Sparsity: " << cfg.sparsity << "\n";
+
+    return cfg;
+}
+
+// --- Matrix Init Helpers ---
+
+inline void fillCVMat(cv::Mat& mat, float value) {
+    if (mat.type() == CV_8UC1)
+        mat.setTo(cv::Scalar(static_cast<uint8_t>(value)));
+    else if (mat.type() == CV_32FC1)
+        mat.setTo(cv::Scalar(static_cast<float>(value)));
+}
+
+inline void randomizeCVMat(cv::Mat& mat, float maxVal = 1.0f) {
+    if (mat.type() == CV_8UC1)
+        cv::randu(mat, 0, static_cast<uint8_t>(maxVal));
+    else if (mat.type() == CV_32FC1)
+        cv::randu(mat, 0.0f, maxVal);
+}
+
+inline void setRandomBinMat(bincv::BinMat& mat, float fillRatio = 0.1f) {
+    int w = mat.width(), h = mat.height();
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            if ((rand() / float(RAND_MAX)) < fillRatio)
+                mat.set(y, x, true);
+}
+
+// --- Benchmark Wrapper ---
+
 using Clock = std::chrono::high_resolution_clock;
 
-inline void benchmark(const std::string& name, int iterations, const std::function<void()>& func) {
+inline void benchmark(const std::string& name, int iterations, const std::function<void()>& fn) {
     auto start = Clock::now();
-    for (int i = 0; i < iterations; ++i) {
-        func();
-    }
+    for (int i = 0; i < iterations; ++i)
+        fn();
     auto end = Clock::now();
     double ms = std::chrono::duration<double, std::milli>(end - start).count();
     std::cout << "[BENCH] " << name << " - Avg: " << (ms / iterations) << " ms over " << iterations << " runs\n";
 }
 
-inline void fillCVMat(cv::Mat& mat, uint8_t value) {
-    mat.setTo(cv::Scalar(value));
+// --- Memory Usage (Linux only) ---
+// @TODO: Memory usage might be better captured by other tools (such as valgrind). Need more investigation.
+#ifdef __linux__
+#include <sys/resource.h>
+inline size_t getCurrentRSS() {
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    return usage.ru_maxrss; // kilobytes
 }
-
-inline void randomizeCVMat(cv::Mat& mat, int maxVal) {
-    cv::randu(mat, 0, maxVal);
+inline void printMemoryUsage(const std::string& label = "") {
+    std::cout << "[MEM] " << label << " RSS: " << (getCurrentRSS() / 1024.0) << " MB\n";
 }
+#endif
 
-inline void setRandomBinMat(bincv::BinMat& mat, float fillRatio = 0.1f) {
-    int w = mat.width();
-    int h = mat.height();
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            if ((rand() / float(RAND_MAX)) < fillRatio) {
-                mat.set(y, x, true);
-            }
-        }
-    }
-}
-
-} // namespace bench
+}  // namespace bench
