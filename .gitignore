@@ -1,2 +1,3 @@
 bincv-cuda/build/*
 bincv-cpp/build/*
+bincv-cpp/results/
