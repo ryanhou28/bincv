@@ -3,27 +3,36 @@
 #include <opencv2/core.hpp>
 #include <cstdint>
 #include <iostream>
+#include <type_traits>
+#include <stdexcept>
+#include <functional>
 
 namespace bincv {
 
 namespace detail {
 
-// Helper function to calculate byte index
-// Computes which byte in the row contains the pixel at column x.
-static inline int byte_index(int x) {
-    return x >> 3; // x / 8
+// Helper function to calculate word index
+// Computes which word in the row contains the pixel at column x.
+template <typename WordType>
+static inline int word_index(int x) {
+    static_assert(std::is_unsigned<WordType>::value, "WordType must be unsigned");
+    return x / (8 * sizeof(WordType));
 }
 
-// Helper function to calculate bit mask
+// Helper function to create a bit mask with a 1 at the bit corresponding to column x.
 // Creates a bitmask where the bit corresponding to column x is set to 1, and all others are 0.
 // @note Indexing starts with LSB->MSB, so bit 0 is the least significant bit.
-static inline uint8_t bit_mask(int x) {
-    return 1 << (x & 7);
+template <typename WordType>
+static inline WordType bit_mask(int x) {
+    return WordType(1) << (x % (8 * sizeof(WordType)));
 }
 
 } // namespace detail
 
+template <typename WordType = uint64_t>
 class BinMat {
+    static_assert(std::is_unsigned<WordType>::value, "WordType must be an unsigned integral type");
+
 public:
     // Constructors
     BinMat();
@@ -40,6 +49,7 @@ public:
     // @brief Converts a cv::Mat to a BinMat.
     // @param mat The input cv::Mat, must be of type CV_8UC (for now)
     // @note Any nonzero pixel in the input cv::Mat will be set to 1 in the BinMat.
+    // @todo: Support other types like CV_32FC1, etc.
     void fromCVMat(const cv::Mat& mat);
 
     // toCVMat
@@ -47,6 +57,7 @@ public:
     // @brief Converts the BinMat to a cv::Mat.
     // @param mat The output cv::Mat, will be of type CV_8UC
     // @note Each pixel will maintain its original value
+    // @todo Support other types like CV_32FC1, etc.
     void toCVMat(cv::Mat& mat) const;
 
     // toCVMatNormalized
@@ -54,6 +65,7 @@ public:
     // @brief Converts the BinMat to a cv::Mat with normalized values.
     // @param mat The output cv::Mat, will be of type CV_8UC
     // @note Each pixel will be set to 255 if it is 1 in the BinMat, otherwise it will be set to 0.
+    // @todo Support other types like CV_32FC1, etc.
     void toCVMatNormalized(cv::Mat& mat) const;
 
     // @todo add multi-element / slicing access that indexes by BinMat range
@@ -65,8 +77,8 @@ public:
         if (row < 0 || row >= height_ || col < 0 || col >= width_) {
             throw std::out_of_range("BinMat::at: index out of range");
         }
-        const uint8_t* row_ptr = mat_.ptr<uint8_t>(row);
-        return (row_ptr[detail::byte_index(col)] & detail::bit_mask(col)) != 0;
+        const WordType* row_ptr = mat_.ptr<WordType>(row);
+        return (row_ptr[detail::word_index<WordType>(col)] & detail::bit_mask<WordType>(col)) != 0;
     }
 
     // set
@@ -76,14 +88,14 @@ public:
         if (row < 0 || row >= height_ || col < 0 || col >= width_) {
             throw std::out_of_range("BinMat::set: index out of range");
         }
-        uint8_t* row_ptr = mat_.ptr<uint8_t>(row);
-        uint8_t& byte = row_ptr[detail::byte_index(col)];
-        uint8_t mask = detail::bit_mask(col);
+        WordType* row_ptr = mat_.ptr<WordType>(row);
+        WordType& word = row_ptr[detail::word_index<WordType>(col)];
+        WordType mask = detail::bit_mask<WordType>(col);
 
         if (value) {
-            byte |= mask;   // set bit
+            word |= mask;   // set bit
         } else {
-            byte &= ~mask;  // clear bit
+            word &= ~mask;  // clear bit
         }
     }
 
@@ -97,14 +109,14 @@ public:
     // @brief Gets a const pointer to the start of the specified row.
     // @note Out of bounds access is not protected and may lead to undefined behavior.
     //    This is intended for performance-sensitive code where bounds are checked externally.
-    const uint8_t* ptr(int row) const;
+    const WordType* ptr(int row) const;
 
     // ptr
     //
     // @brief Gets a pointer to the start of the specified row.
     // @note Out of bounds access is not protected and may lead to undefined behavior.
     //    This is intended for performance-sensitive code where bounds are checked externally.
-    uint8_t* ptr(int row);
+    WordType* ptr(int row);
 
     // resize
     //
@@ -142,9 +154,9 @@ public:
             throw std::runtime_error("BinMat is empty, cannot iterate over non-zero pixels");
         }
         for (int y = 0; y < height_; ++y) {
-            const uint8_t* row = mat_.ptr<uint8_t>(y);
+            const WordType* row = mat_.ptr<WordType>(y);
             for (int x = 0; x < width_; ++x) {
-                if (row[detail::byte_index(x)] & detail::bit_mask(x)) {
+                if (row[detail::word_index<WordType>(x)] & detail::bit_mask<WordType>(x)) {
                     callback(y, x);
                 }
             }
@@ -199,8 +211,8 @@ private:
     int height_;
     int stride_bytes_;  // number of bytes per row (aligned for SIMD/CUDA)
 
-    // Internal storage: row-wise packed 1-bit pixels, 8 per byte
-    // size: height_ × stride_bytes_, type = CV_8UC1
+    // Internal storage: row-wise packed 1-bit pixels, where each row is a multiple of WordType size.
+    // size: height_ × stride_bytes_
     cv::Mat mat_;
 };
 
