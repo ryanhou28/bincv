@@ -44,24 +44,18 @@ public:
     int strideBytes() const { return stride_bytes_; }
     const cv::Mat& getCVMat() const { return mat_; }
 
-    // fromCVMat
-    // 
     // @brief Converts a cv::Mat to a BinMat.
     // @param mat The input cv::Mat, must be of type CV_8UC (for now)
     // @note Any nonzero pixel in the input cv::Mat will be set to 1 in the BinMat.
     // @todo: Support other types like CV_32FC1, etc.
     void fromCVMat(const cv::Mat& mat);
 
-    // toCVMat
-    // 
     // @brief Converts the BinMat to a cv::Mat.
     // @param mat The output cv::Mat, will be of type CV_8UC
     // @note Each pixel will maintain its original value
     // @todo Support other types like CV_32FC1, etc.
     void toCVMat(cv::Mat& mat) const;
 
-    // toCVMatNormalized
-    //
     // @brief Converts the BinMat to a cv::Mat with normalized values.
     // @param mat The output cv::Mat, will be of type CV_8UC
     // @note Each pixel will be set to 255 if it is 1 in the BinMat, otherwise it will be set to 0.
@@ -70,8 +64,6 @@ public:
 
     // @todo add multi-element / slicing access that indexes by BinMat range
 
-    // at
-    //
     // @brief Gets a single element at (row, col). Not a reference.
     inline bool at(int row, int col) const {
         if (row < 0 || row >= height_ || col < 0 || col >= width_) {
@@ -81,8 +73,6 @@ public:
         return (row_ptr[detail::word_index<WordType>(col)] & detail::bit_mask<WordType>(col)) != 0;
     }
 
-    // set
-    //
     // @brief Sets a single element at (row, col) to value.
     inline void set(int row, int col, bool value) {
         if (row < 0 || row >= height_ || col < 0 || col >= width_) {
@@ -104,22 +94,16 @@ public:
     // @note Users need to be careful as they expose the internal storage directly
     //   can need to deal with pixel alignment and byte packing.
 
-    // ptr
-    //
     // @brief Gets a const pointer to the start of the specified row.
     // @note Out of bounds access is not protected and may lead to undefined behavior.
     //    This is intended for performance-sensitive code where bounds are checked externally.
     const WordType* ptr(int row) const;
 
-    // ptr
-    //
     // @brief Gets a pointer to the start of the specified row.
     // @note Out of bounds access is not protected and may lead to undefined behavior.
     //    This is intended for performance-sensitive code where bounds are checked externally.
     WordType* ptr(int row);
 
-    // resize
-    //
     // @brief Resizes the BinMat to given dimensions.
     // @note For smaller sizes, it will clear the existing data.
     // @note For larger sizes, it will zero-fill the new area, appending rows
@@ -127,26 +111,18 @@ public:
     // @note To extend size at specific dimensions, use pad() instead.
     void resize(int new_width, int new_height);
 
-    // pad
-    //
     // @brief Pads the BinMat with given value at sides with non-zero padding.
     // @note Zero-padding unless value is specified as true.
     void pad(int top, int bottom, int left, int right, bool value = false);
 
-    // transposed
-    //
     // @brief Returns a transposed version of the BinMat.
     // @note The original BinMat remains unchanged.
     BinMat transposed() const;
 
-    // transpose
-    //
     // @brief Transposes the BinMat in-place.
     // @note The BinMat dimensions and data are updated.
     void transpose();
 
-    // forEachNonZero
-    //
     // @brief Iterates over all non-zero pixels in the BinMat and applies the callback function.
     template <typename Func>
     void forEachNonZero(Func callback) const {
@@ -163,39 +139,27 @@ public:
         }
     }
 
-    // printMatrix
-    //
     // @brief Prints the binary values as a human-readable matrix.
     // @note Output uses 0/1 per pixel, with rows and columns corresponding to image layout.
     // @note Prints in row-major order.
     void printMatrix() const;
 
-    // operator<<
-    // 
     // @brief Overload stream operator to print BinMat
     // @note Prints in row-major order.
     friend std::ostream& operator<<(std::ostream& os, const BinMat& binmat);
 
-    // printInternalData
-    //
     // @brief Prints the packed bytes of internal storage row by row.
     // @param hex If true, prints each byte in hex. Otherwise, prints decimal.
     // @note Prints in row-major order.
     void printInternalData(bool hex = false) const;
 
-    // fill
-    //
     // @brief Fills the entire BinMat with the given binary value.
     void fill(bool value);
 
-    // countNonZero
-    //
     // @brief Counts the number of non-zero (set) pixels in the matrix.
     // @return The total number of 1s in the matrix.
     int countNonZero() const;
 
-    // sparsity
-    //
     // @brief Returns the sparsity ratio (fraction of zero pixels).
     // @return A float in [0.0, 1.0] representing how sparse the matrix is.
     // @note Empty matrices have undefined sparsity and will throw an exception.
