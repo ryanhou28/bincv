@@ -9,40 +9,49 @@
 
 namespace bincv {
 
-namespace detail {
-
-// Helper function to calculate word index
-// Computes which word in the row contains the pixel at column x.
-template <typename WordType>
-static inline int word_index(int x) {
-    static_assert(std::is_unsigned<WordType>::value, "WordType must be unsigned");
-    return x / (8 * sizeof(WordType));
-}
-
-// Helper function to create a bit mask with a 1 at the bit corresponding to column x.
-// Creates a bitmask where the bit corresponding to column x is set to 1, and all others are 0.
-// @note Indexing starts with LSB->MSB, so bit 0 is the least significant bit.
-template <typename WordType>
-static inline WordType bit_mask(int x) {
-    return WordType(1) << (x % (8 * sizeof(WordType)));
-}
-
-} // namespace detail
-
-template <typename WordType = uint64_t>
+/// @brief A binary matrix class that stores binary data in a packed format using OpenCV's cv::Mat.
+/// @tparam WordSize The size of the word (in bits) used for packing binary pixels..
+///         Currently supported values are 8, 16, 32, and 64.
+/// @note Currently the underlying storage is OpenCV's cv::Mat, and it seems that 32-bit words are optimized more.
+template <size_t WordSize = 32>
 class BinMat {
-    static_assert(std::is_unsigned<WordType>::value, "WordType must be an unsigned integral type");
+    // Ensure WordSize is one of the supported sizes
+    static_assert(
+        WordSize == 8 || WordSize == 16 || WordSize == 32 || WordSize == 64,
+        "WordSize must be one of: 8, 16, 32, or 64 bits");
+
+    // Deduce the correct word type based on WordSize
+    using WordType = typename std::conditional<
+        WordSize == 8, uint8_t,
+        typename std::conditional<
+            WordSize == 16, uint16_t,
+            typename std::conditional<
+                WordSize == 32, uint32_t,
+                typename std::conditional<WordSize == 64, uint64_t, void>::type
+            >::type
+        >::type
+    >::type;
 
 public:
     // Constructors
     BinMat();
-    BinMat(int width, int height);
+
+    // @param width Width of the matrix in pixels
+    // @param height Height of the matrix in pixels
+    // @param memAlignment Number of bytes to align the row stride to.
+    //        Must be a positive power of 2, default is 32 bytes.
+    BinMat(size_t width, size_t height, size_t rowAlignment = 32);
+
+    // Ensure rowAlignment is a positive power of 2
+    static_assert(
+        (WordSize & (WordSize - 1)) == 0 && WordSize > 0,
+        "WordSize must be a positive power of 2");
 
     // Accessors
-    int width() const { return width_; }
-    int height() const { return height_; }
-    int strideBytes() const { return stride_bytes_; }
-    const cv::Mat& getCVMat() const { return mat_; }
+    size_t width() const { return width; }
+    size_t height() const { return height; }
+    size_t rowAlignment() const { return rowAlignment; }
+    const cv::Mat& getCVMat() const { return mat; }
 
     // @brief Converts a cv::Mat to a BinMat.
     // @param mat The input cv::Mat, must be of type CV_8UC (for now)
@@ -50,7 +59,7 @@ public:
     // @todo: Support other types like CV_32FC1, etc.
     void fromCVMat(const cv::Mat& mat);
 
-    // @brief Converts the BinMat to a cv::Mat.
+    // @brief Converts the BinMat to a cv::Mat where each pixel is either 0 or 1.
     // @param mat The output cv::Mat, will be of type CV_8UC
     // @note Each pixel will maintain its original value
     // @todo Support other types like CV_32FC1, etc.
@@ -64,30 +73,12 @@ public:
 
     // @todo add multi-element / slicing access that indexes by BinMat range
 
-    // @brief Gets a single element at (row, col). Not a reference.
-    inline bool at(int row, int col) const {
-        if (row < 0 || row >= height_ || col < 0 || col >= width_) {
-            throw std::out_of_range("BinMat::at: index out of range");
-        }
-        const WordType* row_ptr = mat_.ptr<WordType>(row);
-        return (row_ptr[detail::word_index<WordType>(col)] & detail::bit_mask<WordType>(col)) != 0;
-    }
+    // @brief Gets the value of a single element at (row, col). Not a reference.
+    // @todo should the arguments be of type int?
+    inline bool at(int row, int col) const;
 
     // @brief Sets a single element at (row, col) to value.
-    inline void set(int row, int col, bool value) {
-        if (row < 0 || row >= height_ || col < 0 || col >= width_) {
-            throw std::out_of_range("BinMat::set: index out of range");
-        }
-        WordType* row_ptr = mat_.ptr<WordType>(row);
-        WordType& word = row_ptr[detail::word_index<WordType>(col)];
-        WordType mask = detail::bit_mask<WordType>(col);
-
-        if (value) {
-            word |= mask;   // set bit
-        } else {
-            word &= ~mask;  // clear bit
-        }
-    }
+    inline void set(int row, int col, bool value);
 
     // Fast row-level access to packed bytes via pointers
     // @brief Needed for efficient access to values when being more performant
@@ -113,6 +104,7 @@ public:
 
     // @brief Pads the BinMat with given value at sides with non-zero padding.
     // @note Zero-padding unless value is specified as true.
+    // @todo Add support for "replicate" padding modes
     void pad(int top, int bottom, int left, int right, bool value = false);
 
     // @brief Returns a transposed version of the BinMat.
@@ -125,19 +117,7 @@ public:
 
     // @brief Iterates over all non-zero pixels in the BinMat and applies the callback function.
     template <typename Func>
-    void forEachNonZero(Func callback) const {
-        if (width_ == 0 || height_ == 0) {
-            throw std::runtime_error("BinMat is empty, cannot iterate over non-zero pixels");
-        }
-        for (int y = 0; y < height_; ++y) {
-            const WordType* row = mat_.ptr<WordType>(y);
-            for (int x = 0; x < width_; ++x) {
-                if (row[detail::word_index<WordType>(x)] & detail::bit_mask<WordType>(x)) {
-                    callback(y, x);
-                }
-            }
-        }
-    }
+    void forEachNonZero(Func callback) const;
 
     // @brief Prints the binary values as a human-readable matrix.
     // @note Output uses 0/1 per pixel, with rows and columns corresponding to image layout.
@@ -170,14 +150,23 @@ public:
 
 private:
 
-    // Dimensions are in pixels
-    int width_;
-    int height_;
-    int stride_bytes_;  // number of bytes per row (aligned for SIMD/CUDA)
+    // Dimensions are in number of pixels
+    size_t width;
+    size_t height;
+    size_t rowAlignment;  // number of bytes to align the size of each row to for performance
+    size_t alignedWidth; // number of words in a row in internal storage, aligned to rowAlignment bytes
+
+    // @todo Consider defining cvType used in ::impl functions as a static constant since it is known at compile time
+
+    // @note Each row is padded such that its size aligns with the chosen memory alignment.
+    //       Thus, width stores the number of pixels in each row, while rowBytes stores the actual
+    //       number of bytes used for each row in the internal storage, which is aligned to rowAlignment.
 
     // Internal storage: row-wise packed 1-bit pixels, where each row is a multiple of WordType size.
-    // size: height_ × stride_bytes_
-    cv::Mat mat_;
+    // Dimension of the matrix is height by the row-aligned width
+    cv::Mat mat;
 };
 
 } // namespace bincv
+
+#include "impl/binMat_impl.hpp"
