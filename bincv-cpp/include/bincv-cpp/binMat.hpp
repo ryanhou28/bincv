@@ -1,89 +1,114 @@
 #pragma once
 
-#include <opencv2/core.hpp>
 #include <cstdint>
+#include <cstddef>
 #include <iostream>
 #include <type_traits>
 #include <stdexcept>
-#include <functional>
+#include <vector>
+#include "core/types.hpp"
+
+// OpenCV integration is optional and provided behind a compile-time switch.
+// The core library never requires OpenCV; see CMakeLists.txt.
+#ifdef BINCV_WITH_OPENCV
+#include <opencv2/core.hpp>
+#endif
 
 namespace bincv {
 
-/// @brief A binary matrix class that stores binary data in a packed format using OpenCV's cv::Mat.
-/// @tparam WordSize The size of the word (in bits) used for packing binary pixels..
-///         Currently supported values are 8, 16, 32, and 64.
-/// @note Currently the underlying storage is OpenCV's cv::Mat, and it seems that 32-bit words are optimized more.
-template <size_t WordSize = 32>
+/// @brief A binary matrix storing one bit per pixel, packed into words.
+/// @tparam WordType The unsigned integral type used to pack pixels.
+///         Supported: uint8_t, uint16_t, uint32_t (default), uint64_t.
+/// @note Parameterizing on the storage word *type* (rather than a bit count)
+///       follows boost::dynamic_bitset<Block> and cv::Mat_<T>. The bit width is
+///       derived as WordBits, so the type never has to be recovered from a number.
+/// @note The underlying storage is std::vector for embedded compatibility.
+///       32-bit words typically provide optimal performance on most platforms.
+template <typename WordType_>
 class BinMat {
-    // Ensure WordSize is one of the supported sizes
-    static_assert(
-        WordSize == 8 || WordSize == 16 || WordSize == 32 || WordSize == 64,
-        "WordSize must be one of: 8, 16, 32, or 64 bits");
-
-    // Deduce the correct word type based on WordSize
-    using WordType = typename std::conditional<
-        WordSize == 8, uint8_t,
-        typename std::conditional<
-            WordSize == 16, uint16_t,
-            typename std::conditional<
-                WordSize == 32, uint32_t,
-                typename std::conditional<WordSize == 64, uint64_t, void>::type
-            >::type
-        >::type
-    >::type;
+    static_assert(std::is_integral<WordType_>::value && std::is_unsigned<WordType_>::value,
+                  "WordType must be an unsigned integral type");
+    static_assert(sizeof(WordType_) == 1 || sizeof(WordType_) == 2 ||
+                  sizeof(WordType_) == 4 || sizeof(WordType_) == 8,
+                  "WordType must be 8, 16, 32, or 64 bits wide");
 
 public:
+    /// The storage word type, exposed for pointer-level access.
+    using WordType = WordType_;
+
+    /// Number of pixels packed into a single word.
+    static constexpr size_t WordBits = sizeof(WordType) * 8;
+
     // Constructors
+
+    /// @brief Constructs an empty matrix with no allocated storage.
     BinMat();
 
-    // @param width Width of the matrix in pixels
-    // @param height Height of the matrix in pixels
-    // @param memAlignment Number of bytes to align the row stride to.
-    //        Must be a positive power of 2, default is 32 bytes.
-    BinMat(size_t width, size_t height, size_t rowAlignment = 32);
-
-    // Ensure rowAlignment is a positive power of 2
-    static_assert(
-        (WordSize & (WordSize - 1)) == 0 && WordSize > 0,
-        "WordSize must be a positive power of 2");
+    /// @brief Constructs a zero-filled matrix.
+    /// @param width Width of the matrix in pixels
+    /// @param height Height of the matrix in pixels
+    /// @param rowAlignment Number of bytes to align each row's stride to.
+    ///        Must be a positive power of two; default is 32 bytes (AVX2 / cache friendly).
+    /// @throws std::invalid_argument if dimensions are negative or alignment is invalid.
+    BinMat(int width, int height, size_t rowAlignment = 32);
 
     // Accessors
-    size_t width() const { return width; }
-    size_t height() const { return height; }
-    size_t rowAlignment() const { return rowAlignment; }
-    const cv::Mat& getCVMat() const { return mat; }
+    size_t getWidth() const { return width; }
+    size_t getHeight() const { return height; }
+    size_t getRowAlignment() const { return rowAlignment; }
+    Size getSize() const { return Size(static_cast<int>(width), static_cast<int>(height)); }
+
+    /// @brief Number of words allocated per row, including alignment padding.
+    size_t getAlignedWidth() const { return alignedWidth; }
+
+    /// @brief True if the matrix has no pixels.
+    bool empty() const { return width == 0 || height == 0; }
+
+    // OpenCV-compatible aliases
+    int rows() const { return static_cast<int>(height); }
+    int cols() const { return static_cast<int>(width); }
+
+    /// @brief Raw access to the packed storage, for bulk/SIMD operations.
+    const WordType* data() const { return storage.data(); }
+    WordType* data() { return storage.data(); }
+
+    /// @brief Total number of words in the backing store (height * alignedWidth).
+    size_t sizeInWords() const { return storage.size(); }
+
+#ifdef BINCV_WITH_OPENCV
+    // OpenCV interoperability (only available when BINCV_WITH_OPENCV is defined)
 
     // @brief Converts a cv::Mat to a BinMat.
-    // @param mat The input cv::Mat, must be of type CV_8UC (for now)
+    // @param mat The input cv::Mat, must be of type CV_8UC1 (for now)
     // @note Any nonzero pixel in the input cv::Mat will be set to 1 in the BinMat.
     // @todo: Support other types like CV_32FC1, etc.
     void fromCVMat(const cv::Mat& mat);
 
     // @brief Converts the BinMat to a cv::Mat where each pixel is either 0 or 1.
-    // @param mat The output cv::Mat, will be of type CV_8UC
+    // @param mat The output cv::Mat, will be of type CV_8UC1
     // @note Each pixel will maintain its original value
     // @todo Support other types like CV_32FC1, etc.
     void toCVMat(cv::Mat& mat) const;
 
     // @brief Converts the BinMat to a cv::Mat with normalized values.
-    // @param mat The output cv::Mat, will be of type CV_8UC
-    // @note Each pixel will be set to 255 if it is 1 in the BinMat, otherwise it will be set to 0.
+    // @param mat The output cv::Mat, will be of type CV_8UC1
+    // @note Each pixel will be set to 255 if it is 1 in the BinMat, otherwise 0.
     // @todo Support other types like CV_32FC1, etc.
     void toCVMatNormalized(cv::Mat& mat) const;
+#endif // BINCV_WITH_OPENCV
 
     // @todo add multi-element / slicing access that indexes by BinMat range
 
     // @brief Gets the value of a single element at (row, col). Not a reference.
-    // @todo should the arguments be of type int?
-    inline bool at(int row, int col) const;
+    bool at(int row, int col) const;
 
     // @brief Sets a single element at (row, col) to value.
-    inline void set(int row, int col, bool value);
+    void set(int row, int col, bool value);
 
-    // Fast row-level access to packed bytes via pointers
+    // Fast row-level access to packed words via pointers
     // @brief Needed for efficient access to values when being more performant
     // @note Users need to be careful as they expose the internal storage directly
-    //   can need to deal with pixel alignment and byte packing.
+    //   and need to deal with pixel alignment and word packing.
 
     // @brief Gets a const pointer to the start of the specified row.
     // @note Out of bounds access is not protected and may lead to undefined behavior.
@@ -100,7 +125,7 @@ public:
     // @note For larger sizes, it will zero-fill the new area, appending rows
     //    and columns as needed at larger indices.
     // @note To extend size at specific dimensions, use pad() instead.
-    void resize(int new_width, int new_height);
+    void resize(int newWidth, int newHeight);
 
     // @brief Pads the BinMat with given value at sides with non-zero padding.
     // @note Zero-padding unless value is specified as true.
@@ -115,7 +140,7 @@ public:
     // @note The BinMat dimensions and data are updated.
     void transpose();
 
-    // @brief Iterates over all non-zero pixels in the BinMat and applies the callback function.
+    // @brief Iterates over all non-zero pixels, invoking callback(row, col).
     template <typename Func>
     void forEachNonZero(Func callback) const;
 
@@ -124,12 +149,8 @@ public:
     // @note Prints in row-major order.
     void printMatrix() const;
 
-    // @brief Overload stream operator to print BinMat
-    // @note Prints in row-major order.
-    friend std::ostream& operator<<(std::ostream& os, const BinMat& binmat);
-
-    // @brief Prints the packed bytes of internal storage row by row.
-    // @param hex If true, prints each byte in hex. Otherwise, prints decimal.
+    // @brief Prints the packed words of internal storage row by row.
+    // @param hex If true, prints each word in hex. Otherwise, prints decimal.
     // @note Prints in row-major order.
     void printInternalData(bool hex = false) const;
 
@@ -149,22 +170,27 @@ public:
     // @todo: Consider adding "channels" support for multi-channel binary images
 
 private:
+    // @brief Zeroes the padding bits beyond `width` in every row.
+    // @note Bulk word-wise operations (fill, and future bitwise/popcount ops) write
+    //       whole words, which can set bits past the end of a row. Those bits must stay
+    //       zero or countNonZero and friends would over-count once they go word-wise.
+    void clearTrailingBits();
 
     // Dimensions are in number of pixels
     size_t width;
     size_t height;
-    size_t rowAlignment;  // number of bytes to align the size of each row to for performance
-    size_t alignedWidth; // number of words in a row in internal storage, aligned to rowAlignment bytes
+    size_t rowAlignment;  // bytes each row's stride is aligned to, for performance
+    size_t alignedWidth;  // words per row in internal storage, aligned to rowAlignment bytes
 
-    // @todo Consider defining cvType used in ::impl functions as a static constant since it is known at compile time
+    // @note Each row is padded such that its stride aligns with the chosen memory alignment.
+    //       width stores the number of pixels in each row, while alignedWidth stores the
+    //       actual number of words used for each row in the internal storage.
+    // @todo rowAlignment currently aligns only the row *stride*. Aligning the base pointer
+    //       too (for aligned SIMD loads) requires a custom aligned allocator.
 
-    // @note Each row is padded such that its size aligns with the chosen memory alignment.
-    //       Thus, width stores the number of pixels in each row, while rowBytes stores the actual
-    //       number of bytes used for each row in the internal storage, which is aligned to rowAlignment.
-
-    // Internal storage: row-wise packed 1-bit pixels, where each row is a multiple of WordType size.
-    // Dimension of the matrix is height by the row-aligned width
-    cv::Mat mat;
+    // Internal storage: row-wise packed 1-bit pixels, height * alignedWidth words.
+    // Using std::vector for embedded compatibility (no OpenCV dependency in core).
+    std::vector<WordType> storage;
 };
 
 } // namespace bincv

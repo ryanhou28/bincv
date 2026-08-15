@@ -25,25 +25,27 @@ Build the world's fastest binary image processing library by exploiting bit-pack
 
 ## Current Status
 
+**Phase 0 is complete.** The core builds and passes its tests with no OpenCV present.
+
 ### Working
-- ✅ Templated `BinMat` class with 8/16/32/64-bit word sizes
+- ✅ `BinMat<WordType>` templated on the storage word **type** (uint8/16/32/64, default uint32_t)
+- ✅ Core is OpenCV-free; interop lives behind `BINCV_WITH_OPENCV`
+- ✅ CMake auto-configures OpenCV, SIMD capability, and build type
 - ✅ Basic operations: fill, resize, padding, transpose (slow)
-- ✅ OpenCV conversion (with bugs)
+- ✅ Test suite: 282 checks across all four word widths, wired into `ctest`
 - ✅ Benchmarking infrastructure
-- ✅ Fill operation 1.2-4.3× faster than OpenCV
+- ✅ Measured 7.83× memory reduction vs OpenCV `CV_8U`
 
-### Broken
-- ❌ **3 critical compilation bugs** (must fix first)
-- ❌ Transpose 50-175× SLOWER than OpenCV (naive implementation)
-- ❌ No SIMD optimization
-- ❌ No formal testing framework
-
-### Missing
+### Broken / Missing
+- ❌ Transpose ~70× SLOWER than OpenCV (naive per-pixel; Phase 1.3)
+- ❌ No SIMD optimization — capability is detected but no vector kernels exist
+- ❌ `countNonZero` still loops per pixel instead of using popcount
 - ❌ Core bitwise operations (AND, OR, XOR, NOT)
 - ❌ Morphological operations (erode, dilate, open, close)
-- ❌ Connected components
-- ❌ Distance transform
+- ❌ Connected components, distance transform
+- ❌ Google Test (currently a minimal in-repo assertion harness)
 - ❌ Python bindings
+- ❌ ARM cross-compilation not yet exercised
 
 ---
 
@@ -316,15 +318,23 @@ ls -lh test_binMat
 4. **Update README.md:** Add embedded use case examples
 
 **Phase 0 Completion Criteria:**
-- ✅ Core builds without OpenCV (`-DCMAKE_DISABLE_FIND_PACKAGE_OpenCV=ON`)
-- ✅ Desktop workflow unchanged (just add `#include <bincv/opencv.hpp>`)
-- ✅ All existing tests pass
-- ✅ External buffer wrapping works
-- ✅ Cross-compiles for ARM
-- ✅ Binary size measured (<100KB for core + scalar ops)
-- ✅ CMake auto-configuration working
+- ✅ Core builds without OpenCV (`-DBINCV_USE_OPENCV=OFF`), verified: 0 OpenCV
+      libraries linked, core test suite passes
+- ✅ Desktop workflow unchanged (OpenCV auto-detected, interop enabled)
+- ✅ All tests pass (`ctest`: 2/2 suites, 282 + 21 checks)
+- ✅ CMake auto-configuration working (OpenCV, SIMD, build type)
+- ⬜ External buffer wrapping (deferred — see below)
+- ⬜ Cross-compiles for ARM (not yet exercised)
+- ⬜ Binary size target for core + scalar ops
+      (core-only test binary currently 151 KB, but that includes the test suite)
 
-**Estimated Effort:** 2-3 days
+**Deferred from Phase 0:** the non-owning external-buffer constructor
+(`BinMat(rows, cols, WordType* data, size_t step)`) and `ownsMemory()`. These
+matter for wrapping DMA/sensor buffers on embedded targets, but nothing in the
+current codebase depends on them, so they were not needed to unblock Phase 1.
+Adding them means splitting storage into an owning `std::vector` plus a
+`WordType*`/`bool` pair — a change worth making alongside the first operation
+that actually consumes an external buffer.
 
 ---
 
@@ -334,31 +344,33 @@ ls -lh test_binMat
 
 **Note:** Phase 0 must be completed first.
 
-#### 1.1 Fix Critical Bugs
+#### 1.1 Fix Critical Bugs — ✅ DONE (in Phase 0)
 
-**Priority: CRITICAL - Must be done first**
+The compilation bugs previously listed here described code that the Phase 0
+refactor rewrote, so they no longer exist. What was actually fixed:
 
-1. **Fix `fromCVMat()` undefined variables**
-   - Location: [binMat_impl.hpp:42](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp)
-   - Problem: References undefined `mat_` instead of `mat`
-   - Fix: Change all `mat_` to `mat` in function body
+1. **Template parameterization conflict** — `core/types.hpp` forward-declared
+   `BinMat` on a type while the class was defined on a `size_t` bit count.
+   Resolved by standardizing on the **type** (`BinMat<uint32_t>`), matching
+   `boost::dynamic_bitset<Block>` and `cv::Mat_<T>`.
 
-2. **Fix template specialization scope issues**
-   - Location: [binMat_impl.hpp:156+](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp)
-   - Problem: Missing `BinMat::` scope qualifier in template specializations
-   - Fix: Add `BinMat<WordSize>::` prefix to all specialized methods
+2. **Six methods referencing the removed `cv::Mat` member** (`transposed`,
+   `forEachNonZero`, `printMatrix`, `printInternalData`, `fill`, `countNonZero`)
+   — repointed at the `std::vector` storage.
 
-3. **Fix `forEachNonZero()` namespace error**
-   - Location: [binMat_impl.hpp:345](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp)
-   - Problem: References `detail::bitMask` instead of `impl::bitMask`
-   - Fix: Change namespace from `detail` to `impl`
+3. **`WordType` inaccessible to `impl::` helpers** — dissolved by the type
+   parameterization; helpers now template on the word type directly.
+
+4. **`toCVMatHelper` declared with member-template syntax** as a free function.
+
+5. **Row padding bits could be set by `fill(true)`/`pad(..., true)`**, which
+   would have made word-wise popcount over-count. Added `clearTrailingBits()`.
 
 **Verification:**
 ```bash
-cd bincv-cpp/build
-make clean
-make -j$(nproc)  # Should compile without errors
-./test_binMat    # Should pass
+cmake -S bincv-cpp -B bincv-cpp/build -DCMAKE_BUILD_TYPE=Release
+cmake --build bincv-cpp/build -j$(nproc)
+cd bincv-cpp/build && ctest --output-on-failure
 ```
 
 #### 1.2 Testing Infrastructure
@@ -1326,22 +1338,25 @@ perf report
 
 ## Next Actions
 
-### Immediate (Phase 0 - Core Refactoring)
-1. Create `bincv/core/types.hpp` with Size struct and enums
-2. Refactor BinMat to use `std::vector` instead of `cv::Mat`
-3. Add external buffer constructor for embedded
-4. Create `bincv/opencv.hpp` with conversion functions
-5. Update CMake for optional OpenCV
-6. Update all existing code to use `bincv::Size`
-7. Split tests into core and OpenCV-dependent
-8. Cross-compile for ARM and measure binary size
+### Phase 0 - Core Refactoring — ✅ COMPLETE
+1. ✅ Create `bincv/core/types.hpp` with Size struct and enums
+2. ✅ Refactor BinMat to use `std::vector` instead of `cv::Mat`
+3. ⬜ Add external buffer constructor for embedded (deferred, see Phase 0 above)
+4. ✅ OpenCV conversion behind `BINCV_WITH_OPENCV`
+   (kept as `BinMat` members rather than a separate `opencv.hpp`; revisit if the
+   interop surface grows beyond the three conversion functions)
+5. ✅ Update CMake for optional OpenCV
+6. ✅ Update all existing code to use `bincv::Size`
+7. ✅ Split tests into core and OpenCV-dependent
+8. ⬜ Cross-compile for ARM and measure binary size
 
-### Next Steps (Phase 1)
-1. Fix 3 critical compilation bugs
-2. Set up Google Test framework
-3. Create golden test files
-4. Implement cache-blocked transpose
-5. Implement scalar bitwise operations
+### Immediate (Phase 1)
+1. Implement scalar bitwise operations (AND, OR, XOR, NOT) — first real
+   validation of the 10× thesis, and the building block for morphology
+2. Replace `countNonZero`'s per-pixel loop with word-wise popcount
+3. Implement cache-blocked / bit-parallel transpose (currently ~36-71× slower)
+4. Set up Google Test, replacing `tests/test_util.hpp`
+5. Create golden test files
 
 ### Future Work
 1. SIMD implementations (AVX2, NEON)

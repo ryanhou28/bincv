@@ -1,3 +1,8 @@
 bincv-cuda/build/*
 bincv-cpp/build/*
 bincv-cpp/results/
+
+# Alternate build trees (core-only, cross-compiled, etc.)
+build*/
+bincv-cpp/build*/
+bincv-cuda/build*/

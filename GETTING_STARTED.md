@@ -142,82 +142,87 @@ cd bincv-cpp/build
 
 ## Current Performance
 
-### Status (256×256 images)
+Measured in **Release** mode, sparsity 0.5, 100 iterations. Earlier numbers in
+`results/*.log` were produced without a pinned build type and are not comparable.
 
-| Operation | OpenCV | binCV | Status |
-|-----------|--------|-------|--------|
-| Fill | 0.003 ms | 0.002 ms | ✅ 1.5× faster |
-| Transpose | 0.003 ms | **0.19-0.52 ms** | ❌ 50-175× SLOWER |
-| Set 1000 pixels | 0.011 ms | 0.015 ms | ⚠️ 1.3× slower |
+**256x256**
 
-**Critical Issues:**
-- ✅ Fill is optimized
-- ❌ Transpose uses naive pixel-by-pixel (must fix)
-- ⚠️ Element access has bit-unpacking overhead
+| Operation | OpenCV | binCV | Ratio |
+|-----------|--------|-------|-------|
+| fill | 0.0024 ms | 0.00019 ms | 12.6x faster |
+| set 1000 px | 0.0033 ms | 0.0010 ms | 3.2x faster |
+| resize | 0.069 ms | 0.200 ms | 2.9x slower |
+| transpose | 0.0029 ms | 0.208 ms | **71x slower** |
+
+**1024x1024**
+
+| Operation | OpenCV | binCV | Ratio |
+|-----------|--------|-------|-------|
+| fill | 0.0225 ms | 0.0021 ms | 10.5x faster |
+| set 1000 px | 0.0036 ms | 0.0029 ms | 1.2x faster |
+| resize | 0.540 ms | 3.62 ms | 6.7x slower |
+| transpose | 0.110 ms | 3.97 ms | **36x slower** |
+
+**Memory:** 7.83x reduction on the sample image (46 KB vs 361 KB), close to the
+theoretical 8x -- the gap is row-stride alignment padding.
+
+### Reading these numbers
+
+`fill` is the only operation that currently exploits bit packing: it writes whole
+words over contiguous storage, so it gets roughly the memory-traffic win the
+architecture predicts.
+
+Everything else still loops **pixel by pixel**, paying bit-extraction cost per
+pixel while OpenCV moves whole bytes. `transpose` and `resize` are slower than
+OpenCV for exactly this reason, and no amount of tuning fixes that shape -- they
+need bit-parallel algorithms (Phase 1.3), not micro-optimization.
+
+So the 10-100x thesis is **not yet demonstrated**. The operations that would
+demonstrate it -- bitwise AND/OR/XOR, popcount-based `countNonZero`, morphology
+-- are not implemented. `fill` is the existence proof that the approach works
+when an operation is written word-wise.
 
 ---
 
-## Critical Bugs (Fix First!)
+## Build Configurations
 
-### 1. `fromCVMat()` Undefined Variables
-
-**Location:** [bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp:42](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp)
-
-**Problem:**
-```cpp
-// Bug: References undefined `mat_` instead of `mat`
-data_ = cv::Mat(mat_.rows, ...) // Wrong!
-```
-
-**Fix:**
-```cpp
-data_ = cv::Mat(mat.rows, ...)  // Correct
-```
-
-Change all `mat_` to `mat` in function body.
-
-### 2. Template Specialization Scope Issues
-
-**Location:** [bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp:156+](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp)
-
-**Problem:**
-```cpp
-// Bug: Missing BinMat:: scope qualifier
-template<> bool at<uint32_t>(...) { ... } // Wrong!
-```
-
-**Fix:**
-```cpp
-template<> bool BinMat::at<uint32_t>(...) { ... } // Correct
-```
-
-Add `BinMat<WordSize>::` prefix to all specialized methods.
-
-### 3. `forEachNonZero()` Namespace Error
-
-**Location:** [bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp:345](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp)
-
-**Problem:**
-```cpp
-// Bug: References wrong namespace
-if (word & detail::bitMask[bit]) // Wrong!
-```
-
-**Fix:**
-```cpp
-if (word & impl::bitMask[bit])   // Correct
-```
-
-Change `detail` to `impl`.
-
-### Verify Fixes
-
+### Desktop (OpenCV auto-detected)
 ```bash
-cd bincv-cpp/build
-make clean
-make -j$(nproc)  # Should compile without errors
-./test_binMat    # Should pass
+cmake -S bincv-cpp -B bincv-cpp/build -DCMAKE_BUILD_TYPE=Release
+cmake --build bincv-cpp/build -j$(nproc)
+cd bincv-cpp/build && ctest --output-on-failure
 ```
+
+### Core-only / embedded (no OpenCV)
+```bash
+cmake -S bincv-cpp -B bincv-cpp/build-noocv \
+      -DCMAKE_BUILD_TYPE=Release -DBINCV_USE_OPENCV=OFF
+cmake --build bincv-cpp/build-noocv -j$(nproc)
+cd bincv-cpp/build-noocv && ctest --output-on-failure
+```
+
+CMake prints a configuration summary showing the detected platform, build type,
+SIMD capability, and whether OpenCV interop is enabled.
+
+**Options:** `BINCV_USE_OPENCV` (default ON), `BINCV_BUILD_TESTS` (ON),
+`BINCV_BUILD_BENCHMARKS` (ON, skipped automatically without OpenCV).
+
+Benchmarks are only built with OpenCV, since they measure against it.
+
+---
+
+## Testing
+
+Tests use a minimal in-repo harness (`tests/test_util.hpp`) that reports
+failures with file/line and returns a non-zero exit code, so `ctest` catches
+regressions. Google Test is planned for Phase 1.2.
+
+- `tests/test_binMat.cpp` — core suite, no OpenCV. Runs the full behavioural
+  contract against all four word widths.
+- `tests/test_opencv_interop.cpp` — cv::Mat round-trips, built only with OpenCV.
+
+Add core tests to the first and OpenCV-dependent ones to the second; keeping
+them separate is what makes the embedded build verifiable.
 
 ---
 
@@ -245,8 +250,8 @@ make -j$(nproc)  # Should compile without errors
 ### Code Architecture
 
 ```
-BinMat<WordType>
-├── Storage: cv::Mat (OpenCV compatible)
+BinMat<WordType>          // WordType = uint8_t/uint16_t/uint32_t (default)/uint64_t
+├── Storage: std::vector<WordType> (no OpenCV dependency)
 ├── Layout: Row-major, bit-packed into words
 ├── Alignment: 32 bytes (cache-line aligned)
 └── Operations:
@@ -456,11 +461,13 @@ int main() {
 ## Next Steps
 
 ### Immediate Actions
-1. Fix 3 critical compilation bugs
-2. Verify existing tests pass
-3. Set up Google Test framework
-4. Create test utilities
-5. Add 20+ basic tests
+Phase 0 is done — the core compiles, tests pass, and it builds without OpenCV.
+Next up (Phase 1):
+1. Implement scalar bitwise operations (AND, OR, XOR, NOT) — the first real test
+   of the performance thesis
+2. Replace `countNonZero`'s per-pixel loop with word-wise popcount
+3. Implement cache-blocked / bit-parallel transpose
+4. Swap the in-repo test harness for Google Test
 
 ### Short Term
 1. Implement cache-blocked transpose

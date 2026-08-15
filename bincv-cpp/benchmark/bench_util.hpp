@@ -58,8 +58,9 @@ inline void randomizeCVMat(cv::Mat& mat, float maxVal = 1.0f) {
         cv::randu(mat, 0.0f, maxVal);
 }
 
-inline void setRandomBinMat(bincv::BinMat& mat, float fillRatio = 0.1f) {
-    int w = mat.width(), h = mat.height();
+template <typename WordType>
+inline void setRandomBinMat(bincv::BinMat<WordType>& mat, float fillRatio = 0.1f) {
+    int w = mat.cols(), h = mat.rows();
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
             if ((rand() / float(RAND_MAX)) < fillRatio)

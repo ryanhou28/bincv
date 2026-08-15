@@ -1,87 +1,92 @@
-namespace bincv {
+#pragma once
 
-// @todo There are several instances of repeated index lookups when doing for-loops.
-//       Need to refactor the code to make it cleaner.
+#include <algorithm>
+#include <ostream>
+
+namespace bincv {
 
 namespace impl {
 
-// Helper function to calculate word index
-// Computes which word in the row contains the pixel at column x.
-static inline int wordIndex(int x, size_t WordSize) {
-    return x / WordSize;
+// These helpers are templated directly on the storage word type, so they never
+// need to reach back into BinMat to recover it.
+
+/// @brief Number of pixels packed into one word of the given type.
+template <typename WordType>
+constexpr size_t bitsPerWord() {
+    return sizeof(WordType) * 8;
 }
 
-// Helper function to create a bit mask with a 1 at the bit corresponding to column x.
-// Creates a bitmask where the bit corresponding to column x is set to 1, and all others are 0.
-// @note Indexing starts with LSB->MSB, so bit 0 is the least significant bit.
-static inline typename BinMat<WordSize>::WordType bitMask(int x, size_t WordSize) {
-    return static_cast<typename BinMat<WordSize>::WordType>(1) << (x % WordSize);
+/// @brief Index of the word within a row that holds the pixel at column x.
+template <typename WordType>
+inline size_t wordIndex(size_t x) {
+    return x / bitsPerWord<WordType>();
 }
 
-// Determine the number of elements a row should have to align with the chosen memory alignment.
-static inline size_t calcAlignedWidth(size_t width, size_t alignment, size_t WordSize) {
-    size_t rowBits = width * WordSize;
-
-    // Align rowBits to the specified alignment. I.e., round up to the nearest multiple of alignment.
-    size_t remainder = rowBits % alignment;
-    if (remainder == 0) {
-        return rowBits / WordSize;
-    } else {
-        return (rowBits + alignment - remainder) / WordSize;
-    }
+/// @brief Mask with a single 1 at the bit corresponding to column x.
+/// @note Indexing runs LSB->MSB, so column 0 is the least significant bit.
+template <typename WordType>
+inline WordType bitMask(size_t x) {
+    return static_cast<WordType>(1) << (x % bitsPerWord<WordType>());
 }
 
-// Find a OpenCV data type based on the WordSize.
-// @todo: we should do profiling to see which OpenCV type is more performant
-static inline int cvTypeFromWordSize(size_t wordSize) {
-    switch (wordSize) {
-        case 8: return CV_8U;
-        case 16: return CV_16U;
-        case 32: return CV_32F;
-        case 64: return CV_64F;
-        default: throw std::invalid_argument("Unsupported WordSize");
-    }
-
+/// @brief Mask covering bits [0, n) of a word; n == bitsPerWord yields all ones.
+template <typename WordType>
+inline WordType lowBitsMask(size_t n) {
+    if (n == 0) return static_cast<WordType>(0);
+    if (n >= bitsPerWord<WordType>()) return static_cast<WordType>(~static_cast<WordType>(0));
+    return static_cast<WordType>((static_cast<WordType>(1) << n) - 1);
 }
 
-template <typename PixelTransform>
-inline void BinMat<WordSize>::toCVMatHelper(cv::Mat& output, size_t WordSize, PixelTransform transform) const {
-    if (width == 0 || height == 0) {
-        // Return an empty matrix if dimensions are zero
-        output = cv::Mat();
-        return;
-    }
+/// @brief Words per row so that the row stride meets the requested byte alignment.
+template <typename WordType>
+inline size_t calcAlignedWidth(size_t widthPixels, size_t alignmentBytes) {
+    constexpr size_t bitsPerWordV = bitsPerWord<WordType>();
+    constexpr size_t bytesPerWord = sizeof(WordType);
 
-    output = cv::Mat::zeros(height, width, CV_8U);
-    for (size_t y = 0; y < height; ++y) {
-        const WordType* row_in = mat.ptr<WordType>(y);
-        uint8_t* row_out = output.ptr<uint8_t>(y);
-        for (size_t x = 0; x < width; ++x) {
-            bool value = (row_in[impl::wordIndex(x)] & impl::bitMask(x)) != 0;
-            row_out[x] = transform(value);
-        }
-    }
+    // Words needed to hold the row's pixels (one bit each), rounded up
+    size_t wordsNeeded = (widthPixels + bitsPerWordV - 1) / bitsPerWordV;
+    size_t rowBytes = wordsNeeded * bytesPerWord;
+
+    // Round the row stride up to the requested byte alignment
+    size_t alignedBytes = ((rowBytes + alignmentBytes - 1) / alignmentBytes) * alignmentBytes;
+
+    return alignedBytes / bytesPerWord;
 }
 
 } // namespace impl
 
-template <size_t WordSize>
-BinMat::BinMat()
-    : width(0), height(0), rowAlignment(32), alignedWidth(0), mat() {}
+// Constructors
+template <typename WordType_>
+BinMat<WordType_>::BinMat()
+    : width(0), height(0), rowAlignment(32), alignedWidth(0), storage() {}
 
-template <size_t WordSize>
-BinMat::BinMat(size_t width, size_t height, size_t rowAlignment)
-    : width(width), height(height), rowAlignment(rowAlignment) {
+template <typename WordType_>
+BinMat<WordType_>::BinMat(int w, int h, size_t rowAlign)
+    : width(0), height(0), rowAlignment(rowAlign), alignedWidth(0), storage() {
 
-    alignedWidth = impl::calcAlignedWidth(width, rowAlignment, WordSize);
+    if (w < 0 || h < 0) {
+        throw std::invalid_argument("BinMat dimensions must be non-negative");
+    }
+    if (rowAlign == 0 || (rowAlign & (rowAlign - 1)) != 0) {
+        throw std::invalid_argument("BinMat rowAlignment must be a positive power of two");
+    }
+    if (rowAlign % sizeof(WordType) != 0) {
+        throw std::invalid_argument("BinMat rowAlignment must be a multiple of the word size");
+    }
 
-    int cvType = impl::cvTypeFromWordSize(WordSize);
+    width = static_cast<size_t>(w);
+    height = static_cast<size_t>(h);
+    alignedWidth = impl::calcAlignedWidth<WordType>(width, rowAlignment);
 
-    mat = cv::Mat::zeros(height, alignedWidth, cvType);
+    // Allocate zero-initialized storage
+    storage.assign(height * alignedWidth, 0);
 }
 
-template <size_t WordSize>
-void BinMat::fromCVMat(const cv::Mat& input) {
+#ifdef BINCV_WITH_OPENCV
+// OpenCV interoperability implementations
+
+template <typename WordType_>
+void BinMat<WordType_>::fromCVMat(const cv::Mat& input) {
     if (input.empty()) {
         throw std::invalid_argument("Input cv::Mat is empty");
     }
@@ -89,55 +94,96 @@ void BinMat::fromCVMat(const cv::Mat& input) {
         throw std::invalid_argument("Input cv::Mat must be of type CV_8UC1");
     }
 
-    width = input.cols;
-    height = input.rows;
+    width = static_cast<size_t>(input.cols);
+    height = static_cast<size_t>(input.rows);
+    alignedWidth = impl::calcAlignedWidth<WordType>(width, rowAlignment);
 
-    alignedWidth = impl::calcAlignedWidth(width, rowAlignment, WordSize);
-
-    int cvType = impl::cvTypeFromWordSize(WordSize);
-
-    mat = cv::Mat::zeros(height, alignedWidth, cvType);
+    // Allocate zero-initialized storage
+    storage.assign(height * alignedWidth, 0);
 
     for (size_t y = 0; y < height; ++y) {
-        const BinMat<WordSize>::WordType* row_in = input.ptr<BinMat<WordSize>::WordType>(y);
-        BinMat<WordSize>::WordType* row_out = mat_.ptr<BinMat<WordSize>::WordType>(y);
-        for (size_t x = 0; x < alignedWidth; ++x) {
-            if (row_in[x]) {
-                row_out[impl::wordIndex(x, WordSize)] |= impl::wordIndex(x, WordSize);
+        const uint8_t* rowIn = input.ptr<uint8_t>(static_cast<int>(y));
+        WordType* rowOut = &storage[y * alignedWidth];
+        for (size_t x = 0; x < width; ++x) {
+            if (rowIn[x]) {
+                rowOut[impl::wordIndex<WordType>(x)] |= impl::bitMask<WordType>(x);
             }
         }
     }
 }
 
+// Shared unpacking loop for the two cv::Mat conversions; `transform` maps a bit
+// to the output pixel value.
+template <typename WordType, typename PixelTransform>
+inline void toCVMatHelper(const BinMat<WordType>& binmat, cv::Mat& output, PixelTransform transform) {
+    if (binmat.empty()) {
+        output = cv::Mat();
+        return;
+    }
+
+    output = cv::Mat::zeros(binmat.rows(), binmat.cols(), CV_8U);
+    for (int y = 0; y < binmat.rows(); ++y) {
+        const WordType* rowIn = binmat.ptr(y);
+        uint8_t* rowOut = output.ptr<uint8_t>(y);
+        for (size_t x = 0; x < binmat.getWidth(); ++x) {
+            bool value = (rowIn[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) != 0;
+            rowOut[x] = transform(value);
+        }
+    }
+}
+
 // @todo: could an approach using OpenCV's resize and scaling functions be more efficient?
-//              need to think more about how to do this efficiently
-template <size_t WordSize>
-void BinMat::toCVMat(cv::Mat& output) const {
-    impl::toCVMatHelper(output, WordSize, [](bool value) { return value ? 1 : 0; });
+//        need to think more about how to do this efficiently
+template <typename WordType_>
+void BinMat<WordType_>::toCVMat(cv::Mat& output) const {
+    toCVMatHelper(*this, output, [](bool value) -> uint8_t { return value ? 1 : 0; });
 }
 
-template <size_t WordSize>
-void BinMat::toCVMatNormalized(cv::Mat& output) const {
-    impl::toCVMatHelper(output, WordSize, [](bool value) { return value ? 255 : 0; });
+template <typename WordType_>
+void BinMat<WordType_>::toCVMatNormalized(cv::Mat& output) const {
+    toCVMatHelper(*this, output, [](bool value) -> uint8_t { return value ? 255 : 0; });
 }
 
-template <size_t WordSize>
-bool at(int row, int col) const {
-    if (row < 0 || row >= height || col < 0 || col >= width) {
+#endif // BINCV_WITH_OPENCV
+
+// clearTrailingBits
+template <typename WordType_>
+void BinMat<WordType_>::clearTrailingBits() {
+    if (empty()) return;
+
+    // Bits [width, alignedWidth * WordBits) are padding and must stay zero.
+    size_t lastWord = impl::wordIndex<WordType>(width == 0 ? 0 : width - 1);
+    size_t validBitsInLastWord = width - lastWord * WordBits;
+    WordType keepMask = impl::lowBitsMask<WordType>(validBitsInLastWord);
+
+    for (size_t y = 0; y < height; ++y) {
+        WordType* row = &storage[y * alignedWidth];
+        row[lastWord] &= keepMask;
+        // Any whole words past the last partially-used one are pure padding
+        std::fill(row + lastWord + 1, row + alignedWidth, static_cast<WordType>(0));
+    }
+}
+
+// at and set
+template <typename WordType_>
+bool BinMat<WordType_>::at(int row, int col) const {
+    if (row < 0 || row >= static_cast<int>(height) || col < 0 || col >= static_cast<int>(width)) {
         throw std::out_of_range("BinMat::at: index out of range");
     }
-    const BinMat<WordSize>::WordType* row_ptr = mat_.ptr<BinMat<WordSize>::WordType>(row);
-    return (row_ptr[impl::word_index(col, WordSize)] & impl::bit_mask(col, WordSize)) != 0;
+    const WordType* rowPtr = &storage[static_cast<size_t>(row) * alignedWidth];
+    size_t x = static_cast<size_t>(col);
+    return (rowPtr[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) != 0;
 }
 
-template <size_t WordSize>
-void set(int row, int col, bool value) {
-    if (row < 0 || row >= height || col < 0 || col >= width) {
+template <typename WordType_>
+void BinMat<WordType_>::set(int row, int col, bool value) {
+    if (row < 0 || row >= static_cast<int>(height) || col < 0 || col >= static_cast<int>(width)) {
         throw std::out_of_range("BinMat::set: index out of range");
     }
-    BinMat<WordSize>::WordType* row_ptr = mat_.ptr<BinMat<WordSize>::WordType>(row);
-    BinMat<WordSize>::WordType& word = row_ptr[impl::wordIndex(col, WordSize)];
-    BinMat<WordSize>::WordType mask = impl::bit_mask(col, WordSize);
+    WordType* rowPtr = &storage[static_cast<size_t>(row) * alignedWidth];
+    size_t x = static_cast<size_t>(col);
+    WordType& word = rowPtr[impl::wordIndex<WordType>(x)];
+    WordType mask = impl::bitMask<WordType>(x);
 
     if (value) {
         word |= mask;   // set bit
@@ -146,97 +192,86 @@ void set(int row, int col, bool value) {
     }
 }
 
-template <size_t WordSize>
-const typename BinMat<WordSize>::WordType* BinMat<WordSize>::ptr(int row) const {
-    return mat.ptr<WordType>(row);
+// ptr
+template <typename WordType_>
+const typename BinMat<WordType_>::WordType* BinMat<WordType_>::ptr(int row) const {
+    return &storage[static_cast<size_t>(row) * alignedWidth];
 }
 
-template <size_t WordSize>
-typename BinMat<WordSize>::WordType* BinMat<WordSize>::ptr(int row) {
-    return mat.ptr<WordType>(row);
+template <typename WordType_>
+typename BinMat<WordType_>::WordType* BinMat<WordType_>::ptr(int row) {
+    return &storage[static_cast<size_t>(row) * alignedWidth];
 }
 
-// @todo: This could potentially be optimized
-template <size_t WordSize>
-void BinMat::resize(int newWidth, int newHeight) {
-    if (width < 0 || height < 0)
+// resize
+// @todo: This could potentially be optimized (word-wise copy when alignment permits)
+template <typename WordType_>
+void BinMat<WordType_>::resize(int newWidth, int newHeight) {
+    if (newWidth < 0 || newHeight < 0)
         throw std::invalid_argument("BinMat dimensions must be non-negative");
 
-    int newAlignedWidth = calcAlignedWidth(newWidth, rowAlignment, WordSize);
+    size_t nw = static_cast<size_t>(newWidth);
+    size_t nh = static_cast<size_t>(newHeight);
+    size_t newAlignedWidth = impl::calcAlignedWidth<WordType>(nw, rowAlignment);
 
-    int cvType = impl::cvTypeFromWordSize(WordSize);
-
-    // Create new zero-initialized matrix
-    cv::Mat newMat = cv::Mat::zeros(newHeight, newAlignedWidth, cvType);
+    // Create new zero-initialized storage
+    std::vector<WordType> newData(nh * newAlignedWidth, 0);
 
     // Determine region to copy from old matrix
-    int minWidth = std::min(width, newWidth);
-    int minHeight = std::min(height, newHeight);
-
-    if (minWidth == 0 || minHeight == 0) {
-        // If either dimension is zero, we can skip copying
-        width = 0;
-        height = 0;
-        alignedWidth = 0;
-        mat = std::move(newMat);
-        return;
-    }
+    size_t minWidth = std::min(width, nw);
+    size_t minHeight = std::min(height, nh);
 
     for (size_t y = 0; y < minHeight; ++y) {
-        const BinMat<WordSize>::WordType* oldRow = mat_.ptr<BinMat<WordSize>::WordType>(y);
-        BinMat<WordSize>::WordType* newRow = new_mat.ptr<BinMat<WordSize>::WordType>(y);
+        const WordType* oldRow = &storage[y * alignedWidth];
+        WordType* newRow = &newData[y * newAlignedWidth];
 
         for (size_t x = 0; x < minWidth; ++x) {
-            if (oldRow[impl::wordIndex(x, WordSize)] & impl::bit_mask(x, WordSize)) {
-                newRow[impl::wordIndex(x, WordSize)] |= impl::bit_mask(x, WordSize);
+            if (oldRow[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) {
+                newRow[impl::wordIndex<WordType>(x)] |= impl::bitMask<WordType>(x);
             }
         }
     }
 
     // Update internal state
-    width = newWidth;
-    height = newHeight;
+    width = nw;
+    height = nh;
     alignedWidth = newAlignedWidth;
-    mat = std::move(newMat);
+    storage = std::move(newData);
 }
 
+// pad
 // @todo: This could potentially be optimized further
-// @todo: OpenCV has a copyMakeBorder function, however alignment with our packed representation becomes complicated with 
-//        padding towards the left. For now we will implement our own padding function.
-void BinMat::pad(int top, int bottom, int left, int right, bool value) {
+// @todo: OpenCV has a copyMakeBorder function, however alignment with our packed
+//        representation becomes complicated when padding towards the left.
+//        For now we implement our own padding.
+template <typename WordType_>
+void BinMat<WordType_>::pad(int top, int bottom, int left, int right, bool value) {
     if (top < 0 || bottom < 0 || left < 0 || right < 0) {
         throw std::invalid_argument("Padding values must be non-negative");
     }
 
     // Calculate new dimensions
-    size_t newWidth = width + left + right;
-    size_t newHeight = height + top + bottom;
+    size_t newWidth = width + static_cast<size_t>(left) + static_cast<size_t>(right);
+    size_t newHeight = height + static_cast<size_t>(top) + static_cast<size_t>(bottom);
+    size_t newAlignedWidth = impl::calcAlignedWidth<WordType>(newWidth, rowAlignment);
 
-    // Calculate new aligned width
-    size_t newAlignedWidth = impl::calcAlignedWidth(newWidth, rowAlignment, WordSize);
+    // Start from a buffer filled with the padding value, then overwrite the
+    // interior with the original contents.
+    WordType fillValue = value ? static_cast<WordType>(~static_cast<WordType>(0))
+                               : static_cast<WordType>(0);
+    std::vector<WordType> newData(newHeight * newAlignedWidth, fillValue);
 
-    // Determine OpenCV type based on WordSize
-    int cvType = impl::cvTypeFromWordSize(WordSize);
-
-    // Create a new matrix with the new dimensions
-    cv::Mat newMat = cv::Mat::zeros(newHeight, newAlignedWidth, cvType);
-
-    // Fill the new matrix with the padding value
-    typename BinMat<WordSize>::WordType fillValue = value ? ~static_cast<typename BinMat<WordSize>::WordType>(0) : 0;
-
-    for (size_t y = 0; y < newHeight; ++y) {
-        typename BinMat<WordSize>::WordType* row = newMat.ptr<typename BinMat<WordSize>::WordType>(y);
-        std::fill(row, row + newAlignedWidth, fillValue);
-    }
-
-    // Copy the original matrix into the new matrix at the correct offset
     for (size_t y = 0; y < height; ++y) {
-        const typename BinMat<WordSize>::WordType* oldRow = mat.ptr<typename BinMat<WordSize>::WordType>(y);
-        typename BinMat<WordSize>::WordType* newRow = newMat.ptr<typename BinMat<WordSize>::WordType>(y + top);
+        const WordType* oldRow = &storage[y * alignedWidth];
+        WordType* newRow = &newData[(y + static_cast<size_t>(top)) * newAlignedWidth];
 
         for (size_t x = 0; x < width; ++x) {
-            if (oldRow[impl::wordIndex(x)] & impl::bitMask(x)) {
-                newRow[impl::wordIndex(x + left)] |= impl::bitMask(x + left);
+            size_t newX = x + static_cast<size_t>(left);
+            bool bit = (oldRow[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) != 0;
+            if (bit) {
+                newRow[impl::wordIndex<WordType>(newX)] |= impl::bitMask<WordType>(newX);
+            } else {
+                newRow[impl::wordIndex<WordType>(newX)] &= ~impl::bitMask<WordType>(newX);
             }
         }
     }
@@ -245,95 +280,106 @@ void BinMat::pad(int top, int bottom, int left, int right, bool value) {
     width = newWidth;
     height = newHeight;
     alignedWidth = newAlignedWidth;
-    mat = std::move(newMat);
+    storage = std::move(newData);
+
+    // A `true` fill writes ones across the whole stride, including padding bits
+    if (value) clearTrailingBits();
 }
 
-template <size_t WordSize>
-BinMat<WordSize> BinMat::transposed() const {
+// transposed
+// @todo: naive pixel-by-pixel transpose; replace with a cache-blocked / bit-parallel
+//        version (see ARCHITECTURE.md 6.4). This is currently the slowest operation.
+template <typename WordType_>
+BinMat<WordType_> BinMat<WordType_>::transposed() const {
     // Skip if empty matrix
-    if (width == 0 || height == 0) {
-        return BinMat();
+    if (empty()) {
+        return BinMat<WordType>();
     }
 
-    BinMat<WordSize> result(height, width, rowAlignment);
+    BinMat<WordType> result(static_cast<int>(height), static_cast<int>(width), rowAlignment);
     for (size_t y = 0; y < height; ++y) {
-        const BinMat<WordSize>::WordType* row = mat.ptr<BinMat<WordSize>::WordType>(y);
+        const WordType* row = &storage[y * alignedWidth];
         for (size_t x = 0; x < width; ++x) {
-            if (row[impl::wordIndex(x, WordSize)] & impl::bitMask(x, WordSize)) {
-                result.set(x, y, true);
+            if (row[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) {
+                result.set(static_cast<int>(x), static_cast<int>(y), true);
             }
         }
     }
     return result;
 }
 
-// @todo: this could potentially be optimized further to avoid copying data in the transposed() implementation
-template <size_t WordSize>
-void BinMat::transpose() {
+// transpose
+// @todo: this could avoid the copy made by transposed() for the square case
+template <typename WordType_>
+void BinMat<WordType_>::transpose() {
     *this = this->transposed();
 }
 
-template <size_t WordSize>
+// forEachNonZero
+template <typename WordType_>
 template <typename Func>
-void forEachNonZero(Func callback) const {
-    if (width == 0 || height == 0) {
+void BinMat<WordType_>::forEachNonZero(Func callback) const {
+    if (empty()) {
         throw std::runtime_error("BinMat is empty, cannot iterate over non-zero pixels");
     }
     for (size_t y = 0; y < height; ++y) {
-        const BinMat<WordSize>::WordType* row = mat.ptr<BinMat<WordSize>::WordType>(y);
+        const WordType* row = &storage[y * alignedWidth];
         for (size_t x = 0; x < width; ++x) {
-            if (row[impl::wordIndex(x, WordSize)] & detail::bitMask(x, WordSize)) {
-                callback(y, x);
+            if (row[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) {
+                callback(static_cast<int>(y), static_cast<int>(x));
             }
         }
     }
 }
 
-template <size_t WordSize>
-void BinMat::printMatrix() const {
-    if (width == 0 || height == 0) {
+// printMatrix
+template <typename WordType_>
+void BinMat<WordType_>::printMatrix() const {
+    if (empty()) {
         return;
     }
 
     for (size_t y = 0; y < height; ++y) {
-        const BinMat<WordSize>::WordType* row = mat_.ptr<BinMat<WordSize>::WordType>(y);
+        const WordType* row = &storage[y * alignedWidth];
         for (size_t x = 0; x < width; ++x) {
-            std::cout << ((row[impl::wordIndex(x, WordSize)] & impl::bitMask(x, WordSize)) ? '1' : '0');
+            std::cout << ((row[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) ? '1' : '0');
         }
         std::cout << '\n';
     }
 }
 
+// operator<<
 // @todo: consider std::ostringstream or wrapping std::ostream& for reusable logging.
-template <size_t WordSize>
-std::ostream& operator<<(std::ostream& os, const BinMat<WordSize>& binmat) {
-    if (binmat.width() == 0 || binmat.height() == 0) {
+template <typename WordType>
+std::ostream& operator<<(std::ostream& os, const BinMat<WordType>& binmat) {
+    if (binmat.empty()) {
         return os; // Nothing to print for empty matrix
     }
 
-    for (size_t y = 0; y < binmat.height(); ++y) {
-        const BinMat<WordSize>::WordType* row = binmat.ptr(y);
-        for (size_t x = 0; x < binmat.width(); ++x) {
-            os << ((row[impl::wordIndex(x, WordSize)] & impl::bitMask(x, WordSize)) ? '1' : '0');
+    for (int y = 0; y < binmat.rows(); ++y) {
+        const WordType* row = binmat.ptr(y);
+        for (size_t x = 0; x < binmat.getWidth(); ++x) {
+            os << ((row[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) ? '1' : '0');
         }
         os << '\n';
     }
     return os;
 }
 
-template <size_t WordSize>
-void BinMat::printInternalData(bool hex) const {
-    if (width == 0 || height == 0) {
+// printInternalData
+template <typename WordType_>
+void BinMat<WordType_>::printInternalData(bool hex) const {
+    if (empty()) {
         return;
     }
 
     for (size_t y = 0; y < height; ++y) {
-        const BinMat<WordSize>::WordType* row = mat.ptr<BinMat<WordSize>::WordType>(y);
+        const WordType* row = &storage[y * alignedWidth];
         for (size_t b = 0; b < alignedWidth; ++b) {
             if (hex)
-                std::cout << std::hex << static_cast<int>(row[b]) << " ";
+                std::cout << std::hex << static_cast<uint64_t>(row[b]) << " ";
             else
-                std::cout << std::dec << static_cast<int>(row[b]) << " ";
+                std::cout << std::dec << static_cast<uint64_t>(row[b]) << " ";
         }
         std::cout << '\n';
     }
@@ -341,34 +387,35 @@ void BinMat::printInternalData(bool hex) const {
     std::cout << std::dec;
 }
 
-template <size_t WordSize>
-void BinMat::fill(bool value) {
-    if (width == 0 || height == 0)
+// fill
+template <typename WordType_>
+void BinMat<WordType_>::fill(bool value) {
+    if (empty())
         return;
 
-    BinMat<WordSize>::WordType fillWord = 0;
+    WordType fillWord = value ? static_cast<WordType>(~static_cast<WordType>(0))
+                              : static_cast<WordType>(0);
 
-    if (value) {
-        fillWord = ~static_cast<BinMat<WordSize>::WordType>(0);
-    }
+    std::fill(storage.begin(), storage.end(), fillWord);
 
-    for (size_t y = 0; y < height; ++y) {
-        BinMat<WordSize>::WordType* row = mat.ptr<BinMat<WordSize>::WordType>(y);
-        std::fill(row, row + alignedWidth, fillWord);
-    }
+    // fill(true) sets the row-padding bits too; clear them so that word-wise
+    // consumers (countNonZero, future bitwise ops) don't see phantom pixels.
+    if (value) clearTrailingBits();
 }
 
-// @todo: This could probably be optimized
-template <size_t WordSize>
-int BinMat::countNonZero() const {
-    if (width == 0 || height == 0)
+// countNonZero
+// @todo: replace the per-pixel loop with popcount over whole words
+//        (see ARCHITECTURE.md 6.3). Relies on padding bits being zero.
+template <typename WordType_>
+int BinMat<WordType_>::countNonZero() const {
+    if (empty())
         return 0;
 
     int count = 0;
     for (size_t y = 0; y < height; ++y) {
-        const BinMat<WordSize>::WordType* row = mat.ptr<BinMat<WordSize>::WordType>(y);
+        const WordType* row = &storage[y * alignedWidth];
         for (size_t x = 0; x < width; ++x) {
-            if (row[impl::wordIndex(x, WordSize)] & impl::bitMask(x, WordSize)) {
+            if (row[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) {
                 ++count;
             }
         }
@@ -376,14 +423,15 @@ int BinMat::countNonZero() const {
     return count;
 }
 
-template <size_t WordSize>
-float BinMat::sparsity() const {
-    int totalPixels = width * height;
+// sparsity
+template <typename WordType_>
+float BinMat<WordType_>::sparsity() const {
+    size_t totalPixels = width * height;
     if (totalPixels == 0)
         throw std::runtime_error("Sparsity is undefined for empty BinMat");
 
     int nonzero = countNonZero();
-    return 1.0f - static_cast<float>(nonzero) / totalPixels;
+    return 1.0f - static_cast<float>(nonzero) / static_cast<float>(totalPixels);
 }
 
 } // namespace bincv
