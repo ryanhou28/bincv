@@ -1,7 +1,8 @@
 # binCV Roadmap
 
-Concrete plan for building binCV. For the design and its rationale, see
-[ARCHITECTURE.md](ARCHITECTURE.md).
+Phase structure and success criteria. For the executable task breakdown, see
+**[TASKS.md](TASKS.md)** — that is where work is picked up. For the design and its
+rationale, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 **The goal every phase serves:** run a binary-frame VIO frontend on embedded and
 mobile CPUs with a fraction of the memory footprint and better performance than a

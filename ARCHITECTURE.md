@@ -220,10 +220,15 @@ Why the data model is the whole argument, at 640×480:
 
 | Buffer | Byte-per-pixel | binCV | Ratio |
 |---|---|---|---|
-| One frame | 300 KiB | 37.5 KiB | 8× |
-| 4-level pyramid | ~400 KiB | ~50 KiB | 8× |
-| LK spatial derivative (2ch `CV_16S`) | **1.2 MiB** | ~150 KiB (4 planes) | 8× |
-| Two frames + derivatives | **~4 MiB** | **~0.5 MiB** | 8× |
+| One frame (level 0, 1-bit) | 300 KiB | 37.5 KiB | 8× |
+| 4-level pyramid | ~400 KiB | ~78 KiB | ~5× |
+| LK spatial derivative, level 0 (2ch `CV_16S`) | **1.2 MiB** | ~150 KiB (4 planes) | 8× |
+| Two frames + derivatives | **~4 MiB** | **~0.6 MiB** | ~6× |
+
+The pyramid ratio is lower than 8× because **pyramid levels are not binary** — see
+[§7.2](#72-pyramid-downsample--box-22). Level 0 is 1-bit; upper levels need 3–5
+bits. binCV chooses that quantization, which is why the container is N-bit rather
+than binary-only.
 
 On a device with a few megabytes of memory, the conventional path spends its
 entire budget before the odometry backend receives a byte. The derivative buffer
@@ -357,8 +362,30 @@ One expression, 64 pixels per word, no branches.
 
 ### 7.2 Pyramid downsample — box 2×2
 
-Sum four bits, threshold. A 2×2 popcount and compare; the bit-sliced adder for
-four inputs is a handful of logic ops.
+**This is where binary stops being enough, and it is measured, not assumed.**
+
+The reference pipeline applies a 2×2 box blur and subsamples, with no
+re-binarization. Starting from a binary level 0, the distinct-value count grows:
+
+| Level | Distinct values | Bits |
+|---|---|---|
+| 0 | 2 — `{0, 255}` | 1 |
+| 1 | 5 — `{0, 64, 128, 192, 255}` | 3 |
+| 2 | 15 | 4 |
+| 3 | 26 | 5 |
+
+Two consequences:
+
+1. **The N-bit container is required, not speculative.** A binary-only library
+   cannot represent pyramid level 1. This is the concrete justification for
+   `QuantMat<N>` ([§4.1](#41-bit-plane-representation)).
+2. **binCV chooses the quantization, and that is a lever.** The reference lets
+   precision grow into a full byte; binCV can cap levels at N bits and control
+   footprint directly. Whether a capped N preserves tracking accuracy is
+   [E-7](#9-open-questions-and-planned-experiments).
+
+The 2×2 sum itself stays bit-parallel: a 4-input bit-sliced adder over the source
+planes, then requantization to N bits.
 
 ### 7.3 Edge filter / threshold
 
@@ -368,8 +395,8 @@ host.
 
 ### 7.4 Spatial derivative — binarized `[-1, 0, 1]`
 
-On a 1-bit input the derivative is **ternary**, computed by shifts and masks
-rather than convolution:
+**On a 1-bit input** (pyramid level 0) the derivative is **ternary**, computed by
+shifts and masks rather than convolution:
 
 ```
 pos = (src >> 1) & ~(src << 1)      // rising edge
@@ -377,6 +404,11 @@ neg = (src << 1) & ~(src >> 1)      // falling edge
 ```
 
 Output is a sign-magnitude ternary image: `mag = pos | neg`, `sign = neg`.
+
+**On an N-bit input** (pyramid levels ≥ 1, per [§7.2](#72-pyramid-downsample--box-22))
+the derivative is a signed (N+1)-bit value, computed as a bit-sliced subtraction
+of the shifted planes. Ternary is the N=1 instance of the same operation, not a
+separate code path — which is what the sign-magnitude convention buys.
 
 ### 7.5 LK gradient covariance
 
@@ -396,6 +428,12 @@ The window is large (31×31 in practice), so the reduction API must support
 **masked, windowed, and preferably incremental** accumulation from the start.
 This requirement is in the MVP and shapes the reduction interface — it is not a
 later addition.
+
+The identity above is exact for ternary derivatives, i.e. pyramid level 0. For
+N-bit levels the same structure holds with **bit-sliced weighted sums**: each
+plane pair contributes at its binary weight, so the covariance is a weighted
+combination of the same masked popcounts rather than a single one. The reduction
+interface is therefore specified over plane pairs, not over a single mask.
 
 ### 7.6 Corner response
 
@@ -504,6 +542,30 @@ independently demand belongs in the foundation.
 See [§6.2](#62-reductions-are-bulk-only). Derived from measured `aarch64`
 codegen, not from preference.
 
+### D-8: Value semantics, not reference counting
+
+`cv::Mat` copies are shallow and reference-counted. binCV containers instead have
+**value semantics: copy means deep copy.** Sharing is expressed by taking a view.
+
+Reference counting would require atomics, which cost size and cycles on Tier 2
+targets and add a thread-safety surface the library does not otherwise need. It is
+also a well-known source of aliasing surprises in OpenCV code. Since views already
+provide the sharing mechanism ([D-5](#d-5-views-are-core-not-an-add-on)),
+refcounting would be a second way to do the same thing.
+
+This is a deliberate divergence from OpenCV's shape, and one of the few. It is
+worth it because the alternative silently changes aliasing behavior — a class of
+bug that is expensive to find.
+
+### D-9: Two view types, not a const-templated one
+
+`BinMatView` (mutable) and `BinMatConstView` (read-only) are separate types rather
+than `BinMatView<const WordType>`.
+
+Templating on constness interacts badly with the unsigned-integral constraint on
+`WordType` and produces error messages that are hard to read. Two plain types are
+more verbose to declare and considerably easier to work with.
+
 ### D-7: Existing code is not a constraint
 
 The pre-existing `BinMat` implementation is a prototype. Where it conflicts with
@@ -525,6 +587,7 @@ should become a committed benchmark.
 | **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — but it is the result the project exists to produce. |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. |
+| **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | Measured growth is 1/3/4/5 bits ([§7.2](#72-pyramid-downsample--box-22)), but the reference never chose that — it fell out of using `CV_8U`. Capping N is a direct footprint lever. | Pyramid level bit depths; a large share of total frontend footprint. |
 
 ---
 
