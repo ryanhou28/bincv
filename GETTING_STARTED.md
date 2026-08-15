@@ -1,522 +1,274 @@
 # Getting Started with binCV Development
 
-Quick start guide for developing binCV, an accelerated binary image processing library.
+Practical guide for building, testing, and contributing to binCV.
+
+**Read first:** [ARCHITECTURE.md](ARCHITECTURE.md) for the design and its
+rationale, [ROADMAP.md](ROADMAP.md) for what to work on next.
 
 ---
 
-## What is binCV?
+## The one thing to keep in mind
 
-binCV is a computer vision library optimized for binary (1-bit) images, targeting:
-- **SPAD cameras**: 1000s of fps binary frames
-- **Event cameras**: Binary event frame representations
-- **Document processing**: Binarized text images
-- **Depth sensing**: Binary masks and patterns
+binCV exists to answer whether bit-parallel software can make low-bit-width image
+processing efficient enough for embedded and mobile deployment. Two goals are
+co-equal: **performance and memory footprint**. When they conflict and no
+explicit choice has been made, **memory wins** — a user who wants raw throughput
+and has memory to spare already has OpenCV.
 
-**Goal:** Achieve 10-100× speedup over OpenCV by exploiting bit-packed storage, bitwise operations, SIMD, and GPU parallelism.
-
----
-
-## Essential Reading
-
-1. **[ARCHITECTURE.md](ARCHITECTURE.md)** - Complete technical architecture and design
-2. **[ROADMAP.md](ROADMAP.md)** - Concrete implementation tasks
-3. This document - Quick start guide
+If a change stores more bits per pixel than the data contains, or adds an
+operation no VIO frontend calls, it is probably drift.
 
 ---
 
-## Development Environment Setup
+## Environment Setup
 
-### Prerequisites
+### Required
+- C++17 compiler (GCC 7+, Clang 5+)
+- CMake 3.15+
 
-**Required:**
-- C++17 compiler (GCC 7+, Clang 5+, MSVC 2017+)
-- CMake 3.12+
-- OpenCV 4.0+
+That is all the core needs — it has no dependencies.
 
-**Optional:**
-- CUDA Toolkit 11.0+ (for GPU acceleration)
-- Google Test (will be added as submodule)
+### Optional
+- **OpenCV 4.0+** — enables interop, the equivalence harness, and comparison
+  benchmarks. Strongly recommended for development.
+- **aarch64 cross-compiler** — for the primary target platform.
 
-### Linux/WSL Setup
+### Linux / WSL
 
 ```bash
-# Install dependencies (Ubuntu/Debian)
 sudo apt-get update
 sudo apt-get install -y build-essential cmake libopencv-dev git
 
-# Optional: CUDA toolkit
-# Follow: https://developer.nvidia.com/cuda-downloads
-
-# Navigate to repository
-cd /path/to/bincv
+# For the primary target platform
+sudo apt-get install -y g++-aarch64-linux-gnu
 ```
 
-### macOS Setup
+### macOS
 
 ```bash
-# Install dependencies via Homebrew
-brew install cmake opencv git
-
-cd /path/to/bincv
+brew install cmake opencv
 ```
-
-### Windows (WSL Recommended)
-
-Use Windows Subsystem for Linux and follow Linux setup above.
-
----
-
-## Building binCV
-
-### C++ Library (CPU)
-
-```bash
-cd bincv-cpp
-mkdir -p build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
-
-# Run tests
-./test_binMat
-```
-
-### C++ Library with CUDA (GPU)
-
-```bash
-cd bincv-cuda
-mkdir -p build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
-
-# Run tests
-./test_edge_filter
-```
-
-### Build Options
-
-```bash
-# Debug build
-cmake -DCMAKE_BUILD_TYPE=Debug ..
-
-# Release build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-
-# Specific compiler
-cmake -DCMAKE_CXX_COMPILER=clang++ ..
-
-# Verbose
-make VERBOSE=1
-```
-
----
-
-## Running Tests & Benchmarks
-
-### Current Tests
-
-```bash
-cd bincv-cpp/build
-./test_binMat
-```
-
-### Run All Benchmarks
-
-```bash
-cd bincv-cpp/scripts
-./run_all_benchmarks.sh
-
-# Results saved to bincv-cpp/results/
-cat ../results/fill_benchmark_*.log
-cat ../results/transpose_benchmark_*.log
-```
-
-### Run Single Benchmark
-
-```bash
-cd bincv-cpp/build
-./fill_benchmark
-./transpose_benchmark
-```
-
----
-
-## Current Performance
-
-Measured in **Release** mode, sparsity 0.5, 100 iterations. Earlier numbers in
-`results/*.log` were produced without a pinned build type and are not comparable.
-
-**256x256**
-
-| Operation | OpenCV | binCV | Ratio |
-|-----------|--------|-------|-------|
-| fill | 0.0024 ms | 0.00019 ms | 12.6x faster |
-| set 1000 px | 0.0033 ms | 0.0010 ms | 3.2x faster |
-| resize | 0.069 ms | 0.200 ms | 2.9x slower |
-| transpose | 0.0029 ms | 0.208 ms | **71x slower** |
-
-**1024x1024**
-
-| Operation | OpenCV | binCV | Ratio |
-|-----------|--------|-------|-------|
-| fill | 0.0225 ms | 0.0021 ms | 10.5x faster |
-| set 1000 px | 0.0036 ms | 0.0029 ms | 1.2x faster |
-| resize | 0.540 ms | 3.62 ms | 6.7x slower |
-| transpose | 0.110 ms | 3.97 ms | **36x slower** |
-
-**Memory:** 7.83x reduction on the sample image (46 KB vs 361 KB), close to the
-theoretical 8x -- the gap is row-stride alignment padding.
-
-### Reading these numbers
-
-`fill` is the only operation that currently exploits bit packing: it writes whole
-words over contiguous storage, so it gets roughly the memory-traffic win the
-architecture predicts.
-
-Everything else still loops **pixel by pixel**, paying bit-extraction cost per
-pixel while OpenCV moves whole bytes. `transpose` and `resize` are slower than
-OpenCV for exactly this reason, and no amount of tuning fixes that shape -- they
-need bit-parallel algorithms (Phase 1.3), not micro-optimization.
-
-So the 10-100x thesis is **not yet demonstrated**. The operations that would
-demonstrate it -- bitwise AND/OR/XOR, popcount-based `countNonZero`, morphology
--- are not implemented. `fill` is the existence proof that the approach works
-when an operation is written word-wise.
 
 ---
 
 ## Build Configurations
 
 ### Desktop (OpenCV auto-detected)
+
 ```bash
 cmake -S bincv-cpp -B bincv-cpp/build -DCMAKE_BUILD_TYPE=Release
 cmake --build bincv-cpp/build -j$(nproc)
 cd bincv-cpp/build && ctest --output-on-failure
 ```
 
-### Core-only / embedded (no OpenCV)
+### Core-only (no OpenCV)
+
 ```bash
-cmake -S bincv-cpp -B bincv-cpp/build-noocv \
+cmake -S bincv-cpp -B bincv-cpp/build-core \
       -DCMAKE_BUILD_TYPE=Release -DBINCV_USE_OPENCV=OFF
-cmake --build bincv-cpp/build-noocv -j$(nproc)
-cd bincv-cpp/build-noocv && ctest --output-on-failure
+cmake --build bincv-cpp/build-core -j$(nproc)
+cd bincv-cpp/build-core && ctest --output-on-failure
 ```
 
-CMake prints a configuration summary showing the detected platform, build type,
-SIMD capability, and whether OpenCV interop is enabled.
+Run this before committing. It is what keeps the core dependency-free, and it
+regresses silently otherwise.
+
+### No exceptions / no heap (Tier 2 correctness)
+
+```bash
+cmake -S bincv-cpp -B bincv-cpp/build-noexcept \
+      -DBINCV_USE_OPENCV=OFF -DCMAKE_CXX_FLAGS="-fno-exceptions"
+```
+
+binCV commits to compiling and running correctly in this configuration. See
+[ARCHITECTURE §2](ARCHITECTURE.md#tier-2--cortex-m-class-correctness-only).
+
+CMake prints a configuration summary showing platform, build type, SIMD
+capability, and whether OpenCV interop is enabled.
 
 **Options:** `BINCV_USE_OPENCV` (default ON), `BINCV_BUILD_TESTS` (ON),
 `BINCV_BUILD_BENCHMARKS` (ON, skipped automatically without OpenCV).
-
-Benchmarks are only built with OpenCV, since they measure against it.
 
 ---
 
 ## Testing
 
-Tests use a minimal in-repo harness (`tests/test_util.hpp`) that reports
-failures with file/line and returns a non-zero exit code, so `ctest` catches
-regressions. Google Test is planned for Phase 1.2.
+Tests are registered with `ctest`. The suites are split so the embedded
+configuration is actually exercised rather than assumed:
 
-- `tests/test_binMat.cpp` — core suite, no OpenCV. Runs the full behavioural
-  contract against all four word widths.
-- `tests/test_opencv_interop.cpp` — cv::Mat round-trips, built only with OpenCV.
+- `tests/test_binMat.cpp` — core suite, **no OpenCV**. Runs the behavioural
+  contract against all supported word widths.
+- `tests/test_opencv_interop.cpp` — `cv::Mat` round-trips, built only with OpenCV.
 
-Add core tests to the first and OpenCV-dependent ones to the second; keeping
-them separate is what makes the embedded build verifiable.
+Add core tests to the first and OpenCV-dependent tests to the second.
+
+The interim harness (`tests/test_util.hpp`) reports failures with file and line
+and returns a non-zero exit code. Google Test replaces it in Phase 1.6.
+
+### Correctness standards
+
+What "correct" means depends on the API tier
+([ARCHITECTURE §5.1](ARCHITECTURE.md#51-three-tiers)):
+
+| Tier | Standard |
+|---|---|
+| 1 — identical semantics | **Bit-exact** against the equivalent OpenCV expression |
+| 2 — specialized numerics | Downstream task accuracy (VIO trajectory) preserved |
+| 3 — no OpenCV equivalent | Against hand-derived reference implementations |
+
+Every Tier 1 operation ships with an equivalence test. That harness is Phase 2.1
+and is built *before* the kernels it validates.
+
+---
+
+## Benchmarking
+
+```bash
+cd bincv-cpp/build
+./benchmark/fill_benchmark --width 640 --height 480 --iterations 100 \
+                           --dtype binary --sparsity 0.5
+```
+
+Or run the full sweep:
+
+```bash
+cd bincv-cpp/scripts && ./run_all_benchmarks.sh
+```
+
+### Benchmarking rules
+
+**Always build Release.** An unoptimized build makes the numbers meaningless.
+CMake defaults to Release for this reason.
+
+**Use the right denominator.** Compare against OpenCV performing the *same
+semantic operation on the same binary content stored as `CV_8U`* — that is
+exactly what a user does today without binCV. Not OpenCV on grayscale (different
+information content), and not a strawman implementation.
+
+**Report peak working set, not per-buffer ratios.** A target either fits the
+pipeline in its memory budget or it does not
+([ARCHITECTURE §10.4](ARCHITECTURE.md#104-the-metric-that-matters)).
+
+**Commit the measurement.** Every performance claim in this repository must be
+reproducible from a committed benchmark.
 
 ---
 
 ## Code Tour
 
-### Key Files
+### Core
+- [bincv-cpp/include/bincv-cpp/core/types.hpp](bincv-cpp/include/bincv-cpp/core/types.hpp) — `Size`, morphology and border enums, type aliases
+- [bincv-cpp/include/bincv-cpp/binMat.hpp](bincv-cpp/include/bincv-cpp/binMat.hpp) — the 1-bit container
+- [bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp) — template implementation
 
-**Core Data Structure:**
-- [bincv-cpp/include/bincv-cpp/binMat.hpp](bincv-cpp/include/bincv-cpp/binMat.hpp) - Main class declaration
-- [bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp) - Template implementation
+### Support
+- [bincv-cpp/include/bincv-cpp/util.hpp](bincv-cpp/include/bincv-cpp/util.hpp) — image I/O for tests (OpenCV-only)
+- [bincv-cpp/tests/](bincv-cpp/tests/) — test suites
+- [bincv-cpp/benchmark/](bincv-cpp/benchmark/) — comparison benchmarks
 
-**Utilities:**
-- [bincv-cpp/include/bincv-cpp/util.hpp](bincv-cpp/include/bincv-cpp/util.hpp) - Helper functions
-
-**Tests:**
-- [bincv-cpp/tests/test_binMat.cpp](bincv-cpp/tests/test_binMat.cpp) - Test suite
-
-**Benchmarks:**
-- [bincv-cpp/benchmark/](bincv-cpp/benchmark/) - Performance benchmarks
-- [bincv-cpp/benchmark/bench_util.hpp](bincv-cpp/benchmark/bench_util.hpp) - Benchmark utilities
-
-**CUDA:**
-- [bincv-cuda/src/edge_filter.cu](bincv-cuda/src/edge_filter.cu) - GPU kernels
-
-### Code Architecture
+### Current shape
 
 ```
-BinMat<WordType>          // WordType = uint8_t/uint16_t/uint32_t (default)/uint64_t
-├── Storage: std::vector<WordType> (no OpenCV dependency)
-├── Layout: Row-major, bit-packed into words
-├── Alignment: 32 bytes (cache-line aligned)
-└── Operations:
-    ├── Construction & conversion
-    ├── Element access (slow - bit unpacking)
-    ├── Row access (fast - direct pointer)
-    └── Matrix operations (resize, transpose, pad)
+storage {ptr, stride, owns}          <- Phase 1.1
+  |
+  +-- BinMatView / QuantView<N>      <- Phase 1.2, the kernel interface
+  |
+  +-- QuantMat<N, WordType>          <- Phase 1.3, compile-time N
+        |
+        +-- BinMat<WordType>         <- exists today; becomes the N=1 specialization
 ```
+
+Only `BinMat` exists today, and it still embeds a `std::vector` rather than the
+storage model. See [ROADMAP Phase 1](ROADMAP.md#phase-1--container-foundation).
 
 ---
 
-## Development Workflow
+## Conventions
 
-### Phase 1 Priorities
+### Naming
+Follow OpenCV: `camelCase` functions, `PascalCase` types, `UPPER_CASE` constants,
+lowercase namespaces, destination as out-parameter — `op(src, dst, ...)`.
 
-**1. Fix Critical Bugs**
-- Fix 3 compilation bugs listed above
-- Verify tests pass
+Tier 3 operations (no OpenCV equivalent) must **not** borrow OpenCV names, so
+that Tier 1's drop-in promise stays credible.
 
-**2. Setup Testing**
-- Add Google Test framework
-- Create test utilities
-- Add 20+ correctness tests
+### Errors
+Validation throws; `BINCV_NO_EXCEPTIONS` converts to assert/abort. `at()` is
+bounds-checked in debug and unchecked in release, matching `cv::Mat::at`. Kernels
+never throw.
 
-**3. Optimize Transpose**
-- Implement cache-blocked algorithm
-- Target: Match OpenCV (0.003 ms for 256×256)
+### Interfaces
+**Kernels take views, never owning containers.** A kernel compiles once per
+`(WordType, N)` and works regardless of its arguments' alignment or ownership.
 
-**4. Implement Bitwise Operations**
-- AND, OR, XOR, NOT
-- Scalar + SIMD variants (AVX2, AVX-512)
-- Target: 10× faster than OpenCV
+**Never expose a per-word popcount.** Reductions are bulk-only — region, masked,
+or windowed. On aarch64 a per-word popcount pays two register-domain crossings
+per 64 pixels ([ARCHITECTURE §6.2](ARCHITECTURE.md#62-reductions-are-bulk-only)).
 
-### Code Style
+### Documentation
 
-**Follow OpenCV Conventions:**
-- Functions: `camelCase`
-- Classes: `PascalCase`
-- Constants: `UPPER_CASE`
-- Namespaces: `lowercase`
-
-**Documentation Example:**
 ```cpp
 /**
- * @brief Performs bitwise AND operation on two binary matrices.
+ * @brief Bitwise AND of two binary matrices.
  *
- * @param src1 First input binary matrix
- * @param src2 Second input binary matrix
- * @param dst Output binary matrix
+ * @param src1 First input
+ * @param src2 Second input
+ * @param dst  Output, resized to match
  *
- * @throws std::invalid_argument if src1 and src2 have different sizes
- *
- * @note Performance: ~10× faster than OpenCV
- *
- * @code
- * BinMat mask = BinMat::ones(480, 640);
- * BinMat result;
- * bincv::bitwise_and(input, mask, result);
- * @endcode
+ * @note API tier 1 - bit-exact against cv::bitwise_and on equivalent content.
  */
-void bitwise_and(const BinMat& src1, const BinMat& src2, BinMat& dst);
+void bitwiseAnd(const BinMatView& src1, const BinMatView& src2, BinMatView dst);
 ```
+
+State the API tier in the docstring. It tells a reader whether OpenCV
+equivalence is a guarantee or explicitly not one.
 
 ---
 
-## Debugging Tips
+## Profiling
 
-### Common Issues
-
-**Compilation errors:**
 ```bash
-# Make sure you're including impl headers
-#include "bincv-cpp/binMat.hpp"  // Includes impl/binMat_impl.hpp
-```
-
-**Slow performance:**
-```bash
-# Build in Release mode
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
-```
-
-**Test failures:**
-```bash
-# Validate against OpenCV
-BinMat result = bincv::transpose(input);
-cv::Mat cv_result;
-cv::transpose(input.toCVMat(), cv_result);
-assertMatEqual(result, cv_result);
-```
-
-### Profiling Performance
-
-**Linux with perf:**
-```bash
-perf record -g ./transpose_benchmark
+perf record -g ./benchmark/transpose_benchmark
 perf report
-perf annotate
 ```
 
-**Intel VTune:**
-```bash
-vtune -collect hotspots -result-dir vtune_results -- ./transpose_benchmark
-vtune -report hotspots -result-dir vtune_results
-```
+For memory, peak working set is the number that matters:
 
-**gprof:**
 ```bash
-cmake -DCMAKE_CXX_FLAGS="-pg" ..
-make -j$(nproc)
-./transpose_benchmark
-gprof ./transpose_benchmark gmon.out > analysis.txt
+/usr/bin/time -v ./your_benchmark 2>&1 | grep "Maximum resident"
+valgrind --tool=massif ./your_benchmark
 ```
 
 ---
 
-## Testing Guidelines
+## Adding an Operation
 
-### Write Tests First (TDD)
-
-```cpp
-#include <gtest/gtest.h>
-#include "bincv-cpp/binMat.hpp"
-
-TEST(BitwiseTest, AndOperation) {
-    BinMat src1 = createTestMatrix({{1, 0, 1}, {0, 1, 0}});
-    BinMat src2 = createTestMatrix({{1, 1, 0}, {0, 1, 1}});
-    BinMat expected = createTestMatrix({{1, 0, 0}, {0, 1, 0}});
-
-    BinMat dst;
-    bincv::bitwise_and(src1, src2, dst);
-
-    EXPECT_EQ(dst, expected);
-}
-
-TEST(BitwiseTest, AndAgainstOpenCV) {
-    BinMat src1 = createRandomBinary(256, 256, 0.5);
-    BinMat src2 = createRandomBinary(256, 256, 0.5);
-
-    BinMat bincv_result;
-    bincv::bitwise_and(src1, src2, bincv_result);
-
-    cv::Mat cv_result;
-    cv::bitwise_and(src1.toCVMat(), src2.toCVMat(), cv_result);
-
-    EXPECT_MAT_EQUAL(bincv_result, cv_result);
-}
-```
-
-### Benchmark Template
-
-```cpp
-#include "bench_util.hpp"
-
-int main() {
-    BinMat src1 = createRandomBinary(1024, 1024, 0.5);
-    BinMat src2 = createRandomBinary(1024, 1024, 0.5);
-    BinMat dst;
-
-    // Benchmark binCV
-    auto start = high_resolution_clock::now();
-    for (int i = 0; i < 1000; ++i) {
-        bincv::bitwise_and(src1, src2, dst);
-    }
-    auto end = high_resolution_clock::now();
-    double bincv_time = duration_cast<microseconds>(end - start).count() / 1000.0 / 1000;
-
-    // Benchmark OpenCV
-    cv::Mat cv_src1 = src1.toCVMat();
-    cv::Mat cv_src2 = src2.toCVMat();
-    cv::Mat cv_dst;
-    start = high_resolution_clock::now();
-    for (int i = 0; i < 1000; ++i) {
-        cv::bitwise_and(cv_src1, cv_src2, cv_dst);
-    }
-    end = high_resolution_clock::now();
-    double opencv_time = duration_cast<microseconds>(end - start).count() / 1000.0 / 1000;
-
-    std::cout << "binCV:  " << bincv_time << " ms\n";
-    std::cout << "OpenCV: " << opencv_time << " ms\n";
-    std::cout << "Speedup: " << (opencv_time / bincv_time) << "×\n";
-}
-```
+1. **Check it is in scope.** Is it called by a binary-frame VIO frontend? If not,
+   it likely belongs in [ROADMAP Phase 6](ROADMAP.md#phase-6--deferred).
+2. **Determine its API tier** and name it accordingly.
+3. **Write the equivalence or reference test first.**
+4. **Express it in the primitive vocabulary** — logic, shift, majority,
+   thresholded count, bulk reduction. If it does not decompose into those, that
+   is worth understanding before writing it.
+5. **Take views, not containers.**
+6. **Benchmark against the right denominator**, and commit the benchmark.
 
 ---
 
 ## Learning Resources
 
-### Binary Image Processing
+### Binary and morphological image processing
 - Digital Image Processing (Gonzalez & Woods)
-- [Mathematical morphology (Wikipedia)](https://en.wikipedia.org/wiki/Mathematical_morphology)
+- [Mathematical morphology](https://en.wikipedia.org/wiki/Mathematical_morphology)
 
-### SIMD Programming
+### Bit manipulation
+- Hacker's Delight (Warren) — the reference for bit-parallel algorithms
+- [Faster Population Counts Using AVX2](https://arxiv.org/abs/1611.07612) (Muła, Kurz, Lemire)
+
+### SIMD
+- [ARM NEON Intrinsics Reference](https://developer.arm.com/architectures/instruction-sets/intrinsics/)
 - [Intel Intrinsics Guide](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html)
 - [Agner Fog's optimization manuals](https://www.agner.org/optimize/)
 
-### CUDA Programming
-- [CUDA Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)
-- [CUDA Optimization](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)
-
-### Performance Engineering
-- Computer Systems: A Programmer's Perspective
+### Performance engineering
 - [What Every Programmer Should Know About Memory](https://people.freebsd.org/~lstewart/articles/cpumemory.pdf)
-
----
-
-## Next Steps
-
-### Immediate Actions
-Phase 0 is done — the core compiles, tests pass, and it builds without OpenCV.
-Next up (Phase 1):
-1. Implement scalar bitwise operations (AND, OR, XOR, NOT) — the first real test
-   of the performance thesis
-2. Replace `countNonZero`'s per-pixel loop with word-wise popcount
-3. Implement cache-blocked / bit-parallel transpose
-4. Swap the in-repo test harness for Google Test
-
-### Short Term
-1. Implement cache-blocked transpose
-2. Benchmark and optimize transpose
-3. Implement scalar bitwise operations
-4. Validate against OpenCV
-5. Add AVX2 SIMD variants
-
-### Medium Term
-1. Implement morphology operations
-2. Add CUDA GPU backend
-3. Create Python bindings
-4. Implement advanced operations
-5. Platform expansion (ARM, Metal, Vulkan)
-
----
-
-## Quick Reference
-
-### Build Commands
-```bash
-# Build C++
-cd bincv-cpp/build
-cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
-
-# Build CUDA
-cd bincv-cuda/build
-cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
-```
-
-### Test Commands
-```bash
-cd bincv-cpp/build
-./test_binMat
-```
-
-### Benchmark Commands
-```bash
-cd bincv-cpp/scripts
-./run_all_benchmarks.sh
-```
-
-### Profile Commands
-```bash
-cd bincv-cpp/build
-perf record -g ./transpose_benchmark
-perf report
-```
-
----
-
-For the complete architecture and implementation plan, see [ARCHITECTURE.md](ARCHITECTURE.md) and [ROADMAP.md](ROADMAP.md).

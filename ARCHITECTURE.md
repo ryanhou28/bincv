@@ -1,1452 +1,568 @@
-# binCV Architecture & Implementation Plan
+# binCV Architecture
 
-## Executive Summary
+## Thesis
 
-binCV is an accelerated computer vision library optimized for binary (1-bit) image processing. It targets applications like single-photon cameras, event camera frame representations, and other novel binary sensors where traditional libraries like OpenCV are inefficient.
+> **binCV is a computer vision library for low-bit-width image frames — binary,
+> ternary, and few-bit quantized — that keeps OpenCV's API shape while storing
+> pixels at their true bit width and computing on them bit-parallel. It targets
+> embedded and mobile CPUs first, where memory footprint and energy are the
+> binding constraints.**
 
-**Core Value Proposition:** Achieve 10-100x performance improvements over traditional libraries by:
-1. Exploiting bit-packed storage (8-64x memory reduction)
-2. Leveraging bitwise operations native to binary data
-3. SIMD vectorization of packed operations
-4. Optimized CPU and GPU implementations
-
-This document provides the technical architecture and concrete implementation plan for building binCV.
-
----
-
-## 1. Motivation & Technical Opportunity
-
-### Target Applications
-
-1. **Single-Photon Avalanche Diode (SPAD) Cameras**
-   - Generate thousands of binary frames per second
-   - Each pixel = photon detected (1) or not (0)
-   - Example: 1000 fps @ 1024x1024 = 1 GB/s with uint8, only 128 MB/s with 1-bit
-   - Often deployed on resource-constrained embedded platforms
-
-2. **Event Camera Frame Representations**
-   - Asynchronous event streams collapsed into synchronous frames
-   - Binary masks indicating which pixels had events
-   - Edge/embedded deployment for robotics and autonomous systems
-
-3. **Depth Sensing & Structured Light**
-   - Binary patterns for structured light projection
-   - Binary masks for depth discontinuities
-   - Embedded depth sensors on mobile and edge devices
-
-4. **Medical Imaging**
-   - Binary segmentation masks
-   - High-throughput morphological processing
-   - Portable/embedded medical devices
-
-5. **Document Processing**
-   - Binarized text images
-   - Morphological operations on text
-   - Mobile document scanning
-
-### Target Platforms
-
-binCV is designed to run efficiently across the full spectrum of computing platforms:
-
-1. **High-End Embedded** (Raspberry Pi, Jetson Nano, i.MX8)
-   - ARM Cortex-A processors with NEON SIMD
-   - 512MB - 4GB RAM
-   - Optional GPU acceleration
-   - Full feature set available
-
-2. **Mid-Range Embedded** (BeagleBone, i.MX6)
-   - ARM Cortex-A processors
-   - 256MB - 1GB RAM
-   - Core operations, optional SIMD
-
-3. **Desktop/Server** (x86_64, ARM workstations)
-   - Full AVX2/AVX-512 SIMD support
-   - CUDA GPU acceleration
-   - All features including Python bindings
-
-4. **Low-End Embedded** (ARM Cortex-M7) - Future Support
-   - Microcontrollers with limited RAM
-   - Scalar operations only
-   - Static allocation
-
-### Why Existing Libraries Fail
-
-**OpenCV's Limitations:**
-- Stores binary images as CV_8U (8 bits per pixel) - 8x memory waste
-- Operations process 8-bit values even for binary data
-- No bitwise operation optimizations
-- Cannot leverage population count (popcount), parallel bit extract (PEXT), etc.
-- Cache inefficient for binary data
-
-**Performance Gap Example (256x256 image):**
-```
-Operation        OpenCV      binCV Goal      Target Speedup
-Memory           64 KB       8 KB            8x
-Transpose        0.003 ms    0.003 ms        1x (match)
-Convolution      0.5 ms      0.05 ms         10x
-Morphology       1.0 ms      0.05 ms         20x
-```
+Every design decision in this repository should be traceable to that sentence.
+When a decision is not obviously implied by it, record the reasoning in
+[Design Decisions](#8-design-decisions) below.
 
 ---
 
-## 2. Technical Opportunities
+## 1. Scope
 
-### 2.1 Bit-Level Operations
+### What binCV is
 
-**Boolean Logic as Image Processing:**
-- **AND:** Intersection/masking
-- **OR:** Union/accumulation
-- **XOR:** Difference detection
-- **NOT:** Inversion
-- **POPCOUNT:** Area calculation, histogram
+A CV library whose data model is **N bits per pixel**, where N is small
+(typically 1–4), and whose kernels operate on many pixels per machine word using
+bitwise logic and population counts.
 
-### 2.2 SIMD Vectorization
+### What binCV is not
 
-Modern CPUs can process 256-512 bits per instruction:
-- AVX2: 256 bits = 256 pixels per operation
-- AVX-512: 512 bits = 512 pixels per operation
-- ARM NEON: 128 bits = 128 pixels per operation
+| Not this | Why |
+|---|---|
+| A general-purpose OpenCV replacement | OpenCV is excellent at 8-bit and float. binCV only wins where pixels are genuinely low-bit. |
+| A quantized neural network runtime | MAC-heavy workloads favor SWAR packing over bit-planes (see [D-2](#d-2-bit-planes-over-swar-packing)). Explicit non-goal. |
+| A geometry or estimation library | RANSAC, PnP, essential-matrix solvers, IMU fusion belong to Eigen and the application. binCV's boundary is **pixels in, features and flow out**. |
+| A GPU-first library | GPUs are a later target. The CPU path is the product. |
 
-**Opportunity:** Process entire rows/blocks in single instructions.
+### The problem
 
-### 2.3 GPU Parallelism
+Libraries like OpenCV store a binary image as `CV_8U` — **one byte per pixel to
+carry one bit of information**. Every operation then moves and computes on eight
+times more data than the image contains. On a memory-constrained device that is
+not merely slow, it is disqualifying: the buffers do not fit.
 
-GPUs excel at bit-packed operations:
-- **Warp-level primitives:** `__popc()`, `__ballot_sync()`
-- **Shared memory:** Efficient for bit-packed convolutions
-- **Coalesced access:** Natural with bit-packed storage
+binCV stores that image at 1 bit per pixel and computes on 32 or 64 pixels per
+instruction.
 
-### 2.4 Cache Efficiency
+### The motivating result
 
-Binary images fit in cache hierarchy:
-- 1024x1024 binary: 128 KB (fits in L2)
-- 1024x1024 uint8: 1 MB (overflows L2 on many CPUs)
-- 4096x4096 binary: 2 MB (fits in L3)
+The SEAL work (ISCA 2025) showed that **binary edge frames are sufficient input
+for visual-inertial odometry** — feed them to an existing VIO framework and
+tracking accuracy holds up. But SEAL obtained its energy and latency wins from
+dedicated in-sensor hardware. Its software artifact is a functional simulator:
+the "binary" images are binary-*valued* `CV_8U`, and every downstream stage
+(corner detection, optical flow, pyramids) is ordinary byte-per-pixel OpenCV code.
 
-**Opportunity:** Orders of magnitude fewer cache misses.
+That leaves a specific, unanswered question, and it is the one binCV exists to
+answer:
 
-### 2.5 Specialized Algorithms
+> **SEAL showed binary frames are sufficient. SEAL needed custom silicon to make
+> them efficient. Can bit-parallel software recover that win on commodity
+> embedded and mobile hardware?**
 
-**Binary Morphology:**
-- Traditional: Per-pixel comparisons with structuring element
-- Binary-optimized: Parallel OR/AND with shifted masks
-
-**Binary Convolution:**
-- Traditional: Multiply-accumulate operations
-- Binary-optimized: POPCOUNT of masked regions
-
----
-
-## 3. Current State Analysis
-
-### 3.1 Strengths
-
-✅ **Solid Foundation:**
-- Templated `BinMat` class with flexible word sizes (8, 16, 32, 64 bits)
-- OpenCV integration for compatibility
-- Comprehensive benchmarking infrastructure
-- Basic matrix operations working
-
-✅ **Performance Wins:**
-- Fill operations: 1.2-4.3x faster than OpenCV
-- Memory: 8x reduction demonstrated
-
-### 3.2 Critical Weaknesses
-
-❌ **Naive Implementations:**
-- Transpose: 50-175x SLOWER than OpenCV (pixel-by-pixel)
-- No SIMD utilization
-- No cache-aware algorithms
-
-❌ **Missing Core Operations:**
-- No convolution/filtering (except basic CUDA edge filter)
-- No morphological operations (erode, dilate, open, close)
-- No connected components
-- No distance transforms
-
-❌ **Implementation Bugs:**
-- `fromCVMat()` has undefined variable references
-- Template specializations missing scope qualifiers
-- `forEachNonZero()` references wrong namespace
-
-❌ **Testing Gap:**
-- No formal test framework
-- Limited test coverage
-- No correctness validation against OpenCV
+Answering it requires a library that is bit-parallel end to end, which is what
+this repository is.
 
 ---
 
-## 4. Architecture Design
+## 2. Target Platforms
 
-### 4.1 Core Design Principles
+Two tiers, with genuinely different constraints. They are not a continuum.
 
-1. **OpenCV-Compatible API:** Users should feel at home
-2. **Zero-Copy Interop:** Seamless conversion to/from OpenCV (when available)
-3. **Performance by Default:** Optimized paths without user intervention
-4. **Correctness First:** Match OpenCV semantics exactly
-5. **Modular Design:** CPU, GPU, and future accelerators as plugins
-6. **Compile-Time Optimization:** Template-based specialization
-7. **Progressive Enhancement:** Core works everywhere, features layer on top
-8. **Zero Dependencies:** Core library has no external dependencies (not even OpenCV)
-9. **Platform Flexibility:** From embedded to desktop with same codebase
+### Tier 1 — Cortex-A class (primary)
 
-### 4.2 Layered Architecture
+Raspberry Pi, Jetson (CPU), Android/iOS phones, ARM SBCs.
 
-**Progressive Enhancement Model:**
+- `aarch64` with NEON, uniformly. **One SIMD target covers this entire tier.**
+- Full OS, heap, exceptions available.
+- This is where the VIO story lives. Optimize here.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│         Optional: Python Bindings (Desktop)             │  ← Desktop/Server
-├─────────────────────────────────────────────────────────┤
-│      Optional: OpenCV Integration (opencv.hpp)          │  ← Desktop/Embedded with OpenCV
-├─────────────────────────────────────────────────────────┤
-│                   Algorithm Layer                       │  ← All Platforms
-│  (Vision kernels: filter, morph, transform, etc.)      │
-├─────────────────────────────────────────────────────────┤
-│            Dispatch Layer (Optional)                    │  ← Runtime or Compile-time
-│  (Runtime CPU/GPU selection, SIMD detection)           │
-├─────────────────────────────────────────────────────────┤
-│              Implementation Backends                    │  ← Mix and Match
-│  ┌────────┬────────┬───────┬────────┬────────┐        │
-│  │ Scalar │  NEON  │ AVX2  │ AVX512 │  CUDA  │        │  ← Auto-detected
-│  └────────┴────────┴───────┴────────┴────────┘        │
-├─────────────────────────────────────────────────────────┤
-│            Core Layer (Zero Dependencies)               │  ← All Platforms
-│  BinMat, Size, bit utilities, memory management        │
-│           (C++11, std::vector only)                    │
-└─────────────────────────────────────────────────────────┘
-```
+Desktop x86_64 is supported as a development and comparison platform, not as a
+deployment target.
 
-**Platform Configurations:**
+### Tier 2 — Cortex-M class (correctness only)
 
-| Platform | Core | SIMD | OpenCV | CUDA | Python |
-|----------|------|------|--------|------|--------|
-| **Desktop x86** | ✓ | AVX2/512 | ✓ | ✓ | ✓ |
-| **Desktop ARM** | ✓ | NEON | ✓ | - | ✓ |
-| **Raspberry Pi** | ✓ | NEON | Optional | - | Optional |
-| **BeagleBone** | ✓ | Optional | Optional | - | - |
-| **Jetson Nano** | ✓ | NEON | ✓ | ✓ | ✓ |
-| **Cortex-M7** | ✓ | - | - | - | - |
+Microcontrollers.
 
-### 4.3 Core Data Structure: BinMat
+**Commitment:** binCV compiles and runs correctly with `-fno-exceptions` and
+without a heap. Scalar kernels, static or caller-provided buffers.
 
-**Refined Design (Zero Dependencies):**
+**Not committed:** Cortex-M-specific optimization (DSP extensions, hand-tuned
+SWAR). Deliberately unscoped — revisit only if a concrete application demands it.
 
-```cpp
-template <typename WordType = uint32_t>
-class BinMat {
-public:
-    // Type traits
-    using word_type = WordType;
-    static constexpr size_t word_size = sizeof(WordType) * 8;
+Constraints that shape the API for this tier:
 
-    // NOTE: Currently using fixed 32-byte alignment (good for AVX2, cache lines, ARM NEON)
-    // FUTURE OPTIMIZATION: Could make this compile-time configurable based on platform
-    // (e.g., 64 bytes for AVX-512, 16 bytes for constrained embedded)
-    static constexpr size_t alignment = 32; // bytes
+1. **No exceptions.** See [error policy](#53-error-policy).
+2. **No heap.** See [storage model](#43-storage-model-and-views).
+3. **Code size is often the binding constraint**, before RAM. Keep the template
+   instantiation surface small.
+4. **No popcount instruction** — the compiler emits a ~15-instruction SWAR
+   sequence. Still roughly 0.25 instructions per pixel versus several for a
+   per-pixel loop, so the approach holds; the margin is just smaller.
 
-    // Construction - owning memory
-    BinMat();
-    BinMat(int rows, int cols);
-    BinMat(Size size);
+---
 
-    // Construction - non-owning (wrap external buffer)
-    BinMat(int rows, int cols, WordType* data, size_t step_words);
+## 3. Design Principles
 
-    // Properties
-    int rows() const;
-    int cols() const;
-    Size size() const;
-    bool empty() const;
-    size_t total() const;
-    bool ownsMemory() const;
+1. **Bit width is the point.** If a design stores more bits per pixel than the
+   data contains, it is wrong regardless of how fast it benchmarks.
+2. **Memory footprint and performance are co-equal goals.** When they conflict
+   and no explicit choice has been made, **favor memory.** A user who wants raw
+   throughput and has memory to spare already has OpenCV.
+3. **OpenCV's shape, not OpenCV's internals.** Match names, call conventions and
+   semantics. Do not match runtime type erasure or dynamic dispatch.
+4. **Compile-time over runtime.** Bit width, word type, and plane count are
+   template parameters. No dispatch tables, no dynamic allocation in kernels.
+5. **Measure before optimizing, and record the measurement.** Every performance
+   claim in this repository must be reproducible from a committed benchmark.
+6. **The MVP is a VIO frontend, not a feature checklist.** Depth-first on the
+   operations a real pipeline calls, not breadth-first across OpenCV's API.
 
-    // Element access (use sparingly - slow)
-    bool at(int row, int col) const;
-    void set(int row, int col, bool value);
-    bool operator()(int row, int col) const;
+---
 
-    // Row access (efficient)
-    const WordType* ptr(int row) const;
-    WordType* ptr(int row);
+## 4. Data Model
 
-    // Memory layout
-    size_t step() const; // Row stride in bytes
-    WordType* data();
-    const WordType* data() const;
+### 4.1 Bit-plane representation
 
-    // Metadata
-    bool isContinuous() const;
-    BinMat clone() const;
-
-    // Factory methods
-    static BinMat zeros(int rows, int cols);
-    static BinMat ones(int rows, int cols);
-
-private:
-    WordType* data_;                    // Pointer to data
-    std::vector<WordType> storage_;     // Owned storage (only used if owns_memory_)
-    int rows_, cols_;
-    size_t step_words_;                 // Row stride in words
-    bool owns_memory_;                  // True if storage_ is used
-};
-```
-
-**Key Design Decisions:**
-
-1. **No OpenCV Dependency:** Uses `std::vector` for owned memory, not `cv::Mat`
-2. **External Buffer Support:** Can wrap user-provided buffers (for embedded, DMA, sensor buffers)
-3. **Simple Ownership:** Owned memory uses `std::vector`, wrapped buffers never own
-4. **OpenCV-Compatible API:** Same method names and conventions
-5. **Alignment Note:** Documents future optimization opportunity
-
-### 4.4 OpenCV Integration (Optional)
-
-**Separate Header:** `bincv/opencv.hpp`
-
-```cpp
-#ifdef BINCV_HAVE_OPENCV
-
-#include <opencv2/core.hpp>
-#include <bincv/bincv.hpp>
-
-namespace bincv {
-namespace opencv {
-
-// Conversion from OpenCV
-BinMat fromMat(const cv::Mat& mat);
-void threshold(const cv::Mat& src, BinMat& dst, double thresh, int type);
-
-// Conversion to OpenCV
-cv::Mat toMat(const BinMat& bin);          // Returns CV_8U with values 0 or 255
-cv::Mat toDisplay(const BinMat& bin);      // Alias for toMat (for clarity)
-
-} // namespace opencv
-} // namespace bincv
-
-#endif // BINCV_HAVE_OPENCV
-```
-
-**Usage Patterns:**
-
-```cpp
-// Desktop with OpenCV
-#include <bincv/bincv.hpp>
-#include <bincv/opencv.hpp>
-
-cv::Mat cv_img = cv::imread("image.jpg", cv::IMREAD_GRAYSCALE);
-bincv::BinMat bin = bincv::opencv::fromMat(cv_img);
-bincv::erode(bin, result, kernel);
-cv::imshow("Result", bincv::opencv::toDisplay(result));
-
-// Embedded without OpenCV
-#include <bincv/bincv.hpp>
-
-uint32_t sensor_buffer[256];
-bincv::BinMat bin(32, 32, sensor_buffer, 8);
-bincv::erode(bin, result, kernel);
-```
-
-### 4.5 Core Types
-
-**Size Struct:** Replaces `cv::Size` in core
-
-```cpp
-namespace bincv {
-    struct Size {
-        int width;
-        int height;
-
-        Size() : width(0), height(0) {}
-        Size(int w, int h) : width(w), height(h) {}
-
-        int area() const { return width * height; }
-    };
-}
-```
-
-**Type Aliases:**
-
-```cpp
-namespace bincv {
-    template<typename WordType> class BinMat;
-
-    using BinMat8  = BinMat<uint8_t>;   // 8 pixels per word
-    using BinMat16 = BinMat<uint16_t>;  // 16 pixels per word
-    using BinMat32 = BinMat<uint32_t>;  // 32 pixels per word (default)
-    using BinMat64 = BinMat<uint64_t>;  // 64 pixels per word
-}
-```
-
-### 4.6 Memory Layout
-
-**Row-Major with Word Packing:**
+An N-bit image is stored as **N bit-planes**. Plane *i* holds bit *i* of every
+pixel, packed into machine words. A 1-bit image is one plane; a ternary
+derivative is two.
 
 ```
-Image: 10 cols × 3 rows (WordType = uint32_t)
-Pixels per word: 32
+QuantMat<3>  (3-bit pixels, 8 pixels shown)
 
-Row 0: [p0-p9  | padding zeros] = 1 word (32 bits)
-Row 1: [p10-p19 | padding zeros] = 1 word (32 bits)
-Row 2: [p20-p29 | padding zeros] = 1 word (32 bits)
-
-Memory alignment: 32 bytes (cache line aligned)
+pixel:      5   2   7   0   3   1   6   4
+           ---------------------------------
+plane 2:    1   0   1   0   0   0   1   1     <- MSB
+plane 1:    0   1   1   0   1   0   1   0
+plane 0:    1   0   1   0   1   1   0   0     <- LSB
 ```
 
-**Design Rationale:**
-- Each row independently aligned → efficient row access
-- Padding within words → no cross-word pixel access
-- Cache line aligned → maximize throughput
-- Works with external buffers (DMA, sensors) on embedded
+Memory is exactly N bits per pixel. Logic operations apply per plane and are
+free. Reductions are population counts. Arbitrary N is expressible.
 
-### 4.7 Algorithm Categories
+Rejected alternative: SWAR sub-byte packing. See [D-2](#d-2-bit-planes-over-swar-packing).
 
-**Priority 1: Foundational Operations**
-1. **Point Operations:** threshold, bitwise (AND, OR, XOR, NOT)
-2. **Morphology:** erode, dilate, open, close, morphologyEx
-3. **Filtering:** blur, medianBlur (binary variants)
-4. **Geometric:** resize, warpAffine, flip, rotate, transpose
+### 4.2 Signed values: sign-magnitude
 
-**Priority 2: Analysis Operations**
-5. **Statistics:** countNonZero, mean, moments
-6. **Components:** connectedComponents, connectedComponentsWithStats
-7. **Contours:** findContours, drawContours
-8. **Distance:** distanceTransform
+Signed low-bit images (gradients, differences) use **magnitude planes plus one
+sign plane**, not two's complement.
 
-**Priority 3: Advanced Operations**
-9. **Feature Detection:** corners, edges, keypoints
-10. **Template Matching:** matchTemplate
-11. **Optical Flow:** calcOpticalFlow (for binary sequences)
+Ternary — the case that matters most — is then one magnitude plane and one sign
+plane:
 
-### 4.8 Dispatch Mechanism
-
-**Runtime CPU Feature Detection:**
-
-```cpp
-namespace bincv {
-namespace dispatch {
-
-enum class Backend {
-    Scalar,     // Fallback
-    SSE2,       // x86 baseline
-    AVX2,       // 256-bit SIMD
-    AVX512,     // 512-bit SIMD
-    NEON,       // ARM SIMD
-    CUDA,       // NVIDIA GPU
-};
-
-Backend detectBestBackend();
-
-// Function dispatch
-template <typename Func>
-auto dispatch(Func scalar_impl) {
-    static Backend backend = detectBestBackend();
-
-    switch (backend) {
-        case Backend::AVX512:
-            if constexpr (has_avx512_impl<Func>())
-                return avx512_impl<Func>();
-        case Backend::AVX2:
-            if constexpr (has_avx2_impl<Func>())
-                return avx2_impl<Func>();
-        default:
-            return scalar_impl;
-    }
-}
-
-} // namespace dispatch
-} // namespace bincv
 ```
+value   mag  sign
+  0      0    -
+ +1      1    0
+ -1      1    1
+```
+
+This makes the Lucas-Kanade gradient covariance fall out directly as population
+counts (see [§7.5](#75-lk-gradient-covariance)), and it degrades gracefully:
+ternary is simply the one-magnitude-plane case of the general signed form.
+Two's complement would require a comparator network for the same result and
+would make ternary a special case rather than an instance.
+
+### 4.3 Storage model and views
+
+Storage is **`{pointer, stride, ownership}`**, not a `std::vector` baked into the
+container. An owning heap allocation is one backing option among several.
+
+This single mechanism serves four independent needs, which is why it is core
+rather than an add-on:
+
+| Need | Served by |
+|---|---|
+| MCU static allocation (no heap) | caller-provided buffer |
+| DMA / sensor buffer ingest | non-owning wrap, zero copy |
+| GPU zero-copy and unified memory (later) | non-owning wrap |
+| Kernels that must not care about alignment | view with runtime stride |
+
+**Views are the kernel interface.** A view is a non-owning
+`{ptr, width, height, stride}`. Kernels take views, so a kernel compiles once per
+`(WordType, N)` regardless of the alignment or ownership of its arguments, and
+matrices of differing alignment interoperate freely.
+
+**All planes live in one contiguous allocation** at fixed offsets, not N separate
+allocations. One allocation matters on constrained targets, improves locality,
+and keeps external-buffer wrapping tractable.
+
+### 4.4 Container hierarchy
+
+```
+storage {ptr, stride, owns}
+  |
+  +-- BinMatView / QuantView<N>      non-owning, runtime stride, kernel interface
+  |
+  +-- QuantMat<N, WordType>          owning, compile-time N
+        |
+        +-- BinMat<WordType>         alias for the N=1 specialization
+```
+
+`BinMat` remains a distinct name because the 1-bit path deserves hand-written
+kernels with no plane-loop overhead, and because it carries the project's
+identity.
+
+### 4.5 Row alignment
+
+**Default: word granularity.** A row's stride is `ceil(width / WordBits)` words,
+with no padding beyond that. Larger alignment is an opt-in per-object argument.
+
+Word-granularity padding is inherent and free, and it already provides the only
+property kernels need: that the trailing partial word can be read and written
+whole, without a bounds check.
+
+Aggressive row alignment was measured and rejected as a default. See
+[D-4](#d-4-word-granularity-alignment-by-default) — this is flagged for
+re-measurement in [§9](#9-open-questions-and-planned-experiments).
+
+### 4.6 Memory arithmetic
+
+Why the data model is the whole argument, at 640×480:
+
+| Buffer | Byte-per-pixel | binCV | Ratio |
+|---|---|---|---|
+| One frame | 300 KiB | 37.5 KiB | 8× |
+| 4-level pyramid | ~400 KiB | ~50 KiB | 8× |
+| LK spatial derivative (2ch `CV_16S`) | **1.2 MiB** | ~150 KiB (4 planes) | 8× |
+| Two frames + derivatives | **~4 MiB** | **~0.5 MiB** | 8× |
+
+On a device with a few megabytes of memory, the conventional path spends its
+entire budget before the odometry backend receives a byte. The derivative buffer
+alone exceeds what many targets have. **This is the argument for the library, and
+it is a memory argument, not a speed argument.**
 
 ---
 
 ## 5. API Design
 
-### 5.1 Core API (C++)
+### 5.1 Three tiers
 
-**Desktop with OpenCV:**
+Adding quantization creates a category with no OpenCV counterpart, so the
+compatibility promise has to be stated per tier.
 
-```cpp
-#include <bincv/bincv.hpp>
-#include <bincv/opencv.hpp>  // Optional OpenCV interop
+**Tier 1 — identical semantics.** `bitwise_and/or/xor/not`, `erode`, `dilate`,
+`morphologyEx`, `countNonZero`, `copyMakeBorder`. Drop-in for OpenCV users;
+results are bit-exact against OpenCV on equivalent content. Verified by the
+equivalence harness ([§10.2](#102-equivalence-harness)).
 
-// Construction
-bincv::BinMat src(480, 640);
-bincv::BinMat dst;
+**Tier 2 — same name, specialized numerics.** `calcOpticalFlowPyrLK`,
+`goodFeaturesToTrack`, `pyrDown`. Same call shape and role, deliberately
+different math. **Not** bit-exact against OpenCV; validated against downstream
+task accuracy instead.
 
-// From OpenCV (requires opencv.hpp)
-cv::Mat cv_gray = cv::imread("image.jpg", cv::IMREAD_GRAYSCALE);
-bincv::BinMat bin = bincv::opencv::fromMat(cv_gray);
+**Tier 3 — no OpenCV equivalent.** Plane packing and unpacking, bit-sliced
+arithmetic, census/Hamming matching, masked window reductions. These must **not**
+borrow OpenCV names, precisely so that Tier 1's drop-in promise stays credible.
 
-// Bitwise operations - flat namespace
-bincv::BinMat mask = bincv::BinMat::ones(480, 640);
-bincv::bitwise_and(src, mask, dst);
-bincv::bitwise_or(src, mask, dst);
-bincv::bitwise_xor(src, mask, dst);
-bincv::bitwise_not(src, dst);
+### 5.2 Naming conventions
 
-// Morphology - flat namespace
-bincv::BinMat kernel = bincv::getStructuringElement(bincv::MORPH_RECT, {3, 3});
-bincv::erode(src, dst, kernel);
-bincv::dilate(src, dst, kernel);
-bincv::morphologyEx(src, dst, bincv::MORPH_OPEN, kernel);
+Follow OpenCV: `camelCase` functions, `PascalCase` types, `UPPER_CASE`
+constants, lowercase namespaces, destination-as-out-parameter
+(`op(src, dst, ...)`).
 
-// Analysis
-int count = bincv::countNonZero(src);
-float density = count / (float)src.total();
+### 5.3 Error policy
 
-// Display (requires opencv.hpp)
-cv::imshow("Result", bincv::opencv::toDisplay(dst));
-```
+Split validation from the hot path, matching OpenCV's own convention.
 
-**Embedded without OpenCV:**
+**Validation** — construction, `resize`, argument checking. Throws by default.
+Called at setup, not per pixel. Compiling with `BINCV_NO_EXCEPTIONS` converts
+these to assert/abort, which is what makes Tier 2 platforms viable.
 
-```cpp
-#include <bincv/bincv.hpp>  // Core only, no dependencies
+**Element access** — `at()` is bounds-checked in debug builds and unchecked in
+release, exactly as `cv::Mat::at` behaves. This removes throws from hot paths
+entirely and lets release builds inline access to a shift and a mask.
 
-// Wrap external buffer (sensor, DMA, etc.)
-uint32_t sensor_buffer[256];
-bincv::BinMat src(32, 32, sensor_buffer, 8);
-
-// Or allocate
-bincv::BinMat dst(32, 32);
-
-// All operations work the same
-bincv::BinMat kernel = bincv::getStructuringElement(bincv::MORPH_RECT, {3, 3});
-bincv::erode(src, dst, kernel);
-
-int count = bincv::countNonZero(dst);
-```
-
-**GPU Acceleration (nested namespace):**
-
-```cpp
-#include <bincv/bincv.hpp>
-#include <bincv/cuda.hpp>
-
-// CPU version (flat namespace)
-bincv::erode(src, dst, kernel);
-
-// GPU version (nested namespace - explicit)
-bincv::cuda::erode(src, dst, kernel);
-
-// Async GPU execution
-bincv::cuda::Stream stream;
-stream.erode(src, dst, kernel);
-stream.synchronize();
-```
-
-### 5.2 Python API
-
-**NumPy/OpenCV-Compatible:**
-
-```python
-import bincv as bcv
-import cv2
-import numpy as np
-
-# From NumPy/OpenCV
-cv_gray = cv2.imread('image.jpg', cv2.IMREAD_GRAYSCALE)
-_, cv_binary = cv2.threshold(cv_gray, 128, 255, cv2.THRESH_BINARY)
-bin_img = bcv.from_numpy(cv_binary)
-
-# Bitwise operations
-mask = bcv.ones((480, 640), dtype=bcv.binary)
-result = bcv.bitwise_and(bin_img, mask)
-
-# Morphology
-kernel = bcv.getStructuringElement(bcv.MORPH_RECT, (3, 3))
-eroded = bcv.erode(bin_img, kernel)
-
-# Analysis
-count = bcv.countNonZero(bin_img)
-n_components, labels = bcv.connectedComponents(bin_img)
-```
-
-### 5.3 Naming Conventions
-
-**Follow OpenCV Conventions:**
-- Functions: `camelCase` (e.g., `morphologyEx`, `connectedComponents`)
-- Classes: `PascalCase` (e.g., `BinMat`, `Size`)
-- Constants: `UPPER_CASE` (e.g., `MORPH_RECT`, `INTER_NEAREST`)
-- Namespaces: `lowercase` (e.g., `bincv`, `bincv::cuda`, `bincv::opencv`)
-
-**Namespace Organization:**
-- **Flat namespace for CPU operations:** `bincv::erode()`, `bincv::bitwise_and()` (OpenCV-style)
-- **Nested for backends:** `bincv::cuda::erode()` (explicit GPU)
-- **Nested for optional features:** `bincv::opencv::fromMat()` (requires OpenCV)
+Kernels never throw. A kernel that receives inconsistent views is a programming
+error, caught by assertion in debug.
 
 ---
 
-## 6. Optimization Techniques
+## 6. Compute Strategy
 
-### 6.1 SIMD Bitwise Operations
+### 6.1 Bit-parallel primitives
 
-**Example: Bitwise AND (AVX2)**
+The kernel vocabulary is small and closed:
 
-```cpp
-void bitwise_and_avx2(const BinMat& src1, const BinMat& src2, BinMat& dst) {
-    assert(src1.size() == src2.size());
-    dst = BinMat(src1.rows(), src1.cols());
+| Primitive | Form |
+|---|---|
+| logic | `&`, `\|`, `^`, `~` per plane |
+| shift | word shifts with cross-word carry (horizontal), row offset (vertical) |
+| majority / median | `(a&b) \| (b&c) \| (a&c)` for 3 inputs |
+| threshold on a count | bit-sliced adder network, then compare |
+| reduction | population count over a region or mask |
 
-    const size_t n_words = src1.rows() * (src1.step() / sizeof(uint32_t));
-    const uint32_t* p1 = reinterpret_cast<const uint32_t*>(src1.data());
-    const uint32_t* p2 = reinterpret_cast<const uint32_t*>(src2.data());
-    uint32_t* pd = reinterpret_cast<uint32_t*>(dst.data());
+Nearly every operation in the MVP set is a composition of these.
 
-    size_t i = 0;
-    // Process 8 words (256 pixels) at a time
-    for (; i + 8 <= n_words; i += 8) {
-        __m256i v1 = _mm256_loadu_si256((__m256i*)(p1 + i));
-        __m256i v2 = _mm256_loadu_si256((__m256i*)(p2 + i));
-        __m256i vd = _mm256_and_si256(v1, v2);
-        _mm256_storeu_si256((__m256i*)(pd + i), vd);
-    }
+### 6.2 Reductions are bulk-only
 
-    // Scalar remainder
-    for (; i < n_words; ++i) {
-        pd[i] = p1[i] & p2[i];
-    }
-}
+**binCV must not expose a per-word popcount primitive.** This is a hard interface
+rule derived from measurement.
+
+On `aarch64` — the primary target — there is no scalar popcount instruction.
+`__builtin_popcountll` compiles to:
+
+```asm
+fmov   d0, x0          ; GPR -> NEON  (domain crossing)
+cnt    v0.8b, v0.8b    ; the actual popcount
+uaddlv h0, v0.8b       ; horizontal add
+fmov   w0, s0          ; NEON -> GPR  (domain crossing)
 ```
 
-### 6.2 Binary Morphology Optimization
+The cost is dominated by the two register-domain crossings, not by `cnt`. A
+caller that popcounts word by word in scalar code pays both crossings per 64
+pixels.
 
-**Traditional Approach (Slow):**
-```cpp
-// For each pixel, check neighborhood - O(kernel_size * image_size)
-for (int r = 0; r < rows; ++r) {
-    for (int c = 0; c < cols; ++c) {
-        bool result = false;
-        for (int kr = 0; kr < kernel_rows; ++kr) {
-            for (int kc = 0; kc < kernel_cols; ++kc) {
-                if (kernel(kr, kc) && src(r+kr, c+kc)) {
-                    result = true;
-                    break;
-                }
-            }
-        }
-        dst(r, c) = result;
-    }
-}
-```
+Therefore reductions are exposed only in bulk form — over a region, a row range,
+or a mask — so the implementation keeps data in vector registers and accumulates
+with `cnt` + `uaddlv` without crossing back. The same interface lowers to
+`popcntq` in a loop on x86 and to the SWAR sequence on Cortex-M, so one API stays
+optimal on all three.
 
-**Binary-Optimized Approach (Fast):**
-```cpp
-// Dilate = OR of shifted versions
-void dilate_3x3(const BinMat& src, BinMat& dst) {
-    dst = src.clone();
+### 6.3 SIMD strategy
 
-    // OR with 8 shifted neighbors
-    for (int dr = -1; dr <= 1; ++dr) {
-        for (int dc = -1; dc <= 1; ++dc) {
-            if (dr == 0 && dc == 0) continue;
+**NEON is the reference implementation. x86 is the portability path.** This is
+the inverse of the usual habit and it follows directly from the platform tiers:
+if the popcount and shift abstractions are designed against AVX-512, they will
+not port to the hardware that actually matters here.
 
-            // Shift and OR (vectorized)
-            BinMat shifted = shift(src, dr, dc);
-            bitwise_or(dst, shifted, dst);
-        }
-    }
-}
-```
+Relevant asymmetries, verified:
 
-### 6.3 Population Count (POPCOUNT)
+| | scalar popcount | vector popcount |
+|---|---|---|
+| aarch64 / NEON | none (via NEON, 2 domain crossings) | `cnt` + `uaddlv` |
+| x86 SSE4.2+ | `popcnt`, fast | — |
+| x86 AVX2 | `popcnt` | **none** — requires `pshufb` nibble-LUT |
+| x86 AVX-512 | `popcnt` | `vpopcntdq` (server-class; not a target) |
+| Cortex-M | none — SWAR sequence | none |
 
-**Example: countNonZero with SIMD**
-
-```cpp
-int countNonZero_avx2(const BinMat& src) {
-    const uint64_t* data = reinterpret_cast<const uint64_t*>(src.data());
-    const size_t n_words = src.rows() * src.step() / sizeof(uint64_t);
-
-    int total = 0;
-    size_t i = 0;
-
-    // AVX2: Process 4 × uint64 at a time
-    __m256i sum = _mm256_setzero_si256();
-    for (; i + 4 <= n_words; i += 4) {
-        __m256i v = _mm256_loadu_si256((__m256i*)(data + i));
-
-        // Use lookup table method for POPCNT
-        __m256i lookup = _mm256_setr_epi8(
-            0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
-            0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4
-        );
-        __m256i low = _mm256_and_si256(v, _mm256_set1_epi8(0x0F));
-        __m256i high = _mm256_and_si256(_mm256_srli_epi16(v, 4), _mm256_set1_epi8(0x0F));
-        __m256i cnt_low = _mm256_shuffle_epi8(lookup, low);
-        __m256i cnt_high = _mm256_shuffle_epi8(lookup, high);
-        __m256i cnt = _mm256_add_epi8(cnt_low, cnt_high);
-
-        sum = _mm256_add_epi64(sum, _mm256_sad_epu8(cnt, _mm256_setzero_si256()));
-    }
-
-    // Reduce vector to scalar
-    uint64_t counts[4];
-    _mm256_storeu_si256((__m256i*)counts, sum);
-    total = counts[0] + counts[1] + counts[2] + counts[3];
-
-    // Scalar remainder
-    for (; i < n_words; ++i) {
-        total += __builtin_popcountll(data[i]);
-    }
-
-    return total;
-}
-```
-
-### 6.4 Cache-Blocked Transpose
-
-```cpp
-template <typename WordType>
-void transpose_blocked(const BinMat<WordType>& src, BinMat<WordType>& dst) {
-    constexpr int BLOCK_SIZE = 32; // Tune for L1 cache
-
-    dst = BinMat<WordType>(src.cols(), src.rows());
-
-    for (int i = 0; i < src.rows(); i += BLOCK_SIZE) {
-        for (int j = 0; j < src.cols(); j += BLOCK_SIZE) {
-            int max_i = std::min(i + BLOCK_SIZE, src.rows());
-            int max_j = std::min(j + BLOCK_SIZE, src.cols());
-
-            // Transpose block
-            for (int ii = i; ii < max_i; ++ii) {
-                for (int jj = j; jj < max_j; ++jj) {
-                    dst.set(jj, ii, src.at(ii, jj));
-                }
-            }
-        }
-    }
-}
-```
-
-### 6.5 GPU Morphology (CUDA)
-
-```cuda
-__global__ void dilate_3x3_kernel(
-    const uint32_t* src, uint32_t* dst,
-    int rows, int cols, int step_words
-) {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (row >= rows || col >= cols) return;
-
-    // Each thread processes 32 pixels (1 word)
-    uint32_t result = 0;
-
-    // OR with neighborhood
-    for (int dr = -1; dr <= 1; ++dr) {
-        for (int dc = -1; dc <= 1; ++dc) {
-            int nr = row + dr;
-            int nc = col + dc;
-            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
-                uint32_t neighbor = src[nr * step_words + nc];
-
-                // Handle bit shifts for pixel alignment
-                if (dc < 0) {
-                    neighbor >>= 1;
-                    if (nc + 1 < cols) {
-                        neighbor |= (src[nr * step_words + nc + 1] & 1) << 31;
-                    }
-                } else if (dc > 0) {
-                    neighbor <<= 1;
-                    if (nc > 0) {
-                        neighbor |= (src[nr * step_words + nc - 1] >> 31) & 1;
-                    }
-                }
-
-                result |= neighbor;
-            }
-        }
-    }
-
-    dst[row * step_words + col] = result;
-}
-```
+Dispatch is compile-time where possible. Runtime dispatch is added only if a
+deployment target requires a single binary across ISA levels.
 
 ---
 
-## 7. Performance Targets
+## 7. The MVP Operation Set
 
-**Benchmark Suite (1024×1024 image):**
+Derived from what a real binary-frame VIO frontend calls, not from OpenCV's
+table of contents. Each entry lists its bit-parallel form, which is why this set
+is tractable.
 
-| Operation | OpenCV (uint8) | binCV Target | Speedup Goal |
-|-----------|----------------|--------------|--------------|
-| Bitwise AND | 0.05 ms | 0.005 ms | 10x |
-| Erode 3×3 | 0.8 ms | 0.05 ms | 16x |
-| Dilate 3×3 | 0.8 ms | 0.05 ms | 16x |
-| Morphology Open | 1.6 ms | 0.1 ms | 16x |
-| countNonZero | 0.1 ms | 0.01 ms | 10x |
-| Resize 2×2 | 0.3 ms | 0.05 ms | 6x |
-| Connected Components | 5.0 ms | 0.5 ms | 10x |
-| Distance Transform | 2.0 ms | 0.2 ms | 10x |
+### 7.1 Denoise — median of 3
 
-**Memory Targets:**
-- 1024×1024 binary: 128 KB (vs 1 MB for uint8)
-- 8× memory reduction
-
----
-
-## 8. Error Handling Strategy
-
-**Two-Phase Approach:**
-
-**Phase 0-2: Exceptions (Simpler Development)**
-
-```cpp
-void erode(const BinMat& src, BinMat& dst, const BinMat& kernel) {
-    if (src.empty()) {
-        throw std::invalid_argument("erode: source image is empty");
-    }
-    if (kernel.empty()) {
-        throw std::invalid_argument("erode: kernel is empty");
-    }
-    // ... implementation
-}
-```
-
-- Clean, idiomatic C++
-- Good error messages
-- Works well for desktop/Python bindings
-
-**Phase 3+: Optional No-Exceptions Mode (Embedded Support)**
-
-```cpp
-// error.hpp
-#ifdef BINCV_NO_EXCEPTIONS
-    #define BINCV_CHECK(cond, msg) assert((cond) && msg)
-#else
-    #define BINCV_CHECK(cond, msg) if(!(cond)) throw std::invalid_argument(msg)
-#endif
-
-// Refactored implementation
-void erode(const BinMat& src, BinMat& dst, const BinMat& kernel) {
-    BINCV_CHECK(!src.empty(), "erode: source image is empty");
-    BINCV_CHECK(!kernel.empty(), "erode: kernel is empty");
-    // ... implementation
-}
-```
-
-- Compile flag: `-DBINCV_NO_EXCEPTIONS`
-- Embedded toolchains with `-fno-exceptions` supported
-- Desktop users unaffected
-
----
-
-## 9. Build System Strategy
-
-**CMake Auto-Configuration:**
-
-```cmake
-# Automatic feature detection
-find_package(OpenCV QUIET)
-if(OpenCV_FOUND)
-    target_compile_definitions(bincv INTERFACE BINCV_HAVE_OPENCV)
-    message(STATUS "OpenCV found - enabling interop")
-else()
-    message(STATUS "OpenCV not found - core-only mode (embedded)")
-endif()
-
-# SIMD detection
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-mavx2" HAVE_AVX2)
-check_cxx_compiler_flag("-mavx512f" HAVE_AVX512)
-check_cxx_compiler_flag("-mfpu=neon" HAVE_NEON)
-
-# CUDA detection
-find_package(CUDA QUIET)
-if(CUDA_FOUND)
-    target_compile_definitions(bincv INTERFACE BINCV_HAVE_CUDA)
-endif()
-
-# Platform-specific optimizations
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
-    message(STATUS "ARM target - optimizing for size")
-    target_compile_options(bincv INTERFACE -Os)
-endif()
-```
-
-**Build Modes:**
-
-| Mode | Command | Features |
-|------|---------|----------|
-| **Full** | `cmake ..` | Auto-detect all |
-| **No OpenCV** | `cmake -DCMAKE_DISABLE_FIND_PACKAGE_OpenCV=ON ..` | Core only |
-| **No CUDA** | `cmake -DCMAKE_DISABLE_FIND_PACKAGE_CUDA=ON ..` | CPU only |
-| **Embedded** | `cmake -DBINCV_EMBEDDED=ON ..` | Core + scalar, size-optimized |
-
----
-
-## 10. Implementation Plan
-
-### Phase 0: Embedded Foundation & Core Refactoring
-
-**Goal:** Remove OpenCV dependency from core, enable embedded support, maintain desktop usability
-
-**Priority:** CRITICAL - Must be done before Phase 1
-
-**Tasks:**
-
-1. **Create Core Types** (`bincv/core/types.hpp`)
-   - Add `struct Size { int width, height; }`
-   - Add type aliases: `BinMat8`, `BinMat16`, `BinMat32`, `BinMat64`
-   - Add enums: `MorphShape`, `MorphOp`, border types, etc.
-
-2. **Refactor `BinMat` Storage** (`bincv/core/binmat.hpp`)
-   - Replace `cv::Mat data_` with `std::vector<WordType> storage_`
-   - Add `WordType* data_` pointer member
-   - Add `bool owns_memory_` flag
-   - Add external buffer constructor: `BinMat(int rows, int cols, WordType* data, size_t step_words)`
-   - Update all internal methods to use new storage
-   - Add alignment constant with comment about future platform-specific optimization
-
-3. **Create OpenCV Interop Header** (`bincv/opencv.hpp`)
-   - Move `fromMat()`, `toMat()`, `toDisplay()` to `bincv::opencv` namespace
-   - Guard with `#ifdef BINCV_HAVE_OPENCV`
-   - Keep same functionality, just separate from core
-
-4. **Update Existing Operations**
-   - Replace `cv::Size` with `bincv::Size` throughout
-   - Replace `cv::Rect` with `bincv::Rect` (if used)
-   - Update `getStructuringElement()` signature
-   - Ensure no OpenCV usage in core implementations
-
-5. **CMake Configuration**
-   - Make OpenCV optional (auto-detect)
-   - Auto-detect SIMD capabilities
-   - Add configuration summary
-   - Support cross-compilation for ARM
-
-6. **Testing**
-   - Ensure all existing tests pass
-   - Add test for external buffer wrapping
-   - Cross-compile for ARM (Raspberry Pi)
-   - Measure binary size (core only, no OpenCV)
-   - Create golden test files (pre-computed results)
-
-7. **Documentation**
-   - Update this ARCHITECTURE.md with decisions
-   - Update ROADMAP.md with Phase 0 details
-   - Add embedded build guide
-   - Document build without OpenCV
-
-**Completion Criteria:**
-- ✅ Core builds without OpenCV (`-DCMAKE_DISABLE_FIND_PACKAGE_OpenCV=ON`)
-- ✅ Desktop workflow unchanged (just add `#include <bincv/opencv.hpp>` where needed)
-- ✅ All existing tests pass
-- ✅ Cross-compiles for ARM
-- ✅ Binary size measured and documented
-- ✅ External buffer wrapping works and tested
-
-**Estimated Effort:** 2-3 days
-
----
-
-### Phase 1: Foundation & Correctness
-
-**Goals:**
-- Fix existing bugs
-- Establish testing infrastructure
-- Implement core optimized operations
-- Match OpenCV semantics exactly
-
-**Concrete Tasks:**
-
-1. **Fix Critical Bugs**
-   - Fix `fromCVMat()` undefined variable references ([binMat_impl.hpp:42](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp))
-   - Fix template specialization scope issues ([binMat_impl.hpp:156+](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp))
-   - Fix `forEachNonZero()` namespace errors ([binMat_impl.hpp:345](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp))
-   - Validate all existing operations compile and work
-
-2. **Testing Infrastructure**
-   - Integrate Google Test framework
-   - Create test utilities for comparing with OpenCV:
-     ```cpp
-     void assertMatEqual(const BinMat& actual, const cv::Mat& expected);
-     BinMat createRandomBinary(int rows, int cols, float sparsity);
-     ```
-   - Implement property-based testing
-   - Add correctness tests for all operations (100+ test cases)
-
-3. **Optimize Transpose**
-   - Implement cache-blocked algorithm
-     - Target: Match or beat OpenCV (0.003 ms for 256×256)
-     - Use 32×32 or 64×64 tiles for cache locality
-   - Add AVX2 SIMD variant for hot paths
-   - Handle edge cases (non-square, small matrices)
-
-4. **Core Bitwise Operations**
-   - Implement: `bitwise_and`, `bitwise_or`, `bitwise_xor`, `bitwise_not`
-   - Multiple backends:
-     - Scalar (fallback)
-     - AVX2 (256-bit SIMD)
-     - AVX-512 (512-bit SIMD)
-     - NEON (ARM)
-   - Runtime dispatch based on CPU features
-   - Target: 10× faster than OpenCV
-
-5. **Documentation Setup**
-   - Set up Doxygen for API documentation
-   - Document all public APIs with usage examples
-   - Create benchmarking guide
-
-**Phase 1 Completion Criteria:**
-- ✅ All existing bugs fixed and code compiles
-- ✅ All existing operations validated against OpenCV
-- ✅ Transpose performance matches OpenCV
-- ✅ Core bitwise operations 10× faster
-- ✅ 100+ passing unit tests
-- ✅ Google Test integrated
-
----
-
-### Phase 2: Core Vision Operations
-
-**Goals:**
-- Implement morphological operations
-- Implement filtering operations
-- Establish CPU SIMD dispatch
-- Comprehensive benchmarking
-
-**Concrete Tasks:**
-
-1. **Morphological Operations**
-   - Implement separable morphology:
-     ```cpp
-     void erode(const BinMat& src, BinMat& dst, const BinMat& kernel);
-     void dilate(const BinMat& src, BinMat& dst, const BinMat& kernel);
-     void morphologyEx(const BinMat& src, BinMat& dst, int op, const BinMat& kernel);
-     ```
-   - Operations: `MORPH_ERODE`, `MORPH_DILATE`, `MORPH_OPEN`, `MORPH_CLOSE`, `MORPH_GRADIENT`, `MORPH_TOPHAT`, `MORPH_BLACKHAT`
-   - Optimizations:
-     - Shift-and-OR/AND for 3×3, 5×5 kernels (most common)
-     - SIMD horizontal OR/AND reductions
-     - Separable decomposition for rectangular kernels
-   - Target: 15-20× faster than OpenCV
-
-2. **Filtering Operations**
-   - Binary blur (majority filter):
-     ```cpp
-     void blur(const BinMat& src, BinMat& dst, cv::Size ksize);
-     ```
-   - Binary median filter:
-     ```cpp
-     void medianBlur(const BinMat& src, BinMat& dst, int ksize);
-     ```
-   - Use SIMD POPCOUNT for counting
-   - Target: 10× faster than OpenCV
-
-3. **Runtime Dispatch System**
-   - CPU feature detection at runtime
-   - Function pointer tables for operations
-   - Compile-time backend selection option
-
-4. **Padding Operations**
-   - Implement all OpenCV border types:
-     ```cpp
-     void copyMakeBorder(const BinMat& src, BinMat& dst,
-                         int top, int bottom, int left, int right,
-                         int borderType, bool value = false);
-     ```
-   - Types: `BORDER_CONSTANT`, `BORDER_REPLICATE`, `BORDER_REFLECT`, `BORDER_WRAP`
-
-5. **Comprehensive Benchmarking**
-   - Extend benchmark suite:
-     - All morphological operations
-     - All filter operations
-     - Multiple image sizes: 256², 512², 1024², 2048², 4096²
-     - Multiple sparsity levels: 1%, 10%, 50%, 90%, 99%
-   - Generate performance reports
-
-**Phase 2 Completion Criteria:**
-- ✅ Morphology: erode, dilate, open, close, etc. (15-20× faster)
-- ✅ Filters: blur, median (10× faster)
-- ✅ Runtime SIMD dispatch working
-- ✅ Padding with all border types
-- ✅ Comprehensive benchmark results
-
----
-
-### Phase 3: Analysis & GPU Acceleration
-
-**Goals:**
-- Connected components analysis
-- Distance transforms
-- Statistical operations
-- CUDA GPU implementations
-
-**Concrete Tasks:**
-
-1. **Connected Components**
-   - Union-find on binary images:
-     ```cpp
-     int connectedComponents(const BinMat& image, BinMat& labels, int connectivity = 8);
-     int connectedComponentsWithStats(const BinMat& image, BinMat& labels,
-                                      cv::Mat& stats, cv::Mat& centroids, int connectivity = 8);
-     ```
-   - Optimizations:
-     - Parallel union-find
-     - Block-based processing for cache efficiency
-     - SIMD for label propagation
-   - Target: 10× faster than OpenCV
-
-2. **Distance Transform**
-   - Euclidean and L1 distance:
-     ```cpp
-     void distanceTransform(const BinMat& src, cv::Mat& dst, int distanceType, int maskSize);
-     ```
-   - Use fast sequential algorithm (Felzenszwalb)
-   - Optimize with SIMD for distance comparisons
-   - Target: 5-10× faster than OpenCV
-
-3. **Statistical Operations**
-   - Optimized counting:
-     ```cpp
-     int countNonZero(const BinMat& src);
-     double mean(const BinMat& src);
-     cv::Moments moments(const BinMat& src);
-     ```
-   - Use SIMD POPCOUNT implementations
-   - Target: 10× faster for countNonZero
-
-4. **CUDA Implementations**
-   - Port optimized operations to CUDA:
-     - Bitwise operations
-     - Morphology: erode, dilate, open, close
-     - Connected components (GPU parallel union-find)
-     - Distance transform (parallel algorithm)
-   - Optimizations:
-     - Shared memory for convolution-like ops
-     - Warp-level primitives
-     - Coalesced memory access
-   - Target: 100× faster on GPU for large images (2048² and above)
-
-5. **Async GPU Execution**
-   - Non-blocking API:
-     ```cpp
-     namespace bincv::cuda {
-         class Stream {
-         public:
-             void erode(const BinMat& src, BinMat& dst, const BinMat& kernel);
-             void synchronize();
-         };
-     }
-     ```
-   - Overlapped CPU/GPU execution
-
-**Phase 3 Completion Criteria:**
-- ✅ Connected components (10× faster on CPU)
-- ✅ Distance transform (5-10× faster on CPU)
-- ✅ CUDA implementations of core operations
-- ✅ GPU performance: 100× faster for 2048² images
-- ✅ Async CUDA API functional
-
----
-
-### Phase 4: Advanced Operations & Language Bindings
-
-**Goals:**
-- Python bindings
-- Advanced vision operations
-- Comprehensive documentation
-- Example applications
-
-**Concrete Tasks:**
-
-1. **Python Bindings (binCV-py)**
-   - Use pybind11 for C++ bindings
-   - NumPy interop:
-     ```python
-     def from_numpy(arr: np.ndarray) -> BinMat
-     def to_numpy(mat: BinMat) -> np.ndarray
-     ```
-   - Match OpenCV-Python API style
-   - Support Python type hints
-   - Zero-copy where possible
-   - Release GIL in all operations
-
-2. **Contour Operations**
-   - Find contours:
-     ```cpp
-     void findContours(const BinMat& image,
-                       std::vector<std::vector<cv::Point>>& contours,
-                       int mode, int method);
-     ```
-   - Draw contours:
-     ```cpp
-     void drawContours(BinMat& image,
-                       const std::vector<std::vector<cv::Point>>& contours,
-                       int contourIdx, bool color, int thickness = 1);
-     ```
-
-3. **Template Matching**
-   - Binary correlation:
-     ```cpp
-     void matchTemplate(const BinMat& image, const BinMat& templ,
-                        cv::Mat& result, int method);
-     ```
-   - Methods: `TM_SQDIFF`, `TM_CCORR`, `TM_CCOEFF`
-   - Use FFT for large templates
-   - Use SIMD POPCOUNT for small templates
-
-4. **Feature Detection**
-   - Binary corner detection:
-     ```cpp
-     void goodFeaturesToTrack(const BinMat& image,
-                              std::vector<cv::Point2f>& corners,
-                              int maxCorners, double qualityLevel, double minDistance);
-     ```
-
-5. **Example Applications**
-   - SPAD camera processing pipeline
-   - Event camera frame processing
-   - Document image morphology
-   - Depth discontinuity detection
-   - Binary pattern matching
-
-6. **Documentation**
-   - Tutorials:
-     - Getting started
-     - Migration from OpenCV
-     - Performance optimization
-     - CUDA programming with binCV
-   - API reference (Doxygen)
-   - Architecture overview
-   - Benchmarking guide
-
-**Phase 4 Completion Criteria:**
-- ✅ Python bindings working with pip package structure
-- ✅ Contour operations matching OpenCV
-- ✅ Template matching (10× faster)
-- ✅ 5+ example applications
-- ✅ Complete documentation
-- ✅ Pip package installable locally
-
----
-
-### Phase 5: Platform Expansion & Advanced Backends
-
-**Goals:**
-- Additional platform support
-- Framework integration
-- Advanced GPU backends
-- Profiling infrastructure
-
-**Concrete Tasks:**
-
-1. **ARM Platform Support**
-   - Implement ARM NEON SIMD backend
-   - Runtime detection for ARM CPUs
-   - Optimize for mobile and edge devices
-
-2. **Framework Integration**
-   - PyTorch custom operators
-   - TensorFlow custom ops
-   - JAX integration
-
-3. **Additional GPU Backends**
-   - Apple Metal GPU backend
-   - Vulkan compute backend
-   - OpenCL backend
-
-4. **Advanced GPU Features**
-   - Multi-GPU support
-   - GPU streams and events
-   - Unified memory
-
-5. **Performance Profiling Tools**
-   - Built-in profiler:
-     ```cpp
-     bincv::Profiler profiler;
-     profiler.start("erode");
-     bincv::erode(src, dst, kernel);
-     profiler.stop("erode");
-     profiler.report();
-     ```
-
-**Phase 5 Completion Criteria:**
-- ✅ ARM NEON backend functional
-- ✅ PyTorch/TensorFlow custom operators working
-- ✅ Metal or Vulkan GPU backend implemented
-- ✅ Multi-GPU support for CUDA
-- ✅ Built-in profiling infrastructure
-
----
-
-## 9. Technical Challenges & Solutions
-
-### Challenge 1: Bit Shifting Across Word Boundaries
-
-**Problem:** Morphology operations need to access neighboring pixels, which may cross word boundaries.
-
-**Solution:**
-- Precompute shifted copies for small shifts (±1, ±2)
-- Use SIMD shuffle for intra-register shifts
-- Cache word pairs in hot loops
-
-### Challenge 2: Non-Multiple-of-Word-Size Dimensions
-
-**Problem:** Image width may not be divisible by word size.
-
-**Solution:**
-- Always pad width to next multiple of word size
-- Mark padding bits as 0
-- Handle remainder in scalar code for correctness
-
-### Challenge 3: Cache Coherency on GPU
-
-**Problem:** Bit-packed data reduces memory bandwidth but increases computation for unpacking.
-
-**Solution:**
-- Use shared memory aggressively
-- Unpack once per block, process many pixels
-- Coalesce memory accesses
-
-### Challenge 4: Python GIL for NumPy Interop
-
-**Problem:** Python's Global Interpreter Lock limits parallelism.
-
-**Solution:**
-- Release GIL in all binCV operations:
-  ```cpp
-  py::gil_scoped_release release;
-  bincv::erode(src, dst, kernel);
-  ```
-- Zero-copy NumPy arrays where possible
-
-### Challenge 5: Maintaining OpenCV Compatibility
-
-**Problem:** OpenCV has quirks (coordinate conventions, border handling).
-
-**Solution:**
-- Extensive testing against OpenCV reference
-- Document any unavoidable differences
-- Provide conversion utilities for edge cases
-
----
-
-## 10. Quality & Performance Metrics
-
-### Performance Targets
-
-**Quantitative Goals:**
-1. **Speedup:** 10-100× faster than OpenCV for core operations
-2. **Memory:** 8× reduction (1-bit vs 8-bit storage)
-3. **Throughput:** Process 1000 fps @ 1024×1024 on consumer GPU
-4. **Latency:** <1ms for common operations on CPU
-
-**Benchmark Coverage:**
-- 50+ operations benchmarked
-- 5 image sizes: 256², 512², 1024², 2048², 4096²
-- 5 sparsity levels: 1%, 10%, 50%, 90%, 99%
-- 3 backends: CPU scalar, CPU SIMD, GPU CUDA
-
-### Correctness Requirements
-
-**Testing:**
-- 100% test coverage of public API
-- 500+ unit tests passing
-- Validation against OpenCV on 1000+ random images
-- Property-based testing for morphological operations
-- Fuzz testing for edge cases
-
-**Code Quality:**
-- All public APIs documented with Doxygen
-- Static analysis passing (clang-tidy, cppcheck)
-- No memory leaks (valgrind clean)
-- Thread-safe where applicable
-
----
-
-## 11. Comparison with Related Work
-
-| Library | Binary Support | Performance | Usability | GPU Support |
-|---------|----------------|-------------|-----------|-------------|
-| **OpenCV** | No (uses uint8) | Baseline | Excellent | CUDA module |
-| **scikit-image** | No (uses uint8) | Slow (Python) | Good | No |
-| **IPP** (Intel) | No | Fast (SIMD) | Good | No |
-| **NPP** (NVIDIA) | No | Fast (GPU) | Good | Yes (CUDA only) |
-| **Halide** | Custom DSL | Fast (JIT) | Complex | Yes |
-| **binCV** | **Yes (native)** | **10-100× faster** | **OpenCV-like** | **Yes (CUDA, Vulkan)** |
-
-**Unique Value Proposition:**
-- Only library with native binary (1-bit) support
-- 10-100× speedup for binary operations
-- OpenCV-compatible API (drop-in replacement)
-- Cross-platform CPU and GPU acceleration
-
----
-
-## 11. Implementation Priorities
-
-### Critical Path
-
-The following sequence must be followed as each builds on the previous:
-
-1. **Phase 0: Core Refactoring** → Remove OpenCV dependency, enable embedded
-2. **Fix Compilation Bugs** → Required for any development
-3. **Establish Testing** → Required for validating correctness
-4. **Optimize Transpose** → High-impact, foundational operation
-5. **Core Bitwise Ops** → Building blocks for advanced operations
-6. **Morphology** → Most important vision operations for binary images
-7. **SIMD Dispatch** → Performance multiplier for all operations
-8. **GPU Backend** → Massive speedup for large images
-9. **Advanced Operations** → Build on stable foundation
-10. **Language Bindings** → Enable broader usage
-
-### Dependency Graph
+For binary input, median equals majority:
 
 ```
-Phase 0: Core Refactoring (Remove OpenCV dependency)
-      ↓
-Testing Framework
-      ↓
-Bug Fixes → Transpose Opt → Bitwise Ops → Morphology → Filtering
-                                  ↓            ↓          ↓
-                            SIMD Dispatch ─────┴──────────┘
-                                  ↓
-                            GPU Backend
-                                  ↓
-                      Connected Components, Distance Transform
-                                  ↓
-                         Advanced Operations
-                                  ↓
-                          Python Bindings
+maj3(a, b, c) = (a & b) | (b & c) | (a & c)
 ```
 
-### Platform Support Timeline
+One expression, 64 pixels per word, no branches.
 
-| Phase | Desktop | High-End Embedded | Mid-Range Embedded | Low-End Embedded |
-|-------|---------|-------------------|-------------------|------------------|
-| **Phase 0** | Core working | Core working | Core working | Core working |
-| **Phase 1** | + Optimized ops | + Optimized ops | + Scalar ops | + Scalar ops |
-| **Phase 2** | + SIMD (AVX2) | + SIMD (NEON) | Optional SIMD | - |
-| **Phase 3** | + CUDA | + CUDA (Jetson) | - | - |
-| **Phase 4** | + Python | Optional Python | - | - |
-| **Phase 5** | Full features | Full features | Core features | Core features |
+### 7.2 Pyramid downsample — box 2×2
+
+Sum four bits, threshold. A 2×2 popcount and compare; the bit-sliced adder for
+four inputs is a handful of logic ops.
+
+### 7.3 Edge filter / threshold
+
+Produces the 1-bit frame from a higher-precision source. In a deployed system
+this may happen in-sensor; binCV provides it for pipelines that binarize on the
+host.
+
+### 7.4 Spatial derivative — binarized `[-1, 0, 1]`
+
+On a 1-bit input the derivative is **ternary**, computed by shifts and masks
+rather than convolution:
+
+```
+pos = (src >> 1) & ~(src << 1)      // rising edge
+neg = (src << 1) & ~(src >> 1)      // falling edge
+```
+
+Output is a sign-magnitude ternary image: `mag = pos | neg`, `sign = neg`.
+
+### 7.5 LK gradient covariance
+
+The load-bearing operation, and the strongest evidence that a software approach
+can work. Lucas-Kanade needs the 2×2 matrix `[ΣIx², ΣIxIy; ΣIxIy, ΣIy²]` over a
+window. With sign-magnitude ternary derivatives, every entry is a population
+count over a mask:
+
+```
+ΣIx²  = popcount(mag_x)
+ΣIy²  = popcount(mag_y)
+ΣIxIy = popcount(mag_x & mag_y & ~(sign_x ^ sign_y))   // agreeing signs: +1
+      - popcount(mag_x & mag_y &  (sign_x ^ sign_y))   // opposing signs: -1
+```
+
+The window is large (31×31 in practice), so the reduction API must support
+**masked, windowed, and preferably incremental** accumulation from the start.
+This requirement is in the MVP and shapes the reduction interface — it is not a
+later addition.
+
+### 7.6 Corner response
+
+Built from the same covariance machinery as §7.5.
+
+### 7.7 Morphology
+
+`erode`, `dilate`, `morphologyEx`. Shifted ANDs and ORs. Tier 1 semantics — must
+match OpenCV bit-exactly on binary input.
+
+### 7.8 Explicitly out of the MVP
+
+Subpixel refinement, RANSAC, essential-matrix estimation, IMU fusion, bundle
+adjustment. Not image operations. They belong to the VIO application.
+
+### 7.9 The known hard problem: subpixel interpolation
+
+Lucas-Kanade warps its window to subpixel positions and bilinearly interpolates.
+That is inherently continuous and does not bit-parallelize. Two routes:
+
+- **(a)** Integer-pixel tracking with binary block matching (census / Hamming +
+  popcount). Fully bit-parallel, but a different algorithm whose accuracy must
+  be re-validated.
+- **(b)** Hybrid: bit-parallel window extraction and covariance accumulation,
+  floating-point solve.
+
+**Decision: start with (b).** It preserves the accuracy result that motivates the
+project and still captures the memory win, which is the dominant claim. Route (a)
+is the research upside, explored only after (b) is validated end to end.
 
 ---
 
-## 12. Conclusion
+## 8. Design Decisions
 
-binCV fills a critical gap in computer vision for binary image processing. By leveraging bit-level operations, SIMD vectorization, and GPU parallelism, we can achieve 10-100× performance improvements over existing libraries while supporting platforms from embedded microcontrollers to high-performance servers.
+Recorded so that future work can tell what was chosen deliberately from what was
+merely inherited.
 
-**Key Success Factors:**
-1. **Correctness First:** Match OpenCV semantics exactly
-2. **Performance by Default:** Optimize common cases automatically
-3. **Usability:** OpenCV-compatible API
-4. **Platform Flexibility:** From embedded to desktop with same codebase
-5. **Zero Dependencies:** Core library works everywhere
-6. **Progressive Enhancement:** Features layer on top as available
-7. **Comprehensive Testing:** Validate everything against reference
-8. **Systematic Implementation:** Follow dependency-ordered plan
+### D-1: Template on the word *type*, not a bit count
 
-**Unique Value Proposition:**
-- **Only library with native 1-bit binary support**
-- **10-100× speedup across all platforms**
-- **Works on embedded devices** (Raspberry Pi, ARM Cortex-A)
-- **No mandatory dependencies** (OpenCV optional)
-- **Same codebase, automatic adaptation** to platform capabilities
+`BinMat<uint32_t>`, not `BinMat<32>`.
 
-With systematic execution of this implementation plan, binCV can enable new applications in emerging vision technologies like SPAD cameras, event cameras, and high-speed binary pattern processing - on any platform from embedded edge devices to high-performance computing clusters.
+Follows `boost::dynamic_bitset<Block>` (the closest analogue: runtime-sized,
+bit-packed, user-chosen storage word) and `cv::Mat_<T>`. `std::bitset<N>` is not
+a counterexample — its `N` is the container's extent, and the storage word is
+derived internally.
+
+Practical consequence: the bit width derives from the type, so helpers never need
+to recover the type from a number.
+
+### D-2: Bit-planes over SWAR packing
+
+| | bit-planes | SWAR packed |
+|---|---|---|
+| logic | free, per plane | fine |
+| **popcount reductions** | **native** | needs field extraction |
+| arbitrary N | natural | awkward outside N ∈ {2,4,8} |
+| 1-bit case | the base case | a special case |
+| add | ~5 ops/plane, ripple | cheap |
+| multiply / MAC | expensive (N² adders) | still hard |
+
+Every MVP operation is logic and popcount; none is a MAC. Bit-planes win on
+exactly the operations needed, and they make 1-bit the natural base case rather
+than an oddity.
+
+**This is why MAC-heavy quantized-NN workloads are an explicit non-goal:** that
+is the workload where SWAR would win, and declaring it out of scope prevents a
+future argument for changing the representation on those grounds.
+
+### D-3: Sign-magnitude over two's complement
+
+See [§4.2](#42-signed-values-sign-magnitude). Chosen because the LK covariance
+reduces to masked popcounts directly, and because ternary becomes an instance of
+the general form rather than a special case.
+
+### D-4: Word-granularity alignment by default
+
+Measured on the current implementation:
+
+```
+640x480 frame,    align=32 ->  46080 B vs  38400 ideal   (+20%)
+94x60 pyr level3, align=32 ->   1920 B vs    705 ideal  (+172%)
+94x60 pyr level3, align=4  ->    720 B                    (+2%)
+```
+
+Upper pyramid levels — which LK uses on every frame — pay up to **172% memory
+overhead** for fixed 32-byte row alignment. Meanwhile the benefit of aggressive
+alignment is weak on the relevant hardware: unaligned loads on ARMv8 and modern
+x86 are close to free, and the property kernels actually rely on (safe whole-word
+access to the trailing partial word) is already provided by word granularity.
+
+Given principle 2 — memory wins ties — word granularity is the default and
+larger alignment is opt-in per object.
+
+**This decision is provisional and flagged for experimental validation**; see
+[E-1](#9-open-questions-and-planned-experiments). No profile system is built
+until data justifies one.
+
+### D-5: Views are core, not an add-on
+
+Four independent needs converged on one mechanism
+([§4.3](#43-storage-model-and-views)). A design element that four requirements
+independently demand belongs in the foundation.
+
+### D-6: Bulk-only reductions
+
+See [§6.2](#62-reductions-are-bulk-only). Derived from measured `aarch64`
+codegen, not from preference.
+
+### D-7: Existing code is not a constraint
+
+The pre-existing `BinMat` implementation is a prototype. Where it conflicts with
+this architecture it is replaced, not preserved. Behavior changes to tests and
+call sites are expected and acceptable.
+
+---
+
+## 9. Open Questions and Planned Experiments
+
+Deliberately unresolved, to be settled with data rather than argument. Each
+should become a committed benchmark.
+
+| ID | Question | Why it matters | Decision it would change |
+|---|---|---|---|
+| **E-1** | Does row alignment beyond word granularity measurably help any kernel on NEON? | [D-4](#d-4-word-granularity-alignment-by-default) was decided on a memory measurement plus a weak-benefit assumption. The benefit side is untested. | Whether a profile system is worth building at all; whether the default flips. |
+| **E-2** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | `BinMat`'s default template argument. |
+| **E-3** | At what window size does incremental/sliding popcount beat recomputation for the LK covariance? | The 31×31 window is recomputed per keypoint today. | Reduction API shape (whether incremental state is exposed). |
+| **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. |
+| **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — but it is the result the project exists to produce. |
+| **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. |
+
+---
+
+## 10. Quality Strategy
+
+### 10.1 What "correct" means
+
+Tier 1 operations are correct when bit-exact against OpenCV on equivalent
+content. Tier 2 operations are correct when the downstream task — VIO trajectory
+accuracy — is preserved. Tier 3 operations are correct against hand-derived
+reference implementations.
+
+### 10.2 Equivalence harness
+
+Every Tier 1 operation ships with a test asserting bit-exactness against the
+equivalent OpenCV expression on the same content. Built early: it is cheap now
+and it is what makes "same accuracy" a claim rather than an assertion.
+
+### 10.3 Benchmark denominator
+
+Performance is measured against **OpenCV performing the same semantic operation
+on the same binary content stored as `CV_8U`** — because that is exactly what a
+user does today without binCV. Not against OpenCV on grayscale (different
+information content), and not against a strawman implementation.
+
+### 10.4 The metric that matters
+
+**Peak working-set footprint of the full frontend, measured end to end** — not
+per-buffer ratios. A target either fits the pipeline in its memory budget or it
+does not. Per-buffer ratios are supporting evidence for that headline number.
+
+### 10.5 Defensible claims
+
+The claim this architecture supports:
+
+> Equivalent VIO accuracy, several-fold smaller peak memory footprint, and
+> faster execution on the bit-parallel operation set.
+
+Not "10–100× faster than OpenCV." OpenCV is well optimized; on operations that
+are not bit-parallel it will win, and chasing a throughput crown would pull
+development toward benchmarking operations no real pipeline calls.
