@@ -43,7 +43,8 @@ and logged below** rather than guessed at.
 | **T1.6** Signed / ternary | `DONE` — −1/0/+1 round trip, no storage duplication | `db4e96d` |
 | **T1.7** Test framework | `DONE` — hybrid GTest/built-in, counts preserved | `see below` |
 | **T1.8** `verify.sh` | `DONE` — **both vacuous gates now real and proven** | `see below` |
-| **T1.9** aarch64 runner | `DONE` — counts identical to x86, 33 death tests | `see below` |
+| **T1.9** aarch64 runner | `DONE` — counts identical to x86, 33 death tests | `ef7dfa5` |
+| **T1.10** Pi runner | `PARTIAL` — written, skip paths verified; device paths untestable | `see below` |
 | **T1.5** `QuantMat<N>` | `DONE` — 3×38400 B in ONE allocation, measured at the allocator | working tree |
 | **T1.6** Signed / ternary | `DONE` — canonical zero tested both ways, no storage duplication | working tree |
 
@@ -230,6 +231,25 @@ all 33 death tests running, and a loud do-not-benchmark banner.
    GCC 12, then reproduced on x86 `gcc:12` — a compiler-version finding, not an
    architecture one. The code was correct; it was restructured so the question does
    not arise.
+
+---
+
+### T1.10 — written, marked PARTIAL
+
+`scripts/run_on_pi.sh` exists and enforces the four Pi-4 measurement hazards as
+hard refusals rather than warnings: it refuses `armv7l`, refuses a device already
+throttled, pins the `performance` governor with restore-on-exit (including on
+failure and interrupt), pins to one core, re-checks throttle afterwards and marks
+the run **INVALID** if it fired, and prints an environment block for pasting into
+an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
+
+**What I could verify:** syntax, both skip paths (no target, unreachable target)
+returning exit 77 — which is deliberately *not* a pass, so a caller cannot report
+"OK" for a run that measured nothing.
+
+**What I could not:** every path that touches a device. Deliberately left
+`PARTIAL` rather than `DONE`. It is untested code and should be treated that way
+on first use — expect to debug it once against the real Pi.
 
 ---
 

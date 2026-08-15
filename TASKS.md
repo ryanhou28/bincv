@@ -597,7 +597,7 @@ verifying less than it said:
 
 ---
 
-### T1.10 · Cortex-A measurement runner · `TODO` · ⚙️ needs Pi to verify
+### T1.10 · Cortex-A measurement runner · `PARTIAL` · ⚙️ written; needs Pi to verify
 
 **Depends:** T1.9
 **Files:** `scripts/run_on_pi.sh` (new)
