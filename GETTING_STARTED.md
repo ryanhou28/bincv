@@ -187,8 +187,9 @@ reproducible from a committed benchmark.
 - [bincv-cpp/include/bincv-cpp/core/storage.hpp](bincv-cpp/include/bincv-cpp/core/storage.hpp) — owning or caller-provided backing memory
 - [bincv-cpp/include/bincv-cpp/core/view.hpp](bincv-cpp/include/bincv-cpp/core/view.hpp) — `BinMatView` / `BinMatConstView`, the kernel interface
 - [bincv-cpp/include/bincv-cpp/core/error.hpp](bincv-cpp/include/bincv-cpp/core/error.hpp) — `BINCV_THROW` / `BINCV_ASSERT`, the error policy
-- [bincv-cpp/include/bincv-cpp/binMat.hpp](bincv-cpp/include/bincv-cpp/binMat.hpp) — the 1-bit container
+- [bincv-cpp/include/bincv-cpp/binMat.hpp](bincv-cpp/include/bincv-cpp/binMat.hpp) — the 1-bit container, which is `QuantMat<1>`
 - [bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp) — template implementation
+- [bincv-cpp/include/bincv-cpp/quantMat.hpp](bincv-cpp/include/bincv-cpp/quantMat.hpp) — the N-bit container, and its signed / ternary reading
 
 ### Support
 - [bincv-cpp/include/bincv-cpp/util.hpp](bincv-cpp/include/bincv-cpp/util.hpp) — image I/O for tests (OpenCV-only)
@@ -198,17 +199,27 @@ reproducible from a committed benchmark.
 ### Current shape
 
 ```
-storage {ptr, stride, owns}          <- Phase 1.1
+Storage {ptr, words, owns}           <- T1.1
   |
-  +-- BinMatView / QuantView<N>      <- Phase 1.2, the kernel interface
+  +-- BinMatView / BinMatConstView   <- T1.2, the kernel interface
   |
-  +-- QuantMat<N, WordType>          <- Phase 1.3, compile-time N
+  +-- QuantMat<N, WordType>          <- T1.5, compile-time N, one allocation
         |
-        +-- BinMat<WordType>         <- exists today; becomes the N=1 specialization
+        +-- BinMat<WordType>         <- T1.3, the hand-written N=1 specialization
+        |
+        +-- SignedQuantMat<N, W>     <- T1.6, N magnitude planes + 1 sign plane
+              |
+              +-- TernaryMat<W>      <- the N=1 case: {-1, 0, +1}
 ```
 
-Only `BinMat` exists today, and it still embeds a `std::vector` rather than the
-storage model. See [ROADMAP Phase 1](ROADMAP.md#phase-1--container-foundation).
+`BinMat<WordType>` is an **alias** for `QuantMat<1, WordType>`, not a separate
+type: the 1-bit case keeps its hand-written single-plane paths while still being
+what a `QuantMat<N>` parameter binds to (ARCHITECTURE
+[4.4](ARCHITECTURE.md#44-container-hierarchy)). One consequence under C++17:
+class template argument deduction does not see through an alias template, so a
+default-word-type container is spelled `BinMat<> m(w, h)`, not `BinMat m(w, h)`.
+
+`SignedQuantMat` adds no storage — it is a reading of a `QuantMat<N+1>`.
 
 ---
 

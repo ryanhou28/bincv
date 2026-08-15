@@ -300,7 +300,7 @@ halves of this policy are invisible to an ordinary in-process test)*
 
 ---
 
-### T1.5 · `QuantMat<N>` multi-plane container · `TODO`
+### T1.5 · `QuantMat<N>` multi-plane container · `DONE`
 
 **Depends:** T1.3, T1.4
 **Files:** `include/bincv-cpp/quantMat.hpp` (new)
@@ -346,7 +346,7 @@ public:
 
 ---
 
-### T1.6 · Signed and ternary interpretation · `TODO`
+### T1.6 · Signed and ternary interpretation · `DONE`
 
 **Depends:** T1.5
 **Files:** `include/bincv-cpp/quantMat.hpp`

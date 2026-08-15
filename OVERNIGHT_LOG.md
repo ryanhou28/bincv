@@ -37,8 +37,27 @@ and logged below** rather than guessed at.
 |---|---|---|
 | **T1.1** Storage model | `DONE` — 544 checks, ASan/UBSan/LSan clean, aarch64 verified | `see below` |
 | **T1.2** Views | `DONE` — same suite | `0e86bfc` |
-| **T1.3** BinMat on Storage/views | `DONE` — 857 checks, 640x480 = exactly 38400 B | `049b63c` |
-| **T1.4** Error policy | `DONE` — **-fno-exceptions gate CLOSED, 57 errors → 0** | `see below` |
+| **T1.3** BinMat on Storage/views | `DONE` — 857 checks (see note), 640x480 = exactly 38400 B | `049b63c` |
+| **T1.4** Error policy | `DONE` — **-fno-exceptions gate CLOSED, 57 errors → 0** | `bc34329` |
+| **T1.5** `QuantMat<N>` | `DONE` — 1 allocation, 3×38400 B exact | `see below` |
+| **T1.6** Signed / ternary | `DONE` — −1/0/+1 round trip, no storage duplication | `see below` |
+| **T1.5** `QuantMat<N>` | `DONE` — 3×38400 B in ONE allocation, measured at the allocator | working tree |
+| **T1.6** Signed / ternary | `DONE` — canonical zero tested both ways, no storage duplication | working tree |
+
+> **The 857 figure is a T1.3-era count and does NOT match the current suite.**
+> `test_binMat` has reported **845** since T1.4 moved four out-of-range
+> `at()`/`set()` assertions out of the in-process suite and into death tests
+> (`tests/test_assert_abort.cpp`) — nothing regressed, the checks changed
+> address. Current expected figures, so that a future comparison has something
+> true to compare against:
+>
+> | Suite | Release / core-only | `-fno-exceptions` |
+> |---|---|---|
+> | `test_binMat` | 845 | 801 passed, 44 skipped |
+> | `test_quantMat` | 443 | 427 passed, 16 skipped |
+>
+> The skips are `BINCV_CHECK_THROWS`, which cannot evaluate its expression
+> without exceptions; each is covered as a death test in every configuration.
 
 **T1.1 / T1.2 detail.** `core/storage.hpp` and `core/view.hpp`. Reviewers found
 and the fix phase corrected **8 confirmed defects**, two of them real
@@ -120,6 +139,48 @@ if the child both terminated abnormally *and* printed the expected diagnostic.
 
 This is the same failure mode as the T1.3 "test that could not fail": coverage that
 looks complete and is not.
+
+---
+
+### T1.5 / T1.6 detail — the container the pyramid measurement made mandatory
+
+`QuantMat<N, WordType>` and `SignedQuantMat<N>` / `TernaryMat`. `BinMat<W>` is now
+literally `QuantMat<1, W>` — the hand-written container became the N=1 partial
+specialization, so the 1-bit path carries no plane-loop overhead (confirmed by
+`-O2 -S`: `QuantMat<1>::at` is 12 instructions with no loop; `QuantMat<3>::at`
+loads the plane pitch and loops).
+
+Verified independently: `QuantMat<3,uint32_t>` at 640×480 is **one allocation of
+115200 bytes = 3 × 38400** measured at the allocator; `SignedQuantMat<3>` is
+byte-identical to `QuantMat<4>`; ternary round-trips all three values;
+443/443 clean under ASan+UBSan+LSan; the BinMat suite unchanged at 845/845.
+
+**Two release-mode memory bugs caught, both invisible to the test suite as written:**
+
+1. **`plane(i)` was assert-only, so `plane(N)` returned a writable view one plane
+   past the end.** Asserts compile away in every configuration the project
+   verifies, so this was live in Release. The reviewer laid two 3-plane images in
+   one arena and showed `a.plane(3).ptr == b.data()` exactly — writing through it
+   silently corrupted the neighbour. On the heap it is a 37.5 KiB overflow at
+   640×480, confirmed under ASan. Now `BINCV_THROW`, and I re-verified it throws
+   in a `-O2 -DNDEBUG` build.
+
+   The reasoning for the change is worth keeping: [§5.3](ARCHITECTURE.md#53-error-policy)
+   sanctions unchecked release access for *per-pixel* `at()`, not for a view
+   factory called ≤8 times per image. The blast radius differs in kind — `at()`
+   leaks one bit, `plane()` hands out write access to an adjacent allocation.
+
+2. **`magnitude(N)` silently returned the sign plane** — in bounds on the
+   underlying `QuantMat<N+1>`, so *no sanitizer would ever catch it*. It produced
+   wrong numbers with no memory error. This would have corrupted the LK covariance
+   in T3.6 with no failure signal at all.
+
+Also fixed: `-value` at `INT_MIN` was signed-overflow UB (UBSan-confirmed), and
+the wrapping constructor could not verify an N-fold buffer length.
+
+**Note this closes open question 2 below** — the deduction problem. `constPlane()`,
+`constMagnitude()` and `constSign()` were added, so kernels written as
+`countNonZero(dx.magnitude(0), window)` have an ergonomic spelling.
 
 ---
 

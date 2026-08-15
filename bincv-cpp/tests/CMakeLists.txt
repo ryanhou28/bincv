@@ -1,5 +1,5 @@
 # Core tests: must build and run without OpenCV.
-set(BINCV_CORE_TESTS test_binMat test_storage test_error test_error_checked)
+set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -60,6 +60,30 @@ bincv_add_death_test(test_error_abort wrap-short-stride
                      "strideWords must be at least")
 bincv_add_death_test(test_error_abort wrap-null-pointer
                      "cannot wrap a null pointer as a non-empty matrix")
+bincv_add_death_test(test_error_abort quant-height-overflow
+                     "height x N planes does not fit in an int")
+
+# Plane indices (T1.5/T1.6). Validation rather than element access, so these are
+# live in Release too -- which is the whole point: unchecked, plane(N) handed out
+# a writable view of the next allocation, and magnitude(N) handed back the sign
+# plane. One case per overload, mutable and const, on all three spellings of the
+# accessor, because each overload carries its own copy of the check.
+bincv_add_death_test(test_error_abort quant-plane-index
+                     "QuantMat::plane: index out of range")
+bincv_add_death_test(test_error_abort quant-plane-index-const
+                     "QuantMat::plane: index out of range")
+bincv_add_death_test(test_error_abort binmat-plane-index
+                     "QuantMat<1>::plane: index out of range")
+bincv_add_death_test(test_error_abort binmat-plane-index-const
+                     "QuantMat<1>::plane: index out of range")
+bincv_add_death_test(test_error_abort signed-magnitude-index
+                     "SignedQuantMat::magnitude: index out of range")
+bincv_add_death_test(test_error_abort signed-magnitude-index-const
+                     "SignedQuantMat::magnitude: index out of range")
+bincv_add_death_test(test_error_abort quant-wrap-short-buffer
+                     "buffer is shorter than N x height x strideWords")
+bincv_add_death_test(test_error_abort signed-wrap-short-buffer
+                     "buffer is shorter than N x height x strideWords")
 bincv_add_death_test(test_error_abort resize-negative
                      "BinMat dimensions must be non-negative")
 bincv_add_death_test(test_error_abort pad-negative
@@ -91,6 +115,21 @@ bincv_add_death_test(test_assert_abort at-col "BinMat::at: index out of range")
 bincv_add_death_test(test_assert_abort at-negative "BinMat::at: index out of range")
 bincv_add_death_test(test_assert_abort set-row "BinMat::set: index out of range")
 bincv_add_death_test(test_assert_abort set-col "BinMat::set: index out of range")
+bincv_add_death_test(test_assert_abort quant-at-row "QuantMat::at: index out of range")
+bincv_add_death_test(test_assert_abort quant-at-col "QuantMat::at: index out of range")
+bincv_add_death_test(test_assert_abort quant-set-row "QuantMat::set: index out of range")
+bincv_add_death_test(test_assert_abort quant-set-value
+                     "QuantMat::set: value does not fit in N bits")
+# The same precondition at N == 1, where BinMat::set's bool parameter used to
+# swallow it: an out-of-range value narrowed to 1 instead of being reported.
+bincv_add_death_test(test_assert_abort binmat-set-value
+                     "QuantMat<1>::set: value does not fit in N bits")
+bincv_add_death_test(test_assert_abort signed-set-value
+                     "SignedQuantMat::set: value does not fit in N magnitude bits")
+# INT_MIN specifically: the value whose magnitude used to be computed as `-value`,
+# which is signed-overflow UB rather than merely a wrong number.
+bincv_add_death_test(test_assert_abort signed-set-int-min
+                     "SignedQuantMat::set: value does not fit in N magnitude bits")
 bincv_add_death_test(test_assert_abort view-stride
                      "BinMatView: multi-row view needs a non-zero stride")
 bincv_add_death_test(test_assert_abort const-view-stride

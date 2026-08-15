@@ -29,6 +29,7 @@
 #include <cstring>
 
 #include "bincv-cpp/binMat.hpp"
+#include "bincv-cpp/quantMat.hpp"
 
 namespace {
 
@@ -48,6 +49,82 @@ int caseNegativeDims() { Mat m(-1, 10); return m.cols(); }
 int caseWrapNegativeDims() { Mat m(g_buffer, -1, 2, 2); return m.cols(); }
 int caseWrapShortStride() { Mat m(g_buffer, 64, 2, 1); return m.cols(); }
 int caseWrapNullPointer() { Mat m(nullptr, 8, 2, 1); return m.cols(); }
+
+// QuantMat's only validation of its own: BinMat takes int dimensions, and an
+// N-fold plane stack that no longer fits one would otherwise be truncated into a
+// plausible smaller matrix rather than reported. Rejected before anything is
+// allocated, so the case costs nothing to run.
+int caseQuantHeightOverflow() {
+    bincv::QuantMat<8, uint32_t> m(1, 300000000);
+    return m.cols();
+}
+
+// --- Plane indices (T1.5/T1.6) ---------------------------------------------
+//
+// These are validation, not element access, so they are checked in EVERY build
+// and belong here rather than in test_assert_abort.cpp. What an unchecked one
+// did, measured in Release before the fix: QuantMat<3>::plane(3) returned a
+// fully-formed writable view of the next allocation (37.5 KiB of heap overflow
+// at 640x480), BinMat::plane(7) quietly returned plane 0, and
+// SignedQuantMat<2>::magnitude(2) returned the SIGN plane as a magnitude plane --
+// three different outcomes for one identical caller mistake, and the third
+// invisible to every sanitizer because the address is valid storage.
+//
+// The const overloads carry their own copies of the check, so each is driven
+// separately; a check tested only through the mutable overload is not tested.
+using Quant = bincv::QuantMat<3, uint32_t>;
+using Signed = bincv::SignedQuantMat<2, uint32_t>;
+
+int caseQuantPlaneIndex() {
+    Quant m(20, 4);
+    return static_cast<int>(*m.plane(3).ptr);          // planes are 0..2
+}
+
+int caseQuantPlaneIndexConst() {
+    const Quant m(20, 4);
+    return static_cast<int>(*m.plane(3).ptr);
+}
+
+int caseBinMatPlaneIndex() {
+    Mat m(20, 4);
+    return static_cast<int>(*m.plane(1).ptr);          // BinMat is QuantMat<1>
+}
+
+int caseBinMatPlaneIndexConst() {
+    const Mat m(20, 4);
+    return static_cast<int>(*m.plane(1).ptr);
+}
+
+int caseSignedMagnitudeIndex() {
+    Signed m(20, 4);
+    return static_cast<int>(*m.magnitude(2).ptr);      // magnitude planes are 0..1
+}
+
+int caseSignedMagnitudeIndexConst() {
+    const Signed m(20, 4);
+    return static_cast<int>(*m.magnitude(2).ptr);
+}
+
+// --- Wrapping a buffer that is too short ------------------------------------
+//
+// The wrapping constructor is spelled exactly like BinMat's but needs N times as
+// many words, and is handed no length, so it cannot check. wrap() is the spelling
+// that is told the length -- and this is what it is for.
+uint32_t g_shortBuffer[8 * 2] = {0};   // 16 words; QuantMat<3> at 64x8 needs 48
+
+int caseQuantWrapShortBuffer() {
+    Quant m = Quant::wrap(g_shortBuffer, sizeof(g_shortBuffer) / sizeof(g_shortBuffer[0]),
+                          64, 8, 2);
+    return m.cols();
+}
+
+int caseSignedWrapShortBuffer() {
+    // N = 2 magnitude planes plus a sign plane: three planes' worth is required,
+    // which is one more than the type parameter reads as.
+    Signed m = Signed::wrap(g_shortBuffer, sizeof(g_shortBuffer) / sizeof(g_shortBuffer[0]),
+                            64, 8, 2);
+    return m.cols();
+}
 
 int caseResizeNegative() {
     Mat m(8, 4);
@@ -99,6 +176,15 @@ const Case kCases[] = {
     {"wrap-negative-dims", caseWrapNegativeDims},
     {"wrap-short-stride", caseWrapShortStride},
     {"wrap-null-pointer", caseWrapNullPointer},
+    {"quant-height-overflow", caseQuantHeightOverflow},
+    {"quant-plane-index", caseQuantPlaneIndex},
+    {"quant-plane-index-const", caseQuantPlaneIndexConst},
+    {"binmat-plane-index", caseBinMatPlaneIndex},
+    {"binmat-plane-index-const", caseBinMatPlaneIndexConst},
+    {"signed-magnitude-index", caseSignedMagnitudeIndex},
+    {"signed-magnitude-index-const", caseSignedMagnitudeIndexConst},
+    {"quant-wrap-short-buffer", caseQuantWrapShortBuffer},
+    {"signed-wrap-short-buffer", caseSignedWrapShortBuffer},
     {"resize-negative", caseResizeNegative},
     {"pad-negative", casePadNegative},
     {"for-each-on-empty", caseForEachOnEmpty},

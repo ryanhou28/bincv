@@ -64,10 +64,25 @@ enum BorderType {
     BORDER_REFLECT_101 = 4 ///< Reflect 101 border (gfedcb|abcdefgh|gfedcba)
 };
 
-/// @brief Forward declaration of the BinMat template.
+/// @brief Forward declaration of the QuantMat template -- the N-bit container.
 /// @note The default template argument is declared here (not on the definition)
 ///       because this header is included first; a default may only be given once.
-template <typename WordType = uint32_t> class BinMat;
+/// @note The primary template (N planes, quantMat.hpp) and the hand-written N=1
+///       partial specialization (binMat.hpp) are defined in different headers, so
+///       the declaration they both need lives here, ahead of either.
+template <size_t N, typename WordType = uint32_t> class QuantMat;
+
+/// @brief The 1-bit container: an alias for the N=1 specialization of QuantMat.
+/// @note ARCHITECTURE 4.4. BinMat is a name, not a separate type -- QuantMat<1>
+///       IS the hand-written single-plane container, so a kernel or container
+///       written against QuantMat<N> accepts the binary case with no adapter and
+///       no plane loop. binMat.hpp defines that specialization.
+/// @note One consequence of the alias, and it is the only one: class template
+///       argument deduction through an alias template is C++20 (P1814), so under
+///       this project's C++17 the empty argument list is required --
+///       `BinMat<> m(w, h)`, not `BinMat m(w, h)`. `BinMat<uint32_t>` and the
+///       BinMat8/16/32/64 aliases below are unaffected.
+template <typename WordType = uint32_t> using BinMat = QuantMat<1, WordType>;
 
 /// @brief Type aliases for convenience
 /// @note These provide easy access to BinMat with different word sizes

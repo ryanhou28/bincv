@@ -31,6 +31,16 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// @brief A binary matrix storing one bit per pixel, packed into words.
 /// @tparam WordType The unsigned integral type used to pack pixels.
 ///         Supported: uint8_t, uint16_t, uint32_t (default), uint64_t.
+/// @note Spelled QuantMat<1, WordType> here and BinMat<WordType> everywhere else:
+///       this IS the N=1 specialization of the N-bit container, and BinMat is an
+///       alias for it (core/types.hpp, ARCHITECTURE 4.4). The two names are one
+///       type. The specialization exists so the 1-bit case keeps the hand-written
+///       single-plane paths below -- at(), set(), fill(), countNonZero() and the
+///       rest address the one plane directly, with no loop over planes and no
+///       delegation -- while still being what a QuantMat<N> parameter binds to.
+/// @note Only the N=1 case is written out by hand. The general N>1 container
+///       (quantMat.hpp) is a shape over this one: N planes stacked in a single
+///       allocation, each plane a view of the same layout.
 /// @note Parameterizing on the storage word *type* (rather than a bit count)
 ///       follows boost::dynamic_bitset<Block> and cv::Mat_<T>. The bit width is
 ///       derived as WordBits, so the type never has to be recovered from a number.
@@ -50,7 +60,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 ///       reads "throws, or aborts with that message under BINCV_NO_EXCEPTIONS",
 ///       and it is not repeated per function.
 template <typename WordType_>
-class BinMat {
+class QuantMat<1, WordType_> {
     static_assert(std::is_integral<WordType_>::value && std::is_unsigned<WordType_>::value,
                   "WordType must be an unsigned integral type");
     static_assert(sizeof(WordType_) == 1 || sizeof(WordType_) == 2 ||
@@ -63,6 +73,19 @@ public:
 
     /// Number of pixels packed into a single word.
     static constexpr size_t WordBits = sizeof(WordType) * 8;
+
+    /// @brief Number of bit-planes: one, which is what makes this a BinMat.
+    /// @note Present so that code generic over QuantMat<N> reads the same count
+    ///       here as it does for N > 1.
+    static constexpr size_t Planes = 1;
+
+    /// @brief Largest value a pixel can hold: 1, this being a binary matrix.
+    /// @note Present for the same reason Planes is -- code generic over
+    ///       QuantMat<N> asks the container for its range rather than computing
+    ///       2^N - 1 itself. The per-pixel accessors here are still bool-valued:
+    ///       a one-bit unsigned would be a worse type for the binary case, and
+    ///       the binary case is the one this specialization exists to serve.
+    static constexpr unsigned MaxValue = 1u;
 
     /// @brief Default row-stride alignment: one word, i.e. no padding beyond the
     ///        ceil(width / WordBits) words a row inherently needs (D-4).
@@ -79,7 +102,7 @@ public:
     // Constructors
 
     /// @brief Constructs an empty matrix with no allocated storage.
-    BinMat();
+    QuantMat();
 
     /// @brief Constructs a zero-filled matrix that owns its storage.
     /// @param width Width of the matrix in pixels
@@ -88,7 +111,7 @@ public:
     ///        a positive power of two and a multiple of the word size; default is
     ///        DefaultRowAlignment, i.e. word granularity with no padding (D-4).
     /// @throws std::invalid_argument if dimensions are negative or alignment is invalid.
-    BinMat(int width, int height, size_t rowAlignment = DefaultRowAlignment);
+    QuantMat(int width, int height, size_t rowAlignment = DefaultRowAlignment);
 
     /// @brief Wraps a caller-provided buffer without taking ownership of it.
     /// @param data First word of the caller's buffer. Must outlive this object and
@@ -122,7 +145,7 @@ public:
     /// @note Operations that write whole words (fill, pad with `true`) write
     ///       across the full stride, so wrapping a sub-region of a larger image
     ///       and then calling them disturbs the surrounding columns.
-    BinMat(WordType* data, int width, int height, size_t strideWords);
+    QuantMat(WordType* data, int width, int height, size_t strideWords);
 
     // Special members
 
@@ -139,17 +162,17 @@ public:
     ///       padding-bit invariant when the source was a wrapped buffer whose bits
     ///       past `width` were dirty. Otherwise the copy would inherit phantom bits
     ///       that no per-pixel read can see but every word-wise reduction counts.
-    BinMat(const BinMat& other);
+    QuantMat(const QuantMat& other);
 
     /// @brief Deep-copies `other`, always. See the copy constructor.
     /// @note The copy is built before this object releases anything, so assigning
     ///       from a BinMat that wraps this object's own buffer copies live data.
-    BinMat& operator=(const BinMat& other);
+    QuantMat& operator=(const QuantMat& other);
 
     /// @brief Takes over `other`'s storage, leaving it empty.
     /// @note A moved-from BinMat is a valid empty matrix -- dimensions included,
     ///       so that empty() cannot report false while data() is null.
-    BinMat(BinMat&& other) noexcept;
+    QuantMat(QuantMat&& other) noexcept;
 
     /// @brief Takes over `other`'s storage, leaving it empty. See the move
     ///        constructor.
@@ -158,9 +181,9 @@ public:
     ///       such a transfer -- it would have to free the block and then adopt a
     ///       pointer into it -- and this is the only answer that keeps the move
     ///       allocation-free and noexcept, which the Tier 2 path depends on.
-    BinMat& operator=(BinMat&& other) noexcept;
+    QuantMat& operator=(QuantMat&& other) noexcept;
 
-    ~BinMat() = default;
+    ~QuantMat() = default;
 
     // Accessors
     size_t getWidth() const { return width; }
@@ -213,6 +236,42 @@ public:
         return BinMatConstView<WordType>{storage.data(), width, height, alignedWidth};
     }
 
+    /// @brief Bit-plane `i` as a view. There is exactly one, and it is this matrix.
+    /// @param i Plane index; the only valid value is 0.
+    /// @note The QuantMat<N> plane interface, at N = 1. Identical to view() --
+    ///       same pointer, same stride, no offset arithmetic and no loop -- which
+    ///       is the whole point of the specialization: generic code can address
+    ///       the binary case by plane without the binary case paying for it.
+    /// @throws std::out_of_range if `i != 0`, in EVERY build -- NOT debug-only.
+    ///         This is a view factory, not element access (ARCHITECTURE 5.3), and
+    ///         it is checked here for the same reason it is checked on QuantMat<N>:
+    ///         so that one wrong plane index has one defined behaviour across the
+    ///         family. Discarding the index in release, as this did, meant generic
+    ///         code could not be tested for index handling at N = 1 and have the
+    ///         result carry to N > 1 -- which is precisely the portability the
+    ///         QuantMat<1> spelling exists to provide. The compare is against a
+    ///         constant and folds away at the constant call sites.
+    BinMatView<WordType> plane(size_t i) {
+        if (i != 0) BINCV_THROW(std::out_of_range, "QuantMat<1>::plane: index out of range");
+        return view();
+    }
+    BinMatConstView<WordType> plane(size_t i) const {
+        if (i != 0) BINCV_THROW(std::out_of_range, "QuantMat<1>::plane: index out of range");
+        return constView();
+    }
+
+    /// @brief Plane `i` as a read-only view, from a NON-const matrix.
+    /// @note The QuantMat<N> spelling of constView(), present so that generic code
+    ///       can hand a plane to a read-only kernel at N = 1 as well. Same reason
+    ///       constView() exists: template argument deduction ignores the
+    ///       BinMatView -> BinMatConstView conversion.
+    BinMatConstView<WordType> constPlane(size_t i) const { return plane(i); }
+
+    /// @brief Words occupied by one plane -- here, by the whole matrix.
+    /// @note The QuantMat<N> layout accessor at N = 1: plane i begins at word
+    ///       offset i * planeWords(), and with one plane that offset is zero.
+    size_t planeWords() const { return height * alignedWidth; }
+
 #ifdef BINCV_WITH_OPENCV
     // OpenCV interoperability (only available when BINCV_WITH_OPENCV is defined)
 
@@ -256,6 +315,27 @@ public:
     ///       word-wise reduction depends on, and release builds will not stop you.
     void set(int row, int col, bool value);
 
+    /// @brief Sets a single element from an integral value; only 0 and 1 fit.
+    /// @note Exists so the QuantMat<N> value-range precondition survives at N = 1.
+    ///       The parameter above is `bool`, which is the right type for the binary
+    ///       case but silently accepts anything nonzero: code written generically
+    ///       as `m.set(y, x, value)` got "value does not fit in N bits" for N >= 2
+    ///       and a quiet narrowing to 1 for N == 1, in the very build whose job is
+    ///       to catch it. This overload restores the check without changing what
+    ///       `set(y, x, true)` means -- a bool argument is an exact match for the
+    ///       bool overload and never reaches here.
+    /// @note Debug-checked like the rest of the per-pixel path. Negative values
+    ///       fail it too: the cast makes them large, which is what they are as a
+    ///       pixel value.
+    template <typename T, typename = typename std::enable_if<
+                              std::is_integral<T>::value &&
+                              !std::is_same<T, bool>::value>::type>
+    void set(int row, int col, T value) {
+        BINCV_ASSERT(static_cast<unsigned long long>(value) <= MaxValue,
+                     "QuantMat<1>::set: value does not fit in N bits");
+        set(row, col, value != 0);
+    }
+
     // Fast row-level access to packed words via pointers
     // @brief Needed for efficient access to values when being more performant
     // @note Users need to be careful as they expose the internal storage directly
@@ -292,7 +372,7 @@ public:
     //    alignment, whether or not this matrix wraps a caller buffer.
     // @note An empty matrix transposes to its transposed shape, not to 0x0:
     //    640x0 gives 0x640.
-    BinMat transposed() const;
+    QuantMat transposed() const;
 
     // @brief Transposes the BinMat in-place.
     // @note The BinMat dimensions and data are updated.

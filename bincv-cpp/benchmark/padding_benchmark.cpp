@@ -10,7 +10,7 @@ int main(int argc, char* argv[]) {
     int padTop = 1, padBottom = 1, padLeft = 2, padRight = 2;
 
     // Construct input BinMat and cv::Mat based on dtype
-    bincv::BinMat binmat(cfg.width, cfg.height);
+    bincv::BinMat<> binmat(cfg.width, cfg.height);
     cv::Mat cvmat;
 
     if (cfg.dtype == "binary" || cfg.dtype == "uint8")
@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
 
     // Run BinMat pad benchmark
     bench::benchmark("BinMat pad", cfg.iterations, [&] {
-        bincv::BinMat tmp = binmat;
+        bincv::BinMat<> tmp = binmat;
         tmp.pad(padTop, padBottom, padLeft, padRight);
     });
 

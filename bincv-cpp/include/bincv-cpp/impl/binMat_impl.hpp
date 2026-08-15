@@ -97,11 +97,11 @@ inline void checkRowAlignment(size_t alignmentBytes) {
 
 // Constructors
 template <typename WordType_>
-BinMat<WordType_>::BinMat()
+QuantMat<1, WordType_>::QuantMat()
     : width(0), height(0), rowAlignment(DefaultRowAlignment), alignedWidth(0), storage() {}
 
 template <typename WordType_>
-BinMat<WordType_>::BinMat(int w, int h, size_t rowAlign)
+QuantMat<1, WordType_>::QuantMat(int w, int h, size_t rowAlign)
     : width(0), height(0), rowAlignment(rowAlign), alignedWidth(0), storage() {
 
     if (w < 0 || h < 0) {
@@ -119,7 +119,7 @@ BinMat<WordType_>::BinMat(int w, int h, size_t rowAlign)
 }
 
 template <typename WordType_>
-BinMat<WordType_>::BinMat(WordType* dataPtr, int w, int h, size_t strideWords)
+QuantMat<1, WordType_>::QuantMat(WordType* dataPtr, int w, int h, size_t strideWords)
     : width(0), height(0), rowAlignment(DefaultRowAlignment), alignedWidth(0), storage() {
 
     if (w < 0 || h < 0) {
@@ -150,7 +150,7 @@ BinMat<WordType_>::BinMat(WordType* dataPtr, int w, int h, size_t strideWords)
 
 // Special members
 template <typename WordType_>
-BinMat<WordType_>::BinMat(const BinMat& other)
+QuantMat<1, WordType_>::QuantMat(const QuantMat& other)
     : width(other.width),
       height(other.height),
       rowAlignment(other.rowAlignment),
@@ -180,19 +180,19 @@ BinMat<WordType_>::BinMat(const BinMat& other)
 }
 
 template <typename WordType_>
-BinMat<WordType_>& BinMat<WordType_>::operator=(const BinMat& other) {
+QuantMat<1, WordType_>& QuantMat<1, WordType_>::operator=(const QuantMat& other) {
     if (this == &other) return *this;
 
     // Copy first, then move into place. The copy reads `other` while this object
     // still holds its own buffer, which is what makes the case of `other` wrapping
     // this object's storage a live read rather than a use-after-free.
-    BinMat copy(other);
+    QuantMat copy(other);
     *this = std::move(copy);
     return *this;
 }
 
 template <typename WordType_>
-BinMat<WordType_>::BinMat(BinMat&& other) noexcept
+QuantMat<1, WordType_>::QuantMat(QuantMat&& other) noexcept
     : width(other.width),
       height(other.height),
       rowAlignment(other.rowAlignment),
@@ -210,7 +210,7 @@ BinMat<WordType_>::BinMat(BinMat&& other) noexcept
 }
 
 template <typename WordType_>
-BinMat<WordType_>& BinMat<WordType_>::operator=(BinMat&& other) noexcept {
+QuantMat<1, WordType_>& QuantMat<1, WordType_>::operator=(QuantMat&& other) noexcept {
     if (this == &other) return *this;
 
     // Read the source's descriptor before the storage move. Storage refuses to
@@ -253,7 +253,7 @@ BinMat<WordType_>& BinMat<WordType_>::operator=(BinMat&& other) noexcept {
 // OpenCV interoperability implementations
 
 template <typename WordType_>
-void BinMat<WordType_>::fromCVMat(const cv::Mat& input) {
+void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
     if (input.empty()) {
         BINCV_THROW(std::invalid_argument, "Input cv::Mat is empty");
     }
@@ -311,12 +311,12 @@ inline void toCVMatHelper(const BinMat<WordType>& binmat, cv::Mat& output, Pixel
 // @todo: could an approach using OpenCV's resize and scaling functions be more efficient?
 //        need to think more about how to do this efficiently
 template <typename WordType_>
-void BinMat<WordType_>::toCVMat(cv::Mat& output) const {
+void QuantMat<1, WordType_>::toCVMat(cv::Mat& output) const {
     toCVMatHelper(*this, output, [](bool value) -> uint8_t { return value ? 1 : 0; });
 }
 
 template <typename WordType_>
-void BinMat<WordType_>::toCVMatNormalized(cv::Mat& output) const {
+void QuantMat<1, WordType_>::toCVMatNormalized(cv::Mat& output) const {
     toCVMatHelper(*this, output, [](bool value) -> uint8_t { return value ? 255 : 0; });
 }
 
@@ -324,7 +324,7 @@ void BinMat<WordType_>::toCVMatNormalized(cv::Mat& output) const {
 
 // clearTrailingBits
 template <typename WordType_>
-void BinMat<WordType_>::clearTrailingBits() {
+void QuantMat<1, WordType_>::clearTrailingBits() {
     if (empty()) return;
 
     // Bits [width, alignedWidth * WordBits) are padding and must stay zero.
@@ -351,7 +351,7 @@ void BinMat<WordType_>::clearTrailingBits() {
 // is for cv::Mat::at. Callers that cannot guarantee their indices should clamp
 // before calling, not rely on the container to report it.
 template <typename WordType_>
-bool BinMat<WordType_>::at(int row, int col) const {
+bool QuantMat<1, WordType_>::at(int row, int col) const {
     BINCV_ASSERT(row >= 0 && row < static_cast<int>(height) &&
                      col >= 0 && col < static_cast<int>(width),
                  "BinMat::at: index out of range");
@@ -361,7 +361,7 @@ bool BinMat<WordType_>::at(int row, int col) const {
 }
 
 template <typename WordType_>
-void BinMat<WordType_>::set(int row, int col, bool value) {
+void QuantMat<1, WordType_>::set(int row, int col, bool value) {
     BINCV_ASSERT(row >= 0 && row < static_cast<int>(height) &&
                      col >= 0 && col < static_cast<int>(width),
                  "BinMat::set: index out of range");
@@ -379,19 +379,19 @@ void BinMat<WordType_>::set(int row, int col, bool value) {
 
 // ptr
 template <typename WordType_>
-const typename BinMat<WordType_>::WordType* BinMat<WordType_>::ptr(int row) const {
+const typename QuantMat<1, WordType_>::WordType* QuantMat<1, WordType_>::ptr(int row) const {
     return storage.data() + static_cast<size_t>(row) * alignedWidth;
 }
 
 template <typename WordType_>
-typename BinMat<WordType_>::WordType* BinMat<WordType_>::ptr(int row) {
+typename QuantMat<1, WordType_>::WordType* QuantMat<1, WordType_>::ptr(int row) {
     return storage.data() + static_cast<size_t>(row) * alignedWidth;
 }
 
 // resize
 // @todo: This could potentially be optimized (word-wise copy when alignment permits)
 template <typename WordType_>
-void BinMat<WordType_>::resize(int newWidth, int newHeight) {
+void QuantMat<1, WordType_>::resize(int newWidth, int newHeight) {
     if (newWidth < 0 || newHeight < 0)
         BINCV_THROW(std::invalid_argument, "BinMat dimensions must be non-negative");
 
@@ -430,7 +430,7 @@ void BinMat<WordType_>::resize(int newWidth, int newHeight) {
 //        representation becomes complicated when padding towards the left.
 //        For now we implement our own padding.
 template <typename WordType_>
-void BinMat<WordType_>::pad(int top, int bottom, int left, int right, bool value) {
+void QuantMat<1, WordType_>::pad(int top, int bottom, int left, int right, bool value) {
     if (top < 0 || bottom < 0 || left < 0 || right < 0) {
         BINCV_THROW(std::invalid_argument, "Padding values must be non-negative");
     }
@@ -479,12 +479,12 @@ void BinMat<WordType_>::pad(int top, int bottom, int left, int right, bool value
 // @todo: naive pixel-by-pixel transpose; replace with a cache-blocked / bit-parallel
 //        version (see ARCHITECTURE.md 6.4). This is currently the slowest operation.
 template <typename WordType_>
-BinMat<WordType_> BinMat<WordType_>::transposed() const {
+QuantMat<1, WordType_> QuantMat<1, WordType_>::transposed() const {
     // An empty matrix still has a shape to transpose: a 640x0 matrix transposes to
     // 0x640, not to 0x0, and it keeps its row alignment like any other result. The
     // constructor allocates nothing when either dimension is zero, so this costs
     // nothing; the pixel loops below simply do not run.
-    BinMat<WordType> result(static_cast<int>(height), static_cast<int>(width), rowAlignment);
+    QuantMat result(static_cast<int>(height), static_cast<int>(width), rowAlignment);
     if (empty()) {
         return result;
     }
@@ -503,14 +503,14 @@ BinMat<WordType_> BinMat<WordType_>::transposed() const {
 // transpose
 // @todo: this could avoid the copy made by transposed() for the square case
 template <typename WordType_>
-void BinMat<WordType_>::transpose() {
+void QuantMat<1, WordType_>::transpose() {
     *this = this->transposed();
 }
 
 // forEachNonZero
 template <typename WordType_>
 template <typename Func>
-void BinMat<WordType_>::forEachNonZero(Func callback) const {
+void QuantMat<1, WordType_>::forEachNonZero(Func callback) const {
     if (empty()) {
         BINCV_THROW(std::runtime_error,
                     "BinMat is empty, cannot iterate over non-zero pixels");
@@ -527,7 +527,7 @@ void BinMat<WordType_>::forEachNonZero(Func callback) const {
 
 // printMatrix
 template <typename WordType_>
-void BinMat<WordType_>::printMatrix() const {
+void QuantMat<1, WordType_>::printMatrix() const {
     if (empty()) {
         return;
     }
@@ -562,7 +562,7 @@ std::ostream& operator<<(std::ostream& os, const BinMat<WordType>& binmat) {
 
 // printInternalData
 template <typename WordType_>
-void BinMat<WordType_>::printInternalData(bool hex) const {
+void QuantMat<1, WordType_>::printInternalData(bool hex) const {
     if (empty()) {
         return;
     }
@@ -582,7 +582,7 @@ void BinMat<WordType_>::printInternalData(bool hex) const {
 
 // fill
 template <typename WordType_>
-void BinMat<WordType_>::fill(bool value) {
+void QuantMat<1, WordType_>::fill(bool value) {
     if (empty())
         return;
 
@@ -600,7 +600,7 @@ void BinMat<WordType_>::fill(bool value) {
 // @todo: replace the per-pixel loop with popcount over whole words
 //        (see ARCHITECTURE.md 6.3). Relies on padding bits being zero.
 template <typename WordType_>
-int BinMat<WordType_>::countNonZero() const {
+int QuantMat<1, WordType_>::countNonZero() const {
     if (empty())
         return 0;
 
@@ -618,7 +618,7 @@ int BinMat<WordType_>::countNonZero() const {
 
 // sparsity
 template <typename WordType_>
-float BinMat<WordType_>::sparsity() const {
+float QuantMat<1, WordType_>::sparsity() const {
     size_t totalPixels = width * height;
     if (totalPixels == 0)
         BINCV_THROW(std::runtime_error, "Sparsity is undefined for empty BinMat");
