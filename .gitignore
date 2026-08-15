@@ -1,6 +1,18 @@
 bincv-cuda/build/*
 bincv-cpp/build/*
-bincv-cpp/results/
+
+# Benchmark output.
+#
+# The DIRECTORY is ignored but the committed logs are not: CLAUDE.md requires
+# every performance claim to be reproducible and several tasks say "results
+# committed under results/" in as many words. With the whole directory ignored
+# that was unmeetable -- `git add bincv-cpp/results/logic_benchmark.log` refused,
+# `git ls-files bincv-cpp/results` was empty, and T2.2 was marked DONE anyway
+# while TASKS.md quoted figures from a file no one else could read. Result logs
+# are the evidence for a published number; scratch output is not, so it keeps
+# whatever other extension it likes.
+bincv-cpp/results/*
+!bincv-cpp/results/*.log
 
 # Alternate build trees (core-only, cross-compiled, etc.)
 build*/

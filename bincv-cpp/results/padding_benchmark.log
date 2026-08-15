@@ -1,0 +1,114 @@
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: binary, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.310451 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.235164 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.168958 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: uint8, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.167418 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.162705 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.163491 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: float32, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.163816 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.161169 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.160655 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: binary, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.57376 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.46689 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.344475 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: uint8, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.323959 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.323893 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.323799 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: float32, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.325043 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.324054 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.336565 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: binary, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.627345 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.46298 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.343678 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: uint8, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.327978 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.320716 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.330484 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: float32, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.326322 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.323682 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.334269 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: binary, Sparsity: 1
+[BENCH] BinMat pad - Avg: 1.28123 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.908536 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.682169 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: uint8, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.67114 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.66163 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.655445 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: float32, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.640344 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.1
+[BENCH] BinMat pad - Avg: 0.649985 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.01
+[BENCH] BinMat pad - Avg: 0.662001 ms over 50 runs
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 50, DType: uint8, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.761832 ms over 50 runs
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+[BENCH] BinMat pad - Avg: 0.77245 ms over 100 runs

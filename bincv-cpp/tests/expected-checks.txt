@@ -42,6 +42,26 @@
 #             test_error drops the 17 exception-shaped ones. Total 1815 + 60s.
 #   opencv    adds test_opencv_interop and test_equivalence (T2.1, which needs
 #             cv::Mat); otherwise identical to core.
+#   test_logic  65768 under opencv, 53672 everywhere else. The 12096 difference is
+#             the Tier 1 half of T2.2 -- bit-exactness against cv::bitwise_and /
+#             _or / _xor / _not over the full T2.1 size and fill matrix -- which
+#             only compiles where OpenCV does. The other 53672 are the per-pixel
+#             reference, the differing-stride sweep, in-place aliasing, the
+#             degenerate shapes, the padding-bit invariant, the dirty-source
+#             sweep, the alias-acceptance cases and the trailing-word contract,
+#             and they run in all four configurations because the kernels are
+#             core code.
+#             It was 56044 / 43948 when T2.2 was first written. The 9724 added to
+#             each are three review findings turned into cases: sources whose
+#             padding was already dirty (without them, deleting the trailing-word
+#             mask from applyBinary left the whole suite green), views over one
+#             buffer whose rows do not meet (the alias predicate rejected them
+#             and aborted Debug builds), and the destination's trailing word at
+#             BIT granularity.
+#   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
+#             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
+#             through constPlane() -> unpackTo8U, and that conversion was the one
+#             the anchor did not pin.
 #
 # WHY test_equivalence HAS NO FAULT-INJECTED ROWS
 #
@@ -71,15 +91,17 @@ opencv	test_quantMat	443	0
 opencv	test_storage	544	0
 opencv	test_error	31	0
 opencv	test_error_checked	21	0
+opencv	test_logic	65768	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
-opencv	test_equivalence	9923	0
+opencv	test_equivalence	16403	0
 
 core	test_binMat	845	0
 core	test_quantMat	443	0
 core	test_storage	544	0
 core	test_error	31	0
 core	test_error_checked	21	0
+core	test_logic	53672	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -87,6 +109,7 @@ noexcept	test_quantMat	427	16
 noexcept	test_storage	544	0
 noexcept	test_error	14	0
 noexcept	test_error_checked	21	0
+noexcept	test_logic	53672	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -94,5 +117,6 @@ debug	test_quantMat	443	0
 debug	test_storage	544	0
 debug	test_error	21	0
 debug	test_error_checked	21	0
+debug	test_logic	53672	0
 debug	test_harness	8	0
 

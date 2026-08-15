@@ -1,0 +1,152 @@
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: binary, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.002486 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0020054 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.00247802 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.002039 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.002379 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0019624 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: uint8, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.00276882 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0022422 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.0027832 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00196702 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.0029362 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00313442 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: float32, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.00414842 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0022636 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.0038376 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0019704 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.0036128 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00196 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: binary, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.0029012 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0046506 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.0029302 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00405 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.0029354 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0039782 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: uint8, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.0041594 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.003876 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.003298 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00464282 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.0034346 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0039102 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: float32, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.0071108 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00389802 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.00707702 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.004143 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.00684062 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.003952 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: binary, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.0030306 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00214142 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.0029132 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.002 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.0030316 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00196582 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: uint8, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.0033634 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00196962 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.0034188 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.001949 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.0036232 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0021764 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: float32, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.00853722 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0020498 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.00691902 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00197 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.0077542 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00197382 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: binary, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.0042516 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00389 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.00432782 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.004081 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.0043084 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0039126 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: uint8, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.00474042 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0041044 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.00475702 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0038896 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.0051164 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00406182 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: float32, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.0162806 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00470342 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.1
+[BENCH] OpenCV fill - Avg: 0.0161672 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.00391862 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.01
+[BENCH] OpenCV fill - Avg: 0.0142146 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.0041158 ms over 50 runs
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 50, DType: uint8, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.012326 ms over 50 runs
+[BENCH] BinMat fill - Avg: 0.005677 ms over 50 runs
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+[BENCH] OpenCV fill - Avg: 0.00629141 ms over 100 runs
+[BENCH] BinMat fill - Avg: 0.00540881 ms over 100 runs

@@ -30,6 +30,7 @@
 
 #include "bincv-cpp/binMat.hpp"
 #include "bincv-cpp/core/view.hpp"
+#include "bincv-cpp/ops/logic.hpp"
 #include "bincv-cpp/quantMat.hpp"
 
 #if !BINCV_DEBUG_CHECKS
@@ -156,6 +157,62 @@ int caseSignedSetIntMin() {
     return m.at(0, 0);
 }
 
+// The T2.2 kernel preconditions. Kernels never throw (ARCHITECTURE 5.3), so
+// mismatched dimensions and an unsafe destination alias are BINCV_ASSERT sites --
+// which means they are observable only from outside the process, exactly like the
+// per-pixel checks above.
+//
+// The alias case is the one worth having. A destination that overlaps a source at
+// a DIFFERENT offset reads words the row loop has already overwritten: every
+// address involved is valid memory, so no sanitizer sees anything, and the result
+// is simply wrong for part of the image. Exact aliasing (dst IS a, same stride) is
+// supported and is covered in-process by tests/test_logic.cpp.
+uint32_t g_logicA[8] = {0};
+uint32_t g_logicB[8] = {0};
+uint32_t g_logicDst[8] = {0};
+
+int caseLogicDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_logicA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> b{g_logicB, 32, 3, 1};    // narrower
+    const bincv::BinMatView<uint32_t> dst{g_logicDst, 64, 3, 2};
+    bincv::bitwiseAnd(a, b, dst);
+    return static_cast<int>(g_logicDst[0]);
+}
+
+int caseLogicDimsNot() {
+    const bincv::BinMatConstView<uint32_t> src{g_logicA, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_logicDst, 32, 3, 1};     // narrower
+    bincv::bitwiseNot(src, dst);
+    return static_cast<int>(g_logicDst[0]);
+}
+
+int caseLogicAlias() {
+    // Same shape, same buffer, one word apart: word i of dst is word i+1 of src.
+    //
+    // Half a row apart, deliberately. The predicate accepts two views over one
+    // buffer whose ROWS never meet -- interleaved row bands and column tiles are
+    // legal (D-5) and are covered in-process by Logic.AliasAccepts_* -- so a case
+    // that merely shared a buffer would no longer prove anything. This one shares
+    // words: dst row 0 is src words 1..2, and word 1 is read after it was written.
+    const bincv::BinMatConstView<uint32_t> src{g_logicA, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_logicA + 1, 64, 3, 2};
+    bincv::bitwiseNot(src, dst);
+    return static_cast<int>(g_logicA[0]);
+}
+
+// A stride shorter than the row it has to hold: consecutive rows overlap, so the
+// kernel reads each row through the previous one's tail. BinMat's wrap constructor
+// rejects the same numbers by name; a hand-built view is what a kernel takes
+// (D-5), so the kernel carries the check. Measured before it existed: this call
+// produced three rows of ffff0000 from a source of 0000ffff, in every build, with
+// nothing reported.
+int caseLogicShortStride() {
+    const bincv::BinMatConstView<uint32_t> src{g_logicA, 64, 3, 1};   // needs 2 words
+    const bincv::BinMatView<uint32_t> dst{g_logicDst, 64, 3, 1};
+    bincv::bitwiseNot(src, dst);
+    return static_cast<int>(g_logicDst[0]);
+}
+
 struct Case {
     const char* name;
     int (*run)();
@@ -176,6 +233,10 @@ const Case kCases[] = {
     {"signed-set-int-min", caseSignedSetIntMin},
     {"view-stride", caseViewStride},
     {"const-view-stride", caseConstViewStride},
+    {"logic-dims", caseLogicDims},
+    {"logic-dims-not", caseLogicDimsNot},
+    {"logic-alias", caseLogicAlias},
+    {"logic-short-stride", caseLogicShortStride},
 };
 
 } // namespace

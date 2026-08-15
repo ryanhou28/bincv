@@ -40,6 +40,9 @@
 #include <opencv2/core.hpp>
 
 #include "bincv-cpp/binMat.hpp"
+// QuantMat, for the bit-plane row of the packing anchor: a plane view is the one
+// conversion T2.2's per-plane Tier 1 checks depend on, and it is not a BinMat view.
+#include "bincv-cpp/quantMat.hpp"
 #include "equivalence.hpp"
 #include "test_util.hpp"
 
@@ -721,6 +724,46 @@ void testPackingAnchor(const char* wordTypeName) {
                 bincv::BinMat<WordType> padded =
                     randomBinary<WordType>(width, height, fill, seed, PADDED_ROW_ALIGNMENT);
                 BINCV_EXPECT_BIT_EXACT(padded.constView(), reference, label + " [padded stride]");
+
+                // (d) and so does a QuantMat<3> BIT PLANE, which is a different
+                //     view entirely: same word type and stride, but offset by the
+                //     plane pitch (height * strideWords) rather than starting at
+                //     the allocation.
+                //
+                //     Added because the anchor pinned only BinMat views while
+                //     T2.2's plane overloads are checked through constPlane() ->
+                //     unpackTo8U on the binCV side -- so the one conversion those
+                //     2592 checks depend on was the one conversion nothing here
+                //     pinned. A plane pitch off by a row would be invisible to any
+                //     test that also built its expectation from constPlane().
+                //
+                //     Each plane carries INDEPENDENT content, so a plane loop that
+                //     read the wrong plane cannot pass by symmetry.
+                if (width > 0 && height > 0) {
+                    cv::Mat planeMasks[3];
+                    for (size_t p = 0; p < 3; ++p) {
+                        planeMasks[p] =
+                            randomCvMask(width, height, fill,
+                                         seed + UINT64_C(0x51ED270F) * (p + 1));
+                    }
+                    bincv::QuantMat<3, WordType> quant(width, height);
+                    for (int y = 0; y < height; ++y) {
+                        for (int x = 0; x < width; ++x) {
+                            unsigned value = 0;
+                            for (size_t p = 0; p < 3; ++p) {
+                                if (planeMasks[p].ptr<uint8_t>(y)[x] != 0) {
+                                    value |= (1u << p);
+                                }
+                            }
+                            quant.set(y, x, value);
+                        }
+                    }
+                    for (size_t p = 0; p < 3; ++p) {
+                        BINCV_EXPECT_BIT_EXACT(quant.constPlane(p), planeMasks[p],
+                                               label + " [quantmat plane " +
+                                                   std::to_string(p) + "]");
+                    }
+                }
             }
         }
     }

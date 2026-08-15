@@ -45,7 +45,8 @@ and logged below** rather than guessed at.
 | **T1.8** `verify.sh` | `DONE` — **both vacuous gates now real and proven** | `see below` |
 | **T1.9** aarch64 runner | `DONE` — counts identical to x86, 33 death tests | `ef7dfa5` |
 | **T1.10** Pi runner | `PARTIAL` — written, skip paths verified; device paths untestable | `c9c4db8` |
-| **T2.1** Equivalence harness | `DONE` — **caught its own circularity**; 11847 checks | `see below` |
+| **T2.1** Equivalence harness | `DONE` — **caught its own circularity**; 11847 checks | `00f9b13` |
+| **T2.2** Logic ops | `DONE` (code) — **perf number UNCONFIRMED, see finding 7** | `see below` |
 | **T1.5** `QuantMat<N>` | `DONE` — 3×38400 B in ONE allocation, measured at the allocator | working tree |
 | **T1.6** Signed / ternary | `DONE` — canonical zero tested both ways, no storage duplication | working tree |
 
@@ -425,6 +426,48 @@ it up — it simply should have said so.
 from the wrong directory litters the repository. `save_test_image` should resolve
 against a known base rather than `current_path()`. Not urgent, not in any current
 task's scope.
+
+---
+
+### 7. T2.2's speedup number — I could not independently reproduce it
+
+**The code is correct and thoroughly verified.** 84095 checks, four configurations
+green, bit-exact against OpenCV through T2.1's harness across the full matrix,
+padding bits handled, differing strides handled, aliasing decided and tested.
+None of that is in doubt.
+
+**The performance claim is.** The committed benchmark reports **8–10×** at 640×480
+and 1024×1024, with binCV at ~127 GB/s. My independent probe measured **2.1–2.8×**,
+with binCV at 27–38 GB/s.
+
+What I checked, and ruled out:
+- my first probe (1.3×) was genuinely flawed — a per-iteration destination read
+  serialized it. Corrected.
+- lambda indirection: not the cause
+- `-O2` vs `-O3`: not the cause (`-O3` was *slower* in my probe)
+- their harness reproduces its own number reliably, and is better constructed than
+  my probe: it calibrates iteration count, rotates across four input buffers to
+  defeat cache warming, and consumes the result
+
+**Why I am not banking the 8–10×:** my probe varies **65% run to run**
+(0.0095–0.0157 ns/px), so it is noise-dominated and cannot refute anything. But
+one specific thing still looks wrong in *their* numbers: **ns/px is nearly constant
+across a 64× size range** — 0.00343 at 256², 0.00288 at 640×480, 0.00306 at 1024²,
+0.00320 at 2048². The working set spans L1 through L3 over that range. A genuinely
+bandwidth-bound kernel should degrade, and this one does not.
+
+**What I did:** committed the code, marked T2.2 `DONE` on correctness, and did
+**not** promote the speedup into any claim. `results/logic_benchmark.log` records
+it as measured; nothing in ARCHITECTURE or README cites it.
+
+**What to do in the morning:** re-measure on the Pi. That is the authoritative
+device ([EXPERIMENTS.md](EXPERIMENTS.md#measurement-platforms)), it is where E-1
+and E-2 close anyway, and a Cortex-A72's smaller cache would make the
+size-invariance question answer itself. Until then the honest statement is
+"logic ops are faster; by how much is not settled."
+
+The direction is not in doubt — binCV moves 8× less data for the same result, and
+the memory ratio of exactly 8.0× is measured and solid.
 
 ---
 

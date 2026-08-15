@@ -301,6 +301,9 @@ reproducible from a committed benchmark.
 - [bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp) — template implementation
 - [bincv-cpp/include/bincv-cpp/quantMat.hpp](bincv-cpp/include/bincv-cpp/quantMat.hpp) — the N-bit container, and its signed / ternary reading
 
+### Kernels
+- [bincv-cpp/include/bincv-cpp/ops/logic.hpp](bincv-cpp/include/bincv-cpp/ops/logic.hpp) — `bitwiseAnd` / `Or` / `Xor` / `Not` (T2.2), over views and per `QuantMat` plane
+
 ### Support
 - [bincv-cpp/include/bincv-cpp/util.hpp](bincv-cpp/include/bincv-cpp/util.hpp) — image I/O for tests (OpenCV-only)
 - [bincv-cpp/tests/](bincv-cpp/tests/) — test suites

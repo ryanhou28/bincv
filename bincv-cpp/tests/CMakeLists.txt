@@ -101,7 +101,15 @@ function(bincv_add_test_target TARGET)
 endfunction()
 
 # Core tests: must build and run without OpenCV.
-set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked)
+#
+# test_logic (T2.2) is a core test even though half of it is the Tier 1
+# comparison against cv::bitwise_*: that half sits behind BINCV_WITH_OPENCV
+# inside the file, so the kernels are still compiled and checked against a
+# per-pixel reference in the three configurations that have no OpenCV --
+# including the Debug one, which is the only place their BINCV_ASSERT
+# preconditions are live.
+set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
+                     test_logic)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -265,6 +273,19 @@ bincv_add_death_test(test_assert_abort view-stride
 bincv_add_death_test(test_assert_abort const-view-stride
                      "BinMatConstView: multi-row view needs a non-zero stride")
 
+# T2.2 kernel preconditions. A kernel never throws (ARCHITECTURE 5.3), so these
+# are the only place the logic kernels' argument checking can be observed
+# failing -- and the alias case is a defect no sanitizer can see, since every
+# address involved is valid memory and only the answer is wrong.
+bincv_add_death_test(test_assert_abort logic-dims
+                     "a, b and dst must have the same dimensions")
+bincv_add_death_test(test_assert_abort logic-dims-not
+                     "src and dst must have the same dimensions")
+bincv_add_death_test(test_assert_abort logic-alias
+                     "dst must alias an input exactly or not overlap it")
+bincv_add_death_test(test_assert_abort logic-short-stride
+                     "every view's stride must cover a whole row")
+
 if(BINCV_OPENCV_FOUND)
     foreach(TEST_NAME ${BINCV_OPENCV_TESTS})
         bincv_add_test_target(${TEST_NAME} ${TEST_NAME}.cpp)
@@ -327,4 +348,36 @@ if(BINCV_OPENCV_FOUND)
     bincv_add_faulted_equivalence_test(dropped_trailing_word 2)
     bincv_add_faulted_equivalence_test(transposed_row_col   3)
     bincv_add_faulted_equivalence_test(dirty_padding        4)
+
+    # -----------------------------------------------------------------------
+    # The same proof for the suite that CONSUMES the harness (T2.2)
+    #
+    # test_equivalence going red under a fault says the harness can detect one.
+    # It says nothing about whether a kernel suite built on the harness can, and
+    # MEASURED, tests/test_logic.cpp could not: built with fault 1 it passed
+    # 56044 of 56044 checks and exited 0, and with fault 3 likewise. Its Tier 1
+    # half fed OpenCV through toCvMask() and read binCV back through
+    # expectBitExact(), so a fault in the conversion applied to both sides of a
+    # pointwise operation and cancelled exactly -- which is the failure mode
+    # equivalence.hpp property 2 predicts in writing.
+    #
+    # test_logic now builds its OpenCV inputs with randomCvMask() instead, so the
+    # two sides no longer share a conversion, and these three targets are what
+    # keep that true. Fault 4 is deliberately NOT among them: it dirties the
+    # GENERATOR's padding, and a destination the kernels wrote is clean whatever
+    # the sources' padding held -- that is the invariant, and the in-process
+    # Logic.DirtySources_* sweep is what asserts it in all four configurations.
+    # -----------------------------------------------------------------------
+    function(bincv_add_faulted_logic_test SUFFIX FAULT_ID)
+        set(FAULT_TARGET test_logic_fault_${SUFFIX})
+        bincv_add_test_target(${FAULT_TARGET} test_logic.cpp)
+        target_compile_definitions(${FAULT_TARGET} PRIVATE
+                                   BINCV_EQUIVALENCE_INJECT_FAULT=${FAULT_ID})
+        add_test(NAME ${FAULT_TARGET} COMMAND ${FAULT_TARGET})
+        set_tests_properties(${FAULT_TARGET} PROPERTIES WILL_FAIL TRUE)
+    endfunction()
+
+    bincv_add_faulted_logic_test(column_off_by_one     1)
+    bincv_add_faulted_logic_test(dropped_trailing_word 2)
+    bincv_add_faulted_logic_test(transposed_row_col    3)
 endif()

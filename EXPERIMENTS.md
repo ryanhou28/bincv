@@ -327,6 +327,75 @@ for the first time: both sides are now unchecked in release.
 
 ---
 
+### X-5 · Bandwidth-ceiling probes for the T2.2 logic benchmark · `DONE`
+
+**Gates:** nothing about binCV's design. This is a **method record**: it is the
+measurement that decides what the T2.2 benchmark's physical-bound check is allowed
+to claim, and it is logged because the first two answers to that question were both
+wrong in the published log rather than in the code.
+
+**Question:** What is a usable upper bound on memory throughput at the footprints
+`logic_benchmark` measures, so that a row reporting more than the machine can move
+is flagged rather than published?
+
+**Decision rule:** *(written before re-measuring)* the bound is whichever candidate
+is (a) reproducible within its own run-to-run spread and (b) tight enough that a
+kernel measured 2× too fast trips it. A candidate that fails either is not a bound
+and must not be described as one.
+
+**Variants:** `std::memcpy` at the footprint; a hand-written one-read-one-write
+`uint64_t` copy loop at the footprint.
+
+**Workload:** 38400 B, 131072 B, 307200 B, 1048576 B, 4.19 MB, 33.55 MB — the
+buffer sizes the three benchmark sizes produce on both sides. Nine batches per
+measurement in the original, twenty-seven after. `taskset -c 3`, three whole runs.
+
+**Metric:** GB/s, best batch *and* worst batch. The spread is the point.
+
+**Method:** the probes shipped inside `bincv-cpp/benchmark/logic_benchmark.cpp`;
+raw output in `bincv-cpp/results/logic_benchmark.log`.
+
+**Result**
+
+| footprint | copy loop, best | copy loop, worst | `std::memcpy` |
+|---|---|---|---|
+| 38400 B | 142.06–143.40 | 55.05–58.41 | 118.5–133.6 |
+| 131072 B | 130.29–135.54 | 39.61–82.08 | 8.4–8.7 |
+| 307200 B | 108.99–116.89 | 48.32–73.38 | 8.2–8.3 |
+| 1048576 B | 105.82–112.55 | 49.83–63.79 | 6.3–7.9 |
+| 4.19 MB | 96.48–108.21 | 49.31–60.86 | 7.0–8.6 |
+| 33.55 MB | 14.98–18.02 | 6.46–7.66 | 21.0–28.2 |
+
+**Conclusion — two published claims were wrong, in opposite directions.**
+
+1. The copy loop was described in the benchmark header and in the results log as
+   "a steady 48–68 GB/s". It is not steady and it is not 48–68: it is 15–143 GB/s
+   depending on footprint, with a **1.65× spread at a single footprint across
+   three runs** (122.61, 102.20, 74.08 GB/s at 307200 B in the shipped log). A
+   4× threshold built on a 100–140 GB/s probe needed 400–560 GB/s to fire, so it
+   could only ever have caught total dead-code elimination — a kernel measured
+   three times too fast passed it silently. It now uses 1.5×, which the port-count
+   argument supports (2 loads + 1 store against 1 load + 1 store), takes three
+   times as many batches, and prints its own worst batch so the ceiling's
+   instability is visible rather than asserted away.
+
+2. `std::memcpy` was excluded as the bound for a stated reason — "above ~128 KB
+   glibc switches to non-temporal stores, so it reports DRAM bandwidth" — and the
+   probe's own output refutes it: memcpy comes back **up** to 21–28 GB/s at
+   33.55 MB, above its 6–8 GB/s at 128 KB–4 MB. Whatever produces that shape, it
+   is not monotonic in size and the non-temporal-store story does not fit. The
+   exclusion stands (a primitive that swings 16× across the sizes under test
+   cannot bound them), the *explanation* is withdrawn, and the header no longer
+   offers one it cannot support.
+
+**Decision:** no D-record — this changes the benchmark's method, not binCV's
+design. `logic_benchmark.cpp` now flags at 1.5× the best batch, reports the probe's
+spread, and describes memcpy as unexplained rather than explained. The affected
+numbers in `results/logic_benchmark.log` and TASKS.md T2.2 were corrected rather
+than annotated, because a wrong bound licenses every row beneath it.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

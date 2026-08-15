@@ -1,0 +1,228 @@
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: binary, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 1.68145 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.383389 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.281686 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.274382 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.259245 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.224747 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: uint8, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.252083 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.216756 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.280057 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.213577 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.243598 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.224564 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: float32, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.392892 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.211504 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.303215 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.212653 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.306541 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.22378 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: binary, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.257882 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.648448 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.268274 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.51538 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.259812 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.407179 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: uint8, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.280158 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.393694 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.259198 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.393582 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.274992 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.395171 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: float32, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.325506 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.385814 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.316896 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.389216 ms over 50 runs
+=== Benchmark Config ===
+Width: 256, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.371424 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.402948 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: binary, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.270144 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.647076 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.382885 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.509065 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: binary, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.251516 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.408499 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: uint8, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.26977 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.393724 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.254992 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.400068 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: uint8, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.261308 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.393613 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: float32, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.331515 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.390587 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.316594 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.38368 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 256, Iterations: 50, DType: float32, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.318563 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.38688 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: binary, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.315644 ms over 50 runs
+[BENCH] BinMat resize - Avg: 1.24603 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.322547 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.997352 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: binary, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.325632 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.759568 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: uint8, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.310218 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.740258 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.353976 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.764919 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: uint8, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.408456 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.769943 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: float32, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.450347 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.742144 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.417836 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.781357 ms over 50 runs
+=== Benchmark Config ===
+Width: 512, Height: 512, Iterations: 50, DType: float32, Sparsity: 0.01
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.468041 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.743931 ms over 50 runs
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 50, DType: uint8, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.594947 ms over 50 runs
+[BENCH] BinMat resize - Avg: 0.867221 ms over 50 runs
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+=== Resize Benchmark ===
+[BENCH] OpenCV resize - Avg: 0.211569 ms over 100 runs
+[BENCH] BinMat resize - Avg: 0.858814 ms over 100 runs

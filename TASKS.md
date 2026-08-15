@@ -733,7 +733,7 @@ conversion cannot see a bug in it. Only the anchor sweep saw all five.
 
 ---
 
-### T2.2 · Logic operations · `TODO`
+### T2.2 · Logic operations · `DONE`
 
 **Depends:** T2.1
 **Files:** `include/bincv-cpp/ops/logic.hpp` (new)
@@ -761,6 +761,120 @@ void bitwiseNot(BinMatConstView<W> src, BinMatView<W> dst);
 - Benchmark results committed under `results/`
 
 **Verify:** V-ALL
+
+**What was built.** `include/bincv-cpp/ops/logic.hpp` (the four view kernels plus
+per-plane `QuantMat<N>` overloads) and `tests/test_logic.cpp`. The suite is a
+**core** test: its Tier 1 half sits behind `BINCV_WITH_OPENCV`, so the kernels are
+compiled and checked in all four configurations — including Debug, the only one
+where their `BINCV_ASSERT` preconditions are live. 65768 checks under `opencv`,
+53672 under the other three, plus four death tests and three `WILL_FAIL` builds.
+
+**Preconditions, and what each is worth.** Mismatched dimensions, a stride shorter
+than `ceil(width / WordBits)`, and an unsafe destination alias are `BINCV_ASSERT`
+sites; each has a death test. Two are *not* checkable and are documented instead:
+a destination that is a **sub-width window onto a wider image** has its next
+1–`WordBits−1` pixels cleared by the trailing-word mask (measured: 52 of 52 live
+pixels in columns 70–95 of a 640-wide parent), and every address written is inside
+the parent, so nothing can diagnose it. `Logic.TrailingWord_*` pins that behaviour
+at bit granularity so a future change to it is a test failure rather than a
+surprise.
+
+**Aliasing — decided, documented, tested.** `dst` may be *exactly* one of the
+sources (same first word, same stride), or share **no word** with it. In-place is
+safe because these operations are pointwise in the word index. A destination that
+overlaps a source at a different offset is undefined and asserted against, because
+it cannot be diagnosed any other way — every address involved is valid memory and
+only the answer is wrong. Recorded as
+[D-11](ARCHITECTURE.md#d-11-kernels-alias-exactly-or-not-at-all), since
+it binds every future `ops/` kernel and not only this one.
+
+The "no shared word" half is checked **per row**, not by bounding span. The first
+version compared spans and therefore rejected two views over one buffer whose rows
+interleave — alternate row bands, left/right column tiles — which are legal under
+D-5, correct in release, and aborted every Debug build. `Logic.AliasAccepts_*`
+covers all three shapes.
+
+**Four things were measured rather than argued, each by breaking something on
+purpose and watching which cases went red.** The first two are the kernel; the
+last two are the *suite*, and they are the ones worth reading.
+
+| injected fault | before review | after |
+|---|---|---|
+| trailing-word mask removed from `applyBinary` | **0 fail** — 56044/56044 green | 1860 of 65768 fail |
+| kernel writes zeros into `dst`'s in-stride padding | **0 fail** | 120 fail |
+| `BINCV_EQUIVALENCE_INJECT_FAULT=1` (column off by one) | **0 fail**, exit 0 | 3368 fail, exit 1 |
+| `BINCV_EQUIVALENCE_INJECT_FAULT=3` (transposed conversion) | **0 fail**, exit 0 | 5904 fail, exit 1 |
+
+Rows 1 and 3–4 were **blind spots, not passes**. Every source in every sweep was
+built through `set()`, so all padding was already zero and `Op(0,0) == 0` left the
+mask nothing to do — `Logic.DirtySources_*` now sweeps sources wrapped over
+all-ones buffers, which is a documented construction and the only one where the
+mask is load-bearing for AND/OR/XOR. And the Tier 1 half built *both* sides through
+`toCvMask`/`unpackTo8U`, so a fault in the conversion cancelled exactly through a
+pointwise operation — precisely what `equivalence.hpp` property 2 predicts in
+writing. OpenCV's inputs now come from `randomCvMask()`, the harness's independent
+generator, and `tests/CMakeLists.txt` builds `test_logic` under faults 1–3 as
+`WILL_FAIL` targets so the property is a ctest result. The earlier claim that the
+mask accounted for "5317 failing checks" was **wrong**: all 5317 came from
+`bitwiseNot`, which fails with or without a dirty source.
+
+**Benchmark** (`benchmark/logic_benchmark.cpp`, results committed at
+`results/logic_benchmark.log`). Denominator per
+[§10.3](ARCHITECTURE.md#103-benchmark-denominator): `cv::bitwise_*` on the same
+content as `CV_8U`, verified to produce the same image before anything is timed —
+and a disagreement now skips the size and exits non-zero instead of printing a
+table under a warning. Median of three pinned runs, x86_64 — **indicative, not
+authoritative** ([EXPERIMENTS.md](EXPERIMENTS.md#measurement-platforms)).
+
+**The denominator has to be named, because it changes the answer.** Two OpenCV 4.x
+installs on this machine, both Release, both with the same dispatch list, differ by
+**3.3× on `cv::bitwise_not` alone** (105 GB/s in distro 4.5.4, 32 GB/s in a locally
+built 4.8.0-dev) while agreeing within noise on the binary operations. The figures
+below use **4.5.4** — the faster denominator, and the one a user gets by installing
+rather than building OpenCV. The benchmark now prints its OpenCV baseline/dispatch
+lines so any table can be attributed.
+
+| | 640×480 | 1024×1024 | 8192×4096 |
+|---|---|---|---|
+| `bitwiseAnd` binCV `uint32` | 0.00297 ns/px | 0.00308 ns/px | 0.01096 ns/px |
+| `bitwiseAnd` OpenCV `CV_8U` | 0.02798 ns/px | 0.02851 ns/px | 0.16450 ns/px |
+| ratio, and/or/xor (all 6 binCV rows) | **7.6–10.2×**, median 8.0× | **7.6–9.8×**, median 8.1× | 14.8–21.2× |
+| ratio, `bitwiseNot` | **5.4–5.5×** | **5.5–5.6×** | 18.4–19.2× |
+| buffer | 38400 B vs 307200 B | 131072 B vs 1048576 B | 4.19 MB vs 33.55 MB |
+| both sides cache-resident? | yes | yes | **no — OpenCV only goes to DRAM** |
+
+**One ratio for the binary operations, with its spread — not three.** AND, OR and
+XOR are one shared loop differing in a single instruction; the earlier per-op
+figures (8.0× / 10.1× / 8.1×) were code-placement noise, and the fast/slow cluster
+swaps between word types and between runs. Anything above 8.0× at a cache-resident
+size has no mechanism behind it and is the top of the noise band.
+
+**`bitwiseNot` is the weak result, and the weakness is binCV's.** 5.5× against a
+denominator that dispatches properly — *below* the 8× traffic ratio. binCV's unary
+kernel manages ~72 GB/s where `cv::bitwise_not` manages ~105, so the representation
+wins 8× and the kernel gives a third back. It is the one row where binCV is slower
+per byte than OpenCV. The previously published **18.0× / 19.8× is withdrawn**: it
+was a property of the local 4.8.0-dev build, not of binCV. Nothing was tuned in
+response — an accurate negative result is the finding.
+
+**The mechanism holds where the claim is made.** At both cache-resident sizes the
+two sides move memory at about the same rate (~100–108 GB/s OpenCV, ~100–134 GB/s
+binCV), so both are bandwidth-bound and the speedup lands on the 8× compression
+ratio. At 8192×4096 the ratio roughly doubles for a *different* reason — binCV's
+12.6 MB working set fits the 32 MiB L3 and OpenCV's 100 MB does not — and that
+number must not be averaged with the others. **Word width is still not settled**
+(`uint64` leads on some rows, trails on others); that is
+[E-2](ARCHITECTURE.md#9-open-questions-and-planned-experiments)/T2.9.
+
+**Two measurement-validity corrections, both recorded as
+[X-5](EXPERIMENTS.md#x-5--bandwidth-ceiling-probes-for-the-t22-logic-benchmark--done):**
+the physical-bound probe was described as "a steady 48–68 GB/s" and actually
+reports 74–143 GB/s with a 1.65× spread at one footprint, so the 4× threshold
+built on it needed 400–560 GB/s to fire; it is now 1.5× against a probe that
+prints its own worst batch. And the `std::memcpy` context number was explained by
+non-temporal stores above ~128 KB, which the probe's own output contradicts — it
+comes back *up* to 21–28 GB/s at 33 MB. The swing is real, the explanation was
+not, and it has been withdrawn rather than repeated.
 
 ---
 

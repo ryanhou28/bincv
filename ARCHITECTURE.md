@@ -590,6 +590,40 @@ than reverted because T1.4 is what *created* the hazard, and reverting would lea
 a real ODR trap with a silent failure mode. Recorded here so it is a deliberate
 decision rather than an accident.
 
+### D-11: Kernels alias exactly or not at all
+
+*(Added during T2.2, not pre-planned — the first task with kernels in it was the
+first task that needed the rule.)*
+
+Every kernel in `ops/` accepts a destination that is **exactly** one of its
+sources — same first word, same stride, so word *i* of the destination is word *i*
+of the source — or one that shares **no word** with any source. Any other overlap
+is undefined.
+
+**Why those two and nothing between.** The T2.2 kernels are pointwise in the word
+index, so an exact alias reads each word immediately before overwriting it; that is
+the in-place idiom (`m &= other`) and it is free. A destination overlapping a
+source at a *different* offset makes word *i* of the destination word *j* of the
+source, and the row loop then reads words it has already written. Supporting it
+would mean either a temporary — forbidden, [no heap in kernels](#53-error-policy)
+— or a direction-aware loop whose correctness depends on the sign of the offset.
+
+**Why it is asserted, not thrown.** It is a programming error at the call site, not
+a runtime condition, and it is on the per-pixel path
+([§5.3](#53-error-policy)). It also cannot be diagnosed any other way: every
+address involved is valid memory, no sanitizer sees anything, and only some of the
+pixels are wrong.
+
+**"Shares no word" means per row, not per bounding box.** Two views laid over one
+buffer can interleave without sharing a byte — alternate row bands (what a pyramid
+downsample takes, [§7.2](#7-the-mvp-operation-set)) and left/right column tiles
+both do. [D-5](#d-5-views-are-core-not-an-add-on) says a kernel takes any
+`{ptr, width, height, stride}`, so a check that rejects those is wrong, and it was:
+the first version compared spans and aborted every Debug build on a call that was
+correct in release.
+
+**Binds:** every kernel added under `ops/` — T2.3 shift, T2.4 morphology, and after.
+
 ### D-7: Existing code is not a constraint
 
 The pre-existing `BinMat` implementation is a prototype. Where it conflicts with
