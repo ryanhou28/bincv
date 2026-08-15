@@ -436,6 +436,54 @@ this environment are meaningless, so no one is tempted to benchmark in it — se
 
 ---
 
+### T1.10 · Cortex-A measurement runner · `TODO`
+
+**Depends:** T1.9
+**Files:** `scripts/run_on_pi.sh` (new)
+
+**Goal:** Make the reference device usable from an ordinary session, with the
+measurement hazards enforced mechanically rather than remembered.
+
+**Why this is Phase 1:** every Phase 2 experiment (T2.8–T2.10) closes on this
+device. Without a runner, each of them either blocks on manual work or silently
+settles for non-authoritative numbers.
+
+**Spec**
+
+```bash
+scripts/run_on_pi.sh <target> <command>     # target e.g. pi@raspberrypi.local
+```
+
+1. **Preflight — refuse rather than warn.** Abort with a clear message if:
+   - `uname -m` is not `aarch64` (a 32-bit OS answers a different question — see
+     [EXPERIMENTS.md § Measuring on the Pi 4](EXPERIMENTS.md#measuring-on-the-pi-4))
+   - `vcgencmd get_throttled` is non-zero before the run
+   - the host is unreachable
+2. Sync the repo (`rsync`, excluding build trees).
+3. Set the governor to `performance`; restore the previous setting on exit,
+   including on failure.
+4. Build Release, core-only configuration.
+5. Run the command pinned to one core via `taskset`.
+6. **Re-check `vcgencmd get_throttled` afterwards. If non-zero, mark the results
+   INVALID** — throttled numbers must not be recorded.
+7. Print an environment block for pasting into the log: architecture, kernel, CPU
+   model, governor, throttle state before/after, core pinning, compiler version.
+8. Copy results back to `results/`.
+
+**Done when**
+- `./scripts/run_on_pi.sh <target> ./tests/test_binMat` builds and runs remotely
+  and reports 261/261
+- A 32-bit target is refused with an explanatory message
+- A throttled run is reported INVALID, not recorded
+- The governor is restored even when the command fails
+- Skips with a clear message when no target is configured, so
+  `scripts/verify.sh` remains usable without the Pi
+
+**Do not:** make the Pi a hard dependency of the normal build or test flow. It is
+a measurement device, not part of the development loop.
+
+---
+
 # Phase 2 — Bit-Parallel Primitives
 
 ---
@@ -704,13 +752,12 @@ bulk kernel, enough to justify up to 172% memory overhead?
 **Workload:** `bitwiseAnd` (T2.2) and `countNonZero` (T2.5) at 640×480 and 94×60
 — the two extremes from X-1. Enough iterations for stable timing.
 **Metric:** ns/pixel **and** allocated bytes. Both, per the protocol.
-**Platform:** run on every platform available, cheapest first — x86 for a fast
-signal, Apple Silicon if available for real aarch64. Record each separately.
-**Do not close E-1 on either**: both are non-authoritative for this question, x86
-because it is the wrong ISA and Apple Silicon because its cache hierarchy is
-unrepresentative of deployment cores — and this is a cache question. Mark X-1
-`PARTIAL` and close it on a Cortex-A device in Phase 5. See
-[EXPERIMENTS.md § Measurement platforms](EXPERIMENTS.md#measurement-platforms).
+**Platform:** **close this on the Pi 4** via `scripts/run_on_pi.sh` (T1.10) — it is
+the reference device and this is a cache question, which is exactly what a laptop
+hides. Running x86 first is fine as a cheap signal, but x86 and Apple Silicon are
+both non-authoritative here and cannot close E-1. Observe the Pi 4 measurement
+discipline — 64-bit OS, throttle checks, governor, pinning:
+[EXPERIMENTS.md § Measuring on the Pi 4](EXPERIMENTS.md#measuring-on-the-pi-4).
 **Never measure this under emulation.**
 
 **Done when:** [EXPERIMENTS.md](EXPERIMENTS.md) X-1 is `DONE` with the benefit
@@ -739,8 +786,11 @@ footprint effect is worst exactly at upper pyramid levels. **Measure footprint a
 **Variants:** `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`.
 **Workload:** same kernels and sizes as T2.8.
 **Metric:** ns/pixel and allocated bytes at both resolutions.
-**Platform:** same policy as T2.8 — the footprint half is architecture-independent
-and closes anywhere; the speed half needs a Cortex-A device.
+**Platform:** the footprint half is architecture-independent and closes anywhere;
+**the speed half closes on the Pi 4** (T1.10). This experiment is the most
+sensitive of the three to a 32-bit OS — on `armv7l` every `uint64_t` operation is
+synthesised from 32-bit pairs, so the result would describe the compiler rather
+than the hardware. Confirm `aarch64` before recording anything.
 
 **Done when:** logged as X-4, default confirmed or changed, benchmark committed.
 
@@ -765,6 +815,9 @@ recomputation for overlapping windows?
 keypoints, per the reference `gftt_max_corners`); include the heavy-overlap case,
 since that is what favors incremental.
 **Metric:** ns per window, plus any additional memory the accumulator needs.
+**Platform:** close on the Pi 4 (T1.10). The tradeoff turns on whether the
+accumulator stays resident in a 32 KiB L1D — a laptop with four times the L1 would
+favour incremental more than the deployment target does.
 
 **Done when:** logged as X-5, T2.6's API is confirmed or extended, benchmark
 committed.

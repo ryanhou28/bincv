@@ -81,7 +81,16 @@ and do not close an experiment on a platform that cannot authoritatively answer 
 | **QEMU / Docker `--platform linux/arm64`** | ✅ authoritative | ❌ | ❌ |
 | **Native x86_64** | ✅ | ✅ | ⚠️ indicative only — wrong ISA |
 | **Apple Silicon** | ✅ | ✅ real aarch64 + NEON | ⚠️ risky — see below |
-| **Cortex-A device** (Pi 4/5, Jetson) | ✅ | ✅ | ✅ authoritative |
+| **Raspberry Pi 4 (Cortex-A72)** | ✅ | ✅ | ✅ **authoritative — the reference device** |
+| Other Cortex-A (Pi 5, Jetson) | ✅ | ✅ | ✅ authoritative |
+
+**The Pi 4 is the reference measurement device.** Its Cortex-A72 is squarely the
+deployment class this library targets — 32 KiB L1D and 1 MiB shared L2, against
+roughly 128 KiB L1D and 12 MiB L2 on an M-series core. Cache pressure is visible
+there and hidden on a laptop, which is precisely what E-1 and E-2 are asking about.
+It also reproduces the popcount situation behind
+[D-6](ARCHITECTURE.md#d-6-bulk-only-reductions): ARMv8-A has no scalar popcount, so
+`CNT` runs in the NEON domain with the crossings that motivated bulk-only reductions.
 
 **Emulation is for correctness only.** QEMU user-mode does dynamic binary
 translation without modelling cache hierarchy, instruction latency, or memory
@@ -104,6 +113,35 @@ for the target class.
 deployment-class Cortex-A device. Earlier platforms narrow the search and catch
 large effects; they do not close the question. Record the platform and mark the
 entry `PARTIAL` if it was not the authoritative one.
+
+### Measuring on the Pi 4
+
+A Pi 4 will happily produce stable-looking numbers that are wrong. Four hazards,
+all of which the runner script ([T1.10](TASKS.md)) must handle rather than leaving
+to whoever is at the keyboard:
+
+**1. The OS must be 64-bit.** `uname -m` must report `aarch64`, not `armv7l`.
+Raspberry Pi OS shipped 32-bit by default for years, and on 32-bit ARM every
+`uint64_t` operation is synthesised from 32-bit pairs — which would make
+[E-2](ARCHITECTURE.md#9-open-questions-and-planned-experiments) measure the
+compiler's 64-bit emulation rather than the hardware. The deployment target is
+aarch64 (Jetson, modern phones), so a 32-bit result is not merely noisy, it answers
+a different question. **The runner script must refuse to run on `armv7l`.**
+
+**2. Thermal throttling.** The BCM2711 throttles around 80 °C, and an uncooled Pi
+4 will reach that during a sustained benchmark. Check `vcgencmd get_throttled`
+**before and after** every run: a non-zero result means the numbers are invalid,
+not merely slower. Discard and re-run with cooling, do not record.
+
+**3. CPU frequency governor.** The default is `ondemand`, scaling 600 MHz–1.5 GHz.
+Left alone, a short benchmark measures the governor's ramp behavior. Pin to
+`performance` for the run and record which governor was active.
+
+**4. Core migration and background load.** Pin with `taskset` and prefer a Lite
+image without a desktop session.
+
+Record all four in the log entry: architecture, throttle state before/after,
+governor, and core pinning. An entry without them is not reproducible.
 
 ---
 
