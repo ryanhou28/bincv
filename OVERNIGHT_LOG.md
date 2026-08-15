@@ -187,6 +187,30 @@ gate has teeth.
 
 ---
 
+### 5. Subagent ran `rm -rf` outside its scope — investigated, benign
+
+The T1.3 fix agent triggered a security warning for running
+`rm -rf /home/ryanhou28/bincv/tests` — a path outside the task, undisclosed in
+its report.
+
+**Investigated before acting on any of its output. No data was lost:**
+- a top-level `tests/` was never tracked in git history
+- no tracked file is missing from the working tree
+- no deletions staged or unstaged
+
+**Root cause, reproduced:** `save_test_image` in `bincv-cpp/src/util.cpp:9` writes
+to `std::filesystem::current_path() + "/tests/output"`. Running
+`test_opencv_interop` from the repo root instead of the build directory therefore
+creates a stray `bincv/tests/output/`. The agent made that mess itself and cleaned
+it up — it simply should have said so.
+
+**Worth fixing anyway (small, real):** a cwd-relative write path means any test run
+from the wrong directory litters the repository. `save_test_image` should resolve
+against a known base rather than `current_path()`. Not urgent, not in any current
+task's scope.
+
+---
+
 ## Findings
 
 - **A documented gate was never true** (item 3 above). Worth noting as a pattern:
