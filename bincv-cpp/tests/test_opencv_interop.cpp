@@ -1,14 +1,51 @@
 // OpenCV interop tests. Only built when OpenCV is available; the core test suite
 // (test_binMat.cpp) covers everything that must work without it.
 
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <new>
 
 #include <opencv2/opencv.hpp>
 
 #include "bincv-cpp/binMat.hpp"
 #include "bincv-cpp/util.hpp"
 #include "test_util.hpp"
+
+// ---------------------------------------------------------------------------
+// One-shot allocation failure
+//
+// fromCVMat() must build its new buffer before it commits the new dimensions;
+// otherwise a failed allocation leaves the matrix describing storage it does not
+// have, and at()'s bounds check then validates against dimensions the buffer
+// cannot back. Proving that needs an allocation that fails on demand, so the
+// global operators are replaced here. Same shape as tests/test_binMat.cpp.
+// ---------------------------------------------------------------------------
+
+namespace {
+bool g_failNextAlloc = false;
+}
+
+void* operator new(std::size_t bytes) {
+    if (g_failNextAlloc) {
+        g_failNextAlloc = false;   // one shot: arm it immediately before the call
+        throw std::bad_alloc();
+    }
+    // array-new passes SIZE_MAX as its overflow sentinel and expects the allocator
+    // to fail; forwarding it to malloc also makes GCC warn once this inlines.
+    if (bytes > static_cast<std::size_t>(PTRDIFF_MAX)) throw std::bad_alloc();
+    void* p = std::malloc(bytes == 0 ? 1 : bytes);
+    if (p == nullptr) throw std::bad_alloc();
+    return p;
+}
+
+void* operator new[](std::size_t bytes) { return ::operator new(bytes); }
+
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { ::operator delete(p); }
+void operator delete(void* p, std::size_t) noexcept { ::operator delete(p); }
+void operator delete[](void* p, std::size_t) noexcept { ::operator delete(p); }
 
 namespace {
 
@@ -86,6 +123,50 @@ void testInvalidInput() {
     BINCV_CHECK(out.empty());
 }
 
+// A failed conversion must leave the matrix exactly as it was.
+void testFromCVMatAllocationFailure() {
+    std::cout << "\n--- fromCVMat is atomic across allocation failure ---\n";
+
+    bincv::BinMat<> m(8, 2);
+    m.set(1, 7, true);
+    const size_t wordsBefore = m.sizeInWords();
+    const bincv::BinMat<>::WordType* const dataBefore = m.data();
+
+    // Built before the allocator is armed, so the sentinel hits fromCVMat's own
+    // allocation and nothing else: fromCVMat allocates exactly once, and only
+    // argument checks and stride arithmetic run before it.
+    cv::Mat big = cv::Mat::zeros(64, 64, CV_8UC1);
+    big.at<uint8_t>(0, 0) = 255;
+
+    bool threw = false;
+    g_failNextAlloc = true;
+    try {
+        m.fromCVMat(big);
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    g_failNextAlloc = false;
+    BINCV_CHECK(threw);
+
+    // Dimensions, storage, and contents all still describe the ORIGINAL buffer.
+    // If the dimensions had been committed first, m would claim to be 64x64 over
+    // 4 words and at(63, 63) would pass its bounds check and read past the end.
+    BINCV_CHECK_EQ(m.getWidth(), size_t(8));
+    BINCV_CHECK_EQ(m.getHeight(), size_t(2));
+    BINCV_CHECK_EQ(m.sizeInWords(), wordsBefore);
+    BINCV_CHECK_EQ(m.sizeInWords(), m.getHeight() * m.getAlignedWidth());
+    BINCV_CHECK(m.data() == dataBefore);
+    BINCV_CHECK(m.at(1, 7));
+    BINCV_CHECK_EQ(m.countNonZero(), 1);
+    BINCV_CHECK_THROWS(m.at(63, 63), std::out_of_range);
+
+    // The matrix is still usable, and the same call succeeds when memory does.
+    m.fromCVMat(big);
+    BINCV_CHECK_EQ(m.getWidth(), size_t(64));
+    BINCV_CHECK_EQ(m.getHeight(), size_t(64));
+    BINCV_CHECK_EQ(m.countNonZero(), 1);
+}
+
 // Exercises the real sample image if it is present.
 void testSampleImage() {
     std::cout << "\n--- Sample image conversion ---\n";
@@ -132,6 +213,7 @@ int main() {
     testRoundTrip();
     testAllWordTypes();
     testInvalidInput();
+    testFromCVMatAllocationFailure();
     testSampleImage();
 
     return bincv::test::summarize("BinMat OpenCV interop tests");

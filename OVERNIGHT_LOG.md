@@ -36,7 +36,8 @@ and logged below** rather than guessed at.
 | Task | Result | Commit |
 |---|---|---|
 | **T1.1** Storage model | `DONE` — 544 checks, ASan/UBSan/LSan clean, aarch64 verified | `see below` |
-| **T1.2** Views | `DONE` — same suite | `see below` |
+| **T1.2** Views | `DONE` — same suite | `0e86bfc` |
+| **T1.3** BinMat on Storage/views | `DONE` — 857 checks, 640x480 = exactly 38400 B | `see below` |
 
 **T1.1 / T1.2 detail.** `core/storage.hpp` and `core/view.hpp`. Reviewers found
 and the fix phase corrected **8 confirmed defects**, two of them real
@@ -62,6 +63,36 @@ Independently re-verified before commit: both green configs from scratch, the
 aliasing reproducer under ASan+UBSan, the full suite under
 ASan+UBSan+LeakSanitizer, and the suite proven able to fail via injected
 assertion.
+
+---
+
+### T1.3 detail
+
+`BinMat` now sits on `Storage` + views, with **word-granularity stride as the
+default (D-4)**. Headline number independently confirmed: a 640x480
+`BinMat<uint32_t>` allocates **exactly 38400 bytes** — down from 46080, and equal
+to 640*480/8 with zero padding. At pyramid level 3 (94x60) it is 720 B against
+1920 B, which is the 172% case D-4 was decided on.
+
+Eight confirmed defects fixed, the two most serious being:
+
+1. **Move-assignment half-applied** when the source wrapped the target's own
+   block: geometry was committed even though `Storage`'s move correctly refused,
+   leaving `sizeInWords()` inconsistent with `height*alignedWidth`. Now geometry
+   commits only if the storage actually adopted.
+2. **A test that could not fail.** Deleting the trailing partial-word mask
+   (`row[lastWord] &= keepMask`) left every suite green — the padding-bit
+   invariant, which every future word-wise reduction depends on, was unguarded.
+   Fixed and now mutation-confirmed.
+
+Also fixed: the copy constructor laundering a wrapped buffer's dirty padding bits
+into an owning matrix (per-pixel count 140 vs whole-word 192); `fromCVMat`
+committing dimensions before allocating; `transposed()` collapsing an empty
+matrix to 0x0; and two double-writes of whole buffers (copy 1.02 -> 0.62 us at
+640x480).
+
+Verified independently before commit: both configs from scratch (3/3, 2/2, zero
+warnings), 38400 confirmed by my own program, 857/857 under ASan+UBSan+LSan.
 
 ---
 
@@ -136,6 +167,23 @@ anyway, because blocking would discard verified work and force an unreviewable
 combined diff later. The two configurations that can be green are green and
 warning-free; `test_storage` builds clean and passes 544/544 under
 `-fno-exceptions` too. **T1.4 closes this properly.**
+
+---
+
+### 4. A second gate is vacuous: nothing enforces "warning-free"
+
+`grep -rnE '\-Wall|\-Wextra|\-Werror' ` over all three `CMakeLists.txt` returns
+**nothing**. V-ALL, CLAUDE.md and GETTING_STARTED all require builds to be
+"warning-free", but no warning flags are enabled — so the gate passes vacuously.
+
+The code does appear genuinely clean: every translation unit was compiled by hand
+under `-Wall -Wextra -Wpedantic` with zero warnings. But that is luck plus care,
+not enforcement.
+
+**This is the same failure as item 3** — a property asserted in the docs that
+nothing actually checks. Both belong to **T1.8** (`scripts/verify.sh`), whose spec
+already says "fail on any warning". T1.8 should also add the flags to CMake so the
+gate has teeth.
 
 ---
 

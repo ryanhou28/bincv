@@ -211,7 +211,7 @@ struct BinMatConstView { /* same, const WordType* ptr */ };
 
 ---
 
-### T1.3 · Rework `BinMat` onto storage + views · `TODO`
+### T1.3 · Rework `BinMat` onto storage + views · `DONE`
 
 **Depends:** T1.1, T1.2
 **Files:** `binMat.hpp`, `impl/binMat_impl.hpp`

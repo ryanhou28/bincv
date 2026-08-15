@@ -5,8 +5,9 @@
 #include <iostream>
 #include <type_traits>
 #include <stdexcept>
-#include <vector>
+#include "core/storage.hpp"
 #include "core/types.hpp"
+#include "core/view.hpp"
 
 // OpenCV integration is optional and provided behind a compile-time switch.
 // The core library never requires OpenCV; see CMakeLists.txt.
@@ -22,8 +23,14 @@ namespace bincv {
 /// @note Parameterizing on the storage word *type* (rather than a bit count)
 ///       follows boost::dynamic_bitset<Block> and cv::Mat_<T>. The bit width is
 ///       derived as WordBits, so the type never has to be recovered from a number.
-/// @note The underlying storage is std::vector for embedded compatibility.
-///       32-bit words typically provide optimal performance on most platforms.
+/// @note Backed by Storage (core/storage.hpp), which is what lets the same
+///       container hold either an owning heap allocation or a caller-provided
+///       buffer -- the no-heap / DMA path (ARCHITECTURE 4.3). Storage is also why
+///       nothing here uses std::vector: owning allocation has to work with
+///       exceptions disabled.
+/// @note Kernels never take this type. They take the views returned by view() and
+///       constView() (D-5), so a kernel compiles once per WordType regardless of
+///       how its arguments were allocated or how their rows are aligned.
 template <typename WordType_>
 class BinMat {
     static_assert(std::is_integral<WordType_>::value && std::is_unsigned<WordType_>::value,
@@ -39,30 +46,124 @@ public:
     /// Number of pixels packed into a single word.
     static constexpr size_t WordBits = sizeof(WordType) * 8;
 
+    /// @brief Default row-stride alignment: one word, i.e. no padding beyond the
+    ///        ceil(width / WordBits) words a row inherently needs (D-4).
+    /// @note Word granularity already gives kernels the only property they rely
+    ///       on -- that the trailing partial word can be read and written whole --
+    ///       whereas fixed 16/32/64-byte row alignment costs up to 172% memory on
+    ///       upper pyramid levels, which LK touches every frame. Memory wins ties
+    ///       (ARCHITECTURE principle 2), so larger alignment is opt-in per object
+    ///       via the constructor's rowAlignment argument, not the default.
+    /// @note D-4 is provisional pending E-1; the constructor argument is what
+    ///       keeps the alternative measurable without an API change.
+    static constexpr size_t DefaultRowAlignment = sizeof(WordType);
+
     // Constructors
 
     /// @brief Constructs an empty matrix with no allocated storage.
     BinMat();
 
-    /// @brief Constructs a zero-filled matrix.
+    /// @brief Constructs a zero-filled matrix that owns its storage.
     /// @param width Width of the matrix in pixels
     /// @param height Height of the matrix in pixels
-    /// @param rowAlignment Number of bytes to align each row's stride to.
-    ///        Must be a positive power of two; default is 32 bytes (AVX2 / cache friendly).
+    /// @param rowAlignment Number of bytes to align each row's stride to. Must be
+    ///        a positive power of two and a multiple of the word size; default is
+    ///        DefaultRowAlignment, i.e. word granularity with no padding (D-4).
     /// @throws std::invalid_argument if dimensions are negative or alignment is invalid.
-    BinMat(int width, int height, size_t rowAlignment = 32);
+    BinMat(int width, int height, size_t rowAlignment = DefaultRowAlignment);
+
+    /// @brief Wraps a caller-provided buffer without taking ownership of it.
+    /// @param data First word of the caller's buffer. Must outlive this object and
+    ///        hold at least `height * strideWords` words.
+    /// @param width Width of the matrix in pixels
+    /// @param height Height of the matrix in pixels
+    /// @param strideWords Distance between consecutive rows, in WORDS. Must be at
+    ///        least the ceil(width / WordBits) words a row needs.
+    /// @throws std::invalid_argument if dimensions are negative, if `strideWords`
+    ///         cannot hold a row, or if `data` is null for a non-empty matrix.
+    /// @note Allocates nothing and frees nothing: the buffer belongs to the caller
+    ///       for this object's whole lifetime. This is the Tier 2 (no-heap) path,
+    ///       and the way sensor / DMA memory is ingested without a copy.
+    /// @note The buffer is used as-is; it is neither zeroed nor trailing-bit
+    ///       cleared, because the caller may be wrapping data it has already
+    ///       filled in, or a sub-region of a larger image whose surrounding
+    ///       columns must not be disturbed. The padding-bit invariant (bits from
+    ///       `width` to the end of the last used word are zero) is therefore the
+    ///       caller's to establish -- word-wise reductions over-count otherwise.
+    ///       Copying such a matrix re-establishes the invariant, since the copy
+    ///       owns its storage; see the copy constructor.
+    /// @note Operations that reallocate (resize, pad, transpose, transposed, and
+    ///       fromCVMat) replace the wrapped buffer with an owning allocation rather
+    ///       than writing outside it, so the caller's buffer is left alone but no
+    ///       longer referenced.
+    /// @note `strideWords` describes the caller's buffer, not an allocation policy:
+    ///       a wrapped matrix reports getRowAlignment() == DefaultRowAlignment, so
+    ///       if it later reallocates it does so at word granularity regardless of
+    ///       how the wrapped rows were aligned. Construct at the desired alignment
+    ///       and copy in if a reallocating matrix must keep a wider stride.
+    /// @note Operations that write whole words (fill, pad with `true`) write
+    ///       across the full stride, so wrapping a sub-region of a larger image
+    ///       and then calling them disturbs the surrounding columns.
+    BinMat(WordType* data, int width, int height, size_t strideWords);
+
+    // Special members
+
+    /// @brief Deep-copies `other`, always. The copy owns its storage.
+    /// @note D-8: copy means deep copy, with no reference counting; sharing is
+    ///       expressed by taking a view instead. This holds even when `other`
+    ///       wraps an external buffer -- copying a non-owning BinMat allocates and
+    ///       copies rather than producing a second wrapper. A user-facing rule
+    ///       that silently changed with how the source happened to be constructed
+    ///       would reintroduce exactly the aliasing surprises D-8 exists to avoid.
+    ///       (Storage's own copy does alias a non-owning source; that stays an
+    ///       internal detail of the storage layer.)
+    /// @note Because the copy owns its storage, it also re-establishes the
+    ///       padding-bit invariant when the source was a wrapped buffer whose bits
+    ///       past `width` were dirty. Otherwise the copy would inherit phantom bits
+    ///       that no per-pixel read can see but every word-wise reduction counts.
+    BinMat(const BinMat& other);
+
+    /// @brief Deep-copies `other`, always. See the copy constructor.
+    /// @note The copy is built before this object releases anything, so assigning
+    ///       from a BinMat that wraps this object's own buffer copies live data.
+    BinMat& operator=(const BinMat& other);
+
+    /// @brief Takes over `other`'s storage, leaving it empty.
+    /// @note A moved-from BinMat is a valid empty matrix -- dimensions included,
+    ///       so that empty() cannot report false while data() is null.
+    BinMat(BinMat&& other) noexcept;
+
+    /// @brief Takes over `other`'s storage, leaving it empty. See the move
+    ///        constructor.
+    /// @note Moving from a matrix that WRAPS this object's own storage leaves this
+    ///       object unchanged (`other` is still emptied). Storage cannot honour
+    ///       such a transfer -- it would have to free the block and then adopt a
+    ///       pointer into it -- and this is the only answer that keeps the move
+    ///       allocation-free and noexcept, which the Tier 2 path depends on.
+    BinMat& operator=(BinMat&& other) noexcept;
+
+    ~BinMat() = default;
 
     // Accessors
     size_t getWidth() const { return width; }
     size_t getHeight() const { return height; }
+
+    /// @brief Byte alignment this matrix rounds its row stride up to when it
+    ///        allocates. Describes the allocation policy, not the current stride:
+    ///        a wrapped buffer keeps whatever stride the caller supplied.
     size_t getRowAlignment() const { return rowAlignment; }
     Size getSize() const { return Size(static_cast<int>(width), static_cast<int>(height)); }
 
-    /// @brief Number of words allocated per row, including alignment padding.
+    /// @brief Row stride in words: the distance from one row to the next.
+    /// @note At the default alignment this is exactly ceil(width / WordBits).
     size_t getAlignedWidth() const { return alignedWidth; }
 
     /// @brief True if the matrix has no pixels.
     bool empty() const { return width == 0 || height == 0; }
+
+    /// @brief True if this matrix will free its storage; false when it wraps a
+    ///        caller-provided buffer (or is empty).
+    bool ownsMemory() const { return storage.ownsMemory(); }
 
     // OpenCV-compatible aliases
     int rows() const { return static_cast<int>(height); }
@@ -75,12 +176,33 @@ public:
     /// @brief Total number of words in the backing store (height * alignedWidth).
     size_t sizeInWords() const { return storage.size(); }
 
+    // Views -- the kernel interface (D-5)
+
+    /// @brief Non-owning mutable view over this matrix's pixels.
+    /// @note The view borrows; it does not extend this matrix's lifetime, and it
+    ///       is invalidated by anything that reallocates (resize, pad, transpose,
+    ///       fromCVMat, assignment) exactly as a raw pointer would be.
+    BinMatView<WordType> view() {
+        return BinMatView<WordType>{storage.data(), width, height, alignedWidth};
+    }
+
+    /// @brief Non-owning read-only view over this matrix's pixels.
+    /// @note Available on a non-const BinMat too, which is how a caller passes a
+    ///       mutable matrix to a kernel that only reads. See the note on
+    ///       BinMatView's conversion operator for why the explicit call is
+    ///       usually needed at a template kernel's call site.
+    BinMatConstView<WordType> constView() const {
+        return BinMatConstView<WordType>{storage.data(), width, height, alignedWidth};
+    }
+
 #ifdef BINCV_WITH_OPENCV
     // OpenCV interoperability (only available when BINCV_WITH_OPENCV is defined)
 
     // @brief Converts a cv::Mat to a BinMat.
     // @param mat The input cv::Mat, must be of type CV_8UC1 (for now)
     // @note Any nonzero pixel in the input cv::Mat will be set to 1 in the BinMat.
+    // @note Allocates owning storage at this matrix's row alignment, so calling
+    //       this on a matrix that wraps a caller buffer detaches it from that buffer.
     // @todo: Support other types like CV_32FC1, etc.
     void fromCVMat(const cv::Mat& mat);
 
@@ -125,19 +247,31 @@ public:
     // @note For larger sizes, it will zero-fill the new area, appending rows
     //    and columns as needed at larger indices.
     // @note To extend size at specific dimensions, use pad() instead.
+    // @note Allocates owning storage, so this detaches a wrapped matrix from the
+    //    caller's buffer instead of writing outside it.
     void resize(int newWidth, int newHeight);
 
     // @brief Pads the BinMat with given value at sides with non-zero padding.
     // @note Zero-padding unless value is specified as true.
+    // @note Allocates owning storage, as resize() does.
     // @todo Add support for "replicate" padding modes
     void pad(int top, int bottom, int left, int right, bool value = false);
 
     // @brief Returns a transposed version of the BinMat.
     // @note The original BinMat remains unchanged.
+    // @note The result owns its storage and is built at this matrix's row
+    //    alignment, whether or not this matrix wraps a caller buffer.
+    // @note An empty matrix transposes to its transposed shape, not to 0x0:
+    //    640x0 gives 0x640.
     BinMat transposed() const;
 
     // @brief Transposes the BinMat in-place.
     // @note The BinMat dimensions and data are updated.
+    // @note "In-place" describes the variable, not the buffer: this builds the
+    //    transpose in a fresh owning allocation and adopts it, so it detaches a
+    //    wrapped matrix from the caller's buffer as resize() and pad() do. The
+    //    caller's buffer is left unmodified -- including for a square matrix,
+    //    where an in-place bit transpose would otherwise be the natural reading.
     void transpose();
 
     // @brief Iterates over all non-zero pixels, invoking callback(row, col).
@@ -174,23 +308,27 @@ private:
     // @note Bulk word-wise operations (fill, and future bitwise/popcount ops) write
     //       whole words, which can set bits past the end of a row. Those bits must stay
     //       zero or countNonZero and friends would over-count once they go word-wise.
+    // @note This matters more, not less, now that the default stride is tight: at
+    //       word granularity the only padding left is the tail of the last word,
+    //       and that tail is read by every whole-word reduction.
     void clearTrailingBits();
 
     // Dimensions are in number of pixels
     size_t width;
     size_t height;
-    size_t rowAlignment;  // bytes each row's stride is aligned to, for performance
-    size_t alignedWidth;  // words per row in internal storage, aligned to rowAlignment bytes
+    size_t rowAlignment;  // bytes each row's stride is rounded up to when allocating
+    size_t alignedWidth;  // row stride in words
 
-    // @note Each row is padded such that its stride aligns with the chosen memory alignment.
-    //       width stores the number of pixels in each row, while alignedWidth stores the
-    //       actual number of words used for each row in the internal storage.
+    // @note width stores the number of pixels in each row, while alignedWidth stores
+    //       the actual number of words between one row and the next. At the default
+    //       alignment they differ only by the ceil to a whole word.
     // @todo rowAlignment currently aligns only the row *stride*. Aligning the base pointer
-    //       too (for aligned SIMD loads) requires a custom aligned allocator.
+    //       too (for aligned SIMD loads) requires a custom aligned allocation helper.
 
     // Internal storage: row-wise packed 1-bit pixels, height * alignedWidth words.
-    // Using std::vector for embedded compatibility (no OpenCV dependency in core).
-    std::vector<WordType> storage;
+    // Storage (not std::vector) so the same container can wrap caller-provided
+    // memory and so owning allocation works without exceptions.
+    Storage<WordType> storage;
 };
 
 } // namespace bincv
