@@ -61,6 +61,50 @@ committed benchmark or probe.
 question and is worth the same as a large effect — it usually means take the
 cheaper or simpler option.
 
+**Verify the benchmark measures something.** A loop whose result is unused gets
+deleted by the optimizer, and the resulting number looks spectacular. Consume the
+result through a `volatile` sink, vary the input data so it cannot be constant
+folded, and sanity-check against a physical bound — if a memory-bound kernel
+reports more than DRAM bandwidth, the measurement is wrong, not the kernel. This
+rule exists because the first attempt at the platform comparison below was
+dead-code eliminated on both platforms and produced 524288 GB/s.
+
+---
+
+## Measurement platforms
+
+Not every platform can answer every question. **State the platform in every entry**,
+and do not close an experiment on a platform that cannot authoritatively answer it.
+
+| Platform | Correctness | Algorithmic wins (large effects) | Micro-decisions (E-1, E-2, E-3) |
+|---|---|---|---|
+| **QEMU / Docker `--platform linux/arm64`** | ✅ authoritative | ❌ | ❌ |
+| **Native x86_64** | ✅ | ✅ | ⚠️ indicative only — wrong ISA |
+| **Apple Silicon** | ✅ | ✅ real aarch64 + NEON | ⚠️ risky — see below |
+| **Cortex-A device** (Pi 4/5, Jetson) | ✅ | ✅ | ✅ authoritative |
+
+**Emulation is for correctness only.** QEMU user-mode does dynamic binary
+translation without modelling cache hierarchy, instruction latency, or memory
+bandwidth. Measured on this machine, the same popcount loop takes ~15.7 ms native
+x86 versus ~54 ms emulated aarch64 — but the slowdown is not uniform across
+instruction mixes, so A/B rankings between design variants can invert. Since
+E-1 and E-2 are *cache* questions and D-6 rests on *instruction latency*, emulation
+cannot answer any of them. It answers correctness perfectly: the core suite passes
+261/261 under emulation with identical results.
+
+**Apple Silicon is real aarch64 but not a representative Cortex-A.** M-series
+cores have roughly 4× the L1D and far larger L2 than a Cortex-A72, plus much wider
+out-of-order execution and more aggressive prefetching. Those differences sit
+directly on the variables E-1 and E-2 measure — a padding or word-width penalty
+that an M-series core absorbs may be plainly visible on a deployment-class core.
+Real ARM numbers, so strictly better than x86 for ARM questions; not a substitute
+for the target class.
+
+**Rule:** an experiment gating a shipped default is closed only on a
+deployment-class Cortex-A device. Earlier platforms narrow the search and catch
+large effects; they do not close the question. Record the platform and mark the
+entry `PARTIAL` if it was not the authoritative one.
+
 ---
 
 ## Entry template

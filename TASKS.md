@@ -396,6 +396,46 @@ configuration breaks.
 
 ---
 
+### T1.9 · aarch64 correctness verification · `TODO`
+
+**Depends:** T1.8
+**Files:** `scripts/verify_arm.sh` (new)
+
+**Goal:** Catch aarch64 correctness bugs continuously, without ARM hardware.
+
+**Why now:** aarch64 is the primary target
+([ARCHITECTURE §2](ARCHITECTURE.md#2-target-platforms)), and the bugs that only
+appear there — type-width assumptions, alignment faults, NEON intrinsics that fail
+to compile — are cheap to catch early and expensive to find late. This is already
+verified to work on the current machine: the core suite passes 261/261 under
+emulation.
+
+**Spec**
+
+```bash
+docker run --rm --platform linux/arm64 -v "$PWD":/src -w /src \
+    arm64v8/gcc:12 bash -c '<build and run core + no-exceptions suites>'
+```
+
+- Runs the **core-only** and **no-exceptions** configurations; the OpenCV interop
+  suite is out of scope (avoids installing OpenCV in the container).
+- Script should skip with a clear message, not fail, when Docker or the arm64
+  platform is unavailable.
+
+**This is a correctness gate only.** It must print a warning that timings from
+this environment are meaningless, so no one is tempted to benchmark in it — see
+[EXPERIMENTS.md § Measurement platforms](EXPERIMENTS.md#measurement-platforms).
+
+**Done when**
+- `./scripts/verify_arm.sh` builds and passes the core suite under emulated aarch64
+- Results match x86 exactly (same check counts, same pass/fail)
+- The script warns against benchmarking in it
+- Skips gracefully without Docker
+
+**Do not:** benchmark here; do not treat a pass as ARM performance validation.
+
+---
+
 # Phase 2 — Bit-Parallel Primitives
 
 ---
@@ -664,8 +704,14 @@ bulk kernel, enough to justify up to 172% memory overhead?
 **Workload:** `bitwiseAnd` (T2.2) and `countNonZero` (T2.5) at 640×480 and 94×60
 — the two extremes from X-1. Enough iterations for stable timing.
 **Metric:** ns/pixel **and** allocated bytes. Both, per the protocol.
-**Platform:** x86 now; re-run on aarch64 during Phase 5 and note that the Phase 2
-result is indicative only, since NEON is the reference target.
+**Platform:** run on every platform available, cheapest first — x86 for a fast
+signal, Apple Silicon if available for real aarch64. Record each separately.
+**Do not close E-1 on either**: both are non-authoritative for this question, x86
+because it is the wrong ISA and Apple Silicon because its cache hierarchy is
+unrepresentative of deployment cores — and this is a cache question. Mark X-1
+`PARTIAL` and close it on a Cortex-A device in Phase 5. See
+[EXPERIMENTS.md § Measurement platforms](EXPERIMENTS.md#measurement-platforms).
+**Never measure this under emulation.**
 
 **Done when:** [EXPERIMENTS.md](EXPERIMENTS.md) X-1 is `DONE` with the benefit
 side filled in, D-4 is confirmed or reopened, and the benchmark is committed.
@@ -693,6 +739,8 @@ footprint effect is worst exactly at upper pyramid levels. **Measure footprint a
 **Variants:** `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`.
 **Workload:** same kernels and sizes as T2.8.
 **Metric:** ns/pixel and allocated bytes at both resolutions.
+**Platform:** same policy as T2.8 — the footprint half is architecture-independent
+and closes anywhere; the speed half needs a Cortex-A device.
 
 **Done when:** logged as X-4, default confirmed or changed, benchmark committed.
 

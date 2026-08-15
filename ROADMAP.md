@@ -28,7 +28,7 @@ OpenCV. This is the primary defense against scope drift.
 - Core builds and tests without OpenCV; interop behind `BINCV_WITH_OPENCV`
 - CMake auto-configuration (OpenCV detection, SIMD detection, build type)
 - Operations: fill, resize, pad, transpose, countNonZero, sparsity
-- Test suite: 282 core checks across all word widths + 21 interop checks, in `ctest`
+- Test suite: 261 core checks across all word widths + 21 interop checks, in `ctest`
 - Benchmark harness comparing against OpenCV
 - Measured 7.83× memory reduction versus `CV_8U`
 

@@ -6,3 +6,6 @@ bincv-cpp/results/
 build*/
 bincv-cpp/build*/
 bincv-cuda/build*/
+
+# Test image output
+bincv-cpp/tests/output/
