@@ -1,5 +1,5 @@
 # Core tests: must build and run without OpenCV.
-set(BINCV_CORE_TESTS test_binMat)
+set(BINCV_CORE_TESTS test_binMat test_storage)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)

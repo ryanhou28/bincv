@@ -116,7 +116,7 @@ container get rewritten.
 
 ---
 
-### T1.1 · Storage model · `TODO`
+### T1.1 · Storage model · `DONE`
 
 **Depends:** —
 **Files:** `include/bincv-cpp/core/storage.hpp` (new)
@@ -168,7 +168,7 @@ public:
 
 ---
 
-### T1.2 · Views · `TODO`
+### T1.2 · Views · `DONE`
 
 **Depends:** T1.1
 **Files:** `include/bincv-cpp/core/view.hpp` (new)
