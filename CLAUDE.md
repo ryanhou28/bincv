@@ -20,6 +20,7 @@ hardware with a fraction of the memory of a byte-per-pixel pipeline.
 | [TASKS.md](TASKS.md) | **Start here.** Executable backlog; pick the lowest-numbered task whose deps are `DONE` |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Design and recorded decisions (D-1…D-9), open experiments (E-1…E-7) |
 | [EXPERIMENTS.md](EXPERIMENTS.md) | Measurement log — every result that informed a decision |
+| [docs/MEASUREMENT_HARDWARE.md](docs/MEASUREMENT_HARDWARE.md) | Reference-device setup, and what works without it |
 | [ROADMAP.md](ROADMAP.md) | Phase structure and success criteria |
 | [GETTING_STARTED.md](GETTING_STARTED.md) | Build, test, benchmark, conventions |
 

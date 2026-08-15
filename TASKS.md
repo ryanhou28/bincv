@@ -19,6 +19,17 @@ document — see [Stop and ask](#stop-and-ask).
 
 **Status:** `TODO` · `IN PROGRESS` · `DONE` · `BLOCKED`
 
+Tasks marked **⚙️ needs Pi** require the reference measurement device
+([setup](docs/MEASUREMENT_HARDWARE.md)). **Skip them and continue** — they are not
+on the critical path for implementation work. Everything through T3.5 proceeds
+without hardware; see
+[What works without it](docs/MEASUREMENT_HARDWARE.md#what-works-without-it).
+
+**Do not substitute a laptop measurement to unblock one.** Closing E-1/E-2/E-3 on
+non-authoritative hardware is worse than leaving them open, because a recorded
+wrong answer stops anyone from asking again. Running them early on x86 as a
+*signal* is fine, provided the entry stays `PARTIAL`.
+
 ### Stop and ask
 
 Stop and surface the question rather than deciding, if:
@@ -436,10 +447,11 @@ this environment are meaningless, so no one is tempted to benchmark in it — se
 
 ---
 
-### T1.10 · Cortex-A measurement runner · `TODO`
+### T1.10 · Cortex-A measurement runner · `TODO` · ⚙️ needs Pi to verify
 
 **Depends:** T1.9
 **Files:** `scripts/run_on_pi.sh` (new)
+**Setup:** [docs/MEASUREMENT_HARDWARE.md](docs/MEASUREMENT_HARDWARE.md)
 
 **Goal:** Make the reference device usable from an ordinary session, with the
 measurement hazards enforced mechanically rather than remembered.
@@ -730,7 +742,7 @@ documented claim, report it — do not adjust the code to fit the doc.
 
 ---
 
-### T2.8 · E-1 · Does row alignment earn its memory? · `TODO`
+### T2.8 · E-1 · Does row alignment earn its memory? · `BLOCKED` · ⚙️ needs Pi
 
 **Depends:** T2.5
 **Gates:** [D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default) —
@@ -765,7 +777,7 @@ side filled in, D-4 is confirmed or reopened, and the benchmark is committed.
 
 ---
 
-### T2.9 · E-2 · Default word width · `TODO`
+### T2.9 · E-2 · Default word width · `BLOCKED` · ⚙️ needs Pi
 
 **Depends:** T2.5
 **Gates:** `BinMat`'s default template argument — affects every kernel
@@ -796,7 +808,7 @@ than the hardware. Confirm `aarch64` before recording anything.
 
 ---
 
-### T2.10 · E-3 · Incremental versus recomputed window reductions · `TODO`
+### T2.10 · E-3 · Incremental versus recomputed window reductions · `BLOCKED` · ⚙️ needs Pi
 
 **Depends:** T2.6
 **Gates:** T2.6's interface and T3.6's implementation
@@ -962,7 +974,7 @@ Reference semantics: `SEAL/src/keypoint_tracking/gradients.cpp`,
 
 ### T3.6 · LK gradient covariance · `TODO`
 
-**Depends:** T3.5
+**Depends:** T3.5, and **E-3 settled** (T2.10) — this is built directly on T2.6's reduction API, so starting before E-3 closes risks rewriting it against an incremental interface. If E-3 is still blocked on hardware, stop here and report rather than guessing which API to build against.
 **Files:** `include/bincv-cpp/ops/covariance.hpp` (new)
 
 **Goal:** The load-bearing operation

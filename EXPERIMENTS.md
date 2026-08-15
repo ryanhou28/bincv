@@ -116,6 +116,8 @@ entry `PARTIAL` if it was not the authoritative one.
 
 ### Measuring on the Pi 4
 
+Setup instructions: [docs/MEASUREMENT_HARDWARE.md](docs/MEASUREMENT_HARDWARE.md).
+
 A Pi 4 will happily produce stable-looking numbers that are wrong. Four hazards,
 all of which the runner script ([T1.10](TASKS.md)) must handle rather than leaving
 to whoever is at the keyboard:
