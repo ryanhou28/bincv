@@ -273,4 +273,58 @@ if(BINCV_OPENCV_FOUND)
         add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME}
                  WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     endforeach()
+
+    # -----------------------------------------------------------------------
+    # Equivalence harness (T2.1)
+    #
+    # Needs cv::Mat, so it is an OpenCV test. It does no image I/O, so unlike the
+    # suites above it does not link bincv_cpp and does not need a working
+    # directory.
+    # -----------------------------------------------------------------------
+    bincv_add_test_target(test_equivalence test_equivalence.cpp)
+    add_test(NAME test_equivalence COMMAND test_equivalence)
+
+    # --- the harness's own regression check --------------------------------
+    #
+    # T2.1: "a harness that passes everything is worse than no harness, because
+    # it licenses every kernel built on it." The same source is rebuilt once per
+    # deliberate conversion fault and registered WILL_FAIL, so ctest passes only
+    # when the harness REPORTS the fault. Same shape as test_harness_failing
+    # above, and for the same reason: asking for a property is not verifying it.
+    #
+    # Measured, with each fault compiled in (checks passed, of 9922):
+    #   1 column off-by-one       8405 -- PackingAnchor and Transpose go red
+    #   2 dropped trailing word   7339 -- all three swept cases go red
+    #   3 transposed row/column   6737 -- PackingAnchor goes red
+    #   4 dirty padding           6346 -- every padding verdict goes red
+    #
+    # The gaps between the faults are the point. Fault 1 leaves countNonZero
+    # GREEN, a cyclic column rotation being count-preserving; fault 3 leaves the
+    # transpose case green, because a transposing conversion applied to both sides
+    # of cv::transpose cancels exactly. Only the anchor sweep -- whose expectation
+    # comes from a generator that never touches the conversion -- sees all three.
+    # That is why tests/equivalence.hpp carries a second content generator.
+    #
+    # Fault 4 is the odd one out and the reason it was added: it corrupts the
+    # GENERATOR's padding rather than the conversion, because no pixel comparison
+    # can see a padding bit -- unpackTo8U never reads one. Before
+    # expectPaddingClean() existed, a stand-in word-wise bitwiseNot with no
+    # clearTrailingBits() passed 240 of 240 swept cases at uint64_t while leaving
+    # 826,200 phantom set bits behind. Fault 4 is what keeps that check honest.
+    #
+    # Excluded from the check-count harvest by scripts/verify.sh, which skips
+    # WILL_FAIL tests, so these need no row in tests/expected-checks.txt.
+    function(bincv_add_faulted_equivalence_test SUFFIX FAULT_ID)
+        set(FAULT_TARGET test_equivalence_fault_${SUFFIX})
+        bincv_add_test_target(${FAULT_TARGET} test_equivalence.cpp)
+        target_compile_definitions(${FAULT_TARGET} PRIVATE
+                                   BINCV_EQUIVALENCE_INJECT_FAULT=${FAULT_ID})
+        add_test(NAME ${FAULT_TARGET} COMMAND ${FAULT_TARGET})
+        set_tests_properties(${FAULT_TARGET} PROPERTIES WILL_FAIL TRUE)
+    endfunction()
+
+    bincv_add_faulted_equivalence_test(column_off_by_one    1)
+    bincv_add_faulted_equivalence_test(dropped_trailing_word 2)
+    bincv_add_faulted_equivalence_test(transposed_row_col   3)
+    bincv_add_faulted_equivalence_test(dirty_padding        4)
 endif()

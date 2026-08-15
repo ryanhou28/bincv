@@ -40,7 +40,31 @@
 #             the Debug build can make. Totals: core 1892, debug 1882.
 #   noexcept  44 + 16 validation checks move from in-process to death tests, and
 #             test_error drops the 17 exception-shaped ones. Total 1815 + 60s.
-#   opencv    adds test_opencv_interop; otherwise identical to core.
+#   opencv    adds test_opencv_interop and test_equivalence (T2.1, which needs
+#             cv::Mat); otherwise identical to core.
+#
+# WHY test_equivalence HAS NO FAULT-INJECTED ROWS
+#
+# tests/CMakeLists.txt also builds test_equivalence four more times with a
+# deliberate fault compiled in, each registered WILL_FAIL. verify.sh skips
+# WILL_FAIL tests when harvesting, so those runs are counted here neither as
+# checks nor as skips -- which is correct: they exist to prove the harness can
+# fail, and their check totals are supposed to be lower.
+#
+# KNOWN GAP, and it is in verify.sh rather than in this file: nothing enforces a
+# floor on the number of ctest CASES. Measured -- commenting out the four
+# bincv_add_faulted_equivalence_test() calls took the OpenCV configuration from
+# 47/47 to 44/44 ctest cases with the CHECKS column unchanged at 5316, and the
+# run still printed ALL CONFIGURATIONS GREEN and exited 0. The baseline loop only
+# iterates rows present here (the fault targets deliberately have none, so
+# MISSING SUITE cannot fire), the UNRECORDED SUITE branch only fires for suites
+# that ran, and the CTEST column is compared solely against the literal '-'.
+# Closing it properly needs a ctest-case floor in scripts/verify.sh. What is in
+# place instead is that test_equivalence now carries the "this harness can fail"
+# property IN-PROCESS -- Equivalence.ExpectBitExactReportsFailures drives
+# expectBitExact's own failure path through VerdictCapture -- so deleting the
+# WILL_FAIL targets no longer deletes the proof, and the in-process version does
+# have a floor: the row below.
 
 opencv	test_binMat	845	0
 opencv	test_quantMat	443	0
@@ -49,6 +73,7 @@ opencv	test_error	31	0
 opencv	test_error_checked	21	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
+opencv	test_equivalence	9923	0
 
 core	test_binMat	845	0
 core	test_quantMat	443	0
@@ -70,3 +95,4 @@ debug	test_storage	544	0
 debug	test_error	21	0
 debug	test_error_checked	21	0
 debug	test_harness	8	0
+

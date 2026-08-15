@@ -44,7 +44,8 @@ and logged below** rather than guessed at.
 | **T1.7** Test framework | `DONE` — hybrid GTest/built-in, counts preserved | `see below` |
 | **T1.8** `verify.sh` | `DONE` — **both vacuous gates now real and proven** | `see below` |
 | **T1.9** aarch64 runner | `DONE` — counts identical to x86, 33 death tests | `ef7dfa5` |
-| **T1.10** Pi runner | `PARTIAL` — written, skip paths verified; device paths untestable | `see below` |
+| **T1.10** Pi runner | `PARTIAL` — written, skip paths verified; device paths untestable | `c9c4db8` |
+| **T2.1** Equivalence harness | `DONE` — **caught its own circularity**; 11847 checks | `see below` |
 | **T1.5** `QuantMat<N>` | `DONE` — 3×38400 B in ONE allocation, measured at the allocator | working tree |
 | **T1.6** Signed / ternary | `DONE` — canonical zero tested both ways, no storage duplication | working tree |
 
@@ -250,6 +251,48 @@ returning exit 77 — which is deliberately *not* a pass, so a caller cannot rep
 **What I could not:** every path that touches a device. Deliberately left
 `PARTIAL` rather than `DONE`. It is untested code and should be treated that way
 on first use — expect to debug it once against the real Pi.
+
+---
+
+### T2.1 detail — the harness caught its own circularity
+
+This is the finding of the night, and it justifies building the harness *before*
+the kernels rather than alongside them.
+
+**The naive design would have been circular and silently useless.** Every
+Phase 2/3 tier-1 test has the shape:
+
+```cpp
+cvA = toCvMask(a);  cvB = toCvMask(b);
+cv::bitwise_and(cvA, cvB, cvExpected);
+expectBitExact(dst, cvExpected);
+```
+
+A fault in `toCvMask` — a shifted column mapping, a transposition — applies to
+**both sides and cancels exactly**. Measured, not theorised: a cyclic column
+rotation preserves `countNonZero`, and a transposing conversion on either side of
+`cv::transpose` cancels to the identity. The harness would have passed every
+kernel built on it while validating nothing.
+
+The fix is a **second, independent content generator**: `randomCvMask` builds the
+`cv::Mat` directly and — I verified this by inspection — contains **zero**
+references to `BinMat`, `toCvMask`, or the unpacking path. `testPackingAnchor`
+pins the conversion against it across the full matrix, and it was the only case
+that caught all five injected faults.
+
+**Verified independently**, not taken from the report: flipped pixel at (0,0), in
+the last partial word (width 70, where T1.3's padding bug lived), in the last row,
+a transposition, and a dimension mismatch — **all five DETECTED**. Same seed gives
+identical content for `uint8_t` and `uint64_t`. `randomBinary` leaves padding bits
+zero (173 per-pixel == 173 across-stride).
+
+Reproducibility uses hand-written SplitMix64 rather than
+`std::uniform_int_distribution`, which is deliberate: the standard fixes what a
+distribution *means*, not how it consumes its engine, so a golden value recorded
+on libstdc++ would fail on libc++ looking exactly like a packing bug.
+
+Gate after: **48/48 ctest, 11847 checks** in the OpenCV configuration; the other
+three byte-identical, which is the point of the `BINCV_WITH_OPENCV` guard.
 
 ---
 

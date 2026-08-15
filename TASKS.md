@@ -650,10 +650,10 @@ a measurement device, not part of the development loop.
 
 ---
 
-### T2.1 · Equivalence harness · `TODO`
+### T2.1 · Equivalence harness · `DONE`
 
 **Depends:** T1.8
-**Files:** `tests/equivalence.hpp` (new)
+**Files:** `tests/equivalence.hpp` (new), `tests/test_equivalence.cpp` (new)
 
 **Goal:** Build this **before** the kernels it validates
 ([§10.2](ARCHITECTURE.md#102-equivalence-harness)).
@@ -678,6 +678,58 @@ BinMat<W> randomBinary(int w, int h, float fillRatio, uint64_t seed);
 operation (`countNonZero` against `cv::countNonZero`).
 
 **Verify:** V-ALL
+
+**What was built.** `tests/equivalence.hpp` plus `tests/test_equivalence.cpp`
+(3392 checks, `opencv` configuration only). The spec's two entry points are
+there as written, and three things it did not ask for are, because without them
+the harness would license kernels rather than judge them:
+
+- **`firstMismatch` / `Mismatch::describe()`.** "Not equal" over a 640×480 frame
+  is unactionable. Failures read
+  `uint8_t 7x2 fill=0.50 [fromCVMat] -- first mismatch at row 0, col 0: expected
+  0, actual 255; 10 of 14 pixels differ`, and the total separates a one-bit bug
+  from a whole-image one at a glance.
+
+- **A second, independent content generator** (`randomCvMask`), which builds the
+  same content directly as `CV_8U` without constructing a `BinMat` or calling the
+  unpacking path. `Equivalence.PackingAnchor` pins the conversion against it
+  across the whole size and fill matrix. Without it the harness is circular:
+  comparing a `BinMat` against its own conversion passes even when the conversion
+  reads the wrong column, and — measured, see below — a shared conversion fault
+  **cancels exactly** through a pointwise operation, which is the shape every
+  T2.2–T2.7 test has.
+
+- **Injectable faults, as `WILL_FAIL` ctest cases.** `tests/CMakeLists.txt`
+  rebuilds the suite once per deliberate conversion fault, so "the harness can
+  fail" is three ctest results rather than a claim. Neutering the injection makes
+  all three go red; that was checked.
+
+**Reproducibility.** SplitMix64 (four `uint64_t` operations, no state array, no
+implementation freedom) plus a hand-written bit-to-pixel mapping.
+`std::uniform_int_distribution` is **not** portable — the standard fixes what a
+distribution means, not how it consumes its engine — so a recorded value would
+differ between libstdc++, libc++ and MSVC and the failure would look like a
+packing bug. One draw per pixel in row-major order, which is also what makes the
+content **word-type independent**: `BinMat<uint8_t>` and `BinMat<uint64_t>` from
+the same seed hold the same picture, checked directly. Golden `countNonZero` and
+FNV-1a digests are committed for four cases.
+
+**Matrix.** Widths 1, 7, 31, 33, 63, 65, 70, 640 × heights 1, 2, 3, 17, 37, 480 ×
+fills 0.0, 0.01, 0.5, 0.99, 1.0 × four word types. All widths but 640 are
+non-multiples of at least one word width; 0.0 and 1.0 are exact, not approximate.
+
+**The faults, and what caught them** (checks passed, of 3392):
+
+| injected | result | what stayed green |
+|---|---|---|
+| column off-by-one in the conversion | 2444 | `countNonZero` — a cyclic rotation is count-preserving |
+| dropped trailing partial word | 1621 | — |
+| transposed row/column | 1512 | `countNonZero`, **and the transpose case, where the fault cancels** |
+| `countNonZero` skips the last column (real library bug) | 2745 | packing anchor |
+| `fromCVMat` packs column x into bit x+1 (real library bug) | 2984 | `countNonZero` |
+
+The two "stayed green" columns are the finding: a test whose two sides share the
+conversion cannot see a bug in it. Only the anchor sweep saw all five.
 
 ---
 
