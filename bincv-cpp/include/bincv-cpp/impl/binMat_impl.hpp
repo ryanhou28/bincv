@@ -40,9 +40,16 @@ inline size_t wordIndex(size_t x) {
 
 /// @brief Mask with a single 1 at the bit corresponding to column x.
 /// @note Indexing runs LSB->MSB, so column 0 is the least significant bit.
+/// @note The outer cast is not redundant at narrow word widths. Integer
+///       promotion runs the shift in `int` for uint8_t and uint16_t, so the
+///       return narrows implicitly -- harmless for a single bit, which always
+///       fits, and exactly the shape that stops being harmless the moment a mask
+///       is built from more than one. Written explicitly so the truncation is a
+///       decision rather than a side effect (clang's -Wimplicit-int-conversion
+///       reports the implicit form; GCC's -Wconversion does not).
 template <typename WordType>
 inline WordType bitMask(size_t x) {
-    return static_cast<WordType>(1) << (x % bitsPerWord<WordType>());
+    return static_cast<WordType>(static_cast<WordType>(1) << (x % bitsPerWord<WordType>()));
 }
 
 /// @brief Mask covering bits [0, n) of a word; n == bitsPerWord yields all ones.
@@ -460,7 +467,12 @@ void QuantMat<1, WordType_>::pad(int top, int bottom, int left, int right, bool 
             if (bit) {
                 newRow[impl::wordIndex<WordType>(newX)] |= impl::bitMask<WordType>(newX);
             } else {
-                newRow[impl::wordIndex<WordType>(newX)] &= ~impl::bitMask<WordType>(newX);
+                // The cast is not cosmetic at narrow word widths: `~` promotes a
+                // uint8_t/uint16_t mask to int, so the compound assignment
+                // narrows back. Harmless for `&`, but it is the same shape as a
+                // genuine truncation, and -Wconversion cannot tell them apart.
+                newRow[impl::wordIndex<WordType>(newX)] &=
+                    static_cast<WordType>(~impl::bitMask<WordType>(newX));
             }
         }
     }

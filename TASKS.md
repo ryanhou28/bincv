@@ -85,27 +85,30 @@ in Phase 2 rather than at the end.
 
 ### Verify commands
 
-Referenced below as **V-ALL**:
+Referenced below as **V-ALL**. Since T1.8 this is one command:
 
 ```bash
-# desktop, with OpenCV
-cmake -S bincv-cpp -B bincv-cpp/build -DCMAKE_BUILD_TYPE=Release
-cmake --build bincv-cpp/build -j$(nproc)
-(cd bincv-cpp/build && ctest --output-on-failure)
-
-# core-only, no OpenCV
-cmake -S bincv-cpp -B bincv-cpp/build-core -DCMAKE_BUILD_TYPE=Release -DBINCV_USE_OPENCV=OFF
-cmake --build bincv-cpp/build-core -j$(nproc)
-(cd bincv-cpp/build-core && ctest --output-on-failure)
-
-# no exceptions (Tier 2 correctness)
-cmake -S bincv-cpp -B bincv-cpp/build-noexcept -DBINCV_USE_OPENCV=OFF \
-      -DCMAKE_CXX_FLAGS="-fno-exceptions"
-cmake --build bincv-cpp/build-noexcept -j$(nproc)
-(cd bincv-cpp/build-noexcept && ctest --output-on-failure)
+./scripts/verify.sh            # all four configurations, warnings fatal
+./scripts/verify_arm.sh        # aarch64 correctness under emulation (T1.9)
 ```
 
-All three must build **warning-free** and pass.
+It builds and tests four configurations, and a warning in any of them fails the
+run — `-DBINCV_WERROR=ON` plus an independent scan of the build log:
+
+| | build type | OpenCV | exceptions | `BINCV_DEBUG_CHECKS` | test backend |
+|---|---|---|---|---|---|
+| `build` | Release | yes | yes | 0 | Google Test |
+| `build-core` | Release | no | yes | 0 | Google Test |
+| `build-noexcept` | Release | no | **no** | 0 | built-in harness |
+| `build-debug` | **Debug** | no | yes | **1** | Google Test |
+
+The fourth was added by T1.8. Before it, every configuration was Release, so
+`BINCV_ASSERT` — every bounds check in `at()` and `set()`, and every kernel
+precondition — was compiled out of everything that could fail.
+
+The individual commands are still in
+[GETTING_STARTED](GETTING_STARTED.md#build) for when one configuration needs to
+be driven by hand.
 
 ---
 
@@ -384,39 +387,61 @@ using TernaryMat = SignedQuantMat<1, WordType>;
 
 ---
 
-### T1.7 · Google Test migration · `TODO`
+### T1.7 · Google Test migration · `DONE` — as a hybrid, deliberately
 
 **Depends:** T1.6
-**Files:** `tests/`, `CMakeLists.txt`
+**Files:** `tests/`, `tests/CMakeLists.txt`, `CMakeLists.txt`
 
 **Goal:** Replace the interim harness (`tests/test_util.hpp`).
 
 **Spec**
 - Vendor GoogleTest via `FetchContent`, guarded so the **core-only and
-  no-exceptions builds still work** — GTest needs exceptions, so the Tier 2
-  configuration keeps a minimal assertion path.
+  no-exceptions builds still work**.
 - Port existing suites; preserve the core / interop split.
 - `ctest` remains the entry point.
 
 **Done when**
-- All three V-ALL configurations pass
+- All V-ALL configurations pass
 - Test count is at least what it was before the migration
 - A deliberately failing assertion still produces a non-zero exit code
   (regression-check the harness itself)
+
+**What was built.** Google Test is the backend in three of the four
+configurations. The built-in harness stays the backend of the dependency-free
+one (core-only, `-fno-exceptions`), and both run the *same* case bodies through
+the *same* check macros — `tests/test_util.hpp` is now a two-backend shim, not a
+second test framework. Suites are named cases (`BinMat.Contract_uint8_t` and so
+on) in both, so a `--gtest_filter` written for one narrows the other.
+
+**Correction to this spec.** "GTest needs exceptions, so the Tier 2
+configuration keeps a minimal assertion path" is **not true**, and the
+implementation does not rely on it. Measured: googletest v1.14.0 compiles from
+source under `-fno-exceptions` — it detects the absent `__EXCEPTIONS` and sets
+`GTEST_HAS_EXCEPTIONS` to 0 itself — links, runs, reports a deliberate failure,
+exits non-zero, and `EXPECT_DEATH` works. `-DBINCV_USE_GTEST=ON` is therefore
+supported in that configuration.
+
+The default declines it for a different and better reason: that configuration's
+whole claim is that binCV needs a C++17 compiler and nothing else. Putting the
+one gate the embedded claim rests on behind a network fetch and a 30k-line
+desktop framework is how a gate goes dark. Neither is the death-test machinery
+ported to `EXPECT_DEATH`: it forks and re-runs the test binary, which is
+materially more fragile under the emulation T1.9 runs in, and those 33 cases are
+the only validation coverage the no-exceptions build has.
 
 **Verify:** V-ALL
 
 ---
 
-### T1.8 · Verification script · `TODO`
+### T1.8 · Verification script · `DONE`
 
 **Depends:** T1.7
-**Files:** `scripts/verify.sh` (new)
+**Files:** `scripts/verify.sh` (new), `cmake/BincvWarnings.cmake` (new)
 
 **Goal:** One command that runs everything a session should check before committing.
 
 **Spec**
-- Build and test all three V-ALL configurations
+- Build and test all V-ALL configurations
 - Fail on any warning
 - Print a short summary table
 - Non-zero exit if anything fails
@@ -424,9 +449,69 @@ using TernaryMat = SignedQuantMat<1, WordType>;
 **Done when:** `./scripts/verify.sh` is green on a clean tree and red if any
 configuration breaks.
 
+**What was built.** Two gates that had been documented but never enforced now
+have teeth:
+
+- **Warnings.** `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion`
+  are applied to every first-party target through the `bincv_warnings` interface
+  target — not to `bincv_core`, so a consumer's warning policy stays theirs.
+  OpenCV's headers are included as `SYSTEM`, without which `-Wconversion` buried
+  the gate under ~107 unactionable warnings per interop translation unit.
+  `-Werror` is **off by default and on in `verify.sh`**: a compiler upgrade
+  should not break every working tree at once, but nothing may be committed
+  until the gate is green. A target that never links `bincv_warnings` cannot
+  slip through, because `bincv_assert_warning_policy()` fails the *configure*
+  step when one exists.
+- **`BINCV_DEBUG_CHECKS == 1`.** The Debug configuration compiles it. Mutating
+  `BinMat::at`'s bounds check to reject the last legal column fails 5 tests
+  there and 1 in Release core-only — the Debug build runs all ~1900 checks
+  through live assertions, which is coverage no Release configuration can give.
+
+Clean builds by default: an incremental build does not recompile an unchanged
+translation unit, so it does not re-emit its warnings, and a log scan over one
+would pass vacuously. `--incremental` is available and says so.
+
+**Follow-up (review of T1.7–T1.9): the teeth were partly false, and are now
+real.** Four reviewers found nine confirmed ways for a green run to mean nothing;
+all are fixed and each has a check that fails without the fix.
+
+- **The wiring claim above was wrong as originally written.** `verify.sh` scanned
+  the build log and the doc said that covered a target missing `bincv_warnings`.
+  It cannot: such a target compiles with *no warning flags*, so it emits nothing
+  to scan. Measured — a test target with three deliberate warnings gave
+  `WARN 0 … PASS … ALL CONFIGURATIONS GREEN`, exit 0. Replaced with a
+  configure-time assertion over `BUILDSYSTEM_TARGETS`. The log scan stays for what
+  it *can* catch (linker and CMake warnings) and no longer claims more.
+- **Gate self-check.** Two throwaway builds that must fail — a wired target that
+  warns, and an unwired target — run before the configurations. Before this,
+  neither half of the warning policy had ever been observed rejecting anything.
+- **`CHECKS` is compared against a committed floor**
+  (`tests/expected-checks.txt`, per configuration, per suite). It used to be
+  printed and compared against nothing: dropping `test_storage` from
+  `BINCV_CORE_TESTS` took core from 1892 checks to 1348 and still printed
+  `ALL CONFIGURATIONS GREEN`.
+- **Each configuration must be itself.** `BINCV_DEBUG_CHECKS` and
+  `BINCV_EXCEPTIONS_ENABLED` are read back out of the built `test_error`.
+  `CXXFLAGS=-DNDEBUG ./scripts/verify.sh --only debug` used to pass with every
+  `BINCV_ASSERT` compiled away — the exact vacuity T1.8 exists to remove.
+- **A configuration that ran no tests is red.** `ctest` exits 0 on an empty test
+  set; a cached `-DBINCV_BUILD_TESTS=OFF` produced `PASS` with
+  `No tests were found!!!` in the log.
+- **The suite list is derived, not hardcoded** — from `ctest --show-only=json-v1`
+  in `verify.sh` and from `tests/CMakeLists.txt` in `verify_arm.sh`. A suite
+  appended to `BINCV_CORE_TESTS` used to run and be counted by neither.
+- **`build-logs/checks-*.txt` is stamped and published only on PASS.** It was
+  truncated unconditionally, so an aborted or `--only` run left `verify_arm.sh`
+  diffing against a partial or stale reference.
+- **Robustness.** A `head -15` on a warning list gave `sort` a SIGPIPE, which
+  under `set -o pipefail` killed the whole run with exit 141 — no table, no
+  `VERIFICATION FAILED` — reproduced 3/3 on a build with ~300 diagnostics. A
+  non-build-tree `build-core/` aborted the run instead of failing one
+  configuration. `--only` with no value exited 1 with zero output.
+
 ---
 
-### T1.9 · aarch64 correctness verification · `TODO`
+### T1.9 · aarch64 correctness verification · `DONE`
 
 **Depends:** T1.8
 **Files:** `scripts/verify_arm.sh` (new)
@@ -463,6 +548,52 @@ this environment are meaningless, so no one is tempted to benchmark in it — se
 - Skips gracefully without Docker
 
 **Do not:** benchmark here; do not treat a pass as ARM performance validation.
+
+**Status: `DONE`.** Both configurations pass under emulated aarch64, warning-free
+under the full flag set, with check counts identical to x86_64 — 1892 (core) and
+1815 + 60 skipped (no-exceptions). The comparison is mechanical: `verify.sh`
+writes per-suite counts to `bincv-cpp/build-logs/checks-*.txt` and this script
+diffs against them, so "matches x86 exactly" is checked rather than eyeballed.
+All 33 death tests run here too, driven by a shell loop that enforces the same
+two conditions as `tests/expect_fatal.cmake` — died abnormally, and named the
+reason — with the expected diagnostics parsed out of `tests/CMakeLists.txt` so
+the two cannot drift apart.
+
+`arm64v8/gcc:12` has a compiler and `make` and no `cmake`, so the suites are
+compiled directly rather than configured. Installing cmake would put an apt
+fetch inside an emulated container on the critical path of a gate meant to be
+run often; compiling directly keeps it hermetic, which is the right property for
+the configuration whose claim is that binCV needs nothing but a compiler.
+
+**It found something on its first run**, though not the kind of thing it was
+built for: `Storage::operator=` tripped `-Wuse-after-free`, which **GCC 12
+enables in `-Wall` and GCC 11 does not have at all**. Reproduced on x86_64
+`gcc:12`, so it is a compiler-version finding rather than an architecture one —
+and it means "builds warning-free" was true of the desktop compiler and false of
+the next one. The code was correct (an alias guard the compiler cannot follow);
+it now installs the new descriptor before freeing the old block, which removes
+the question instead of answering it. See `core/storage.hpp::adoptThenFree`.
+
+**Follow-up (same review).** The aarch64 gate had four ways to look green while
+verifying less than it said:
+
+- **The skip is exit 77, not exit 0.** `verify.sh --arm` treated any zero exit as
+  a pass, so on a machine without Docker it printed `aarch64: OK` directly under
+  this script's own `aarch64 correctness was NOT verified`.
+- **The x86_64 comparison always reports its outcome**, and is stamped. It used
+  to sit inside `if reference exists`, so on a fresh clone — where `build-logs/`
+  is gitignored and absent — the run printed `PASS`/`PASS` having compared
+  nothing. And a reference left over from an earlier tree was diffed as if it
+  described the current one; both sides now carry a content hash of
+  `include/` + `tests/`, and a mismatch is `NOT PERFORMED`, not a pass.
+- **The summary can no longer contradict the exit code.** A failed comparison
+  printed `core-only PASS` / `-fno-exceptions PASS` and exited 1. There is now a
+  third row for the comparison and an explicit `AARCH64 VERIFICATION FAILED`.
+- **The death-test count is checked.** The case list is read out of each binary's
+  usage output; an enumeration that parsed to nothing printed
+  `death tests: 0 passed` and PASSed. The expected count now comes from
+  `tests/CMakeLists.txt` (excluding the `if(BINCV_OPENCV_FOUND)` cases, which
+  this container does not compile) and a mismatch fails.
 
 ---
 

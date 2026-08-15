@@ -40,7 +40,10 @@ and logged below** rather than guessed at.
 | **T1.3** BinMat on Storage/views | `DONE` — 857 checks (see note), 640x480 = exactly 38400 B | `049b63c` |
 | **T1.4** Error policy | `DONE` — **-fno-exceptions gate CLOSED, 57 errors → 0** | `bc34329` |
 | **T1.5** `QuantMat<N>` | `DONE` — 1 allocation, 3×38400 B exact | `see below` |
-| **T1.6** Signed / ternary | `DONE` — −1/0/+1 round trip, no storage duplication | `see below` |
+| **T1.6** Signed / ternary | `DONE` — −1/0/+1 round trip, no storage duplication | `db4e96d` |
+| **T1.7** Test framework | `DONE` — hybrid GTest/built-in, counts preserved | `see below` |
+| **T1.8** `verify.sh` | `DONE` — **both vacuous gates now real and proven** | `see below` |
+| **T1.9** aarch64 runner | `DONE` — counts identical to x86, 33 death tests | `see below` |
 | **T1.5** `QuantMat<N>` | `DONE` — 3×38400 B in ONE allocation, measured at the allocator | working tree |
 | **T1.6** Signed / ternary | `DONE` — canonical zero tested both ways, no storage duplication | working tree |
 
@@ -181,6 +184,52 @@ the wrapping constructor could not verify an N-fold buffer length.
 **Note this closes open question 2 below** — the deduction problem. `constPlane()`,
 `constMagnitude()` and `constSign()` were added, so kernels written as
 `countNonZero(dx.magnitude(0), window)` have an ergonomic spelling.
+
+---
+
+### T1.7 / T1.8 / T1.9 detail — the gates now have teeth
+
+**My two vacuous gates are closed, and I verified it adversarially rather than
+taking the report's word.** Injecting an unused variable into `core/view.hpp` makes
+`./scripts/verify.sh` exit 1 with `-Werror=unused-variable`. Restored, the clean
+run is exit 0:
+
+```
+  Gate self-check       warning policy                   3/3           -     -   PASS
+  Release + OpenCV      Google Test                    43/43        1924     0   PASS
+  Release core-only     Google Test                    40/40        1892     0   PASS
+  -fno-exceptions core  built-in (dependency-free)     40/40    1815+60s     0   PASS
+  Debug core-only       Google Test                    40/40        1882     0   PASS
+```
+
+The **Debug** row is the second gap closed: `BINCV_DEBUG_CHECKS == 1` is now
+compiled and its bounds checks exercised — ~1900 checks through live assertions
+that no previous configuration ran. `verify.sh` also runs **self-checks on the gate
+itself**, and `expected-checks.txt` records per-suite floors so a silent drop in
+coverage is red.
+
+`verify_arm.sh` passes with check counts **identical to x86_64 on all six suites**,
+all 33 death tests running, and a loud do-not-benchmark banner.
+
+**Three corrections to my own earlier claims, all found by measurement:**
+
+1. **My T1.7 spec was factually wrong.** I wrote "GTest needs exceptions". It does
+   not — googletest 1.14 detects the absent `__EXCEPTIONS`, sets
+   `GTEST_HAS_EXCEPTIONS=0`, and works under `-fno-exceptions`; verified end to end
+   through the real build. The hybrid was kept anyway, for a *better* reason than
+   mine: putting the gate the embedded claim rests on behind a network fetch and a
+   30k-line desktop framework is precisely how a gate goes dark.
+
+2. **"The code is genuinely clean under `-Wall -Wextra`" was under-measured.**
+   Turning the flags on for real exposed **7 sites**, two of which are middle-end
+   warnings that only fire with optimization — a syntax-level check cannot see
+   them. One was a latent narrowing in `pad()`'s `~bitMask` promotion.
+
+3. **`Storage::operator=` did not build warning-free on GCC 12+** with plain
+   `-Wall` (`-Wuse-after-free`). Found by `verify_arm.sh`, whose container ships
+   GCC 12, then reproduced on x86 `gcc:12` — a compiler-version finding, not an
+   architecture one. The code was correct; it was restructured so the question does
+   not arise.
 
 ---
 

@@ -1052,48 +1052,44 @@ void testNoStorageDuplication() {
 
 } // namespace
 
-int main() {
-    std::cout << "=== QuantMat / SignedQuantMat core tests (no OpenCV) ===\n";
+// Layout across every supported word width and a spread of N.
+BINCV_TEST(QuantMat, PlaneLayout_N2_uint8_t)   { testPlaneLayout<2, uint8_t>("uint8_t"); }
+BINCV_TEST(QuantMat, PlaneLayout_N3_uint16_t)  { testPlaneLayout<3, uint16_t>("uint16_t"); }
+BINCV_TEST(QuantMat, PlaneLayout_N3_uint32_t)  { testPlaneLayout<3, uint32_t>("uint32_t"); }
+BINCV_TEST(QuantMat, PlaneLayout_N5_uint64_t)  { testPlaneLayout<5, uint64_t>("uint64_t"); }
+BINCV_TEST(QuantMat, PlaneLayout_N8_uint32_t)  { testPlaneLayout<8, uint32_t>("uint32_t"); }
 
-    // Layout across every supported word width and a spread of N.
-    testPlaneLayout<2, uint8_t>("uint8_t");
-    testPlaneLayout<3, uint16_t>("uint16_t");
-    testPlaneLayout<3, uint32_t>("uint32_t");
-    testPlaneLayout<5, uint64_t>("uint64_t");
-    testPlaneLayout<8, uint32_t>("uint32_t");
+BINCV_TEST(QuantMat, Footprint)           { testFootprint(); }
+BINCV_TEST(QuantMat, SinglePlaneIsBinMat) { testSinglePlaneIsBinMat(); }
 
-    testFootprint();
-    testSinglePlaneIsBinMat();
+BINCV_TEST(QuantMat, PlanesIndependent_N2_uint8_t)  { testPlanesIndependent<2, uint8_t>("uint8_t"); }
+BINCV_TEST(QuantMat, PlanesIndependent_N3_uint32_t) { testPlanesIndependent<3, uint32_t>("uint32_t"); }
+BINCV_TEST(QuantMat, PlanesIndependent_N8_uint64_t) { testPlanesIndependent<8, uint64_t>("uint64_t"); }
 
-    testPlanesIndependent<2, uint8_t>("uint8_t");
-    testPlanesIndependent<3, uint32_t>("uint32_t");
-    testPlanesIndependent<8, uint64_t>("uint64_t");
+// Round trip for every N in 1..8, N = 1 going through BinMat's own paths.
+BINCV_TEST(QuantMat, RoundTrip_N1_uint32_t) { testRoundTrip<1, uint32_t>("uint32_t"); }
+BINCV_TEST(QuantMat, RoundTrip_N2_uint32_t) { testRoundTrip<2, uint32_t>("uint32_t"); }
+BINCV_TEST(QuantMat, RoundTrip_N3_uint32_t) { testRoundTrip<3, uint32_t>("uint32_t"); }
+BINCV_TEST(QuantMat, RoundTrip_N4_uint32_t) { testRoundTrip<4, uint32_t>("uint32_t"); }
+BINCV_TEST(QuantMat, RoundTrip_N5_uint32_t) { testRoundTrip<5, uint32_t>("uint32_t"); }
+BINCV_TEST(QuantMat, RoundTrip_N6_uint32_t) { testRoundTrip<6, uint32_t>("uint32_t"); }
+BINCV_TEST(QuantMat, RoundTrip_N7_uint32_t) { testRoundTrip<7, uint32_t>("uint32_t"); }
+BINCV_TEST(QuantMat, RoundTrip_N8_uint32_t) { testRoundTrip<8, uint32_t>("uint32_t"); }
+BINCV_TEST(QuantMat, RoundTrip_N3_uint8_t)  { testRoundTrip<3, uint8_t>("uint8_t"); }
+BINCV_TEST(QuantMat, RoundTrip_N3_uint64_t) { testRoundTrip<3, uint64_t>("uint64_t"); }
 
-    // Round trip for every N in 1..8, N = 1 going through BinMat's own paths.
-    testRoundTrip<1, uint32_t>("uint32_t");
-    testRoundTrip<2, uint32_t>("uint32_t");
-    testRoundTrip<3, uint32_t>("uint32_t");
-    testRoundTrip<4, uint32_t>("uint32_t");
-    testRoundTrip<5, uint32_t>("uint32_t");
-    testRoundTrip<6, uint32_t>("uint32_t");
-    testRoundTrip<7, uint32_t>("uint32_t");
-    testRoundTrip<8, uint32_t>("uint32_t");
-    testRoundTrip<3, uint8_t>("uint8_t");
-    testRoundTrip<3, uint64_t>("uint64_t");
+BINCV_TEST(QuantMat, WrapAllocatesNothing)  { testWrapAllocatesNothing(); }
+BINCV_TEST(QuantMat, PlaneIndexIsChecked)   { testPlaneIndexIsChecked(); }
+BINCV_TEST(QuantMat, ConstPlaneAccessors)   { testConstPlaneAccessors(); }
+BINCV_TEST(QuantMat, WrapChecksBufferLength) { testWrapChecksBufferLength(); }
+BINCV_TEST(QuantMat, ValueSemantics)        { testValueSemantics(); }
 
-    testWrapAllocatesNothing();
-    testPlaneIndexIsChecked();
-    testConstPlaneAccessors();
-    testWrapChecksBufferLength();
-    testValueSemantics();
+BINCV_TEST(SignedQuantMat, TernaryRoundTrip)      { testTernaryRoundTrip(); }
+BINCV_TEST(SignedQuantMat, CanonicalZero)         { testCanonicalZero(); }
+BINCV_TEST(SignedQuantMat, RoundTrip_N1)          { testSignedRoundTrip<1>("1"); }
+BINCV_TEST(SignedQuantMat, RoundTrip_N2)          { testSignedRoundTrip<2>("2"); }
+BINCV_TEST(SignedQuantMat, RoundTrip_N7)          { testSignedRoundTrip<7>("7"); }
+BINCV_TEST(SignedQuantMat, MagnitudeIsUnsigned)   { testSignedMagnitudeIsUnsigned(); }
+BINCV_TEST(SignedQuantMat, NoStorageDuplication)  { testNoStorageDuplication(); }
 
-    testTernaryRoundTrip();
-    testCanonicalZero();
-    testSignedRoundTrip<1>("1");
-    testSignedRoundTrip<2>("2");
-    testSignedRoundTrip<7>("7");
-    testSignedMagnitudeIsUnsigned();
-    testNoStorageDuplication();
-
-    return bincv::test::summarize("QuantMat core tests");
-}
+BINCV_TEST_MAIN("QuantMat core tests")

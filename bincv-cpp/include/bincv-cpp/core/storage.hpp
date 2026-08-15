@@ -136,10 +136,7 @@ public:
         const size_t otherWords = other.words_;
         if (aliasesOwnedBlock(otherPtr)) return *this;
 
-        release();
-        ptr_ = otherPtr;
-        words_ = otherWords;
-        owns_ = false;
+        adoptThenFree(otherPtr, otherWords, false);
         return *this;
     }
 
@@ -171,10 +168,7 @@ public:
             return *this;
         }
 
-        release();
-        ptr_ = otherPtr;
-        words_ = otherWords;
-        owns_ = otherOwns;
+        adoptThenFree(otherPtr, otherWords, otherOwns);
         other.clear();
         return *this;
     }
@@ -223,6 +217,29 @@ private:
         const uintptr_t base = reinterpret_cast<uintptr_t>(ptr_);
         const uintptr_t here = reinterpret_cast<uintptr_t>(p);
         return here >= base && here < base + words_ * sizeof(WordType);
+    }
+
+    /// @brief Installs a new descriptor, then frees the block this object held.
+    /// @note The order is the point. The obvious spelling of both assignment
+    ///       operators is `release(); ptr_ = otherPtr;`, and it is correct --
+    ///       each caller has already established, via aliasesOwnedBlock() or via
+    ///       new[] returning a fresh block, that the incoming pointer does not
+    ///       point into the block being freed. But that reasoning lives in the
+    ///       caller, and GCC 12's -Wuse-after-free cannot follow it: all it sees
+    ///       is a pointer stored after a free that might have been the same
+    ///       pointer, which is precisely the bug the warning exists to catch.
+    ///       Freeing last removes the question instead of answering it, and costs
+    ///       nothing -- the two orders are otherwise indistinguishable.
+    /// @note Found by scripts/verify_arm.sh: its container ships GCC 12, where
+    ///       -Wall enables this warning. GCC 11 -- the desktop compiler this
+    ///       project has been developed against -- does not have it at all, so
+    ///       "builds warning-free" was true of one compiler and not of the next.
+    void adoptThenFree(WordType* newPtr, size_t newWords, bool newOwns) {
+        WordType* const stale = owns_ ? ptr_ : nullptr;
+        ptr_ = newPtr;
+        words_ = newWords;
+        owns_ = newOwns;
+        delete[] stale;   // no-op when null, which is the non-owning case
     }
 
     /// @brief Releases the buffer if owned, and resets to the empty state so a

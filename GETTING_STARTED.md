@@ -53,6 +53,22 @@ brew install cmake opencv
 
 ## Build Configurations
 
+**Before committing, run the gate rather than these by hand:**
+
+```bash
+./scripts/verify.sh          # all four configurations, warnings fatal, ~40 s
+./scripts/verify_arm.sh      # aarch64 correctness under emulation
+```
+
+Run `verify.sh` first: `verify_arm.sh` compares its emulated check counts against
+the reference `verify.sh` writes to `bincv-cpp/build-logs/checks-*.txt`, and says
+`NOT PERFORMED` rather than `PASS` when that reference is missing or describes a
+different tree. It exits **77** when Docker or arm64 emulation is unavailable —
+not a failure, and not a pass either.
+
+The individual commands below are for driving one configuration during
+development. They do **not** enable `-Werror`; `verify.sh` does.
+
 ### Desktop (OpenCV auto-detected)
 
 ```bash
@@ -83,11 +99,61 @@ cmake -S bincv-cpp -B bincv-cpp/build-noexcept \
 binCV commits to compiling and running correctly in this configuration. See
 [ARCHITECTURE §2](ARCHITECTURE.md#tier-2--cortex-m-class-correctness-only).
 
+### Debug (the checked configuration)
+
+```bash
+cmake -S bincv-cpp -B bincv-cpp/build-debug \
+      -DCMAKE_BUILD_TYPE=Debug -DBINCV_USE_OPENCV=OFF
+cmake --build bincv-cpp/build-debug -j$(nproc)
+cd bincv-cpp/build-debug && ctest --output-on-failure
+```
+
+The only configuration where `BINCV_DEBUG_CHECKS` is 1, so it is the only one
+that compiles `BINCV_ASSERT` — the bounds checks in `at()` and `set()`, and every
+kernel precondition. Everything else defines `NDEBUG` and deletes them.
+
+`verify.sh` does not take that on trust. It reads `BINCV_DEBUG_CHECKS` and
+`BINCV_EXCEPTIONS_ENABLED` back out of the `test_error` binary each configuration
+built, and fails on a mismatch — an exported `CXXFLAGS=-DNDEBUG` otherwise turns
+this configuration into a second copy of core-only, with an identical check
+count and every assertion gone.
+
 CMake prints a configuration summary showing platform, build type, SIMD
-capability, and whether OpenCV interop is enabled.
+capability, the warning flags in force, the test backend, and whether OpenCV
+interop is enabled.
 
 **Options:** `BINCV_USE_OPENCV` (default ON), `BINCV_BUILD_TESTS` (ON),
-`BINCV_BUILD_BENCHMARKS` (ON, skipped automatically without OpenCV).
+`BINCV_BUILD_BENCHMARKS` (ON, skipped automatically without OpenCV),
+`BINCV_WERROR` (OFF; `verify.sh` sets it), `BINCV_USE_GTEST`
+(`AUTO`/`ON`/`OFF`).
+
+### Warnings
+
+`-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion` are on for
+every first-party target, from `bincv-cpp/cmake/BincvWarnings.cmake`. They are
+deliberately **not** attached to `bincv_core`'s interface — a consumer's warning
+policy is theirs to pick.
+
+`-Wconversion` earns its keep here: the container is templated on the word
+*type*, so each mask and shift compiles at 8, 16, 32 and 64 bits, and integer
+promotion means the narrow instantiations are the ones that silently narrow back.
+Cast deliberate narrowing explicitly.
+
+`-Werror` is off by default, so a build mid-edit shows you every diagnostic
+instead of stopping at the first. `verify.sh` turns it on, and nothing should be
+committed until that is green.
+
+**Linking `bincv_warnings` is not optional.** `bincv_assert_warning_policy()`
+runs after every `add_subdirectory()` and fails the configure step, naming the
+target, if a first-party target that compiles anything does not link it. A
+build-log scan cannot substitute: a target with no warning flags emits no
+diagnostics, so there is nothing in the log to find, and the run stays green.
+Use `bincv_add_test_target()` and the wiring comes with it.
+
+`verify.sh` proves both halves still bite before it builds anything, via two
+throwaway builds that must fail (`-DBINCV_SELFTEST_WARNING=ON` and
+`-DBINCV_SELFTEST_UNWIRED=ON`, over `tests/selftest_warning.cpp`). If you ever
+need to see what the gate rejects, run those by hand.
 
 ---
 
@@ -101,12 +167,56 @@ configuration is actually exercised rather than assumed:
 - `tests/test_storage.cpp` — the storage layer on its own.
 - `tests/test_error.cpp` — the error policy as compiled in *this* build.
 - `tests/test_error_checked.cpp` — the error policy with checks forced **on**.
+- `tests/test_quantMat.cpp` — `QuantMat<N>` / `SignedQuantMat<N>` bit planes.
+- `tests/test_harness.cpp` — the harness's own regression check, built twice:
+  once ordinary, once with a case that fails on purpose and is registered
+  `WILL_FAIL`, so "a failing check exits non-zero" is verified rather than
+  assumed.
 - `tests/test_opencv_interop.cpp` — `cv::Mat` round-trips, built only with OpenCV.
 
 Add core tests to the first and OpenCV-dependent tests to the last.
 
-The interim harness (`tests/test_util.hpp`) reports failures with file and line
-and returns a non-zero exit code. Google Test replaces it in Phase 1.6.
+### Writing a test
+
+```cpp
+#include "test_util.hpp"
+
+BINCV_TEST(SuiteName, CaseName) {
+    BINCV_CHECK(condition);
+    BINCV_CHECK_EQ(actual, expected);
+    BINCV_CHECK_THROWS(expr, std::invalid_argument);
+}
+
+BINCV_TEST_MAIN("Suite label")     // once per test binary, last line
+```
+
+`tests/test_util.hpp` runs these over **two backends**, and the suite source does
+not know which:
+
+- **Google Test** in the OpenCV, core-only and Debug configurations. `BINCV_TEST`
+  is `TEST`, failures carry the original file and line, `--gtest_filter` works.
+- **The built-in harness** in the dependency-free configuration (core-only,
+  `-fno-exceptions`), where the cases are registered at static init and run by a
+  shared `main`. A bare substring argument filters, the same way.
+
+Both count checks and print the same `N/M checks passed` summary, which is what
+lets `verify.sh` compare configurations and catch a suite quietly losing
+assertions.
+
+`verify.sh` discovers the suites from `ctest --show-only=json-v1` rather than
+from a list, so a suite appended to `BINCV_CORE_TESTS` is picked up with no other
+edit. It then compares each suite's count against
+**`tests/expected-checks.txt`** — a committed floor, per configuration, per
+suite — and fails on a drop, on a listed suite that did not run, and on a suite
+that ran with no row of its own. Adding a suite therefore needs one line there
+too; `./scripts/verify.sh --update-checks-baseline` writes it, and the diff is
+meant to be reviewed rather than rubber-stamped.
+
+Google Test is obtained by `FetchContent` with `FIND_PACKAGE_ARGS`, so an
+installed copy satisfies it without a download. The dependency-free
+configuration declines it on purpose — not because it cannot compile there (it
+can; `-DBINCV_USE_GTEST=ON` works) but because that configuration exists to show
+binCV needs nothing but a C++17 compiler.
 
 ### Tests for checks that kill the process
 

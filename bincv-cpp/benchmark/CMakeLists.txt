@@ -8,6 +8,6 @@ foreach(benchmark_src ${BENCHMARK_SOURCES})
     get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
 
     add_executable(${benchmark_name} ${benchmark_src})
-    target_link_libraries(${benchmark_name} PRIVATE bincv_core)
+    target_link_libraries(${benchmark_name} PRIVATE bincv_core bincv_warnings)
     target_include_directories(${benchmark_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()

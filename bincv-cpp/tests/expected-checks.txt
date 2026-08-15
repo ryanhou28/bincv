@@ -1,0 +1,72 @@
+# binCV expected check counts -- the floor scripts/verify.sh enforces.
+#
+# WHY THIS FILE EXISTS
+#
+# CLAUDE.md says "a drop in the CHECKS column is a regression even when every
+# ctest case still passes", and TASKS.md T1.7 requires that the test count not
+# fall below what it was before the Google Test migration. Until this file
+# existed both sentences were enforced by a human remembering four numbers:
+# verify.sh printed CHECKS and compared it against nothing. Measured -- deleting
+# test_storage from BINCV_CORE_TESTS took core from 1892 checks to 1348 and the
+# gate still printed ALL CONFIGURATIONS GREEN and exited 0.
+#
+# HOW IT IS READ
+#
+#   <configuration>  <suite>  <checks>  <skipped>       (tab-separated)
+#
+# verify.sh fails the configuration when a suite reports FEWER checks or FEWER
+# skips than its row here, when a listed suite did not run at all, or when a
+# suite ran that has no row. A count that RISES is not a failure; it prints a
+# notice, because raising the floor should be a reviewed edit rather than a side
+# effect of running the gate:
+#
+#   ./scripts/verify.sh --update-checks-baseline
+#
+# and commit the diff with the change that earned it.
+#
+# WHY SKIPS ARE A SEPARATE COLUMN
+#
+# Without exceptions BINCV_CHECK_THROWS cannot evaluate its expression, so those
+# checks are reported as skipped and covered as death tests instead. They are
+# still coverage that can be deleted, so they get their own floor: a run where
+# noexcept/test_binMat reported 801 checks and 0 skips would otherwise look
+# identical to a healthy one.
+#
+# WHY THE FOUR CONFIGURATIONS DIFFER, LEGITIMATELY
+#
+#   debug     test_error 21 vs 31 elsewhere. tests/test_error.cpp guards ten
+#             checks with `#if !BINCV_DEBUG_CHECKS` -- they assert that
+#             BINCV_ASSERT compiles away under NDEBUG, which is not a statement
+#             the Debug build can make. Totals: core 1892, debug 1882.
+#   noexcept  44 + 16 validation checks move from in-process to death tests, and
+#             test_error drops the 17 exception-shaped ones. Total 1815 + 60s.
+#   opencv    adds test_opencv_interop; otherwise identical to core.
+
+opencv	test_binMat	845	0
+opencv	test_quantMat	443	0
+opencv	test_storage	544	0
+opencv	test_error	31	0
+opencv	test_error_checked	21	0
+opencv	test_harness	8	0
+opencv	test_opencv_interop	32	0
+
+core	test_binMat	845	0
+core	test_quantMat	443	0
+core	test_storage	544	0
+core	test_error	31	0
+core	test_error_checked	21	0
+core	test_harness	8	0
+
+noexcept	test_binMat	801	44
+noexcept	test_quantMat	427	16
+noexcept	test_storage	544	0
+noexcept	test_error	14	0
+noexcept	test_error_checked	21	0
+noexcept	test_harness	8	0
+
+debug	test_binMat	845	0
+debug	test_quantMat	443	0
+debug	test_storage	544	0
+debug	test_error	21	0
+debug	test_error_checked	21	0
+debug	test_harness	8	0

@@ -106,10 +106,12 @@ void testAssertCompilesAwayInRelease() {
     BINCV_ASSERT(countedCondition(), "holds either way");
 
 #if BINCV_DEBUG_CHECKS
-    // Debug build: the check is live, so the condition ran exactly once. Kept
-    // for a hand-configured Debug build, but not relied on -- no verified
-    // configuration compiles this branch, which is why the same claim is made
-    // unconditionally in tests/test_error_checked.cpp.
+    // Debug build: the check is live, so the condition ran exactly once. This
+    // branch WAS unverified when it was written -- all three configurations were
+    // Release, so nothing compiled it. T1.8 added the Debug configuration to
+    // scripts/verify.sh, and this is now one of the lines that configuration
+    // exists to run. The same claim is also made unconditionally in
+    // tests/test_error_checked.cpp, which forces the checks on regardless.
     BINCV_CHECK_EQ(g_conditionEvaluations, 1);
 #else
     // Release build: nothing ran. This is the claim that lets at() reduce to a
@@ -247,29 +249,29 @@ void reportConfiguration() {
 
 } // namespace
 
-int main() {
-    std::cout << "=== Error policy tests (T1.4) ===\n";
-
-    reportConfiguration();
+BINCV_TEST(ErrorPolicy, Configuration) { reportConfiguration(); }
 
 #if BINCV_EXCEPTIONS_ENABLED
-    testThrowCarriesTypeAndMessage();
-    testValidationStillRejects();
+BINCV_TEST(ErrorPolicy, ThrowCarriesTypeAndMessage) { testThrowCarriesTypeAndMessage(); }
+BINCV_TEST(ErrorPolicy, ValidationStillRejects)     { testValidationStillRejects(); }
 #else
+BINCV_TEST(ErrorPolicy, ThrowAbortsWithoutExceptions) {
     std::cout << "\n  exceptions disabled: BINCV_THROW's abort path is covered by"
                  " test_error_abort\n";
+}
 #endif
 
-    testAssertCompilesAwayInRelease();
+BINCV_TEST(ErrorPolicy, AssertCompilesAwayInRelease) { testAssertCompilesAwayInRelease(); }
 
 #if !BINCV_DEBUG_CHECKS
-    testAtIsUncheckedInRelease();
+BINCV_TEST(ErrorPolicy, AtIsUncheckedInRelease) { testAtIsUncheckedInRelease(); }
 #else
+BINCV_TEST(ErrorPolicy, AtIsCheckedInDebug) {
     std::cout << "\n  debug build: at()/set() are bounds-checked, so the"
                  " unchecked-access test is skipped here -- the checked"
                  " behaviour is covered by test_error_checked and"
                  " test_assert_abort\n";
+}
 #endif
 
-    return bincv::test::summarize("Error policy tests");
-}
+BINCV_TEST_MAIN("Error policy tests")

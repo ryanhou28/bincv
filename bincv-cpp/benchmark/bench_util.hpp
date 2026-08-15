@@ -68,7 +68,7 @@ inline void setRandomBinMat(bincv::BinMat<WordType>& mat, float fillRatio = 0.1f
     int w = mat.cols(), h = mat.rows();
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
-            if ((rand() / float(RAND_MAX)) < fillRatio)
+            if ((static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) < fillRatio)
                 mat.set(y, x, true);
 }
 
@@ -92,10 +92,13 @@ inline void benchmark(const std::string& name, int iterations, const std::functi
 inline size_t getCurrentRSS() {
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
-    return usage.ru_maxrss; // kilobytes
+    // ru_maxrss is a signed long; the kernel never reports it negative, but the
+    // conversion has to say so rather than wrap silently.
+    return usage.ru_maxrss < 0 ? size_t(0) : static_cast<size_t>(usage.ru_maxrss); // kilobytes
 }
 inline void printMemoryUsage(const std::string& label = "") {
-    std::cout << "[MEM] " << label << " RSS: " << (getCurrentRSS() / 1024.0) << " MB\n";
+    std::cout << "[MEM] " << label << " RSS: "
+              << (static_cast<double>(getCurrentRSS()) / 1024.0) << " MB\n";
 }
 #endif
 

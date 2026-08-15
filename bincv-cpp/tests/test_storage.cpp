@@ -33,14 +33,39 @@ size_t g_deleteCount = 0;
 const void* volatile g_sink = nullptr;
 inline void escape(const void* p) { g_sink = p; }
 
-} // namespace
-
-void* operator new(std::size_t bytes) {
+// Every replacement operator below routes through this pair rather than the
+// scalar forms forwarding to each other, so that each operator has its own body
+// and every malloc is visibly paired with a free in the same two functions. The
+// alternative -- `operator new[]` calling `::operator new`, the sized deletes
+// calling `::operator delete` -- spreads one allocation's lifetime across four
+// bodies that a reader has to hold in their head at once, for no gain.
+//
+// NOT because a compiler rejects the forwarding spelling. An earlier version of
+// this comment said -Wall reports -Wmismatched-new-delete on it at -O2; that does
+// not reproduce anywhere in this project's verification set. Measured with the
+// project flag set
+// (-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion), on the
+// forwarding spelling, zero warnings in every combination:
+//
+//   g++ 11.4 (x86_64)              -O0 -O1 -O2 -O3
+//   g++ 12.5 (x86_64, gcc:12)      -O0 -O1 -O2 -O3
+//   g++ 12.5 (arm64v8/gcc:12)      -O0 -O2      <- the image scripts/verify_arm.sh uses
+//   clang++ 18 (x86_64)            -O0 -O2
+//
+// The -Walloc-size-larger-than= claim that used to sit on the guard below did not
+// reproduce either (g++ 11.4, -O0/-O2, guard removed). Keeping a rule no compiler
+// in the gate enforces teaches the next contributor something untrue, so the
+// style reason above is the one that stands. The guard itself stays: it is
+// behaviour, not warning-appeasement.
+//
+// The neighbouring -Wuse-after-free finding in core/storage.hpp (TASKS.md T1.9)
+// is a different matter -- that one does reproduce on GCC 12 -- so the two should
+// not be read as equally shaky.
+void* countedAllocate(std::size_t bytes) {
     ++g_newCount;
-    // Reject unsatisfiable requests up front. array-new passes SIZE_MAX as its
-    // overflow sentinel, expecting the allocator to fail; forwarding it to
-    // malloc also makes GCC warn (-Walloc-size-larger-than=) once this operator
-    // inlines into Storage's array-new at -O2.
+    // Reject unsatisfiable requests up front: array-new passes SIZE_MAX as its
+    // overflow sentinel and expects the allocator to fail rather than to hand
+    // back whatever malloc(SIZE_MAX) does on this platform.
     if (bytes > static_cast<std::size_t>(PTRDIFF_MAX)) std::abort();
     // Cannot throw std::bad_alloc: this file also builds with -fno-exceptions.
     void* p = std::malloc(bytes == 0 ? 1 : bytes);
@@ -48,16 +73,20 @@ void* operator new(std::size_t bytes) {
     return p;
 }
 
-void* operator new[](std::size_t bytes) { return ::operator new(bytes); }
-
-void operator delete(void* p) noexcept {
+void countedFree(void* p) noexcept {
     if (p != nullptr) ++g_deleteCount;
     std::free(p);
 }
 
-void operator delete[](void* p) noexcept { ::operator delete(p); }
-void operator delete(void* p, std::size_t) noexcept { ::operator delete(p); }
-void operator delete[](void* p, std::size_t) noexcept { ::operator delete(p); }
+} // namespace
+
+void* operator new(std::size_t bytes)   { return countedAllocate(bytes); }
+void* operator new[](std::size_t bytes) { return countedAllocate(bytes); }
+
+void operator delete(void* p) noexcept                 { countedFree(p); }
+void operator delete[](void* p) noexcept               { countedFree(p); }
+void operator delete(void* p, std::size_t) noexcept    { countedFree(p); }
+void operator delete[](void* p, std::size_t) noexcept  { countedFree(p); }
 
 namespace {
 
@@ -669,21 +698,17 @@ void testViewOverStorage() {
 
 } // namespace
 
-int main() {
-    std::cout << "=== Storage and view core tests (no OpenCV) ===\n";
+BINCV_TEST(Storage, Contract_uint8_t)  { testStorage<uint8_t>("uint8_t"); }
+BINCV_TEST(Storage, Contract_uint16_t) { testStorage<uint16_t>("uint16_t"); }
+BINCV_TEST(Storage, Contract_uint32_t) { testStorage<uint32_t>("uint32_t"); }
+BINCV_TEST(Storage, Contract_uint64_t) { testStorage<uint64_t>("uint64_t"); }
+BINCV_TEST(Storage, AllocationDiscipline) { testAllocationDiscipline(); }
 
-    testStorage<uint8_t>("uint8_t");
-    testStorage<uint16_t>("uint16_t");
-    testStorage<uint32_t>("uint32_t");
-    testStorage<uint64_t>("uint64_t");
-    testAllocationDiscipline();
+BINCV_TEST(View, TypeProperties)   { testViewTypeProperties(); }
+BINCV_TEST(View, Contract_uint8_t)  { testView<uint8_t>("uint8_t"); }
+BINCV_TEST(View, Contract_uint16_t) { testView<uint16_t>("uint16_t"); }
+BINCV_TEST(View, Contract_uint32_t) { testView<uint32_t>("uint32_t"); }
+BINCV_TEST(View, Contract_uint64_t) { testView<uint64_t>("uint64_t"); }
+BINCV_TEST(View, OverStorage)      { testViewOverStorage(); }
 
-    testViewTypeProperties();
-    testView<uint8_t>("uint8_t");
-    testView<uint16_t>("uint16_t");
-    testView<uint32_t>("uint32_t");
-    testView<uint64_t>("uint64_t");
-    testViewOverStorage();
-
-    return bincv::test::summarize("Storage and view core tests");
-}
+BINCV_TEST_MAIN("Storage and view core tests")

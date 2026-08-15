@@ -33,14 +33,15 @@ size_t g_deleteCount = 0;
 const void* volatile g_sink = nullptr;
 inline void escape(const void* p) { g_sink = p; }
 
-} // namespace
-
-void* operator new(std::size_t bytes) {
+// Every replacement operator below routes through this pair rather than the
+// scalar forms forwarding to each other -- see tests/test_storage.cpp for why,
+// and for the measurement that retired the compiler-warning story this comment
+// used to tell. Kept identical in both files on purpose: they are the same
+// instrument, and a difference between them would be read as meaningful.
+void* countedAllocate(std::size_t bytes) {
     ++g_newCount;
-    // Reject unsatisfiable requests up front. array-new passes SIZE_MAX as its
-    // overflow sentinel, expecting the allocator to fail; forwarding it to
-    // malloc also makes GCC warn (-Walloc-size-larger-than=) once this operator
-    // inlines into Storage's array-new at -O2.
+    // Reject unsatisfiable requests up front: array-new passes SIZE_MAX as its
+    // overflow sentinel and expects the allocator to fail.
     if (bytes > static_cast<std::size_t>(PTRDIFF_MAX)) std::abort();
     // Cannot throw std::bad_alloc: this file also has to build with -fno-exceptions.
     void* p = std::malloc(bytes == 0 ? 1 : bytes);
@@ -48,16 +49,20 @@ void* operator new(std::size_t bytes) {
     return p;
 }
 
-void* operator new[](std::size_t bytes) { return ::operator new(bytes); }
-
-void operator delete(void* p) noexcept {
+void countedFree(void* p) noexcept {
     if (p != nullptr) ++g_deleteCount;
     std::free(p);
 }
 
-void operator delete[](void* p) noexcept { ::operator delete(p); }
-void operator delete(void* p, std::size_t) noexcept { ::operator delete(p); }
-void operator delete[](void* p, std::size_t) noexcept { ::operator delete(p); }
+} // namespace
+
+void* operator new(std::size_t bytes)   { return countedAllocate(bytes); }
+void* operator new[](std::size_t bytes) { return countedAllocate(bytes); }
+
+void operator delete(void* p) noexcept                 { countedFree(p); }
+void operator delete[](void* p) noexcept               { countedFree(p); }
+void operator delete(void* p, std::size_t) noexcept    { countedFree(p); }
+void operator delete[](void* p, std::size_t) noexcept  { countedFree(p); }
 
 namespace {
 
@@ -788,33 +793,34 @@ void testTypeAliases() {
 
 } // namespace
 
-int main() {
-    std::cout << "=== BinMat core tests (no OpenCV) ===\n";
+// One registered case per (behaviour, word type). The bodies above are unchanged
+// by the T1.7 migration -- only the driver is -- so the check count this suite
+// reports is the same 845 it reported before, by construction rather than by
+// re-counting.
 
-    testWordType<uint8_t>("uint8_t");
-    testWordType<uint16_t>("uint16_t");
-    testWordType<uint32_t>("uint32_t");
-    testWordType<uint64_t>("uint64_t");
+BINCV_TEST(BinMat, Contract_uint8_t)  { testWordType<uint8_t>("uint8_t"); }
+BINCV_TEST(BinMat, Contract_uint16_t) { testWordType<uint16_t>("uint16_t"); }
+BINCV_TEST(BinMat, Contract_uint32_t) { testWordType<uint32_t>("uint32_t"); }
+BINCV_TEST(BinMat, Contract_uint64_t) { testWordType<uint64_t>("uint64_t"); }
 
-    testValueSemantics<uint8_t>("uint8_t");
-    testValueSemantics<uint16_t>("uint16_t");
-    testValueSemantics<uint32_t>("uint32_t");
-    testValueSemantics<uint64_t>("uint64_t");
+BINCV_TEST(BinMat, ValueSemantics_uint8_t)  { testValueSemantics<uint8_t>("uint8_t"); }
+BINCV_TEST(BinMat, ValueSemantics_uint16_t) { testValueSemantics<uint16_t>("uint16_t"); }
+BINCV_TEST(BinMat, ValueSemantics_uint32_t) { testValueSemantics<uint32_t>("uint32_t"); }
+BINCV_TEST(BinMat, ValueSemantics_uint64_t) { testValueSemantics<uint64_t>("uint64_t"); }
 
-    testExternalBuffer<uint8_t>("uint8_t");
-    testExternalBuffer<uint16_t>("uint16_t");
-    testExternalBuffer<uint32_t>("uint32_t");
-    testExternalBuffer<uint64_t>("uint64_t");
+BINCV_TEST(BinMat, ExternalBuffer_uint8_t)  { testExternalBuffer<uint8_t>("uint8_t"); }
+BINCV_TEST(BinMat, ExternalBuffer_uint16_t) { testExternalBuffer<uint16_t>("uint16_t"); }
+BINCV_TEST(BinMat, ExternalBuffer_uint32_t) { testExternalBuffer<uint32_t>("uint32_t"); }
+BINCV_TEST(BinMat, ExternalBuffer_uint64_t) { testExternalBuffer<uint64_t>("uint64_t"); }
 
-    testViews<uint8_t>("uint8_t");
-    testViews<uint16_t>("uint16_t");
-    testViews<uint32_t>("uint32_t");
-    testViews<uint64_t>("uint64_t");
+BINCV_TEST(BinMat, Views_uint8_t)  { testViews<uint8_t>("uint8_t"); }
+BINCV_TEST(BinMat, Views_uint16_t) { testViews<uint16_t>("uint16_t"); }
+BINCV_TEST(BinMat, Views_uint32_t) { testViews<uint32_t>("uint32_t"); }
+BINCV_TEST(BinMat, Views_uint64_t) { testViews<uint64_t>("uint64_t"); }
 
-    testDefaultFootprint();
-    testWrapAllocatesNothing();
-    testRowAlignment();
-    testTypeAliases();
+BINCV_TEST(BinMat, DefaultFootprint)      { testDefaultFootprint(); }
+BINCV_TEST(BinMat, WrapAllocatesNothing)  { testWrapAllocatesNothing(); }
+BINCV_TEST(BinMat, RowAlignment)          { testRowAlignment(); }
+BINCV_TEST(BinMat, TypeAliases)           { testTypeAliases(); }
 
-    return bincv::test::summarize("BinMat core tests");
-}
+BINCV_TEST_MAIN("BinMat core tests")

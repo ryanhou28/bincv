@@ -137,14 +137,14 @@ void testViewRowPreconditionAcceptsLegalShapes() {
 
 } // namespace
 
-int main() {
-    std::cout << "=== Error policy tests, checked configuration (T1.4) ===\n";
+BINCV_TEST(ErrorPolicyChecked, Configuration) {
     std::cout << "  BINCV_DEBUG_CHECKS       = " << BINCV_DEBUG_CHECKS << "\n";
     std::cout << "  BINCV_EXCEPTIONS_ENABLED = " << BINCV_EXCEPTIONS_ENABLED << "\n";
-
-    testAssertIsLiveInDebug();
-    testInRangeAccessIsUnaffected();
-    testViewRowPreconditionAcceptsLegalShapes();
-
-    return bincv::test::summarize("Error policy tests (checked)");
 }
+BINCV_TEST(ErrorPolicyChecked, AssertIsLiveInDebug)   { testAssertIsLiveInDebug(); }
+BINCV_TEST(ErrorPolicyChecked, InRangeAccessUnaffected) { testInRangeAccessIsUnaffected(); }
+BINCV_TEST(ErrorPolicyChecked, ViewRowPreconditionAcceptsLegalShapes) {
+    testViewRowPreconditionAcceptsLegalShapes();
+}
+
+BINCV_TEST_MAIN("Error policy tests (checked)")

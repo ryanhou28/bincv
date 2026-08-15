@@ -25,27 +25,31 @@
 
 namespace {
 bool g_failNextAlloc = false;
-}
 
-void* operator new(std::size_t bytes) {
+// Both replacement forms allocate through this rather than forwarding to each
+// other -- see tests/test_storage.cpp for why (readability of the malloc/free
+// pairing; not, as this comment once claimed, a compiler diagnostic).
+void* failableAllocate(std::size_t bytes) {
     if (g_failNextAlloc) {
         g_failNextAlloc = false;   // one shot: arm it immediately before the call
         throw std::bad_alloc();
     }
     // array-new passes SIZE_MAX as its overflow sentinel and expects the allocator
-    // to fail; forwarding it to malloc also makes GCC warn once this inlines.
+    // to fail rather than to forward it to malloc.
     if (bytes > static_cast<std::size_t>(PTRDIFF_MAX)) throw std::bad_alloc();
     void* p = std::malloc(bytes == 0 ? 1 : bytes);
     if (p == nullptr) throw std::bad_alloc();
     return p;
 }
+} // namespace
 
-void* operator new[](std::size_t bytes) { return ::operator new(bytes); }
+void* operator new(std::size_t bytes)   { return failableAllocate(bytes); }
+void* operator new[](std::size_t bytes) { return failableAllocate(bytes); }
 
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete[](void* p) noexcept { ::operator delete(p); }
-void operator delete(void* p, std::size_t) noexcept { ::operator delete(p); }
-void operator delete[](void* p, std::size_t) noexcept { ::operator delete(p); }
+void operator delete(void* p) noexcept                { std::free(p); }
+void operator delete[](void* p) noexcept              { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept   { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 namespace {
 
@@ -212,14 +216,10 @@ void testSampleImage() {
 
 } // namespace
 
-int main() {
-    std::cout << "=== BinMat OpenCV interop tests ===\n";
+BINCV_TEST(OpenCVInterop, RoundTrip)                 { testRoundTrip(); }
+BINCV_TEST(OpenCVInterop, AllWordTypes)              { testAllWordTypes(); }
+BINCV_TEST(OpenCVInterop, InvalidInput)              { testInvalidInput(); }
+BINCV_TEST(OpenCVInterop, FromCVMatAllocationFailure) { testFromCVMatAllocationFailure(); }
+BINCV_TEST(OpenCVInterop, SampleImage)               { testSampleImage(); }
 
-    testRoundTrip();
-    testAllWordTypes();
-    testInvalidInput();
-    testFromCVMatAllocationFailure();
-    testSampleImage();
-
-    return bincv::test::summarize("BinMat OpenCV interop tests");
-}
+BINCV_TEST_MAIN("BinMat OpenCV interop tests")

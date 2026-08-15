@@ -49,24 +49,57 @@ If a task needs a performance or footprint choice that no experiment has settled
 ## Verify before committing
 
 ```bash
-./scripts/verify.sh          # once T1.8 exists
+./scripts/verify.sh          # ~35 s, four configurations, warnings fatal
+./scripts/verify_arm.sh      # aarch64 correctness under emulation; skips without Docker
 ```
 
-Until then, all three configurations must build warning-free and pass:
+`verify.sh` builds and tests four configurations — Release+OpenCV, Release
+core-only, `-fno-exceptions` core-only, and **Debug** core-only — with
+`-DBINCV_WERROR=ON`, and exits non-zero if anything fails. It starts with a
+**gate self-check**: two throwaway builds that are *supposed* to fail, one on a
+warning and one on a target that omits `bincv_warnings`. A gate nobody has
+watched fail is not known to work.
 
-```bash
-cmake -S bincv-cpp -B bincv-cpp/build -DCMAKE_BUILD_TYPE=Release
-cmake --build bincv-cpp/build -j$(nproc) && (cd bincv-cpp/build && ctest --output-on-failure)
+Read the two numbers in its summary table:
 
-cmake -S bincv-cpp -B bincv-cpp/build-core -DCMAKE_BUILD_TYPE=Release -DBINCV_USE_OPENCV=OFF
-cmake --build bincv-cpp/build-core -j$(nproc) && (cd bincv-cpp/build-core && ctest --output-on-failure)
+- **CTEST** — cases run.
+- **CHECKS** — assertions executed. `+Ns` means checks that configuration cannot
+  express in-process (without exceptions `BINCV_CHECK_THROWS` cannot evaluate its
+  argument) and covers as death tests instead. A drop in this column is a
+  regression even when every ctest case still passes — and it is **checked**, not
+  left to a reader: per-suite floors live in `bincv-cpp/tests/expected-checks.txt`
+  and a count below one of them fails the run. Raising a floor is a reviewed edit
+  (`./scripts/verify.sh --update-checks-baseline`, then commit the diff with the
+  change that earned it).
 
-cmake -S bincv-cpp -B bincv-cpp/build-noexcept -DBINCV_USE_OPENCV=OFF -DCMAKE_CXX_FLAGS="-fno-exceptions"
-cmake --build bincv-cpp/build-noexcept -j$(nproc) && (cd bincv-cpp/build-noexcept && ctest --output-on-failure)
-```
+Each configuration also has to *be* the configuration it claims to be:
+`verify.sh` reads `BINCV_DEBUG_CHECKS` and `BINCV_EXCEPTIONS_ENABLED` back out of
+the built `test_error` binary and fails on a mismatch. `CXXFLAGS=-DNDEBUG` used
+to turn the Debug build into a second copy of core-only, silently.
 
-The core-only and no-exceptions builds regress silently if not run. They are the
-whole embedded claim.
+The core-only, no-exceptions and Debug builds regress silently if not run. The
+first two are the whole embedded claim; the third is the only thing that
+compiles `BINCV_ASSERT`.
+
+**Warnings are project policy, not the script's.** They live in
+`bincv-cpp/cmake/BincvWarnings.cmake` and are on in every build:
+`-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion`. `-Werror` is
+off by default so a mid-edit build still finishes; the gate turns it on. Warnings
+apply to first-party targets only — never to `bincv_core`'s interface, because a
+consumer's warning policy is theirs.
+
+The wiring is not optional: `bincv_assert_warning_policy()` runs at configure
+time and **fails the configuration** if any first-party target does not link
+`bincv_warnings`. That is a structural check, not a log scan, because a target
+compiled with no warning flags emits nothing for a log scan to find — measured,
+such a target produced `WARN 0 … PASS` and `ALL CONFIGURATIONS GREEN`. Build
+`bincv_add_test_target()` targets and you get the wiring for free.
+
+`-Wconversion` is the load-bearing one: the library is templated on the word
+*type* (D-1), so every mask and shift is compiled at 8, 16, 32 and 64 bits, and
+an expression that is exact at `uint64_t` can truncate at `uint8_t`. Deliberate
+narrowing needs a `static_cast`. That is the point — a cast is where a reader is
+told the truncation is intended.
 
 ## Hard rules
 
