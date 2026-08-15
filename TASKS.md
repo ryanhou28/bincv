@@ -46,6 +46,31 @@ These apply to every task and are not repeated per-task:
 - **When memory and speed conflict, memory wins** unless the task says otherwise.
 - Existing code is a prototype; replace it where it conflicts.
   ([D-7](ARCHITECTURE.md#d-7-existing-code-is-not-a-constraint))
+- **Performance and footprint choices are settled by measurement, not argument.**
+  If a task needs such a choice and no experiment has decided it, that is a
+  stop-and-ask — see below.
+
+### Experiment tasks
+
+Tasks marked **· E-n ·** are experiments, not implementations. They follow the
+protocol in
+[ARCHITECTURE §9](ARCHITECTURE.md#how-performance-and-footprint-decisions-get-made):
+
+1. **Write the decision rule into [EXPERIMENTS.md](EXPERIMENTS.md) before
+   measuring anything.** Each such task states its rule; copy it into the log
+   first. Deciding afterward invites fitting the conclusion to the numbers.
+2. Measure **alternatives**, on representative workloads, reporting **memory and
+   speed together**.
+3. Log method, result, and conclusion. Commit the measurement code.
+4. Promote the conclusion to a D-record in
+   [ARCHITECTURE §8](ARCHITECTURE.md#8-design-decisions), or reopen the existing
+   one.
+
+A result that contradicts a documented claim is a **finding**. Report it; do not
+adjust code or docs to make the contradiction disappear.
+
+Experiments run **in the phase whose code they gate**, which is why T2.8–T2.10 sit
+in Phase 2 rather than at the end.
 
 ### Verify commands
 
@@ -574,6 +599,8 @@ SplitCount countAndSplit(BinMatConstView<W> a, BinMatConstView<W> b,
 ---
 
 ### T2.7 · Majority and thresholded counts · `TODO`
+<!-- kernel tasks continue; experiment tasks T2.8-T2.10 follow -->
+
 
 **Depends:** T2.6
 **Files:** `include/bincv-cpp/ops/bitslice.hpp` (new)
@@ -600,6 +627,99 @@ W thresholdGE(const W* planes, size_t nPlanes, unsigned threshold);
 - `thresholdGE` correct across all threshold values for the tested widths
 
 **Verify:** V-ALL
+
+---
+
+## Phase 2 experiments
+
+These run **now**, not in Phase 4, because they gate code already written or about
+to be. Follow the experiment protocol in
+[ARCHITECTURE §9](ARCHITECTURE.md#how-performance-and-footprint-decisions-get-made)
+and log results in [EXPERIMENTS.md](EXPERIMENTS.md).
+
+**Write the decision rule down before measuring.** If a result contradicts a
+documented claim, report it — do not adjust the code to fit the doc.
+
+---
+
+### T2.8 · E-1 · Does row alignment earn its memory? · `TODO`
+
+**Depends:** T2.5
+**Gates:** [D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default) —
+currently **provisional**, the only such decision in the project
+**Completes:** [X-1](EXPERIMENTS.md), which measured cost but not benefit
+
+**Question:** Does row alignment beyond word granularity measurably speed up any
+bulk kernel, enough to justify up to 172% memory overhead?
+
+**Decision rule** — *write this into the log before running anything:*
+- Speedup < 5% on all kernels → D-4 confirmed, close E-1, **do not build a
+  profile system**
+- 5–20% → D-4 stands as default; larger alignment stays opt-in and is documented
+  as worth it for specific kernels
+- \> 20% on a kernel the frontend calls per frame → **reopen D-4**, report before
+  changing anything
+
+**Variants:** `rowAlignment` ∈ {word granularity, 16, 32, 64} bytes.
+**Workload:** `bitwiseAnd` (T2.2) and `countNonZero` (T2.5) at 640×480 and 94×60
+— the two extremes from X-1. Enough iterations for stable timing.
+**Metric:** ns/pixel **and** allocated bytes. Both, per the protocol.
+**Platform:** x86 now; re-run on aarch64 during Phase 5 and note that the Phase 2
+result is indicative only, since NEON is the reference target.
+
+**Done when:** [EXPERIMENTS.md](EXPERIMENTS.md) X-1 is `DONE` with the benefit
+side filled in, D-4 is confirmed or reopened, and the benchmark is committed.
+
+---
+
+### T2.9 · E-2 · Default word width · `TODO`
+
+**Depends:** T2.5
+**Gates:** `BinMat`'s default template argument — affects every kernel
+
+**Question:** Is `uint32_t` the right default, or does `uint64_t` win on bulk
+throughput?
+
+**Decision rule** — *before measuring:*
+- `uint64_t` wins by > 10% on bulk kernels **and** does not increase footprint at
+  representative widths → change the default
+- Within 10%, or footprint increases at small pyramid levels → keep `uint32_t`
+  (memory wins ties)
+
+Note the interaction: wider words round row strides up more coarsely, so the
+footprint effect is worst exactly at upper pyramid levels. **Measure footprint at
+94×60, not only at 640×480**, or this experiment will reach the wrong conclusion.
+
+**Variants:** `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`.
+**Workload:** same kernels and sizes as T2.8.
+**Metric:** ns/pixel and allocated bytes at both resolutions.
+
+**Done when:** logged as X-4, default confirmed or changed, benchmark committed.
+
+---
+
+### T2.10 · E-3 · Incremental versus recomputed window reductions · `TODO`
+
+**Depends:** T2.6
+**Gates:** T2.6's interface and T3.6's implementation
+
+**Question:** At what window size does incremental/sliding accumulation beat
+recomputation for overlapping windows?
+
+**Decision rule** — *before measuring:*
+- Recompute within 15% of incremental at 31×31 → **keep the simpler recompute
+  API**, close E-3, and record that incremental state was rejected on data
+- Incremental wins by > 15% at 31×31 → extend T2.6 with incremental state
+  *before* T3.6 is written against the simpler form
+
+**Variants:** recompute-per-window versus a sliding accumulator.
+**Workload:** window sizes 7, 15, 31 at realistic keypoint densities (~200
+keypoints, per the reference `gftt_max_corners`); include the heavy-overlap case,
+since that is what favors incremental.
+**Metric:** ns per window, plus any additional memory the accumulator needs.
+
+**Done when:** logged as X-5, T2.6's API is confirmed or extended, benchmark
+committed.
 
 ---
 
@@ -819,24 +939,69 @@ Reference: `SEAL/src/keypoint_tracking/SparsePyrLKOpticalFlowSealImpl.cpp`.
 
 ---
 
+### T3.9 · E-4 · Generic-N cost versus specialized paths · `TODO`
+
+**Depends:** T3.5
+**Gates:** whether N stays arbitrary or gets capped
+
+**Question:** Does the bit-sliced generic-N implementation regress the specialized
+N=1 and ternary paths?
+
+**Decision rule** — *before measuring:*
+- Specialized paths within 5% of a hand-written binary-only implementation →
+  arbitrary N confirmed at no cost to the common cases
+- Regression > 5% → report before acting; options are stronger specialization or
+  capping N, and which is right depends on where the cost comes from
+
+**Variants:** `QuantMat<1>` and `TernaryMat` through the generic path versus their
+specializations, versus a hand-written binary-only reference.
+**Workload:** T3.5's derivative and T2.5's reductions.
+**Metric:** ns/pixel and code size (`size` on the built object).
+
+**Done when:** logged as X-6, specialization strategy confirmed or revised.
+
+---
+
 # Phase 4 — Validation
 
-Phase 4 tasks are experiments. Each produces a committed measurement and a written
-conclusion, and each may invalidate a decision — **that is the point**, and a
-contradicted claim should be reported, not worked around.
+Phase 4 holds only the experiments that genuinely cannot run earlier — those
+needing the complete frontend. The decisions gating Phases 1–3 were settled in
+T2.8–T2.10 and T3.9, where they belong.
 
-| Task | Experiment | Produces |
-|---|---|---|
-| T4.1 | [E-1](ARCHITECTURE.md#9-open-questions-and-planned-experiments) row alignment beyond word granularity | Whether D-4 stands; whether profiles get built |
-| T4.2 | [E-2](ARCHITECTURE.md#9-open-questions-and-planned-experiments) default word width on aarch64 | `BinMat`'s default template argument |
-| T4.3 | [E-3](ARCHITECTURE.md#9-open-questions-and-planned-experiments) incremental vs recomputed window reductions | Whether T2.6 grows incremental state |
-| T4.4 | [E-4](ARCHITECTURE.md#9-open-questions-and-planned-experiments) generic-N cost versus specialized paths | Whether N stays arbitrary |
-| T4.5 | [E-7](ARCHITECTURE.md#9-open-questions-and-planned-experiments) pyramid level bit depths | Level depths; large share of footprint |
-| T4.6 | [E-5](ARCHITECTURE.md#9-open-questions-and-planned-experiments) end-to-end accuracy, footprint, speed | **The project's headline result** |
+Each task produces a committed measurement and a written conclusion, and each may
+invalidate a decision — **that is the point.** A contradicted claim gets reported,
+not worked around.
 
-T4.6 is the milestone the whole plan serves: equivalent trajectory accuracy,
-several-fold smaller peak footprint, faster on the bit-parallel operation set
-([ROADMAP success criteria](ROADMAP.md#success-criteria)).
+### T4.1 · E-7 · Pyramid level bit depths · `TODO`
+
+**Depends:** T3.8
+**Question:** How many bits does each pyramid level need to preserve tracking
+accuracy? Measured natural growth is 1/3/4/5 bits
+([X-2](EXPERIMENTS.md)), but the reference never chose that — it fell out of
+using `CV_8U`.
+**Decision rule** — *before measuring:* adopt the smallest per-level depth whose
+tracking accuracy is within the Phase-4 tolerance of the full-precision pipeline.
+Report the accuracy/footprint curve, not just the chosen point.
+**Metric:** trajectory accuracy versus pyramid footprint, per configuration.
+**Also:** re-run X-2 against the real reference pyramid path, closing that entry's
+caveat.
+
+### T4.2 · E-6 · Hybrid LK versus binary block matching · `TODO`
+
+**Depends:** T4.1
+**Question:** Does fully bit-parallel tracking (census/Hamming) match hybrid LK's
+accuracy, and what does it cost?
+**Decision rule** — *before measuring:* switch only if accuracy is within
+tolerance **and** the footprint or speed win is material; otherwise hybrid stands
+and route (a) is closed.
+
+### T4.3 · E-5 · End-to-end validation · `TODO`
+
+**Depends:** T4.2
+**The milestone the whole plan serves.** Produces the three
+[success criteria](ROADMAP.md#success-criteria): equivalent trajectory accuracy,
+several-fold smaller peak footprint measured end to end, and faster execution on
+the bit-parallel operation set against the byte-per-pixel denominator.
 
 ---
 

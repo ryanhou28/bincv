@@ -576,18 +576,59 @@ call sites are expected and acceptable.
 
 ## 9. Open Questions and Planned Experiments
 
-Deliberately unresolved, to be settled with data rather than argument. Each
-should become a committed benchmark.
+### How performance and footprint decisions get made
 
-| ID | Question | Why it matters | Decision it would change |
-|---|---|---|---|
-| **E-1** | Does row alignment beyond word granularity measurably help any kernel on NEON? | [D-4](#d-4-word-granularity-alignment-by-default) was decided on a memory measurement plus a weak-benefit assumption. The benefit side is untested. | Whether a profile system is worth building at all; whether the default flips. |
-| **E-2** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | `BinMat`'s default template argument. |
-| **E-3** | At what window size does incremental/sliding popcount beat recomputation for the LK covariance? | The 31×31 window is recomputed per keypoint today. | Reduction API shape (whether incremental state is exposed). |
-| **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. |
-| **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — but it is the result the project exists to produce. |
-| **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. |
-| **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | Measured growth is 1/3/4/5 bits ([§7.2](#72-pyramid-downsample--box-22)), but the reference never chose that — it fell out of using `CV_8U`. Capping N is a direct footprint lever. | Pyramid level bit depths; a large share of total frontend footprint. |
+binCV has two co-equal goals that routinely conflict. Which one a given design
+serves is usually not obvious from reasoning, so the standing method is:
+
+> **Measure the alternatives, weigh the result against the project's goals, then
+> decide — and record all three.**
+
+This is a process requirement, not a suggestion. Concretely:
+
+1. **Register the question** as an E-entry below, stating what decision it would
+   change. A design choice with no registered question behind it should be
+   uncontroversial or explicitly provisional.
+2. **State the decision rule before measuring.** Write down what result favors
+   which choice *first*. Deciding afterward invites fitting the conclusion to
+   whatever the numbers happened to show.
+3. **Measure alternatives**, on representative workloads, reporting **memory and
+   speed together** — a result that reports one alone cannot be weighed against
+   goals that trade off against each other.
+4. **Log it** in [EXPERIMENTS.md](EXPERIMENTS.md), including the method and the
+   code, so the result is reproducible and the reasoning is auditable.
+5. **Promote the conclusion** to a D-record in [§8](#8-design-decisions).
+
+**Run each experiment in the phase whose code it gates, not at the end.** An
+experiment that runs after the code it was meant to decide is not a decision
+procedure — it is a rationalization, and if it contradicts the code it is
+expensive rather than useful.
+
+A decision made without this loop is **provisional by definition and must say
+so**. [D-4](#d-4-word-granularity-alignment-by-default) is currently the only
+such decision.
+
+### Register
+
+Deliberately unresolved, to be settled with data rather than argument. Each
+becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
+
+| ID | Question | Why it matters | Decision it would change | Gates | Runs |
+|---|---|---|---|---|---|
+| **E-1** | Does row alignment beyond word granularity measurably help any kernel on NEON? | [D-4](#d-4-word-granularity-alignment-by-default) was decided on a memory measurement plus an untested weak-benefit assumption. | Whether a profile system is worth building at all; whether the default flips. | T1.3 and every kernel | **Phase 2** (T2.8) |
+| **E-2** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | `BinMat`'s default template argument. | all kernels | **Phase 2** (T2.9) |
+| **E-3** | At what window size does incremental/sliding popcount beat recomputation for the LK covariance? | The 31×31 window is recomputed per keypoint; windows overlap heavily. | Reduction API shape — whether incremental state is exposed. | T2.6, T3.6 | **Phase 2** (T2.10) |
+| **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | **Phase 3** (T3.9) |
+| **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | Measured growth is 1/3/4/5 bits ([§7.2](#72-pyramid-downsample--box-22)), but the reference never chose that — it fell out of using `CV_8U`. Capping N is a direct footprint lever. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |
+| **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
+| **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |
+
+The **Gates** column is why the **Runs** column is not simply "Phase 4". E-1, E-2
+and E-3 constrain code written in Phases 1–2; running them afterward would mean
+either rewriting that code or quietly keeping a decision the data does not
+support. E-7 is deferrable only because [T3.4](TASKS.md) takes the bit depth as a
+parameter rather than baking it in — **parameterizing a contested choice is what
+buys the right to defer measuring it.**
 
 ---
 

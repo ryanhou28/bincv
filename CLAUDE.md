@@ -19,8 +19,31 @@ hardware with a fraction of the memory of a byte-per-pixel pipeline.
 |---|---|
 | [TASKS.md](TASKS.md) | **Start here.** Executable backlog; pick the lowest-numbered task whose deps are `DONE` |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Design and recorded decisions (D-1…D-9), open experiments (E-1…E-7) |
+| [EXPERIMENTS.md](EXPERIMENTS.md) | Measurement log — every result that informed a decision |
 | [ROADMAP.md](ROADMAP.md) | Phase structure and success criteria |
 | [GETTING_STARTED.md](GETTING_STARTED.md) | Build, test, benchmark, conventions |
+
+## How performance and footprint decisions get made
+
+**Measure the alternatives, weigh the result against the project's goals, then
+decide — and record all three.** Argument alone does not settle a performance or
+footprint question; neither does a benchmark without a stated decision rule.
+
+- **Write the decision rule before measuring.** What result favors which choice,
+  written down first. Deciding afterward invites fitting the conclusion to the
+  numbers.
+- **Compare alternatives**, not one option, on representative workloads.
+- **Report memory and speed together** — they trade off, so one alone cannot be
+  weighed against goals that conflict.
+- **Log it in [EXPERIMENTS.md](EXPERIMENTS.md)** and commit the measurement code.
+- **Promote the conclusion** to a D-record in ARCHITECTURE §8.
+
+Experiments run **in the phase whose code they gate**, never at the end. A
+decision made without this loop is provisional and must say so —
+[D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default) currently is.
+
+If a task needs a performance or footprint choice that no experiment has settled,
+**stop and ask** rather than picking one.
 
 ## Verify before committing
 
