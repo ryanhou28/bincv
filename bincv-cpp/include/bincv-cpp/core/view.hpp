@@ -1,10 +1,16 @@
 #pragma once
 
-#include <cassert>
 #include <cstddef>
 #include <type_traits>
 
+// BINCV_ASSERT for the row() precondition, and BINCV_ABI_NAMESPACE. The views
+// are the type kernels bind to, so their preconditions are exactly the hot-path
+// case the project's error policy is written for -- not a place for a raw
+// assert() and its stringified-condition-only diagnostic (ARCHITECTURE 5.3).
+#include "error.hpp"
+
 namespace bincv {
+inline namespace BINCV_ABI_NAMESPACE {
 
 template <typename WordType_> struct BinMatConstView;
 
@@ -58,11 +64,13 @@ struct BinMatView {
     ///       (ARCHITECTURE 5.3: an inconsistent view is a programming error,
     ///       caught by assertion in debug).
     WordType* row(size_t y) {
-        assert((stride != 0 || height <= 1) && "BinMatView: multi-row view needs a non-zero stride");
+        BINCV_ASSERT(stride != 0 || height <= 1,
+                     "BinMatView: multi-row view needs a non-zero stride");
         return ptr + y * stride;
     }
     const WordType* row(size_t y) const {
-        assert((stride != 0 || height <= 1) && "BinMatView: multi-row view needs a non-zero stride");
+        BINCV_ASSERT(stride != 0 || height <= 1,
+                     "BinMatView: multi-row view needs a non-zero stride");
         return ptr + y * stride;
     }
 
@@ -116,7 +124,8 @@ struct BinMatConstView {
     /// @note Unchecked: y must be in [0, height). See BinMatView::row, including
     ///       the debug-only non-zero-stride precondition.
     const WordType* row(size_t y) const {
-        assert((stride != 0 || height <= 1) && "BinMatConstView: multi-row view needs a non-zero stride");
+        BINCV_ASSERT(stride != 0 || height <= 1,
+                     "BinMatConstView: multi-row view needs a non-zero stride");
         return ptr + y * stride;
     }
 };
@@ -126,4 +135,5 @@ inline BinMatView<WordType_>::operator BinMatConstView<WordType_>() const {
     return BinMatConstView<WordType>{ptr, width, height, stride};
 }
 
+} // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv

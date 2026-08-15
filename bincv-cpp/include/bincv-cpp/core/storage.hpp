@@ -5,7 +5,13 @@
 #include <cstring>
 #include <type_traits>
 
+// BINCV_ABI_NAMESPACE (core/error.hpp). Storage itself has no configuration-
+// dependent code, but it must sit in the same namespace as everything that
+// holds one.
+#include "error.hpp"
+
 namespace bincv {
+inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief Backing memory for a bit-packed matrix: {pointer, word count, ownership}.
 /// @tparam WordType_ The unsigned integral type the buffer is measured in.
@@ -50,10 +56,17 @@ public:
     /// @param words Number of words to allocate. Zero allocates nothing.
     /// @note Zero-filled because padding bits must start clear -- word-wise
     ///       reductions over-count otherwise.
-    /// @note Allocation failure uses plain new[]: with exceptions enabled it
-    ///       throws std::bad_alloc, and under -fno-exceptions the toolchain
-    ///       aborts. T1.4 routes this through the BINCV_THROW error policy;
-    ///       until then there is deliberately no error mechanism here.
+    /// @note Allocation failure is left to plain new[], which already produces
+    ///       exactly the two behaviours BINCV_THROW encodes: it throws
+    ///       std::bad_alloc where exceptions are enabled, and aborts where they
+    ///       are not. Routing it through the macro would mean allocating with
+    ///       new(std::nothrow) and testing the result on every allocation, and
+    ///       would force a choice of exception type -- std::bad_alloc is not
+    ///       constructible from a message, so the macro cannot express it. That
+    ///       choice is not recorded anywhere, so it is not made here (T1.4).
+    /// @note Consequence worth knowing: the abort on this path is the runtime's,
+    ///       so it carries no binCV diagnostic. Every failure binCV reports
+    ///       itself goes through core/error.hpp.
     explicit Storage(size_t words)
         : ptr_(words > 0 ? new WordType[words]() : nullptr),
           words_(words),
@@ -231,4 +244,5 @@ private:
     bool owns_;       // true if ptr_ came from this object's own new[]
 };
 
+} // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv

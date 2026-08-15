@@ -247,7 +247,7 @@ alignment default.
 
 ---
 
-### T1.4 · Error policy · `TODO`
+### T1.4 · Error policy · `DONE`
 
 **Depends:** T1.3
 **Files:** `include/bincv-cpp/core/error.hpp` (new), all headers
@@ -278,6 +278,25 @@ alignment default.
 - The no-exceptions build passes its tests
 
 **Verify:** V-ALL — the `build-noexcept` configuration is the point of this task.
+
+**How the two halves stay covered** *(the part that is easy to get wrong: both
+halves of this policy are invisible to an ordinary in-process test)*
+
+- Every `BINCV_THROW` site and every `BINCV_ASSERT` site is a **death test**: one
+  ctest test per case, driven by `tests/expect_fatal.cmake`, which requires the
+  child to terminate *abnormally* and to print its diagnostic. A failed check
+  ends the process, so nothing inside that process can report on it.
+  `BINCV_CHECK_THROWS` cannot stand in — without exceptions it cannot evaluate
+  its expression at all, so it reports a SKIP (44 of them in `test_binMat`), and
+  a suite of only those checks would pass in `build-noexcept` while verifying
+  nothing.
+- The **checked** configuration is compiled by `tests/test_error_checked.cpp` and
+  `tests/test_assert_abort.cpp`, which `#undef NDEBUG` before including anything.
+  All three V-ALL builds are Release, so without that the live-assert half of the
+  policy would be dead source in every configuration anyone runs. This is why
+  V-ALL does **not** need a fourth Debug configuration.
+- Both are regression-proven, not assumed: deleting a `BINCV_THROW` check or
+  either `at()`/`set()` bounds check makes all three configurations fail.
 
 ---
 

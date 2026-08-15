@@ -2,9 +2,19 @@
 
 #include <cstdint>
 #include <cstddef>
-#include <iostream>
 #include <type_traits>
-#include <stdexcept>
+// No <iostream> here, and none reachable from here: including it registers the
+// iostream static initializer (an ios_base::Init construction plus an
+// __cxa_atexit entry) in EVERY translation unit that includes this container,
+// whether or not it ever prints. That is the cost core/error.hpp avoids by
+// reporting through <cstdio>, and a header-only container has no business
+// reimposing it on a Tier 2 target where code size is often the binding
+// constraint (ARCHITECTURE 2). The printing helpers use std::fprintf; only
+// operator<<, which cannot be written without a stream type, pulls <ostream> --
+// and <ostream> alone carries no static initializer.
+// <stdexcept> likewise: core/error.hpp includes it when, and only when, the
+// throw path is the one being compiled.
+#include "core/error.hpp"
 #include "core/storage.hpp"
 #include "core/types.hpp"
 #include "core/view.hpp"
@@ -16,6 +26,7 @@
 #endif
 
 namespace bincv {
+inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief A binary matrix storing one bit per pixel, packed into words.
 /// @tparam WordType The unsigned integral type used to pack pixels.
@@ -31,6 +42,13 @@ namespace bincv {
 /// @note Kernels never take this type. They take the views returned by view() and
 ///       constView() (D-5), so a kernel compiles once per WordType regardless of
 ///       how its arguments were allocated or how their rows are aligned.
+/// @note Error policy (core/error.hpp, ARCHITECTURE 5.3): every constructor and
+///       every argument check below reports through BINCV_THROW, which throws by
+///       default and prints-and-aborts where exceptions are disabled. The two
+///       per-pixel accessors, at() and set(), are the exception -- they are
+///       debug-checked and unchecked in release. So each `@throws` clause here
+///       reads "throws, or aborts with that message under BINCV_NO_EXCEPTIONS",
+///       and it is not repeated per function.
 template <typename WordType_>
 class BinMat {
     static_assert(std::is_integral<WordType_>::value && std::is_unsigned<WordType_>::value,
@@ -221,10 +239,21 @@ public:
 
     // @todo add multi-element / slicing access that indexes by BinMat range
 
-    // @brief Gets the value of a single element at (row, col). Not a reference.
+    /// @brief Gets the value of a single element at (row, col). Not a reference.
+    /// @note DEBUG-CHECKED, UNCHECKED IN RELEASE, as cv::Mat::at is. An index
+    ///       outside [0, height) x [0, width) trips a BINCV_ASSERT in a debug
+    ///       build and is undefined behaviour in a release one -- it does not
+    ///       throw, and did until T1.4 (D-7 sanctions the change). This is what
+    ///       keeps the bounds test out of every per-pixel loop and lets a release
+    ///       build inline the access down to a row offset, a shift and a mask.
+    /// @note Reading a column in [width, alignedWidth * WordBits) therefore
+    ///       silently returns a padding bit rather than reporting the mistake.
     bool at(int row, int col) const;
 
-    // @brief Sets a single element at (row, col) to value.
+    /// @brief Sets a single element at (row, col) to value.
+    /// @note Debug-checked, unchecked in release; see at().
+    /// @note Writing past `width` breaks the padding-bit invariant that every
+    ///       word-wise reduction depends on, and release builds will not stop you.
     void set(int row, int col, bool value);
 
     // Fast row-level access to packed words via pointers
@@ -275,17 +304,23 @@ public:
     void transpose();
 
     // @brief Iterates over all non-zero pixels, invoking callback(row, col).
+    // @note An empty matrix is reported through BINCV_THROW rather than treated
+    //    as "no non-zero pixels" -- iterating something with no pixels is a
+    //    caller mistake, not a degenerate case with an obvious answer.
     template <typename Func>
     void forEachNonZero(Func callback) const;
 
     // @brief Prints the binary values as a human-readable matrix.
     // @note Output uses 0/1 per pixel, with rows and columns corresponding to image layout.
     // @note Prints in row-major order.
+    // @note Writes to stdout through <cstdio>, not std::cout, so that including
+    //    this container never drags the iostream static initializers into a
+    //    Tier 2 build. See the include block at the top of this file.
     void printMatrix() const;
 
     // @brief Prints the packed words of internal storage row by row.
     // @param hex If true, prints each word in hex. Otherwise, prints decimal.
-    // @note Prints in row-major order.
+    // @note Prints in row-major order, to stdout. See printMatrix().
     void printInternalData(bool hex = false) const;
 
     // @brief Fills the entire BinMat with the given binary value.
@@ -297,7 +332,8 @@ public:
 
     // @brief Returns the sparsity ratio (fraction of zero pixels).
     // @return A float in [0.0, 1.0] representing how sparse the matrix is.
-    // @note Empty matrices have undefined sparsity and will throw an exception.
+    // @note Empty matrices have undefined sparsity: this reports through
+    //    BINCV_THROW rather than inventing a value for 0/0.
     float sparsity() const;
 
     // @todo: add functions or representations for sparse formats e.g. CSR/CSC
@@ -331,6 +367,7 @@ private:
     Storage<WordType> storage;
 };
 
+} // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv
 
 #include "impl/binMat_impl.hpp"

@@ -18,9 +18,9 @@
 //
 // fromCVMat() must build its new buffer before it commits the new dimensions;
 // otherwise a failed allocation leaves the matrix describing storage it does not
-// have, and at()'s bounds check then validates against dimensions the buffer
-// cannot back. Proving that needs an allocation that fails on demand, so the
-// global operators are replaced here. Same shape as tests/test_binMat.cpp.
+// have, and every later read trusts those dimensions. Proving that needs an
+// allocation that fails on demand, so the global operators are replaced here.
+// Same shape as tests/test_binMat.cpp.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -150,7 +150,13 @@ void testFromCVMatAllocationFailure() {
 
     // Dimensions, storage, and contents all still describe the ORIGINAL buffer.
     // If the dimensions had been committed first, m would claim to be 64x64 over
-    // 4 words and at(63, 63) would pass its bounds check and read past the end.
+    // 4 words, and every subsequent read would trust that claim -- more so since
+    // T1.4, because at() no longer bounds-checks in release and so cannot catch
+    // it. The word count is the check that matters: sizeInWords() must equal
+    // height * alignedWidth for the ORIGINAL shape, not the attempted one --
+    // which pins the same property the deleted BINCV_CHECK_THROWS(m.at(63, 63))
+    // used to pin, and pins it directly rather than through an accessor. That
+    // accessor's own bounds check is covered by tests/test_assert_abort.cpp.
     BINCV_CHECK_EQ(m.getWidth(), size_t(8));
     BINCV_CHECK_EQ(m.getHeight(), size_t(2));
     BINCV_CHECK_EQ(m.sizeInWords(), wordsBefore);
@@ -158,7 +164,6 @@ void testFromCVMatAllocationFailure() {
     BINCV_CHECK(m.data() == dataBefore);
     BINCV_CHECK(m.at(1, 7));
     BINCV_CHECK_EQ(m.countNonZero(), 1);
-    BINCV_CHECK_THROWS(m.at(63, 63), std::out_of_range);
 
     // The matrix is still usable, and the same call succeeds when memory does.
     m.fromCVMat(big);

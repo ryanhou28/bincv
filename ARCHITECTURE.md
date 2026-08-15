@@ -566,6 +566,30 @@ Templating on constness interacts badly with the unsigned-integral constraint on
 `WordType` and produces error messages that are hard to read. Two plain types are
 more verbose to declare and considerably easier to work with.
 
+### D-10: Versioned inline namespace for configuration-dependent bodies
+
+*(Added during T1.4, not pre-planned — see the note below.)*
+
+Every binCV header opens `inline namespace BINCV_ABI_NAMESPACE`, whose name
+encodes the exceptions and debug-check configuration the translation unit was
+compiled with. Users never spell it.
+
+**Why it is necessary.** [§5.3](#53-error-policy) makes `NDEBUG` and
+`BINCV_NO_EXCEPTIONS` change the *body* of inline and template functions —
+`at()`'s bounds check, every `BINCV_THROW` site's throw-versus-abort. binCV is
+header-only, so those bodies are emitted into whichever objects use them. Two
+objects compiled with different settings then define the same symbol differently:
+an ODR violation where the linker keeps one arbitrarily. The symptom is bounds
+checks that appear to vanish — silent, and very hard to attribute.
+
+The versioned namespace makes that mismatch a link error instead. Same technique
+as libstdc++'s `__cxx11`.
+
+**Status: keep, but confirm.** This was not in T1.4's spec. It was kept rather
+than reverted because T1.4 is what *created* the hazard, and reverting would leave
+a real ODR trap with a silent failure mode. Recorded here so it is a deliberate
+decision rather than an accident.
+
 ### D-7: Existing code is not a constraint
 
 The pre-existing `BinMat` implementation is a prototype. Where it conflicts with

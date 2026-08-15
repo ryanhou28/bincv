@@ -1,11 +1,25 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <ostream>
 #include <utility>
 
+// BINCV_THROW / BINCV_ASSERT. Named here rather than left to binMat.hpp, which
+// is the only file that includes this one: every validation check below is
+// written in terms of these two macros, so the dependency is real. It also
+// carries <stdexcept> in exactly the configuration whose expansion needs it, and
+// BINCV_ABI_NAMESPACE.
+#include "../core/error.hpp"
+
+// <ostream> is here for operator<< alone, which cannot be expressed without a
+// stream type. It declares no global objects, so it costs no static initializer
+// -- unlike <iostream>, which is why the two print helpers below use std::fprintf
+// instead of std::cout. See the include block in binMat.hpp.
+
 namespace bincv {
+inline namespace BINCV_ABI_NAMESPACE {
 
 namespace impl {
 
@@ -70,10 +84,12 @@ inline size_t calcAlignedWidth(size_t widthPixels, size_t alignmentBytes) {
 template <typename WordType>
 inline void checkRowAlignment(size_t alignmentBytes) {
     if (alignmentBytes == 0 || (alignmentBytes & (alignmentBytes - 1)) != 0) {
-        throw std::invalid_argument("BinMat rowAlignment must be a positive power of two");
+        BINCV_THROW(std::invalid_argument,
+                    "BinMat rowAlignment must be a positive power of two");
     }
     if (alignmentBytes % sizeof(WordType) != 0) {
-        throw std::invalid_argument("BinMat rowAlignment must be a multiple of the word size");
+        BINCV_THROW(std::invalid_argument,
+                    "BinMat rowAlignment must be a multiple of the word size");
     }
 }
 
@@ -89,7 +105,7 @@ BinMat<WordType_>::BinMat(int w, int h, size_t rowAlign)
     : width(0), height(0), rowAlignment(rowAlign), alignedWidth(0), storage() {
 
     if (w < 0 || h < 0) {
-        throw std::invalid_argument("BinMat dimensions must be non-negative");
+        BINCV_THROW(std::invalid_argument, "BinMat dimensions must be non-negative");
     }
     impl::checkRowAlignment<WordType>(rowAlign);
 
@@ -107,7 +123,7 @@ BinMat<WordType_>::BinMat(WordType* dataPtr, int w, int h, size_t strideWords)
     : width(0), height(0), rowAlignment(DefaultRowAlignment), alignedWidth(0), storage() {
 
     if (w < 0 || h < 0) {
-        throw std::invalid_argument("BinMat dimensions must be non-negative");
+        BINCV_THROW(std::invalid_argument, "BinMat dimensions must be non-negative");
     }
 
     const size_t wrapWidth = static_cast<size_t>(w);
@@ -116,11 +132,12 @@ BinMat<WordType_>::BinMat(WordType* dataPtr, int w, int h, size_t strideWords)
     // A stride shorter than the row needs would make consecutive rows overlap,
     // and every row pointer past row 0 would be wrong rather than merely tight.
     if (strideWords < impl::minRowWords<WordType>(wrapWidth)) {
-        throw std::invalid_argument(
-            "BinMat strideWords must be at least ceil(width / WordBits) words");
+        BINCV_THROW(std::invalid_argument,
+                    "BinMat strideWords must be at least ceil(width / WordBits) words");
     }
     if (dataPtr == nullptr && wrapWidth > 0 && wrapHeight > 0) {
-        throw std::invalid_argument("BinMat cannot wrap a null pointer as a non-empty matrix");
+        BINCV_THROW(std::invalid_argument,
+                    "BinMat cannot wrap a null pointer as a non-empty matrix");
     }
 
     width = wrapWidth;
@@ -238,10 +255,10 @@ BinMat<WordType_>& BinMat<WordType_>::operator=(BinMat&& other) noexcept {
 template <typename WordType_>
 void BinMat<WordType_>::fromCVMat(const cv::Mat& input) {
     if (input.empty()) {
-        throw std::invalid_argument("Input cv::Mat is empty");
+        BINCV_THROW(std::invalid_argument, "Input cv::Mat is empty");
     }
     if (input.type() != CV_8UC1) {
-        throw std::invalid_argument("Input cv::Mat must be of type CV_8UC1");
+        BINCV_THROW(std::invalid_argument, "Input cv::Mat must be of type CV_8UC1");
     }
 
     const size_t newWidth = static_cast<size_t>(input.cols);
@@ -251,7 +268,8 @@ void BinMat<WordType_>::fromCVMat(const cv::Mat& input) {
     // Allocate and fill zero-initialized storage BEFORE touching this object's
     // dimensions, the same commit-last shape resize() uses. Committing first would
     // leave a failed allocation behind a matrix that describes a buffer it does not
-    // have, and at()'s bounds check would then validate against those dimensions.
+    // have, and every later read would trust those dimensions -- at() cannot catch
+    // it, since T1.4 made the bounds check debug-only.
     Storage<WordType> newData(newHeight * newAlignedWidth);
 
     for (size_t y = 0; y < newHeight; ++y) {
@@ -324,11 +342,19 @@ void BinMat<WordType_>::clearTrailingBits() {
 }
 
 // at and set
+//
+// Debug-checked, unchecked in release (ARCHITECTURE 5.3, and the behaviour
+// change D-7 sanctions). These are the two functions on the per-pixel path, and
+// a throw here would sit inside every loop that reads an image. In a release
+// build the checks are gone entirely -- what remains is the row offset, a shift
+// and a mask -- and an out-of-range index is undefined behaviour, exactly as it
+// is for cv::Mat::at. Callers that cannot guarantee their indices should clamp
+// before calling, not rely on the container to report it.
 template <typename WordType_>
 bool BinMat<WordType_>::at(int row, int col) const {
-    if (row < 0 || row >= static_cast<int>(height) || col < 0 || col >= static_cast<int>(width)) {
-        throw std::out_of_range("BinMat::at: index out of range");
-    }
+    BINCV_ASSERT(row >= 0 && row < static_cast<int>(height) &&
+                     col >= 0 && col < static_cast<int>(width),
+                 "BinMat::at: index out of range");
     const WordType* rowPtr = storage.data() + static_cast<size_t>(row) * alignedWidth;
     size_t x = static_cast<size_t>(col);
     return (rowPtr[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) != 0;
@@ -336,9 +362,9 @@ bool BinMat<WordType_>::at(int row, int col) const {
 
 template <typename WordType_>
 void BinMat<WordType_>::set(int row, int col, bool value) {
-    if (row < 0 || row >= static_cast<int>(height) || col < 0 || col >= static_cast<int>(width)) {
-        throw std::out_of_range("BinMat::set: index out of range");
-    }
+    BINCV_ASSERT(row >= 0 && row < static_cast<int>(height) &&
+                     col >= 0 && col < static_cast<int>(width),
+                 "BinMat::set: index out of range");
     WordType* rowPtr = storage.data() + static_cast<size_t>(row) * alignedWidth;
     size_t x = static_cast<size_t>(col);
     WordType& word = rowPtr[impl::wordIndex<WordType>(x)];
@@ -367,7 +393,7 @@ typename BinMat<WordType_>::WordType* BinMat<WordType_>::ptr(int row) {
 template <typename WordType_>
 void BinMat<WordType_>::resize(int newWidth, int newHeight) {
     if (newWidth < 0 || newHeight < 0)
-        throw std::invalid_argument("BinMat dimensions must be non-negative");
+        BINCV_THROW(std::invalid_argument, "BinMat dimensions must be non-negative");
 
     size_t nw = static_cast<size_t>(newWidth);
     size_t nh = static_cast<size_t>(newHeight);
@@ -406,7 +432,7 @@ void BinMat<WordType_>::resize(int newWidth, int newHeight) {
 template <typename WordType_>
 void BinMat<WordType_>::pad(int top, int bottom, int left, int right, bool value) {
     if (top < 0 || bottom < 0 || left < 0 || right < 0) {
-        throw std::invalid_argument("Padding values must be non-negative");
+        BINCV_THROW(std::invalid_argument, "Padding values must be non-negative");
     }
 
     // Calculate new dimensions
@@ -486,7 +512,8 @@ template <typename WordType_>
 template <typename Func>
 void BinMat<WordType_>::forEachNonZero(Func callback) const {
     if (empty()) {
-        throw std::runtime_error("BinMat is empty, cannot iterate over non-zero pixels");
+        BINCV_THROW(std::runtime_error,
+                    "BinMat is empty, cannot iterate over non-zero pixels");
     }
     for (size_t y = 0; y < height; ++y) {
         const WordType* row = storage.data() + y * alignedWidth;
@@ -508,9 +535,10 @@ void BinMat<WordType_>::printMatrix() const {
     for (size_t y = 0; y < height; ++y) {
         const WordType* row = storage.data() + y * alignedWidth;
         for (size_t x = 0; x < width; ++x) {
-            std::cout << ((row[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) ? '1' : '0');
+            std::fputc((row[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) ? '1' : '0',
+                       stdout);
         }
-        std::cout << '\n';
+        std::fputc('\n', stdout);
     }
 }
 
@@ -542,15 +570,14 @@ void BinMat<WordType_>::printInternalData(bool hex) const {
     for (size_t y = 0; y < height; ++y) {
         const WordType* row = storage.data() + y * alignedWidth;
         for (size_t b = 0; b < alignedWidth; ++b) {
-            if (hex)
-                std::cout << std::hex << static_cast<uint64_t>(row[b]) << " ";
-            else
-                std::cout << std::dec << static_cast<uint64_t>(row[b]) << " ";
+            // Widened to the largest word type so one format string covers all
+            // four. Nothing to reset afterwards, unlike the std::hex this used to
+            // leave stuck on std::cout.
+            std::fprintf(stdout, hex ? "%llx " : "%llu ",
+                         static_cast<unsigned long long>(row[b]));
         }
-        std::cout << '\n';
+        std::fputc('\n', stdout);
     }
-    // Reset output stream to decimal format
-    std::cout << std::dec;
 }
 
 // fill
@@ -594,10 +621,11 @@ template <typename WordType_>
 float BinMat<WordType_>::sparsity() const {
     size_t totalPixels = width * height;
     if (totalPixels == 0)
-        throw std::runtime_error("Sparsity is undefined for empty BinMat");
+        BINCV_THROW(std::runtime_error, "Sparsity is undefined for empty BinMat");
 
     int nonzero = countNonZero();
     return 1.0f - static_cast<float>(nonzero) / static_cast<float>(totalPixels);
 }
 
+} // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv

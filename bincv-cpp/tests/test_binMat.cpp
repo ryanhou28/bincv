@@ -270,13 +270,20 @@ void testWordType(const char* label) {
     BINCV_CHECK_EQ(thin.getHeight(), size_t(0));
     BINCV_CHECK(thin.empty());
 
-    // Argument validation
+    // Argument validation. These are setup-time checks, so they still report
+    // through BINCV_THROW (T1.4). The at()/set() bounds cases that used to sit
+    // here cannot: those accessors are debug-checked and unchecked in release
+    // now, so an out-of-range index aborts instead of throwing and no
+    // in-process check can observe it. They moved to tests/test_assert_abort.cpp
+    // (cases at-row, at-col, at-negative, set-row, set-col), which forces the
+    // checked configuration and runs them as death tests in every build.
+    //
+    // Note also that in a build without exceptions BINCV_CHECK_THROWS reports a
+    // SKIP rather than a pass; the same sites are covered there by
+    // tests/test_error_abort.cpp.
     BINCV_CHECK_THROWS(bincv::BinMat<WordType>(-1, 10), std::invalid_argument);
     BINCV_CHECK_THROWS(bincv::BinMat<WordType>(10, 10, 0), std::invalid_argument);
     BINCV_CHECK_THROWS(bincv::BinMat<WordType>(10, 10, 3), std::invalid_argument);
-    BINCV_CHECK_THROWS(mat.at(999, 0), std::out_of_range);
-    BINCV_CHECK_THROWS(mat.at(0, 999), std::out_of_range);
-    BINCV_CHECK_THROWS(mat.set(-1, 5, true), std::out_of_range);
     BINCV_CHECK_THROWS(mat.resize(-1, 5), std::invalid_argument);
     BINCV_CHECK_THROWS(mat.pad(-1, 0, 0, 0), std::invalid_argument);
 }

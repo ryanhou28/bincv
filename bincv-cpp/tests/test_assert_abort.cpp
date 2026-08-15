@@ -1,0 +1,128 @@
+// Deliberately violates one debug-checked precondition, and does not survive it.
+//
+// THIS FILE FORCES THE CHECKED CONFIGURATION. The #undef below runs before any
+// binCV header is seen, so BINCV_DEBUG_CHECKS is 1 here no matter which build
+// type compiled it. Without that, this suite would be dead source in every
+// configuration the project actually verifies: all three V-ALL builds are
+// Release, so NDEBUG is set in all of them, and the debug half of the error
+// policy -- the live BINCV_ASSERT, and the bounds checks that at() and set() are
+// specified to have -- would never be compiled or run.
+//
+// WHAT IT REPLACES: before T1.4, out-of-range at()/set() threw std::out_of_range
+// and tests/test_binMat.cpp asserted that with three BINCV_CHECK_THROWS lines
+// (plus one in tests/test_opencv_interop.cpp). D-7 removed the throw, and those
+// four assertions were deleted with it and not replaced -- deleting both bounds
+// checks from binMat_impl.hpp left Release, Debug and -fno-exceptions all
+// reporting 100% passed. These cases are that coverage, restored at the checked
+// configuration's terms: the failure is now an abort, so it is observed from
+// outside the process by tests/expect_fatal.cmake.
+//
+// Each case is registered in tests/CMakeLists.txt with the diagnostic it must
+// print, so the message is covered too -- an assert that fires with the wrong
+// message points at the wrong mistake.
+
+#undef NDEBUG
+
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+
+#include "bincv-cpp/binMat.hpp"
+#include "bincv-cpp/core/view.hpp"
+
+#if !BINCV_DEBUG_CHECKS
+#error "test_assert_abort must compile with BINCV_DEBUG_CHECKS == 1; the #undef NDEBUG above is what guarantees it"
+#endif
+
+namespace {
+
+using Mat = bincv::BinMat<uint32_t>;
+
+// 20 pixels in a 32-bit word, so the out-of-range columns below are still inside
+// the row's own allocation: the case proves the CHECK fires, and does not depend
+// on undefined behaviour to do it.
+Mat makeMat() { return Mat(20, 4); }
+
+uint32_t g_buffer[8] = {0};
+
+int caseAtRow() {
+    const Mat m = makeMat();
+    return m.at(999, 0) ? 1 : 0;
+}
+
+int caseAtCol() {
+    const Mat m = makeMat();
+    return m.at(0, 999) ? 1 : 0;
+}
+
+int caseAtNegative() {
+    const Mat m = makeMat();
+    return m.at(-1, 0) ? 1 : 0;
+}
+
+int caseSetRow() {
+    Mat m = makeMat();
+    m.set(-1, 5, true);
+    return m.countNonZero();
+}
+
+int caseSetCol() {
+    Mat m = makeMat();
+    // Column 25 is past `width` but inside the first word. In release this
+    // silently sets a padding bit that countNonZero() cannot see, which is the
+    // invariant break the check exists to catch (CLAUDE.md: padding bits stay
+    // zero).
+    m.set(0, 25, true);
+    return m.countNonZero();
+}
+
+// The views are the type kernels bind to, so their preconditions are the other
+// half of the hot-path policy. A missing stride is the one field whose omission
+// is not self-announcing: every row silently aliases row 0.
+int caseViewStride() {
+    bincv::BinMatView<uint32_t> v{g_buffer, 64, 4, 0};
+    return static_cast<int>(*v.row(2));
+}
+
+int caseConstViewStride() {
+    bincv::BinMatConstView<uint32_t> v{g_buffer, 64, 4, 0};
+    return static_cast<int>(*v.row(2));
+}
+
+struct Case {
+    const char* name;
+    int (*run)();
+};
+
+const Case kCases[] = {
+    {"at-row", caseAtRow},
+    {"at-col", caseAtCol},
+    {"at-negative", caseAtNegative},
+    {"set-row", caseSetRow},
+    {"set-col", caseSetCol},
+    {"view-stride", caseViewStride},
+    {"const-view-stride", caseConstViewStride},
+};
+
+} // namespace
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::fprintf(stderr, "usage: %s <case>\ncases:\n", argv[0]);
+        for (const Case& c : kCases) std::fprintf(stderr, "  %s\n", c.name);
+        return 2;
+    }
+
+    for (const Case& c : kCases) {
+        if (std::strcmp(argv[1], c.name) == 0) {
+            const int evidence = c.run();
+            std::fprintf(stderr, "REACHED: the check did not fire for case '%s' (evidence %d)\n",
+                         c.name, evidence);
+            std::fflush(stderr);
+            return 0;
+        }
+    }
+
+    std::fprintf(stderr, "unknown case '%s'\n", argv[1]);
+    return 2;
+}

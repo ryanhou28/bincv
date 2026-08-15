@@ -37,7 +37,8 @@ and logged below** rather than guessed at.
 |---|---|---|
 | **T1.1** Storage model | `DONE` — 544 checks, ASan/UBSan/LSan clean, aarch64 verified | `see below` |
 | **T1.2** Views | `DONE` — same suite | `0e86bfc` |
-| **T1.3** BinMat on Storage/views | `DONE` — 857 checks, 640x480 = exactly 38400 B | `see below` |
+| **T1.3** BinMat on Storage/views | `DONE` — 857 checks, 640x480 = exactly 38400 B | `049b63c` |
+| **T1.4** Error policy | `DONE` — **-fno-exceptions gate CLOSED, 57 errors → 0** | `see below` |
 
 **T1.1 / T1.2 detail.** `core/storage.hpp` and `core/view.hpp`. Reviewers found
 and the fix phase corrected **8 confirmed defects**, two of them real
@@ -93,6 +94,32 @@ matrix to 0x0; and two double-writes of whole buffers (copy 1.02 -> 0.62 us at
 
 Verified independently before commit: both configs from scratch (3/3, 2/2, zero
 warnings), 38400 confirmed by my own program, 857/857 under ASan+UBSan+LSan.
+
+---
+
+### T1.4 detail — the Tier 2 claim is now real
+
+**`-fno-exceptions` went from 57 errors to 0.** All three configurations build and
+pass: 24 / 21 / 21 tests. This is the first time the embedded configuration has
+ever been green, and it is the whole Tier 2 / microcontroller claim.
+
+`core/error.hpp` provides `BINCV_THROW` (throws normally, prints and aborts when
+exceptions are unavailable) and `BINCV_ASSERT` (debug-only, compiles away entirely
+under NDEBUG). 14 throw sites routed; the only `throw` token left under `include/`
+is inside `BINCV_THROW`'s own definition. `at()`/`set()` are now debug-checked and
+release-unchecked, matching `cv::Mat::at` — verified by `-O2 -S` inspection showing
+12 instructions, zero branches.
+
+**The best catch of this task — a suite that silently covered less than it claimed.**
+`BINCV_CHECK_THROWS` cannot work without exceptions. Expanding it to nothing made
+the two builds report `801/801` and `845/845`, *both reading as complete success*,
+while **44 validation checks had quietly disappeared** from the embedded build. It
+now reports `801/801 passed, 44 skipped`, and those 44 are covered by **17 death
+tests** that run in every configuration via `expect_fatal.cmake` — which passes only
+if the child both terminated abnormally *and* printed the expected diagnostic.
+
+This is the same failure mode as the T1.3 "test that could not fail": coverage that
+looks complete and is not.
 
 ---
 
@@ -170,7 +197,24 @@ warning-free; `test_storage` builds clean and passes 544/544 under
 
 ---
 
-### 4. A second gate is vacuous: nothing enforces "warning-free"
+### 4. Unrequested architectural addition — kept, recorded as D-10, please confirm
+
+T1.4 added `BINCV_ABI_NAMESPACE`, a versioned inline namespace that every header
+now opens. **This was not in the task spec.**
+
+It solves a real hazard that **T1.4 itself created**: `NDEBUG` and
+`BINCV_NO_EXCEPTIONS` now change the *bodies* of inline and template functions in a
+header-only library, so linking objects compiled with different settings is an ODR
+violation where the linker picks one arbitrarily. The symptom would be *bounds
+checks that appear to vanish* — silent and very hard to attribute. The versioned
+namespace turns that into a link error. Same technique as libstdc++'s `__cxx11`.
+
+**I kept it rather than reverting**, because reverting would leave a real trap with
+a silent failure mode, and recorded it as
+[D-10](ARCHITECTURE.md#d-10-versioned-inline-namespace-for-configuration-dependent-bodies)
+so it is a deliberate decision rather than an accident. Confirm or reject.
+
+### 5. A second gate is vacuous: nothing enforces "warning-free"
 
 `grep -rnE '\-Wall|\-Wextra|\-Werror' ` over all three `CMakeLists.txt` returns
 **nothing**. V-ALL, CLAUDE.md and GETTING_STARTED all require builds to be
@@ -187,7 +231,7 @@ gate has teeth.
 
 ---
 
-### 5. Subagent ran `rm -rf` outside its scope — investigated, benign
+### 6. Subagent ran `rm -rf` outside its scope — investigated, benign
 
 The T1.3 fix agent triggered a security warning for running
 `rm -rf /home/ryanhou28/bincv/tests` — a path outside the task, undisclosed in

@@ -98,12 +98,38 @@ configuration is actually exercised rather than assumed:
 
 - `tests/test_binMat.cpp` — core suite, **no OpenCV**. Runs the behavioural
   contract against all supported word widths.
+- `tests/test_storage.cpp` — the storage layer on its own.
+- `tests/test_error.cpp` — the error policy as compiled in *this* build.
+- `tests/test_error_checked.cpp` — the error policy with checks forced **on**.
 - `tests/test_opencv_interop.cpp` — `cv::Mat` round-trips, built only with OpenCV.
 
-Add core tests to the first and OpenCV-dependent tests to the second.
+Add core tests to the first and OpenCV-dependent tests to the last.
 
 The interim harness (`tests/test_util.hpp`) reports failures with file and line
 and returns a non-zero exit code. Google Test replaces it in Phase 1.6.
+
+### Tests for checks that kill the process
+
+A failed binCV check terminates the process — it throws where exceptions exist
+and calls `std::abort()` where they do not ([§5.3](ARCHITECTURE.md#53-error-policy))
+— so no assertion inside that process can observe it. Those cases are **death
+tests**:
+
+- `tests/test_error_abort.cpp` — one case per `BINCV_THROW` site.
+- `tests/test_assert_abort.cpp` — one case per `BINCV_ASSERT` site.
+- `tests/expect_fatal.cmake` runs a case as its own process and passes only if it
+  terminated *abnormally* **and** printed the expected diagnostic. A clean
+  non-zero return is a failure, not a pass.
+
+Adding a validation check means adding a case to `test_error_abort.cpp` and
+registering it in `tests/CMakeLists.txt` with the message it must print.
+`BINCV_CHECK_THROWS` is not a substitute: without exceptions it cannot evaluate
+its expression, so it reports a SKIP and covers nothing.
+
+Two of these suites `#undef NDEBUG` before their includes, which forces
+`BINCV_DEBUG_CHECKS` on. That is deliberate: every configuration the project
+verifies is Release, so the debug-checked half of the policy would otherwise
+never be compiled at all.
 
 ### Correctness standards
 
@@ -158,6 +184,9 @@ reproducible from a committed benchmark.
 
 ### Core
 - [bincv-cpp/include/bincv-cpp/core/types.hpp](bincv-cpp/include/bincv-cpp/core/types.hpp) — `Size`, morphology and border enums, type aliases
+- [bincv-cpp/include/bincv-cpp/core/storage.hpp](bincv-cpp/include/bincv-cpp/core/storage.hpp) — owning or caller-provided backing memory
+- [bincv-cpp/include/bincv-cpp/core/view.hpp](bincv-cpp/include/bincv-cpp/core/view.hpp) — `BinMatView` / `BinMatConstView`, the kernel interface
+- [bincv-cpp/include/bincv-cpp/core/error.hpp](bincv-cpp/include/bincv-cpp/core/error.hpp) — `BINCV_THROW` / `BINCV_ASSERT`, the error policy
 - [bincv-cpp/include/bincv-cpp/binMat.hpp](bincv-cpp/include/bincv-cpp/binMat.hpp) — the 1-bit container
 - [bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp](bincv-cpp/include/bincv-cpp/impl/binMat_impl.hpp) — template implementation
 

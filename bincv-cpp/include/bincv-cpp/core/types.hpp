@@ -3,7 +3,13 @@
 #include <cstdint>
 #include <cstddef>
 
+// BINCV_ABI_NAMESPACE. Every binCV header opens the same versioned inline
+// namespace, so that objects compiled in different configurations cannot merge
+// silently; see core/error.hpp.
+#include "error.hpp"
+
 namespace bincv {
+inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief Size structure representing width and height
 /// @note Replaces cv::Size in core to eliminate OpenCV dependency
@@ -71,4 +77,5 @@ using BinMat16 = BinMat<uint16_t>;  ///< BinMat with 16-bit words (16 pixels per
 using BinMat32 = BinMat<uint32_t>;  ///< BinMat with 32-bit words (32 pixels per word) - Default
 using BinMat64 = BinMat<uint64_t>;  ///< BinMat with 64-bit words (64 pixels per word)
 
+} // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv

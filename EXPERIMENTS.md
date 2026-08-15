@@ -284,6 +284,49 @@ Recorded as [D-6](ARCHITECTURE.md#d-6-bulk-only-reductions).
 
 ---
 
+### X-4 · Set-pixel benchmark discontinuity at T1.4 · `DONE`
+
+**Gates:** nothing. This is a **comparability record**, not a decision
+experiment — the choice it follows from was already made by
+[D-7](ARCHITECTURE.md#d-7-existing-code-is-not-a-constraint) /
+[§5.3](ARCHITECTURE.md#53-error-policy), so there is no decision rule written in
+advance. It is logged because a published performance ratio changed for a reason
+that has nothing to do with performance work, and the log exists to make exactly
+that visible.
+
+**Question:** How much of the `BinMat set pixels` number is the bounds check that
+T1.4 removed?
+**Variants:** `set()` as it is now (`BINCV_ASSERT`, compiled away under NDEBUG)
+versus `set()` as it was before T1.4 (an `if` that threw `std::out_of_range`,
+live in release).
+**Workload:** `set_pixels_benchmark --iterations 20000`, default 640×480, 1000
+random coordinates per run; 5 runs of each variant, same machine, back to back.
+**Metric:** ms per run, both variants and the OpenCV denominator.
+**Method:** the shipped benchmark, built Release against each variant of
+`impl/binMat_impl.hpp`.
+
+**Result**
+
+| Variant | ms per run (5 runs) | median |
+|---|---|---|
+| before T1.4 — checked, throwing | 0.00114 · 0.00134 · 0.00143 · 0.00166 · 0.00167 | 0.00143 |
+| after T1.4 — unchecked in release | 0.00086 · 0.00087 · 0.00093 · 0.00117 · 0.00120 | 0.00093 |
+| OpenCV `cv::Mat::at` (denominator) | unchanged: 0.00324, 0.00335 | — |
+
+**Conclusion:** Roughly **1.3–1.6× faster**, from deleting a per-pixel branch —
+not from any change to the packing or the write. The denominator did not move,
+because `cv::Mat::at` was already unchecked under NDEBUG, so the binCV-versus-
+OpenCV ratio for this benchmark shifts by that factor on the T1.4 commit alone.
+
+**Consequence for the log:** set-pixel numbers recorded before T1.4 —
+`bincv-cpp/results/set_pixels_benchmark.log` — are **not comparable** with
+numbers recorded after it. Numbers taken after it are a like-for-like comparison
+for the first time: both sides are now unchecked in release.
+
+**Decision:** none. No D-record; D-7 already covers the behaviour change.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
