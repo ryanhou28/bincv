@@ -73,8 +73,21 @@ straight to headless.
 
 ## Network
 
-`.local` mDNS resolution **does not work from WSL2** — its NAT does not carry
-mDNS. Do not rely on `bincv-pi.local`; use a fixed address.
+**Correction (verified 2026-08-16):** an earlier version of this file claimed
+`.local` does not resolve from WSL2. That was wrong — it was concluded from a test
+against a hostname that did not exist yet, which shows only that a name is absent,
+not that the mechanism is broken. With a real device on the LAN, `ryan-pi4.local`
+resolves fine through the Windows resolver.
+
+The real hazard is different and worse, because it is **intermittent**: mDNS
+returns **dual-stack**, and a WSL2 host typically has no IPv6 route. ssh then
+sometimes picks the AAAA record and fails with `Network is unreachable`. Measured
+here: it worked 10 times in a row, then failed inside the runner.
+
+**Therefore: force IPv4.** `scripts/run_on_pi.sh` passes `-4` on every ssh and
+rsync call for this reason. If you connect by hand, use `ssh -4`. A DHCP
+reservation plus a literal IP in `~/.ssh/config` avoids the question entirely and
+is still the more robust setup.
 
 1. Find the Pi's address from the router's client list, or from Windows:
    ```powershell

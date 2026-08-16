@@ -12,7 +12,8 @@
 #   ./scripts/run_on_pi.sh bincv-pi ./tests/test_binMat
 #
 # <target> is any ssh destination -- a ~/.ssh/config alias is strongly preferred,
-# because mDNS (.local) does NOT resolve from WSL2. See
+# and pass -4 (see remote() below): mDNS .local resolves dual-stack and the IPv6
+# leg is unroutable from WSL2. See
 # docs/MEASUREMENT_HARDWARE.md. It may also be given as BINCV_PI_TARGET.
 #
 # ---------------------------------------------------------------------------
@@ -49,7 +50,11 @@ readonly REPO_ROOT
 
 # Remote scratch. Deliberately not /tmp: some Pi images mount it as tmpfs, and a
 # build tree there competes for the RAM the measurement is about.
-readonly REMOTE_DIR="\$HOME/bincv-measure"
+# Relative on purpose. An earlier version used "\$HOME/bincv-measure", which ssh
+# expanded but rsync did NOT -- rsync received the literal string and created a
+# directory named '$HOME' on the device. A relative path resolves against the
+# remote home for both, so there is nothing to quote and nothing to disagree about.
+readonly REMOTE_DIR="bincv-measure"
 readonly RESULTS_DIR="${REPO_ROOT}/results"
 
 GOVERNOR_SAVED=""
@@ -73,7 +78,11 @@ skip() {
 # same options: no interactive prompts, and a bounded connect time so an absent
 # device fails in seconds rather than hanging a session.
 remote() {
-    ssh -o BatchMode=yes -o ConnectTimeout=10 "$TARGET" "$@"
+    # -4 is not optional. An mDNS .local name resolves dual-stack, and a WSL2 host
+    # typically has no IPv6 route, so ssh intermittently picks the AAAA record and
+    # dies with "Network is unreachable". Measured here: 1 failure in a handful of
+    # connections, which is precisely the flake that kills an unattended run at 3am.
+    ssh -4 -o BatchMode=yes -o ConnectTimeout=10 "$TARGET" "$@"
 }
 
 # --------------------------------------------------------------------------
@@ -86,9 +95,29 @@ remote() {
 restore_governor() {
     local rc=$?
     if [[ -n "$GOVERNOR_SAVED" && -n "$TARGET" ]]; then
-        remote "echo '$GOVERNOR_SAVED' | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1" \
-            && info "governor restored to $GOVERNOR_SAVED" \
-            || printf '  WARNING: could not restore governor to %s\n' "$GOVERNOR_SAVED" >&2
+        # RETRY. The restore itself needs the network, so a transient ssh failure
+        # would otherwise leave the device pinned to `performance` -- which
+        # silently changes every later measurement anyone takes on it. Observed
+        # in the first real run against hardware: the restore lost a name
+        # resolution and the Pi stayed pinned.
+        local attempt restored=0
+        for attempt in 1 2 3; do
+            if remote "echo '$GOVERNOR_SAVED' | sudo -n tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null" 2>/dev/null; then
+                restored=1; break
+            fi
+            sleep 2
+        done
+        if [[ $restored -eq 1 ]]; then
+            info "governor restored to $GOVERNOR_SAVED"
+        else
+            printf '\n  ####################################################################\n' >&2
+            printf '  ## WARNING: COULD NOT RESTORE THE GOVERNOR after 3 attempts.\n' >&2
+            printf '  ## The device is probably still pinned to `performance`, which will\n' >&2
+            printf '  ## silently affect every later measurement taken on it.\n' >&2
+            printf '  ## Fix by hand:\n' >&2
+            printf '  ##   ssh -4 %s "echo %s | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"\n' "$TARGET" "$GOVERNOR_SAVED" >&2
+            printf '  ####################################################################\n\n' >&2
+        fi
     fi
     exit $rc
 }
@@ -163,7 +192,7 @@ esac
 # 3. Governor. Saved first so the trap can put it back.
 GOVERNOR_SAVED="$(remote 'cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown' | tr -d '\r')"
 if [[ "$GOVERNOR_SAVED" != "unknown" ]]; then
-    remote "echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null" \
+    remote "echo performance | sudo -n tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null" \
         || fail "could not set the performance governor (passwordless sudo required)"
     info "governor: $GOVERNOR_SAVED -> performance"
 else
@@ -178,7 +207,7 @@ printf '\n  sync\n'
 remote "mkdir -p $REMOTE_DIR"
 rsync -az --delete \
       --exclude 'build*/' --exclude '.git/' --exclude 'results/' \
-      -e 'ssh -o BatchMode=yes -o ConnectTimeout=10' \
+      -e 'ssh -4 -o BatchMode=yes -o ConnectTimeout=10' \
       "${REPO_ROOT}/" "${TARGET}:${REMOTE_DIR}/" \
     || fail "rsync failed"
 info "repository synced to ${REMOTE_DIR}"
@@ -239,7 +268,7 @@ hr
 # Results
 # --------------------------------------------------------------------------
 mkdir -p "$RESULTS_DIR"
-rsync -az -e 'ssh -o BatchMode=yes' \
+rsync -az -e 'ssh -4 -o BatchMode=yes' \
       "${TARGET}:${REMOTE_DIR}/bincv-cpp/build-pi/*.log" "$RESULTS_DIR/" 2>/dev/null || true
 
 printf '\n'

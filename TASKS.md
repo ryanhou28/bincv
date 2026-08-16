@@ -597,7 +597,7 @@ verifying less than it said:
 
 ---
 
-### T1.10 · Cortex-A measurement runner · `PARTIAL` · ⚙️ written; needs Pi to verify
+### T1.10 · Cortex-A measurement runner · `DONE` · verified against real hardware 2026-08-16
 
 **Depends:** T1.9
 **Files:** `scripts/run_on_pi.sh` (new)
@@ -1058,7 +1058,7 @@ documented claim, report it — do not adjust the code to fit the doc.
 
 ---
 
-### T2.8 · E-1 · Does row alignment earn its memory? · `BLOCKED` · ⚙️ needs Pi
+### T2.8 · E-1 · Does row alignment earn its memory? · `TODO` · ⚙️ Pi available
 
 **Depends:** T2.5
 **Gates:** [D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default) —
@@ -1093,7 +1093,7 @@ side filled in, D-4 is confirmed or reopened, and the benchmark is committed.
 
 ---
 
-### T2.9 · E-2 · Default word width · `BLOCKED` · ⚙️ needs Pi
+### T2.9 · E-2 · Default word width · `TODO` · ⚙️ Pi available
 
 **Depends:** T2.5
 **Gates:** `BinMat`'s default template argument — affects every kernel
@@ -1124,7 +1124,7 @@ than the hardware. Confirm `aarch64` before recording anything.
 
 ---
 
-### T2.10 · E-3 · Incremental versus recomputed window reductions · `BLOCKED` · ⚙️ needs Pi
+### T2.10 · E-3 · Incremental versus recomputed window reductions · `TODO` · ⚙️ Pi available
 
 **Depends:** T2.6
 **Gates:** T2.6's interface and T3.6's implementation
