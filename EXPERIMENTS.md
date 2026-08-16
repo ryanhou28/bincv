@@ -327,7 +327,7 @@ for the first time: both sides are now unchecked in release.
 
 ---
 
-### X-6 · Is the T2.2 logic speedup real? · `PARTIAL`
+### X-6 · Is the T2.2 logic speedup real? · `DONE`
 
 **Gates:** the T2.2 performance claim, flagged unconfirmed at commit `22cbe5c`.
 **Question:** the committed benchmark reported 8-10x on x86; an independent probe
@@ -364,6 +364,44 @@ the honest headline is whatever the Cortex-A72 reports, whatever it is.
 - ratio < 2x  -> report plainly that logic ops are near parity on the target, and
   that the memory ratio rather than throughput is what carries the thesis.
 No outcome is a failure. Overclaiming would be.
+
+**Result — Pi 4, Cortex-A72, governor `performance`, `taskset -c 3`,
+`throttled=0x0` before and after, gcc 14.2, 640×480, sparsity 0.5:**
+
+| op | binCV uint32 | OpenCV `CV_8U` | ratio |
+|---|---|---|---|
+| bitwiseAnd | 0.02240 ns/px · 16.74 GB/s | 0.65272 ns/px · 4.60 GB/s | **29.1×** |
+| bitwiseOr | 0.02231 ns/px · 16.81 GB/s | 0.66016 ns/px · 4.54 GB/s | **29.6×** |
+| bitwiseXor | 0.02369 ns/px · 15.83 GB/s | 0.65907 ns/px · 4.55 GB/s | **27.8×** |
+| bitwiseNot | 0.01872 ns/px · 13.35 GB/s | 0.32362 ns/px · 6.18 GB/s | **17.3×** |
+
+Set-pixel counts agree exactly between implementations on every op, so the two are
+computing the same thing.
+
+**Conclusion: the ratio on the target device is ~28-30×, well above the x86 8-10×
+the decision rule was written to adjudicate — and the mechanism matters more than
+the number.**
+
+Working set per call: **binCV 115 KB, OpenCV 922 KB**, against the Pi's **1 MiB
+shared L2**. binCV fits; OpenCV does not. OpenCV runs at 4.5-4.6 GB/s, which is
+essentially Pi 4 DRAM bandwidth — it is memory-bound. binCV runs at 16.7 GB/s,
+above DRAM, because it is being served from cache.
+
+So the speedup is **not** a cleverer inner loop, and should never be described as
+one. It is the 8× smaller representation crossing a cache-residency threshold on a
+device whose cache is small. That predicts the shape of the whole project:
+
+- **the win grows as the device gets more memory-constrained** — 8-10× on a
+  desktop with 32 MiB of L3 that swallows both working sets, ~28-30× on a
+  Cortex-A72 where only binCV's fits
+- it will shrink again for operations that are not word-parallel, and for images
+  small enough that both sides fit in cache anyway
+
+That is the thesis in [ARCHITECTURE §1](ARCHITECTURE.md#the-problem) behaving as
+designed, measured on the target class rather than argued.
+
+**Supersedes** the unconfirmed x86 figure flagged at commit `22cbe5c`. The honest
+headline is the Pi number, with the mechanism stated alongside it.
 
 ---
 

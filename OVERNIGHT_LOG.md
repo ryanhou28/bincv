@@ -115,7 +115,7 @@ and logged below** rather than guessed at.
 | **T1.9** aarch64 runner | `DONE` — counts identical to x86, 33 death tests | `ef7dfa5` |
 | **T1.10** Pi runner | `PARTIAL` — written, skip paths verified; device paths untestable | `c9c4db8` |
 | **T2.1** Equivalence harness | `DONE` — **caught its own circularity**; 11847 checks | `00f9b13` |
-| **T2.2** Logic ops | `DONE` (code) — **perf number UNCONFIRMED, see finding 7** | `see below` |
+| **T2.2** Logic ops | `DONE` — **perf now SETTLED on the Pi: ~28-30×, see X-6** | `22cbe5c` |
 | **T1.5** `QuantMat<N>` | `DONE` — 3×38400 B in ONE allocation, measured at the allocator | working tree |
 | **T1.6** Signed / ternary | `DONE` — canonical zero tested both ways, no storage duplication | working tree |
 
@@ -498,7 +498,17 @@ task's scope.
 
 ---
 
-### 7. T2.2's speedup number — I could not independently reproduce it
+### 7. T2.2's speedup number — RESOLVED on the Pi (X-6), see below
+
+**Update 2026-08-16:** settled on the reference device at **~28-30×**, higher than
+either figure in the dispute below. Mechanism: binCV's 115 KB working set fits the
+Pi's 1 MiB L2 while OpenCV's 922 KB does not, so OpenCV runs at DRAM bandwidth
+(4.5 GB/s) and binCV runs from cache (16.7 GB/s). The original dispute is left
+below for the record.
+
+---
+
+#### Original entry (x86, unresolved)
 
 **The code is correct and thoroughly verified.** 84095 checks, four configurations
 green, bit-exact against OpenCV through T2.1's harness across the full matrix,

@@ -213,8 +213,16 @@ rsync -az --delete \
 info "repository synced to ${REMOTE_DIR}"
 
 printf '\n  build (Release, core-only)\n'
+# Core-only by default: it is the fastest build and covers the embedded claim.
+# Set BINCV_PI_OPENCV=1 to build interop and the comparison BENCHMARKS, which need
+# OpenCV on the device -- required for any binCV-versus-OpenCV ratio.
+PI_OPENCV_FLAG="-DBINCV_USE_OPENCV=OFF"
+if [[ "${BINCV_PI_OPENCV:-0}" == "1" ]]; then
+    PI_OPENCV_FLAG="-DBINCV_USE_OPENCV=ON"
+    info "OpenCV build requested (BINCV_PI_OPENCV=1): benchmarks will be built"
+fi
 remote "cd $REMOTE_DIR && cmake -S bincv-cpp -B bincv-cpp/build-pi \
-            -DCMAKE_BUILD_TYPE=Release -DBINCV_USE_OPENCV=OFF >/dev/null" \
+            -DCMAKE_BUILD_TYPE=Release $PI_OPENCV_FLAG >/dev/null" \
     || fail "cmake configure failed on the device"
 remote "cd $REMOTE_DIR && cmake --build bincv-cpp/build-pi -j\$(nproc)" \
     || fail "build failed on the device"
