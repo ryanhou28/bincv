@@ -356,8 +356,14 @@ explained by that machine's 32 MiB L3, which swallows the same working set whole
 Suspecting the benchmark was reasonable; the Pi's smaller cache is what settled it,
 which is the entire argument for having a deployment-class reference device.
 
-**Still open:** the binCV-versus-OpenCV *ratio*. That needs OpenCV on the Pi
-(installing) and is why this entry is `PARTIAL` rather than `DONE`.
+**Second decision rule** *(written before the ratio was measured, 2026-08-16)*:
+the honest headline is whatever the Cortex-A72 reports, whatever it is.
+- ratio >= 6x  -> the x86 8-10x figure is broadly corroborated; publish the Pi number
+- 2x <= ratio < 6x -> the x86 figure was optimistic; publish the Pi number and
+  correct the record. binCV still wins, by less than x86 suggested.
+- ratio < 2x  -> report plainly that logic ops are near parity on the target, and
+  that the memory ratio rather than throughput is what carries the thesis.
+No outcome is a failure. Overclaiming would be.
 
 ---
 
