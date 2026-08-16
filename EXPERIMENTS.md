@@ -327,6 +327,40 @@ for the first time: both sides are now unchecked in release.
 
 ---
 
+### X-6 · Is the T2.2 logic speedup real? · `PARTIAL`
+
+**Gates:** the T2.2 performance claim, flagged unconfirmed at commit `22cbe5c`.
+**Question:** the committed benchmark reported 8-10x on x86; an independent probe
+measured 2.1-2.8x. Which is right, and was the near-constant ns/px across a 64x
+size range evidence of a broken measurement?
+**Decision rule** *(written before measuring on the Pi)*: if ns/px degrades once
+the working set exceeds L2 on the Cortex-A72, the x86 flatness is explained by
+that machine's large L3 and is not evidence of a broken benchmark. If it stays
+flat on the Pi too, the benchmark is measuring something other than it claims.
+**Platform:** Pi 4, Cortex-A72, 32 KiB L1D / 1 MiB shared L2, governor pinned to
+performance, taskset -c 3, throttled=0x0 before and after.
+
+**Result** — binCV `bitwiseAnd`, uint32, alone (no OpenCV comparison yet):
+
+| size | working set | ns/px | GB/s |
+|---|---|---|---|
+| 256x256 | 8 KiB x3 | 0.05064 | 7.41 |
+| 512x512 | 32 KiB x3 | 0.02997 | 12.51 |
+| 1024x1024 | 128 KiB x3 | 0.03116 | 12.04 |
+| 2048x2048 | 512 KiB x3 | **0.06475** | **5.79** |
+
+**Conclusion on the size-invariance concern: RESOLVED, and my suspicion was wrong.**
+ns/px degrades 2x at 2048x2048, where the 1.5 MiB working set exceeds the Pi's
+1 MiB L2 -- exactly what a bandwidth-bound kernel must do. The x86 flatness is
+explained by that machine's 32 MiB L3, which swallows the same working set whole.
+Suspecting the benchmark was reasonable; the Pi's smaller cache is what settled it,
+which is the entire argument for having a deployment-class reference device.
+
+**Still open:** the binCV-versus-OpenCV *ratio*. That needs OpenCV on the Pi
+(installing) and is why this entry is `PARTIAL` rather than `DONE`.
+
+---
+
 ### X-5 · Bandwidth-ceiling probes for the T2.2 logic benchmark · `DONE`
 
 **Gates:** nothing about binCV's design. This is a **method record**: it is the
