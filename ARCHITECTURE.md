@@ -624,6 +624,65 @@ correct in release.
 
 **Binds:** every kernel added under `ops/` — T2.3 shift, T2.4 morphology, and after.
 
+**Narrowed by T2.3: the in-place half applies only to kernels that are pointwise
+in the word index.** `ops/shift.hpp` accepts the "shares no word" case and
+**refuses** the exact-alias one. The reason is the mechanism this record already
+names: an exact alias is safe *because* word *i* of the destination is read from
+word *i* of the source and from nothing else, and a shift reads words
+*i* ± `wordShift` instead. A direction-aware loop would rescue the purely
+horizontal case (ascending for `shiftLeft`, descending for `shiftRight` — the
+`memmove` argument), and it does **not** rescue the vertical one: with a row
+offset and a non-constant border, the source row for destination row *y* is not
+monotonic in *y*. A 10-row image shifted up by 5 under `BORDER_REFLECT_101` has
+destination row 9 reading source row 4 — a row an ascending loop overwrote four
+iterations earlier, and one a descending loop has not written yet but will need
+again. No row order works for every `(dy, BorderType)`, and the temporary that
+would make one unnecessary is forbidden.
+
+So the rule is per kernel family and stated in each kernel's docstring, not
+inferred from this record. `impl::kernel_util.hpp` carries the two predicates
+separately (`viewsShareNoWord`, `destinationAliasIsSafe`) so that a kernel picks
+the one that matches its access pattern rather than the one that happens to be
+there.
+
+### D-12: A shift carries a border, and the fill is the caller's
+
+*(Added during T2.3/T2.4, not pre-planned — the task that built the shift was the
+first that had to choose.)*
+
+Every entry point in `ops/shift.hpp` takes `(BorderType borderType, bool
+borderValue)`, defaulting to `BORDER_CONSTANT` / `false`. The alternative — a
+shift that always zero-fills, leaving borders to whatever calls it — was rejected
+because the two callers the MVP has want **opposite** fills:
+
+| | form | a pixel outside the image must… | so it must read |
+|---|---|---|---|
+| `dilate` ([§7.7](#77-morphology)) | OR of shifted copies | contribute nothing to an OR | **0** |
+| `erode` | AND of shifted copies | contribute nothing to an AND | **1** |
+
+With one fixed fill one of the two is wrong at every edge: a zero fill makes
+`erode` eat a *k*-wide band off a full frame, a one fill makes `dilate` grow one.
+Since the choice cannot be made once for both, it is not the kernel's to make.
+
+**OpenCV reaches the same conclusion and encodes it the same way**, which is what
+makes this the Tier 1 answer rather than merely a workable one: `cv::erode` and
+`cv::dilate` default `borderValue` to `morphologyDefaultBorderValue()`, which the
+implementation resolves to the depth's **maximum** for erosion and its **minimum**
+for dilation. Measured, not inferred — `cv::erode` on an all-white 8×8 frame with
+the default border leaves 64 of 64 pixels set, and against an explicit zero border
+leaves 36. `tests/test_shift.cpp` (`Shift.MorphologyFillPremise`) pins that
+premise against the real `cv::erode`/`cv::dilate`, because the paragraph above is
+a claim about OpenCV and T3.3's defaults will follow it.
+
+The four non-constant types are not optional either. T3.3 is Tier 1, so its border
+behaviour must be OpenCV's for every `BorderType` a caller passes through, not
+only for the morphological default. They are implemented as a per-pixel fixup over
+the at most `min(|dx|, width)` affected columns at one edge, leaving the interior
+word-parallel.
+
+**Binds:** T3.3 morphology and T3.5 derivative, which are the two callers this
+record exists to serve.
+
 ### D-7: Existing code is not a constraint
 
 The pre-existing `BinMat` implementation is a prototype. Where it conflicts with

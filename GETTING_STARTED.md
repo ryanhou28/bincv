@@ -255,6 +255,34 @@ What "correct" means depends on the API tier
 Every Tier 1 operation ships with an equivalence test. That harness is Phase 2.1
 and is built *before* the kernels it validates.
 
+#### Sanitizers, for the kernels where undefined behaviour is the likely bug
+
+`verify.sh` does not run them — four clean builds plus two sanitizer builds is a
+gate people stop running — so they are a per-kernel step, taken where the kernel's
+own hazard calls for it and recorded in the task's notes when it is.
+
+A bit-packed shift is the clearest case: `x << WordBits` is undefined, and on x86
+the natural encoding **masks the shift count** and returns `x` where the algebra
+wants 0, so the bug is invisible at every shift distance except the exact multiples
+of the word width. Reading the code is not a proof that the guard branch is there;
+watching the sanitizer stay quiet, and then watching it fire when the branch is
+removed, is.
+
+```bash
+cd bincv-cpp
+# the shipping configuration: optimized, assertions compiled out
+g++ -std=c++17 -O2 -DNDEBUG -fsanitize=undefined -fno-sanitize-recover=all \
+    -Iinclude -Itests tests/test_shift.cpp -o /tmp/test_shift_ubsan && /tmp/test_shift_ubsan
+
+# and with BINCV_ASSERT live, plus ASan for the wrapped-buffer cases
+g++ -std=c++17 -O1 -g -fsanitize=undefined,address -fno-sanitize-recover=all \
+    -Iinclude -Itests tests/test_shift.cpp -o /tmp/test_shift_asan && /tmp/test_shift_asan
+```
+
+Both compile without CMake and without OpenCV: the suites' Tier 1 halves are
+behind `BINCV_WITH_OPENCV` and the built-in harness is the default backend, so a
+sanitizer run needs a compiler and nothing else.
+
 ---
 
 ## Benchmarking
@@ -303,6 +331,8 @@ reproducible from a committed benchmark.
 
 ### Kernels
 - [bincv-cpp/include/bincv-cpp/ops/logic.hpp](bincv-cpp/include/bincv-cpp/ops/logic.hpp) — `bitwiseAnd` / `Or` / `Xor` / `Not` (T2.2), over views and per `QuantMat` plane
+- [bincv-cpp/include/bincv-cpp/ops/shift.hpp](bincv-cpp/include/bincv-cpp/ops/shift.hpp) — `shiftLeft` / `Right` / `Up` / `Down` and the 2-D `shift` (T2.3, T2.4), with OpenCV `BorderType` semantics
+- [bincv-cpp/include/bincv-cpp/impl/kernel_util.hpp](bincv-cpp/include/bincv-cpp/impl/kernel_util.hpp) — the row-tail mask, the stride check and the [D-11](ARCHITECTURE.md#d-11-kernels-alias-exactly-or-not-at-all) overlap predicates, shared by every kernel under `ops/`
 
 ### Support
 - [bincv-cpp/include/bincv-cpp/util.hpp](bincv-cpp/include/bincv-cpp/util.hpp) — image I/O for tests (OpenCV-only)

@@ -878,7 +878,7 @@ not, and it has been withdrawn rather than repeated.
 
 ---
 
-### T2.3 · Horizontal shift · `TODO`
+### T2.3 · Horizontal shift · `DONE`
 
 **Depends:** T2.2
 **Files:** `include/bincv-cpp/ops/shift.hpp` (new)
@@ -919,9 +919,95 @@ behavior, and this is the single most likely bug in this task.
 
 **Do not:** hand-vectorize yet. Correct scalar first; NEON is Phase 5.
 
+**What was built.** `include/bincv-cpp/ops/shift.hpp` — `shiftLeft`, `shiftRight`,
+`shiftUp`, `shiftDown` and the 2-D `shift` they are all one-line wrappers over —
+plus `tests/test_shift.cpp`, a **core** test whose Tier 1 half sits behind
+`BINCV_WITH_OPENCV` so the kernels are compiled and checked in all four
+configurations, Debug included. 307133 checks under `opencv`, 99695 under the
+other three, plus five death tests. Also
+`include/bincv-cpp/impl/kernel_util.hpp`: the row-tail mask, the stride check and
+the D-11 overlap predicates moved out of `ops/logic.hpp` unchanged, because the
+second kernel header needed the same three and a copy would have been a second
+place for the aliasing rule to drift.
+
+**The spec's recurrence is incomplete, and the gap is where the bug lives.**
+"Out-of-range source words read as zero" covers whole words past the row. It does
+not cover the **padding bits of the trailing partial word**, which sit at column
+indices past `width` — outside the image — and which a `shiftLeft` by *k* moves
+into destination columns `width-k … width-1`, which are live pixels. Sources with
+dirty padding are a supported construction (`BinMat`'s wrap constructor documents
+that a caller's padding is the caller's, and `test_logic` already sweeps it), so
+every source word is read through `impl::extendedRowWord`, which substitutes the
+BORDER value for everything at or past `width`. Measured with that substitution
+removed — width 5, `uint8_t`, all five pixels clear in a wrapped word of `0xE0`,
+so every set bit is padding:
+
+| | correct | substitution removed |
+|---|---|---|
+| `shiftLeft(1)` | `0x00` | `0x10` — pixel 4 set |
+| `shiftLeft(2)` | `0x00` | `0x18` — pixels 3, 4 |
+| `shiftLeft(3)` | `0x00` | `0x1C` — pixels 2, 3, 4 |
+
+Both words the recurrence reads are in range, so nothing about the word
+arithmetic is wrong and no bounds check has anything to say —
+`Shift.DirtySource_*` is the only thing that sees it, and 1492 checks go red
+across the suite when it is missing.
+
+**`bitShift == 0`, and how "no UB" was proven rather than asserted.** It is a
+separate branch, and the proof is not a reading of the code:
+
+- `tests/test_shift.cpp` sweeps `k` from 0 through `2*WordBits+1` at all four word
+  widths, which reaches `k ∈ {0, WordBits, 2*WordBits}` — every `bitShift == 0`
+  case — by construction rather than by someone remembering to add them.
+- The whole suite is additionally compiled and run under
+  `-fsanitize=undefined -fno-sanitize-recover=all`, twice: `-O2 -DNDEBUG` (the
+  shipping configuration, assertions compiled out) and `-O1` without `NDEBUG` and
+  with ASan as well (`BINCV_ASSERT` live). Both are clean, 99695/99695, zero
+  diagnostics.
+- **And the sanitizer was watched failing.** With the `bitShift == 0` branch
+  removed, UBSan reports
+  `ops/shift.hpp:316: runtime error: shift exponent 32 is too large for 32-bit
+  type 'unsigned int'` and 1008 checks go red. Without the sanitizer this is the
+  bug that hides: on x86 the natural encoding masks the shift count, so
+  `x << WordBits` quietly yields `x` where the algebra wants 0, and every test
+  written at `k = 1` still passes.
+
+Reproduce: `g++ -std=c++17 -O2 -DNDEBUG -fsanitize=undefined
+-fno-sanitize-recover=all -Iinclude -Itests tests/test_shift.cpp`.
+
+**Seven mutations, and what each turned red** (checks passed, of 99695 core):
+
+| injected fault | passed | what went red |
+|---|---|---|
+| `bitShift == 0` branch removed | 98687 | 7 case families, **and a UBSan shift-exponent diagnostic** |
+| source's trailing word read as-is | 98203 | Borders, DirtySource, GuardWords |
+| destination tail mask dropped | 91112 | 6 families, padding verdicts throughout |
+| `BORDER_REFLECT_101` collapsed onto `BORDER_REFLECT` | 97743 | BorderIndex_Reference, Borders, DirtySource (and, with OpenCV, BorderInterpolate_OpenCv and OpenCv) |
+| `shiftRight`'s direction inverted | 93131 | 6 families |
+| vertical offset negated | 94921 | Borders, GuardWords, Strides, Vertical |
+| out-of-range word read as `row[0]` instead of the fill | 98141 | 6 families |
+
+The fourth is the one worth reading: a one-column difference between the two
+reflect flavours is invisible in the middle of a frame, and it is what a
+downstream `cv::erode` comparison would eventually fail on for reasons that would
+look nothing like a border bug.
+
+**In place is NOT supported, and that is a narrowing of D-11** rather than a
+contradiction of it — recorded there. `ops/logic.hpp` accepts `dst == src`
+because its kernels are pointwise in the word index; a shift reads words
+`i ± wordShift`, and no row order rescues the vertical case under a non-constant
+border. `impl::kernel_util.hpp` carries the two predicates separately so a kernel
+picks the one matching its access pattern.
+
+**Not hand-vectorized, and one optimisation deliberately not taken:** the row loop
+calls a bounds-checked word accessor rather than splitting into a check-free
+interior plus two edges. That is Phase 5's business; the branch is perfectly
+predictable and the split doubles the number of index expressions that can be off
+by one.
+
 ---
 
-### T2.4 · Vertical shift and borders · `TODO`
+### T2.4 · Vertical shift and borders · `DONE`
 
 **Depends:** T2.3
 **Files:** `include/bincv-cpp/ops/shift.hpp`
@@ -940,6 +1026,82 @@ behavior, and this is the single most likely bug in this task.
 - Vertical shifts correct for offsets exceeding the image height
 
 **Verify:** V-ALL
+
+**What was built.** Same file and same suite as T2.3. A vertical shift is a
+row-index remap and no bit manipulation at all, which is also what makes the 2-D
+`shift(src, dst, dx, dy, ...)` a **single pass with no scratch buffer**: each
+destination row resolves its source row through the border mapping and is then
+written by the horizontal path. That matters for T3.3 — morphology shifts by a
+structuring element offset, which is 2-D, and a caller composing two axis-aligned
+shifts would need a temporary between them, which "no heap in kernels" would make
+the caller's problem.
+
+**The border mapping is the Tier 1 promise, so it is tested as a function and not
+only through images.** `impl::borderIndex` is `cv::borderInterpolate`: same five
+types, `-1` for `BORDER_CONSTANT`, `0` for both reflect flavours at `len == 1`. It
+is checked three ways —
+
+1. against `cv::borderInterpolate` directly, every coordinate in
+   `[-3*len-3, 3*len+3]` for 15 lengths × 5 types (`Shift.BorderInterpolate_OpenCv`);
+2. against an **independently written iterative reference** in the test file — the
+   `do { } while (out of range)` shape OpenCV documents, where the library uses a
+   closed-form modulo into the pattern's period. Two different algorithms for one
+   function, so the core-only configurations keep the property even without OpenCV
+   (`Shift.BorderIndex_Reference`);
+3. through whole shifted images against `cv::copyMakeBorder` over the T2.1 size
+   matrix — `equivalenceWidths()` × `equivalenceHeights()` × `equivalenceFillRatios()`
+   — at all four word widths, at 16 offsets per size, the last six of them *past*
+   one or both extents (`Shift.OpenCv_*`).
+
+An image comparison alone cannot do this job: the border reaches only `|dx|`
+columns and `|dy|` rows, so at 640×480 with `dx = 1` a wrong mapping is 480 of
+307200 pixels and any sampling test misses it.
+
+**Point 3 was a claim before it was true, and a review caught it.** As first
+written it swept `equivalenceWidths()` × `{1, 3, 17}` at a single fill of 0.5, and
+its offsets were a fixed table reaching `|dy| = 3` — so `dy > height` at a height
+above 1 was never put to `cv::copyMakeBorder` at all, which is the exact regime
+this task's second done-when clause names. (At height 1 the case is degenerate:
+every non-constant border maps every row to row 0.) Measured, with a clamp
+injected into the row loop that is wrong *only* past the height —
+`dy > src.height ? src.height : dy` feeding `borderIndex` — the core reference half
+went red at 112589 of 112733 and **all four `Shift.OpenCv_*` stayed green**. The
+horizontal analogue (clamping `dx` to the width) did fail, because
+`{wordBits + 1, -1}` already exceeds a width of 1; the hole was one axis wide,
+which is the shape of gap that "it is symmetric" reasoning misses. The sweep now
+runs the whole matrix and adds `{0, ±(h+2)}`, `{±(w+2), 0}` and `{±(w+2), ±(h+2)}`,
+under which that clamp fails 2768 checks and takes every `Shift.OpenCv_*` with it.
+The kernel was never wrong — this was a missing acceptance check, and the cost of
+closing it is 112733 → 307133 checks and about six seconds in the one
+configuration that has OpenCV.
+
+**Why a closed form rather than OpenCV's loop.** T2.4 requires vertical offsets
+*exceeding the image height* to be correct, and T3.3 will pass structuring-element
+offsets through unchanged. OpenCV's do-while converges by about `2*len` per
+iteration, so shifting a 7-row image by 500 costs ~35 iterations per row; one
+signed modulo costs the same at any offset. The two agree because both reflect
+patterns are periodic — period `2*len` for `BORDER_REFLECT`, `2*len-2` for
+`BORDER_REFLECT_101` — and mutation 4 above is what says so when they stop.
+
+**The `cv::copyMakeBorder` denominator had to be built, and it is exact.** OpenCV
+has no shift, but `dst(y,x) = extended-src(y+dy, x+dx)` and `copyMakeBorder` is
+the function that materialises "extended src": pad by `top = max(0,-dy)`,
+`bottom = max(0,dy)` (and likewise horizontally), then crop at
+`(max(dx,0), max(dy,0))`. Corners come out right for free, because
+`copyMakeBorder` builds them by applying both axes' mappings — which is exactly
+what this file's row-then-column structure does.
+
+**The fill decision, which T2.4 required and which is now
+[D-12](ARCHITECTURE.md#d-12-a-shift-carries-a-border-and-the-fill-is-the-callers).**
+Erode (AND of shifts) needs **ones** outside the image and dilate (OR of shifts)
+needs **zeros**; one fixed fill makes one of them wrong at every edge. So the fill
+is a parameter — `(BorderType, bool)`, defaulting to `BORDER_CONSTANT` / `false`,
+which is the zero fill T2.3 specifies for the bare three-argument call. OpenCV
+encodes the same asymmetry through `morphologyDefaultBorderValue()`, and that is a
+claim about OpenCV, so it is **measured** rather than cited:
+`Shift.MorphologyFillPremise` runs the real `cv::erode` and `cv::dilate` and pins
+64/64 pixels surviving erosion of an all-white frame under the default border
+against 36/64 under an explicit zero border.
 
 ---
 

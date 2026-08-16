@@ -30,7 +30,9 @@
 
 #include "bincv-cpp/binMat.hpp"
 #include "bincv-cpp/core/view.hpp"
+#include "bincv-cpp/core/types.hpp"
 #include "bincv-cpp/ops/logic.hpp"
+#include "bincv-cpp/ops/shift.hpp"
 #include "bincv-cpp/quantMat.hpp"
 
 #if !BINCV_DEBUG_CHECKS
@@ -213,6 +215,68 @@ int caseLogicShortStride() {
     return static_cast<int>(g_logicDst[0]);
 }
 
+// The T2.3/T2.4 shift preconditions. Two of them say something the logic cases
+// above do not.
+//
+// `shift-in-place` is the important one. ops/logic.hpp ACCEPTS a destination that
+// is exactly a source -- D-11's in-place idiom -- because those kernels are
+// pointwise in the word index. A shift is not: word i of the destination is built
+// from words i +/- wordShift of the source, so the same call that is legal for
+// bitwiseAnd is undefined here. That difference is invisible in a release build
+// (the answer is merely wrong for part of the image, with every address valid and
+// no sanitizer able to see it), which is exactly what makes it worth a case.
+//
+// `shift-border-type` covers the argument no other kernel has: BorderType is an
+// enum, so an int can arrive as one, and an unchecked unknown value would silently
+// behave as BORDER_CONSTANT -- a plausible answer to a question nobody asked.
+uint32_t g_shiftSrc[8] = {0};
+uint32_t g_shiftDst[8] = {0};
+
+int caseShiftDims() {
+    const bincv::BinMatConstView<uint32_t> src{g_shiftSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_shiftDst, 32, 3, 1};      // narrower
+    bincv::shiftLeft(src, dst, 1);
+    return static_cast<int>(g_shiftDst[0]);
+}
+
+int caseShiftInPlace() {
+    const bincv::BinMatConstView<uint32_t> src{g_shiftSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_shiftSrc, 64, 3, 2};      // exactly src
+    bincv::shiftLeft(src, dst, 1);
+    return static_cast<int>(g_shiftSrc[0]);
+}
+
+int caseShiftOverlap() {
+    // Same shape, same buffer, one word apart: word i of dst is word i+1 of src.
+    // Half a row apart, deliberately -- the predicate accepts two views over one
+    // buffer whose ROWS never meet (Shift.DisjointViews_* covers those), so a case
+    // that merely shared a buffer would no longer prove anything.
+    const bincv::BinMatConstView<uint32_t> src{g_shiftSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_shiftSrc + 1, 64, 3, 2};
+    bincv::shiftUp(src, dst, 1);
+    return static_cast<int>(g_shiftSrc[0]);
+}
+
+int caseShiftShortStride() {
+    const bincv::BinMatConstView<uint32_t> src{g_shiftSrc, 64, 3, 1};   // needs 2 words
+    const bincv::BinMatView<uint32_t> dst{g_shiftDst, 64, 3, 1};
+    bincv::shiftRight(src, dst, 1);
+    return static_cast<int>(g_shiftDst[0]);
+}
+
+int caseShiftBorderType() {
+    const bincv::BinMatConstView<uint32_t> src{g_shiftSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_shiftDst, 64, 3, 2};
+    // 7, not 99. BorderType's enumerators span 0..4, so the smallest bit-field
+    // that holds them all is 3 bits and the type's value range is 0..7: casting
+    // 99 into it is UNSPECIFIED, and -Wconversion says so ("the result of the
+    // conversion is unspecified because '99' is outside the range of type"). 7 is
+    // a representable value that is not one of the five, which is exactly the
+    // input isKnownBorderType() exists to reject.
+    bincv::shift(src, dst, 1, 1, static_cast<bincv::BorderType>(7), false);
+    return static_cast<int>(g_shiftDst[0]);
+}
+
 struct Case {
     const char* name;
     int (*run)();
@@ -237,6 +301,11 @@ const Case kCases[] = {
     {"logic-dims-not", caseLogicDimsNot},
     {"logic-alias", caseLogicAlias},
     {"logic-short-stride", caseLogicShortStride},
+    {"shift-dims", caseShiftDims},
+    {"shift-in-place", caseShiftInPlace},
+    {"shift-overlap", caseShiftOverlap},
+    {"shift-short-stride", caseShiftShortStride},
+    {"shift-border-type", caseShiftBorderType},
 };
 
 } // namespace

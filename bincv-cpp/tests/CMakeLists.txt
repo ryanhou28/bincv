@@ -102,14 +102,15 @@ endfunction()
 
 # Core tests: must build and run without OpenCV.
 #
-# test_logic (T2.2) is a core test even though half of it is the Tier 1
-# comparison against cv::bitwise_*: that half sits behind BINCV_WITH_OPENCV
-# inside the file, so the kernels are still compiled and checked against a
-# per-pixel reference in the three configurations that have no OpenCV --
-# including the Debug one, which is the only place their BINCV_ASSERT
+# test_logic (T2.2) and test_shift (T2.3/T2.4) are core tests even though half of
+# each is the Tier 1 comparison against OpenCV -- cv::bitwise_* for one,
+# cv::borderInterpolate and cv::copyMakeBorder for the other. That half sits
+# behind BINCV_WITH_OPENCV inside the file, so the kernels are still compiled and
+# checked against a per-pixel reference in the three configurations that have no
+# OpenCV -- including the Debug one, which is the only place their BINCV_ASSERT
 # preconditions are live.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
-                     test_logic)
+                     test_logic test_shift)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -285,6 +286,24 @@ bincv_add_death_test(test_assert_abort logic-alias
                      "dst must alias an input exactly or not overlap it")
 bincv_add_death_test(test_assert_abort logic-short-stride
                      "every view's stride must cover a whole row")
+
+# T2.3/T2.4 shift preconditions. The overlap case is the one that differs from
+# the logic kernels and is the reason it gets its own case rather than being
+# assumed covered by logic-alias: a shift is NOT pointwise in the word index, so
+# the in-place spelling ops/logic.hpp supports is undefined here, and the two
+# kernels therefore accept different sets of views. An unknown BorderType is the
+# other: BorderType is an enum, so an int can reach these kernels as one, and
+# without the check it would silently mean BORDER_CONSTANT.
+bincv_add_death_test(test_assert_abort shift-dims
+                     "shift: src and dst must have the same dimensions")
+bincv_add_death_test(test_assert_abort shift-in-place
+                     "dst must share no word with src")
+bincv_add_death_test(test_assert_abort shift-overlap
+                     "dst must share no word with src")
+bincv_add_death_test(test_assert_abort shift-short-stride
+                     "shift: every view's stride must cover a whole row")
+bincv_add_death_test(test_assert_abort shift-border-type
+                     "shift: unknown BorderType")
 
 if(BINCV_OPENCV_FOUND)
     foreach(TEST_NAME ${BINCV_OPENCV_TESTS})

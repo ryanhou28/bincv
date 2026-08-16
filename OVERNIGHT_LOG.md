@@ -27,6 +27,44 @@ working set exceeds the 1 MiB L2 — as a bandwidth-bound kernel must. The x86
 flatness is explained by that machine's 32 MiB L3. My suspicion was reasonable
 and wrong; the smaller cache is what settled it.
 
+### T2.3 / T2.4 — shifts, and a correction to my own spec
+
+`ops/shift.hpp`. Both axes in one pass with no scratch, since T3.3 shifts by a 2-D
+structuring-element offset and composing two axis-aligned shifts would need a
+temporary the no-heap rule makes the caller's problem.
+
+**The composability gate passed, and is proven rather than argued.** Dilate as an
+OR of shifts and erode as an AND of shifts, built from *only* `shift.hpp` +
+`logic.hpp`, are **bit-exact against `cv::dilate` / `cv::erode`** across 12960
+checks — 9 widths × 6 heights × 5 fills × 3 structuring elements × 4 word types.
+One element is deliberately **asymmetric**, because both standard 3×3 elements are
+symmetric and so cannot catch a flipped shift sign. Sources come from the
+harness's two independent generators, so a conversion fault cannot cancel.
+**T3.3 is unblocked.**
+
+**My spec was wrong, and the fix is measured.** I wrote "out-of-range source
+*words* read as zero". That misses the **padding bits of the trailing partial
+word**: they sit past `width`, i.e. outside the image, but inside a valid word, so
+no bounds check has anything to say. `shiftLeft` moved them into live columns.
+Measured at width 5 / `uint8_t` / dirty word `0xE0`: `shiftLeft(1)` produced
+`0x10` where the border says 0. Every source word now goes through
+`extendedRowWord`, which substitutes the border value at and past `width`. I
+re-verified independently: 0 leaked pixels at k=1 and k=3.
+
+**D-12 recorded — and shown to be load-bearing.** Erode and dilate want *opposite*
+fills (dilate ORs, so needs 0 outside; erode ANDs, so needs 1), so the fill is a
+parameter rather than a kernel choice. Flipping erode's fill to `false` drops the
+composability suite to 11056/12960 — the asymmetry is demonstrated, not asserted.
+The claim *about OpenCV* (`morphologyDefaultBorderValue`) was also measured rather
+than cited.
+
+**UBSan was watched failing.** Removing the `bitShift == 0` branch produces
+`shift exponent 32 is too large` and reddens 1008 checks — and the note that
+matters: on x86 the encoding masks the shift count and returns `x`, so every test
+at k=1 still passes. Without a sanitizer this is precisely the bug that hides.
+
+Gate: 62/62 ctest, 391228 checks. Pi: 99695/99695, `throttled=0x0` both ends.
+
 ---
 
 ## Session 1 — 2026-08-15
