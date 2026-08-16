@@ -1,5 +1,36 @@
 # Overnight Session Log
 
+## Session 2 — 2026-08-16 · Pi 4 online
+
+The reference device is set up and verified. **T2.8/T2.9/T2.10 (E-1, E-2, E-3)
+are unblocked**, and every performance measurement now runs on Cortex-A72 rather
+than x86.
+
+Device: Pi 4 Model B Rev 1.5, Cortex-A72, 4 GB, aarch64, gcc 14.2, kernel 6.18 v8.
+Verified: 845/845 checks on hardware, `throttled=0x0` before and after, governor
+restored. Runner: `./scripts/run_on_pi.sh pi4 <cmd>`.
+
+**Three bugs in `run_on_pi.sh` surfaced on first contact with hardware** — which
+is exactly why it shipped `PARTIAL`. See commit `227eafe`. The instructive one:
+the governor-restore trap needs the network, so a transient ssh failure left the
+Pi pinned to `performance`, silently affecting every later measurement. It now
+retries and, failing that, prints the manual fix.
+
+**A self-inflicted diagnosis worth remembering:** connection failures that looked
+like mDNS or IPv6 trouble were largely my own rapid test loops tripping sshd's
+rate limiting. Fixed with `ControlMaster` multiplexing — one TCP session per run
+instead of ~15.
+
+**X-6 partially settled a flagged concern.** T2.2's near-constant ns/px across a
+64x size range looked like a broken benchmark. On the Pi it degrades 2x once the
+working set exceeds the 1 MiB L2 — as a bandwidth-bound kernel must. The x86
+flatness is explained by that machine's 32 MiB L3. My suspicion was reasonable
+and wrong; the smaller cache is what settled it.
+
+---
+
+## Session 1 — 2026-08-15
+
 Autonomous run started 2026-08-15. Working the [TASKS.md](TASKS.md) backlog,
 hardware-independent tasks only.
 
