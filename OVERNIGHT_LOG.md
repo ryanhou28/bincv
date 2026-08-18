@@ -27,6 +27,49 @@ working set exceeds the 1 MiB L2 — as a bandwidth-bound kernel must. The x86
 flatness is explained by that machine's 32 MiB L3. My suspicion was reasonable
 and wrong; the smaller cache is what settled it.
 
+### T2.7 — bit-sliced arithmetic, proven exhaustively
+
+`ops/bitslice.hpp`. Every primitive here is pointwise in the bit *lane*, so k
+inputs have exactly 2^k per-lane patterns — small enough to **enumerate rather
+than sample**. `maj3` over all 8 patterns, `bitSlicedSum` over every pattern at
+k = 1,2,3,4,9 and all 65536 at k = 16, `thresholdGE` over its entire input space.
+Verified again independently here: 536/536 exact at k = 3,4,9, and 8/8 for `maj3`.
+
+Two reviewers returned **no findings**, which is the first time that has happened —
+consistent with an input space small enough to prove.
+
+**The implementer found three defects in their own work**, which is the behaviour
+worth having: a dead narrowing step in `thresholdGE` that the exhaustive
+enumeration showed changed no result; a dimension assert that did not need its
+third argument (no in-process test can catch that, so it became a death test); and
+a stride-sweep gap where no case had exactly one argument over-strided.
+
+**No `QuantMat` overload for `majority3`, deliberately** — bit 3 of a median of
+three N-bit images is not the majority of the three bit 3s, so a per-plane loop
+would compile, run, and be wrong.
+
+### ⚠️ Planning gap for T3.4 — no horizontal decimation primitive
+
+Nothing in the primitive set expresses **output bit *j* ← input bit 2*j***.
+`logic.hpp` is pointwise, `shift.hpp` moves every lane uniformly, `bitslice.hpp`
+is per-lane. Vertical decimation is free (stride-doubled view); horizontal is not.
+
+**T3.4's pyramid needs it**, so the gap is recorded directly in T3.4's spec rather
+than left in a log. Related: the 2×2 box equals `bitSlicedSum` at k = 4 only for a
+**1-bit** source — an N-bit level costs k = 4·(2^N − 1), i.e. 124 inputs at N = 5,
+so it needs a different formulation rather than a bigger k.
+
+### ⚠️ Both non-x86 verification paths are down
+
+- **Pi 4 offline** — `run_on_pi.sh` returns 77.
+- **Docker daemon unreachable** — `verify_arm.sh` returns 77, so the emulated
+  aarch64 path is gone too.
+
+Both correctly report not-a-pass rather than skipping silently, but the practical
+effect is that **everything since T2.5 is verified on x86 only**. ARM-specific
+bugs — type promotion, char signedness, the NEON popcount path — would not be
+caught right now. Worth a re-run of both once either is back.
+
 ### T2.5 / T2.6 — reductions, and a correction to X-3
 
 `ops/reduce.hpp`. **The LK covariance identity is verified independently**: sumXX,

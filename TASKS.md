@@ -1681,6 +1681,18 @@ benchmarks committed.
 
 ### T3.4 · Pyramid downsample · `TODO`
 
+> **⚠️ BLOCKING GAP found during T2.7 — read before starting.**
+> **No primitive expresses horizontal decimation** (output bit *j* ← input bit
+> 2*j*). `logic.hpp` is pointwise, `shift.hpp` moves every lane uniformly, and
+> `bitslice.hpp` is per-lane, so none of them can do it. Vertical decimation *is*
+> free — a stride-doubled `BinMatConstView` — so the gap is horizontal only.
+> This task must provide that primitive, or a preceding one must.
+>
+> Also from T2.7: the 2×2 box **is** `bitSlicedSum` at k = 4 only for a **1-bit**
+> source. For an N-bit level the replication route costs k = 4·(2^N − 1) — 124
+> inputs at N = 5 — so an N-bit pyramid level needs a different formulation, not
+> just a bigger k.
+
 **Depends:** T3.3
 **Files:** `include/bincv-cpp/ops/pyramid.hpp` (new)
 
