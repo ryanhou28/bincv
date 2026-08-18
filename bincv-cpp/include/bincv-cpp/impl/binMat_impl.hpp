@@ -609,8 +609,18 @@ void QuantMat<1, WordType_>::fill(bool value) {
 }
 
 // countNonZero
-// @todo: replace the per-pixel loop with popcount over whole words
-//        (see ARCHITECTURE.md 6.3). Relies on padding bits being zero.
+//
+// STILL A PER-PIXEL LOOP, and deliberately so since T2.5. The bulk reduction is
+// `bincv::countNonZero(m.constView())` in ops/reduce.hpp, which is 6x faster here
+// and 35x faster where the popcount lowers to an instruction
+// (bincv-cpp/results/reduce_benchmark.log). This member cannot simply forward to
+// it: ops/reduce.hpp includes binMat.hpp, which includes this file, so the call
+// would close a cycle. It stays for two reasons -- it is the container-shaped
+// spelling callers already use, and it is the "before" the T2.5 benchmark
+// measures against, which stops being true the moment it becomes a wrapper.
+//
+// It does NOT rely on padding bits being zero (it never reads one), which is the
+// same guarantee the bulk kernels now make by masking; see D-13.
 template <typename WordType_>
 int QuantMat<1, WordType_>::countNonZero() const {
     if (empty())

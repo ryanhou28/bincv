@@ -321,7 +321,7 @@ reproducible from a committed benchmark.
 ## Code Tour
 
 ### Core
-- [bincv-cpp/include/bincv-cpp/core/types.hpp](bincv-cpp/include/bincv-cpp/core/types.hpp) — `Size`, morphology and border enums, type aliases
+- [bincv-cpp/include/bincv-cpp/core/types.hpp](bincv-cpp/include/bincv-cpp/core/types.hpp) — `Size`, `Rect`, morphology and border enums, type aliases
 - [bincv-cpp/include/bincv-cpp/core/storage.hpp](bincv-cpp/include/bincv-cpp/core/storage.hpp) — owning or caller-provided backing memory
 - [bincv-cpp/include/bincv-cpp/core/view.hpp](bincv-cpp/include/bincv-cpp/core/view.hpp) — `BinMatView` / `BinMatConstView`, the kernel interface
 - [bincv-cpp/include/bincv-cpp/core/error.hpp](bincv-cpp/include/bincv-cpp/core/error.hpp) — `BINCV_THROW` / `BINCV_ASSERT`, the error policy
@@ -332,6 +332,7 @@ reproducible from a committed benchmark.
 ### Kernels
 - [bincv-cpp/include/bincv-cpp/ops/logic.hpp](bincv-cpp/include/bincv-cpp/ops/logic.hpp) — `bitwiseAnd` / `Or` / `Xor` / `Not` (T2.2), over views and per `QuantMat` plane
 - [bincv-cpp/include/bincv-cpp/ops/shift.hpp](bincv-cpp/include/bincv-cpp/ops/shift.hpp) — `shiftLeft` / `Right` / `Up` / `Down` and the 2-D `shift` (T2.3, T2.4), with OpenCV `BorderType` semantics
+- [bincv-cpp/include/bincv-cpp/ops/reduce.hpp](bincv-cpp/include/bincv-cpp/ops/reduce.hpp) — `countNonZero`, `countAnd`, `countAndSplit` (T2.5, T2.6). Bulk only, per [D-6](ARCHITECTURE.md#d-6-bulk-only-reductions): there is no per-word popcount in the public surface, and [D-13](ARCHITECTURE.md#d-13-a-reduction-counts-pixels-never-padding) says a reduction never counts a bit past `width`
 - [bincv-cpp/include/bincv-cpp/impl/kernel_util.hpp](bincv-cpp/include/bincv-cpp/impl/kernel_util.hpp) — the row-tail mask, the stride check and the [D-11](ARCHITECTURE.md#d-11-kernels-alias-exactly-or-not-at-all) overlap predicates, shared by every kernel under `ops/`
 
 ### Support

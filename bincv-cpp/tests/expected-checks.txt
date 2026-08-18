@@ -86,6 +86,61 @@
 #             independently written iterative one. They run in all four
 #             configurations because the kernels are core code -- and the Debug
 #             one is the only place their BINCV_ASSERT preconditions are live.
+#   test_reduce  711812 under opencv, 546572 everywhere else. The 165240
+#             difference is the Tier 1 half of T2.5 -- countNonZero against
+#             cv::countNonZero over the full T2.1 size and fill matrix, whole
+#             image and by region -- plus the Tier 3 masked reductions against an
+#             OpenCV composite (cv::bitwise_and into a temporary, then
+#             cv::countNonZero), which is a second reference and not a tier
+#             promise. The other 546572 are the per-pixel reference sweeps for
+#             all three entry points, the exhaustive region GEOMETRY cross
+#             product, the padding contract, the differing-stride combinations,
+#             the degenerate shapes, the LK covariance identity, and the 16 that
+#             keep impl::popcountWordPortable -- the builtin-free popcount that no
+#             GCC/clang configuration would otherwise execute one instruction of
+#             -- from being untested source. They run in all four configurations
+#             because the kernels are core code.
+#             This suite counts ONE CHECK PER (case, region) rather than per case:
+#             every interesting input here is a region, so a per-case count would
+#             leave the CHECKS column blind to a region list that got shorter,
+#             which is this suite's most likely regression. Per pixel would be the
+#             other extreme and would drown the summary.
+#             The floor has teeth, measured by mutating ops/reduce.hpp (checks
+#             passed, out of the 546468 core checks the suite had before the
+#             portable-popcount case added 16 more):
+#               tail mask dropped                496202 -- 6 case families
+#               head mask dropped                491251 -- 6 families
+#               one-word region drops head mask  488559 -- 6 families
+#               tail mask off by one             511817 -- 6 families
+#               interior loop revisits lastWord  443742 -- 7 families, Geometry included
+#               whenClear = total (split lost)   470980 -- 5 families
+#               region not clipped to the width  SEGFAULT after 19 failing cases
+#               whole-image count trusts the
+#               padding invariant (T2.5's
+#               literal reading)                 545919 -- Reduce.DirtyPadding ONLY
+#             The last row is the one worth reading: the padding decision in
+#             ops/reduce.hpp is invisible to every other case in the suite, and
+#             Reduce.DirtyPadding_* is the only thing standing between it and a
+#             silent over-count on a wrapped buffer.
+#             THE +88 FROM THE T2.5/T2.6 REVIEW (546484 -> 546572) are three
+#             things a value sweep could not see, so each was mutation-checked
+#             rather than assumed (baseline 711812 under opencv):
+#               SplitCount::crossTerm() sign flipped     709356 -- Covariance
+#               crossTerm() returns the sum instead      709432 -- Covariance
+#               Rect::empty() uses < 0 instead of <= 0   711800 -- 8 families
+#               Rect::operator== ignores height          711808 -- 8 families
+#               Rect::operator!= loses its negation      711792 -- 8 families
+#             The Rect rows are small on purpose: those three members had zero
+#             call sites and zero coverage anywhere in the repo, so a wrong body
+#             shipped green in all four configurations. Two checks are cheap; a
+#             silently wrong region predicate under T3.6 is not. Reduce.Covariance
+#             also now compiles the constMagnitude()/constSign() spelling from a
+#             deliberately NON-const container, which is a compile-time check that
+#             costs one runtime check and pins the advice ops/reduce.hpp gives.
+#             The ctest count rose by one too: reduce-empty-extent, a death test
+#             for impl::regionFromExtent's non-empty precondition, which no public
+#             entry point can reach and which underflows into a ~5.8e17-word row
+#             range if it is ever removed.
 #   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
 #             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
 #             through constPlane() -> unpackTo8U, and that conversion was the one
@@ -121,6 +176,7 @@ opencv	test_error	31	0
 opencv	test_error_checked	21	0
 opencv	test_logic	65768	0
 opencv	test_shift	307133	0
+opencv	test_reduce	711812	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
 opencv	test_equivalence	16403	0
@@ -132,6 +188,7 @@ core	test_error	31	0
 core	test_error_checked	21	0
 core	test_logic	53672	0
 core	test_shift	99695	0
+core	test_reduce	546572	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -141,6 +198,7 @@ noexcept	test_error	14	0
 noexcept	test_error_checked	21	0
 noexcept	test_logic	53672	0
 noexcept	test_shift	99695	0
+noexcept	test_reduce	546572	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -150,5 +208,6 @@ debug	test_error	21	0
 debug	test_error_checked	21	0
 debug	test_logic	53672	0
 debug	test_shift	99695	0
+debug	test_reduce	546572	0
 debug	test_harness	8	0
 

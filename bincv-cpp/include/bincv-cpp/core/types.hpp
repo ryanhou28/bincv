@@ -37,6 +37,46 @@ struct Size {
     }
 };
 
+/// @brief An axis-aligned rectangle in PIXELS: origin (x, y), extent (width, height).
+///
+/// @note Field names and order are cv::Rect's, deliberately. A caller porting
+///       `cv::countNonZero(img(roi))` writes the same four numbers here, and the
+///       T2.5 region reduction is Tier 1 against exactly that expression.
+/// @note The rectangle covers columns [x, x + width) and rows [y, y + height) --
+///       half-open, like cv::Rect. `width` and `height` are extents, not
+///       coordinates of the far corner.
+/// @note **Signed on purpose.** A window centred on a keypoint near an edge has a
+///       negative origin (ARCHITECTURE 7.5: 31x31 windows over the whole frame),
+///       and the alternative -- making the caller clamp before it can express the
+///       window -- moves the same clipping arithmetic into every call site, where
+///       it would be written once per caller instead of once per library. Every
+///       consumer in ops/ clips against the image and is documented as doing so.
+/// @note No intersection or union arithmetic here. This is the argument type a
+///       kernel takes, not a geometry library; ops/reduce.hpp does the one
+///       clipping operation the MVP needs, internally.
+struct Rect {
+    int x;       ///< Column of the left edge; may be negative (clipped by the op)
+    int y;       ///< Row of the top edge; may be negative (clipped by the op)
+    int width;   ///< Extent in columns; <= 0 means an empty rectangle
+    int height;  ///< Extent in rows; <= 0 means an empty rectangle
+
+    Rect() : x(0), y(0), width(0), height(0) {}
+    Rect(int x_, int y_, int width_, int height_) : x(x_), y(y_), width(width_), height(height_) {}
+
+    /// @brief True when the rectangle covers no pixel at all, before any clipping.
+    /// @note A rectangle that lies wholly outside an image is NOT empty by this
+    ///       test -- it is empty after clipping, which is the operation's business
+    ///       and not the rectangle's.
+    bool empty() const { return width <= 0 || height <= 0; }
+
+    /// @brief Equality, field for field.
+    bool operator==(const Rect& other) const {
+        return x == other.x && y == other.y && width == other.width && height == other.height;
+    }
+
+    bool operator!=(const Rect& other) const { return !(*this == other); }
+};
+
 /// @brief Morphological structuring element shapes
 enum MorphShape {
     MORPH_RECT = 0,      ///< Rectangular structuring element

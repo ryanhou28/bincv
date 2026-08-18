@@ -102,15 +102,16 @@ endfunction()
 
 # Core tests: must build and run without OpenCV.
 #
-# test_logic (T2.2) and test_shift (T2.3/T2.4) are core tests even though half of
-# each is the Tier 1 comparison against OpenCV -- cv::bitwise_* for one,
-# cv::borderInterpolate and cv::copyMakeBorder for the other. That half sits
-# behind BINCV_WITH_OPENCV inside the file, so the kernels are still compiled and
-# checked against a per-pixel reference in the three configurations that have no
-# OpenCV -- including the Debug one, which is the only place their BINCV_ASSERT
+# test_logic (T2.2), test_shift (T2.3/T2.4) and test_reduce (T2.5/T2.6) are core
+# tests even though half of each is the Tier 1 comparison against OpenCV --
+# cv::bitwise_* for the first, cv::borderInterpolate and cv::copyMakeBorder for
+# the second, cv::countNonZero for the third. That half sits behind
+# BINCV_WITH_OPENCV inside the file, so the kernels are still compiled and checked
+# against a per-pixel reference in the three configurations that have no OpenCV --
+# including the Debug one, which is the only place their BINCV_ASSERT
 # preconditions are live.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
-                     test_logic test_shift)
+                     test_logic test_shift test_reduce)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -304,6 +305,26 @@ bincv_add_death_test(test_assert_abort shift-short-stride
                      "shift: every view's stride must cover a whole row")
 bincv_add_death_test(test_assert_abort shift-border-type
                      "shift: unknown BorderType")
+
+# T2.5/T2.6 reduction preconditions. There is deliberately NO alias case: a
+# reduction reads only, so D-11 does not bind it and every overlap -- including
+# countAndSplit(m, m, m, r), which is how a caller asks "how many pixels are set"
+# through the split -- is legal. The two that remain are dimensions and stride,
+# and the dimension check has one case per entry point because countAnd compares
+# two views and countAndSplit three: a third view nobody compared would simply be
+# read at the first two's geometry, inside its own buffer, with only the answer
+# wrong.
+bincv_add_death_test(test_assert_abort reduce-dims
+                     "reduce: masked reductions need views of the same size")
+bincv_add_death_test(test_assert_abort reduce-split-dims
+                     "reduce: masked reductions need views of the same size")
+bincv_add_death_test(test_assert_abort reduce-short-stride
+                     "reduce: every view's stride must cover a whole row")
+# impl::regionFromExtent's non-empty precondition. Unreachable through the public
+# entry points -- both callers guard it -- so it is driven directly: an empty
+# extent underflows x1 - 1 into a ~5.8e17-word row range with isEmpty == false.
+bincv_add_death_test(test_assert_abort reduce-empty-extent
+                     "reduce: regionFromExtent needs a non-empty extent")
 
 if(BINCV_OPENCV_FOUND)
     foreach(TEST_NAME ${BINCV_OPENCV_TESTS})

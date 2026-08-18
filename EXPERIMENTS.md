@@ -474,6 +474,202 @@ than annotated, because a wrong bound licenses every row beneath it.
 
 ---
 
+### X-7 · What `__builtin_popcountll` actually compiles to in binCV's own build · `DONE`
+
+**Gates:** nothing new — this is a **finding against a recorded result**, X-3, and
+a measurement-validity record for `results/reduce_benchmark.log`.
+**Scope:** x86_64. The `aarch64` half — the tier D-6 is actually derived from — is
+[X-7b](#x-7b--the-same-question-on-aarch64-where-d-6-comes-from--done) below, which
+was `PARTIAL`'s missing piece; read the two together before quoting either.
+**Question:** T2.5 specifies scalar `__builtin_popcountll` "for now". In the
+configuration binCV ships, what is that?
+**Hypothesis:** X-3 recorded `popcntq %rdi, %rax` for x86_64, so the scalar form
+was expected to cost one instruction per word there and to be slow only on the
+aarch64 and Cortex-M tiers.
+**Decision rule** *(written before measuring)*: if the shipping build's lowering
+differs from X-3's, report it and change nothing — enabling an ISA baseline is a
+dispatch decision (ROADMAP 2.3) that no experiment has settled, and quietly adding
+`-mpopcnt` to make a benchmark look better is exactly the shape of change this
+log exists to prevent.
+**Variants:** GCC 13 and clang, x86_64, with and without `-mpopcnt`.
+**Workload:** `int f(unsigned long long x) { return __builtin_popcountll(x); }`,
+`-O2 -S`; then `benchmark/reduce_benchmark.cpp` at four sizes.
+**Metric:** emitted instruction sequence, then ns/pixel.
+
+**Result — the codegen**
+
+| build | emitted per word |
+|---|---|
+| `g++ -O2` (**binCV's default**) | `call __popcountdi2@PLT` — a libgcc call |
+| `clang -O2` (binCV's default) | ~15-instruction inline SWAR sequence |
+| either, `-mpopcnt` | `popcntq` |
+| aarch64 (X-3, unchanged) | `fmov` · `cnt` · `uaddlv` · `fmov` |
+
+**Result — what it costs** (640×480, x86_64, `taskset -c 2`, full table in
+`bincv-cpp/results/reduce_benchmark.log`)
+
+| | as shipped | `-mpopcnt` |
+|---|---|---|
+| `countNonZero` binCV `uint64` | 0.04544 ns/px | 0.00639 ns/px |
+| `cv::countNonZero` on `CV_8U` | 0.01098 ns/px | 0.01304 ns/px |
+| ratio | **0.24× — binCV 4.2× slower** | **2.04× — binCV 2.0× faster** |
+| versus `BinMat::countNonZero()`'s per-pixel loop | 6.1× faster | 35.3× faster |
+
+**Conclusion.** X-3's x86_64 row is right about the ISA and wrong about binCV:
+`popcntq` exists, and the library does not compile with it, because
+`bincv-cpp/CMakeLists.txt` deliberately detects AVX2/AVX-512 without applying any
+`-march` flag until runtime dispatch lands. So on the shipping x86 build the
+"scalar popcount" T2.5 asks for is **a function call per word**, and T2.5's own
+done-when clause — "expected to be a large win over the per-pixel loop" — holds
+(6.1×) while the Tier 1 comparison against OpenCV does not (0.24×).
+
+This does not weaken [D-6](ARCHITECTURE.md#d-6-bulk-only-reductions); it is a
+second instance of it. D-6's argument is that the per-word cost is where the time
+goes on the targets that matter, and here a *third* target tier turns out to have
+a per-word cost that dwarfs `cnt` — an entire PLT call. Because the public API is
+bulk (`ops/reduce.hpp` exposes no per-word popcount at all), the fix lands in one
+file; had the API exported `popcount(WordType)`, the same call would now be inlined
+into every caller's loop and every caller would have to be revisited.
+
+**Decision:** no code change, and specifically **no `-mpopcnt`**. Recorded so the
+Phase 5 vectorization task starts from a measured baseline rather than from X-3's
+row, and so no one reads `results/reduce_benchmark.log` as an algorithmic result.
+
+---
+
+### X-7b · The same question on `aarch64`, where D-6 comes from · `DONE`
+
+**Gates:** nothing new. This is a **finding against a documented claim** —
+ARCHITECTURE §6.2's present tense — and the measured baseline Phase 5 starts from.
+Added when the T2.5/T2.6 review pointed out that §6.2 describes an implementation
+`ops/reduce.hpp` does not have.
+
+**Question:** X-7 measured the shipping *x86_64* lowering. On the primary target,
+does the bulk reduction API — the thing D-6 exists to make possible — actually beat
+the per-word popcount loop D-6 forbids exposing?
+
+**Hypothesis:** it should not, yet. T2.5 specifies scalar `__builtin_popcountll`
+per word and Phase 5 owns the vectorized form, so the two loops were expected to be
+close. §6.2, which is written in the present tense, says otherwise.
+
+**Decision rule** *(written before measuring,*
+`bincv-cpp/benchmark/reduce_target_benchmark.cpp`*)*:
+- bulk ≥ 1.15× the per-word loop → §6.2's present tense is defensible; correct only
+  the instruction sequence it quotes.
+- bulk within ±15% of the per-word loop → the **interface** decision (D-6) stands
+  and the **implementation** claim does not. Separate the two in §6.2 and in
+  `ops/reduce.hpp`, record the numbers, and **change no kernel** — vectorization is
+  Phase 5 and this is a documentation defect, not a kernel defect.
+- Either way, no `-march` flag and no intrinsics enter the library — the same
+  standing decision X-7's x86_64 half already recorded.
+
+**Variants:** the shipped `countNonZero`; a caller-written per-word
+`__builtin_popcountll` loop at the same load width; and — **as a headroom probe,
+not a candidate** — identical 64-bit loads with the running total kept in a NEON
+register (`vcnt_u8` + `vpadal_u8`, one crossing per *row*).
+**Workload:** 4096×8 `uint64` (4 KiB, L1-resident on a 32 KiB L1D), so the loop is
+measured rather than the memory system. Counts compared before timing.
+**Metric:** ns/pixel. **Platform:** the reference device, three runs.
+
+**Result — the codegen** (`g++ 14.2 -O2 -DNDEBUG -S` on the device, reading the
+interior loop of each entry point rather than a minimal function)
+
+| kernel | GPR↔NEON crossings per word | interior loop |
+|---|---|---|
+| `countNonZero` | **1** | `ldr d31,[x2],8` · `cnt` · `addv b31` · `fmov x1,d31` · `add x0,x0,x1` |
+| `countAnd` | **2** | the AND is done in GPRs, so the word moves in *and* out |
+| `countAndSplit` | **4** | two `fmov` in, two out — and this is the §7.5 covariance path |
+| X-3's minimal function | 2 | `fmov d0,x0` · `cnt` · `uaddlv h0` · `fmov w0,s0` |
+
+X-3's row is an accurate ISA illustration and is **not** what these kernels emit:
+`countNonZero`'s inbound `fmov` is elided because the word is loaded straight into
+a NEON register, and gcc emits `addv b31` where clang emitted `uaddlv h0`. The
+accumulator stays in a general-purpose register in all three, which is the point —
+the compiler crosses back on every word.
+
+**Result — what it costs**
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| `countNonZero`, shipped bulk API | 0.04109 | 0.03800 | 0.03992 ns/px |
+| caller-written per-word loop | 0.04094 | 0.03773 | 0.03970 ns/px |
+| **bulk ÷ per-word** | **1.00×** | **0.99×** | **0.99×** |
+| vector accumulator (headroom probe) | 0.02333 | 0.02045 | 0.02209 ns/px |
+| **headroom for Phase 5** | **1.76×** | **1.86×** | **1.81×** |
+
+**Conclusion.** On the target D-6 was derived from, the bulk entry point is
+currently worth **nothing** against the loop shape it exists to prevent — the two
+*are* the same loop, because the emitted interior crosses the register-domain
+boundary once per word and accumulates in a GPR. So §6.2's sentence "the
+implementation keeps data in vector registers and accumulates with `cnt` + `uaddlv`
+without crossing back" was false of the shipped code. That sentence has been split
+into the interface decision (settled) and the implementation status (scalar today,
+1.8× available). `ops/reduce.hpp`'s own D-6 preamble now quotes the sequences its
+kernels emit, with the per-entry-point crossing counts, instead of X-3's.
+
+This does not weaken [D-6](ARCHITECTURE.md#d-6-bulk-only-reductions) — it is the
+clearest instance of it yet. The 1.8× is reachable by editing one file precisely
+because no caller was ever made to write the per-word loop; had `popcount(WordType)`
+been public, the 1.8× would be spread across every call site instead.
+
+**Decision:** documents corrected, **no kernel changed**, no intrinsics in the
+library. The headroom probe lives in the benchmark, where measurement code belongs.
+The width axis was deliberately left alone: everything above is at one 64-bit load
+width, so the ratio isolates the crossing rather than mixing in a wider load, and
+choosing a load width is Phase 5's job with its own decision rule.
+
+---
+
+### X-8 · What composing the LK covariance out of T2.6 costs · `DONE`
+
+**Gates:** [E-3](ARCHITECTURE.md#9-open-questions-and-planned-experiments) (T2.10),
+whose brief this widens, and therefore T3.6.
+
+**Question:** `countAndSplit` is single-pass, as T2.6 requires. But ARCHITECTURE
+§7.5's 2×2 covariance needs *three* calls — `countNonZero(mag_x)`,
+`countNonZero(mag_y)`, `countAndSplit(...)` — and therefore three traversals of the
+same window, issuing the popcounts a single fused traversal would issue once. What
+does that composition cost?
+
+**Hypothesis:** the popcount is the expensive operation (D-6), so re-traversal was
+expected to be cheap and the composition close to free.
+
+**Decision rule** *(written before measuring)*:
+- composition within 15% of a fused traversal → free enough; record and close.
+- composition > 15% worse → **widen T2.10's brief** to measure a covariance-shaped
+  entry point against the composition *before* T3.6 is written against either, and
+  register that in TASKS.md and ARCHITECTURE §9. **Do not add the entry point on
+  the strength of this measurement** — choosing T2.6's interface without the
+  experiment is exactly what T2.6 forbids for incremental state.
+- 15% is T2.10's own existing threshold, adopted rather than invented, so two
+  questions about one interface are not judged on two scales.
+
+**Variants:** the composition as shipped, versus one `impl::visitRowWords` pass
+producing all four numbers. **Workload:** 640×480 `uint64`, 200 keypoints (the
+reference `gftt_max_corners`), 31×31 windows, edge-clipped windows included.
+**Metric:** ns/keypoint. **Platform:** the reference device, three runs. Both sides
+compared on every window before timing.
+
+**Result**
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| composed, as shipped | 844.6 | 841.0 | 841.1 ns/kp |
+| fused, one traversal | 650.9 | 644.8 | 646.1 ns/kp |
+| **composed ÷ fused** | **1.30×** | **1.30×** | **1.30×** |
+
+**Conclusion.** 1.30×, reproducibly, with the *same* number of popcounts on both
+sides — so the delta is redundant traversal and redundant loads, not extra work per
+word. Past the 15% line.
+
+**Decision:** **no interface change now.** T2.10's brief is widened to carry this
+second axis (composed-versus-fused) alongside incremental-versus-recompute, and
+T3.6 continues to depend on T2.10 settling first. Recorded here rather than acted
+on because the alternative — adding a covariance entry point because one benchmark
+liked it — is the shape of change this log exists to prevent.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

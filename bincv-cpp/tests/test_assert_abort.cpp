@@ -32,6 +32,7 @@
 #include "bincv-cpp/core/view.hpp"
 #include "bincv-cpp/core/types.hpp"
 #include "bincv-cpp/ops/logic.hpp"
+#include "bincv-cpp/ops/reduce.hpp"
 #include "bincv-cpp/ops/shift.hpp"
 #include "bincv-cpp/quantMat.hpp"
 
@@ -277,6 +278,51 @@ int caseShiftBorderType() {
     return static_cast<int>(g_shiftDst[0]);
 }
 
+// The T2.5/T2.6 reduction preconditions. A reduction READS ONLY, so it has no
+// aliasing case at all -- D-11 binds kernels that write, and countAndSplit(m, m,
+// m, r) is a supported call that an alias predicate copied in from ops/logic.hpp
+// would abort on. What is left is the two checks a reduction can still fail:
+// dimensions that disagree between the masked arguments, and a stride too short
+// to hold a row.
+//
+// The dimension check gets a case per entry point because each carries its own:
+// countAnd compares two views and countAndSplit three, and a third view that
+// nobody compared would be read at the first two's geometry -- inside the buffer,
+// wrong answer, nothing to see.
+uint32_t g_reduceA[8] = {0};
+uint32_t g_reduceB[8] = {0};
+
+int caseReduceDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> b{g_reduceB, 32, 3, 1};  // narrower
+    return static_cast<int>(bincv::countAnd(a, b, bincv::Rect(0, 0, 64, 3)));
+}
+
+int caseReduceSplitDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c{g_reduceB, 64, 2, 2};  // one row short
+    return static_cast<int>(bincv::countAndSplit(a, a, c, bincv::Rect(0, 0, 64, 3)).whenSet);
+}
+
+int caseReduceShortStride() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 1};  // needs 2 words
+    return static_cast<int>(bincv::countNonZero(a));
+}
+
+// impl::regionFromExtent's non-empty precondition, called DIRECTLY rather than
+// through an entry point -- because no entry point can reach it. Both callers in
+// ops/reduce.hpp guard the empty extent themselves (wholeViewWords returns early
+// on width == 0, clipRegion on x0 >= x1), so this is a trap laid for the next
+// caller, not a live bug: x1 == 0 underflows `x1 - 1` and yields lastWord =
+// SIZE_MAX / WordBits with isEmpty == false, which visitRowWords would walk
+// straight off the end of the buffer. The assertion is what stops that being
+// discovered by a segfault in Phase 3; this case is what stops the assertion from
+// being deleted as unreachable.
+int caseReduceEmptyExtent() {
+    const bincv::impl::RegionWords<uint32_t> r = bincv::impl::regionFromExtent<uint32_t>(0, 0, 0, 1);
+    return static_cast<int>(r.lastWord);
+}
+
 struct Case {
     const char* name;
     int (*run)();
@@ -306,6 +352,10 @@ const Case kCases[] = {
     {"shift-overlap", caseShiftOverlap},
     {"shift-short-stride", caseShiftShortStride},
     {"shift-border-type", caseShiftBorderType},
+    {"reduce-dims", caseReduceDims},
+    {"reduce-split-dims", caseReduceSplitDims},
+    {"reduce-short-stride", caseReduceShortStride},
+    {"reduce-empty-extent", caseReduceEmptyExtent},
 };
 
 } // namespace

@@ -303,7 +303,7 @@ Nearly every operation in the MVP set is a composition of these.
 rule derived from measurement.
 
 On `aarch64` — the primary target — there is no scalar popcount instruction.
-`__builtin_popcountll` compiles to:
+`__builtin_popcountll` on a minimal standalone function compiles to:
 
 ```asm
 fmov   d0, x0          ; GPR -> NEON  (domain crossing)
@@ -312,15 +312,32 @@ uaddlv h0, v0.8b       ; horizontal add
 fmov   w0, s0          ; NEON -> GPR  (domain crossing)
 ```
 
-The cost is dominated by the two register-domain crossings, not by `cnt`. A
-caller that popcounts word by word in scalar code pays both crossings per 64
-pixels.
+The cost is dominated by the register-domain crossings, not by `cnt`. A caller
+that popcounts word by word in scalar code pays them per 64 pixels, and cannot
+amortize them, because the crossings are in the caller's data flow rather than in
+the popcount helper's.
 
-Therefore reductions are exposed only in bulk form — over a region, a row range,
-or a mask — so the implementation keeps data in vector registers and accumulates
-with `cnt` + `uaddlv` without crossing back. The same interface lowers to
-`popcntq` in a loop on x86 and to the SWAR sequence on Cortex-M, so one API stays
-optimal on all three.
+**Therefore reductions are exposed only in bulk form** — over a region, a row
+range, or a mask — *so that* the implementation **can** keep data in vector
+registers and accumulate there, crossing back once per row or per region instead
+of once per word. The same interface lowers to `popcntq` in a loop on x86 (where
+the build enables it — [X-7](EXPERIMENTS.md)) and to the SWAR sequence on
+Cortex-M, so one API stays right on all three.
+
+**The interface decision is settled; the implementation is not there yet, and the
+two must not be read as one sentence.** What `ops/reduce.hpp` ships today is the
+scalar per-word form T2.5 specifies, and on the reference device its interior loop
+crosses back on *every* word — so it measures at **0.99×** of the per-word loop
+this section forbids exposing, i.e. the bulk API currently buys nothing. A vector
+accumulator at the identical load width is **1.8×** faster and is Phase 5's to
+land. Measured, three runs, in [X-7b](EXPERIMENTS.md) and
+`bincv-cpp/results/reduce_target_benchmark.log`. The crossing counts also differ
+per entry point rather than being "two per word" everywhere — `countNonZero` 1,
+`countAnd` 2, `countAndSplit` 4 — and `ops/reduce.hpp`'s own header carries the
+sequences its kernels actually emit.
+
+That gap is an argument *for* the rule, not against it: because the API is bulk,
+the fix is a change to one file and no caller is revisited.
 
 ### 6.3 SIMD strategy
 
@@ -424,10 +441,47 @@ count over a mask:
       - popcount(mag_x & mag_y &  (sign_x ^ sign_y))   // opposing signs: -1
 ```
 
-The window is large (31×31 in practice), so the reduction API must support
-**masked, windowed, and preferably incremental** accumulation from the start.
-This requirement is in the MVP and shapes the reduction interface — it is not a
-later addition.
+Through the shipped T2.5/T2.6 primitives, over one window, that is exactly:
+
+```cpp
+BinMat<W> signXor(width, height);                        // once per level
+bitwiseXor(dx.constSign(), dy.constSign(), signXor.view());
+
+const size_t    sumXX = countNonZero(dx.constMagnitude(0), window);
+const size_t    sumYY = countNonZero(dy.constMagnitude(0), window);
+const SplitCount s    = countAndSplit(dx.constMagnitude(0), dy.constMagnitude(0),
+                                      signXor.constView(), window);
+const long long sumXY = s.crossTerm();     // whenClear - whenSet, SIGNED
+```
+
+Three details of that snippet are load-bearing and each has cost someone an hour:
+`constMagnitude` / `constSign`, not `magnitude` / `sign` — the kernels take
+`BinMatConstView` and deduction does not consider the conversion
+([D-9](#d-9-two-view-types-not-a-const-templated-one)); `crossTerm()`, not
+`whenClear - whenSet` — the fields are `size_t` and the difference is signed;
+and `signXor` is a **frame-sized** plane, because all three views are indexed by
+the same window in the image's coordinate frame.
+
+**Masked and windowed accumulation is in the MVP and shapes the reduction
+interface — it is not a later addition.** That much T2.6 built.
+
+**Incremental/sliding accumulation is NOT, and this section used to say
+otherwise.** The window is large (31×31) and consecutive windows overlap heavily,
+which is the regime where a sliding accumulator could win — but whether it does is
+unmeasured, so the MVP **recomputes per window** and no incremental state exists
+in `ops/reduce.hpp`. Building it before measuring would fix the interface around an
+answer nobody has. That is [E-3](#9-open-questions-and-planned-experiments)
+(T2.10), whose stated gate is T2.6's interface and on which T3.6 depends; see
+[D-13](#d-13-a-reduction-counts-pixels-never-padding) for the neighbouring
+reduction decision this task did settle.
+
+T2.10 also has to decide a second interface question that composing the snippet
+above exposed: those three calls make **three traversals** of the same window,
+issuing the same popcounts a single fused pass would, and that measures **1.30×**
+on the reference device — past T2.10's own 15% threshold
+(`bincv-cpp/results/reduce_target_benchmark.log`). Whether the covariance gets its
+own entry point is therefore T2.10's to settle, before T3.6 is written against
+either shape.
 
 The identity above is exact for ternary derivatives, i.e. pyramid level 0. For
 N-bit levels the same structure holds with **bit-sliced weighted sums**: each
@@ -541,6 +595,13 @@ independently demand belongs in the foundation.
 
 See [§6.2](#62-reductions-are-bulk-only). Derived from measured `aarch64`
 codegen, not from preference.
+
+**This binds the interface, not the current implementation, and the difference is
+measured rather than assumed.** No per-word popcount is public; the shipped
+reduction is nevertheless still one `__builtin_popcountll` per word and performs
+accordingly on the primary target (0.99× of the loop the rule forbids exposing,
+against 1.8× available from a vector accumulator — [X-7b](EXPERIMENTS.md)). D-6 is
+what makes closing that gap a change to `ops/reduce.hpp` alone.
 
 ### D-8: Value semantics, not reference counting
 
@@ -683,6 +744,53 @@ word-parallel.
 **Binds:** T3.3 morphology and T3.5 derivative, which are the two callers this
 record exists to serve.
 
+### D-13: A reduction counts pixels, never padding
+
+*(Added during T2.5/T2.6, not pre-planned — the first task whose kernels read a
+row's trailing partial word without writing it.)*
+
+Every reduction in `ops/reduce.hpp` counts **only bits inside the requested region
+intersected with the image**. A bit at or past `width` is never counted, whatever
+it holds. `countNonZero(v)` therefore equals `cv::countNonZero` of the same
+content as `CV_8U` even when `v` wraps a buffer whose padding bits are all ones.
+
+**This is a deliberate departure from T2.5's wording**, which says "whole-word
+accumulation; correctness depends on padding bits being zero". Read literally that
+means accumulating each row's trailing word unmasked and trusting the invariant.
+Three reasons not to:
+
+- **A source with dirty padding is a supported construction, not a bug.**
+  `BinMat`'s wrap constructor states that a wrapped buffer's padding belongs to
+  its caller — sensor DMA, a sub-region of a larger frame — and
+  `tests/test_logic.cpp` already sweeps sources built that way. A reduction that
+  over-counts on such a view returns a wrong answer from a legal input.
+- **`ops/shift.hpp` already decided the same question the same way**, and pays
+  considerably more for it: every source word goes through
+  `impl::extendedRowWord`. Two kernel families disagreeing about whether a
+  source's padding is trustworthy would be worse than either rule alone.
+- **The cost is one AND per row**, not per word. The trailing word is masked
+  outside the interior loop, exactly as in `ops/logic.hpp`, so the loop Phase 5
+  vectorizes carries no mask.
+
+The invariant remains load-bearing everywhere else: a region's *interior* words
+are accumulated unmasked, which is correct only because every bit of a word
+strictly inside a row is a pixel.
+
+**The same rule answers a question padding alone does not.** A view that windows a
+wider image has its neighbours' live pixels sitting past its `width` — an LK
+window is exactly that ([§7.5](#75-lk-gradient-covariance)) — and a reduction over
+a window must be over the window. One sentence covers both cases.
+
+**Measured, because the alternative is invisible otherwise:** with the whole-image
+count changed to trust the invariant (i.e. T2.5's literal reading), 545919 of
+`test_reduce`'s 546468 core checks still pass and the only case family that goes
+red is `Reduce.DirtyPadding_*`. Every value sweep, every Tier 1 comparison against
+`cv::countNonZero`, and the covariance identity stay green — so this decision has
+exactly one test standing behind it, and that is why that test exists.
+
+**Binds:** every reduction added under `ops/`, and T3.6's covariance, which reduces
+over windows of a frame.
+
 ### D-7: Existing code is not a constraint
 
 The pre-existing `BinMat` implementation is a prototype. Where it conflicts with
@@ -734,7 +842,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 |---|---|---|---|---|---|
 | **E-1** | Does row alignment beyond word granularity measurably help any kernel on NEON? | [D-4](#d-4-word-granularity-alignment-by-default) was decided on a memory measurement plus an untested weak-benefit assumption. | Whether a profile system is worth building at all; whether the default flips. | T1.3 and every kernel | **Phase 2** (T2.8) |
 | **E-2** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | `BinMat`'s default template argument. | all kernels | **Phase 2** (T2.9) |
-| **E-3** | At what window size does incremental/sliding popcount beat recomputation for the LK covariance? | The 31×31 window is recomputed per keypoint; windows overlap heavily. | Reduction API shape — whether incremental state is exposed. | T2.6, T3.6 | **Phase 2** (T2.10) |
+| **E-3** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls — measured at **1.30×** on the reference device, [X-8](EXPERIMENTS.md), past T2.10's own 15% line? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | Reduction API shape — whether incremental state is exposed, whether a covariance-shaped entry point exists, and whether the selector is a plane or two arguments. | T2.6, T3.6 | **Phase 2** (T2.10) |
 | **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | **Phase 3** (T3.9) |
 | **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | Measured growth is 1/3/4/5 bits ([§7.2](#72-pyramid-downsample--box-22)), but the reference never chose that — it fell out of using `CV_8U`. Capping N is a direct footprint lever. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |

@@ -1105,7 +1105,7 @@ against 36/64 under an explicit zero border.
 
 ---
 
-### T2.5 · Bulk reductions · `TODO`
+### T2.5 · Bulk reductions · `DONE`
 
 **Depends:** T2.4
 **Files:** `include/bincv-cpp/ops/reduce.hpp` (new)
@@ -1134,9 +1134,79 @@ size_t countNonZero(BinMatConstView<W> src, Rect region);
 
 **Verify:** V-ALL
 
+**What was built.** `include/bincv-cpp/ops/reduce.hpp` (both `countNonZero`
+overloads plus T2.6's two masked forms) and `tests/test_reduce.cpp`, a **core**
+test whose Tier 1 half sits behind `BINCV_WITH_OPENCV` so the kernels are compiled
+and checked in all four configurations — including Debug, the only one where their
+`BINCV_ASSERT` preconditions are live. 711724 checks under `opencv`, 546484 under
+the other three, plus three death tests. `core/types.hpp` gained `Rect`, which the
+spec used and the project did not have; it is `cv::Rect`'s four fields in
+`cv::Rect`'s order, signed, because a 31×31 window centred near an edge has a
+negative origin.
+
+**No per-word popcount is reachable from outside the file**, which is the whole
+interface (D-6). `impl::popcountWord` is the only place `__builtin_popcountll`
+appears, and it is deliberately **not** in `impl/kernel_util.hpp` — the header
+every kernel already includes — because a per-word popcount one include away from
+every kernel is one that will be called from one. `grep -rn popcount
+include/bincv-cpp` finds it, its four call sites inside the same file, this file's
+own documentation, and two pre-existing comments that mention the word.
+
+The builtin-free SWAR form beside it (`impl::popcountWordPortable`, for a toolchain
+with no `__builtin_popcountll` — MSVC, and the claim that binCV needs a C++17
+compiler and nothing else) is compiled **unconditionally** rather than inside the
+`#if`, because every configuration this project verifies is GCC or clang and a
+guarded definition would be source that nothing ever compiles.
+`Reduce.PortablePopcount_*` runs it against the builtin over 20480 values per word
+width, including both endpoints by name.
+
+**The region is clipped, not rejected**, and that is a calling convention rather
+than leniency: an LK window (§7.5) is out of range for every keypoint within 15
+pixels of an edge, so clipping once here replaces the same four `min`/`max`
+expressions in every call site. Negative origins, extents past either edge, and
+rectangles wholly outside all count what exists and nothing else. The arithmetic
+runs in `long long` before anything becomes a `size_t`: `x + width` overflows
+`int`, and a negative origin converted to `size_t` is not "clipped to zero", it is
+2⁶⁴ − k.
+
+**The padding decision is [D-13](ARCHITECTURE.md#d-13-a-reduction-counts-pixels-never-padding)
+and it departs from this task's wording.** T2.5 says "correctness depends on
+padding bits being zero"; the shipped kernels do not depend on it — a bit at or
+past `width` is never counted, at a cost of one AND per row. The reasons and the
+measurement are in the D-record. The short version: sources with dirty padding are
+a documented, supported construction, `ops/shift.hpp` already decided the same way,
+and with the whole-image count changed to trust the invariant instead, 545919 of
+546468 core checks still pass and only `Reduce.DirtyPadding_*` goes red.
+
+**Benchmark** (`benchmark/reduce_benchmark.cpp`, results committed at
+`results/reduce_benchmark.log`). Denominator per
+[§10.3](ARCHITECTURE.md#103-benchmark-denominator): `cv::countNonZero` on the same
+content as `CV_8U`, with every implementation's count compared before anything is
+timed. **The result is a finding, and it is unflattering** — recorded as
+[X-7](EXPERIMENTS.md):
+
+| 640×480, x86_64 | as shipped | with `-mpopcnt` |
+|---|---|---|
+| `countNonZero` binCV `uint64` | 0.04544 ns/px | 0.00639 ns/px |
+| `cv::countNonZero` on `CV_8U` | 0.01098 ns/px | 0.01304 ns/px |
+| ratio | **0.24× — binCV 4.2× slower** | **2.04× — binCV 2.0× faster** |
+| versus `BinMat::countNonZero()` | 6.1× faster | 35.3× faster |
+
+binCV applies no `-march` flags (the top-level `CMakeLists.txt` detects AVX2 and
+AVX-512 and deliberately does not enable them until runtime dispatch lands), so on
+the shipping x86 build `__builtin_popcountll` is **a call to libgcc's
+`__popcountdi2`, once per word** — verified in `-O2 -S` output; clang inlines a
+~15-instruction SWAR sequence instead, and neither is `popcntq`. X-3 recorded
+`popcntq` for x86_64, which is true of the ISA and not of this build. So T2.5's
+done-when clause about the per-pixel loop holds (6.1×) and the Tier 1 speed
+comparison does not. **Nothing was changed in response** — enabling an ISA baseline
+is a dispatch decision (ROADMAP 2.3) that no experiment has settled, and the
+aarch64 half of the same question is E-2/T2.9's to close on the reference device.
+The bulk API is what makes the eventual fix a change to one file.
+
 ---
 
-### T2.6 · Masked and windowed reductions · `TODO`
+### T2.6 · Masked and windowed reductions · `DONE`
 
 **Depends:** T2.5
 **Files:** `include/bincv-cpp/ops/reduce.hpp`
@@ -1173,6 +1243,100 @@ SplitCount countAndSplit(BinMatConstView<W> a, BinMatConstView<W> b,
 - Single-pass: `countAndSplit` reads each word once
 
 **Verify:** V-ALL
+
+**What was built.** Same file and same suite as T2.5. `countAnd` and
+`countAndSplit` take views, read only, and allocate nothing — the AND happens a
+word at a time inside the reduction, which is the reason these exist rather than
+being spelled `bitwiseAnd` into a scratch image followed by `countNonZero`: the
+scratch would be a heap allocation in a kernel, or a caller-provided buffer whose
+only purpose is to be counted and thrown away.
+
+**Aliasing is unrestricted, and that is the one place D-11 does not reach.**
+Nothing is written, so `a`, `b` and `c` may be the same view or overlap
+arbitrarily; `countAndSplit(m, m, m, r)` is well defined and tested. An alias
+predicate copied in from `ops/logic.hpp` would have rejected exactly the calls the
+covariance makes — overlapping windows of one frame — so the death-test list has a
+dimension case and a stride case and deliberately no alias case.
+
+**Single pass, and two popcounts per word rather than three.**
+
+```
+both  = a[i] & b[i] & mask
+total = popcount(both)
+set   = popcount(both & c[i])
+whenSet += set;  whenClear += total - set
+```
+
+`whenClear` is `total - set`, never `popcount(a & b & ~c)`. Besides being one
+popcount cheaper on a target where the popcount is the expensive part (D-6), it
+never forms `~c` — which sets every padding bit of a trailing word and would count
+phantom pixels unless the mask were applied a second time.
+
+The row skeleton (head word, unmasked interior, tail word) is
+`impl::visitRowWords`, shared by all four entry points, so "each word index is
+visited exactly once, in ascending order, under the right mask" is a property of
+**one** function — and `Reduce.Geometry_*` drives that function directly with a
+recording visitor over an exhaustive cross product of origins and extents,
+reconstructing the selected column set and comparing it against an independently
+written clipping reference. A value comparison cannot see a double visit whose
+word happens to be empty; this does.
+
+**The covariance identity is tested as the thing it is for.**
+`Reduce.Covariance_*` builds a `TernaryMat` pair, computes `sumXX`/`sumYY`/`sumXY`
+through these primitives exactly as T3.6 will, and compares against a per-pixel
+**float** reference over the same window — with exact equality, since every term is
+a small integer and an approximate comparison would accept the off-by-one this
+operation can actually have. Windows are 7, 15 and 31 at centres including all four
+corners and past both edges, at six image sizes down to 1×1, and the sweep runs
+twice: once with canonical-zero signs, and once with the **sign planes deliberately
+dirtied** where the magnitude is zero. That second variant is not decoration —
+T1.6's canonical-zero rule permits it and T3.5's derivative will produce it
+(`sign = neg` is a whole-plane assignment), and the identity survives only because
+the `a & b` factor removes those bits.
+
+**MVP recomputes per window; no incremental state was built.** Windows are 31×31
+in practice and overlap heavily — consecutive keypoints, and consecutive iterations
+on one keypoint, re-read almost the same words — which is exactly the regime where
+a sliding accumulator might win. Whether it does is E-3 (T2.10) and is unmeasured,
+so `benchmark/reduce_benchmark.cpp` times recomputation at 7/15/31 as *context for*
+that experiment and does not implement the alternative: measuring one option is not
+an experiment. The signature is chosen so that either answer leaves it unchanged.
+
+**Eight mutations of `ops/reduce.hpp`, and what each turned red** (core checks
+passed, out of the 546468 the suite had when they were run — the
+portable-popcount case added 16 afterwards):
+
+| injected fault | passed | what went red |
+|---|---|---|
+| tail mask dropped | 496202 | 6 case families |
+| head mask dropped | 491251 | 6 families |
+| one-word region drops the head mask | 488559 | 6 families |
+| tail mask off by one (half-open confusion) | 511817 | 6 families |
+| interior loop revisits `lastWord` | 443742 | 7 families, `Reduce.Geometry_*` included |
+| `whenClear = total` (the split lost) | 470980 | 5 families |
+| region not clipped to the width | **segfault** | 19 failing regions, then the process died |
+| whole-image count trusts the padding invariant | 545919 | **`Reduce.DirtyPadding_*` only** |
+
+The last row is the one worth reading, and it is why D-13 has a test rather than a
+paragraph.
+
+**What a four-reviewer pass then changed** (code and documents, no interface
+change; the two performance findings were measured on the reference device with
+decision rules written first, and both were *recorded* rather than acted on
+because acting on either would have chosen T2.6's shape ahead of T2.10):
+
+| finding | outcome |
+|---|---|
+| `SplitCount`'s halves are both `size_t`, so §7.5's `whenClear - whenSet` wraps to ~1.8e19 for every negatively correlated window — clean under `-Werror` | **fixed:** `SplitCount::crossTerm()` returns the signed difference; `Reduce.Covariance_*` now takes `sumXY` through it and pins the sign on a deterministic anti-correlated case |
+| `impl::regionFromExtent` documented but did not assert its non-empty precondition; `x1 == 0` underflows into a ~5.8e17-word row range with `isEmpty == false` | **fixed:** `BINCV_ASSERT`, plus the `reduce-empty-extent` death test — unreachable from the public API today, which is why it needed a test rather than a comment |
+| `Rect::empty/==/!=` had zero call sites and zero coverage anywhere in the repo | **fixed:** `impl::clipRegion` now calls `Rect::empty()` instead of re-spelling it, and `Reduce.Degenerate_*` exercises all three; each member's body was mutated to confirm the checks bite |
+| the region overload's Tier 1 line claimed unconditional equality with `cv::countNonZero(src(region))`, but `cv::Mat::operator()(Rect)` *throws* outside the image | **fixed:** the claim is now stated over the rectangles OpenCV can express, which is also what `testOpenCvEquivalence` actually tests |
+| the header's aarch64 sequence matched none of its four kernels | **fixed:** the D-6 preamble quotes what each kernel emits, with per-entry-point crossing counts (1 / 2 / 4); `reduce_benchmark.cpp`'s banner likewise |
+| ARCHITECTURE §6.2 claimed in the present tense that the implementation keeps data in vector registers "without crossing back" | **false, and now measured:** the shipped bulk count runs at 0.99× of the per-word loop D-6 forbids exposing, with 1.8× available from a vector accumulator ([X-7b](EXPERIMENTS.md)). §6.2 now separates the settled interface from the implementation status; **no kernel changed** — vectorization is Phase 5 |
+| ARCHITECTURE §7.5 still demanded incremental accumulation "from the start" | **fixed:** §7.5 now says the MVP recomputes and defers incremental state to E-3, and carries the exact snippet T3.6 should copy |
+| composing the 2×2 covariance makes three traversals of one window | **measured at 1.30×** ([X-8](EXPERIMENTS.md)) and registered as a second axis of T2.10 — past that task's own 15% line. No entry point added |
+| `countAndSplit`'s selector `c` must be frame-sized, so T3.6 cannot pass a window-sized buffer | **documented** on `countAndSplit` with the plane the caller forms and what it costs; the zero-plane four-argument alternative is registered as T2.10's third axis, since it is a memory-versus-speed choice and no experiment has settled it |
+| `countNonZero(dx.magnitude(0), w)` — the spelling §7.5 and T2.6 printed — does not compile from a non-const container (D-9: deduction ignores the conversion) | **fixed in the documents,** not by adding overloads: `constMagnitude`/`constSign`/`constView` is the house spelling (`ops/logic.hpp` and every test already use it), so `reduce.hpp` and §7.5 now print it, and `Reduce.Covariance_*` compiles it from a deliberately non-const container so it cannot silently stop being the right advice |
 
 ---
 
@@ -1301,6 +1465,30 @@ recomputation for overlapping windows?
   *before* T3.6 is written against the simpler form
 
 **Variants:** recompute-per-window versus a sliding accumulator.
+
+**SECOND AXIS, added by the T2.5/T2.6 review — composed versus fused.** T2.6's
+primitives are each single-pass, but the 2×2 covariance composed out of them makes
+**three** traversals of one window (`countNonZero` ×2 + `countAndSplit`), issuing
+the popcounts a fused traversal would issue once. Measured at **1.30×** on the
+reference device, three runs, with the popcount count identical on both sides — so
+the cost is redundant traversal, past this task's own 15% line
+([X-8](EXPERIMENTS.md), `bincv-cpp/results/reduce_target_benchmark.log`,
+`benchmark/reduce_target_benchmark.cpp`).
+
+- **Decision rule, same threshold:** a covariance-shaped entry point (returning
+  `xx`, `yy`, `whenClear`, `whenSet` from one `visitRowWords` pass) beats the
+  composition by > 15% at 31×31 → add it to T2.6 *before* T3.6 is written; within
+  15% → keep the composition and record that the fused form was rejected on data.
+- This axis is here rather than acted on because E-3 is the experiment whose stated
+  gate is *T2.6's interface*, and adding an entry point because one benchmark liked
+  it is the same mistake as adding incremental state for the same reason.
+- A **third** interface question belongs with it, and it is a memory-versus-speed
+  one, so it needs the same treatment: `countAndSplit`'s selector `c` must be a
+  frame-sized plane (`sign_x ^ sign_y`, one bit per pixel, 38400 B at 640×480,
+  formed once per pyramid level). A four-argument form taking `c0` and `c1` and
+  XOR-ing them in the word loop would need no plane at all. Report both memory and
+  speed, per CLAUDE.md, since this is precisely a case where the two goals may
+  disagree.
 **Workload:** window sizes 7, 15, 31 at realistic keypoint densities (~200
 keypoints, per the reference `gftt_max_corners`); include the heavy-overlap case,
 since that is what favors incremental.
@@ -1309,8 +1497,10 @@ since that is what favors incremental.
 accumulator stays resident in a 32 KiB L1D — a laptop with four times the L1 would
 favour incremental more than the deployment target does.
 
-**Done when:** logged as X-5, T2.6's API is confirmed or extended, benchmark
-committed.
+**Done when:** logged as the next free X-number (X-5 and X-8 are taken; X-8 already
+carries this task's composed-versus-fused axis as a *finding*, not as its
+decision), all three axes above answered, T2.6's API confirmed or extended, and
+the benchmark committed.
 
 ---
 
