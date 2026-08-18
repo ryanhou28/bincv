@@ -32,9 +32,11 @@
 #include "bincv-cpp/core/view.hpp"
 #include "bincv-cpp/core/types.hpp"
 #include "bincv-cpp/ops/bitslice.hpp"
+#include "bincv-cpp/ops/denoise.hpp"
 #include "bincv-cpp/ops/logic.hpp"
 #include "bincv-cpp/ops/reduce.hpp"
 #include "bincv-cpp/ops/shift.hpp"
+#include "bincv-cpp/ops/threshold.hpp"
 #include "bincv-cpp/quantMat.hpp"
 
 #if !BINCV_DEBUG_CHECKS
@@ -366,6 +368,78 @@ int caseReduceEmptyExtent() {
     return static_cast<int>(r.lastWord);
 }
 
+// T3.1's preconditions. `denoise-in-place` is the one no case above states:
+// denoiseMedian3 reads SOURCE ROW y - 1 while writing destination row y, so it is
+// not pointwise in the word index and the in-place spelling ops/logic.hpp
+// supports is undefined here. Nothing diagnoses it -- the memory is valid and the
+// filter simply feeds on its own output from the second row onwards.
+uint32_t g_denSrc[16] = {0};
+uint32_t g_denDst[16] = {0};
+
+int caseDenoiseDims() {
+    const bincv::BinMatConstView<uint32_t> src{g_denSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_denDst, 32, 3, 1};        // narrower
+    bincv::denoiseMedian3(src, dst);
+    return static_cast<int>(g_denDst[0]);
+}
+
+int caseDenoiseInPlace() {
+    const bincv::BinMatConstView<uint32_t> src{g_denSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_denSrc, 64, 3, 2};        // the same words
+    bincv::denoiseMedian3(src, dst);
+    return static_cast<int>(g_denSrc[0]);
+}
+
+int caseDenoiseShortStride() {
+    const bincv::BinMatConstView<uint32_t> src{g_denSrc, 64, 3, 1};   // needs 2 words
+    const bincv::BinMatView<uint32_t> dst{g_denDst, 64, 3, 1};
+    bincv::denoiseMedian3(src, dst);
+    return static_cast<int>(g_denDst[0]);
+}
+
+// T3.2's preconditions. `binarize-dims` is a PER-PLANE check: an N-bit source
+// arrives as N separate views (D-5), and a check that only inspected plane 0
+// would read the rest at plane 0's geometry. The narrowed plane here is plane 1,
+// not plane 0, so a loop that stops after the first plane does not fire.
+uint32_t g_binPlanes[3][16] = {{0}, {0}, {0}};
+uint32_t g_binDst[16] = {0};
+
+int caseBinarizeDims() {
+    const bincv::BinMatConstView<uint32_t> planes[3] = {
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[0], 64, 3, 2},
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[1], 32, 3, 1},   // narrower
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[2], 64, 3, 2},
+    };
+    const bincv::BinMatView<uint32_t> dst{g_binDst, 64, 3, 2};
+    bincv::binarize(planes, dst, 1u);
+    return static_cast<int>(g_binDst[0]);
+}
+
+int caseBinarizeAlias() {
+    // dst IS plane 2. ops/logic.hpp would accept that (pointwise in the word
+    // index); this kernel must not -- plane 2 is read after dst's word has been
+    // written from planes 0 and 1.
+    const bincv::BinMatConstView<uint32_t> planes[3] = {
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[0], 64, 3, 2},
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[1], 64, 3, 2},
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[2], 64, 3, 2},
+    };
+    const bincv::BinMatView<uint32_t> dst{g_binPlanes[2], 64, 3, 2};
+    bincv::binarize(planes, dst, 1u);
+    return static_cast<int>(g_binPlanes[2][0]);
+}
+
+int caseBinarizeShortStride() {
+    const bincv::BinMatConstView<uint32_t> planes[3] = {
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[0], 64, 3, 1},   // needs 2 words
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[1], 64, 3, 1},
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[2], 64, 3, 1},
+    };
+    const bincv::BinMatView<uint32_t> dst{g_binDst, 64, 3, 2};
+    bincv::binarize(planes, dst, 1u);
+    return static_cast<int>(g_binDst[0]);
+}
+
 struct Case {
     const char* name;
     int (*run)();
@@ -465,6 +539,12 @@ const Case kCases[] = {
     {"bitslice-alias", caseBitSliceAlias},
     {"bitslice-short-stride", caseBitSliceShortStride},
     {"bitslice-sum-overlap", caseBitSliceSumOverlap},
+    {"denoise-dims", caseDenoiseDims},
+    {"denoise-in-place", caseDenoiseInPlace},
+    {"denoise-short-stride", caseDenoiseShortStride},
+    {"binarize-dims", caseBinarizeDims},
+    {"binarize-alias", caseBinarizeAlias},
+    {"binarize-short-stride", caseBinarizeShortStride},
 };
 
 } // namespace

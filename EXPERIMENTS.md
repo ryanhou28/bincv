@@ -1380,6 +1380,182 @@ it attributed a two-variable difference to one variable.
 
 ---
 
+### X-12 · T3.1 denoise against the reference implementation · `DONE`
+
+**Gates:** nothing that was open. T3.1's done-when requires a committed benchmark,
+and CLAUDE.md requires a decision rule written before the numbers exist — so this
+entry records **a measurement that could not have changed the code**, and says so
+plainly rather than dressing a confirmation up as an experiment.
+
+**Question:** what does the bit-parallel three-pixel median cost against the
+reference implementation on the target device, and does fusing the two neighbour
+shifts into the kernel trade memory for speed or win both?
+
+**Decision rule** *(written into `benchmark/denoise_benchmark.cpp`'s header before
+the device run, and stated here at full strength):*
+
+- If the **composed** spelling (`shiftDown` + `shiftLeft` + `majority3`, three
+  passes and two frame-sized scratch buffers) is **faster** than the fused kernel,
+  the fused kernel still ships: it is strictly smaller, and CLAUDE.md's tiebreak
+  is that memory wins when the goals conflict and no explicit choice has been
+  made. The measurement would then be recorded as **a known speed cost accepted
+  for footprint**, with the number attached.
+- If the fused kernel is **faster or equal**, nothing is traded and there is no
+  decision to record — only a claim to substantiate.
+
+**That first branch is why this is not a free confirmation.** It has a real
+consequence (a documented speed cost, quotable against the project), and it was
+written before the device had run. What it does *not* have is a branch that
+changes the code, and an entry that pretended otherwise would be worse than one
+that admits it.
+
+**Variants:** the reference implementation on `CV_8U` in two spellings — *as
+written* (all six `cv::Mat::zeros` fills) and the **denominator**, which drops the
+four fills the reference immediately overwrites; `bincv::denoiseMedian3` at
+`uint32_t` and `uint64_t`; the composed binCV spelling at `uint32_t`.
+
+**Workload:** 640×480 and the pyramid ladder below it (320×240, 160×120, 94×60),
+~50% fill, four distinct images rotated through, batches calibrated to a 40 ms
+budget with the minimum of five batches reported.
+
+**Metric:** ns/pixel **and** the working set of one call, together (CLAUDE.md),
+plus the **measured fixed per-call cost** of each side — see the conclusion for
+why the ladder cannot be read without it.
+
+**Method:** `bincv-cpp/benchmark/denoise_benchmark.cpp`. The denominator is
+ARCHITECTURE 10.3's, and for this operation it is not a judgement call: it is
+`SEAL/src/temporal_processing/denoise.cpp`'s `three_pix_median_filter` **ported
+call for call** — two `cv::Mat::zeros` neighbour matrices, the two range-limited
+`copyTo` calls, then `cv::min`/`cv::max` in its order — on the same binary content
+stored as `CV_8U`. The neighbour construction is timed because that is how the
+reference obtains its neighbours.
+
+*What is hoisted, precisely, because an earlier version of this entry said "only
+the allocations" and that was not true.* All seven `cv::Mat` **allocations** are
+hoisted, as a caller in a frame loop would hoist them — timing `malloc` would
+flatter binCV, which allocates nothing here. Of the six **zero-fills**, the
+denominator row re-pays only the two the border depends on (`right`'s last column
+and `above`'s first row are never written by the `copyTo` calls, so those zeros
+*are* the border); the other four buffers are completely overwritten by the
+`cv::min`/`cv::max` that follows, so their fill is dead work no caller would keep.
+A fifth row, **`OpenCV as-written`**, pays all six and is 1.5×–2.1× slower down
+the ladder. Every ratio in this entry is against the *faster* of the two, so it is
+conservative by exactly that gap.
+
+All five implementations are compared pixel for pixel before anything is timed,
+and a disagreement skips the size and exits non-zero. After the timing, each one
+is run once more on the same image and its destination folded **pixel by pixel**
+into a representation-independent checksum printed in the table; all five must
+match. (The previous version fed one word per iteration to a volatile sink and
+called it a checksum of the destination — a kernel that computed only its first
+word would have satisfied it.)
+
+**Platform:** Pi 4, Cortex-A72, 32 KiB L1D / 1 MiB shared L2, aarch64, kernel
+6.18.34+rpt-rpi-v8, g++ 14.2.0, Release with `-DBINCV_USE_OPENCV=ON`, governor
+`performance`, `taskset -c 3`, `throttled=0x0` before **and** after. Raw log:
+`bincv-cpp/results/denoise_benchmark_pi4.log`, which records the four source
+hashes as well as the commit — `71ef245` is HEAD and contains neither
+`ops/denoise.hpp` nor the benchmark, so the commit alone does not pin what ran.
+
+**Result — reference device:**
+
+| size | impl | ns/px | vs denominator | working set |
+|---|---|---|---|---|
+| 640×480 | reference `CV_8U` *(denominator)* | 3.44739 | 1.00× | 2 150 400 B |
+| 640×480 | reference `CV_8U` as written | 5.15740 | 0.67× | 2 150 400 B |
+| 640×480 | binCV fused `uint32` | 0.06074 | **56.8×** | 76 800 B |
+| 640×480 | binCV fused `uint64` | 0.04739 | **72.8×** | 76 800 B |
+| 640×480 | binCV composed `uint32` | 0.21166 | 16.3× | 153 600 B |
+| 320×240 | reference `CV_8U` *(denominator)* | 1.46580 | 1.00× | 537 600 B |
+| 320×240 | reference `CV_8U` as written | 2.19517 | 0.67× | 537 600 B |
+| 320×240 | binCV fused `uint32` | 0.06443 | 22.8× | 19 200 B |
+| 320×240 | binCV fused `uint64` | 0.05192 | 28.2× | 19 200 B |
+| 320×240 | binCV composed `uint32` | 0.21055 | 7.0× | 38 400 B |
+| 160×120 | reference `CV_8U` *(denominator)* | 2.26354 | 1.00× | 134 400 B |
+| 160×120 | reference `CV_8U` as written | 3.58778 | 0.63× | 134 400 B |
+| 160×120 | binCV fused `uint32` | 0.07389 | 30.6× | 4 800 B |
+| 160×120 | binCV fused `uint64` | 0.07070 | 32.0× | 5 760 B |
+| 160×120 | binCV composed `uint32` | 0.22940 | 9.9× | 9 600 B |
+| 94×60 | reference `CV_8U` *(denominator)* | 3.64058 | 1.00× | 39 480 B |
+| 94×60 | reference `CV_8U` as written | 7.19723 | 0.51× | 39 480 B |
+| 94×60 | binCV fused `uint32` | 0.12633 | 28.8× | 1 440 B |
+| 94×60 | binCV fused `uint64` | 0.08549 | 42.6× | 1 920 B |
+| 94×60 | binCV composed `uint32` | 0.38962 | 9.3× | 2 880 B |
+
+**Fixed per-call cost, measured on a 2×2 frame** (the same eight `cv::` calls, on
+an image whose pixel work is four bytes): **reference 4.147 µs, binCV 0.014 µs.**
+That is 20% of the 94×60 baseline frame, 10% of 160×120, 4% of 320×240 and 0.4%
+of 640×480.
+
+**Run-to-run spread on the device**, recorded so a later reader does not over-read
+a small difference: an earlier run of the same binary gave 56.4× / 23.1× / 33.5× /
+26.5× for fused `uint32` against 56.8× / 22.8× / 30.6× / 28.8× here. The two
+largest sizes repeat to within 2%; the two smallest move by up to 10%, which is
+what a frame whose denominator is a fifth per-call overhead looks like.
+
+*x86_64 is no longer quoted here.* The previous version of this entry carried a
+one-line contrast row with no committed log behind it, and it does not reproduce:
+three consecutive runs on an idle desktop give 19.25× / 16.05× / 19.34× at
+640×480, a 20% spread on one binary and one input, and an earlier set spread 45%.
+The log is now committed anyway (`bincv-cpp/results/denoise_benchmark.log`) so the
+claim and its evidence live together; nothing in this entry rests on it.
+
+**Conclusion.**
+
+*On the fuse-versus-compose question, the rule's first branch did not fire.* The
+fused kernel is **3.1–3.5× faster** than the composed one at every size (3.49× /
+3.27× / 3.11× / 3.08× down the ladder) and uses **half** its memory, so nothing
+was traded and no decision needed recording. The gap is what three traversals
+versus one predicts, plus two frame-sized writes the fused form never issues. Note
+that this settles the question **for this neighbourhood only** — T3.3's morphology
+shifts by an arbitrary structuring element, where composing is the only general
+spelling, and nothing here says what that costs.
+
+*On the headline ratio, read the working-set column with it.* At 640×480 the
+reference implementation holds 2 150 400 B live against the Pi's **1 MiB shared
+L2** and binCV's fused call holds 76 800 B, so 57×/73× is substantially a
+**cache-residency** result and not a cleverer inner loop — the same mechanism
+[X-6](#x-6--is-the-t22-logic-speedup-real--done) identified for the logic kernels,
+and it should be quoted the same way. The direct evidence is inside the baseline
+rather than across the two sides: the *same OpenCV code* costs 3.45 ns/pixel at
+640×480 and 1.47 ns/pixel at 320×240, i.e. it gets 2.4× slower per pixel on the
+larger frame, which is the signature of the working set crossing L2. Some of the
+8× is also the representation doing less work per pixel rather than moving fewer
+bytes: the reference spends four passes on `cv::min`/`cv::max` plus two neighbour
+copies where binCV spends one `maj3` per 32 or 64 pixels.
+
+*THE PYRAMID-LEVEL RATIOS ARE NOT A CACHE RESULT, AND THE PREVIOUS VERSION OF
+THIS ENTRY SAID THEY WERE.* Below 320×240 the baseline's per-pixel cost **rises**
+(1.47 → 2.26 → 3.64 ns/px) while its working set **falls** (537 600 → 134 400 →
+39 480 B), all of it comfortably inside L2. No cache explanation predicts that,
+and the earlier claim that "the ratio is largest exactly where the reference stops
+fitting and smallest at 320×240 where both sides fit" was fitted to a shape it did
+not explain. What does explain it, measured rather than argued: the reference
+makes **eight `cv::` calls per frame**, whose fixed cost this run measures directly
+at **4.147 µs** — 20% of the 94×60 frame and 0.4% of the 640×480 one. Subtracting
+even that leaves a per-pixel cost still rising down the ladder (1.41 → 2.05 → 2.91
+ns/px), so the remainder is per-frame and per-row overhead in those eight calls
+rather than the operation. **Consequence: ratios at different sizes are not
+comparable with each other, and the 31×/29× pyramid rows are not a stronger claim
+than the 640×480 one — they are a weaker one with more overhead in the
+denominator.**
+
+*`uint64_t` beats `uint32_t` at every size in this run* (1.28×, 1.24×, 1.05×,
+1.48×) — but the 160×120 margin **changes sign** between two runs of the same
+binary, so nothing may be concluded from it. That is consistent with, and does not
+re-open,
+[X-10](#x-10--default-word-width--done): the default is `uint32_t` on footprint
+grounds at upper pyramid levels, and this row is a per-kernel speed observation,
+not a word-width experiment. E-9 already holds the per-level version of it.
+
+**Decision:** none. No D-record; nothing was traded, and the one thing that was
+measured against a real branch came out the way the code already was. The number
+that may now be quoted for T3.1 is **57× at 640×480 on the reference device, with
+28× less memory**, never the ratio alone and never a pyramid-level ratio in its
+place.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

@@ -254,6 +254,141 @@
 #             test_assert_abort.bitslice-dims, with bitslice-alias,
 #             bitslice-short-stride and bitslice-sum-overlap alongside it. The
 #             ctest count rises by those four.
+#   test_denoise  9744 under opencv, 7584 everywhere else. The 2160 difference is
+#             the reference implementation itself: SEAL's three_pix_median_filter
+#             PORTED CALL FOR CALL -- two cv::Mat::zeros neighbour matrices, the
+#             two range-limited copyTo calls, then cv::min/cv::max in its order --
+#             over the full T2.1 size, height and fill matrix at all four word
+#             widths. It is a port and not a paraphrase for one reason: the BORDER
+#             is specified by which sub-ranges those copyTo calls DO NOT write
+#             (colRange(0, cols - 1) and rowRange(1, rows)), so re-deriving it by
+#             hand would put this suite's reading of those ranges on both sides of
+#             the comparison.
+#             The other 7584 are the per-pixel neighbourhood reference over the
+#             same matrix, the all-ones border family, the fused-equals-composed
+#             family, nine stride combinations, sources whose padding is already
+#             dirty, the degenerate shapes and the interleaved-views acceptance
+#             case -- and they run in all four configurations because the kernel
+#             is core code, with Debug the only place its BINCV_ASSERTs are live.
+#             THE FLOOR HAS TEETH, measured by mutating ops/denoise.hpp (checks
+#             passed, out of 9744 under opencv):
+#               source trailing word not masked
+#               before the right-shift              8529 -- 5 case families
+#               right-neighbour shifted the wrong
+#               way (left neighbour instead)        5748 -- 5 families
+#               row 0 reads its own row as the
+#               above neighbour (replicate, not
+#               the reference's zero fill)          5524 -- 5 families
+#               cross-word carry-in dropped, so
+#               the neighbour stops at each word
+#               boundary                            7401 -- 5 families
+#             ONE MUTATION SURVIVED AND WAS ACTED ON RATHER THAN LOGGED, the same
+#             way T2.7's dead `equal` narrowing was. The kernel originally masked
+#             its DESTINATION's trailing word as well; re-adding that mask leaves
+#             all 9744 checks passing, byte for byte, in every configuration,
+#             because masking the SOURCE word already puts zeros past `width` in
+#             both `c` and its shift and majority needs two of three. The dead
+#             store-mask was removed and the coupling it hid was written down in
+#             medianRow3: in this kernel the padding invariant is carried by a
+#             mask that is there for a BORDER reason, so a change to the border is
+#             a change to D-13 compliance. The first row of the table above is
+#             what now stands behind both.
+#   test_threshold  33112 under opencv, 21304 everywhere else. The 11808
+#             difference is the TIER 1 half -- `threshold`, CV_8U to one bit,
+#             against cv::threshold with THRESH_BINARY and maxval 255. The other
+#             21304 are `binarize`, the QuantMat<N> to one bit kernel, which is
+#             TIER 3 (OpenCV has no N-bit image type) and is checked against
+#             `src.at(y, x) > thresh` per pixel.
+#             THE BOUNDARY IS ENUMERATED RATHER THAN SAMPLED, because `>` versus
+#             `>=` differs on ONE VALUE CLASS and a mid-range sample can miss it:
+#               Threshold.Ramp_*   a 256-pixel ramp holding every uint8 value
+#                                  exactly once, at every integer threshold
+#                                  0..255 -- the ENTIRE (value, threshold) space
+#                                  of the CV_8U operation -- plus eight fractional
+#                                  and out-of-range thresholds, since cv::threshold
+#                                  FLOORS its double for a CV_8U source.
+#               BinarizeSweep_*    every threshold from 0 to MaxValue + 1 at
+#                                  N = 1, 2, 3 and 5.
+#             The rest is the T2.1 size matrix at the end thresholds, the
+#             saturated and all-zero images (where `>` and `>=` differ on EVERY
+#             pixel rather than one in 2^N), stride combinations, source planes
+#             whose padding is already dirty, the plane-view entry point against
+#             the QuantMat wrapper, and the degenerate shapes.
+#             THE FLOOR HAS TEETH, measured by mutating ops/threshold.hpp (checks
+#             passed, out of 27040 under opencv):
+#               threshold: cutoff not incremented,
+#               i.e. `>=` instead of `>`           24272 -- Ramp, Sizes, RampWidths
+#               threshold: thresh >= 255 answered
+#               as 255 rather than "none"          26156 -- Ramp, Sizes
+#               threshold: the row's partial-word
+#               limit ignored                      25308 -- Ramp, RampWidths, Sizes
+#               binarize: `>=` instead of `>`      20040 -- 6 families
+#               binarize: trailing word stored
+#               unmasked                           25483 -- 6 families
+#               binarize: planes gathered MSB
+#               first                              24171 -- 5 families
+#               binarize: the thresh >= MaxValue
+#               shortcut bypassed at UINT_MAX      26320 -- Saturated ONLY
+#               threshold: dst.row(y) replaced by
+#               dst.ptr + y * words, i.e. the
+#               destination stride ignored         30729 -- Sizes, RampWidths, Roi
+#               threshold: src.ptr<uint8_t>(y)
+#               replaced by ptr(0) + y * cols,
+#               i.e. cv::Mat::step ignored         32912 -- Roi ONLY
+#               threshold: `!(thresh < 255)`
+#               written as `thresh >= 255`, so a
+#               NaN threshold reaches a cast it
+#               cannot represent                   33072 -- OutOfDomain ONLY
+#               binarize: the shortcut's `>=`
+#               weakened to `>` at N = 32, where
+#               MaxValue IS UINT_MAX and
+#               `thresh + 1` wraps                 33072 -- WideCutoff ONLY
+#             The last row is the one worth reading, and it is a case that had to
+#             be ADDED for the guard to have any. That shortcut is not an
+#             optimisation: without it `thresh + 1` wraps to 0 at UINT_MAX and
+#             thresholdGE answers EVERY LANE, so the threshold that should select
+#             least of all returns an all-ones image. No ordinary sweep reaches a
+#             threshold that can wrap, so Threshold.BinarizeSaturated_* now
+#             thresholds a saturated image at ~0u explicitly. (Measured before it
+#             existed: bypassing the shortcut left all 26320 checks green.)
+#             THE LAST FOUR ROWS WERE ADDED BY REVIEW, and each names a shape the
+#             suite could not see before:
+#               * Every Tier 1 destination was a BinMat at DefaultRowAlignment,
+#                 where alignedWidth == minRowWords and the stride is invisible.
+#                 Threshold.Sizes_* and Threshold.RampWidths_* now sweep an
+#                 over-aligned destination beside the tight one (D-4 is
+#                 provisional, so both are supported shapes), and
+#                 Threshold.Roi_* is new.
+#               * Every cv::Mat handed to the Tier 1 kernel was freshly allocated,
+#                 hence continuous, so src.step was never exercised -- and a
+#                 cropped frame is how a VIO frontend passes a region.
+#                 Threshold.Roi_* thresholds cv::Mat ROIs at non-zero x and y
+#                 offsets against cv::threshold on the same ROI.
+#               * Threshold.OutOfDomain_* pins the thresholds where
+#                 cv::threshold is UNDEFINED (its cvFloor converts an
+#                 out-of-int-range double) and therefore cannot be the reference:
+#                 +/-1e300, +/-inf, +/-2^31, +/-2^32 and NaN, against the
+#                 arithmetic instead. Measured on OpenCV 4.5.4: cv::threshold sets
+#                 every pixel at +1e300 and clears every pixel at -1e300, the
+#                 opposite of the comparison in both directions. The suite's
+#                 previous "out-of-range" values (-1.0 and 300.0) are both inside
+#                 int range and never reached this.
+#               * Threshold.BinarizeWideCutoff_* is the only family with more than
+#                 8 planes. The plane-view entry point takes N from its argument
+#                 and QuantMat's N <= 8 cap does not reach it; at N = 32 MaxValue
+#                 IS UINT_MAX, which is where the shortcut and the `thresh + 1`
+#                 wrap meet. (N > 32 is now a compile error: the cutoff such a
+#                 caller needs is 2^32 and an `unsigned` cannot hold it. Measured
+#                 before that static_assert existed -- 33 planes, one pixel
+#                 holding 2^32: thresh = UINT_MAX - 1 selected it and
+#                 thresh = UINT_MAX did not, an answer not monotone in the
+#                 threshold.)
+#             A SECOND SURVIVOR IS DOCUMENTED RATHER THAN FIXED: changing the
+#             shortcut's `>=` to `>` changes no result, because at
+#             thresh == MaxValue the general path computes thresholdGE at
+#             MaxValue + 1, which that function already answers as "no lane". The
+#             `>=` boundary is the cheap answer, not the correct one; the wrap
+#             guard above is what makes the branch load-bearing.
 #   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
 #             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
 #             through constPlane() -> unpackTo8U, and that conversion was the one
@@ -291,6 +426,8 @@ opencv	test_logic	65768	0
 opencv	test_shift	307133	0
 opencv	test_reduce	759424	0
 opencv	test_bitslice	351620	0
+opencv	test_denoise	9744	0
+opencv	test_threshold	33112	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
 opencv	test_equivalence	16403	0
@@ -304,6 +441,8 @@ core	test_logic	53672	0
 core	test_shift	99695	0
 core	test_reduce	594184	0
 core	test_bitslice	350540	0
+core	test_denoise	7584	0
+core	test_threshold	21304	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -315,6 +454,8 @@ noexcept	test_logic	53672	0
 noexcept	test_shift	99695	0
 noexcept	test_reduce	594184	0
 noexcept	test_bitslice	350540	0
+noexcept	test_denoise	7584	0
+noexcept	test_threshold	21304	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -326,5 +467,7 @@ debug	test_logic	53672	0
 debug	test_shift	99695	0
 debug	test_reduce	594184	0
 debug	test_bitslice	350540	0
+debug	test_denoise	7584	0
+debug	test_threshold	21304	0
 debug	test_harness	8	0
 

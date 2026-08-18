@@ -117,8 +117,19 @@ endfunction()
 # so the exhaustive pattern enumeration that proves them is the ONLY thing
 # standing behind maj3, bitSlicedSum and thresholdGE -- and it has to run in the
 # configuration the embedded claim rests on.
+#
+# test_denoise (T3.1) and test_threshold (T3.2) are core for the same reason and
+# with one addition. test_denoise's OpenCV half PORTS the reference pipeline's own
+# cv::min/cv::max median, which is the correctness bar T3.1 is written against;
+# its core half carries the per-pixel neighbourhood reference, the zero-border
+# cases and the fused-equals-composed check, all of which have to run where the
+# embedded claim does. test_threshold is split by TIER rather than by
+# configuration: `binarize` (QuantMat<N> -> 1 bit) is Tier 3 and core, `threshold`
+# (CV_8U -> 1 bit) is Tier 1 and needs cv::threshold, so half the file is behind
+# the guard and half is not.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
-                     test_logic test_shift test_reduce test_bitslice)
+                     test_logic test_shift test_reduce test_bitslice
+                     test_denoise test_threshold)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -365,6 +376,34 @@ bincv_add_death_test(test_assert_abort bitslice-short-stride
                      "majority3: every view's stride must cover a whole row")
 bincv_add_death_test(test_assert_abort bitslice-sum-overlap
                      "bitSlicedSum: outPlanes must not overlap inputs")
+
+# T3.1 denoise preconditions. `denoise-in-place` is the one that is NOT covered by
+# any case above, and it is the reason denoiseMedian3 takes viewsShareNoWord
+# rather than destinationAliasIsSafe: destination row y reads SOURCE ROW y - 1, so
+# the in-place spelling ops/logic.hpp supports would feed the filter its own
+# output from the second row onwards -- every address valid, only the image wrong.
+# The reference implementation has the same property and answers it the same way
+# (it assigns `img = median_img` at the end rather than filtering in place).
+bincv_add_death_test(test_assert_abort denoise-dims
+                     "denoiseMedian3: src and dst must have the same dimensions")
+bincv_add_death_test(test_assert_abort denoise-in-place
+                     "denoiseMedian3: dst must share no word with src")
+bincv_add_death_test(test_assert_abort denoise-short-stride
+                     "denoiseMedian3: every view's stride must cover a whole row")
+
+# T3.2 binarize preconditions. `binarize-dims` is a PER-PLANE check -- the loop
+# compares every one of the N planes against dst, so a check that only looked at
+# plane 0 would read planes 1..N-1 at plane 0's geometry, off the end of a shorter
+# buffer, and an N-bit source arrives as N separate views under D-5.
+# `binarize-alias` is the exact-alias case ops/logic.hpp permits and this kernel
+# does not: plane p is read at word i AFTER dst's word i has been written for the
+# lower planes, so writing into a source plane corrupts values still to be read.
+bincv_add_death_test(test_assert_abort binarize-dims
+                     "binarize: every source plane must have dst's dimensions")
+bincv_add_death_test(test_assert_abort binarize-alias
+                     "binarize: dst must share no word with any source plane")
+bincv_add_death_test(test_assert_abort binarize-short-stride
+                     "binarize: every view's stride must cover a whole row")
 
 if(BINCV_OPENCV_FOUND)
     foreach(TEST_NAME ${BINCV_OPENCV_TESTS})

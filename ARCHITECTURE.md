@@ -249,7 +249,8 @@ Adding quantization creates a category with no OpenCV counterpart, so the
 compatibility promise has to be stated per tier.
 
 **Tier 1 — identical semantics.** `bitwise_and/or/xor/not`, `erode`, `dilate`,
-`morphologyEx`, `countNonZero`, `copyMakeBorder`. Drop-in for OpenCV users;
+`morphologyEx`, `countNonZero`, `copyMakeBorder`, `threshold` (`THRESH_BINARY`,
+from a `CV_8U` source). Drop-in for OpenCV users;
 results are bit-exact against OpenCV on equivalent content. Verified by the
 equivalence harness ([§10.2](#102-equivalence-harness)).
 
@@ -410,6 +411,24 @@ maj3(a, b, c) = (a & b) | (b & c) | (a & c)
 
 One expression, 64 pixels per word, no branches.
 
+**Shipped as `denoiseMedian3` in `ops/denoise.hpp` (T3.1), API tier 3.** Two
+details are the reference implementation's rather than this expression's, and both
+are invisible on interior pixels:
+
+- **The neighbourhood is an asymmetric L** — the pixel above, the pixel itself,
+  and the pixel to its RIGHT. No left neighbour, no below neighbour.
+- **The border is zero fill**, not replicate and not reflect: the first row's
+  above-neighbour and the last column's right-neighbour read 0. That is not stated
+  in the reference's comment; it follows from its two neighbour matrices being
+  `cv::Mat::zeros` with only their interiors copied into.
+
+The kernel is **one pass with no scratch buffer**: the above-neighbour is a row
+index (a vertical shift moves no bits, T2.4) and the right-neighbour is computed
+into a register, so the composed `shift`+`shift`+`majority3` spelling's two
+frame-sized temporaries never exist. [X-12](EXPERIMENTS.md) priced that on the
+reference device — 3.1–3.5× faster and half the memory, so the two goals agreed
+and no decision was needed.
+
 ### 7.2 Pyramid downsample — box 2×2
 
 **This is where binary stops being enough, and it is measured, not assumed.**
@@ -442,6 +461,25 @@ planes, then requantization to N bits.
 Produces the 1-bit frame from a higher-precision source. In a deployed system
 this may happen in-sensor; binCV provides it for pipelines that binarize on the
 host.
+
+**Shipped in `ops/threshold.hpp` (T3.2), and it is two operations at two tiers.**
+`threshold(const cv::Mat&, dst, thresh)` is **tier 1** — bit-exact against
+`cv::threshold` with `THRESH_BINARY` for every `thresh` with `|thresh| < 2^31` —
+and takes OpenCV's name for that reason; what differs is the output container, not
+the answer. *The domain is stated because it is real, not as a hedge:* beyond
+`int`'s range `cv::threshold` reduces its `double` through `cvFloor`, whose
+conversion is undefined there, and it answers the opposite of the comparison in
+both directions (measured: every pixel set at `+1e300`, every pixel cleared at
+`-1e300`). binCV answers the arithmetic instead and pins it with a test rather
+than chasing that. `binarize(planes, dst,
+thresh)` reads an N-bit `QuantMat` and is **tier 3**, since OpenCV has no N-bit
+image type, so it deliberately does not borrow the name ([§5.1](#51-three-tiers)).
+
+Both compare **strictly greater than**, which is `cv::threshold`'s semantics and
+the one place an off-by-one moves a whole value class of pixels rather than a few.
+`binarize` is `thresholdGE` ([§6.1](#61-bit-parallel-primitives), T2.7) at
+`thresh + 1`, so the N-bit path costs one bit-sliced comparison per 8–64 pixels
+and adds no arithmetic of its own.
 
 ### 7.4 Spatial derivative — binarized `[-1, 0, 1]`
 

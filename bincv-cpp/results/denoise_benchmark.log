@@ -1,0 +1,158 @@
+T3.1 denoise -- three-pixel median vs the reference implementation (x86_64)
+================================================================================
+
+PLATFORM: x86_64, native, taskset -c 2, Release (-O2 -DNDEBUG), OpenCV 4.5.4.
+
+  INDICATIVE ONLY (EXPERIMENTS.md "Measurement platforms"). NOTHING HERE CLOSES
+  AN EXPERIMENT and nothing here is quotable. X-12 closes on the reference
+  device; the device log is results/denoise_benchmark_pi4.log.
+
+WHY THIS FILE EXISTS AT ALL. EXPERIMENTS.md X-12 used to carry a one-line x86
+"for contrast" row with no committed log behind it, unlike every other benchmark
+in this directory. That row could not be reproduced -- see the spread below --
+so the log is committed and the numbers are quoted from it or not at all.
+
+  sha256[0:16]  79cab91615d5faa5  bincv-cpp/include/bincv-cpp/ops/denoise.hpp
+  sha256[0:16]  50fdecde0500c9f4  bincv-cpp/benchmark/denoise_benchmark.cpp
+
+THE SPREAD IS THE POINT. Three consecutive runs of this binary on an idle
+machine, 640x480, binCV fused uint32 against the OpenCV denominator:
+
+  run 1   19.25x        (the run printed in full below)
+  run 2   16.05x
+  run 3   19.34x
+
+20% between the extremes, on the same binary and the same input, because this is
+a shared desktop with frequency scaling and no governor control -- exactly what
+scripts/run_on_pi.sh exists to eliminate. Read the device log instead. The one
+thing this file is good for is the SHAPE that survives the noise: binCV's fused
+kernel is more than an order of magnitude faster than the reference at every size
+here too, and the ordering of the five rows never changes.
+
+COMMAND
+
+  cmake -S bincv-cpp -B <build> -DCMAKE_BUILD_TYPE=Release
+  cmake --build <build> --target denoise_benchmark
+  taskset -c 2 <build>/benchmark/denoise_benchmark
+
+================================================================================
+T3.1 denoise -- three-pixel median vs the reference implementation
+================================================================================
+
+DENOMINATOR (ARCHITECTURE 10.3): SEAL's three_pix_median_filter on the SAME
+binary content stored as CV_8U -- cv::min/cv::max over two zero-filled
+neighbour matrices, ported call for call. That is what the pipeline runs
+today without binCV.
+
+binCV rows: the fused one-pass kernel (ops/denoise.hpp) at uint32 and uint64,
+and the composed shiftDown + shiftLeft + majority3 spelling it replaced --
+same image, three passes, two frame-sized scratch buffers.
+
+TWO OpenCV ROWS. 'OpenCV CV_8U' re-zeroes only the two neighbour matrices,
+whose zeros ARE the border; 'OpenCV as-written' also re-zeroes the four
+temporaries the reference builds with cv::Mat::zeros and then completely
+overwrites. The DENOMINATOR is the first, so every ratio is conservative by
+the gap between them.
+
+The checksum column folds EVERY destination pixel and is representation-
+independent, so all rows of a size must print the same value.
+
+Working set is one call's live buffers, not a per-buffer ratio (CLAUDE.md,
+ARCHITECTURE 10.4).
+
+FIXED PER-CALL COST (hazard 5), measured on a 2x2 frame -- the part of every
+row below that is not the operation:
+  OpenCV reference (8 cv:: calls):     0.937 us per call
+  binCV denoiseMedian3:                0.003 us per call
+  Divided by a frame's pixel count this is what a small frame's ns/pixel is
+  mostly made of. It is NOT subtracted from the tables; it is printed beside
+  them so the ladder is read with it.
+
+================ 640 x 480 (307200 pixels) ================
+  one frame:   binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+  WORKING SET of one call (the number CLAUDE.md asks for):
+    binCV fused           76800 B   (src + dst, no scratch)
+    binCV composed       153600 B   (src + dst + 2 scratch frames)
+    OpenCV reference    2150400 B   (7 CV_8U frames, as written)
+    OpenCV minimal      1228800 B   (4 CV_8U frames, temporaries reused)
+
+  IMPLEMENTATION           ns/pixel  vs OpenCV    working set   passes             checksum
+  ----------------------------------------------------------------------------------------
+  OpenCV CV_8U              0.18969      1.00x      2150400 B        7  7677494634835705852
+  OpenCV as-written         0.28129      0.67x      2150400 B        7  7677494634835705852
+  binCV fused u32           0.00986     19.25x        76800 B        1  7677494634835705852
+  binCV fused u64           0.00770     24.63x        76800 B        1  7677494634835705852
+  binCV composed u32        0.05147      3.69x       153600 B        3  7677494634835705852
+  ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).
+  PER-FRAME: OpenCV 58.27 us, of which 0.94 us is the measured fixed per-call
+             cost (2%). binCV fused u32 3.03 us, fixed cost 0.00 us (0%).
+             SUBTRACT BEFORE COMPARING SIZES: the ratio column at the small
+             sizes is mostly this, not the operation.
+  sink=2796713525519069642
+
+================ 320 x 240 (76800 pixels) ================
+  one frame:   binCV uint32 9600 B, binCV uint64 9600 B, OpenCV CV_8U 76800 B (8.0x)
+  WORKING SET of one call (the number CLAUDE.md asks for):
+    binCV fused           19200 B   (src + dst, no scratch)
+    binCV composed        38400 B   (src + dst + 2 scratch frames)
+    OpenCV reference     537600 B   (7 CV_8U frames, as written)
+    OpenCV minimal       307200 B   (4 CV_8U frames, temporaries reused)
+
+  IMPLEMENTATION           ns/pixel  vs OpenCV    working set   passes             checksum
+  ----------------------------------------------------------------------------------------
+  OpenCV CV_8U              0.21592      1.00x       537600 B        7  4997630579212281745
+  OpenCV as-written         0.36321      0.59x       537600 B        7  4997630579212281745
+  binCV fused u32           0.01631     13.24x        19200 B        1  4997630579212281745
+  binCV fused u64           0.00945     22.85x        19200 B        1  4997630579212281745
+  binCV composed u32        0.04460      4.84x        38400 B        3  4997630579212281745
+  ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).
+  PER-FRAME: OpenCV 16.58 us, of which 0.94 us is the measured fixed per-call
+             cost (6%). binCV fused u32 1.25 us, fixed cost 0.00 us (0%).
+             SUBTRACT BEFORE COMPARING SIZES: the ratio column at the small
+             sizes is mostly this, not the operation.
+  sink=5975956769147392662
+
+================ 160 x 120 (19200 pixels) ================
+  one frame:   binCV uint32 2400 B, binCV uint64 2880 B, OpenCV CV_8U 19200 B (8.0x)
+  WORKING SET of one call (the number CLAUDE.md asks for):
+    binCV fused            4800 B   (src + dst, no scratch)
+    binCV composed         9600 B   (src + dst + 2 scratch frames)
+    OpenCV reference     134400 B   (7 CV_8U frames, as written)
+    OpenCV minimal        76800 B   (4 CV_8U frames, temporaries reused)
+
+  IMPLEMENTATION           ns/pixel  vs OpenCV    working set   passes             checksum
+  ----------------------------------------------------------------------------------------
+  OpenCV CV_8U              0.40527      1.00x       134400 B        7   938393707454369753
+  OpenCV as-written         0.77210      0.52x       134400 B        7   938393707454369753
+  binCV fused u32           0.02174     18.64x         4800 B        1   938393707454369753
+  binCV fused u64           0.01505     26.93x         5760 B        1   938393707454369753
+  binCV composed u32        0.04503      9.00x         9600 B        3   938393707454369753
+  ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).
+  PER-FRAME: OpenCV 7.78 us, of which 0.94 us is the measured fixed per-call
+             cost (12%). binCV fused u32 0.42 us, fixed cost 0.00 us (1%).
+             SUBTRACT BEFORE COMPARING SIZES: the ratio column at the small
+             sizes is mostly this, not the operation.
+  sink=4533974235176096200
+
+================ 94 x 60 (5640 pixels) ================
+  one frame:   binCV uint32 720 B, binCV uint64 960 B, OpenCV CV_8U 5640 B (7.8x)
+  WORKING SET of one call (the number CLAUDE.md asks for):
+    binCV fused            1440 B   (src + dst, no scratch)
+    binCV composed         2880 B   (src + dst + 2 scratch frames)
+    OpenCV reference      39480 B   (7 CV_8U frames, as written)
+    OpenCV minimal        22560 B   (4 CV_8U frames, temporaries reused)
+
+  IMPLEMENTATION           ns/pixel  vs OpenCV    working set   passes             checksum
+  ----------------------------------------------------------------------------------------
+  OpenCV CV_8U              0.77653      1.00x        39480 B        7 11314127237383249744
+  OpenCV as-written         1.87989      0.41x        39480 B        7 11314127237383249744
+  binCV fused u32           0.03432     22.63x         1440 B        1 11314127237383249744
+  binCV fused u64           0.02684     28.93x         1920 B        1 11314127237383249744
+  binCV composed u32        0.08845      8.78x         2880 B        3 11314127237383249744
+  ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).
+  PER-FRAME: OpenCV 4.38 us, of which 0.94 us is the measured fixed per-call
+             cost (21%). binCV fused u32 0.19 us, fixed cost 0.00 us (1%).
+             SUBTRACT BEFORE COMPARING SIZES: the ratio column at the small
+             sizes is mostly this, not the operation.
+  sink=17481208509416120170
+

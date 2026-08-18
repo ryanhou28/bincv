@@ -1798,10 +1798,11 @@ no decision moves, since the split costs nothing and still wins at W=15 and 31.
 
 ---
 
-### T3.1 · Denoise — median of 3 · `TODO`
+### T3.1 · Denoise — median of 3 · `DONE`
 
 **Depends:** T2.7
-**Files:** `include/bincv-cpp/ops/denoise.hpp` (new)
+**Files:** `include/bincv-cpp/ops/denoise.hpp` (new), `tests/test_denoise.cpp`,
+`benchmark/denoise_benchmark.cpp`
 
 **Spec:** Three-pixel median. For binary input median equals majority, so this is
 `maj3` over the three-pixel neighbourhood. Reference semantics (neighbourhood
@@ -1814,12 +1815,47 @@ input; benchmark committed.
 
 **Verify:** V-ALL
 
+**What landed.** `denoiseMedian3(src, dst)` — **API tier 3** by name, because
+`cv::medianBlur` is a square-window median with a replicate border and this is
+neither. The neighbourhood read out of the reference is **above, self, right** —
+an asymmetric three-pixel L with no left and no below neighbour — and the border
+is **zero fill**, which is not stated in the reference's comment but falls out of
+its two `cv::Mat::zeros` neighbour matrices being written only on
+`colRange(0, cols - 1)` and `rowRange(1, rows)`.
+
+The test does not re-derive that from the comment: `tests/test_denoise.cpp` ports
+the reference's own `cv::min`/`cv::max` calls, `cv::Mat::zeros` constructions
+included, so the border comes from the same construction on both sides. It also
+runs a per-pixel neighbourhood reference in the three configurations without
+OpenCV, an all-ones border family (where a replicate border would give a
+different image), and a family requiring the fused kernel to agree pixel for pixel
+with `shiftDown` + `shiftLeft` + `majority3`.
+
+**One pass, no scratch.** The above-neighbour is a row index and the
+right-neighbour is computed into a register, so the kernel needs no caller-provided
+buffer at all. [X-12](EXPERIMENTS.md) measured that against the composed spelling
+on the reference device: **3.1–3.5× faster and half the memory**, so nothing was
+traded and no D-record was earned. Against the reference implementation on the
+same binary content stored as `CV_8U`: **57× at 640×480 with 28× less memory** —
+quotable only with the working-set figure beside it, since it is substantially a
+cache-residency result (X-12, and [X-6](EXPERIMENTS.md) before it). **The
+pyramid-level ratios are not quotable in its place**: X-12 measures the
+denominator's fixed per-call cost at 4.1 µs, which is 20% of the 94×60 frame and
+0.4% of the 640×480 one, so ratios at different sizes are not comparable.
+
+**A dead operation was removed rather than logged.** The kernel originally masked
+its destination's trailing word as well as its source's; re-adding that mask
+changes no check in any configuration, because masking the source already zeroes
+both `c` and its shift past `width`. What replaced it is the coupling written down
+in `medianRow3`: here the padding invariant is carried by a mask that exists for a
+**border** reason, so a change to the border is a change to D-13 compliance.
+
 ---
 
-### T3.2 · Threshold / binarize · `TODO`
+### T3.2 · Threshold / binarize · `DONE`
 
 **Depends:** T3.1
-**Files:** `include/bincv-cpp/ops/threshold.hpp` (new)
+**Files:** `include/bincv-cpp/ops/threshold.hpp` (new), `tests/test_threshold.cpp`
 
 **Spec:** Produce a 1-bit frame from a higher-precision source (`CV_8U` via
 interop, or `QuantMat<N>`). Tier 1 semantics against `cv::threshold` for the
@@ -1828,6 +1864,61 @@ binary output case.
 **Done when:** bit-exact against `cv::threshold` with `THRESH_BINARY`.
 
 **Verify:** V-ALL
+
+**What landed.** Two entry points, split by tier rather than by convenience:
+
+- `threshold(const cv::Mat&, dst, thresh)` — **API tier 1**, bit-exact against
+  `cv::threshold(src, dst, thresh, 255, THRESH_BINARY)` for every `thresh` with
+  `|thresh| < 2^31`, so it takes OpenCV's name. Guarded by `BINCV_WITH_OPENCV`;
+  nothing the embedded claim rests on sees it.
+- `binarize(planes, dst, thresh)` and its `QuantMat<N>` wrapper — **API tier 3**,
+  since OpenCV has no N-bit image type. It must not borrow the Tier 1 name, and
+  does not. The arithmetic is T2.7's `thresholdGE`, whose whole (value, threshold)
+  input space is already enumerated by `tests/test_bitslice.cpp`.
+
+**The comparison is strictly greater than**, on both, and that is the whole risk
+in this task: `>=` instead of `>` moves exactly the pixels *equal* to the
+threshold, which a mid-range sample can miss. So the boundary is enumerated rather
+than sampled — a 256-pixel ramp holding every `uint8` value exactly once,
+thresholded at every integer 0..255 plus eight fractional and out-of-range values,
+against `cv::threshold` on the same `cv::Mat`; and every threshold from 0 to
+`MaxValue + 1` on the N-bit side. `cv::threshold` **floors** its `double` for a
+`CV_8U` source, which is why 127.5 and 127 must give the same image and why the
+kernel reduces the parameter to one integer cutoff.
+
+**No `maxval` and no `type` parameter.** In a one-bit destination the set value is
+1 by construction, `THRESH_BINARY_INV` is `bitwiseNot` of this, and the four
+truncating types cannot be expressed at all — an enum whose every other value
+asserted would be a promise the file cannot keep.
+
+**One guard needed a case written for it.** `binarize`'s `thresh >= MaxValue`
+shortcut is not an optimisation: without it `thresh + 1` wraps to 0 at `UINT_MAX`
+and `thresholdGE` answers every lane, returning an all-ones image for the
+threshold that should select least of all. No ordinary sweep reaches a threshold
+that can wrap, so bypassing the shortcut left all 26 320 checks green until
+`Threshold.BinarizeSaturated_*` was given a `~0u` case.
+
+**Four shapes review found untested, each now swept** (see
+`tests/expected-checks.txt` for the mutation that each one kills):
+
+- **An over-aligned destination on the Tier 1 path.** Every Tier 1 destination was
+  a `BinMat` at `DefaultRowAlignment`, where `alignedWidth == minRowWords` and the
+  row stride is invisible; deleting the stride from the kernel left all 27 040
+  checks green. D-4 is provisional, so a padded destination is a supported shape.
+- **A non-continuous `cv::Mat`.** Every source was freshly allocated, so `src.step`
+  was never exercised — and a cropped frame (`cv::Mat` ROI) is how a VIO frontend
+  hands in a region. `Threshold.Roi_*` is new.
+- **Thresholds outside `int`'s range**, where `cv::threshold` is undefined and
+  cannot be the reference. `Threshold.OutOfDomain_*` pins binCV's answer against
+  the arithmetic at ±1e300, ±∞, ±2^31, ±2^32 and `NaN`. The kernel's own reduction
+  was restructured so no non-finite `double` reaches an `int` conversion.
+- **More than eight planes.** The plane-view entry point takes `N` from its
+  argument and `QuantMat`'s `N <= 8` cap does not reach it. At 33 planes with a
+  pixel holding 2^32, `thresh = UINT_MAX - 1` selected it and `thresh = UINT_MAX`
+  did not — an answer not monotone in the threshold, because `maxValue` saturates.
+  `N > 32` is now a compile error (the cutoff such a caller needs is 2^32 and an
+  `unsigned` cannot hold it) and `Threshold.BinarizeWideCutoff_*` sweeps `N = 32`,
+  the widest that remains expressible.
 
 ---
 
