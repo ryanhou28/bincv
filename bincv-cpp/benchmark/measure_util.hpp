@@ -14,10 +14,15 @@
 //
 //   1. A volatile sink consumes every result, so no measured loop is dead code.
 //   2. Inputs rotate through several distinct random images, so nothing constant
-//      folds.
+//      folds. The index handed to body() RUNS ON ACROSS BATCHES rather than
+//      restarting at 0 each batch -- see measureInterleaved() for why that is not
+//      a detail.
 //   3. Batches are calibrated to a time budget, then repeated -- and the SPREAD
 //      across repeats is reported next to the central value. A difference smaller
-//      than the spread is a null result, and a null result is a result.
+//      than the spread is a null result, and a null result is a result. The
+//      spread bounds WITHIN-run noise only; run-to-run scatter is a separate and
+//      sometimes larger number, and an entry that calls a difference real should
+//      clear the larger of the two.
 //   4. Whatever is being compared must AGREE before it is timed. That check lives
 //      in the individual benchmarks, since only they know what agreement means.
 //
@@ -116,17 +121,28 @@ inline std::vector<Timing> measureInterleaved(const std::vector<Bench>& benches,
         samples[b].reserve(static_cast<size_t>(repeats));
     }
 
+    // The index passed to body() is a RUNNING per-variant call counter, not the
+    // position within the batch. Validity hazard 2 says inputs must rotate, and
+    // bodies implement that as `i % kInputs` -- but calibrate() returns 1 whenever
+    // a single call already exceeds the budget, and a batch of one restarted at 0
+    // would then time image 0 forever while a cheaper variant in the same
+    // comparison rotated through all four. The two sides of a ratio would be on
+    // different input sets. Running the counter on makes the rotation independent
+    // of the calibrated batch size, which is the property the hazard actually asks
+    // for.
+    std::vector<int> callIndex(n, 0);
+
     // One discarded warm-up round, so that the first recorded batch of the first
     // variant is not the only one paying for a cold cache and a cold branch
     // predictor.
     for (size_t b = 0; b < n; ++b) {
-        for (int i = 0; i < iterations[b]; ++i) benches[b].body(i);
+        for (int i = 0; i < iterations[b]; ++i) benches[b].body(callIndex[b]++);
     }
 
     for (int r = 0; r < repeats; ++r) {
         for (size_t b = 0; b < n; ++b) {
             const auto start = Clock::now();
-            for (int i = 0; i < iterations[b]; ++i) benches[b].body(i);
+            for (int i = 0; i < iterations[b]; ++i) benches[b].body(callIndex[b]++);
             const double ns =
                 std::chrono::duration<double, std::nano>(Clock::now() - start).count() /
                 static_cast<double>(iterations[b]);

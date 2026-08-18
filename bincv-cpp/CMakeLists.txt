@@ -11,7 +11,7 @@ endif()
 
 option(BINCV_USE_OPENCV "Enable OpenCV interop and OpenCV-based tests/benchmarks" ON)
 option(BINCV_BUILD_TESTS "Build tests" ON)
-option(BINCV_BUILD_BENCHMARKS "Build benchmarks (requires OpenCV)" ON)
+option(BINCV_BUILD_BENCHMARKS "Build benchmarks (the OpenCV-comparison ones need OpenCV; the binCV-versus-binCV experiment benchmarks do not)" ON)
 
 # AUTO uses Google Test wherever it can be obtained AND the configuration is not
 # the dependency-free one; see tests/CMakeLists.txt for why that exception exists.
@@ -110,7 +110,12 @@ if(BINCV_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-if(BINCV_BUILD_BENCHMARKS AND BINCV_OPENCV_FOUND)
+# NOT gated on OpenCV. benchmark/CMakeLists.txt partitions its sources: the
+# binCV-versus-OpenCV comparisons need OpenCV and are skipped without it, while
+# the Phase 2 experiment benchmarks (E-1/E-2/E-3) compare binCV against binCV and
+# must build in the core-only configuration -- which is the reference device's
+# default build, and therefore the one a reproduction attempt uses.
+if(BINCV_BUILD_BENCHMARKS)
     add_subdirectory(benchmark)
 endif()
 
@@ -140,7 +145,8 @@ if(BINCV_OPENCV_FOUND)
 else()
     message(STATUS "OpenCV:     NO - core-only mode (embedded)")
     if(BINCV_BUILD_BENCHMARKS)
-        message(STATUS "            benchmarks skipped (they compare against OpenCV)")
+        message(STATUS "            OpenCV-comparison benchmarks skipped; the E-1/E-2/E-3")
+        message(STATUS "            experiment benchmarks build (binCV vs binCV, no OpenCV)")
     endif()
 endif()
 message(STATUS "=========================================")

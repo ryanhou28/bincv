@@ -102,9 +102,13 @@
 // these comparisons.
 //
 // VALIDITY: measure::g_sink consumes every result; four distinct random images
-// rotate through each timed body; batches are calibrated, interleaved across the
-// variants being compared and repeated with the spread reported; and every variant
-// is checked against the shipped kernel on every window before anything is timed.
+// rotate through each timed body, on a call counter that runs on across batches --
+// which matters here more than anywhere else, because DENSE recompute at W=31 is
+// one call per batch and would otherwise have timed image 0 forever while the
+// cheap variant it is being divided by rotated through all four; batches are
+// calibrated, interleaved across the variants being compared and repeated with the
+// spread reported; and every variant is checked against the shipped kernel on
+// every window before anything is timed.
 
 #include <algorithm>
 #include <cstddef>

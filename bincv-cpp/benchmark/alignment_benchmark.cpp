@@ -56,9 +56,12 @@
 // This experiment closes on the reference device (scripts/run_on_pi.sh).
 //
 // VALIDITY: measure::g_sink consumes every result; four distinct random images
-// rotate through each timed body; batches are calibrated and repeated with the
-// spread reported; and every variant is checked to produce the SAME answers as
-// the baseline before anything is timed.
+// rotate through each timed body (on a call counter that runs on across batches,
+// so the rotation does not degenerate when a batch is one call long); batches are
+// calibrated and repeated with the spread reported; and every variant is checked
+// to produce the SAME answers as the baseline before anything is timed. The
+// printed spread bounds within-run noise only -- the log states run-to-run scatter
+// separately, and a difference has to clear the larger of the two.
 
 #include <cstddef>
 #include <cstdint>
@@ -262,22 +265,37 @@ bool runCase(const Case& c) {
     }
 
     // ---- physical sanity ----------------------------------------------------
-    // bitwiseAnd touches three images per call. Reporting the implied bandwidth is
-    // how a reader checks the number against the machine rather than trusting it:
-    // on the reference device DRAM is roughly 4-6 GB/s, L2 is 1 MiB and L1D is
-    // 32 KiB, so a working set inside those may legitimately exceed DRAM rates and
-    // one outside them may not.
-    const double andBytes = static_cast<double>(variants[0].bytesPerImage) * 3.0;
-    const double gbs = andBytes / andT[0].medianNs;  // B/ns == GB/s
+    // TWO DIFFERENT FOOTPRINTS, and conflating them is how a validity control
+    // stops controlling anything. TRAFFIC is what one bitwiseAnd call moves --
+    // three images -- and it is the numerator of the GB/s figure. RESIDENT is what
+    // a timed batch keeps live, which is larger: the body rotates over kInputs
+    // input pairs plus one destination, so a variant's batch touches
+    // 2*kInputs + 1 images, and all kVariants of them are interleaved inside one
+    // round-robin round. The cache tier is classified from RESIDENT, because that
+    // is what the machine sees; an earlier version classified it from TRAFFIC and
+    // reported a 112.5 KiB working set for a batch that in fact held 337.5 KiB.
+    const double andTraffic = static_cast<double>(variants[0].bytesPerImage) * 3.0;
+    const double gbs = andTraffic / andT[0].medianNs;  // B/ns == GB/s
+    const double perCall = static_cast<double>(2 * kInputs + 1);
+    const double residentOne = static_cast<double>(variants[0].bytesPerImage) * perCall;
+    double residentAll = 0.0;
+    for (size_t v = 0; v < kVariants; ++v) {
+        residentAll += static_cast<double>(variants[v].bytesPerImage) * perCall;
+    }
     std::printf("\n  sanity: bitwiseAnd at word granularity moves %.0f B per call in "
                 "%.0f ns = %.2f GB/s\n",
-                andBytes, andT[0].medianNs, gbs);
-    std::printf("          working set %.1f KiB -- %s\n", andBytes / 1024.0,
-                andBytes <= 32.0 * 1024.0
+                andTraffic, andT[0].medianNs, gbs);
+    std::printf("          resident during its batch %.1f KiB (%d images) -- %s\n",
+                residentOne / 1024.0, 2 * kInputs + 1,
+                residentOne <= 32.0 * 1024.0
                     ? "L1-resident on the reference device (32 KiB L1D)"
-                    : (andBytes <= 1024.0 * 1024.0
+                    : (residentOne <= 1024.0 * 1024.0
                            ? "L2-resident (1 MiB L2), so rates above DRAM's ~4-6 GB/s are expected"
                            : "beyond L2 -- DRAM-bound, so ~4-6 GB/s is the ceiling"));
+    std::printf("          all %zu variants interleaved: %.1f KiB, which is %s the 1 MiB "
+                "L2 -- each batch re-warms what the previous variants evicted\n",
+                kVariants, residentAll / 1024.0,
+                residentAll <= 1024.0 * 1024.0 ? "inside" : "beyond");
     return true;
 }
 

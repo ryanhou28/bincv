@@ -41,9 +41,11 @@
 // (ROADMAP 2.3) that no experiment has settled.
 //
 // VALIDITY: measure::g_sink consumes every result; four distinct random images
-// rotate through each timed body; batches are calibrated, interleaved across
-// variants and repeated with the spread reported; and every width is checked to
-// produce the same answers as uint8_t before anything is timed.
+// rotate through each timed body, on a call counter that runs on across batches so
+// the rotation does not degenerate when a batch is one call long; batches are
+// calibrated, interleaved across variants and repeated with the spread reported;
+// and every width is checked to produce the same answers as uint8_t before
+// anything is timed. The printed spread bounds within-run noise only.
 
 #include <cstddef>
 #include <cstdint>
@@ -232,16 +234,30 @@ bool runCase(const Case& c) {
                     andT[v].spreadPct(), cnzT[v].spreadPct());
     }
 
-    // Physical sanity: three images per bitwiseAnd call, at the uint32_t default.
-    const double andBytes = static_cast<double>(bytes[2]) * 3.0;
+    // Physical sanity. TRAFFIC (three images per bitwiseAnd call) is the numerator
+    // of the GB/s figure; RESIDENT is what a timed batch keeps live, which is the
+    // number the cache tier must be read off. A batch rotates over kInputs input
+    // pairs plus a destination -- 2*kInputs + 1 images -- and all four widths are
+    // interleaved in one round-robin round. Classifying the tier from TRAFFIC, as
+    // an earlier version did, understated the batch by 3x and the round by 12x.
+    const double andTraffic = static_cast<double>(bytes[2]) * 3.0;
+    const double perCall = static_cast<double>(2 * kInputs + 1);
+    const double residentOne = static_cast<double>(bytes[2]) * perCall;
+    const double residentAll = (static_cast<double>(bytes[0]) + static_cast<double>(bytes[1]) +
+                                static_cast<double>(bytes[2]) + static_cast<double>(bytes[3])) *
+                               perCall;
     std::printf("\n  sanity: bitwiseAnd (uint32_t) moves %.0f B per call in %.0f ns = "
-                "%.2f GB/s; working set %.1f KiB (%s)\n",
-                andBytes, andT[2].medianNs, andBytes / andT[2].medianNs, andBytes / 1024.0,
-                andBytes <= 32.0 * 1024.0
+                "%.2f GB/s\n",
+                andTraffic, andT[2].medianNs, andTraffic / andT[2].medianNs);
+    std::printf("          resident during its batch %.1f KiB (%d images) -- %s;\n"
+                "          all four widths interleaved: %.1f KiB, %s the 1 MiB L2\n",
+                residentOne / 1024.0, 2 * kInputs + 1,
+                residentOne <= 32.0 * 1024.0
                     ? "inside the reference device's 32 KiB L1D"
-                    : (andBytes <= 1024.0 * 1024.0 ? "inside its 1 MiB L2, so rates above "
-                                                     "DRAM's ~4-6 GB/s are expected"
-                                                   : "beyond L2 -- DRAM-bound"));
+                    : (residentOne <= 1024.0 * 1024.0 ? "inside its 1 MiB L2, so rates above "
+                                                        "DRAM's ~4-6 GB/s are expected"
+                                                      : "beyond L2 -- DRAM-bound"),
+                residentAll / 1024.0, residentAll <= 1024.0 * 1024.0 ? "inside" : "beyond");
     return true;
 }
 
