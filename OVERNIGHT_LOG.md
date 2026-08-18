@@ -27,6 +27,53 @@ working set exceeds the 1 MiB L2 — as a bandwidth-bound kernel must. The x86
 flatness is explained by that machine's 32 MiB L3. My suspicion was reasonable
 and wrong; the smaller cache is what settled it.
 
+### T2.5 / T2.6 — reductions, and a correction to X-3
+
+`ops/reduce.hpp`. **The LK covariance identity is verified independently**: sumXX,
+sumYY and sumXY through the public primitives agree **exactly** with a per-pixel
+reference at 108 window positions, including negative origins and windows clipped
+at every edge. T3.6's foundation holds.
+
+**X-7 corrects X-3, and it is a real performance finding.** binCV's `countNonZero`
+benchmarks **4.2× slower than `cv::countNonZero`** on x86. Cause: with no `-march`
+flags, `__builtin_popcountll` lowers to **`call __popcountdi2@PLT`** — a library
+call *per word*. Verified directly:
+
+```
+default (what binCV builds with):  call __popcountdi2@PLT
+with -mpopcnt:                     popcntq %rdi, %rax
+aarch64 (primary target):          fmov / cnt / uaddlv / fmov
+```
+
+X-3 recorded `popcntq` for x86_64 — true of the ISA, **false of this build**. No
+`-march` was added, correctly: enabling an ISA baseline is a dispatch decision
+(ROADMAP 2.3) that no experiment has settled. It *strengthens* D-6 — a third
+target tier whose per-word cost dwarfs the count itself, fixable in one file
+precisely because no caller was made to write that loop.
+
+**D-13** records the padding-bit contract and deliberately departs from T2.5's
+wording: reductions count only bits inside the region ∩ image, so a wrapped
+buffer's dirty padding cannot corrupt a count. That also answers the sub-width
+window, where bits past `width` are a neighbour's live pixels — which is exactly
+what an LK window is.
+
+Gate: 67/67 ctest, 1103040 checks.
+
+> ⚠️ **Not verified on the Pi.** The device went unreachable mid-session. The
+> runner returned **77 (not a pass)** rather than reporting success for a run that
+> measured nothing — the design working as intended. Re-run
+> `./scripts/run_on_pi.sh pi4 './tests/test_reduce'` when it is back.
+
+### ⚠️ Reference device went offline — 2026-08-17
+
+WSL reaches the router fine (2.8 ms, no loss) and no VPN is active, but
+`10.0.0.240` does not respond and `ryan-pi4.local` no longer resolves. **The Pi is
+powered off or off the network** — not a host-side configuration problem.
+
+Consequences: **T2.8 / T2.9 / T2.10 (E-1, E-2, E-3) are blocked again**, and
+T2.5/T2.6 carries an unverified-on-target gap. Everything else continues; the
+hardware-independent backlog is T2.7 and T3.1–T3.5.
+
 ### T2.3 / T2.4 — shifts, and a correction to my own spec
 
 `ops/shift.hpp`. Both axes in one pass with no scratch, since T3.3 shifts by a 2-D
