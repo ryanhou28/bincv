@@ -59,7 +59,27 @@ than left in a log. Related: the 2×2 box equals `bitSlicedSum` at k = 4 only fo
 **1-bit** source — an N-bit level costs k = 4·(2^N − 1), i.e. 124 inputs at N = 5,
 so it needs a different formulation rather than a bigger k.
 
-### ⚠️ Both non-x86 verification paths are down
+### ✅ Reference device back — all ARM gaps closed (2026-08-17)
+
+Power restored. Verified on the device after reboot:
+
+| suite | result |
+|---|---|
+| `test_reduce` (T2.5/T2.6) | **546572/546572** |
+| `test_bitslice` (T2.7) | **350540/350540** |
+| full `ctest` | **61/61 tests** |
+
+`throttled=0x0` before and after every run, governor restored each time. The two
+deferred gaps from T2.5/T2.6 and T2.7 are now closed on the primary target.
+
+**One caveat worth remembering:** `vcgencmd get_throttled` resets on boot, so a
+`0x0` read immediately after power-up means "nothing has happened yet", not
+"the supply is healthy". It only becomes evidence after the device has been under
+load — which these runs then provided.
+
+**E-1 / E-2 / E-3 are unblocked again.**
+
+### ⚠️ Both non-x86 verification paths were down (resolved above)
 
 - **Pi 4 offline** — `run_on_pi.sh` returns 77.
 - **Docker daemon unreachable** — `verify_arm.sh` returns 77, so the emulated
