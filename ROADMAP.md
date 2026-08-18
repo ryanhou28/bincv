@@ -33,22 +33,21 @@ OpenCV. This is the primary defense against scope drift.
 - Measured 7.83× memory reduction versus `CV_8U`
 
 ### Foundation work still required
-The existing `BinMat` predates the architecture in its current form. Per
-[D-7](ARCHITECTURE.md#d-7-existing-code-is-not-a-constraint), it is a prototype
-to be reshaped, not preserved:
-
-- Storage is a hard-coded `std::vector`; needs the `{ptr, stride, owns}` model
-- No views — kernels have nowhere to bind
-- No bit-plane container; only the N=1 case exists
-- Row alignment defaults to 32 bytes; should be word granularity
-- `at()` throws unconditionally; should be debug-checked only
-- No `BINCV_NO_EXCEPTIONS` path
-- Transpose and resize are naive per-pixel loops
-- No bitwise operations, no reductions beyond a per-pixel `countNonZero`
+**This list is historical — it described the prototype `BinMat` before Phases 1
+and 2 reshaped it, per [D-7](ARCHITECTURE.md#d-7-existing-code-is-not-a-constraint),
+and every line of it has since been done.** Storage is now `{ptr, stride, owns}`
+with two view types (D-5, D-9); bit-planes exist for arbitrary N (D-2); row
+alignment defaults to word granularity and that default is now measured on both
+sides rather than assumed (D-4, [X-1](EXPERIMENTS.md) and
+[X-9](EXPERIMENTS.md)); `at()` is debug-checked; the `BINCV_NO_EXCEPTIONS` path is
+built and verified in its own configuration; and `ops/` carries the logic kernels,
+the bulk and windowed reductions and the bit-sliced arithmetic. **The single
+source of truth for what is done is [TASKS.md](TASKS.md)'s status column**, not
+this section.
 
 ### Not started
-Everything in the MVP operation set. Bit-plane containers, bulk reductions, the
-SEAL-derived frontend kernels, NEON, VIO integration.
+The Phase 3 frontend kernels (denoise, derivative, pyramid, covariance, corner
+response), NEON intrinsics, and VIO integration.
 
 ---
 
@@ -131,9 +130,10 @@ The windowed and masked forms are required by
 [ARCHITECTURE §7.5](ARCHITECTURE.md#75-lk-gradient-covariance) and belong in the
 MVP, so the reduction interface is designed for them now rather than growing a
 second interface later. Experiment [E-3](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
-determined whether incremental accumulation state is exposed: **it is** — an
-accumulator beat recomputation by 1.32×–36× at 31×31 on the reference device
-([X-11](EXPERIMENTS.md)), along with a fused covariance entry point at 1.27–1.29×.
+determined whether incremental accumulation state is exposed: **it is** — the
+vertically-sliding form beat recomputation by 7.3× on a search sweep and 20× on a
+dense scan at 31×31 on the reference device ([X-11](EXPERIMENTS.md)), along with a
+fused covariance entry point at 1.27–1.29×.
 
 ### 2.5 Majority and thresholded counts
 `maj3` and the bit-sliced adder network for thresholding small counts. Feeds
@@ -206,7 +206,8 @@ closed in Phase 2 where they belonged**, on the reference device — the alignme
 default stands and no profile system is built ([X-9](EXPERIMENTS.md)), `uint32_t`
 stays the default word type ([X-10](EXPERIMENTS.md)), and the reduction API grows
 incremental state and a fused covariance ([X-11](EXPERIMENTS.md)). What remains for
-Phase 4 is E-5, E-6 and E-7, with E-4 in Phase 3 and E-8/E-9 unscheduled.
+Phase 4 is E-5, E-6 and E-7, with E-4 and E-8 in Phase 3 (T3.9 and T3.4) and E-9
+unscheduled.
 
 **Done when:** accuracy, footprint, and performance are measured and published in
 the repository, and no decision on the D-list is still provisional.

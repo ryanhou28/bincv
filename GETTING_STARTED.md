@@ -123,7 +123,9 @@ capability, the warning flags in force, the test backend, and whether OpenCV
 interop is enabled.
 
 **Options:** `BINCV_USE_OPENCV` (default ON), `BINCV_BUILD_TESTS` (ON),
-`BINCV_BUILD_BENCHMARKS` (ON, skipped automatically without OpenCV),
+`BINCV_BUILD_BENCHMARKS` (ON; the OpenCV-comparison benchmarks are skipped
+automatically without OpenCV, the binCV-versus-binCV experiment benchmarks still
+build),
 `BINCV_WERROR` (OFF; `verify.sh` sets it), `BINCV_USE_GTEST`
 (`AUTO`/`ON`/`OFF`).
 
@@ -314,7 +316,15 @@ pipeline in its memory budget or it does not
 ([ARCHITECTURE §10.4](ARCHITECTURE.md#104-the-metric-that-matters)).
 
 **Commit the measurement.** Every performance claim in this repository must be
-reproducible from a committed benchmark.
+reproducible from a committed benchmark — and, for anything closed on the
+reference device, from a committed raw log too.
+
+**Two kinds of benchmark live in `benchmark/`.** The comparisons against OpenCV
+need OpenCV and are the ones the denominator rule above is about. The experiment
+benchmarks that settle an E-question (`alignment_`, `wordwidth_`, `window_`)
+compare binCV against binCV, need no OpenCV, and **build in the core-only
+configuration** — which is what `scripts/run_on_pi.sh` configures by default, so
+reproducing X-9, X-10 or X-11 on the reference device takes no extra flags.
 
 ---
 
@@ -338,7 +348,8 @@ reproducible from a committed benchmark.
 ### Support
 - [bincv-cpp/include/bincv-cpp/util.hpp](bincv-cpp/include/bincv-cpp/util.hpp) — image I/O for tests (OpenCV-only)
 - [bincv-cpp/tests/](bincv-cpp/tests/) — test suites
-- [bincv-cpp/benchmark/](bincv-cpp/benchmark/) — comparison benchmarks
+- [bincv-cpp/benchmark/](bincv-cpp/benchmark/) — OpenCV comparisons (need OpenCV)
+  and the binCV-versus-binCV experiment benchmarks (core-only, no OpenCV)
 
 ### Current shape
 

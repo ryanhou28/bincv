@@ -209,7 +209,7 @@ untested, and there were no bulk kernels to test it on, so D-4 stood
 rather than let pass as settled, and it is now closed:
 [X-9](#x-9--does-row-alignment-earn-its-memory--done) measured the benefit on the
 reference device and found none — the best of twelve alignment/kernel/size
-combinations was 1.008×, inside its own batch spread. D-4 is confirmed and no
+combinations was 1.015×, inside its own batch spread. D-4 is confirmed and no
 longer provisional.
 
 ---
@@ -406,6 +406,22 @@ designed, measured on the target class rather than argued.
 
 **Supersedes** the unconfirmed x86 figure flagged at commit `22cbe5c`. The honest
 headline is the Pi number, with the mechanism stated alongside it.
+
+**Added later — the reference-device raw log, and a 1.5× disagreement resolved.**
+This entry originally committed no Pi log at all (`results/logic_benchmark.log`
+holds only the x86_64 run), and its `bitwiseAnd` figure of 0.02240 ns/px sits
+about 1.5× away from the 0.0327–0.0330 ns/px that
+[X-9](#x-9--does-row-alignment-earn-its-memory--done) and
+[X-10](#x-10--default-word-width--done) later measured for the same kernel on the
+same device. Re-running this benchmark on the device settles it: **the difference
+is the fixture, not the kernel.** `logic_benchmark` holds one image triple
+(115.2 KiB resident); the two experiment benchmarks hold nine images per variant
+(337.5 KiB) and interleave four variants. The sweep in this very entry predicts
+that: 0.02997 ns/px at a 96 KiB working set, 0.03116 at 384 KiB. The corroboration
+run reproduces the binCV side to within 5% (0.02350 ns/px) and is committed as
+`bincv-cpp/results/logic_benchmark_pi4.log`. It is **not** a re-issue of the
+ratios above — the device now carries OpenCV 4.10.0, so the denominator moved
+(`bitwiseAnd` 27.95× there against 29.1× here) — but the ~28–30× headline stands.
 
 ---
 
@@ -683,6 +699,15 @@ copied **verbatim** from its [TASKS.md](TASKS.md) task entry and was not re-scal
 re-scoped or softened once numbers arrived. All three have since been measured on
 the reference device and carry their **Result**, **Conclusion** and **Decision**.
 
+**All three were then RE-MEASURED**, at 0072c1a (X-9, X-10) and 3f32493 (X-11),
+after a review found defects in the shared harness rather than in any kernel: a
+physical-bound sanity check computed from the wrong footprint, an input rotation
+that degenerated when a batch was one call long, and two reporting gaps in X-11's
+axes 2 and 3. **Each fix was committed before the run that used it**, the same
+discipline the original benchmarks were held to. No ratio moved and no decision
+changed; the tables now carry the second set of runs, and each entry names what
+was wrong with the first.
+
 Two of them landed where the rule's wording had to do real work, which is the
 argument for writing rules first in one sentence: X-10 declined a measured **1.94×**
 because the rule is a conjunction and the footprint clause failed, and X-11's data
@@ -711,7 +736,8 @@ them.
 ### X-9 · Does row alignment earn its memory? · `DONE`
 
 **Gates:** [D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default) —
-currently **provisional**, and the only such decision in the project ·
+**was provisional until this entry closed it**, and was the only such decision in
+the project ·
 [E-1](ARCHITECTURE.md#9-open-questions-and-planned-experiments) · task
 [T2.8](TASKS.md) · completes
 [X-1](#x-1--row-alignment-memory-cost--done), which measured the cost side and
@@ -753,6 +779,16 @@ question is the same order as the drift a sequential run would charge to whichev
 variant went last. Ratios are on medians of 9 batches; min/median/max is printed
 per variant. Reduction timings carry the X-7 popcount-lowering caveat above.
 
+**RE-MEASURED at 0072c1a; the table below is the second set of three runs.** A
+review found that the entry's own validity control was computed from the wrong
+footprint: the physical-bound check derived the cache tier from the *traffic* of
+one `bitwiseAnd` call (three images) and printed it as the working set, reporting
+"112.5 KiB — L2-resident" for a batch that actually holds 337.5 KiB inside a
+1.58 MiB interleaved round. The shared harness also restarted its input rotation
+each batch. Both were fixed and **committed before the re-run**, exactly as the
+original benchmark was. Neither touched a ratio; the numbers below reproduce the
+first set's conclusion on a harness whose controls now hold.
+
 **Environment** (identical for all three runs; `scripts/run_on_pi.sh pi4`):
 
 ```
@@ -763,42 +799,65 @@ compiler:         g++ (Debian 14.2.0-19) 14.2.0, Release (-O2 -DNDEBUG)
 governor:         performance (restored to ondemand on exit)
 core pinning:     taskset -c 3
 throttled before / after: throttled=0x0 / throttled=0x0   (every run)
-benchmark commit: 3383996
+benchmark commit: 0072c1a
 ```
 
 **Result** — speedup against word granularity, three runs. **>1.00× means the
-wider alignment is faster**, which is the direction the rule reads. Per-run batch
-spread never exceeded 7%.
+wider alignment is faster**, which is the direction the rule reads.
 
 | Size | Alignment | bytes/image | bitwiseAnd | countNonZero |
 |---|---|---|---|---|
 | 640×480 | 4 (word) | 38400 | 1.000× | 1.000× |
-| 640×480 | 16 | 38400 (+0%) | 1.008 / 0.983 / 1.001× | 1.000 / 1.000 / 1.001× |
-| 640×480 | 32 | 46080 (+20%) | **0.321 / 0.311 / 0.321×** | 0.999 / 0.999 / 0.998× |
-| 640×480 | 64 | 61440 (+60%) | **0.211 / 0.205 / 0.209×** | 0.996 / 0.996 / 0.996× |
+| 640×480 | 16 | 38400 (+0%) | 1.003 / 0.999 / 1.015× | 0.999 / 1.000 / 1.000× |
+| 640×480 | 32 | 46080 (+20%) | **0.305 / 0.302 / 0.309×** | 1.000 / 0.998 / 0.997× |
+| 640×480 | 64 | 61440 (+60%) | **0.205 / 0.207 / 0.209×** | 0.996 / 0.996 / 0.995× |
 | 94×60 | 4 (word) | 720 | 1.000× | 1.000× |
-| 94×60 | 16 | 960 (+33%) | 0.988 / 1.000 / 0.993× | 1.009 / 1.000 / 0.990× |
-| 94×60 | 32 | 1920 (+167%) | 0.991 / 0.980 / 0.994× | 0.974 / 1.000 / 0.999× |
-| 94×60 | 64 | 3840 (+433%) | 0.913 / 0.874 / 0.929× | 0.956 / 0.947 / 0.992× |
+| 94×60 | 16 | 960 (+33%) | 0.996 / 0.985 / 1.000× | 0.990 / 0.981 / 1.000× |
+| 94×60 | 32 | 1920 (+167%) | 0.978 / 0.969 / 0.969× | 0.967 / 0.886 / 1.000× |
+| 94×60 | 64 | 3840 (+433%) | 0.915 / 0.878 / 0.849× | 0.944 / 0.899 / 0.897× |
+
+**Two noise figures, and a difference has to clear the larger.** The *batch
+spread* the benchmark prints — (max−min)/median inside one run — is 5–13% on the
+640×480 `bitwiseAnd` rows and ≤1.4% everywhere else. The *run-to-run scatter*
+across the three runs above is a different number and is sometimes far larger:
+94×60 / align 32 / `countNonZero` has a batch spread of 0.1–0.3% and a scatter of
+**11.4%** (0.967 / 0.886 / 1.000×). The first version of this entry quoted only
+the batch spread, which understated what a difference must exceed. No conclusion
+here turns on it — every cell is a slowdown or a null on either measure — but the
+bound is now reported honestly, and both figures are in the log.
 
 **Conclusion:** **No alignment beats word granularity anywhere, on either kernel,
-in any run.** The largest number in the table is 1.008×, which sits inside its own
-row's 5–6% batch spread — a null result, not a small win. The hypothesis held.
+in any run.** The largest number anywhere in the table is 1.015×, against an 8.6%
+batch spread on that row and a 1.6% run-to-run scatter — inside the noise on
+either measure and inside the rule's first band on both. A null result, not a
+small win. The hypothesis held.
 
 Two of the slowdowns are large enough to be worth naming, and both are
 consequences of choosing the alignment rather than confounds:
 
 1. `ops/logic.hpp`'s contiguous fast path requires every stride to equal the words
    a row needs, so **over-aligning disables it**: `bitwiseAnd` at 640×480 runs
-   3.1× slower at alignment 32 and 4.8× slower at alignment 64, while using 20%
+   3.3× slower at alignment 32 and 4.8× slower at alignment 64, while using 20%
    and 60% more memory. At 94×60 the width is not a whole number of words, no
    variant takes that path, and the cliff does not appear.
 2. Padding words are allocated and never read, so a wider stride spends cache
-   lines on nothing — the residual 0.87–0.99× at 94×60.
+   lines on nothing — the residual 0.85–1.00× at 94×60.
 
 `countNonZero` has no fast path and walks rows unconditionally, so its column is
 the clean isolation of alignment alone: **flat to within 0.5% at 640×480 across
 all four alignments.** On this core the alignment effect by itself is zero.
+
+**The absolute ns/pixel here is not comparable with [X-6](#x-6--is-the-t22-logic-speedup-real--done)'s,
+and the reason is the fixture.** This benchmark holds nine images per variant
+(four input pairs plus a destination, 337.5 KiB at 640×480) and interleaves four
+variants; `logic_benchmark` holds one triple (115.2 KiB). So `bitwiseAnd` uint32
+at 640×480 reads 0.0327–0.0330 ns/px here and 0.0224–0.0235 ns/px there — a 1.5×
+gap on the same kernel, same device, same governor. X-6's own working-set sweep
+predicts it: 0.02997 ns/px at a 96 KiB working set, 0.03116 at 384 KiB. That was
+checked by re-running `logic_benchmark` on the device, which also supplied the
+reference-device raw log X-6 never committed —
+`bincv-cpp/results/logic_benchmark_pi4.log`. Ratios are unaffected either way,
+since every variant here shares one fixture.
 
 One thing this does *not* test, stated so nobody credits it with more than it
 did: `BinMat` allocates with `new[]`, whose guarantee here is 16 bytes, so
@@ -854,6 +913,13 @@ the three — on `armv7l` every `uint64_t` operation is synthesised from 32-bit
 pairs, so the result would describe the compiler rather than the hardware.
 `aarch64` is confirmed before anything is recorded.
 
+**RE-MEASURED at 0072c1a; the speed table below is the second set of three runs.**
+This benchmark carried the same wrong-footprint sanity check as X-9 — it reported
+"112.5 KiB, inside its 1 MiB L2" for a batch holding 337.5 KiB inside a 1.32 MiB
+interleaved round — and the same batch-restarted input rotation. Both were fixed
+and committed before the re-run. No ratio moved. The footprint half is exact
+integer arithmetic and was never in question.
+
 **Method:** `bincv-cpp/benchmark/wordwidth_benchmark.cpp`, committed at 3383996
 **before** it was run; raw output in `bincv-cpp/results/wordwidth_benchmark.log`.
 All four widths hold the same four images, are checked to agree on every count and
@@ -873,20 +939,27 @@ compiler:         g++ (Debian 14.2.0-19) 14.2.0, Release (-O2 -DNDEBUG)
 governor:         performance (restored to ondemand on exit)
 core pinning:     taskset -c 3
 throttled before / after: throttled=0x0 / throttled=0x0   (every run)
-benchmark commit: 3383996
+benchmark commit: 0072c1a
 ```
 
 **Result — speed**, three runs, against `uint32_t`. >1.00× is faster than the
-current default.
+current default. Batch spread is within-run; run-to-run scatter across the three
+runs is in the last column, and a difference has to clear the larger of the two.
 
-| Size | Word | bitwiseAnd | countNonZero | batch spread |
-|---|---|---|---|---|
-| 640×480 | `uint8_t` | 0.959 / 0.962 / 1.065× | 0.247 / 0.247 / 0.247× | 10–17% / 0.1% |
-| 640×480 | `uint16_t` | 0.989 / 0.962 / 1.010× | 0.463 / 0.463 / 0.463× | 7–12% / 0.1% |
-| 640×480 | `uint64_t` | 0.974 / 0.959 / 1.035× | **1.941 / 1.942 / 1.939×** | 3–13% / 0.2% |
-| 94×60 | `uint8_t` | 0.604 / 0.607 / 0.607× | 0.315 / 0.316 / 0.316× | 0.2% |
-| 94×60 | `uint16_t` | 0.579 / 0.579 / 0.574× | 0.580 / 0.580 / 0.580× | 0.2% |
-| 94×60 | `uint64_t` | **1.285 / 1.285 / 1.285×** | **1.562 / 1.562 / 1.561×** | 0.1% |
+| Size | Word | bitwiseAnd | countNonZero | batch spread | scatter |
+|---|---|---|---|---|---|
+| 640×480 | `uint8_t` | 0.968 / 0.990 / 0.996× | 0.247 / 0.247 / 0.247× | 8–16% / 0.1% | 2.8% / 0.0% |
+| 640×480 | `uint16_t` | 0.969 / 0.988 / 0.979× | 0.463 / 0.463 / 0.463× | 9–12% / 0.1% | 1.9% / 0.0% |
+| 640×480 | `uint64_t` | 0.945 / 0.970 / 0.970× | **1.942 / 1.942 / 1.939×** | 7–12% / 0.4% | 2.5% / 0.3% |
+| 94×60 | `uint8_t` | 0.604 / 0.608 / 0.606× | 0.316 / 0.316 / 0.317× | 0.3% / 0.1% | 0.4% / 0.1% |
+| 94×60 | `uint16_t` | 0.578 / 0.579 / 0.578× | 0.577 / 0.580 / 0.580× | 0.1% | 0.1% / 0.3% |
+| 94×60 | `uint64_t` | **1.285 / 1.284 / 1.271×** | **1.563 / 1.563 / 1.564×** | 0.2% / 0.1% | 1.4% / 0.1% |
+
+The absolute ns/pixel here is not comparable with
+[X-6](#x-6--is-the-t22-logic-speedup-real--done)'s for the same reason it is not
+in X-9: this fixture holds nine images per width and interleaves four widths, so a
+batch streams from L2 rather than L1. The ratios are unaffected — all four widths
+share the fixture.
 
 **Result — footprint**, exact, architecture-independent, bytes for one plane at
 word granularity:
@@ -906,10 +979,11 @@ as the hypothesis above predicted — and the rule is a conjunction, so the
 footprint clause decides.**
 
 `uint64_t` is a large, reproducible win on the reduction: **1.94× at 640×480 and
-1.56× at 94×60**, stable to 0.2% across three runs. That clears ">10% on bulk
-kernels" outright. `bitwiseAnd` is a null result at 640×480 (0.96–1.07× against a
-3–17% batch spread) because it is memory-bound and all four widths move identical
-bytes there; at 94×60, where per-row overhead dominates, `uint64_t` wins 1.29×.
+1.56× at 94×60**, stable to 0.3% across three runs. That clears ">10% on bulk
+kernels" outright. `bitwiseAnd` is a null result at 640×480 (0.945–0.970× against
+a 7–12% batch spread) because it is memory-bound and all four widths move
+identical bytes there; at 94×60, where per-row overhead dominates, `uint64_t`
+wins 1.27–1.29×.
 Narrow words are much worse on the reduction — `uint8_t` at 0.25× is the per-word
 popcount lowering paid eight times as often, which is X-7's finding seen from the
 other side.
@@ -989,6 +1063,16 @@ since that is what favors incremental.
 accumulator stays resident in a 32 KiB L1D — a laptop with four times the L1 would
 favour incremental more than the deployment target does.
 
+**RE-MEASURED at 3f32493; every table below is the second set of three runs.**
+Three harness defects were found by review and fixed **before** the re-run, each
+committed first. The one that mattered here: `measureInterleaved` restarted its
+input rotation every batch, and `calibrate()` returns a batch of **one** when a
+single call already exceeds the budget — which DENSE recompute at W=31 does, at
+~73 ms per call. So that variant timed image 0 forever while the variant it is
+divided by rotated through all four, and the two sides of the 20×/36× ratios were
+not on identical inputs. The other two were reporting defects, both stated under
+their axes below. No ratio moved on the corrected harness.
+
 **Method:** `bincv-cpp/benchmark/window_benchmark.cpp`, committed at 3383996
 **before** it was run; raw output in `bincv-cpp/results/window_benchmark.log`.
 Every variant is compared against the shipped kernel on every window of every
@@ -1008,7 +1092,7 @@ compiler:         g++ (Debian 14.2.0-19) 14.2.0, Release (-O2 -DNDEBUG)
 governor:         performance (restored to ondemand on exit)
 core pinning:     taskset -c 3
 throttled before / after: throttled=0x0 / throttled=0x0   (every run)
-benchmark commit: 3383996
+benchmark commit: 3f32493
 ```
 
 **Two accumulators, not one**, because "a sliding accumulator" over bit-packed
@@ -1032,55 +1116,72 @@ size but not a pattern, and T2.10's two requirements ("~200 keypoints" and
   §7.6 builds from the same covariance machinery)
 
 **Result — axis 1**, ns/window, uint32_t, 640×480, run 3 (runs 1 and 2 agree to
-within 2% on every cell; per-run batch spread was 0.0–2.2%):
+within 3% on every cell; per-run batch spread was 0.0–3.1%):
 
 | Pattern | W | recompute | INC-COL | INC-ROW | INC-COL × | INC-ROW × | scratch |
 |---|---|---|---|---|---|---|---|
-| SPARSE | 7 | 67.9 | 251.8 | 69.1 | 0.27× | 0.98× | 28 B |
-| SEARCH | 7 | 47.2 | 18.1 | 13.2 | 2.61× | 3.58× | 56 B |
-| DENSE | 7 | 44.9 | 6.9 | 8.8 | 6.48× | 5.11× | 2560 B |
-| SPARSE | 15 | 138.0 | 976.3 | 118.9 | 0.14× | 1.16× | 60 B |
-| SEARCH | 15 | 110.8 | 39.7 | 20.4 | 2.79× | 5.44× | 88 B |
-| DENSE | 15 | 106.7 | 7.1 | 10.2 | 15.06× | 10.47× | 2560 B |
-| SPARSE | **31** | 314.1 | 3879.6 | 238.1 | 0.08× | **1.32×** | 124 B |
-| SEARCH | **31** | 269.8 | 104.1 | 36.6 | 2.59× | **7.37×** | 152 B |
-| DENSE | **31** | 267.3 | 7.4 | 13.2 | **36.35×** | 20.27× | 2560 B |
+| SPARSE | 7 | 67.1 | 248.3 | 68.7 | 0.27× | 0.98× | 28 B |
+| SEARCH | 7 | 47.2 | 18.0 | 13.1 | 2.62× | 3.59× | 56 B |
+| DENSE | 7 | 44.9 | 6.9 | 8.8 | 6.48× | 5.09× | 2560 B |
+| SPARSE | 15 | 135.2 | 975.5 | 117.2 | 0.14× | 1.15× | 60 B |
+| SEARCH | 15 | 110.7 | 39.6 | 20.3 | 2.79× | 5.46× | 88 B |
+| DENSE | 15 | 106.7 | 7.1 | 10.2 | 15.02× | 10.43× | 2560 B |
+| SPARSE | **31** | 306.8 | 3874.8 | 232.5 | 0.08× | **1.32×** | 124 B |
+| SEARCH | **31** | 269.7 | 103.8 | 36.8 | 2.60× | **7.33×** | 152 B |
+| DENSE | **31** | 267.3 | 7.4 | 13.2 | 36.34× | **20.25×** | 2560 B |
 
-Across runs at W=31: SPARSE INC-ROW 1.31/1.32/1.32×, SEARCH INC-ROW
-7.31/7.33/7.37×, DENSE INC-COL 36.37/36.35/36.35×.
+Across runs at W=31: SPARSE INC-ROW 1.32/1.31/1.32×, SEARCH INC-ROW
+7.39/7.31/7.33×, DENSE INC-ROW 20.51/20.22/20.25×, DENSE INC-COL
+36.35/36.36/36.34×.
 
-**Result — axis 2**, ns/keypoint, composed ÷ fused:
+**INC-ROW is the form this axis adopts, so INC-ROW's column is the one to quote
+for it: 1.32× / 7.3× / 20×.** The 36× belongs to INC-COL, which the decision
+below explicitly declines to expose.
+
+**Result — axis 2**, ns/keypoint, composed ÷ fused (ns from run 3):
 
 | Word | W | composed | fused | run 1 | run 2 | run 3 |
 |---|---|---|---|---|---|---|
-| `uint32_t` | 7 | 193.7 | 152.9 | 1.26× | 1.27× | 1.27× |
-| `uint32_t` | 15 | 432.6 | 344.0 | 1.26× | 1.25× | 1.26× |
-| `uint32_t` | **31** | 1011.4 | 796.3 | **1.27×** | **1.27×** | **1.27×** |
-| `uint64_t` | 7 | 200.3 | 144.6 | 1.38× | 1.39× | 1.38× |
-| `uint64_t` | 15 | 390.7 | 300.0 | 1.30× | 1.31× | 1.30× |
-| `uint64_t` | **31** | 822.3 | 637.0 | **1.29×** | **1.29×** | **1.29×** |
+| `uint32_t` | 7 | 197.8 | 156.4 | 1.27× | 1.26× | 1.26× |
+| `uint32_t` | 15 | 438.8 | 351.4 | 1.26× | 1.25× | 1.25× |
+| `uint32_t` | **31** | 1019.2 | 803.2 | **1.28×** | **1.27×** | **1.27×** |
+| `uint64_t` | 7 | 208.9 | 153.3 | 1.38× | 1.38× | 1.36× |
+| `uint64_t` | 15 | 399.6 | 309.8 | 1.29× | 1.30× | 1.29× |
+| `uint64_t` | **31** | 832.9 | 644.5 | **1.29×** | **1.29×** | **1.29×** |
 
-**Result — axis 3**, ns/keypoint, uint32_t, and the memory each form needs:
+**Extra memory: 0 B for both forms** — neither needs scratch, and the fused pass
+returns its four counters by value. The first version of this entry reported axis
+2's speed with no memory figure at all, which the protocol does not allow even
+when the answer is zero.
+
+**Result — axis 3**, ns/keypoint, uint32_t, and the memory each form needs (ns
+from run 3):
 
 | W | plane (shipped) | four-arg XOR | plane ÷ 4arg |
 |---|---|---|---|
-| 7 | 109.4 | 152.1 | 0.72 / 0.74 / 0.78× |
-| 15 | 247.4 | 328.3 | 0.75 / 0.77 / 0.80× |
-| 31 | 580.3 | 731.9 | 0.79 / 0.79 / 0.80× |
+| 7 | 110.9 | 149.5 | 0.77 / 0.76 / 0.74× |
+| 15 | 252.5 | 327.5 | 0.79 / 0.78 / 0.77× |
+| 31 | 584.7 | 733.0 | 0.80 / 0.80 / 0.80× |
 
 Per frame at W=31 and 200 keypoints, **with the plane's formation cost included**:
-plane 116.1 µs + 6.5 µs = **122.6 µs**; four-arg **146.4 µs**. The plane is 16%
-faster per level even after paying to build it. Memory: the plane is **38400 B per
-pyramid level**, held for the frame's lifetime, against **0 B** for the four-argument
-form — and for scale, the ternary `dx`/`dy` the covariance reads are 4 planes =
-153600 B per level, so the selector is a fifth plane, **+25% on the derivative
-working set of every level**.
+plane 116.9 µs + 7.2 µs = **124.1 µs**; four-arg **146.6 µs**. The plane is
+**16–18%** faster per level across the three runs, even after paying to build it.
+
+Memory: the plane is **38400 B at 640×480, and it scales with the level** — 9600 B
+at L1, 2400 B at L2, ~51 kB summed over a 4-level pyramid — held for the frame's
+lifetime, against **0 B at every level** for the four-argument form. The first
+version of this entry wrote "38400 B per pyramid level", which read literally
+overstates the pyramid-wide cost about 3× *in favour of the memory side that won
+this axis*. The level-invariant statement is the relative one, and it is correct
+at every level: the ternary `dx`/`dy` the covariance reads are 4 planes (153600 B
+at 640×480), so the selector is a fifth plane — **+25% on the derivative working
+set of every level**.
 
 **Conclusion:**
 
 *Axis 1.* At 31×31 an accumulator beats recompute in **every** pattern — 1.32×
-where windows barely overlap, 7.4× and 36× where they do. Past the 15% line in all
-three. Which accumulator wins depends on the pattern and they are not
+where windows barely overlap, 7.3× and 20× where they do for the form being
+adopted (36× for the one that is not). Past the 15% line in all three. Which accumulator wins depends on the pattern and they are not
 interchangeable: DENSE favours INC-COL (36×, and its cost per window is constant
 in W — 6.9, 7.1 and 7.4 ns at W = 7, 15 and 31 against recompute's 44.9, 106.7
 and 267.3, because it issues no popcount), while SPARSE
@@ -1104,6 +1205,16 @@ region reduction in `ops/reduce.hpp` with no interface change whatsoever. It is
 also a warning about reading axis 1's SPARSE column as evidence for incremental
 state: it is not.
 
+**Two consequences follow, and both have to travel with these numbers.** First,
+crediting 1.32× to the sliding accumulator *and* crediting the same 1.32× again to
+the accumulator split counts one measurement twice — item 1 and item 4 of the
+decision below are not independently supported by the SPARSE column, only item 4
+is. Second, **every ratio in the axis-1 table is measured against the pre-split
+recompute baseline.** Land item 4 first and that baseline gets up to 1.32× faster,
+so SEARCH's 7.3× and DENSE's 20× shrink to roughly 5.6× and 15×. Both stay far
+past the 15% line, so the branch this rule selects does not change; the magnitudes
+quoted for it do.
+
 *Axis 2.* 1.27× (`uint32_t`) and 1.29× (`uint64_t`) at 31×31, in all three runs,
 past the 15% line — reproducing X-8's 1.30× in a separate session and extending it
 to two word widths and three window sizes, where it holds from 1.25× to 1.39×. The
@@ -1111,13 +1222,15 @@ popcount count is identical on both sides, so the delta is redundant traversal:
 three calls visit and load each region word three times.
 
 *Axis 3.* The two goals disagree, which is why T2.10 set no threshold: the plane is
-16% faster per frame and costs 38400 B per level; the four-argument form is 16%
-slower and costs nothing.
+16–18% faster per frame and costs a fifth plane at every pyramid level (+25% of
+the derivative working set; 38400 B at 640×480, 9600 B at L1, ~51 kB over four
+levels); the four-argument form is that much slower and costs nothing anywhere.
 
 **Decision:**
 
 1. **Axis 1 → the rule's second branch: extend T2.6 with incremental state before
-   T3.6 is written.** INC-ROW is the form to expose — it wins or ties everywhere,
+   T3.6 is written.** INC-ROW is the form to expose, at **1.32× / 7.3× / 20×** —
+   it wins or ties everywhere,
    is word-parallel, and needs no caller scratch, so it does not drag the
    no-heap-in-kernels rule into the interface. INC-COL's 36× on DENSE is real and
    large, but it is a *second* shape with a scratch-buffer argument and a pattern

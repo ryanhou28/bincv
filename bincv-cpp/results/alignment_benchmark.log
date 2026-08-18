@@ -1,10 +1,10 @@
 E-1 / T2.8 -- does row alignment earn its memory?
 =================================================
 
-The BENEFIT side of X-1, which measured only the cost. Gates D-4, the project's
-only PROVISIONAL decision. NOT a binCV-versus-OpenCV comparison: it compares
-binCV against binCV at four row alignments, so ARCHITECTURE 10.3's denominator
-does not apply.
+The BENEFIT side of X-1, which measured only the cost. Gates D-4, which was the
+project's only PROVISIONAL decision until this closed it. NOT a
+binCV-versus-OpenCV comparison: it compares binCV against binCV at four row
+alignments, so ARCHITECTURE 10.3's denominator does not apply.
 
 DECISION RULE, WRITTEN BEFORE MEASURING (TASKS.md T2.8, recorded in
 EXPERIMENTS.md X-9 at commit 4245210, and in benchmark/alignment_benchmark.cpp):
@@ -14,6 +14,23 @@ EXPERIMENTS.md X-9 at commit 4245210, and in benchmark/alignment_benchmark.cpp):
 "Speedup" means faster than the word-granularity baseline; a variant that is
 SLOWER lands in the first band, and the size of the slowdown is reported rather
 than clamped.
+
+RE-MEASURED AT COMMIT 0072c1a. The numbers below supersede the first three runs
+(commit 3383996). Two harness defects were fixed first and the fix was committed
+before this re-run, exactly as the original benchmark was:
+
+  * the physical-bound sanity check derived the cache tier from TRAFFIC (three
+    images per bitwiseAnd call) and printed it as the working set, reporting
+    "112.5 KiB -- L2-resident" for a batch that in fact holds 337.5 KiB inside a
+    1.58 MiB interleaved round. EXPERIMENTS.md names that check as the validity
+    control, so it is the one number that must not come from the wrong footprint.
+  * measure::measureInterleaved restarted the body index at 0 each batch, so the
+    input rotation degenerated whenever a single call already exceeded the time
+    budget. It does not degenerate in THIS benchmark (batches here are thousands
+    of calls), but the harness is shared with window_benchmark, where it did.
+
+Neither defect touched a ratio: every conclusion below is the one the first three
+runs reached, reproduced on a corrected harness.
 
 PLATFORM: the reference device -- AUTHORITATIVE. E-1 is a cache question, which
 is exactly what a laptop hides (EXPERIMENTS.md "Measurement platforms").
@@ -25,48 +42,57 @@ is exactly what a laptop hides (EXPERIMENTS.md "Measurement platforms").
   governor:         performance (restored to ondemand on exit)
   core pinning:     taskset -c 3
   throttled before / after: throttled=0x0 / throttled=0x0  (every run)
-  benchmark commit: 3383996
+  benchmark commit: 0072c1a
 
 THREE RUNS, because one cannot show that a ratio reproduced. Ratios are on
-medians of 9 interleaved batches; the spread column in each run's own output is
-(max-min)/median and never exceeded 7%.
+medians of 9 interleaved batches. TWO noise figures are reported, and the larger
+one is what a difference has to clear:
 
-  640x480, uint32_t          run 1    run 2    run 3     footprint   AND fast path
-  align 4 (word)  bitwiseAnd  1.000x   1.000x   1.000x     38400 B   contiguous
-                  countNonZero 1.000x  1.000x   1.000x
-  align 16        bitwiseAnd  1.008x   0.983x   1.001x     38400 B   contiguous
-                  countNonZero 1.000x  1.000x   1.001x      (+0.0%)
-  align 32        bitwiseAnd  0.321x   0.311x   0.321x     46080 B   row loop
-                  countNonZero 0.999x  0.999x   0.998x     (+20.0%)
-  align 64        bitwiseAnd  0.211x   0.205x   0.209x     61440 B   row loop
-                  countNonZero 0.996x  0.996x   0.996x     (+60.0%)
+  * batch spread -- (max-min)/median WITHIN one run, printed by the benchmark
+  * run-to-run scatter -- (max-min) across the three runs, in the table below
 
-  94x60 (pyr L3), uint32_t   run 1    run 2    run 3     footprint   AND fast path
-  align 4 (word)  bitwiseAnd  1.000x   1.000x   1.000x       720 B   row loop
-                  countNonZero 1.000x  1.000x   1.000x
-  align 16        bitwiseAnd  0.988x   1.000x   0.993x       960 B   row loop
-                  countNonZero 1.009x  1.000x   0.990x     (+33.3%)
-  align 32        bitwiseAnd  0.991x   0.980x   0.994x      1920 B   row loop
-                  countNonZero 0.974x  1.000x   0.999x    (+166.7%)
-  align 64        bitwiseAnd  0.913x   0.874x   0.929x      3840 B   row loop
-                  countNonZero 0.956x  0.947x   0.992x    (+433.3%)
+They disagree, sometimes by two orders of magnitude, and only reporting the first
+would have understated reproducibility. The starkest case is 94x60 / align 32 /
+countNonZero: batch spread 0.1-0.3%, run-to-run scatter 11.4%. Read on the batch
+spread alone, that row's 0.886x would have looked like a real 13% slowdown.
+
+  640x480, uint32_t          run 1    run 2    run 3   scatter   footprint  AND fast path
+  align 4 (word)  bitwiseAnd  1.000x   1.000x   1.000x       --     38400 B  contiguous
+                  countNonZero 1.000x  1.000x   1.000x       --
+  align 16        bitwiseAnd  1.003x   0.999x   1.015x     1.6%     38400 B  contiguous
+                  countNonZero 0.999x  1.000x   1.000x     0.1%      (+0.0%)
+  align 32        bitwiseAnd  0.305x   0.302x   0.309x     2.3%     46080 B  row loop
+                  countNonZero 1.000x  0.998x   0.997x     0.3%     (+20.0%)
+  align 64        bitwiseAnd  0.205x   0.207x   0.209x     1.9%     61440 B  row loop
+                  countNonZero 0.996x  0.996x   0.995x     0.1%     (+60.0%)
+
+  94x60 (pyr L3), uint32_t   run 1    run 2    run 3   scatter   footprint  AND fast path
+  align 4 (word)  bitwiseAnd  1.000x   1.000x   1.000x       --       720 B  row loop
+                  countNonZero 1.000x  1.000x   1.000x       --
+  align 16        bitwiseAnd  0.996x   0.985x   1.000x     1.5%       960 B  row loop
+                  countNonZero 0.990x  0.981x   1.000x     1.9%      (+33.3%)
+  align 32        bitwiseAnd  0.978x   0.969x   0.969x     0.9%      1920 B  row loop
+                  countNonZero 0.967x  0.886x   1.000x    11.4%     (+166.7%)
+  align 64        bitwiseAnd  0.915x   0.878x   0.849x     6.6%      3840 B  row loop
+                  countNonZero 0.944x   0.899x  0.897x     4.7%     (+433.3%)
 
 READING. No alignment beats word granularity anywhere, on either kernel, in any
-run. The best number in the whole table is 1.008x -- inside the 5-6% batch
-spread of the row it sits in, so it is a null result and not a small win. The
-rule's first band therefore applies, unambiguously: D-4 is confirmed, E-1 closes,
-and no profile system gets built.
+run. The largest number anywhere in the table is 1.015x, against a batch spread
+of 8.6% on that row and a run-to-run scatter of 1.6% -- inside the noise on
+either measure, and inside the rule's first band on both. So it is a null result
+and not a small win. The rule's first band applies, unambiguously: D-4 is
+confirmed, E-1 closes, and no profile system gets built.
 
 WHERE THE SLOWDOWNS COME FROM, since three of them are large. Two mechanisms,
 both consequences of choosing the alignment rather than confounds to subtract:
 
   1. ops/logic.hpp's contiguous fast path requires every stride to equal the
      words a row needs. Over-aligning disables it, and bitwiseAnd at 640x480
-     drops to 0.32x (align 32) and 0.21x (align 64) -- 3.1x and 4.8x SLOWER for
+     drops to 0.31x (align 32) and 0.21x (align 64) -- 3.3x and 4.8x SLOWER for
      20% and 60% more memory. At 94x60 the width is not a whole number of words,
      so no variant takes that path and no variant shows the cliff.
   2. Padding words are allocated and never read, so a wider stride spends cache
-     lines and bandwidth on nothing. That is the residual 0.91-0.99x at 94x60,
+     lines and bandwidth on nothing. That is the residual 0.85-1.00x at 94x60,
      and it is why the align-64 row is the worst one there too.
 
 countNonZero, which has no fast path and walks rows unconditionally, is flat to
@@ -80,6 +106,15 @@ varies (16/32/64 B) with the allocator rather than with the requested alignment.
 So this experiment shows that making rows mutually congruent buys nothing; it
 does not test absolutely-64-byte-aligned rows, which no binCV API can currently
 request. Nothing in the MVP asks for one.
+
+FOOTPRINT AND ABSOLUTE SPEED ARE NOT COMPARABLE WITH X-6's LOGIC NUMBERS, and
+the difference is the fixture, not the kernel. This benchmark holds nine images
+per variant (four input pairs plus a destination, 337.5 KiB at 640x480) and
+interleaves four variants, so a batch streams from L2; logic_benchmark holds one
+triple (115.2 KiB) and streams largely from L1. bitwiseAnd uint32 at 640x480
+therefore reads 0.0327-0.0330 ns/px here and 0.0224-0.0235 ns/px there. X-6's own
+working-set sweep predicts exactly that: it measured 0.02997 ns/px at a 96 KiB
+working set and 0.03116 at 384 KiB. See results/logic_benchmark_pi4.log.
 
 X-7 CAVEAT. binCV builds with no -march flags, so the countNonZero rows measure
 fmov/cnt/uaddlv/fmov per word as much as they measure alignment. That lowering is
@@ -108,20 +143,21 @@ new[] guarantees 16-byte alignment here, so rowAlignment aligns the STRIDE, not 
 
   SPEED (ns/pixel, min / median / max over 9 interleaved batches)
   align    bitwiseAnd                 countNonZero               AND path
-  4         0.0323/ 0.0336/ 0.0346  0.0735/ 0.0735/ 0.0735 contiguous
-  16        0.0323/ 0.0336/ 0.0343  0.0734/ 0.0734/ 0.0735 contiguous
-  32        0.1038/ 0.1048/ 0.1060  0.0736/ 0.0736/ 0.0737 row loop
-  64        0.1604/ 0.1606/ 0.1610  0.0737/ 0.0738/ 0.0740 row loop
+  4         0.0319/ 0.0332/ 0.0335  0.0734/ 0.0734/ 0.0734 contiguous
+  16        0.0314/ 0.0327/ 0.0342  0.0734/ 0.0734/ 0.0735 contiguous
+  32        0.1072/ 0.1075/ 0.1081  0.0735/ 0.0736/ 0.0737 row loop
+  64        0.1581/ 0.1586/ 0.1588  0.0738/ 0.0738/ 0.0740 row loop
 
   SPEEDUP vs word granularity (>1.00 = wider alignment is FASTER; the rule reads this column)
   align      bitwiseAnd countNonZero   AND spread   cnz spread
-  4              1.000x       1.000x         6.9%         0.0%
-  16             1.001x       1.001x         5.9%         0.1%
-  32             0.321x       0.998x         2.1%         0.2%
-  64             0.209x       0.996x         0.4%         0.3%
+  4              1.000x       1.000x         5.1%         0.0%
+  16             1.015x       1.000x         8.6%         0.2%
+  32             0.309x       0.997x         0.9%         0.2%
+  64             0.209x       0.995x         0.5%         0.3%
 
-  sanity: bitwiseAnd at word granularity moves 115200 B per call in 10329 ns = 11.15 GB/s
-          working set 112.5 KiB -- L2-resident (1 MiB L2), so rates above DRAM's ~4-6 GB/s are expected
+  sanity: bitwiseAnd at word granularity moves 115200 B per call in 10204 ns = 11.29 GB/s
+          resident during its batch 337.5 KiB (9 images) -- L2-resident (1 MiB L2), so rates above DRAM's ~4-6 GB/s are expected
+          all 4 variants interleaved: 1620.0 KiB, which is beyond the 1 MiB L2 -- each batch re-warms what the previous variants evicted
 
 === 94x60 pyramid L3, uint32_t words ===
   a row inherently needs 3 words (12 B); width is NOT a whole number of words
@@ -137,19 +173,20 @@ new[] guarantees 16-byte alignment here, so rowAlignment aligns the STRIDE, not 
 
   SPEED (ns/pixel, min / median / max over 9 interleaved batches)
   align    bitwiseAnd                 countNonZero               AND path
-  4         0.0815/ 0.0815/ 0.0816  0.0987/ 0.0987/ 0.0987 row loop
-  16        0.0821/ 0.0821/ 0.0822  0.0997/ 0.0997/ 0.0998 row loop
-  32        0.0820/ 0.0820/ 0.0822  0.0987/ 0.0988/ 0.0988 row loop
-  64        0.0878/ 0.0878/ 0.0879  0.0994/ 0.0994/ 0.0995 row loop
+  4         0.0816/ 0.0816/ 0.0817  0.0987/ 0.0987/ 0.0988 row loop
+  16        0.0816/ 0.0816/ 0.0816  0.0987/ 0.0987/ 0.0987 row loop
+  32        0.0842/ 0.0842/ 0.0843  0.0987/ 0.0987/ 0.0988 row loop
+  64        0.0961/ 0.0961/ 0.0962  0.1100/ 0.1100/ 0.1102 row loop
 
   SPEEDUP vs word granularity (>1.00 = wider alignment is FASTER; the rule reads this column)
   align      bitwiseAnd countNonZero   AND spread   cnz spread
-  4              1.000x       1.000x         0.0%         0.0%
-  16             0.993x       0.990x         0.1%         0.1%
-  32             0.994x       0.999x         0.2%         0.1%
-  64             0.929x       0.992x         0.1%         0.1%
+  4              1.000x       1.000x         0.1%         0.1%
+  16             1.000x       1.000x         0.1%         0.0%
+  32             0.969x       1.000x         0.2%         0.1%
+  64             0.849x       0.897x         0.1%         0.2%
 
-  sanity: bitwiseAnd at word granularity moves 2160 B per call in 460 ns = 4.70 GB/s
-          working set 2.1 KiB -- L1-resident on the reference device (32 KiB L1D)
+  sanity: bitwiseAnd at word granularity moves 2160 B per call in 460 ns = 4.69 GB/s
+          resident during its batch 6.3 KiB (9 images) -- L1-resident on the reference device (32 KiB L1D)
+          all 4 variants interleaved: 65.4 KiB, which is inside the 1 MiB L2 -- each batch re-warms what the previous variants evicted
 
-sink: 2753703350156273 (printed so nothing above can be optimized away)
+sink: 2702830581408309 (printed so nothing above can be optimized away)

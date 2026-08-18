@@ -207,20 +207,26 @@
 /// countNonZero(mag_y), countAndSplit(...) -- and therefore three traversals of the
 /// same window, issuing the same popcounts a fused traversal would issue once. On
 /// the reference device that composition costs 1.30x a fused pass, reproducibly,
-/// with the popcount count identical on both sides (EXPERIMENTS.md X-8). It is
-/// recorded and NOT fixed here: a covariance-shaped entry point is an interface
-/// change, 1.30x is past T2.10's own 15% threshold, and T2.10 is the experiment
-/// whose stated gate is this interface. T3.6 depends on it settling first.
+/// with the popcount count identical on both sides (EXPERIMENTS.md X-8, reproduced
+/// at 1.27-1.29x across two word widths and three window sizes by X-11).
 ///
-/// **The MVP RECOMPUTES per window. There is no incremental or sliding state
-/// here, on purpose.** LK windows are large (31x31 in practice) and overlap
-/// heavily -- consecutive keypoints, and consecutive pyramid iterations on one
-/// keypoint, re-read almost the same words -- which is exactly the regime where a
-/// sliding accumulator could win. Whether it does is E-3 (T2.10), and it is
-/// unmeasured. Building the accumulator now would fix this interface around an
-/// answer nobody has, which is the thing TASKS.md T2.6 asks not to do; if E-3 says
-/// incremental wins, the state is added here without any recompute caller
-/// changing shape.
+/// **E-3 IS SETTLED, AND IT WENT AGAINST THE SHAPE IN THIS FILE** (EXPERIMENTS.md
+/// X-11 / T2.10, ARCHITECTURE.md D-15). All three of its axes moved off the
+/// simpler form:
+///
+///   1. a vertically-sliding accumulator beats recompute by 7.3x on a search sweep
+///      and 20x on a dense scan at 31x31, so incremental state IS exposed;
+///   2. the fused covariance entry point wins 1.27-1.29x, so it IS added;
+///   3. a four-argument countAndSplit costs 16-18% of one operation's time and
+///      saves a frame-sized plane at every pyramid level, and the project's
+///      tiebreak takes the memory.
+///
+/// **What this file still ships is the recompute-only shape**, because the
+/// interface was deliberately not changed in the same commit as the measurement
+/// that gated it. The four changes are scheduled as TASKS.md T2.11, and T3.6 is
+/// written against the extended interface rather than against this one. Until
+/// T2.11 lands, everything below recomputes per window -- which is correct, and is
+/// no longer the answer to an open question.
 
 #include <cstddef>
 #include <cstdint>
@@ -558,11 +564,12 @@ inline size_t countNonZero(BinMatConstView<WordType> src, Rect region) {
 ///       buffer whose only purpose is to be counted and discarded.
 /// @note This is ΣIx² / ΣIy² territory for the LK covariance when a == b, and the
 ///       `mag_x & mag_y` factor of the cross term otherwise (ARCHITECTURE 7.5).
-/// @note MVP RECOMPUTES PER WINDOW. LK windows are 31x31 and overlap heavily, so
-///       consecutive calls re-read almost the same words; whether a sliding
-///       accumulator beats that is E-3 (T2.10) and is deliberately unmeasured
-///       here. This signature is chosen so that answering E-3 either way leaves it
-///       unchanged.
+/// @note RECOMPUTES PER WINDOW. LK windows are 31x31 and overlap heavily, so
+///       consecutive calls re-read almost the same words. E-3 (T2.10, X-11) has
+///       measured what a sliding accumulator is worth there -- 7.3x on a search
+///       sweep, 20x on a dense scan at 31x31 -- and T2.11 adds that form as an
+///       ADDITIONAL entry point. This signature is unchanged by it: a caller with
+///       one window still wants exactly this.
 /// @note Reads only: `a` and `b` may be the same view or overlap arbitrarily.
 /// @note Never throws, never allocates. Mismatched dimensions and a stride shorter
 ///       than a row are BINCV_ASSERT programming errors.
@@ -616,7 +623,8 @@ inline size_t countAnd(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
 ///       Besides being one popcount cheaper on a target where the popcount is the
 ///       expensive part (D-6), it never forms `~c` -- which would set every
 ///       padding bit of a trailing word and count phantom pixels.
-/// @note MVP RECOMPUTES PER WINDOW; see countAnd() and E-3 (T2.10).
+/// @note RECOMPUTES PER WINDOW; see countAnd(). E-3 is settled (X-11 / D-15) and
+///       the sliding form arrives alongside this one in T2.11, not instead of it.
 /// @note **`c` IS A FRAME-SIZED PLANE, NOT A WINDOW-SIZED ONE**, and T3.6 should
 ///       plan for that. All three views are indexed by the SAME `region`, in the
 ///       image's coordinate frame, so `c` must carry `a`'s dimensions -- asserted.
@@ -635,12 +643,13 @@ inline size_t countAnd(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
 ///       derivative planes, and it is a CALLER allocation -- no kernel here
 ///       allocates. A four-argument form taking `c0` and `c1` and XOR-ing them in
 ///       the word loop would need no plane at all; it is deliberately NOT added
-///       yet, because choosing between "one plane, three arguments" and "no plane,
-///       four arguments" is a memory-versus-speed call, this project settles those
-///       with a measurement and a decision rule written first (CLAUDE.md), and the
-///       experiment whose stated gate is "T2.6's interface" is E-3 (T2.10), still
-///       TODO. Adding it now would fix the interface ahead of the measurement --
-///       the same mistake T2.6 forbids for incremental state.
+///       yet **in this file**, but the choice has been made: X-11 axis 3 measured
+///       the plane at 16-18% faster per frame INCLUDING its formation cost, against
+///       a fifth frame-sized plane at every pyramid level (+25% of the derivative
+///       working set), and CLAUDE.md's tiebreak takes the memory. So the
+///       four-argument overload is what T3.6 will call, and this three-argument
+///       form stays for a caller that already has a plane. See D-15 and T2.11 --
+///       the overload lands there rather than in the commit that measured it.
 /// @note Reads only: `a`, `b` and `c` may be the same view or overlap arbitrarily.
 /// @note Never throws, never allocates. Mismatched dimensions and a stride shorter
 ///       than a row are BINCV_ASSERT programming errors.

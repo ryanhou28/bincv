@@ -95,8 +95,16 @@ public:
     ///       upper pyramid levels, which LK touches every frame. Memory wins ties
     ///       (ARCHITECTURE principle 2), so larger alignment is opt-in per object
     ///       via the constructor's rowAlignment argument, not the default.
-    /// @note D-4 is provisional pending E-1; the constructor argument is what
-    ///       keeps the alternative measurable without an API change.
+    /// @note E-1 CLOSED and D-4 is confirmed, not provisional (EXPERIMENTS.md X-9,
+    ///       T2.8, reference device). The benefit side was measured across four
+    ///       alignments x two kernels x two sizes and the best of the twelve
+    ///       combinations was 1.015x -- inside its own batch spread. countNonZero,
+    ///       which walks rows unconditionally and so isolates alignment alone, was
+    ///       flat to within 0.5%. Over-aligning is also 3.3-4.8x SLOWER on
+    ///       bitwiseAnd at 640x480, because a stride wider than the row's own words
+    ///       disables ops/logic.hpp's contiguous fast path. The rowAlignment
+    ///       argument therefore stays as an opt-in escape hatch, not as a hook for
+    ///       a measurement that has since been taken.
     static constexpr size_t DefaultRowAlignment = sizeof(WordType);
 
     // Constructors

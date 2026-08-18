@@ -1302,7 +1302,8 @@ the `a & b` factor removes those bits.
 Windows are 31×31 in practice and overlap heavily — consecutive keypoints, and
 consecutive iterations on one keypoint, re-read almost the same words — which is
 exactly the regime where a sliding accumulator might win. **E-3 has since measured
-it and it does**, by 1.32×–36× at 31×31 ([X-11](EXPERIMENTS.md)), so the
+it and it does**, by **7.3× on a search sweep and 20× on a dense scan** at 31×31
+for the form being adopted ([X-11](EXPERIMENTS.md)), so the
 accumulator is being added in [T2.11](#t211--t26-api-extensions-mandated-by-e-3--todo).
 The signature chosen here survives that: incremental state arrives as an additional
 entry point rather than as a change to this one.
@@ -1533,16 +1534,19 @@ discipline — 64-bit OS, throttle checks, governor, pinning:
 **Done when:** [EXPERIMENTS.md](EXPERIMENTS.md) X-1 is `DONE` with the benefit
 side filled in, D-4 is confirmed or reopened, and the benchmark is committed.
 
-**RESULT — first band, D-4 CONFIRMED.** Reference device, three runs
+**RESULT — first band, D-4 CONFIRMED.** Reference device, two sets of three runs
 ([X-9](EXPERIMENTS.md), `bincv-cpp/results/alignment_benchmark.log`,
-`benchmark/alignment_benchmark.cpp`). Best of four alignments × two kernels × two
-sizes was **1.008×**, inside its own batch spread — a null result, not a small
-win. `countNonZero`, which has no fast path and so isolates alignment alone, was
-flat to within **0.5%** at 640×480 across all four alignments. Two alignments were
-much worse: over-aligning disables `ops/logic.hpp`'s contiguous fast path, so
-`bitwiseAnd` at 640×480 ran **3.1× slower at align 32 and 4.8× slower at align
-64** for 20% and 60% more memory. **No profile system is built.** D-4 loses its
-"provisional" tag and X-1 is now `DONE`.
+`benchmark/alignment_benchmark.cpp`); the second set was taken after a review
+found the benchmark's own physical-bound check was computing the cache tier from
+the wrong footprint, and it reproduced the first. Best of four alignments × two
+kernels × two sizes was **1.015×**, inside both its 8.6% batch spread and its 1.6%
+run-to-run scatter — a null result, not a small win. `countNonZero`, which has no
+fast path and so isolates alignment alone, was flat to within **0.5%** at 640×480
+across all four alignments. Two alignments were much worse: over-aligning disables
+`ops/logic.hpp`'s contiguous fast path, so `bitwiseAnd` at 640×480 ran **3.3×
+slower at align 32 and 4.8× slower at align 64** for 20% and 60% more memory.
+**No profile system is built.** D-4 loses its "provisional" tag and X-1 is now
+`DONE`.
 
 ---
 
@@ -1651,9 +1655,9 @@ runs ([X-11](EXPERIMENTS.md), `bincv-cpp/results/window_benchmark.log`,
 
 | Axis | At 31×31 | Branch selected |
 |---|---|---|
-| 1 · incremental vs recompute | **1.32×** sparse, **7.4×** search, **36×** dense | extend T2.6 with incremental state before T3.6 |
+| 1 · incremental vs recompute | **7.3×** search, **20×** dense, for INC-ROW — the form adopted (INC-COL hits 36× on dense and is rejected; the 1.32× "sparse" column is the accumulator-split finding, not an incremental win) | extend T2.6 with incremental state before T3.6 |
 | 2 · fused vs composed covariance | **1.27×** (`uint32_t`), **1.29×** (`uint64_t`) | add a covariance entry point before T3.6 |
-| 3 · plane vs four-argument | plane **16% faster** per frame, **38400 B**/level; four-arg **0 B** | four-argument form — memory wins the tiebreak |
+| 3 · plane vs four-argument | plane **16–18% faster** per frame, a fifth plane at every level (**+25%** of the derivative working set; 38400 B at 640×480); four-arg **0 B** | four-argument form — memory wins the tiebreak |
 
 **The surprise, and it needs stating plainly:** the sparse column is *not* an
 incremental win. At 200 isolated keypoints the sliding path never executes, so the
@@ -1686,9 +1690,14 @@ the discrepancy.
 
 1. **Incremental window state, INC-ROW form.** A vertically-sliding accumulator
    over one column of window positions: the sum gains the incoming row's windowed
-   popcount and loses the outgoing row's. Measured **1.32×** on isolated
-   keypoints, **7.4×** on an 8×8 search sweep and **20×** on a dense scan, at
-   31×31. It keeps one scalar of state and needs **no caller scratch**, which is
+   popcount and loses the outgoing row's. Measured **7.3×** on an 8×8 search sweep
+   and **20×** on a dense scan at 31×31. On **isolated** keypoints it is ~1.0×
+   (0.98× at W=7): the sliding path never executes there, so that column's 1.32×
+   is item 4's effect and not this one's — X-11 says so explicitly, and quoting it
+   here as well would count one measurement twice. Note also that the 7.3× and 20×
+   are against the **pre-item-4** recompute baseline; land item 4 first and they
+   fall to roughly 5.6× and 15×, still far past the 15% line that selected this
+   branch. It keeps one scalar of state and needs **no caller scratch**, which is
    why it is the form to expose rather than the per-column accumulator — that one
    is faster on a dense sweep (**36×**) but 12× *slower* on isolated keypoints and
    needs a `sweepWidth + W − 1` counter array, so it is a second shape and a
@@ -1701,17 +1710,21 @@ the discrepancy.
    and nothing else.
 3. **A four-argument `countAndSplit(a, b, c0, c1, region)`** that XORs the two
    selector planes in the word loop. This one *costs* speed — the precomputed
-   plane is 16% faster per frame even after paying to form it — and buys
-   **38400 B per pyramid level**, a fifth plane on top of the four the covariance
-   already reads. [CLAUDE.md](CLAUDE.md)'s tiebreak decides it: memory wins when
+   plane is 16–18% faster per frame even after paying to form it — and buys a
+   **fifth plane at every pyramid level** on top of the four the covariance
+   already reads: +25% of the derivative working set, which is 38400 B at 640×480
+   and scales down with the level (~51 kB over four levels). [CLAUDE.md](CLAUDE.md)'s tiebreak decides it: memory wins when
    the goals conflict. Keep the three-argument overload; a caller that has already
    formed the plane for other reasons should not be made to unform it.
 4. **Split `impl::countViewRegion`'s accumulator per row.** Not an interface
    change at all — the region reduction accumulates into one `size_t` across every
    row and word, which is a single dependency chain through the popcount latency.
-   Per-row partial sums measured **1.16–1.32×** at LK window sizes on *identical*
-   popcounts. Cheapest item on this list and it benefits every region reduction in
-   the file.
+   Per-row partial sums measured **1.15–1.32×** at LK window sizes on *identical*
+   popcounts; this is the finding item 1's isolated-keypoint column actually
+   measured. Cheapest item on this list, it benefits every region reduction in the
+   file, and it is the one to land **first** — items 1–3 are all measured against
+   the un-split baseline, so doing this first means their re-measurement reports
+   the gain the shipped code will really have.
 
 **Done when**
 - All four land, each with a test in `tests/test_reduce.cpp`; the incremental and
@@ -1722,9 +1735,16 @@ the discrepancy.
 - `ops/reduce.hpp`'s docstrings state which shape to reach for and why, citing
   X-11 — a reader choosing between two entry points needs the access-pattern
   argument, not just the signatures
-- [ARCHITECTURE §7.5](ARCHITECTURE.md#75-lk-gradient-covariance) drops the
-  "incremental accumulation is NOT part of the interface" paragraph, which X-11
-  has superseded
+- [ARCHITECTURE §7.5](ARCHITECTURE.md#75-lk-gradient-covariance)'s code snippet is
+  updated to the shapes this task lands — the fused covariance entry point and the
+  four-argument `countAndSplit` — and its "`signXor` is a **frame-sized** plane"
+  note stops being load-bearing, since after item 3 no caller is obliged to form
+  one. (The paragraph that called incremental accumulation "not part of the
+  interface" was already rewritten when T2.11 was scheduled; nothing is left to
+  drop there.)
+- `benchmark/window_benchmark.cpp`'s axis-1 numbers are re-measured **after** item
+  4 lands, and the entry records the post-split ratios next to the pre-split ones
+  rather than replacing them silently
 
 **Verify:** V-ALL
 
@@ -1898,7 +1918,10 @@ Reference semantics: `SEAL/src/keypoint_tracking/gradients.cpp`,
 **Goal:** The load-bearing operation
 ([§7.5](ARCHITECTURE.md#75-lk-gradient-covariance)).
 
-**Spec**
+**Spec** — written against the **T2.11** interface. The earlier version of this
+spec prescribed exactly the shape E-3 rejected (three composed calls plus a
+caller-provided frame-sized selector plane); [D-15](ARCHITECTURE.md#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)
+supersedes it.
 
 ```cpp
 struct GradientCovariance { int64_t sumXX, sumYY, sumXY; };
@@ -1909,24 +1932,30 @@ GradientCovariance gradientCovariance(const TernaryMat<W>& dx,
                                       Rect window);
 ```
 
-Implemented entirely with T2.5/T2.6 reductions:
+Built on the **fused covariance entry point** T2.11 adds — one `visitRowWords`
+pass returning `xx`, `yy`, `whenClear`, `whenSet` — not on three separate T2.6
+calls. Composing it out of `countNonZero` ×2 plus `countAndSplit` costs 1.27–1.29×
+for redundant traversal (X-11 axis 2), which is why the entry point exists.
 
-```
-sumXX = countNonZero(dx.magnitude(0), window)
-sumYY = countNonZero(dy.magnitude(0), window)
-// cross term: one countAndSplit pass over (mag_x, mag_y, sign_x ^ sign_y)
-sumXY = split.whenClear - split.whenSet
-```
+`sumXY` is `whenClear − whenSet`, signed, via `crossTerm()`.
 
-The `sign_x ^ sign_y` term needs a scratch plane; take it as a caller-provided
-buffer — **no allocation inside the kernel**.
+The selector is **not** a caller-provided frame-sized plane. T2.11's
+four-argument `countAndSplit(a, b, c0, c1, region)` XORs `dx.sign()` and
+`dy.sign()` inside the word loop, so the covariance needs **no scratch at all**;
+the plane form stays available for a caller that already has one, and is 16–18%
+faster when it does, but it is not what this operation requires (X-11 axis 3,
+memory wins).
+
+Where a caller sweeps a column of window positions — the corner response of T3.7,
+and any search sweep — reach for T2.11's **INC-ROW** incremental form rather than
+calling this per position.
 
 **Done when**
 - Matches a per-pixel float reference exactly (all values are integers, so exact
   agreement is required, not approximate)
 - Correct for windows clipped at image edges
-- Benchmarked across window sizes 7, 15, 31 — results feed
-  [E-3](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
+- Benchmarked across window sizes 7, 15, 31, against both the fused and composed
+  forms, so the T2.11 entry point's advantage is confirmed at this level too
 
 **Verify:** V-ALL
 

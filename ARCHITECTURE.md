@@ -210,9 +210,13 @@ Word-granularity padding is inherent and free, and it already provides the only
 property kernels need: that the trailing partial word can be read and written
 whole, without a bounds check.
 
-Aggressive row alignment was measured and rejected as a default. See
-[D-4](#d-4-word-granularity-alignment-by-default) — this is flagged for
-re-measurement in [§9](#9-open-questions-and-planned-experiments).
+Aggressive row alignment was measured and rejected as a default — on both sides.
+X-1 priced the memory cost, and X-9 (T2.8) then measured the benefit on the
+reference device and found it to be **zero**: no alignment beat word granularity
+on any kernel at any size, and over-aligning is 3.3–4.8× *slower* on `bitwiseAnd`
+because it disables `ops/logic.hpp`'s contiguous fast path. See
+[D-4](#d-4-word-granularity-alignment-by-default). Nothing is pending behind it —
+[E-1 is closed](#9-open-questions-and-planned-experiments).
 
 ### 4.6 Memory arithmetic
 
@@ -491,6 +495,11 @@ Three details of that snippet are load-bearing and each has cost someone an hour
 and `signXor` is a **frame-sized** plane, because all three views are indexed by
 the same window in the image's coordinate frame.
 
+That snippet is the **current** shape, and [T2.11](TASKS.md) replaces it: the
+three calls become one fused covariance call, and the four-argument
+`countAndSplit` removes the `signXor` plane entirely — so the third detail above
+stops being load-bearing once T2.11 lands.
+
 **Masked and windowed accumulation is in the MVP and shapes the reduction
 interface — it is not a later addition.** That much T2.6 built.
 
@@ -498,11 +507,16 @@ interface — it is not a later addition.** That much T2.6 built.
 The window is large (31×31) and consecutive windows overlap heavily, which is the
 regime where a sliding accumulator could win. Whether it did was
 [E-3](#9-open-questions-and-planned-experiments) (T2.10), and the answer on the
-reference device is that it wins everywhere at 31×31: **1.32×** even on isolated
-keypoints, **7.4×** on an 8×8 search sweep, **36×** on a dense scan
-([X-11](EXPERIMENTS.md)). `ops/reduce.hpp` therefore gains a vertically-sliding
-accumulator, and T3.6 is written against it rather than against the recompute-only
-shape — see [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)
+reference device is that overlap pays: at 31×31 the adopted vertically-sliding
+form is **7.3×** on an 8×8 search sweep and **20×** on a dense scan
+([X-11](EXPERIMENTS.md)). Its 1.32× on *isolated* keypoints is **not** an
+incremental result — the sliding path never executes there, and that number is the
+separate accumulator-split finding recorded at the end of
+[D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance).
+
+`ops/reduce.hpp` therefore gains a vertically-sliding accumulator, and T3.6 is
+written against it rather than against the recompute-only shape — see
+[D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)
 and [T2.11](TASKS.md). Until T2.11 lands, `ops/reduce.hpp` still recomputes per
 window; the interface was deliberately not changed in the same commit as the
 measurement. See [D-13](#d-13-a-reduction-counts-pixels-never-padding) for the
@@ -616,13 +630,14 @@ Given principle 2 — memory wins ties — word granularity is the default and
 larger alignment is opt-in per object.
 
 **The benefit side is now measured too, and it is zero** (X-9 / T2.8, reference
-device, three runs). Across four alignments × two kernels × both sizes, the best
-result was 1.008× — inside its own batch spread — and `countNonZero`, which walks
-rows unconditionally and so isolates alignment on its own, was flat to within 0.5%
-at 640×480 across all four. Two alignments were much *worse*: over-aligning
-disables `ops/logic.hpp`'s contiguous fast path, so `bitwiseAnd` at 640×480 runs
-**3.1× slower at align 32 and 4.8× slower at align 64**, for 20% and 60% more
-memory.
+device, two sets of three runs — the second on a harness whose validity controls
+were corrected first). Across four alignments × two kernels × both sizes, the best
+result anywhere was 1.015×, inside both its 8.6% batch spread and its 1.6%
+run-to-run scatter; and `countNonZero`, which walks rows unconditionally and so
+isolates alignment on its own, was flat to within 0.5% at 640×480 across all four.
+Two alignments were much *worse*: over-aligning disables `ops/logic.hpp`'s
+contiguous fast path, so `bitwiseAnd` at 640×480 runs **3.3× slower at align 32
+and 4.8× slower at align 64**, for 20% and 60% more memory.
 
 **This decision is therefore confirmed and no longer provisional**, and
 [E-1](#9-open-questions-and-planned-experiments) is closed. **No profile system is
@@ -880,17 +895,23 @@ Measured on the reference device (X-11 / T2.10, three runs), against three rules
 written first. All three axes moved off the simpler shape:
 
 ```
-axis 1  incremental vs recompute @ 31x31:  1.32x sparse, 7.4x search, 36x dense
+axis 1  incremental vs recompute @ 31x31:  7.3x search, 20x dense (INC-ROW, the
+        form adopted); INC-COL reaches 36x on dense but is rejected below. The
+        1.32x "sparse" column is NOT an incremental result -- see the end of this
+        record.
 axis 2  fused vs composed covariance @ 31x31:  1.27x (uint32), 1.29x (uint64)
-axis 3  selector plane vs four-argument:  plane 16% faster per frame, 38400 B
-                                          per level; four-arg 0 B
+axis 3  selector plane vs four-argument:  plane 16-18% faster per frame, and a
+                                          fifth plane at every level (+25% of the
+                                          derivative working set; 38400 B at
+                                          640x480); four-arg 0 B, 0 B/level
 ```
 
 So `ops/reduce.hpp` gains, before T3.6 is written against the current shape:
 
 1. **Incremental state**, in the INC-ROW form — slide vertically with one scalar
    accumulator, gaining the incoming row's windowed popcount and losing the
-   outgoing row's. It wins or ties in every access pattern and needs no caller
+   outgoing row's. Measured **7.3× on an 8×8 search sweep and 20× on a dense
+   scan** at 31×31; it wins or ties in every access pattern and needs no caller
    scratch, so it does not drag an allocation argument into the interface. The
    popcount-free per-column accumulator is faster still on a dense sweep (36×) but
    loses 12× on isolated keypoints and needs a scratch array, so it is a second
@@ -900,19 +921,28 @@ So `ops/reduce.hpp` gains, before T3.6 is written against the current shape:
    region word three times; the popcount count is identical, so the 1.27–1.29× is
    pure redundant traversal.
 3. **A four-argument `countAndSplit`** taking the two sign planes instead of a
-   precomputed selector plane. Here speed and memory disagree — the plane is 16%
-   faster per frame *including* its formation cost, and costs 38400 B per pyramid
-   level, a fifth plane on top of the four the covariance already reads. Principle
-   2 decides: memory wins, so the plane stops being mandatory.
+   precomputed selector plane. Here speed and memory disagree — the plane is
+   16–18% faster per frame *including* its formation cost, and costs a fifth plane
+   at every pyramid level on top of the four the covariance already reads: +25% of
+   the derivative working set, 38400 B at 640×480 and scaling down with the level.
+   Principle 2 decides: memory wins, so the plane stops being mandatory.
 
 Scheduled as [T2.11](TASKS.md); T3.6 is written against the extended interface.
 
 **A separate finding from the same experiment, needing no interface change:**
 `impl::countViewRegion` carries one accumulator across the whole region, so a
 window traversal is a single dependency chain through the popcount latency.
-Splitting it into per-row partial sums measured **1.16–1.32×** at LK window sizes
+Splitting it into per-row partial sums measured **1.15–1.32×** at LK window sizes
 on identical popcounts — the isolated-keypoint column of axis 1 is exactly that
 comparison, since the sliding path never executes there.
+
+**Two things that follow from that, and must not be lost between here and T2.11.**
+The 1.32× belongs to this finding alone; quoting it for item 1 as well counts one
+measurement twice. And every ratio in item 1 was measured against the *pre-split*
+recompute baseline, so landing this finding first makes that baseline up to 1.32×
+faster and shrinks item 1's 7.3×/20× to roughly 5.6×/15×. Both stay far past the
+15% line, so nothing about the decision changes — only the numbers to quote for
+it.
 
 ---
 
@@ -958,9 +988,9 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 
 | ID | Question | Why it matters | Decision it would change | Gates | Runs |
 |---|---|---|---|---|---|
-| ~~**E-1**~~ **RESOLVED** | Does row alignment beyond word granularity measurably help any kernel on NEON? | [D-4](#d-4-word-granularity-alignment-by-default) was decided on a memory measurement plus an untested weak-benefit assumption. | **Answered: no — best of twelve combinations was 1.008×, inside its spread; over-aligning costs 3–5× on `bitwiseAnd`. D-4 confirmed, no profile system, D-4 no longer provisional.** [X-9](EXPERIMENTS.md) | T1.3 and every kernel | Phase 2 (T2.8) ✔ |
+| ~~**E-1**~~ **RESOLVED** | Does row alignment beyond word granularity measurably help any kernel on NEON? | [D-4](#d-4-word-granularity-alignment-by-default) was decided on a memory measurement plus an untested weak-benefit assumption. | **Answered: no — best of twelve combinations was 1.015×, inside its spread; over-aligning costs 3.3–4.8× on `bitwiseAnd`. D-4 confirmed, no profile system, D-4 no longer provisional.** [X-9](EXPERIMENTS.md) | T1.3 and every kernel | Phase 2 (T2.8) ✔ |
 | ~~**E-2**~~ **RESOLVED** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | **Answered: `uint32_t` stays. `uint64_t` reduces 1.94× faster but costs +33% at 94×60, and the rule is a conjunction — memory wins.** [D-14](#d-14-uint32_t-is-the-default-word-type), [X-10](EXPERIMENTS.md) | all kernels | Phase 2 (T2.9) ✔ |
-| ~~**E-3**~~ **RESOLVED** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | **Answered, and all three moved off the simpler shape: (a) 1.32×–36× → expose incremental state; (b) 1.27–1.29× → add a covariance entry point; (c) plane 16% faster but 38400 B/level → four-argument form, memory wins.** [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance), [X-11](EXPERIMENTS.md) | T2.6, T3.6 | Phase 2 (T2.10) ✔ |
+| ~~**E-3**~~ **RESOLVED** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | **Answered, and all three moved off the simpler shape: (a) 7.3×–20× for the adopted sliding form → expose incremental state; (b) 1.27–1.29× → add a covariance entry point; (c) plane 16–18% faster but a fifth plane at every level → four-argument form, memory wins.** [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance), [X-11](EXPERIMENTS.md) | T2.6, T3.6 | Phase 2 (T2.10) ✔ |
 | **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | **Phase 3** (T3.9) |
 | **E-8** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | Whether `ops/` gains a resample primitive, and whether it is word-local (word literals only) or frame-masked. | T3.4 | **Phase 3** (T3.4) |
 | **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | Measured growth is 1/3/4/5 bits ([§7.2](#72-pyramid-downsample--box-22)), but the reference never chose that — it fell out of using `CV_8U`. Capping N is a direct footprint lever. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |

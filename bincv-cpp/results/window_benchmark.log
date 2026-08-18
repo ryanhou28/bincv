@@ -29,10 +29,28 @@ whole ratio and x86 cannot rank these at all.
   governor:         performance (restored to ondemand on exit)
   core pinning:     taskset -c 3
   throttled before / after: throttled=0x0 / throttled=0x0  (every run)
-  benchmark commit: 3383996
+  benchmark commit: 3f32493
 
-THREE RUNS. Batch spread within each run was 0.0-2.2% on every row, so the
-run-to-run agreement below is the real reproducibility check.
+RE-MEASURED AT COMMIT 3f32493, superseding the first three runs (commit 3383996).
+Three harness defects were fixed and committed BEFORE this re-run:
+
+  1. measure::measureInterleaved restarted body()'s input index at 0 every batch.
+     calibrate() returns 1 whenever one call already exceeds the time budget, and
+     DENSE recompute at W=31 is ~73 ms per call -- so that variant timed image 0
+     forever while the variant it is divided by rotated through all four. The two
+     sides of the 20x and 36x ratios were not on identical inputs. THIS BENCHMARK
+     IS WHERE THAT MATTERED; the index is now a running per-variant call counter.
+  2. Axis 2 reported speed and no memory, which CLAUDE.md forbids. The answer is
+     0 B for both forms, and it is now printed.
+  3. Axis 3's memory line read "38400 B per pyramid level". That is the 640x480
+     figure; the plane is one bit per pixel OF ITS LEVEL, so 9600 B at L1 and
+     2400 B at L2. Read literally the old line overstated the pyramid-wide cost
+     ~3x, in favour of the memory side -- which is the side that won the axis.
+
+No ratio moved. Every conclusion below is the one the first three runs reached.
+
+THREE RUNS. Batch spread within each run was 0.0-3.1% on every row; run-to-run
+scatter is quoted next to each headline ratio and is the larger check.
 
 -----------------------------------------------------------------------------
 AXIS 1 -- recompute versus two sliding accumulators, uint32_t, 640x480
@@ -46,26 +64,27 @@ Three access patterns, all of them in the MVP:
   SEARCH  200 keypoints x an 8x8 sweep    (heavy local overlap, 12800 windows)
   DENSE   every window position in frame  (corner response, ARCHITECTURE 7.6)
 
-  ns/window, run 3 (runs 1 and 2 agree to <2% on every cell):
+  ns/window, run 3 (runs 1 and 2 agree to <3% on every cell):
 
   pattern  W    recompute   INC-COL   INC-ROW   INC-COL x   INC-ROW x   scratch
-  SPARSE    7        67.9     251.8      69.1       0.27x       0.98x      28 B
-  SEARCH    7        47.2      18.1      13.2       2.61x       3.58x      56 B
-  DENSE     7        44.9       6.9       8.8       6.48x       5.11x    2560 B
-  SPARSE   15       138.0     976.3     118.9       0.14x       1.16x      60 B
-  SEARCH   15       110.8      39.7      20.4       2.79x       5.44x      88 B
-  DENSE    15       106.7       7.1      10.2      15.06x      10.47x    2560 B
-  SPARSE   31       314.1    3879.6     238.1       0.08x       1.32x     124 B
-  SEARCH   31       269.8     104.1      36.6       2.59x       7.37x     152 B
-  DENSE    31       267.3       7.4      13.2      36.35x      20.27x    2560 B
+  SPARSE    7        67.1     248.3      68.7       0.27x       0.98x      28 B
+  SEARCH    7        47.2      18.0      13.1       2.62x       3.59x      56 B
+  DENSE     7        44.9       6.9       8.8       6.48x       5.09x    2560 B
+  SPARSE   15       135.2     975.5     117.2       0.14x       1.15x      60 B
+  SEARCH   15       110.7      39.6      20.3       2.79x       5.46x      88 B
+  DENSE    15       106.7       7.1      10.2      15.02x      10.43x    2560 B
+  SPARSE   31       306.8    3874.8     232.5       0.08x       1.32x     124 B
+  SEARCH   31       269.7     103.8      36.8       2.60x       7.33x     152 B
+  DENSE    31       267.3       7.4      13.2      36.34x      20.25x    2560 B
 
   the same ratios across runs, at W = 31:
-    SPARSE INC-ROW   1.31x  1.32x  1.32x
-    SEARCH INC-ROW   7.31x  7.33x  7.37x
-    DENSE  INC-COL  36.37x 36.35x 36.35x
+    SPARSE INC-ROW   1.32x  1.31x  1.32x       scatter 0.8%
+    SEARCH INC-ROW   7.39x  7.31x  7.33x       scatter 1.1%
+    DENSE  INC-ROW  20.51x 20.22x 20.25x       scatter 1.4%
+    DENSE  INC-COL  36.35x 36.36x 36.34x       scatter 0.1%
 
 READING AXIS 1. At 31x31 an accumulator beats recompute in every pattern, by
-1.31x where windows barely overlap and by 7.4x-36x where they do. That is past
+1.32x where windows barely overlap and by 7.3x-36x where they do. That is past
 the 15% line in all three, so the rule selects its second branch: EXTEND T2.6
 WITH INCREMENTAL STATE BEFORE T3.6 IS WRITTEN.
 
@@ -79,11 +98,14 @@ interchangeable:
   * SEARCH and SPARSE favour INC-ROW, which stays word-parallel and keeps no
     array. INC-ROW never loses (0.98x at its worst) and needs no scratch, so it
     is the safer shape for an API that cannot know the caller's access pattern.
+    The form being ADOPTED is INC-ROW, so INC-ROW's numbers -- 1.32x / 7.3x /
+    20x -- are the ones to quote for it. 36x is INC-COL's, and INC-COL is the
+    shape this axis declines to expose.
 
 *** THE SPARSE ROW IS NOT AN INCREMENTAL WIN, AND THIS IS THE SURPRISE. ***
 At SPARSE the sweep is 1x1, so INC-ROW's sliding path never executes: it issues
 exactly the same popcounts over exactly the same masked words as the shipped
-countNonZero, and it is still 1.31x faster at W=31, 1.16x at 15, 0.98x at 7. The
+countNonZero, and it is still 1.32x faster at W=31, 1.15x at 15, 0.98x at 7. The
 only difference between the two is where the sum accumulates. impl::countViewRegion
 carries ONE size_t total across every row and word of the region, so the whole
 traversal is a single serialized dependency chain through the popcount latency;
@@ -93,23 +115,37 @@ That is a finding about the shipped reduction's codegen, not about incremental
 state, and it is worth more than it looks: it is available to every region
 reduction in ops/reduce.hpp without any interface change at all.
 
+TWO CONSEQUENCES OF THAT, AND BOTH MUST BE CARRIED WHEREVER THESE NUMBERS GO:
+  * The SPARSE column is NOT evidence for incremental state. Crediting 1.32x to
+    the sliding accumulator and then crediting the same 1.32x again to the
+    accumulator split counts one measurement twice.
+  * EVERY ratio in the axis-1 table is measured against the PRE-SPLIT recompute
+    baseline. Split countViewRegion's accumulator first and the baseline itself
+    gets up to 1.32x faster, so SEARCH's 7.3x and DENSE's 20x shrink by up to
+    that factor -- to roughly 5.6x and 15x. Both remain far past the 15% line, so
+    the branch selection is unaffected; the quoted magnitudes are not.
+
 -----------------------------------------------------------------------------
 AXIS 2 -- the 2x2 covariance composed out of T2.6 versus one fused pass
 -----------------------------------------------------------------------------
-  ns/keypoint, 200 keypoints, composed / fused:
+  ns/keypoint, 200 keypoints, composed / fused (values from run 3):
 
   word       W    composed   fused    run 1   run 2   run 3
-  uint32_t    7      193.7   152.9    1.26x   1.27x   1.27x
-  uint32_t   15      432.6   344.0    1.26x   1.25x   1.26x
-  uint32_t   31     1011.4   796.3    1.27x   1.27x   1.27x
-  uint64_t    7      200.3   144.6    1.38x   1.39x   1.38x
-  uint64_t   15      390.7   300.0    1.30x   1.31x   1.30x
-  uint64_t   31      822.3   637.0    1.29x   1.29x   1.29x
+  uint32_t    7      197.8   156.4    1.27x   1.26x   1.26x
+  uint32_t   15      438.8   351.4    1.26x   1.25x   1.25x
+  uint32_t   31     1019.2   803.2    1.28x   1.27x   1.27x
+  uint64_t    7      208.9   153.3    1.38x   1.38x   1.36x
+  uint64_t   15      399.6   309.8    1.29x   1.30x   1.29x
+  uint64_t   31      832.9   644.5    1.29x   1.29x   1.29x
+
+  EXTRA MEMORY: 0 B for both forms. Neither needs scratch -- the fused pass
+  returns its four counters by value. CLAUDE.md requires memory and speed
+  together, and "there is none" is an answer that still has to be stated.
 
 READING AXIS 2. 1.27x (uint32_t) and 1.29x (uint64_t) at 31x31, past the 15%
 line, in all three runs. This reproduces X-8's 1.30x at uint64_t/31x31 in a
 separate session and extends it to two word widths and three window sizes, where
-it holds from 1.25x to 1.39x. The rule selects: ADD A COVARIANCE-SHAPED ENTRY
+it holds from 1.25x to 1.38x. The rule selects: ADD A COVARIANCE-SHAPED ENTRY
 POINT TO T2.6 BEFORE T3.6 IS WRITTEN. The composition's three calls visit each
 region word three times and load it three times; the popcount count is identical
 on both sides, so the delta is redundant traversal.
@@ -117,36 +153,40 @@ on both sides, so the delta is redundant traversal.
 -----------------------------------------------------------------------------
 AXIS 3 -- frame-sized selector plane versus a four-argument countAndSplit
 -----------------------------------------------------------------------------
-  ns/keypoint, uint32_t, 200 keypoints:
+  ns/keypoint, uint32_t, 200 keypoints (values from run 3):
 
-  W     plane (shipped)   four-arg XOR   plane/4arg   run 1   run 2   run 3
-   7             109.4          152.1        0.72x    0.74x   0.78x   0.72x
-  15             247.4          328.3        0.75x    0.77x   0.80x   0.75x
-  31             580.3          731.9        0.79x    0.79x   0.80x   0.79x
+  W     plane (shipped)   four-arg XOR   run 1   run 2   run 3
+   7             110.9          149.5    0.77x   0.76x   0.74x
+  15             252.5          327.5    0.79x   0.78x   0.77x
+  31             584.7          733.0    0.80x   0.80x   0.80x
 
   SPEED, per frame at W=31 and 200 keypoints, formation included:
-    plane     580.3 ns x 200 = 116.1 us  +  6.5 us to form the plane  = 122.6 us
-    four-arg  731.9 ns x 200 = 146.4 us  +  0                         = 146.4 us
-    -> the plane is 16% faster per frame per pyramid level, even after paying to
-       build it. The four-argument form loads a fourth stream and XORs it inside
-       the word loop, and that costs more than one streaming pass over the frame.
+    plane     584.7 ns x 200 = 116.9 us  +  7.2 us to form the plane  = 124.1 us
+    four-arg  733.0 ns x 200 = 146.6 us  +  0                         = 146.6 us
+    -> the plane is 16-18% faster per frame per pyramid level across the three
+       runs, even after paying to build it. The four-argument form loads a fourth
+       stream and XORs it inside the word loop, and that costs more than one
+       streaming pass over the frame.
 
   MEMORY:
-    selector plane          38400 B per pyramid level (one bit per pixel at 640x480)
-    four-argument form          0 B
-    for scale: the ternary dx and dy the covariance reads are 4 planes = 153600 B
-    per level, so the selector is a fifth plane -- +25% on the derivative working
-    set of every level, held for the frame's lifetime.
+    selector plane   38400 B at 640x480, and it SCALES WITH THE LEVEL -- 9600 B
+                     at L1, 2400 B at L2, ~51 kB summed over a 4-level pyramid.
+                     The level-invariant statement is the relative one below.
+    four-argument         0 B, at every level
+    for scale: the ternary dx and dy the covariance reads are 4 planes (153600 B
+    at 640x480), so the selector is a fifth plane -- +25% on the derivative
+    working set of EVERY level, held for the frame's lifetime.
 
 READING AXIS 3. The two goals disagree, which is exactly why T2.10 set no
-threshold here: the plane is 16% faster per frame and costs 38400 B per level;
-the four-argument form is 16% slower and costs nothing. CLAUDE.md's tiebreak is
-explicit for this situation -- "performance and memory footprint are co-equal
-goals; when they conflict and no explicit choice has been made, memory wins" --
-so on the project's own stated rule the FOUR-ARGUMENT FORM is the one to build,
-buying 38400 B per level (a quarter of the derivative footprint) for 16% of one
-operation's time. That weighing is recorded here rather than enacted: adding the
-overload is T2.6 API work, and it lands with the axis 1 and axis 2 changes.
+threshold here: the plane is 16-18% faster per frame and costs a fifth plane at
+every pyramid level; the four-argument form is that much slower and costs
+nothing. CLAUDE.md's tiebreak is explicit for this situation -- "performance and
+memory footprint are co-equal goals; when they conflict and no explicit choice
+has been made, memory wins" -- so on the project's own stated rule the
+FOUR-ARGUMENT FORM is the one to build, buying +25% of the derivative working set
+per level for 16-18% of one operation's time. That weighing is recorded here
+rather than enacted: adding the overload is T2.6 API work, and it lands with the
+axis 1 and axis 2 changes.
 
 X-7 CAVEAT. Every variant above except INC-COL is popcount-bound, and INC-COL is
 the one that issues none -- so the axis 1 ratios in particular are a direct
@@ -168,24 +208,24 @@ AXIS 1 -- recompute per window versus a sliding accumulator
 
   pattern  W         recompute        INC-COL        INC-ROW    INC-COL    INC-ROW  INC-COL mem
                      ns/window      ns/window      ns/window  vs recomp  vs recomp        bytes
-  SPARSE   7              67.9          251.8           69.1      0.27x      0.98x           28
-           spread (max-min)/median: recompute 0.1%, INC-COL 0.5%, INC-ROW 0.2%   [200 isolated keypoints (LK, ARCHITECTURE 7.5)]
-  SEARCH   7              47.2           18.1           13.2      2.61x      3.58x           56
-           spread (max-min)/median: recompute 0.1%, INC-COL 0.2%, INC-ROW 0.1%   [200 keypoints x 8x8 sweep = 12800 windows, heavy local overlap]
-  DENSE    7              44.9            6.9            8.8      6.48x      5.11x         2560
-           spread (max-min)/median: recompute 0.1%, INC-COL 0.1%, INC-ROW 0.1%   [every position in the frame (corner response, ARCHITECTURE 7.6)]
-  SPARSE   15            138.0          976.3          118.9      0.14x      1.16x           60
-           spread (max-min)/median: recompute 0.3%, INC-COL 1.4%, INC-ROW 0.3%   [200 isolated keypoints (LK, ARCHITECTURE 7.5)]
-  SEARCH   15            110.8           39.7           20.4      2.79x      5.44x           88
-           spread (max-min)/median: recompute 0.2%, INC-COL 3.2%, INC-ROW 0.1%   [200 keypoints x 8x8 sweep = 12800 windows, heavy local overlap]
-  DENSE    15            106.7            7.1           10.2     15.06x     10.47x         2560
-           spread (max-min)/median: recompute 0.1%, INC-COL 0.1%, INC-ROW 0.0%   [every position in the frame (corner response, ARCHITECTURE 7.6)]
-  SPARSE   31            314.1         3879.6          238.1      0.08x      1.32x          124
-           spread (max-min)/median: recompute 0.1%, INC-COL 0.2%, INC-ROW 0.1%   [200 isolated keypoints (LK, ARCHITECTURE 7.5)]
-  SEARCH   31            269.8          104.1           36.6      2.59x      7.37x          152
-           spread (max-min)/median: recompute 0.1%, INC-COL 0.1%, INC-ROW 0.0%   [200 keypoints x 8x8 sweep = 12800 windows, heavy local overlap]
-  DENSE    31            267.3            7.4           13.2     36.35x     20.27x         2560
-           spread (max-min)/median: recompute 0.1%, INC-COL 0.1%, INC-ROW 0.1%   [every position in the frame (corner response, ARCHITECTURE 7.6)]
+  SPARSE   7              67.1          248.3           68.7      0.27x      0.98x           28
+           spread (max-min)/median: recompute 0.1%, INC-COL 0.6%, INC-ROW 0.1%   [200 isolated keypoints (LK, ARCHITECTURE 7.5)]
+  SEARCH   7              47.2           18.0           13.1      2.62x      3.59x           56
+           spread (max-min)/median: recompute 0.1%, INC-COL 0.3%, INC-ROW 0.1%   [200 keypoints x 8x8 sweep = 12800 windows, heavy local overlap]
+  DENSE    7              44.9            6.9            8.8      6.48x      5.09x         2560
+           spread (max-min)/median: recompute 0.1%, INC-COL 0.1%, INC-ROW 0.4%   [every position in the frame (corner response, ARCHITECTURE 7.6)]
+  SPARSE   15            135.2          975.5          117.2      0.14x      1.15x           60
+           spread (max-min)/median: recompute 0.5%, INC-COL 0.7%, INC-ROW 0.4%   [200 isolated keypoints (LK, ARCHITECTURE 7.5)]
+  SEARCH   15            110.7           39.6           20.3      2.79x      5.46x           88
+           spread (max-min)/median: recompute 0.1%, INC-COL 2.4%, INC-ROW 0.1%   [200 keypoints x 8x8 sweep = 12800 windows, heavy local overlap]
+  DENSE    15            106.7            7.1           10.2     15.02x     10.43x         2560
+           spread (max-min)/median: recompute 0.1%, INC-COL 0.1%, INC-ROW 0.3%   [every position in the frame (corner response, ARCHITECTURE 7.6)]
+  SPARSE   31            306.8         3874.8          232.5      0.08x      1.32x          124
+           spread (max-min)/median: recompute 0.1%, INC-COL 0.1%, INC-ROW 0.1%   [200 isolated keypoints (LK, ARCHITECTURE 7.5)]
+  SEARCH   31            269.7          103.8           36.8      2.60x      7.33x          152
+           spread (max-min)/median: recompute 0.1%, INC-COL 0.1%, INC-ROW 0.1%   [200 keypoints x 8x8 sweep = 12800 windows, heavy local overlap]
+  DENSE    31            267.3            7.4           13.2     36.34x     20.25x         2560
+           spread (max-min)/median: recompute 0.1%, INC-COL 0.1%, INC-ROW 0.3%   [every position in the frame (corner response, ARCHITECTURE 7.6)]
 
   "vs recomp" > 1.00x means the accumulator is FASTER than recompute;
   axis 3's "plane/4arg" > 1.00x means the four-argument form is faster.
@@ -197,15 +237,17 @@ AXIS 2 -- the 2x2 covariance composed out of T2.6 versus fused
 
   word      W          composed          fused    composed/    spread comp / fused
                     ns/keypoint    ns/keypoint        fused
-  uint32_t  7             193.7          152.9        1.27x        0.4% / 0.7%
-  uint32_t  15            432.6          344.0        1.26x        0.4% / 0.5%
-  uint32_t  31           1011.4          796.3        1.27x        0.1% / 0.1%
+  uint32_t  7             197.8          156.4        1.26x        1.7% / 1.4%
+  uint32_t  15            438.8          351.4        1.25x        1.2% / 1.7%
+  uint32_t  31           1019.2          803.2        1.27x        0.8% / 0.5%
+  EXTRA MEMORY: 0 B for both forms -- neither needs scratch; the fused pass returns four counters in registers.
 
   word      W          composed          fused    composed/    spread comp / fused
                     ns/keypoint    ns/keypoint        fused
-  uint64_t  7             200.3          144.6        1.38x        0.6% / 0.3%
-  uint64_t  15            390.7          300.0        1.30x        1.2% / 0.7%
-  uint64_t  31            822.3          637.0        1.29x        1.1% / 0.9%
+  uint64_t  7             208.9          153.3        1.36x        1.5% / 2.2%
+  uint64_t  15            399.6          309.8        1.29x        1.8% / 1.3%
+  uint64_t  31            832.9          644.5        1.29x        0.7% / 0.4%
+  EXTRA MEMORY: 0 B for both forms -- neither needs scratch; the fused pass returns four counters in registers.
   (uint64_t at W=31 is X-8's measurement, repeated here in the same session for comparability.)
 
 ===========================================================
@@ -216,11 +258,13 @@ AXIS 3 -- selector plane versus a four-argument countAndSplit
 
   word      W     plane (shipped)     four-arg XOR plane/4arg   spread p / 4
                       ns/keypoint      ns/keypoint
-  uint32_t  7               109.4            152.1      0.72x     1.8% / 4.4%
-  uint32_t  15              247.4            328.3      0.75x     0.8% / 1.4%
-  uint32_t  31              580.3            731.9      0.79x     0.4% / 0.5%
+  uint32_t  7               110.9            149.5      0.74x     2.6% / 2.1%
+  uint32_t  15              252.5            327.5      0.77x     1.1% / 1.4%
+  uint32_t  31              584.7            733.0      0.80x     0.6% / 0.6%
 
-  MEMORY (uint32_t): the selector plane is 38400 B per pyramid level, allocated for the frame's lifetime.
-  Forming it costs 6.5 us per level (32.3 ns amortized over 200 keypoints); the four-argument form allocates nothing.
+  MEMORY (uint32_t): the selector plane is 38400 B at 640x480 and scales with the level
+  (9600 B at L1, 2400 B at L2, ~51000 B summed over a 4-level pyramid), held for the frame's lifetime.
+  Level-invariant form: +25% on the derivative working set of every level -- a fifth plane against dx/dy's four.
+  Forming it costs 7.2 us at 640x480 (36.1 ns amortized over 200 keypoints); the four-argument form allocates nothing, at any level.
 
-sink: 51551956046655 (printed so nothing above can be optimized away)
+sink: 44216014609740 (printed so nothing above can be optimized away)
