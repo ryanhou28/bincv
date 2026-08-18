@@ -295,7 +295,36 @@ The kernel vocabulary is small and closed:
 | threshold on a count | bit-sliced adder network, then compare |
 | reduction | population count over a region or mask |
 
-Nearly every operation in the MVP set is a composition of these.
+Nearly every operation in the MVP set is a composition of these — with **two
+known gaps, recorded here rather than left for a later task to discover**:
+
+- **There is no resample row, and the table needs one.** [§7.2](#72-pyramid-downsample--box-22)'s
+  pyramid step is "box 2×2 sum *then subsample*", and nothing in `ops/` decimates
+  horizontally. Vertically it is free — a view with twice the stride and half the
+  height. Horizontally it wants output bit *j* to come from input bit 2*j*, which
+  no pointwise (`ops/logic.hpp`), uniform-shift (`ops/shift.hpp`) or per-lane
+  (`ops/bitslice.hpp`) kernel can express. The two known routes trade speed
+  against footprint, so the choice is registered as [E-8](#9-open-questions-and-planned-experiments)
+  and gates T3.4 rather than being made in passing.
+- **The bit-sliced adder is single-bit and equal-weight.** `bitSlicedSum` counts
+  *k* inputs each worth one, which is the 2×2 box over a **1-bit** source and
+  nothing else. §7.2 measures levels 1–3 as 3, 4 and 5 bits, and a 2×2 box over an
+  N-bit source adds four values worth up to 2^N − 1 each. It can be expressed by
+  replicating plane *p* of each pixel 2^p times — correct, and exponential:
+  *k* = 4·(2^N − 1), so 4 inputs at N = 1 but 124 at N = 5. A bit-sliced add over
+  multi-bit operands is linear in N instead, and T3.4 is where its shape gets
+  fixed, by the caller that needs it.
+
+The middle two live in `ops/bitslice.hpp` (T2.7) — `maj3`, `bitSlicedSum` and
+`thresholdGE`, plus the view-level `majority3` that T3.1's denoise is written in.
+**A bit-sliced sum is the bit-parallel alternative to the popcount §6.2 forbids
+exposing, not an exception to it.** A popcount collapses a word's 64 independent
+pixels into one scalar; a bit-sliced sum of k inputs answers the same question per
+*lane* and returns ceil(log2(k+1)) *planes*, so the result is still 64 pixels wide
+and the next operation is still word-parallel. Nothing in it crosses to the vector
+register file, and nothing in it reduces across lanes. A reduction counts pixels
+across a region and returns a number; this counts inputs per pixel and returns
+planes.
 
 ### 6.2 Reductions are bulk-only
 
@@ -844,6 +873,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | **E-2** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | `BinMat`'s default template argument. | all kernels | **Phase 2** (T2.9) |
 | **E-3** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls — measured at **1.30×** on the reference device, [X-8](EXPERIMENTS.md), past T2.10's own 15% line? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | Reduction API shape — whether incremental state is exposed, whether a covariance-shaped entry point exists, and whether the selector is a plane or two arguments. | T2.6, T3.6 | **Phase 2** (T2.10) |
 | **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | **Phase 3** (T3.9) |
+| **E-8** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | Whether `ops/` gains a resample primitive, and whether it is word-local (word literals only) or frame-masked. | T3.4 | **Phase 3** (T3.4) |
 | **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | Measured growth is 1/3/4/5 bits ([§7.2](#72-pyramid-downsample--box-22)), but the reference never chose that — it fell out of using `CV_8U`. Capping N is a direct footprint lever. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |

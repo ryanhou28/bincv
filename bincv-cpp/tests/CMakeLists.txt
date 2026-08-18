@@ -102,16 +102,23 @@ endfunction()
 
 # Core tests: must build and run without OpenCV.
 #
-# test_logic (T2.2), test_shift (T2.3/T2.4) and test_reduce (T2.5/T2.6) are core
-# tests even though half of each is the Tier 1 comparison against OpenCV --
-# cv::bitwise_* for the first, cv::borderInterpolate and cv::copyMakeBorder for
-# the second, cv::countNonZero for the third. That half sits behind
-# BINCV_WITH_OPENCV inside the file, so the kernels are still compiled and checked
-# against a per-pixel reference in the three configurations that have no OpenCV --
-# including the Debug one, which is the only place their BINCV_ASSERT
+# test_logic (T2.2), test_shift (T2.3/T2.4), test_reduce (T2.5/T2.6) and
+# test_bitslice (T2.7) are core tests even though part of each is a comparison
+# against OpenCV -- cv::bitwise_* for the first, cv::borderInterpolate and
+# cv::copyMakeBorder for the second, cv::countNonZero for the third, and the
+# reference pipeline's cv::min/cv::max median for the fourth. That part sits
+# behind BINCV_WITH_OPENCV inside the file, so the kernels are still compiled and
+# checked against a per-pixel reference in the three configurations that have no
+# OpenCV -- including the Debug one, which is the only place their BINCV_ASSERT
 # preconditions are live.
+#
+# test_bitslice is core for a second reason: T2.7's word-level primitives have no
+# OpenCV counterpart at all (bit-sliced arithmetic is Tier 3, ARCHITECTURE 5.1),
+# so the exhaustive pattern enumeration that proves them is the ONLY thing
+# standing behind maj3, bitSlicedSum and thresholdGE -- and it has to run in the
+# configuration the embedded claim rests on.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
-                     test_logic test_shift test_reduce)
+                     test_logic test_shift test_reduce test_bitslice)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -325,6 +332,22 @@ bincv_add_death_test(test_assert_abort reduce-short-stride
 # extent underflows x1 - 1 into a ~5.8e17-word row range with isEmpty == false.
 bincv_add_death_test(test_assert_abort reduce-empty-extent
                      "reduce: regionFromExtent needs a non-empty extent")
+
+# T2.7 bit-sliced preconditions. `bitslice-dims` is not a duplicate of logic-dims:
+# majority3 compares THREE sources, and a dimension check that forgot the third
+# left all 348061 of test_bitslice's checks green in every configuration when it
+# was deleted. `bitslice-sum-overlap` is the only precondition in the project
+# stated over raw pointers rather than views -- bitSlicedSum accumulates in its
+# destination planes, so an outPlanes array overlapping inputs corrupts inputs the
+# ripple has not read yet, with every address valid and only the answer wrong.
+bincv_add_death_test(test_assert_abort bitslice-dims
+                     "majority3: a, b, c and dst must have the same dimensions")
+bincv_add_death_test(test_assert_abort bitslice-alias
+                     "majority3: dst must alias an input exactly or not overlap it")
+bincv_add_death_test(test_assert_abort bitslice-short-stride
+                     "majority3: every view's stride must cover a whole row")
+bincv_add_death_test(test_assert_abort bitslice-sum-overlap
+                     "bitSlicedSum: outPlanes must not overlap inputs")
 
 if(BINCV_OPENCV_FOUND)
     foreach(TEST_NAME ${BINCV_OPENCV_TESTS})

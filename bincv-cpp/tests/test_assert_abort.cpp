@@ -31,6 +31,7 @@
 #include "bincv-cpp/binMat.hpp"
 #include "bincv-cpp/core/view.hpp"
 #include "bincv-cpp/core/types.hpp"
+#include "bincv-cpp/ops/bitslice.hpp"
 #include "bincv-cpp/ops/logic.hpp"
 #include "bincv-cpp/ops/reduce.hpp"
 #include "bincv-cpp/ops/shift.hpp"
@@ -328,6 +329,64 @@ struct Case {
     int (*run)();
 };
 
+// The T2.7 bit-sliced preconditions. Two of them say something no case above does.
+//
+// `bitslice-dims` is the three-source dimension check. ops/logic.hpp's kernels
+// compare two views, majority3 compares three, and a check that forgot the third
+// would read `c` at the other two's geometry -- inside its own buffer, with only
+// the answer wrong. Measured by deleting `c.width == dst.width && c.height ==
+// dst.height` from the assert: every one of tests/test_bitslice.cpp's 348061
+// checks still passed, in all four configurations. That is the whole reason this
+// case exists rather than being assumed covered by logic-dims.
+//
+// `bitslice-sum-overlap` is a precondition on RAW POINTERS rather than on views,
+// which nothing else in this file has. bitSlicedSum accumulates in its output
+// planes, so an outPlanes array overlapping inputs rewrites inputs the ripple has
+// not read yet -- again valid memory, again only the answer wrong.
+uint32_t g_majA[8] = {0};
+uint32_t g_majB[8] = {0};
+uint32_t g_majC[8] = {0};
+uint32_t g_majDst[8] = {0};
+
+int caseBitSliceDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_majA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> b{g_majB, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c{g_majC, 32, 3, 1};       // narrower
+    const bincv::BinMatView<uint32_t> dst{g_majDst, 64, 3, 2};
+    bincv::majority3(a, b, c, dst);
+    return static_cast<int>(g_majDst[0]);
+}
+
+int caseBitSliceAlias() {
+    // Same shape, same buffer, one word apart -- half a row, so the two views
+    // really do share words rather than merely sharing a buffer (the disjoint
+    // cases are legal under D-5 and are covered in-process).
+    const bincv::BinMatConstView<uint32_t> a{g_majA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> b{g_majB, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c{g_majC, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_majA + 1, 64, 3, 2};
+    bincv::majority3(a, b, c, dst);
+    return static_cast<int>(g_majA[0]);
+}
+
+int caseBitSliceShortStride() {
+    const bincv::BinMatConstView<uint32_t> a{g_majA, 64, 3, 1};       // needs 2 words
+    const bincv::BinMatConstView<uint32_t> b{g_majB, 64, 3, 1};
+    const bincv::BinMatConstView<uint32_t> c{g_majC, 64, 3, 1};
+    const bincv::BinMatView<uint32_t> dst{g_majDst, 64, 3, 1};
+    bincv::majority3(a, b, c, dst);
+    return static_cast<int>(g_majDst[0]);
+}
+
+uint32_t g_sumBuffer[8] = {0};
+
+int caseBitSliceSumOverlap() {
+    // Four inputs at [0, 4), three output planes at [2, 5) -- the accumulator
+    // would overwrite inputs 2 and 3 before it read them.
+    bincv::bitSlicedSum<uint32_t>(g_sumBuffer, 4, g_sumBuffer + 2);
+    return static_cast<int>(g_sumBuffer[0]);
+}
+
 const Case kCases[] = {
     {"at-row", caseAtRow},
     {"at-col", caseAtCol},
@@ -356,6 +415,10 @@ const Case kCases[] = {
     {"reduce-split-dims", caseReduceSplitDims},
     {"reduce-short-stride", caseReduceShortStride},
     {"reduce-empty-extent", caseReduceEmptyExtent},
+    {"bitslice-dims", caseBitSliceDims},
+    {"bitslice-alias", caseBitSliceAlias},
+    {"bitslice-short-stride", caseBitSliceShortStride},
+    {"bitslice-sum-overlap", caseBitSliceSumOverlap},
 };
 
 } // namespace

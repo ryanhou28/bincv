@@ -141,6 +141,86 @@
 #             for impl::regionFromExtent's non-empty precondition, which no public
 #             entry point can reach and which underflows into a ~5.8e17-word row
 #             range if it is ever removed.
+#   test_bitslice  351620 under opencv, 350540 everywhere else. The 1080
+#             difference is majority3 against the reference pipeline's own median
+#             -- max(min(a,b), min(max(a,b),c)) as cv::min/cv::max over CV_8U,
+#             which is SEAL's three_pix_median_filter unchanged. That is a SECOND
+#             REFERENCE and not a tier promise: bit-sliced arithmetic is Tier 3
+#             (ARCHITECTURE 5.1) and OpenCV has no pointwise median of three
+#             images. It is worth its 1080 checks because T3.1 has to reproduce
+#             that formula exactly.
+#             The other 350540 are dominated by EXHAUSTIVE ENUMERATION, which is
+#             what this suite has instead of a sampled sweep. Each primitive is
+#             pointwise in the bit LANE, so k inputs have exactly 2^k distinct
+#             per-lane patterns and the whole input space fits in the test:
+#               maj3          all 8 patterns (k = 3)
+#               bitSlicedSum  all patterns at k = 1, 2, 3, 4, 9 and at k = 16
+#                             -- 65536 of them, which is most of the total
+#               thresholdGE   every value 0..2^n-1 against every threshold
+#                             0..2^n+1 for n = 0..5, i.e. that function's ENTIRE
+#                             input space at every plane count any k here reaches
+#               composed      sum-then-threshold at every threshold from 0 to k+1
+#             at all four word widths, with the patterns packed into the LANES of
+#             the words under test so the enumeration also proves the lanes stay
+#             independent. The rest is majority3's plumbing: the T2.1 size and
+#             fill matrix, sixteen stride combinations, in-place aliasing on each
+#             of the three sources, degenerate shapes, and sources whose padding
+#             bits are already dirty.
+#             559 of them are BitSlice.ThresholdPadding_*, added by review: it was
+#             349981 / 351061 before. thresholdGE returns a FULL WORD and has no
+#             notion of `width` -- at threshold 0 every lane is answered yes
+#             whatever the planes hold -- so a caller storing one into a row's
+#             trailing word without impl::rowTailMask leaves padding bits set past
+#             `width`, which is D-13's over-count with nothing to diagnose it.
+#             That family asserts BOTH halves: that the raw word really does carry
+#             bits past `width` (so a later "fix" that masks inside thresholdGE
+#             fails here on purpose, and the docstring is what has to change), and
+#             that the documented remedy leaves the padding zero while costing no
+#             live pixel its answer. Measured: rewriting its masked store as an
+#             unmasked one turns 159 of the 559 red.
+#             The floor has teeth, measured by mutating ops/bitslice.hpp (checks
+#             passed, out of 349981 core):
+#               maj3 drops the (a & c) term      347857 -- 4 case families
+#               ripple stops one plane short     215321 -- 5 families
+#               accumulator not cleared first    215436 -- 5 families
+#               half adder takes its carry from
+#               the sum it just stored            84815 -- 5 families
+#               thresholdGE returns > not >=     344817 -- 4 families
+#               the "less" decision dropped      309569 -- 3 families
+#               a lane already ruled less is
+#               revived into "greater"           324327 -- 3 families
+#               unreachable-threshold guard
+#               removed                          349457 -- 3 families
+#               threshold == 0 shortcut removed  349973 -- 2 families
+#               bitSlicedSumPlanes one short     COMPILE ERROR (static_assert)
+#               majority3 stores its trailing
+#               word unmasked                    349888 -- DirtySources ONLY
+#             (that table was measured against the 349981 core baseline, before
+#             the ThresholdPadding family raised it to 350540; none of the twelve
+#             mutations is in code that family covers, so the deltas stand.)
+#               dense path ignores one argument's
+#               stride (each of the four)   349945/349909 -- Strides only
+#             Two rows are the ones worth reading. The trailing-word row is this
+#             suite's D-13 moment: the padding mask is invisible to every other
+#             case, and BitSlice.DirtySources_* is the only thing between it and
+#             a destination that hands phantom pixels to the next reduction.
+#             The dense-path row is a review finding turned into cases: the
+#             stride list was six mixed combinations, none with a, b and dst
+#             tight and only `c` over-strided, so deleting `c.stride == words`
+#             left all 348061 checks green. It now runs the four "exactly one
+#             argument non-tight" shapes at both non-tight flavours, and each of
+#             the four deletions fails.
+#             TWO MUTATIONS SURVIVED AND WERE ACTED ON RATHER THAN LOGGED:
+#             narrowing `equal` in thresholdGE's comparator changed no result
+#             anywhere in the exhaustive (value, threshold) enumeration, because
+#             any lane it dropped had been added to `greater` in the same step --
+#             so the two operations per plane were removed and the mask renamed
+#             `notLess`. And deleting `c`'s half of majority3's dimension assert
+#             left every check green in all four configurations, because an
+#             assert has no in-process test: that one became the death test
+#             test_assert_abort.bitslice-dims, with bitslice-alias,
+#             bitslice-short-stride and bitslice-sum-overlap alongside it. The
+#             ctest count rises by those four.
 #   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
 #             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
 #             through constPlane() -> unpackTo8U, and that conversion was the one
@@ -177,6 +257,7 @@ opencv	test_error_checked	21	0
 opencv	test_logic	65768	0
 opencv	test_shift	307133	0
 opencv	test_reduce	711812	0
+opencv	test_bitslice	351620	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
 opencv	test_equivalence	16403	0
@@ -189,6 +270,7 @@ core	test_error_checked	21	0
 core	test_logic	53672	0
 core	test_shift	99695	0
 core	test_reduce	546572	0
+core	test_bitslice	350540	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -199,6 +281,7 @@ noexcept	test_error_checked	21	0
 noexcept	test_logic	53672	0
 noexcept	test_shift	99695	0
 noexcept	test_reduce	546572	0
+noexcept	test_bitslice	350540	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -209,5 +292,6 @@ debug	test_error_checked	21	0
 debug	test_logic	53672	0
 debug	test_shift	99695	0
 debug	test_reduce	546572	0
+debug	test_bitslice	350540	0
 debug	test_harness	8	0
 

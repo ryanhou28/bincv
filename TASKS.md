@@ -1340,7 +1340,7 @@ because acting on either would have chosen T2.6's shape ahead of T2.10):
 
 ---
 
-### T2.7 · Majority and thresholded counts · `TODO`
+### T2.7 · Majority and thresholded counts · `DONE`
 <!-- kernel tasks continue; experiment tasks T2.8-T2.10 follow -->
 
 
@@ -1369,6 +1369,116 @@ W thresholdGE(const W* planes, size_t nPlanes, unsigned threshold);
 - `thresholdGE` correct across all threshold values for the tested widths
 
 **Verify:** V-ALL
+
+**What was built.** `include/bincv-cpp/ops/bitslice.hpp` — the three word-level
+primitives above, plus `bitSlicedSumPlanes(k)` (constexpr, so the caller can size
+its plane array without allocating) and one view-level kernel,
+`majority3(a, b, c, dst)`. **API Tier 3 throughout**: bit-sliced arithmetic has no
+OpenCV counterpart ([§5.1](ARCHITECTURE.md#51-three-tiers)), so nothing here
+borrows an OpenCV name. Tests in `tests/test_bitslice.cpp`, registered as a core
+suite so the primitives are checked in the `-fno-exceptions` and Debug builds too.
+
+**The adder network is the ripple, deliberately.** `bitSlicedSum` accumulates one
+input at a time into the output planes through a chain of half adders, cutting the
+chain at the plane where the running total provably cannot carry further (before
+input *i* the total is at most *i*). That is not the cheapest network — the
+textbook k = 4 form is two half adders and a full adder, 9 operations against this
+file's 16 — and the task said to prefer a correct reference over a minimal one.
+What the ripple buys is one loop nest correct for every k with a one-line
+invariant, where a compressor tree is a different shape per k and the shapes that
+matter (4 and 9) are the ones every pyramid level and every denoised frame depend
+on. Phase 5 can replace the body; the exhaustive tests below are what would prove
+the replacement.
+
+**A view-level `majority3` was added**, and the reasoning is T3.1: the reference
+three-pixel median filter takes the pixel above, the pixel itself and the pixel to
+its right, so denoise is two shifts and one pointwise majority. Without the kernel
+T3.1 would open-code a word loop — with its own stride handling, its own trailing
+word mask and its own aliasing contract — next to the identical loop in
+`ops/logic.hpp`. It takes views (D-5), is pointwise in the word index so it takes
+the same half of [D-11](ARCHITECTURE.md#d-11-kernels-alias-exactly-or-not-at-all)
+that the logic kernels do (`dst` may be `a`, `b` or `c` exactly), and masks its
+trailing word so the destination's padding stays zero even when the sources' does
+not. There is deliberately **no `QuantMat` overload**: bit 3 of the median of
+three N-bit images is not the majority of the three bit 3s, so a per-plane loop
+would compile, run, and be wrong.
+
+**Exhaustive rather than sampled, because here that is affordable.** Every
+primitive is pointwise in the bit *lane*, so k inputs have exactly 2^k distinct
+per-lane patterns and the whole input space is enumerated: all 8 patterns for
+`maj3`, all patterns at k = 1, 2, 3, 4, 9 and all 65536 at k = 16 for
+`bitSlicedSum`, and for `thresholdGE` every value against every threshold from 0
+to one past the maximum at 0–5 planes — which is that function's entire input
+space at every plane count any k here reaches. The patterns are packed into the
+*lanes* of the words under test, so the sweep also proves the lanes stay
+independent: a carry leaking from lane L into L+1 would pass a test that used lane
+0 only. The references are independent of the implementations — the median is the
+sorting network `max(min(a,b), min(max(a,b),c))`, not `(a&b)|(b&c)|(a&c)`.
+
+**Twelve mutations of `ops/bitslice.hpp`, and what each turned red** — the table
+lives in `tests/expected-checks.txt` next to the floor it justifies. Two rows are
+worth repeating here:
+
+- **The trailing-word mask is held by one case family.** Storing `majority3`'s
+  last word unmasked leaves 349888 of 349981 checks green, and only
+  `BitSlice.DirtySources_*` fails — the same shape as
+  [D-13](ARCHITECTURE.md#d-13-a-reduction-counts-pixels-never-padding)'s finding
+  for `ops/reduce.hpp`.
+- **Two mutations survived, and both were acted on rather than logged.**
+  Narrowing `equal` in `thresholdGE`'s comparator changed no result anywhere in
+  the exhaustive `(value, threshold)` enumeration — any lane it dropped had been
+  added to `greater` in the same step — so two operations per plane came out and
+  the mask is now named `notLess`. And deleting `c`'s half of `majority3`'s
+  dimension assert left every check green in all four configurations, because an
+  assert has no in-process test; that became the death test
+  `test_assert_abort.bitslice-dims`, with `bitslice-alias`,
+  `bitslice-short-stride` and `bitslice-sum-overlap` alongside it. The last is the
+  only precondition in the project stated over raw pointers rather than views.
+
+**A review finding turned into cases.** The stride sweep started as six mixed
+combinations, none of which had `a`, `b` and `dst` tight with only `c`
+over-strided — so deleting `c.stride == words` from the dense-path condition left
+all 348061 checks green, and the kernel walked `c` as one contiguous run at the
+wrong stride whenever the other three happened to be dense. That is what a caller
+gets by mixing an over-aligned frame (D-4 makes alignment per-object) with tightly
+packed ones. The list now runs the four "exactly one argument non-tight" shapes at
+both non-tight flavours, and each of the four deletions fails.
+
+**A review pass corrected three claims in the header and added a case family.**
+`thresholdGE` returns a **full word and has no notion of `width`** — every lane is
+answered, and at `threshold == 0` every lane is answered *yes* whatever the planes
+hold, which is exactly the value T3.2's requantization sweep reaches by
+arithmetic. A caller storing that into a row's trailing word without
+`impl::rowTailMask` leaves padding bits set past `width`, which is
+[D-13](ARCHITECTURE.md#d-13-a-reduction-counts-pixels-never-padding)'s
+over-counting failure with nothing to diagnose it; `majority3` masks internally
+because it owns its destination, and this one cannot. That contract is now a
+docstring `@note`, a masked file-header example, and the `BitSlice.ThresholdPadding_*`
+family (559 checks) — which asserts *both* halves: that the raw word really does
+carry bits past `width`, so a future "fix" that masks inside `thresholdGE` fails
+here on purpose, and that the documented remedy leaves padding zero while costing
+no live pixel its answer. Measured: rewriting the test's masked store as an
+unmasked one turns 159 of its checks red. The other two corrections are the
+pyramid claims now recorded in [ARCHITECTURE §6.1](ARCHITECTURE.md#61-bit-parallel-primitives)
+and on T3.4 — the header said the 2×2 box *was* `bitSlicedSum` at k = 4 without
+saying that holds for a 1-bit source only, and `@param k` said "the MVP uses 3, 4
+and 9" when k = 3 has no caller (the three-pixel median is `maj3`).
+
+**Sanitizers.** Both spellings from
+[GETTING_STARTED](GETTING_STARTED.md#sanitizers-for-the-kernels-where-undefined-behaviour-is-the-likely-bug)
+were run over `test_bitslice` and are clean: UBSan at `-O2 -DNDEBUG` (the shipping
+configuration) and UBSan+ASan at `-O1 -g` (assertions live). Worth doing here
+because the file is full of shift counts — `1 << lane` in the enumeration,
+`threshold >> p` in the comparator — and a shift at or past the word width is
+undefined in exactly the way the T2.3 notes describe.
+
+**No benchmark.** T2.7's done-when clauses are correctness only, and the
+denominator question is not obvious: OpenCV's nearest equivalent to the composed
+operation is `cv::min`/`cv::max` over three `CV_8U` frames, which is what the
+OpenCV half already runs as an oracle. Measuring it as a *speed* claim belongs
+with T3.1 and T3.2, where the operation has a caller and a working set to report —
+and on the reference device, which is offline (`scripts/run_on_pi.sh` returns 77,
+which is not a pass).
 
 ---
 
@@ -1588,7 +1698,19 @@ template <typename W>
 class Pyramid { /* levels, each its own QuantMat; bit depth per level */ };
 ```
 
-- 2×2 sum via `bitSlicedSum` (T2.7), then requantize to `NOut` bits.
+- 2×2 sum via `bitSlicedSum` (T2.7), then requantize to `NOut` bits — **but read
+  `ops/bitslice.hpp`'s "what pyrDown still needs" section first.** T2.7's review
+  found two prerequisites this task owns and neither exists yet:
+  - **`bitSlicedSum` is single-bit and equal-weight**, so it is the 2×2 box for
+    `NIn == 1` only. At `NIn > 1` the only composition available is replicating
+    plane *p* of each pixel 2^p times, which is correct and exponential
+    (*k* = 4·(2^NIn − 1) — 124 inputs at `NIn = 5`, i.e.
+    [§7.2](ARCHITECTURE.md#72-pyramid-downsample--box-22)'s level 3). Add the
+    bit-sliced multi-bit add here, where the caller fixes its shape.
+  - **Nothing decimates horizontally.** Vertical subsampling is a stride-doubled
+    view and costs nothing; horizontal is
+    [E-8](ARCHITECTURE.md#9-open-questions-and-planned-experiments), unsettled.
+    Write its decision rule before measuring, per CLAUDE.md.
 - **Requantization is a documented choice, not a default.** The reference lets
   precision grow into `CV_8U` (1 → 3 → 4 → 5 bits measured). Whether a capped
   `NOut` preserves tracking accuracy is
