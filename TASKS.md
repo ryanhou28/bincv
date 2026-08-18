@@ -25,10 +25,12 @@ on the critical path for implementation work. Everything through T3.5 proceeds
 without hardware; see
 [What works without it](docs/MEASUREMENT_HARDWARE.md#what-works-without-it).
 
-**Do not substitute a laptop measurement to unblock one.** Closing E-1/E-2/E-3 on
-non-authoritative hardware is worse than leaving them open, because a recorded
-wrong answer stops anyone from asking again. Running them early on x86 as a
-*signal* is fine, provided the entry stays `PARTIAL`.
+**Do not substitute a laptop measurement to unblock one.** Closing an experiment on
+non-authoritative hardware is worse than leaving it open, because a recorded wrong
+answer stops anyone from asking again. Running one early on x86 as a *signal* is
+fine, provided the entry stays `PARTIAL`. E-1, E-2 and E-3 were all closed on the
+reference device, and the x86 pre-runs disagreed with the device on the sign of
+several rows — see [X-11](EXPERIMENTS.md)'s X-7 caveat for why that was expected.
 
 ### Stop and ask
 
@@ -1231,9 +1233,11 @@ SplitCount countAndSplit(BinMatConstView<W> a, BinMatConstView<W> b,
 `b = mag_y`, `c = sign_x ^ sign_y`, `whenClear` counts agreeing signs and
 `whenSet` counts opposing ones.
 
-- MVP recomputes per window. Do **not** build incremental/sliding accumulation —
-  [E-3](ARCHITECTURE.md#9-open-questions-and-planned-experiments) decides whether
-  that is worth it, and premature incremental state would fix the API shape early.
+- MVP recomputes per window. Incremental/sliding accumulation was deliberately not
+  built here, because [E-3](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
+  had not run and premature incremental state would have fixed the API shape early.
+  **E-3 has now run and chose incremental** ([X-11](EXPERIMENTS.md)); it lands in
+  [T2.11](#t211--t26-api-extensions-mandated-by-e-3--todo), not here.
 - Windows are large (31×31) and overlap heavily; note that in the docstring so the
   E-3 experiment has context.
 
@@ -1294,13 +1298,14 @@ T1.6's canonical-zero rule permits it and T3.5's derivative will produce it
 (`sign = neg` is a whole-plane assignment), and the identity survives only because
 the `a & b` factor removes those bits.
 
-**MVP recomputes per window; no incremental state was built.** Windows are 31×31
-in practice and overlap heavily — consecutive keypoints, and consecutive iterations
-on one keypoint, re-read almost the same words — which is exactly the regime where
-a sliding accumulator might win. Whether it does is E-3 (T2.10) and is unmeasured,
-so `benchmark/reduce_benchmark.cpp` times recomputation at 7/15/31 as *context for*
-that experiment and does not implement the alternative: measuring one option is not
-an experiment. The signature is chosen so that either answer leaves it unchanged.
+**T2.6 shipped recompute-per-window and no incremental state, pending E-3.**
+Windows are 31×31 in practice and overlap heavily — consecutive keypoints, and
+consecutive iterations on one keypoint, re-read almost the same words — which is
+exactly the regime where a sliding accumulator might win. **E-3 has since measured
+it and it does**, by 1.32×–36× at 31×31 ([X-11](EXPERIMENTS.md)), so the
+accumulator is being added in [T2.11](#t211--t26-api-extensions-mandated-by-e-3--todo).
+The signature chosen here survives that: incremental state arrives as an additional
+entry point rather than as a change to this one.
 
 **Eight mutations of `ops/reduce.hpp`, and what each turned red** (core checks
 passed, out of the 546468 the suite had when they were run — the
@@ -1494,11 +1499,12 @@ documented claim, report it — do not adjust the code to fit the doc.
 
 ---
 
-### T2.8 · E-1 · Does row alignment earn its memory? · `TODO` · ⚙️ Pi available
+### T2.8 · E-1 · Does row alignment earn its memory? · `DONE`
 
 **Depends:** T2.5
-**Gates:** [D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default) —
-currently **provisional**, the only such decision in the project
+**Gates:** [D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default) — was
+**provisional**, the only such decision in the project; **confirmed by this task
+and no longer provisional**
 **Completes:** [X-1](EXPERIMENTS.md), which measured cost but not benefit
 
 **Question:** Does row alignment beyond word granularity measurably speed up any
@@ -1527,9 +1533,20 @@ discipline — 64-bit OS, throttle checks, governor, pinning:
 **Done when:** [EXPERIMENTS.md](EXPERIMENTS.md) X-1 is `DONE` with the benefit
 side filled in, D-4 is confirmed or reopened, and the benchmark is committed.
 
+**RESULT — first band, D-4 CONFIRMED.** Reference device, three runs
+([X-9](EXPERIMENTS.md), `bincv-cpp/results/alignment_benchmark.log`,
+`benchmark/alignment_benchmark.cpp`). Best of four alignments × two kernels × two
+sizes was **1.008×**, inside its own batch spread — a null result, not a small
+win. `countNonZero`, which has no fast path and so isolates alignment alone, was
+flat to within **0.5%** at 640×480 across all four alignments. Two alignments were
+much worse: over-aligning disables `ops/logic.hpp`'s contiguous fast path, so
+`bitwiseAnd` at 640×480 ran **3.1× slower at align 32 and 4.8× slower at align
+64** for 20% and 60% more memory. **No profile system is built.** D-4 loses its
+"provisional" tag and X-1 is now `DONE`.
+
 ---
 
-### T2.9 · E-2 · Default word width · `TODO` · ⚙️ Pi available
+### T2.9 · E-2 · Default word width · `DONE`
 
 **Depends:** T2.5
 **Gates:** `BinMat`'s default template argument — affects every kernel
@@ -1556,11 +1573,27 @@ sensitive of the three to a 32-bit OS — on `armv7l` every `uint64_t` operation
 synthesised from 32-bit pairs, so the result would describe the compiler rather
 than the hardware. Confirm `aarch64` before recording anything.
 
-**Done when:** logged as X-4, default confirmed or changed, benchmark committed.
+**Done when:** logged as X-10 (the older "X-4" here was stale — X-4 is taken by
+the set-pixel discontinuity entry), default confirmed or changed, benchmark
+committed.
+
+**RESULT — `uint32_t` KEPT, and the rule had to do real work.** Reference device,
+three runs ([X-10](EXPERIMENTS.md), `bincv-cpp/results/wordwidth_benchmark.log`,
+`benchmark/wordwidth_benchmark.cpp`). `uint64_t` reduces **1.94× faster at 640×480
+and 1.56× at 94×60** (reproducible to 0.2%), and is a null result on `bitwiseAnd`,
+which is memory-bound. So the ">10% on bulk kernels" clause is satisfied outright
+— but the rule is a **conjunction**, and footprint rises **+33.3% at 94×60 and
++20.0% at 160×120** while costing nothing at either full frame. The second clause
+fires and `uint32_t` stays: **a measured 1.94× declined on footprint grounds**,
+which is principle 2 working as designed rather than an oversight. The trap this
+task names was real — measured only at 640×480 every footprint row reads 0.0% and
+the decision inverts. Promoted to
+[D-14](ARCHITECTURE.md#d-14-uint32_t-is-the-default-word-type); the per-level word
+width this exposes is registered as **E-9**, not decided.
 
 ---
 
-### T2.10 · E-3 · Incremental versus recomputed window reductions · `TODO` · ⚙️ Pi available
+### T2.10 · E-3 · Incremental versus recomputed window reductions · `DONE`
 
 **Depends:** T2.6
 **Gates:** T2.6's interface and T3.6's implementation
@@ -1611,6 +1644,89 @@ favour incremental more than the deployment target does.
 carries this task's composed-versus-fused axis as a *finding*, not as its
 decision), all three axes above answered, T2.6's API confirmed or extended, and
 the benchmark committed.
+
+**RESULT — all three axes moved OFF the simpler shape.** Reference device, three
+runs ([X-11](EXPERIMENTS.md), `bincv-cpp/results/window_benchmark.log`,
+`benchmark/window_benchmark.cpp`), logged as **X-11**.
+
+| Axis | At 31×31 | Branch selected |
+|---|---|---|
+| 1 · incremental vs recompute | **1.32×** sparse, **7.4×** search, **36×** dense | extend T2.6 with incremental state before T3.6 |
+| 2 · fused vs composed covariance | **1.27×** (`uint32_t`), **1.29×** (`uint64_t`) | add a covariance entry point before T3.6 |
+| 3 · plane vs four-argument | plane **16% faster** per frame, **38400 B**/level; four-arg **0 B** | four-argument form — memory wins the tiebreak |
+
+**The surprise, and it needs stating plainly:** the sparse column is *not* an
+incremental win. At 200 isolated keypoints the sliding path never executes, so the
+"incremental" variant issues **identical popcounts over identical words** as the
+shipped `countNonZero` and is still 1.32× faster at W=31. The difference is that
+`impl::countViewRegion` accumulates into **one** `size_t` across the whole region —
+one dependency chain through the popcount latency — where the variant accumulates
+per row. That is a codegen finding about the shipped reduction, free of any
+interface change, and it must not be read as evidence for incremental state.
+
+The interface was **not** changed in the same commit as the measurement — that
+inversion is what this task exists to prevent. The four changes the data mandates
+are scheduled as **[T2.11](#t211--t26-api-extensions-mandated-by-e-3--todo)**, and
+**T3.6 is now blocked on T2.11 rather than on T2.10.**
+
+---
+
+### T2.11 · T2.6 API extensions mandated by E-3 · `TODO`
+
+**Depends:** T2.10 (`DONE` — this task exists only because of what it measured)
+**Gates:** [T3.6](#t36--lk-gradient-covariance--todo), which must be written against the
+extended interface, not the current one
+**Files:** `include/bincv-cpp/ops/reduce.hpp`, `tests/test_reduce.cpp`
+
+Every item below is a **decision already made on data**
+([X-11](EXPERIMENTS.md), [D-15](ARCHITECTURE.md#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)),
+not an open question. Do not re-measure to re-open one; if a number here looks
+wrong, re-run `benchmark/window_benchmark.cpp` on the reference device and report
+the discrepancy.
+
+1. **Incremental window state, INC-ROW form.** A vertically-sliding accumulator
+   over one column of window positions: the sum gains the incoming row's windowed
+   popcount and loses the outgoing row's. Measured **1.32×** on isolated
+   keypoints, **7.4×** on an 8×8 search sweep and **20×** on a dense scan, at
+   31×31. It keeps one scalar of state and needs **no caller scratch**, which is
+   why it is the form to expose rather than the per-column accumulator — that one
+   is faster on a dense sweep (**36×**) but 12× *slower* on isolated keypoints and
+   needs a `sweepWidth + W − 1` counter array, so it is a second shape and a
+   second decision.
+2. **A covariance-shaped entry point** returning `xx`, `yy`, `whenClear`,
+   `whenSet` from a single `visitRowWords` pass. Measured **1.27×** (`uint32_t`)
+   and **1.29×** (`uint64_t`) against the three-call composition at 31×31,
+   reproducing [X-8](EXPERIMENTS.md)'s 1.30× and extending it across window sizes.
+   The popcount count is identical on both sides, so this is redundant traversal
+   and nothing else.
+3. **A four-argument `countAndSplit(a, b, c0, c1, region)`** that XORs the two
+   selector planes in the word loop. This one *costs* speed — the precomputed
+   plane is 16% faster per frame even after paying to form it — and buys
+   **38400 B per pyramid level**, a fifth plane on top of the four the covariance
+   already reads. [CLAUDE.md](CLAUDE.md)'s tiebreak decides it: memory wins when
+   the goals conflict. Keep the three-argument overload; a caller that has already
+   formed the plane for other reasons should not be made to unform it.
+4. **Split `impl::countViewRegion`'s accumulator per row.** Not an interface
+   change at all — the region reduction accumulates into one `size_t` across every
+   row and word, which is a single dependency chain through the popcount latency.
+   Per-row partial sums measured **1.16–1.32×** at LK window sizes on *identical*
+   popcounts. Cheapest item on this list and it benefits every region reduction in
+   the file.
+
+**Done when**
+- All four land, each with a test in `tests/test_reduce.cpp`; the incremental and
+  fused paths are checked to agree with the recompute/composed ones **window for
+  window**, including windows clipped at the frame edge
+- `benchmark/window_benchmark.cpp` is updated to time the shipped entry points
+  rather than its own measurement copies, and re-run on the reference device
+- `ops/reduce.hpp`'s docstrings state which shape to reach for and why, citing
+  X-11 — a reader choosing between two entry points needs the access-pattern
+  argument, not just the signatures
+- [ARCHITECTURE §7.5](ARCHITECTURE.md#75-lk-gradient-covariance) drops the
+  "incremental accumulation is NOT part of the interface" paragraph, which X-11
+  has superseded
+
+**Verify:** V-ALL
 
 ---
 
@@ -1776,7 +1892,7 @@ Reference semantics: `SEAL/src/keypoint_tracking/gradients.cpp`,
 
 ### T3.6 · LK gradient covariance · `TODO`
 
-**Depends:** T3.5, and **E-3 settled** (T2.10) — this is built directly on T2.6's reduction API, so starting before E-3 closes risks rewriting it against an incremental interface. If E-3 is still blocked on hardware, stop here and report rather than guessing which API to build against.
+**Depends:** T3.5 and **T2.11**. E-3 is settled (T2.10, [X-11](EXPERIMENTS.md)) and it went the way this line was written to guard against: incremental state and a fused covariance entry point both won, so T2.6's current shape is **not** the one to build on. Wait for T2.11 to land them rather than writing this against the recompute-only API and rewriting it afterwards.
 **Files:** `include/bincv-cpp/ops/covariance.hpp` (new)
 
 **Goal:** The load-bearing operation

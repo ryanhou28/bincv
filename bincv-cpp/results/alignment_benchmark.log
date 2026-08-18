@@ -1,0 +1,155 @@
+E-1 / T2.8 -- does row alignment earn its memory?
+=================================================
+
+The BENEFIT side of X-1, which measured only the cost. Gates D-4, the project's
+only PROVISIONAL decision. NOT a binCV-versus-OpenCV comparison: it compares
+binCV against binCV at four row alignments, so ARCHITECTURE 10.3's denominator
+does not apply.
+
+DECISION RULE, WRITTEN BEFORE MEASURING (TASKS.md T2.8, recorded in
+EXPERIMENTS.md X-9 at commit 4245210, and in benchmark/alignment_benchmark.cpp):
+  * speedup < 5% on all kernels     -> D-4 confirmed, close E-1, build no profile system
+  * 5-20%                           -> D-4 stands; larger alignment documented as opt-in
+  * > 20% on a per-frame kernel     -> reopen D-4, report before changing anything
+"Speedup" means faster than the word-granularity baseline; a variant that is
+SLOWER lands in the first band, and the size of the slowdown is reported rather
+than clamped.
+
+PLATFORM: the reference device -- AUTHORITATIVE. E-1 is a cache question, which
+is exactly what a laptop hides (EXPERIMENTS.md "Measurement platforms").
+
+  device:           pi4
+  cpu:              Raspberry Pi 4 Model B Rev 1.5 (Cortex-A72)
+  arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+  compiler:         g++ (Debian 14.2.0-19) 14.2.0, Release (-O2 -DNDEBUG)
+  governor:         performance (restored to ondemand on exit)
+  core pinning:     taskset -c 3
+  throttled before / after: throttled=0x0 / throttled=0x0  (every run)
+  benchmark commit: 3383996
+
+THREE RUNS, because one cannot show that a ratio reproduced. Ratios are on
+medians of 9 interleaved batches; the spread column in each run's own output is
+(max-min)/median and never exceeded 7%.
+
+  640x480, uint32_t          run 1    run 2    run 3     footprint   AND fast path
+  align 4 (word)  bitwiseAnd  1.000x   1.000x   1.000x     38400 B   contiguous
+                  countNonZero 1.000x  1.000x   1.000x
+  align 16        bitwiseAnd  1.008x   0.983x   1.001x     38400 B   contiguous
+                  countNonZero 1.000x  1.000x   1.001x      (+0.0%)
+  align 32        bitwiseAnd  0.321x   0.311x   0.321x     46080 B   row loop
+                  countNonZero 0.999x  0.999x   0.998x     (+20.0%)
+  align 64        bitwiseAnd  0.211x   0.205x   0.209x     61440 B   row loop
+                  countNonZero 0.996x  0.996x   0.996x     (+60.0%)
+
+  94x60 (pyr L3), uint32_t   run 1    run 2    run 3     footprint   AND fast path
+  align 4 (word)  bitwiseAnd  1.000x   1.000x   1.000x       720 B   row loop
+                  countNonZero 1.000x  1.000x   1.000x
+  align 16        bitwiseAnd  0.988x   1.000x   0.993x       960 B   row loop
+                  countNonZero 1.009x  1.000x   0.990x     (+33.3%)
+  align 32        bitwiseAnd  0.991x   0.980x   0.994x      1920 B   row loop
+                  countNonZero 0.974x  1.000x   0.999x    (+166.7%)
+  align 64        bitwiseAnd  0.913x   0.874x   0.929x      3840 B   row loop
+                  countNonZero 0.956x  0.947x   0.992x    (+433.3%)
+
+READING. No alignment beats word granularity anywhere, on either kernel, in any
+run. The best number in the whole table is 1.008x -- inside the 5-6% batch
+spread of the row it sits in, so it is a null result and not a small win. The
+rule's first band therefore applies, unambiguously: D-4 is confirmed, E-1 closes,
+and no profile system gets built.
+
+WHERE THE SLOWDOWNS COME FROM, since three of them are large. Two mechanisms,
+both consequences of choosing the alignment rather than confounds to subtract:
+
+  1. ops/logic.hpp's contiguous fast path requires every stride to equal the
+     words a row needs. Over-aligning disables it, and bitwiseAnd at 640x480
+     drops to 0.32x (align 32) and 0.21x (align 64) -- 3.1x and 4.8x SLOWER for
+     20% and 60% more memory. At 94x60 the width is not a whole number of words,
+     so no variant takes that path and no variant shows the cliff.
+  2. Padding words are allocated and never read, so a wider stride spends cache
+     lines and bandwidth on nothing. That is the residual 0.91-0.99x at 94x60,
+     and it is why the align-64 row is the worst one there too.
+
+countNonZero, which has no fast path and walks rows unconditionally, is flat to
+within 0.5% at 640x480 across all four alignments. That is the clean isolation of
+the alignment effect on its own: on this core it is zero.
+
+WHAT ROW ALIGNMENT ACTUALLY DELIVERS. binMat allocates with new[], whose
+guarantee here is 16 bytes, so rowAlignment aligns the row STRIDE and not the
+base pointer -- the benchmark prints the measured base alignment per run and it
+varies (16/32/64 B) with the allocator rather than with the requested alignment.
+So this experiment shows that making rows mutually congruent buys nothing; it
+does not test absolutely-64-byte-aligned rows, which no binCV API can currently
+request. Nothing in the MVP asks for one.
+
+X-7 CAVEAT. binCV builds with no -march flags, so the countNonZero rows measure
+fmov/cnt/uaddlv/fmov per word as much as they measure alignment. That lowering is
+identical across the four variants, so it cannot bias this comparison, but it
+does mean the absolute ns/pixel figures move if a dispatch policy is ever chosen
+(ROADMAP 2.3). No -march flag was added.
+
+Full output of run 3 follows.
+
+=== E-1 / T2.8: does row alignment earn its memory? ===
+target: aarch64 -- AUTHORITATIVE (the reference device closes E-1)
+The decision rule is in this file's header, written before measuring (EXPERIMENTS.md X-9).
+new[] guarantees 16-byte alignment here, so rowAlignment aligns the STRIDE, not the base pointer.
+
+=== 640x480 frame, uint32_t words ===
+  a row inherently needs 20 words (80 B); width is a whole number of words
+  all 4 alignment variants agree with the word-granularity baseline on all 4 images
+
+  FOOTPRINT (allocated bytes, one image; overhead vs word granularity)
+  align      stride   bytes/img   overhead     AND set  base align
+  4            20 w       38400       0.0%      115200        16 B
+  16           20 w       38400       0.0%      115200        32 B
+  32           24 w       46080      20.0%      138240        16 B
+  64           32 w       61440      60.0%      184320        64 B
+  (AND set = two inputs plus the destination -- that kernel's peak working set)
+
+  SPEED (ns/pixel, min / median / max over 9 interleaved batches)
+  align    bitwiseAnd                 countNonZero               AND path
+  4         0.0323/ 0.0336/ 0.0346  0.0735/ 0.0735/ 0.0735 contiguous
+  16        0.0323/ 0.0336/ 0.0343  0.0734/ 0.0734/ 0.0735 contiguous
+  32        0.1038/ 0.1048/ 0.1060  0.0736/ 0.0736/ 0.0737 row loop
+  64        0.1604/ 0.1606/ 0.1610  0.0737/ 0.0738/ 0.0740 row loop
+
+  SPEEDUP vs word granularity (>1.00 = wider alignment is FASTER; the rule reads this column)
+  align      bitwiseAnd countNonZero   AND spread   cnz spread
+  4              1.000x       1.000x         6.9%         0.0%
+  16             1.001x       1.001x         5.9%         0.1%
+  32             0.321x       0.998x         2.1%         0.2%
+  64             0.209x       0.996x         0.4%         0.3%
+
+  sanity: bitwiseAnd at word granularity moves 115200 B per call in 10329 ns = 11.15 GB/s
+          working set 112.5 KiB -- L2-resident (1 MiB L2), so rates above DRAM's ~4-6 GB/s are expected
+
+=== 94x60 pyramid L3, uint32_t words ===
+  a row inherently needs 3 words (12 B); width is NOT a whole number of words
+  all 4 alignment variants agree with the word-granularity baseline on all 4 images
+
+  FOOTPRINT (allocated bytes, one image; overhead vs word granularity)
+  align      stride   bytes/img   overhead     AND set  base align
+  4             3 w         720       0.0%        2160        32 B
+  16            4 w         960      33.3%        2880        64 B
+  32            8 w        1920     166.7%        5760        16 B
+  64           16 w        3840     433.3%       11520        16 B
+  (AND set = two inputs plus the destination -- that kernel's peak working set)
+
+  SPEED (ns/pixel, min / median / max over 9 interleaved batches)
+  align    bitwiseAnd                 countNonZero               AND path
+  4         0.0815/ 0.0815/ 0.0816  0.0987/ 0.0987/ 0.0987 row loop
+  16        0.0821/ 0.0821/ 0.0822  0.0997/ 0.0997/ 0.0998 row loop
+  32        0.0820/ 0.0820/ 0.0822  0.0987/ 0.0988/ 0.0988 row loop
+  64        0.0878/ 0.0878/ 0.0879  0.0994/ 0.0994/ 0.0995 row loop
+
+  SPEEDUP vs word granularity (>1.00 = wider alignment is FASTER; the rule reads this column)
+  align      bitwiseAnd countNonZero   AND spread   cnz spread
+  4              1.000x       1.000x         0.0%         0.0%
+  16             0.993x       0.990x         0.1%         0.1%
+  32             0.994x       0.999x         0.2%         0.1%
+  64             0.929x       0.992x         0.1%         0.1%
+
+  sanity: bitwiseAnd at word granularity moves 2160 B per call in 460 ns = 4.70 GB/s
+          working set 2.1 KiB -- L1-resident on the reference device (32 KiB L1D)
+
+sink: 2753703350156273 (printed so nothing above can be optimized away)

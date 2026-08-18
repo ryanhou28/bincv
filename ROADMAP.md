@@ -131,7 +131,9 @@ The windowed and masked forms are required by
 [ARCHITECTURE §7.5](ARCHITECTURE.md#75-lk-gradient-covariance) and belong in the
 MVP, so the reduction interface is designed for them now rather than growing a
 second interface later. Experiment [E-3](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
-determines whether incremental accumulation state is exposed.
+determined whether incremental accumulation state is exposed: **it is** — an
+accumulator beat recomputation by 1.32×–36× at 31×31 on the reference device
+([X-11](EXPERIMENTS.md)), along with a fused covariance entry point at 1.27–1.29×.
 
 ### 2.5 Majority and thresholded counts
 `maj3` and the bit-sliced adder network for thresholding small counts. Feeds
@@ -199,12 +201,15 @@ Against OpenCV performing the same semantic operations on the same binary conten
 stored as `CV_8U` ([ARCHITECTURE §10.3](ARCHITECTURE.md#103-benchmark-denominator)).
 
 ### 4.4 Run the planned experiments
-Settle [E-1 through E-4](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
-with committed benchmarks. E-1 in particular decides whether the alignment default
-stands and whether a profile system is worth building.
+Settle the remaining register entries with committed benchmarks. **E-1, E-2 and E-3
+closed in Phase 2 where they belonged**, on the reference device — the alignment
+default stands and no profile system is built ([X-9](EXPERIMENTS.md)), `uint32_t`
+stays the default word type ([X-10](EXPERIMENTS.md)), and the reduction API grows
+incremental state and a fused covariance ([X-11](EXPERIMENTS.md)). What remains for
+Phase 4 is E-5, E-6 and E-7, with E-4 in Phase 3 and E-8/E-9 unscheduled.
 
 **Done when:** accuracy, footprint, and performance are measured and published in
-the repository, and the provisional decisions have data behind them.
+the repository, and no decision on the D-list is still provisional.
 
 ---
 

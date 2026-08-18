@@ -494,23 +494,28 @@ the same window in the image's coordinate frame.
 **Masked and windowed accumulation is in the MVP and shapes the reduction
 interface — it is not a later addition.** That much T2.6 built.
 
-**Incremental/sliding accumulation is NOT, and this section used to say
-otherwise.** The window is large (31×31) and consecutive windows overlap heavily,
-which is the regime where a sliding accumulator could win — but whether it does is
-unmeasured, so the MVP **recomputes per window** and no incremental state exists
-in `ops/reduce.hpp`. Building it before measuring would fix the interface around an
-answer nobody has. That is [E-3](#9-open-questions-and-planned-experiments)
-(T2.10), whose stated gate is T2.6's interface and on which T3.6 depends; see
-[D-13](#d-13-a-reduction-counts-pixels-never-padding) for the neighbouring
-reduction decision this task did settle.
+**Incremental/sliding accumulation was not, and now is — measured, not assumed.**
+The window is large (31×31) and consecutive windows overlap heavily, which is the
+regime where a sliding accumulator could win. Whether it did was
+[E-3](#9-open-questions-and-planned-experiments) (T2.10), and the answer on the
+reference device is that it wins everywhere at 31×31: **1.32×** even on isolated
+keypoints, **7.4×** on an 8×8 search sweep, **36×** on a dense scan
+([X-11](EXPERIMENTS.md)). `ops/reduce.hpp` therefore gains a vertically-sliding
+accumulator, and T3.6 is written against it rather than against the recompute-only
+shape — see [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)
+and [T2.11](TASKS.md). Until T2.11 lands, `ops/reduce.hpp` still recomputes per
+window; the interface was deliberately not changed in the same commit as the
+measurement. See [D-13](#d-13-a-reduction-counts-pixels-never-padding) for the
+neighbouring reduction decision T2.6 did settle.
 
-T2.10 also has to decide a second interface question that composing the snippet
-above exposed: those three calls make **three traversals** of the same window,
-issuing the same popcounts a single fused pass would, and that measures **1.30×**
-on the reference device — past T2.10's own 15% threshold
-(`bincv-cpp/results/reduce_target_benchmark.log`). Whether the covariance gets its
-own entry point is therefore T2.10's to settle, before T3.6 is written against
-either shape.
+The second interface question composing the snippet above exposed is settled the
+same way: those three calls make **three traversals** of the same window, issuing
+the same popcounts a single fused pass would. X-8 measured **1.30×** for that, and
+X-11 reproduced it at **1.27×** (`uint32_t`) and **1.29×** (`uint64_t`) across
+three window sizes — past T2.10's 15% threshold every time
+(`bincv-cpp/results/window_benchmark.log`). **The covariance gets its own entry
+point** (D-15, T2.11), returning all four numbers from one pass, and T3.6 is
+written against it.
 
 The identity above is exact for ternary derivatives, i.e. pyramid level 0. For
 N-bit levels the same structure holds with **bit-sliced weighted sums**: each
@@ -610,9 +615,23 @@ access to the trailing partial word) is already provided by word granularity.
 Given principle 2 — memory wins ties — word granularity is the default and
 larger alignment is opt-in per object.
 
-**This decision is provisional and flagged for experimental validation**; see
-[E-1](#9-open-questions-and-planned-experiments). No profile system is built
-until data justifies one.
+**The benefit side is now measured too, and it is zero** (X-9 / T2.8, reference
+device, three runs). Across four alignments × two kernels × both sizes, the best
+result was 1.008× — inside its own batch spread — and `countNonZero`, which walks
+rows unconditionally and so isolates alignment on its own, was flat to within 0.5%
+at 640×480 across all four. Two alignments were much *worse*: over-aligning
+disables `ops/logic.hpp`'s contiguous fast path, so `bitwiseAnd` at 640×480 runs
+**3.1× slower at align 32 and 4.8× slower at align 64**, for 20% and 60% more
+memory.
+
+**This decision is therefore confirmed and no longer provisional**, and
+[E-1](#9-open-questions-and-planned-experiments) is closed. **No profile system is
+built.** Larger alignment stays opt-in per object, documented as costing memory to
+buy nothing measurable. One limit on what was tested: `BinMat` allocates with
+`new[]`, so `rowAlignment` aligns the row *stride* and not the base pointer — the
+result says that making rows mutually congruent buys nothing, not that absolute
+64-byte row addresses would. No binCV API can request those and nothing in the MVP
+wants them.
 
 ### D-5: Views are core, not an add-on
 
@@ -826,6 +845,75 @@ The pre-existing `BinMat` implementation is a prototype. Where it conflicts with
 this architecture it is replaced, not preserved. Behavior changes to tests and
 call sites are expected and acceptable.
 
+### D-14: `uint32_t` is the default word type
+
+Measured on the reference device (X-10 / T2.9, three runs), against a rule written
+first: change the default only if `uint64_t` wins by >10% on bulk kernels **and**
+does not increase footprint at representative widths.
+
+```
+speed   countNonZero  uint64 vs uint32:  1.94x @ 640x480,  1.56x @ 94x60
+        bitwiseAnd    uint64 vs uint32:  0.96-1.07x (null; memory-bound)
+footprint (bytes/plane, word granularity)
+        640x480   uint32 38400   uint64 38400     0.0%
+        160x120   uint32  2400   uint64  2880   +20.0%
+        94x60     uint32   720   uint64   960   +33.3%
+```
+
+**The two clauses point opposite ways and the rule is a conjunction, so footprint
+decides: `uint32_t` stays.** A measured 1.94× on the reduction is declined on
+footprint grounds — principle 2, memory wins ties, doing exactly the work it exists
+to do. The penalty appears only at the upper pyramid levels LK touches every frame,
+which is why T2.9 required measuring at 94×60: measured only at 640×480, every
+footprint row reads 0.0% and the decision inverts.
+
+Narrow words are worse on both counts: `uint8_t` reduces at 0.25× of `uint32_t`,
+which is the per-word popcount lowering (D-6, X-7) paid eight times as often.
+
+**Not decided here:** the word type is a per-object template parameter (D-1), so a
+pyramid could use `uint64_t` at the levels where it costs no bytes and `uint32_t`
+above them. X-10 priced both sides; choosing is a new question, registered as E-9.
+
+### D-15: window reductions get incremental state and a fused covariance
+
+Measured on the reference device (X-11 / T2.10, three runs), against three rules
+written first. All three axes moved off the simpler shape:
+
+```
+axis 1  incremental vs recompute @ 31x31:  1.32x sparse, 7.4x search, 36x dense
+axis 2  fused vs composed covariance @ 31x31:  1.27x (uint32), 1.29x (uint64)
+axis 3  selector plane vs four-argument:  plane 16% faster per frame, 38400 B
+                                          per level; four-arg 0 B
+```
+
+So `ops/reduce.hpp` gains, before T3.6 is written against the current shape:
+
+1. **Incremental state**, in the INC-ROW form — slide vertically with one scalar
+   accumulator, gaining the incoming row's windowed popcount and losing the
+   outgoing row's. It wins or ties in every access pattern and needs no caller
+   scratch, so it does not drag an allocation argument into the interface. The
+   popcount-free per-column accumulator is faster still on a dense sweep (36×) but
+   loses 12× on isolated keypoints and needs a scratch array, so it is a second
+   shape rather than the one to expose first.
+2. **A covariance-shaped entry point** returning `xx`, `yy`, `whenClear`,
+   `whenSet` from one `visitRowWords` pass. The composition's three calls load each
+   region word three times; the popcount count is identical, so the 1.27–1.29× is
+   pure redundant traversal.
+3. **A four-argument `countAndSplit`** taking the two sign planes instead of a
+   precomputed selector plane. Here speed and memory disagree — the plane is 16%
+   faster per frame *including* its formation cost, and costs 38400 B per pyramid
+   level, a fifth plane on top of the four the covariance already reads. Principle
+   2 decides: memory wins, so the plane stops being mandatory.
+
+Scheduled as [T2.11](TASKS.md); T3.6 is written against the extended interface.
+
+**A separate finding from the same experiment, needing no interface change:**
+`impl::countViewRegion` carries one accumulator across the whole region, so a
+window traversal is a single dependency chain through the popcount latency.
+Splitting it into per-row partial sums measured **1.16–1.32×** at LK window sizes
+on identical popcounts — the isolated-keypoint column of axis 1 is exactly that
+comparison, since the sliding path never executes there.
+
 ---
 
 ## 9. Open Questions and Planned Experiments
@@ -859,8 +947,9 @@ procedure — it is a rationalization, and if it contradicts the code it is
 expensive rather than useful.
 
 A decision made without this loop is **provisional by definition and must say
-so**. [D-4](#d-4-word-granularity-alignment-by-default) is currently the only
-such decision.
+so**. [D-4](#d-4-word-granularity-alignment-by-default) was the only such decision
+in the project; X-9 closed it on the reference device and it is now confirmed.
+**There is currently no provisional decision on this list.**
 
 ### Register
 
@@ -869,19 +958,23 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 
 | ID | Question | Why it matters | Decision it would change | Gates | Runs |
 |---|---|---|---|---|---|
-| **E-1** | Does row alignment beyond word granularity measurably help any kernel on NEON? | [D-4](#d-4-word-granularity-alignment-by-default) was decided on a memory measurement plus an untested weak-benefit assumption. | Whether a profile system is worth building at all; whether the default flips. | T1.3 and every kernel | **Phase 2** (T2.8) |
-| **E-2** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | `BinMat`'s default template argument. | all kernels | **Phase 2** (T2.9) |
-| **E-3** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls — measured at **1.30×** on the reference device, [X-8](EXPERIMENTS.md), past T2.10's own 15% line? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | Reduction API shape — whether incremental state is exposed, whether a covariance-shaped entry point exists, and whether the selector is a plane or two arguments. | T2.6, T3.6 | **Phase 2** (T2.10) |
+| ~~**E-1**~~ **RESOLVED** | Does row alignment beyond word granularity measurably help any kernel on NEON? | [D-4](#d-4-word-granularity-alignment-by-default) was decided on a memory measurement plus an untested weak-benefit assumption. | **Answered: no — best of twelve combinations was 1.008×, inside its spread; over-aligning costs 3–5× on `bitwiseAnd`. D-4 confirmed, no profile system, D-4 no longer provisional.** [X-9](EXPERIMENTS.md) | T1.3 and every kernel | Phase 2 (T2.8) ✔ |
+| ~~**E-2**~~ **RESOLVED** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | **Answered: `uint32_t` stays. `uint64_t` reduces 1.94× faster but costs +33% at 94×60, and the rule is a conjunction — memory wins.** [D-14](#d-14-uint32_t-is-the-default-word-type), [X-10](EXPERIMENTS.md) | all kernels | Phase 2 (T2.9) ✔ |
+| ~~**E-3**~~ **RESOLVED** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | **Answered, and all three moved off the simpler shape: (a) 1.32×–36× → expose incremental state; (b) 1.27–1.29× → add a covariance entry point; (c) plane 16% faster but 38400 B/level → four-argument form, memory wins.** [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance), [X-11](EXPERIMENTS.md) | T2.6, T3.6 | Phase 2 (T2.10) ✔ |
 | **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | **Phase 3** (T3.9) |
 | **E-8** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | Whether `ops/` gains a resample primitive, and whether it is word-local (word literals only) or frame-masked. | T3.4 | **Phase 3** (T3.4) |
 | **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | Measured growth is 1/3/4/5 bits ([§7.2](#72-pyramid-downsample--box-22)), but the reference never chose that — it fell out of using `CV_8U`. Capping N is a direct footprint lever. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |
+| **E-9** | Should the word type vary down the pyramid — `uint64_t` where it costs no bytes (L0, L1), `uint32_t` above? | [X-10](EXPERIMENTS.md) measured both sides: `uint64_t` reduces **1.94×** faster and costs **+33%** at 94×60 but **0%** at 640×480, so the right answer may not be one type. The width is already a per-object template parameter (D-1), so this costs no new machinery — only a decision. | Whether the pyramid picks a word type per level, and whether kernels that walk several levels pay for two instantiations. | T3.4's pyramid, [D-14](#d-14-uint32_t-is-the-default-word-type) | unscheduled |
 
 The **Gates** column is why the **Runs** column is not simply "Phase 4". E-1, E-2
-and E-3 constrain code written in Phases 1–2; running them afterward would mean
-either rewriting that code or quietly keeping a decision the data does not
-support. E-7 is deferrable only because [T3.4](TASKS.md) takes the bit depth as a
+and E-3 constrained code written in Phases 1–2; running them afterward would have
+meant either rewriting that code or quietly keeping a decision the data does not
+support. All three closed in Phase 2, on the reference device, before T3.6 — and
+E-3 is the case in point: it selected the branch that **rejects** the interface
+T2.6 currently ships, which is precisely the rewrite that running it late would
+have made expensive. E-7 is deferrable only because [T3.4](TASKS.md) takes the bit depth as a
 parameter rather than baking it in — **parameterizing a contested choice is what
 buys the right to defer measuring it.**
 

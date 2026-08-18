@@ -172,7 +172,7 @@ governor, and core pinning. An entry without them is not reproducible.
 
 # Completed
 
-### X-1 · Row alignment memory cost · `PARTIAL`
+### X-1 · Row alignment memory cost · `DONE`
 
 **Gates:** [D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default) ·
 [E-1](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
@@ -202,11 +202,15 @@ resolution-dependent, so a single fixed alignment is a poor default.
 **Decision:** Word granularity becomes the default; larger alignment is opt-in
 per object. Recorded as [D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default).
 
-**Why this is `PARTIAL`:** only the *cost* side was measured. The *benefit* side —
-whether aligned rows measurably speed up any NEON kernel — is untested, and there
-were no bulk kernels to test it on. D-4 is therefore **provisional** until
-[T2.8](TASKS.md) completes it. This is exactly the situation the log exists to
-make visible rather than let pass as settled.
+**Why this was `PARTIAL` until T2.8:** only the *cost* side was measured here. The
+*benefit* side — whether aligned rows measurably speed up any bulk kernel — was
+untested, and there were no bulk kernels to test it on, so D-4 stood
+**provisional**. That is exactly the situation this log exists to make visible
+rather than let pass as settled, and it is now closed:
+[X-9](#x-9--does-row-alignment-earn-its-memory--done) measured the benefit on the
+reference device and found none — the best of twelve alignment/kernel/size
+combinations was 1.008×, inside its own batch spread. D-4 is confirmed and no
+longer provisional.
 
 ---
 
@@ -670,15 +674,20 @@ liked it — is the shape of change this log exists to prevent.
 
 ---
 
-# Open — rules recorded, measurement pending
+# Phase 2 experiments — rules recorded first, then measured
 
 The three entries below were written **before any measurement existed** and
-committed on their own, so the history shows the rules predate the data. Each
-**Decision rule** is copied **verbatim** from its [TASKS.md](TASKS.md) task entry.
-It is not to be re-scaled, re-scoped or softened once numbers arrive; if a result
-sits awkwardly against a threshold, that is a finding to report, not a rule to
-edit. **Result**, **Conclusion** and **Decision** read `pending` until the runs
-happen.
+committed on their own (4245210), so the history shows the rules predate the data
+(3383996 committed the benchmarks, still before any run). Each **Decision rule** is
+copied **verbatim** from its [TASKS.md](TASKS.md) task entry and was not re-scaled,
+re-scoped or softened once numbers arrived. All three have since been measured on
+the reference device and carry their **Result**, **Conclusion** and **Decision**.
+
+Two of them landed where the rule's wording had to do real work, which is the
+argument for writing rules first in one sentence: X-10 declined a measured **1.94×**
+because the rule is a conjunction and the footprint clause failed, and X-11's data
+selected the branch that **rejects the simpler API** it would have been comfortable
+to keep.
 
 **Numbering.** X-8 is already taken by the composed-versus-fused finding above and
 is cross-referenced from [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
@@ -699,13 +708,13 @@ them.
 
 ---
 
-### X-9 · Does row alignment earn its memory? · `TODO`
+### X-9 · Does row alignment earn its memory? · `DONE`
 
 **Gates:** [D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default) —
 currently **provisional**, and the only such decision in the project ·
 [E-1](ARCHITECTURE.md#9-open-questions-and-planned-experiments) · task
 [T2.8](TASKS.md) · completes
-[X-1](#x-1--row-alignment-memory-cost--partial), which measured the cost side and
+[X-1](#x-1--row-alignment-memory-cost--done), which measured the cost side and
 not the benefit side.
 
 **Question:** Does row alignment beyond word granularity measurably speed up any
@@ -735,19 +744,82 @@ cache question, which is exactly what a laptop hides. x86 first is fine as a che
 signal but cannot close E-1; never under emulation. Architecture, throttle state
 before **and** after, governor and core pinning get recorded with the result.
 
-**Method:** *pending* — benchmark to be committed under `bincv-cpp/benchmark/`,
-raw output under `bincv-cpp/results/`, both cited here when the run happens.
-Reduction timings carry the X-7 popcount-lowering caveat above.
+**Method:** `bincv-cpp/benchmark/alignment_benchmark.cpp`, committed at 3383996
+**before** it was run; raw output and the full reading in
+`bincv-cpp/results/alignment_benchmark.log`. Four alignments are built, checked to
+agree with the word-granularity baseline on every pixel of every image, and then
+timed **interleaved** — one batch of each per round, round-robin — because a 5%
+question is the same order as the drift a sequential run would charge to whichever
+variant went last. Ratios are on medians of 9 batches; min/median/max is printed
+per variant. Reduction timings carry the X-7 popcount-lowering caveat above.
 
-**Result:** *pending*
+**Environment** (identical for all three runs; `scripts/run_on_pi.sh pi4`):
 
-**Conclusion:** *pending*
+```
+device:           pi4
+cpu:              Raspberry Pi 4 Model B Rev 1.5 (Cortex-A72)
+arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+compiler:         g++ (Debian 14.2.0-19) 14.2.0, Release (-O2 -DNDEBUG)
+governor:         performance (restored to ondemand on exit)
+core pinning:     taskset -c 3
+throttled before / after: throttled=0x0 / throttled=0x0   (every run)
+benchmark commit: 3383996
+```
 
-**Decision:** *pending*
+**Result** — speedup against word granularity, three runs. **>1.00× means the
+wider alignment is faster**, which is the direction the rule reads. Per-run batch
+spread never exceeded 7%.
+
+| Size | Alignment | bytes/image | bitwiseAnd | countNonZero |
+|---|---|---|---|---|
+| 640×480 | 4 (word) | 38400 | 1.000× | 1.000× |
+| 640×480 | 16 | 38400 (+0%) | 1.008 / 0.983 / 1.001× | 1.000 / 1.000 / 1.001× |
+| 640×480 | 32 | 46080 (+20%) | **0.321 / 0.311 / 0.321×** | 0.999 / 0.999 / 0.998× |
+| 640×480 | 64 | 61440 (+60%) | **0.211 / 0.205 / 0.209×** | 0.996 / 0.996 / 0.996× |
+| 94×60 | 4 (word) | 720 | 1.000× | 1.000× |
+| 94×60 | 16 | 960 (+33%) | 0.988 / 1.000 / 0.993× | 1.009 / 1.000 / 0.990× |
+| 94×60 | 32 | 1920 (+167%) | 0.991 / 0.980 / 0.994× | 0.974 / 1.000 / 0.999× |
+| 94×60 | 64 | 3840 (+433%) | 0.913 / 0.874 / 0.929× | 0.956 / 0.947 / 0.992× |
+
+**Conclusion:** **No alignment beats word granularity anywhere, on either kernel,
+in any run.** The largest number in the table is 1.008×, which sits inside its own
+row's 5–6% batch spread — a null result, not a small win. The hypothesis held.
+
+Two of the slowdowns are large enough to be worth naming, and both are
+consequences of choosing the alignment rather than confounds:
+
+1. `ops/logic.hpp`'s contiguous fast path requires every stride to equal the words
+   a row needs, so **over-aligning disables it**: `bitwiseAnd` at 640×480 runs
+   3.1× slower at alignment 32 and 4.8× slower at alignment 64, while using 20%
+   and 60% more memory. At 94×60 the width is not a whole number of words, no
+   variant takes that path, and the cliff does not appear.
+2. Padding words are allocated and never read, so a wider stride spends cache
+   lines on nothing — the residual 0.87–0.99× at 94×60.
+
+`countNonZero` has no fast path and walks rows unconditionally, so its column is
+the clean isolation of alignment alone: **flat to within 0.5% at 640×480 across
+all four alignments.** On this core the alignment effect by itself is zero.
+
+One thing this does *not* test, stated so nobody credits it with more than it
+did: `BinMat` allocates with `new[]`, whose guarantee here is 16 bytes, so
+`rowAlignment` aligns the row **stride** and not the base pointer — the measured
+base alignment varies with the allocator, not with the request. So the result is
+that making rows mutually congruent buys nothing. Absolutely-64-byte-aligned rows
+are not something any binCV API can currently ask for, and nothing in the MVP
+asks for them.
+
+**Decision:** The rule's **first band** applies: speedup < 5% on all kernels →
+**D-4 confirmed, E-1 closed, and no profile system is built.** D-4 loses the
+"provisional" qualifier it has carried since X-1; the project now has no
+provisional decisions. Larger alignment stays available per object and is
+documented as costing 20–433% of memory to buy nothing measurable — and, for a
+dense-strided kernel at a word-multiple width, to cost 3–5× the time as well.
+[X-1](#x-1--row-alignment-memory-cost--done) is completed by this entry and is
+no longer `PARTIAL`.
 
 ---
 
-### X-10 · Default word width · `TODO`
+### X-10 · Default word width · `DONE`
 
 **Gates:** `BinMat`'s default template argument — affects every kernel ·
 [E-2](ARCHITECTURE.md#9-open-questions-and-planned-experiments) · task
@@ -782,21 +854,91 @@ the three — on `armv7l` every `uint64_t` operation is synthesised from 32-bit
 pairs, so the result would describe the compiler rather than the hardware.
 `aarch64` is confirmed before anything is recorded.
 
-**Method:** *pending* — benchmark to be committed under `bincv-cpp/benchmark/`, raw
-output under `bincv-cpp/results/`. The width axis interacts with the X-7 lowering
-directly: on x86 every width pays the same per-word `__popcountdi2` call, which
-flatters the narrow words and would invert the ranking. x86 results, if taken, are
-signal only.
+**Method:** `bincv-cpp/benchmark/wordwidth_benchmark.cpp`, committed at 3383996
+**before** it was run; raw output in `bincv-cpp/results/wordwidth_benchmark.log`.
+All four widths hold the same four images, are checked to agree on every count and
+every AND pixel, and are timed interleaved round-robin; ratios are on medians of 9
+batches. The footprint half is exact integer arithmetic over a pyramid ladder and
+needs no device. The width axis interacts with the X-7 lowering directly: on x86
+every width pays the same per-word `__popcountdi2` call, which flatters the narrow
+words and would invert the ranking. x86 results, if taken, are signal only.
 
-**Result:** *pending*
+**Environment** (identical for all three runs; `scripts/run_on_pi.sh pi4`):
 
-**Conclusion:** *pending*
+```
+device:           pi4
+cpu:              Raspberry Pi 4 Model B Rev 1.5 (Cortex-A72)
+arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+compiler:         g++ (Debian 14.2.0-19) 14.2.0, Release (-O2 -DNDEBUG)
+governor:         performance (restored to ondemand on exit)
+core pinning:     taskset -c 3
+throttled before / after: throttled=0x0 / throttled=0x0   (every run)
+benchmark commit: 3383996
+```
 
-**Decision:** *pending*
+**Result — speed**, three runs, against `uint32_t`. >1.00× is faster than the
+current default.
+
+| Size | Word | bitwiseAnd | countNonZero | batch spread |
+|---|---|---|---|---|
+| 640×480 | `uint8_t` | 0.959 / 0.962 / 1.065× | 0.247 / 0.247 / 0.247× | 10–17% / 0.1% |
+| 640×480 | `uint16_t` | 0.989 / 0.962 / 1.010× | 0.463 / 0.463 / 0.463× | 7–12% / 0.1% |
+| 640×480 | `uint64_t` | 0.974 / 0.959 / 1.035× | **1.941 / 1.942 / 1.939×** | 3–13% / 0.2% |
+| 94×60 | `uint8_t` | 0.604 / 0.607 / 0.607× | 0.315 / 0.316 / 0.316× | 0.2% |
+| 94×60 | `uint16_t` | 0.579 / 0.579 / 0.574× | 0.580 / 0.580 / 0.580× | 0.2% |
+| 94×60 | `uint64_t` | **1.285 / 1.285 / 1.285×** | **1.562 / 1.562 / 1.561×** | 0.1% |
+
+**Result — footprint**, exact, architecture-independent, bytes for one plane at
+word granularity:
+
+| Size | `uint8` | `uint16` | `uint32` | `uint64` | u64 vs u32 |
+|---|---|---|---|---|---|
+| 640×480 (L0) | 38400 | 38400 | 38400 | 38400 | 0.0% |
+| 320×240 (L1) | 9600 | 9600 | 9600 | 9600 | 0.0% |
+| 160×120 (L2) | 2400 | 2400 | 2400 | 2880 | **+20.0%** |
+| 752×480 (L0) | 45120 | 45120 | 46080 | 46080 | 0.0% |
+| 188×120 (L2) | 2880 | 2880 | 2880 | 2880 | 0.0% |
+| 94×60 (L3) | 720 | 720 | 720 | 960 | **+33.3%** |
+| 47×30 (L4) | 180 | 180 | 240 | 240 | 0.0% |
+
+**Conclusion:** **The two halves of the rule point in opposite directions, exactly
+as the hypothesis above predicted — and the rule is a conjunction, so the
+footprint clause decides.**
+
+`uint64_t` is a large, reproducible win on the reduction: **1.94× at 640×480 and
+1.56× at 94×60**, stable to 0.2% across three runs. That clears ">10% on bulk
+kernels" outright. `bitwiseAnd` is a null result at 640×480 (0.96–1.07× against a
+3–17% batch spread) because it is memory-bound and all four widths move identical
+bytes there; at 94×60, where per-row overhead dominates, `uint64_t` wins 1.29×.
+Narrow words are much worse on the reduction — `uint8_t` at 0.25× is the per-word
+popcount lowering paid eight times as often, which is X-7's finding seen from the
+other side.
+
+But `uint64_t` costs **+33.3% at 94×60 and +20.0% at 160×120**, and nothing at
+either full frame. The penalty lands exactly where T2.9 warned it would — the
+upper pyramid levels LK touches every frame. **Had this been measured only at
+640×480, every footprint row would have read 0.0% and the experiment would have
+concluded the opposite.** The trap was real, not hypothetical.
+
+**Decision:** **Keep `uint32_t` as the default.** The rule's second clause fires
+— footprint increases at small pyramid levels — and memory wins ties. This is not
+a tie being broken casually: a measured 1.94× on the reduction is being **declined
+on footprint grounds**, which is the project's stated tiebreak doing exactly the
+work it exists to do, and it is recorded here so that nobody has to rediscover
+that the speed was on the table. Promoted to
+[D-14](ARCHITECTURE.md#d-14-uint32_t-is-the-default-word-type).
+
+**What this does not settle, and deliberately does not decide:** the word type is
+a per-object template parameter (D-1), so nothing stops a pyramid from using
+`uint64_t` at the levels where it costs no bytes (L0, L1, and 188×120) and
+`uint32_t` above them. This experiment has now priced both sides of that, but
+per-level word width is a *new* decision that no E-entry registers, and picking it
+here would be the same mistake this log exists to prevent. Registered as
+[E-9](ARCHITECTURE.md#9-open-questions-and-planned-experiments).
 
 ---
 
-### X-11 · Incremental versus recomputed window reductions · `TODO`
+### X-11 · Incremental versus recomputed window reductions · `DONE`
 
 **Gates:** [T2.6](TASKS.md)'s interface and [T3.6](TASKS.md)'s implementation ·
 [E-3](ARCHITECTURE.md#9-open-questions-and-planned-experiments) · task
@@ -847,19 +989,160 @@ since that is what favors incremental.
 accumulator stays resident in a 32 KiB L1D — a laptop with four times the L1 would
 favour incremental more than the deployment target does.
 
-**Method:** *pending* — benchmark to be committed under `bincv-cpp/benchmark/`
-(alongside `reduce_target_benchmark.cpp`, which carries the X-8 axis), raw output
-under `bincv-cpp/results/`. Both sides compared on every window before timing, as
-X-8 did. Every variant here is popcount-bound, so the X-7 caveat is at its
-strongest: the ratio between recompute and incremental depends on what a popcount
-costs relative to a load, and that is exactly what the missing `-march` changes.
-x86 cannot rank these.
+**Method:** `bincv-cpp/benchmark/window_benchmark.cpp`, committed at 3383996
+**before** it was run; raw output in `bincv-cpp/results/window_benchmark.log`.
+Every variant is compared against the shipped kernel on every window of every
+image before anything is timed, as X-8 did, and the variants under comparison are
+timed interleaved round-robin. Every variant here is popcount-bound except INC-COL,
+which issues none — so the X-7 caveat is at its strongest: the ratio between
+recompute and incremental *is* a function of what a popcount costs relative to a
+load, and that is exactly what the missing `-march` changes. x86 cannot rank these.
 
-**Result:** *pending*
+**Environment** (identical for all three runs; `scripts/run_on_pi.sh pi4`):
 
-**Conclusion:** *pending*
+```
+device:           pi4
+cpu:              Raspberry Pi 4 Model B Rev 1.5 (Cortex-A72)
+arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+compiler:         g++ (Debian 14.2.0-19) 14.2.0, Release (-O2 -DNDEBUG)
+governor:         performance (restored to ondemand on exit)
+core pinning:     taskset -c 3
+throttled before / after: throttled=0x0 / throttled=0x0   (every run)
+benchmark commit: 3383996
+```
 
-**Decision:** *pending*
+**Two accumulators, not one**, because "a sliding accumulator" over bit-packed
+rows is not a single design and the two differ in exactly the resource T2.10 asks
+about:
+
+- **INC-COL** — the separable box accumulator: per-column running sums slid in x
+  and y. Issues **no popcount at all**. Needs a caller-provided array of
+  `sweepWidth + W − 1` counters.
+- **INC-ROW** — slides vertically with **one scalar**: the window sum gains the
+  incoming row's windowed popcount and loses the outgoing row's. Stays
+  word-parallel, needs no scratch.
+
+**Three access patterns, all of them in the MVP**, because the rule names a window
+size but not a pattern, and T2.10's two requirements ("~200 keypoints" and
+"include the heavy-overlap case") are not the same workload:
+
+- **SPARSE** — 200 isolated keypoints (LK covariance, ARCHITECTURE §7.5)
+- **SEARCH** — 200 keypoints × an 8×8 sweep = 12800 windows (heavy local overlap)
+- **DENSE** — every window position in the frame (corner response, §7.6, which
+  §7.6 builds from the same covariance machinery)
+
+**Result — axis 1**, ns/window, uint32_t, 640×480, run 3 (runs 1 and 2 agree to
+within 2% on every cell; per-run batch spread was 0.0–2.2%):
+
+| Pattern | W | recompute | INC-COL | INC-ROW | INC-COL × | INC-ROW × | scratch |
+|---|---|---|---|---|---|---|---|
+| SPARSE | 7 | 67.9 | 251.8 | 69.1 | 0.27× | 0.98× | 28 B |
+| SEARCH | 7 | 47.2 | 18.1 | 13.2 | 2.61× | 3.58× | 56 B |
+| DENSE | 7 | 44.9 | 6.9 | 8.8 | 6.48× | 5.11× | 2560 B |
+| SPARSE | 15 | 138.0 | 976.3 | 118.9 | 0.14× | 1.16× | 60 B |
+| SEARCH | 15 | 110.8 | 39.7 | 20.4 | 2.79× | 5.44× | 88 B |
+| DENSE | 15 | 106.7 | 7.1 | 10.2 | 15.06× | 10.47× | 2560 B |
+| SPARSE | **31** | 314.1 | 3879.6 | 238.1 | 0.08× | **1.32×** | 124 B |
+| SEARCH | **31** | 269.8 | 104.1 | 36.6 | 2.59× | **7.37×** | 152 B |
+| DENSE | **31** | 267.3 | 7.4 | 13.2 | **36.35×** | 20.27× | 2560 B |
+
+Across runs at W=31: SPARSE INC-ROW 1.31/1.32/1.32×, SEARCH INC-ROW
+7.31/7.33/7.37×, DENSE INC-COL 36.37/36.35/36.35×.
+
+**Result — axis 2**, ns/keypoint, composed ÷ fused:
+
+| Word | W | composed | fused | run 1 | run 2 | run 3 |
+|---|---|---|---|---|---|---|
+| `uint32_t` | 7 | 193.7 | 152.9 | 1.26× | 1.27× | 1.27× |
+| `uint32_t` | 15 | 432.6 | 344.0 | 1.26× | 1.25× | 1.26× |
+| `uint32_t` | **31** | 1011.4 | 796.3 | **1.27×** | **1.27×** | **1.27×** |
+| `uint64_t` | 7 | 200.3 | 144.6 | 1.38× | 1.39× | 1.38× |
+| `uint64_t` | 15 | 390.7 | 300.0 | 1.30× | 1.31× | 1.30× |
+| `uint64_t` | **31** | 822.3 | 637.0 | **1.29×** | **1.29×** | **1.29×** |
+
+**Result — axis 3**, ns/keypoint, uint32_t, and the memory each form needs:
+
+| W | plane (shipped) | four-arg XOR | plane ÷ 4arg |
+|---|---|---|---|
+| 7 | 109.4 | 152.1 | 0.72 / 0.74 / 0.78× |
+| 15 | 247.4 | 328.3 | 0.75 / 0.77 / 0.80× |
+| 31 | 580.3 | 731.9 | 0.79 / 0.79 / 0.80× |
+
+Per frame at W=31 and 200 keypoints, **with the plane's formation cost included**:
+plane 116.1 µs + 6.5 µs = **122.6 µs**; four-arg **146.4 µs**. The plane is 16%
+faster per level even after paying to build it. Memory: the plane is **38400 B per
+pyramid level**, held for the frame's lifetime, against **0 B** for the four-argument
+form — and for scale, the ternary `dx`/`dy` the covariance reads are 4 planes =
+153600 B per level, so the selector is a fifth plane, **+25% on the derivative
+working set of every level**.
+
+**Conclusion:**
+
+*Axis 1.* At 31×31 an accumulator beats recompute in **every** pattern — 1.32×
+where windows barely overlap, 7.4× and 36× where they do. Past the 15% line in all
+three. Which accumulator wins depends on the pattern and they are not
+interchangeable: DENSE favours INC-COL (36×, and its cost per window is constant
+in W — 6.9, 7.1 and 7.4 ns at W = 7, 15 and 31 against recompute's 44.9, 106.7
+and 267.3, because it issues no popcount), while SPARSE
+punishes INC-COL brutally (0.08×: with nothing to slide across it builds W×W bit
+reads of state and discards it). INC-ROW never loses (0.98× at its worst), needs
+no scratch, and is therefore the safer shape for an API that cannot know the
+caller's access pattern.
+
+***The SPARSE row is not an incremental win at all, and this is the surprise of
+the experiment.*** At SPARSE the sweep is 1×1, so INC-ROW's sliding path never
+executes: it issues **exactly the same popcounts over exactly the same masked
+words** as the shipped `countNonZero`, and is still 1.32× faster at W=31, 1.16× at
+15, 0.98× at 7. The only difference is where the sum lands.
+`impl::countViewRegion` carries **one** `size_t` accumulator across every row and
+word of the region, making the whole traversal one serialized dependency chain
+through the popcount latency; INC-ROW accumulates per row and adds the rows,
+giving the core W independent chains. The gain growing with W is what a
+dependency-chain explanation predicts. **That is a finding about the shipped
+reduction's codegen, not about incremental state**, and it is available to every
+region reduction in `ops/reduce.hpp` with no interface change whatsoever. It is
+also a warning about reading axis 1's SPARSE column as evidence for incremental
+state: it is not.
+
+*Axis 2.* 1.27× (`uint32_t`) and 1.29× (`uint64_t`) at 31×31, in all three runs,
+past the 15% line — reproducing X-8's 1.30× in a separate session and extending it
+to two word widths and three window sizes, where it holds from 1.25× to 1.39×. The
+popcount count is identical on both sides, so the delta is redundant traversal:
+three calls visit and load each region word three times.
+
+*Axis 3.* The two goals disagree, which is why T2.10 set no threshold: the plane is
+16% faster per frame and costs 38400 B per level; the four-argument form is 16%
+slower and costs nothing.
+
+**Decision:**
+
+1. **Axis 1 → the rule's second branch: extend T2.6 with incremental state before
+   T3.6 is written.** INC-ROW is the form to expose — it wins or ties everywhere,
+   is word-parallel, and needs no caller scratch, so it does not drag the
+   no-heap-in-kernels rule into the interface. INC-COL's 36× on DENSE is real and
+   large, but it is a *second* shape with a scratch-buffer argument and a pattern
+   in which it loses 12×, so exposing both is a bigger interface question than
+   this experiment's rule answers.
+2. **Axis 2 → add a covariance-shaped entry point to T2.6 before T3.6 is
+   written**, returning `xx`, `yy`, `whenClear`, `whenSet` from one
+   `visitRowWords` pass.
+3. **Axis 3 → the four-argument form**, by CLAUDE.md's stated tiebreak: memory
+   wins when the goals conflict and no explicit choice has been made. It buys
+   38400 B per level — a quarter of the derivative working set — for 16% of one
+   operation's time. Recorded rather than enacted, since it lands with 1 and 2 as
+   T2.6 API work.
+4. **A fourth item that no axis asked for**, from the SPARSE finding: break
+   `impl::countViewRegion`'s single accumulator into per-row partial sums. Free,
+   no interface change, 1.16–1.32× on the region reduction at LK window sizes.
+
+None of the four is implemented in this entry: T2.10 is the experiment, and
+writing the interface it gates in the same commit as the measurement is the exact
+inversion this log exists to prevent. They are scheduled as
+[T2.11](TASKS.md#t211--t26-api-extensions-mandated-by-e-3--todo).
+
+E-3 is **resolved** — with the answer that the simpler API does *not* survive,
+which is the opposite of what the first branch would have given and is why the
+rule was written down first.
 
 ---
 
@@ -869,12 +1152,19 @@ Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-ex
 scheduled as tasks in [TASKS.md](TASKS.md). Each runs **in the phase whose code it
 gates**, not at the end.
 
+**E-1, E-2 and E-3 have closed** on the reference device —
+[X-9](#x-9--does-row-alignment-earn-its-memory--done),
+[X-10](#x-10--default-word-width--done),
+[X-11](#x-11--incremental-versus-recomputed-window-reductions--done). Phase 2 has
+no open experiment left, and the project has no provisional decision left.
+
 | ID | Question | Task | Runs during |
 |---|---|---|---|
-| E-1 | Does alignment beyond word granularity help any kernel? | T2.8 | Phase 2 — rule recorded, [X-9](#x-9--does-row-alignment-earn-its-memory--todo) |
-| E-2 | Best default word width on aarch64 | T2.9 | Phase 2 — rule recorded, [X-10](#x-10--default-word-width--todo) |
-| E-3 | Incremental versus recomputed window reductions | T2.10 | Phase 2 — rule recorded, [X-11](#x-11--incremental-versus-recomputed-window-reductions--todo) |
+| E-8 | Horizontal decimation for `pyrDown`: gather loop or frame-masked unshuffle | T3.4 | Phase 3 |
 | E-4 | Does generic-N regress the specialized paths? | T3.9 | Phase 3 |
 | E-7 | Bits needed per pyramid level | T4.1 | Phase 4 |
 | E-6 | Hybrid LK versus binary block matching | T4.2 | Phase 4 |
 | E-5 | End-to-end accuracy, footprint, speed | T4.3 | Phase 4 |
+| E-9 | Per-level word width down the pyramid | — | unscheduled; spun out of [X-10](#x-10--default-word-width--done), which priced both sides |
+
+(E-8 was registered in ARCHITECTURE §9 but had never been listed here.)

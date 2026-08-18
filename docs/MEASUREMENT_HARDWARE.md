@@ -164,8 +164,10 @@ closed on x86.
 alignment padding, word width, whether an accumulator stays L1-resident — not for
 validating the core approach.
 
-**Blocked:** T2.8, T2.9, T2.10 (closing E-1, E-2, E-3), Phase 4 validation, and
-meaningful Phase 5 NEON work.
+**Blocked:** Phase 4 validation and meaningful Phase 5 NEON work. (T2.8, T2.9 and
+T2.10 were blocked on this device too, and all three have now run on it —
+[X-9, X-10, X-11](../EXPERIMENTS.md). Their x86 pre-runs disagreed with the device
+on the sign of several rows, which is the case for the device in one line.)
 
 **Why the blocked set is small:** two architecture decisions insulate the
 structural work from the tuning results.

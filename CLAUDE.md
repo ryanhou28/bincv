@@ -40,8 +40,9 @@ footprint question; neither does a benchmark without a stated decision rule.
 - **Promote the conclusion** to a D-record in ARCHITECTURE §8.
 
 Experiments run **in the phase whose code they gate**, never at the end. A
-decision made without this loop is provisional and must say so —
-[D-4](ARCHITECTURE.md#d-4-word-granularity-alignment-by-default) currently is.
+decision made without this loop is provisional and must say so. **No decision on
+the list is provisional right now** — D-4 was the last one, and X-9 closed it on
+the reference device.
 
 If a task needs a performance or footprint choice that no experiment has settled,
 **stop and ask** rather than picking one.
