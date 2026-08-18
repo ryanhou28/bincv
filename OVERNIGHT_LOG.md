@@ -27,6 +27,55 @@ working set exceeds the 1 MiB L2 — as a bandwidth-bound kernel must. The x86
 flatness is explained by that machine's 32 MiB L3. My suspicion was reasonable
 and wrong; the smaller cache is what settled it.
 
+### E-1, E-2, E-3 — all three closed on the reference device
+
+Pre-registration verified by git order: rules (`4245210`, EXPERIMENTS.md **only**,
+no measurement code) → benchmark (`3383996`) → results (`1363edf`). The reviewers
+then found validity defects that forced a **re-measure** before any number was
+accepted (`0072c1a`, `3f32493`).
+
+**X-9 / E-1 — D-4 confirmed. The project now has no provisional decision.**
+Best of twelve alignment combinations: **1.008×**, inside its own spread.
+`countNonZero` flat to 0.5%. And over-aligning is **3.1–4.8× slower** on
+`bitwiseAnd`, because padding disables `logic.hpp`'s contiguous fast path — the
+opposite of the intuition the alignment default was originally hedging against.
+No profile system will be built. X-1 moves PARTIAL → DONE.
+
+**X-10 / E-2 — `uint32_t` kept, declining a measured 1.94×.**
+`uint64_t` won `countNonZero` by **1.94×** at 640×480 (spread 0.2%). But footprint
+rose **+20% at 160×120 and +33.3% at 94×60**. The pre-registered rule required
+">10% faster **and** no footprint increase" — the conjunction fails, so the rule
+selects `uint32_t`.
+
+**T2.9's trap was real and would have inverted the decision.** Measured only at
+640×480, every footprint row reads 0.0% and `uint64_t` wins outright. The warning
+to measure at 94×60 was written into the task before the data existed, and it is
+the only reason the right branch was taken.
+
+This is the co-equal-goals rule actually biting: a large, real speedup declined on
+memory grounds. The nuanced answer — different word widths per pyramid level — is
+registered as **E-9**, not decided.
+
+**X-11 / E-3 — all three axes reject the simpler shape.**
+
+| axis | at 31×31 | outcome |
+|---|---|---|
+| incremental vs recompute | 1.32× sparse, 7.4× search, **36× dense** | extend T2.6 |
+| fused vs composed covariance | 1.27–1.29× | add covariance entry point |
+| selector plane vs four-arg | plane 16% faster, +38400 B/level | four-arg — memory wins |
+
+→ **D-15**, scheduled as **T2.11**. **T3.6 is repointed from T2.10 to T2.11** with
+the reasoning recorded, so it is not written against an API that measurement has
+already superseded.
+
+**A finding inside the finding.** The "sparse" column of axis 1 is *not* an
+incremental win — at 200 isolated keypoints the sliding path never executes, yet
+it is still 1.32× faster at W=31 and 0.98× at W=7. Cause: `impl::countViewRegion`
+accumulates into **one** `size_t` across the whole region, so the loop is one
+dependency chain through popcount latency. Per-row partial sums give W independent
+chains, and the gain growing with W is exactly what that predicts. Free, no
+interface change, benefits every region reduction. Carried as T2.11 item 4.
+
 ### T2.7 — bit-sliced arithmetic, proven exhaustively
 
 `ops/bitslice.hpp`. Every primitive here is pointwise in the bit *lane*, so k
