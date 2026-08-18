@@ -1,6 +1,15 @@
 E-3 / T2.10 -- window reductions: three interface axes
 ======================================================
 
+THIS FILE IS THE PRE-T2.11 RECORD AND IS KEPT AS ONE. Every variant timed below
+was a measurement copy living in benchmark/window_benchmark.cpp, and the recompute
+baseline every ratio is divided by is the one-accumulator-per-region kernel that
+T2.11 item 4 replaced. The re-measurement against the SHIPPED entry points is
+`window_benchmark_t211.log` in this directory; it does not supersede this file,
+and this file is not updated to match it. The two answer different questions --
+"what is the accumulator worth" and "what does it buy in the shipped library" --
+and T2.11's done-when requires both to exist side by side.
+
 Gates T2.6's interface and T3.6's implementation. T3.6 cannot start until this
 closes. Compares binCV against binCV throughout, so ARCHITECTURE 10.3's OpenCV
 denominator does not apply to any of the three axes.

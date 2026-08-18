@@ -1237,7 +1237,7 @@ SplitCount countAndSplit(BinMatConstView<W> a, BinMatConstView<W> b,
   built here, because [E-3](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
   had not run and premature incremental state would have fixed the API shape early.
   **E-3 has now run and chose incremental** ([X-11](EXPERIMENTS.md)); it lands in
-  [T2.11](#t211--t26-api-extensions-mandated-by-e-3--todo), not here.
+  [T2.11](#t211--t26-api-extensions-mandated-by-e-3--done), not here.
 - Windows are large (31×31) and overlap heavily; note that in the docstring so the
   E-3 experiment has context.
 
@@ -1304,7 +1304,7 @@ consecutive iterations on one keypoint, re-read almost the same words — which 
 exactly the regime where a sliding accumulator might win. **E-3 has since measured
 it and it does**, by **7.3× on a search sweep and 20× on a dense scan** at 31×31
 for the form being adopted ([X-11](EXPERIMENTS.md)), so the
-accumulator is being added in [T2.11](#t211--t26-api-extensions-mandated-by-e-3--todo).
+accumulator is being added in [T2.11](#t211--t26-api-extensions-mandated-by-e-3--done).
 The signature chosen here survives that: incremental state arrives as an additional
 entry point rather than as a change to this one.
 
@@ -1670,12 +1670,12 @@ interface change, and it must not be read as evidence for incremental state.
 
 The interface was **not** changed in the same commit as the measurement — that
 inversion is what this task exists to prevent. The four changes the data mandates
-are scheduled as **[T2.11](#t211--t26-api-extensions-mandated-by-e-3--todo)**, and
+are scheduled as **[T2.11](#t211--t26-api-extensions-mandated-by-e-3--done)**, and
 **T3.6 is now blocked on T2.11 rather than on T2.10.**
 
 ---
 
-### T2.11 · T2.6 API extensions mandated by E-3 · `TODO`
+### T2.11 · T2.6 API extensions mandated by E-3 · `DONE`
 
 **Depends:** T2.10 (`DONE` — this task exists only because of what it measured)
 **Gates:** [T3.6](#t36--lk-gradient-covariance--todo), which must be written against the
@@ -1747,6 +1747,50 @@ the discrepancy.
   rather than replacing them silently
 
 **Verify:** V-ALL
+
+**RESULT — all four landed, item 4 first.** `include/bincv-cpp/ops/reduce.hpp`
+now carries:
+
+| Item | What shipped |
+|---|---|
+| 4 | `impl::countRowRegion` / `countAndRowRegion` / `splitRowRegion` / `covarianceRowRegion` — every row body returns its OWN partial sum, and all four reductions loop over them. No interface change. |
+| 1 | `SlidingWindowCount<W>` — one scalar of state, no caller scratch, column band clipped once at construction, rows clipped per position |
+| 2 | `countCovariance(a, b, c, region)` → `CovarianceCount{xx, yy, xy}` from one `visitRowWords` pass |
+| 3 | `countAndSplit(a, b, c0, c1, region)` and `countCovariance(a, b, c0, c1, region)` — selector XOR-ed in the word loop, no plane at any level. Both three-argument overloads kept. |
+
+The fifth signature — the *fused* covariance taking two sign planes — is neither
+item 2 nor item 3 alone but the conjunction the two decisions force: T3.6's spec
+requires one traversal AND no scratch, and only that overload is both.
+
+**Correctness.** `tests/test_reduce.cpp` gains `Reduce.Sliding_*` and
+`Reduce.Fused_*`: whole-frame sweeps comparing every window position against
+recompute and against the composition, edge-clipped positions included, plus a
+freshly-constructed accumulator at each position. 546572 → 594184 core checks.
+Mutation-tested — a `slideDown()` that never removes row 0 (a drift visible only
+after the window passes the top of the image) fails all four `Reduce.Sliding_*`.
+
+**Re-measured on the reference device, three runs**
+([X-11b](EXPERIMENTS.md), `bincv-cpp/results/window_benchmark_t211.log`). Post-split
+beside pre-split, at 31×31, INC-ROW:
+
+| Pattern | X-11 pre-split | X-11b post-split | X-11's prediction |
+|---|---|---|---|
+| SEARCH | 7.33× | **5.96×** | ~5.6× — met |
+| DENSE | 20.25× | **15.92×** | ~15× — met |
+| SPARSE | 1.32× | 1.10× | ~1.0× — **not met**; see X-11b's amendment |
+
+Axis 2 at 31×31: 1.20× (`uint32_t`), 1.27× (`uint64_t`) — still past 15%. Axis 3:
+the plane is 11–14% faster per frame (was 16–18%) for the same +25% of the
+derivative working set, so the tiebreak lands where it landed.
+
+**AND ONE MEASUREMENT THAT CONTRADICTS THIS TASK'S OWN ITEM 4.** Timed directly
+and interleaved rather than inferred, the accumulator split is worth **1.03–1.09×
+at the LK window sizes, not the 1.15–1.32× recorded in X-11 and D-15**, and it is
+a 5–6% loss at W=7 on the overlapping patterns. X-11 read that figure off axis 1's
+isolated-keypoint column, which differs from a per-window `countNonZero` in two
+ways rather than one. Reported in [X-11b](EXPERIMENTS.md) and amended in
+[D-15](ARCHITECTURE.md#d-15-window-reductions-get-incremental-state-and-a-fused-covariance);
+no decision moves, since the split costs nothing and still wins at W=15 and 31.
 
 ---
 
@@ -1912,7 +1956,7 @@ Reference semantics: `SEAL/src/keypoint_tracking/gradients.cpp`,
 
 ### T3.6 · LK gradient covariance · `TODO`
 
-**Depends:** T3.5 and **T2.11**. E-3 is settled (T2.10, [X-11](EXPERIMENTS.md)) and it went the way this line was written to guard against: incremental state and a fused covariance entry point both won, so T2.6's current shape is **not** the one to build on. Wait for T2.11 to land them rather than writing this against the recompute-only API and rewriting it afterwards.
+**Depends:** T3.5 and **T2.11** (`DONE`). E-3 is settled (T2.10, [X-11](EXPERIMENTS.md)) and it went the way this line was written to guard against: incremental state and a fused covariance entry point both won, so T2.6's original shape was **not** the one to build on. T2.11 landed the extended interface, so this task is now unblocked on that side and writes against `countCovariance(dx.constMagnitude(0), dy.constMagnitude(0), dx.constSign(), dy.constSign(), window)` — one traversal, no scratch.
 **Files:** `include/bincv-cpp/ops/covariance.hpp` (new)
 
 **Goal:** The load-bearing operation

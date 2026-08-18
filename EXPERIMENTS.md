@@ -1251,11 +1251,132 @@ levels); the four-argument form is that much slower and costs nothing anywhere.
 None of the four is implemented in this entry: T2.10 is the experiment, and
 writing the interface it gates in the same commit as the measurement is the exact
 inversion this log exists to prevent. They are scheduled as
-[T2.11](TASKS.md#t211--t26-api-extensions-mandated-by-e-3--todo).
+[T2.11](TASKS.md#t211--t26-api-extensions-mandated-by-e-3--done).
 
 E-3 is **resolved** — with the answer that the simpler API does *not* survive,
 which is the opposite of what the first branch would have given and is why the
 rule was written down first.
+
+---
+
+#### X-11b · The same three axes re-measured after T2.11 landed them · `DONE`
+
+**Why this section exists.** Everything above was measured against *copies* of the
+winning shapes, living in the benchmark, because writing them into
+`ops/reduce.hpp` in the same commit as the measurement that gated them is the
+inversion this log exists to prevent. [T2.11](TASKS.md) then landed them, and its
+done-when requires the axis-1 numbers to be re-measured **after item 4** and the
+post-split ratios recorded **next to** the pre-split ones rather than in place of
+them. This is that record. Neither set supersedes the other: the tables above
+answer *what is the accumulator worth*, these answer *what does it buy in the
+shipped library*.
+
+**Method:** the same `bincv-cpp/benchmark/window_benchmark.cpp`, now timing
+`bincv::SlidingWindowCount`, `bincv::countCovariance` and the four-argument
+`bincv::countAndSplit` instead of its own copies, plus one new variant —
+`recompute-1acc`, the recompute path with item 4 undone — timed interleaved with
+the rest so that item 4's own effect is measured the same way everything else here
+is. Raw output in `bincv-cpp/results/window_benchmark_t211.log`. The pre-split
+`window_benchmark.log` keeps its measured data unchanged — not one number in it
+was touched; the only edit is a header note at the top pointing at this
+re-measurement and saying that neither file supersedes the other.
+
+**Environment** (identical for all three runs; `scripts/run_on_pi.sh pi4`):
+
+```
+device:           pi4
+cpu:              Raspberry Pi 4 Model B Rev 1.5 (Cortex-A72)
+arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+compiler:         g++ (Debian 14.2.0-19) 14.2.0, Release (-O2 -DNDEBUG)
+governor:         performance (restored to ondemand on exit)
+core pinning:     taskset -c 3
+throttled before / after: throttled=0x0 / throttled=0x0   (every run)
+```
+
+**Axis 1, INC-ROW — the adopted form — pre-split beside post-split**, ×
+against recompute, at each window size (post-split figures are run 3; the three
+runs agree to within 2%):
+
+| Pattern | W | X-11 pre-split | X-11b post-split | predicted |
+|---|---|---|---|---|
+| SPARSE | 7 | 0.98× | 1.05× | — |
+| SEARCH | 7 | 3.59× | 3.74× | — |
+| DENSE | 7 | 5.09× | 4.94× | — |
+| SPARSE | 15 | 1.15× | 1.09× | — |
+| SEARCH | 15 | 5.46× | 4.60× | — |
+| DENSE | 15 | 10.43× | 8.51× | — |
+| SPARSE | **31** | **1.32×** | **1.10×** | ~1.0× — **not met**, see the amendment below |
+| SEARCH | **31** | **7.33×** | **5.96×** | **~5.6× — met** |
+| DENSE | **31** | **20.25×** | **15.92×** | **~15× — met** |
+
+Across runs at W=31: SEARCH 5.96/5.95/5.96×, DENSE 15.81/15.74/15.92×, SPARSE
+1.10/1.10/1.10×. Scratch is still **0 B**. The two ratios the decision rests on
+land where this entry predicted they would when it wrote down that landing item 4
+first would shrink them.
+
+**Axis 2**, composed ÷ fused, both sides carrying the accumulator split:
+
+| Word | W | X-11 | X-11b |
+|---|---|---|---|
+| `uint32_t` | 7 | 1.26× | 1.37× |
+| `uint32_t` | 15 | 1.25× | 1.25× |
+| `uint32_t` | **31** | **1.27×** | **1.20×** |
+| `uint64_t` | 7 | 1.36× | 1.65× |
+| `uint64_t` | 15 | 1.29× | 1.39× |
+| `uint64_t` | **31** | **1.29×** | **1.27×** |
+
+Still past the 15% line at every point. `uint32_t` at 31×31 moved 1.27× → 1.20×
+because item 4 helps the denominator more than the numerator: the composition
+makes two `countNonZero` calls and the fused pass makes none. Extra memory **0 B**
+for both, unchanged.
+
+**Axis 3**, plane ÷ four-argument, `uint32_t`:
+
+| W | X-11 | X-11b |
+|---|---|---|
+| 7 | 0.74× | 0.82× |
+| 15 | 0.77× | 0.85× |
+| **31** | **0.80×** | **0.85×** |
+
+Per frame at W=31 with formation included: plane 118.2 µs + 7.5 µs = **125.7 µs**,
+four-argument **139.1 µs** — the plane is **11–14%** faster across the three runs,
+against X-11's 16–18%. Memory is unchanged and is what decides the axis: 38400 B
+at 640×480 scaling with the level, ~51 kB over four levels, a fifth plane on top
+of the derivative's four (+25% of that working set), against 0 B at every level.
+The direction did not move, so CLAUDE.md's tiebreak reaches the same place.
+
+**A MEASUREMENT THAT CONTRADICTS A CLAIM IN THIS ENTRY, reported rather than
+quietly corrected.** X-11's decision 4 above, and
+[D-15](ARCHITECTURE.md#d-15-window-reductions-get-incremental-state-and-a-fused-covariance),
+record the accumulator split as worth **1.15–1.32× at LK window sizes**. Measured
+directly and interleaved — `recompute-1acc` ÷ `recompute`, identical popcounts
+over identical words, the only difference being where the sum lands — it is worth:
+
+| Pattern | W=7 | W=15 | W=31 |
+|---|---|---|---|
+| SPARSE | 1.09× | 1.04× | **1.08×** |
+| SEARCH | 0.95× | 0.99× | **1.03×** |
+| DENSE | 0.94× | 0.98× | **1.04×** |
+
+**1.03–1.09× at the LK window sizes, and a 5–6% loss on the overlapping patterns
+at W=7.** The original figure was never measured directly: X-11 *inferred* it from
+axis 1's SPARSE column, on the argument that at a 1×1 sweep INC-ROW's sliding path
+never executes and so the only thing left to explain 1.32× is the accumulator.
+That argument has a gap — INC-ROW differs from a per-window `countNonZero` in
+**two** ways, not one: where the sum lands, *and* that it clips its column band
+once at construction instead of running the full region clip per position. This
+run separates them: item 4 alone is 1.08× at SPARSE W=31, and `SlidingWindowCount`
+against the already-split recompute is still 1.10× there, on a path that issues no
+incremental update at all. 1.08 × 1.10 = 1.19×, not 1.32×; the remainder is not
+accounted for here and is not claimed — `recompute-1acc` is the pre-split
+*accumulator* on today's clipping code rather than a byte-exact restoration of
+commit 3f32493's kernel, and the two figures come from different sessions.
+
+**Nothing about any decision changes.** Item 4 costs no memory and no interface
+and is a gain at both window sizes LK uses; items 1–3 keep the branches their rules
+selected, by wide margins. What changes is the number to quote for item 4:
+**1.03–1.09×, not 1.15–1.32×**, and the reason the older figure was wrong is that
+it attributed a two-variable difference to one variable.
 
 ---
 

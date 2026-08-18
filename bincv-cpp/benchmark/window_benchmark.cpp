@@ -5,6 +5,28 @@
 // ops/reduce.hpp rather than its speed.
 //
 // ===========================================================================
+// WHAT CHANGED WHEN T2.11 LANDED, AND WHY THIS FILE HAD TO BE RE-RUN
+// ===========================================================================
+//
+// E-3 closed against measurement copies: the winning variants lived in this file,
+// because writing them into ops/reduce.hpp in the same commit as the measurement
+// that gated them is the inversion EXPERIMENTS.md exists to prevent. T2.11 then
+// landed them for real, so this file now times the SHIPPED entry points --
+// bincv::SlidingWindowCount, bincv::countCovariance and the four-argument
+// bincv::countAndSplit -- and a copy survives here only where nothing shipped
+// (INC-COL, which axis 1 explicitly declines to expose).
+//
+// T2.11 also landed a FOURTH change that no axis asked for: impl::countViewRegion
+// carried one accumulator across a whole region, one dependency chain through the
+// popcount latency, and its row bodies now each return their own partial sum. That
+// landed FIRST of the four, so the recompute baseline every ratio below is divided
+// by is up to 1.32x faster than the one X-11 measured. The axis-1 ratios here are
+// therefore SMALLER than X-11's, by design and not by regression: X-11 predicted
+// roughly 5.6x and 15x where it had measured 7.3x and 20x. EXPERIMENTS.md X-11
+// records both sets side by side; neither replaces the other, because they answer
+// "what did the accumulator buy" and "what does it buy in the shipped library".
+//
+// ===========================================================================
 // AXIS 1 -- recompute per window versus a sliding accumulator
 // ===========================================================================
 //
@@ -46,20 +68,26 @@
 //   INC-ROW  slides vertically only, keeping ONE scalar accumulator: the window
 //            sum gains the incoming row's windowed popcount and loses the
 //            outgoing row's. Word-parallel like the shipped kernel, and needs
-//            essentially no extra memory -- so if it is the one that wins, the
-//            interface change T2.6 would need is much smaller.
+//            essentially no extra memory.
 //
-// Both incremental forms are MEASUREMENT CODE. INC-ROW reaches into impl:: for the
-// row masks (as benchmark/reduce_target_benchmark.cpp already does) so that the
-// comparison is between ALGORITHMS and not between one algorithm and the region
-// clipping the other would pay per call. Neither is proposed for include/ by this
-// file; that is the decision the numbers inform.
+// INC-ROW won and is now bincv::SlidingWindowCount, so this file times the shipped
+// class rather than a copy of it. INC-COL remains MEASUREMENT CODE -- axis 1
+// declined to expose it, so there is nothing shipped to time, and it stays here
+// because a rejected alternative with no number next to it is an assertion rather
+// than a decision.
+//
+// A FOURTH variant, recompute-1acc, is the recompute path with T2.11 item 4
+// UNDONE: one accumulator across the whole region. It is timed interleaved with
+// the other three so that item 4's own effect is measured the same way everything
+// else here is, rather than inferred by comparing absolute ns against a run from
+// another session. It also keeps X-11's original denominator alive, so the
+// pre-split ratios that entry quotes can be reproduced from this binary.
 //
 // Windows are placed fully inside the image on this axis. Edge clipping is real
-// (ARCHITECTURE 7.5) and axes 2 and 3 below include it, but the accumulators
-// would need their own clipping logic to agree with the shipped kernel at the
-// border, and a comparison between two implementations of clipping is not the
-// question E-3 asks.
+// (ARCHITECTURE 7.5) and axes 2 and 3 below include it; the shipped
+// SlidingWindowCount clips exactly (tests/test_reduce.cpp sweeps whole frames
+// checking it position by position), but INC-COL here does not, and a comparison
+// between two implementations of clipping is not the question E-3 asks.
 //
 // ===========================================================================
 // AXIS 2 -- the 2x2 covariance composed out of T2.6 versus one fused pass
@@ -71,6 +99,10 @@
 // composition by > 15% at 31x31 -> add it to T2.6 before T3.6 is written; within
 // 15% -> keep the composition and record that the fused form was rejected on data.
 //
+// The fused side is now bincv::countCovariance. BOTH sides carry T2.11's per-row
+// accumulator split, so this ratio is still redundant traversal and nothing else:
+// splitting only the fused side would have made it a mixture of two effects.
+//
 // Re-measured here at three window sizes and at two word widths, in the same
 // session as axis 1, rather than resting on X-8's single 31x31 uint64_t point.
 //
@@ -78,9 +110,11 @@
 // AXIS 3 -- frame-sized selector plane versus a four-argument countAndSplit
 // ===========================================================================
 //
-// countAndSplit's selector `c` is sign_x ^ sign_y, which today the caller forms as
-// a whole extra plane, once per pyramid level. A four-argument form taking the two
-// sign planes and XOR-ing them inside the word loop needs no plane at all.
+// countAndSplit's selector `c` is sign_x ^ sign_y, which the three-argument form
+// takes as a whole extra plane, formed once per pyramid level. The four-argument
+// form takes the two sign planes and XORs them inside the word loop, needing no
+// plane at all. Both are now shipped overloads of bincv::countAndSplit, so this
+// axis times the library rather than a copy.
 //
 // TASKS.md states NO numeric threshold for this axis -- it requires that both
 // memory and speed be reported, "since this is precisely a case where the two
@@ -174,7 +208,41 @@ struct Sweep {
 // AXIS 1 -- the three implementations
 // ---------------------------------------------------------------------------
 
-/// @brief What the API ships today: one countNonZero per window position.
+/// @brief The recompute path AS IT WAS BEFORE T2.11 item 4: ONE size_t
+///        accumulator carried across every row and every word of the region.
+///        MEASUREMENT CODE -- the only copy of a shipped kernel left in this file.
+/// @note It is here because item 4's own effect is otherwise measurable only by
+///       comparing absolute ns across two sessions, which is the one comparison
+///       this harness is built to avoid: every other number in this file is
+///       produced by variants timed INTERLEAVED on identical inputs in one
+///       process. Item 4 is the change the other three are divided by, so what it
+///       is worth had better not rest on a weaker method than they do.
+/// @note Byte for byte the pre-split loop: clip, then one accumulator over the
+///       whole region. The shipped kernel differs from it in exactly one respect,
+///       which is where the sum lands.
+template <typename Word>
+size_t sweepRecomputeOneAccumulator(const BinMatConstView<Word>& v, const Sweep& s, int W) {
+    size_t total = 0;
+    for (int j = 0; j < s.sy; ++j) {
+        for (int i = 0; i < s.sx; ++i) {
+            const bincv::impl::RegionWords<Word> r =
+                bincv::impl::clipRegion<Word>(v.width, v.height, Rect(s.x0 + i, s.y0 + j, W, W));
+            if (r.isEmpty) continue;
+            size_t region = 0;  // ONE chain through the popcount latency
+            for (size_t y = r.y0; y < r.y1; ++y) {
+                const Word* rs = v.row(y);
+                bincv::impl::visitRowWords<Word>(r, [&](size_t k, Word mask) {
+                    region += bincv::impl::popcountWord<Word>(static_cast<Word>(rs[k] & mask));
+                });
+            }
+            total += region;
+        }
+    }
+    return total;
+}
+
+/// @brief What the API ships: one countNonZero per window position, with T2.11
+///        item 4's per-row partial sums inside it.
 template <typename Word>
 size_t sweepRecompute(const BinMatConstView<Word>& v, const Sweep& s, int W) {
     size_t total = 0;
@@ -223,38 +291,22 @@ size_t sweepIncrementalColumns(const BinMatConstView<Word>& v, const Sweep& s, i
     return total;
 }
 
-/// @brief Windowed popcount of ONE row, through the same masks the shipped kernel
-///        uses. MEASUREMENT CODE: it reaches into impl:: so that INC-ROW is
-///        compared as an algorithm rather than as a call-overhead difference.
-template <typename Word>
-inline size_t rowWindowCount(const BinMatConstView<Word>& v, int y,
-                             const bincv::impl::RegionWords<Word>& r) {
-    const Word* rs = v.row(static_cast<size_t>(y));
-    size_t total = 0;
-    bincv::impl::visitRowWords<Word>(r, [&](size_t i, Word mask) {
-        total += bincv::impl::popcountWord<Word>(static_cast<Word>(rs[i] & mask));
-    });
-    return total;
-}
-
-/// @brief INC-ROW: slide vertically with ONE scalar accumulator. The window sum
-///        gains the incoming row's windowed popcount and loses the outgoing row's,
-///        so it stays word-parallel and needs no scratch array.
+/// @brief INC-ROW: the SHIPPED bincv::SlidingWindowCount, one accumulator per
+///        column of window positions. The window sum gains the incoming row's
+///        windowed popcount and loses the outgoing row's, so it stays
+///        word-parallel and needs no scratch array.
+/// @note One construction per x offset, which is where the column masks are
+///       clipped -- the same amortization the measurement copy did by hoisting
+///       impl::clipRegion out of the y loop, except that this is the library's own
+///       and includes the row clipping the shipped class does per position.
 template <typename Word>
 size_t sweepIncrementalRows(const BinMatConstView<Word>& v, const Sweep& s, int W) {
     size_t total = 0;
     for (int i = 0; i < s.sx; ++i) {
-        // The column mask set is the same for every row of this x offset, so it is
-        // built once per offset rather than once per window.
-        const bincv::impl::RegionWords<Word> r =
-            bincv::impl::clipRegion<Word>(v.width, v.height, Rect(s.x0 + i, s.y0, W, W));
-        size_t win = 0;
-        for (int t = 0; t < W; ++t) win += rowWindowCount(v, s.y0 + t, r);
-        total += win;
-        for (int j = 1; j < s.sy; ++j) {
-            win += rowWindowCount(v, s.y0 + j + W - 1, r);
-            win -= rowWindowCount(v, s.y0 + j - 1, r);
-            total += win;
+        bincv::SlidingWindowCount<Word> acc(v, Rect(s.x0 + i, s.y0, W, W));
+        for (int j = 0; j < s.sy; ++j) {
+            total += acc.count();
+            if (j + 1 < s.sy) acc.slideDown();
         }
     }
     return total;
@@ -336,10 +388,12 @@ bool runAxis1() {
         imgs.push_back(std::move(m));
     }
 
-    std::printf("\n  %-8s %-4s %14s %14s %14s %10s %10s %12s\n", "pattern", "W",
-                "recompute", "INC-COL", "INC-ROW", "INC-COL", "INC-ROW", "INC-COL mem");
-    std::printf("  %-8s %-4s %14s %14s %14s %10s %10s %12s\n", "", "", "ns/window",
-                "ns/window", "ns/window", "vs recomp", "vs recomp", "bytes");
+    std::printf("\n  %-8s %-4s %13s %13s %13s %13s %9s %9s %9s %10s\n", "pattern", "W",
+                "recomp-1acc", "recompute", "INC-COL", "INC-ROW", "item 4", "INC-COL",
+                "INC-ROW", "INC-COL mem");
+    std::printf("  %-8s %-4s %13s %13s %13s %13s %9s %9s %9s %10s\n", "", "", "ns/window",
+                "ns/window", "ns/window", "ns/window", "1acc/rec", "vs recomp", "vs recomp",
+                "bytes");
 
     for (size_t wi = 0; wi < sizeof(kWindows) / sizeof(kWindows[0]); ++wi) {
         const int W = kWindows[wi];
@@ -352,16 +406,17 @@ bool runAxis1() {
             // any of them is timed.
             for (int i = 0; i < kInputs; ++i) {
                 const BinMatConstView<Word> v = imgs[static_cast<size_t>(i)].constView();
-                size_t a = 0, b = 0, c = 0;
+                size_t a = 0, b = 0, c = 0, d = 0;
                 for (const Sweep& s : p.sweeps) {
                     a += sweepRecompute(v, s, W);
                     b += sweepIncrementalColumns(v, s, W, scratch);
                     c += sweepIncrementalRows(v, s, W);
+                    d += sweepRecomputeOneAccumulator(v, s, W);
                 }
-                if (a != b || a != c) {
+                if (a != b || a != c || a != d) {
                     std::printf("  DISAGREEMENT %s W=%d image %d: recompute %zu, "
-                                "INC-COL %zu, INC-ROW %zu\n",
-                                p.name, W, i, a, b, c);
+                                "INC-COL %zu, INC-ROW %zu, recompute-1acc %zu\n",
+                                p.name, W, i, a, b, c, d);
                     return false;
                 }
             }
@@ -370,6 +425,14 @@ bool runAxis1() {
             const std::vector<BinMat<Word>>* im = &imgs;
             std::vector<uint32_t>* sc = &scratch;
             std::vector<measure::Bench> benches;
+            benches.push_back({"recompute-1acc", [pp, im, W](int i) {
+                                   const BinMatConstView<Word> v =
+                                       (*im)[static_cast<size_t>(i % kInputs)].constView();
+                                   size_t acc = 0;
+                                   for (const Sweep& s : pp->sweeps)
+                                       acc += sweepRecomputeOneAccumulator(v, s, W);
+                                   measure::g_sink += acc;
+                               }});
             benches.push_back({"recompute", [pp, im, W](int i) {
                                    const BinMatConstView<Word> v =
                                        (*im)[static_cast<size_t>(i % kInputs)].constView();
@@ -404,16 +467,20 @@ bool runAxis1() {
                 widestSweep = std::max(widestSweep, static_cast<size_t>(s.sx + W - 1));
             }
 
-            std::printf("  %-8s %-4d %14.1f %14.1f %14.1f %9.2fx %9.2fx %12zu\n", p.name, W,
-                        t[0].medianNs / n, t[1].medianNs / n, t[2].medianNs / n,
-                        t[0].medianNs / t[1].medianNs, t[0].medianNs / t[2].medianNs,
+            std::printf("  %-8s %-4d %13.1f %13.1f %13.1f %13.1f %8.2fx %8.2fx %8.2fx %10zu\n",
+                        p.name, W, t[0].medianNs / n, t[1].medianNs / n, t[2].medianNs / n,
+                        t[3].medianNs / n, t[0].medianNs / t[1].medianNs,
+                        t[1].medianNs / t[2].medianNs, t[1].medianNs / t[3].medianNs,
                         widestSweep * sizeof(uint32_t));
-            std::printf("           spread (max-min)/median: recompute %.1f%%, "
+            std::printf("           spread (max-min)/median: recomp-1acc %.1f%%, recompute %.1f%%, "
                         "INC-COL %.1f%%, INC-ROW %.1f%%   [%s]\n",
-                        t[0].spreadPct(), t[1].spreadPct(), t[2].spreadPct(), p.note);
+                        t[0].spreadPct(), t[1].spreadPct(), t[2].spreadPct(), t[3].spreadPct(),
+                        p.note);
         }
     }
-    std::printf("\n  \"vs recomp\" > 1.00x means the accumulator is FASTER than recompute;\n");
+    std::printf("\n  \"vs recomp\" > 1.00x means the accumulator is FASTER than the SHIPPED\n");
+    std::printf("  recompute -- i.e. than the post-item-4 baseline, not X-11's pre-split one.\n");
+    std::printf("  \"item 4\" > 1.00x means the per-row accumulator split made recompute faster.\n");
     std::printf("  axis 3's \"plane/4arg\" > 1.00x means the four-argument form is faster.\n");
     return true;
 }
@@ -422,84 +489,24 @@ bool runAxis1() {
 // AXIS 2 -- composed versus fused covariance
 // ---------------------------------------------------------------------------
 
-struct Covariance {
-    size_t xx = 0;
-    size_t yy = 0;
-    SplitCount xy;
+/// @brief Value equality on the shipped result type, for the agreement check.
+bool sameCovariance(const bincv::CovarianceCount& a, const bincv::CovarianceCount& b) {
+    return a.xx == b.xx && a.yy == b.yy && a.xy.whenClear == b.xy.whenClear &&
+           a.xy.whenSet == b.xy.whenSet;
+}
 
-    bool operator==(const Covariance& o) const {
-        return xx == o.xx && yy == o.yy && xy.whenClear == o.xy.whenClear &&
-               xy.whenSet == o.xy.whenSet;
-    }
-};
-
-/// @brief ARCHITECTURE 7.5 through the T2.6 primitives: three calls, therefore
-///        three traversals of one window.
+/// @brief ARCHITECTURE 7.5 through the T2.5/T2.6 primitives: three calls, therefore
+///        three traversals of one window. Still a shipped composition -- a caller
+///        who has not read X-11 writes exactly this -- so it is the denominator.
 template <typename Word>
-Covariance covarianceComposed(const BinMatConstView<Word>& magX, const BinMatConstView<Word>& magY,
-                              const BinMatConstView<Word>& signXor, const Rect& window) {
-    Covariance out;
+bincv::CovarianceCount covarianceComposed(const BinMatConstView<Word>& magX,
+                                          const BinMatConstView<Word>& magY,
+                                          const BinMatConstView<Word>& signXor,
+                                          const Rect& window) {
+    bincv::CovarianceCount out;
     out.xx = bincv::countNonZero(magX, window);
     out.yy = bincv::countNonZero(magY, window);
     out.xy = bincv::countAndSplit(magX, magY, signXor, window);
-    return out;
-}
-
-/// @brief The same four numbers from ONE traversal. MEASUREMENT CODE -- the shape
-///        a covariance entry point would have, not a proposal in itself.
-template <typename Word>
-Covariance covarianceFused(const BinMatConstView<Word>& magX, const BinMatConstView<Word>& magY,
-                           const BinMatConstView<Word>& signXor, const Rect& window) {
-    Covariance out;
-    const bincv::impl::RegionWords<Word> r =
-        bincv::impl::clipRegion<Word>(magX.width, magX.height, window);
-    if (r.isEmpty) return out;
-
-    for (size_t y = r.y0; y < r.y1; ++y) {
-        const Word* rx = magX.row(y);
-        const Word* ry = magY.row(y);
-        const Word* rc = signXor.row(y);
-        bincv::impl::visitRowWords<Word>(r, [&](size_t i, Word mask) {
-            const Word wx = static_cast<Word>(rx[i] & mask);
-            const Word wy = static_cast<Word>(ry[i] & mask);
-            const Word both = static_cast<Word>(wx & wy);
-            const size_t total = bincv::impl::popcountWord<Word>(both);
-            const size_t set =
-                bincv::impl::popcountWord<Word>(static_cast<Word>(both & rc[i]));
-            out.xx += bincv::impl::popcountWord<Word>(wx);
-            out.yy += bincv::impl::popcountWord<Word>(wy);
-            out.xy.whenSet += set;
-            out.xy.whenClear += total - set;
-        });
-    }
-    return out;
-}
-
-/// @brief The four-argument alternative of axis 3: no selector plane, the XOR
-///        happens in the word loop. MEASUREMENT CODE.
-template <typename Word>
-SplitCount countAndSplitXor(const BinMatConstView<Word>& a, const BinMatConstView<Word>& b,
-                            const BinMatConstView<Word>& c0, const BinMatConstView<Word>& c1,
-                            const Rect& window) {
-    SplitCount out;
-    const bincv::impl::RegionWords<Word> r =
-        bincv::impl::clipRegion<Word>(a.width, a.height, window);
-    if (r.isEmpty) return out;
-
-    for (size_t y = r.y0; y < r.y1; ++y) {
-        const Word* ra = a.row(y);
-        const Word* rb = b.row(y);
-        const Word* r0 = c0.row(y);
-        const Word* r1 = c1.row(y);
-        bincv::impl::visitRowWords<Word>(r, [&](size_t i, Word mask) {
-            const Word both = static_cast<Word>(static_cast<Word>(ra[i] & rb[i]) & mask);
-            const Word sel = static_cast<Word>(r0[i] ^ r1[i]);
-            const size_t total = bincv::impl::popcountWord<Word>(both);
-            const size_t set = bincv::impl::popcountWord<Word>(static_cast<Word>(both & sel));
-            out.whenSet += set;
-            out.whenClear += total - set;
-        });
-    }
     return out;
 }
 
@@ -562,13 +569,11 @@ bool runAxis2(const char* wordName, const DerivativeSet<Word>& d) {
         for (int i = 0; i < kInputs; ++i) {
             const size_t k = static_cast<size_t>(i);
             for (const Rect& w : windows) {
-                const Covariance a = covarianceComposed<Word>(d.dx[k].constMagnitude(0),
-                                                              d.dy[k].constMagnitude(0),
-                                                              d.sel[k].constView(), w);
-                const Covariance b = covarianceFused<Word>(d.dx[k].constMagnitude(0),
-                                                           d.dy[k].constMagnitude(0),
-                                                           d.sel[k].constView(), w);
-                if (!(a == b)) {
+                const bincv::CovarianceCount a = covarianceComposed<Word>(
+                    d.dx[k].constMagnitude(0), d.dy[k].constMagnitude(0), d.sel[k].constView(), w);
+                const bincv::CovarianceCount b = bincv::countCovariance<Word>(
+                    d.dx[k].constMagnitude(0), d.dy[k].constMagnitude(0), d.sel[k].constView(), w);
+                if (!sameCovariance(a, b)) {
                     std::printf("  DISAGREEMENT composed vs fused at W=%d\n", W);
                     return false;
                 }
@@ -582,7 +587,7 @@ bool runAxis2(const char* wordName, const DerivativeSet<Word>& d) {
                                const size_t k = static_cast<size_t>(i % kInputs);
                                size_t acc = 0;
                                for (const Rect& w : *wp) {
-                                   const Covariance c = covarianceComposed<Word>(
+                                   const bincv::CovarianceCount c = covarianceComposed<Word>(
                                        dp->dx[k].constMagnitude(0), dp->dy[k].constMagnitude(0),
                                        dp->sel[k].constView(), w);
                                    acc += c.xx + c.yy + c.xy.whenClear + c.xy.whenSet;
@@ -593,7 +598,7 @@ bool runAxis2(const char* wordName, const DerivativeSet<Word>& d) {
                                const size_t k = static_cast<size_t>(i % kInputs);
                                size_t acc = 0;
                                for (const Rect& w : *wp) {
-                                   const Covariance c = covarianceFused<Word>(
+                                   const bincv::CovarianceCount c = bincv::countCovariance<Word>(
                                        dp->dx[k].constMagnitude(0), dp->dy[k].constMagnitude(0),
                                        dp->sel[k].constView(), w);
                                    acc += c.xx + c.yy + c.xy.whenClear + c.xy.whenSet;
@@ -635,7 +640,7 @@ bool runAxis3(const char* wordName, DerivativeSet<Word>& d) {
                 const SplitCount a = bincv::countAndSplit<Word>(d.dx[k].constMagnitude(0),
                                                                 d.dy[k].constMagnitude(0),
                                                                 d.sel[k].constView(), w);
-                const SplitCount b = countAndSplitXor<Word>(
+                const SplitCount b = bincv::countAndSplit<Word>(
                     d.dx[k].constMagnitude(0), d.dy[k].constMagnitude(0), d.dx[k].constSign(),
                     d.dy[k].constSign(), w);
                 if (a.whenClear != b.whenClear || a.whenSet != b.whenSet) {
@@ -663,7 +668,7 @@ bool runAxis3(const char* wordName, DerivativeSet<Word>& d) {
                                const size_t k = static_cast<size_t>(i % kInputs);
                                size_t acc = 0;
                                for (const Rect& w : *wp) {
-                                   const SplitCount c = countAndSplitXor<Word>(
+                                   const SplitCount c = bincv::countAndSplit<Word>(
                                        dp->dx[k].constMagnitude(0), dp->dy[k].constMagnitude(0),
                                        dp->dx[k].constSign(), dp->dy[k].constSign(), w);
                                    acc += c.whenClear + c.whenSet;

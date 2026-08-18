@@ -86,13 +86,13 @@
 #             independently written iterative one. They run in all four
 #             configurations because the kernels are core code -- and the Debug
 #             one is the only place their BINCV_ASSERT preconditions are live.
-#   test_reduce  711812 under opencv, 546572 everywhere else. The 165240
+#   test_reduce  759424 under opencv, 594184 everywhere else. The 165240
 #             difference is the Tier 1 half of T2.5 -- countNonZero against
 #             cv::countNonZero over the full T2.1 size and fill matrix, whole
 #             image and by region -- plus the Tier 3 masked reductions against an
 #             OpenCV composite (cv::bitwise_and into a temporary, then
 #             cv::countNonZero), which is a second reference and not a tier
-#             promise. The other 546572 are the per-pixel reference sweeps for
+#             promise. The other 594184 are the per-pixel reference sweeps for
 #             all three entry points, the exhaustive region GEOMETRY cross
 #             product, the padding contract, the differing-stride combinations,
 #             the degenerate shapes, the LK covariance identity, and the 16 that
@@ -100,6 +100,25 @@
 #             GCC/clang configuration would otherwise execute one instruction of
 #             -- from being untested source. They run in all four configurations
 #             because the kernels are core code.
+#             It was 711812 / 546572 before T2.11. The 47612 added to each are the
+#             three entry points and one accumulator T2.11 landed, and they are
+#             AGREEMENT sweeps rather than new value checks: Reduce.Sliding_*
+#             sweeps whole frames comparing SlidingWindowCount against recompute
+#             at every window position of every column, and Reduce.Fused_* does
+#             the same for countCovariance and the four-argument countAndSplit
+#             against the composition they replace. Reporting is one check per
+#             COLUMN of positions (Sliding) and per window ROW (Fused), on the
+#             same argument as the per-region rule above: per position would drown
+#             the summary, per case would go blind to a shortened sweep.
+#             Measured, by mutating ops/reduce.hpp: a slideDown() that never
+#             removes row 0 (a drift that shows only after the window passes the
+#             top of the image) fails all four Reduce.Sliding_*; a four-argument
+#             selector that ANDs instead of XORing fails Reduce.Fused_* and
+#             Reduce.Covariance_*. One mutant survived the first version of the
+#             sweep -- a constructor that dropped the last row of its initial sum
+#             -- because every column started above the frame, where the initial
+#             row range is empty; the sweep now also constructs an accumulator AT
+#             every position, and that mutant fails.
 #             This suite counts ONE CHECK PER (case, region) rather than per case:
 #             every interesting input here is a region, so a per-case count would
 #             leave the CHECKS column blind to a region list that got shorter,
@@ -141,6 +160,20 @@
 #             for impl::regionFromExtent's non-empty precondition, which no public
 #             entry point can reach and which underflows into a ~5.8e17-word row
 #             range if it is ever removed.
+#             AND FOUR MORE FROM THE T2.11 REVIEW, for the same reason and with
+#             the same evidence: T2.11 added a fourth view argument (c1) and two
+#             new entry points, each carrying its OWN copy of a precondition, and
+#             an assert has no in-process test. Measured -- deleting c1's half of
+#             the dimension check from BOTH four-argument overloads and the stride
+#             check from SlidingWindowCount's constructor left every configuration
+#             green with byte-identical CHECKS (Debug test_reduce 594184/594184
+#             either way), while the consequence is countAndSplit(a, b, c0, c1, r)
+#             reading c1 at a's geometry, off the end of its buffer, in Release,
+#             returning a plausible count. The four cases --
+#             reduce-xor-split-dims, reduce-covariance-dims,
+#             reduce-covariance-xor-dims and reduce-sliding-short-stride -- were
+#             each watched failing against that mutation before being committed.
+#             They add no checks and no skips; only ctest cases.
 #   test_bitslice  351620 under opencv, 350540 everywhere else. The 1080
 #             difference is majority3 against the reference pipeline's own median
 #             -- max(min(a,b), min(max(a,b),c)) as cv::min/cv::max over CV_8U,
@@ -256,7 +289,7 @@ opencv	test_error	31	0
 opencv	test_error_checked	21	0
 opencv	test_logic	65768	0
 opencv	test_shift	307133	0
-opencv	test_reduce	711812	0
+opencv	test_reduce	759424	0
 opencv	test_bitslice	351620	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
@@ -269,7 +302,7 @@ core	test_error	31	0
 core	test_error_checked	21	0
 core	test_logic	53672	0
 core	test_shift	99695	0
-core	test_reduce	546572	0
+core	test_reduce	594184	0
 core	test_bitslice	350540	0
 core	test_harness	8	0
 
@@ -280,7 +313,7 @@ noexcept	test_error	14	0
 noexcept	test_error_checked	21	0
 noexcept	test_logic	53672	0
 noexcept	test_shift	99695	0
-noexcept	test_reduce	546572	0
+noexcept	test_reduce	594184	0
 noexcept	test_bitslice	350540	0
 noexcept	test_harness	8	0
 
@@ -291,7 +324,7 @@ debug	test_error	21	0
 debug	test_error_checked	21	0
 debug	test_logic	53672	0
 debug	test_shift	99695	0
-debug	test_reduce	546572	0
+debug	test_reduce	594184	0
 debug	test_bitslice	350540	0
 debug	test_harness	8	0
 

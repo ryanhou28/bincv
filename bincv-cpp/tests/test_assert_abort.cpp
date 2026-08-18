@@ -305,6 +305,48 @@ int caseReduceSplitDims() {
     return static_cast<int>(bincv::countAndSplit(a, a, c, bincv::Rect(0, 0, 64, 3)).whenSet);
 }
 
+// T2.11 added a FOURTH view argument and two more entry points, each with its own
+// dimension assert, and each therefore its own way to be deleted unnoticed. That
+// is not hypothetical: deleting `&& a.width == c1.width && a.height == c1.height`
+// from both four-argument overloads and the stride assert from
+// SlidingWindowCount's constructor left all four gate configurations green with
+// byte-identical CHECKS counts (Debug test_reduce: 594184/594184 either way). An
+// assert has no in-process test, so these three cases are the only place those
+// checks can be observed firing.
+int caseReduceXorSplitDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c1{g_reduceB, 64, 2, 2};  // one row short
+    // c1 is the argument nobody compared before this case existed: it would be
+    // read at a's geometry -- row 2 of a two-row view -- which is off the end of
+    // its buffer, in Release, returning a plausible-looking count.
+    return static_cast<int>(
+        bincv::countAndSplit(a, a, a, c1, bincv::Rect(0, 0, 64, 3)).whenSet);
+}
+
+int caseReduceCovarianceDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c{g_reduceB, 64, 2, 2};  // one row short
+    return static_cast<int>(bincv::countCovariance(a, a, c, bincv::Rect(0, 0, 64, 3)).xx);
+}
+
+// The four-argument countCovariance carries its OWN copy of the same clause --
+// four entry points, four copies, four separate deletions. Covered separately for
+// exactly the reason the three-argument cases are.
+int caseReduceCovarianceXorDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c1{g_reduceB, 64, 2, 2};  // one row short
+    return static_cast<int>(bincv::countCovariance(a, a, a, c1, bincv::Rect(0, 0, 64, 3)).xx);
+}
+
+// SlidingWindowCount is the one entry point that is a CLASS, so its precondition
+// is checked in a constructor rather than at a call. Same short stride as
+// reduce-short-stride, different site.
+int caseReduceSlidingShortStride() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 1};  // needs 2 words
+    bincv::SlidingWindowCount<uint32_t> w(a, bincv::Rect(0, 0, 31, 3));
+    return static_cast<int>(w.count());
+}
+
 int caseReduceShortStride() {
     const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 1};  // needs 2 words
     return static_cast<int>(bincv::countNonZero(a));
@@ -413,6 +455,10 @@ const Case kCases[] = {
     {"shift-border-type", caseShiftBorderType},
     {"reduce-dims", caseReduceDims},
     {"reduce-split-dims", caseReduceSplitDims},
+    {"reduce-xor-split-dims", caseReduceXorSplitDims},
+    {"reduce-covariance-dims", caseReduceCovarianceDims},
+    {"reduce-covariance-xor-dims", caseReduceCovarianceXorDims},
+    {"reduce-sliding-short-stride", caseReduceSlidingShortStride},
     {"reduce-short-stride", caseReduceShortStride},
     {"reduce-empty-extent", caseReduceEmptyExtent},
     {"bitslice-dims", caseBitSliceDims},

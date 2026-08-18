@@ -1,4 +1,15 @@
-// Bulk reductions (T2.5, T2.6): countNonZero / countAnd / countAndSplit.
+// Bulk reductions (T2.5, T2.6, T2.11): countNonZero / countAnd / countAndSplit /
+// countCovariance / SlidingWindowCount.
+//
+// T2.11 added three entry points and one accumulator to what T2.5/T2.6 shipped,
+// and every one of them computes something an older entry point already computes
+// -- faster, by traversing less. So the suite's central question for them is not
+// "is this number right" but "is this number THE SAME": Reduce.Sliding_* sweeps
+// whole frames comparing the incremental accumulator against recompute position
+// by position, and Reduce.Fused_* does the same for the fused covariance and the
+// four-argument selector against the composition. Both also go through the
+// per-pixel references, so two implementations that were wrong the same way could
+// not agree their way past.
 //
 // TWO HALVES, and they answer different questions -- the same split as
 // tests/test_logic.cpp and tests/test_shift.cpp.
@@ -74,7 +85,10 @@ namespace {
 using bincv::Rect;
 using bincv::SplitCount;
 using bincv::countAnd;
+using bincv::CovarianceCount;
+using bincv::SlidingWindowCount;
 using bincv::countAndSplit;
+using bincv::countCovariance;
 using bincv::countNonZero;
 
 // ---------------------------------------------------------------------------
@@ -1024,6 +1038,40 @@ void testCovarianceIdentity(const char* wordTypeName) {
                             }
                         }
 
+                        // THE SHAPE T3.6 CALLS (T2.11 items 2 and 3): all four
+                        // numbers from one pass, and the selector formed in the
+                        // word loop rather than in a plane. Checked against the
+                        // SAME float reference as the composition above, in the
+                        // same loop, so "the fused path agrees window for window"
+                        // covers the identity and not only the counts -- and every
+                        // window here is clipped on at least one side except the
+                        // middle ones.
+                        const CovarianceCount fused =
+                            countCovariance(dx.constMagnitude(0), dy.constMagnitude(0),
+                                            signXor.constView(), window);
+                        const CovarianceCount fusedXor =
+                            countCovariance(dx.constMagnitude(0), dy.constMagnitude(0),
+                                            dx.constSign(), dy.constSign(), window);
+                        const bool fusedExact =
+                            static_cast<double>(fused.xx) == refXX &&
+                            static_cast<double>(fused.yy) == refYY &&
+                            static_cast<double>(fused.crossTerm()) == refXY &&
+                            fused.xx == sumXX && fused.yy == sumYY &&
+                            fused.xy.whenClear == split.whenClear &&
+                            fused.xy.whenSet == split.whenSet &&
+                            fusedXor.xx == fused.xx && fusedXor.yy == fused.yy &&
+                            fusedXor.xy.whenClear == fused.xy.whenClear &&
+                            fusedXor.xy.whenSet == fused.xy.whenSet;
+                        REDUCE_EXPECT_TRUE(
+                            fusedExact,
+                            "countCovariance matches the composition and the float reference",
+                            rectText(window) + " fused xx=" + std::to_string(fused.xx) + " yy=" +
+                                std::to_string(fused.yy) + " crossTerm=" +
+                                std::to_string(fused.crossTerm()) + " ref " +
+                                std::to_string(refXX) + "/" + std::to_string(refYY) + "/" +
+                                std::to_string(refXY),
+                            label);
+
                         const bool exact = static_cast<double>(sumXX) == refXX &&
                                            static_cast<double>(sumYY) == refYY &&
                                            static_cast<double>(sumXY) == refXY;
@@ -1131,6 +1179,411 @@ void testCovarianceIdentity(const char* wordTypeName) {
                                          mutableXor.constView(), whole)
                                    .crossTerm() == -static_cast<long long>(width) * height,
                            "countAndSplit through const accessors", "crossTerm", label);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 9. SlidingWindowCount agrees with recompute WINDOW FOR WINDOW (T2.11 item 1)
+// ---------------------------------------------------------------------------
+//
+// The whole risk of an incremental accumulator is that it is right for a while.
+// A sum that gains a row and loses a row can be off by one row's popcount at a
+// border, or can drift after many slides, and either bug leaves the first few
+// windows of every sweep correct -- which is exactly the sample a spot check
+// takes. So this sweeps WHOLE FRAMES: every x offset from one window-width left
+// of the image to one past its right edge, and within each, every y position from
+// one window-height above the image to one past its bottom. Every position is
+// compared against countNonZero(src, window) -- the recompute path, unchanged by
+// T2.11 -- and against the rectangle the accumulator says it is on.
+//
+// The y range is deliberately wider than the image on BOTH sides. Above it, the
+// window is clipped from the top and the "outgoing" row does not exist; below it,
+// the count has to walk back down to zero and STAY there, which is the case a
+// signed/unsigned slip in the subtraction would fail.
+//
+// Reporting is one check per (case, window size, x column) -- one per COLUMN of
+// positions rather than one per position, for the reason the file header gives:
+// per position would drown the summary, and per case would make the CHECKS column
+// blind to a shortened sweep. The message names the first disagreeing position.
+
+/// @brief One column of window positions, checked at every y. Returns the number
+///        of positions that disagreed, and the first one's description.
+/// @note TWO accumulators per position, not one, and the second is not redundant.
+///       `slid` is constructed once above the frame and walked down, so it tests
+///       the incremental path; `fresh` is constructed AT each position, so it
+///       tests the constructor's initial sum over an arbitrary clipped row range.
+///       Measured: with only the slid one, a constructor that dropped the last row
+///       of its initial sum passed the whole suite -- because a column that starts
+///       above the image starts with an empty row range and an initial sum of
+///       zero, so the initialization loop never ran with anything to do.
+template <typename WordType>
+size_t slideColumnMismatches(const bincv::BinMatConstView<WordType>& v, int x, int windowW,
+                             int windowH, std::string& firstBad) {
+    const int yFirst = -windowH - 1;
+    const int yLast = static_cast<int>(v.height) + windowH + 1;
+    SlidingWindowCount<WordType> slid(v, Rect(x, yFirst, windowW, windowH));
+
+    size_t mismatches = 0;
+    for (int y = yFirst; y <= yLast; ++y) {
+        const Rect w(x, y, windowW, windowH);
+        const size_t got = slid.count();
+        const size_t want = refCountNonZero(v, w);
+        const size_t recompute = countNonZero(v, w);
+        const size_t constructed = SlidingWindowCount<WordType>(v, w).count();
+        const bool rectOk = slid.window() == w;
+        if (got != want || got != recompute || constructed != want || !rectOk) {
+            ++mismatches;
+            if (firstBad.empty()) {
+                firstBad = rectText(w) + " slid=" + std::to_string(got) + " constructed=" +
+                           std::to_string(constructed) + " recompute=" +
+                           std::to_string(recompute) + " reference=" + std::to_string(want) +
+                           (rectOk ? "" : " (window() disagreed: " + rectText(slid.window()) + ")");
+            }
+        }
+        slid.slideDown();
+    }
+    return mismatches;
+}
+
+/// @brief Sweeps every window position of one view and reports per x column.
+template <typename WordType>
+void sweepSlidingWindow(const bincv::BinMatConstView<WordType>& v, int windowW, int windowH,
+                        const std::string& label) {
+    const int width = static_cast<int>(v.width);
+    for (int x = -windowW - 1; x <= width + 1; ++x) {
+        std::string firstBad;
+        const size_t bad = slideColumnMismatches<WordType>(v, x, windowW, windowH, firstBad);
+        REDUCE_EXPECT_TRUE(bad == 0,
+                           "sliding window agrees with recompute at every position of the column",
+                           "W=" + std::to_string(windowW) + "x" + std::to_string(windowH) +
+                               " x=" + std::to_string(x) + " mismatches=" + std::to_string(bad) +
+                               " first: " + firstBad,
+                           label);
+    }
+}
+
+template <typename WordType>
+void testSlidingWindow(const char* wordTypeName) {
+    std::cout << "\n--- sliding window count vs recompute, window for window: " << wordTypeName
+              << " ---\n";
+    constexpr size_t wordBits = bincv::BinMatConstView<WordType>::WordBits;
+
+    struct Frame {
+        int width;
+        int height;
+        float fill;
+    };
+    // Widths on and off every word boundary the four supported widths have, and
+    // one full frame row count so the sweep is over a realistic image rather than
+    // only over small ones.
+    const Frame frames[] = {
+        {1, 1, 1.0f},   {7, 5, 0.5f},    {33, 9, 0.5f},   {64, 8, 0.99f},
+        {70, 37, 0.5f}, {129, 21, 0.01f}, {640, 17, 0.5f},
+    };
+    const int squareWindows[] = {1, 7, 15, 31};
+
+    for (const Frame& f : frames) {
+        bincv::BinMat<WordType> m(f.width, f.height);
+        fillRandom(m, f.fill, caseSeed(f.width, f.height, 1100));
+        const bincv::BinMatConstView<WordType> v = m.constView();
+        const std::string label = sizeLabel(wordTypeName, f.width, f.height, f.fill) + " [sliding]";
+        for (int W : squareWindows) {
+            sweepSlidingWindow<WordType>(v, W, W, label);
+        }
+    }
+
+    // Non-square windows. The accumulator's x extent and y extent are independent
+    // -- the columns are clipped once and the rows per position -- so a window
+    // that is wider than it is tall, or a single column of pixels, has to work.
+    {
+        const int width = 70;
+        const int height = 37;
+        bincv::BinMat<WordType> m(width, height);
+        fillRandom(m, 0.5f, caseSeed(width, height, 1101));
+        const bincv::BinMatConstView<WordType> v = m.constView();
+        const std::string label =
+            sizeLabel(wordTypeName, width, height) + " [sliding, non-square]";
+        struct Shape { int w; int h; };
+        const Shape shapes[] = {{7, 15}, {15, 7}, {31, 3}, {1, 31}, {31, 1}, {64, 2}, {2, 64}};
+        for (const Shape& sh : shapes) {
+            sweepSlidingWindow<WordType>(v, sh.w, sh.h, label);
+        }
+    }
+
+    // The same sweep over the view constructions a reduction must not assume away:
+    // an over-aligned stride, a hand-built wide stride, and -- the one that can
+    // silently over-count -- a buffer whose padding bits are all ones (D-13).
+    {
+        const int width = 33;
+        const int height = 9;
+        const size_t uw = static_cast<size_t>(width);
+        const size_t uh = static_cast<size_t>(height);
+        const size_t minWords = (uw + wordBits - 1) / wordBits;
+        const WordType allOnes = static_cast<WordType>(~static_cast<WordType>(0));
+
+        bincv::BinMat<WordType> padded(width, height, PADDED_ALIGNMENT);
+        fillRandom(padded, 0.5f, caseSeed(width, height, 1102));
+
+        bincv::BinMat<WordType> clean(width, height);
+        fillRandom(clean, 0.5f, caseSeed(width, height, 1103));
+        const size_t wideStride = minWords + 2;
+        std::vector<WordType> wideBuffer(wideStride * uh, 0);
+        std::vector<WordType> dirtyBuffer(wideStride * uh, allOnes);
+        for (size_t y = 0; y < uh; ++y) {
+            const WordType* src = clean.constView().row(y);
+            for (size_t i = 0; i < minWords; ++i) {
+                wideBuffer[y * wideStride + i] = src[i];
+                dirtyBuffer[y * wideStride + i] = src[i];
+            }
+            const size_t tail = uw % wordBits;
+            if (tail != 0) {
+                const WordType keep =
+                    static_cast<WordType>((static_cast<WordType>(1) << tail) - 1);
+                dirtyBuffer[y * wideStride + minWords - 1] = static_cast<WordType>(
+                    dirtyBuffer[y * wideStride + minWords - 1] | static_cast<WordType>(~keep));
+            }
+        }
+        const bincv::BinMatConstView<WordType> wide{wideBuffer.data(), uw, uh, wideStride};
+        const bincv::BinMatConstView<WordType> dirty{dirtyBuffer.data(), uw, uh, wideStride};
+
+        for (int W : {7, 31}) {
+            sweepSlidingWindow<WordType>(padded.constView(), W, W,
+                                         sizeLabel(wordTypeName, width, height) +
+                                             " [sliding, over-aligned stride]");
+            sweepSlidingWindow<WordType>(wide, W, W,
+                                         sizeLabel(wordTypeName, width, height) +
+                                             " [sliding, wide stride]");
+            sweepSlidingWindow<WordType>(dirty, W, W,
+                                         sizeLabel(wordTypeName, width, height) +
+                                             " [sliding, dirty padding]");
+        }
+    }
+
+    // Degenerate columns: nothing here may read a word, and every position counts
+    // zero however many times it is slid.
+    {
+        const std::string label = std::string(wordTypeName) + " [sliding, degenerate]";
+        const Rect none(0, 0, 0, 0);
+
+        bincv::BinMat<WordType> m(40, 6);
+        fillRandom(m, 1.0f, caseSeed(40, 6, 1104));
+        const bincv::BinMatConstView<WordType> v = m.constView();
+
+        const Rect degenerate[] = {
+            Rect(0, 0, 0, 7),        // zero width
+            Rect(0, 0, 7, 0),        // zero height
+            Rect(0, 0, -3, 7),       // negative width
+            Rect(0, 0, 7, -3),       // negative height
+            Rect(-100, 0, 7, 7),     // wholly left
+            Rect(40, 0, 7, 7),       // wholly right, touching the edge
+            Rect(2147483000, 0, 2147483000, 7),   // x + width overflows int
+            Rect(-2147483000, 0, 2000000, 7),     // far left, no wrap into the image
+        };
+        for (const Rect& r : degenerate) {
+            SlidingWindowCount<WordType> acc(v, r);
+            size_t nonZero = 0;
+            for (int step = 0; step < 20; ++step) {
+                if (acc.count() != 0) ++nonZero;
+                acc.slideDown();
+            }
+            REDUCE_EXPECT_COUNT(nonZero, 0u, "degenerate column counts zero at every position", r,
+                                label);
+        }
+
+        // A default-constructed view has no pixels and no pointer; the accumulator
+        // must not dereference it.
+        const bincv::BinMatConstView<WordType> nullView{};
+        SlidingWindowCount<WordType> nullAcc(nullView, Rect(0, 0, 31, 31));
+        REDUCE_EXPECT_COUNT(nullAcc.count(), 0u, "empty view, first window", none, label);
+        nullAcc.slideDown();
+        REDUCE_EXPECT_COUNT(nullAcc.count(), 0u, "empty view, after a slide", none, label);
+
+        // window() tracks y and nothing else, including through positions whose
+        // count is zero.
+        SlidingWindowCount<WordType> tracked(v, Rect(-3, -5, 9, 4));
+        bool rectsOk = true;
+        for (int step = 0; step < 25; ++step) {
+            if (tracked.window() != Rect(-3, -5 + step, 9, 4)) rectsOk = false;
+            tracked.slideDown();
+        }
+        REDUCE_EXPECT_TRUE(rectsOk, "window() advances by exactly one row per slide", "25 slides",
+                           label);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 10. countCovariance and the four-argument split (T2.11 items 2 and 3)
+// ---------------------------------------------------------------------------
+//
+// Two properties, and they are different claims:
+//
+//   * the FUSED pass returns what the three-call COMPOSITION returns -- for every
+//     region in the curated list, and window for window over a whole frame at the
+//     three LK window sizes, edge-clipped positions included;
+//   * the FOUR-ARGUMENT selector returns what the precomputed XOR plane returns.
+//     `c0 ^ c1` is formed a word at a time inside the loop there, so the padding
+//     hazard is not the same one: a trailing word's padding bits of c0 and c1 are
+//     both the caller's, and their XOR is whatever it is. It may not reach a count.
+//
+// Both are also checked against the per-pixel references written before the
+// kernels, so a fused pass and a composition that were wrong the same way could
+// not agree their way past this.
+
+template <typename WordType>
+bool covarianceAgrees(const CovarianceCount& fused, const bincv::BinMatConstView<WordType>& a,
+                      const bincv::BinMatConstView<WordType>& b,
+                      const bincv::BinMatConstView<WordType>& c, const Rect& r) {
+    const size_t xx = countNonZero(a, r);
+    const size_t yy = countNonZero(b, r);
+    const SplitCount xy = countAndSplit(a, b, c, r);
+    const SplitCount ref = refCountAndSplit(a, b, c, r);
+    return fused.xx == xx && fused.yy == yy && fused.xy.whenClear == xy.whenClear &&
+           fused.xy.whenSet == xy.whenSet && fused.xx == refCountNonZero(a, r) &&
+           fused.yy == refCountNonZero(b, r) && fused.xy.whenClear == ref.whenClear &&
+           fused.xy.whenSet == ref.whenSet && fused.crossTerm() == xy.crossTerm();
+}
+
+template <typename WordType>
+std::string covarianceText(const CovarianceCount& f) {
+    return "xx=" + std::to_string(f.xx) + " yy=" + std::to_string(f.yy) + " whenClear=" +
+           std::to_string(f.xy.whenClear) + " whenSet=" + std::to_string(f.xy.whenSet);
+}
+
+template <typename WordType>
+void testFusedCovariance(const char* wordTypeName) {
+    std::cout << "\n--- fused covariance and the four-argument split: " << wordTypeName << " ---\n";
+
+    for (int width : {1, 7, 33, 64, 70, 129}) {
+        for (int height : {1, 3, 13}) {
+            const uint64_t seed = caseSeed(width, height, 1200);
+            bincv::BinMat<WordType> a(width, height);
+            bincv::BinMat<WordType> b(width, height);
+            bincv::BinMat<WordType> c0(width, height);
+            bincv::BinMat<WordType> c1(width, height);
+            fillRandom(a, 0.5f, seed);
+            fillRandom(b, 0.5f, seed ^ UINT64_C(0xDEADBEEF));
+            fillRandom(c0, 0.5f, seed ^ UINT64_C(0x1111));
+            fillRandom(c1, 0.5f, seed ^ UINT64_C(0x2222));
+            bincv::BinMat<WordType> sel(width, height);
+            bincv::bitwiseXor(c0.constView(), c1.constView(), sel.view());
+
+            const bincv::BinMatConstView<WordType> va = a.constView();
+            const bincv::BinMatConstView<WordType> vb = b.constView();
+            const bincv::BinMatConstView<WordType> v0 = c0.constView();
+            const bincv::BinMatConstView<WordType> v1 = c1.constView();
+            const bincv::BinMatConstView<WordType> vs = sel.constView();
+            const std::string label = sizeLabel(wordTypeName, width, height) + " [fused]";
+
+            for (const Rect& r : valueRegions(width, height)) {
+                const CovarianceCount fused = countCovariance(va, vb, vs, r);
+                REDUCE_EXPECT_TRUE(covarianceAgrees<WordType>(fused, va, vb, vs, r),
+                                   "fused covariance equals the composition and the reference",
+                                   rectText(r) + " " + covarianceText<WordType>(fused), label);
+
+                // The four-argument forms: identical to the plane forms, with no
+                // plane in existence.
+                const CovarianceCount xored = countCovariance(va, vb, v0, v1, r);
+                REDUCE_EXPECT_TRUE(xored.xx == fused.xx && xored.yy == fused.yy &&
+                                       xored.xy.whenClear == fused.xy.whenClear &&
+                                       xored.xy.whenSet == fused.xy.whenSet,
+                                   "four-argument covariance equals the plane form",
+                                   rectText(r) + " " + covarianceText<WordType>(xored), label);
+
+                const SplitCount planeSplit = countAndSplit(va, vb, vs, r);
+                const SplitCount xorSplit = countAndSplit(va, vb, v0, v1, r);
+                REDUCE_EXPECT_COUNT(xorSplit.whenClear, planeSplit.whenClear,
+                                    "four-argument split whenClear", r, label);
+                REDUCE_EXPECT_COUNT(xorSplit.whenSet, planeSplit.whenSet,
+                                    "four-argument split whenSet", r, label);
+            }
+
+            // Aliasing is unrestricted (promise 3): every argument the same view.
+            const Rect whole(0, 0, width, height);
+            const CovarianceCount self = countCovariance(va, va, va, va, whole);
+            REDUCE_EXPECT_COUNT(self.xy.whenClear, countNonZero(va),
+                                "countCovariance(a, a, a, a): a ^ a is clear everywhere", whole,
+                                label);
+            REDUCE_EXPECT_COUNT(self.xy.whenSet, 0u, "countCovariance(a, a, a, a) whenSet", whole,
+                                label);
+            REDUCE_EXPECT_COUNT(self.xx, self.yy, "countCovariance(a, a, ...) xx equals yy", whole,
+                                label);
+        }
+    }
+
+    // Window for window over a whole frame, at the three LK window sizes, with the
+    // centres placed so that every window on the border is clipped. This is the
+    // half of the requirement the curated region list does not cover: the region
+    // list is chosen, and a sweep is not.
+    {
+        const int width = 70;
+        const int height = 23;
+        const uint64_t seed = caseSeed(width, height, 1201);
+        bincv::BinMat<WordType> a(width, height);
+        bincv::BinMat<WordType> b(width, height);
+        bincv::BinMat<WordType> c0(width, height);
+        bincv::BinMat<WordType> c1(width, height);
+        fillRandom(a, 0.5f, seed);
+        fillRandom(b, 0.37f, seed ^ UINT64_C(0xABCD));
+        fillRandom(c0, 0.5f, seed ^ UINT64_C(0x1111));
+        fillRandom(c1, 0.5f, seed ^ UINT64_C(0x2222));
+        bincv::BinMat<WordType> sel(width, height);
+        bincv::bitwiseXor(c0.constView(), c1.constView(), sel.view());
+
+        const bincv::BinMatConstView<WordType> va = a.constView();
+        const bincv::BinMatConstView<WordType> vb = b.constView();
+        const bincv::BinMatConstView<WordType> v0 = c0.constView();
+        const bincv::BinMatConstView<WordType> v1 = c1.constView();
+        const bincv::BinMatConstView<WordType> vs = sel.constView();
+        const std::string label =
+            sizeLabel(wordTypeName, width, height) + " [fused, full-frame sweep]";
+
+        for (int W : {7, 15, 31}) {
+            for (int y = -W; y <= height; ++y) {
+                size_t bad = 0;
+                std::string firstBad;
+                for (int x = -W; x <= width; ++x) {
+                    const Rect w(x, y, W, W);
+                    const CovarianceCount fused = countCovariance(va, vb, vs, w);
+                    const CovarianceCount xored = countCovariance(va, vb, v0, v1, w);
+                    const SplitCount xorSplit = countAndSplit(va, vb, v0, v1, w);
+                    const bool ok = covarianceAgrees<WordType>(fused, va, vb, vs, w) &&
+                                    xored.xx == fused.xx && xored.yy == fused.yy &&
+                                    xored.xy.whenClear == fused.xy.whenClear &&
+                                    xored.xy.whenSet == fused.xy.whenSet &&
+                                    xorSplit.whenClear == fused.xy.whenClear &&
+                                    xorSplit.whenSet == fused.xy.whenSet;
+                    if (!ok) {
+                        ++bad;
+                        if (firstBad.empty()) {
+                            firstBad = rectText(w) + " fused " + covarianceText<WordType>(fused) +
+                                       " four-arg " + covarianceText<WordType>(xored);
+                        }
+                    }
+                }
+                REDUCE_EXPECT_TRUE(bad == 0,
+                                   "fused and four-argument forms agree with the composition at "
+                                   "every window of the row",
+                                   "W=" + std::to_string(W) + " y=" + std::to_string(y) +
+                                       " mismatches=" + std::to_string(bad) + " first: " + firstBad,
+                                   label);
+            }
+        }
+    }
+
+    // Degenerate: an empty view and an empty region both give four zeros, and
+    // nothing is dereferenced.
+    {
+        const std::string label = std::string(wordTypeName) + " [fused, degenerate]";
+        const Rect none(0, 0, 0, 0);
+        const bincv::BinMatConstView<WordType> nullView{};
+        const CovarianceCount empty = countCovariance(nullView, nullView, nullView, Rect(0, 0, 9, 9));
+        REDUCE_EXPECT_COUNT(empty.xx + empty.yy + empty.xy.whenClear + empty.xy.whenSet, 0u,
+                            "empty view gives four zeros", none, label);
+        const CovarianceCount empty4 =
+            countCovariance(nullView, nullView, nullView, nullView, Rect(0, 0, 9, 9));
+        REDUCE_EXPECT_COUNT(empty4.xx + empty4.yy + empty4.xy.whenClear + empty4.xy.whenSet, 0u,
+                            "empty view gives four zeros, four-argument form", none, label);
+        REDUCE_EXPECT_TRUE(empty.crossTerm() == 0, "an empty cross term is zero", "0", label);
     }
 }
 
@@ -1284,6 +1737,16 @@ BINCV_TEST(Reduce, Covariance_uint8_t)  { testCovarianceIdentity<uint8_t>("uint8
 BINCV_TEST(Reduce, Covariance_uint16_t) { testCovarianceIdentity<uint16_t>("uint16_t"); }
 BINCV_TEST(Reduce, Covariance_uint32_t) { testCovarianceIdentity<uint32_t>("uint32_t"); }
 BINCV_TEST(Reduce, Covariance_uint64_t) { testCovarianceIdentity<uint64_t>("uint64_t"); }
+
+BINCV_TEST(Reduce, Sliding_uint8_t)  { testSlidingWindow<uint8_t>("uint8_t"); }
+BINCV_TEST(Reduce, Sliding_uint16_t) { testSlidingWindow<uint16_t>("uint16_t"); }
+BINCV_TEST(Reduce, Sliding_uint32_t) { testSlidingWindow<uint32_t>("uint32_t"); }
+BINCV_TEST(Reduce, Sliding_uint64_t) { testSlidingWindow<uint64_t>("uint64_t"); }
+
+BINCV_TEST(Reduce, Fused_uint8_t)  { testFusedCovariance<uint8_t>("uint8_t"); }
+BINCV_TEST(Reduce, Fused_uint16_t) { testFusedCovariance<uint16_t>("uint16_t"); }
+BINCV_TEST(Reduce, Fused_uint32_t) { testFusedCovariance<uint32_t>("uint32_t"); }
+BINCV_TEST(Reduce, Fused_uint64_t) { testFusedCovariance<uint64_t>("uint64_t"); }
 
 #ifdef BINCV_WITH_OPENCV
 BINCV_TEST(Reduce, OpenCv_uint8_t)  { testOpenCvEquivalence<uint8_t>("uint8_t"); }

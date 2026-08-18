@@ -474,31 +474,38 @@ count over a mask:
       - popcount(mag_x & mag_y &  (sign_x ^ sign_y))   // opposing signs: -1
 ```
 
-Through the shipped T2.5/T2.6 primitives, over one window, that is exactly:
+Through the shipped primitives, over one window, that is exactly **one call and
+no scratch**:
 
 ```cpp
-BinMat<W> signXor(width, height);                        // once per level
-bitwiseXor(dx.constSign(), dy.constSign(), signXor.view());
+const CovarianceCount c = countCovariance(dx.constMagnitude(0), dy.constMagnitude(0),
+                                          dx.constSign(), dy.constSign(), window);
 
-const size_t    sumXX = countNonZero(dx.constMagnitude(0), window);
-const size_t    sumYY = countNonZero(dy.constMagnitude(0), window);
-const SplitCount s    = countAndSplit(dx.constMagnitude(0), dy.constMagnitude(0),
-                                      signXor.constView(), window);
-const long long sumXY = s.crossTerm();     // whenClear - whenSet, SIGNED
+const size_t    sumXX = c.xx;
+const size_t    sumYY = c.yy;
+const long long sumXY = c.crossTerm();     // whenClear - whenSet, SIGNED
 ```
 
-Three details of that snippet are load-bearing and each has cost someone an hour:
+Two details of that snippet are load-bearing and each has cost someone an hour:
 `constMagnitude` / `constSign`, not `magnitude` / `sign` — the kernels take
 `BinMatConstView` and deduction does not consider the conversion
-([D-9](#d-9-two-view-types-not-a-const-templated-one)); `crossTerm()`, not
-`whenClear - whenSet` — the fields are `size_t` and the difference is signed;
-and `signXor` is a **frame-sized** plane, because all three views are indexed by
-the same window in the image's coordinate frame.
+([D-9](#d-9-two-view-types-not-a-const-templated-one)); and `crossTerm()`, not
+`whenClear - whenSet` — the fields are `size_t` and the difference is signed.
 
-That snippet is the **current** shape, and [T2.11](TASKS.md) replaces it: the
-three calls become one fused covariance call, and the four-argument
-`countAndSplit` removes the `signXor` plane entirely — so the third detail above
-stops being load-bearing once T2.11 lands.
+**There is no third detail any more.** The snippet used to be three calls plus a
+frame-sized `signXor = sign_x ^ sign_y` plane the caller had to form once per
+pyramid level, and "that plane is frame-sized, not window-sized" was the third
+thing to get wrong. [T2.11](TASKS.md) landed both halves of
+[D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance) that
+remove it: `countCovariance` returns all four numbers from one traversal, and its
+four-argument form XORs the two sign planes inside the word loop. A caller that
+already holds such a plane for other reasons still passes it —
+`countCovariance(magX, magY, signXor, window)` — and is 11–14% faster for having
+it ([X-11b](EXPERIMENTS.md); X-11 measured 16–18% against the pre-split code);
+nothing *obliges* one to exist.
+
+Sweeping a **column** of window positions — the corner response of §7.6, or a
+search region — calls `SlidingWindowCount` rather than this per position.
 
 **Masked and windowed accumulation is in the MVP and shapes the reduction
 interface — it is not a later addition.** That much T2.6 built.
@@ -509,27 +516,32 @@ regime where a sliding accumulator could win. Whether it did was
 [E-3](#9-open-questions-and-planned-experiments) (T2.10), and the answer on the
 reference device is that overlap pays: at 31×31 the adopted vertically-sliding
 form is **7.3×** on an 8×8 search sweep and **20×** on a dense scan
-([X-11](EXPERIMENTS.md)). Its 1.32× on *isolated* keypoints is **not** an
-incremental result — the sliding path never executes there, and that number is the
-separate accumulator-split finding recorded at the end of
-[D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance).
+([X-11](EXPERIMENTS.md)) — **5.96× and 15.9× against the code that shipped**
+([X-11b](EXPERIMENTS.md)), item 4 having landed first and made the denominator
+faster, exactly as X-11 required and predicted. Its 1.32× on *isolated* keypoints
+is **not** an incremental result: the sliding path never executes there. X-11 read
+that column as the accumulator-split finding; X-11b then showed it is not wholly
+that either, and the amendment at the end of
+[D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance) is
+what to read for what the number does and does not mean.
 
-`ops/reduce.hpp` therefore gains a vertically-sliding accumulator, and T3.6 is
-written against it rather than against the recompute-only shape — see
-[D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)
-and [T2.11](TASKS.md). Until T2.11 lands, `ops/reduce.hpp` still recomputes per
-window; the interface was deliberately not changed in the same commit as the
-measurement. See [D-13](#d-13-a-reduction-counts-pixels-never-padding) for the
-neighbouring reduction decision T2.6 did settle.
+`ops/reduce.hpp` therefore gained a vertically-sliding accumulator —
+`SlidingWindowCount`, landed by [T2.11](TASKS.md) — and T3.6 is written against it
+rather than against the recompute-only shape; see
+[D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance). The
+interface was deliberately not changed in the same commit as the measurement,
+which is why the two are different tasks. See
+[D-13](#d-13-a-reduction-counts-pixels-never-padding) for the neighbouring
+reduction decision T2.6 did settle.
 
 The second interface question composing the snippet above exposed is settled the
 same way: those three calls make **three traversals** of the same window, issuing
 the same popcounts a single fused pass would. X-8 measured **1.30×** for that, and
 X-11 reproduced it at **1.27×** (`uint32_t`) and **1.29×** (`uint64_t`) across
 three window sizes — past T2.10's 15% threshold every time
-(`bincv-cpp/results/window_benchmark.log`). **The covariance gets its own entry
-point** (D-15, T2.11), returning all four numbers from one pass, and T3.6 is
-written against it.
+(`bincv-cpp/results/window_benchmark.log`). **The covariance has its own entry
+point** (`countCovariance`; D-15, T2.11), returning all four numbers from one
+pass, and T3.6 is written against it.
 
 The identity above is exact for ternary derivatives, i.e. pyramid level 0. For
 N-bit levels the same structure holds with **bit-sliced weighted sums**: each
@@ -897,10 +909,15 @@ written first. All three axes moved off the simpler shape:
 ```
 axis 1  incremental vs recompute @ 31x31:  7.3x search, 20x dense (INC-ROW, the
         form adopted); INC-COL reaches 36x on dense but is rejected below. The
-        1.32x "sparse" column is NOT an incremental result -- see the end of this
-        record.
+        1.32x "sparse" column is NOT an incremental result -- and is not wholly
+        the accumulator-split finding either; read the AMENDMENT at the end of
+        this record before quoting it for anything.
+        [X-11b, against the SHIPPED code: 5.96x search, 15.9x dense, 1.10x sparse]
 axis 2  fused vs composed covariance @ 31x31:  1.27x (uint32), 1.29x (uint64)
-axis 3  selector plane vs four-argument:  plane 16-18% faster per frame, and a
+        [X-11b, against the SHIPPED code: 1.20x (uint32), 1.27x (uint64);
+         1.20x-1.65x across the three window sizes]
+axis 3  selector plane vs four-argument:  plane 16-18% faster per frame [X-11b,
+                                          against the SHIPPED code: 11-14%], and a
                                           fifth plane at every level (+25% of the
                                           derivative working set; 38400 B at
                                           640x480); four-arg 0 B, 0 B/level
@@ -922,27 +939,47 @@ So `ops/reduce.hpp` gains, before T3.6 is written against the current shape:
    pure redundant traversal.
 3. **A four-argument `countAndSplit`** taking the two sign planes instead of a
    precomputed selector plane. Here speed and memory disagree — the plane is
-   16–18% faster per frame *including* its formation cost, and costs a fifth plane
+   16–18% faster per frame *including* its formation cost (11–14% against the code
+   that shipped, [X-11b](EXPERIMENTS.md)), and costs a fifth plane
    at every pyramid level on top of the four the covariance already reads: +25% of
    the derivative working set, 38400 B at 640×480 and scaling down with the level.
    Principle 2 decides: memory wins, so the plane stops being mandatory.
 
-Scheduled as [T2.11](TASKS.md); T3.6 is written against the extended interface.
+**Landed by [T2.11](TASKS.md)** as `SlidingWindowCount`, `countCovariance`, and
+four-argument overloads of both `countAndSplit` and `countCovariance`; T3.6 is
+written against that interface.
 
 **A separate finding from the same experiment, needing no interface change:**
 `impl::countViewRegion` carries one accumulator across the whole region, so a
 window traversal is a single dependency chain through the popcount latency.
-Splitting it into per-row partial sums measured **1.15–1.32×** at LK window sizes
-on identical popcounts — the isolated-keypoint column of axis 1 is exactly that
-comparison, since the sliding path never executes there.
+Splitting it into per-row partial sums was recorded here as **1.15–1.32×** at LK
+window sizes on identical popcounts, read off the isolated-keypoint column of
+axis 1 on the argument that the sliding path never executes there.
 
-**Two things that follow from that, and must not be lost between here and T2.11.**
+> **AMENDED after T2.11 landed it and measured it directly
+> ([X-11b](EXPERIMENTS.md)): the split is worth 1.03–1.09× at the LK window
+> sizes, not 1.15–1.32×, and it is a 5–6% loss on the overlapping patterns at
+> W=7.** The original figure was inferred, never measured: the isolated-keypoint
+> column differs from a per-window `countNonZero` in *two* ways, not one — where
+> the sum lands, and that the sliding form clips its column band once at
+> construction rather than per position. Timed interleaved against itself with
+> only the accumulator changed, item 4 is 1.08× at SPARSE W=31 and the remaining
+> 1.10× belongs to the call structure. The decision does not change — the split
+> costs no memory and no interface and is a gain at both window sizes LK uses —
+> but 1.03–1.09× is the number to quote.
+
+**Two things that follow from that, and were not lost between here and T2.11.**
 The 1.32× belongs to this finding alone; quoting it for item 1 as well counts one
-measurement twice. And every ratio in item 1 was measured against the *pre-split*
-recompute baseline, so landing this finding first makes that baseline up to 1.32×
-faster and shrinks item 1's 7.3×/20× to roughly 5.6×/15×. Both stay far past the
-15% line, so nothing about the decision changes — only the numbers to quote for
-it.
+measurement twice. (X-11b then showed the 1.32× does not belong entirely to this
+finding either — see the amendment above. It belongs to neither item on its own,
+and the honest reading is that nothing should be quoted off that column.) And
+every ratio in item 1 was measured against the *pre-split* recompute baseline, so
+landing this finding first makes that baseline **1.03–1.09× faster**
+([X-11b](EXPERIMENTS.md)) and shrinks item 1's 7.3×/20× to **5.96×/15.9×**. T2.11
+landed it first for exactly that reason and re-measured afterwards;
+[X-11b](EXPERIMENTS.md) carries the post-split ratios beside the pre-split ones
+rather than in place of them. The branch the rule selected does not change — only
+the magnitudes quoted for it.
 
 ---
 
@@ -990,7 +1027,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 |---|---|---|---|---|---|
 | ~~**E-1**~~ **RESOLVED** | Does row alignment beyond word granularity measurably help any kernel on NEON? | [D-4](#d-4-word-granularity-alignment-by-default) was decided on a memory measurement plus an untested weak-benefit assumption. | **Answered: no — best of twelve combinations was 1.015×, inside its spread; over-aligning costs 3.3–4.8× on `bitwiseAnd`. D-4 confirmed, no profile system, D-4 no longer provisional.** [X-9](EXPERIMENTS.md) | T1.3 and every kernel | Phase 2 (T2.8) ✔ |
 | ~~**E-2**~~ **RESOLVED** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | **Answered: `uint32_t` stays. `uint64_t` reduces 1.94× faster but costs +33% at 94×60, and the rule is a conjunction — memory wins.** [D-14](#d-14-uint32_t-is-the-default-word-type), [X-10](EXPERIMENTS.md) | all kernels | Phase 2 (T2.9) ✔ |
-| ~~**E-3**~~ **RESOLVED** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | **Answered, and all three moved off the simpler shape: (a) 7.3×–20× for the adopted sliding form → expose incremental state; (b) 1.27–1.29× → add a covariance entry point; (c) plane 16–18% faster but a fifth plane at every level → four-argument form, memory wins.** [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance), [X-11](EXPERIMENTS.md) | T2.6, T3.6 | Phase 2 (T2.10) ✔ |
+| ~~**E-3**~~ **RESOLVED** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | **Answered, and all three moved off the simpler shape: (a) 7.3×–20× for the adopted sliding form → expose incremental state; (b) 1.27–1.29× → add a covariance entry point; (c) plane 16–18% faster but a fifth plane at every level → four-argument form, memory wins.** Re-measured against the shipped code by [X-11b](EXPERIMENTS.md) — 5.96×/15.9×, 1.20–1.27×, 11–14% — with no branch changing. [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance), [X-11](EXPERIMENTS.md) | T2.6, T3.6 | Phase 2 (T2.10) ✔ |
 | **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | **Phase 3** (T3.9) |
 | **E-8** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | Whether `ops/` gains a resample primitive, and whether it is word-local (word literals only) or frame-masked. | T3.4 | **Phase 3** (T3.4) |
 | **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | Measured growth is 1/3/4/5 bits ([§7.2](#72-pyramid-downsample--box-22)), but the reference never chose that — it fell out of using `CV_8U`. Capping N is a direct footprint lever. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |

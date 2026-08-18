@@ -325,7 +325,24 @@ bincv_add_death_test(test_assert_abort reduce-dims
                      "reduce: masked reductions need views of the same size")
 bincv_add_death_test(test_assert_abort reduce-split-dims
                      "reduce: masked reductions need views of the same size")
+# T2.11 added a FOURTH view (c1) and two more entry points. Each carries its own
+# copy of the dimension assert, so each is its own deletion -- and a deletion no
+# in-process suite can see: measured, removing c1's half from BOTH four-argument
+# overloads left all four configurations green with byte-identical CHECKS
+# (Debug test_reduce 594184/594184 before and after). countCovariance gets its own
+# case for the same reason countAnd and countAndSplit do: a third view nobody
+# compared is read at the first two's geometry, off the end of its buffer.
+bincv_add_death_test(test_assert_abort reduce-xor-split-dims
+                     "reduce: masked reductions need views of the same size")
+bincv_add_death_test(test_assert_abort reduce-covariance-dims
+                     "reduce: masked reductions need views of the same size")
+bincv_add_death_test(test_assert_abort reduce-covariance-xor-dims
+                     "reduce: masked reductions need views of the same size")
 bincv_add_death_test(test_assert_abort reduce-short-stride
+                     "reduce: every view's stride must cover a whole row")
+# SlidingWindowCount checks the same stride precondition in a CONSTRUCTOR, which
+# is a site no call-shaped case reaches.
+bincv_add_death_test(test_assert_abort reduce-sliding-short-stride
                      "reduce: every view's stride must cover a whole row")
 # impl::regionFromExtent's non-empty precondition. Unreachable through the public
 # entry points -- both callers guard it -- so it is driven directly: an empty
