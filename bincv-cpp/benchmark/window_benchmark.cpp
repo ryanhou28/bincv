@@ -608,6 +608,12 @@ bool runAxis2(const char* wordName, const DerivativeSet<Word>& d) {
                     t[0].medianNs / n, t[1].medianNs / n, t[0].medianNs / t[1].medianNs,
                     t[0].spreadPct(), t[1].spreadPct());
     }
+    // CLAUDE.md requires memory and speed together, and "there is none" is an
+    // answer that still has to be stated: both forms read the same views and
+    // return by value, so neither needs scratch. Axis 1 and axis 3 both carry a
+    // byte column; this one would look like an omission without the line.
+    std::printf("  EXTRA MEMORY: 0 B for both forms -- neither needs scratch; the fused "
+                "pass returns four counters in registers.\n");
     return true;
 }
 
@@ -688,13 +694,29 @@ bool runAxis3(const char* wordName, DerivativeSet<Word>& d) {
     const std::vector<measure::Timing> ft =
         measure::measureInterleaved(formBench, kRepeats, kTargetMs);
 
-    std::printf("\n  MEMORY (%s): the selector plane is %zu B per pyramid level, "
-                "allocated for the frame's lifetime.\n",
-                wordName, planeBytes);
-    std::printf("  Forming it costs %.1f us per level (%.1f ns amortized over %d "
-                "keypoints); the four-argument form allocates nothing.\n",
-                ft[0].medianNs / 1000.0, ft[0].medianNs / static_cast<double>(kKeypoints),
-                kKeypoints);
+    // The plane is one bit per pixel OF THE LEVEL IT BELONGS TO, so it shrinks by 4x
+    // per level exactly as the derivative planes do. Printing only the 640x480
+    // figure and calling it "per pyramid level" overstates the pyramid-wide cost by
+    // about 3x -- in favour of the memory side of this axis, which is the direction
+    // an error must never go unremarked. The level-invariant statement is the
+    // relative one: a fifth plane against the four the covariance already reads.
+    const size_t levels[] = {1, 4, 16, 64};  // area divisors for L0..L3
+    size_t planeLadder = 0;
+    for (size_t li = 0; li < sizeof(levels) / sizeof(levels[0]); ++li) {
+        planeLadder += planeBytes / levels[li];
+    }
+    std::printf("\n  MEMORY (%s): the selector plane is %zu B at %dx%d and scales with the "
+                "level\n",
+                wordName, planeBytes, kWidth, kHeight);
+    std::printf("  (%zu B at L1, %zu B at L2, ~%zu B summed over a 4-level pyramid), held "
+                "for the frame's lifetime.\n",
+                planeBytes / 4, planeBytes / 16, planeLadder);
+    std::printf("  Level-invariant form: +25%% on the derivative working set of every "
+                "level -- a fifth plane against dx/dy's four.\n");
+    std::printf("  Forming it costs %.1f us at %dx%d (%.1f ns amortized over %d "
+                "keypoints); the four-argument form allocates nothing, at any level.\n",
+                ft[0].medianNs / 1000.0, kWidth, kHeight,
+                ft[0].medianNs / static_cast<double>(kKeypoints), kKeypoints);
     return true;
 }
 
