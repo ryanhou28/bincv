@@ -580,7 +580,7 @@ opencv	test_denoise	9744	0
 opencv	test_threshold	33112	0
 opencv	test_morphology	299181	0
 opencv	test_resample	245312	0
-opencv	test_pyramid	262008	0
+opencv	test_pyramid	262321	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
 opencv	test_equivalence	16403	0
@@ -598,7 +598,7 @@ core	test_denoise	7584	0
 core	test_threshold	21304	0
 core	test_morphology	172632	0
 core	test_resample	245312	0
-core	test_pyramid	236122	0
+core	test_pyramid	236429	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -614,7 +614,7 @@ noexcept	test_denoise	7584	0
 noexcept	test_threshold	21304	0
 noexcept	test_morphology	172632	0
 noexcept	test_resample	245312	0
-noexcept	test_pyramid	236122	0
+noexcept	test_pyramid	236429	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -630,6 +630,6 @@ debug	test_denoise	7584	0
 debug	test_threshold	21304	0
 debug	test_morphology	172632	0
 debug	test_resample	245312	0
-debug	test_pyramid	236122	0
+debug	test_pyramid	236429	0
 debug	test_harness	8	0
 

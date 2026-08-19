@@ -2167,11 +2167,16 @@ The formulation is `boxSum4` (3·N + 1 full-adder stages, linear in N) then a
 requantization that is a constant multiply, a constant add and a restoring
 division by a constant — quadratic in `NOut`, linear in `NIn`, exponential in
 neither. Odd extents **replicate** the edge pixel so the divisor stays 4 and the
-destination stays ceil(w/2) × ceil(h/2). The kernel takes **no scratch**: the four
-2×2 phases are registers, gathered with
+destination stays ceil(w/2) × ceil(h/2). The kernel takes **no scratch parameter
+and allocates nothing** — the four 2×2 phases are gathered in registers with
 [D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local)'s word-local
-unshuffle, and the whole arithmetic runs in NIn + NOut + 2 words of automatic
-storage per destination word.
+unshuffle — and its stack is bounded at compile time and independent of image
+size: `impl::pyrDownAutomaticWords(NIn, NOut) = 8·NIn + 2·NOut + 6` words plus
+2·NIn + NOut row pointers, measuring on the reference device (aarch64)
+**272 B at NIn = 1 / NOut = 3 / `uint64_t` and 912 B at 8 / 8**. (This block first said NIn + NOut + 2 words, which is the
+widest single intermediate rather than the total and understated the frame by
+5×–10×; the measurement and the two restructurings that were tried and rejected
+for costing *more* stack are in [X-15](EXPERIMENTS.md).)
 [D-18](ARCHITECTURE.md#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale)
 records all three choices and the three deviations from the reference.
 

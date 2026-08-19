@@ -1196,8 +1196,10 @@ wrong — which is why CLAUDE.md requires the measurement rather than the argume
 **Consequences.** T3.4's `pyrDown` carries no scratch for its subsample half and
 `ops/` gains no plan-shaped API. The frame-masked route is not a tuning target:
 it does the same log-depth gather with a memory pass per step instead of a
-register step, and pads each row to a power-of-two bit count, so it runs 10 passes
-over 32 words at 640 columns where the word-local route makes one pass over 5.
+register step, and pads each row to a power-of-two bit count, so at 640 columns
+and `uint64_t` it runs 10 passes over 16 words where the word-local route makes
+one pass over 5 destination words (at `uint32_t`, 10 passes over 32 against one
+over 10). Counted at one word type, as [X-14](EXPERIMENTS.md) now is.
 
 **Not decided here:** X-14 measured the winner **1.49× faster at `uint64_t`** and
 the gather loop **1.21× slower** there. That is [E-9](#9-open-questions-and-planned-experiments)'s

@@ -38,6 +38,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -51,6 +52,44 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #endif
+
+// ---------------------------------------------------------------------------
+// The allocation counter, in the idiom tests/test_storage.cpp established.
+//
+// ops/pyramid.hpp promises "no allocation and no scratch parameter". Half of that
+// sentence used to carry a wrong number for the kernel's automatic storage (it
+// quoted the widest single intermediate, NIn + NOut + 2 words, as the total); the
+// stack half is now measured with -fstack-usage and recorded in the header and in
+// EXPERIMENTS.md X-15, because it is a property of the emitted code rather than
+// of the source. THE HEAP HALF IS CHECKABLE HERE, and is checked -- a kernel that
+// grew a std::vector of scratch would still pass every value test in this file.
+// ---------------------------------------------------------------------------
+namespace {
+std::size_t g_newCount = 0;
+
+const void* volatile g_sink = nullptr;
+inline void escape(const void* p) { g_sink = p; }
+
+void* countedAllocate(std::size_t bytes) {
+    ++g_newCount;
+    if (bytes > static_cast<std::size_t>(PTRDIFF_MAX)) std::abort();
+    // Cannot throw std::bad_alloc: this file also builds with -fno-exceptions.
+    void* p = std::malloc(bytes == 0 ? 1 : bytes);
+    if (p == nullptr) std::abort();
+    return p;
+}
+
+void countedFree(void* p) noexcept { std::free(p); }
+
+} // namespace
+
+void* operator new(std::size_t bytes)   { return countedAllocate(bytes); }
+void* operator new[](std::size_t bytes) { return countedAllocate(bytes); }
+
+void operator delete(void* p) noexcept                 { countedFree(p); }
+void operator delete[](void* p) noexcept               { countedFree(p); }
+void operator delete(void* p, std::size_t) noexcept    { countedFree(p); }
+void operator delete[](void* p, std::size_t) noexcept  { countedFree(p); }
 
 namespace {
 
@@ -601,6 +640,124 @@ void testCostIsNotExponential() {
 }
 
 // ---------------------------------------------------------------------------
+// 4b. The footprint claim
+// ---------------------------------------------------------------------------
+
+/// ops/pyramid.hpp's promise 2 has two halves, and only one of them was ever
+/// right.
+///
+/// THE HEAP HALF -- "no allocation, no scratch parameter" -- is true and is
+/// checked here by counting `operator new` across pyrDown at several (NIn, NOut,
+/// WordType) and across Pyramid::build over the 1-3-4-5 ladder. `build()`
+/// allocates nothing because every level already exists; the CONSTRUCTOR does,
+/// which is why the arming happens after it.
+///
+/// THE STACK HALF was documented as "NIn + NOut + 2 words of automatic storage",
+/// which is the widest SINGLE intermediate and not the total: the source declares
+/// 8*NIn + 2*NOut + 6 words, and a -fstack-usage measurement of the emitted frame
+/// is larger still (368 B at NIn=1/NOut=3/uint64_t where the old sentence implied
+/// 48 B). impl::pyrDownAutomaticWords is that corrected inventory. A test cannot
+/// read the emitted frame portably, so what is pinned here is the property whose
+/// violation caused the bug: the budget must EXCEED the widest single
+/// intermediate, so that quoting one for the other fails.
+void testFootprintClaims() {
+    // --- the automatic-storage inventory ---
+    for (size_t nIn = 1; nIn <= 8; ++nIn) {
+        for (size_t nOut = 1; nOut <= 8; ++nOut) {
+            const std::string where =
+                "NIn=" + std::to_string(nIn) + " NOut=" + std::to_string(nOut);
+            const size_t words = bincv::impl::pyrDownAutomaticWords(nIn, nOut);
+
+            // Named term by term, in the order ops/pyramid.hpp lists them, so a
+            // reader can match this against the kernel's declarations.
+            const size_t phases = 4 * nIn;              // topLeft..bottomRight
+            const size_t partials = 2 * (nIn + 1);      // boxSum4's left, right
+            const size_t sum = nIn + 2;                 // the 2x2 sum
+            const size_t scaled = nIn + nOut + 2;       // requantize's value
+            const size_t value = nOut;                  // the destination pixel
+            PYR_EXPECT(words == phases + partials + sum + scaled + value,
+                       "pyrDownAutomaticWords is the sum of the arrays the kernel declares",
+                       where);
+
+            // THE REGRESSION THIS FILE EXISTS TO CATCH. The header used to quote
+            // the widest single intermediate as the whole budget. It is strictly
+            // smaller for every supported (NIn, NOut), so the two can never again
+            // be confused without this failing.
+            PYR_EXPECT(words > nIn + nOut + 2,
+                       "the automatic-storage budget is strictly larger than the widest "
+                       "single intermediate -- quoting one for the other understated the "
+                       "kernel's stack by 5x-10x",
+                       where);
+            // Larger by a FACTOR, not by a constant offset. The ratio runs from
+            // 2.73x (NIn=1, NOut=8: 30 words against 11) to 6.9x (NIn=8, NOut=1:
+            // 76 against 11), so 2x is the bound the whole supported range
+            // actually supports -- and it is enough to make the substitution that
+            // caused the bug a factor-of-two error at minimum.
+            PYR_EXPECT(words >= 2 * (nIn + nOut + 2),
+                       "and larger by a factor, not a constant: the widest single "
+                       "intermediate is under half the budget everywhere in the "
+                       "supported range",
+                       where);
+
+            // Linear in both, exponential in neither: the same shape claim
+            // testCostIsNotExponential makes about time, made about space.
+            if (nIn >= 2) {
+                PYR_EXPECT(words - bincv::impl::pyrDownAutomaticWords(nIn - 1, nOut) == 8,
+                           "a source bit costs a constant 8 words of stack", where);
+            }
+            if (nOut >= 2) {
+                PYR_EXPECT(words - bincv::impl::pyrDownAutomaticWords(nIn, nOut - 1) == 2,
+                           "an output bit costs a constant 2 words of stack", where);
+            }
+        }
+    }
+
+    // --- the heap half, measured ---
+    {
+        QuantMat<1, uint32_t> src(64, 32);
+        QuantMat<3, uint32_t> dst(32, 16);
+        for (int y = 0; y < 32; ++y)
+            for (int x = 0; x < 64; ++x) src.set(y, x, static_cast<unsigned>((x ^ y) & 1));
+        escape(&src);
+        escape(&dst);
+        const std::size_t before = g_newCount;
+        pyrDown<3, 1, uint32_t>(src, dst);
+        escape(&dst);
+        PYR_EXPECT(g_newCount == before,
+                   "pyrDown allocates nothing on the heap", "NIn=1 NOut=3 uint32_t");
+    }
+    {
+        QuantMat<4, uint64_t> src(95, 61);
+        QuantMat<5, uint64_t> dst(48, 31);
+        for (int y = 0; y < 61; ++y)
+            for (int x = 0; x < 95; ++x) src.set(y, x, static_cast<unsigned>((x * 7 + y) & 15));
+        escape(&src);
+        escape(&dst);
+        const std::size_t before = g_newCount;
+        pyrDown<5, 4, uint64_t>(src, dst);
+        escape(&dst);
+        PYR_EXPECT(g_newCount == before,
+                   "pyrDown allocates nothing at an odd extent either",
+                   "NIn=4 NOut=5 uint64_t");
+    }
+    {
+        // The whole ladder. The constructor allocates; build() must not.
+        bincv::Pyramid<uint32_t, 1, 3, 4, 5> pyramid(640, 480);
+        auto& base = pyramid.level<0>();
+        for (int y = 0; y < 480; y += 7)
+            for (int x = 0; x < 640; x += 3) base.set(y, x, 1u);
+        escape(&pyramid);
+        const std::size_t before = g_newCount;
+        pyramid.build();
+        escape(&pyramid);
+        PYR_EXPECT(g_newCount == before,
+                   "Pyramid::build allocates nothing -- every level already exists and "
+                   "pyrDown takes no scratch",
+                   "1-3-4-5 at 640x480");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 5. The ladder
 // ---------------------------------------------------------------------------
 
@@ -743,6 +900,12 @@ template <typename WordType>
 void testAgainstReferencePipeline(const char* wordName) {
     size_t exact = 0;
     size_t offByOne = 0;
+    // The WHOLE-LEVEL distance to the reference pipeline, which is a different
+    // quantity from the one-LSB arithmetic bound above and is measured here rather
+    // than described. See check 6.
+    size_t sealPixels = 0;
+    size_t sealSame = 0;
+    int sealMaxDelta = 0;
     for (int width : {16, 63, 64, 65, 128}) {
         for (int height : {8, 15, 16}) {
             const cv::Mat cvSrc = randomBinaryMat(
@@ -791,10 +954,18 @@ void testAgainstReferencePipeline(const char* wordName) {
                                "pyrDown<8, 1> is the exact 2x2 mean rounded once, half up",
                                where);
                     // 3. The two therefore agree to within one LSB out of 255, and
-                    //    OpenCV is never the lower of the two.
+                    //    OpenCV is never the lower of the two. NOTE WHAT `openCv`
+                    //    IS: alignedBox2x2, i.e. cv::blur at anchor (0, 0) with
+                    //    BORDER_REPLICATE -- binCV's OWN geometry, so this bounds
+                    //    the ARITHMETIC alone. The distance to the reference
+                    //    pipeline's actual level (referenceBox2x2, default anchor)
+                    //    is far larger and is entirely phase; checks 4 and 5 below
+                    //    are what account for it.
                     PYR_EXPECT(openCv >= got && openCv - got <= 1,
-                               "binCV and the reference pipeline's BOX_2x2 agree to within "
-                               "one LSB, OpenCV never lower",
+                               "binCV and OpenCV's 2x2 box ARITHMETIC, on the aligned "
+                               "block, agree to within one LSB -- OpenCV never lower "
+                               "(this is not the whole-level distance to the reference "
+                               "pipeline; see checks 4 and 5 for the phase)",
                                where);
                     if (got == openCv) {
                         ++exact;
@@ -849,14 +1020,58 @@ void testAgainstReferencePipeline(const char* wordName) {
                        "cv::blur's default anchor puts its 2x2 window half a pixel up and to "
                        "the left -- the phase deviation ops/pyramid.hpp records",
                        label + ": " + std::to_string(agree) + " of " + std::to_string(interior));
+
+            // 6. REGRESSION GUARD ON THE DOCUMENTED DEVIATION ITSELF. Check 3
+            //    bounds binCV against the ALIGNED block by one LSB; that bound was
+            //    once described as agreement with "the reference pipeline's
+            //    BOX_2x2", which it is not. Measure the actual whole-level
+            //    distance to referenceBox2x2 (default anchor, the SEAL path) so
+            //    the deviation is a number the header can quote, and assert that
+            //    it is emphatically NOT within one LSB -- if it ever became so,
+            //    the phase deviation would have silently disappeared and the three
+            //    documented deviations would need re-deriving.
+            for (int y = 0; y < sealLevel.rows; ++y) {
+                for (int x = 0; x < sealLevel.cols; ++x) {
+                    ++sealPixels;
+                    const int delta = static_cast<int>(dst.at(y, x)) -
+                                      static_cast<int>(sealLevel.at<uchar>(y, x));
+                    const int mag = delta < 0 ? -delta : delta;
+                    if (mag == 0) ++sealSame;
+                    if (mag > sealMaxDelta) sealMaxDelta = mag;
+                }
+            }
         }
     }
 
-    std::cout << "\n--- pyrDown<8, 1> against the reference BOX_2x2 arithmetic: " << wordName
-              << " ---\n"
+    // Asserted once over the whole sweep, because it is a property of the
+    // deviation and not of any one frame.
+    PYR_EXPECT(sealPixels > 0 && sealMaxDelta > 1,
+               "the distance to the reference pipeline's own BOX_2x2 level is NOT the "
+               "one-LSB arithmetic bound -- it carries the phase deviation too, and a "
+               "run where it did not would mean the phase deviation had vanished",
+               std::string(wordName) + ": max |binCV - reference| = " +
+                   std::to_string(sealMaxDelta));
+    PYR_EXPECT(sealMaxDelta <= 255,
+               "and it is bounded by full scale at NOut = 8",
+               std::string(wordName) + ": " + std::to_string(sealMaxDelta));
+    PYR_EXPECT(sealSame < sealPixels / 2,
+               "most destination pixels differ from the reference level -- the phase "
+               "deviation dominates, which is why check 3's bound is scoped to the "
+               "aligned block",
+               std::string(wordName) + ": " + std::to_string(sealSame) + " of " +
+                   std::to_string(sealPixels) + " identical");
+
+    std::cout << "\n--- pyrDown<8, 1> against OpenCV's 2x2 box ARITHMETIC on the ALIGNED "
+                 "block (binCV's own geometry): "
+              << wordName << " ---\n"
               << "    identical      " << exact << " destination pixels\n"
               << "    one LSB apart  " << offByOne
-              << " (OpenCV rounds the mean up; binCV rounds to nearest)\n";
+              << " (OpenCV rounds the mean up; binCV rounds to nearest)\n"
+              << "--- and against the reference pipeline's WHOLE BOX_2x2 level "
+                 "(default anchor), which also carries the phase deviation ---\n"
+              << "    identical      " << sealSame << " of " << sealPixels
+              << " destination pixels\n"
+              << "    max |delta|    " << sealMaxDelta << " of 255 (all of it phase)\n";
 }
 
 #endif // BINCV_WITH_OPENCV
@@ -944,6 +1159,7 @@ PYRAMID_ARITHMETIC(uint32_t, uint32_t)
 PYRAMID_ARITHMETIC(uint64_t, uint64_t)
 
 BINCV_TEST(Pyramid, CostIsNotExponential) { testCostIsNotExponential(); }
+BINCV_TEST(Pyramid, FootprintClaims) { testFootprintClaims(); }
 
 #ifdef BINCV_WITH_OPENCV
 BINCV_TEST(Pyramid, ReferencePipeline_uint32_t) {

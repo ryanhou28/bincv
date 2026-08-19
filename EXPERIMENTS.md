@@ -1894,11 +1894,17 @@ auxiliary bytes each variant needs, in the same table. Speed and memory together
 because that is the pair rule 1 weighs.
 
 **Sanity bound:** at 640×480 → 320×240 with `uint32_t` one call touches 19200 B of
-source (only even rows are read) plus 9600 B of destination = **28.1 KiB**, which
-fits the Cortex-A72's 32 KiB L1D, and every smaller ladder step more so. DRAM
-bandwidth (~4–6 GB/s) is therefore *not* the bound and must not be used as one;
-the bound is L1 load throughput, on the order of 8–16 B/cycle at 1.5 GHz =
-**12–24 GB/s**. A variant reporting more than that is measuring dead code.
+source (only even rows are read) plus 9600 B of destination = **28.1 KiB**, and
+every smaller ladder step less. That is the **per-call** footprint, and it is what
+the bound below is built from; it is *not* a claim that the benchmark runs out of
+L1. The harness rotates `kInputs = 4` distinct source frames so nothing
+constant-folds, so a batch's resident set is ~163 KB at 640×480 and consecutive
+calls of the same variant land in L2, not L1. The useful ceiling is therefore a
+range rather than a single number: L1 load throughput on the order of 8–16 B/cycle
+at 1.5 GHz = **12–24 GB/s** at the top, L2 below it, and DRAM (~4–6 GB/s) at the
+bottom. **A variant reporting more than the highest of those is measuring dead
+code** — that is the check this bound exists to enable, and it does not depend on
+which level the working set actually sits in.
 
 **Method:** `bincv-cpp/benchmark/decimate_benchmark.cpp` — binCV against binCV, so
 [§10.3](ARCHITECTURE.md#103-benchmark-denominator)'s OpenCV denominator does not
@@ -1958,8 +1964,10 @@ runs are in `bincv-cpp/results/decimate_benchmark_pi4.log`.
 **The sanity bound holds (rule 4).** Every ratio here is above 8×, so all of them
 were checked. The winner moves 28800 B per call in 0.2750 ns/pixel × 76800
 pixels = 21.1 µs, i.e. **1.36 GB/s at `uint32_t` and 2.03 GB/s at `uint64_t`** —
-below the ~4–6 GB/s DRAM figure and far below the 12–24 GB/s L1 bound this entry
-wrote down in advance, so nothing was deleted by the optimizer. The second check
+an order of magnitude below **every** ceiling the bound listed, the ~4–6 GB/s DRAM
+floor included, so it does not matter that the four-frame rotation puts the batch
+in L2 rather than L1: no variant is fast enough for the question "was this deleted
+by the optimizer?" to be live. The second check
 is per-word cost: 0.1847 ns/pixel × 64 pixels is **11.8 ns = ~17.7 cycles at
 1.5 GHz** for one destination word, against roughly 28 ALU operations (two
 six-step deinterleaves plus the combine, load, store) — about 1.6 ops/cycle on a
@@ -1980,9 +1988,17 @@ Two things are worth recording beyond the branch that fired:
 1. **The frame-masked route loses for a structural reason, not a tuning one.** It
    performs the same log-depth gather as B, but each step is a pass over memory
    instead of a register operation, and its recurrence needs the row padded to a
-   power-of-two bit count: 20 words become 32 at 640 columns, so it runs 10 passes
-   over 32 words where B makes one pass over 5. Predicted ratio ~10.7×, measured
-   8.35× at `uint64_t`. No amount of tuning closes that; it is more work.
+   power-of-two bit count. **Stated at one word type**, because an earlier version
+   of this sentence mixed two and produced a ratio neither one gives: at
+   `uint64_t`, 640 columns is 10 words padded to 16, so C runs **10 passes over 16
+   words** where B makes **one pass over 5** destination words. At `uint32_t` the
+   same counts are 20 → 32, 10 passes over 32, against one pass over 10. Either
+   way the word-count ratio is 32×, against 8.35× measured — the gap is B's
+   per-word cost, which is a six-step deinterleave rather than a single move, so
+   the count alone was never going to predict the ratio and no predicted figure is
+   claimed here. What the counts do establish is the direction, and it is
+   structural: more passes over more words. No amount of tuning closes that; it is
+   more work.
 2. **A word-width result that belongs to [E-9](ARCHITECTURE.md#9-open-questions-and-planned-experiments), not to this decision.**
    The winner is **1.49× faster at `uint64_t`** (0.1847 against 0.2750) because
    its fixed per-word cost amortises over 64 pixels instead of 32 — while the
@@ -2137,16 +2153,57 @@ statement about the **operation count**, and it is exact: the loops run to
 `NIn + 2`. The measured wall time of the shipped route grows faster than that —
 8.0× from NIn = 1 to NIn = 4 where the stage count
 (`3·NIn + 1` plus `(NOut+2)(NIn+NOut+2)`, i.e. 24 → 90) predicts 3.75×. The likely
-cause is register pressure rather than arithmetic: the kernel holds `4·NIn` phase
-words plus `NIn + NOut + 2` arithmetic planes live per destination word, which is
-12 words at NIn = 1 and 28 at NIn = 4, and a Cortex-A72 has 31 general registers.
-That is a **tuning** observation, not an algorithmic one — the comparison T3.4
-turned on is against `4·(2^NIn − 1)`, which grows 13.3× over the same range — but
-it is the number to look at first if a pyramid level ever needs to be faster, and
-it is left here rather than smoothed away.
+cause is register pressure rather than arithmetic, **and the live-word count this
+paragraph first quoted was itself too low** — it counted the four phase arrays and
+`scaled` and missed `boxSum4`'s two partial sums and `value`. The corrected
+inventory is `impl::pyrDownAutomaticWords(NIn, NOut) = 8·NIn + 2·NOut + 6` words
+per destination word: **18 at NIn = 1, NOut = 2 and 48 at NIn = 4, NOut = 5**,
+against a Cortex-A72's 31 general registers. So the register-pressure explanation
+is *stronger* than it read, not weaker: the kernel is already over the register
+file at NIn = 1 by this count and is 1.5× over it at NIn = 4. That is a **tuning**
+observation, not an algorithmic one — the comparison T3.4 turned on is against
+`4·(2^NIn − 1)`, which grows 13.3× over the same range — but it is the number to
+look at first if a pyramid level ever needs to be faster, and it is left here
+rather than smoothed away.
+
+**The kernel's automatic storage, measured rather than asserted.** The same
+correction applies to what `ops/pyramid.hpp` promised a caller. Its header said
+"the whole arithmetic runs in NIn + NOut + 2 words of automatic storage"; that is
+the widest *single* intermediate (`scaled`), not the total, and it understated the
+emitted frame by 5×–10×. Measured with
+`g++ -std=c++17 -O2 -DNDEBUG -fstack-usage` on non-inlined instantiations of
+`impl::pyrDownRoute<NOut, NIn, W, false>`:
+
+| NIn / NOut | 1 / 3 | 3 / 4 | 4 / 5 | 8 / 8 |
+|---|---|---|---|---|
+| **aarch64**, `uint32_t` | 224 B | 416 B | 448 B | 640 B |
+| **aarch64**, `uint64_t` | **272 B** | **544 B** | **592 B** | **912 B** |
+| x86_64, `uint32_t` | 288 B | 480 B | 544 B | 720 B |
+| x86_64, `uint64_t` | 368 B | 640 B | 704 B | 1040 B |
+| *claimed*, `uint64_t` | *48 B* | *72 B* | *88 B* | *144 B* |
+| declared words, `uint64_t` | 160 B | 304 B | 384 B | 688 B |
+
+The aarch64 row is the authoritative one — it was taken on the reference device
+itself (g++ 14.2.0, environment block above), and it is smaller than x86_64's
+because a Cortex-A72 has twice the registers to spill into. The old sentence was
+low by **5.7×–7.7×** across the whole table, and low against the *declared* word
+count too. The frame does not depend on image size.
+
+**The code was not changed to fit the number.** Two restructurings that would have
+made the source-level count tight — grouping the nine arrays into one struct, and
+hoisting the helpers' locals into the caller — were both tried and both measured
+**larger** (784 B and 816 B against 704 B at NIn = 4 / NOut = 5 / `uint64_t`,
+x86_64), because the compiler can no longer overlap the lifetimes that do not
+meet. Memory wins ([CLAUDE.md](CLAUDE.md)), so the kernel kept its shape and the
+documentation was corrected instead — which is also what
+"[a measurement contradicts a documented claim] → report it rather than adjusting
+the code to fit the doc" asks for. The heap half of the promise was
+true and is now checked rather than asserted: `tests/test_pyramid.cpp`
+(`Pyramid.FootprintClaims`) counts `operator new` across `pyrDown` and
+`Pyramid::build` and requires zero.
 
 **Correctness on the reference device.** `tests/test_pyramid.cpp` reports
-**236122/236122** under `aarch64` on the same device, byte-identical to the three
+**236429/236429** under `aarch64` on the same device, byte-identical to the three
 core x86 configurations — so nothing in the bit-sliced arithmetic, the word-local
 gather or the tail masking depends on the host architecture.
 

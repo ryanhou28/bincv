@@ -58,8 +58,10 @@
 /// decimated frames per source PLANE (4 * NIn frames of scratch at quarter size,
 /// i.e. NIn full frames) and four passes over memory before the first add. Fused,
 /// the four phases are four registers, the arithmetic runs on them, and the
-/// kernel takes **no scratch at all**. The odd phase is the same gather over
-/// `word >> 1`, which costs one shift.
+/// kernel needs **no scratch BUFFER** -- nothing frame-sized, nothing caller-
+/// provided, nothing on the heap. It does use a bounded stack frame; the number
+/// is in promise 2 below, and it is not the one this file used to quote. The odd
+/// phase is the same gather over `word >> 1`, which costs one shift.
 ///
 /// ---------------------------------------------------------------------------
 /// PROBLEM 2 OF T3.4's SPEC -- THE N-BIT BOX. Closed here, and this is the part
@@ -176,7 +178,15 @@
 ///     {0, 63.75, 127.5, 191.25, 255}, and rounded to NEAREST the fourth would be
 ///     191. binCV rounds once, half up, so at NOut = 8 the two agree exactly
 ///     wherever the mean is an integer and differ by ONE LSB out of 255 where it
-///     is not, with OpenCV never the lower of the pair. Rounding a mean up is a
+///     is not, with OpenCV never the lower of the pair. **That one-LSB bound is
+///     the ARITHMETIC compared on the ALIGNED block** -- cv::blur run at anchor
+///     (0, 0) with BORDER_REPLICATE, i.e. binCV's own geometry expressed in
+///     OpenCV calls -- and NOT the distance to the reference pipeline's whole
+///     level, which also carries the phase deviation below. Measured against the
+///     reference's actual BOX_2x2 level the two differ on **74.9% of destination
+///     pixels (848 of 3380 identical) by up to 192 of 255** -- measured by
+///     tests/test_pyramid.cpp check 6, and all of it phase; the third bullet is
+///     where that is accounted for. Rounding a mean up is a
 ///     systematic brightening of every level; rounding to nearest is the better
 ///     numeric and Tier 2 is what buys the right to differ. The test checks BOTH
 ///     rules, so if OpenCV's ever changes it fails here rather than being
@@ -210,9 +220,31 @@
 ///  1. **Views, never containers** (D-5). The kernel takes NIn source plane views
 ///     and NOut destination plane views; the QuantMat overload is a wrapper that
 ///     names them, exactly as ops/threshold.hpp's binarize is.
-///  2. **No allocation and no scratch.** The whole arithmetic runs in
-///     NIn + NOut + 2 words of automatic storage per destination word. There is no
-///     scratch parameter because there is nothing to put in it.
+///  2. **No allocation and no scratch parameter.** There is no scratch parameter
+///     because there is nothing to put in it, and no heap allocation on any path
+///     -- tests/test_pyramid.cpp pins both by counting `operator new` across
+///     pyrDown and Pyramid::build. What the kernel does use is a
+///     **compile-time-bounded stack frame**, and this file used to quote the
+///     wrong number for it: NIn + NOut + 2 words is the widest SINGLE intermediate
+///     (`scaled`), not the total. The source declares
+///     `impl::pyrDownAutomaticWords(NIn, NOut) == 8*NIn + 2*NOut + 6` words --
+///     four phase arrays at NIn, boxSum4's two partials at NIn+1, `sum` at NIn+2,
+///     `scaled` at NIn+NOut+2 and `value` at NOut -- plus 2*NIn + NOut row
+///     pointers. MEASURED with `-fstack-usage` at `-O2 -DNDEBUG`, one call's frame
+///     is (aarch64 / g++ 14.2 above, x86_64 / g++ 11.4 below, in bytes):
+///
+///         NIn/NOut       1/3    3/4    4/5    8/8
+///         aarch64  u32   224    416    448    640
+///                  u64   272    544    592    912
+///         x86_64   u32   288    480    544    720
+///                  u64   368    640    704   1040
+///
+///     -- larger than the declared words alone, because the compiler also spills,
+///     and smaller on aarch64, which has twice the registers to spill into. The
+///     old sentence implied 48 B at 1/3 and 144 B at 8/8, so it was low by
+///     5.7x-7.7x across this table. A caller sizing a Cortex-M stack should budget
+///     from here, not from the widest intermediate. The frame does not depend on
+///     image size.
 ///  3. **Never throws.** Shape and aliasing violations are programming errors,
 ///     reported by BINCV_ASSERT in debug and undefined in release
 ///     (ARCHITECTURE 5.3).
@@ -250,6 +282,9 @@ inline namespace BINCV_ABI_NAMESPACE {
 // ---------------------------------------------------------------------------
 
 /// @brief Destination width of one pyramid level: ceil(srcWidth / 2).
+///        **API TIER 3** -- the bare extent computation has no cv:: equivalent
+///        (cv::pyrDown computes it internally), exactly as ops/resample.hpp's
+///        `decimatedWidth` does.
 /// @note cv::pyrDown's own `dsize` rule, and the reference pipeline's. An odd
 ///       width keeps its last column; that column's 2x2 block replicates the edge
 ///       pixel (see the file header).
@@ -257,6 +292,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 constexpr size_t pyrDownWidth(size_t srcWidth) { return (srcWidth + 1) / 2; }
 
 /// @brief Destination height of one pyramid level: ceil(srcHeight / 2).
+///        **API TIER 3**, with pyrDownWidth.
 constexpr size_t pyrDownHeight(size_t srcHeight) { return (srcHeight + 1) / 2; }
 
 namespace impl {
@@ -300,6 +336,35 @@ constexpr size_t pyrDownAdderStages(size_t nIn, size_t nOut) {
            + width                    // multiply by 2^NOut - 1
            + width                    // add the rounding constant
            + nOut * width;            // the restoring division
+}
+
+/// @brief Words of automatic storage the shipped `pyrDown` DECLARES per
+///        destination word.
+/// @return 8 * NIn + 2 * NOut + 6, which is every word-valued array on the path:
+///
+///         topLeft, topRight, bottomLeft, bottomRight   4 * NIn
+///         boxSum4's left and right                     2 * (NIn + 1)
+///         sum                                          NIn + 2
+///         requantizeBoxSum's scaled                    NIn + NOut + 2
+///         value                                        NOut
+///
+///        On top of it the kernel holds 2 * NIn + NOut row POINTERS and a few
+///        scalars. None of it scales with the image.
+/// @note **NIn + NOut + 2 -- the widest single intermediate -- was documented as
+///       the whole budget until a `-fstack-usage` measurement said otherwise.**
+///       The file header carries the measured frames; they exceed even this count,
+///       because a compiler that inlines the helpers also spills. So this is a
+///       source-level inventory a reader can check against the declarations, not a
+///       promise about the emitted frame -- and it is deliberately NOT enforced by
+///       restructuring the kernel to match: grouping these into one object, or
+///       hoisting the helpers' locals into the caller, both MEASURED LARGER
+///       (784 B and 816 B against 704 B at NIn = 4 / NOut = 5 / uint64_t, x86_64),
+///       because the compiler can no longer overlap the lifetimes that do not
+///       meet. Memory wins, so the code stayed and the number was corrected.
+/// @note Does NOT describe impl::pyrDownReplicated, whose rejected box sum adds
+///       4 * (2^NIn - 1) words of its own -- half of why it lost.
+constexpr size_t pyrDownAutomaticWords(size_t nIn, size_t nOut) {
+    return 8 * nIn + 2 * nOut + 6;
 }
 
 /// @brief `out = a + b`, bit-sliced. `out` holds max(na, nb) + 1 planes.
@@ -598,8 +663,11 @@ namespace impl {
 /// @note Odd widths and heights replicate the edge pixel into the missing half of
 ///       the block, so the divisor stays 4 everywhere (file header).
 /// @note Empty destinations (width or height 0) are a no-op, not an error.
-/// @note Never throws, never allocates, takes no scratch. The arithmetic runs in
-///       NIn + NOut + 2 words of automatic storage per destination word.
+/// @note Never throws, never allocates, takes no scratch parameter. Its automatic
+///       storage is impl::pyrDownAutomaticWords(NIn, NOut) words plus 2*NIn + NOut
+///       row pointers, bounded at compile time and independent of image size; the
+///       measured frames are in the file header. NIn + NOut + 2 is the widest
+///       single intermediate, not the total.
 /// @note Padding bits past `dst.width` are zero in every destination plane on
 ///       return, even when the source's are not (D-13).
 template <size_t NOut, size_t NIn, typename WordType, bool Replicated>
@@ -916,7 +984,9 @@ public:
 
     /// @brief Fills levels 1..N-1 by running pyrDown down the ladder.
     /// @note Level 0 is the caller's input and is not touched. Allocates nothing:
-    ///       every level already exists, and pyrDown takes no scratch.
+    ///       every level already exists, and pyrDown takes no scratch buffer.
+    ///       tests/test_pyramid.cpp counts operator new across this call and
+    ///       requires zero.
     void build() { levels_.buildDown(); }
 
     /// @brief Total words across every level -- the pyramid's whole footprint.
