@@ -127,9 +127,17 @@ endfunction()
 # configuration: `binarize` (QuantMat<N> -> 1 bit) is Tier 3 and core, `threshold`
 # (CV_8U -> 1 bit) is Tier 1 and needs cv::threshold, so half the file is behind
 # the guard and half is not.
+#
+# test_morphology (T3.3) is core for the same reason and carries one thing the
+# others do not: BORDER_WRAP. cv::morphologyEx REFUSES that border type -- it is
+# an OpenCV assertion, not an omission -- so there is no Tier 1 denominator for
+# it at all, and the only thing standing behind binCV's wrapped morphology is
+# this file's core half (a per-pixel reference over an independently written
+# border mapping, plus agreement with ops/shift.hpp for a one-cell element).
+# That coverage would vanish if the suite were OpenCV-only.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
                      test_logic test_shift test_reduce test_bitslice
-                     test_denoise test_threshold)
+                     test_denoise test_threshold test_morphology)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -404,6 +412,44 @@ bincv_add_death_test(test_assert_abort binarize-alias
                      "binarize: dst must share no word with any source plane")
 bincv_add_death_test(test_assert_abort binarize-short-stride
                      "binarize: every view's stride must cover a whole row")
+
+# T3.3 morphology preconditions. TWO OF THESE HAVE NO ANALOGUE ANYWHERE ELSE IN
+# THE PROJECT, which is why the list is longer than denoise's or binarize's:
+#
+#   `morphex-scratch-size` / `morphex-scratch-overlap` are the D-16 SCRATCH
+#   CONTRACT, and morphologyEx is the only kernel in binCV that takes a
+#   caller-provided intermediate. An undersized scratch is not a wrong answer but
+#   an overrun of the caller's array -- OPEN erodes into every word of scratch and
+#   then reads every word back -- and a scratch aliasing dst makes the second step
+#   read what the first wrote.
+#
+#   `morph-element-invalid` is the only check anywhere that validates an
+#   argument's own internal consistency rather than a relationship between views,
+#   and StructuringElement::valid() has NO other caller: without this case it can
+#   be deleted with every configuration still green, and an element with no set
+#   cell yields a uniform frame -- the fold's identity everywhere -- which reads
+#   as a plausible image rather than as a fault.
+#
+# Measured before these existed: neutering every BINCV_ASSERT in ops/morphology.hpp
+# at once (`BINCV_ASSERT(true || ...)`) left tests/test_morphology.cpp reporting
+# 172632/172632 checks passed with assertions live. Preconditions with no death
+# test are not covered by a correctness suite that never violates them.
+bincv_add_death_test(test_assert_abort morph-dims
+                     "erode: src and dst must have the same dimensions")
+bincv_add_death_test(test_assert_abort morph-short-stride
+                     "erode: every view's stride must cover a whole row")
+bincv_add_death_test(test_assert_abort morph-in-place
+                     "erode: dst must share no word with src")
+bincv_add_death_test(test_assert_abort morph-border-type
+                     "dilate: unknown BorderType")
+bincv_add_death_test(test_assert_abort morph-element-invalid
+                     "erode: the structuring element needs positive extents")
+bincv_add_death_test(test_assert_abort morphex-op
+                     "morphologyEx: unknown MorphOp")
+bincv_add_death_test(test_assert_abort morphex-scratch-size
+                     "morphologyEx: this op needs a caller-provided scratch view of src's size")
+bincv_add_death_test(test_assert_abort morphex-scratch-overlap
+                     "morphologyEx: scratch must share no word with src or dst")
 
 if(BINCV_OPENCV_FOUND)
     foreach(TEST_NAME ${BINCV_OPENCV_TESTS})

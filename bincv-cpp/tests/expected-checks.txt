@@ -389,6 +389,96 @@
 #             MaxValue + 1, which that function already answers as "no lane". The
 #             `>=` boundary is the cheap answer, not the correct one; the wrap
 #             guard above is what makes the branch load-bearing.
+#   test_morphology  299181 under opencv, 172632 everywhere else. The 126549
+#             difference is the TIER 1 half of T3.3: erode and dilate against
+#             cv::erode / cv::dilate over the full T2.1 size and fill matrix at the
+#             three 3x3 shapes, all seven MorphOps against cv::morphologyEx over
+#             all fourteen structuring elements, the four border types
+#             cv::morphologyEx ACCEPTS (it refuses BORDER_WRAP by assertion) and
+#             -- the one that is not an image comparison at all --
+#             StructuringElement against cv::getStructuringElement CELL BY CELL at
+#             121 sizes x 3 shapes x 4 anchors. Without that last family every
+#             image comparison could be two implementations agreeing about the
+#             wrong element, and MORPH_ELLIPSE's cell set has no specification
+#             other than what OpenCV's rounding computes.
+#             The other 172632 run in all four configurations because the kernels
+#             are core code: the per-pixel reference over an INDEPENDENTLY WRITTEN
+#             border mapping (the do-while shape, against the library's closed
+#             form), a one-cell element against ops/shift.hpp's shift() at every
+#             offset of a 7x5 element and all five BorderTypes, the 3x3 fast path
+#             against the general path it replaces, the seven compound ops against
+#             their definitions, dirty source padding, wide elements, and
+#             BORDER_WRAP -- which has no Tier 1 denominator anywhere, so this half
+#             is the only thing standing behind it.
+#             THE FLOOR HAS TEETH, measured by mutating ops/morphology.hpp
+#             (checks passed, out of 299181 under opencv; every row re-measured
+#             from the shipped tree, with the mutation stated precisely enough to
+#             reproduce -- the previous version of this table did not reconcile,
+#             claiming 245086 passed in one line and 52888 failures two lines
+#             below, and attributing 68776 of them):
+#
+#               THE OFFSET SIGN, FLIPPED. There are FOUR places this file forms a
+#               horizontal offset, not three, and each is mutated on its own below
+#               as well as all together, because a row that flips several at once
+#               cannot show that any ONE of them is covered:
+#                 all four at once                   246165  (53016 failed)
+#                 morphFixupPixel's dx only          270233  (28948)
+#                 morphRowGeneric's window `d` only  245343  (53838)
+#                 morphRowGeneric's fallback dx only 299139  (    42)
+#                 morphRow3x3's left/right cells     286421  (12760)
+#               D-12: erode's default border fill
+#               changed from ones to zeros           270319  (28862)
+#               the non-constant border fixup
+#               skipped entirely                     268477  (30704)
+#               the destination's trailing-word
+#               mask dropped                         232915  (66266)
+#               TOPHAT's subtraction reading the
+#               scratch instead of the source        295313  ( 3868)
+#               the windowed path's cross-word
+#               carry from the previous word
+#               replaced by zero                     270304  (28877)
+#               the fallback recurrence's offset
+#               perturbed by one                     299028  (  153)
+#
+#             THE SIGN ROWS ARE THE POINT OF THE ASYMMETRIC ELEMENTS, and that is
+#             a measurement rather than an argument. All three parametric shapes
+#             are point-symmetric about their centre, so at the default anchor the
+#             offset set satisfies E == -E and negating every offset changes
+#             nothing. The 53016 checks the all-at-once flip fails decompose
+#             EXACTLY, by the check family that reported them:
+#                 31584  a one-cell element is exactly ops/shift.hpp's shift
+#                  8732  bit-exact against OpenCV
+#                  6404  morphologyEx matches its definition
+#                  6168  an asymmetric element matches the reference
+#                   128  a wide element -- the fallback recurrence
+#                 -----
+#                 53016
+#             and NOT ONE of them names a centred rect, cross or ellipse: the only
+#             parametric elements that appear in a failure label are rect3x3@(0,0),
+#             ellipse5x5@(0,4) and cross5x5@(4,1), every one off-centre. A suite of
+#             rect and cross at centred anchors would have passed the flip
+#             5040/5040 -- measured directly, before this suite existed.
+#
+#             THE FALLBACK ROW HAD TO BE EARNED TWICE. The fallback recurrence --
+#             the branch morphRowGeneric takes when an element reaches a whole WORD
+#             sideways and the three-word window cannot express it -- is the
+#             hardest path in the file to discriminate, because everything that
+#             reaches it is wide and most wide things are symmetric.
+#               * Its offset PERTURBED BY ONE first survived 298381/298381: the
+#                 wide elements were solid rects, and sliding a CONTIGUOUS offset
+#                 range by one changes only which columns fall outside the image,
+#                 and those read the border either way. The sparse wide mask -- two
+#                 cells at the extremes of a wide span -- is what sees it.
+#               * Its offset SIGN then survived too, 298541/298541, and that was
+#                 found in T3.3's review rather than by its author. Both families
+#                 reaching the fallback were point-symmetric about their anchor:
+#                 the rects were centred, and the sparse mask's cells sat at
+#                 {0, half, cols-1} around an anchor at half. Anchoring the wide
+#                 rects at column 0 and at column `size - 1` as well makes the
+#                 offset set {0..size-1} and {-(size-1)..0}, and the mutation now
+#                 fails 42 checks. 42 is small because only the widest elements at
+#                 each word width reach that branch at all; it is not zero, which
+#                 is the property the row asserts.
 #   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
 #             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
 #             through constPlane() -> unpackTo8U, and that conversion was the one
@@ -428,6 +518,7 @@ opencv	test_reduce	759424	0
 opencv	test_bitslice	351620	0
 opencv	test_denoise	9744	0
 opencv	test_threshold	33112	0
+opencv	test_morphology	299181	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
 opencv	test_equivalence	16403	0
@@ -443,6 +534,7 @@ core	test_reduce	594184	0
 core	test_bitslice	350540	0
 core	test_denoise	7584	0
 core	test_threshold	21304	0
+core	test_morphology	172632	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -456,6 +548,7 @@ noexcept	test_reduce	594184	0
 noexcept	test_bitslice	350540	0
 noexcept	test_denoise	7584	0
 noexcept	test_threshold	21304	0
+noexcept	test_morphology	172632	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -469,5 +562,6 @@ debug	test_reduce	594184	0
 debug	test_bitslice	350540	0
 debug	test_denoise	7584	0
 debug	test_threshold	21304	0
+debug	test_morphology	172632	0
 debug	test_harness	8	0
 

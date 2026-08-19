@@ -34,6 +34,7 @@
 #include "bincv-cpp/ops/bitslice.hpp"
 #include "bincv-cpp/ops/denoise.hpp"
 #include "bincv-cpp/ops/logic.hpp"
+#include "bincv-cpp/ops/morphology.hpp"
 #include "bincv-cpp/ops/reduce.hpp"
 #include "bincv-cpp/ops/shift.hpp"
 #include "bincv-cpp/ops/threshold.hpp"
@@ -440,6 +441,102 @@ int caseBinarizeShortStride() {
     return static_cast<int>(g_binDst[0]);
 }
 
+// T3.3's preconditions. Two of these say something NO OTHER CASE IN THIS FILE
+// says, because no other kernel in the project takes a caller-provided scratch
+// view and none takes a shape object:
+//
+//   `morphex-scratch-size` and `morphex-scratch-overlap` are the D-16 scratch
+//   contract. morphologyEx's five compound ops write an intermediate frame the
+//   CALLER owns (a kernel may not allocate one), so a scratch that is too small
+//   or that aliases src or dst is a silent wrong answer or a buffer overrun --
+//   `erode(src, scratch)` followed by `dilate(scratch, dst)` reads every word of
+//   scratch back, so an undersized one runs off the end of the caller's array.
+//
+//   `morph-element-invalid` is the only precondition anywhere that checks an
+//   ARGUMENT'S OWN INTERNAL CONSISTENCY rather than a relationship between views.
+//   StructuringElement::valid() has no other caller: without this case, deleting
+//   it changes nothing observable, and an element with zero set cells makes every
+//   destination pixel the fold's identity -- a plausible all-black or all-white
+//   frame rather than a crash.
+//
+// The frames are 64 x 3 at uint32_t, i.e. two words per row, which is what makes
+// the short-stride case (stride 1) a violation rather than a tight fit.
+uint32_t g_morphSrc[16] = {0};
+uint32_t g_morphDst[16] = {0};
+uint32_t g_morphScratch[16] = {0};
+
+int caseMorphDims() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 32, 3, 1};      // narrower
+    bincv::erode(src, dst, bincv::rect3x3());
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphShortStride() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 1};  // needs 2 words
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 1};
+    bincv::erode(src, dst, bincv::rect3x3());
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphInPlace() {
+    // A destination word is built from SEVERAL source words, so in place is not
+    // merely unsupported here -- it feeds already-eroded words back in.
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphSrc, 64, 3, 2};       // the same words
+    bincv::erode(src, dst, bincv::rect3x3());
+    return static_cast<int>(g_morphSrc[0]);
+}
+
+int caseMorphBorderType() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
+    // 7, not 99, for the reason caseShiftBorderType() gives above: BorderType's
+    // enumerators span 0..4, so the type's value range is 0..7 and casting 99 into
+    // it is UNSPECIFIED (-Wconversion says so). 7 is representable and not one of
+    // the five, which is exactly what isKnownBorderType() rejects.
+    bincv::dilate(src, dst, bincv::rect3x3(), static_cast<bincv::BorderType>(7));
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphElementInvalid() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
+    // A cross whose every cell is cleared: cols and rows are positive and the
+    // anchor is in range, so only the set-cell half of valid() rejects it.
+    static const uint8_t emptyMask[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    bincv::erode(src, dst, bincv::StructuringElement::custom(emptyMask, 3, 3));
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphExOp() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> scratch{g_morphScratch, 64, 3, 2};
+    // 7, not 42: MorphOp's enumerators span 0..6, so its value range is 0..7 and 7
+    // is the one representable value that names no operation.
+    bincv::morphologyEx(src, dst, static_cast<bincv::MorphOp>(7), bincv::rect3x3(), scratch);
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphExScratchSize() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> scratch{g_morphScratch, 32, 3, 1};  // half a frame
+    bincv::morphologyEx(src, dst, bincv::MORPH_OPEN, bincv::rect3x3(), scratch);
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphExScratchOverlap() {
+    // scratch IS dst. OPEN erodes into scratch and then dilates scratch into dst,
+    // so the second step would read words the first wrote at a different offset.
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> scratch{g_morphDst, 64, 3, 2};
+    bincv::morphologyEx(src, dst, bincv::MORPH_OPEN, bincv::rect3x3(), scratch);
+    return static_cast<int>(g_morphDst[0]);
+}
+
 struct Case {
     const char* name;
     int (*run)();
@@ -545,6 +642,14 @@ const Case kCases[] = {
     {"binarize-dims", caseBinarizeDims},
     {"binarize-alias", caseBinarizeAlias},
     {"binarize-short-stride", caseBinarizeShortStride},
+    {"morph-dims", caseMorphDims},
+    {"morph-short-stride", caseMorphShortStride},
+    {"morph-in-place", caseMorphInPlace},
+    {"morph-border-type", caseMorphBorderType},
+    {"morph-element-invalid", caseMorphElementInvalid},
+    {"morphex-op", caseMorphExOp},
+    {"morphex-scratch-size", caseMorphExScratchSize},
+    {"morphex-scratch-overlap", caseMorphExScratchOverlap},
 };
 
 } // namespace

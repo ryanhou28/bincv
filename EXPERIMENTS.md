@@ -1554,6 +1554,269 @@ that may now be quoted for T3.1 is **57× at 640×480 on the reference device, w
 28× less memory**, never the ratio alone and never a pyramid-level ratio in its
 place.
 
+### X-13 · T3.3 morphology against `cv::erode` / `cv::dilate` · `DONE`
+
+**Gates:** nothing that was open, and one thing that was not written down. T3.3's
+done-when requires a committed benchmark; CLAUDE.md requires the decision rule to
+exist before the numbers do. **The decision rule below was committed before the
+reference device ran**, and its live branch is the first one, which fired.
+
+> **Re-measured during T3.3's review, and four of its numbers changed.** The
+> border axis, the per-case call floor and OpenCV's real `OPEN` footprint were
+> all missing; the erode 3×3 `uint32_t` ratio does not reproduce at the precision
+> it was quoted to; and a border-fixup defect the review found made four of the
+> five border types 6–10× slower than `cv::erode` while this entry published a
+> number for the fifth. Everything below is the post-review measurement. The
+> superseded figures are named where they were wrong rather than deleted.
+
+**Question:** what does bit-parallel morphology cost against `cv::erode` /
+`cv::dilate` on the same binary content as `CV_8U`, at what footprint — and does
+the **fused** kernel that `ops/morphology.hpp` ships (accumulating in the
+destination row, no scratch) trade speed for that footprint against the
+**composed** spelling the operation is *defined* as (a `shift` per element cell
+into a temporary, combined with `ops/logic.hpp`)?
+
+**Hypothesis:** the packed frame is 8× smaller and that is not in doubt. Time is:
+OpenCV's 3×3 morphology is separable and vectorised, and binCV's is scalar until
+Phase 5, so parity rather than a large win is expected at `uint32_t` and a modest
+win at `uint64_t`. The general path (a 5×5 ellipse, non-separable for both sides)
+is expected to be **slower** than OpenCV, because 17 shifted folds per word
+against a NEON kernel is not a fair fight without vectorisation.
+
+**Decision rule** *(written before the device run):*
+
+1. **Fused versus composed — the branch that can change the code.** If the
+   composed spelling is **faster** than the fused kernel, the fused kernel still
+   ships (it is strictly smaller: two frames against three, and no caller-owned
+   scratch on the MVP's hottest morphological call), and the gap is recorded here
+   as **a known speed cost accepted for footprint**, quotable against the
+   project. If the fused kernel is **faster or equal**, nothing is traded and
+   there is no trade-off to record — only a claim to substantiate.
+2. **Against OpenCV.** No branch: T3.3 is Tier 1 and ships whatever the ratio is,
+   because bit-exact drop-in compatibility is the deliverable and the 8× footprint
+   is the project's goal. What the rule fixes is **what may be said**: a ratio is
+   only quotable **with the working set beside it**, at 640×480, and never as a
+   pyramid-level number in place of the frame number. If binCV is **slower** on
+   any case, that number is recorded here in the same sentence as the footprint —
+   not omitted, and not softened.
+3. **Cache residency.** If any ratio exceeds ~5×, it is checked against the
+   ladder for the shape [X-6](#x-6--is-the-t22-logic-speedup-real--done) and
+   [X-12](#x-12--t31-denoise-against-the-reference-implementation--done) found —
+   a ratio that grows as the frame shrinks is a fixed per-call cost, and one that
+   grows as the frame *grows* is cache residency. Both are stated as such rather
+   than reported as the operation's speed.
+
+**Variants:** `cv::erode` / `cv::dilate` / `cv::morphologyEx` on `CV_8U` (the
+ARCHITECTURE 10.3 denominator); `ops/morphology.hpp` at `uint32_t` (D-14's
+default) and `uint64_t`; the composed `shift` + `bitwise` spelling at `uint32_t`;
+and — added during T3.3's review — the general row kernel with the 3×3 special
+case refused (`impl::MorphPath::Generic`), which is binCV against binCV and lives
+in its own binary.
+
+**Cases:** erode 3×3 rect (the special-cased common path), dilate 3×3 rect (the
+same shape with the opposite fold and the opposite border fill, D-12), erode 5×5
+ellipse (the general path, non-separable for both sides, **17** set cells), and
+`morphologyEx` OPEN 3×3 rect (the compound path, where binCV's one
+caller-provided scratch frame appears in the working set). **Plus a BORDER TYPE
+AXIS**: erode 3×3 at `BORDER_REPLICATE` and `BORDER_REFLECT_101`, because binCV
+handles `BORDER_CONSTANT` in the word path and the other four in a per-pixel edge
+fixup, so a ratio measured at one says nothing about the other. `BORDER_WRAP` is
+absent: `cv::morphologyEx` refuses it by assertion, so it has no denominator.
+
+**Workload:** 640×480 and the pyramid ladder below it (320×240, 160×120, 94×60),
+~50% fill, four distinct images rotated through, batches calibrated to a 40 ms
+budget with the minimum of five batches reported.
+
+**Metric:** ns/pixel **and** the working set of one call, together (CLAUDE.md),
+plus the fixed per-call cost of both sides **measured per case** — the compound
+op's floor is 2.1× the 3×3 erosion's, so one global figure printed beside every
+row understates it exactly where the ladder argument needs it.
+
+**Method:** `bincv-cpp/benchmark/morphology_benchmark.cpp` and
+`bincv-cpp/benchmark/morphology_path_benchmark.cpp`, on the reference device via
+`./scripts/run_on_pi.sh pi4` (the first with `BINCV_PI_OPENCV=1`). Both sides are
+compared pixel for pixel before anything is timed, and every row folds its whole
+destination into a checksum that must match.
+
+**Environment** (reference device, `./scripts/run_on_pi.sh`):
+
+```
+device:           pi4
+cpu:              Raspberry Pi 4 Model B Rev 1.5 (Cortex-A72)
+arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+compiler:         g++ (Debian 14.2.0-19) 14.2.0
+governor:         performance (restored to ondemand on exit)
+core pinning:     taskset -c 3
+throttled before: throttled=0x0
+throttled after:  throttled=0x0
+```
+
+Full logs: [`bincv-cpp/results/morphology_benchmark_pi4.log`](../bincv-cpp/results/morphology_benchmark_pi4.log)
+and [`bincv-cpp/results/morphology_path_benchmark_pi4.log`](../bincv-cpp/results/morphology_path_benchmark_pi4.log).
+Both carry the platform block above including both throttle readings, and the
+sha256 of every source that produced them — T3.3's files are untracked at the
+time of the run, so the commit hash alone does not pin what was measured (the
+convention [X-12](#x-12--t31-denoise-against-the-reference-implementation--done)
+established).
+
+**Result — 640×480, `BORDER_CONSTANT`, ns/pixel and the working set of one call,
+together:**
+
+| case | impl | ns/pixel | vs OpenCV | working set | vs OpenCV |
+|---|---|---:|---:|---:|---:|
+| erode 3×3 rect | OpenCV `CV_8U` | 0.71590 | 1.00× | 614400 B | 1.00× |
+| | binCV `uint32_t` | 0.72014 | 0.99× | 76800 B | **8.00×** |
+| | binCV `uint64_t` | 0.37922 | **1.89×** | 76800 B | **8.00×** |
+| | binCV composed `uint32_t` | 1.48731 | 0.48× | 115200 B | 5.33× |
+| dilate 3×3 rect | OpenCV `CV_8U` | 0.71457 | 1.00× | 614400 B | 1.00× |
+| | binCV `uint32_t` | 0.48186 | **1.48×** | 76800 B | **8.00×** |
+| | binCV `uint64_t` | 0.26196 | **2.73×** | 76800 B | **8.00×** |
+| | binCV composed `uint32_t` | 1.37363 | 0.52× | 115200 B | 5.33× |
+| erode 5×5 ellipse | OpenCV `CV_8U` | 1.85886 | 1.00× | 614400 B | 1.00× |
+| | binCV `uint32_t` | 3.59575 | **0.52×** | 76800 B | **8.00×** |
+| | binCV `uint64_t` | 2.54880 | **0.73×** | 76800 B | **8.00×** |
+| | binCV composed `uint32_t` | 2.88145 | 0.65× | 115200 B | 5.33× |
+| `morphologyEx` OPEN 3×3 | OpenCV `CV_8U` | 1.36395 | 1.00× | 614400 B | 1.00× |
+| | binCV `uint32_t` | 1.20153 | **1.14×** | 115200 B | **5.33×** |
+| | binCV `uint64_t` | 0.64088 | **2.13×** | 115200 B | **5.33×** |
+
+**OPENCV'S WORKING SET FOR `OPEN` IS TWO FRAMES, NOT THREE, AND IT IS MEASURED.**
+It is tempting to write "OPEN = erode then dilate, so OpenCV needs a temporary";
+`cv::morphologyEx` does `erode(src,dst)` then `dilate(dst,dst)` and allocates
+nothing. Probed with `VmHWM` around a single 4096×4096 call, **one op per
+process**: OPEN, CLOSE, TOPHAT and BLACKHAT each moved the high-water mark by
+0 kB, and only `MORPH_GRADIENT` by ~one frame (17188 kB of a 16384 kB frame). The
+compound row's footprint advantage is therefore **5.33×, not the 8.00× this entry
+previously recorded** — binCV holds three frames there (src, dst, caller scratch)
+against OpenCV's two. Memory is a co-equal goal here, so this is the number most
+likely to be quoted and it was wrong by 1.5×.
+
+**The BORDER AXIS, 640×480, erode 3×3 — the four non-constant types are a
+different kernel and a different answer:**
+
+| border | OpenCV | binCV `uint32_t` | binCV `uint64_t` |
+|---|---:|---:|---:|
+| `BORDER_CONSTANT` | 0.71590 | 0.72014 (0.99×) | 0.37922 (1.89×) |
+| `BORDER_REPLICATE` | 0.70245 | 0.92953 (**0.76×**) | 0.61351 (1.14×) |
+| `BORDER_REFLECT_101` | 0.70882 | 0.94370 (**0.75×**) | 0.63452 (1.12×) |
+
+Under a non-constant border binCV recomputes the `2 × reach` edge columns of each
+row one pixel at a time — 2 of 640 for a 3×3 element — and that costs about 30% at
+`uint32_t`, which is stated here rather than left to the reader of a
+`BORDER_CONSTANT` number. **It cost 12× before T3.3's review.** The fixup walked
+every column of every row and `continue`d over the interior, so it paid `width`
+iterations to rewrite `2 × reach` pixels: measured at 640×480 `uint64_t` on x86,
+19.5 µs under `BORDER_CONSTANT` against 241–260 µs under the other four, which
+made binCV **6–10× slower than `cv::erode`** on every border type but the default
+while this entry published 1.11× for the default alone. It now visits the two
+bands by index and the same four cost 40–45 µs. The lesson is recorded in the
+kernel: **the border is a boundary and its cost must scale with the boundary.**
+
+**The ladder, `vs OpenCV` at each size** (`uint32_t`, `BORDER_CONSTANT` except
+where named):
+
+| size | erode 3×3 | dilate 3×3 | erode 5×5 ellipse | OPEN 3×3 | erode 3×3 REPLICATE |
+|---|---:|---:|---:|---:|---:|
+| 640×480 | 0.99× | 1.48× | 0.52× | 1.14× | 0.76× |
+| 320×240 | 1.13× | 1.68× | 0.46× | 1.33× | 0.69× |
+| 160×120 | 1.67× | 2.28× | 0.52× | 1.94× | 0.76× |
+| 94×60 | 2.92× | 3.62× | 0.84× | 3.24× | 1.06× |
+
+Fixed per-call cost, **measured per case** on a 2×2 frame: `cv::erode` 3×3
+**2.77 µs**, `cv::erode` 5×5 ellipse **3.36 µs**, `cv::morphologyEx` OPEN 3×3
+**5.93 µs**; binCV 0.22 / 1.08 / 0.43 µs. One global figure would have been wrong
+by 2.1× on the compound row.
+
+**A NUMBER THIS ENTRY PREVIOUSLY QUOTED DOES NOT REPRODUCE, AND THAT IS THE
+FINDING.** The erode 3×3 `uint32_t` row was recorded as **1.11×** from a single
+run. Four runs of the current benchmark give 0.72195, 0.73935, 0.72016 and
+0.72014 ns/pixel — a tie with `cv::erode`, reproducible to 2% *within one build*.
+But the **same library call** timed by `morphology_path_benchmark.cpp` instead
+reads **0.66153 ns/pixel at a 0.1% batch spread**, which is the old figure. The
+9% sits between two translation units, not between two kernels: adding a single
+`MorphPath::Generic` call site to the comparison benchmark moved its erode row by
+~10% on x86 as well, which is why that comparison was split into its own binary.
+**So the honest statement for this case is that binCV's `uint32_t` 3×3 erosion is
+within code-layout noise of `cv::erode` — 0.99×–1.11× depending on the object
+file — and 1.11× was quoted to a precision the instrument does not have.** The
+`uint64_t` rows, the dilation and the compound op are all well outside that band
+and stand.
+
+**What the 3×3 special case is worth** (`morphology_path_benchmark`, binCV against
+binCV, the same kernel with `MorphPath::Generic`; batch spreads under 4%):
+
+| size | rect3×3 erode | rect3×3 dilate | cross3×3 erode | cross3×3 dilate |
+|---|---:|---:|---:|---:|
+| 640×480 `uint32_t` | 2.12× | 3.18× | 2.79× | 3.37× |
+| 640×480 `uint64_t` | 2.48× | 3.70× | 3.27× | 3.68× |
+| 94×60 `uint32_t` | 2.29× | 2.86× | 2.54× | 2.67× |
+
+T3.3 asks for the special case; this is what it buys, across the whole ladder:
+**2.1×–3.7×**. Its docstring used to justify it by load count — "one
+`extendedRowWord` per word per element row where the general path pays two per set
+cell" — which is false, since `morphRowGeneric`'s window branch hoists the same
+call per word for any element reaching less than a word sideways, i.e. every 3×3.
+What it actually removes is the inner loop over element cells, the data-dependent
+shift count and the per-row span queries. Now measured rather than asserted.
+
+**Conclusion, taking the decision rule's three clauses in order.**
+
+**1. Fused versus composed — the live branch FIRED, on one case out of four.**
+On the two 3×3 cases the fused kernel wins on both axes and there is nothing to
+trade: 0.720 against 1.487 ns/pixel for erode (**2.07×**) and 0.482 against 1.374
+for dilate (**2.85×**), at two frames rather than three. **On the 5×5 ellipse the
+composed spelling is FASTER than the shipped kernel** — 2.881 against 3.596
+ns/pixel at 640×480 (**1.25×**), and 1.34× at 320×240, 1.35× at 160×120, 1.04× at
+94×60. Under the rule written before the run the fused kernel still ships, because
+it is strictly smaller (two frames and no caller-owned scratch against three), and
+**the gap is recorded here as a known speed cost accepted for footprint: up to
+~1.35× on a non-separable element at `uint32_t`.** The cause is legible rather
+than mysterious — `ops/shift.hpp`'s row kernel hoists its shift amount out of the
+word loop, while the fused kernel's inner loop runs over element cells with a
+data-dependent shift count. It is a Phase 5 vectorisation question, not a reason
+to hand every 3×3 erosion a third frame.
+
+**2. Against OpenCV, with the footprint beside it, including where binCV loses.**
+At 640×480 on the reference device and `BORDER_CONSTANT`, binCV is **a tie with
+`cv::erode` at `uint32_t` (0.99×) and 1.89× at `uint64_t`, at 8× less memory** for
+the 3×3 rect; **1.48× / 2.73×** for the 3×3 dilation; and **1.14× / 2.13×** for
+`morphologyEx` OPEN, at **5.33×** less memory there rather than 8×. **On the 5×5
+ellipse binCV is SLOWER — 0.52× at `uint32_t` and 0.73× at `uint64_t`** — at the
+same 8× less memory: that is the general path, 17 shifted folds per word, scalar,
+against OpenCV's vectorised morphology. **And on the four non-constant border
+types binCV is slower again — 0.76× at `uint32_t`** — because the edge band is
+recomputed per pixel. binCV's advantage on this operation is the footprint, the
+`uint64_t` word width and the dilation; the general path and the non-constant
+borders are at a disadvantage until Phase 5.
+
+**3. Cache residency: NO — this ladder is the denominator's fixed cost.** The
+largest ratio anywhere is 4.43× (dilate, `uint64_t`, 94×60), and the ladder rises
+as the frame **shrinks**, which is the opposite of the shape
+[X-6](#x-6--is-the-t22-logic-speedup-real--done) and
+[X-12](#x-12--t31-denoise-against-the-reference-implementation--done) found. The
+mechanism is measured, not inferred: at 94×60 `cv::erode` pays **2.77 µs per
+call** against binCV's **0.22 µs**, which is **18% of an entire 94×60 erode frame
+time (15.25 µs)** and 1% of a 640×480 one; for OPEN at 94×60 the same figure is
+**19%**. (This entry previously said 10%; that was the 5×5 ellipse row, not the
+erode row the argument is about.) binCV's own ns/pixel is nearly flat — 0.720 at
+640×480 against 0.926 at 94×60 — so **the number that may be quoted for T3.3 is
+the 640×480 one, with its working set, and never the 94×60 ratio.**
+
+**One asymmetry the ladder does not control for, stated rather than argued.**
+Hazard 2 rotates four input images, so what is RESIDENT in the timed loop is four
+sources plus a destination — 1500 KiB on the OpenCV side against 188 KiB at
+`uint32_t` at 640×480 — and only the OpenCV side straddles the Cortex-A72's 1 MiB
+L2. The reported working set (614400 B against 76800 B) is one call's, which is
+what CLAUDE.md asks for and is not what the loop keeps live. The effect can only
+flatter binCV, so every ratio above is an upper bound in that respect; the
+benchmark now prints both numbers per size so a reader can bound it.
+
+**Decision:** [D-16](ARCHITECTURE.md#d-16-morphology-fuses-the-shift-and-the-fold-and-only-the-compound-ops-take-scratch)
+— `erode` and `dilate` fuse the shift and the fold and take no scratch; the five
+compound operations take exactly one caller-provided frame. The ~1.35× cost on
+non-separable elements is part of that record, not a footnote to it.
+
+
 ---
 
 # Pending

@@ -596,6 +596,20 @@ Built from the same covariance machinery as §7.5.
 `erode`, `dilate`, `morphologyEx`. Shifted ANDs and ORs. Tier 1 semantics — must
 match OpenCV bit-exactly on binary input.
 
+Landed by [T3.3](TASKS.md) as `ops/morphology.hpp`. The shift/fold composition is
+**fused into one pass over the destination**, so `erode` and `dilate` allocate
+nothing and take no scratch; the five compound operations take exactly one
+caller-provided frame — [D-16](#d-16-morphology-fuses-the-shift-and-the-fold-and-only-the-compound-ops-take-scratch),
+priced by [X-13](EXPERIMENTS.md#x-13--t33-morphology-against-cverode--cvdilate--done).
+The border fills are opposite for the two operations and that is
+[D-12](#d-12-a-shift-carries-a-border-and-the-fill-is-the-callers).
+
+| | working set of one call | scratch |
+|---|---|---|
+| `erode`, `dilate` | src + dst | none |
+| `morphologyEx` ERODE/DILATE | src + dst | none |
+| `morphologyEx` OPEN/CLOSE/GRADIENT/TOPHAT/BLACKHAT | src + dst + 1 frame | one, the caller's |
+
 ### 7.8 Explicitly out of the MVP
 
 Subpixel refinement, RANSAC, essential-matrix estimation, IMU fusion, bundle
@@ -1018,6 +1032,88 @@ landed it first for exactly that reason and re-measured afterwards;
 [X-11b](EXPERIMENTS.md) carries the post-split ratios beside the pre-split ones
 rather than in place of them. The branch the rule selected does not change — only
 the magnitudes quoted for it.
+
+### D-16: morphology fuses the shift and the fold, and only the compound ops take scratch
+
+*(Added during T3.3, not pre-planned — the task that built morphology was the
+first whose kernel had a choice between allocating nothing and being written as
+the composition it is defined as.)*
+
+`erode` and `dilate` ([§7.7](#77-morphology)) are, by definition, an AND and an OR
+over shifted copies of the source ([D-12](#d-12-a-shift-carries-a-border-and-the-fill-is-the-callers)).
+Written that way, with `ops/shift.hpp` and `ops/logic.hpp`, each element cell
+needs a **frame-sized temporary** between the shift and the combine — and a kernel
+may not allocate one, so that temporary would have to be a caller-provided scratch
+argument on `erode` and `dilate` themselves. `ops/morphology.hpp` instead
+accumulates **in the destination row**, folding each cell's shifted source word
+into it, so the operation is one pass and needs **no scratch at all**.
+
+Measured on the reference device against a decision rule written first
+([X-13](EXPERIMENTS.md#x-13--t33-morphology-against-cverode--cvdilate--done),
+640×480, ns/pixel; `uint32_t`):
+
+```
+erode 3x3 rect      fused 0.720   composed 1.487   fused 2.07x faster, 2 frames vs 3
+dilate 3x3 rect     fused 0.482   composed 1.374   fused 2.85x faster, 2 frames vs 3
+erode 5x5 ellipse   fused 3.596   composed 2.881   COMPOSED 1.25x faster (1.35x at 320x240)
+```
+
+**The rule's live branch fired, and the answer is recorded rather than
+reversed.** On a non-separable element the composed spelling is *faster*, by up to
+1.35×. The fused kernel still ships because it is strictly smaller and the
+tiebreak is that memory wins; the cost is part of this record. Its cause is not
+mysterious — `ops/shift.hpp` hoists its shift amount out of the word loop while
+the fused kernel's inner loop runs over element cells at a data-dependent shift
+count — and closing it is Phase 5 vectorisation, not a third frame on every 3×3
+erosion.
+
+**The five compound operations do take one caller-provided frame, and one is
+enough for all of them.** OPEN and CLOSE are two kernels through it; GRADIENT,
+TOPHAT and BLACKHAT would each look like they need a second, and do not, because
+`ops/logic.hpp` supports the exact-alias in-place case
+([D-11](#d-11-kernels-alias-exactly-or-not-at-all)) and the scratch is dead by the
+time the subtraction runs. `morphologyExNeedsScratch(op)` is that contract as a
+predicate, so a caller sizing a buffer from a runtime `op` asks rather than
+hard-codes the list.
+
+**The structuring element is a 32-byte value, not a container.** `MORPH_RECT`,
+`MORPH_CROSS` and `MORPH_ELLIPSE` are evaluated on demand from
+`{shape, cols, rows, anchorX, anchorY}` exactly as `cv::getStructuringElement`
+computes them, so any odd size works with no capacity limit and no allocation; a
+non-owning `mask` pointer is the escape hatch for an arbitrary cell set, and it is
+a view like every other argument (D-5). One consequence is load-bearing and is
+asserted rather than assumed: **each parametric shape's row is a SOLID run**, so a
+kernel iterating that run needs no per-cell test — and the per-cell test is the
+shape query, which for the ellipse is a `sqrt`. Measured: evaluating it once per
+(word, cell) rather than once per element row made a 5×5 ellipse erosion of a
+640×480 frame **4.23 ns/pixel, 17× slower than `cv::erode`**. A shape query is not
+the operation and must not be inside the word loop.
+
+**The 3×3 special case is a second row kernel, and what it buys is measured.**
+`morphRow3x3` runs when the element is 3×3 and centred; `morphRowGeneric` handles
+everything else. A duplicated kernel is a maintenance cost forever, so
+`benchmark/morphology_path_benchmark.cpp` prices it by running the same call with
+the special case refused (`impl::MorphPath::Generic`, the same entry point the
+correctness suite uses to require the two to agree image for image). On the
+reference device the general path costs **2.1×–3.7×** across the whole pyramid
+ladder, at both word widths and for rect and cross alike. `MorphPath` is a
+**template** parameter rather than an argument, which is also a measurement: as an
+argument it was constant-folded only while every call site in a translation unit
+agreed, and adding the benchmark's one `Generic` call site made the branch live in
+the shipped path and moved the headline row ~10%.
+
+**The border is a boundary and its cost must scale with the boundary.**
+`BORDER_CONSTANT` is exact in the word path; the other four map each out-of-range
+column to a *different* source column, so binCV recomputes the `2 × reach` edge
+columns of each row per pixel. That fixup must visit only those two bands. Written
+as one loop over the row with the interior skipped by test, it cost `width`
+iterations to rewrite `2 × reach` pixels and made erode **6–10× slower than
+`cv::erode`** on four of the five border types — 241–260 µs against 19.5 µs for
+the same call under `BORDER_CONSTANT`, at 640×480. Any kernel that repairs an edge
+inherits this: index the bands, do not filter the row.
+
+**Binds:** T3.5's derivative and anything else built from a neighbourhood over
+`ops/shift.hpp`, which faces the same choice — and the same border-fixup shape.
 
 ---
 

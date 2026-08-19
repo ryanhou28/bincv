@@ -1922,7 +1922,7 @@ that can wrap, so bypassing the shortcut left all 26 320 checks green until
 
 ---
 
-### T3.3 · Morphology · `TODO`
+### T3.3 · Morphology · `DONE`
 
 **Depends:** T3.2
 **Files:** `include/bincv-cpp/ops/morphology.hpp` (new)
@@ -1947,6 +1947,143 @@ void morphologyEx(BinMatConstView<W> src, BinMatView<W> dst, MorphOp op,
 benchmarks committed.
 
 **Verify:** V-ALL
+
+**What was built.** `include/bincv-cpp/ops/morphology.hpp` (`StructuringElement`,
+`erode`, `dilate`, `morphologyEx`, `morphologyExNeedsScratch`),
+`tests/test_morphology.cpp` — a **core** suite whose Tier 1 half sits behind
+`BINCV_WITH_OPENCV` — eight `test_assert_abort` death cases, and two benchmarks:
+`benchmark/morphology_benchmark.cpp` (against OpenCV) and
+`benchmark/morphology_path_benchmark.cpp` (binCV against binCV, pricing the 3×3
+special case). 299181 checks under OpenCV, 172632 in the three configurations
+without it, and 172632/172632 on the reference device (`throttled=0x0` before and
+after).
+
+**The structuring element, and why it is a value rather than a container.**
+`{shape, cols, rows, anchorX, anchorY, mask}` — 32 bytes, no allocation, no
+capacity limit. The three parametric shapes are evaluated on demand by
+`spanOfRow()` / `activeAt()`, transcribed branch for branch from
+`cv::getStructuringElement`, so any odd size works and `Morphology.ElementMatchesOpenCv`
+pins all of it cell by cell at 121 sizes × 3 shapes × 4 anchors. Three of
+OpenCV's behaviours are surprising and are inherited deliberately: a 3×3
+`MORPH_ELLIPSE` is a PLUS, a `MORPH_CROSS` is centred on the ANCHOR rather than on
+the element, and a 1×1 element is filled whatever its shape says. `mask` is a
+non-owning pointer to a caller's cell array — the escape hatch for an arbitrary
+shape, and the thing that makes an asymmetric element expressible.
+
+**The kernel is the FUSED form of the composition, and that choice was measured,
+not argued** — [D-16](ARCHITECTURE.md#d-16-morphology-fuses-the-shift-and-the-fold-and-only-the-compound-ops-take-scratch)
+/ [X-13](EXPERIMENTS.md#x-13--t33-morphology-against-cverode--cvdilate--done). The
+composed spelling (a `shift` per element cell into a temporary, combined with
+`ops/logic.hpp`) would need a caller-provided scratch frame on `erode` and
+`dilate` themselves, because a kernel may not allocate one. Fusing the fold into
+the destination row removes it entirely. On the reference device at 640×480 the
+fused form is 2.24× (erode 3×3) and 3.12× (dilate 3×3) faster than the composed
+one at two frames rather than three — **and 1.18× SLOWER on a 5×5 ellipse**, which
+is the branch the decision rule was written for and is recorded as a known cost
+accepted for footprint rather than reversed.
+
+**Against OpenCV on the reference device at 640×480 under `BORDER_CONSTANT`, with
+the working set beside every number, including where binCV loses:** erode 3×3 rect
+**0.99× (`uint32_t`) / 1.89× (`uint64_t`) at 8× less memory** — a tie at the
+default word width — dilate 3×3 **1.48× / 2.73×**, `morphologyEx` OPEN **1.14× /
+2.13× at 5.33× less memory** (not 8×: `cv::morphologyEx(OPEN)` allocates no
+temporary, measured, so OpenCV holds two frames there against binCV's three), and
+erode 5×5 ellipse **0.52× / 0.73×** — slower, at the same 8× less memory, because
+the general path is 17 scalar shifted folds per word against a vectorised OpenCV
+kernel. **On the four NON-CONSTANT border types binCV is slower again — 0.76× at
+`uint32_t`** — because the `2 × reach` edge columns of each row are recomputed per
+pixel; every published ratio names its border type. **The ladder rises as the frame
+shrinks (2.92× at 94×60), and that is NOT cache residency**: `cv::erode`'s fixed
+per-call cost is 2.77 µs against binCV's 0.22 µs — 18% of an entire 94×60 frame —
+and binCV's own ns/pixel is nearly flat. The 640×480 number is the quotable one.
+
+**Two of those numbers replace ones this record previously carried, and the
+reason is worth keeping.** The erode 3×3 `uint32_t` ratio was quoted as 1.11×;
+four runs now give a tie, while the *same call* timed in the other benchmark's
+translation unit reproduces 1.11× at a 0.1% spread. The 9% is code layout between
+two object files, so the case is a tie *within the instrument's precision* and
+1.11× was quoted to a precision it does not have. The OPEN footprint ratio was
+8.00× on the assumption that `cv::morphologyEx` needs a temporary; probed with
+`VmHWM` one op per process, only `MORPH_GRADIENT` allocates one. See
+[X-13](EXPERIMENTS.md#x-13--t33-morphology-against-cverode--cvdilate--done).
+
+**The 3×3 special case T3.3 asks for is priced, not assumed.**
+`benchmark/morphology_path_benchmark.cpp` runs the same kernel with the special
+case refused: the general path costs **2.1×–3.7×** across the whole ladder at both
+word widths. Its docstring's original justification (fewer `extendedRowWord`
+calls) was wrong — the general path's window branch hoists that call per word too
+— and what it actually removes is the per-cell loop, the data-dependent shift
+count and the per-row span queries.
+
+**A performance defect the border axis found.** The non-constant border fixup
+walked every column of every row and skipped the interior by test, paying `width`
+iterations to rewrite `2 × reach` pixels. At 640×480 that cost 241–260 µs against
+19.5 µs for the same call under `BORDER_CONSTANT` and made binCV **6–10× slower
+than `cv::erode`** on four of the five border types, while the benchmark measured
+only the fifth. It now indexes the two bands directly.
+
+**The asymmetric elements are the suite's load-bearing idea, and it is a
+measurement.** All three parametric shapes are point-symmetric about their centre,
+so at the default anchor negating every offset changes nothing and a rect/cross
+suite cannot see an inverted shift sign. Measured before this suite existed: a
+5040-case sweep of the three shapes at centred anchors passed **5040/5040 with the
+sign flipped**. Against the shipped suite the same mutation fails 53016 checks —
+**zero of which name a centred parametric element** — decomposing exactly by the
+check family that reported them: 31584 one-cell-equals-`shift()`, 8732 Tier 1
+against OpenCV, 6404 compound-op definitions, 6168 asymmetric elements, 128 wide
+elements. `tests/expected-checks.txt` carries the full mutation table, now with
+each of the **four** offset sites mutated on its own as well as together.
+
+**The fallback recurrence had to be earned twice, and the second time was a
+reviewer's find.** `morphRowGeneric`'s fallback — the branch taken when an element
+reaches a whole word sideways — was reached only by wide *centred* rects and by a
+sparse mask whose cells sat symmetrically about its anchor. Both satisfy `E == -E`,
+so flipping that one site's offset sign left the suite at **298541/298541** while
+the same mutation at any of the other three sites went red. Anchoring the wide
+rects at column 0 and at `size - 1` as well makes the offset set asymmetric, and
+the mutation now fails 42 checks. A path reached is not a path discriminated.
+
+**Every precondition now has a death test.** T3.3 originally registered none, and
+neutering all of `ops/morphology.hpp`'s `BINCV_ASSERT`s at once left the suite at
+172632/172632 with assertions live — a correctness suite never violates the
+preconditions it obeys. Eight cases in `tests/test_assert_abort.cpp` cover them,
+two of which have no analogue anywhere else in the project: the **D-16 scratch
+contract** (`morphologyEx` is the only kernel taking a caller-provided
+intermediate, and an undersized one overruns the caller's array rather than
+answering wrongly) and **element validity** (`StructuringElement::valid()` has no
+other caller, and an element with no set cell yields a uniform frame that reads as
+a plausible image).
+
+**Two defects this suite caught in its own author's work**, both worth recording
+because each looked right:
+- The asymmetric catalogue's original 5×5 mask was the main DIAGONAL, which is
+  invariant under a 180° rotation and therefore symmetric — `Morphology.ElementStructure`
+  rejected it, and it was replaced by a wedge.
+- The wide-element case originally used solid rects, and a mutation that
+  perturbed the fallback recurrence's offset by one still passed 298381/298381:
+  sliding a *contiguous* offset range by one only changes which columns fall
+  outside the image, and those read the border either way. A sparse wide mask sees
+  it.
+
+**A performance defect the benchmark caught, and the rule it produced.**
+`activeAt()` was first called once per (word, cell) in the inner loop. For
+`MORPH_ELLIPSE` that is a `sqrt`, and a 5×5 ellipse erosion of a 640×480 frame ran
+at **4.23 ns/pixel — 17× slower than `cv::erode`**. The shape query is now
+evaluated once per element row (or once per call for the 3×3 table), which is
+correct only because each parametric shape's row is a solid run — a property
+`Morphology.ElementStructure` now asserts in both directions rather than assumes.
+
+**`BORDER_WRAP` has no Tier 1 denominator anywhere.** `cv::morphologyEx` refuses
+it by assertion (`columnBorderType != BORDER_WRAP`), so binCV's wrapped morphology
+is stood behind entirely by the core half — the per-pixel reference over an
+independently written iterative border mapping, and agreement with
+`ops/shift.hpp`. That is the second reason this suite is core rather than
+OpenCV-only.
+
+**What was deliberately not built:** `iterations` (n > 1 needs a second buffer to
+ping-pong through, and would make the signature understate its own memory), and a
+literal `borderValue` on `morphologyEx` (each step uses the morphological default
+for its own operation, which is what `cv::morphologyEx` does with its default).
 
 ---
 
