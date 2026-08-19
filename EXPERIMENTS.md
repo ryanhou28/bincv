@@ -1946,6 +1946,15 @@ and the headline medians reproduced to 0.1% (0.2750 → 0.2750, 4.0188 → 4.018
 3.0938 → 3.0972). Both bounds are three orders of magnitude below the smallest
 gap the rule weighs.
 
+**A third run confirms the numbers belong to the SHIPPED code, not to a
+candidate.** Runs 1 and 2 were taken at commit `f77d8f1`, where all three arms
+were `impl::` candidates; run 3 was taken at `f3235b5`, after the winner became
+the public `decimateColumnsBy2()` and the benchmark was re-pointed at it —
+0.2753 / 0.1842 against 0.2750 / 0.1847, inside the batch spread. This is X-11b's
+lesson applied without waiting to be bitten by it: a benchmark that times a copy
+of the winner stops describing the library the moment the copy drifts. All three
+runs are in `bincv-cpp/results/decimate_benchmark_pi4.log`.
+
 **The sanity bound holds (rule 4).** Every ratio here is above 8×, so all of them
 were checked. The winner moves 28800 B per call in 0.2750 ns/pixel × 76800
 pixels = 21.1 µs, i.e. **1.36 GB/s at `uint32_t` and 2.03 GB/s at `uint64_t`** —

@@ -1,5 +1,8 @@
 # X-14 / E-8 -- horizontal decimation by two, reference device (Pi 4, Cortex-A72).
-# Two full runs at commit f77d8f1; the second is the run-to-run scatter check.
+# Three full runs. 1 and 2 are at commit f77d8f1, where all three arms were
+# impl:: candidates; run 2 is the run-to-run scatter check. Run 3 is at f3235b5,
+# AFTER the winner became the public decimateColumnsBy2() -- it is what makes the
+# published numbers the SHIPPED function's rather than a candidate's.
 # Produced by: ./scripts/run_on_pi.sh pi4 './benchmark/decimate_benchmark'
 
 ############################ RUN 1 ############################
@@ -302,6 +305,172 @@ sink=4588427340296904118
   throttled before: throttled=0x0
   throttled after:  throttled=0x0
   commit:           f77d8f1
+------------------------------------------------------------
+
+  OK -- command succeeded, device state valid throughout
+  Timings from this device ARE authoritative (unlike emulation).
+  Record the environment block above in EXPERIMENTS.md.
+
+  governor restored to ondemand
+
+############################ RUN 3 (shipped entry point) ############################
+
+------------------------------------------------------------
+  binCV reference-device run
+------------------------------------------------------------
+  target:  pi4
+  command: ./benchmark/decimate_benchmark
+
+  preflight
+  arch: aarch64
+  throttle before: 0x0 (clean)
+  governor: ondemand -> performance
+
+  sync
+  repository synced to bincv-measure
+
+  build (Release, core-only)
+[  6%] Built target test_error_abort
+[  6%] Building CXX object tests/CMakeFiles/test_assert_abort.dir/test_assert_abort.cpp.o
+[ 10%] Built target alignment_benchmark
+[ 14%] Built target gtest
+[ 16%] Building CXX object benchmark/CMakeFiles/decimate_benchmark.dir/decimate_benchmark.cpp.o
+[ 20%] Built target morphology_path_benchmark
+[ 24%] Built target reduce_target_benchmark
+[ 28%] Built target window_benchmark
+[ 32%] Built target wordwidth_benchmark
+[ 36%] Built target test_binMat
+[ 40%] Built target test_quantMat
+[ 44%] Built target test_storage
+[ 48%] Built target test_error
+[ 52%] Built target test_error_checked
+[ 56%] Built target test_logic
+[ 60%] Built target test_shift
+[ 64%] Built target test_reduce
+[ 66%] Building CXX object tests/CMakeFiles/test_bitslice.dir/test_bitslice.cpp.o
+[ 68%] Building CXX object tests/CMakeFiles/test_denoise.dir/test_denoise.cpp.o
+[ 70%] Linking CXX executable decimate_benchmark
+[ 72%] Linking CXX executable test_assert_abort
+[ 72%] Built target decimate_benchmark
+[ 74%] Building CXX object tests/CMakeFiles/test_threshold.dir/test_threshold.cpp.o
+[ 74%] Built target test_assert_abort
+[ 78%] Built target test_morphology
+[ 80%] Building CXX object tests/CMakeFiles/test_resample.dir/test_resample.cpp.o
+[ 82%] Linking CXX executable test_denoise
+[ 82%] Built target test_denoise
+[ 86%] Built target test_harness
+[ 90%] Built target test_harness_failing
+[ 94%] Built target gtest_main
+[ 96%] Linking CXX executable test_bitslice
+[ 96%] Built target test_bitslice
+[ 98%] Linking CXX executable test_resample
+[ 98%] Built target test_resample
+[100%] Linking CXX executable test_threshold
+[100%] Built target test_threshold
+  build complete
+
+  run
+------------------------------------------------------------
+binCV -- E-8 / X-14: horizontal decimation by two
+three routes to the same destination; 4 inputs, 9 interleaved batches, 40 ms budget
+aux B is the mask table plus the scratch row -- built ONCE per width, which is
+the most favourable accounting variant C can have
+
+=== 640x480 -> 320x240 ===
+  all three variants match the per-pixel reference and each other
+  working set of one call: 28800 B read + written at uint32_t, 28800 B at uint64_t
+
+  variant                  ns/dst-pixel min/med/max    spread     aux B       GB/s
+  gather uint32_t         4.0181/ 4.0195/ 4.0284      0.3%         0       0.09
+  unshuffle uint32_t      0.2753/ 0.2753/ 0.2756      0.1%         0       1.36
+  frame-masked uint32_t   3.0960/ 3.0968/ 3.1096      0.4%      1408       0.12
+  gather uint64_t         4.8788/ 4.8795/ 4.8845      0.1%         0       0.08
+  unshuffle uint64_t      0.1842/ 0.1842/ 0.1845      0.2%         0       2.04
+  frame-masked uint64_t   1.5413/ 1.5414/ 1.5423      0.1%      1408       0.24
+
+  variant                    x slower   vs fastest
+  gather uint32_t              21.82x             
+  unshuffle uint32_t            1.49x             
+  frame-masked uint32_t        16.81x             
+  gather uint64_t              26.49x             
+  unshuffle uint64_t            1.00x   <- fastest
+  frame-masked uint64_t         8.37x             
+
+=== 320x240 -> 160x120 ===
+  all three variants match the per-pixel reference and each other
+  working set of one call: 7200 B read + written at uint32_t, 7680 B at uint64_t
+
+  variant                  ns/dst-pixel min/med/max    spread     aux B       GB/s
+  gather uint32_t         4.0009/ 4.0012/ 4.0037      0.1%         0       0.09
+  unshuffle uint32_t      0.2666/ 0.2666/ 0.2669      0.1%         0       1.41
+  frame-masked uint32_t   2.7258/ 2.7262/ 2.7291      0.1%       640       0.14
+  gather uint64_t         4.8995/ 4.9101/ 4.9189      0.4%         0       0.08
+  unshuffle uint64_t      0.1729/ 0.1731/ 0.1733      0.2%         0       2.31
+  frame-masked uint64_t   1.6398/ 1.6405/ 1.6435      0.2%       640       0.24
+
+  variant                    x slower   vs fastest
+  gather uint32_t              23.11x             
+  unshuffle uint32_t            1.54x             
+  frame-masked uint32_t        15.75x             
+  gather uint64_t              28.36x             
+  unshuffle uint64_t            1.00x   <- fastest
+  frame-masked uint64_t         9.48x             
+
+=== 160x120 -> 80x60 ===
+  all three variants match the per-pixel reference and each other
+  working set of one call: 1920 B read + written at uint32_t, 2400 B at uint64_t
+
+  variant                  ns/dst-pixel min/med/max    spread     aux B       GB/s
+  gather uint32_t         4.0585/ 4.0590/ 4.0614      0.1%         0       0.10
+  unshuffle uint32_t      0.2690/ 0.2693/ 0.2694      0.2%         0       1.49
+  frame-masked uint32_t   2.7877/ 2.7879/ 2.7977      0.4%       288       0.14
+  gather uint64_t         4.9123/ 4.9127/ 4.9215      0.2%         0       0.10
+  unshuffle uint64_t      0.2283/ 0.2285/ 0.2312      1.3%         0       2.19
+  frame-masked uint64_t   1.7258/ 1.7264/ 1.7279      0.1%       288       0.29
+
+  variant                    x slower   vs fastest
+  gather uint32_t              17.76x             
+  unshuffle uint32_t            1.18x             
+  frame-masked uint32_t        12.20x             
+  gather uint64_t              21.50x             
+  unshuffle uint64_t            1.00x   <- fastest
+  frame-masked uint64_t         7.55x             
+
+=== 94x60 -> 47x30 ===
+  all three variants match the per-pixel reference and each other
+  working set of one call: 600 B read + written at uint32_t, 720 B at uint64_t
+
+  variant                  ns/dst-pixel min/med/max    spread     aux B       GB/s
+  gather uint32_t         4.0666/ 4.0668/ 4.0706      0.1%         0       0.10
+  unshuffle uint32_t      0.3024/ 0.3029/ 0.3033      0.3%         0       1.40
+  frame-masked uint32_t   2.6173/ 2.6176/ 2.6192      0.1%       128       0.16
+  gather uint64_t         4.7232/ 4.7234/ 4.7284      0.1%         0       0.11
+  unshuffle uint64_t      0.2621/ 0.2642/ 0.2646      1.0%         0       1.93
+  frame-masked uint64_t   1.7647/ 1.7650/ 1.7671      0.1%       128       0.29
+
+  variant                    x slower   vs fastest
+  gather uint32_t              15.39x             
+  unshuffle uint32_t            1.15x             
+  frame-masked uint32_t         9.91x             
+  gather uint64_t              17.88x             
+  unshuffle uint64_t            1.00x   <- fastest
+  frame-masked uint64_t         6.68x             
+
+sink=2855557666340179767
+------------------------------------------------------------
+
+------------------------------------------------------------
+  ENVIRONMENT -- record this with any measurement
+------------------------------------------------------------
+  device:           pi4
+  cpu:              Raspberry Pi 4 Model B Rev 1.5
+  arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+  compiler:         g++ (Debian 14.2.0-19) 14.2.0
+  governor:         performance (restored to ondemand on exit)
+  core pinning:     taskset -c 3
+  throttled before: throttled=0x0
+  throttled after:  throttled=0x0
+  commit:           f3235b5
 ------------------------------------------------------------
 
   OK -- command succeeded, device state valid throughout
