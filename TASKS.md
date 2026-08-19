@@ -109,7 +109,7 @@ The fourth was added by T1.8. Before it, every configuration was Release, so
 precondition — was compiled out of everything that could fail.
 
 The individual commands are still in
-[GETTING_STARTED](GETTING_STARTED.md#build) for when one configuration needs to
+[GETTING_STARTED](GETTING_STARTED.md#build-configurations) for when one configuration needs to
 be driven by hand.
 
 ---

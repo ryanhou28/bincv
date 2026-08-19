@@ -1651,8 +1651,8 @@ throttled before: throttled=0x0
 throttled after:  throttled=0x0
 ```
 
-Full logs: [`bincv-cpp/results/morphology_benchmark_pi4.log`](../bincv-cpp/results/morphology_benchmark_pi4.log)
-and [`bincv-cpp/results/morphology_path_benchmark_pi4.log`](../bincv-cpp/results/morphology_path_benchmark_pi4.log).
+Full logs: [`bincv-cpp/results/morphology_benchmark_pi4.log`](bincv-cpp/results/morphology_benchmark_pi4.log)
+and [`bincv-cpp/results/morphology_path_benchmark_pi4.log`](bincv-cpp/results/morphology_path_benchmark_pi4.log).
 Both carry the platform block above including both throttle readings, and the
 sha256 of every source that produced them — T3.3's files are untracked at the
 time of the run, so the commit hash alone does not pin what was measured (the
