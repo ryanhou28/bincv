@@ -286,13 +286,28 @@ start until it produces numbers.
 
 ## Success Criteria
 
-The project has succeeded when, on Tier 1 hardware, a binary-frame VIO frontend
-built on binCV demonstrates:
+binCV ships **kernels**, so its success criteria are kernel-level and do not
+depend on a VIO framework existing. On Tier 1 hardware:
 
-1. **Equivalent trajectory accuracy** to the byte-per-pixel pipeline
-2. **Several-fold smaller peak memory footprint**, measured end to end
-3. **Faster execution** on the bit-parallel operation set, against the
+1. **Tier 1 operations bit-exact** against OpenCV — enforced per operation by the
+   equivalence harness
+2. **Tier 2 operations agreeing with the reference frontend frame by frame** —
+   feature positions, flow vectors, track lifetimes
+3. **Several-fold smaller peak footprint** over the frontend operation set,
+   measured end to end
+4. **Faster execution** on the bit-parallel operations, against the
    byte-per-pixel denominator
+
+**Trajectory accuracy is deliberately absent from this list.** It is a property of
+the whole integration — frontend, estimator, IMU fusion, tuning — and
+[§1](ARCHITECTURE.md#what-bincv-is-not) puts estimation out of scope. Building the
+VIO framework that turns these kernels into a low-footprint tracker is a
+**separate repository's job**.
+
+Measuring trajectory accuracy is still valuable, as *evidence* that the kernels
+are sufficient: swap them into an existing frontend and see whether tracking
+holds. That is a sufficiency check on binCV, attributed to the integration —
+never binCV's own claim.
 
 That is the answer to the question in
 [ARCHITECTURE §1](ARCHITECTURE.md#the-motivating-result): whether bit-parallel

@@ -30,6 +30,7 @@ bitwise logic and population counts.
 | A quantized neural network runtime | MAC-heavy workloads favor SWAR packing over bit-planes (see [D-2](#d-2-bit-planes-over-swar-packing)). Explicit non-goal. |
 | A geometry or estimation library | RANSAC, PnP, essential-matrix solvers, IMU fusion belong to Eigen and the application. binCV's boundary is **pixels in, features and flow out**. |
 | A GPU-first library | GPUs are a later target. The CPU path is the product. |
+| **A VIO system** | binCV supplies the kernels a binary-frame VIO frontend calls. **Building the VIO framework is a separate repository's job.** binCV may be swapped into an existing frontend *to test its own kernels*; that is an instrument, not a deliverable. |
 
 ### The problem
 
@@ -1211,10 +1212,24 @@ does not. Per-buffer ratios are supporting evidence for that headline number.
 
 ### 10.5 Defensible claims
 
-The claim this architecture supports:
+The claims this architecture supports are **kernel-level**, because kernels are
+what binCV ships:
 
-> Equivalent VIO accuracy, several-fold smaller peak memory footprint, and
-> faster execution on the bit-parallel operation set.
+> Tier 1 operations bit-exact against OpenCV; tier 2 operations agreeing with the
+> reference frontend frame by frame; several-fold smaller peak footprint over the
+> frontend operation set; and faster execution on the bit-parallel operations,
+> against the byte-per-pixel denominator.
+
+**Not "equivalent VIO accuracy."** Trajectory error is a property of the whole
+integration — frontend, estimator, IMU fusion and tuning — and this repository
+supplies only the first. binCV can be flawless and a trajectory still poor, or
+sloppy and a trajectory still fine, because the estimator absorbs a great deal.
+Claiming it would also contradict [§1](#what-bincv-is-not), which puts estimation
+out of scope.
+
+Trajectory accuracy is still worth measuring, as **evidence** that these kernels
+are sufficient for the job they were designed for. It is recorded that way — a
+sufficiency check attributed to the integration — never as binCV's own result.
 
 Not "10–100× faster than OpenCV." OpenCV is well optimized; on operations that
 are not bit-parallel it will win, and chasing a throughput crown would pull

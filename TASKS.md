@@ -2330,10 +2330,29 @@ and route (a) is closed.
 ### T4.3 · E-5 · End-to-end validation · `TODO`
 
 **Depends:** T4.2
-**The milestone the whole plan serves.** Produces the three
-[success criteria](ROADMAP.md#success-criteria): equivalent trajectory accuracy,
-several-fold smaller peak footprint measured end to end, and faster execution on
-the bit-parallel operation set against the byte-per-pixel denominator.
+
+**Split deliberately, because the two halves need different things and only one
+of them is binCV's to claim.**
+
+**T4.3a — binCV's own result. Needs OpenCV and image sequences; no VIO stack.**
+- tier 2 kernels agreeing with the reference frontend **frame by frame**: feature
+  positions, flow vectors, track lifetimes
+- **peak footprint** over the whole frontend operation set, measured end to end
+- **speed** against the byte-per-pixel denominator
+
+That is three of the four [success criteria](ROADMAP.md#success-criteria) —
+the fourth (tier 1 bit-exactness) is already enforced per operation.
+
+**T4.3b — a sufficiency check, not a binCV claim. Needs a VIO stack.**
+Swap the frontend into an existing VIO framework and measure trajectory error.
+`~/seal/SEAL/SEAL_HybVIO` ships Docker repro scripts, so this is "run their
+harness with our frontend", not "build a VIO system".
+
+**Record 4.3b as evidence that the kernels are sufficient, attributed to the
+integration.** Trajectory accuracy is not binCV's result — building the VIO
+framework is a separate repository's job
+([ARCHITECTURE §1](ARCHITECTURE.md#what-bincv-is-not)). 4.3a must not be gated
+behind 4.3b.
 
 ---
 
