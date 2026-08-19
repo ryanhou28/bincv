@@ -1819,6 +1819,106 @@ non-separable elements is part of that record, not a footnote to it.
 
 ---
 
+### X-14 · Horizontal decimation for the pyramid · `TODO`
+
+**Gates:** [E-8](ARCHITECTURE.md#9-open-questions-and-planned-experiments) —
+whether `ops/` gains a resample primitive, and whether it is **word-local** (word
+literals only) or **frame-masked** (materialised masks at frame width). Nothing
+in `ops/` expresses output bit *j* ← input bit 2*j* today
+([§6.1](ARCHITECTURE.md#61-bit-parallel-primitives)), so [T3.4](TASKS.md)'s
+`pyrDown` cannot be written until this is answered. Vertical decimation is not in
+question: it is a stride-doubled `BinMatConstView` and costs nothing.
+
+**Question:** which route produces output bit *j* from input bit 2*j* — a
+per-pixel gather loop, a **word-local** unshuffle (log2(WordBits) mask/shift steps
+in registers), or the **frame-masked** big-integer unshuffle E-8 names
+(log2(rowBits) passes over the row against materialised frame-width masks and a
+scratch row)?
+
+**Hypothesis:** the word-local unshuffle wins on time — it does the same log-depth
+gather as the frame-masked route, but each step is a register operation instead of
+a pass over memory, and it needs no mask storage at all. If that holds, **the
+trade E-8 was registered on does not exist**: E-8 assumes speed (word-parallel
+masks) is bought with footprint (frame-sized constants), and a word-local
+unshuffle is word-parallel *and* zero-byte. The gather loop is expected to be the
+slow one, by roughly the ratio of one branchy bit-test per pixel to one
+mask/shift chain per 32 or 64 pixels. All of that is argument, which is precisely
+what CLAUDE.md says may not settle it.
+
+**Decision rule** *(written and committed before measuring):*
+
+1. **Frame-masked ships only if it is decisively faster.** It costs a mask table
+   and a scratch row per (width, word type) and forces a prepared-plan API that
+   T3.4 would have to thread scratch through; the word-local routes cost zero
+   bytes and take `(src, dst)`. So it is adopted only if its median beats the
+   better word-local variant by **≥ 1.5×, with non-overlapping [min, max] batch
+   spreads, at both word types, on the 640×480 → 320×240 case**. Below that bar
+   **memory wins** — CLAUDE.md's tiebreak, applied as written rather than
+   after seeing which side it favours.
+2. **Gather loop versus word-local unshuffle** is decided on speed alone: both
+   cost zero auxiliary bytes, so the footprint tiebreak has nothing to weigh.
+   Take the faster **if the median difference exceeds the larger of the two
+   spreads** at 640×480 at both word types. If it is inside the spread the result
+   is null and **the gather loop wins on simplicity** — it is ~10 lines and needs
+   no per-word-width mask constants.
+3. **The winner becomes the shipped primitive** `decimateColumnsBy2` and is its
+   *default*, not a special case. E-8's second half is answered by the winner's
+   class. A frame-masked win additionally means `ops/` gains a prepared-plan
+   entry point and T3.4 carries caller-provided scratch through `pyrDown`; a
+   word-local win means the primitive is `(src, dst)` and the pyramid needs no
+   scratch for the subsample half.
+4. **Any ratio above 8× is checked against the physical bound below before it is
+   believed.** A gather loop that looks 40× slower than a mask chain is plausible;
+   an unshuffle that looks 40× faster than DRAM allows is a dead-code measurement.
+
+**Variants:** three, required to produce an identical destination before anything
+is timed.
+
+| | Route | Auxiliary memory |
+|---|---|---|
+| **A** | **Gather loop.** Per destination pixel, read source bit 2*j*, accumulate into a local word, one store per destination word. | none |
+| **B** | **Word-local unshuffle.** Per destination word, deinterleave the even bits of source words 2*i* and 2*i*+1 with log2(WordBits) mask/shift steps in registers, then combine the halves. Destination word *i* covers source columns [2*i*·WordBits, 2(*i*+1)·WordBits), so the pairing is exact and no cross-word carry arises. | none |
+| **C** | **Frame-masked unshuffle.** The row as one big integer: log2(paddedRowBits) passes, each a masked shift-or over the whole row, against a caller-built mask table at frame width and a caller-provided scratch row. | mask table + scratch row |
+
+**Workload:** the pyramid ladder this operation exists for — 640×480 → 320×240,
+320×240 → 160×120, 160×120 → 80×60, and 94×60 → 47×30 (odd source width, a
+non-word-multiple at every word type). ~50% fill, four distinct random images
+rotated through so nothing constant-folds, at `uint32_t`
+([D-14](ARCHITECTURE.md#d-14-uint32_t-is-the-default-word-type)) and `uint64_t`.
+All three variants read the same stride-doubled source view, so what separates
+them is the horizontal half alone.
+
+**Metric:** ns per destination pixel and per call — median of ≥ 7 calibrated
+batches with min/max printed beside it, interleaved round-robin — **and** the
+auxiliary bytes each variant needs, in the same table. Speed and memory together,
+because that is the pair rule 1 weighs.
+
+**Sanity bound:** at 640×480 → 320×240 with `uint32_t` one call touches 19200 B of
+source (only even rows are read) plus 9600 B of destination = **28.1 KiB**, which
+fits the Cortex-A72's 32 KiB L1D, and every smaller ladder step more so. DRAM
+bandwidth (~4–6 GB/s) is therefore *not* the bound and must not be used as one;
+the bound is L1 load throughput, on the order of 8–16 B/cycle at 1.5 GHz =
+**12–24 GB/s**. A variant reporting more than that is measuring dead code.
+
+**Method:** `bincv-cpp/benchmark/decimate_benchmark.cpp` — binCV against binCV, so
+[§10.3](ARCHITECTURE.md#103-benchmark-denominator)'s OpenCV denominator does not
+apply and it builds in the reference device's default core-only configuration.
+Run with `./scripts/run_on_pi.sh pi4 './benchmark/decimate_benchmark'`.
+Correctness comes first and is separate: `bincv-cpp/tests/test_resample.cpp`
+compares **all three** variants against a per-pixel reference at `uint8_t`,
+`uint16_t`, `uint32_t` and `uint64_t` over widths that are and are not word
+multiples, including the padding-bit invariant
+([D-13](ARCHITECTURE.md#d-13-a-reduction-counts-pixels-never-padding)); the
+benchmark additionally re-checks agreement in-binary before timing anything.
+
+**Result:** *pending — this entry was committed before the device ran.*
+
+**Conclusion:** *pending*
+
+**Decision:** *pending*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
