@@ -153,7 +153,11 @@ forms.
 Majority of three; one expression per word.
 
 ### 3.2 Pyramid downsample — box 2×2
-2×2 popcount and threshold. Pyramid construction over bit-planes.
+2×2 box mean, subsampled, requantized to a caller-chosen bit depth. Pyramid
+construction over bit-planes. *"2×2 popcount and threshold" was the 1-bit case
+only; over an N-bit level the sum is a bit-sliced multi-bit add and the threshold
+is a rescale —
+[D-18](ARCHITECTURE.md#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale).*
 
 ### 3.3 Edge filter / threshold
 Produces 1-bit frames from higher-precision input, for pipelines that binarize on
@@ -211,6 +215,10 @@ unscheduled. **E-8 closed in Phase 3**, in T3.4 and before the code it gates was
 written: horizontal decimation is word-local, and the speed-against-footprint
 trade the register was built on turned out not to exist
 ([X-14](EXPERIMENTS.md), [D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local)).
+T3.4 then measured E-7's footprint axis ahead of Phase 4
+([X-15](EXPERIMENTS.md)): capping the pyramid's bit depths spans 1.65×, not an
+order of magnitude, because level 0 dominates and no cap touches it. E-7 still
+has to price the accuracy side.
 
 **Done when:** accuracy, footprint, and performance are measured and published in
 the repository, and no decision on the D-list is still provisional.

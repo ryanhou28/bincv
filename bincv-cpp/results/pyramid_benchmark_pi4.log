@@ -1,0 +1,113 @@
+
+------------------------------------------------------------
+  binCV reference-device run
+------------------------------------------------------------
+  target:  pi4
+  command: ./benchmark/pyramid_benchmark
+
+  preflight
+  arch: aarch64
+  throttle before: 0x0 (clean)
+  governor: ondemand -> performance
+
+  sync
+  repository synced to bincv-measure
+
+  build (Release, core-only)
+[  7%] Built target alignment_benchmark
+[  7%] Built target test_error_abort
+[ 11%] Built target gtest
+[ 14%] Built target test_assert_abort
+[ 18%] Built target decimate_benchmark
+[ 22%] Built target morphology_path_benchmark
+[ 25%] Built target pyramid_benchmark
+[ 29%] Built target reduce_target_benchmark
+[ 33%] Built target window_benchmark
+[ 37%] Built target wordwidth_benchmark
+[ 40%] Built target test_binMat
+[ 44%] Built target test_quantMat
+[ 48%] Built target test_storage
+[ 55%] Built target test_error
+[ 55%] Built target test_logic
+[ 59%] Built target test_error_checked
+[ 62%] Built target test_shift
+[ 70%] Built target test_reduce
+[ 70%] Built target test_bitslice
+[ 74%] Built target test_denoise
+[ 77%] Built target test_threshold
+[ 81%] Built target test_resample
+[ 85%] Built target test_morphology
+[ 88%] Built target test_pyramid
+[ 92%] Built target test_harness
+[100%] Built target test_harness_failing
+[100%] Built target gtest_main
+  build complete
+
+  run
+------------------------------------------------------------
+binCV pyramid downsample -- T3.4
+================================
+
+BIT GROWTH AND PEAK FOOTPRINT -- four levels from 640x480, uint32_t
+  the CV_8U denominator is 408000 bytes (one byte per pixel, four levels,
+  all resident)
+
+  ladder (NOut caps)      declared   in the frame    reachable       bits needed     bytes    vs 8U
+  ----------------------  ---------  --------------  --------------  -----------  --------  -------
+  1-3-5-7  uncapped       1/3/5/7    2/5/24/50       2/5/26/121      1/3/5/7         84240    4.84x
+  1-3-4-5  reference      1/3/4/5    2/5/14/15       2/5/16/32       1/3/4/5         80400    5.07x
+  1-3-3-3                 1/3/3/3    2/5/7/4         2/5/8/8         1/3/3/3         76560    5.33x
+  1-2-2-2                 1/2/2/2    2/4/4/3         2/4/4/4         1/2/2/2         63840    6.39x
+  1-1-1-1  re-binarized   1/1/1/1    2/2/2/2         2/2/2/2         1/1/1/1         51120    7.98x
+  1-8-8-8  CV_8U-like     1/8/8/8    2/5/20/34       2/5/21/95       1/3/5/7        140160    2.91x
+
+  "in the frame" counts DISTINCT VALUES PRESENT in one 640x480-derived
+  level; "reachable" is the alphabet the arithmetic can produce at all, and
+  "bits needed" follows the reachable column. The two differ, and the
+  difference matters: EXPERIMENTS.md X-2 reported 2/5/15/26 for the CV_8U
+  ladder, which is what a 256x256 frame CONTAINED -- its level 3 is 32x32,
+  i.e. 1024 pixels drawn from an alphabet of 65. A frame statistic falls
+  with the frame size; the reachable alphabet does not.
+
+THE 2x2 BOX SUM: LINEAR AGAINST EXPONENTIAL -- 640x480 -> 320x240, uint32_t
+  NOut = NIn + 1 throughout, so the requantizer is the same shape in every
+  row and the difference between the pair is the SUM alone.
+
+  route                      ns/dst px      spread    stages    inputs   vs linear
+  ------------------------  ----------  ----------  --------  --------  ----------
+  NIn=1 linear adder            1.1301        0.1%         4         -           -
+  NIn=1 replicated              2.3462        0.5%         -         4       2.08x
+  NIn=2 linear adder            3.0387        0.1%         7         -           -
+  NIn=2 replicated              6.4503        0.2%         -        12       2.12x
+  NIn=3 linear adder            4.3974        0.1%        10         -           -
+  NIn=3 replicated             14.0389        1.1%         -        28       3.19x
+  NIn=4 linear adder            9.0190        0.2%        13         -           -
+  NIn=4 replicated             31.2323        0.2%         -        60       3.46x
+
+  The stage counts are impl::boxSumFullAdders(NIn) = 3*NIn + 1 and
+  impl::boxSum4ReplicatedInputs(NIn) = 4*(2^NIn - 1). At NIn = 8 they are 25
+  and 1020; the replicated arm refuses to compile above NIn = 5, where its
+  input array is already 124 words per destination word.
+
+sink = 31683969524600
+------------------------------------------------------------
+
+------------------------------------------------------------
+  ENVIRONMENT -- record this with any measurement
+------------------------------------------------------------
+  device:           pi4
+  cpu:              Raspberry Pi 4 Model B Rev 1.5
+  arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+  compiler:         g++ (Debian 14.2.0-19) 14.2.0
+  governor:         performance (restored to ondemand on exit)
+  core pinning:     taskset -c 3
+  throttled before: throttled=0x0
+  throttled after:  throttled=0x0
+  commit:           7bbe65d
+------------------------------------------------------------
+
+  OK -- command succeeded, device state valid throughout
+  Timings from this device ARE authoritative (unlike emulation).
+  Record the environment block above in EXPERIMENTS.md.
+
+  governor restored to ondemand

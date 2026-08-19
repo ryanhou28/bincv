@@ -2003,6 +2003,165 @@ rather than a copy of it.
 
 ---
 
+### X-15 · Pyramid bit growth and footprint, against the reference path · `DONE`
+
+**Gates:** nothing on its own — it is the measurement half of
+[T3.4](TASKS.md)'s done-when clauses, and the data
+[E-7](ARCHITECTURE.md#9-open-questions-and-planned-experiments) (T4.1) will weigh.
+It also **completes [X-2](#x-2--pyramid-bit-growth--done)**, whose caveat asked for
+a re-run against the reference's actual `PyrDownInvoker` path rather than against
+`cv::resize(INTER_NEAREST)` as a stand-in.
+
+**No decision rule, and that is not an omission.** There is no choice being made
+here: the bit depth per level is a *parameter* of `pyrDown`, and E-7 is the entry
+that decides it, in Phase 4, against tracking accuracy. Parameterizing a contested
+choice is what buys the right to defer measuring it
+([ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments)).
+What T3.4 owes is the numbers E-7 will need and the evidence for the cost claim
+its second blocking gap turned on.
+
+**Question:** three of them. (a) How many bits does each pyramid level actually
+need, and how many does a frame contain? (b) What does a four-level pyramid cost
+in bytes at several `NOut` caps, against the `CV_8U` pyramid a user has today?
+(c) Is the shipped 2×2 box sum really linear in `NIn` where the replication route
+is exponential?
+
+**Method:** `bincv-cpp/benchmark/pyramid_benchmark.cpp` (core-only, no OpenCV, so
+it builds in the reference device's default configuration) and the OpenCV half of
+`bincv-cpp/tests/test_pyramid.cpp`. Growth and footprint are
+architecture-independent and close anywhere; the timing half was closed **on the
+reference device** (`./scripts/run_on_pi.sh pi4 './benchmark/pyramid_benchmark'`),
+with the x86 pre-run kept beside it as a non-authoritative cross-check.
+
+---
+
+**Result (a) — THREE FINDINGS, and two of them correct a documented claim.**
+
+**1. `cv::blur` on `CV_8U` does not round the mean to nearest. It rounds it UP.**
+Measured over 59 940 operand quadruples, its 2×2 box is exactly
+`ceil((a + b + c + d) / 4)`. That is where [§7.2](ARCHITECTURE.md#72-pyramid-downsample--box-22)'s
+level-1 value `192` comes from: the exact mean of `{0, 255, 255, 255}` is 191.25,
+and rounded to *nearest* it would be 191. X-2's table was right and the obvious
+reading of it — "the reference rounds the mean" — was not.
+`tests/test_pyramid.cpp` now checks OpenCV's rule as well as binCV's, so a change
+in either fails rather than being absorbed. binCV rounds once, half up: rounding a
+mean up is a systematic brightening of every level, and Tier 2 is what buys the
+right to differ.
+
+**2. X-2's 1/3/4/5 is a FRAME STATISTIC, not the precision the operation needs.**
+X-2 counted distinct values in a 256×256 frame; its level 3 is 32×32, i.e. 1024
+pixels. The alphabet the arithmetic can *reach* is larger, and it does not shrink
+with the frame:
+
+| Level | reachable, reference rule (`ceil`) | reachable, binCV rule (half up) | in a 640×480-derived frame (binCV, `1-8-8-8`) | X-2, 256² frame |
+|---|---|---|---|---|
+| 0 | 2 — 1 bit | 2 — 1 bit | 2 | 2 |
+| 1 | 5 — 3 bits | 5 — 3 bits | 5 | 5 |
+| 2 | 17 — 5 bits | 21 — 5 bits | 20 | 15 |
+| 3 | 65 — 7 bits | 95 — 7 bits | 34 | 26 |
+
+So an *uncapped* box mean adds exactly two bits per level — 1, 3, 5, 7 — which is
+what a 4-input sum of `NIn`-bit values must, and the reference's "1/3/4/5" is what
+one small frame happened to contain. [§7.2](ARCHITECTURE.md#72-pyramid-downsample--box-22)
+is corrected: the table now says which column is which. **The conclusion X-2 drew
+is unchanged and strengthened** — binary survives exactly one level and
+`QuantMat<N>` is mandatory — but E-7's lever is larger than it looked, because the
+uncapped ladder wants 7 bits at level 3 rather than 5.
+
+**3. The reference's 2×2 window is half a pixel up and to the left of the aligned
+block.** `cv::blur(src, dst, cv::Size(2, 2))` takes OpenCV's *default* anchor,
+which for an even kernel size is (1, 1), so the reference's output at (y, x)
+averages source rows 2y−1…2y and columns 2x−1…2x. binCV uses the aligned,
+non-overlapping block, whose centre maps to source coordinate 2·(y + ½) with no
+offset. Pinned in `tests/test_pyramid.cpp` OpenCV-against-OpenCV, so that only the
+anchor differs between the two sides of the check.
+
+---
+
+**Result (b) — bit growth and peak footprint, 640×480, four levels, `uint32_t`.**
+
+Every level coexists, because a tracker reads all of them, so this is a peak
+working set and not a per-buffer ratio. The `CV_8U` denominator is exact
+arithmetic — one byte per pixel per level — and is **408 000 bytes**.
+
+| ladder (`NOut` caps) | distinct in the frame | reachable | bits needed | bytes | vs `CV_8U` |
+|---|---|---|---|---|---|
+| 1-3-5-7 uncapped | 2/5/24/50 | 2/5/26/121 | 1/3/5/7 | 84 240 | **4.84×** |
+| 1-3-4-5 reference-shaped | 2/5/14/15 | 2/5/16/32 | 1/3/4/5 | 80 400 | **5.07×** |
+| 1-3-3-3 | 2/5/7/4 | 2/5/8/8 | 1/3/3/3 | 76 560 | 5.33× |
+| 1-2-2-2 | 2/4/4/3 | 2/4/4/4 | 1/2/2/2 | 63 840 | 6.39× |
+| 1-1-1-1 re-binarized | 2/2/2/2 | 2/2/2/2 | 1/1/1/1 | 51 120 | 7.98× |
+| 1-8-8-8 `CV_8U`-shaped | 2/5/20/34 | 2/5/21/95 | 1/3/5/7 | 140 160 | 2.91× |
+
+**The cap is worth less than it looks, and that is the useful part.** Level 0 is
+38 400 of those bytes and no cap touches it, so the whole range from "keep every
+bit the box produces" to "re-binarize every level" spans 84 240 → 51 120 bytes —
+**1.65×**, against the 4.84×–7.98× the pyramid already wins over `CV_8U`. E-7 is
+therefore trading a 1.65× footprint band against tracking accuracy, not an order
+of magnitude, and it should be run knowing that.
+
+---
+
+**Result (c) — the box sum, linear against exponential.** 640×480 → 320×240,
+`uint32_t`, `NOut = NIn + 1` throughout so the requantizer is the same shape in
+every row and the pair differs only in the sum. **Reference device**, spreads
+≤ 1.1%; `bincv-cpp/results/pyramid_benchmark_pi4.log`.
+
+```
+device: pi4   Raspberry Pi 4 Model B Rev 1.5
+arch:   aarch64 / 6.18.34+rpt-rpi-v8      compiler: g++ (Debian 14.2.0-19) 14.2.0
+governor: performance (restored)          pinning: taskset -c 3
+throttled before: 0x0                     throttled after: 0x0
+commit: 7bbe65d
+```
+
+| `NIn` | linear adder (ns/dst px) | spread | replicated (ns/dst px) | spread | ratio | stages `3·NIn+1` | inputs `4·(2^NIn−1)` |
+|---|---|---|---|---|---|---|---|
+| 1 | 1.1301 | 0.1% | 2.3462 | 0.5% | **2.08×** | 4 | 4 |
+| 2 | 3.0387 | 0.1% | 6.4503 | 0.2% | **2.12×** | 7 | 12 |
+| 3 | 4.3974 | 0.1% | 14.0389 | 1.1% | **3.19×** | 10 | 28 |
+| 4 | 9.0190 | 0.2% | 31.2323 | 0.2% | **3.46×** | 13 | 60 |
+
+The ratio widens monotonically, which is the shape the two formulas predict. The
+x86 pre-run agreed on the shape and disagreed on the level (1.39× / 2.12× / 3.10×
+/ 3.51×, spreads up to 97% on a loaded desktop) — recorded in
+`bincv-cpp/results/pyramid_benchmark.log` and non-authoritative, as
+[X-7](#x-7--what-__builtin_popcountll-actually-compiles-to-in-bincvs-own-build--done)'s
+caveat requires. The replicated arm **refuses to compile above `NIn = 5`**, where
+its per-destination-word input array is already 124 words; at `NIn = 8` it would
+be 1020 against the shipped route's 25 adder stages. Both routes are checked to
+agree pixel for pixel before either is timed.
+
+**One thing this does NOT show, and it is worth saying.** "Linear in NIn" is a
+statement about the **operation count**, and it is exact: the loops run to
+`NIn + 2`. The measured wall time of the shipped route grows faster than that —
+8.0× from NIn = 1 to NIn = 4 where the stage count
+(`3·NIn + 1` plus `(NOut+2)(NIn+NOut+2)`, i.e. 24 → 90) predicts 3.75×. The likely
+cause is register pressure rather than arithmetic: the kernel holds `4·NIn` phase
+words plus `NIn + NOut + 2` arithmetic planes live per destination word, which is
+12 words at NIn = 1 and 28 at NIn = 4, and a Cortex-A72 has 31 general registers.
+That is a **tuning** observation, not an algorithmic one — the comparison T3.4
+turned on is against `4·(2^NIn − 1)`, which grows 13.3× over the same range — but
+it is the number to look at first if a pyramid level ever needs to be faster, and
+it is left here rather than smoothed away.
+
+**Correctness on the reference device.** `tests/test_pyramid.cpp` reports
+**236122/236122** under `aarch64` on the same device, byte-identical to the three
+core x86 configurations — so nothing in the bit-sliced arithmetic, the word-local
+gather or the tail masking depends on the host architecture.
+
+**Conclusion:** the numbers E-7 needs exist, X-2's caveat is discharged, and two
+of its readings are corrected. The cost claim T3.4's second blocking gap turned on
+holds: linear in `NIn` for the sum, quadratic in `NOut` and linear in `NIn` for
+the requantization, exponential in neither.
+
+**Decision:** promoted to
+[D-18](ARCHITECTURE.md#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale).
+E-7 stays open and stays in Phase 4; it now has its footprint axis measured and
+knows the band is 1.65× rather than an order of magnitude.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

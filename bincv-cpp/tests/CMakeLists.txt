@@ -141,9 +141,22 @@ endfunction()
 # both axes on a byte image and rounds rather than keeping the even columns -- so
 # there is no Tier 1 denominator, and this suite is the ONLY thing standing behind
 # the primitive T3.4's pyramid is built on.
+# test_pyramid (T3.4) is core for the same reason once more, and for a fourth
+# that is specific to it: pyrDown is TIER 2 (ARCHITECTURE 5.1) -- cv::pyrDown's
+# name and role with deliberately different numerics -- so there is no
+# bit-exactness promise anywhere in it and no Tier 1 denominator at all. What
+# stands behind it is a per-pixel reference, an enumeration of the requantizer's
+# entire input space, and agreement with the EXPONENTIAL formulation T3.4
+# replaced (impl::boxSum4Replicated, ops/bitslice.hpp's single-bit adder at
+# k = 4*(2^NIn - 1)). None of those needs OpenCV, and all of them have to run
+# where the embedded claim does -- including Debug, the only configuration in
+# which pyrDown's BINCV_ASSERT preconditions are live. Its OpenCV half is one
+# suite: binCV at NOut = 8 against the reference pipeline's own BOX_2x2 path, and
+# the phase deviation that path's default anchor introduces.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
                      test_logic test_shift test_reduce test_bitslice
-                     test_denoise test_threshold test_morphology test_resample)
+                     test_denoise test_threshold test_morphology test_resample
+                     test_pyramid)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)

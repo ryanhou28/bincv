@@ -2087,9 +2087,14 @@ for its own operation, which is what `cv::morphologyEx` does with its default).
 
 ---
 
-### T3.4 · Pyramid downsample · `TODO`
+### T3.4 · Pyramid downsample · `DONE`
 
-> **⚠️ ONE OF THE TWO BLOCKING GAPS IS NOW CLOSED. Read both before starting.**
+> **⚠️ BOTH BLOCKING GAPS ARE NOW CLOSED.** The first by
+> [D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local) ahead of the
+> rest of the task, the second by this one
+> ([D-18](ARCHITECTURE.md#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale)).
+> Both notices are kept as written, because what the gaps looked like before they
+> were closed is the useful part of the record.
 >
 > ~~**No primitive expresses horizontal decimation**~~ — **RESOLVED.**
 > `ops/resample.hpp` provides `decimateColumnsBy2(src, dst)` and the free
@@ -2099,10 +2104,14 @@ for its own operation, which is what `cv::morphologyEx` does with its default).
 > takes `(src, dst)` and **needs no scratch and no prepared plan** — `pyrDown`
 > carries nothing through for the subsample half.
 >
-> **STILL OPEN — this task owns it.** From T2.7: the 2×2 box **is**
-> `bitSlicedSum` at k = 4 only for a **1-bit** source. For an N-bit level the
-> replication route costs k = 4·(2^N − 1) — 124 inputs at N = 5 — so an N-bit
-> pyramid level needs a different formulation, not just a bigger k.
+> ~~**STILL OPEN — this task owns it.**~~ **RESOLVED.** From T2.7: the 2×2 box
+> **is** `bitSlicedSum` at k = 4 only for a **1-bit** source. For an N-bit level
+> the replication route costs k = 4·(2^N − 1) — 124 inputs at N = 5 — so an N-bit
+> pyramid level needed a different formulation, not a bigger k. It got one: a
+> bit-sliced **multi-bit** add, a tree of three ripple-carry additions costing
+> **3·N + 1 full-adder stages**, equal to the single-bit route at N = 1 and 40×
+> cheaper at N = 8. The replication route stays in `impl::` under test and under
+> measurement so the comparison is reproducible ([X-15](EXPERIMENTS.md)).
 
 **Depends:** T3.3
 **Files:** `include/bincv-cpp/ops/pyramid.hpp` (new)
@@ -2150,6 +2159,35 @@ class Pyramid { /* levels, each its own QuantMat; bit depth per level */ };
 - Peak footprint of the pyramid measured and committed (feeds E-7)
 
 **Verify:** V-ALL
+
+**RESULT — shipped as `ops/pyramid.hpp`, and the reference disagreed with the
+docs in two places.**
+
+The formulation is `boxSum4` (3·N + 1 full-adder stages, linear in N) then a
+requantization that is a constant multiply, a constant add and a restoring
+division by a constant — quadratic in `NOut`, linear in `NIn`, exponential in
+neither. Odd extents **replicate** the edge pixel so the divisor stays 4 and the
+destination stays ceil(w/2) × ceil(h/2). The kernel takes **no scratch**: the four
+2×2 phases are registers, gathered with
+[D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local)'s word-local
+unshuffle, and the whole arithmetic runs in NIn + NOut + 2 words of automatic
+storage per destination word.
+[D-18](ARCHITECTURE.md#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale)
+records all three choices and the three deviations from the reference.
+
+**Two documented claims turned out to be wrong, and are corrected rather than
+worked around** ([X-15](EXPERIMENTS.md)):
+
+- `cv::blur` on `CV_8U` **rounds the mean up**, not to nearest — measured, its
+  2×2 box is `ceil((a+b+c+d)/4)`. That is where §7.2's `192` comes from.
+- §7.2's **1/3/4/5 bits is a frame statistic, not a requirement.** The reachable
+  alphabet is 2/5/17/65 — 1/3/5/7 bits — and X-2 counted what a 256² frame
+  happened to contain. X-2's conclusion is unchanged and strengthened.
+
+Footprint, 640×480 × 4 levels: **84 240 B uncapped down to 51 120 B
+re-binarized**, against 408 000 B for the `CV_8U` equivalent — 4.84× to 7.98×.
+The cap's whole range is **1.65×**, which is smaller than it looked and is what
+E-7 (T4.1) is really trading against accuracy.
 
 ---
 

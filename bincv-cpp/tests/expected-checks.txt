@@ -492,6 +492,53 @@
 #             protocol requires each to be correct BEFORE any is timed; a
 #             two-thirds drop here means a losing arm was deleted, which is
 #             exactly what the floor is for.
+#   test_pyramid  262008 under opencv, 236122 everywhere else. The 25886
+#             difference is the reference pipeline's own BOX_2x2 path (T3.4,
+#             X-15): cv::blur(2x2) then PyrDownInvoker's disableGaussian
+#             early-out, which is what SEAL/src/keypoint_tracking/pyramids.cpp
+#             runs. It is a SECOND REFERENCE and not a tier promise -- pyrDown is
+#             Tier 2 (ARCHITECTURE 5.1), so there is no bit-exactness to check --
+#             and it carries three separate claims: that cv::blur on CV_8U is
+#             ceil(sum/4) rather than the mean rounded to nearest (which is where
+#             ARCHITECTURE 7.2's 192 comes from), that binCV is the mean rounded
+#             once half up, and that cv::blur's DEFAULT anchor puts its window
+#             half a pixel up and to the left. The last is checked OpenCV against
+#             OpenCV so that only the anchor differs between the two sides.
+#             The other 236122 are one check per destination pixel across the
+#             width sweep (0 .. 2*WordBits+3 plus the pyramid ladder) at four
+#             heights, for thirteen (NIn, NOut, WordType) instantiations, plus:
+#             the requantizer's ENTIRE input space enumerated per (NIn, NOut) --
+#             every sum from 0 to 4*(2^NIn - 1), packed into the lanes of the
+#             words under test so lane independence comes out of the same
+#             enumeration; the four bit-sliced primitives underneath it
+#             (addPlanes, multiplyByAllOnes, addConstant, divideByConstant,
+#             quotient AND remainder); agreement with THE FORMULATION T3.4
+#             REJECTED, both at the word level (boxSum4 vs boxSum4Replicated) and
+#             for the whole kernel (pyrDown vs impl::pyrDownReplicated); the
+#             edge-replication rule checked a second way, against a source whose
+#             last column and row were duplicated by hand; dirty-source padding;
+#             differing strides; degenerate shapes; and the four-level ladder.
+#             THE ROUTE-AGREEMENT CASES ARE THE ONES TO PROTECT. impl::
+#             boxSum4Replicated is the exponential k = 4*(2^NIn - 1) route T3.4
+#             replaced, kept under test precisely so the replacement is a
+#             comparison rather than a claim -- the same argument test_resample
+#             makes for E-8's losing arms. Deleting it would take ~15000 checks
+#             with it and leave the suite green-looking.
+#             The floor has teeth, measured by mutating ops/pyramid.hpp (checks
+#             passed out of 236122 core):
+#               boxSum4 drops a plane of an operand   164123
+#               addPlanes drops its carry out         134054
+#               requantize loses its rounding bias    132811
+#               restoring division runs LSB-first      95008
+#               the odd 2x2 phase gathers even cols   146959
+#               the bottom row of each block dropped  161403
+#               destination trailing word unmasked    235348
+#               odd width stops replicating its edge  232991
+#             The last two are small and are the two that matter most: the
+#             padding-bit invariant (D-13) and the edge rule are each visible to
+#             one family of cases and invisible to every other, so without
+#             Pyramid.EdgeReplication_* and the per-case padding check a wrong
+#             border rule ships green in all four configurations.
 #   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
 #             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
 #             through constPlane() -> unpackTo8U, and that conversion was the one
@@ -533,6 +580,7 @@ opencv	test_denoise	9744	0
 opencv	test_threshold	33112	0
 opencv	test_morphology	299181	0
 opencv	test_resample	245312	0
+opencv	test_pyramid	262008	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
 opencv	test_equivalence	16403	0
@@ -550,6 +598,7 @@ core	test_denoise	7584	0
 core	test_threshold	21304	0
 core	test_morphology	172632	0
 core	test_resample	245312	0
+core	test_pyramid	236122	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -565,6 +614,7 @@ noexcept	test_denoise	7584	0
 noexcept	test_threshold	21304	0
 noexcept	test_morphology	172632	0
 noexcept	test_resample	245312	0
+noexcept	test_pyramid	236122	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -580,5 +630,6 @@ debug	test_denoise	7584	0
 debug	test_threshold	21304	0
 debug	test_morphology	172632	0
 debug	test_resample	245312	0
+debug	test_pyramid	236122	0
 debug	test_harness	8	0
 

@@ -301,10 +301,11 @@ The kernel vocabulary is small and closed:
 | threshold on a count | bit-sliced adder network, then compare |
 | reduction | population count over a region or mask |
 | resample | horizontal decimation by two, word-local (`ops/resample.hpp`); vertical is a stride-doubled view |
+| multi-bit add | ripple-carry over plane *arrays* — the 2×2 box over an N-bit source (`ops/pyramid.hpp`, [D-18](#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale)) |
 
 Nearly every operation in the MVP set is a composition of these — with **two
-known gaps, recorded here rather than left for a later task to discover. The
-first is now closed; the second is not**:
+known gaps, recorded here rather than left for a later task to discover. Both are
+now closed**:
 
 - ~~**There is no resample row, and the table needs one.**~~ **CLOSED by
   [D-17](#d-17-horizontal-decimation-is-word-local) / [X-14](EXPERIMENTS.md).**
@@ -317,14 +318,20 @@ first is now closed; the second is not**:
   was no trade** — the word-local unshuffle is word-parallel and costs zero
   auxiliary bytes, and it beat both alternatives by 8.3×–26.4× on the reference
   device. The table has its resample row and it is word-local.
-- **The bit-sliced adder is single-bit and equal-weight.** `bitSlicedSum` counts
-  *k* inputs each worth one, which is the 2×2 box over a **1-bit** source and
-  nothing else. §7.2 measures levels 1–3 as 3, 4 and 5 bits, and a 2×2 box over an
-  N-bit source adds four values worth up to 2^N − 1 each. It can be expressed by
-  replicating plane *p* of each pixel 2^p times — correct, and exponential:
-  *k* = 4·(2^N − 1), so 4 inputs at N = 1 but 124 at N = 5. A bit-sliced add over
-  multi-bit operands is linear in N instead, and T3.4 is where its shape gets
-  fixed, by the caller that needs it.
+- ~~**The bit-sliced adder is single-bit and equal-weight.**~~ **CLOSED by
+  [D-18](#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale)
+  / T3.4.** `bitSlicedSum` counts *k* inputs each worth one, which is the 2×2 box
+  over a **1-bit** source and nothing else; over an N-bit source the only
+  composition available was replicating plane *p* of each pixel 2^p times —
+  correct, and exponential (*k* = 4·(2^N − 1), so 4 inputs at N = 1 but 124 at
+  N = 5). `ops/pyramid.hpp` adds the multi-bit form: a tree of three ripple-carry
+  additions, **3·N + 1 full-adder stages**, linear in N and equal to the
+  single-bit route at N = 1. The rejected route stays under test and under
+  measurement as `impl::boxSum4Replicated`, which is why the "exponential" in that
+  sentence is a measured ratio ([X-15](EXPERIMENTS.md)) rather than an estimate.
+  The primitives themselves — a multi-bit add, a constant multiply, a constant
+  restoring division — stay in `impl::` inside the file whose caller fixed their
+  shape, exactly as `ops/bitslice.hpp` said they should.
 
 The middle two live in `ops/bitslice.hpp` (T2.7) — `maj3`, `bitSlicedSum` and
 `thresholdGE`, plus the view-level `majority3` that T3.1's denoise is written in.
@@ -440,27 +447,63 @@ and no decision was needed.
 **This is where binary stops being enough, and it is measured, not assumed.**
 
 The reference pipeline applies a 2×2 box blur and subsamples, with no
-re-binarization. Starting from a binary level 0, the distinct-value count grows:
+re-binarization. Starting from a binary level 0, the value count grows — and
+**there are two different numbers here, which [X-2](EXPERIMENTS.md) reported as
+one**. [X-15](EXPERIMENTS.md) separated them against the reference's actual
+`PyrDownInvoker` path, which is what X-2's own caveat asked for:
 
-| Level | Distinct values | Bits |
-|---|---|---|
-| 0 | 2 — `{0, 255}` | 1 |
-| 1 | 5 — `{0, 64, 128, 192, 255}` | 3 |
-| 2 | 15 | 4 |
-| 3 | 26 | 5 |
+| Level | Values the arithmetic can REACH | Bits needed | Values a 256² frame CONTAINED (X-2) |
+|---|---|---|---|
+| 0 | 2 — `{0, 255}` | 1 | 2 |
+| 1 | 5 — `{0, 64, 128, 192, 255}` | 3 | 5 |
+| 2 | 17 | 5 | 15 |
+| 3 | 65 | 7 | 26 |
+
+**The right-hand column is a frame statistic and falls with the frame size** —
+level 3 of a 256² pyramid is 32×32, i.e. 1024 pixels drawn from an alphabet of 65,
+and a 640×480 frame shows 34 of them. The left-hand column does not move: an
+uncapped 2×2 mean adds exactly two bits per level, because a four-input sum of
+N-bit values needs N + 2. "1/3/4/5" was the sample, not the requirement.
+
+Two details of the reference's arithmetic, both measured in
+[X-15](EXPERIMENTS.md) rather than inferred, and both reproduced as checks in
+`tests/test_pyramid.cpp`:
+
+- **`cv::blur` on `CV_8U` rounds the mean UP, not to nearest.** Its 2×2 box is
+  exactly `ceil((a+b+c+d)/4)`. That is where `192` in the level-1 set comes from;
+  the exact mean is 191.25 and rounding to nearest gives 191.
+- **Its window sits half a pixel up and to the left of the aligned block.**
+  `cv::blur(src, dst, cv::Size(2, 2))` takes OpenCV's default anchor, which for an
+  even kernel size is (1, 1), so the window for output (y, x) is source rows
+  2y−1…2y and columns 2x−1…2x.
+
+binCV matches neither, deliberately — see
+[D-18](#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale).
 
 Two consequences:
 
 1. **The N-bit container is required, not speculative.** A binary-only library
    cannot represent pyramid level 1. This is the concrete justification for
    `QuantMat<N>` ([§4.1](#41-bit-plane-representation)).
-2. **binCV chooses the quantization, and that is a lever.** The reference lets
-   precision grow into a full byte; binCV can cap levels at N bits and control
-   footprint directly. Whether a capped N preserves tracking accuracy is
-   [E-7](#9-open-questions-and-planned-experiments).
+2. **binCV chooses the quantization, and that is a lever — a smaller one than it
+   looked.** The reference lets precision grow into a full byte; binCV caps levels
+   at N bits and controls footprint directly. Measured at 640×480 over four levels
+   ([X-15](EXPERIMENTS.md)), the whole range from "keep every bit the box
+   produces" (1-3-5-7, 84 240 B) to "re-binarize every level" (1-1-1-1, 51 120 B)
+   is **1.65×**, against the **4.84×–7.98×** the pyramid already wins over the
+   `CV_8U` equivalent — because level 0 is 38 400 of those bytes and no cap
+   touches it. Whether a capped N preserves tracking accuracy is still
+   [E-7](#9-open-questions-and-planned-experiments); it is now a 1.65× question
+   rather than an order-of-magnitude one, and should be run knowing that.
 
-The 2×2 sum itself stays bit-parallel: a 4-input bit-sliced adder over the source
-planes, then requantization to N bits.
+**Shipped as `pyrDown` in `ops/pyramid.hpp` (T3.4), API tier 2.** The 2×2 sum
+stays bit-parallel and is a **multi-bit** bit-sliced adder over the source planes,
+not the single-bit one — three ripple-carry additions, 3·N + 1 full-adder stages,
+linear in N where the replication route is exponential
+([D-18](#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale)).
+The subsample half is a row index vertically and `impl::gatherEvenBits`
+([D-17](#d-17-horizontal-decimation-is-word-local)) horizontally, fused into the
+same pass, so the kernel takes **no scratch at all**.
 
 ### 7.3 Edge filter / threshold
 
@@ -1166,6 +1209,89 @@ the shipped code rather than against a description of it.
 
 ---
 
+### D-18: the N-bit box is a multi-bit adder, and the requantization is a documented rescale
+
+T3.4 opened with two blocking gaps. [D-17](#d-17-horizontal-decimation-is-word-local)
+closed the first. This closes the second, and settles three choices `pyrDown` had
+to make that no experiment could decide because none of them is a
+speed-against-footprint trade.
+
+**1. The 2×2 sum is a bit-sliced multi-bit ADD, not a bigger `bitSlicedSum`.**
+Three ripple-carry additions in a tree — `(a+b) + (c+d)` — each stage a full adder
+whose carry is `ops/bitslice.hpp`'s `maj3`:
+
+```
+                          NIn = 1   2    3    4    5    8
+3*NIn + 1   shipped             4   7   10   13   16    25
+4*(2^NIn-1) replication route   4  12   28   60  124  1020
+```
+
+Equal at NIn = 1 — which is why T2.7 could ship a single-bit adder and call it the
+box — and 40× apart at NIn = 8, where the replication route also wants 1020 words
+of stack per destination word. Measured on the shipped code on the reference
+device at 640×480 → 320×240, the two routes are **2.08× apart at NIn = 1 and
+3.46× at NIn = 4**, widening with every bit, spreads ≤ 1.1%
+([X-15](EXPERIMENTS.md)). The rejected route stays in `impl::` under test and
+under measurement, so the word "exponential" here is a ratio and not an estimate.
+
+*Linear in NIn is a statement about the operation count and is exact. X-15 also
+records that the shipped route's measured time grows faster than its stage count
+predicts (8.0× against 3.75× from NIn = 1 to 4), most likely register pressure —
+a tuning note, not a correction to this decision.*
+
+The requantization that follows is a constant multiply (`(S << NOut) − S`, one
+borrow chain, because an all-ones constant is one less than a power of two), a
+constant add, and a **restoring division by a constant** — NOut steps of
+`thresholdGE` plus a masked subtract. Quadratic in NOut, linear in NIn,
+exponential in neither. Deliberately not a reciprocal multiply: a reciprocal
+accurate enough to round identically for every input needs a constant wider than
+the value, and a bit-sliced multiply costs one addition per set bit of it.
+
+**2. The output is the mean re-expressed on the OUTPUT's full scale.**
+
+```
+dst(y,x) = round( (S / 4) * (2^NOut - 1) / (2^NIn - 1) )      [half up]
+```
+
+A `QuantMat<N>` value *v* means the intensity *v* / (2^N − 1) — 1 is white at
+N = 1 exactly as 255 is white in `CV_8U`. Storing the sum on its own scale instead
+would make white read as 4/7 of full scale at NOut = 3, and the error compounds
+down the ladder. At NIn == NOut the multiply and the divide cancel and this is
+`round(S / 4)`, the reference's case; nothing special-cases it.
+
+**3. An odd extent REPLICATES its edge pixel** into the missing half of the block,
+so the destination stays ceil(w/2) × ceil(h/2) — `cv::pyrDown`'s `dsize` and the
+reference's — and the divisor stays 4 everywhere, which is what lets the
+requantization be one rule with no per-column special case. Zero fill would darken
+the last column and row of every level, which on a frontend whose keypoints live
+near edges is a systematic bias; dropping the odd column would lose a column of
+image per level.
+
+**Three deviations from the reference pipeline, each measured and each pinned by a
+test** (`tests/test_pyramid.cpp`, [X-15](EXPERIMENTS.md)):
+
+| | reference (`SEAL`, `BOX_2x2`) | binCV | why |
+|---|---|---|---|
+| precision | grows into `CV_8U`, never capped | capped at `NOut` | the footprint lever [E-7](#9-open-questions-and-planned-experiments) exists to price |
+| rounding | `ceil(sum/4)` — the mean rounded UP | the mean rounded to nearest, half up | rounding up brightens every level systematically |
+| window phase | rows 2y−1…2y, cols 2x−1…2x (`cv::blur`'s default anchor on an even kernel) | the aligned block, rows 2y…2y+1 | the aligned block maps the destination grid onto the source by a factor of two with no offset |
+
+Tier 2 is what buys the right to differ ([§5.1](#51-three-tiers)): `pyrDown` has
+`cv::pyrDown`'s name and role and is validated against downstream task accuracy,
+not against bit-exactness. The test checks OpenCV's rule as well as binCV's, so a
+change in either fails there rather than being quietly absorbed.
+
+**What this does NOT decide.** How many bits each level should keep is
+[E-7](#9-open-questions-and-planned-experiments), still open and still in Phase 4.
+`NOut` is a template parameter precisely so that it can be measured rather than
+argued — and X-15 has now measured its footprint axis, so E-7 knows the band it is
+trading against accuracy is 1.65×.
+
+**Binds:** T3.5's derivative, which reads these levels; T3.6's tracker, which reads
+all of them at once; and any later operation that requantizes.
+
+---
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -1213,7 +1339,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-3**~~ **RESOLVED** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | **Answered, and all three moved off the simpler shape: (a) 7.3×–20× for the adopted sliding form → expose incremental state; (b) 1.27–1.29× → add a covariance entry point; (c) plane 16–18% faster but a fifth plane at every level → four-argument form, memory wins.** Re-measured against the shipped code by [X-11b](EXPERIMENTS.md) — 5.96×/15.9×, 1.20–1.27×, 11–14% — with no branch changing. [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance), [X-11](EXPERIMENTS.md) | T2.6, T3.6 | Phase 2 (T2.10) ✔ |
 | **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | **Phase 3** (T3.9) |
 | ~~**E-8**~~ **RESOLVED** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | **Answered, and the question was leading: there is no tiebreak. A third route the register did not list — the WORD-LOCAL unshuffle — is word-parallel and costs zero bytes, and beat the gather loop by 14.6×/26.4× and the frame-masked route by 11.3×/8.3×. `ops/` gains a word-local resample primitive taking `(src, dst)`; no plan, no scratch.** [D-17](#d-17-horizontal-decimation-is-word-local), [X-14](EXPERIMENTS.md) | T3.4 | Phase 3 (T3.4) ✔ |
-| **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | Measured growth is 1/3/4/5 bits ([§7.2](#72-pyramid-downsample--box-22)), but the reference never chose that — it fell out of using `CV_8U`. Capping N is a direct footprint lever. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |
+| **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | The reference never chose its depths — they fell out of using `CV_8U`. Capping N is a direct footprint lever, and T3.4 shipped the cap as a parameter. **Its footprint axis is now measured ([X-15](EXPERIMENTS.md)): the whole range from uncapped to re-binarized is 1.65×, not an order of magnitude, because level 0 dominates and no cap touches it. The accuracy axis is what remains.** X-15 also corrected the premise this row used to state — the reachable alphabet is 1/3/5/7 bits; 1/3/4/5 was one 256² frame's contents. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |
 | **E-9** | Should the word type vary down the pyramid — `uint64_t` where it costs no bytes (L0, L1), `uint32_t` above? | [X-10](EXPERIMENTS.md) measured both sides: `uint64_t` reduces **1.94×** faster and costs **+33%** at 94×60 but **0%** at 640×480, so the right answer may not be one type. The width is already a per-object template parameter (D-1), so this costs no new machinery — only a decision. | Whether the pyramid picks a word type per level, and whether kernels that walk several levels pay for two instantiations. | T3.4's pyramid, [D-14](#d-14-uint32_t-is-the-default-word-type) | unscheduled |
