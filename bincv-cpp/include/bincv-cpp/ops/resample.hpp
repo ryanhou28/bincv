@@ -33,28 +33,35 @@
 /// E-8 registered the choice as speed against footprint -- "a per-pixel gather
 /// loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant
 /// masks" -- which is the trade CLAUDE.md forbids settling by argument. X-14
-/// measured it on the reference device, and the three variants it compares are
-/// the three impl:: kernels below:
+/// measured three routes on the reference device against a rule written first:
 ///
-///   A  decimateColumnsBy2Gather      per destination pixel, read source bit 2j
-///                                    and accumulate into a local word. Word
-///                                    literals only, no scratch.
-///   B  decimateColumnsBy2Unshuffle   per destination WORD, deinterleave the even
-///                                    bits of two source words with log2(WordBits)
-///                                    mask/shift steps in registers. Word literals
-///                                    only, no scratch.
-///   C  decimateColumnsBy2FrameMasked the row as one big integer: log2(rowBits)
-///                                    masked shift-or passes over a caller-provided
-///                                    scratch row against a caller-built mask table
-///                                    at frame width. This is E-8's "frame-masked"
-///                                    route, and the only one that costs bytes.
+///   A  impl::decimateColumnsBy2Gather      per destination pixel, read source
+///                                          bit 2j into a local word. Word
+///                                          literals only, no scratch.
+///   B  decimateColumnsBy2 (below)          per destination WORD, deinterleave
+///                                          the even bits of two source words
+///                                          with log2(WordBits) mask/shift steps
+///                                          in registers. Word literals only, no
+///                                          scratch.
+///   C  impl::decimateColumnsBy2FrameMasked the row as one big integer:
+///                                          log2(rowBits) masked shift-or passes
+///                                          over a caller-provided scratch row
+///                                          against a caller-built mask table at
+///                                          frame width. E-8's "frame-masked"
+///                                          route, and the only one costing bytes.
 ///
-/// All three survive because tests/test_resample.cpp checks each against a
-/// per-pixel reference at every word width and at widths that are not word
-/// multiples, and benchmark/decimate_benchmark.cpp times them against each other;
-/// an experiment whose losing arms cannot be rebuilt is not reproducible. The
-/// PUBLIC entry point is decimateColumnsBy2(), which is the winner and the only
-/// one a caller outside this experiment should name.
+/// **B won, and E-8's premise turned out to be wrong.** The register did not list
+/// the word-local unshuffle as a third option; it framed the choice as buying
+/// speed with frame-sized masks. Measured at 640x480 -> 320x240 on a Cortex-A72,
+/// B is 14.6x/26.4x faster than A and 11.2x/8.3x faster than C (uint32_t /
+/// uint64_t, batch spreads <= 1.2%) -- so the route that costs zero auxiliary
+/// bytes is also the fastest by an order of magnitude, and there was no trade to
+/// make. See EXPERIMENTS.md X-14 and ARCHITECTURE.md D-17.
+///
+/// A and C stay in impl:: because a closed experiment whose losing arms cannot be
+/// rebuilt is not reproducible: tests/test_resample.cpp checks all three against
+/// the same per-pixel reference, and benchmark/decimate_benchmark.cpp times the
+/// SHIPPED function against them rather than against a copy of it.
 ///
 /// ---------------------------------------------------------------------------
 /// THE PAIRING IS EXACT, WHICH IS WHY NONE OF THIS NEEDS A CROSS-WORD CARRY
@@ -220,7 +227,11 @@ inline void decimateColumnsBy2Gather(BinMatConstView<WordType> src,
 }
 
 // ---------------------------------------------------------------------------
-// B -- the word-local unshuffle
+// B -- the word-local unshuffle's word primitive
+//
+// The kernel that uses it is the PUBLIC decimateColumnsBy2() below, not another
+// impl:: arm: X-14 chose it, so the benchmark times the shipped function itself
+// rather than a copy that could drift from it (the X-11b lesson).
 // ---------------------------------------------------------------------------
 
 /// @brief Even bits of one word, packed into its low half. **Internal.**
@@ -256,36 +267,6 @@ inline WordType gatherEvenBits(WordType x) {
                                   static_cast<WordType>(UINT64_C(0x00000000ffffffff)));
     }
     return x;
-}
-
-/// @brief E-8 variant B: horizontal decimation one destination WORD at a time.
-/// @note Destination word i is `gather(src[2i]) | gather(src[2i+1]) << WordBits/2`
-///       -- see the file header on why that pairing is exact. Source words past
-///       the row read as zero, which can only affect destination padding bits.
-template <typename WordType>
-inline void decimateColumnsBy2Unshuffle(BinMatConstView<WordType> src,
-                                        BinMatView<WordType> dst) {
-    checkDecimateArgs(src, dst);
-    if (dst.width == 0 || dst.height == 0) return;
-
-    constexpr size_t B = bitsPerWord<WordType>();
-    const size_t srcWords = minRowWords<WordType>(src.width);
-    const size_t dstWords = minRowWords<WordType>(dst.width);
-    const WordType tail = rowTailMask<WordType>(dst.width);
-
-    for (size_t y = 0; y < dst.height; ++y) {
-        const WordType* srcRow = src.row(y);
-        WordType* dstRow = dst.row(y);
-
-        for (size_t i = 0; i < dstWords; ++i) {
-            const size_t lo = 2 * i;
-            const WordType a = (lo < srcWords) ? srcRow[lo] : static_cast<WordType>(0);
-            const WordType b = (lo + 1 < srcWords) ? srcRow[lo + 1] : static_cast<WordType>(0);
-            const WordType word = static_cast<WordType>(
-                gatherEvenBits(a) | static_cast<WordType>(gatherEvenBits(b) << (B / 2)));
-            dstRow[i] = (i + 1 == dstWords) ? static_cast<WordType>(word & tail) : word;
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -453,6 +434,51 @@ inline void decimateColumnsBy2FrameMasked(BinMatConstView<WordType> src,
 }
 
 } // namespace impl
+
+// ---------------------------------------------------------------------------
+// The primitive E-8 chose
+// ---------------------------------------------------------------------------
+
+/// @brief Horizontal decimation by two: `dst(y, j) = src(y, 2j)`. **API TIER 3.**
+/// @param src Source view. Decimate its ROWS first with rowsDecimatedBy2() if a
+///        2x2 subsample is what is wanted -- this kernel is horizontal only.
+/// @param dst Destination view, exactly `decimatedWidth(src.width)` wide and
+///        `src.height` tall. Must not share a word with `src`.
+///
+/// @note This is E-8's answer, chosen by measurement (EXPERIMENTS.md X-14,
+///       ARCHITECTURE.md D-17): the word-local unshuffle, which needs no scratch,
+///       no mask table and no prepared plan, and was also 8-26x faster than both
+///       alternatives on the reference device.
+/// @note Destination word i is `gather(src[2i]) | gather(src[2i+1]) << WordBits/2`
+///       -- see the file header on why that pairing is exact. Source words past
+///       the row read as zero, which can only affect destination padding bits.
+/// @note Never throws, never allocates. Shape and aliasing violations are
+///       programming errors, reported by BINCV_ASSERT in debug and undefined in
+///       release (ARCHITECTURE 5.3).
+template <typename WordType>
+inline void decimateColumnsBy2(BinMatConstView<WordType> src, BinMatView<WordType> dst) {
+    impl::checkDecimateArgs(src, dst);
+    if (dst.width == 0 || dst.height == 0) return;
+
+    constexpr size_t B = impl::bitsPerWord<WordType>();
+    const size_t srcWords = impl::minRowWords<WordType>(src.width);
+    const size_t dstWords = impl::minRowWords<WordType>(dst.width);
+    const WordType tail = impl::rowTailMask<WordType>(dst.width);
+
+    for (size_t y = 0; y < dst.height; ++y) {
+        const WordType* srcRow = src.row(y);
+        WordType* dstRow = dst.row(y);
+
+        for (size_t i = 0; i < dstWords; ++i) {
+            const size_t lo = 2 * i;
+            const WordType a = (lo < srcWords) ? srcRow[lo] : static_cast<WordType>(0);
+            const WordType b = (lo + 1 < srcWords) ? srcRow[lo + 1] : static_cast<WordType>(0);
+            const WordType word = static_cast<WordType>(
+                impl::gatherEvenBits(a) | static_cast<WordType>(impl::gatherEvenBits(b) << (B / 2)));
+            dstRow[i] = (i + 1 == dstWords) ? static_cast<WordType>(word & tail) : word;
+        }
+    }
+}
 
 } // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv

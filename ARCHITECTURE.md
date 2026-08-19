@@ -300,18 +300,23 @@ The kernel vocabulary is small and closed:
 | majority / median | `(a&b) \| (b&c) \| (a&c)` for 3 inputs |
 | threshold on a count | bit-sliced adder network, then compare |
 | reduction | population count over a region or mask |
+| resample | horizontal decimation by two, word-local (`ops/resample.hpp`); vertical is a stride-doubled view |
 
 Nearly every operation in the MVP set is a composition of these — with **two
-known gaps, recorded here rather than left for a later task to discover**:
+known gaps, recorded here rather than left for a later task to discover. The
+first is now closed; the second is not**:
 
-- **There is no resample row, and the table needs one.** [§7.2](#72-pyramid-downsample--box-22)'s
-  pyramid step is "box 2×2 sum *then subsample*", and nothing in `ops/` decimates
-  horizontally. Vertically it is free — a view with twice the stride and half the
-  height. Horizontally it wants output bit *j* to come from input bit 2*j*, which
-  no pointwise (`ops/logic.hpp`), uniform-shift (`ops/shift.hpp`) or per-lane
-  (`ops/bitslice.hpp`) kernel can express. The two known routes trade speed
-  against footprint, so the choice is registered as [E-8](#9-open-questions-and-planned-experiments)
-  and gates T3.4 rather than being made in passing.
+- ~~**There is no resample row, and the table needs one.**~~ **CLOSED by
+  [D-17](#d-17-horizontal-decimation-is-word-local) / [X-14](EXPERIMENTS.md).**
+  [§7.2](#72-pyramid-downsample--box-22)'s pyramid step is "box 2×2 sum *then
+  subsample*", and nothing in `ops/` decimated horizontally. Vertically it is free
+  — a view with twice the stride and half the height. Horizontally it wants output
+  bit *j* to come from input bit 2*j*, which no pointwise (`ops/logic.hpp`),
+  uniform-shift (`ops/shift.hpp`) or per-lane (`ops/bitslice.hpp`) kernel can
+  express. E-8 registered the choice as speed against footprint; measured, **there
+  was no trade** — the word-local unshuffle is word-parallel and costs zero
+  auxiliary bytes, and it beat both alternatives by 8.3×–26.4× on the reference
+  device. The table has its resample row and it is word-local.
 - **The bit-sliced adder is single-bit and equal-weight.** `bitSlicedSum` counts
   *k* inputs each worth one, which is the 2×2 box over a **1-bit** source and
   nothing else. §7.2 measures levels 1–3 as 3, 4 and 5 bits, and a 2×2 box over an
@@ -1116,6 +1121,49 @@ inherits this: index the bands, do not filter the row.
 **Binds:** T3.5's derivative and anything else built from a neighbourhood over
 `ops/shift.hpp`, which faces the same choice — and the same border-fixup shape.
 
+### D-17: horizontal decimation is word-local
+
+Measured on the reference device ([X-14](EXPERIMENTS.md) / T3.4, two runs), against
+a rule written and committed first: adopt the frame-masked route only if it is
+**≥ 1.5× faster** than the best word-local route with non-overlapping spreads at
+both word types; decide between the two zero-byte routes on speed alone, taking
+the simpler one if the difference sits inside the spread.
+
+```
+640x480 -> 320x240, median ns per destination pixel, spreads <= 1.0%
+        gather loop        4.0188 (u32)   4.8823 (u64)      0 B aux
+        word-local         0.2750         0.1847            0 B aux
+        frame-masked       3.0938         1.5416         1408 B aux
+        ratios vs word-local:  14.61x / 26.43x  and  11.25x / 8.35x
+```
+
+**`ops/resample.hpp` ships `decimateColumnsBy2(src, dst)`, the word-local
+unshuffle.** Destination word *i* is the even bits of source words 2*i* and
+2*i*+1, gathered by log2(WordBits) mask/shift steps in registers — word literals
+only, no mask table, no scratch, no prepared plan. Vertical decimation stays what
+it always was: `rowsDecimatedBy2()`, a view with twice the stride.
+
+**What this decision actually settles is that [E-8](#9-open-questions-and-planned-experiments)
+asked a leading question.** It framed the choice as buying word-parallel speed
+with frame-sized constant masks, and offered the per-pixel loop as the zero-byte
+alternative. The route that won is neither: word-parallel *and* zero-byte. A
+register entry is a hypothesis about the shape of the answer, and this one was
+wrong — which is why CLAUDE.md requires the measurement rather than the argument.
+
+**Consequences.** T3.4's `pyrDown` carries no scratch for its subsample half and
+`ops/` gains no plan-shaped API. The frame-masked route is not a tuning target:
+it does the same log-depth gather with a memory pass per step instead of a
+register step, and pads each row to a power-of-two bit count, so it runs 10 passes
+over 32 words at 640 columns where the word-local route makes one pass over 5.
+
+**Not decided here:** X-14 measured the winner **1.49× faster at `uint64_t`** and
+the gather loop **1.21× slower** there. That is [E-9](#9-open-questions-and-planned-experiments)'s
+question, not this one; [D-14](#d-14-uint32_t-is-the-default-word-type) stands.
+
+**Binds:** T3.4's pyramid, and any later operation that resamples. Both losing
+arms remain in `impl::` and under test, so the experiment can be re-run against
+the shipped code rather than against a description of it.
+
 ---
 
 ## 9. Open Questions and Planned Experiments
@@ -1164,11 +1212,17 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-2**~~ **RESOLVED** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | **Answered: `uint32_t` stays. `uint64_t` reduces 1.94× faster but costs +33% at 94×60, and the rule is a conjunction — memory wins.** [D-14](#d-14-uint32_t-is-the-default-word-type), [X-10](EXPERIMENTS.md) | all kernels | Phase 2 (T2.9) ✔ |
 | ~~**E-3**~~ **RESOLVED** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | **Answered, and all three moved off the simpler shape: (a) 7.3×–20× for the adopted sliding form → expose incremental state; (b) 1.27–1.29× → add a covariance entry point; (c) plane 16–18% faster but a fifth plane at every level → four-argument form, memory wins.** Re-measured against the shipped code by [X-11b](EXPERIMENTS.md) — 5.96×/15.9×, 1.20–1.27×, 11–14% — with no branch changing. [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance), [X-11](EXPERIMENTS.md) | T2.6, T3.6 | Phase 2 (T2.10) ✔ |
 | **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | **Phase 3** (T3.9) |
-| **E-8** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | Whether `ops/` gains a resample primitive, and whether it is word-local (word literals only) or frame-masked. | T3.4 | **Phase 3** (T3.4) |
+| ~~**E-8**~~ **RESOLVED** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | **Answered, and the question was leading: there is no tiebreak. A third route the register did not list — the WORD-LOCAL unshuffle — is word-parallel and costs zero bytes, and beat the gather loop by 14.6×/26.4× and the frame-masked route by 11.3×/8.3×. `ops/` gains a word-local resample primitive taking `(src, dst)`; no plan, no scratch.** [D-17](#d-17-horizontal-decimation-is-word-local), [X-14](EXPERIMENTS.md) | T3.4 | Phase 3 (T3.4) ✔ |
 | **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | Measured growth is 1/3/4/5 bits ([§7.2](#72-pyramid-downsample--box-22)), but the reference never chose that — it fell out of using `CV_8U`. Capping N is a direct footprint lever. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |
 | **E-9** | Should the word type vary down the pyramid — `uint64_t` where it costs no bytes (L0, L1), `uint32_t` above? | [X-10](EXPERIMENTS.md) measured both sides: `uint64_t` reduces **1.94×** faster and costs **+33%** at 94×60 but **0%** at 640×480, so the right answer may not be one type. The width is already a per-object template parameter (D-1), so this costs no new machinery — only a decision. | Whether the pyramid picks a word type per level, and whether kernels that walk several levels pay for two instantiations. | T3.4's pyramid, [D-14](#d-14-uint32_t-is-the-default-word-type) | unscheduled |
+
+E-8 is the Phase 3 instance of the same discipline, and of the same lesson: it
+gated the *primitive* T3.4 is built from, so it ran before that primitive was
+written rather than after — and the answer was that its own framing of the trade
+was wrong. Running it late would have meant shipping a pyramid built on a
+prepared-plan API that nothing needed.
 
 The **Gates** column is why the **Runs** column is not simply "Phase 4". E-1, E-2
 and E-3 constrained code written in Phases 1–2; running them afterward would have

@@ -103,6 +103,14 @@
 ///      forbids settling by argument. It is registered as **E-8**
 ///      (ARCHITECTURE 9) and gates T3.4.
 ///
+///      **RESOLVED, and neither of those two won.** X-14 measured a third route
+///      the paragraph above did not consider -- a WORD-LOCAL unshuffle, which is
+///      word-parallel and needs no frame-sized masks at all -- and it beat both
+///      by 8.3x-26.4x on the reference device. ops/resample.hpp now ships it as
+///      decimateColumnsBy2(); see ARCHITECTURE D-17. The speed-against-footprint
+///      framing above is left standing because it is what the gap looked like
+///      from here, and being wrong about that is the useful part of the record.
+///
 /// ARCHITECTURE 6.1's primitive table says "nearly every operation in the MVP set
 /// is a composition of these"; it has no resample row, and now says so.
 ///

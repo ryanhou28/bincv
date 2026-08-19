@@ -1,0 +1,57 @@
+T3.3 -- the 3x3 special case priced against the general row kernel
+================================================================================
+
+Both columns are ops/morphology.hpp. `auto` is what bincv::erode and
+bincv::dilate call; `generic` is impl::MorphPath::Generic, the same kernel
+with the 3x3 special case refused. A ratio > 1 is what the special case saves.
+The two are required to compute the same image before either is timed.
+
+================ 640 x 480 ================
+  word     element   fold        auto   generic  generic/auto
+  ------------------------------------------------------------------------
+  uint32   rect3x3   erode    0.66153   1.39962      2.12x   (spread 0.1% / 0.1%)
+  uint32   rect3x3   dilate   0.44130   1.40243      3.18x   (spread 0.1% / 0.0%)
+  uint64   rect3x3   erode    0.34737   0.86101      2.48x   (spread 3.3% / 0.1%)
+  uint64   rect3x3   dilate   0.23250   0.85915      3.70x   (spread 1.7% / 0.1%)
+  uint32   cross3x3  erode    0.38484   1.07358      2.79x   (spread 0.1% / 1.0%)
+  uint32   cross3x3  dilate   0.32004   1.07901      3.37x   (spread 0.1% / 1.0%)
+  uint64   cross3x3  erode    0.20577   0.67288      3.27x   (spread 0.1% / 2.1%)
+  uint64   cross3x3  dilate   0.18148   0.66762      3.68x   (spread 0.1% / 0.9%)
+
+================ 320 x 240 ================
+  word     element   fold        auto   generic  generic/auto
+  ------------------------------------------------------------------------
+  uint32   rect3x3   erode    0.68016   1.54228      2.27x   (spread 6.0% / 0.0%)
+  uint32   rect3x3   dilate   0.46029   1.53725      3.34x   (spread 5.2% / 0.1%)
+  uint64   rect3x3   erode    0.34553   0.89461      2.59x   (spread 0.9% / 0.1%)
+  uint64   rect3x3   dilate   0.23997   0.89977      3.75x   (spread 0.5% / 0.1%)
+  uint32   cross3x3  erode    0.40014   1.23908      3.10x   (spread 0.8% / 2.3%)
+  uint32   cross3x3  dilate   0.35354   1.24181      3.51x   (spread 2.0% / 1.0%)
+  uint64   cross3x3  erode    0.24341   0.71146      2.92x   (spread 2.8% / 0.8%)
+  uint64   cross3x3  dilate   0.22900   0.71139      3.11x   (spread 2.3% / 0.3%)
+
+================ 160 x 120 ================
+  word     element   fold        auto   generic  generic/auto
+  ------------------------------------------------------------------------
+  uint32   rect3x3   erode    0.68675   1.61550      2.35x   (spread 0.1% / 0.1%)
+  uint32   rect3x3   dilate   0.51352   1.61876      3.15x   (spread 0.1% / 0.0%)
+  uint64   rect3x3   erode    0.49258   1.24110      2.52x   (spread 1.0% / 3.3%)
+  uint64   rect3x3   dilate   0.37169   1.25319      3.37x   (spread 3.7% / 1.4%)
+  uint32   cross3x3  erode    0.47721   1.33619      2.80x   (spread 1.6% / 0.6%)
+  uint32   cross3x3  dilate   0.46212   1.33051      2.88x   (spread 2.6% / 0.1%)
+  uint64   cross3x3  erode    0.39317   1.06038      2.70x   (spread 2.0% / 0.1%)
+  uint64   cross3x3  dilate   0.36873   1.03273      2.80x   (spread 0.4% / 0.2%)
+
+================ 94 x 60 ================
+  word     element   fold        auto   generic  generic/auto
+  ------------------------------------------------------------------------
+  uint32   rect3x3   erode    0.84921   1.90726      2.25x   (spread 0.0% / 2.1%)
+  uint32   rect3x3   dilate   0.69679   1.92760      2.77x   (spread 0.0% / 1.8%)
+  uint64   rect3x3   erode    0.72367   1.61766      2.24x   (spread 2.6% / 3.8%)
+  uint64   rect3x3   dilate   0.48792   1.64812      3.38x   (spread 0.6% / 2.5%)
+  uint32   cross3x3  erode    0.68179   1.70823      2.51x   (spread 0.1% / 0.1%)
+  uint32   cross3x3  dilate   0.65743   1.72234      2.62x   (spread 0.1% / 0.1%)
+  uint64   cross3x3  erode    0.55118   1.40779      2.55x   (spread 3.0% / 0.2%)
+  uint64   cross3x3  dilate   0.46966   1.36371      2.90x   (spread 3.0% / 0.5%)
+
+  sink=1723724065934092909

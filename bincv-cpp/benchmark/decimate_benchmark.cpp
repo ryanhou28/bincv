@@ -17,7 +17,12 @@
 // on a byte image and rounds, rather than keeping the even columns.)
 //
 // VARIANTS   impl::decimateColumnsBy2Gather       per-pixel gather loop, 0 B aux
-//            impl::decimateColumnsBy2Unshuffle    word-local Morton deinterleave, 0 B aux
+//            decimateColumnsBy2                   word-local Morton deinterleave,
+//                                                 0 B aux -- and after X-14 chose
+//                                                 it (D-17) this is the SHIPPED
+//                                                 entry point, so re-running this
+//                                                 benchmark measures the library
+//                                                 rather than a copy of one arm
 //            impl::decimateColumnsBy2FrameMasked  big-integer masked unshuffle,
 //                                                 mask table + scratch row
 // WORKLOAD   the pyramid ladder T3.4 will call this with -- 640x480, 320x240,
@@ -160,7 +165,7 @@ template <typename Word>
 bool agree(Fixture<Word>& f, const char* wordName) {
     for (int i = 0; i < kInputs; ++i) {
         bincv::impl::decimateColumnsBy2Gather(f.source(i), f.dstA.view());
-        bincv::impl::decimateColumnsBy2Unshuffle(f.source(i), f.dstB.view());
+        bincv::decimateColumnsBy2(f.source(i), f.dstB.view());
         bincv::impl::decimateColumnsBy2FrameMasked(f.source(i), f.dstC.view(), f.masks.data(),
                                                    f.scratch.data());
         const BinMat<Word>& s = f.src[static_cast<size_t>(i)];
@@ -226,7 +231,7 @@ bool addCase(const Case& c, const char* wordName, std::vector<measure::Bench>& b
                            measure::g_sink += p->dstA.data()[0];
                        }});
     benches.push_back({std::string("unshuffle") + suffix, [p](int i) {
-                           bincv::impl::decimateColumnsBy2Unshuffle(p->source(i), p->dstB.view());
+                           bincv::decimateColumnsBy2(p->source(i), p->dstB.view());
                            measure::g_sink += p->dstB.data()[0];
                        }});
     benches.push_back({std::string("frame-masked") + suffix, [p](int i) {

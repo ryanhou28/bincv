@@ -2089,17 +2089,20 @@ for its own operation, which is what `cv::morphologyEx` does with its default).
 
 ### T3.4 · Pyramid downsample · `TODO`
 
-> **⚠️ BLOCKING GAP found during T2.7 — read before starting.**
-> **No primitive expresses horizontal decimation** (output bit *j* ← input bit
-> 2*j*). `logic.hpp` is pointwise, `shift.hpp` moves every lane uniformly, and
-> `bitslice.hpp` is per-lane, so none of them can do it. Vertical decimation *is*
-> free — a stride-doubled `BinMatConstView` — so the gap is horizontal only.
-> This task must provide that primitive, or a preceding one must.
+> **⚠️ ONE OF THE TWO BLOCKING GAPS IS NOW CLOSED. Read both before starting.**
 >
-> Also from T2.7: the 2×2 box **is** `bitSlicedSum` at k = 4 only for a **1-bit**
-> source. For an N-bit level the replication route costs k = 4·(2^N − 1) — 124
-> inputs at N = 5 — so an N-bit pyramid level needs a different formulation, not
-> just a bigger k.
+> ~~**No primitive expresses horizontal decimation**~~ — **RESOLVED.**
+> `ops/resample.hpp` provides `decimateColumnsBy2(src, dst)` and the free
+> `rowsDecimatedBy2(src)` view, chosen by measurement on the reference device
+> ([X-14](EXPERIMENTS.md), [D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local)).
+> E-8 is closed and its framing was wrong: the winning route is word-local, so it
+> takes `(src, dst)` and **needs no scratch and no prepared plan** — `pyrDown`
+> carries nothing through for the subsample half.
+>
+> **STILL OPEN — this task owns it.** From T2.7: the 2×2 box **is**
+> `bitSlicedSum` at k = 4 only for a **1-bit** source. For an N-bit level the
+> replication route costs k = 4·(2^N − 1) — 124 inputs at N = 5 — so an N-bit
+> pyramid level needs a different formulation, not just a bigger k.
 
 **Depends:** T3.3
 **Files:** `include/bincv-cpp/ops/pyramid.hpp` (new)
@@ -2127,10 +2130,13 @@ class Pyramid { /* levels, each its own QuantMat; bit depth per level */ };
     (*k* = 4·(2^NIn − 1) — 124 inputs at `NIn = 5`, i.e.
     [§7.2](ARCHITECTURE.md#72-pyramid-downsample--box-22)'s level 3). Add the
     bit-sliced multi-bit add here, where the caller fixes its shape.
-  - **Nothing decimates horizontally.** Vertical subsampling is a stride-doubled
-    view and costs nothing; horizontal is
-    [E-8](ARCHITECTURE.md#9-open-questions-and-planned-experiments), unsettled.
-    Write its decision rule before measuring, per CLAUDE.md.
+  - ~~**Nothing decimates horizontally.**~~ **Done, ahead of the rest of T3.4.**
+    Vertical subsampling is a stride-doubled view and costs nothing; horizontal is
+    `decimateColumnsBy2()` in `ops/resample.hpp`. The rule was written and
+    committed before the device ran, E-8 is resolved, and the answer was that
+    E-8's speed-against-footprint framing did not survive contact with the
+    measurement ([X-14](EXPERIMENTS.md),
+    [D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local)).
 - **Requantization is a documented choice, not a default.** The reference lets
   precision grow into `CV_8U` (1 → 3 → 4 → 5 bits measured). Whether a capped
   `NOut` preserves tracking accuracy is

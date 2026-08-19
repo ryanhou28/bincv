@@ -1819,7 +1819,7 @@ non-separable elements is part of that record, not a footnote to it.
 
 ---
 
-### X-14 · Horizontal decimation for the pyramid · `TODO`
+### X-14 · Horizontal decimation for the pyramid · `DONE`
 
 **Gates:** [E-8](ARCHITECTURE.md#9-open-questions-and-planned-experiments) —
 whether `ops/` gains a resample primitive, and whether it is **word-local** (word
@@ -1877,7 +1877,7 @@ is timed.
 | | Route | Auxiliary memory |
 |---|---|---|
 | **A** | **Gather loop.** Per destination pixel, read source bit 2*j*, accumulate into a local word, one store per destination word. | none |
-| **B** | **Word-local unshuffle.** Per destination word, deinterleave the even bits of source words 2*i* and 2*i*+1 with log2(WordBits) mask/shift steps in registers, then combine the halves. Destination word *i* covers source columns [2*i*·WordBits, 2(*i*+1)·WordBits), so the pairing is exact and no cross-word carry arises. | none |
+| **B** | **Word-local unshuffle.** Per destination word, deinterleave the even bits of source words 2*i* and 2*i*+1 with log2(WordBits) mask/shift steps in registers, then combine the halves. Destination word *i* covers source columns [2*i*·WordBits, 2(*i*+1)·WordBits), so the pairing is exact and no cross-word carry arises. **This is the arm E-8 did not list**, and it is why the hypothesis above doubts the register's framing. | none |
 | **C** | **Frame-masked unshuffle.** The row as one big integer: log2(paddedRowBits) passes, each a masked shift-or over the whole row, against a caller-built mask table at frame width and a caller-provided scratch row. | mask table + scratch row |
 
 **Workload:** the pyramid ladder this operation exists for — 640×480 → 320×240,
@@ -1911,11 +1911,86 @@ multiples, including the padding-bit invariant
 ([D-13](ARCHITECTURE.md#d-13-a-reduction-counts-pixels-never-padding)); the
 benchmark additionally re-checks agreement in-binary before timing anything.
 
-**Result:** *pending — this entry was committed before the device ran.*
+**Environment:** Raspberry Pi 4 Model B Rev 1.5 · Cortex-A72 · aarch64,
+kernel 6.18.34+rpt-rpi-v8 · g++ (Debian 14.2.0-19) 14.2.0 · Release, no `-march`
+(X-7) · governor `performance` · `taskset -c 3` · `throttled=0x0` **before and
+after** · commit `f77d8f1`. Correctness on the same device first:
+`test_resample` 245312/245312.
 
-**Conclusion:** *pending*
+**Result** — median ns per destination pixel, 9 interleaved batches, min/max in
+the spread column. Auxiliary bytes are the mask table plus the scratch row,
+built once per width, which is the most favourable accounting variant C can have.
 
-**Decision:** *pending*
+*640×480 → 320×240, the case rule 1 names:*
+
+| Variant | `uint32_t` | spread | `uint64_t` | spread | aux B |
+|---|---|---|---|---|---|
+| A gather loop | 4.0188 | 0.1% | 4.8823 | 0.1% | **0** |
+| **B word-local unshuffle** | **0.2750** | 0.2% | **0.1847** | 0.2% | **0** |
+| C frame-masked | 3.0938 | 1.0% | 1.5416 | 0.1% | 1408 |
+| A ÷ B | **14.61×** | | **26.43×** | | |
+| C ÷ B | **11.25×** | | **8.35×** | | |
+
+*The whole pyramid ladder, medians, `uint32_t` / `uint64_t`:*
+
+| Source | A gather | B unshuffle | C frame-masked | aux B (C) |
+|---|---|---|---|---|
+| 640×480 | 4.0188 / 4.8823 | 0.2750 / 0.1847 | 3.0938 / 1.5416 | 1408 |
+| 320×240 | 4.0051 / 4.9045 | 0.2681 / 0.1704 | 2.7273 / 1.6396 | 640 |
+| 160×120 | 4.0724 / 4.8959 | 0.2742 / 0.2200 | 2.7981 / 1.8072 | 288 |
+| 94×60 | 4.0631 / 4.7239 | 0.3029 / 0.2643 | 2.6156 / 1.7650 | 128 |
+
+Every batch spread was ≤ 3.1% and all but two ≤ 1.2%. **Run-to-run scatter was
+measured rather than assumed**: the whole benchmark was run twice on the device,
+and the headline medians reproduced to 0.1% (0.2750 → 0.2750, 4.0188 → 4.0187,
+3.0938 → 3.0972). Both bounds are three orders of magnitude below the smallest
+gap the rule weighs.
+
+**The sanity bound holds (rule 4).** Every ratio here is above 8×, so all of them
+were checked. The winner moves 28800 B per call in 0.2750 ns/pixel × 76800
+pixels = 21.1 µs, i.e. **1.36 GB/s at `uint32_t` and 2.03 GB/s at `uint64_t`** —
+below the ~4–6 GB/s DRAM figure and far below the 12–24 GB/s L1 bound this entry
+wrote down in advance, so nothing was deleted by the optimizer. The second check
+is per-word cost: 0.1847 ns/pixel × 64 pixels is **11.8 ns = ~17.7 cycles at
+1.5 GHz** for one destination word, against roughly 28 ALU operations (two
+six-step deinterleaves plus the combine, load, store) — about 1.6 ops/cycle on a
+3-wide core. Fast, and not impossibly fast.
+
+**Conclusion:** **E-8's premise was wrong, and that is the result.** The register
+framed horizontal decimation as speed bought with footprint — "a per-pixel gather
+loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant
+masks" — so the interesting question was where the project's tiebreak fell. There
+was no tiebreak to apply: the word-local unshuffle is word-parallel **and**
+zero-byte, and it beat both alternatives by 8.3× to 26.4× on the device. Rule 1's
+bar (frame-masked must be ≥ 1.5× *faster*) was missed in the opposite direction
+by an order of magnitude, and rule 2 was decided far outside both the batch
+spread and the run-to-run scatter.
+
+Two things are worth recording beyond the branch that fired:
+
+1. **The frame-masked route loses for a structural reason, not a tuning one.** It
+   performs the same log-depth gather as B, but each step is a pass over memory
+   instead of a register operation, and its recurrence needs the row padded to a
+   power-of-two bit count: 20 words become 32 at 640 columns, so it runs 10 passes
+   over 32 words where B makes one pass over 5. Predicted ratio ~10.7×, measured
+   8.35× at `uint64_t`. No amount of tuning closes that; it is more work.
+2. **A word-width result that belongs to [E-9](ARCHITECTURE.md#9-open-questions-and-planned-experiments), not to this decision.**
+   The winner is **1.49× faster at `uint64_t`** (0.1847 against 0.2750) because
+   its fixed per-word cost amortises over 64 pixels instead of 32 — while the
+   gather loop is **1.21× SLOWER** at `uint64_t`, having no per-word cost to
+   amortise. That is the shape E-9 asks about and this entry does not settle it:
+   [D-14](ARCHITECTURE.md#d-14-uint32_t-is-the-default-word-type) stands, and one
+   kernel's preference is not a default.
+
+**Decision:** [D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local).
+`ops/resample.hpp` ships `decimateColumnsBy2()` — the word-local unshuffle,
+taking `(src, dst)` and nothing else. `ops/` gains a resample row in
+[§6.1](ARCHITECTURE.md#61-bit-parallel-primitives)'s table, T3.4's `pyrDown`
+needs no scratch and no prepared plan for the subsample half, and E-8 is
+resolved. The two losing arms stay in `impl::` so the experiment can be re-run:
+`tests/test_resample.cpp` checks all three against one per-pixel reference, and
+`benchmark/decimate_benchmark.cpp` times the **shipped** function against them
+rather than a copy of it.
 
 ---
 
@@ -1925,6 +2000,11 @@ Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-ex
 scheduled as tasks in [TASKS.md](TASKS.md). Each runs **in the phase whose code it
 gates**, not at the end.
 
+**E-8 has closed too**, in Phase 3 and in the task whose code it gates
+([X-14](#x-14--horizontal-decimation-for-the-pyramid--done),
+[D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local)) — with the
+answer that its own framing was wrong.
+
 **E-1, E-2 and E-3 have closed** on the reference device —
 [X-9](#x-9--does-row-alignment-earn-its-memory--done),
 [X-10](#x-10--default-word-width--done),
@@ -1933,11 +2013,11 @@ no open experiment left, and the project has no provisional decision left.
 
 | ID | Question | Task | Runs during |
 |---|---|---|---|
-| E-8 | Horizontal decimation for `pyrDown`: gather loop or frame-masked unshuffle | T3.4 | Phase 3 |
 | E-4 | Does generic-N regress the specialized paths? | T3.9 | Phase 3 |
 | E-7 | Bits needed per pyramid level | T4.1 | Phase 4 |
 | E-6 | Hybrid LK versus binary block matching | T4.2 | Phase 4 |
 | E-5 | End-to-end accuracy, footprint, speed | T4.3 | Phase 4 |
 | E-9 | Per-level word width down the pyramid | — | unscheduled; spun out of [X-10](#x-10--default-word-width--done), which priced both sides |
 
-(E-8 was registered in ARCHITECTURE §9 but had never been listed here.)
+(E-8 was registered in ARCHITECTURE §9 and never listed here until it was
+about to run; it is now closed and has left the table.)

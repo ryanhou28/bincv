@@ -97,14 +97,20 @@ a stride-sweep gap where no case had exactly one argument over-strided.
 three N-bit images is not the majority of the three bit 3s, so a per-plane loop
 would compile, run, and be wrong.
 
-### ⚠️ Planning gap for T3.4 — no horizontal decimation primitive
+### ⚠️ Planning gap for T3.4 — no horizontal decimation primitive → ✅ CLOSED
 
 Nothing in the primitive set expresses **output bit *j* ← input bit 2*j***.
 `logic.hpp` is pointwise, `shift.hpp` moves every lane uniformly, `bitslice.hpp`
 is per-lane. Vertical decimation is free (stride-doubled view); horizontal is not.
 
 **T3.4's pyramid needs it**, so the gap is recorded directly in T3.4's spec rather
-than left in a log. Related: the 2×2 box equals `bitSlicedSum` at k = 4 only for a
+than left in a log.
+
+**Closed by `ops/resample.hpp` and X-14** — `decimateColumnsBy2()`, chosen on the
+reference device against a rule committed first. E-8 framed it as speed bought
+with frame-sized masks; the winning route is word-local, which is word-parallel
+*and* zero-byte, so there was no trade to make
+([D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local)). Related: the 2×2 box equals `bitSlicedSum` at k = 4 only for a
 **1-bit** source — an N-bit level costs k = 4·(2^N − 1), i.e. 124 inputs at N = 5,
 so it needs a different formulation rather than a bigger k.
 

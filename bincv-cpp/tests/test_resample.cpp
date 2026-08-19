@@ -18,7 +18,11 @@
 // EACH OTHER is then implied rather than asserted separately.
 //
 //   A  impl::decimateColumnsBy2Gather        per-pixel gather loop
-//   B  impl::decimateColumnsBy2Unshuffle     word-local Morton deinterleave
+//   B  decimateColumnsBy2                    word-local Morton deinterleave --
+//                                            the PUBLIC entry point, because
+//                                            X-14 chose it (D-17), so the suite
+//                                            tests the shipped function rather
+//                                            than a copy of it
 //   C  impl::decimateColumnsBy2FrameMasked   big-integer masked unshuffle
 //
 // WHAT THE WIDTH SWEEP IS FOR
@@ -134,7 +138,7 @@ enum class Variant { Gather, Unshuffle, FrameMasked };
 const char* variantName(Variant v) {
     switch (v) {
         case Variant::Gather: return "gather";
-        case Variant::Unshuffle: return "unshuffle";
+        case Variant::Unshuffle: return "decimateColumnsBy2";
         case Variant::FrameMasked: return "frame-masked";
     }
     return "?";
@@ -148,7 +152,7 @@ void runVariant(Variant variant, const BinMatConstView<WordType>& src,
             bincv::impl::decimateColumnsBy2Gather(src, dst);
             return;
         case Variant::Unshuffle:
-            bincv::impl::decimateColumnsBy2Unshuffle(src, dst);
+            bincv::decimateColumnsBy2(src, dst);
             return;
         case Variant::FrameMasked: {
             // The mask table and scratch are the caller's (no heap in a kernel),
