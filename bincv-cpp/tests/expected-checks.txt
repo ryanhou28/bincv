@@ -479,6 +479,19 @@
 #                 fails 42 checks. 42 is small because only the widest elements at
 #                 each word width reach that branch at all; it is not zero, which
 #                 is the property the row asserts.
+#   test_resample  245312 in ALL FOUR, which is the point rather than an
+#             omission: horizontal decimation (E-8 / X-14) has no OpenCV
+#             counterpart to compare against -- cv::resize resamples both axes on
+#             a byte image and rounds rather than keeping the even columns -- so
+#             the suite has no Tier 1 half to gain under `opencv` and nothing to
+#             lose without exceptions. The number is one check per destination
+#             pixel per variant across the width sweep (0 .. 3*WordBits+3 plus the
+#             pyramid ladder) at four word widths, times three implementations,
+#             plus the padding, stride, degenerate, row-view and plan-size cases.
+#             Three implementations because X-14 compares three routes and the
+#             protocol requires each to be correct BEFORE any is timed; a
+#             two-thirds drop here means a losing arm was deleted, which is
+#             exactly what the floor is for.
 #   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
 #             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
 #             through constPlane() -> unpackTo8U, and that conversion was the one
@@ -519,6 +532,7 @@ opencv	test_bitslice	351620	0
 opencv	test_denoise	9744	0
 opencv	test_threshold	33112	0
 opencv	test_morphology	299181	0
+opencv	test_resample	245312	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
 opencv	test_equivalence	16403	0
@@ -535,6 +549,7 @@ core	test_bitslice	350540	0
 core	test_denoise	7584	0
 core	test_threshold	21304	0
 core	test_morphology	172632	0
+core	test_resample	245312	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -549,6 +564,7 @@ noexcept	test_bitslice	350540	0
 noexcept	test_denoise	7584	0
 noexcept	test_threshold	21304	0
 noexcept	test_morphology	172632	0
+noexcept	test_resample	245312	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -563,5 +579,6 @@ debug	test_bitslice	350540	0
 debug	test_denoise	7584	0
 debug	test_threshold	21304	0
 debug	test_morphology	172632	0
+debug	test_resample	245312	0
 debug	test_harness	8	0
 

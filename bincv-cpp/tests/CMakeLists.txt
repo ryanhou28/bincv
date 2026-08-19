@@ -135,9 +135,15 @@ endfunction()
 # this file's core half (a per-pixel reference over an independently written
 # border mapping, plus agreement with ops/shift.hpp for a one-cell element).
 # That coverage would vanish if the suite were OpenCV-only.
+#
+# test_resample (E-8 / X-14) is core for the third reason and the strongest one:
+# horizontal decimation has no OpenCV counterpart at all -- cv::resize resamples
+# both axes on a byte image and rounds rather than keeping the even columns -- so
+# there is no Tier 1 denominator, and this suite is the ONLY thing standing behind
+# the primitive T3.4's pyramid is built on.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
                      test_logic test_shift test_reduce test_bitslice
-                     test_denoise test_threshold test_morphology)
+                     test_denoise test_threshold test_morphology test_resample)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
