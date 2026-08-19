@@ -1,0 +1,162 @@
+  run
+------------------------------------------------------------
+T3.5 binarized spatial derivative -- vs cv::filter2D with the same kernel
+================================================================================
+
+DENOMINATOR (ARCHITECTURE 10.3): SEAL's calcBinarizedDeriv on the SAME binary
+content stored as CV_8U -- two cv::filter2D calls with [-1, 0, 1] as a 1x3 and
+a 3x1, ported. That is what the pipeline runs today without binCV.
+
+The DENOMINATOR row is 'OpenCV filter2D x2' -- the derivative and nothing else.
+'OpenCV as-written' adds the reference's own `*= 16` and cv::merge, which binCV
+reproduces neither of (ops/derivative.hpp: the scale is representational, and
+interleaved channels are unreachable to a word-parallel popcount). Charging
+those to the baseline would flatter binCV, so they are printed and not used.
+
+Every row computes BOTH AXES, because that is what a VIO frontend needs before
+it can form the T3.6 covariance.
+
+The checksum column folds every destination pixel's VALUE and is
+representation-independent, so all rows of a size must print the same number.
+
+READ THE WORKING-SET COLUMN WITH THE RATIO. binCV's whole working set is five
+BIT-planes where OpenCV's is one byte-plane and two 16-bit planes -- 8x smaller
+-- so on a 1 MiB-L2 Cortex-A part of any large ratio at 640x480 is residency
+rather than arithmetic, exactly as in X-6, X-12 and X-13. The size ladder is
+there to separate the two: if the ratio collapses once BOTH sides fit in cache,
+the headline figure was residency; if it holds, it is the operation.
+
+FIXED PER-CALL COST (hazard 5), measured on a 2x2 frame -- the part of every
+row below that is not the operation:
+  OpenCV, 2 x cv::filter2D:            9.301 us per call
+  binCV, derivativeX + derivativeY:    0.048 us per call
+  Divided by a frame's pixel count this is what a small frame's ns/pixel is
+  mostly made of. It is NOT subtracted from the tables; it is printed beside
+  them so the ladder is read with it.
+
+================ 640 x 480 (307200 pixels) ================
+  one plane:   binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B
+  WORKING SET of one call, BOTH AXES (the number CLAUDE.md asks for):
+    binCV u32              192000 B   src + 2 ternary results, no scratch
+    binCV u64              192000 B   the same at 64-bit words
+    binCV composed u32     268800 B   + 2 frame-sized scratch buffers (1.40x)
+    OpenCV filter2D       1536000 B   CV_8U src + 2 x CV_16S  (8.0x binCV u32)
+    OpenCV as-written     2764800 B   + the CV_16SC2 merge     (14.4x binCV u32)
+
+  IMPLEMENTATION           ns/pixel  vs OpenCV    working set   passes             checksum
+  ----------------------------------------------------------------------------------------
+  OpenCV filter2D x2        5.00711      1.00x      1536000 B        2 13153857155123841136
+  OpenCV as-written        10.03253      0.50x      2764800 B        5 13153857155123841136
+  binCV u32                 0.20111     24.90x       192000 B        2 13153857155123841136
+  binCV u64                 0.11446     43.75x       192000 B        2 13153857155123841136
+  binCV composed u32        0.59042      8.48x       268800 B        8 13153857155123841136
+  ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).
+  PER-FRAME: OpenCV 1538.18 us, of which 9.30 us is the measured fixed per-call
+             cost (1%). binCV u32 61.78 us, fixed cost 0.05 us (0%).
+             SUBTRACT BEFORE COMPARING SIZES.
+  sink=4149080219225526250
+
+================ 320 x 240 (76800 pixels) ================
+  one plane:   binCV uint32 9600 B, binCV uint64 9600 B, OpenCV CV_8U 76800 B
+  WORKING SET of one call, BOTH AXES (the number CLAUDE.md asks for):
+    binCV u32               48000 B   src + 2 ternary results, no scratch
+    binCV u64               48000 B   the same at 64-bit words
+    binCV composed u32      67200 B   + 2 frame-sized scratch buffers (1.40x)
+    OpenCV filter2D        384000 B   CV_8U src + 2 x CV_16S  (8.0x binCV u32)
+    OpenCV as-written      691200 B   + the CV_16SC2 merge     (14.4x binCV u32)
+
+  IMPLEMENTATION           ns/pixel  vs OpenCV    working set   passes             checksum
+  ----------------------------------------------------------------------------------------
+  OpenCV filter2D x2        4.96146      1.00x       384000 B        2 10047739323926732760
+  OpenCV as-written         8.85346      0.56x       691200 B        5 10047739323926732760
+  binCV u32                 0.22131     22.42x        48000 B        2 10047739323926732760
+  binCV u64                 0.13795     35.96x        48000 B        2 10047739323926732760
+  binCV composed u32        0.60206      8.24x        67200 B        8 10047739323926732760
+  ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).
+  PER-FRAME: OpenCV 381.04 us, of which 9.30 us is the measured fixed per-call
+             cost (2%). binCV u32 17.00 us, fixed cost 0.05 us (0%).
+             SUBTRACT BEFORE COMPARING SIZES.
+  sink=16803167872057699772
+
+================ 160 x 120 (19200 pixels) ================
+  one plane:   binCV uint32 2400 B, binCV uint64 2880 B, OpenCV CV_8U 19200 B
+  WORKING SET of one call, BOTH AXES (the number CLAUDE.md asks for):
+    binCV u32               12000 B   src + 2 ternary results, no scratch
+    binCV u64               14400 B   the same at 64-bit words
+    binCV composed u32      16800 B   + 2 frame-sized scratch buffers (1.40x)
+    OpenCV filter2D         96000 B   CV_8U src + 2 x CV_16S  (8.0x binCV u32)
+    OpenCV as-written      172800 B   + the CV_16SC2 merge     (14.4x binCV u32)
+
+  IMPLEMENTATION           ns/pixel  vs OpenCV    working set   passes             checksum
+  ----------------------------------------------------------------------------------------
+  OpenCV filter2D x2        5.83995      1.00x        96000 B        2  8250720100464563275
+  OpenCV as-written         9.67447      0.60x       172800 B        5  8250720100464563275
+  binCV u32                 0.27076     21.57x        12000 B        2  8250720100464563275
+  binCV u64                 0.20459     28.54x        14400 B        2  8250720100464563275
+  binCV composed u32        0.71499      8.17x        16800 B        8  8250720100464563275
+  ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).
+  PER-FRAME: OpenCV 112.13 us, of which 9.30 us is the measured fixed per-call
+             cost (8%). binCV u32 5.20 us, fixed cost 0.05 us (1%).
+             SUBTRACT BEFORE COMPARING SIZES.
+  sink=11460211382666369372
+
+================ 94 x 60 (5640 pixels) ================
+  one plane:   binCV uint32 720 B, binCV uint64 960 B, OpenCV CV_8U 5640 B
+  WORKING SET of one call, BOTH AXES (the number CLAUDE.md asks for):
+    binCV u32                3600 B   src + 2 ternary results, no scratch
+    binCV u64                4800 B   the same at 64-bit words
+    binCV composed u32       5040 B   + 2 frame-sized scratch buffers (1.40x)
+    OpenCV filter2D         28200 B   CV_8U src + 2 x CV_16S  (7.8x binCV u32)
+    OpenCV as-written       50760 B   + the CV_16SC2 merge     (14.1x binCV u32)
+
+  IMPLEMENTATION           ns/pixel  vs OpenCV    working set   passes             checksum
+  ----------------------------------------------------------------------------------------
+  OpenCV filter2D x2        8.51404      1.00x        28200 B        2  1339992128576407953
+  OpenCV as-written        12.60480      0.68x        50760 B        5  1339992128576407953
+  binCV u32                 0.34530     24.66x         3600 B        2  1339992128576407953
+  binCV u64                 0.27935     30.48x         4800 B        2  1339992128576407953
+  binCV composed u32        1.34570      6.33x         5040 B        8  1339992128576407953
+  ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).
+  PER-FRAME: OpenCV 48.02 us, of which 9.30 us is the measured fixed per-call
+             cost (19%). binCV u32 1.95 us, fixed cost 0.05 us (2%).
+             SUBTRACT BEFORE COMPARING SIZES.
+  sink=13749786019773728624
+
+================ N-BIT LADDER, 640 x 480 ================
+  Is the N-bit path LINEAR in N (2N stages) or exponential (2*(2^N - 1))?
+  Every row is checked against cv::filter2D on the same values first.
+
+  N          ns/pixel     vs N=1    2N stages     replicated     planes
+  ---------------------------------------------------------------------------
+  1           0.20042      1.00x            2              2          2
+  2           0.46286      2.31x            4              6          3
+  3           0.78275      3.91x            6             14          4
+  4           1.04433      5.21x            8             30          5
+  5           1.38836      6.93x           10             62          6
+
+  'vs N=1' against the STAGES column is the whole reading: a cost that tracks
+  2N is the linear formulation, one that tracks the replicated column is the
+  exponential one T3.4 was written to avoid. The two axes together write
+  2*(N+1) destination planes at row N, so part of any growth is stores.
+
+------------------------------------------------------------
+
+------------------------------------------------------------
+  ENVIRONMENT -- record this with any measurement
+------------------------------------------------------------
+  device:           pi4
+  cpu:              Raspberry Pi 4 Model B Rev 1.5
+  arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+  compiler:         g++ (Debian 14.2.0-19) 14.2.0
+  governor:         performance (restored to ondemand on exit)
+  core pinning:     taskset -c 3
+  throttled before: throttled=0x0
+  throttled after:  throttled=0x0
+  commit:           6d05ec3
+------------------------------------------------------------
+
+  OK -- command succeeded, device state valid throughout
+  Timings from this device ARE authoritative (unlike emulation).
+  Record the environment block above in EXPERIMENTS.md.
+
+  governor restored to ondemand

@@ -2196,7 +2196,7 @@ E-7 (T4.1) is really trading against accuracy.
 
 ---
 
-### T3.5 · Binarized spatial derivative · `TODO`
+### T3.5 · Binarized spatial derivative · `DONE`
 
 **Depends:** T3.4
 **Files:** `include/bincv-cpp/ops/derivative.hpp` (new)
@@ -2228,6 +2228,110 @@ Reference semantics: `SEAL/src/keypoint_tracking/gradients.cpp`,
 - Benchmark against `cv::filter2D` with the same kernel, committed
 
 **Verify:** V-ALL
+
+**RESULT — shipped as `ops/derivative.hpp`, and the container did not fight.**
+
+`derivativeX` / `derivativeY`, **API tier 3** with tier 1 border semantics, taking
+plane views (D-5) with `QuantMat` / `SignedQuantMat` wrappers. One pass per axis,
+**no scratch and no allocation**; padding bits cleared in every destination plane
+*including the sign plane*.
+[D-19](ARCHITECTURE.md#d-19-the-derivatives-border-is-reflect-101-and-its-sign-is-the-borrow)
+records the three choices this task had to make.
+
+**Two properties of `cv::filter2D` decided the semantics, and both were checked
+against the real function rather than against its documentation.** It
+**correlates** — `dst(x) = src(x+1) − src(x−1)`, so the `+1` tap is the RIGHT
+neighbour — and its default border is **`BORDER_REFLECT_101`, not zero**, which is
+`cv::BORDER_DEFAULT`. `ops/derivative.hpp` therefore defaults to reflect-101,
+**deliberately breaking with [D-12](ARCHITECTURE.md#d-12-a-shift-carries-a-border-and-the-fill-is-the-callers)'s
+`BORDER_CONSTANT` default**, and that is the better answer as well as the
+compatible one: reflect-101 makes both taps read the same pixel on the outer
+column and row, so the derivative is exactly 0 there, where a zero fill
+manufactures an edge around the whole frame for T3.7 to detect as a ring of
+corners. `Derivative.OpenCvFilter2D_Direction` and `..._BorderDefault` pin both
+against `cv::filter2D` itself.
+
+**The N-bit path is `2·N` adder-class stages** — one ripple-borrow subtraction,
+then one conditional two's-complement negate — against `2·(2^N − 1)` single-bit
+inputs for the replication route T3.4 rejected. Measured on the reference device
+at 640×480, the cost tracks the stage count ([X-16](EXPERIMENTS.md)).
+
+**THE CANONICAL-ZERO RULE HOLDS BY CONSTRUCTION.** The sign plane *is* the
+subtraction's borrow-out, and a borrow means `a < b`, which forces a non-zero
+magnitude — so no input can produce a set sign over a zero magnitude and there is
+no canonicalization pass. `Derivative.Reference*_*` asserts it per pixel across
+the whole sweep (6 border cases × 140 sizes × 2 axes × 3 values of N × 4 word
+widths) and counts violations separately from value mismatches so one cannot hide
+the other.
+
+**Against `cv::filter2D` on the reference device** ([X-16](EXPERIMENTS.md),
+`benchmark/derivative_benchmark.cpp`, `results/derivative_benchmark_pi4.log`):
+both axes cost **0.201 ns/pixel at 640×480 in 192 000 B**, against **5.007
+ns/pixel in 1 536 000 B** for the two `cv::filter2D` calls the reference runs —
+**24.9× faster in 8.0× less memory**. Unlike X-6, X-12 and X-13, that is **not
+mainly a cache-residency result**: with each side's measured per-call floor
+subtracted the ratio is 24.8× at 640×480 and 20.0× at 160×120 where both working
+sets fit, so ~20× is arithmetic and at most a quarter is residency. The fused
+kernel is also **2.94× faster than the composed spelling** as well as 1.40×
+smaller, so X-16's live branch — record a speed cost accepted for footprint — did
+not fire.
+
+**What the container cost, since T3.5 existed to ask.** `SignedQuantMat` fit: the
+destination width is exactly right (a difference of two N-bit values needs N
+magnitude planes and a sign, which is `SignedQuantMat<N>`), the canonical-zero
+rule falls out of the arithmetic, and `TernaryMat` is the N = 1 instance with no
+adapter. Three frictions, all small and none worth an interface change:
+`magnitude(i)` and `sign()` hand out one plane at a time, so a kernel wanting the
+array writes a loop (`pyrDown` does the same for `QuantMat`); those accessors are
+checked in every build, so the *container* wrapper can throw where the view kernel
+cannot — with a loop index bounded by N, it cannot fire; and nothing in the
+container can express "these two planes belong to one image" to the aliasing
+predicate, so `ops/derivative.hpp` checks destination planes against each other
+by hand. A sign plane aliasing a magnitude plane would otherwise compile, run, and
+quietly break the canonical-zero rule.
+
+**REVIEW OUTCOME — the kernel was right; the things standing behind it were not.**
+Four reviewers found no sign inversion on either axis, no canonical-zero
+violation, no dirty sign-plane padding, no undocumented border deviation and no
+exponential N-bit path. What they found was that several of T3.5's *guarantees*
+were unbacked or misdescribed, and all of it is now fixed:
+
+- **The entire precondition block was deletable with every configuration green.**
+  Replacing all fourteen conditions in `impl::checkDerivativeArgs` with a literal
+  `true` left `test_derivative` reporting a byte-identical `47593/47593` in the
+  Debug core-only build and left `verify.sh` ALL GREEN. That included the two
+  checks with **no analogue anywhere else in the project** — destination versus
+  destination, which is the class a multi-plane output introduces and whose
+  failure mode is exactly the canonical-zero violation this task exists to
+  prevent, visible only in T3.6's cross term. Six death tests now cover them
+  (`derivative-dims`, `-short-stride`, `-in-place`, `-sign-alias`, `-mag-alias`,
+  `-border-type`), and each was watched **fail** against the neutered kernel
+  before being kept.
+- **A mutation number was quoted against a kernel that no longer exists.** The
+  "right-border fixup removed" row read 31700, which was measured while the source
+  trailing-word mask was still in; against the shipped, unmasked kernel it is
+  31672. The 28-check gap is exactly `Derivative.DirtyPadding*` — and it is the
+  proof that the mask is dead *because* the fixup is there, so the two numbers are
+  now both recorded as the coupling itself.
+- `derivativeReplicatedInputs(n)` was **undefined for n ≥ 64** (`size_t{1} << n`);
+  it returned 0 at 64 and 137438953470 at 100 under `-fsanitize=undefined`, which
+  `-Wconversion` cannot see and the gate runs no sanitizer to catch. It now
+  saturates, and `Derivative.Stages` pins both sides of the domain.
+- The composed-versus-fused footprint multiplier was **1.67× in one place and
+  1.40× in three others** under the same phrase — per-axis against both-axes.
+  Both are stated, with 1.40× named as the one a footprint claim should use.
+
+**ONE ITEM IS OPEN AND T3.5 IS NOT FULLY CLOSED ON IT.** The N-bit ladder's
+`cv::filter2D` comparison was called *the denominator* in three places and was
+never timed — it ran once, outside every timed region, as a correctness oracle —
+so the **N ≥ 2 path, which every pyramid level above 0 runs, has no measured
+OpenCV ratio**. The benchmark now times it and prints working-set columns beside
+it, but the device re-run **tripped the soft temperature limit** (`throttled after
+0x80000` → `RESULTS INVALID`) and the flag is sticky until reboot, so no device
+number was taken and none is recorded. See the
+[X-16 amendment](EXPERIMENTS.md) for the exact command that closes it. The
+headline result above is unaffected — it comes from the main size table, and rule
+3's linear-in-N verdict reads binCV's own curve.
 
 ---
 

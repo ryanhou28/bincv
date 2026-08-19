@@ -2219,6 +2219,277 @@ knows the band is 1.65× rather than an order of magnitude.
 
 ---
 
+### X-16 · T3.5 derivative against `cv::filter2D` · `DONE`
+
+**Gates:** nothing that was open. T3.5's done-when requires a committed benchmark
+against `cv::filter2D` with the same kernel, and CLAUDE.md requires the decision
+rule to exist before the numbers do. As with
+[X-12](#x-12--t31-denoise-against-the-reference-implementation--done), this entry
+records a measurement that **cannot change the shipped kernel**, and says so
+rather than dressing a confirmation up as an experiment. It has two live branches
+all the same, and both are stated at full strength below.
+
+**Question:** what does the bit-parallel `[-1, 0, 1]` derivative cost against
+`cv::filter2D` on the reference device; how much of any ratio is cache residency
+rather than arithmetic; and is the N-bit path's cost linear in N as
+`derivativeAdderStages(N) == 2N` claims?
+
+**Decision rule** *(written into `benchmark/derivative_benchmark.cpp`'s header and
+into this entry before the device ran):*
+
+1. **Fused against composed.** If the composed spelling — two `ops/shift.hpp`
+   calls plus `ops/logic.hpp` per axis, four passes and **two frame-sized scratch
+   buffers** — is **faster** than the fused kernel, the fused kernel still ships:
+   it is strictly smaller (5 bit-planes of working set against 7, 1.40×) and
+   CLAUDE.md's tiebreak is that memory wins when no explicit choice has been made.
+   The result would then be recorded as **a known speed cost accepted for
+   footprint**, with the number attached, exactly as
+   [D-16](ARCHITECTURE.md#d-16-morphology-fuses-the-shift-and-the-fold-and-only-the-compound-ops-take-scratch)
+   records morphology's. If the fused kernel is faster or equal, nothing is traded.
+2. **Is the headline a cache result?** binCV's working set for both axes is 5
+   BIT-planes where OpenCV's is a byte-plane and two 16-bit planes — 8× smaller —
+   so at 640×480 one side fits a 1 MiB L2 and the other does not. **The ratio at
+   94×60 and 160×120, where both sides fit comfortably, is the arithmetic ratio.**
+   If the 640×480 ratio exceeds it by more than ~30%, the excess is residency and
+   the entry says so in those words, as
+   [X-6](#x-6--is-the-t22-logic-speedup-real--done),
+   [X-12](#x-12--t31-denoise-against-the-reference-implementation--done) and
+   [X-13](#x-13--t33-morphology-against-cverode--cvdilate--done) each had to.
+   The fixed per-call cost of both sides is measured on a 2×2 frame and printed
+   beside every size, because a ns/pixel ladder divides it by the pixel count and
+   it dominates the small end.
+3. **Linear in N.** From N = 1 to N = 5 the stage count rises 5× and the
+   destination plane count rises 3× (2·(N+1) planes across both axes, 4 → 12), so
+   a linear formulation should land **roughly in the 5×–15× band**. The
+   replication route T3.4 rejected would rise **31×** (`2·(2^N − 1)`, 2 → 62). A
+   measured growth at or above 31× would mean the shipped formulation is not the
+   linear one it is documented as, which **is** a finding and would reopen the
+   N-bit path rather than be absorbed.
+
+**Variants:** `OpenCV filter2D x2` (the **denominator** — the derivative and
+nothing else, into pre-allocated `CV_16S`); `OpenCV as-written` (the same plus the
+reference's `*= 16` on each result and its `cv::merge`, neither of which binCV
+reproduces, so charging them to the baseline would flatter binCV); `binCV u32`;
+`binCV u64`; `binCV composed u32`. Every row computes **both axes**, because that
+is what a VIO frontend needs before it can form the T3.6 covariance.
+
+**Workload:** 640×480 and the pyramid ladder below it (320×240, 160×120, 94×60),
+~50% fill, four distinct images rotated through, batches calibrated to a 40 ms
+budget with the minimum of five batches reported. The N-bit ladder runs at
+640×480 for N = 1…5.
+
+**Metric:** ns/pixel **and** the working set of one call, together (CLAUDE.md),
+plus the measured fixed per-call cost of each side.
+
+**Method:** `bincv-cpp/benchmark/derivative_benchmark.cpp`. The denominator is
+ARCHITECTURE 10.3's and is not a judgement call for this operation: it is
+`SEAL/src/keypoint_tracking/gradients.cpp`'s `calcBinarizedDeriv` — two
+`cv::filter2D` calls with `[-1, 0, 1]` as a 1×3 and a 3×1 — on the same binary
+content stored as `CV_8U`. The two kernel `cv::Mat`s and both `CV_16S`
+destinations are hoisted out of the timed region as a caller in a frame loop would
+hoist them; `cv::filter2D`'s own per-call kernel analysis is **not**, because it is
+not something a caller can hoist. Every implementation is compared pixel for pixel
+before anything is timed and each destination is folded into a
+representation-independent checksum afterwards; a disagreement skips the size and
+exits non-zero. For the N-bit rows the denominator is `cv::filter2D` on a `CV_8U`
+image holding the pixel VALUES, which is the same operation with no scale factor,
+and each row is checked against it before its time is reported. **See the
+amendment at the end of this entry: when this was written the N-bit rows' OpenCV
+calls ran only as a correctness oracle, outside every timed region, so the ladder
+had no denominator despite this sentence and two others calling it one. The
+benchmark now times them; the device number for that column is still outstanding.**
+
+**Environment** *(one run, `bincv-cpp/results/derivative_benchmark_pi4.log`)*:
+
+```
+device pi4 · Raspberry Pi 4 Model B Rev 1.5 · aarch64 / 6.18.34+rpt-rpi-v8
+g++ (Debian 14.2.0-19) 14.2.0 · governor performance · taskset -c 3
+throttled before 0x0 · throttled after 0x0 · commit 6d05ec3
+```
+
+**Fixed per-call cost, measured on a 2×2 frame:** OpenCV (2 × `cv::filter2D`)
+**9.301 µs**, binCV (`derivativeX` + `derivativeY`) **0.048 µs** — 194× apart, and
+the reason the small end of the ladder cannot be read raw. `cv::filter2D`
+re-analyses and re-separates its 1×3 kernel on every call; nothing a caller can
+hoist.
+
+**RESULT — ns/pixel, both axes, and the working set of one call:**
+
+```
+                    640x480          320x240          160x120           94x60
+                 ns/px    vs      ns/px    vs      ns/px    vs      ns/px    vs
+OpenCV filter2D  5.007  1.00x     4.961  1.00x     5.840  1.00x     8.514  1.00x
+OpenCV as-written 10.033 0.50x    8.853  0.56x     9.674  0.60x    12.605  0.68x
+binCV u32        0.201 24.90x     0.221 22.42x     0.271 21.57x     0.345 24.66x
+binCV u64        0.114 43.75x     0.138 35.96x     0.205 28.54x     0.279 30.48x
+binCV composed   0.590  8.48x     0.602  8.24x     0.715  8.17x     1.346  6.33x
+
+working set of one call, both axes (bytes)
+binCV u32       192000            48000            12000             3600
+binCV composed  268800  (1.40x)   67200            16800             5040
+OpenCV filter2D 1536000 (8.0x)   384000           96000            28200
+OpenCV as-writ  2764800 (14.4x)  691200          172800            50760
+```
+
+All five rows of every size printed the same pixel-value checksum, and all five
+were compared pixel for pixel before anything was timed.
+
+**Rule 1 — fused against composed: the live branch did NOT fire, and nothing is
+traded.** The fused kernel is **2.94× faster at 640×480** (2.72×, 2.64× and 3.90×
+down the ladder) *and* 1.40× smaller. Memory and speed do not conflict here, so
+there is no cost to record and no tiebreak to invoke — the same shape
+[X-12](#x-12--t31-denoise-against-the-reference-implementation--done) found for
+denoise, and the opposite of what
+[D-16](ARCHITECTURE.md#d-16-morphology-fuses-the-shift-and-the-fold-and-only-the-compound-ops-take-scratch)
+had to record for a non-separable morphological element. The composed row's eight
+passes against the fused kernel's two are most of it.
+
+**Rule 2 — the headline is NOT mainly a cache result, and that is the finding.**
+The rule said the ratio where both sides fit in cache is the arithmetic ratio, and
+that anything above ~30% of it at 640×480 is residency. Subtracting each side's
+measured per-call floor, the ratios are:
+
+```
+640x480  24.8x      320x240  21.9x      160x120  20.0x      94x60  20.4x
+```
+
+**24.8 / 20.0 = 1.24× — inside the threshold.** So roughly **20× of the 24.9× is
+the operation** and at most ~24% is the 8× smaller working set staying resident;
+at 640×480 OpenCV's 1.5 MB does not fit the Pi 4's 1 MiB L2 and binCV's 192 KB
+does, and that buys about a quarter. This is a **different answer** from
+[X-6](#x-6--is-the-t22-logic-speedup-real--done),
+[X-12](#x-12--t31-denoise-against-the-reference-implementation--done) and
+[X-13](#x-13--t33-morphology-against-cverode--cvdilate--done), where residency
+was the larger part of the story, and the reason is visible in the table rather
+than speculative: `cv::filter2D` spends most of its time on per-pixel
+multiply-accumulate arithmetic that binCV replaces with three word operations,
+so the arithmetic gap survives into cache. The raw 94×60 ratio (24.66×) is
+*higher* than 160×120's only because OpenCV's 9.3 µs floor is 19% of that frame;
+corrected, the ladder is flat.
+
+**Rule 3 — linear in N, confirmed.** From N = 1 to N = 5 the measured cost rises
+**6.93×**, against 5× from the stage count and 3× from the destination planes
+(2·(N+1) across both axes, 4 → 12) — inside the 5×–15× band the rule named, and
+nowhere near the **31×** the replication route would cost. Every row was checked
+against `cv::filter2D` on the same values before its time was reported. **Checked
+against, not measured against** — see the amendment below. The rule-3 verdict does
+not depend on the missing column, because it reads binCV's own curve against the
+stage count; what was claimed and never measured is the ladder's *ratio*.
+
+```
+N        1      2      3      4      5
+ns/px  0.200  0.463  0.783  1.044  1.388
+vs N=1 1.00x  2.31x  3.91x  5.21x  6.93x     (2N stages: 1, 2, 3, 4, 5x)
+                                             (replicated: 1, 3, 7, 15, 31x)
+```
+
+**One thing this measured that it was not asked to, and it is registered rather
+than acted on.** `uint64_t` beat `uint32_t` by **1.75× at 640×480** (43.75× against
+24.90×), narrowing to 1.32× at 160×120 and 1.24× at 94×60 — a bigger word-width
+gap than [X-10](#x-10--default-word-width--done) measured for `bitwiseAnd`
+(null, memory-bound) and closer to what it measured for `countNonZero` (1.94×).
+At 640×480 the two word widths have **identical footprint** (38400 B/plane), so
+[D-14](ARCHITECTURE.md#d-14-uint32_t-is-the-default-word-type)'s conjunction —
+faster *and* no footprint increase — is satisfied at that size and fails only at
+the upper pyramid levels, where `uint64_t` costs +20% and +33% per plane. That is
+**exactly E-9**, the per-level word width question X-10 spun out, and this entry
+adds a second operation to its evidence. **D-14 is unchanged and nothing here
+overrides it**; the derivative ships at whatever `WordType` its caller's container
+uses (D-1), so no code decision was deferred by leaving it open.
+
+**Conclusion:** T3.5's done-when is satisfied — the benchmark exists, is committed,
+and runs on the reference device against the denominator ARCHITECTURE 10.3
+specifies. `derivativeX` + `derivativeY` cost **0.201 ns/pixel at 640×480 in
+192 000 B**, against **5.007 ns/pixel in 1 536 000 B** for the two `cv::filter2D`
+calls the reference pipeline runs: **24.9× faster in 8.0× less memory**, of which
+about 20× is arithmetic and about a quarter is cache residency.
+
+**Decision:** nothing to promote that
+[D-19](ARCHITECTURE.md#d-19-the-derivatives-border-is-reflect-101-and-its-sign-is-the-borrow)
+does not already record; the fused-versus-composed branch resolved with no trade,
+so D-19 states the choice without a cost attached. E-9 gains a second data point
+and stays open and unscheduled.
+
+---
+
+#### X-16 amendment · the N-bit ladder had no denominator · `OPEN`
+
+*(Added by the T3.5 review, after the entry above was written and measured. It
+corrects a claim, so it is an amendment in place rather than an edit over the
+original text — the original is what the device actually measured.)*
+
+**What was wrong.** Three places said the N-bit ladder's denominator is
+`cv::filter2D` on a `CV_8U` value image: this entry's **Method**,
+`benchmark/derivative_benchmark.cpp`'s header, and the ladder's own comment. The
+two `cv::filter2D` calls were real, but they ran **once, outside every timed
+region**, purely to check that binCV and OpenCV computed the same picture. The
+ladder's printed columns were N, ns/pixel, vs N=1, 2N stages, replicated, planes —
+no OpenCV row and no ratio. So the **N ≥ 2 path, which is what every pyramid level
+above 0 runs, had no timed OpenCV comparison anywhere**, against ARCHITECTURE 10.3
+and against T3.5's done-when. The word "denominator" was doing work no measurement
+supported.
+
+**What changed.** `timeNBit()` now runs the two `cv::filter2D` calls in their own
+`measureNs`, over the same four images, with the destinations hoisted the way the
+main table hoists them, and the ladder prints a **vs OpenCV** column. The ladder
+also gained the **working-set columns** CLAUDE.md asks for — N is the one axis in
+this benchmark along which binCV's footprint moves (3(N+1) − 1 bit-planes against
+OpenCV's flat byte-plane plus two 16-bit planes), so a ns/pixel-only table was
+reporting speed without memory on precisely the table where the two diverge.
+
+**Status: the device number is NOT TAKEN, and nothing from the attempted run is
+recorded as a result.** The re-run on `pi4` tripped the **soft temperature limit
+during the benchmark** — `throttled before 0x0`, `throttled after 0x80000` — which
+`run_on_pi.sh` reports as `RESULTS INVALID`. A throttled measurement is wrong
+rather than merely slow. That flag is sticky until the device is rebooted, so no
+further device run was possible in the same session. **The x86 run is indicative
+only** ("Measurement platforms") and is written here as a shape, not a result:
+
+```
+x86_64, INDICATIVE ONLY -- not a result, do not quote
+N          1       2       3       4       5
+binCV  0.048   0.110   0.205   0.357   0.388   ns/px
+OpenCV 0.519   0.520   0.522   0.519   0.526   ns/px
+vs OCV 10.82x   4.72x   2.55x   1.46x   1.36x
+bytes 192000  307200  422400  537600  652800   B   (OpenCV flat at 1536000 B)
+```
+
+**What closes it:** reboot the device (which is what clears the sticky flag), let
+it reach a cold start, and re-run
+
+```
+BINCV_PI_OPENCV=1 ./scripts/run_on_pi.sh pi4 \
+    './benchmark/derivative_benchmark > derivative_benchmark.log'
+```
+
+then replace `bincv-cpp/results/derivative_benchmark_pi4.log` — **which records
+the PRE-AMENDMENT binary and therefore has no ladder ratio column** — and fill the
+table above.
+
+**What this does NOT change.** Rules 1 and 2 and the headline (24.9× faster in
+8.0× less memory at 640×480) come from the main size table, which the amendment
+touched only in a volatile-sink read. Rule 3's verdict — linear in N — reads
+binCV's own curve against the stage count and the replication count, so it stands
+on the device numbers already recorded.
+
+What is missing is the ratio alone, and the indicative shape says something worth
+measuring properly: **binCV's advantage over `cv::filter2D` shrinks steeply with
+N**, because OpenCV's cost is flat in the pixel depth while binCV's is linear in
+it. If that survives on the device it belongs to **E-7** (bits per pyramid level),
+which is where each level's depth is decided. Registered here, not acted on.
+
+**One more sink asymmetry, fixed with it.** The OpenCV rows' volatile sink read
+`dx.at<short>(0, 0)`, which `BORDER_REFLECT_101` pins to **exactly 0 for every
+input** — both taps read column 1 — while the binCV rows' sink
+(`dx32.data()[0]`, spanning columns 0–31) is content-dependent. Measured on six
+random 640×480 draws: `dx(0,0) = 0` every time, `dx(1,1)` alternating 0 and 4080.
+All three OpenCV sinks now read an interior pixel. The 2×2 call-floor rows are
+left constant on **both** sides, and the benchmark says why: on a 2×2 frame
+reflect-101 maps column 2 back to column 0, so the whole derivative is identically
+zero whatever the content — for binCV exactly as for OpenCV.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

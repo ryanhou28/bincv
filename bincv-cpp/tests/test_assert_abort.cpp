@@ -33,6 +33,7 @@
 #include "bincv-cpp/core/types.hpp"
 #include "bincv-cpp/ops/bitslice.hpp"
 #include "bincv-cpp/ops/denoise.hpp"
+#include "bincv-cpp/ops/derivative.hpp"
 #include "bincv-cpp/ops/logic.hpp"
 #include "bincv-cpp/ops/morphology.hpp"
 #include "bincv-cpp/ops/reduce.hpp"
@@ -600,6 +601,97 @@ int caseBitSliceSumOverlap() {
     return static_cast<int>(g_sumBuffer[0]);
 }
 
+// T3.5's preconditions. TWO OF THESE ARE A CLASS NO OTHER KERNEL IN THE PROJECT
+// HAS, which is why they lead the block rather than trail it.
+//
+//   `derivative-sign-alias` / `derivative-mag-alias` are DESTINATION-VERSUS-
+//   DESTINATION. Every other kernel here writes one plane, so "no aliasing" has
+//   only ever meant src-versus-dst; the derivative writes N magnitude planes AND
+//   a sign plane, so the destinations must be distinct from EACH OTHER too. The
+//   failure is silent and specific: a sign plane that shares words with a
+//   magnitude plane leaves pixels at magnitude 0 with the sign bit SET, which is
+//   precisely the canonical-zero violation ops/derivative.hpp's header says
+//   "would compile, run, and quietly produce an image where the canonical-zero
+//   rule no longer holds" -- and which corrupts only T3.6's sumXY, leaving sumXX
+//   and sumYY correct. No magnitude-checking test can see it.
+//
+//   `derivative-border-type` goes through derivativeY rather than derivativeX, so
+//   the shared impl::checkDerivativeArgs is covered from both entry points; the
+//   same device tests/CMakeLists.txt uses for erode/dilate above.
+//
+// Measured before these existed: replacing every condition inside
+// impl::checkDerivativeArgs with a literal `true` -- all fourteen -- left
+// tests/test_derivative.cpp reporting a BYTE-IDENTICAL 47593/47593 checks passed
+// in the Debug core-only build (the only configuration where BINCV_ASSERT is
+// live), and ./scripts/verify.sh ALL CONFIGURATIONS GREEN. The whole precondition
+// block was deletable. Preconditions with no death test are not covered by a
+// correctness suite that never violates them.
+uint32_t g_derSrc[32] = {0};
+uint32_t g_derSrc1[32] = {0};
+uint32_t g_derMag[32] = {0};
+uint32_t g_derSign[32] = {0};
+
+int caseDerivativeDims() {
+    const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 2}};
+    bincv::BinMatView<uint32_t> mag[1] = {{g_derMag, 32, 3, 1}};      // narrower
+    const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
+    bincv::derivativeX<1, uint32_t>(src, mag, sign);
+    return static_cast<int>(g_derMag[0]);
+}
+
+int caseDerivativeShortStride() {
+    const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 1}};   // needs 2 words
+    bincv::BinMatView<uint32_t> mag[1] = {{g_derMag, 64, 3, 2}};
+    const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
+    bincv::derivativeX<1, uint32_t>(src, mag, sign);
+    return static_cast<int>(g_derMag[0]);
+}
+
+int caseDerivativeInPlace() {
+    // dst word 1 onto src word 1 -- the views really share words, not merely a
+    // buffer. Neither axis is pointwise in the word index, so no in-place form
+    // exists: derivativeX reads source words i-1, i and i+1 for destination word i.
+    const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 2}};
+    bincv::BinMatView<uint32_t> mag[1] = {{g_derSrc, 64, 3, 2}};
+    const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
+    bincv::derivativeX<1, uint32_t>(src, mag, sign);
+    return static_cast<int>(g_derSrc[0]);
+}
+
+int caseDerivativeSignAlias() {
+    // The sign plane one word into the magnitude plane's own storage -- half a
+    // row, so they overlap rather than abut.
+    const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 2}};
+    bincv::BinMatView<uint32_t> mag[1] = {{g_derMag, 64, 3, 2}};
+    const bincv::BinMatView<uint32_t> sign{g_derMag + 1, 64, 3, 2};
+    bincv::derivativeX<1, uint32_t>(src, mag, sign);
+    return static_cast<int>(g_derMag[0]);
+}
+
+int caseDerivativeMagAlias() {
+    // N = 2, and the two magnitude planes share storage. The subtraction writes
+    // plane 0 and then reads it back through the conditional negate, so this is
+    // not merely an untidy destination.
+    const bincv::BinMatConstView<uint32_t> src[2] = {{g_derSrc, 64, 3, 2},
+                                                     {g_derSrc1, 64, 3, 2}};
+    bincv::BinMatView<uint32_t> mag[2] = {{g_derMag, 64, 3, 2}, {g_derMag + 1, 64, 3, 2}};
+    const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
+    bincv::derivativeX<2, uint32_t>(src, mag, sign);
+    return static_cast<int>(g_derMag[0]);
+}
+
+int caseDerivativeBorderType() {
+    const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 2}};
+    bincv::BinMatView<uint32_t> mag[1] = {{g_derMag, 64, 3, 2}};
+    const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
+    // 7, not 99, for the reason caseShiftBorderType() gives above: BorderType's
+    // enumerators span 0..4, so the type's value range is 0..7 and casting 99 into
+    // it is UNSPECIFIED (-Wconversion says so). 7 is representable and not one of
+    // the five, which is exactly what isKnownBorderType() rejects.
+    bincv::derivativeY<1, uint32_t>(src, mag, sign, static_cast<bincv::BorderType>(7), false);
+    return static_cast<int>(g_derMag[0]);
+}
+
 const Case kCases[] = {
     {"at-row", caseAtRow},
     {"at-col", caseAtCol},
@@ -650,6 +742,12 @@ const Case kCases[] = {
     {"morphex-op", caseMorphExOp},
     {"morphex-scratch-size", caseMorphExScratchSize},
     {"morphex-scratch-overlap", caseMorphExScratchOverlap},
+    {"derivative-dims", caseDerivativeDims},
+    {"derivative-short-stride", caseDerivativeShortStride},
+    {"derivative-in-place", caseDerivativeInPlace},
+    {"derivative-sign-alias", caseDerivativeSignAlias},
+    {"derivative-mag-alias", caseDerivativeMagAlias},
+    {"derivative-border-type", caseDerivativeBorderType},
 };
 
 } // namespace

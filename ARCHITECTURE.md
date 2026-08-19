@@ -302,6 +302,7 @@ The kernel vocabulary is small and closed:
 | reduction | population count over a region or mask |
 | resample | horizontal decimation by two, word-local (`ops/resample.hpp`); vertical is a stride-doubled view |
 | multi-bit add | ripple-carry over plane *arrays* — the 2×2 box over an N-bit source (`ops/pyramid.hpp`, [D-18](#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale)) |
+| sign-magnitude difference | ripple-borrow subtract, then a conditional two's-complement negate — the derivative over an N-bit source (`ops/derivative.hpp`, [D-19](#d-19-the-derivatives-border-is-reflect-101-and-its-sign-is-the-borrow)). The borrow out *is* the sign, which is why the canonical-zero rule needs no fix-up pass |
 
 Nearly every operation in the MVP set is a composition of these — with **two
 known gaps, recorded here rather than left for a later task to discover. Both are
@@ -543,9 +544,33 @@ neg = (src << 1) & ~(src >> 1)      // falling edge
 Output is a sign-magnitude ternary image: `mag = pos | neg`, `sign = neg`.
 
 **On an N-bit input** (pyramid levels ≥ 1, per [§7.2](#72-pyramid-downsample--box-22))
-the derivative is a signed (N+1)-bit value, computed as a bit-sliced subtraction
-of the shifted planes. Ternary is the N=1 instance of the same operation, not a
+the derivative is a signed (N+1)-bit value — N magnitude planes plus a sign,
+which is exactly `SignedQuantMat<N>` — computed as a bit-sliced subtraction of
+the shifted planes. Ternary is the N=1 instance of the same operation, not a
 separate code path — which is what the sign-magnitude convention buys.
+
+**Shipped as `ops/derivative.hpp` (T3.5), and two things about it are not what
+the four lines above imply.**
+
+*The taps are the RIGHT and LEFT neighbours in that order, because `cv::filter2D`
+CORRELATES.* The reference is `SEAL/src/keypoint_tracking/gradients.cpp`'s
+`calcBinarizedDeriv`, which is two `cv::filter2D` calls with `[-1, 0, 1]`; with
+the anchor at the centre that computes `dst(x) = src(x+1) − src(x−1)`, not its
+negation. Verified by experiment rather than read off the documentation, and
+pinned by `Derivative.OpenCvFilter2D_Direction`. The inversion is worth naming
+because of what it would and would not break: [§7.5](#75-lk-gradient-covariance)'s
+`ΣIx²` and `ΣIy²` are popcounts of the MAGNITUDE and would be untouched, while
+`ΣIxIy` — the only entry that reads the sign planes — would come out negated.
+
+*The border is `BORDER_REFLECT_101`, not
+[D-12](#d-12-a-shift-carries-a-border-and-the-fill-is-the-callers)'s
+`BORDER_CONSTANT` default.* That is `cv::filter2D`'s default and therefore the
+reference's, and it is also the right answer independently: reflect-101 makes both
+taps read the same pixel on the outer column and row, so the derivative there is
+exactly zero, where a zero fill manufactures a full-strength edge around the whole
+frame for [§7.6](#76-corner-response) to detect.
+[D-19](#d-19-the-derivatives-border-is-reflect-101-and-its-sign-is-the-borrow)
+records both, and the scale factor binCV does not reproduce.
 
 ### 7.5 LK gradient covariance
 
@@ -1291,6 +1316,119 @@ trading against accuracy is 1.65×.
 
 **Binds:** T3.5's derivative, which reads these levels; T3.6's tracker, which reads
 all of them at once; and any later operation that requantizes.
+
+---
+
+### D-19: the derivative's border is reflect-101, and its sign is the borrow
+
+*(Added during T3.5, not pre-planned — the task that built the derivative was the
+first whose reference operation carried an OpenCV default binCV does not share,
+and the first to produce a multi-plane SIGNED output.)*
+
+**1. `ops/derivative.hpp` defaults to `BORDER_REFLECT_101`, breaking with
+[D-12](#d-12-a-shift-carries-a-border-and-the-fill-is-the-callers)'s
+`BORDER_CONSTANT`/`false`.** The border stays a parameter — D-12's argument that
+the fill is the caller's is untouched — but the *default* is the reference's,
+for two reasons that point the same way:
+
+- `cv::filter2D`'s default border is `cv::BORDER_DEFAULT`, which **is**
+  `BORDER_REFLECT_101` (both are 4, in OpenCV and in `core/types.hpp`). Measured
+  on a 1×8 row with one set pixel at column 1: the default and an explicit
+  reflect-101 both give `dx(0) = 0`, an explicit `BORDER_CONSTANT` gives `+255`.
+  So `calcBinarizedDeriv` reflects, and T3.6 is written against derivatives that
+  agree with it at every pixel including the edges.
+- Reflect-101 makes **both taps read the same source pixel** on the first and last
+  column (row), so the derivative there is exactly 0 whatever the frame holds. A
+  zero fill instead reads the second column against nothing and manufactures a
+  full-strength edge all the way around the frame — which
+  [§7.6](#76-corner-response)'s min-eigenvalue response would then select as a
+  ring of keypoints along the image border. Reflect-101 is the answer that is both
+  reference-exact and correct; a compatibility tax that also happened to be wrong
+  would have been worth arguing about, and this is not one.
+
+The degenerate extent is OpenCV's too: at `width == 1` both reflect flavours map
+every out-of-range coordinate to 0, so the derivative is 0 — which is what
+`cv::filter2D` returns on a 1×1 image.
+
+**2. The scale factor is NOT reproduced, and that is representational.** The
+reference multiplies by 16 into `CV_16S` over `{0, 255}` content, so its values are
+`{−4080, 0, +4080}`; binCV's pixels are `{0, 1}` so its derivative is
+`{−1, 0, +1}`. Sign and magnitude structure are identical — a common positive
+factor multiplies every entry of [§7.5](#75-lk-gradient-covariance)'s 2×2 matrix
+alike, leaving eigenvector directions and the min-eigenvalue *ordering*
+[§7.6](#76-corner-response) selects on unchanged. Reproducing 4080 costs 13 more
+magnitude planes per pixel to carry no information. `tests/test_derivative.cpp`
+divides the ported reference's output by 4080 and **requires the division to be
+exact**, so "no other value ever appears" is checked rather than assumed. binCV
+also keeps the two axes as two images where the reference `cv::merge`s them:
+interleaved channels put every second word out of reach of a word-parallel
+popcount, and nothing in binCV consumes a two-channel image.
+
+**3. The N-bit path is linear in N, and the sign costs nothing.** `a − b` over
+N-bit bit-sliced operands is one ripple-borrow subtraction (N full-subtractor
+stages, the borrow being `maj3` with the minuend inverted) followed by one
+conditional two's-complement negate (N half-adder stages): `2·N` adder-class
+stages, against `2·(2^N − 1)` single-bit inputs for the replication route
+[D-18](#d-18-the-n-bit-box-is-a-multi-bit-adder-and-the-requantization-is-a-documented-rescale)
+rejected for the box sum. Measured on the reference device at 640×480, N = 1 → 5
+costs **6.93×** against 5× from the stage count and 3× from the destination plane
+count — and against **31×** for the replication route ([X-16](EXPERIMENTS.md)).
+
+**Against the denominator, and the residency question answered rather than
+assumed.** Both axes cost **0.201 ns/pixel at 640×480 in 192 000 B**, against
+**5.007 ns/pixel in 1 536 000 B** for the two `cv::filter2D` calls
+`calcBinarizedDeriv` makes: 24.9× faster in 8.0× less memory. With each side's
+measured fixed per-call cost subtracted the ratio is 24.8× at 640×480 and 20.0× at
+160×120, where both working sets fit in cache — so **~20× is the arithmetic and at
+most a quarter is residency**, which is a different balance from
+[X-6, X-12 and X-13](EXPERIMENTS.md) and is stated because those three had to say
+the opposite. The **fused kernel is 2.94× faster than the composed spelling as
+well as 1.40× smaller**, so unlike D-16's non-separable element there is no speed
+cost accepted for footprint here. (**1.40× counts both axes** — 5 planes against
+7, the two scratch frames being shared between them, which is what a caller
+forming a covariance needs. One axis in isolation is 1.67×, 3 planes against 5.
+`ops/derivative.hpp` states both and says which is which; a footprint claim about
+this operation should use 1.40×.)
+
+**What the N-bit path costs against the denominator is still open**, and is
+registered rather than glossed: the N-bit ladder's `cv::filter2D` comparison was
+described as a denominator in three places and never timed, so N ≥ 2 — every
+pyramid level above 0 — has no measured ratio on the device yet. The benchmark now
+times it; see the [X-16 amendment](EXPERIMENTS.md). Nothing in this decision
+depends on that number: the border rule, the sign-is-the-borrow construction and
+the linear-in-N claim are each settled without it.
+
+**THE CANONICAL-ZERO RULE HOLDS BY CONSTRUCTION AND NEEDS NO FIX-UP PASS**, which
+is the answer to the question T3.5 was set to ask about the container: the sign
+plane **is** the subtraction's borrow-out, and a borrow out of `a − b` means
+`a < b`, which forces a non-zero magnitude. No input can produce a set sign over a
+zero magnitude, in either direction. `SignedQuantMat`'s docstring already permits
+kernels to write the two planes independently for exactly this reason; T3.5 is the
+first operation to rely on it, and it turns out not to need the permission.
+
+**What the container did cost, recorded because it is D-3's bill arriving.** A
+two's-complement destination would be the subtraction alone — N+1 stages over
+sign-extended operands — so sign-magnitude costs roughly N−1 extra adder-class
+stages per destination word here, approaching 2× at large N. That is the price of
+[§7.5](#75-lk-gradient-covariance)'s covariance being three population counts over
+masks rather than a bit-sliced multiply, and §7.5 runs 31×31 times per keypoint
+where this runs once per pixel. Recorded, not measured: no experiment has priced
+the two's-complement alternative end to end, because nothing in the MVP would
+consume it.
+
+**The kernel takes no scratch**, following
+[D-16](#d-16-morphology-fuses-the-shift-and-the-fold-and-only-the-compound-ops-take-scratch),
+which named this operation as its second caller. Written as the composition it is
+defined as — two `ops/shift.hpp` calls per axis and then the mask — each axis needs
+two frame-sized temporaries, and a kernel may not allocate. The horizontal taps are
+computed into registers from the source row's words; the vertical ones are a row
+index (T2.4). D-16's border lesson applies too and is why the edge fixup is one
+bit per row rather than a test per word: the left tap is carried as a synthetic
+word before word 0, and the right tap is folded into the trailing word's branch,
+which the tail mask requires anyway.
+
+**Binds:** T3.6's covariance and T3.7's corner response, both of which read these
+two planes; and any later operation that produces a `SignedQuantMat`.
 
 ---
 

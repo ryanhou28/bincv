@@ -167,6 +167,13 @@ the host.
 Shift-and-mask producing sign-magnitude ternary. The first operation whose output
 is a multi-plane `QuantMat`, and therefore the real test of the container design.
 
+*Shipped as `ops/derivative.hpp` (T3.5). The container passed: the canonical-zero
+rule falls out of the arithmetic — the sign plane is the subtraction's borrow-out
+— so there is no canonicalization pass. Two `cv::filter2D` properties decided the
+semantics and both are pinned by test:  it CORRELATES, and its default border is
+`BORDER_REFLECT_101` rather than zero. See
+[D-19](ARCHITECTURE.md#d-19-the-derivatives-border-is-reflect-101-and-its-sign-is-the-borrow).*
+
 ### 3.5 LK gradient covariance
 `ΣIx²`, `ΣIy²`, `ΣIxIy` as masked population counts. The load-bearing operation.
 

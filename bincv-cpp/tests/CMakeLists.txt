@@ -153,10 +153,23 @@ endfunction()
 # which pyrDown's BINCV_ASSERT preconditions are live. Its OpenCV half is one
 # suite: binCV at NOut = 8 against the reference pipeline's own BOX_2x2 path, and
 # the phase deviation that path's default anchor introduces.
+# test_derivative (T3.5) is core for the same reasons and for one more. The
+# binarized derivative is TIER 3 -- OpenCV has no operation with these semantics
+# (see ops/derivative.hpp) -- so there is no bit-exactness promise to a cv:: call
+# and no Tier 1 denominator. What stands behind it is a per-pixel reference over
+# an INDEPENDENTLY WRITTEN border mapping, the canonical-zero sweep, the
+# dirty-source-padding cases, and agreement between three formulations of one
+# operation (the ternary spelling, the generic ripple, and the composed
+# shift+logic route). None of those needs OpenCV, and all of them have to run
+# where the embedded claim does -- including Debug, the only configuration in
+# which the kernels' BINCV_ASSERT preconditions are live. The OpenCV half is the
+# reference pipeline's own calcBinarizedDeriv, ported call for call, plus the two
+# probes that pin cv::filter2D's correlation direction and default border --
+# the two properties this operation would otherwise differ on silently.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
                      test_logic test_shift test_reduce test_bitslice
                      test_denoise test_threshold test_morphology test_resample
-                     test_pyramid)
+                     test_pyramid test_derivative)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -469,6 +482,44 @@ bincv_add_death_test(test_assert_abort morphex-scratch-size
                      "morphologyEx: this op needs a caller-provided scratch view of src's size")
 bincv_add_death_test(test_assert_abort morphex-scratch-overlap
                      "morphologyEx: scratch must share no word with src or dst")
+
+# T3.5 derivative preconditions. TWO OF THESE ARE A CLASS NO OTHER KERNEL HAS,
+# and it is the class T3.5 was set to discover: the derivative is the first
+# operation with a MULTI-PLANE destination, so "no aliasing" stops meaning
+# src-versus-dst alone and starts meaning DESTINATION-VERSUS-DESTINATION as well.
+#
+#   `derivative-sign-alias` is the one that matters most. A sign plane sharing
+#   words with a magnitude plane compiles, runs, and leaves pixels at magnitude 0
+#   with the sign bit SET -- SignedQuantMat's canonical-zero rule broken, which
+#   corrupts T3.6's sumXY while leaving sumXX and sumYY exactly right. Every
+#   magnitude-only test passes over it.
+#   `derivative-mag-alias` is the N > 1 half of the same class: the ripple writes
+#   magnitude plane p and reads it back in the conditional negate.
+#
+#   `derivative-border-type` is driven through derivativeY so the shared
+#   impl::checkDerivativeArgs is entered from both public kernels, the same way
+#   `morph-border-type` above uses dilate where its neighbours use erode.
+#
+# Measured before these existed: replacing all FOURTEEN conditions inside
+# impl::checkDerivativeArgs with a literal `true` left tests/test_derivative.cpp
+# reporting a byte-identical 47593/47593 checks passed in the Debug core-only
+# build -- the only configuration in which BINCV_ASSERT is live -- and left
+# ./scripts/verify.sh ALL CONFIGURATIONS GREEN. The entire precondition block was
+# deletable. That is the same measurement the morphology block above records, and
+# the same conclusion: preconditions with no death test are not covered by a
+# correctness suite that never violates them.
+bincv_add_death_test(test_assert_abort derivative-dims
+                     "derivative: every magnitude plane must have the source's dimensions")
+bincv_add_death_test(test_assert_abort derivative-short-stride
+                     "derivative: a source plane's stride is shorter than one of its own rows")
+bincv_add_death_test(test_assert_abort derivative-in-place
+                     "derivative: no destination plane may share a word with a source plane")
+bincv_add_death_test(test_assert_abort derivative-sign-alias
+                     "derivative: the sign plane must not share a word with a magnitude plane")
+bincv_add_death_test(test_assert_abort derivative-mag-alias
+                     "derivative: the magnitude planes must not share a word with each other")
+bincv_add_death_test(test_assert_abort derivative-border-type
+                     "derivative: unknown BorderType")
 
 if(BINCV_OPENCV_FOUND)
     foreach(TEST_NAME ${BINCV_OPENCV_TESTS})

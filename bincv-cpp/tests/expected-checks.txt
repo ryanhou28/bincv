@@ -539,6 +539,82 @@
 #             one family of cases and invisible to every other, so without
 #             Pyramid.EdgeReplication_* and the per-case padding check a wrong
 #             border rule ships green in all four configurations.
+#   test_derivative  48526 under opencv, 47675 everywhere else. The 851
+#             difference is T3.5's OpenCV half: the reference pipeline's own
+#             calcBinarizedDeriv PORTED (its two cv::filter2D calls, its CV_16S
+#             ddepth and its *= 16) compared at every pixel after the scale is
+#             divided out, the same comparison for N-bit sources where
+#             cv::filter2D on CV_8U VALUES needs no scale at all, and the two
+#             probes that pin cv::filter2D's own behaviour: that it CORRELATES
+#             (dst(x) = src(x+1) - src(x-1)) and that its default border is
+#             BORDER_REFLECT_101 rather than zero. Those two probes are the ones
+#             to protect. Both properties would differ SILENTLY -- a reversed
+#             correlation leaves every magnitude correct and negates only T3.6's
+#             cross term, and a zero border differs on exactly one column and one
+#             row -- and both are claims about OpenCV, so they belong in a check
+#             that fails if OpenCV ever disagrees rather than in a comment.
+#             The scale division is required to be EXACT, which is what turns
+#             "the scale factor is representational, not semantic"
+#             (ops/derivative.hpp, D-19) into a checked claim: if any value other
+#             than a multiple of 4080 ever appeared, that check fails.
+#             The other 47675 are the per-pixel reference sweep -- 6 border cases
+#             (all five BorderTypes, plus BORDER_CONSTANT at both fill values) x
+#             20 widths x 7 heights x 2 axes x N = 1, 2, 3 x four word widths --
+#             over an INDEPENDENTLY WRITTEN border mapping (a do-while, OpenCV's
+#             shape, not the closed form ops/shift.hpp ships, so this suite is not
+#             blind to a border regression); the canonical-zero rule and the
+#             padding-bit count reported per case alongside it; agreement between
+#             the three formulations of one operation (the ternary spelling, the
+#             generic ripple at N = 1 through impl::derivativeXGeneric, and the
+#             composed shift+logic route); dirty-source padding on wrapped
+#             buffers; differing strides; and the degenerate shapes.
+#             plus 82 that are not a sweep at all: Derivative.Stages pins the
+#             DOMAIN of the public derivativeReplicatedInputs(), whose body is
+#             `size_t{1} << n` and was therefore undefined at n >= 64 -- it
+#             returned 0 for 64 and 137438953470 for 100 under
+#             -fsanitize=undefined, which -Wconversion cannot see and the gate
+#             runs no sanitizer to catch.
+#             This suite counts ONE CHECK PER (case, axis) rather than per pixel:
+#             a 129x17 case would contribute 2193 checks and drown the summary,
+#             and each case reports its DISAGREEMENT COUNT so a failure still says
+#             how badly it failed.
+#             The floor has teeth, measured by mutating ops/derivative.hpp (checks
+#             passed out of 48444 under opencv -- measured before Derivative.Stages
+#             gained its 82 domain checks, which are constexpr/arithmetic
+#             assertions about a public constant that NO mutation of the kernels
+#             can reach, so every row below is unchanged and every total is now
+#             82 higher):
+#               dx taps swapped (convolution)          28710
+#               dy taps swapped                        31516
+#               default border -> BORDER_CONSTANT      47404
+#               right-border fixup removed             31672
+#               left-border word forced to zero        31748
+#               dy border rows fall back to the fill   36214
+#               conditional negate dropped (N > 1)     30378
+#               sign := all-ones (canonical zero lost) 20800
+#               magnitude store unmasked (padding)     35400
+#               sign store unmasked (padding)          35400
+#             One mutation SURVIVED, and it is recorded rather than papered over:
+#             deleting the source trailing-word mask in derivativeX changed
+#             nothing. That mask is genuinely dead -- the bit it protects is
+#             exactly the bit the right-border fixup overwrites -- so it was
+#             REMOVED and ops/derivative.hpp carries the measurement and the
+#             coupling it creates.
+#             THE 'right-border fixup removed' ROW IS AGAINST THE SHIPPED,
+#             UNMASKED KERNEL, and that is a correction: it read 31700 when it was
+#             first written, which was the figure for the kernel WITH the mask
+#             still in -- i.e. against code that no longer exists. Re-measured
+#             both ways, the pair is the coupling itself:
+#               fixup removed, mask absent (as shipped)   31672
+#               fixup removed, mask restored             31700
+#             The 28-check gap is exactly Derivative.DirtyPadding*: with the fixup
+#             gone the mask stops being dead in the same instant. A mutation row
+#             quoted against a kernel that is not the one in the tree is worse
+#             than no row, because it is the number a maintainer checks their own
+#             mutation against.
+#             The 'default border' row is small for a
+#             different reason: only the cases that take the default can see it,
+#             and most of the sweep passes a border explicitly.
 #   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
 #             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
 #             through constPlane() -> unpackTo8U, and that conversion was the one
@@ -581,6 +657,7 @@ opencv	test_threshold	33112	0
 opencv	test_morphology	299181	0
 opencv	test_resample	245312	0
 opencv	test_pyramid	262321	0
+opencv	test_derivative	48526	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
 opencv	test_equivalence	16403	0
@@ -599,6 +676,7 @@ core	test_threshold	21304	0
 core	test_morphology	172632	0
 core	test_resample	245312	0
 core	test_pyramid	236429	0
+core	test_derivative	47675	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -615,6 +693,7 @@ noexcept	test_threshold	21304	0
 noexcept	test_morphology	172632	0
 noexcept	test_resample	245312	0
 noexcept	test_pyramid	236429	0
+noexcept	test_derivative	47675	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -631,5 +710,6 @@ debug	test_threshold	21304	0
 debug	test_morphology	172632	0
 debug	test_resample	245312	0
 debug	test_pyramid	236429	0
+debug	test_derivative	47675	0
 debug	test_harness	8	0
 
