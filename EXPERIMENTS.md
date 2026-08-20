@@ -2490,7 +2490,7 @@ zero whatever the content — for binCV exactly as for OpenCV.
 
 ---
 
-### X-17 · The LK gradient covariance, fused against composed at T3.6's own level · `PARTIAL`
+### X-17 · The LK gradient covariance, fused against composed at T3.6's own level · `DONE`
 
 **Gates:** nothing that is open. [D-15](ARCHITECTURE.md#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)
 axis 2 is settled and `ops/covariance.hpp` is already written against the fused
@@ -2633,6 +2633,38 @@ The no-scratch property that D-15 axis 3 traded speed for is checked by an
 `operator new` counter and is **0 allocations**. Neither of those is a device
 question.
 
+
+**Result — reference device, `throttled` unchanged at `0x80000` (sticky history
+from a previous session; no active bit, 45.7 °C idle — see the runner fix in
+commit `73af779` for why that is not an invalidating condition), governor
+`performance`, `taskset -c 3`, 640×480, 200 keypoints, four variants interleaved
+and all agreeing before timing:**
+
+| word | W | fused ns/win | composed ns/win | composed/fused | spread f / c |
+|---|---|---|---|---|---|
+| `uint32_t` | 7 | 226.9 | 296.9 | **1.31×** | 4.1% / 3.8% |
+| `uint32_t` | 15 | 452.6 | 540.0 | **1.19×** | 0.8% / 4.2% |
+| `uint32_t` | 31 | 945.7 | 1108.9 | **1.17×** | 0.8% / 1.5% |
+| `uint64_t` | 7 | 217.3 | 268.8 | **1.24×** | 1.3% / 2.0% |
+| `uint64_t` | 15 | 435.1 | 476.4 | **1.10×** | 1.5% / 1.2% |
+| `uint64_t` | 31 | 857.6 | 937.3 | **1.09×** | 0.8% / 0.6% |
+
+Memory, measured in this binary rather than printed as a claim: fused **0 B**,
+composed **0 B**, either plane form **38400 B per pyramid level** at 640×480.
+
+**Conclusion.** The fused entry point wins at every window size and both word
+widths, by 1.09–1.31×, every gap comfortably outside its own spread. That
+confirms [X-11](#x-11--e-3--window-reductions--done) axis 2 **at T3.6's own
+level** rather than inheriting a reduction-level number — which is what the
+Done-when asked for, because a ratio measured on bare reductions need not survive
+being wrapped in an operation.
+
+The **plane** form is faster again (1.20–1.44× over the four-argument form) and is
+still not what T3.6 ships, because it costs a fifth plane at every pyramid level.
+That is X-11 axis 3's tradeoff re-confirmed here, and it lands the same way:
+memory wins ([CLAUDE.md](CLAUDE.md)).
+
+Raw log: [bincv-cpp/results/covariance_benchmark_pi4.log](bincv-cpp/results/covariance_benchmark_pi4.log).
 
 ---
 
