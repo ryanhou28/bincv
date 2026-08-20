@@ -207,8 +207,44 @@ bool runSize(int width, int height) {
             }
         }
     }
-    std::printf("  agreement: all three arms produce identical dx, dy, counts and covariances"
-                " on %d inputs\n\n",
+    // The two decomposition points are held to the same standard: a diagnostic
+    // that computes something else localizes nothing.
+    for (int f = 0; f < kInputs; ++f) {
+        const Frame& fr = frames[static_cast<size_t>(f)];
+        std::memset(dests[0].dx.data(), 0, dests[0].dx.size() * sizeof(Word));
+        std::memset(dests[0].dy.data(), 0, dests[0].dy.size() * sizeof(Word));
+        std::memset(dests[1].dx.data(), 0, dests[1].dx.size() * sizeof(Word));
+        std::memset(dests[1].dy.data(), 0, dests[1].dy.size() * sizeof(Word));
+        arms[0]->derivative(fr.src.data(), fr.stride, fr.width, fr.height, dests[0].dx.data(),
+                            dests[0].dy.data());
+        t39::derivativeViewsOnly(fr.src.data(), fr.stride, fr.width, fr.height,
+                                 dests[1].dx.data(), dests[1].dy.data());
+        if (dests[1].dx != dests[0].dx || dests[1].dy != dests[0].dy) {
+            std::printf("  DEFECT: the 'views only' decomposition point computes a different"
+                        " derivative on input %d -- nothing timed.\n",
+                        f);
+            return false;
+        }
+        Cov viewCov;
+        for (const auto& w : windows) {
+            const Cov c = t39::covarianceWindowViewsOnly(dests[1].dx.data(), dests[1].dy.data(),
+                                                         fr.stride, fr.width, fr.height, w.first,
+                                                         w.second, kWindow);
+            viewCov.xx += c.xx;
+            viewCov.yy += c.yy;
+            viewCov.whenClear += c.whenClear;
+            viewCov.whenSet += c.whenSet;
+        }
+        if (viewCov != sweepCovariance(*arms[0], dests[0], fr, windows)) {
+            std::printf("  DEFECT: the 'views only' decomposition point disagrees on the"
+                        " covariance sweep on input %d -- nothing timed.\n",
+                        f);
+            return false;
+        }
+    }
+
+    std::printf("  agreement: all three arms and both decomposition points produce identical"
+                " dx, dy, counts and covariances on %d inputs\n\n",
                 kInputs);
     std::printf("  %-22s %-13s %8s  %-18s %6s   %6s\n", "workload", "arm", "ns/px",
                 "[min, max] ns/px", "spread", "vs hand");
@@ -265,6 +301,61 @@ bool runSize(int width, int height) {
                     arms[0]->name, "", bytes / 1024.0, gbPerSec);
     }
 
+    // ---- decomposition: where the derivative gap lives -----------------------
+    // Not part of the rule comparison. `views only` is the SAME kernel the
+    // specialized arm calls, reached through the public view entry points with
+    // the container removed, so the two differences below add up to the gap:
+    //   views only - hand-written  =  the kernel's generic SHAPE at N = 1
+    //   specialized - views only   =  the container
+    {
+        std::vector<measure::Bench> benches;
+        {
+            const Arm* arm = arms[0];
+            Dest* dst = &dests[0];
+            benches.push_back({"hand-written", [arm, dst, &frames](int i) {
+                                   const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                                   arm->derivative(fr.src.data(), fr.stride, fr.width, fr.height,
+                                                   dst->dx.data(), dst->dy.data());
+                                   measure::g_sink += dst->dx[0] + dst->dy[0];
+                               }});
+        }
+        {
+            Dest* dst = &dests[1];
+            benches.push_back({"views only", [dst, &frames](int i) {
+                                   const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                                   t39::derivativeViewsOnly(fr.src.data(), fr.stride, fr.width,
+                                                            fr.height, dst->dx.data(),
+                                                            dst->dy.data());
+                                   measure::g_sink += dst->dx[0] + dst->dy[0];
+                               }});
+        }
+        {
+            const Arm* arm = arms[1];
+            Dest* dst = &dests[2];
+            benches.push_back({"specialized", [arm, dst, &frames](int i) {
+                                   const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                                   arm->derivative(fr.src.data(), fr.stride, fr.width, fr.height,
+                                                   dst->dx.data(), dst->dy.data());
+                                   measure::g_sink += dst->dx[0] + dst->dy[0];
+                               }});
+        }
+        const std::vector<measure::Timing> t =
+            measure::measureInterleaved(benches, kRepeats, kTargetMs);
+        for (size_t a = 0; a < 3; ++a) {
+            printRow("  decomp: derivative", benches[a].name.c_str(), t[a], framePixels,
+                     t[0].medianNs);
+        }
+    }
+
+    // The derivative timings above left each buffer holding whichever input ran
+    // last, which differs per arm. Popcount cost is content-dependent, so the
+    // covariance rows below are given IDENTICAL content in all three buffers
+    // first -- otherwise a timing difference could be a difference in the data.
+    for (int a = 0; a < 3; ++a) {
+        arms[0]->derivative(frames[0].src.data(), frames[0].stride, frames[0].width,
+                            frames[0].height, dests[a].dx.data(), dests[a].dy.data());
+    }
+
     // ---- covariance over 200 31x31 windows ----------------------------------
     {
         std::vector<measure::Bench> benches;
@@ -282,6 +373,56 @@ bool runSize(int width, int height) {
         for (int a = 0; a < 3; ++a) {
             printRow("covariance 31x31 x200", arms[a]->name, t[static_cast<size_t>(a)],
                      windowPixels, t[0].medianNs);
+        }
+    }
+
+    // ---- decomposition: where the covariance gap lives ----------------------
+    // ops/reduce.hpp never took a container (D-5), so `views only` here differs
+    // from the specialized arm ONLY in the TernaryMat construction and the
+    // magnitude() / sign() calls that name its planes.
+    {
+        std::vector<measure::Bench> benches;
+        {
+            const Arm* arm = arms[0];
+            const Dest* dst = &dests[0];
+            benches.push_back({"hand-written", [arm, dst, &frames, &windows](int i) {
+                                   const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                                   const Cov c = sweepCovariance(*arm, *dst, fr, windows);
+                                   measure::g_sink += c.xx + c.yy + c.whenClear + c.whenSet;
+                               }});
+        }
+        {
+            const Dest* dst = &dests[1];
+            benches.push_back({"views only", [dst, &frames, &windows](int i) {
+                                   const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                                   Cov total;
+                                   for (const auto& w : windows) {
+                                       const Cov c = t39::covarianceWindowViewsOnly(
+                                           dst->dx.data(), dst->dy.data(), fr.stride, fr.width,
+                                           fr.height, w.first, w.second, kWindow);
+                                       total.xx += c.xx;
+                                       total.yy += c.yy;
+                                       total.whenClear += c.whenClear;
+                                       total.whenSet += c.whenSet;
+                                   }
+                                   measure::g_sink +=
+                                       total.xx + total.yy + total.whenClear + total.whenSet;
+                               }});
+        }
+        {
+            const Arm* arm = arms[1];
+            const Dest* dst = &dests[2];
+            benches.push_back({"specialized", [arm, dst, &frames, &windows](int i) {
+                                   const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                                   const Cov c = sweepCovariance(*arm, *dst, fr, windows);
+                                   measure::g_sink += c.xx + c.yy + c.whenClear + c.whenSet;
+                               }});
+        }
+        const std::vector<measure::Timing> t =
+            measure::measureInterleaved(benches, kRepeats, kTargetMs);
+        for (size_t a = 0; a < 3; ++a) {
+            printRow("  decomp: covariance", benches[a].name.c_str(), t[a], windowPixels,
+                     t[0].medianNs);
         }
     }
 

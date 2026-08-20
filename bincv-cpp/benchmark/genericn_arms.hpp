@@ -101,4 +101,12 @@ const Arm& genericArm();
 const Arm& specializedArm();
 const Arm& handWrittenArm();
 
+// The decomposition points, from genericn_diag.cpp. Not arms of the rule
+// comparison -- they exist only to split the gap the rule fires on into the
+// kernel's generic SHAPE and the CONTAINER around it. See that file's header.
+void derivativeViewsOnly(const Word* src, size_t strideWords, int width, int height, Word* dstX,
+                         Word* dstY);
+Cov covarianceWindowViewsOnly(const Word* dx, const Word* dy, size_t strideWords, int width,
+                              int height, int wx, int wy, int wsize);
+
 }  // namespace t39
