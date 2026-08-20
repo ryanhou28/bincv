@@ -3276,9 +3276,43 @@ Each task produces a committed measurement and a written conclusion, and each ma
 invalidate a decision — **that is the point.** A contradicted claim gets reported,
 not worked around.
 
-### T4.1 · E-7 · Pyramid level bit depths · `TODO`
+### T4.1 · E-7 · Pyramid level bit depths · `PARTIAL` — accuracy and footprint measured; speed axis pending the reference device
 
 **Depends:** T3.8
+
+**MEASURED. [X-24](EXPERIMENTS.md) IS RECORDED AND THE PREMISE THIS TASK INHERITED
+DID NOT SURVIVE IT.** Read that entry before the rest of this spec, most of which
+was written against a cause the measurement does not support.
+
+* **Band C fired on the gate.** No ladder up to `1/3/5/7` brings the four-level
+  tracker inside X-20's tolerance on all 141 real-frame keypoints. **A deeper
+  alphabet is not what fixes T3.8's miss.**
+* **Band D fired too, and it is real.** Accuracy is **peaked at 2 bits**, not
+  monotone: on `(1,0)` unclipped, 1/2/3/5 bits give 1.4742 / **0.0010** / 0.5334 /
+  0.8567 px. Every ladder tracked every point, so the rows share identical point
+  sets — this is not a changing denominator. Registered as
+  [E-15](ARCHITECTURE.md#register).
+* **The dominant residual is CLIPPING, not quantisation.** `1/2/2/2` on `(1,0)`
+  goes 0.8356 → **0.0010** px when restricted to the **58 of 141 points (41%)**
+  whose window is inside every level. X-20 had estimated deviation (ii) at about
+  half the error; it is essentially all of it. Registered as
+  [E-14](ARCHITECTURE.md#register), which **blocks adopting any ladder** — a 59%
+  keypoint loss is a larger effect than anything X-24 measured.
+* **What the second bit actually buys is content survival, not precision.** Down a
+  1-bit ladder the edge map is thinned away: level 3 keeps 154 set pixels of 5 640
+  against `1/2/2/2`'s 1 028.
+* **X-2's caveat is closed** on the real reference path: the uncapped ladder holds
+  **2 / 5 / 26 / 108** distinct values at levels 0–3, i.e. exactly 1/3/5/7 bits with
+  nothing wasted. X-15's correction is confirmed and X-2's 1/3/4/5 was one frame's
+  contents. Density RISES down the uncapped ladder (10.36% → 38.94% non-zero) where
+  the 1-bit ladder thins to 2.7% — the same finding from the other side.
+
+**Still open, and why this is `PARTIAL` rather than `DONE`:** the **ns/frame axis
+has not been measured** — the reference device was unreachable for this session, and
+X-22's caveat 1 (the same kernel moving 1.46× between binaries built from unchanged
+source) is why no other platform may close it. X-24's rule pre-declared that no
+ladder is promoted to a D-record until it runs there.
+
 
 **T3.8 CHANGED THIS TASK'S STANDING, AND ITS SCOPE.** [X-20](EXPERIMENTS.md)
 measured tracking accuracy on the reference pipeline's own edge-map content

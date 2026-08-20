@@ -778,6 +778,145 @@ FlowStats runCase(const char* label, int width, int height, const Warp& warp, do
     return runOnFrames<WordType>(label, fe, warp, modelError);
 }
 
+
+// ---------------------------------------------------------------------------
+// X-24 / E-7: THE SAME FRONTEND AT A CHOSEN BIT DEPTH PER LEVEL
+//
+// `Frontend` above is the shipped 1-bit ladder and stays exactly as it is -- it
+// is what every X-20 number was measured on. This is its generic-N counterpart,
+// and it exists so that E-7's question can be asked without disturbing the
+// baseline it has to be compared against.
+//
+// **LEVEL 0 IS ONE BIT IN EVERY LADDER AND IS NOT A VARIABLE.** It is the binary
+// frame -- the project's premise (ARCHITECTURE 1). Only the levels pyrDown
+// PRODUCES have a depth to choose, which is why every ladder below starts `1, ...`.
+// ---------------------------------------------------------------------------
+namespace {
+
+/// @brief One SignedQuantMat per level, each at that level's depth and extent.
+/// @note Recursive for the reason impl::PyramidLevels is: the levels have
+///       DIFFERENT types, so a vector of them would need type erasure.
+template <typename WordType, size_t... LevelBits>
+struct DerivLadder;
+
+template <typename WordType, size_t N0>
+struct DerivLadder<WordType, N0> {
+    bincv::SignedQuantMat<N0, WordType> mat;
+    DerivLadder(int w, int h) : mat(w, h) {}
+    template <size_t I>
+    bincv::SignedQuantMat<N0, WordType>& get() {
+        static_assert(I == 0, "derivative ladder index out of range");
+        return mat;
+    }
+    size_t bytes() const { return mat.sizeInWords() * sizeof(WordType); }
+};
+
+template <typename WordType, size_t N0, size_t N1, size_t... Rest>
+struct DerivLadder<WordType, N0, N1, Rest...> {
+    bincv::SignedQuantMat<N0, WordType> mat;
+    DerivLadder<WordType, N1, Rest...> rest;
+    DerivLadder(int w, int h)
+        : mat(w, h),
+          rest(static_cast<int>(bincv::pyrDownWidth(static_cast<size_t>(w))),
+               static_cast<int>(bincv::pyrDownHeight(static_cast<size_t>(h)))) {}
+    template <size_t I>
+    auto& get() {
+        if constexpr (I == 0) {
+            return mat;
+        } else {
+            return rest.template get<I - 1>();
+        }
+    }
+    size_t bytes() const { return mat.sizeInWords() * sizeof(WordType) + rest.bytes(); }
+};
+
+template <typename WordType, size_t... LevelBits>
+struct LadderFrontend {
+    static constexpr size_t Levels = sizeof...(LevelBits);
+    using Pyr = bincv::Pyramid<WordType, LevelBits...>;
+
+    Pyr prev, next;
+    DerivLadder<WordType, LevelBits...> dx, dy;
+    bincv::LKLevels<WordType, LevelBits...> levels;
+
+    LadderFrontend(int w, int h) : prev(w, h), next(w, h), dx(w, h), dy(w, h) {}
+
+    /// @brief pyrDown down both ladders, then the derivative of every previous
+    ///        level, then bind the views. Level 0 of both pyramids is the caller's.
+    void build() {
+        prev.build();
+        next.build();
+        buildDeriv<0>();
+        bind<0>();
+    }
+
+    template <size_t I>
+    void buildDeriv() {
+        if constexpr (I < Levels) {
+            bincv::derivativeX(prev.template level<I>(), dx.template get<I>());
+            bincv::derivativeY(prev.template level<I>(), dy.template get<I>());
+            buildDeriv<I + 1>();
+        }
+    }
+    template <size_t I>
+    void bind() {
+        if constexpr (I < Levels) {
+            levels.template get<I>() = bincv::lkLevel<Pyr::template levelBits<I>()>(
+                prev.template level<I>(), next.template level<I>(), dx.template get<I>(),
+                dy.template get<I>());
+            bind<I + 1>();
+        }
+    }
+
+    /// @brief Peak working set of the tracking stage: both pyramids and BOTH
+    ///        derivative ladders. They coexist -- the tracker reads all of them --
+    ///        so this is a peak, not a per-buffer ratio (CLAUDE.md, benchmarking).
+    size_t bytes() const {
+        return prev.sizeInBytes() + next.sizeInBytes() + dx.bytes() + dy.bytes();
+    }
+};
+
+/// @brief Copies a rendered 1-bit frame into a ladder's level 0.
+template <typename WordType, size_t... LevelBits>
+void seedLevelZero(LadderFrontend<WordType, LevelBits...>& fe, const BinMat<WordType>& prevSrc,
+                   const BinMat<WordType>& nextSrc) {
+    for (int y = 0; y < prevSrc.rows(); ++y) {
+        for (int x = 0; x < prevSrc.cols(); ++x) {
+            fe.prev.template level<0>().set(y, x, prevSrc.at(y, x));
+            fe.next.template level<0>().set(y, x, nextSrc.at(y, x));
+        }
+    }
+}
+
+/// @brief Runs one ladder over one warp and returns X-20's own FlowStats.
+/// @note Uses `measure()` -- the SAME function every X-20 number came out of --
+///       so the tolerance and the stuck rule cannot drift between the baseline
+///       and the sweep. Two copies of a tolerance is how two tolerances happen.
+template <typename WordType, size_t... LevelBits>
+FlowStats runLadder(const char* label, const BinMat<WordType>& prevSrc,
+                    const BinMat<WordType>& nextSrc, const Warp& warp,
+                    const std::vector<Point2f>& pts, double modelError, size_t* bytesOut) {
+    LadderFrontend<WordType, LevelBits...> fe(prevSrc.cols(), prevSrc.rows());
+    seedLevelZero(fe, prevSrc, nextSrc);
+    fe.build();
+    if (bytesOut != nullptr) *bytesOut = fe.bytes();
+
+    LKParams params;  // seal_params.yaml verbatim
+    std::vector<Point2f> out(pts.size());
+    std::vector<uint8_t> status(pts.size());
+    bincv::calcOpticalFlowPyrLK(fe.levels, pts.data(), out.data(), status.data(), nullptr,
+                                pts.size(), params);
+    const FlowStats s = measure(pts, out, status, warp);
+    const bool within = s.rms <= kRmsTolerance + modelError && s.maxError <= kMaxTolerance +
+                        modelError;
+    std::printf("  %-12s tracked=%3zu/%3zu stuck=%2zu/%2zu  rms=%7.4f  max=%7.4f  bytes=%8zu  %s\n",
+                label, s.tracked, s.eligible, s.stuck, s.truthMoved, s.rms, s.maxError,
+                fe.bytes(), within ? "WITHIN" : "OVER");
+    return s;
+}
+
+} // namespace
+
 constexpr int kW = 320;
 constexpr int kH = 240;
 
@@ -2068,6 +2207,53 @@ BINCV_TEST(Flow, NBitResidualIsExactAgainstPerPixel_uint32_t) {
     BINCV_CHECK_EQ(n5, size_t{0});
 }
 
+BINCV_TEST(Flow, X24_LadderSweep_Synthetic_uint32_t) {
+    // X-24's synthetic half. X-20 PASSED its synthetic cases at four 1-bit levels;
+    // the miss was on the reference pipeline's own edge maps. So this half is not
+    // where the rule is decided -- it is the control that stops a ladder from
+    // passing on real content by wrecking synthetic content, which the decision
+    // rule requires explicitly.
+    const int width = kW, height = kH;
+    BinMat<uint32_t> prevSrc(width, height), nextSrc(width, height);
+    const Warp warp = translation(1.3, -0.7);
+    renderWarped(prevSrc, Warp{});
+    renderWarped(nextSrc, warp);
+
+    // The point set is IDENTICAL across ladders by construction: eligiblePoints
+    // reads level 0's derivative, and level 0 is 1 bit in every ladder. That is
+    // what makes the rows below comparable at all (band D of the rule).
+    Frontend<uint32_t> base(width, height, 4);
+    renderWarped(base.prev[0], Warp{});
+    renderWarped(base.next[0], warp);
+    base.build();
+    LKParams params;
+    const std::vector<Point2f> pts = eligiblePoints(base.dx[0], base.dy[0], width, height, warp,
+                                                    params.winWidth, params.winHeight);
+    std::printf("\n  X-24 synthetic %dx%d, translation (1.30, -0.70), %zu eligible points\n",
+                width, height, pts.size());
+    std::printf("  tolerance: rms <= %.4f, max <= %.4f (X-20's, inherited verbatim)\n",
+                kRmsTolerance, kMaxTolerance);
+
+    size_t b = 0;
+    const FlowStats one   = runLadder<uint32_t, 1>            ("1 (1 level)", prevSrc, nextSrc, warp, pts, 0.0, &b);
+    const FlowStats l1111 = runLadder<uint32_t, 1, 1, 1, 1>   ("1/1/1/1",     prevSrc, nextSrc, warp, pts, 0.0, &b);
+    const FlowStats l1222 = runLadder<uint32_t, 1, 2, 2, 2>   ("1/2/2/2",     prevSrc, nextSrc, warp, pts, 0.0, &b);
+    const FlowStats l1333 = runLadder<uint32_t, 1, 3, 3, 3>   ("1/3/3/3",     prevSrc, nextSrc, warp, pts, 0.0, &b);
+    const FlowStats l1344 = runLadder<uint32_t, 1, 3, 4, 4>   ("1/3/4/4",     prevSrc, nextSrc, warp, pts, 0.0, &b);
+    const FlowStats l1355 = runLadder<uint32_t, 1, 3, 5, 5>   ("1/3/5/5",     prevSrc, nextSrc, warp, pts, 0.0, &b);
+    const FlowStats l1357 = runLadder<uint32_t, 1, 3, 5, 7>   ("1/3/5/7",     prevSrc, nextSrc, warp, pts, 0.0, &b);
+
+    // No tolerance is asserted here: this is a sweep, and X-24's rule is evaluated
+    // on the real-frame half. What IS asserted is the precondition that makes the
+    // sweep readable -- every ladder saw the same points and tracked enough of them.
+    const FlowStats* all[] = {&one, &l1111, &l1222, &l1333, &l1344, &l1355, &l1357};
+    for (const FlowStats* s : all) {
+        BINCV_CHECK_EQ(s->eligible, pts.size());
+        BINCV_CHECK(static_cast<double>(s->tracked) >=
+                    kMinTrackedFraction * static_cast<double>(s->eligible));
+    }
+}
+
 BINCV_TEST(Flow, MixedDepthLadderTracksAndIsNotTheUniformOne_uint32_t) {
     // The mixed-depth ladder is the form E-7's question needs, so it has to run
     // before E-7 can be measured. This checks the PLUMBING -- that every level is
@@ -2346,6 +2532,158 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
         BINCV_CHECK(worst < 0.01);
     }
 }
+
+// ---------------------------------------------------------------------------
+// X-24 / E-7 -- THE MEASUREMENT THE RULE IS DECIDED ON.
+//
+// These are X-20's own failing rows, re-run at every ladder. The tolerance,
+// the binarization, the warps, the eligibility rule and the stuck rule are all
+// X-20's, reached through the same functions -- nothing here is re-derived.
+// ---------------------------------------------------------------------------
+namespace {
+
+/// @brief How many DISTINCT values a level actually holds, against how many its
+///        declared depth could hold. X-2's question, asked of the real path.
+template <size_t N, typename WordType>
+void printLevelAlphabet(const bincv::QuantMat<N, WordType>& level, int index) {
+    std::vector<size_t> counts(size_t{1} << N, 0);
+    for (int y = 0; y < level.rows(); ++y) {
+        for (int x = 0; x < level.cols(); ++x) counts[level.at(y, x)]++;
+    }
+    size_t distinct = 0, set = 0;
+    for (size_t v = 0; v < counts.size(); ++v) {
+        if (counts[v] != 0) ++distinct;
+        if (v != 0) set += counts[v];
+    }
+    std::printf("    L%d  %4dx%-4d declared N=%zu (%zu values)  ACTUALLY USED %2zu"
+                "  non-zero %6zu / %zu (%.2f%%)\n",
+                index, level.cols(), level.rows(), N, counts.size(), distinct, set,
+                static_cast<size_t>(level.cols()) * static_cast<size_t>(level.rows()),
+                100.0 * static_cast<double>(set) /
+                    static_cast<double>(level.cols() * level.rows()));
+}
+
+template <typename WordType>
+void x24RealCase(const cv::Mat& gray, const char* label, const Warp& warp, double modelError,
+                 bool unclippedOnly = false) {
+    cv::Mat warped;
+    cv::warpAffine(gray, warped, affineOf(warp), gray.size(), cv::INTER_CUBIC,
+                   cv::BORDER_REFLECT_101);
+    const cv::Mat bin0 = referenceEdgeFilter(gray, 17);
+    const cv::Mat bin1 = referenceEdgeFilter(warped, 17);
+
+    BinMat<WordType> prevSrc(gray.cols, gray.rows), nextSrc(gray.cols, gray.rows);
+    prevSrc.fromCVMat(bin0);
+    nextSrc.fromCVMat(bin1);
+
+    // The point set comes from LEVEL 0, which is 1 bit in every ladder, so every
+    // row below is measured over the SAME points. Band D of X-24's rule exists
+    // because a curve over different point sets is not a curve.
+    Frontend<WordType> base(gray.cols, gray.rows, 4);
+    base.prev[0].fromCVMat(bin0);
+    base.next[0].fromCVMat(bin1);
+    base.build();
+    LKParams params;
+    std::vector<Point2f> pts = eligiblePoints(base.dx[0], base.dy[0], gray.cols, gray.rows,
+                                              warp, params.winWidth, params.winHeight);
+    // X-20's own control for deviation (ii), applied HERE because it is the one
+    // thing that could hide a depth effect: it attributed about half the
+    // four-level error to the clipped coarse-level window, and a window that is
+    // half outside the level is not measuring that level's ALPHABET.
+    if (unclippedOnly) {
+        pts = unclippedAtEveryLevel(base, pts, params.winWidth, params.winHeight);
+    }
+
+    std::printf("\n  %s  --  %zu eligible points, tol rms<=%.4f max<=%.4f\n", label, pts.size(),
+                kRmsTolerance + modelError, kMaxTolerance + modelError);
+    size_t b = 0;
+    runLadder<WordType, 1>            ("1 (1 level)", prevSrc, nextSrc, warp, pts, modelError, &b);
+    runLadder<WordType, 1, 1, 1, 1>   ("1/1/1/1",     prevSrc, nextSrc, warp, pts, modelError, &b);
+    runLadder<WordType, 1, 2, 2, 2>   ("1/2/2/2",     prevSrc, nextSrc, warp, pts, modelError, &b);
+    runLadder<WordType, 1, 3, 3, 3>   ("1/3/3/3",     prevSrc, nextSrc, warp, pts, modelError, &b);
+    runLadder<WordType, 1, 3, 4, 4>   ("1/3/4/4",     prevSrc, nextSrc, warp, pts, modelError, &b);
+    runLadder<WordType, 1, 3, 5, 5>   ("1/3/5/5",     prevSrc, nextSrc, warp, pts, modelError, &b);
+    runLadder<WordType, 1, 3, 5, 7>   ("1/3/5/7",     prevSrc, nextSrc, warp, pts, modelError, &b);
+}
+
+} // namespace
+
+BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
+    const cv::Mat gray = loadRealFrame();
+    if (gray.empty()) {
+        std::printf("  (skipped: sample image not found)\n");
+        BINCV_CHECK(true);
+        return;
+    }
+    LKParams params;
+    const double halfWin = 0.5 * static_cast<double>(params.winWidth - 1);
+    const double rotModel = halfWin * 1.0 * 3.14159265358979323846 / 180.0;
+    const double scaleModel = halfWin * 0.02;
+
+    std::printf("\n  ===================================================================\n"
+                "  X-24 / E-7: pyramid level bit depths, on the reference pipeline's\n"
+                "  own edge maps -- THE CONFIGURATION X-20 MISSED ON.\n"
+                "  Tolerance is X-20's, inherited verbatim: rms <= %.4f, max <= %.4f.\n"
+                "  `bytes` is both pyramids plus both derivative ladders -- a PEAK,\n"
+                "  since the tracker reads all of them.\n"
+                "  ===================================================================\n",
+                kRmsTolerance, kMaxTolerance);
+
+    x24RealCase<uint32_t>(gray, "real: stationary",        translation(0.0, 0.0), 0.0);
+    x24RealCase<uint32_t>(gray, "real: shift (1, 0)",      translation(1.0, 0.0), 0.0);
+    x24RealCase<uint32_t>(gray, "real: shift (0.25, 0.25)", translation(0.25, 0.25), 0.0);
+    x24RealCase<uint32_t>(gray, "real: shift (0.50, 0.50)", translation(0.50, 0.50), 0.0);
+    x24RealCase<uint32_t>(gray, "real: shift (0.75, 0.75)", translation(0.75, 0.75), 0.0);
+    x24RealCase<uint32_t>(gray, "real: shift (2, -3)",     translation(2.0, -3.0), 0.0);
+    x24RealCase<uint32_t>(gray, "real: rotate 1 deg",      rotation(1.0, gray.cols * 0.5,
+                                                                    gray.rows * 0.5), rotModel);
+    x24RealCase<uint32_t>(gray, "real: scale 1.02",        scaling(1.02, gray.cols * 0.5,
+                                                                   gray.rows * 0.5), scaleModel);
+
+    // THE CLIPPING CONTROL. If depth helps anywhere, it should help here: these
+    // are the points whose 31x31 window is fully inside EVERY level, so the
+    // coarse-level reading is of the level's alphabet and not of its border.
+    std::printf("\n  ---- restricted to points that never clip at ANY level ----\n");
+    x24RealCase<uint32_t>(gray, "unclipped: shift (1, 0)", translation(1.0, 0.0), 0.0, true);
+    x24RealCase<uint32_t>(gray, "unclipped: shift (0.25, 0.25)", translation(0.25, 0.25), 0.0,
+                          true);
+    x24RealCase<uint32_t>(gray, "unclipped: shift (0.75, 0.75)", translation(0.75, 0.75), 0.0,
+                          true);
+
+    // THE DISCRIMINATING CASE. Everything above is a motion a single level can
+    // already handle, so a ladder can score well there by CONTRIBUTING NOTHING.
+    // These are displacements a one-level tracker cannot follow -- the pyramid
+    // has to do real work -- which is the only regime in which "this ladder is
+    // better" means "this ladder tracks", rather than "this ladder does least
+    // harm".
+    std::printf("\n  ---- unclipped, LARGE motion: the pyramid must actually work ----\n");
+    x24RealCase<uint32_t>(gray, "unclipped: shift (2, -3)", translation(2.0, -3.0), 0.0, true);
+    x24RealCase<uint32_t>(gray, "unclipped: shift (6, 4)", translation(6.0, 4.0), 0.0, true);
+    x24RealCase<uint32_t>(gray, "unclipped: shift (12, -8)", translation(12.0, -8.0), 0.0, true);
+
+    // T4.1's other deliverable: RE-RUN X-2 AGAINST THE REAL PYRAMID PATH.
+    // X-2 read the natural alphabet as 1/3/4/5 from one 256^2 frame; X-15
+    // corrected it to 1/3/5/7 from the representation. This measures what the
+    // uncapped ladder ACTUALLY holds on the reference pipeline's own edge map,
+    // which is the content the frontend sees, and closes X-2's caveat.
+    {
+        bincv::Pyramid<uint32_t, 1, 3, 5, 7> deep(gray.cols, gray.rows);
+        const cv::Mat bin0 = referenceEdgeFilter(gray, 17);
+        deep.level<0>().fromCVMat(bin0);
+        deep.build();
+        std::printf("\n  ---- X-2 re-run: the UNCAPPED ladder's real alphabet ----\n");
+        printLevelAlphabet(deep.level<0>(), 0);
+        printLevelAlphabet(deep.level<1>(), 1);
+        printLevelAlphabet(deep.level<2>(), 2);
+        printLevelAlphabet(deep.level<3>(), 3);
+    }
+
+    // No pass/fail asserted here: X-24's rule is evaluated in EXPERIMENTS.md from
+    // the whole curve, and asserting a band inside the sweep that produces it
+    // would be deciding the experiment from inside the measurement.
+    BINCV_CHECK(true);
+}
+
 #endif // BINCV_WITH_OPENCV
 
 BINCV_TEST_MAIN("test_opticalflow")

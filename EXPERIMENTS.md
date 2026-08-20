@@ -4883,7 +4883,7 @@ device is where this is closed.
 
 ---
 
-### X-24 · Pyramid level bit depths · `TODO`
+### X-24 · Pyramid level bit depths · `PARTIAL`
 
 **THIS RULE IS COMMITTED ON ITS OWN, BEFORE THE HARNESS THAT MEASURES IT EXISTS.**
 Same discipline as X-9/X-10/X-11 and X-23. The kernel that makes the question
@@ -4991,7 +4991,114 @@ taken anywhere else would not survive contact with the ladder that has to be cho
 on it. This entry therefore stays **PARTIAL** until the speed axis runs on the Pi,
 and a ladder is not adopted into a D-record until it does.
 
-**Result:** *(not yet measured)*
+**PLATFORM:** development machine (x86_64). Accuracy and footprint only — both are
+exact and device-independent, which is why they close here. **The ns/frame axis has
+NOT been measured**, so this entry is `PARTIAL` and no ladder is promoted to a
+D-record, exactly as the rule pre-declared.
+
+**Harness validity, checked before any row was read.** Every `1/1/1/1` row below
+reproduces [X-20](#x-20--hybrid-lk-accuracy-against-ground-truth-and-the-frontends-peak-footprint--done)'s
+published number **exactly** — 3.2530, 1.2645, 2.2311, 3.5093, 5.8461, 4.5949,
+8.2501 — through the generic-`N` code path rather than the hand-written one. The
+tolerance, binarization, warps, eligibility rule and stuck rule are reached through
+X-20's own functions, not re-derived.
+
+**Result (a) — the real frame, 752×480, reference binarization, 141 eligible
+points, ALL of them (this is the gate):**
+
+| ladder | (1,0) | (0.25,0.25) | (0.50,0.50) | (0.75,0.75) | (2,−3) | rot 1° | scale 1.02 | bytes |
+|---|---|---|---|---|---|---|---|---|
+| 1 (one level) | 0.0017 | 0.2860 | 0.4587 | 0.6800 | 2.5358 | 3.4934 | 3.7678 | 276 480 |
+| **1/1/1/1** *(ships)* | 3.2530 | 1.2645 | 2.2311 | 3.5093 | 5.8461 | 4.5949 | 8.2501 | 367 200 |
+| 1/2/2/2 | **0.8356** | 1.6655 | 1.8877 | 1.8394 | 3.1247 | 7.1873 | 6.6770 | 427 680 |
+| 1/3/3/3 | 1.1092 | 1.6837 | 2.0384 | 1.8483 | **3.0311** | 6.8964 | **5.6894** | 488 160 |
+| 1/3/4/4 | 1.4708 | 1.6776 | 2.0351 | 1.9732 | 3.2101 | 6.9827 | 5.9344 | 502 560 |
+| 1/3/5/5 | 1.5133 | 1.6784 | 2.0407 | 1.9687 | 3.4883 | 6.9169 | 6.1521 | 516 960 |
+| 1/3/5/7 | 1.5151 | 1.6783 | 2.0412 | 1.9654 | 3.4867 | 6.9191 | 6.1376 | 522 720 |
+
+RMS px. **Not one non-stationary cell is inside the 0.25 px tolerance at any
+depth.** Stationary is 0.0000 at every ladder. Every ladder tracked 141/141.
+
+**Result (b) — the SAME points restricted to the 58 whose 31×31 window is fully
+inside EVERY level (X-20's own control for deviation (ii)):**
+
+| ladder | (1,0) | (0.25,0.25) | (0.75,0.75) | (2,−3) | (6,4) | (12,−8) |
+|---|---|---|---|---|---|---|
+| 1 (one level) | 0.0024 | **0.2278** | 0.5916 | 2.2820 | 6.7355 | 14.1441 |
+| **1/1/1/1** *(ships)* | 1.4742 | 0.3994 | 1.3482 | 4.4581 | 1.7816 | **0.0009** |
+| **1/2/2/2** | **0.0010** | 0.3847 | 0.6061 | **0.0014** | **0.0002** | **0.0001** |
+| 1/3/3/3 | 0.5334 | 0.3312 | 0.8172 | **0.0013** | **0.0003** | **0.0001** |
+| 1/3/4/4 | 0.8585 | 0.3441 | 0.8182 | 1.0820 | **0.0003** | **0.0001** |
+| 1/3/5/5 | 0.8567 | 0.3443 | 0.8498 | 2.0650 | **0.0002** | **0.0001** |
+| 1/3/5/7 | 0.8595 | 0.3443 | 0.8484 | 2.0641 | **0.0003** | **0.0001** |
+
+Bold is inside tolerance. 58/58 tracked in every cell.
+
+**Conclusion — and the hypothesis was wrong in BOTH directions, which is why the
+rule was written down first.**
+
+1. **BAND C FIRES ON THE GATE.** No ladder brings the four-level tracker inside
+   X-20's tolerance on the full 141-point set, at any depth up to `1/3/5/7`. **A
+   deeper alphabet is not what fixes T3.8's miss**, and E-7 as posed — "how many
+   bits does each level need to preserve accuracy" — presupposed a cause that the
+   measurement does not support. The tolerance was not widened and nothing was
+   tuned.
+2. **BAND D ALSO FIRES, AND ITS REMEDY DOES NOT DISSOLVE IT.** Accuracy is not
+   monotone in depth: it is **peaked at 2 bits** and gets WORSE with more. On
+   `(1,0)` unclipped, 1 bit gives 1.4742, **2 bits gives 0.0010 — a factor of
+   1474** — and 5 bits gives back 0.8567. Band D's prescribed check was applied and
+   excludes the obvious artifact: **every ladder tracked every point** (141/141,
+   58/58), so the rows are measured over IDENTICAL point sets and the
+   non-monotonicity is real rather than a changing denominator. `minEigThreshold`
+   rejection is likewise not involved, for the same reason.
+3. **Hypothesis 2 is refuted too, in the good direction.** It predicted no ladder
+   would reach the one-level number. On `(1,0)` unclipped `1/2/2/2` returns
+   **0.0010 against one level's 0.0024**, and on every large motion it beats one
+   level by four orders of magnitude.
+4. **THE DOMINANT RESIDUAL IS CLIPPING, NOT QUANTISATION — and that relocates the
+   problem onto a decision the project took deliberately.** X-20 attributed "about
+   half" the four-level error to the clipped coarse window. Measured directly: on
+   `(1,0)`, `1/2/2/2` goes from 0.8356 over all 141 points to **0.0010** over the
+   58 that never clip. Clipping was not half of that ladder's error, it was
+   essentially all of it. Only **58 of 141 points (41%)** have a 31×31 window
+   inside all four levels — which is exactly the population the reference's
+   `winSize`-wide reflected border exists to serve, at the 1.24×-per-level cost
+   [deviation (ii)](../bincv-cpp/include/bincv-cpp/ops/opticalFlow.hpp) declined.
+5. **1-bit coarse levels ARE genuinely broken, so X-20 was half right.** `1/1/1/1`
+   fails unclipped at `(1,0)`, `(2,−3)` and `(6,4)` where `1/2/2/2` is exact. The
+   histogram says why, and it is not about sub-pixel localisation: down a 1-bit
+   ladder the edge map is **thinned away** — level 3 retains 154 set pixels of
+   5 640 against `1/2/2/2`'s 1 028. What the second bit buys is **content
+   survival**, not precision.
+6. **The depth regression is real but its MECHANISM is not established, and two
+   explanations remain open.** (i) The bit-sliced covariance and residual weight
+   plane pairs by `2^(i+j)`, so a few high-magnitude pixels dominate a window whose
+   sub-pixel accuracy comes from averaging many edge crossings — which predicts
+   degradation at SMALL motion and none at large, and that is exactly the observed
+   pattern (`(12,−8)` is exact at every depth; `(2,−3)` fails from 4 bits;
+   `(1,0)` from 3). (ii) `1/2/2/2`'s upper levels collapse to two distinct values
+   anyway, so its advantage may be density preservation rather than precision.
+   **These were not separated here** and the entry does not choose between them.
+7. **`requantizeBoxSum` is excluded as the cause.** It is
+   `round(sum/4 · (2^NOut−1)/(2^NIn−1))` — a faithful average renormalized to the
+   output alphabet — at every depth, verified against the level histograms, so the
+   ladders differ in precision and not in transfer function.
+
+**Decision:** **None taken, and that is the pre-registered outcome, not a stall.**
+Band C requires the remainder to be registered rather than absorbed, and the rule
+forbids adopting any ladder before the speed axis runs on the reference device.
+Two experiments are registered from this entry:
+[E-14](ARCHITECTURE.md#register) (the coarse-level window border — now known to be
+the dominant term, not a secondary one) and
+[E-15](ARCHITECTURE.md#register) (why accuracy peaks at 2 bits). **`1/2/2/2` is the
+provisional leader on accuracy and is also the cheapest non-1-bit ladder** — 427 680
+B against `1/3/5/7`'s 522 720 B — but it is not adopted until E-14 is settled,
+because a 41% keypoint loss is a larger effect than anything this entry measured.
+
+**Method:** `tests/test_opticalflow.cpp`, `Flow.X24_LadderSweep_RealFrame_uint32_t`
+and `Flow.X24_LadderSweep_Synthetic_uint32_t`, built on `LadderFrontend` /
+`runLadder`, which reuse X-20's `measure()`, `eligiblePoints()` and
+`unclippedAtEveryLevel()` verbatim.
 
 ---
 
