@@ -2754,9 +2754,22 @@ and subpixel interpolation. **API tier 2.**
 Reference: `SEAL/src/keypoint_tracking/SparsePyrLKOpticalFlowSealImpl.cpp`.
 
 **Done when**
-- Tracks features across real image sequences
-- Flow vectors agree with the reference within a documented tolerance
-- Peak footprint of the full frontend measured — this is the number Phase 4 needs
+
+*Split along the same line as [T4.3](#t43--e-5--end-to-end-validation--todo), because
+the original bullet conflated a kernel criterion with a pipeline one.*
+
+- **Flow vectors agree with the reference within a documented tolerance.** Testable
+  now, and more sharply than on footage: a synthetic warp of a real frame has
+  **exactly known** ground-truth displacement, so the tolerance is measured against
+  truth rather than against another estimator. Use sub-pixel translations, a
+  rotation, and a scale, on both synthetic texture and the repo's real test image.
+- **Peak footprint of the full frontend measured** — denoise → pyramid →
+  derivative → corner → track, one number, the figure Phase 4 needs.
+- **Tracking across real image sequences belongs to T4.3a**, not here. ADVIO ships
+  `.mov`, so it needs frame extraction and a comparison harness against the
+  reference frontend — that is pipeline validation, and
+  [ARCHITECTURE §1](ARCHITECTURE.md#what-bincv-is-not) puts it on the far side of
+  binCV's boundary. Do not claim it here.
 
 **Verify:** V-ALL
 
