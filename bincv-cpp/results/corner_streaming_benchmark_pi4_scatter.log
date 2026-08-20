@@ -1,0 +1,225 @@
+
+------------------------------------------------------------
+  binCV reference-device run
+------------------------------------------------------------
+  target:  pi4
+  command: ./benchmark/corner_streaming_benchmark
+
+  preflight
+  arch: aarch64
+  throttle before: 0x0 (clean)
+  governor: ondemand -> performance
+
+  sync
+  repository synced to bincv-measure
+
+  build (Release, core-only)
+[  1%] Building CXX object benchmark/CMakeFiles/corner_streaming_arms.dir/corner_streaming_arm_frame.cpp.o
+[  5%] Built target test_error_abort
+[  5%] Building CXX object tests/CMakeFiles/test_assert_abort.dir/test_assert_abort.cpp.o
+[  7%] Built target gtest
+[  8%] Building CXX object benchmark/CMakeFiles/corner_streaming_arms.dir/corner_streaming_arm_stream2.cpp.o
+[ 15%] Built target genericn_arms
+[ 17%] Built target alignment_benchmark
+[ 18%] Building CXX object benchmark/CMakeFiles/corner_benchmark.dir/corner_benchmark.cpp.o
+[ 20%] Building CXX object benchmark/CMakeFiles/corner_streaming_arms.dir/corner_streaming_arm_stream1.cpp.o
+[ 22%] Built target covariance_benchmark
+[ 25%] Built target covariance_nbit_benchmark
+[ 27%] Built target decimate_benchmark
+[ 30%] Built target genericn_benchmark
+[ 32%] Built target morphology_path_benchmark
+[ 35%] Built target pyramid_benchmark
+[ 37%] Built target reduce_target_benchmark
+[ 40%] Built target window_benchmark
+[ 42%] Built target wordwidth_benchmark
+[ 45%] Built target test_binMat
+[ 47%] Built target test_quantMat
+[ 50%] Built target test_storage
+[ 52%] Built target test_error
+[ 55%] Built target test_error_checked
+[ 57%] Built target test_logic
+[ 60%] Built target test_shift
+[ 62%] Built target test_reduce
+[ 65%] Built target test_bitslice
+[ 67%] Built target test_denoise
+[ 70%] Built target test_threshold
+[ 72%] Built target test_morphology
+[ 75%] Built target test_resample
+[ 77%] Built target test_pyramid
+[ 80%] Built target test_derivative
+[ 82%] Built target test_covariance
+[ 83%] Building CXX object tests/CMakeFiles/test_corner.dir/test_corner.cpp.o
+[ 83%] Built target corner_streaming_arms
+[ 85%] Building CXX object tests/CMakeFiles/test_opticalflow.dir/test_opticalflow.cpp.o
+[ 86%] Linking CXX executable corner_benchmark
+[ 86%] Built target corner_benchmark
+[ 88%] Built target test_harness
+[ 91%] Built target test_harness_failing
+[ 93%] Built target gtest_main
+[ 95%] Building CXX object benchmark/CMakeFiles/corner_streaming_benchmark.dir/corner_streaming_benchmark.cpp.o
+[ 96%] Linking CXX executable test_assert_abort
+[ 96%] Built target test_assert_abort
+[ 97%] Linking CXX executable corner_streaming_benchmark
+[ 97%] Built target corner_streaming_benchmark
+[ 98%] Linking CXX executable test_opticalflow
+[ 98%] Built target test_opticalflow
+[100%] Linking CXX executable test_corner
+[100%] Built target test_corner
+  build complete
+
+  run
+------------------------------------------------------------
+binCV T3.11 / E-10 (X-23) -- the rolling response ring against the frame map
+three arms, one translation unit each; every answer checked before anything is timed
+selection parameters are GoodFeaturesParams' defaults = seal_params.yaml verbatim
+
+
+  TRUE PEAK, uint32_t 640x480, blockSize 3, candidate array sized to the MEASURED
+  survivor count (13186). The probe buffer that measured it is destroyed before
+  these numbers are taken.
+    term                                 frame map   streaming
+    response storage                     1228800 B      7680 B
+    candidate array (also the output)     158232 B    158232 B
+    carry for the GLOBAL properties            0 B        16 B
+    TRUE PEAK                            1387032 B    165928 B   R = 8.36x
+    structural worst case (w-2)(h-2)     4888368 B   3667264 B
+    the candidate row is THIS FRAME's reading (13186 survivors). At X-20's own
+    frontend content (8 754 survivors, 105048 B) the same arithmetic gives, with
+    X-20's other four stages = 387720 B:
+      frontend  frame map 1721568 B   streaming 500464 B   R = 3.44x
+      X-23's saving gate is P_stream <= 750 000 B: PASSES
+      THE END-TO-END RE-MEASUREMENT IS NOT THIS LINE: it is
+      Flow.FrontendFootprint_640x480 in tests/test_opticalflow.cpp, which owns
+      the frontend, counts `operator new` through all five stages and asserts
+      the two shapes return identical corners. This line only lets the
+      benchmark's own peaks be read in X-20's units.
+
+  640x480, uint32_t (D-14's default) -- THE DECISION CELL IS blockSize 3
+  block  arm           det ns/px    spread det ms/f rsp ns/px    spread     vs F  allc
+  3      F  frame-map    131.070     0.19%    40.26   105.360     0.13%    1.00x     0
+  3      S2 two-pass     176.171     0.15%    54.12   150.859     0.04%    1.34x     0
+  3      S1 one-pass     100.190     0.16%    30.78    74.654     0.04%    0.76x     0
+         -> T(S1) 0.764x   T(S2) 1.344x   (whole detector, medians)   candidates 13186
+  7      F  frame-map    267.167     0.10%    82.07   153.750     0.17%    1.00x     0
+  7      S2 two-pass     369.287     0.14%   113.45   256.046     0.08%    1.38x     0
+  7      S1 one-pass     244.060     0.15%    74.98   129.810     0.07%    0.91x     0
+         -> T(S1) 0.914x   T(S2) 1.382x   (whole detector, medians)   candidates 67447
+  15     F  frame-map    392.551     0.75%   120.59   266.031     0.10%    1.00x     0
+  15     S2 two-pass     652.161     0.72%   200.34   523.113     0.07%    1.66x     0
+  15     S1 one-pass     391.346     0.76%   120.22   263.429     0.06%    1.00x     0
+         -> T(S1) 0.997x   T(S2) 1.661x   (whole detector, medians)   candidates 72557
+  31     F  frame-map    647.839     0.70%   199.02   579.743     0.51%    1.00x     0
+  31     S2 two-pass    1336.699     4.33%   410.63  1266.802     4.38%    2.06x     0
+  31     S1 one-pass     702.612     4.17%   215.84   644.767     0.91%    1.08x     0
+         -> T(S1) 1.085x   T(S2) 2.063x   (whole detector, medians)   candidates 32468
+
+  THE SAME CELLS WITH THE ARM ORDER SWAPPED IN THE BATCH (S1, S2, F).
+  A verdict that moves here is layout, not a result.
+  block  arm           det ns/px    spread det ms/f rsp ns/px    spread     vs F  allc
+  3      F  frame-map    131.049     0.15%    40.26   105.362     0.12%    1.00x     0
+  3      S2 two-pass     176.154     0.13%    54.11   150.822     0.05%    1.34x     0
+  3      S1 one-pass     100.231     0.10%    30.79    74.644     0.07%    0.76x     0
+         -> T(S1) 0.765x   T(S2) 1.344x   (whole detector, medians)   candidates 13186
+  7      F  frame-map    267.144     0.15%    82.07   153.714     0.16%    1.00x     0
+  7      S2 two-pass     369.189     0.18%   113.41   255.983     0.08%    1.38x     0
+  7      S1 one-pass     244.149     0.12%    75.00   129.808     0.09%    0.91x     0
+         -> T(S1) 0.914x   T(S2) 1.382x   (whole detector, medians)   candidates 67447
+  15     F  frame-map    392.648     0.76%   120.62   265.953     0.08%    1.00x     0
+  15     S2 two-pass     651.697     0.68%   200.20   523.171     0.09%    1.66x     0
+  15     S1 one-pass     391.473     0.70%   120.26   263.418     0.05%    1.00x     0
+         -> T(S1) 0.997x   T(S2) 1.660x   (whole detector, medians)   candidates 72557
+  31     F  frame-map    647.678     0.66%   198.97   579.703     0.51%    1.00x     0
+  31     S2 two-pass    1336.208     4.32%   410.48  1266.729     4.39%    2.06x     0
+  31     S1 one-pass     703.213     4.29%   216.03   644.680     0.92%    1.09x     0
+         -> T(S1) 1.086x   T(S2) 2.063x   (whole detector, medians)   candidates 32468
+
+  blockSize 3 decision cell: T = 0.764x in order (F, S2, S1) and 0.765x in order (S1, S2, F);
+  response stage 0.709x and 0.708x.
+
+  TRUE PEAK, uint64_t 640x480, blockSize 3, candidate array sized to the MEASURED
+  survivor count (13186). The probe buffer that measured it is destroyed before
+  these numbers are taken.
+    term                                 frame map   streaming
+    response storage                     1228800 B      7680 B
+    candidate array (also the output)     158232 B    158232 B
+    carry for the GLOBAL properties            0 B        16 B
+    TRUE PEAK                            1387032 B    165928 B   R = 8.36x
+    structural worst case (w-2)(h-2)     4888368 B   3667264 B
+    the candidate row is THIS FRAME's reading (13186 survivors). At X-20's own
+    frontend content (8 754 survivors, 105048 B) the same arithmetic gives, with
+    X-20's other four stages = 387720 B:
+      frontend  frame map 1721568 B   streaming 500464 B   R = 3.44x
+      X-23's saving gate is P_stream <= 750 000 B: PASSES
+      THE END-TO-END RE-MEASUREMENT IS NOT THIS LINE: it is
+      Flow.FrontendFootprint_640x480 in tests/test_opticalflow.cpp, which owns
+      the frontend, counts `operator new` through all five stages and asserts
+      the two shapes return identical corners. This line only lets the
+      benchmark's own peaks be read in X-20's units.
+
+  640x480, uint64_t
+  block  arm           det ns/px    spread det ms/f rsp ns/px    spread     vs F  allc
+  3      F  frame-map    136.460     0.14%    41.92   110.521     0.12%    1.00x     0
+  3      S2 two-pass     182.942     0.15%    56.20   157.483     0.07%    1.34x     0
+  3      S1 one-pass     105.766     0.19%    32.49    80.142     0.07%    0.78x     0
+         -> T(S1) 0.775x   T(S2) 1.341x   (whole detector, medians)   candidates 13186
+  7      F  frame-map    268.667     0.12%    82.53   154.740     0.18%    1.00x     0
+  7      S2 two-pass     375.599     0.14%   115.38   262.478     0.08%    1.40x     0
+  7      S1 one-pass     250.460     0.14%    76.94   136.086     0.06%    0.93x     0
+         -> T(S1) 0.932x   T(S2) 1.398x   (whole detector, medians)   candidates 67447
+  15     F  frame-map    379.974     0.98%   116.73   252.842     0.06%    1.00x     0
+  15     S2 two-pass     626.312     0.82%   192.40   499.213     0.39%    1.65x     0
+  15     S1 one-pass     386.985     0.80%   118.88   259.437     0.06%    1.02x     0
+         -> T(S1) 1.018x   T(S2) 1.648x   (whole detector, medians)   candidates 72557
+  31     F  frame-map    564.698     2.86%   173.48   496.356     3.01%    1.00x     0
+  31     S2 two-pass    1133.805     7.98%   348.30  1072.410     8.65%    2.01x     0
+  31     S1 one-pass     633.407     3.07%   194.58   565.121     3.21%    1.12x     0
+         -> T(S1) 1.122x   T(S2) 2.008x   (whole detector, medians)   candidates 32468
+
+  TRUE PEAK, uint32_t 752x480, blockSize 3, candidate array sized to the MEASURED
+  survivor count (15557). The probe buffer that measured it is destroyed before
+  these numbers are taken.
+    term                                 frame map   streaming
+    response storage                     1443840 B      9024 B
+    candidate array (also the output)     186684 B    186684 B
+    carry for the GLOBAL properties            0 B        16 B
+    TRUE PEAK                            1630524 B    195724 B   R = 8.33x
+    structural worst case (w-2)(h-2)     5745840 B   4311040 B
+
+  752x480, uint32_t
+  block  arm           det ns/px    spread det ms/f rsp ns/px    spread     vs F  allc
+  3      F  frame-map    129.318     0.39%    46.68   108.302     0.14%    1.00x     0
+  3      S2 two-pass     171.674     0.21%    61.97   151.032     0.07%    1.33x     0
+  3      S1 one-pass      95.598     0.07%    34.51    74.712     0.07%    0.74x     0
+         -> T(S1) 0.739x   T(S2) 1.328x   (whole detector, medians)   candidates 15557
+
+  752x480, uint64_t
+  block  arm           det ns/px    spread det ms/f rsp ns/px    spread     vs F  allc
+  3      F  frame-map    133.993     0.36%    48.37   113.043     0.15%    1.00x     0
+  3      S2 two-pass     178.441     0.25%    64.41   157.597     0.04%    1.33x     0
+  3      S1 one-pass     101.095     0.09%    36.49    80.186     0.06%    0.75x     0
+         -> T(S1) 0.754x   T(S2) 1.332x   (whole detector, medians)   candidates 15557
+
+  the `allc` column is `operator new` calls -- plain AND C++17 over-aligned --
+  counted around ONE call of each arm. Zero is what "no heap in the kernel" means.
+  sink 497332
+------------------------------------------------------------
+
+------------------------------------------------------------
+  ENVIRONMENT -- record this with any measurement
+------------------------------------------------------------
+  device:           pi4
+  cpu:              Raspberry Pi 4 Model B Rev 1.5
+  arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+  compiler:         g++ (Debian 14.2.0-19) 14.2.0
+  governor:         performance (restored to ondemand on exit)
+  core pinning:     taskset -c 3
+  throttled before: throttled=0x0
+  throttled after:  throttled=0x0
+  commit:           79db8f8
+------------------------------------------------------------
+
+  OK -- command succeeded, device state valid throughout
+  Timings from this device ARE authoritative (unlike emulation).
+  Record the environment block above in EXPERIMENTS.md.
+
+  governor restored to ondemand

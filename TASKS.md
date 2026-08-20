@@ -3193,13 +3193,13 @@ rather than deciding this, so the existing entry point stays.
 which is the trade to measure rather than assume.~~ **THE ESTIMATE WAS WRONG IN THE
 DIRECTION THAT MATTERS, AND [X-23](EXPERIMENTS.md)'s RULE PRE-DECLARED THIS
 CORRECTION RATHER THAN LETTING IT BE ABSORBED.** Measured on the reference device
-at 640×480, `uint32_t`, `blockSize` 3: the streaming form is **0.76× the time** —
-40.26 → **30.78 ms/frame** — and **7 680 B of ring plus 16 B of carry** against
+at 640×480, `uint32_t`, `blockSize` 3: the streaming form is **0.774× the time** —
+40.79 → **31.59 ms/frame** — and **7 680 B of ring plus 16 B of carry** against
 1 228 800 B. The "~2×" assumed a second pass to find the global maximum; the second
 pass is not needed (the threshold is a pure post-filter and the survivors are an
 up-set of the raw 3×3 maxima), and a ring forces the row-major sweep X-18 had
 already measured as the *faster* traversal at `blockSize` 3. The two-pass shape the
-estimate described was built and priced anyway, as X-23's arm S2: **1.344×**. The
+estimate described was built and priced anyway, as X-23's arm S2: **1.33×**. The
 same wrong figure appeared in ARCHITECTURE §9's E-10 row and X-20's decision 3, and
 all three carry the correction by name.
 
@@ -3221,7 +3221,9 @@ smaller *and* faster.
   asserted to return the same corners on X-20's own content.
 - ✔ Compute measured on the device (`throttled=0x0` before and after, exit 0), three
   arms in three translation units, arm order swapped and re-run — the verdict moves
-  by 0.001.
+  by 0.001 — and the **whole benchmark run twice**, which is what says the ratio is
+  reproducible (0.774× and 0.764×) while an individual ns/pixel column drifts up to
+  ~3.4% between runs against a within-run spread of 0.15%. Both logs are committed.
 - ✔ Recorded as
   [D-22](ARCHITECTURE.md#d-22-the-corner-response-streams-over-a-three-row-ring-and-that-is-the-recommended-path);
   E-10 closes.

@@ -915,25 +915,35 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 //      is. **So the prune is a speed device with no effect on the answer**, which
 //      is why it can be as aggressive as the running maximum allows.
 //
-// The result is ONE evaluation per pixel, one pass, a three-row ring, and a carry
-// of one `float` on top of the candidate array the frame-map form already owns.
-// `Corner.Streaming_*` proves equality element for element rather than asserting
-// this argument.
+// The result is ONE evaluation per pixel, one pass, a three-row ring, and 16 B of
+// scalar carry on top of the candidate array the frame-map form already owns --
+// a running maximum, a running retained count and the strongest discarded
+// response. Only the last of those three has no counterpart in the frame-map
+// form; all three are counted in the footprint table anyway, because X-23 said
+// every byte of carry comes off the saving. `Corner.Streaming_*` proves the
+// equality element for element rather than asserting this argument.
 //
 // WHAT IT COSTS AND WHAT IT SAVES -- MEASURED, ON THE REFERENCE DEVICE
 //
 // See D-22 in ARCHITECTURE 8 and X-23 in EXPERIMENTS.md for the full table and
 // for the pre-registered rule the numbers were judged against. 640x480,
 // `uint32_t`, `blockSize` 3 (SEAL's own value), medians of 11 interleaved
-// batches, spreads 0.10-0.19%, arm order swapped and re-run:
+// batches, within-run spreads 0.15-0.27%, arm order swapped and re-run:
 //
 //     form        whole detector   response stage    corner peak    frontend peak
-//     frame map   131.1 ns/px       105.4 ns/px      1 333 848 B      1 721 568 B
-//     streaming   100.2 ns/px        74.7 ns/px        112 744 B        500 464 B
-//                 T = 0.76x                             11.8x            3.44x
+//     frame map   132.8 ns/px       107.1 ns/px      1 333 848 B      1 721 568 B
+//     streaming   102.8 ns/px        77.1 ns/px        112 744 B        500 464 B
+//                 T = 0.77x                             11.8x            3.44x
 //
-// **THE STREAMING FORM IS FASTER, NOT 2x SLOWER AS THIS TASK WAS SCHEDULED ON**,
-// and 3.44x smaller across the whole frontend. TASKS.md T3.11, ARCHITECTURE 9's
+// TWO INDEPENDENT DEVICE RUNS, because the within-run spread is not the whole
+// story: the reported run gives T = 0.774x and the other (results/*_scatter.log)
+// gives 0.764x. RUN-TO-RUN scatter is ~1.3% on the ratio and up to ~3.4% on an
+// individual ns/pixel column, an order of magnitude above the within-run spread
+// -- so quote the ratio, not the third digit of a nanosecond. Both runs give the
+// same verdict at every block size, both word types and both frame sizes.
+//
+// **THE STREAMING FORM IS 1.29x FASTER, NOT 2x SLOWER AS THIS TASK WAS SCHEDULED
+// ON**, and 3.44x smaller across the whole frontend. TASKS.md T3.11, ARCHITECTURE 9's
 // E-10 row and X-20's decision 3 all said "roughly 2x the response compute"; all
 // three are corrected by name in X-23 rather than quietly. The reason is the
 // traversal: a ring FORCES a row-major sweep, and X-18 already measured the
@@ -942,13 +952,20 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 // anything.
 //
 // It costs where the sliding accumulator earns its keep, which is LARGE blocks:
-// T = 0.76x at 3, 0.91x at 7, 1.00x at 15, 1.08x at 31. The crossover is between
+// T = 0.77x at 3, 0.92x at 7, 1.00x at 15, 1.08x at 31. The crossover is between
 // 15 and 31, not between 3 and 7. A caller running a large block and wanting the
 // last 8% should take the frame-map form -- and will usually want the map anyway.
 //
-// The two-pass shape the estimate described was measured too (X-23's arm S2) and
-// is 1.34x at `blockSize` 3 for the SAME footprint. It is not shipped: the
-// second pass buys nothing, which is the substantive finding of the experiment.
+// The two-pass shape the estimate described was measured too (X-23's arm S2): it
+// is 1.33x at `blockSize` 3 for THE SAME PEAK -- the same three-row ring (it uses
+// ring row 0 as its first pass's scratch) and the same candidate array, differing
+// only by a scalar or two, which is far inside the resolution of any footprint
+// claim. X-23's arm-tie rule therefore cannot separate the two on peak, and its
+// second clause -- "unless it is more than 1.10x slower" -- decides: S2 is 1.71x
+// S1. It is not shipped, because nothing should ship two implementations of one
+// answer; it lives in benchmark/corner_streaming_arm_stream2.cpp as the priced
+// alternative. **That the second pass buys nothing is the substantive finding of
+// the experiment.**
 // ---------------------------------------------------------------------------
 
 /// @brief Rows the streaming form's ring must have.
