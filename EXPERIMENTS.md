@@ -2668,6 +2668,268 @@ Raw log: [bincv-cpp/results/covariance_benchmark_pi4.log](bincv-cpp/results/cova
 
 ---
 
+### X-18 · Does the incremental window form still pay inside T3.7's dense sweep? · `DONE`
+
+**Gates:** nothing that is written. `ops/corner.hpp` is already built on
+`SlidingWindowCount`, because [D-15](ARCHITECTURE.md#d-15-window-reductions-get-incremental-state-and-a-fused-covariance),
+`ops/reduce.hpp`'s "WHICH SHAPE TO REACH FOR" table and `ops/covariance.hpp`'s
+docstring all send a **dense sweep** there, and [T3.7](TASKS.md)'s spec repeats it.
+This entry exists because that guidance had never been measured **at a caller**,
+and CLAUDE.md requires the decision rule to exist before the numbers do.
+
+**Why it is not X-11 axis 1 again.** X-11b measured `SlidingWindowCount` against
+`countNonZero` on **one plane, one number**, and reported **15.9×** on a dense scan
+at 31×31. T3.7 sweeps a **2×2 covariance**, and only two of its three numbers have
+an incremental form: `sumXX` and `sumYY` slide, `sumXY` needs `magX & magY` split
+by `signX ^ signY` and nothing in `ops/reduce.hpp` slides a split, so the cross
+term is recomputed per position **on both sides of the comparison**. The saving is
+therefore bounded by the share of the work the other two numbers represent — and
+the accumulator also **forces a column-major traversal**, because it only slides
+downward. Inheriting 15.9× would be assuming the answer twice over.
+
+**Question:** at 640×480, is `cornerMinEigenVal`'s sliding sweep faster than the
+obvious `gradientCovariance`-per-position recomputation — and by how much, at
+`blockSize` ∈ {3, 7, 15, 31}?
+
+**Decision rule** *(written into `benchmark/corner_benchmark.cpp`'s header before
+any number existed)*:
+
+1. **Sliding faster at every block size** → X-11 axis 1's advantage survives being
+   embedded in a caller that can slide only two thirds of its state;
+   `ops/corner.hpp`'s "this is the sliding form" note stands and the magnitude
+   recorded here — not 15.9× — is what a caller plans with.
+2. **Sliding within the measured spread of recompute, or slower** → that
+   **contradicts a documented claim**. CLAUDE.md's rule is explicit: report it, do
+   not adjust the code to fit the doc.
+3. **A ratio near 15.9× would also be a surprise**, and would mean the cross term
+   is not the dominant cost the argument above assumes. Written down so it could
+   not be quietly welcomed as a good result.
+
+**Variants:** `sliding` (`cornerMinEigenVal` — what T3.7 ships); `recompute`
+(`gradientCovariance` per position, **row-major**, which is how anyone would write
+it); and `recompute-col`, the same recomputation swept **column-major**. The third
+is a control and the entry is not interpretable without it: `sliding` differs from
+`recompute` in *two* ways at once — incremental state and traversal order — and on
+a 32 KiB L1 those pull in opposite directions. `sliding / recompute-col` isolates
+the incremental effect; `recompute / recompute-col` isolates the traversal effect.
+
+**Workload:** 640×480, four rotating frames with real corner structure
+(overlapping blocks, a diagonal, sparse texture), `uint32_t`, batches calibrated
+to 200 ms, 5 batches, variants interleaved. All three maps are compared **bit for
+bit** and must agree before anything is timed.
+
+**Metric:** ns per pixel of response map, and the working set each form needs,
+together.
+
+**Method:** `bincv-cpp/benchmark/corner_benchmark.cpp`.
+
+**Result — reference device, `throttled=0x0` before AND after (a clean baseline,
+not sticky history), governor `performance`, `taskset -c 3`, g++ 14.2.0, commit
+`5158341`. Within-run spreads 0.04–3.4%; run-to-run scatter measured separately
+over four runs and reported below the table:**
+
+| blockSize | sliding ns/px | recompute ns/px | recompute-col ns/px | net (rec/slide) | incremental alone | traversal alone |
+|---|---|---|---|---|---|---|
+| 3 | 101.25 | **84.83** | 95.19 | **0.84×** | **0.94×** | 1.12× |
+| 7 | 142.84 | 138.55 | 148.49 | **0.97×** | 1.04× | 1.07× |
+| 15 | 252.89 | 278.78 | 288.22 | **1.10×** | 1.14× | 1.03× |
+| 31 | 581.44 | 704.39 | 711.91 | **1.21×** | 1.22× | 1.01× |
+
+**RUN-TO-RUN SCATTER, FROM THREE FURTHER RUNS OF THE SAME BINARY.** The spreads
+above are `measure_util.hpp`'s **within-run** figure — five interleaved batches
+inside one process. That is not the number a difference has to clear, and this
+entry originally quoted it as though it were. X-17 (immediately above) recorded
+that re-runs move ratios; X-14 took three device runs for the same reason. So
+three more were taken, same binary, same protocol, `throttled=0x0` before and
+after each ([`corner_benchmark_pi4_scatter.log`](bincv-cpp/results/corner_benchmark_pi4_scatter.log)):
+
+| blockSize | sliding ns/px (min…max) | recompute ns/px (min…max) | net ratio (min…max) | net scatter |
+|---|---|---|---|---|
+| 3 | 101.25 … 101.54 | 84.83 … 84.88 | 0.836 … 0.838 | 0.28% |
+| 7 | 142.54 … 143.06 | 138.55 … 138.64 | 0.969 … 0.972 | 0.34% |
+| 15 | 252.89 … 253.72 | 278.78 … 279.45 | 1.100 … 1.102 | 0.18% |
+| 31 | 558.89 … 581.44 | 687.34 … 704.39 | 1.203 … 1.243 | 3.32% |
+
+**Run-to-run is the LARGER number at `blockSize` 31 (3.3% on the ratio, against a
+1.9–3.8% within-run spread) and the smaller one below it (0.06–0.76%).** The
+ranking is preserved in every run at every block size: the net ratio never reaches
+1.00 at 3 or 7 and never falls to 1.00 at 15 or 31. **The `blockSize` 7 row — the
+one the crossover claim rests on, and the smallest gap in the table — survives:**
+its 3.1% net gap is about seven times the combined run-to-run range of the two
+rows it is taken from. So the crossover between 7 and 15 is a measured boundary
+rather than one-run evidence, which is what these runs were taken to establish.
+
+**And they correct one statement in the conclusion below.** "The incremental state
+itself is a loss below `blockSize` 15" does not follow from the numbers even in
+run 1, which already showed **1.04× at `blockSize` 7 — a win**. It replicates at
+1.0382–1.0395 across four runs with 0.13% scatter. The **incremental** effect
+crosses over between 3 and 7; the **net** effect crosses between 7 and 15, because
+the column-major traversal the accumulator forces (1.072× at 7) more than eats the
+incremental win there. That distinction is exactly what the `recompute-col` control
+was added to make, and the headline is unchanged: at `seal_params.yaml`'s
+`blockSize` 3 the shipped sliding sweep is **1.20× slower** than a plain row-major
+recomputation. The bullets below are corrected accordingly.
+
+**Memory, identical for all three variants and measured rather than printed:** four
+one-bit derivative planes **153 600 B**, the `float` response map **1 228 800 B**,
+caller scratch **0 B** (two stack accumulators), total **1 382 400 B**. The
+`operator new` count — plain and C++17 over-aligned — is **0** for every variant at
+every block size. So this is speed against speed with **footprint held exactly
+equal**, and nothing was traded for the result below.
+
+**Conclusion — rule 2 fired, and it fired at the block size the reference pipeline
+actually runs.** `gftt_block_size` is **3** in `SEAL/seal_params.yaml`, and there
+the shipped sliding sweep is **19% SLOWER** than a plain row-major recomputation.
+The control variant says why, and it is two independent losses rather than one:
+
+* **The incremental state itself is a loss at `blockSize` 3 and only marginal at
+  7** — 0.93× at 3, 1.039× at 7, then 1.14× and 1.24× at 15 and 31 (four-run
+  medians). At a 3-row window, sliding replaces three row counts with two while
+  paying a per-column construction and per-position bookkeeping, and the cross term
+  traverses all three rows either way. The 4% it wins back at 7 is less than the
+  traversal costs there, which is why the NET crossover sits higher than this one.
+* **The column-major traversal the accumulator forces costs 12% at `blockSize` 3**,
+  decaying to 1% at 31 as per-position work comes to dominate. `SlidingWindowCount`
+  slides only downward, so a caller that wants the incremental form has no choice
+  about this.
+
+Both effects shrink as the window grows, which is why the two of them together
+cross over between 7 and 15 — higher than the incremental effect crosses on its
+own, because the traversal penalty is still 7% at `blockSize` 7. All four runs put
+the net ratio below 1.00 at 7 and above it at 15.
+
+**This contradicts documented guidance, and the documents are what change, not the
+kernel.** `ops/reduce.hpp`'s table, `ops/covariance.hpp`'s docstring, D-15 and
+T3.7's own spec all point a dense sweep at the incremental form with **no
+window-size qualification**. That qualification now exists and is recorded in
+`ops/corner.hpp`'s docstring, in the table above, and in D-15's amendment.
+
+**What is NOT decided here, deliberately.** Whether `cornerMinEigenVal` should
+select on `blockSize` — recompute row-major below ~15, slide above — is an open
+decision and this entry does not take it. One device at one frame size is thin
+evidence for a permanent branch, and the x86 run has the **opposite sign** at
+`blockSize` 3 (1.19× *in the sliding form's favour*) with spreads past 50%
+(`bincv-cpp/results/corner_benchmark_x86_indicative.log`, filed as indicative only
+per "Measurement platforms"). Closing it needs the same table on a second Cortex-A
+part and at a second frame size, plus a decision about whether a window-size branch
+inside a kernel is a shape this project wants at all. Until then T3.7 ships the
+form its spec named, with the cost written down beside it.
+
+Raw logs: [bincv-cpp/results/corner_benchmark_pi4.log](bincv-cpp/results/corner_benchmark_pi4.log)
+(run 1) and
+[bincv-cpp/results/corner_benchmark_pi4_scatter.log](bincv-cpp/results/corner_benchmark_pi4_scatter.log)
+(runs 2–4, with the cross-run summary).
+
+---
+
+### X-19 · The tier 2 denominator: `goodFeaturesToTrack` against OpenCV · `DONE`
+
+**Question:** T3.7 is API tier 2 — it has a direct `cv::` counterpart — so
+CLAUDE.md's denominator rule applies to it: *OpenCV doing the same semantic
+operation on the same binary content stored as `CV_8U`*, with **peak working set
+reported beside speed**. X-18 answered a binCV-versus-binCV question and recorded
+"memory identical for all three variants", which is binCV against binCV. The
+1 228 800 B `float` response map — the operation's whole memory cost per
+`ops/corner.hpp`, and eight times the four one-bit planes it reads — had therefore
+never been weighed against what a byte-per-pixel pipeline pays for the same
+answer. This closes that.
+
+**Decision rule, written before measuring.** This is not a gate on a shipped
+interface; it is the missing denominator for a claim the project makes about
+footprint. Written down first anyway, because "record what result favours which
+conclusion" applies to a characterization too:
+
+1. **binCV smaller AND faster** → the tier 2 claim is unqualified and the response
+   map's cost is bought back.
+2. **binCV smaller and SLOWER** → the trade is real and must be stated as a trade,
+   with both numbers, wherever T3.7's benefit is claimed. CLAUDE.md's tie-break
+   applies (*memory wins* when the two conflict and no explicit choice was made),
+   but the speed number gets printed, not buried.
+3. **binCV larger** → the `float` response map is not affordable and T3.7's shape
+   needs re-deciding, not re-measuring.
+
+**Variants:** `binCV` (pack → `derivativeX`/`derivativeY` → `goodFeaturesToTrack`);
+**`OpenCV binarized`, THE DENOMINATOR** — the same semantics in stock OpenCV over
+`CV_8U`: two `filter2D` calls with the reference's `[-1, 0, 1]` tap, the three
+product planes, a `boxFilter` **sum** (`BORDER_CONSTANT`, which for a sum is
+exactly T3.6's clipped window), the min eigenvalue, then gftt.cpp's selection
+including `greaterThanPtr` and the greedy spacing filter; and `OpenCV Sobel`,
+stock `cv::goodFeaturesToTrack`, which is **not** the same numerics and is timed
+only because it is the call a reader reaches for.
+
+**Method:** `bincv-cpp/benchmark/corner_opencv_benchmark.cpp`, 640×480, four
+rotating frames, `seal_params.yaml`'s parameters verbatim, `measure_util.hpp`'s
+protocol. Both selections are compared **before** anything is timed.
+
+**Result — reference device, `throttled=0x0` before AND after, governor
+`performance`, `taskset -c 3`, g++ 14.2.0, 640×480:**
+
+| variant | ns/frame | ns/pixel | spread | vs denominator | B/pixel |
+|---|---|---|---|---|---|
+| binCV | 42 428 078 | 138.11 | 0.15% | **0.55×** | **16.54** |
+| **OpenCV binarized** (denominator) | 23 365 791 | 76.06 | 1.27% | 1.00× | 36.94 |
+| OpenCV Sobel (stock, different numerics) | 18 277 527 | 59.50 | 1.15% | 1.28× | 29.00 |
+
+**Peak working set, itemized rather than ratioed** (307 200 pixels):
+
+| buffer | binCV | OpenCV binarized |
+|---|---|---|
+| source | 38 400 B (1 bit/px) | 307 200 B (`CV_8U`) |
+| derivatives | 153 600 B (four 1-bit planes) | 2 457 600 B (`dx`, `dy` `CV_32F`) |
+| covariance planes | — (popcounts, no plane) | 3 686 400 B (`xx`, `yy`, `xy` `CV_32F`) |
+| response map + NMS scratch | 1 228 800 B (one `float` map, no dilate buffer) | 2 457 600 B (`eig` + dilate destination) |
+| candidate list, worst case | 3 659 568 B (**is** the output array) | 2 439 712 B (`vector<const float*>`) |
+| **total** | **5 080 368 B (16.54 B/px)** | **11 348 512 B (36.94 B/px)** |
+| total at the **measured** survivor count (13 272) | **1 580 064 B (5.14 B/px)** | 9 014 976 B (29.35 B/px) |
+
+Both candidate buffers are charged their worst case `(w−2)(h−2)` in the first
+total and the measured survivor count in the second, symmetrically — binCV's
+output array *is* its candidate buffer and OpenCV's pointer vector is the same
+list. **2.23× smaller at the worst case, 5.71× at the measured one.** binCV
+allocates nothing (`operator new` count 0, X-18); OpenCV's buffers are the
+allocation.
+
+Raw logs:
+[bincv-cpp/results/corner_opencv_benchmark_pi4.log](bincv-cpp/results/corner_opencv_benchmark_pi4.log),
+and
+[bincv-cpp/results/corner_opencv_benchmark_x86_indicative.log](bincv-cpp/results/corner_opencv_benchmark_x86_indicative.log)
+(indicative only — spreads past 50%, per "Measurement platforms").
+
+**AGREEMENT FIRST, BECAUSE IT IS THE SURPRISE.** Over four frames binCV and the
+OpenCV binarized pipeline return the **same number of corners at exactly the same
+positions** — 723 of 723, worst displacement 0.00 px. That is not bit-exactness
+and is not claimed as it (tier 2 stands: the response *maps* differ in their last
+bits, `double` against `float`), but it says the two sides agree on every decision
+the selection makes on this content, ties included. It is also independent
+evidence for the tie order: the OpenCV side sorts with `greaterThanPtr`, so an
+implementation whose tie rule disagreed with the reference could not produce this
+number.
+
+**Rule 2 fired.** binCV is **2.23–5.71× smaller and 1.82× slower** than the
+denominator, and both halves are recorded wherever T3.7's benefit is claimed. Part
+of that 1.82× is already priced: X-18 measured the shipped sliding sweep as 1.20×
+slower than a row-major recomputation *at this very block size*, so roughly a
+third of the gap is an internal choice X-18 registered as an open decision rather
+than anything intrinsic to bit-parallel corner detection. The rest is that the
+denominator spends 28 bytes per pixel of `float` planes to buy locality binCV
+declines to buy.
+
+**Conclusion.** The `float` response map is affordable. It is the single largest
+fixed binCV buffer — 1 228 800 B, eight times the four one-bit planes, and
+`ops/corner.hpp` calls it the operation's whole memory cost — and the pipeline
+still costs 5.14 B/pixel against the denominator's 29.35, because the OpenCV side
+needs **seven** `float` planes where binCV needs **one**. Speed goes the other way,
+by 1.82×. Neither number settles the question alone, which is why CLAUDE.md asks
+for both and why *memory wins* is the project's stated tie-break.
+
+**What this does NOT close.** T3.7's own "select on `blockSize`" question stays
+open (X-18) — this entry prices its cost against an external baseline but takes no
+new decision. And the denominator here is the reference pipeline *expressed in
+OpenCV*, not the reference binary itself, which this repo cannot run.
+
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

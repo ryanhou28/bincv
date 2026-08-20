@@ -1,0 +1,105 @@
+
+------------------------------------------------------------
+  binCV reference-device run
+------------------------------------------------------------
+  target:  pi4
+  command: ./benchmark/corner_benchmark > corner_benchmark.log 2>&1; cat corner_benchmark.log
+
+  preflight
+  arch: aarch64
+  throttle before: 0x0 (clean)
+  governor: ondemand -> performance
+
+  sync
+  repository synced to bincv-measure
+
+  build (Release, core-only)
+[  9%] Built target test_error_abort
+[  9%] Built target test_assert_abort
+[  9%] Built target alignment_benchmark
+[ 12%] Built target gtest
+[ 14%] Building CXX object benchmark/CMakeFiles/corner_benchmark.dir/corner_benchmark.cpp.o
+[ 21%] Built target covariance_benchmark
+[ 21%] Built target morphology_path_benchmark
+[ 23%] Built target decimate_benchmark
+[ 32%] Built target pyramid_benchmark
+[ 32%] Built target reduce_target_benchmark
+[ 32%] Built target window_benchmark
+[ 35%] Built target wordwidth_benchmark
+[ 42%] Built target test_quantMat
+[ 42%] Built target test_binMat
+[ 48%] Built target test_error
+[ 48%] Built target test_storage
+[ 51%] Built target test_error_checked
+[ 54%] Built target test_logic
+[ 57%] Built target test_shift
+[ 60%] Built target test_reduce
+[ 64%] Built target test_denoise
+[ 67%] Built target test_bitslice
+[ 70%] Built target test_threshold
+[ 76%] Built target test_resample
+[ 76%] Built target test_morphology
+[ 79%] Built target test_pyramid
+[ 85%] Built target test_derivative
+[ 85%] Built target test_covariance
+[ 89%] Built target test_corner
+[ 92%] Built target test_harness
+[ 95%] Built target test_harness_failing
+[ 98%] Built target gtest_main
+[100%] Linking CXX executable corner_benchmark
+[100%] Built target corner_benchmark
+  build complete
+
+  run
+------------------------------------------------------------
+binCV T3.7 -- corner response: sliding against a covariance call per position
+frame 640x480, word uint32_t, one column of sliding state, no caller scratch
+
+  working set, identical for both variants:
+    four one-bit derivative planes      153600 B
+    float response map                 1228800 B
+    caller scratch                          0 B  (two stack accumulators)
+    TOTAL                              1382400 B
+
+  block  variant          ns/frame   ns/pixel   spread vs.slide allocs
+  3      sliding          31104771    101.253    0.18%        -      0
+  3      recompute        26060675     84.833    0.26%    0.84x      0
+  3      recompute-col    29240875     95.185    0.35%    0.94x      0
+         -> incremental effect (sliding vs recompute-col)   0.94x, traversal effect (recompute vs recompute-col)   1.12x
+  7      sliding          43879721    142.838    0.18%        -      0
+  7      recompute        42563452    138.553    0.11%    0.97x      0
+  7      recompute-col    45614934    148.486    0.17%    1.04x      0
+         -> incremental effect (sliding vs recompute-col)   1.04x, traversal effect (recompute vs recompute-col)   1.07x
+  15     sliding          77688400    252.892    0.14%        -      0
+  15     recompute        85641634    278.781    0.04%    1.10x      0
+  15     recompute-col    88540950    288.219    0.19%    1.14x      0
+         -> incremental effect (sliding vs recompute-col)   1.14x, traversal effect (recompute vs recompute-col)   1.03x
+  31     sliding         178619286    581.443    2.13%        -      0
+  31     recompute       216389249    704.392    3.43%    1.21x      0
+  31     recompute-col   218697358    711.905    2.88%    1.22x      0
+         -> incremental effect (sliding vs recompute-col)   1.22x, traversal effect (recompute vs recompute-col)   1.01x
+
+  the `allocs` column is `operator new` calls -- plain AND C++17 over-aligned --
+  counted around ONE call of each variant. Zero is what no scratch means.
+  sink 391
+------------------------------------------------------------
+
+------------------------------------------------------------
+  ENVIRONMENT -- record this with any measurement
+------------------------------------------------------------
+  device:           pi4
+  cpu:              Raspberry Pi 4 Model B Rev 1.5
+  arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+  compiler:         g++ (Debian 14.2.0-19) 14.2.0
+  governor:         performance (restored to ondemand on exit)
+  core pinning:     taskset -c 3
+  throttled before: throttled=0x0
+  throttled after:  throttled=0x0
+  commit:           5158341
+------------------------------------------------------------
+
+  OK -- command succeeded, device state valid throughout
+  Timings from this device ARE authoritative (unlike emulation).
+  Record the environment block above in EXPERIMENTS.md.
+
+  governor restored to ondemand

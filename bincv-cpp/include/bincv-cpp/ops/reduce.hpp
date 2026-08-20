@@ -41,7 +41,7 @@
 ///       nothing (0.98x at W=7, ~1.0x at 31). **One window is a countNonZero.**
 ///
 ///   A COLUMN of window positions -- a search sweep, a dense scan, the corner
-///   response of ARCHITECTURE 7.6
+///   response of ARCHITECTURE 7.6 -- AT A LARGE ENOUGH WINDOW
 ///       SlidingWindowCount. Consecutive windows differ by two rows out of W, and
 ///       recomputing all W of them re-reads what the previous position already
 ///       counted. Measured 7.3x on an 8x8 search sweep and 20x on a dense scan at
@@ -50,6 +50,22 @@
 ///       re-measured **5.96x** (search) and **15.9x** at 31x31, which is where
 ///       X-11 predicted the split would put them and still far past the 15% line
 ///       that selected this branch.
+///
+///       **THOSE ARE ONE-PLANE, ONE-NUMBER SWEEPS, AND THE QUALIFICATION "AT A
+///       LARGE ENOUGH WINDOW" IS MEASURED RATHER THAN CAUTIOUS.** T3.7 is the
+///       first real caller of this shape, and it sweeps a 2x2 covariance of which
+///       only two numbers slide. X-18, on the reference device at 640x480: the
+///       incremental sweep is 1.22x FASTER at a 31x31 window and 1.20x SLOWER at
+///       3x3 -- the size the reference pipeline runs -- over FOUR runs whose
+///       ranking never changes (run-to-run scatter 0.18-0.34% on the ratio below
+///       blockSize 31, 3.3% at 31).
+///       The incremental state alone is 0.93x at 3, 1.04x at 7 and 1.24x at 31 --
+///       so IT crosses over between 3 and 7 while the NET crosses between 7 and 15
+///       -- and this class
+///       slides only DOWNWARD, so a caller that wants it must sweep COLUMN-MAJOR,
+///       which costs a further 12% at 3, 7% at 7 and 1% at 31. Read 15.9x as what it is: a
+///       measurement of `countNonZero` on one plane, not a promise to a caller
+///       with a different mix of work per position.
 ///
 ///   ALL FOUR covariance numbers over one window
 ///       countCovariance, not countNonZero + countNonZero + countAndSplit. The

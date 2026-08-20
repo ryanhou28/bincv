@@ -1,0 +1,30 @@
+binCV T3.7 -- corner response: sliding against a covariance call per position
+frame 640x480, word uint32_t, one column of sliding state, no caller scratch
+
+  working set, identical for both variants:
+    four one-bit derivative planes      153600 B
+    float response map                 1228800 B
+    caller scratch                          0 B  (two stack accumulators)
+    TOTAL                              1382400 B
+
+  block  variant          ns/frame   ns/pixel   spread vs.slide allocs
+  3      sliding          31104771    101.253    0.18%        -      0
+  3      recompute        26060675     84.833    0.26%    0.84x      0
+  3      recompute-col    29240875     95.185    0.35%    0.94x      0
+         -> incremental effect (sliding vs recompute-col)   0.94x, traversal effect (recompute vs recompute-col)   1.12x
+  7      sliding          43879721    142.838    0.18%        -      0
+  7      recompute        42563452    138.553    0.11%    0.97x      0
+  7      recompute-col    45614934    148.486    0.17%    1.04x      0
+         -> incremental effect (sliding vs recompute-col)   1.04x, traversal effect (recompute vs recompute-col)   1.07x
+  15     sliding          77688400    252.892    0.14%        -      0
+  15     recompute        85641634    278.781    0.04%    1.10x      0
+  15     recompute-col    88540950    288.219    0.19%    1.14x      0
+         -> incremental effect (sliding vs recompute-col)   1.14x, traversal effect (recompute vs recompute-col)   1.03x
+  31     sliding         178619286    581.443    2.13%        -      0
+  31     recompute       216389249    704.392    3.43%    1.21x      0
+  31     recompute-col   218697358    711.905    2.88%    1.22x      0
+         -> incremental effect (sliding vs recompute-col)   1.22x, traversal effect (recompute vs recompute-col)   1.01x
+
+  the `allocs` column is `operator new` calls -- plain AND C++17 over-aligned --
+  counted around ONE call of each variant. Zero is what no scratch means.
+  sink 391

@@ -183,10 +183,27 @@ endfunction()
 # four-argument selector form was taken over the 11-14% FASTER plane form purely
 # because it needs no scratch, and an implementation that allocated would pass
 # every value check in the file.
+# test_corner (T3.7) is core, and for a reason none of the suites above has. The
+# corner response is API TIER 2 -- `cv::goodFeaturesToTrack`'s role with the
+# reference pipeline's BINARIZED derivatives -- so there is no bit-exactness
+# promise to a cv:: call, and `cv::cornerMinEigenVal` works in float over float
+# Sobel outputs, which means an exact comparison against it is not available even
+# in principle. What stands behind it is a per-pixel reference written before the
+# kernel, two exact INTEGER properties of the eigenvalue that need no square root
+# (zero response iff singular matrix; an exact half-integer wherever the
+# discriminant is a perfect square), a literal port of gftt.cpp's selection
+# including the dilate buffer and the cell grid, and a hand-built map that pins
+# the ORDER of NMS and the spacing filter. It also carries the check that D-19's
+# reasoning holds: BORDER_REFLECT_101 must give no border ring and BORDER_CONSTANT
+# must give one. None of that needs OpenCV, all of it has to run where the
+# embedded claim does -- including Debug, the only configuration in which the
+# kernels' BINCV_ASSERT preconditions are live -- and it counts `operator new`,
+# because replacing the reference's unbounded candidate vector and its grid with
+# the caller's own array is the whole no-heap claim.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
                      test_logic test_shift test_reduce test_bitslice
                      test_denoise test_threshold test_morphology test_resample
-                     test_pyramid test_derivative test_covariance)
+                     test_pyramid test_derivative test_covariance test_corner)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)

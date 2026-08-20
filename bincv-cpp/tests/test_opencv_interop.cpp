@@ -1,15 +1,22 @@
 // OpenCV interop tests. Only built when OpenCV is available; the core test suite
 // (test_binMat.cpp) covers everything that must work without it.
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <new>
+#include <string>
+#include <vector>
 
 #include <opencv2/opencv.hpp>
 
 #include "bincv-cpp/binMat.hpp"
+#include "bincv-cpp/ops/corner.hpp"
+#include "bincv-cpp/ops/derivative.hpp"
+#include "bincv-cpp/quantMat.hpp"
 #include "bincv-cpp/util.hpp"
 #include "test_util.hpp"
 
@@ -214,6 +221,172 @@ void testSampleImage() {
     BINCV_CHECK(binBytes < cvBytes);
 }
 
+// ---------------------------------------------------------------------------
+// T3.7 ON A REAL FRAME -- the "Done when" bullet tests/test_corner.cpp cannot reach
+//
+// test_corner.cpp is a CORE suite: it must build without OpenCV, so it cannot
+// decode a PNG and every frame in it is synthesised. T3.7's first Done-when bullet
+// asks for detected corners matched against the reference on real content, and
+// that check has to live where an image decoder does. It lives here.
+//
+// THE REFERENCE, EXPRESSED IN STOCK OPENCV. gftt.cpp with
+// `gftt_corner_derivative_type: BINARIZED` is: two [-1, 0, 1] filter2D taps, the
+// three product planes, a boxFilter SUM over the block, the min eigenvalue, then
+// minMaxLoc / THRESH_TOZERO / dilate / the `val != 0 && val == tmp[x]` scan /
+// greaterThanPtr / the greedy spacing filter. Written out below with OpenCV
+// primitives, sharing NO code with ops/corner.hpp -- not the response, not the
+// comparator, not the selection.
+//
+// TWO DELIBERATE ALIGNMENTS, so that a disagreement means something:
+//   * the box filter uses BORDER_CONSTANT, because a SUM with a zero fill is
+//     exactly T3.6's clipped window (D-13). The reference's BORDER_REPLICATE is a
+//     separate, documented deviation (ops/corner.hpp, "THE BORDER").
+//   * the derivative uses BORDER_REFLECT_101, which is D-19's choice and
+//     filter2D's default.
+// Everything else is the reference's own arithmetic in the reference's own order.
+// ---------------------------------------------------------------------------
+
+/// @brief gftt.cpp's comparator, from SEAL/opencv_internal/include/gftt.hpp.
+struct GreaterThanPtr {
+    bool operator()(const float* a, const float* b) const
+
+    // Ensure a fully deterministic result of the sort
+    { return (*a > *b) ? true : (*a < *b) ? false : (a > b); }
+};
+
+void testRealFrameCorners() {
+    std::cout << "\n--- T3.7 corners on a real frame, against the gftt.cpp pipeline ---\n";
+
+    const std::string imagePath = std::filesystem::path(__FILE__).parent_path().string()
+        + "/images/1403715887284058112_bin_normalized.png";
+    cv::Mat input = cv::imread(imagePath, cv::IMREAD_GRAYSCALE);
+    if (input.empty()) {
+        std::cout << "  (skipped: sample image not found at " << imagePath << ")\n";
+        return;
+    }
+    const int w = input.cols, h = input.rows;
+    BINCV_CHECK(w > 32 && h > 32);
+
+    // The SAME binary content on both sides: 1 bit per pixel for binCV, CV_8U
+    // holding {0, 1} for OpenCV. That is CLAUDE.md's denominator rule.
+    cv::Mat bytes(h, w, CV_8U);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            bytes.at<uint8_t>(y, x) = input.at<uint8_t>(y, x) ? uint8_t{1} : uint8_t{0};
+
+    bincv::BinMat<uint32_t> bin;
+    bin.fromCVMat(input);
+    BINCV_CHECK_EQ(bin.countNonZero(), cv::countNonZero(input));
+
+    bincv::GoodFeaturesParams params;  // SEAL/seal_params.yaml verbatim
+    bincv::TernaryMat<uint32_t> dx(static_cast<size_t>(w), static_cast<size_t>(h));
+    bincv::TernaryMat<uint32_t> dy(static_cast<size_t>(w), static_cast<size_t>(h));
+    bincv::derivativeX(bin, dx);
+    bincv::derivativeY(bin, dy);
+
+    std::vector<float> mapStorage(static_cast<size_t>(w) * static_cast<size_t>(h), 0.0f);
+    bincv::ResponseMap map{mapStorage.data(), static_cast<size_t>(w), static_cast<size_t>(h),
+                           static_cast<size_t>(w)};
+    // CAPACITY IS NOT maxCorners: the array is also the candidate buffer, so it is
+    // sized to the worst case and `candidatesTruncated` must come back false.
+    std::vector<bincv::Corner> got(static_cast<size_t>(w - 2) * static_cast<size_t>(h - 2));
+    const bincv::CornerResult r =
+        bincv::goodFeaturesToTrack(dx, dy, params, map, got.data(), got.size());
+    BINCV_CHECK_EQ(r.candidatesTruncated, false);
+    BINCV_CHECK(r.count > 32);
+
+    // ---- the reference pipeline, in stock OpenCV -------------------------
+    const cv::Mat kx = (cv::Mat_<float>(1, 3) << -1.0f, 0.0f, 1.0f);
+    const cv::Mat ky = (cv::Mat_<float>(3, 1) << -1.0f, 0.0f, 1.0f);
+    cv::Mat cvDx, cvDy, xx, yy, xy, eig, dilated;
+    cv::filter2D(bytes, cvDx, CV_32F, kx, cv::Point(-1, -1), 0.0, cv::BORDER_REFLECT_101);
+    cv::filter2D(bytes, cvDy, CV_32F, ky, cv::Point(-1, -1), 0.0, cv::BORDER_REFLECT_101);
+    cv::multiply(cvDx, cvDx, xx);
+    cv::multiply(cvDy, cvDy, yy);
+    cv::multiply(cvDx, cvDy, xy);
+    const cv::Size ksz(params.blockSize, params.blockSize);
+    const int bd = cv::BORDER_CONSTANT | cv::BORDER_ISOLATED;
+    cv::boxFilter(xx, xx, CV_32F, ksz, cv::Point(-1, -1), false, bd);
+    cv::boxFilter(yy, yy, CV_32F, ksz, cv::Point(-1, -1), false, bd);
+    cv::boxFilter(xy, xy, CV_32F, ksz, cv::Point(-1, -1), false, bd);
+
+    eig.create(h, w, CV_32F);
+    size_t mapDiffering = 0;
+    for (int y = 0; y < h; ++y) {
+        const float* a = xx.ptr<float>(y);
+        const float* b = yy.ptr<float>(y);
+        const float* c = xy.ptr<float>(y);
+        float* e = eig.ptr<float>(y);
+        for (int x = 0; x < w; ++x) {
+            const double s = static_cast<double>(a[x]) + static_cast<double>(b[x]);
+            const double d = static_cast<double>(a[x]) - static_cast<double>(b[x]);
+            const double cc = static_cast<double>(c[x]);
+            e[x] = static_cast<float>(0.5 * (s - std::sqrt(d * d + 4.0 * cc * cc)));
+            if (e[x] != mapStorage[static_cast<size_t>(y) * static_cast<size_t>(w) +
+                                   static_cast<size_t>(x)])
+                ++mapDiffering;
+        }
+    }
+    // The three covariance sums are integers on both sides -- popcounts here, exact
+    // float products and an exact float box-filter sum there -- so the maps agree
+    // BIT FOR BIT and the documented tolerance on a real frame is ZERO. This is a
+    // stronger statement than tier 2 owes and it is asserted as measured, not as a
+    // promise: the tier 2 caveat is about cv::cornerMinEigenVal's SOBEL path, which
+    // is a different operation.
+    BINCV_CHECK_EQ(mapDiffering, static_cast<size_t>(0));
+
+    double maxVal = 0.0;
+    cv::minMaxLoc(eig, nullptr, &maxVal, nullptr, nullptr);
+    cv::threshold(eig, eig, maxVal * params.qualityLevel, 0.0, cv::THRESH_TOZERO);
+    cv::dilate(eig, dilated, cv::Mat());
+    std::vector<const float*> candidates;
+    for (int y = 1; y + 1 < h; ++y) {
+        const float* e = eig.ptr<float>(y);
+        const float* t = dilated.ptr<float>(y);
+        for (int x = 1; x + 1 < w; ++x)
+            if (e[x] != 0.0f && e[x] == t[x]) candidates.push_back(e + x);
+    }
+    BINCV_CHECK_EQ(r.candidatesRanked, candidates.size());
+    std::sort(candidates.begin(), candidates.end(), GreaterThanPtr());
+
+    std::vector<cv::Point> want;
+    const double minDistSq = params.minDistance * params.minDistance;
+    const float* base = eig.ptr<float>(0);
+    const size_t stride = eig.step / sizeof(float);
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        const size_t ofs = static_cast<size_t>(candidates[i] - base);
+        const int y = static_cast<int>(ofs / stride);
+        const int x = static_cast<int>(ofs % stride);
+        bool good = true;
+        for (size_t j = 0; j < want.size(); ++j) {
+            const double ddx = static_cast<double>(x) - static_cast<double>(want[j].x);
+            const double ddy = static_cast<double>(y) - static_cast<double>(want[j].y);
+            if (ddx * ddx + ddy * ddy < minDistSq) {
+                good = false;
+                break;
+            }
+        }
+        if (!good) continue;
+        want.push_back(cv::Point(x, y));
+        if (want.size() == static_cast<size_t>(params.maxCorners)) break;
+    }
+
+    // SAME CORNERS, SAME ORDER. The tie rule is doing real work here: a binarized
+    // 3x3 min-eigenvalue map takes few distinct values, so most of these positions
+    // are decided by it, and the port breaks ties by ADDRESS. An implementation
+    // whose ties ran the other way could not produce this number.
+    BINCV_CHECK_EQ(r.count, want.size());
+    size_t differing = 0;
+    for (size_t i = 0; i < r.count && i < want.size(); ++i)
+        if (got[i].x != want[i].x || got[i].y != want[i].y) ++differing;
+    BINCV_CHECK_EQ(differing, static_cast<size_t>(0));
+
+    std::cout << "  " << w << "x" << h << " real frame: " << r.candidatesRanked
+              << " NMS survivors, " << r.count << " corners, ALL at the same positions as the "
+              << "gftt.cpp pipeline; response map bit-identical over " << (w * h)
+              << " pixels\n";
+}
+
 } // namespace
 
 BINCV_TEST(OpenCVInterop, RoundTrip)                 { testRoundTrip(); }
@@ -221,5 +394,6 @@ BINCV_TEST(OpenCVInterop, AllWordTypes)              { testAllWordTypes(); }
 BINCV_TEST(OpenCVInterop, InvalidInput)              { testInvalidInput(); }
 BINCV_TEST(OpenCVInterop, FromCVMatAllocationFailure) { testFromCVMatAllocationFailure(); }
 BINCV_TEST(OpenCVInterop, SampleImage)               { testSampleImage(); }
+BINCV_TEST(OpenCVInterop, RealFrameCorners)          { testRealFrameCorners(); }
 
 BINCV_TEST_MAIN("BinMat OpenCV interop tests")

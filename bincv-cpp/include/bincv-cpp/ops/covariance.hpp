@@ -79,12 +79,21 @@
 /// SWEEPING A COLUMN OF POSITIONS? HALF OF THIS SLIDES AND HALF DOES NOT.
 ///
 /// **T3.7's corner response, and any search sweep, want `SlidingWindowCount` for
-/// `sumXX` and `sumYY`** (ops/reduce.hpp, the INC-ROW form). Consecutive windows in
-/// a vertical column differ by two rows out of W, and recomputing all W of them
-/// re-reads what the previous position already counted. Measured on the reference
-/// device against the shipped recompute path: **15.9x** on a dense scan at 31x31
-/// and **5.96x** on an 8x8 search sweep (X-11b axis 1). This function recomputes,
-/// by construction.
+/// `sumXX` and `sumYY`** (ops/reduce.hpp, the INC-ROW form) -- AT A LARGE ENOUGH
+/// WINDOW. Consecutive windows in a vertical column differ by two rows out of W,
+/// and recomputing all W of them re-reads what the previous position already
+/// counted. Measured on the reference device against the shipped recompute path:
+/// **15.9x** on a dense scan at 31x31 and **5.96x** on an 8x8 search sweep
+/// (X-11b axis 1). This function recomputes, by construction.
+///
+/// **T3.7 then measured the same choice AT ITS OWN LEVEL and it does not hold at
+/// every window size (X-18).** Sweeping a covariance is not sweeping one plane's
+/// popcount: only two of the three numbers slide, and the accumulator forces a
+/// column-major traversal. On the reference device at 640x480 the sliding corner
+/// sweep is 1.22x faster at a 31x31 window and **1.20x SLOWER at 3x3** -- the block
+/// size SEAL/seal_params.yaml runs -- over four runs whose ranking never changes.
+/// The advice above stands
+/// for large windows and is wrong for small ones; ops/corner.hpp carries the table.
 ///
 /// **Read those two numbers for what they are.** `SlidingWindowCount` slides ONE
 /// plane's popcount -- it is constructed from a single `BinMatConstView` and

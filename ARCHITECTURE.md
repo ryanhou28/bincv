@@ -699,6 +699,55 @@ interface is therefore specified over plane pairs, not over a single mask.
 
 Built from the same covariance machinery as §7.5.
 
+**[T3.7](TASKS.md) ships it as `ops/corner.hpp`** — `cornerMinEigenVal` (the
+response map) and `goodFeaturesToTrack` (the selection), **API tier 2**: the role
+and call shape of the OpenCV operations of those names, with the reference
+pipeline's **binarized** derivatives rather than a Sobel, and therefore **not**
+bit-exact against OpenCV. `cv::cornerMinEigenVal` works in float over a float box
+filter of float Sobel outputs, so an exact comparison against it is not available
+even in principle; what stands behind the operation is a per-pixel reference, two
+exact *integer* properties of the eigenvalue, and a literal port of the
+reference's `gftt.cpp` selection.
+
+**The response is `(S − √D)/2` with `S = ΣIx² + ΣIy²` and
+`D = (ΣIx² − ΣIy²)² + 4·ΣIxIy²`** — the smaller eigenvalue of §7.5's matrix,
+spelled so that **both operands of the square root are exact integers** and the
+only rounding in the operation is the root itself (taken in `double`, where IEEE
+correct rounding makes it reproducible across platforms and word types; stored as
+`float`). Two consequences are checked rather than assumed: the response is
+**exactly 0 iff the window's matrix is singular** — which is every straight edge,
+so a 45° step edge with an enormous gradient yields no corner at all — and any
+non-zero response is at least `1/(2·blockSize²)`, so the selection's `> threshold`
+test needs no tolerance.
+
+**The selection's ORDER is its specification**, read out of `gftt.cpp`: the
+maximum over the whole map, a `THRESH_TOZERO` cut at `qualityLevel × max`, a 3×3
+non-maximum suppression over `[1, h−1) × [1, w−1)`, then a descending sort and a
+greedy minimum-distance filter. NMS before the spacing filter is not
+interchangeable with the reverse — NMS deletes a point beside a *higher* one
+whether or not that higher one is ever accepted — and `tests/test_corner.cpp`
+pins it with a case whose two orders give different survivors.
+
+**The border decision of [D-19](#d-19-the-derivatives-border-is-reflect-101-and-its-sign-is-the-borrow)
+is verified here rather than restated.** Reflect-101 was chosen partly because a
+zero fill would manufacture an edge around the whole frame for this operation to
+select; the suite requires **zero** corners on blank, uniform and striped frames
+under reflect-101 and requires the ring to **appear** under `BORDER_CONSTANT`
+(measured at 41×37: 4 spurious corners on a uniform frame, 14 on a striped one,
+all in the outermost columns).
+
+**The dense sweep uses T2.11's incremental form, and [X-18](EXPERIMENTS.md)
+measured that this is not a win at every window size.** Two of the three numbers
+slide (`sumXX`, `sumYY`); `sumXY` has no incremental form and is recomputed. On
+the reference device at 640×480 the shipped sliding sweep is **1.21× faster at
+`blockSize` 31 and 1.19× SLOWER at `blockSize` 3** — the size
+`SEAL/seal_params.yaml` actually runs — because the incremental state itself is a
+loss below ~15 (0.94× at 3) and the column-major traversal it forces costs a
+further 12% there. That contradicts the unqualified guidance in §8's D-15 and in
+`ops/reduce.hpp`; the qualification now lives in both. Whether the operation
+should select on `blockSize` is registered as open in X-18 and deliberately not
+decided from one device.
+
 ### 7.7 Morphology
 
 `erode`, `dilate`, `morphologyEx`. Shifted ANDs and ORs. Tier 1 semantics — must
@@ -1141,6 +1190,27 @@ landed it first for exactly that reason and re-measured afterwards;
 rather than in place of them. The branch the rule selected does not change — only
 the magnitudes quoted for it.
 
+> **AMENDED AGAIN at T3.7, the first real caller of item 1's shape
+> ([X-18](EXPERIMENTS.md)): "a dense sweep wants the incremental form" is TRUE
+> ONLY ABOVE A WINDOW SIZE, and below it the advice is backwards.** The corner
+> response sweeps every pixel of a frame — item 1's DENSE pattern exactly — and on
+> the reference device at 640×480 the incremental sweep is **1.22× faster at 31×31
+> and 1.20× SLOWER at 3×3** (four-run medians; run-to-run scatter on the ratio is
+> 0.18–0.34% below `blockSize` 31 and 3.3% at 31, and the ranking holds in every
+> run, so the boundary is measured rather than read off one run). Two independent
+> reasons, separated by a column-major recompute control: the incremental state
+> alone is worth 0.93× at 3, **1.04× at 7** and 1.24× at 31 — so THAT effect crosses
+> over between 3 and 7, while the NET crosses between 7 and 15 — and
+> `SlidingWindowCount` slides only DOWNWARD, so a caller
+> that wants it must sweep column-major, which costs a further 12% at 3, 7% at 7
+> and 1% at 31 on a 32 KiB L1. The 15.9× of item 1 stands for what it measured — one plane,
+> one number — and does not transfer to a caller that can slide only two of its
+> three numbers at a 3-row window. The decision does not change (the incremental
+> form still exists and still pays where the window is large), but the guidance in
+> this record and in `ops/reduce.hpp`'s table now carries the qualification, and
+> whether `ops/corner.hpp` should select on `blockSize` is registered as open in
+> X-18 rather than decided from one device.
+
 ### D-16: morphology fuses the shift and the fold, and only the compound ops take scratch
 
 *(Added during T3.3, not pre-planned — the task that built morphology was the
@@ -1516,6 +1586,8 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | The reference never chose its depths — they fell out of using `CV_8U`. Capping N is a direct footprint lever, and T3.4 shipped the cap as a parameter. **Its footprint axis is now measured ([X-15](EXPERIMENTS.md)): the whole range from uncapped to re-binarized is 1.65×, not an order of magnitude, because level 0 dominates and no cap touches it. The accuracy axis is what remains.** X-15 also corrected the premise this row used to state — the reachable alphabet is 1/3/5/7 bits; 1/3/4/5 was one 256² frame's contents. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |
+| **E-10** | Does the corner response need a frame-sized float map, or a rolling ring? | The map is 4 B/pixel — **1.23 MB at 640×480, eight times the entire four-plane derivative working set** — and dominates T3.7's footprint. A two-pass three-row ring would cut it to ~15 kB for roughly 2× the response compute. On a project whose thesis is footprint, the largest buffer in the frontend being a float scratch is worth pricing. | Whether `cornerMinEigenVal` keeps a caller-provided frame map or gains a streaming form. | T3.7 (made caller-provided rather than decided) | unscheduled |
+| **E-11** | Should `cornerMinEigenVal` select its window strategy on `blockSize`? | [X-18](EXPERIMENTS.md) measured the incremental form **losing** below `blockSize` 15 — 0.84× at 3, which is what `seal_params.yaml` actually configures. But one device at one frame size is thin, and x86 showed the *opposite sign* there. | Whether the sliding form is unconditional or `blockSize`-gated. | T3.7 (left unconditional, qualified in the docs) | unscheduled |
 | **E-9** | Should the word type vary down the pyramid — `uint64_t` where it costs no bytes (L0, L1), `uint32_t` above? | [X-10](EXPERIMENTS.md) measured both sides: `uint64_t` reduces **1.94×** faster and costs **+33%** at 94×60 but **0%** at 640×480, so the right answer may not be one type. The width is already a per-object template parameter (D-1), so this costs no new machinery — only a decision. | Whether the pyramid picks a word type per level, and whether kernels that walk several levels pay for two instantiations. | T3.4's pyramid, [D-14](#d-14-uint32_t-is-the-default-word-type) | unscheduled |
 
 E-8 is the Phase 3 instance of the same discipline, and of the same lesson: it

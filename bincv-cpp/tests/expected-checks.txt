@@ -676,6 +676,97 @@
 #             test: it leaves `signY` unused and the project's warning policy
 #             fails the build (-Werror=unused-parameter). Recorded because it is
 #             the mutation a reader expects to see a number for.
+#   test_corner  2749 in ALL FOUR configurations, and the equality says the same
+#             thing test_covariance's does: T3.7 is API TIER 2 -- the role of
+#             cv::goodFeaturesToTrack with the reference pipeline's BINARIZED
+#             derivatives -- so it is NOT bit-exact against OpenCV and has no
+#             OpenCV half to add rows in the `opencv` column. What stands behind it
+#             has to run where the embedded claim does, Debug included, since that
+#             is the only configuration in which the kernels' BINCV_ASSERT
+#             preconditions are live.
+#             The 2749 are: 4 word types x 5 frames x 4 block sizes of full-frame
+#             response sweeps, reported as one check per (frame, block size) with
+#             SIX independent mismatch counters -- the map against the eigenvalue of
+#             a per-pixel float oracle's triple, the map against a DOUBLE evaluation
+#             of that triple, the oracle's triple against T3.6's gradientCovariance,
+#             the exact half-integer wherever the discriminant is a perfect square,
+#             `response == 0 iff det == 0`, and the 1/(2*blockSize^2) gap -- plus
+#             the word-type invariance sweep, the float-storage margin measurement,
+#             320 + 144 selection parameter combinations against a literal port of
+#             gftt.cpp, the selection-ORDER case, the three structural frames, the
+#             border-ring check at four word types, the capacity contract, the
+#             degenerate shapes, the two spellings, and the allocation counter.
+#             ONE CHECK PER (frame, block size) rather than per position: 49540
+#             positions per word type go through the oracle, which would be 198160
+#             checks for what is one property. Each counter reports its own total,
+#             so a failure still says WHICH property broke.
+#             THE POSITION COUNT IS ITSELF CHECKED against the arithmetic that
+#             defines it, and the interior and clipped counts are separately
+#             required to be non-zero -- a sweep that stopped clipping, or stopped
+#             evaluating a full window, would otherwise stay green while proving
+#             less. That is T3.6's SWEEP_HEIGHT lesson applied before it could
+#             happen again; two static_asserts pin both frames taller and wider
+#             than the largest block size.
+#             The floor has teeth, measured by mutating ops/corner.hpp (checks
+#             passed out of 2749):
+#               yySlide.slideDown() removed              2445
+#               the 3x3 NMS test removed                 2162
+#               maxVal taken over the interior only      2596
+#               `val > threshold` relaxed to `>=`        2634
+#               spacing `<` relaxed to `<=`              2634
+#               the square root taken in float           2642
+#               gftt.cpp's own halved-float spelling     2642
+#               retention heap comparator reversed       2745
+#               tie order flipped to ascending           2294
+#               `capacity == 0` short-circuit restored   2748
+#             THE FLOOR ROSE FROM 2698 TO 2749 BECAUSE THE LAST THREE WERE BUGS
+#             THIS SUITE DID NOT CATCH. Every one of them passed 2698/2698, so the
+#             floor was measuring a suite that agreed with three defects:
+#               * The bounded retention heap used the REVERSE of the sort order, so
+#                 its root was the strongest retained candidate rather than the
+#                 weakest and truncation kept the first-scanned survivors.
+#                 Corner.CapacityContract asserted `corners[0]` alone -- the one
+#                 entry that bug preserves -- and now compares the WHOLE truncated
+#                 prefix against the untruncated ranking at six capacities.
+#               * impl::CornerStronger broke ties by ASCENDING raster order;
+#                 gftt.cpp's greaterThanPtr breaks them by descending ADDRESS, i.e.
+#                 later position first. The oracle in test_corner.cpp was a copy of
+#                 the library's comparator, so the one place binCV disagreed with
+#                 the reference was the one place the oracle agreed. It now sorts
+#                 `const float*` with the reference's own comparator, and
+#                 Corner.TieOrderIsTheReferenceDescendingRasterOrder pins the
+#                 direction three ways.
+#               * `capacity == 0` short-circuited before the scan and reported
+#                 candidatesTruncated == false even with survivors present, which
+#                 the docstring contradicts; the contract now pins both directions.
+#             Corner.Structure_Checkerboard also changed: a checkerboard junction is
+#             TWO pixels wide in each axis (the derivative is a 3-tap), so the
+#             junction test admits both members of the 2x2 plateau, and a separate
+#             check requires the ACCEPTED member to be the plateau's bottom-right --
+#             which reads the tie direction off the frame where ties decide
+#             everything. Its previous spelling asserted the buggy direction.
+#             The three float/threshold mutants are the reason the sweep compares the map against a
+#             DOUBLE evaluation as well as against impl::minEigenValue: check (a)
+#             calls the same function the kernel does, so it pins the covariance
+#             TRIPLE and says nothing about the precision. Both of those mutants
+#             passed 2040/2040 before check (a2) existed. `maxVal over the interior
+#             only` is the reason Corner.SelectionOnSyntheticMaps exists: no map
+#             built from a real frame has its maximum on the border, because
+#             reflect-101 zeroes the outermost derivative row and column (D-19), so
+#             that mutant passed every real-frame case in the file.
+#   test_opencv_interop  32 -> 40. The added 8 are OpenCVInterop.RealFrameCorners,
+#             which is T3.7's "detected corners match the reference ... on real
+#             sequences" bullet -- the one thing tests/test_corner.cpp cannot check,
+#             because it is a CORE suite and has no image decoder. It runs
+#             ops/corner.hpp over tests/images/1403715887284058112_bin_normalized.png
+#             and against gftt.cpp's pipeline written out in stock OpenCV (two
+#             filter2D taps, three product planes, a boxFilter SUM, the min
+#             eigenvalue, then minMaxLoc / THRESH_TOZERO / dilate / the scan /
+#             greaterThanPtr / the greedy spacing filter), sharing no code with the
+#             library. The documented tolerance is ZERO: the response map is
+#             bit-identical over 360 960 pixels and all 163 corners land at the same
+#             positions. It has teeth on the tie order specifically -- inverting
+#             impl::CornerStronger's tie direction takes it to 39/40.
 #   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
 #             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
 #             through constPlane() -> unpackTo8U, and that conversion was the one
@@ -720,8 +811,9 @@ opencv	test_resample	245312	0
 opencv	test_pyramid	262321	0
 opencv	test_derivative	48526	0
 opencv	test_covariance	3604	0
+opencv	test_corner	2749	0
 opencv	test_harness	8	0
-opencv	test_opencv_interop	32	0
+opencv	test_opencv_interop	40	0
 opencv	test_equivalence	16403	0
 
 core	test_binMat	845	0
@@ -740,6 +832,7 @@ core	test_resample	245312	0
 core	test_pyramid	236429	0
 core	test_derivative	47675	0
 core	test_covariance	3604	0
+core	test_corner	2749	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -758,6 +851,7 @@ noexcept	test_resample	245312	0
 noexcept	test_pyramid	236429	0
 noexcept	test_derivative	47675	0
 noexcept	test_covariance	3604	0
+noexcept	test_corner	2749	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -776,5 +870,6 @@ debug	test_resample	245312	0
 debug	test_pyramid	236429	0
 debug	test_derivative	47675	0
 debug	test_covariance	3604	0
+debug	test_corner	2749	0
 debug	test_harness	8	0
 

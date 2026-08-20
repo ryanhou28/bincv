@@ -2527,7 +2527,7 @@ all are fixed:
 
 ---
 
-### T3.7 · Corner response · `TODO`
+### T3.7 · Corner response · `DONE`
 
 **Depends:** T3.6
 **Files:** `include/bincv-cpp/ops/corner.hpp` (new)
@@ -2540,7 +2540,204 @@ with `gftt_corner_derivative_type: BINARIZED`. **API tier 2.**
 **Done when:** detected corners match the reference within a documented tolerance
 on real sequences; benchmark committed.
 
+> **ONE done-when bullet was outstanding when this task was first marked DONE and
+> the RESULT block did not say so.** "On real sequences" was met by nothing: every
+> frame in `tests/test_corner.cpp` and in the benchmark was synthetic, because
+> `test_corner` is a CORE suite and cannot decode a PNG. It is now met **on a real
+> FRAME** — `OpenCVInterop.RealFrameCorners`, in the OpenCV-configured suite where
+> a decoder exists — and the tolerance is documented and is **zero**: on
+> `tests/images/1403715887284058112_bin_normalized.png` the response map is
+> bit-identical to the gftt.cpp pipeline over 360 960 pixels and all 163 corners
+> land at identical positions. **A real SEQUENCE is still not covered** — the
+> repository has one frame, and running the reference binary itself is out of
+> scope here — so what a sequence would add (temporal stability of the selection)
+> remains untested, and it is T3.8's ground rather than this task's.
+
 **Verify:** V-ALL
+
+**RESULT — shipped as `ops/corner.hpp`: two stages, no heap anywhere, and one
+measurement that contradicts the guidance the task was written from.**
+
+`cornerMinEigenVal(dx, dy, blockSize, dst)` writes the response map;
+`selectGoodFeatures(map, params, corners, capacity)` performs the selection;
+`goodFeaturesToTrack(dx, dy, params, scratch, corners, capacity)` is the two of
+them. `GoodFeaturesParams`' defaults are `SEAL/seal_params.yaml` verbatim —
+`maxCorners 200`, `qualityLevel 0.01`, `minDistance 33.33333333333`,
+`blockSize 3`. There is no Harris option because `gftt_use_harris_detector` is 0
+and an unused second response function is an untested one.
+
+**THE SLIDING FORM IS USED, AND ON THE REFERENCE DEVICE IT IS THE WRONG CHOICE AT
+THE REFERENCE PIPELINE'S OWN BLOCK SIZE.** The map sweeps a column at a time with
+two `SlidingWindowCount`s carrying `sumXX` and `sumYY`; `sumXY` has no incremental
+form and is recomputed per position through the four-argument `countAndSplit`,
+which is what T3.6's docstring said T3.7 had to know. Measured against a
+`gradientCovariance` call per position ([X-18](EXPERIMENTS.md),
+`benchmark/corner_benchmark.cpp`, `results/corner_benchmark_pi4.log`, spreads
+0.04–3.4%, `throttled=0x0` before and after):
+
+| blockSize | sliding ns/px | recompute ns/px | net | incremental alone | traversal alone |
+|---|---|---|---|---|---|
+| 3 | 101.52 | **84.84** | **0.84×** | 0.93× | 1.12× |
+| 7 | 142.90 | 138.60 | 0.97× | 1.04× | 1.07× |
+| 15 | 253.37 | 278.90 | 1.10× | 1.14× | 1.03× |
+| 31 | 566.68 | 693.69 | 1.22× | 1.24× | 1.01× |
+
+Four-run medians. The spreads above are WITHIN-run; **run-to-run scatter was
+measured separately over four runs of the same binary** — 0.18–0.34% on the net
+ratio at `blockSize` 3, 7 and 15 and 3.3% at 31 — and the ranking holds in every
+run at every block size, so the crossover is a measured boundary rather than one
+run's arithmetic (`results/corner_benchmark_pi4_scatter.log`).
+
+A third variant that recomputes **column-major** separates the two effects the
+shape changes at once: the incremental state alone is a **loss at `blockSize` 3
+(0.93×) and only marginal at 7 (1.04×)** — so IT crosses over between 3 and 7,
+while the NET crosses between 7 and 15, because the forced traversal still costs 7%
+at 7 — and `SlidingWindowCount` slides only downward so the caller is forced into a
+column-major traversal that costs a further 12% at `blockSize` 3. Both shrink as
+the window grows. Memory is **identical** for
+every variant — 153 600 B of derivative planes, a 1 228 800 B `float` response map,
+**0 B** of caller scratch, and an `operator new` count of **0** — so this is speed
+against speed with footprint held equal. **That "identical" is binCV against binCV
+and is NOT the tier 2 denominator**; the OpenCV one is [X-19](EXPERIMENTS.md), added
+because CLAUDE.md requires it for an operation with a `cv::` counterpart and T3.7
+had none. Against the reference pipeline expressed in stock OpenCV over `CV_8U`:
+binCV returns **the same 723 corners at the same positions over four frames** for
+**16.54 B/pixel against 36.94** (5.14 against 29.35 once both candidate buffers are
+sized to the measured survivor count) and is **1.82× slower** — about a third of
+which is the sliding form's own 1.20× loss above. CLAUDE.md's rule for a measurement that
+contradicts a documented claim was followed: the kernel was not changed to fit the
+doc, D-15 / `ops/reduce.hpp` / `ops/covariance.hpp` now carry the window-size
+qualification, and **whether the operation should select on `blockSize` is an open
+decision X-18 registers and does not take** — one device at one frame size is thin
+evidence for a permanent branch, and the x86 run has the opposite sign at
+`blockSize` 3 with spreads past 50%.
+
+**PRECISION: exact integers in, one square root, `float` out.** The response is
+evaluated as `(S − √D)/2` with `S = xx + yy` and `D = (xx − yy)² + 4xy²`, so both
+operands of the root are exact integers and nothing rounds before it. `double`
+rather than `float` for the arithmetic, because `float` would round `D` itself once
+`blockSize` passes 16 — a rounding the root's correct rounding does not bound — and
+because IEEE-754 requires `sqrt` to be correctly rounded, which makes the map
+bit-identical across platforms and across all four word types (checked, not
+assumed). Two exact consequences fall out and both are checked with integer
+arithmetic: **the response is exactly 0.0f iff `xx·yy − xy² == 0`**, and otherwise
+it is at least `1/(2·blockSize²)`, so the selection's `> threshold` test needs no
+epsilon. `cv::cornerMinEigenVal` works in float over a float box filter of float
+Sobel outputs, so an exact comparison against it is **not available even in
+principle** — which is one of the two reasons this is tier 2.
+
+**THE SELECTION ORDER IS THE SPECIFICATION, AND A CASE PINS IT.** `gftt.cpp`'s
+order is: maximum over the whole map (border included), `THRESH_TOZERO` at
+`qualityLevel × max`, 3×3 NMS over `[1, h−1) × [1, w−1)`, descending sort, greedy
+minimum-distance. NMS is **not** interchangeable with the spacing filter: it
+deletes a point beside a *higher* one whether or not that higher one is ever
+accepted. `Corner.SelectionOrder_PinsNmsBeforeDistance` builds `A=(10,10) 100`,
+`B=(13,10) 99`, `C=(14,10) 98` at `minDistance 3.5` and asserts **both** answers —
+NMS-first keeps `{A}`, spacing-first keeps `{A, C}` — so the case fails if either
+changes rather than merely agreeing with the code. Two shortcuts are taken and both
+are checked against a literal port of `gftt.cpp` (dilate buffer and cell grid
+included) over 464 parameter combinations: the threshold is fused into the NMS scan
+(the reference's second frame-sized buffer is not needed), and the grid is replaced
+by an exhaustive check over accepted points, which is exact because
+`cell = cvRound(minDistance)` makes the ±1-cell search cover every point within
+`minDistance`. **TIES ARE THE REFERENCE'S ORDER, AND THIS BLOCK USED TO SAY THE OPPOSITE.** It
+claimed `greaterThanPtr` was unstable and the reference's tie order unspecified. It
+is neither: `SEAL/opencv_internal/include/gftt.hpp` reads
+`(*a > *b) ? true : (*a < *b) ? false : (a > b)` under the comment "Ensure a fully
+deterministic result of the sort", and those are pointers into a contiguous
+`CV_32F` map, so equal responses come out LATER-RASTER-POSITION-FIRST.
+`CornerStronger` shipped with the opposite tie direction; on a checkerboard, where
+the whole interior is equal, that moves every selected position. It now breaks ties
+by DESCENDING `(y, x)` and matches the reference.
+
+**CAPACITY IS NOT `maxCorners`, and the flag is how a caller finds out.** The
+output array is also the candidate buffer. The result equals the reference's when
+`capacity` holds every NMS survivor (worst case `(w−2)(h−2)`); below that the
+`capacity` strongest survivors are ranked through an in-place bounded heap and
+`candidatesTruncated` is set, making the returned count a lower bound. **That heap
+shipped with its comparator reversed** — `std::push_heap` under the REVERSE of the
+sort order puts the STRONGEST candidate at the root, so the eviction test fired
+only for a new global maximum and the buffer ended up holding the first-scanned
+survivors rather than the strongest ones. It uses `CornerStronger`, the sort's own
+order, whose max-heap root is the weakest retained candidate. `candidatesTruncated`
+is honest at `capacity == 0` now as well: a zero-length buffer holds no survivor,
+so it reports truncation whenever the map has one. The
+reference pays an unbounded `std::vector<const float*>` plus a
+`vector<vector<Point2f>>` grid for the same thing; neither exists here, and an
+`operator new` counter — plain **and** C++17 over-aligned — reads **0** across every
+entry point.
+
+**D-19's BORDER REASONING IS VERIFIED, NOT RESTATED.** Reflect-101 was chosen partly
+because a zero fill manufactures a frame-wide edge this operation would select.
+`Corner.BorderRing_*` requires **zero** corners on blank, uniform and striped frames
+at all four word types — and requires the ring to **appear** under
+`BORDER_CONSTANT`, which is the half that gives the check teeth: 4 spurious corners
+on a uniform frame, 14 on a striped one, every one of them in the outermost columns.
+The blank frame is the one case where a zero fill is harmless, and it is kept
+because it names the hazard precisely: not "a constant border" but "a constant
+border that disagrees with the content".
+
+**Gate:** `./scripts/verify.sh` — ALL CONFIGURATIONS GREEN; `test_corner` adds
+**2749** checks in each of the four configurations (equal across them because a
+tier 2 operation with no cv:: denominator has no OpenCV half), floors recorded in
+`tests/expected-checks.txt` with the mutation numbers that give them teeth. On the
+reference device, `./scripts/run_on_pi.sh pi4 './tests/test_corner'` reports
+**2749/2749**, `throttled=0x0` before and after.
+
+**THE SUITE'S TEETH ARE MEASURED.** Mutating `ops/corner.hpp` (checks passed out of
+2749): a dropped `yySlide.slideDown()` 2445; the 3×3 NMS test removed 2162;
+`maxVal` taken over the interior only 2596; `val > threshold` relaxed to `>=` 2634;
+the spacing `<` relaxed to `<=` 2634; the square root taken in `float` 2642;
+`gftt.cpp`'s own halved-float spelling 2642; **the retention heap's comparator
+reversed 2745; the tie order flipped to ascending 2294; the `capacity == 0`
+short-circuit restored 2748.**
+
+**THE LAST THREE ARE BUGS THIS SUITE DID NOT CATCH AT 2698 — every one of them
+passed 2698/2698 — and each now has a case written against it:**
+
+* `Corner.CapacityContract` compares the WHOLE truncated prefix against the
+  untruncated ranking at six capacities, with the spacing filter switched off so
+  that the buffer *is* the ranking. It used to compare `corners[0]` alone, which is
+  the one entry the reversed heap happens to preserve. It also pins
+  `candidatesTruncated` at `capacity == 0` in both directions: true when the map has
+  survivors, false when it has none.
+* `Corner.TieOrderIsTheReferenceDescendingRasterOrder` pins the tie direction three
+  ways — an x-only spacing decision, a y-only one, and an all-equal interior whose
+  output must come out in descending raster order.
+* `Corner.Structure_Checkerboard` now admits BOTH members of each junction's 2×2
+  response plateau as junctions (the derivative is a 3-tap, so a junction is two
+  pixels wide in each axis) and separately requires the ACCEPTED member to be the
+  plateau's bottom-right — a direct readout of the tie direction on the frame where
+  ties decide everything. Its previous spelling asserted the buggy direction.
+* **The oracle was why the tie bug survived.** `referenceSelect` — advertised as a
+  literal port of gftt.cpp and the evidence behind the 464-combination agreement
+  claim — sorted with a byte-for-byte copy of `impl::CornerStronger`, so the one
+  place binCV disagreed with gftt.cpp was the one place the oracle was built to
+  agree. It now sorts `const float*` with the reference's own `greaterThanPtr` and
+  recovers `(x, y)` from the pointer offset, as gftt.cpp does. An oracle that cannot
+  share a tie bug with the code under test.
+* `OpenCVInterop.RealFrameCorners` (a new suite member, OpenCV configuration only)
+  is the fifth: on the repository's real frame it requires the response map to be
+  bit-identical to the OpenCV-expressed reference pipeline and all 163 corners to
+  land at the same positions. It fails under the inverted tie order.
+
+**The three earlier mutants that found gaps found them and closed them.** The sweep's primary check compares the map against
+`impl::minEigenValue(oracle triple)` — the same function the kernel calls — so it
+pins the covariance triple and says nothing about precision, and both float-spelling
+mutants passed 2040/2040 before a second check against a `double` evaluation was
+added. And no response map built from a real frame has its maximum on the border,
+because reflect-101 zeroes the outermost derivative row and column, so the
+interior-only `maxVal` mutant passed every real-frame case until
+`Corner.SelectionOnSyntheticMaps` was written.
+
+**Two things were verified and are worth recording because they could have gone the
+other way.** A 45° step edge — an enormous gradient with no corner — gives a
+response of **exactly 0.0f at every position whose window sees only interior
+derivative rows**, at all four block sizes, because every gradient in such a window
+is parallel and `det` is an integer. And the `float` storage margin is measured
+rather than argued: at `blockSize` 3, 7, 15 and 31 the number of 3×3 neighbour pairs
+the `float` map merges that the `double` oracle separates is **0**, and so is the
+number of NMS survivors that differ between the two maps.
 
 ---
 
