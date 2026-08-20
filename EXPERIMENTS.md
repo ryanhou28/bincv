@@ -3144,6 +3144,17 @@ withdraw.
 | track | prevPts/nextPts/status/err, 200 points | 4 200 | 0.2% |
 | **TOTAL** | | **1 721 568** | |
 
+> **THIS TABLE IS SUPERSEDED AS THE PROJECT'S CURRENT FRONTEND FOOTPRINT.** It is
+> the frame-map shape, which
+> [D-22](ARCHITECTURE.md#d-22-the-corner-response-streams-over-a-three-row-ring-and-that-is-the-recommended-path)
+> no longer recommends. On the recommended path the corner row is **112 744 B** and
+> the **TOTAL is 500 464 B** — same content, same five stages, identical corners,
+> re-measured by the same case
+> ([X-23](#x-23--the-rolling-response-ring-against-the-frame-sized-response-map--done),
+> T3.11). **Phase 4 quotes 500 464 B**, not the total above. The table stays because
+> it is the measurement that made the case for changing the shape, and because the
+> 77.5% row is the finding.
+
 **E-10 IS CONFIRMED AND IT IS NOT MARGINAL: the float response map alone is
 71.4% of the frontend and more than everything else combined.** Four bytes per
 pixel where every other plane is one or two BITS. The tracker itself — the
@@ -3208,11 +3219,17 @@ the same review:
    AND THE COMPUTE HALF OF THIS ITEM WAS WRONG — corrected here by name, because
    X-23's pre-registered rule required exactly that of a `T < 1.00` result.** The
    footprint half was right and slightly conservative: measured
-   **1 721 568 B → 500 464 B, 3.44×**. The compute is **0.76×, i.e. FASTER**, not 2×
+   **1 721 568 B → 500 464 B, 3.44×**. The compute is **0.774×, i.e. FASTER**, not 2×
    slower — a ring forces a row-major sweep, which [X-18](#x-18--does-the-incremental-window-form-still-pay-inside-t37s-dense-sweep--done)
    had already measured as the quicker traversal at `blockSize` 3, and no second pass
    is needed to recover the global threshold. Even the two-pass shape this sentence
-   described costs 1.344×, not 2×. The corners are identical.
+   described costs **1.327×**, not 2×. The corners are identical.
+   (Both figures are X-23's **reported** device run,
+   `results/corner_streaming_benchmark_pi4.log`; its second run of the same source
+   reads 0.764× and 1.344×. An earlier version of this paragraph quoted the second
+   run's numbers while D-22, ARCHITECTURE §9's E-10 row, TASKS.md T3.11 and
+   `ops/corner.hpp` all quoted the reported one, so a reader following the named
+   correction met two different figures for one decision cell.)
 4. **Nothing about `lk_min_eig_threshold` was changed**, although this entry
    measured it to be nearly vacuous over exact popcount covariances on binarized
    content: the weakest window among 141 real-frame keypoints scores 0.033 in the
@@ -3248,7 +3265,7 @@ that a rule must be written first — so the bands, their numbers and the
 justification for those numbers were written in the entry itself, at a commit where
 `ops/corner.hpp` contained no streaming form at all. **And the rule earned its
 keep**: it pre-declared `T < 1.00` as a live outcome requiring three documents to be
-corrected by name, that outcome is what happened (`T` = 0.76×), and the correction
+corrected by name, that outcome is what happened (`T` = 0.774×), and the correction
 was therefore a step in a written procedure rather than an awkward discovery. A rule
 that only anticipates the answer you expect is not doing this job.
 
@@ -4106,6 +4123,24 @@ job and still needs a binary per arm.
 
 ### X-23 · The rolling response ring against the frame-sized response map · `DONE`
 
+> **CORRECTED AT TRIAGE, and the corrections are named where they land rather than
+> summarised here.** The *decision* is unchanged — band A fired, the streaming form
+> ships, and 3 655 device checks plus an independent re-derivation of the answer
+> both re-confirmed the equality precondition. What was wrong was reporting: (1) the
+> `blockSize` crossover was stated as one number when the two word types cross in
+> different places — `uint64_t` is already above 1.00 at 15, where X-18 put its own
+> boundary, so conclusion 4's "the boundary moved" held on half the data; (2) two
+> cross-checks against X-18 and the arm-order-swap control quoted the *scatter* run's
+> numbers, and one pair of them (1.083 / 2.058) appears in neither log; (3) X-20's
+> decision 3 carried the scatter run's 0.76× / 1.344× while four other sites carried
+> the reported run's 0.774× / 1.327×; (4) the registered 752×480 *real frame* was
+> replaced by synthetic content of the same size and the substitution was not
+> recorded; (5) the frontend footprint was an **enumeration over listed buffers
+> printed while the frame map was still live**, not the reading it claimed to be —
+> now a live-byte high-water mark, in RESULT (a). A fourth site of the "~2×" figure
+> (TASKS.md T3.8's X-20 write-up) was also missed by the rule's list of three and now
+> carries the same named correction.
+
 > **PRE-REGISTERED. Written and committed BEFORE the streaming form exists** —
 > nothing in `ops/corner.hpp` implements it at this commit, and this commit touches
 > this file and nothing else, so the history shows the rule predates the data. Same
@@ -4431,7 +4466,7 @@ all four `verify.sh` configurations**, not only where a benchmark builds:
 
 | case | what it compares | scale |
 |---|---|---|
-| `Streaming_IdenticalCorners_{uint8,16,32,64}_t` | `count`, `candidatesRanked`, `candidatesTruncated`, and the whole `[0, candidatesRanked)` prefix — coordinates and exact `float` bits | **1 080 cells and 133 098 corner records per word type**; 8 frames × 6 block sizes (3, 4, 5, 7, 15, 31) × 4 parameter sets × 6 capacities |
+| `Streaming_IdenticalCorners_{uint8,16,32,64}_t` | `count`, `candidatesRanked`, `candidatesTruncated`, and the whole `[0, candidatesRanked)` prefix — coordinates and exact `float` bits | **1 080 cells and 133 098 corner records per word type**; 8 frames × 6 block sizes (3, 4, 5, 7, 15, 31) × 4 parameter sets × 6 capacities, **less the 72 cells whose frame has no survivor at that block size, where the capacity sweep is five wide rather than six** (`survivors − 1` is not a capacity when `survivors` is 0) — 1 152 − 72 = 1 080 |
 | `Streaming_IdenticalCorners_LargeFrames` | the same, at 160×120, 129×97 and 151×113 | **184 cells and 566 270 corner records** at `uint32_t` and again at `uint64_t` |
 | `Streaming_RowMatchesFrameMap_*` | `cornerMinEigenValRow` against `cornerMinEigenVal`'s row `y` | **65 910 positions per word type, bit-identical** |
 | `Streaming_DegenerateShapes` | 1×1, 1×9, 9×1, 2×2, 3×3, 4×3, 3×4, 33×2 — frames with no NMS row at all | 8 shapes |
@@ -4555,6 +4590,45 @@ not enumerated. §4.6's "~0.6 MiB" projection for two frames plus derivatives �
 before anything in this project counted a float scratch — is **exceeded 2.7× by the
 frame-map frontend and met by the streaming one.**
 
+**AND THE TWO TOTALS ARE NOW READ RATHER THAN ADDED UP — CORRECTED AT TRIAGE,
+BECAUSE THE FIRST VERSION OF THIS ROW WAS NOT THE MEASUREMENT IT CLAIMED TO BE.**
+`Flow.FrontendFootprint_640x480` used to compute the streaming total as
+`ring + candidates + carry` — an enumeration of the buffers its author had listed, so
+no buffer nobody listed could move it — **and it printed that total while the
+1 228 800 B frame map was still live**, which is the very mistake the case's own
+candidate-probe note says it is avoiding. Both are fixed:
+
+- the test's replaced `operator new`/`delete` now track **live bytes and their
+  high-water mark**, not just call counts (every block carries a 16 B header so the
+  requested size is recoverable at `free`);
+- the frame-map stage and the streaming stage each run in **their own scope with the
+  other shape's buffers destroyed**, and each peak is read *inside* its scope at the
+  high-water moment;
+- the per-stage rows are then required to **account for the reading to the byte** —
+  `BINCV_CHECK_EQ(framePeak, total + bookkeeping)` and the same for the streaming
+  peak — with `bookkeeping` (**1 664 B**: the `std::vector`s of `BinMat`/`TernaryMat`
+  inside the test's `Frontend` and its `LKLevel` bundle) named, printed, and required
+  to be **identical in both readings**, so that
+  `framePeak − streamPeak == responseBytes − ringBytes` is a difference of two
+  measurements of the same thing;
+- nothing asserts *inside* a measured window, because `BINCV_CHECK_EQ` builds its
+  message eagerly (`std::to_string` allocates whether the check passes or not) and a
+  check inside the window lands in the mark being read. That is not hypothetical:
+  the first version of this rewrite asserted inside the window and the two readings
+  disagreed by 313 B. The windows record; the assertions follow.
+
+Read this way the frontend measures **1 723 232 B → 502 112 B**, which is the
+1 721 568 B → 500 464 B table above plus the 1 664 B of bookkeeping and minus the
+16 B of carry that is on the stack and therefore cannot appear in a heap reading.
+**The quoted numbers are unchanged**; what changed is that they are now falsifiable.
+Verified by mutation: a `new float[640*480] … delete[]` transiently inside
+`goodFeaturesToTrackStreaming` takes the streaming reading to 1 730 912 B and fails
+two checks. **And the limit is stated rather than glossed:** this is a HEAP
+high-water mark, so a `static float[640*480]` inside the kernel does *not* move it —
+measured, the test binary's BSS goes 648 B → 1 229 464 B and all 29 checks still
+pass. What covers that case is D-5's caller-provided-scratch contract and reading the
+header, not this case.
+
 ---
 
 **RESULT (b) — TIME. `T` is the whole `goodFeaturesToTrack` call, medians of 11
@@ -4580,9 +4654,14 @@ scatter**, `(max − min)/median`:
 
 **THE ARM ORDER WAS SWAPPED IN THE BATCH AND THE RUN REPEATED**, as the rule
 requires. In order (S1, S2, F) the same cells read `T(S1)` = **0.775, 0.917, 0.998,
-1.083** and `T(S2)` = 1.327, 1.389, 1.661, 2.058 — the largest movement anywhere is
-0.002. **The verdict is not a batch-position effect**, and this is the control the
-twice-measured layout hazard demanded.
+1.081** and `T(S2)` = 1.327, 1.389, 1.661, 2.054 — **the largest movement anywhere is
+0.001**, at `blockSize` 3; at 15 and 31 it is 0.000. **The verdict is not a
+batch-position effect**, and this is the control the twice-measured layout hazard
+demanded. (An earlier version of this paragraph transcribed the `blockSize` 31 cells
+as 1.083 and 2.058 and bounded the movement at 0.002. Neither figure is in either
+committed log — both swapped-order runs read 1.081/2.054 and 1.086/2.063 — and
+TASKS.md T3.11 already carried the correct 0.001. The log lines are
+`corner_streaming_benchmark_pi4.log:134` and `..._scatter.log:134`.)
 
 **AND THE OTHER DEVICE RUN AGREES ON EVERY VERDICT** (the scatter log): `T(S1)` =
 **0.764 / 0.914 / 0.997 / 1.085**, `T(S2)` = 1.344 / 1.382 / 1.661 / 2.063. The
@@ -4591,9 +4670,31 @@ largest disagreement between the two runs is **1.3% on `T` at `blockSize` 3** an
 is why there are two logs rather than one.
 
 `uint64_t`, 640×480: `T(S1)` = **0.771 / 0.931 / 1.025 / 1.125** at blockSize 3 / 7 /
-15 / 31, `T(S2)` = 1.332 / 1.397 / 1.654 / 2.117 — the same shape and the same
-crossover, half a point to four points worse for the streaming form. (Scatter run:
-0.775 / 0.932 / 1.018 / 1.122.)
+15 / 31, `T(S2)` = 1.332 / 1.397 / 1.654 / 2.117 — the same shape, and half a point
+to four points worse for the streaming form. (Scatter run: 0.775 / 0.932 / 1.018 /
+1.122.)
+
+**THE CROSSOVER IS NOT AT THE SAME PLACE IN THE TWO WORD TYPES, AND AN EARLIER
+VERSION OF THIS ENTRY SAID IT WAS.** At `uint32_t` the streaming form is still at
+parity at `blockSize` 15 (0.998) and the crossover falls between 15 and 31. At
+`uint64_t` it is **already above 1.00 at 15** — 1.025 in the reported run, 1.018 in
+the scatter run, against within-run spreads of 0.58% and 0.69% on the two arms, so
+the 2.5% gap is about four times the noise — and the crossover falls between **7 and
+15**. Both runs agree on that, so the reading is:
+
+| word type | `T(S1)` at 3 / 7 / 15 / 31 | crossover |
+|---|---|---|
+| `uint32_t` | 0.774 / 0.917 / 0.998 / 1.081 | between **15 and 31** |
+| `uint64_t` | 0.771 / 0.931 / 1.025 / 1.125 | between **7 and 15** |
+
+This matters for one thing in particular and it is flagged rather than buried:
+[X-18](#x-18--does-the-incremental-window-form-still-pay-inside-t37s-dense-sweep--done)
+put the sliding-versus-recompute crossover between 7 and 15, and **at `uint64_t` this
+entry reproduces that boundary exactly rather than moving it**. So conclusion 4
+below — "X-18's boundary moved" — holds for `uint32_t` only, on half the measured
+data, and [E-11](ARCHITECTURE.md#9-open-questions-and-planned-experiments) (should
+the sweep select its traversal on `blockSize`?) gets a *word-type-dependent* second
+data point, not a clean disagreement. That is a further reason E-11 stays open.
 
 752×480, `blockSize` 3: `T(S1)` = **0.749** (`uint32_t`) and **0.755** (`uint64_t`);
 `T(S2)` = 1.311 and 1.331. The saving is slightly *larger* on the wider frame, which
@@ -4601,20 +4702,41 @@ is the direction a row-major sweep should move in. The corner-stage peak there i
 1 630 524 B → 195 724 B (**8.33×**), on 15 557 survivors of this benchmark's own
 frame.
 
+**A DEVIATION FROM THE REGISTERED WORKLOAD, RECORDED RATHER THAN LEFT TO BE
+NOTICED.** The pre-registration above names "the repository's real 752×480 frame,
+whose survivor count X-20 measured separately at 9 774". What the committed
+benchmark runs at 752×480 is the **frame SIZE** with this benchmark's own synthetic
+content (`makeFrame`), which yields **15 557** survivors — the decoded repository
+frame is behind `BINCV_WITH_OPENCV` and the arms are built core-only. The
+consequence is bounded and stated: 15 557 is **not** comparable to X-20's 9 774, so
+the candidate-array row of the 752×480 footprint block is this benchmark's frame and
+nothing else, and conclusion 3's "9 774 on the real frame" comes from
+[X-20](#x-20--the-lucaskanade-tracker-on-binary-pyramids--done), not from here. The
+*ratio* `T` is unaffected — both arms see the same content — and the 640×480 cells,
+which are the decision, run the same content as each other and are compared with the
+frontend number through `Flow.FrontendFootprint_640x480`, which does run X-20's own
+content.
+
 ---
 
 **TWO CROSS-CHECKS AGAINST X-18, BECAUSE A CONTROL THAT DOES NOT REPRODUCE A KNOWN
-NUMBER IS NOT A CONTROL.** X-18 measured the shipped sliding response sweep at
-**101.25 ns/px** at `blockSize` 3 on this device. Arm F's response column reads
-105.360 — the same sweep plus the `minMaxLoc` pass this entry deliberately charges
-to it, and **4.1 ns/px is the right size for one linear pass over a 1 228 800 B
-`float` map.** So the control is the shipped code behaving as previously measured.
+NUMBER IS NOT A CONTROL. BOTH RUNS ARE QUOTED, BECAUSE THE TWO CROSS-CHECKS ARE
+EXACTLY THE PLACE WHERE PICKING ONE WOULD BE PICKING THE FLATTERING ONE.** X-18
+measured the shipped sliding response sweep at **101.25 ns/px** at `blockSize` 3 on
+this device. Arm F's response column reads **107.119** in the reported run and
+**105.360** in the scatter run — the same sweep plus the `minMaxLoc` pass this entry
+deliberately charges to it. That surcharge is therefore **4.1–5.9 ns/px**, and one
+linear pass over a 1 228 800 B `float` map is the right size for it at either end. So
+the control is the shipped code behaving as previously measured. (An earlier version
+of this paragraph quoted only 105.360 while declaring the reported run its source,
+which made the surcharge look 43% tighter than the bracket the two runs actually
+give.)
 
 The second cross-check does **not** land on X-18's number, and it is reported rather
 than reconciled. X-18's row-major recomputation arm read **84.83 ns/px** at
-`blockSize` 3; S1's row kernel does the same arithmetic in **74.65** — 12% less.
-Two candidate explanations, and **this entry does not have the measurement that
-separates them**:
+`blockSize` 3; S1's row kernel does the same arithmetic in **77.123** (reported run)
+and **74.654** (scatter run) — **9.1% to 12% less**. Two candidate explanations, and
+**this entry does not have the measurement that separates them**:
 
 - **The argument spelling.** X-18's arm calls `gradientCovariance(dx, dy, rect)` on
   the **containers**, which rebuilds four views **per pixel**;
@@ -4628,7 +4750,8 @@ separates them**:
   well inside that.
 
 So **12% is an upper bound on the argument-spelling effect, not a measurement of
-it**, and the sentence to take away is only that S1's row kernel is at least as fast
+it** — and it is the upper end of a 9.1–12% run-to-run bracket, which is itself the
+point — and the sentence to take away is only that S1's row kernel is at least as fast
 as X-18's recomputation arm — which is what the comparison in this entry needs, since
 both of *its* arms are in this binary. It is a further reason not to close
 [E-11](ARCHITECTURE.md#9-open-questions-and-planned-experiments) from either entry's
@@ -4673,12 +4796,13 @@ written for a case nobody expected to arise — the pre-registration assumed the
 arms would differ in *carry*, and they do not.
 
 **THE COST, STATED WITH THE WIN.** The streaming form is *slower* at large blocks —
-1.00× at 15, 1.08× at 31 — because that is where the sliding accumulator earns its
-keep, and X-18 measured that crossover from the other side. **The crossover is
-between 15 and 31, not between 3 and 7**, so the frame-map form is the faster shape
-only above the block size the MVP pipeline runs. It also remains the only shape that
-produces a map, which the documented mask route and any caller selecting twice over
-one map both need.
+at `uint32_t` 1.00× at 15 and 1.08× at 31; at `uint64_t` **1.03× already at 15** and
+1.13× at 31 — because that is where the sliding accumulator earns its keep, and X-18
+measured that crossover from the other side. **The crossover is between 15 and 31 at
+`uint32_t` and between 7 and 15 at `uint64_t`, not between 3 and 7 in either**, so
+the frame-map form is the faster shape only at block sizes above the one the MVP
+pipeline runs. It also remains the only shape that produces a map, which the
+documented mask route and any caller selecting twice over one map both need.
 
 **ONE READING WORTH FLAGGING RATHER THAN ABSORBING.** The `blockSize` 31 rows have
 **6.0–6.8% within-run spreads** against 0.04–0.7% everywhere else, on both streaming
@@ -4713,10 +4837,16 @@ device is where this is closed.
    candidate array, not the response storage** — but it is a CONTRACT question (what
    a caller provisions, and what `candidatesTruncated` costs them), not a buffer
    question, and it is not opened here.
-4. **X-18's crossover is confirmed from the other side and its boundary moved.** X-18
-   measured sliding-versus-recompute inside the response sweep alone and put the net
-   crossover between 7 and 15. Measured through the whole detector with the streaming
-   form's own row kernel, the crossover is between **15 and 31**.
+4. **X-18's crossover is confirmed from the other side, and its boundary moves with
+   the WORD TYPE rather than simply moving.** X-18 measured sliding-versus-recompute
+   inside the response sweep alone and put the net crossover between 7 and 15.
+   Measured through the whole detector with the streaming form's own row kernel, the
+   crossover is between **15 and 31 at `uint32_t`** and between **7 and 15 at
+   `uint64_t`** — i.e. X-18's own boundary, unmoved, at the wider word. Both device
+   runs agree on both cells. This is one data point on
+   [E-11](ARCHITECTURE.md#9-open-questions-and-planned-experiments), not a settled
+   disagreement with X-18, and the word-type dependence is itself a reason E-11
+   should not be closed from either entry's numbers.
 
 **Decision.**
 
@@ -4731,6 +4861,13 @@ device is where this is closed.
    ARCHITECTURE §9's E-10 row, and TASKS.md T3.11 all said "roughly 2× the response
    compute". The measured figure is **0.774×** (0.764× in the other device run),
    and none of the three is edited silently — each carries the correction.
+   **A FOURTH SITE EXISTED AND THE RULE'S LIST DID NOT NAME IT**: TASKS.md T3.8's
+   X-20 write-up carries the same sentence ("E-10 should be scheduled … for roughly
+   2× the response compute"). It was found at triage and now carries the same named
+   correction. The lesson is about the rule, not about the result — an enumeration of
+   sites written from memory is not a search, and a rule that requires a correction
+   "in three documents" should have said "wherever the figure appears", which is what
+   `grep` can actually check.
 4. **X-20's footprint table is restated** with the number this experiment measured:
    1 721 568 B → **500 464 B**, and the 71.4% row becomes 1.5%.
 5. **The two-pass arm is NOT shipped.** It lives in

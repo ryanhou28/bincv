@@ -944,17 +944,25 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 //
 // **THE STREAMING FORM IS 1.29x FASTER, NOT 2x SLOWER AS THIS TASK WAS SCHEDULED
 // ON**, and 3.44x smaller across the whole frontend. TASKS.md T3.11, ARCHITECTURE 9's
-// E-10 row and X-20's decision 3 all said "roughly 2x the response compute"; all
-// three are corrected by name in X-23 rather than quietly. The reason is the
+// E-10 row, X-20's decision 3 and (found at triage, after the rule's list of three)
+// TASKS.md T3.8's X-20 write-up all said "roughly 2x the response compute"; all four
+// are corrected by name in X-23 rather than quietly. The reason is the
 // traversal: a ring FORCES a row-major sweep, and X-18 already measured the
 // shipped column-major sliding sweep 1.19x slower than row-major recomputation at
 // `blockSize` 3 -- the streaming form collects that discount before paying for
 // anything.
 //
-// It costs where the sliding accumulator earns its keep, which is LARGE blocks:
-// T = 0.77x at 3, 0.92x at 7, 1.00x at 15, 1.08x at 31. The crossover is between
-// 15 and 31, not between 3 and 7. A caller running a large block and wanting the
-// last 8% should take the frame-map form -- and will usually want the map anyway.
+// It costs where the sliding accumulator earns its keep, which is LARGE blocks --
+// and NOT at the same block size in the two benchmarked word types:
+//
+//     blockSize          3      7     15     31     crossover
+//     T, uint32_t     0.77   0.92   1.00   1.08     between 15 and 31
+//     T, uint64_t     0.77   0.93   1.03   1.13     between  7 and 15
+//
+// In neither is it between 3 and 7, so the MVP's own block size is well clear. A
+// `uint32_t` caller running blockSize 31 and wanting the last 8%, or a `uint64_t`
+// caller at 15 or above wanting the last 3-13%, should take the frame-map form --
+// and will usually want the map anyway. Both device runs agree on both rows.
 //
 // The two-pass shape the estimate described was measured too (X-23's arm S2): it
 // is 1.33x at `blockSize` 3 for THE SAME PEAK -- the same three-row ring (it uses

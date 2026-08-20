@@ -794,7 +794,8 @@ including frames whose entire interior ties. It is the **recommended path**
 and it is **faster** — 0.77× at `blockSize` 3 on the reference device, because a ring
 forces the row-major sweep X-18 already measured as the quicker traversal there.
 The frame map stays for callers who need the map itself (the documented mask route,
-or selecting twice over one map) and is the faster shape above `blockSize` 15.
+or selecting twice over one map) and is the faster shape at large `blockSize` — above
+15 at `uint32_t`, and from 15 at `uint64_t`.
 
 **The selection's global properties survive the ring EXACTLY rather than
 approximately**, which is the whole difficulty: the threshold is relative to the
@@ -1810,6 +1811,14 @@ and the whole benchmark run twice:**
 | **streaming** | **102.8 ns/px (31.59 ms/frame)** | **77.1 ns/px** | **112 744 B** | **500 464 B** |
 | | **0.774×** | 0.720× | **11.83×** | **3.44×** |
 
+Both footprint totals are **read off a live-byte high-water mark** in
+`Flow.FrontendFootprint_640x480`, each shape in its own scope with the other's
+buffers destroyed, and the per-stage rows are required to account for the reading to
+the byte — so a heap buffer that no row names, anywhere in the frontend, fails the
+case. (Corrected at triage: the first version summed the buffers its author had
+enumerated, and printed the streaming total while the 1 228 800 B frame map was still
+live.)
+
 The other device run reads `T` = **0.764×**: **run-to-run scatter is ~1.3% on the
 ratio and up to ~3.4% on an individual ns/pixel column, an order of magnitude above
 the within-run spread**, so the ratio is the quotable quantity and **both logs are
@@ -1817,8 +1826,9 @@ committed**. The verdict is the same in both runs at every block size, both word
 types and both frame sizes.
 
 **IT IS FASTER, WHICH IS NOT WHAT THIS DECISION WAS SCHEDULED TO WEIGH.** T3.11,
-this document's own E-10 row and X-20's decision 3 all estimated "roughly 2× the
-response compute"; all three are corrected by X-23 by name. A ring FORCES a
+this document's own E-10 row, X-20's decision 3 and TASKS.md T3.8's X-20 write-up
+(the fourth site, which the rule's list of three did not name and triage found) all
+estimated "roughly 2× the response compute"; all four are corrected by X-23 by name. A ring FORCES a
 row-major sweep, and X-18 had already measured the shipped column-major sliding
 sweep 1.19× *slower* than row-major recomputation at `blockSize` 3 — so the
 streaming form collects a traversal discount before paying for anything, and it
@@ -1851,10 +1861,15 @@ candidate array, a scalar or two apart) — and is **not shipped**: with the pea
 indistinguishable, X-23's arm-tie rule falls to its second clause and S2 is 1.71×
 S1.
 
-**Where it costs.** `T` = 0.77× at `blockSize` 3, 0.92× at 7, 1.00× at 15, **1.08×
-at 31**: the crossover is between 15 and 31, above the MVP's block size. A caller
-running a large window, or wanting the map, keeps the frame-map form — and the
-header carries both peaks and both times so that choice is made with numbers.
+**Where it costs, and it is not the same place in the two word types.** At
+`uint32_t`, `T` = 0.77× at `blockSize` 3, 0.92× at 7, 1.00× at 15, **1.08× at 31** —
+crossover between 15 and 31. At `uint64_t`, 0.77× / 0.93× / **1.03×** / 1.13× —
+crossover between **7 and 15**, which is exactly where X-18 put it, so this decision
+moves X-18's boundary at the narrower word and reproduces it at the wider one. Both
+device runs agree on both. In every case the crossover is above the MVP's own block
+size (3). A caller running a large window, or wanting the map, keeps the frame-map
+form — and the header carries both peaks and both times so that choice is made with
+numbers.
 
 **What this does NOT decide.** The corner stage's dominant term is now the
 **candidate array** (105 048 B at 640×480, a per-frame reading whose structural
@@ -1920,7 +1935,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | The reference never chose its depths — they fell out of using `CV_8U`. **NO LONGER DEFERRABLE, AND NO LONGER AN OPTIMISATION.** [X-20](EXPERIMENTS.md) measured tracking accuracy on the reference pipeline's own edge-map content degrading MONOTONICALLY as 1-bit levels are added — 0.0017 px RMS at one level to 3.25 px at four for a 1 px translation, and 0.0024 → 1.47 px on the subset of windows that never clip, so the effect survives the clipping control — because a level whose pixels are bits cannot localise a sub-pixel motion better than its own quantisation, and that error is multiplied by 2^level on the way down. **It is a precondition but NOT the whole of T3.8's miss**: X-20 also separates a level-0 stationary point (no pyramid involved) and the clipped coarse-level window (about half of the four-level error), neither of which a deeper alphabet fixes. ~~1 bit is all binCV can build today ... so T4.1 must ALSO produce §7.5's bit-sliced weighted-sum covariance~~ — **[T3.10](TASKS.md) built it and [X-22](EXPERIMENTS.md) priced it**, so the kernel is no longer part of this row's scope: `ops/covariance.hpp` has the bit-sliced weighted-sum form, exact at every N and bit-identical to the ternary kernel at N = 1, at **3.5× / 6.5× / 12.2×** the 1-bit covariance time for N = 2, 3, 4 (`uint32_t`, W = 31, and read X-22's per-cell band table and its two caveats before interpolating). **What is left for T4.1 is the accuracy side of the trade, and the TRACKER** — `ops/opticalFlow.hpp` is still 1-bit end to end (`LKLevel` holds one magnitude plane per derivative and 1-bit frames; `residualSums` and `windowMeanAbsDiff` are built on the identity `|J − I| = I + (1 − 2I)·J`, which holds only because `I` is a bit), so swapping in the new covariance overload is not by itself an N-bit tracker. Footprint axis already measured ([X-15](EXPERIMENTS.md)): uncapped to re-binarized is 1.65×, because level 0 dominates. X-15 also corrected this row's old premise — the reachable alphabet is 1/3/5/7 bits; 1/3/4/5 was one 256² frame's contents. | Pyramid level bit depths, and whether the hybrid tracker is usable at all on real content. | T3.4 (parameterized), **T3.8 (blocked on it for real content)** | **Phase 4** (T4.1) |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |
-| ~~**E-10**~~ **RESOLVED** | Does the corner response need a frame-sized float map, or a rolling ring — and what does the ring's carry cost once the selection's global properties are preserved exactly? | **Answered: it does not need the map, and the ring is not a trade. The frontend goes 1 721 568 B → 500 464 B (3.44×) and the corner stage 1 333 848 B → 112 744 B (11.83×), with corners IDENTICAL to the byte and the whole detector 0.774× the time** — 40.79 → 31.59 ms/frame at 640×480. [D-22](#d-22-the-corner-response-streams-over-a-three-row-ring-and-that-is-the-recommended-path), [X-23](EXPERIMENTS.md). **~~for roughly 2× the response compute~~ — THIS ROW SAID THAT AND IT WAS WRONG, and X-23's rule pre-declared the correction rather than allowing it to be absorbed.** A ring forces a row-major sweep, which X-18 had already measured as the *faster* traversal at `blockSize` 3; the measured figure is **0.774×** (0.764× in the other device run), and even the two-pass shape the estimate described is 1.33×. The whole carry for the two GLOBAL properties — a frame-wide maximum and a frame-wide ordering — is **16 B**, because the threshold is a pure post-filter and the survivors are an up-set of the raw 3×3 maxima, so a top-K over the caller's existing candidate array is exactly the frame-map form's ranked set. It costs above `blockSize` 15 (1.08× at 31) and the frame-map form stays for that and for callers who want the map. (The corner stage's dominant term is now the CANDIDATE ARRAY — 8 754 survivors at 640×480, 9 774 on the real frame, structural maximum 3 659 568 B — which is a contract question and is deliberately left open. Still measured against no `CV_8U` denominator; that comparison is E-5's.) | Whether `cornerMinEigenVal` keeps a caller-provided frame map or gains a streaming form. | T3.7 (made caller-provided rather than decided) | Phase 3 (T3.11) ✔ |
+| ~~**E-10**~~ **RESOLVED** | Does the corner response need a frame-sized float map, or a rolling ring — and what does the ring's carry cost once the selection's global properties are preserved exactly? | **Answered: it does not need the map, and the ring is not a trade. The frontend goes 1 721 568 B → 500 464 B (3.44×) and the corner stage 1 333 848 B → 112 744 B (11.83×), with corners IDENTICAL to the byte and the whole detector 0.774× the time** — 40.79 → 31.59 ms/frame at 640×480. [D-22](#d-22-the-corner-response-streams-over-a-three-row-ring-and-that-is-the-recommended-path), [X-23](EXPERIMENTS.md). **~~for roughly 2× the response compute~~ — THIS ROW SAID THAT AND IT WAS WRONG, and X-23's rule pre-declared the correction rather than allowing it to be absorbed.** A ring forces a row-major sweep, which X-18 had already measured as the *faster* traversal at `blockSize` 3; the measured figure is **0.774×** (0.764× in the other device run), and even the two-pass shape the estimate described is 1.33×. The whole carry for the two GLOBAL properties — a frame-wide maximum and a frame-wide ordering — is **16 B**, because the threshold is a pure post-filter and the survivors are an up-set of the raw 3×3 maxima, so a top-K over the caller's existing candidate array is exactly the frame-map form's ranked set. It costs at large blocks — above `blockSize` 15 at `uint32_t` (1.08× at 31) and from `blockSize` 15 at `uint64_t` (1.03× at 15, 1.13× at 31) — and the frame-map form stays for that and for callers who want the map. (The corner stage's dominant term is now the CANDIDATE ARRAY — 8 754 survivors at 640×480, 9 774 on the real frame, structural maximum 3 659 568 B — which is a contract question and is deliberately left open. Still measured against no `CV_8U` denominator; that comparison is E-5's.) | Whether `cornerMinEigenVal` keeps a caller-provided frame map or gains a streaming form. | T3.7 (made caller-provided rather than decided) | Phase 3 (T3.11) ✔ |
 | **E-11** | Should `cornerMinEigenVal` select its window strategy on `blockSize`? | [X-18](EXPERIMENTS.md) measured the incremental form **losing** below `blockSize` 15 — 0.84× at 3, which is what `seal_params.yaml` actually configures. But one device at one frame size is thin, and x86 showed the *opposite sign* there. | Whether the sliding form is unconditional or `blockSize`-gated. | T3.7 (left unconditional, qualified in the docs) | unscheduled |
 | **E-9** | Should the word type vary down the pyramid — `uint64_t` where it costs no bytes (L0, L1), `uint32_t` above? | [X-10](EXPERIMENTS.md) measured both sides: `uint64_t` reduces **1.94×** faster and costs **+33%** at 94×60 but **0%** at 640×480, so the right answer may not be one type. The width is already a per-object template parameter (D-1), so this costs no new machinery — only a decision. | Whether the pyramid picks a word type per level, and whether kernels that walk several levels pay for two instantiations. | T3.4's pyramid, [D-14](#d-14-uint32_t-is-the-default-word-type) | unscheduled |
 

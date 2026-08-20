@@ -113,6 +113,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <new>
 #include <string>
 #include <vector>
@@ -141,27 +142,55 @@
 // ---------------------------------------------------------------------------
 namespace {
 std::size_t g_newCount = 0;
+// LIVE BYTES AND THEIR HIGH-WATER MARK, not just a call count. A counter of
+// `operator new` CALLS cannot say what a stage's peak is; X-23's frontend table
+// used to add up the buffers its author had listed, so a buffer nobody listed --
+// including one acquired inside a kernel -- could not move the number. These two
+// make the total a READING: every allocation adds its REQUESTED size, every free
+// subtracts it, and `g_peakBytes` records the largest live total since it was last
+// armed. The requested size is recoverable at free time because every block
+// carries a header (below), which is why this replaces the plain `malloc` form.
+std::size_t g_liveBytes = 0;
+std::size_t g_peakBytes = 0;
 
-void* countedAllocate(std::size_t bytes) {
-    ++g_newCount;
-    if (bytes > static_cast<std::size_t>(PTRDIFF_MAX)) std::abort();
-    void* p = std::malloc(bytes == 0 ? 1 : bytes);
-    if (p == nullptr) std::abort();
-    return p;
-}
+// {requested bytes, base pointer} written immediately below the returned address.
+// 16 B on a 64-bit target, and every block is therefore allocated with alignment
+// at least that, so the header never breaks the alignment the caller asked for.
+constexpr std::size_t kAllocHeader = 2 * sizeof(void*);
 
 void* countedAllocateAligned(std::size_t bytes, std::size_t alignment) {
     ++g_newCount;
     if (bytes > static_cast<std::size_t>(PTRDIFF_MAX)) std::abort();
-    if (alignment < sizeof(void*)) alignment = sizeof(void*);
+    if (alignment < kAllocHeader) alignment = kAllocHeader;
     const std::size_t wanted = (bytes == 0) ? 1 : bytes;
     const std::size_t rounded = ((wanted + alignment - 1) / alignment) * alignment;
-    void* p = std::aligned_alloc(alignment, rounded);
-    if (p == nullptr) std::abort();
-    return p;
+    void* base = std::aligned_alloc(alignment, rounded + alignment);
+    if (base == nullptr) std::abort();
+    char* ret = static_cast<char*>(base) + alignment;
+    std::memcpy(ret - sizeof(void*), &base, sizeof(void*));
+    std::memcpy(ret - kAllocHeader, &wanted, sizeof(std::size_t));
+    g_liveBytes += wanted;
+    if (g_liveBytes > g_peakBytes) g_peakBytes = g_liveBytes;
+    return ret;
 }
 
-void countedFree(void* p) noexcept { std::free(p); }
+void* countedAllocate(std::size_t bytes) {
+    return countedAllocateAligned(bytes, alignof(std::max_align_t));
+}
+
+void countedFree(void* p) noexcept {
+    if (p == nullptr) return;
+    char* ret = static_cast<char*>(p);
+    void* base = nullptr;
+    std::size_t wanted = 0;
+    std::memcpy(&base, ret - sizeof(void*), sizeof(void*));
+    std::memcpy(&wanted, ret - kAllocHeader, sizeof(std::size_t));
+    g_liveBytes -= wanted;
+    std::free(base);
+}
+
+/// @brief Arm the high-water mark at the current live total.
+void armPeak() { g_peakBytes = g_liveBytes; }
 } // namespace
 
 void* operator new(std::size_t bytes)   { return countedAllocate(bytes); }
@@ -1381,6 +1410,35 @@ BINCV_TEST(Flow, NoHeapInTheTracker_uint32_t) {
 // THE FOOTPRINT OF THE FULL FRONTEND -- the number Phase 4 needs
 // ===========================================================================
 
+namespace {
+/// @brief FNV-1a over the exact bytes of a ranked corner prefix -- coordinates and
+///        the response's exact `float` bits.
+/// @note The element-for-element comparison of the two shapes still happens, in
+///       full, in the scaffolding block below; this exists so that the two MEASURED
+///       peak windows can each re-check the answer without holding the other
+///       shape's array live inside the window being measured. A buffer carried
+///       across the boundary purely to compare against would land in the peak and
+///       corrupt the reading it was carried through.
+std::uint64_t cornerDigest(const Corner* c, std::size_t n) {
+    std::uint64_t h = 1469598103934665603ULL;
+    auto mix = [&h](const void* p, std::size_t bytes) {
+        const unsigned char* b = static_cast<const unsigned char*>(p);
+        for (std::size_t i = 0; i < bytes; ++i) {
+            h ^= b[i];
+            h *= 1099511628211ULL;
+        }
+    };
+    mix(&n, sizeof(n));
+    for (std::size_t i = 0; i < n; ++i) {
+        mix(&c[i].x, sizeof(c[i].x));
+        mix(&c[i].y, sizeof(c[i].y));
+        mix(&c[i].response, sizeof(c[i].response));
+    }
+    return h;
+}
+} // namespace
+
+
 BINCV_TEST(Flow, FrontendFootprint_640x480) {
     constexpr int W = 640;
     constexpr int H = 480;
@@ -1389,8 +1447,14 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     using Word = uint32_t;      // D-14
 
     std::printf("\n  PEAK FOOTPRINT OF THE FULL FRONTEND, %dx%d, %d pyramid levels,\n"
-                "  1 bit per level, uint32_t words. Every number below is read off a\n"
-                "  live buffer, not computed from a formula.\n", W, H, LEVELS);
+                "  1 bit per level, uint32_t words. THE TWO TOTALS ARE READ OFF A LIVE-BYTE\n"
+                "  HIGH-WATER MARK, not summed from a list of buffers, and the per-stage rows\n"
+                "  are then required to ACCOUNT for that reading exactly.\n", W, H, LEVELS);
+
+    // THE BASELINE. Everything the test harness itself has on the heap before the
+    // frontend exists. Every peak below is reported as `high-water - baseline`, so
+    // gtest's own allocations are outside the number rather than inside it.
+    const std::size_t baseline = g_liveBytes;
 
     // ---- stage 1: denoise -------------------------------------------------
     // The incoming binarized frame. denoiseMedian3 writes into pyramid level 0,
@@ -1413,86 +1477,167 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     const std::size_t buildAllocs = g_newCount - beforeBuild;
     fe.bindLevels();
 
-    // ---- stage 4: corner --------------------------------------------------
-    std::vector<float> responseStorage(static_cast<std::size_t>(W) * static_cast<std::size_t>(H),
-                                       0.0f);
-    ResponseMap response{responseStorage.data(), static_cast<std::size_t>(W),
-                         static_cast<std::size_t>(H), static_cast<std::size_t>(W)};
-    // Sized to the MEASURED NMS survivor count, which is what T3.7 / X-19 did:
-    // the array is also the candidate buffer, so an over-sized one would inflate
-    // the footprint and an under-sized one would truncate. Measured first with a
-    // buffer that cannot truncate, then reported at the measured size.
-    //
-    // THE MEASURING BUFFER IS SCOPED AND GONE BEFORE ANYTHING IS ADDED UP. It is
-    // W*H Corners -- 3 686 400 B, more than twice the total this case reports --
-    // and it was previously still in scope when the table was printed, so the
-    // "peak" excluded a live buffer 2.1x its own size. It is scaffolding for the
-    // measurement, not a stage of the frontend, and the only way to say that
-    // truthfully is for it not to exist when the peak is taken.
+    // ---- stage 5's buffers, allocated NOW ---------------------------------
+    // The track stage owns four fixed-size arrays. They are allocated before either
+    // peak window so that both windows contain the WHOLE frontend and the two
+    // readings differ by exactly one thing: the corner stage's response storage.
+    std::vector<Point2f> prevPts(POINTS);
+    std::vector<Point2f> nextPts(POINTS);
+    std::vector<uint8_t> status(POINTS);
+    std::vector<float> errs(POINTS);
+
     GoodFeaturesParams gftt;
+
+    // ---- SCAFFOLDING: the equality, and the survivor count ----------------
+    // THIS BLOCK IS NOT MEASURED AND SAYS SO. It holds both shapes' outputs at once
+    // -- which is the only way to compare them element for element -- plus a W*H
+    // probe buffer that cannot truncate. All of it is destroyed before either peak
+    // window is armed. What survives is three scalars and a digest.
     std::size_t candidateCount = 0;
+    std::size_t refCount = 0;
+    std::uint64_t refDigest = 0;
     {
+        std::vector<float> probeStorage(static_cast<std::size_t>(W) * static_cast<std::size_t>(H),
+                                        0.0f);
+        ResponseMap probeMap{probeStorage.data(), static_cast<std::size_t>(W),
+                             static_cast<std::size_t>(H), static_cast<std::size_t>(W)};
         std::vector<Corner> probe(static_cast<std::size_t>(W) * static_cast<std::size_t>(H));
         const CornerResult probeResult = bincv::goodFeaturesToTrack(fe.dx[0], fe.dy[0], gftt,
-                                                                    response, probe.data(),
+                                                                    probeMap, probe.data(),
                                                                     probe.size());
         BINCV_CHECK_EQ(probeResult.candidatesTruncated, false);
+        BINCV_CHECK(probeResult.count > 0);
         candidateCount = probeResult.candidatesRanked;
-    }
+        refCount = probeResult.count;
+        refDigest = cornerDigest(probe.data(), probeResult.candidatesRanked);
 
-    std::vector<Corner> corners(candidateCount);
-    const std::size_t beforeCorner = g_newCount;
-    const CornerResult cornerResult = bincv::goodFeaturesToTrack(fe.dx[0], fe.dy[0], gftt, response,
-                                                                corners.data(), corners.size());
-    const std::size_t cornerAllocs = g_newCount - beforeCorner;
-    BINCV_CHECK_EQ(cornerResult.candidatesTruncated, false);
-    BINCV_CHECK(cornerResult.count > 0);
-
-    // ---- stage 4', THE SAME STAGE THROUGH T3.11's STREAMING SHAPE ---------
-    // `goodFeaturesToTrackStreaming` keeps THREE ROWS where the call above keeps
-    // a frame-sized float map. E-10 asked what that saves once everything carried
-    // to preserve the selection's GLOBAL properties is counted against the ring,
-    // and X-23's answer is measured HERE, end to end, rather than reasoned about:
-    // the candidate array is the same array, and the whole extra carry is three
-    // scalars. The equality is asserted first, because a smaller peak for
-    // different corners is not a saving.
-    std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<std::size_t>(W), 0.0f);
-    ResponseMap ring{ringStorage.data(), static_cast<std::size_t>(W),
-                     bincv::kResponseRingRows, static_cast<std::size_t>(W)};
-    std::vector<Corner> streamCorners(candidateCount);
-    const std::size_t beforeStream = g_newCount;
-    const CornerResult streamResult = bincv::goodFeaturesToTrackStreaming(
-        fe.dx[0], fe.dy[0], gftt, ring, streamCorners.data(), streamCorners.size());
-    const std::size_t streamAllocs = g_newCount - beforeStream;
-    BINCV_CHECK_EQ(streamResult.count, cornerResult.count);
-    BINCV_CHECK_EQ(streamResult.candidatesRanked, cornerResult.candidatesRanked);
-    BINCV_CHECK_EQ(streamResult.candidatesTruncated, cornerResult.candidatesTruncated);
-    {
+        // The ring, against the map, on X-20's own frontend content -- the whole
+        // ranked prefix, coordinates and exact float bits.
+        std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<std::size_t>(W),
+                                       0.0f);
+        ResponseMap ring{ringStorage.data(), static_cast<std::size_t>(W),
+                         bincv::kResponseRingRows, static_cast<std::size_t>(W)};
+        std::vector<Corner> streamCorners(candidateCount);
+        const CornerResult streamResult = bincv::goodFeaturesToTrackStreaming(
+            fe.dx[0], fe.dy[0], gftt, ring, streamCorners.data(), streamCorners.size());
+        BINCV_CHECK_EQ(streamResult.count, refCount);
+        BINCV_CHECK_EQ(streamResult.candidatesRanked, candidateCount);
+        BINCV_CHECK_EQ(streamResult.candidatesTruncated, false);
         std::size_t differing = 0;
-        for (std::size_t i = 0; i < cornerResult.candidatesRanked; ++i) {
-            if (streamCorners[i].x != corners[i].x || streamCorners[i].y != corners[i].y ||
-                streamCorners[i].response != corners[i].response) {
+        for (std::size_t i = 0; i < candidateCount; ++i) {
+            if (streamCorners[i].x != probe[i].x || streamCorners[i].y != probe[i].y ||
+                streamCorners[i].response != probe[i].response) {
                 ++differing;
             }
         }
         BINCV_CHECK_EQ(differing, std::size_t{0});
     }
 
-    // ---- stage 5: track ---------------------------------------------------
-    std::vector<Point2f> prevPts(POINTS);
-    std::vector<Point2f> nextPts(POINTS);
-    std::vector<uint8_t> status(POINTS);
-    std::vector<float> errs(POINTS);
-    const std::size_t used = std::min<std::size_t>(cornerResult.count, POINTS);
-    for (std::size_t i = 0; i < used; ++i) {
-        prevPts[i] = Point2f{static_cast<float>(corners[i].x), static_cast<float>(corners[i].y)};
-    }
-    const std::size_t beforeTrack = g_newCount;
-    bincv::calcOpticalFlowPyrLK<Word>(fe.levels.data(), fe.levels.size(), prevPts.data(),
-                                      nextPts.data(), status.data(), errs.data(), used);
-    const std::size_t trackAllocs = g_newCount - beforeTrack;
+    // ---- READING 1: the frame-map frontend's peak -------------------------
+    // Sized to the MEASURED NMS survivor count, which is what T3.7 / X-19 did:
+    // the array is also the candidate buffer, so an over-sized one would inflate
+    // the footprint and an under-sized one would truncate.
+    //
+    // NOTHING INSIDE EITHER MEASURED WINDOW MAY ASSERT. `BINCV_CHECK_EQ` builds its
+    // message eagerly -- `std::to_string(actual)` runs whether the check passes or
+    // not -- so a check inside the window allocates a few hundred bytes and lands
+    // in the high-water mark being read. That is not hypothetical: the first
+    // version of this rewrite asserted inside the window and the two readings
+    // disagreed by 313 B. The windows therefore only RECORD; every assertion is
+    // made after the buffers are gone.
+    std::size_t framePeak = 0;
+    std::size_t cornerAllocs = 0;
+    std::size_t trackAllocs = 0;
+    std::size_t responseBytes = 0;
+    std::size_t candidateBytes = 0;
+    std::size_t frameCount = 0;
+    std::size_t frameRanked = 0;
+    bool frameTruncated = true;
+    std::uint64_t frameDigest = 0;
+    {
+        armPeak();
+        std::vector<float> responseStorage(static_cast<std::size_t>(W) *
+                                               static_cast<std::size_t>(H), 0.0f);
+        ResponseMap response{responseStorage.data(), static_cast<std::size_t>(W),
+                             static_cast<std::size_t>(H), static_cast<std::size_t>(W)};
+        std::vector<Corner> corners(candidateCount);
+        const std::size_t beforeCorner = g_newCount;
+        const CornerResult cornerResult = bincv::goodFeaturesToTrack(fe.dx[0], fe.dy[0], gftt,
+                                                                    response, corners.data(),
+                                                                    corners.size());
+        cornerAllocs = g_newCount - beforeCorner;
+        frameCount = cornerResult.count;
+        frameRanked = cornerResult.candidatesRanked;
+        frameTruncated = cornerResult.candidatesTruncated;
+        frameDigest = cornerDigest(corners.data(), cornerResult.candidatesRanked);
+        responseBytes = responseStorage.size() * sizeof(float);
+        candidateBytes = corners.size() * sizeof(Corner);
 
-    // ---- the table --------------------------------------------------------
+        // Stage 5 runs here, on the frame-map form's corners, so the track stage's
+        // buffers are inside the window that is measured rather than beside it.
+        const std::size_t used = std::min<std::size_t>(cornerResult.count, POINTS);
+        for (std::size_t i = 0; i < used; ++i) {
+            prevPts[i] = Point2f{static_cast<float>(corners[i].x),
+                                 static_cast<float>(corners[i].y)};
+        }
+        const std::size_t beforeTrack = g_newCount;
+        bincv::calcOpticalFlowPyrLK<Word>(fe.levels.data(), fe.levels.size(), prevPts.data(),
+                                          nextPts.data(), status.data(), errs.data(), used);
+        trackAllocs = g_newCount - beforeTrack;
+        // READ AT THE HIGH-WATER MARK, before anything in this scope is freed.
+        framePeak = g_peakBytes - baseline;
+    }
+    BINCV_CHECK_EQ(frameTruncated, false);
+    BINCV_CHECK_EQ(frameCount, refCount);
+    BINCV_CHECK_EQ(frameRanked, candidateCount);
+    BINCV_CHECK_EQ(frameDigest, refDigest);
+
+    // ---- READING 2: the streaming frontend's peak -------------------------
+    // THE FRAME MAP IS GONE. It was destroyed when the scope above closed, which is
+    // the point: a table that prints a streaming peak while a 1 228 800 B float map
+    // is still live is not measuring the streaming shape.
+    std::size_t streamPeak = 0;
+    std::size_t streamAllocs = 0;
+    std::size_t streamTrackAllocs = 0;
+    std::size_t ringBytes = 0;
+    std::size_t streamCount = 0;
+    std::size_t streamRanked = 0;
+    bool streamTruncated = true;
+    std::uint64_t streamDigest = 0;
+    {
+        armPeak();
+        std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<std::size_t>(W),
+                                       0.0f);
+        ResponseMap ring{ringStorage.data(), static_cast<std::size_t>(W),
+                         bincv::kResponseRingRows, static_cast<std::size_t>(W)};
+        std::vector<Corner> streamCorners(candidateCount);
+        const std::size_t beforeStream = g_newCount;
+        const CornerResult streamResult = bincv::goodFeaturesToTrackStreaming(
+            fe.dx[0], fe.dy[0], gftt, ring, streamCorners.data(), streamCorners.size());
+        streamAllocs = g_newCount - beforeStream;
+        streamCount = streamResult.count;
+        streamRanked = streamResult.candidatesRanked;
+        streamTruncated = streamResult.candidatesTruncated;
+        streamDigest = cornerDigest(streamCorners.data(), streamResult.candidatesRanked);
+        ringBytes = ringStorage.size() * sizeof(float);
+
+        const std::size_t used = std::min<std::size_t>(streamResult.count, POINTS);
+        for (std::size_t i = 0; i < used; ++i) {
+            prevPts[i] = Point2f{static_cast<float>(streamCorners[i].x),
+                                 static_cast<float>(streamCorners[i].y)};
+        }
+        const std::size_t beforeTrack = g_newCount;
+        bincv::calcOpticalFlowPyrLK<Word>(fe.levels.data(), fe.levels.size(), prevPts.data(),
+                                          nextPts.data(), status.data(), errs.data(), used);
+        streamTrackAllocs = g_newCount - beforeTrack;
+        streamPeak = g_peakBytes - baseline;
+    }
+    BINCV_CHECK_EQ(streamTruncated, false);
+    BINCV_CHECK_EQ(streamCount, refCount);
+    BINCV_CHECK_EQ(streamRanked, candidateCount);
+    BINCV_CHECK_EQ(streamDigest, refDigest);
+
+    // ---- the attribution, and the requirement that it ADD UP --------------
     const std::size_t wordBytes = sizeof(Word);
     std::size_t pyramidBytes = 0, derivativeBytes = 0;
     for (int i = 0; i < LEVELS; ++i) {
@@ -1503,14 +1648,17 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     }
     const std::size_t denoiseBytes = (incoming.sizeInWords() + incomingNext.sizeInWords()) *
                                      wordBytes;
-    const std::size_t responseBytes = responseStorage.size() * sizeof(float);
-    const std::size_t candidateBytes = corners.size() * sizeof(Corner);
     const std::size_t cornerBytes = responseBytes + candidateBytes;
     const std::size_t trackBytes = (prevPts.size() + nextPts.size()) * sizeof(Point2f) +
                                    status.size() * sizeof(uint8_t) +
                                    errs.size() * sizeof(float);
     const std::size_t total = denoiseBytes + pyramidBytes + derivativeBytes + cornerBytes +
                               trackBytes;
+    // THE CONTAINER BOOKKEEPING NO STAGE OWNS: the vectors of BinMat/TernaryMat
+    // objects inside `Frontend` and its `levels` bundle. Named and printed rather
+    // than folded into a stage, because the two readings must differ by the
+    // response storage ALONE, and that is only checkable if the residual is stated.
+    const std::size_t bookkeeping = framePeak - total;
 
     auto row = [&](const char* name, const char* what, std::size_t bytes) {
         std::printf("    %-12s %-46s %9zu B  %5.1f%%\n", name, what, bytes,
@@ -1523,6 +1671,10 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     row("corner", "float response map + candidate array (see note)", cornerBytes);
     row("track", "prevPts/nextPts/status/err, 200 points", trackBytes);
     std::printf("    %-12s %-46s %9zu B\n", "TOTAL", "", total);
+    std::printf("      MEASURED PEAK (live-byte high-water mark, harness baseline removed):"
+                " %zu B\n      = the rows above + %zu B of container bookkeeping no stage owns"
+                " (vectors of BinMat/TernaryMat and the LKLevel bundle)\n", framePeak,
+                bookkeeping);
     std::printf("      of which the float response map alone: %zu B (%.1f%%), %zu candidates"
                 " (%zu B)\n", responseBytes,
                 100.0 * static_cast<double>(responseBytes) / static_cast<double>(total),
@@ -1541,17 +1693,19 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
                                     static_cast<double>(total),
                 static_cast<std::size_t>(W) * static_cast<std::size_t>(H) * sizeof(Corner));
     std::printf("      operator new inside the kernels: denoise %zu, pyramid+derivative %zu,"
-                " corner %zu, corner-streaming %zu, track %zu\n", denoiseAllocs, buildAllocs,
-                cornerAllocs, streamAllocs, trackAllocs);
+                " corner %zu, corner-streaming %zu, track %zu/%zu\n", denoiseAllocs, buildAllocs,
+                cornerAllocs, streamAllocs, trackAllocs, streamTrackAllocs);
 
     // ---- THE SAME TABLE WITH T3.11's STREAMING CORNER STAGE ---------------
     // Same five stages, same accounting, one row replaced -- so the 71.4% row can
     // be read directly against its replacement rather than against a projection.
-    const std::size_t ringBytes = ringStorage.size() * sizeof(float);
-    // The streaming form's ENTIRE carry beyond the ring and the candidate array:
-    // a running maximum, a running retained count, and the strongest discarded
-    // response. Counted rather than rounded away, because X-23 said every byte of
-    // carry comes off the saving.
+    //
+    // The 16 B of carry the streaming form keeps for the two GLOBAL properties -- a
+    // running maximum, a running retained count and the strongest discarded
+    // response -- is NOT on the heap and therefore cannot appear in the reading. It
+    // is added to the attributed total explicitly and labelled as the one term here
+    // that is counted rather than read, because X-23 said every byte of carry comes
+    // off the saving and rounding it away would be the easy lie.
     const std::size_t streamCarryBytes = 2 * sizeof(float) + sizeof(std::size_t);
     const std::size_t streamCornerBytes = ringBytes + candidateBytes + streamCarryBytes;
     const std::size_t streamTotal = denoiseBytes + pyramidBytes + derivativeBytes +
@@ -1569,6 +1723,9 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     srow("corner", "3-row float ring + candidate array + 3 scalars", streamCornerBytes);
     srow("track", "prevPts/nextPts/status/err, 200 points", trackBytes);
     std::printf("    %-12s %-46s %9zu B\n", "TOTAL", "", streamTotal);
+    std::printf("      MEASURED PEAK (same high-water mark, frame map DESTROYED first):"
+                " %zu B\n      = the rows above - %zu B of stack carry + %zu B of the same"
+                " container bookkeeping\n", streamPeak, streamCarryBytes, bookkeeping);
     std::printf("      corner stage %zu B -> %zu B (%.2fx); frontend %zu B -> %zu B (%.2fx)\n",
                 cornerBytes, streamCornerBytes,
                 static_cast<double>(cornerBytes) / static_cast<double>(streamCornerBytes), total,
@@ -1576,20 +1733,58 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     std::printf("      the ring is %zu B and the carry %zu B; the candidate array (%zu B) is now\n"
                 "      the corner stage's dominant term, and it is the one content-dependent row\n",
                 ringBytes, streamCarryBytes, candidateBytes);
+
+    // THE ATTRIBUTION MUST ACCOUNT FOR THE READING, EXACTLY.
+    //
+    // This is what makes the two totals measurements rather than sums over a list
+    // of buffers someone remembered to write down. `framePeak` and `streamPeak` are
+    // high-water marks over LIVE BYTES: any heap buffer anywhere in the frontend --
+    // including one acquired inside a kernel, which no enumeration can see -- lands
+    // in them. Requiring the stage rows to reproduce them to the byte means a
+    // buffer that appears without a row fails here.
+    //
+    // The residual is the same in both readings BY CHECK, not by assumption, so the
+    // saving below is a difference of two measurements of the same thing.
+    //
+    // WHAT THIS READING STILL CANNOT SEE, SAID PLAINLY: it is a HEAP high-water
+    // mark. A kernel that kept a frame-sized `static` array, or one that put a
+    // frame-sized array on the stack, would not move it -- measured, by mutating
+    // `goodFeaturesToTrackStreaming` to hold a `static float[640*480]`: the BSS of
+    // the test binary grows from 648 B to 1 229 464 B and every number here is
+    // unchanged (29/29 checks still pass). What
+    // covers that is the no-heap rule's companion -- scratch is CALLER-PROVIDED
+    // (D-5) -- and reading the header, not this case. A heap buffer anywhere,
+    // including one allocated and freed INSIDE a kernel, does move it: the same
+    // mutation spelled `new float[640*480] ... delete[]` fails the two checks below
+    // (streaming peak 1 730 912 B against 502 112 B).
+    BINCV_CHECK_EQ(framePeak, total + bookkeeping);
+    BINCV_CHECK_EQ(streamPeak, streamTotal - streamCarryBytes + bookkeeping);
+    BINCV_CHECK(bookkeeping < ringBytes);
+    // The saving, read: the two windows differ by the response storage alone.
+    BINCV_CHECK_EQ(framePeak - streamPeak, responseBytes - ringBytes);
+
     // X-23's saving gate, evaluated in the place that can actually fail: if a
     // later change puts the streaming frontend back above 750 000 B, D-22's
     // footprint claim has gone and this says so rather than a report nobody re-ran.
     BINCV_CHECK(streamTotal <= 750000);
     BINCV_CHECK(streamAllocs == 0);
-    // And the response storage is no longer the dominant term, which is the exact
-    // sentence E-10 was registered to make false.
-    BINCV_CHECK(ringBytes < streamTotal - ringBytes);
+    // E-10's sentence, NEGATED -- and negated in a form that can actually fail.
+    // `ring < everything else` is near-vacuous at 7 680 B against 492 784 B and
+    // tests nothing. These two do: the response storage must be smaller than every
+    // other stage in the table, and the corner stage must no longer be the largest
+    // stage in the frontend at all. Either is false the moment the ring grows with
+    // the frame again.
+    BINCV_CHECK(ringBytes < denoiseBytes && ringBytes < pyramidBytes &&
+                ringBytes < derivativeBytes);
+    BINCV_CHECK(ringBytes < candidateBytes);
+    BINCV_CHECK(streamCornerBytes < derivativeBytes);
 
     // NO HEAP inside any kernel.
     BINCV_CHECK_EQ(denoiseAllocs, std::size_t{0});
     BINCV_CHECK_EQ(buildAllocs, std::size_t{0});
     BINCV_CHECK_EQ(cornerAllocs, std::size_t{0});
     BINCV_CHECK_EQ(trackAllocs, std::size_t{0});
+    BINCV_CHECK_EQ(streamTrackAllocs, std::size_t{0});
 
     // E-10's prediction, pinned. T3.7's float response map is 4 B/pixel where
     // every other plane in the frontend is 1 or 2 BITS per pixel, so it is

@@ -764,18 +764,35 @@
 #             corners IDENTICAL to goodFeaturesToTrack, and that has to hold in the
 #             Debug configuration (where the kernels' BINCV_ASSERT preconditions are
 #             live) and in the no-exceptions one (the embedded claim), not only where
-#             a benchmark builds. Same accounting as above -- ONE CHECK PER (frame,
-#             block size, parameter set, capacity) cell rather than per corner:
-#             1 664 932 corner records are compared element for element across the
-#             suite, which as individual checks would be two orders of magnitude
-#             more for what is one property. The counters behind the number are the
-#             cell count, the compared-record count, the count of cells that
-#             TRUNCATED and the count of cells containing a TIED response -- the last
-#             two asserted non-zero, so a green run cannot be a sweep that never
-#             entered the paths a three-row ring puts at risk.
-#             test_opticalflow rose 7 in every configuration for the other half of
-#             the same task: Flow.FrontendFootprint_640x480 now measures the frontend
-#             through BOTH corner shapes and asserts they agree.
+#             a benchmark builds. THE ACCOUNTING, SPELLED CORRECTLY -- an earlier
+#             version of this note said "one check per (frame, block size, parameter
+#             set, capacity) cell", which the code does not do and which does not
+#             add up to 906: the streaming suites aggregate every cell into a
+#             StreamTally and assert ONCE PER SUITE. The 857 checks in the five
+#             Streaming_IdenticalCorners* cases are one per compareShapes() CALL --
+#             the `candidatesTruncated == false` probe that measures the cell's
+#             survivor count, 192 calls per word type in the small suite and 32 per
+#             word type in LargeFrames -- plus FIVE aggregate checks per suite
+#             (mismatches == 0, and comparisons / cornersCompared / truncatedCells /
+#             tieCells each required non-zero). 4 x (192 + 5) + (64 + 5) = 857. The
+#             remaining 49 are the row-kernel and degenerate-shape cases. Behind
+#             those 857 sit 4 688 compared cells and 1 664 932 corner records
+#             compared element for element, which as individual checks would be two
+#             orders of magnitude more for what is one property; the non-zero
+#             assertions on truncatedCells and tieCells are what stop a green run
+#             from being a sweep that never entered the paths a three-row ring puts
+#             at risk.
+#             test_opticalflow rose 241 -> 255 (opencv) and 155 -> 169 (core,
+#             noexcept, debug) for the other half of the same task:
+#             Flow.FrontendFootprint_640x480 now measures the frontend through BOTH
+#             corner shapes, asserts they agree, and -- since triage -- READS each
+#             shape's peak off a live-byte high-water mark taken in its own scope
+#             with the other shape's buffers destroyed, then requires the per-stage
+#             rows to account for that reading to the byte. The added checks are the
+#             two accounting identities, the equal-bookkeeping identity, the
+#             read saving (framePeak - streamPeak == responseBytes - ringBytes), the
+#             two E-10-negation checks that replaced a near-vacuous one, and the
+#             per-shape corner-equality digests.
 #
 #             THE POSITION COUNT IS ITSELF CHECKED against the arithmetic that
 #             defines it, and the interior and clipped counts are separately
@@ -889,7 +906,7 @@ opencv	test_pyramid	262321	0
 opencv	test_derivative	48526	0
 opencv	test_covariance	17704	0
 opencv	test_corner	3655	0
-opencv	test_opticalflow	241	0
+opencv	test_opticalflow	255	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	40	0
 opencv	test_equivalence	16403	0
@@ -911,7 +928,7 @@ core	test_pyramid	236429	0
 core	test_derivative	47675	0
 core	test_covariance	17704	0
 core	test_corner	3655	0
-core	test_opticalflow	155	0
+core	test_opticalflow	169	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -931,7 +948,7 @@ noexcept	test_pyramid	236429	0
 noexcept	test_derivative	47675	0
 noexcept	test_covariance	17704	0
 noexcept	test_corner	3655	0
-noexcept	test_opticalflow	155	0
+noexcept	test_opticalflow	169	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -951,6 +968,6 @@ debug	test_pyramid	236429	0
 debug	test_derivative	47675	0
 debug	test_covariance	17704	0
 debug	test_corner	3655	0
-debug	test_opticalflow	155	0
+debug	test_opticalflow	169	0
 debug	test_harness	8	0
 

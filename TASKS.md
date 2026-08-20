@@ -2945,12 +2945,25 @@ pyrDown, derivative, corner and track:**
 | track | prevPts/nextPts/status/err, 200 points | 4 200 | 0.2% |
 | **TOTAL** | | **1 721 568** | |
 
+> **SUPERSEDED AS THE CURRENT FRONTEND FOOTPRINT** by
+> [T3.11](#t311--rolling-response-map-e-10--done) / X-23: on the recommended
+> streaming path the corner row is **112 744 B** and the **TOTAL is 500 464 B**,
+> same content, same five stages, identical corners. **Phase 4 quotes 500 464 B.**
+
 **[E-10](ARCHITECTURE.md#register) PREDICTED THIS AND IT IS CONFIRMED: the float
 response map alone is 1 228 800 B — 71.4% of the whole frontend, and MORE THAN
 EVERYTHING ELSE COMBINED.** Four bytes per pixel, where every other plane in the
-frontend is one or two BITS per pixel. The tracker itself is 0.2%. E-10 should be
+frontend is one or two BITS per pixel. The tracker itself is 0.2%. ~~E-10 should be
 scheduled: a rolling three-row ring would take the frontend from 1.72 MB to about
-0.49 MB, a **3.5×** cut, for roughly 2× the response compute. The test asserts the
+0.49 MB, a **3.5×** cut, for roughly 2× the response compute.~~ **SCHEDULED, RUN AND
+CLOSED as [T3.11](#t311--rolling-response-map-e-10--done) /
+[X-23](EXPERIMENTS.md), AND THE COMPUTE HALF OF THAT SENTENCE WAS WRONG.** Measured:
+**1 721 568 B → 500 464 B, 3.44×**, at `T` = **0.774×** — the ring is *faster*, not
+2× slower, because it forces the row-major sweep X-18 had already measured as the
+quicker traversal at `blockSize` 3, and the second pass the "~2×" assumed is not
+needed. This paragraph is the FOURTH site of that estimate; X-23's rule named three
+(X-20's decision 3, ARCHITECTURE §9's E-10 row, T3.11) and this one was missed, so it
+carries the same named correction rather than being edited quietly. The test asserts the
 dominance — as the expression it prints, `responseBytes > total − responseBytes`;
 spelled as a sum of the other rows it silently omitted the candidate array and
 could not fail — so a future change fails here rather than in a report nobody
@@ -3218,7 +3231,13 @@ smaller *and* faster.
 - ✔ Peak footprint re-measured end to end in `Flow.FrontendFootprint_640x480`, which
   owns the frontend: **1 721 568 B → 500 464 B, 3.44×**, corner stage 1 333 848 B →
   112 744 B (11.83×), `operator new` = 0 through all five stages, and the two shapes
-  asserted to return the same corners on X-20's own content.
+  asserted to return the same corners on X-20's own content. **Both totals are READ
+  off a live-byte high-water mark** — the two shapes run in separate scopes so the
+  frame map is destroyed before the streaming peak is taken, and the per-stage rows
+  must account for the reading to the byte (`framePeak == total + bookkeeping`, the
+  1 664 B of container bookkeeping required identical in both readings). The first
+  version summed the buffers its author had listed while the frame map was still
+  live; that was corrected at triage and is written up in X-23's RESULT (a).
 - ✔ Compute measured on the device (`throttled=0x0` before and after, exit 0), three
   arms in three translation units, arm order swapped and re-run — the verdict moves
   by 0.001 — and the **whole benchmark run twice**, which is what says the ratio is
@@ -3238,9 +3257,12 @@ what a caller provisions, and what `candidatesTruncated` costs them — not a bu
 one, and X-23 leaves it open rather than deciding it inside a footprint task.
 [E-11](ARCHITECTURE.md#9-open-questions-and-planned-experiments) (should the sweep
 select its traversal on `blockSize`?) is also untouched, though this task adds a
-second reading of the same crossover from the other direction: measured through the
-whole detector it sits between `blockSize` 15 and 31, where X-18 put it between 7
-and 15.
+second reading of the same crossover from the other direction — **and it is
+word-type-dependent, which is itself the finding**: measured through the whole
+detector it sits between `blockSize` 15 and 31 at `uint32_t`, but between **7 and 15
+at `uint64_t`**, which is exactly where X-18 put it. Both device runs agree on both
+cells (`T(S1)` at `uint64_t` `blockSize` 15 is 1.025 and 1.018). So this is one
+word-type-dependent data point on E-11, not a clean disagreement with X-18.
 
 ---
 
