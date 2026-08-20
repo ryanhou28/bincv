@@ -36,6 +36,7 @@
 #include "bincv-cpp/ops/derivative.hpp"
 #include "bincv-cpp/ops/logic.hpp"
 #include "bincv-cpp/ops/morphology.hpp"
+#include "bincv-cpp/ops/opticalFlow.hpp"
 #include "bincv-cpp/ops/reduce.hpp"
 #include "bincv-cpp/ops/shift.hpp"
 #include "bincv-cpp/ops/threshold.hpp"
@@ -692,6 +693,33 @@ int caseDerivativeBorderType() {
     return static_cast<int>(g_derMag[0]);
 }
 
+// ---------------------------------------------------------------------------
+// The tracker's one D-11 predicate (T3.8). ops/opticalFlow.hpp writes EVERY
+// `nextPts` entry for a level before it reads ANY `prevPts` entry for that level,
+// so an in-place call tracks every point from an anchor that has already been
+// overwritten. It is the only kernel in the library whose destination is an array
+// of points rather than a view, and it was the only one with no overlap check at
+// all: measured before this case existed, `calcOpticalFlowPyrLK(levels, n, a, a,
+// ...)` returned status 1 for every point and answers up to 23 px away from the
+// correct ones, in the Debug build, silently.
+// ---------------------------------------------------------------------------
+uint32_t g_flowPlane[16] = {0};
+
+int caseFlowAlias() {
+    const bincv::BinMatConstView<uint32_t> plane{g_flowPlane, 64, 8, 2};
+    bincv::LKLevel<uint32_t> level;
+    level.prev = plane;
+    level.next = plane;
+    level.dxMag = plane;
+    level.dxSign = plane;
+    level.dyMag = plane;
+    level.dySign = plane;
+    bincv::Point2f pts[2] = {{32.0f, 4.0f}, {40.0f, 4.0f}};
+    uint8_t status[2] = {0, 0};
+    bincv::calcOpticalFlowPyrLK<uint32_t>(&level, 1, pts, pts, status, nullptr, 2);
+    return static_cast<int>(status[0]);
+}
+
 const Case kCases[] = {
     {"at-row", caseAtRow},
     {"at-col", caseAtCol},
@@ -748,6 +776,7 @@ const Case kCases[] = {
     {"derivative-sign-alias", caseDerivativeSignAlias},
     {"derivative-mag-alias", caseDerivativeMagAlias},
     {"derivative-border-type", caseDerivativeBorderType},
+    {"flow-alias", caseFlowAlias},
 };
 
 } // namespace

@@ -787,6 +787,57 @@ That is inherently continuous and does not bit-parallelize. Two routes:
 project and still captures the memory win, which is the dominant claim. Route (a)
 is the research upside, explored only after (b) is validated end to end.
 
+**[T3.8](TASKS.md) shipped (b) as `ops/opticalFlow.hpp`, and the boundary landed
+further over than this section predicted.** "Floating-point solve" turned out to
+be the whole of it: the RESIDUAL is bit-parallel too, because bilinear
+interpolation is LINEAR in its four taps, the taps of a binary frame are bits, and
+the four weights are constant over the window since every pixel is displaced by
+the same vector. So
+
+    b1 = w00·S(T00) + w01·S(T01) + w10·S(T10) + w11·S(T11) − S(I),
+    S(M) = popcount(magX & M) − 2·popcount(magX & M & signX)
+
+is the residual exactly, from ten integer counts per window per iteration, with
+nothing rounded before the weights are applied — where the reference rounds every
+interpolated sample to 14-bit fixed point. The same collapse gives the error term,
+because `|Jinterp − I| = I + (1−2I)·Jinterp` when `I` is a bit. **What is left on
+the float side is O(iterations), not O(iterations × window area):** the subpixel
+position, the four weights, the 2×2 solve, the update. Those are the irreducibly
+continuous part, and this section was right that they exist.
+
+Two things were traded away to get there, both deliberate and both Tier 2's
+reason for existing here. A bit-plane derivative cannot be interpolated — §7.5's
+identity is exact only for {−1, 0, +1} — so the PREVIOUS window is anchored at
+`floor(prevPt − halfWin)` and the whole subpixel displacement rides on the next
+frame; the aperture moves by up to half a pixel, the estimated flow does not. And
+the window is CLIPPED rather than padded, declining the reference's
+`winSize`-wide reflected border on every level, which at 640×480 with a 31×31
+window is 1.24× each level's own footprint.
+
+**And route (b) has a precondition this section did not name.** The popcount
+covariance is exact only for a ternary derivative, so binCV can build only 1-bit
+pyramid levels today — and [X-20](EXPERIMENTS.md) measured accuracy on the
+reference pipeline's own edge-map content **degrading monotonically as 1-bit
+levels are added**, from 0.0017 px RMS at one level to 3.25 px at four for a 1 px
+translation, and still 0.0024 → 1.47 px on the windows that never clip at any
+level. A level whose pixels are bits cannot localise a sub-pixel motion better than
+its own quantisation, and that error is multiplied by 2^level on the way down.
+[E-7](#register) is therefore not a footprint optimisation; it is what makes the
+pyramid usable, and it needs the bit-sliced weighted-sum covariance §7.5 describes
+and nothing implements.
+
+**Two other things fail on that content, and they are not E-7's.** X-20's control
+measurements separate them, and this section records them here because both are
+consequences of the trades named just above. **The clipped window costs accuracy,
+not only footprint**: all 141 eligible points give 3.25 px at four levels where the
+58 whose window never clips give 1.47 — about half the error is the border binCV
+declined, an accuracy cost that was not measured when the trade was made. And **the
+tracker has a level-0 stationary point on one-pixel-wide edge maps**: on a diagonal
+1 px displacement, ~28% of points return exactly zero flow with `b1 = b2 = 0`, a
+degenerate configuration the `minEigThreshold` does not reject (the weakest such
+window is 33× above it). Neither is fixed by a deeper alphabet, so neither may be
+folded into E-7's scope.
+
 ---
 
 ## 8. Design Decisions
@@ -1536,6 +1587,58 @@ two planes; and any later operation that produces a `SignedQuantMat`.
 
 ---
 
+### D-20: the tracker's per-pixel work is all popcounts; only the solve is float
+
+[§7.9](#79-the-known-hard-problem-subpixel-interpolation) chose route (b) and
+described it as "bit-parallel window extraction and covariance accumulation,
+floating-point solve". [T3.8](TASKS.md) shipped it with the line drawn further
+over, and the placement is a decision rather than an implementation detail because
+it is what the whole hybrid claim is measured against.
+
+**On the bit-parallel side, exact integers, no per-pixel float at all:** the
+window (a `Rect` through `impl::clipRegion` and `impl::visitRowWords` — no patch
+is ever copied out, where the reference copies `winSize.area()*3` shorts per
+invoker); the 2×2 matrix (one `gradientCovariance` call, D-15); the residual and
+the error term, by the identities in §7.9; and the four bilinear tap planes, which
+are word-aligned reads of two next-frame rows with one cross-word bit shift.
+
+**On the float side, once per window per iteration and never per pixel:** the
+subpixel position and its split into an integer tap offset and a fraction; the
+four bilinear weights; the 2×2 solve, its determinant and the minimum eigenvalue;
+and the iteration itself.
+
+Three consequences follow and each is load-bearing.
+
+1. **The singularity test needs no epsilon.** `det = xx·yy − xy²` is a difference
+   of products of exact popcounts: it is 0 or at least 1. The reference guards
+   `D < FLT_EPSILON` because its `D` is a float product of float box-filtered float
+   Sobel outputs; here the test is `det <= 0`, for the same reason
+   [§7.6](#76-corner-response)'s selection needs no epsilon.
+2. **There is no scratch buffer of any kind** — not one byte — because nothing is
+   copied out of the window. That is what makes the tracker 0.2% of the frontend's
+   footprint ([X-20](EXPERIMENTS.md)).
+3. **The result is word-type-invariant, and cross-ISA bit-identity is not
+   PROMISED — though it is what is currently measured.** Every count is exact, so
+   all four word types give identical flow. The solve is float, so a fused
+   multiply-add may move the last digits, and unlike `cornerMinEigenVal` — whose
+   only rounding is a correctly-rounded `sqrt` — this operation declines to promise
+   otherwise. Measured, x86-64 and the aarch64 reference device print **identical**
+   values on all thirteen synthetic accuracy cases; the only quantity that moves is
+   the residual identity's worst rounding gap, 6.306e-14 against 6.573e-14.
+   [X-20](EXPERIMENTS.md) previously reported an accuracy difference between the
+   two platforms and has withdrawn it: the two figures came from two different
+   builds.
+
+**The units are part of the decision.** binCV's `Ix` is the raw `[-1, 0, 1]` tap
+over {0, 1} pixels, which is twice the central difference; the reference reaches
+the same gradient by a different route (pixels in {0, 255}, derivative ×16,
+intensity descaled by `W_BITS1-5`). Substituting `g = Ix/2` scales `A` by 1/4 and
+`b` by 1/2, so the step from raw taps is multiplied by exactly 2. Dropping that
+factor does not diverge — it halves every step and stops early on the epsilon
+test, which looks like "slightly worse accuracy" rather than like a bug.
+
+---
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -1583,10 +1686,10 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-3**~~ **RESOLVED** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | **Answered, and all three moved off the simpler shape: (a) 7.3×–20× for the adopted sliding form → expose incremental state; (b) 1.27–1.29× → add a covariance entry point; (c) plane 16–18% faster but a fifth plane at every level → four-argument form, memory wins.** Re-measured against the shipped code by [X-11b](EXPERIMENTS.md) — 5.96×/15.9×, 1.20–1.27×, 11–14% — with no branch changing. [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance), [X-11](EXPERIMENTS.md) | T2.6, T3.6 | Phase 2 (T2.10) ✔ |
 | **E-4** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | **Phase 3** (T3.9) |
 | ~~**E-8**~~ **RESOLVED** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | **Answered, and the question was leading: there is no tiebreak. A third route the register did not list — the WORD-LOCAL unshuffle — is word-parallel and costs zero bytes, and beat the gather loop by 14.6×/26.4× and the frame-masked route by 11.3×/8.3×. `ops/` gains a word-local resample primitive taking `(src, dst)`; no plan, no scratch.** [D-17](#d-17-horizontal-decimation-is-word-local), [X-14](EXPERIMENTS.md) | T3.4 | Phase 3 (T3.4) ✔ |
-| **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | The reference never chose its depths — they fell out of using `CV_8U`. Capping N is a direct footprint lever, and T3.4 shipped the cap as a parameter. **Its footprint axis is now measured ([X-15](EXPERIMENTS.md)): the whole range from uncapped to re-binarized is 1.65×, not an order of magnitude, because level 0 dominates and no cap touches it. The accuracy axis is what remains.** X-15 also corrected the premise this row used to state — the reachable alphabet is 1/3/5/7 bits; 1/3/4/5 was one 256² frame's contents. | Pyramid level bit depths; a large share of total frontend footprint. | T3.4 (parameterized, so deferrable) | **Phase 4** (T4.1) |
+| **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | The reference never chose its depths — they fell out of using `CV_8U`. **NO LONGER DEFERRABLE, AND NO LONGER AN OPTIMISATION.** [X-20](EXPERIMENTS.md) measured tracking accuracy on the reference pipeline's own edge-map content degrading MONOTONICALLY as 1-bit levels are added — 0.0017 px RMS at one level to 3.25 px at four for a 1 px translation, and 0.0024 → 1.47 px on the subset of windows that never clip, so the effect survives the clipping control — because a level whose pixels are bits cannot localise a sub-pixel motion better than its own quantisation, and that error is multiplied by 2^level on the way down. **It is a precondition but NOT the whole of T3.8's miss**: X-20 also separates a level-0 stationary point (no pyramid involved) and the clipped coarse-level window (about half of the four-level error), neither of which a deeper alphabet fixes. 1 bit is all binCV can build today (the popcount covariance is exact only for a ternary derivative), so T4.1 must ALSO produce §7.5's bit-sliced weighted-sum covariance. Footprint axis already measured ([X-15](EXPERIMENTS.md)): uncapped to re-binarized is 1.65×, because level 0 dominates. X-15 also corrected this row's old premise — the reachable alphabet is 1/3/5/7 bits; 1/3/4/5 was one 256² frame's contents. | Pyramid level bit depths, and whether the hybrid tracker is usable at all on real content. | T3.4 (parameterized), **T3.8 (blocked on it for real content)** | **Phase 4** (T4.1) |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |
-| **E-10** | Does the corner response need a frame-sized float map, or a rolling ring? | The map is 4 B/pixel — **1.23 MB at 640×480, eight times the entire four-plane derivative working set** — and dominates T3.7's footprint. A two-pass three-row ring would cut it to ~15 kB for roughly 2× the response compute. On a project whose thesis is footprint, the largest buffer in the frontend being a float scratch is worth pricing. | Whether `cornerMinEigenVal` keeps a caller-provided frame map or gains a streaming form. | T3.7 (made caller-provided rather than decided) | unscheduled |
+| **E-10** | Does the corner response need a frame-sized float map, or a rolling ring? | **CONFIRMED AND QUANTIFIED AT THE FRONTEND LEVEL BY [X-20](EXPERIMENTS.md), AND NOT MARGINAL: the float response map is 1 228 800 B of a 1 721 568 B frontend — 71.4%, MORE THAN EVERYTHING ELSE COMBINED**, where every other plane is one or two BITS per pixel and the tracker itself is 0.2%. A rolling three-row ring would take the frontend from 1.72 MB to ~0.49 MB, **3.5×**, for roughly 2× the response compute. On a project whose tiebreak is memory this is now the single largest lever left. (The 1.72 MB is a per-frame reading in one term — the candidate array, 8 754 survivors at 640×480 and 9 774 on the real frame — and it is measured against no `CV_8U` denominator; that comparison is E-5's.) | Whether `cornerMinEigenVal` keeps a caller-provided frame map or gains a streaming form. | T3.7 (made caller-provided rather than decided) | **should be scheduled** |
 | **E-11** | Should `cornerMinEigenVal` select its window strategy on `blockSize`? | [X-18](EXPERIMENTS.md) measured the incremental form **losing** below `blockSize` 15 — 0.84× at 3, which is what `seal_params.yaml` actually configures. But one device at one frame size is thin, and x86 showed the *opposite sign* there. | Whether the sliding form is unconditional or `blockSize`-gated. | T3.7 (left unconditional, qualified in the docs) | unscheduled |
 | **E-9** | Should the word type vary down the pyramid — `uint64_t` where it costs no bytes (L0, L1), `uint32_t` above? | [X-10](EXPERIMENTS.md) measured both sides: `uint64_t` reduces **1.94×** faster and costs **+33%** at 94×60 but **0%** at 640×480, so the right answer may not be one type. The width is already a per-object template parameter (D-1), so this costs no new machinery — only a decision. | Whether the pyramid picks a word type per level, and whether kernels that walk several levels pay for two instantiations. | T3.4's pyramid, [D-14](#d-14-uint32_t-is-the-default-word-type) | unscheduled |
 

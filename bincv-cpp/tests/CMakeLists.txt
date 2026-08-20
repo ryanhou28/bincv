@@ -200,10 +200,32 @@ endfunction()
 # kernels' BINCV_ASSERT preconditions are live -- and it counts `operator new`,
 # because replacing the reference's unbounded candidate vector and its grid with
 # the caller's own array is the whole no-heap claim.
+# test_opticalflow (T3.8) is core, and it is the suite with the least excuse to
+# be anywhere else. The tracker is API TIER 2 -- cv::calcOpticalFlowPyrLK's role
+# over 1-bit content, with the previous window anchored on the integer grid --
+# so there is no cv:: call to be exact against and no Tier 1 denominator. What
+# stands behind it is GROUND TRUTH rather than another estimator: synthetic warps
+# of a CONTINUOUS field, binarized after the warp, so every point's displacement
+# is known analytically and the tolerance is stated with its derivation before any
+# error is measured. Alongside that sits an independent per-pixel FLOAT
+# implementation of the same algorithm -- the multiply-and-accumulate formulation
+# the popcount residual identity is asserted to replace -- compared both on a
+# single residual at 864 window positions per word type and on a whole tracked
+# frame. None of that needs OpenCV, and all of it has to run where the embedded
+# claim does: core-only, -fno-exceptions, and Debug, the only configuration in
+# which the tracker's BINCV_ASSERT preconditions are live. It also counts
+# `operator new` -- the tracker takes no scratch buffer AT ALL, where the
+# reference copies the warped patch and its derivative into a winSize.area()*3
+# AutoBuffer, so an implementation that allocated would pass every value check in
+# the file. And it carries the frontend FOOTPRINT table, which is the number
+# Phase 4 needs; it is a test rather than a benchmark because the thing it pins --
+# which stage dominates -- is a structural property that must fail loudly when it
+# changes, not a timing that is allowed to drift.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
                      test_logic test_shift test_reduce test_bitslice
                      test_denoise test_threshold test_morphology test_resample
-                     test_pyramid test_derivative test_covariance test_corner)
+                     test_pyramid test_derivative test_covariance test_corner
+                     test_opticalflow)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -554,6 +576,14 @@ bincv_add_death_test(test_assert_abort derivative-mag-alias
                      "derivative: the magnitude planes must not share a word with each other")
 bincv_add_death_test(test_assert_abort derivative-border-type
                      "derivative: unknown BorderType")
+
+# The tracker's destination-aliasing predicate (T3.8). Its destination is an array
+# of points rather than a view, which is why it fell outside the D-11 pattern every
+# other kernel follows and why it had no check at all until a review found it: an
+# in-place call returned status 1 for every point and answers up to 23 px wrong, in
+# the Debug build, with no diagnostic.
+bincv_add_death_test(test_assert_abort flow-alias
+                     "opticalFlow: nextPts must not overlap prevPts")
 
 if(BINCV_OPENCV_FOUND)
     foreach(TEST_NAME ${BINCV_OPENCV_TESTS})

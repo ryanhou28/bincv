@@ -2930,6 +2930,291 @@ OpenCV*, not the reference binary itself, which this repo cannot run.
 
 ---
 
+### X-20 · Hybrid LK: accuracy against ground truth, and the frontend's peak footprint · `DONE`
+
+**Gates:** [T3.8](TASKS.md#t38--hybrid-lk-tracking--done)'s two Done-when
+criteria, and it is the measurement that
+[E-7](ARCHITECTURE.md#register) / [T4.1](TASKS.md) now depends on ·
+confirms [E-10](ARCHITECTURE.md#register)
+**Question:** (a) How close to a KNOWN displacement does route (b) hybrid LK get
+over 1-bit frames? (b) What is the peak working set of the whole frontend at
+640×480, by stage?
+**Hypothesis:** (a) sub-pixel, and better than the fractional part an integer-only
+tracker would be stuck with — that is the entire purpose of route (b) over route
+(a). (b) the float response map dominates, which is what E-10 was registered on.
+
+**Decision rule** — *written in `tests/test_opticalflow.cpp` before any error was
+measured, and derived from the REPRESENTATION rather than from a run:*
+- **RMS endpoint error ≤ 0.25 px.** A 1-bit frame locates an edge crossing to
+  ±0.5 px; a 31×31 window averages many crossings, so the aggregate must beat the
+  single-crossing bound by at least a factor of two (an effective count of four
+  independent crossings — the modest form of the claim).
+- **Max endpoint error ≤ 1.0 px** — one whole pixel of the grid the estimate is
+  read off: the same ±0.5 px per-axis bound as above, doubled, so that no SINGLE
+  point may miss the single-crossing bound by more than a factor of two.
+- **≥ 80% of eligible points tracked, and no tracked point may be STUCK** — ground
+  truth moved it by ≥ 0.5 px (the 1-bit localisation bound) while the tracker
+  reports a total displacement ≤ `lk_term_criteria_eps` = 0.03 px, the step at
+  which the iteration calls itself converged. Without the second half the rule is
+  vacuous: on the real frame 141 of 141 points come back tracked in every case,
+  including ones that never moved at all.
+- **On a translation with fractional part `q`, RMS strictly below `min(q, 1−q)`** —
+  the error a tracker restricted to whole-pixel displacements cannot avoid, since
+  it can only return `round(d)`.
+
+**TWO OF THOSE BULLETS WERE RESTATED AFTER A REVIEW, WITHOUT MOVING A NUMBER.**
+The max bound and the sub-pixel criterion were originally justified by route (a) —
+"integer block matching gives 1.0 px" and "an integer-only tracker's error is
+exactly `q`". Both halves of that are wrong: a minimising integer matcher returns
+`round(d)`, so its error is `min(q, 1−q) ≤ 0.5` per axis rather than `q` or 1.0,
+and **binCV contains no route (a) implementation** — route (a) is E-6 / T4.2 — so
+nothing had been measured to justify either figure. The 1.0 px is unchanged and now
+rests on the representation alone; the sub-pixel criterion moved to the tighter,
+derived `min(q, 1−q)`, which the operation still clears at q = 0.75 by 2.6×. No
+tolerance was widened at any point in this entry's life.
+- **One allowance, also derived:** LK's model is a pure translation, so under a
+  rotation `θ` or a scale `s` the true displacement varies across the window by up
+  to `halfWin·θ` and `halfWin·|s−1|`. That is model error, added to both bounds
+  for those cases only — 0.26 px at 1° and 0.30 px at 1.02×.
+
+**Variants:** synthetic texture and the repo's real test image, at 1 and 4 pyramid
+levels; sub-pixel translations, integer translations, rotation, scale.
+**Workload:** 320×240 synthetic, 752×480 real; 31×31 windows, `lk_max_level 3`,
+20 iterations, eps 0.03, minEig 0.001 — `seal_params.yaml` verbatim. 30–141
+eligible keypoints per case from `goodFeaturesToTrack` with its own
+`seal_params.yaml` defaults.
+**Metric:** RMS and maximum endpoint error in pixels against ANALYTIC ground
+truth; peak bytes by stage with `operator new` counted.
+
+**Method — and the harness is the part that matters.** Ground truth is never
+another estimator. Frame 1 is the binarization of a WARPED CONTINUOUS FIELD:
+`frame1(z) = [f(A⁻¹z) > 0]` against `frame0(z) = [f(z) > 0]`, so every point's
+displacement is `Az − z` exactly. For the real image the same shape is used on the
+decoded grayscale — warp the continuous-valued thing, binarize both frames
+afterwards with the SAME function. That function is the reference pipeline's own
+`rl_fast_edge_filter_wide(edge_threshold = 17)`
+(`SEAL/src/temporal_processing/edge_filter.cpp`), ported and checked: it
+reproduces the repo's shipped `_bin_normalized.png` to within **0.024%** of
+pixels. Warping the BITS instead would mean resampling binary content, which
+cannot be done without inventing information. Code: `tests/test_opticalflow.cpp`,
+registered as a core suite.
+
+**Result (a) — synthetic texture, 320×240, four 1-bit levels:**
+
+| case | RMS px | max px | stuck | tolerance | verdict |
+|---|---|---|---|---|---|
+| shift (0.25, 0.25) | 0.1117 | 0.2366 | 0/0 | 0.25 / 1.0 | within |
+| shift (0.50, 0.50) | 0.1166 | 0.3108 | 0/35 | 0.25 / 1.0 | within |
+| shift (0.75, 0.75) | 0.1500 | 0.4622 | 0/35 | 0.25 / 1.0 | within |
+| shift (0.75, 0.25) | 0.1129 | 0.3617 | 0/35 | 0.25 / 1.0 | within |
+| shift (2.25, −1.50) | 0.1231 | 0.3183 | 0/35 | 0.25 / 1.0 | within |
+| shift (1, 0) | 0.0004 | 0.0013 | 0/35 | 0.25 / 1.0 | within |
+| shift (0, −2) | 0.0001 | 0.0003 | 0/35 | 0.25 / 1.0 | within |
+| shift (3, 2) | 0.0005 | 0.0021 | 0/35 | 0.25 / 1.0 | within |
+| shift (−5, 4) | 0.0004 | 0.0013 | 0/34 | 0.25 / 1.0 | within |
+| rotate +1° | 0.1519 | 0.4892 | 0/35 | 0.512 / 1.262 | within |
+| rotate −1° | 0.1348 | 0.3385 | 0/34 | 0.512 / 1.262 | within |
+| scale 1.02 | 0.1452 | 0.3130 | 0/34 | 0.550 / 1.300 | within |
+| scale 0.98 | 0.1497 | 0.3455 | 0/35 | 0.550 / 1.300 | within |
+
+("stuck" is `stuck / ground truth moved ≥ 0.5 px`. The 0.25 px diagonal shift moves
+truth by 0.354 px, below the bound the representation resolves at all, so no point
+in that row is eligible to be called stuck — which is why the denominator is 0.)
+
+**And the criterion that separates route (b) from a whole-pixel tracker:** at
+`q` = 0.25, 0.50, 0.75 the RMS is **0.0756, 0.1018, 0.0950** against the
+`min(q, 1−q)` = 0.25, 0.50, 0.25 a whole-pixel tracker cannot avoid — **3.3×, 4.9×
+and 2.6× better**.
+
+**These numbers replace the ones this entry first recorded** (0.1176 / 0.2458 for
+the 0.25 px shift, and so on). Two shipped changes moved them, both from the same
+review: the reference's pyramid cap is now reproduced, so 320×240 uses three levels
+rather than four — the fourth would have been 40×30 under a 31×31 window — and
+`err` is measured at the returned position. Re-measured, not re-derived.
+
+**Result (a) — the repo's real frame, 752×480, reference binarization (10.36%
+set), 141 eligible keypoints:**
+
+| case | 1 level RMS / max / stuck | 4 levels RMS / max |
+|---|---|---|
+| stationary | **0.0000 / 0.0000** / 0 | **0.0000 / 0.0000** |
+| shift (1, 0) — axis-aligned | 0.0017 / 0.0124 / 0 | **3.2530 / 18.68** |
+| shift (0, 1) — axis-aligned | 0.0004 / 0.0017 / 0 | — |
+| **shift (1, 1) — DIAGONAL** | **0.7532 / 1.4142 / 40 of 141** | — |
+| **shift (2, 2) — DIAGONAL** | **1.7459 / 3.5823 / 45 of 140** | — |
+| shift (0.25, 0.25) | **0.2860** / 1.3417 / — | **1.2645** / 7.78 |
+| shift (0.25, 0) | **0.2161** / 1.5323 / — | — |
+| shift (0.50, 0.50) | **0.4587** / 2.5691 / 34 | **2.2311** / 11.43 |
+| shift (0.75, 0.75) | **0.6800** / 3.2123 / 37 | **3.5093** / 19.58 |
+| shift (2, −3) | — | 5.8461 / 33.81 |
+| rotate 1° | — | 4.5949 / 19.52 |
+| scale 1.02 | — | 8.2501 / 47.15 |
+
+**THE STATED TOLERANCE IS NOT MET ON REAL CONTENT.** It was not widened and the
+`minEigThreshold` was not changed. Four facts locate the cause, and **the first
+version of this entry attributed all of the miss to the third of them. A review
+asked for the control measurements, and they do not support that.**
+
+1. **It is not the bit-parallel arithmetic.** An independently written per-pixel
+   FLOAT implementation of the same algorithm — the multiply-and-accumulate
+   formulation the popcount residual identity replaces — agrees with the shipped
+   kernel to **0.000e+00 px** on this same real content, with zero status
+   mismatches, and the residual identity itself agrees to **6.3e-14** over 864
+   window positions per word type.
+2. **It is not the propagation.** A stationary frame tracks EXACTLY at every level
+   count.
+3. **PART OF IT IS A LEVEL-0 FAILURE MODE WITH NO PYRAMID INVOLVED.** At ONE level
+   the axis-aligned 1 px translation tracks to 0.0017 px — and the DIAGONAL one to
+   **0.7532 px, with 40 of 141 points returning EXACTLY zero flow** while ground
+   truth moved 1.41 px. Those points are a stationary point of the iteration, not
+   a rejection: `b1 = b2 = 0` at zero displacement on a one-pixel-wide edge map
+   whose two gradient components live on the same pixels, and the weakest of them
+   still scores 0.033 against the 0.001 rejection threshold. **The sub-pixel rows
+   miss the tolerance at one level too**, where no pyramid exists to blame. The
+   original entry reported only `(1, 0)` and generalised from it; `(1, 0)` is a
+   near-exact special case of this content and `(1, 1)` is the same easy
+   displacement, one axis apart, failing both halves of the tolerance.
+4. **AND PART OF IT IS THE PYRAMID — HALF BIT DEPTH, HALF CLIPPED WINDOWS.**
+   Accuracy still degrades **monotonically** as 1-bit levels are added: 0.0017 px
+   at one level to 3.2530 px at four for a 1 px shift. Two effects move together
+   there, and the control below separates them: the same warp over the subset of
+   points whose 31×31 window is inside EVERY level, so that deviation (ii) — binCV
+   clips where the reference pads — cannot contribute.
+
+   | levels | all 141 eligible points | the 58 whose window never clips |
+   |---|---|---|
+   | 1 | 0.0017 / 0.0124 | 0.0024 / 0.0124 |
+   | 2 | 0.8985 / 7.01 | 0.7441 / 4.22 |
+   | 3 | 3.1327 / 18.69 | 1.4764 / 9.10 |
+   | 4 | **3.2530 / 18.68** | **1.4742 / 9.11** |
+
+   **Roughly half of the headline 3.25 px is the clipped coarse-level window**, an
+   accuracy cost of deviation (ii) that had never been measured — the decision to
+   decline the reference's 1.24× padded levels was taken on footprint alone. The
+   other half survives the control: **0.0024 px to 1.47 px on windows that never
+   clip is still 600× and still six times the tolerance**, so a level whose pixels
+   are BITS genuinely cannot localise sub-pixel motion, and that error is
+   multiplied by 2^level on the way down. Synthetic texture never shows either
+   effect: its level sets are smooth, its coarse levels still carry the geometry,
+   and its level-0 basin is wide.
+
+**Reference device, same suite, `./scripts/run_on_pi.sh pi4 './tests/test_opticalflow'`
+— 148/148 checks (15 cases; the real-frame case needs OpenCV and is not built
+there), `throttled=0x0` before and after:**
+
+```
+  device:           pi4
+  cpu:              Raspberry Pi 4 Model B Rev 1.5
+  arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+  compiler:         g++ (Debian 14.2.0-19) 14.2.0
+  governor:         performance (restored to ondemand on exit)
+  core pinning:     taskset -c 3
+  throttled before: throttled=0x0
+  throttled after:  throttled=0x0
+  commit:           9956596 + the T3.8 review fixes in the working tree
+```
+
+The footprint table is **byte-identical** on aarch64 — it is integer arithmetic
+over container sizes. **AND SO IS EVERY ACCURACY NUMBER**: all thirteen synthetic
+cases and all three T4 rows print the same values to the four decimals the suite
+reports, on both platforms, from the same source. The only quantity that differs
+anywhere in the suite is the residual identity's worst rounding gap — 6.306e-14 on
+x86-64 against 6.573e-14 on the device — which is the float-summation-order effect
+showing up in the one place small enough to see it.
+
+**THIS CORRECTS THIS ENTRY'S OWN EARLIER TEXT**, which reported `q` = 0.25 as
+0.0756 on the device against 0.0765 on x86-64 and explained the gap by aarch64's
+fused multiply-add. Re-measured on both platforms from one tree, there is no gap:
+the two figures came from two different builds of the tracker, one of them from
+before the tap-displacement fix. The CAUTION still stands as a caution — the solve
+is float, and D-20 declines to promise cross-ISA bit-identity for it, where
+`cornerMinEigenVal` does promise it — but it is not currently visible in any
+reported accuracy number, and saying that it was is what this paragraph is here to
+withdraw.
+
+**Result (b) — peak footprint of the full frontend, 640×480, `uint32_t`, four
+1-bit levels, 200 tracked points. `operator new` inside every kernel: ZERO.**
+
+| stage | buffers it owns | bytes | share |
+|---|---|---|---|
+| denoise | 2 incoming frames, 1 bit/px (dst is pyramid L0) | 76 800 | 4.5% |
+| pyramid | 2 × 4 levels, 1 bit/px | 102 240 | 5.9% |
+| derivative | dx+dy ternary, 2 bits/px, prev pyramid only | 204 480 | 11.9% |
+| corner | float response map (1 228 800) + 8 754 candidates (105 048) | 1 333 848 | **77.5%** |
+| track | prevPts/nextPts/status/err, 200 points | 4 200 | 0.2% |
+| **TOTAL** | | **1 721 568** | |
+
+**E-10 IS CONFIRMED AND IT IS NOT MARGINAL: the float response map alone is
+71.4% of the frontend and more than everything else combined.** Four bytes per
+pixel where every other plane is one or two BITS. The tracker itself — the
+operation this task added — is 0.2%.
+
+**TWO QUALIFICATIONS THE FIRST VERSION OF THIS TABLE DID NOT CARRY**, both from
+the same review:
+
+- **The candidate array is a PER-FRAME READING, not a bound**, and it is the only
+  row that is: every other row is fixed by the frame size. 8 754 survivors here,
+  **9 774 on the 752×480 real frame** (117 288 B) — the suite now prints both. A
+  deployed caller cannot know the count in advance and must provision or accept
+  truncation; provisioning the structural maximum `W·H` would be 3 686 400 B and
+  would make the candidate array, not the response map, the dominant term.
+  Related, and now fixed: the `W·H` buffer used to MEASURE the survivor count was
+  still in scope when the table was printed — 3 686 400 B, 2.1× the reported
+  total, excluded from a number labelled "peak". It is scoped and destroyed before
+  the accounting.
+- **`5.60× a single CV_8U 640×480 frame` is a SCALE REFERENCE, NOT CLAUDE.md's
+  DENOMINATOR, and must not be quoted as a memory result.** CLAUDE.md's denominator
+  is "OpenCV doing the same semantic operation on the same binary content stored as
+  `CV_8U`" — for this frontend that is two `CV_8U` frames, two `winSize`-padded
+  `CV_8U` pyramids, `CV_16S` derivatives and the same float response map, none of
+  which is built or measured here. **That comparison is E-5 / T4.3's**, and until
+  it is run this entry states no memory win.
+
+**Conclusion.**
+- Route (b) meets its stated accuracy tolerance on well-textured binary content
+  and **beats the whole-pixel bound by 2.6–4.9× on exactly the sub-pixel cases
+  that justify its existence**. The hybrid is doing what §7.9 chose it to do.
+- It does **not** meet that tolerance on the reference pipeline's own edge-map
+  content, and **three distinguishable things are wrong there, not one**: a
+  level-0 stationary point that leaves ~28% of points exactly where they started
+  on a diagonal displacement; the 1-bit level's own quantisation; and the clipped
+  coarse-level window, which is about half of the four-level number.
+- The frontend's footprint is dominated by a `float` scratch buffer, not by any
+  image plane.
+
+**Decision.** Three, and one deliberate non-decision.
+1. **E-7 / T4.1 is promoted from an optimisation to a precondition — but it is no
+   longer the whole fix.** Per-level bit depth is not a footprint tuning knob; on
+   windows that never clip, four 1-bit levels are still 600× worse than one. T4.1
+   must also produce the bit-sliced weighted-sum covariance of
+   [§7.5](ARCHITECTURE.md#75-lk-gradient-covariance), because without it binCV
+   cannot build an N-bit level at all. **What T4.1 must NOT be asked to close on
+   its own** are the other two terms this entry now separates: the level-0
+   stationary point, which is present with no pyramid at all, and the clipped
+   coarse-level window, which is deviation (ii)'s accuracy cost.
+2. **THE COST OF DEVIATION (ii) IS NOW MEASURED, AND IT WAS NOT WHEN THE
+   DEVIATION WAS TAKEN.** Declining the reference's `winSize`-wide padded levels
+   was decided on footprint alone (1.24× per level); its accuracy cost on real
+   content is about half of the four-level error. CLAUDE.md's loop wants both
+   sides of a trade weighed, so the decision is now weighable — and it is NOT
+   reversed here: re-adding the border is a footprint decision that belongs with
+   T4.1, which is already rebuilding the level representation, and reversing it in
+   this task would change a measurement while reporting it.
+3. **E-10 should be scheduled.** A rolling three-row response ring would take the
+   frontend from 1.72 MB to about 0.49 MB — **3.5×** — for roughly 2× the response
+   compute, on a project whose tiebreak is memory.
+4. **Nothing about `lk_min_eig_threshold` was changed**, although this entry
+   measured it to be nearly vacuous over exact popcount covariances on binarized
+   content: the weakest window among 141 real-frame keypoints scores 0.033 in the
+   reference's units against a 0.001 threshold, i.e. 33× clear, while its ΣIy² is
+   10 pixels out of 961. Aperture-limited points therefore survive rejection and
+   slide along their edge. Changing a parameter `seal_params.yaml` sets is a
+   frontend decision, not a kernel one, and it belongs with T4.3a's outlier
+   handling.
+
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

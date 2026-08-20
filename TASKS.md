@@ -2741,7 +2741,7 @@ number of NMS survivors that differ between the two maps.
 
 ---
 
-### T3.8 · Hybrid LK tracking · `TODO`
+### T3.8 · Hybrid LK tracking · `DONE`
 
 **Depends:** T3.7
 **Files:** `include/bincv-cpp/ops/opticalFlow.hpp` (new)
@@ -2772,6 +2772,206 @@ the original bullet conflated a kernel criterion with a pipeline one.*
   binCV's boundary. Do not claim it here.
 
 **Verify:** V-ALL
+
+**RESULT — shipped as `ops/opticalFlow.hpp`. The bit-parallel side went FURTHER
+than route (b) promised; the accuracy result is a PASS on synthetic texture and a
+DOCUMENTED MISS on the reference pipeline's own content, and the miss is E-7's.**
+
+**THE BOUNDARY MOVED, AND IT MOVED THE RIGHT WAY.** [§7.9](ARCHITECTURE.md#79-the-known-hard-problem-subpixel-interpolation)
+route (b) is "bit-parallel window extraction and covariance accumulation,
+floating-point solve"; this task was written expecting the RESIDUAL to be float
+too. It is not, because it does not have to be. Bilinear interpolation is LINEAR
+in its four taps and the taps of a binary frame are BITS, and the four weights are
+constant across the window because every pixel of the window is displaced by the
+same vector — so
+
+    b1 = w00·S(T00) + w01·S(T01) + w10·S(T10) + w11·S(T11) − S(I),
+    S(M) = popcount(magX & M) − 2·popcount(magX & M & signX)
+
+is the residual EXACTLY, from ten integer counts per window per iteration. The
+same collapse works for the error term, because `|Jinterp − I| = I + (1−2I)·Jinterp`
+when `I` is a bit. **What is left on the float side is O(iterations), not
+O(iterations × window area):** the subpixel position, the four weights, the 2×2
+solve, and the update. Nothing is approximated — `tests/test_opticalflow.cpp`
+compares the popcount residual against an independently written per-pixel float
+one at **864 window positions per word type**, worst disagreement **6.3e-14**, and
+the whole tracker against a whole per-pixel float tracker, worst disagreement
+**0.000e+00 px** on both synthetic and real content.
+
+**WHAT IS STILL IRREDUCIBLY CONTINUOUS**, and therefore what §7.9 got right: the
+position, the weights and the solve. Two consequences are paid for in the open:
+the previous window is anchored at `floor(prevPt − halfWin)` because a bit-plane
+derivative cannot be interpolated, and the window is CLIPPED rather than padded —
+`buildOpticalFlowPyramid` gives every level a `winSize`-wide reflected border,
+**1.24× the level's own footprint at 640×480**, which binCV declines outright.
+
+**THE TOLERANCE IS DERIVED FROM THE REPRESENTATION, NOT FROM A RUN**, and it is in
+the test file with that derivation next to it: **RMS ≤ 0.25 px** (a 1-bit frame
+locates an edge to ±0.5 px, and a 31×31 window must average at least four
+independent crossings), **max ≤ 1.0 px** (one whole pixel of the grid the estimate
+is read off — the same ±0.5 px bound, doubled for a single worst point),
+**≥ 80% tracked AND no tracked point STUCK**, and **RMS strictly below
+`min(q, 1−q)`** on sub-pixel translations, the error a whole-pixel tracker cannot
+avoid because it can only return `round(d)`. Ground truth is a synthetic warp of a
+CONTINUOUS field binarized after the warp, so displacement is analytic — never a
+second estimator.
+
+**TWO OF THOSE FOUR WERE RESTATED IN REVIEW, WITH NO NUMBER MOVED.** The max bound
+and the sub-pixel criterion were first justified by route (a) — "integer matching
+gives 1.0 px" and "an integer-only tracker's error is exactly `q`". Neither was
+measured, because **binCV has no route (a) implementation** (it is E-6 / T4.2), and
+both are wrong in the same way: a minimising integer matcher returns `round(d)`, so
+its error is `min(q, 1−q) ≤ 0.5` per axis. The 1.0 px is unchanged and now rests on
+the representation; the sub-pixel criterion moved to the TIGHTER derived bound and
+is still cleared by 2.6× at its worst. An earlier version of this section also
+claimed the tolerance "was written before the first measurement"; the file's
+derivation is checkable and its numbers were not refitted, but the ORDERING was
+not evidenced by anything in the history, so it is no longer claimed.
+
+| content | case | RMS | max | verdict |
+|---|---|---|---|---|
+| synthetic | shift 0.25 / 0.50 / 0.75 px | 0.112 / 0.117 / 0.150 | 0.237 / 0.311 / 0.462 | **within** |
+| synthetic | integer shifts (1,0) … (−5,4) | 0.0001–0.0005 | ≤ 0.0021 | **within** |
+| synthetic | rotate ±1°, scale 1.02/0.98 | 0.135–0.152 | ≤ 0.489 | **within** |
+| synthetic | T4: q = 0.25 / 0.50 / 0.75 | 0.076 / 0.102 / 0.095 | — | **beats `min(q,1−q)` by 3.3× / 4.9× / 2.6×** |
+| real, 1 level | shift (1,0) / (0,1) — axis-aligned | **0.0017 / 0.0004** | 0.012 | within |
+| real, 1 level | **shift (1,1) / (2,2) — DIAGONAL** | **0.753 / 1.746** | 1.41 / 3.58 | **OVER, 28–32% of points stuck at zero flow** |
+| real, 1 level | shift 0.25 / 0.50 / 0.75 px | **0.286 / 0.459 / 0.680** | 1.34 / 2.57 / 3.21 | **OVER** |
+| real, 4 levels | shift 0.25 / 0.50 / 0.75 px | **1.26 / 2.23 / 3.51** | 7.8 / 11.4 / 19.6 | **OVER** |
+| real, 4 levels | shift 1 px, all 141 points | **3.25** | 18.7 | **OVER** |
+| real, 4 levels | shift 1 px, the 58 windows that never clip | **1.47** | 9.1 | **OVER** |
+
+(The synthetic numbers moved slightly from this section's first version: the
+reference's pyramid cap is now reproduced, so 320×240 uses three levels rather than
+four — the fourth would have been 40×30 under a 31×31 window.)
+
+The tolerance was **not widened**, and the rejection threshold was **not
+changed**. The real-frame cases report their verdict and assert only what can be
+asserted without taking a decision this task does not own.
+
+**THE DIAGNOSIS WAS E-7's ALONE AND IT IS NOT. THREE SEPARABLE THINGS FAIL ON REAL
+CONTENT, AND A REVIEW'S CONTROL MEASUREMENTS SPLIT THEM.** Content is the reference
+pipeline's own binarization — `rl_fast_edge_filter_wide(edge_threshold = 17)`,
+ported and checked to agree with the repo's shipped `_bin_normalized.png` to within
+**0.024%** of pixels.
+
+1. **A LEVEL-0 STATIONARY POINT, WITH NO PYRAMID INVOLVED AT ALL.** At ONE level
+   the axis-aligned 1 px shift tracks to 0.0017 px — and the DIAGONAL (1,1) to
+   **0.753 px, with 40 of 141 points returning EXACTLY zero flow** against a true
+   1.41 px. `b1 = b2 = 0` at zero displacement on a one-pixel-wide edge map whose
+   two gradient components live on the same pixels; the weakest such window still
+   scores 0.033 against the 0.001 rejection threshold, so nothing rejects them.
+   The sub-pixel rows miss the tolerance at one level too. **The first version of
+   this section reported only the axis-aligned `(1, 0)` and generalised from it**,
+   which is how "level 0 tracks a 1 px translation to 0.002 px" came to stand for
+   content on which the same displacement one axis away is 440× worse.
+2. **THE 1-BIT LEVEL'S OWN QUANTISATION**, which is real and is E-7's: on the 58
+   windows that never clip at any level, four levels are **0.0024 → 1.47 px, 600×
+   worse than one**, still six times the tolerance. A coarse level's estimate is
+   multiplied by 2^level on the way down and a level whose pixels are BITS cannot
+   localise sub-pixel motion better than its own quantisation.
+3. **THE CLIPPED COARSE-LEVEL WINDOW — deviation (ii), and about HALF of the
+   headline number.** All 141 points give 3.25 px at four levels where the
+   never-clipping 58 give 1.47. Declining the reference's `winSize`-wide padded
+   levels was decided on footprint alone (1.24× per level); **its accuracy cost had
+   never been measured**, and CLAUDE.md's loop requires both sides of a trade before
+   it is settled. It is not reversed here — re-adding the border is a footprint
+   decision belonging with T4.1, which is already rebuilding the level
+   representation — but it is now on the record as a cost.
+
+**binCV can only build 1-bit levels today**: the popcount covariance is exact only
+for a ternary derivative, and an N-bit level needs the bit-sliced weighted-sum
+covariance of [§7.5](ARCHITECTURE.md#75-lk-gradient-covariance), which is not
+written. So **E-7 / [T4.1](#t41--e-7--pyramid-level-bit-depths--todo) is a
+precondition rather than an optimisation** ([X-20](EXPERIMENTS.md)) — and it is
+**not sufficient**, because (1) and (3) are outside it. A stationary frame tracks
+EXACTLY at every level count, which is what rules out a defect in the propagation.
+
+**ONE BUG THIS HARNESS CAUGHT, AND IT WOULD NOT HAVE SHOWN UP AT LEVEL 0.** The
+tap displacement must be measured from `prevPt`, not from the integer anchor; the
+two differ by `frac(prevPt)`, which is exactly zero at level 0 for integer
+keypoints and non-zero at every coarser level. With the wrong spelling a
+STATIONARY point drifted up to 1.4 px through four levels, because each level
+converged to `d − frac` and handed twice that error to the next one down. Every
+single-level case passed throughout.
+
+**FOUR CODE DEFECTS A REVIEW PASS FOUND AFTER THIS SECTION FIRST SAID DONE, ALL
+FIXED, EACH WITH A TEST THAT FAILS WITHOUT THE FIX.**
+
+1. **`err` was the residual at the PREVIOUS iterate**, not at the position
+   returned — the tap offset and the four bilinear weights were left over from the
+   start of the last iteration, and after the oscillation rule fired they described
+   a point a further half-step away. Measured against an independent per-pixel
+   float residual at the returned point: **134% high at `maxIterations = 1`**, 51%
+   at 2, 0.4% at the default 20. The reference recomputes them in a separate pass
+   after the loop (`LKTrackerInvoker.cpp:222-259`); so does this now, and the
+   weights no longer outlive the loop that computes them. **Nothing in the suite
+   read an `err` value at all**, so the second of the file's two popcount
+   identities — `|Jinterp − I| = I + (1−2I)·Jinterp` — had zero coverage while the
+   first had 864 positions per word type.
+2. **No pyramid cap.** The reference refuses to BUILD a level that is not strictly
+   larger than the window; binCV consumed whatever it was handed. The repo's own
+   149×101 word-type case was tracking on a **38×26 level under a 31×31 window** —
+   every window clipped, every point getting nearly the same `A` and `b`, that one
+   estimate multiplied by 4 on the way down. Levels at or below the window size are
+   now ignored (deviation (vi)); at 320×240 that drops the 40×30 fourth level,
+   which is what moved the synthetic numbers above.
+3. **`nextPts` aliasing `prevPts` was undetected.** The level loop writes every
+   `nextPts` entry before reading any `prevPts` entry, so an in-place call tracks
+   from an overwritten anchor: measured **up to 23 px of divergence, status 1 on
+   every point, no diagnostic, in the Debug build**. It is the only kernel whose
+   destination is an array of points rather than a view, which is how it escaped
+   the D-11 pattern every other kernel follows. Now a `BINCV_ASSERT` with a death
+   test.
+4. **`levelCount == 0` returned before initialising `status` and `err`**, against a
+   docstring that says every entry is written. It now writes them — every point
+   lost, `nextPts` a copy of `prevPts` — which is a value, not an error.
+
+Two documentation defects were fixed with them: `err`'s docstring equated its scale
+with the reference's while dividing by the CLIPPED pixel count where the reference
+divides by the full window area, and the T3 "≥ 80% tracked" gate counted a point
+that never moved as tracked (see the tolerance note above).
+
+**FOOTPRINT OF THE FULL FRONTEND, 640×480, uint32_t, 4 levels, 200 points —
+measured, not estimated, with `operator new` counted at ZERO across denoise,
+pyrDown, derivative, corner and track:**
+
+| stage | buffers it owns | bytes | share |
+|---|---|---|---|
+| denoise | 2 incoming frames, 1 bit/px (dst is pyramid L0) | 76 800 | 4.5% |
+| pyramid | 2 × 4 levels, 1 bit/px | 102 240 | 5.9% |
+| derivative | dx+dy ternary, 2 bits/px, prev pyramid only | 204 480 | 11.9% |
+| corner | float response map + 8 754 candidates | 1 333 848 | **77.5%** |
+| track | prevPts/nextPts/status/err, 200 points | 4 200 | 0.2% |
+| **TOTAL** | | **1 721 568** | |
+
+**[E-10](ARCHITECTURE.md#register) PREDICTED THIS AND IT IS CONFIRMED: the float
+response map alone is 1 228 800 B — 71.4% of the whole frontend, and MORE THAN
+EVERYTHING ELSE COMBINED.** Four bytes per pixel, where every other plane in the
+frontend is one or two BITS per pixel. The tracker itself is 0.2%. E-10 should be
+scheduled: a rolling three-row ring would take the frontend from 1.72 MB to about
+0.49 MB, a **3.5×** cut, for roughly 2× the response compute. The test asserts the
+dominance — as the expression it prints, `responseBytes > total − responseBytes`;
+spelled as a sum of the other rows it silently omitted the candidate array and
+could not fail — so a future change fails here rather than in a report nobody
+re-ran.
+
+**TWO QUALIFICATIONS THE TABLE NOW CARRIES, BOTH FROM REVIEW.** The candidate array
+is the ONE content-dependent row and therefore a per-frame reading rather than a
+bound: 8 754 survivors here, **9 774 on the 752×480 real frame**, and provisioning
+the structural maximum `W·H` would be 3 686 400 B and would dominate the table.
+The `W·H` buffer used to MEASURE the count was also still live when the table was
+printed — 3 686 400 B, 2.1× the reported total, inside a number labelled "peak";
+it is now scoped and destroyed first. And **`5.60× one CV_8U frame` is a scale
+reference, not CLAUDE.md's denominator**: the denominator is a whole `CV_8U`
+frontend — two frames, two padded pyramids, `CV_16S` derivatives, the same response
+map — which is E-5 / [T4.3](#t43--e-5--end-to-end-validation--todo)'s to build.
+**No memory win is claimed by this task.**
+
+**Verify:** V-ALL — `./scripts/verify.sh` green in four configurations;
+`test_opticalflow` registered as a CORE suite (the accuracy, residual-identity,
+word-type-invariance, loss-rule, no-heap and footprint cases run without OpenCV;
+only the real-frame case is behind `BINCV_WITH_OPENCV`).
 
 ---
 
@@ -2811,6 +3011,37 @@ not worked around.
 ### T4.1 · E-7 · Pyramid level bit depths · `TODO`
 
 **Depends:** T3.8
+
+**T3.8 CHANGED THIS TASK'S STANDING, AND ITS SCOPE.** [X-20](EXPERIMENTS.md)
+measured tracking accuracy on the reference pipeline's own edge-map content
+degrading **monotonically** as 1-bit pyramid levels are added — 0.0017 px RMS at
+one level to **3.25 px at four** for a 1 px translation — because a level whose
+pixels are BITS cannot localise a sub-pixel motion better than its own
+quantisation, and that error is multiplied by 2^level on the way down. So this is
+not "which depth is cheapest for equal accuracy"; **at 1 bit the pyramid does not
+work on real content** — on the 58 windows that never clip at any level, four
+1-bit levels are 600× worse than one, so the effect survives every control X-20
+could apply.
+
+**BUT IT IS NOT THE WHOLE OF T3.8's MISS, AND THIS TASK MUST NOT BE SCOPED AS IF IT
+WERE.** An earlier version of this paragraph said the tolerance was missed "for
+that reason and no other". [X-20](EXPERIMENTS.md) now separates three terms, and
+two of them are outside E-7: a **level-0 stationary point** that leaves ~28% of
+points exactly where they started on a diagonal 1 px displacement with NO pyramid
+in the picture, and the **clipped coarse-level window** (deviation (ii)), which is
+about half of the four-level error. What remains true, and is what makes this a
+precondition, is that the bit-parallel arithmetic is not the cause — it agrees with
+a per-pixel float implementation to 0.000e+00 px — and that a stationary frame
+tracks exactly at every level count.
+
+**This task therefore also has to build the kernel that makes an N-bit level
+usable**: `ops/covariance.hpp` is exact only for a TERNARY derivative, so binCV
+cannot currently form the 2×2 matrix at an N-bit level at all. That is the
+bit-sliced weighted-sum covariance of
+[ARCHITECTURE §7.5](ARCHITECTURE.md#75-lk-gradient-covariance) — each magnitude
+plane pair contributing at its binary weight — and it is a new kernel, not a wider
+version of the existing one.
+
 **Question:** How many bits does each pyramid level need to preserve tracking
 accuracy? Measured natural growth is 1/3/4/5 bits
 ([X-2](EXPERIMENTS.md)), but the reference never chose that — it fell out of
