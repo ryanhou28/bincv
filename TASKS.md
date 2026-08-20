@@ -3049,6 +3049,86 @@ reproducible with `./scripts/run_on_pi.sh pi4 '../../scripts/genericn_evidence.s
 
 ---
 
+### T3.10 · N-bit gradient covariance · `TODO`
+
+**Depends:** T3.6 (ternary case), T3.5 (N-bit derivative)
+**Gates:** [T4.1](#t41--e-7--pyramid-level-bit-depths--todo), which cannot measure
+bit depths for a frontend that cannot form the matrix above 1 bit
+**Files:** `include/bincv-cpp/ops/covariance.hpp`
+
+**Why this exists.** [X-20](EXPERIMENTS.md) found the accuracy failure is the
+**1-bit pyramid**, not any kernel — a level whose pixels are bits cannot localise
+sub-pixel motion better than its own quantisation, and that error is multiplied by
+2^level. [X-2](EXPERIMENTS.md) measured levels needing 1/3/4/5 bits. So the fix is
+N-bit levels — and **binCV cannot form the LK covariance at an N-bit level at
+all today.** T3.6 covers only `TernaryMat`; `SignedQuantMat<N>` for N>1
+deliberately matches no overload.
+
+**Spec** — [ARCHITECTURE §7.5](ARCHITECTURE.md#75-lk-gradient-covariance) states
+the generalisation: *"For N-bit levels the same structure holds with bit-sliced
+weighted sums: each plane pair contributes at its binary weight."*
+
+For magnitude planes `m[0..N-1]` and sign plane `s`, with
+`Ix = ±Σ 2^i·m_x[i]`:
+
+```
+sumXX = Σ_i Σ_j 2^(i+j) · popcount(m_x[i] & m_x[j])            // sign squares away
+sumYY = Σ_i Σ_j 2^(i+j) · popcount(m_y[i] & m_y[j])
+sumXY = Σ_i Σ_j 2^(i+j) · [ popcount(m_x[i] & m_y[j] & ~(s_x^s_y))
+                          - popcount(m_x[i] & m_y[j] &  (s_x^s_y)) ]
+```
+
+**It is QUADRATIC in N**, where the derivative is linear — N² plane pairs per
+entry, 9 terms at N=3. That is inherent to a product of two N-bit values, not a
+formulation to be optimised away. Say what it costs and confirm it against the
+ternary case, which must remain **exactly** the N=1 instance.
+
+**Note the scope limit on [D-21](ARCHITECTURE.md#8-design-decisions).** X-21 closed
+E-4 for N=1 only and said so explicitly, flagging that the covariance is quadratic
+in N where the derivative is linear. This task is where that matters.
+
+**Done when**
+- Matches a per-pixel reference EXACTLY at N = 1, 2, 3, 4 — integers, no tolerance
+- The N=1 path is bit-identical to T3.6's ternary result, proven by comparison
+- Correct for windows clipped at frame edges
+- No heap; views per D-5; D-13 for the reduction
+- Cost in N measured and recorded, so T4.1 can price a bit-depth choice
+
+**Verify:** V-ALL, plus the device
+
+---
+
+### T3.11 · Rolling response map (E-10) · `TODO`
+
+**Depends:** T3.7
+**Files:** `include/bincv-cpp/ops/corner.hpp`
+
+**Why this exists.** [X-20](EXPERIMENTS.md) measured the frontend's peak footprint
+at **1721568 B**, of which T3.7's float response map is **1228800 B — 71.4%, more
+than everything else combined**, at 4 B/pixel where every other plane is one or two
+*bits*. On a project whose thesis is footprint, the largest buffer in the frontend
+is a float scratch.
+
+**Spec.** Add a streaming form that keeps only the rows NMS needs — a three-row
+ring — instead of a frame-sized map. T3.7 already made the map caller-provided
+rather than deciding this, so the existing entry point stays.
+
+Estimated at ~15 kB against 1.23 MB, for roughly **2× the response compute**,
+which is the trade to measure rather than assume. **This is a speed/footprint
+conflict with no prior decision, so it follows the experiment protocol**: write
+the rule first, measure both, then choose. [CLAUDE.md](CLAUDE.md)'s tiebreak
+applies only if the measurement leaves it genuinely close.
+
+**Done when**
+- Streaming form produces **identical** corners to the frame-map form, proven over
+  full frames — not merely similar
+- Peak footprint re-measured end to end, so the Phase 4 number reflects it
+- The compute cost measured on the device, and the choice recorded as a D-record
+
+**Verify:** V-ALL, plus the device
+
+---
+
 # Phase 4 — Validation
 
 Phase 4 holds only the experiments that genuinely cannot run earlier — those
