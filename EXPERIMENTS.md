@@ -3201,8 +3201,18 @@ the same review:
    T4.1, which is already rebuilding the level representation, and reversing it in
    this task would change a measurement while reporting it.
 3. **E-10 should be scheduled.** A rolling three-row response ring would take the
-   frontend from 1.72 MB to about 0.49 MB — **3.5×** — for roughly 2× the response
-   compute, on a project whose tiebreak is memory.
+   frontend from 1.72 MB to about 0.49 MB — **3.5×** — ~~for roughly 2× the response
+   compute~~, on a project whose tiebreak is memory.
+   **SCHEDULED, RUN AND CLOSED as T3.11 /
+   [X-23](#x-23--the-rolling-response-ring-against-the-frame-sized-response-map--done),
+   AND THE COMPUTE HALF OF THIS ITEM WAS WRONG — corrected here by name, because
+   X-23's pre-registered rule required exactly that of a `T < 1.00` result.** The
+   footprint half was right and slightly conservative: measured
+   **1 721 568 B → 500 464 B, 3.44×**. The compute is **0.76×, i.e. FASTER**, not 2×
+   slower — a ring forces a row-major sweep, which [X-18](#x-18--does-the-incremental-window-form-still-pay-inside-t37s-dense-sweep--done)
+   had already measured as the quicker traversal at `blockSize` 3, and no second pass
+   is needed to recover the global threshold. Even the two-pass shape this sentence
+   described costs 1.344×, not 2×. The corners are identical.
 4. **Nothing about `lk_min_eig_threshold` was changed**, although this entry
    measured it to be nearly vacuous over exact popcount covariances on binarized
    content: the weakest window among 141 real-frame keypoints scores 0.033 in the
@@ -3226,14 +3236,21 @@ the numbers arrived — which matters here, because the numbers landed partly
 outside the bands the rule anticipated and the entry says so rather than bending
 one of them to fit.
 
-**That paragraph describes X-21, and X-22 and X-23 have since joined this section.**
-X-22 is likewise closed. **[X-23](#x-23--the-rolling-response-ring-against-the-frame-sized-response-map--todo)
-is still open and is the reason this section is not simply part of "Completed":** its
-rule is committed and **nothing it measures exists yet**. Its Decision rule is NOT
-copied from [TASKS.md](TASKS.md) — [T3.11](TASKS.md#t311--rolling-response-map-e-10--todo)
-deliberately states only that a rule must be written first, so the bands, their
-numbers and the justification for those numbers are written in the entry itself, and
-are what a later reader should hold the result to.
+**That paragraph describes X-21, and X-22 and X-23 have since joined this section.
+All three are now closed**, so this section is no longer distinguished from
+"Completed" by having an open entry in it — it is distinguished by *how* its entries
+were written, which is the property worth keeping visible.
+**[X-23](#x-23--the-rolling-response-ring-against-the-frame-sized-response-map--done)
+is the strongest instance of the discipline in the log so far**, and it is worth
+saying why: its Decision rule was NOT copied from [TASKS.md](TASKS.md) —
+[T3.11](TASKS.md#t311--rolling-response-map-e-10--done) deliberately stated only
+that a rule must be written first — so the bands, their numbers and the
+justification for those numbers were written in the entry itself, at a commit where
+`ops/corner.hpp` contained no streaming form at all. **And the rule earned its
+keep**: it pre-declared `T < 1.00` as a live outcome requiring three documents to be
+corrected by name, that outcome is what happened (`T` = 0.76×), and the correction
+was therefore a step in a written procedure rather than an awkward discovery. A rule
+that only anticipates the answer you expect is not doing this job.
 
 ---
 
@@ -4087,21 +4104,23 @@ job and still needs a binary per arm.
 
 ---
 
-### X-23 · The rolling response ring against the frame-sized response map · `TODO`
+### X-23 · The rolling response ring against the frame-sized response map · `DONE`
 
 > **PRE-REGISTERED. Written and committed BEFORE the streaming form exists** —
 > nothing in `ops/corner.hpp` implements it at this commit, and this commit touches
 > this file and nothing else, so the history shows the rule predates the data. Same
 > discipline as [X-9, X-10 and X-11](#phase-2-experiments--rules-recorded-first-then-measured)
 > at 4245210 and as [X-21](#x-21--does-generic-n-cost-the-specialized-n1-and-ternary-paths-anything--done).
-> **Result, Conclusion and Decision are deliberately empty below.**
+> **Result, Conclusion and Decision were deliberately empty at that commit.** They
+> are filled in below, under a horizontal rule, and NOTHING ABOVE THAT RULE WAS
+> TOUCHED when the numbers arrived — no band was re-scaled, re-scoped or softened.
 
 **Numbering:** X-1…X-22 and X-7b are taken, so this entry is **X-23**. (Duplicates
 have happened here — X-21 records two tasks whose Done-when pointed at an X-number
 that was already in use.)
 
 **Gates:** [E-10](ARCHITECTURE.md#9-open-questions-and-planned-experiments) · task
-[T3.11](TASKS.md#t311--rolling-response-map-e-10--todo) — whether
+[T3.11](TASKS.md#t311--rolling-response-map-e-10--done) — whether
 `cornerMinEigenVal` / `goodFeaturesToTrack` gain a streaming form, and if so whether
 it becomes the recommended path or a second shape.
 
@@ -4375,15 +4394,277 @@ and after** recorded — a non-zero value, or one that CHANGES during the run,
 invalidates it, and **exit 77 is a skip, not a pass**. Log:
 `bincv-cpp/results/corner_streaming_benchmark_pi4.log`.
 
-**Result:** *pending — nothing is measured at this commit, and no streaming form
-exists to measure.*
+---
 
-**Conclusion:** *pending.*
+**THE MEASUREMENT. Everything above this line is unchanged from 79db8f8, where it
+was committed with no streaming form in the tree; `git log -p EXPERIMENTS.md` shows
+the bands, their numbers and their justifications predating every number below.**
 
-**Decision:** *pending.* If band A or B fires it promotes to a D-record in
-[ARCHITECTURE §8](ARCHITECTURE.md#8-design-decisions) and closes E-10 in §9; if band
-C fires, E-10 closes as "not at this price" and the register row says so. Either way
-X-20's footprint table is restated with the number this experiment measures.
+**Environment.** Reference device `pi4`, Raspberry Pi 4 Model B Rev 1.5, aarch64 /
+6.18.34+rpt-rpi-v8, `g++ (Debian 14.2.0-19) 14.2.0`, governor `performance`, pinned
+with `taskset -c 3`, `throttled=0x0` **before and after** the run (unchanged during
+it), exit 0 — not 77. Release, core-only. Log:
+`bincv-cpp/results/corner_streaming_benchmark_pi4.log`. Code:
+`benchmark/corner_streaming_benchmark.cpp` plus one translation unit per arm.
+
+---
+
+**PRECONDITION 1 — CORNER EQUALITY. PASSED, AND PROVEN BY FULL-ARRAY COMPARISON
+RATHER THAN BY SAMPLING.**
+
+`Corner.Streaming_*` in `tests/test_corner.cpp` — **core-suite cases, so they run in
+all four `verify.sh` configurations**, not only where a benchmark builds:
+
+| case | what it compares | scale |
+|---|---|---|
+| `Streaming_IdenticalCorners_{uint8,16,32,64}_t` | `count`, `candidatesRanked`, `candidatesTruncated`, and the whole `[0, candidatesRanked)` prefix — coordinates and exact `float` bits | **1 080 cells and 133 098 corner records per word type**; 8 frames × 6 block sizes (3, 4, 5, 7, 15, 31) × 4 parameter sets × 6 capacities |
+| `Streaming_IdenticalCorners_LargeFrames` | the same, at 160×120, 129×97 and 151×113 | **184 cells and 566 270 corner records** at `uint32_t` and again at `uint64_t` |
+| `Streaming_RowMatchesFrameMap_*` | `cornerMinEigenValRow` against `cornerMinEigenVal`'s row `y` | **65 910 positions per word type, bit-identical** |
+| `Streaming_DegenerateShapes` | 1×1, 1×9, 9×1, 2×2, 3×3, 4×3, 3×4, 33×2 — frames with no NMS row at all | 8 shapes |
+| `Flow.FrontendFootprint_640x480` | the two shapes on **X-20's own frontend content**, 640×480 | 8 754 candidates, 0 differing |
+
+**1 664 932 corner records compared, 0 differing.** The frame list is deliberately
+tie-dominated rather than random — a checkerboard at block 1 (the whole interior one
+response), a checkerboard at block 4, stripes, a uniform frame (every response
+exactly 0, so `maxVal` is 0 and nothing survives), and a single dot — because a
+partial-maximum threshold or a reordered tie is invisible on content with distinct
+responses. **82 of the 1 080 cells per word type contain a repeated response and 476
+truncate**, and the suite asserts that both counts are non-zero, so a zero mismatch
+count is a statement about a sweep that actually entered those paths.
+
+**And the suite can fail.** Three mutants of the shipped streaming form, built and
+run: dropping the post-threshold filter (34 mismatching cells, 6 failed checks);
+failing to record an evicted candidate in the discarded-maximum (6 failed checks);
+breaking ties by ASCENDING raster position in the streaming sort alone — the exact
+failure a ring invites — (7 failed checks). All three were caught by
+`Streaming_IdenticalCorners_*` alone.
+
+**PRECONDITION 2 — THE KERNEL RULES. PASSED.** Views only (D-5); never throws; the
+`operator new` counter reads **0** across `goodFeaturesToTrackStreaming` and
+`cornerMinEigenValRow` in the test suite and **0** for all three arms in the
+benchmark, on the device; padding never counted (D-13, inherited from the
+reductions). The ring is the caller's, as the map is.
+
+---
+
+**HOW THE GLOBAL PROPERTIES ARE PRESERVED — the hard part, and it turned out not to
+need a second pass.**
+
+The registered hypothesis was two-sided: a one-pass form is possible in principle
+because the threshold is a pure post-filter, but its candidate carry might be
+unbounded, with a structural worst case of `(w−2)(h−2)` = 3 659 568 B. **The carry
+is bounded, and it is bounded exactly, by an argument rather than by a heuristic.**
+Write `A` for the raw 3×3 maxima, `S = {a ∈ A : a.response > threshold}`, `K` for
+the caller's `capacity`:
+
+1. **`S` is UPWARD CLOSED in `A`** under `CornerStronger`, which orders on response
+   first — anything stronger than a member of `S` is itself above the threshold.
+2. For an up-set, **`topK(A) ∩ S = topK(S)` when `|S| > K`, and `= S` when
+   `|S| ≤ K`.** So keeping the `K` strongest RAW maxima and applying the threshold
+   after the last row yields **exactly** the set the frame-map form ranks, and `K`
+   is the caller's own candidate array. **The carry for the global sort is zero
+   extra bytes.**
+3. **`candidatesTruncated` — which means `|S| > K` — is one `float`.** If any
+   discarded maximum is above the threshold then every retained one is at least as
+   strong and hence also above it, so `|S| ≥ K+1`; if none is, `S` is contained in
+   the retained set and `|S| ≤ K`. So `truncated == (max response among discarded
+   candidates > threshold)`.
+4. **The plateau problem is a RUNNING threshold, and the prune is provably
+   answer-preserving.** Un-thresholded every pixel of a flat plateau is a 3×3
+   maximum. The running maximum is monotone non-decreasing and
+   `x ↦ float(double(x)·q)` is monotone for `q > 0`, so the running threshold never
+   exceeds the final one and everything it rejects is permanently outside `S`.
+   Removing non-members of `S` from `A` changes neither `topK(A) ∩ S` nor the test
+   in item 3, since both arguments used only `S`'s up-set property inside whatever
+   `A` is.
+
+**So the answer is invariant to how aggressive the prune is, and to the order
+candidates are visited in** — which is why equality holds on a checkerboard whose
+entire interior ties. The whole extra carry is **16 B**: a running maximum, a
+running retained count and the strongest discarded response. The two-pass arm S2 was
+still built and measured, because "the second pass is unnecessary" is a claim that
+needs a price beside it.
+
+---
+
+**RESULT (a) — TRUE PEAK. The saving gate is evaluated FIRST, as the rule says.**
+
+640×480, `uint32_t`, `blockSize` 3, `operator new` instrumented, every
+measurement-only buffer scoped and destroyed before the accounting point (the
+mistake X-20 caught in its own first table):
+
+| term | frame map | streaming |
+|---|---|---|
+| response storage | 1 228 800 B | **7 680 B** |
+| candidate array (also the output) | 105 048 B | 105 048 B |
+| carry for the GLOBAL properties | 0 B | **16 B** |
+| **corner stage TRUE PEAK** | **1 333 848 B** | **112 744 B** — 11.83× |
+
+and the frontend in X-20's five-row stage table, re-measured end to end by
+`Flow.FrontendFootprint_640x480` on X-20's own content and with the two shapes
+asserted to return identical corners:
+
+| stage | frame map | share | streaming | share |
+|---|---|---|---|---|
+| denoise | 76 800 | 4.5% | 76 800 | 15.3% |
+| pyramid | 102 240 | 5.9% | 102 240 | 20.4% |
+| derivative | 204 480 | 11.9% | 204 480 | 40.9% |
+| **corner** | **1 333 848** | **77.5%** | **112 744** | **22.5%** |
+| track | 4 200 | 0.2% | 4 200 | 0.8% |
+| **TOTAL** | **1 721 568** | | **500 464** | |
+
+**`P_stream` = 500 464 B ≤ 750 000 B, `R` = 3.44× → THE SAVING GATE PASSES**, so the
+time bands apply. The response storage is 1.5% of the streaming frontend and the
+**candidate array is now the corner stage's dominant term** — which is also the only
+content-dependent row in the table, and the reason the structural worst case is
+stated beside it: at `(w−2)(h−2)` candidates the two forms are 4 888 368 B and
+3 667 264 B, i.e. **the ring stops being the interesting term long before the
+candidate array does.** At 752×480 the corner-stage peak is 1 630 524 B → 195 724 B
+(8.33×) on this benchmark's frame.
+
+**The pre-registered arithmetic predicted 500 448 B; the measurement is 500 464 B.**
+The 16 B difference is the carry the entry insisted on counting and the estimate had
+not enumerated. §4.6's "~0.6 MiB" projection for two frames plus derivatives — written
+before anything in this project counted a float scratch — is **exceeded 2.7× by the
+frame-map frontend and met by the streaming one.**
+
+---
+
+**RESULT (b) — TIME. `T` is the whole `goodFeaturesToTrack` call, medians of 11
+interleaved batches, three arms in three translation units.**
+
+640×480, `uint32_t`, the decision configuration. Spreads are **within-run full
+scatter**, `(max − min)/median`:
+
+| block | arm | detector ns/px | spread | ms/frame | response stage ns/px | spread | `T` |
+|---|---|---|---|---|---|---|---|
+| **3** | F frame map | 131.070 | 0.19% | **40.26** | 105.360 | 0.13% | 1.000 |
+| **3** | S2 two-pass | 176.171 | 0.15% | 54.12 | 150.859 | 0.04% | 1.344 |
+| **3** | **S1 one-pass** | **100.190** | 0.16% | **30.78** | **74.654** | 0.04% | **0.764** |
+| 7 | F | 267.167 | 0.10% | 82.07 | 153.750 | 0.17% | 1.000 |
+| 7 | S2 | 369.287 | 0.14% | 113.45 | 256.046 | 0.08% | 1.382 |
+| 7 | S1 | 244.060 | 0.15% | 74.98 | 129.810 | 0.07% | **0.914** |
+| 15 | F | 392.551 | 0.75% | 120.59 | 266.031 | 0.10% | 1.000 |
+| 15 | S2 | 652.161 | 0.72% | 200.34 | 523.113 | 0.07% | 1.661 |
+| 15 | S1 | 391.346 | 0.76% | 120.22 | 263.429 | 0.06% | **0.997** |
+| 31 | F | 647.839 | 0.70% | 199.02 | 579.743 | 0.51% | 1.000 |
+| 31 | S2 | 1336.699 | 4.33% | 410.63 | 1266.802 | 4.38% | 2.063 |
+| 31 | S1 | 702.612 | 4.17% | 215.84 | 644.767 | 0.91% | **1.085** |
+
+**THE ARM ORDER WAS SWAPPED IN THE BATCH AND THE RUN REPEATED**, as the rule
+requires. In order (S1, S2, F) the same cells read `T(S1)` = **0.765, 0.914, 0.997,
+1.086** and `T(S2)` = 1.344, 1.382, 1.660, 2.063 — the largest movement anywhere is
+0.001. **The verdict is not a batch-position effect**, and this is the control the
+twice-measured layout hazard demanded.
+
+`uint64_t`, 640×480: `T(S1)` = **0.775 / 0.932 / 1.018 / 1.122** at blockSize 3 / 7 /
+15 / 31, `T(S2)` = 1.341 / 1.398 / 1.648 / 2.008 — the same shape, the same crossover,
+about 1 percentage point worse for the streaming form at every size.
+
+752×480, `blockSize` 3: `T(S1)` = **0.739** (`uint32_t`) and **0.754** (`uint64_t`);
+`T(S2)` = 1.328 and 1.332. The saving is slightly *larger* on the wider frame, which
+is the direction a row-major sweep should move in.
+
+---
+
+**BAND A FIRES, AND SO DOES THE OUTCOME THE RULE SAID MUST NOT BE SWALLOWED.**
+
+`T` = **0.764** at the decision point, which is not merely inside band A's `T ≤ 1.25`
+— **it is below 1.00.** The rule pre-declared that case, called it live rather than
+courteous, and required the correction to be named:
+
+> "If the streaming form is *faster*, then the '~2× the response compute' figure is
+> wrong, and **three documents state it** — X-20's decision 3, ARCHITECTURE §9's E-10
+> row, and TASKS.md T3.11. […] all three get corrected to the measured number, and
+> the correction is **named**, not quietly applied."
+
+**All three are corrected in this commit, by name.** The streaming form is
+**1.31× FASTER** at the reference pipeline's own block size, not 2× slower; the
+whole detector goes from 40.26 ms/frame to 30.78 ms/frame at 640×480, and the
+frontend's peak falls 3.44×.
+
+**Why the estimate was wrong is not a mystery and was written into the hypothesis
+before the run.** A ring FORCES a row-major sweep, and
+[X-18](#x-18--does-the-incremental-window-form-still-pay-inside-t37s-dense-sweep--done)
+had already measured the shipped column-major sliding sweep **1.19× slower than
+row-major recomputation at `blockSize` 3**. The streaming form collects that discount
+before paying for anything, and the one-pass argument above means it never pays for a
+second evaluation. The estimate assumed the second pass; **S2 is what the estimate
+actually described, and S2 is 1.344× — so even the naive shape came in well under the
+"~2×" the task was scheduled on, at `blockSize` 3.**
+
+**THE ARM TIE RULE IS WHAT PICKS S1 OVER S2, AND IT IS APPLIED AS WRITTEN.** S2's
+true peak is 16 B *smaller* than S1's — it carries no running maximum past its first
+pass — so the rule's first clause ("smaller true peak wins") points at S2. Its second
+clause ("unless it is more than 1.10× slower") fires: S2 is **1.76× S1**. S1 ships.
+Sixteen bytes against 1.76× is exactly the case the escape clause exists for.
+
+**THE COST, STATED WITH THE WIN.** The streaming form is *slower* at large blocks —
+1.00× at 15, 1.085× at 31 — because that is where the sliding accumulator earns its
+keep, and X-18 measured that crossover from the other side. **The crossover is
+between 15 and 31, not between 3 and 7**, so the frame-map form is the faster shape
+only above the block size the MVP pipeline runs. It also remains the only shape that
+produces a map, which the documented mask route and any caller selecting twice over
+one map both need.
+
+**ONE READING WORTH FLAGGING RATHER THAN ABSORBING.** The `blockSize` 31 rows have
+4.2–4.4% spreads against 0.1–0.8% everywhere else, on both arms and in both orders.
+The verdict there (1.085×) is well outside that scatter and the order swap moves it
+by 0.001, so it is reported as measured; but a reader interpolating a 31×31 number
+from this table should re-measure rather than trust the third digit.
+
+**AND ONE NON-RESULT.** The x86-64 run of the same binary is filed as indicative
+only, and it disagrees: `T(S1)` = 1.044× at `blockSize` 3, with spreads of 12–52%.
+That is the same sign reversal X-18 recorded on x86 for the underlying traversal
+question ("the x86 run has the opposite sign at `blockSize` 3"), and it is why the
+device is where this is closed.
+
+**Conclusion.**
+
+1. **The frame-sized `float` response map is not needed, and removing it is not a
+   trade.** The streaming form is 11.83× smaller in the corner stage, **3.44× smaller
+   across the whole frontend**, and **1.31× faster** at the reference pipeline's block
+   size, with corners identical to the byte. E-10's premise — that the ring costs
+   compute — is wrong at `blockSize` 3, and the reason is the traversal the ring
+   forces rather than anything clever in the implementation.
+2. **The second pass is unnecessary, and that is the substantive finding.** The
+   threshold is a pure post-filter, the candidate set is a top-K over an up-set, and
+   the truncation flag is one `float`. The naive two-pass shape costs 1.344× for a
+   footprint that is 16 B smaller.
+3. **The dominant term in the corner stage is now the candidate array, and it is the
+   one content-dependent row in the table.** 8 754 survivors at 640×480 and 9 774 on
+   the real frame; the structural maximum is 3 659 568 B, which would be 7.3× the
+   whole streaming frontend. **The next footprint question in this operation is the
+   candidate array, not the response storage** — but it is a CONTRACT question (what
+   a caller provisions, and what `candidatesTruncated` costs them), not a buffer
+   question, and it is not opened here.
+4. **X-18's crossover is confirmed from the other side and its boundary moved.** X-18
+   measured sliding-versus-recompute inside the response sweep alone and put the net
+   crossover between 7 and 15. Measured through the whole detector with the streaming
+   form's own row kernel, the crossover is between **15 and 31**.
+
+**Decision.**
+
+1. **[D-22](ARCHITECTURE.md#d-22-the-corner-response-streams-over-a-three-row-ring-and-that-is-the-recommended-path)
+   is promoted to ARCHITECTURE §8**: `goodFeaturesToTrackStreaming` ships and is the
+   **recommended path**; `cornerMinEigenVal` + `selectGoodFeatures` stay, as T3.7's
+   caller-provided map already allowed, for callers who need the map itself or who
+   run a large `blockSize`. Both peaks and both times are in the header so a caller
+   picks with the numbers in front of them.
+2. **E-10 CLOSES** and leaves the register.
+3. **Three documents are corrected by name**, as the rule required: X-20's decision 3,
+   ARCHITECTURE §9's E-10 row, and TASKS.md T3.11 all said "roughly 2× the response
+   compute". The measured figure is **0.76×**, and none of the three is edited
+   silently — each carries the correction.
+4. **X-20's footprint table is restated** with the number this experiment measured:
+   1 721 568 B → **500 464 B**, and the 71.4% row becomes 1.5%.
+5. **The two-pass arm is NOT shipped.** It lives in
+   `benchmark/corner_streaming_arm_stream2.cpp` as the priced alternative, because
+   nothing should ship two implementations of one answer.
+6. **E-11 is not touched.** Whether `cornerMinEigenVal` should select its traversal
+   on `blockSize` is still open and still unscheduled; this entry adds a second data
+   point on the same crossover from a different direction and deliberately takes no
+   decision on it.
 
 ---
 
@@ -4406,7 +4687,6 @@ no open experiment left, and the project has no provisional decision left.
 
 | ID | Question | Task | Runs during |
 |---|---|---|---|
-| E-10 | Does the corner response need a frame-sized `float` map, or a rolling ring — and what does the ring's carry cost once the selection's global properties are preserved exactly? **Pre-registered as [X-23](#x-23--the-rolling-response-ring-against-the-frame-sized-response-map--todo)**, rule committed, not yet measured | T3.11 | Phase 3 |
 | E-13 | Does the per-row partial accumulator still pay above N = 1, where it is O(N²) per row against work that is O(N²) per word — and can the answer be measured free of the code-layout drift [X-22](#x-22--what-an-n-bit-pyramid-level-costs-the-lk-covariance--done) hit? | T4.1 | Phase 4 |
 | E-12 | How much of the `ops/` kernel's per-row cost is genericity that is not in N — runtime `BorderType`, the word type, the argument contract — and which of them? | T4.1 | Phase 4 |
 | E-7 | Bits needed per pyramid level | T4.1 | Phase 4 |

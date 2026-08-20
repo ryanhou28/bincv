@@ -733,7 +733,7 @@
 #             test: it leaves `signY` unused and the project's warning policy
 #             fails the build (-Werror=unused-parameter). Recorded because it is
 #             the mutation a reader expects to see a number for.
-#   test_corner  2749 in ALL FOUR configurations, and the equality says the same
+#   test_corner  3655 in ALL FOUR configurations, and the equality says the same
 #             thing test_covariance's does: T3.7 is API TIER 2 -- the role of
 #             cv::goodFeaturesToTrack with the reference pipeline's BINARIZED
 #             derivatives -- so it is NOT bit-exact against OpenCV and has no
@@ -757,6 +757,26 @@
 #             positions per word type go through the oracle, which would be 198160
 #             checks for what is one property. Each counter reports its own total,
 #             so a failure still says WHICH property broke.
+#             RAISED 2749 -> 3655 BY T3.11 (the streaming corner response). The 906
+#             new checks are the STREAMING EQUALITY suite -- Corner.Streaming_* --
+#             and they are core-suite rather than benchmark-only on purpose: the
+#             claim being defended is that goodFeaturesToTrackStreaming returns
+#             corners IDENTICAL to goodFeaturesToTrack, and that has to hold in the
+#             Debug configuration (where the kernels' BINCV_ASSERT preconditions are
+#             live) and in the no-exceptions one (the embedded claim), not only where
+#             a benchmark builds. Same accounting as above -- ONE CHECK PER (frame,
+#             block size, parameter set, capacity) cell rather than per corner:
+#             1 664 932 corner records are compared element for element across the
+#             suite, which as individual checks would be two orders of magnitude
+#             more for what is one property. The counters behind the number are the
+#             cell count, the compared-record count, the count of cells that
+#             TRUNCATED and the count of cells containing a TIED response -- the last
+#             two asserted non-zero, so a green run cannot be a sweep that never
+#             entered the paths a three-row ring puts at risk.
+#             test_opticalflow rose 7 in every configuration for the other half of
+#             the same task: Flow.FrontendFootprint_640x480 now measures the frontend
+#             through BOTH corner shapes and asserts they agree.
+#
 #             THE POSITION COUNT IS ITSELF CHECKED against the arithmetic that
 #             defines it, and the interior and clipped counts are separately
 #             required to be non-zero -- a sweep that stopped clipping, or stopped
@@ -868,8 +888,8 @@ opencv	test_resample	245312	0
 opencv	test_pyramid	262321	0
 opencv	test_derivative	48526	0
 opencv	test_covariance	17704	0
-opencv	test_corner	2749	0
-opencv	test_opticalflow	234	0
+opencv	test_corner	3655	0
+opencv	test_opticalflow	241	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	40	0
 opencv	test_equivalence	16403	0
@@ -890,8 +910,8 @@ core	test_resample	245312	0
 core	test_pyramid	236429	0
 core	test_derivative	47675	0
 core	test_covariance	17704	0
-core	test_corner	2749	0
-core	test_opticalflow	148	0
+core	test_corner	3655	0
+core	test_opticalflow	155	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -910,8 +930,8 @@ noexcept	test_resample	245312	0
 noexcept	test_pyramid	236429	0
 noexcept	test_derivative	47675	0
 noexcept	test_covariance	17704	0
-noexcept	test_corner	2749	0
-noexcept	test_opticalflow	148	0
+noexcept	test_corner	3655	0
+noexcept	test_opticalflow	155	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -930,7 +950,7 @@ debug	test_resample	245312	0
 debug	test_pyramid	236429	0
 debug	test_derivative	47675	0
 debug	test_covariance	17704	0
-debug	test_corner	2749	0
-debug	test_opticalflow	148	0
+debug	test_corner	3655	0
+debug	test_opticalflow	155	0
 debug	test_harness	8	0
 

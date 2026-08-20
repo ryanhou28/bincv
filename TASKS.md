@@ -3174,10 +3174,10 @@ task**, and T4.1 inherits the covariance half only.
 
 ---
 
-### T3.11 · Rolling response map (E-10) · `TODO`
+### T3.11 · Rolling response map (E-10) · `DONE`
 
 **Depends:** T3.7
-**Files:** `include/bincv-cpp/ops/corner.hpp`
+**Files:** `include/bincv-cpp/ops/corner.hpp`, `benchmark/corner_streaming_*.cpp`
 
 **Why this exists.** [X-20](EXPERIMENTS.md) measured the frontend's peak footprint
 at **1721568 B**, of which T3.7's float response map is **1228800 B — 71.4%, more
@@ -3189,19 +3189,56 @@ is a float scratch.
 ring — instead of a frame-sized map. T3.7 already made the map caller-provided
 rather than deciding this, so the existing entry point stays.
 
-Estimated at ~15 kB against 1.23 MB, for roughly **2× the response compute**,
-which is the trade to measure rather than assume. **This is a speed/footprint
-conflict with no prior decision, so it follows the experiment protocol**: write
-the rule first, measure both, then choose. [CLAUDE.md](CLAUDE.md)'s tiebreak
-applies only if the measurement leaves it genuinely close.
+~~Estimated at ~15 kB against 1.23 MB, for roughly **2× the response compute**,
+which is the trade to measure rather than assume.~~ **THE ESTIMATE WAS WRONG IN THE
+DIRECTION THAT MATTERS, AND [X-23](EXPERIMENTS.md)'s RULE PRE-DECLARED THIS
+CORRECTION RATHER THAN LETTING IT BE ABSORBED.** Measured on the reference device
+at 640×480, `uint32_t`, `blockSize` 3: the streaming form is **0.76× the time** —
+40.26 → **30.78 ms/frame** — and **7 680 B of ring plus 16 B of carry** against
+1 228 800 B. The "~2×" assumed a second pass to find the global maximum; the second
+pass is not needed (the threshold is a pure post-filter and the survivors are an
+up-set of the raw 3×3 maxima), and a ring forces the row-major sweep X-18 had
+already measured as the *faster* traversal at `blockSize` 3. The two-pass shape the
+estimate described was built and priced anyway, as X-23's arm S2: **1.344×**. The
+same wrong figure appeared in ARCHITECTURE §9's E-10 row and X-20's decision 3, and
+all three carry the correction by name.
 
-**Done when**
-- Streaming form produces **identical** corners to the frame-map form, proven over
-  full frames — not merely similar
-- Peak footprint re-measured end to end, so the Phase 4 number reflects it
-- The compute cost measured on the device, and the choice recorded as a D-record
+This was a speed/footprint conflict with no prior decision, so it followed the
+experiment protocol: the rule was committed at `79db8f8` with no streaming form in
+the tree, both sides were measured, and the choice was taken afterwards.
+[CLAUDE.md](CLAUDE.md)'s tiebreak was never reached — band A fired on a form that is
+smaller *and* faster.
 
-**Verify:** V-ALL, plus the device
+**Done when** — all met
+- ✔ Streaming form produces **identical** corners: **1 664 932 corner records**
+  compared element for element across four word types, six block sizes, five frame
+  sizes, capacities that truncate, and tie-dominated frames (a checkerboard at
+  block 1 ties the whole interior) — 0 differing. Core-suite cases, so they run in
+  all four `verify.sh` configurations; three deliberate mutants were caught by them.
+- ✔ Peak footprint re-measured end to end in `Flow.FrontendFootprint_640x480`, which
+  owns the frontend: **1 721 568 B → 500 464 B, 3.44×**, corner stage 1 333 848 B →
+  112 744 B (11.83×), `operator new` = 0 through all five stages, and the two shapes
+  asserted to return the same corners on X-20's own content.
+- ✔ Compute measured on the device (`throttled=0x0` before and after, exit 0), three
+  arms in three translation units, arm order swapped and re-run — the verdict moves
+  by 0.001.
+- ✔ Recorded as
+  [D-22](ARCHITECTURE.md#d-22-the-corner-response-streams-over-a-three-row-ring-and-that-is-the-recommended-path);
+  E-10 closes.
+
+**Verify:** V-ALL, plus the device — `./scripts/verify.sh` ALL CONFIGURATIONS GREEN;
+`bincv-cpp/results/corner_streaming_benchmark_pi4.log`
+
+**What it does NOT settle.** The corner stage's dominant term is now the **candidate
+array** (105 048 B at 640×480, a per-frame reading whose structural maximum is
+3 659 568 B — 7.3× the whole streaming frontend). That is a **contract** question —
+what a caller provisions, and what `candidatesTruncated` costs them — not a buffer
+one, and X-23 leaves it open rather than deciding it inside a footprint task.
+[E-11](ARCHITECTURE.md#9-open-questions-and-planned-experiments) (should the sweep
+select its traversal on `blockSize`?) is also untouched, though this task adds a
+second reading of the same crossover from the other direction: measured through the
+whole detector it sits between `blockSize` 15 and 31, where X-18 put it between 7
+and 15.
 
 ---
 

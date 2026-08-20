@@ -1608,4 +1608,381 @@ BINCV_TEST(Corner, NoAllocation) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 12. THE STREAMING SHAPE (T3.11 / E-10): IDENTICAL CORNERS, NOT SIMILAR ONES
+//
+// `goodFeaturesToTrackStreaming` keeps three rows where `goodFeaturesToTrack`
+// keeps a frame-sized float map -- 7 680 B against 1 228 800 B at 640x480. Its
+// contract is EQUALITY, and equality is the only thing that makes the trade a
+// trade rather than a different operation:
+//
+//   * the quality threshold is relative to the GLOBAL maximum, which a three-row
+//     ring does not have until the last row;
+//   * the spacing filter needs the survivors ordered across the WHOLE frame under
+//     CornerStronger, whose tie rule is DESCENDING raster position.
+//
+// So the two failure modes this section exists to catch are a threshold taken
+// from a partial maximum, and a tie decided by the order candidates happened to
+// be visited in. NEITHER is visible on content with distinct responses, which is
+// why the frame list here is dominated by frames where the response TIES: a
+// checkerboard at block 1 and 4 (the entire interior equal), stripes, a uniform
+// frame (every response exactly zero, so `maxVal` is 0, the threshold is 0 and
+// nothing survives), and the dot. Random frames are included as well, but they
+// are the weak case, not the strong one.
+//
+// WHAT IS COMPARED: `count`, `candidatesRanked`, `candidatesTruncated`, and the
+// whole `[0, candidatesRanked)` prefix of the array element for element --
+// coordinates and the response's exact float bits. Not a count of matches, not a
+// displacement tolerance, and not just the `count` prefix: the compaction leaves
+// the ranked tail in place and it has to agree too.
+//
+// CAPACITIES ARE SWEPT ACROSS THE TRUNCATION BOUNDARY, because that is where the
+// two forms differ most in mechanism. The frame-map form sets
+// `candidatesTruncated` when a survivor arrives at a full buffer; the streaming
+// form has no such moment -- it reconstructs the flag after the last row from the
+// strongest candidate it discarded. `capacity` of 0, 1, half, exactly the
+// survivor count, one below it, and far above it exercise both sides of that.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+const int kStreamBlockSizes[] = {3, 4, 5, 7, 15, 31};
+
+/// @brief The parameter sets swept beside the frames. `blockSize` is filled in by
+///        the caller, so this is only the three SELECTION parameters.
+struct SelectionParams {
+    const char* name;
+    int maxCorners;
+    double qualityLevel;
+    double minDistance;
+};
+
+const SelectionParams kStreamParams[] = {
+    // seal_params.yaml verbatim -- the configuration the decision is taken at.
+    {"seal-defaults", 200, 0.01, 33.33333333333},
+    // The spacing filter DISABLED (gftt.cpp's `else` branch), so the answer is a
+    // pure top-`maxCorners` and every tie in the sort is visible in the output.
+    {"no-spacing", 200, 0.01, 0.0},
+    // No cap and a small spacing: the greedy filter runs over every survivor, so
+    // a single reordered tie changes the accepted set downstream of itself.
+    {"uncapped-tight", 0, 0.01, 3.5},
+    // A severe threshold, which moves the survivor set itself rather than the
+    // ranking -- the half of the pipeline that depends on the GLOBAL maximum.
+    {"high-quality", 0, 0.5, 5.0},
+};
+
+struct StreamTally {
+    size_t comparisons = 0;      ///< (frame, blockSize, params, capacity) cells compared
+    size_t cornersCompared = 0;  ///< individual Corner records compared
+    size_t mismatches = 0;       ///< cells where anything at all differed
+    size_t truncatedCells = 0;   ///< cells where the frame-map form reported truncation
+    size_t tieCells = 0;         ///< cells whose survivor set contained a repeated response
+};
+
+/// @brief Run both shapes over one frame at one blockSize and one parameter set,
+///        across a capacity sweep, and compare everything.
+template <typename WordType>
+void compareShapes(const Frame& f, int blockSize, const SelectionParams& sp, StreamTally& t) {
+    const Derived<WordType> d(f, BORDER_REFLECT_101);
+
+    GoodFeaturesParams params;
+    params.blockSize = blockSize;
+    params.maxCorners = sp.maxCorners;
+    params.qualityLevel = sp.qualityLevel;
+    params.minDistance = sp.minDistance;
+
+    const size_t pixels = static_cast<size_t>(f.width) * static_cast<size_t>(f.height);
+
+    // How many survivors this frame actually has, measured with a buffer that
+    // cannot truncate, so the capacity sweep can be placed ON the boundary rather
+    // than near it.
+    size_t survivors = 0;
+    {
+        std::vector<float> storage = makeMapStorage(f.width, f.height);
+        ResponseMap map = mapView(storage, f.width, f.height);
+        std::vector<Corner> probe(pixels + 1);
+        const CornerResult r = bincv::goodFeaturesToTrack(d.dx, d.dy, params, map, probe.data(),
+                                                          probe.size());
+        BINCV_CHECK_EQ(r.candidatesTruncated, false);
+        survivors = r.candidatesRanked;
+        // Does this cell actually contain a tie? Recorded so the suite can assert
+        // that the tie-breaking path was exercised at all rather than hoping.
+        for (size_t i = 1; i < survivors; ++i) {
+            if (probe[i].response == probe[i - 1].response) {
+                ++t.tieCells;
+                break;
+            }
+        }
+    }
+
+    size_t capacities[6];
+    size_t nCap = 0;
+    capacities[nCap++] = 0;
+    capacities[nCap++] = 1;
+    capacities[nCap++] = survivors / 2;
+    if (survivors > 0) capacities[nCap++] = survivors - 1;
+    capacities[nCap++] = survivors;
+    capacities[nCap++] = survivors + 8;
+
+    for (size_t ci = 0; ci < nCap; ++ci) {
+        const size_t capacity = capacities[ci];
+
+        std::vector<float> storage = makeMapStorage(f.width, f.height);
+        ResponseMap map = mapView(storage, f.width, f.height);
+        std::vector<Corner> a(capacity + 1);  // +1 so `.data()` is never null at 0
+        const CornerResult ra = bincv::goodFeaturesToTrack(d.dx, d.dy, params, map, a.data(),
+                                                           capacity);
+
+        // The ring: THREE rows, at every block size. Nothing else is carried.
+        std::vector<float> ringStorage(bincv::kResponseRingRows *
+                                           static_cast<size_t>(f.width), -1.0f);
+        ResponseMap ring;
+        ring.data = ringStorage.data();
+        ring.width = static_cast<size_t>(f.width);
+        ring.height = bincv::kResponseRingRows;
+        ring.stride = static_cast<size_t>(f.width);
+        std::vector<Corner> b(capacity + 1);
+        const CornerResult rb = bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, params, ring,
+                                                                    b.data(), capacity);
+
+        ++t.comparisons;
+        bool bad = false;
+        if (ra.count != rb.count) bad = true;
+        if (ra.candidatesRanked != rb.candidatesRanked) bad = true;
+        if (ra.candidatesTruncated != rb.candidatesTruncated) bad = true;
+        if (ra.candidatesTruncated) ++t.truncatedCells;
+        if (!bad) {
+            // The WHOLE ranked prefix, not just the selected one: the spacing
+            // filter compacts in place and leaves the rest of the sorted array
+            // behind, and that tail is evidence about the sort's tie order.
+            for (size_t i = 0; i < ra.candidatesRanked; ++i) {
+                ++t.cornersCompared;
+                if (a[i].x != b[i].x || a[i].y != b[i].y || a[i].response != b[i].response) {
+                    bad = true;
+                    break;
+                }
+            }
+        }
+        if (bad) {
+            ++t.mismatches;
+            std::printf("  MISMATCH %s block %d %s capacity %zu: frame-map "
+                        "{%zu, %zu, %d} streaming {%zu, %zu, %d}\n",
+                        f.name.c_str(), blockSize, sp.name, capacity, ra.count,
+                        ra.candidatesRanked, ra.candidatesTruncated ? 1 : 0, rb.count,
+                        rb.candidatesRanked, rb.candidatesTruncated ? 1 : 0);
+        }
+    }
+}
+
+template <typename WordType>
+void streamingSuite(const char* wordName) {
+    const Frame frames[] = {
+        // TIE-DOMINATED, and these are the cases that matter. A checkerboard at
+        // block 1 makes the entire interior one response.
+        checkerboardFrame(kWideW, kWideH, 1),
+        checkerboardFrame(kWideW, kWideH, 4),
+        stripeFrame(kWideW, kWideH, 3),
+        uniformFrame(kNarrowW, kNarrowH, 1),   // every response 0; maxVal 0; no survivor
+        dotFrame(kWideW, kWideH),
+        // Structure and noise.
+        diagonalFrame(kWideW, kWideH),
+        randomFrame(kWideW, kWideH, 0x51ED5EEDULL),
+        randomFrame(kNarrowW, kNarrowH, 0xC0FFEEULL),
+    };
+
+    StreamTally t;
+    for (const Frame& f : frames)
+        for (int blockSize : kStreamBlockSizes)
+            for (const SelectionParams& sp : kStreamParams) compareShapes<WordType>(f, blockSize, sp, t);
+
+    BINCV_CHECK_EQ(t.mismatches, static_cast<size_t>(0));
+    // The sweep has to have EXERCISED what it claims to check, or a zero above is
+    // a statement about nothing: corners must have been compared, the truncation
+    // path must have been entered, and at least one cell must have contained a
+    // tie.
+    BINCV_CHECK(t.comparisons > 0);
+    BINCV_CHECK(t.cornersCompared > 0);
+    BINCV_CHECK(t.truncatedCells > 0);
+    BINCV_CHECK(t.tieCells > 0);
+    std::printf("  [%s] streaming == frame map: %zu cells, %zu corner records, "
+                "%zu truncating cells, %zu cells containing a tied response\n",
+                wordName, t.comparisons, t.cornersCompared, t.truncatedCells, t.tieCells);
+}
+
+} // namespace
+
+BINCV_TEST(Corner, Streaming_IdenticalCorners_uint8_t)  { streamingSuite<uint8_t>("uint8_t"); }
+BINCV_TEST(Corner, Streaming_IdenticalCorners_uint16_t) { streamingSuite<uint16_t>("uint16_t"); }
+BINCV_TEST(Corner, Streaming_IdenticalCorners_uint32_t) { streamingSuite<uint32_t>("uint32_t"); }
+BINCV_TEST(Corner, Streaming_IdenticalCorners_uint64_t) { streamingSuite<uint64_t>("uint64_t"); }
+
+// ---------------------------------------------------------------------------
+// 12b. THE SAME EQUALITY ON FRAMES BIG ENOUGH TO HOLD A REAL SELECTION
+//
+// The frames above are 71x45 and 40x35, chosen so the whole matrix runs at four
+// word types. A frame that size has tens of survivors and a `minDistance` of 33
+// selects two or three corners, so the greedy filter barely runs. These frames
+// are large enough that the spacing filter does real work and the survivor count
+// is in the hundreds -- which is the regime X-23 measures and the frontend runs.
+// ---------------------------------------------------------------------------
+
+BINCV_TEST(Corner, Streaming_IdenticalCorners_LargeFrames) {
+    const Frame frames[] = {
+        randomFrame(160, 120, 0xBEEF1234ULL),
+        checkerboardFrame(160, 120, 2),        // ties everywhere, at scale
+        randomFrame(129, 97, 0xFACE0FFULL),    // width not a multiple of any word width
+        stripeFrame(151, 113, 2),
+    };
+    const int blockSizes[] = {3, 7};
+    StreamTally t32, t64;
+    for (const Frame& f : frames) {
+        for (int blockSize : blockSizes) {
+            for (const SelectionParams& sp : kStreamParams) {
+                compareShapes<uint32_t>(f, blockSize, sp, t32);
+                compareShapes<uint64_t>(f, blockSize, sp, t64);
+            }
+        }
+    }
+    BINCV_CHECK_EQ(t32.mismatches, static_cast<size_t>(0));
+    BINCV_CHECK_EQ(t64.mismatches, static_cast<size_t>(0));
+    BINCV_CHECK(t32.cornersCompared > 1000);
+    BINCV_CHECK(t32.truncatedCells > 0);
+    BINCV_CHECK(t32.tieCells > 0);
+    std::printf("  large frames: uint32_t %zu cells / %zu corner records, "
+                "uint64_t %zu cells / %zu corner records, all identical\n",
+                t32.comparisons, t32.cornersCompared, t64.comparisons, t64.cornersCompared);
+}
+
+// ---------------------------------------------------------------------------
+// 12c. THE ROW KERNEL IS THE FRAME MAP'S ROW, BIT FOR BIT
+//
+// `cornerMinEigenValRow` recomputes a fused `countCovariance` per pixel where
+// `cornerMinEigenVal` slides two accumulators down each column and recomputes
+// only the cross term. Different traversal, different reduction, SAME three
+// integers -- because they are popcounts. If that ever stops being true the
+// streaming form's equality is gone, and it would be gone silently.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+template <typename WordType>
+size_t rowKernelMismatches(const Frame& f, int blockSize) {
+    const Derived<WordType> d(f, BORDER_REFLECT_101);
+    std::vector<float> storage = makeMapStorage(f.width, f.height);
+    ResponseMap map = mapView(storage, f.width, f.height);
+    bincv::cornerMinEigenVal(d.dx, d.dy, blockSize, map);
+
+    std::vector<float> row(static_cast<size_t>(f.width), -1.0f);
+    size_t differing = 0;
+    for (int y = 0; y < f.height; ++y) {
+        bincv::cornerMinEigenValRow<WordType>(d.dx.constMagnitude(0), d.dy.constMagnitude(0),
+                                              d.dx.constSign(), d.dy.constSign(), blockSize, y,
+                                              row.data());
+        const float* expected = ConstResponseMap(map).row(static_cast<size_t>(y));
+        for (int x = 0; x < f.width; ++x) {
+            if (row[static_cast<size_t>(x)] != expected[static_cast<size_t>(x)]) ++differing;
+        }
+    }
+    return differing;
+}
+
+template <typename WordType>
+void rowKernelSuite(const char* wordName) {
+    const Frame frames[] = {checkerboardFrame(kWideW, kWideH, 4), diagonalFrame(kWideW, kWideH),
+                            randomFrame(kWideW, kWideH, 0x5EED5EEDULL),
+                            randomFrame(kNarrowW, kNarrowH, 0x9911ULL)};
+    size_t differing = 0, positions = 0;
+    for (const Frame& f : frames) {
+        for (int blockSize : kStreamBlockSizes) {
+            differing += rowKernelMismatches<WordType>(f, blockSize);
+            positions += static_cast<size_t>(f.width) * static_cast<size_t>(f.height);
+        }
+    }
+    BINCV_CHECK_EQ(differing, static_cast<size_t>(0));
+    BINCV_CHECK(positions > 0);
+    std::printf("  [%s] row kernel == frame map over %zu positions, bit-identical\n", wordName,
+                positions);
+}
+
+} // namespace
+
+BINCV_TEST(Corner, Streaming_RowMatchesFrameMap_uint8_t)  { rowKernelSuite<uint8_t>("uint8_t"); }
+BINCV_TEST(Corner, Streaming_RowMatchesFrameMap_uint16_t) { rowKernelSuite<uint16_t>("uint16_t"); }
+BINCV_TEST(Corner, Streaming_RowMatchesFrameMap_uint32_t) { rowKernelSuite<uint32_t>("uint32_t"); }
+BINCV_TEST(Corner, Streaming_RowMatchesFrameMap_uint64_t) { rowKernelSuite<uint64_t>("uint64_t"); }
+
+// ---------------------------------------------------------------------------
+// 12d. DEGENERATE SHAPES AND NO HEAP, FOR THE STREAMING FORM TOO
+//
+// A frame shorter than the ring has no NMS row at all, and the one-pass form's
+// loop structure is the thing most likely to get that wrong: it evaluates row 0
+// before the loop and suppresses row `y-1` inside it.
+// ---------------------------------------------------------------------------
+
+BINCV_TEST(Corner, Streaming_DegenerateShapes) {
+    struct Shape { int w, h; };
+    const Shape shapes[] = {{1, 1}, {1, 9}, {9, 1}, {2, 2}, {3, 3}, {4, 3}, {3, 4}, {33, 2}};
+    GoodFeaturesParams params;
+    params.blockSize = 3;
+    size_t cells = 0;
+    for (const Shape& s : shapes) {
+        const uint64_t seed = UINT64_C(0x1357) + static_cast<uint64_t>(s.w) * 31u +
+                              static_cast<uint64_t>(s.h);
+        const Frame f = randomFrame(s.w, s.h, seed);
+        const Derived<uint32_t> d(f, BORDER_REFLECT_101);
+        std::vector<float> storage = makeMapStorage(s.w, s.h);
+        ResponseMap map = mapView(storage, s.w, s.h);
+        std::vector<Corner> a(64), b(64);
+        const CornerResult ra = bincv::goodFeaturesToTrack(d.dx, d.dy, params, map, a.data(),
+                                                           a.size());
+        std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<size_t>(s.w), -1.0f);
+        ResponseMap ring{ringStorage.data(), static_cast<size_t>(s.w), bincv::kResponseRingRows,
+                         static_cast<size_t>(s.w)};
+        const CornerResult rb = bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, params, ring,
+                                                                    b.data(), b.size());
+        BINCV_CHECK_EQ(ra.count, rb.count);
+        BINCV_CHECK_EQ(ra.candidatesRanked, rb.candidatesRanked);
+        BINCV_CHECK_EQ(ra.candidatesTruncated, rb.candidatesTruncated);
+        for (size_t i = 0; i < ra.candidatesRanked; ++i) {
+            BINCV_CHECK_EQ(a[i].x, b[i].x);
+            BINCV_CHECK_EQ(a[i].y, b[i].y);
+            BINCV_CHECK(a[i].response == b[i].response);
+        }
+        ++cells;
+    }
+    BINCV_CHECK_EQ(cells, sizeof(shapes) / sizeof(shapes[0]));
+}
+
+BINCV_TEST(Corner, Streaming_NoAllocation) {
+    const Frame f = randomFrame(kWideW, kWideH, 0xA11C0DEULL);
+    const Derived<uint32_t> d(f, BORDER_REFLECT_101);
+    std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<size_t>(f.width), -1.0f);
+    ResponseMap ring{ringStorage.data(), static_cast<size_t>(f.width), bincv::kResponseRingRows,
+                     static_cast<size_t>(f.width)};
+    std::vector<Corner> corners(512);
+    std::vector<float> row(static_cast<size_t>(f.width), 0.0f);
+
+    GoodFeaturesParams params;
+    const std::size_t before = g_newCount;
+    const CornerResult r = bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, params, ring,
+                                                               corners.data(), corners.size());
+    bincv::cornerMinEigenValRow<uint32_t>(d.dx.constMagnitude(0), d.dy.constMagnitude(0),
+                                          d.dx.constSign(), d.dy.constSign(), 3, 0, row.data());
+    const std::size_t during = g_newCount - before;
+    BINCV_CHECK_EQ(during, std::size_t{0});
+    BINCV_CHECK(r.candidatesRanked > 0);
+
+    // The counter is exercised, so the zero above is a reading and not a blind
+    // spot -- the same idiom Corner.NoAllocation uses.
+    const std::size_t probeBefore = g_newCount;
+    {
+        std::vector<double> probe(8, 1.0);
+        BINCV_CHECK(probe.size() == 8);
+    }
+    const std::size_t probeAllocs = g_newCount - probeBefore;
+    BINCV_CHECK_EQ(probeAllocs, std::size_t{1});
+    std::printf("  streaming: operator new = %zu across the whole call (%zu candidates ranked)\n",
+                during, r.candidatesRanked);
+}
+
 BINCV_TEST_MAIN("test_corner")

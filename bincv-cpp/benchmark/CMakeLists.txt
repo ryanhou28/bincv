@@ -33,6 +33,25 @@ file(GLOB BENCHMARK_SOURCES CONFIGURE_DEPENDS *.cpp)
 # So the arms are carved out of the one-executable-per-source glob and built as an
 # OBJECT library, whose per-arm .o files are exactly what `size` is run on.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# T3.11 / E-10 (X-23): the SECOND multi-file benchmark here, for the same measured
+# reason. corner_streaming_benchmark compares three arms -- the shipped frame-map
+# form, a two-pass streaming form and the shipped one-pass streaming form -- and
+# each arm gets its OWN translation unit, because two instantiations of one kernel
+# in a single object move each other's timings by ~10% (morphology_path_benchmark)
+# and the same kernel moves 1.46x between binaries (X-22). An A/B taken inside one
+# object file would be an artefact of that rather than a result.
+# ---------------------------------------------------------------------------
+set(BINCV_CORNER_STREAMING_ARMS
+    ${CMAKE_CURRENT_SOURCE_DIR}/corner_streaming_arm_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/corner_streaming_arm_stream2.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/corner_streaming_arm_stream1.cpp)
+list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_CORNER_STREAMING_ARMS})
+
+add_library(corner_streaming_arms OBJECT ${BINCV_CORNER_STREAMING_ARMS})
+target_link_libraries(corner_streaming_arms PRIVATE bincv_core bincv_warnings)
+target_include_directories(corner_streaming_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 set(BINCV_GENERICN_ARMS
     ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_generic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_specialized.cpp
@@ -76,5 +95,9 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
 
     if(benchmark_name STREQUAL "genericn_benchmark")
         target_link_libraries(${benchmark_name} PRIVATE genericn_arms)
+    endif()
+
+    if(benchmark_name STREQUAL "corner_streaming_benchmark")
+        target_link_libraries(${benchmark_name} PRIVATE corner_streaming_arms)
     endif()
 endforeach()

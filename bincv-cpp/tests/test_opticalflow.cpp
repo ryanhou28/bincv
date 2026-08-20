@@ -1448,6 +1448,36 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     BINCV_CHECK_EQ(cornerResult.candidatesTruncated, false);
     BINCV_CHECK(cornerResult.count > 0);
 
+    // ---- stage 4', THE SAME STAGE THROUGH T3.11's STREAMING SHAPE ---------
+    // `goodFeaturesToTrackStreaming` keeps THREE ROWS where the call above keeps
+    // a frame-sized float map. E-10 asked what that saves once everything carried
+    // to preserve the selection's GLOBAL properties is counted against the ring,
+    // and X-23's answer is measured HERE, end to end, rather than reasoned about:
+    // the candidate array is the same array, and the whole extra carry is three
+    // scalars. The equality is asserted first, because a smaller peak for
+    // different corners is not a saving.
+    std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<std::size_t>(W), 0.0f);
+    ResponseMap ring{ringStorage.data(), static_cast<std::size_t>(W),
+                     bincv::kResponseRingRows, static_cast<std::size_t>(W)};
+    std::vector<Corner> streamCorners(candidateCount);
+    const std::size_t beforeStream = g_newCount;
+    const CornerResult streamResult = bincv::goodFeaturesToTrackStreaming(
+        fe.dx[0], fe.dy[0], gftt, ring, streamCorners.data(), streamCorners.size());
+    const std::size_t streamAllocs = g_newCount - beforeStream;
+    BINCV_CHECK_EQ(streamResult.count, cornerResult.count);
+    BINCV_CHECK_EQ(streamResult.candidatesRanked, cornerResult.candidatesRanked);
+    BINCV_CHECK_EQ(streamResult.candidatesTruncated, cornerResult.candidatesTruncated);
+    {
+        std::size_t differing = 0;
+        for (std::size_t i = 0; i < cornerResult.candidatesRanked; ++i) {
+            if (streamCorners[i].x != corners[i].x || streamCorners[i].y != corners[i].y ||
+                streamCorners[i].response != corners[i].response) {
+                ++differing;
+            }
+        }
+        BINCV_CHECK_EQ(differing, std::size_t{0});
+    }
+
     // ---- stage 5: track ---------------------------------------------------
     std::vector<Point2f> prevPts(POINTS);
     std::vector<Point2f> nextPts(POINTS);
@@ -1511,8 +1541,49 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
                                     static_cast<double>(total),
                 static_cast<std::size_t>(W) * static_cast<std::size_t>(H) * sizeof(Corner));
     std::printf("      operator new inside the kernels: denoise %zu, pyramid+derivative %zu,"
-                " corner %zu, track %zu\n", denoiseAllocs, buildAllocs, cornerAllocs,
-                trackAllocs);
+                " corner %zu, corner-streaming %zu, track %zu\n", denoiseAllocs, buildAllocs,
+                cornerAllocs, streamAllocs, trackAllocs);
+
+    // ---- THE SAME TABLE WITH T3.11's STREAMING CORNER STAGE ---------------
+    // Same five stages, same accounting, one row replaced -- so the 71.4% row can
+    // be read directly against its replacement rather than against a projection.
+    const std::size_t ringBytes = ringStorage.size() * sizeof(float);
+    // The streaming form's ENTIRE carry beyond the ring and the candidate array:
+    // a running maximum, a running retained count, and the strongest discarded
+    // response. Counted rather than rounded away, because X-23 said every byte of
+    // carry comes off the saving.
+    const std::size_t streamCarryBytes = 2 * sizeof(float) + sizeof(std::size_t);
+    const std::size_t streamCornerBytes = ringBytes + candidateBytes + streamCarryBytes;
+    const std::size_t streamTotal = denoiseBytes + pyramidBytes + derivativeBytes +
+                                    streamCornerBytes + trackBytes;
+    std::printf("\n    THE SAME FRONTEND WITH T3.11's STREAMING CORNER STAGE (identical corners,\n"
+                "    asserted above -- count, coordinates, order and CornerResult):\n");
+    std::printf("    %-12s %-46s %9s  %6s\n", "STAGE", "BUFFERS IT OWNS", "BYTES", "SHARE");
+    auto srow = [&](const char* name, const char* what, std::size_t bytes) {
+        std::printf("    %-12s %-46s %9zu B  %5.1f%%\n", name, what, bytes,
+                    100.0 * static_cast<double>(bytes) / static_cast<double>(streamTotal));
+    };
+    srow("denoise", "2 incoming frames, 1 bit/px (dst is pyramid L0)", denoiseBytes);
+    srow("pyramid", "2 x 4 levels, 1 bit/px", pyramidBytes);
+    srow("derivative", "dx+dy ternary, 2 bits/px, prev pyramid only", derivativeBytes);
+    srow("corner", "3-row float ring + candidate array + 3 scalars", streamCornerBytes);
+    srow("track", "prevPts/nextPts/status/err, 200 points", trackBytes);
+    std::printf("    %-12s %-46s %9zu B\n", "TOTAL", "", streamTotal);
+    std::printf("      corner stage %zu B -> %zu B (%.2fx); frontend %zu B -> %zu B (%.2fx)\n",
+                cornerBytes, streamCornerBytes,
+                static_cast<double>(cornerBytes) / static_cast<double>(streamCornerBytes), total,
+                streamTotal, static_cast<double>(total) / static_cast<double>(streamTotal));
+    std::printf("      the ring is %zu B and the carry %zu B; the candidate array (%zu B) is now\n"
+                "      the corner stage's dominant term, and it is the one content-dependent row\n",
+                ringBytes, streamCarryBytes, candidateBytes);
+    // X-23's saving gate, evaluated in the place that can actually fail: if a
+    // later change puts the streaming frontend back above 750 000 B, D-22's
+    // footprint claim has gone and this says so rather than a report nobody re-ran.
+    BINCV_CHECK(streamTotal <= 750000);
+    BINCV_CHECK(streamAllocs == 0);
+    // And the response storage is no longer the dominant term, which is the exact
+    // sentence E-10 was registered to make false.
+    BINCV_CHECK(ringBytes < streamTotal - ringBytes);
 
     // NO HEAP inside any kernel.
     BINCV_CHECK_EQ(denoiseAllocs, std::size_t{0});

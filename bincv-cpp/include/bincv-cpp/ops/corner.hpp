@@ -359,6 +359,15 @@
 ///     directly rather than going through `gradientCovariance`, so widening it is
 ///     its own piece of work and not a re-export of T3.10's.
 ///  5. **Padding is never counted** (D-13), inherited from the reductions.
+///  6. **There are TWO shapes, and they return the SAME corners.**
+///     `goodFeaturesToTrack` takes a frame-sized `float` map;
+///     `goodFeaturesToTrackStreaming` (T3.11) takes a THREE-ROW ring --
+///     1 228 800 B against 7 680 B at 640x480 -- and returns identical corners,
+///     identical order, identical `CornerResult`. That is a contract proven
+///     element for element by `Corner.Streaming_*`, not a resemblance. The
+///     streaming form is the RECOMMENDED path at the reference pipeline's
+///     `blockSize` 3 (D-22); the frame-map form stays for callers who need the
+///     map itself, and is faster at large blocks. See "STAGE 4" below.
 
 #include <algorithm>  // std::sort, push_heap, pop_heap -- none of which allocates
 #include <cmath>      // std::sqrt, correctly rounded (see PRECISION above)
@@ -810,7 +819,10 @@ inline CornerResult selectGoodFeatures(ConstResponseMap response,
 ///        is written, then read. **This is the operation's whole memory cost**:
 ///        4 bytes per pixel, 1 228 800 B at 640x480 -- eight times the four
 ///        one-bit planes it reads, and the reason it is the caller's to place,
-///        reuse across frames, or point at a pool.
+///        reuse across frames, or point at a pool. **If the map itself is not
+///        wanted, `goodFeaturesToTrackStreaming` returns the same corners over a
+///        three-row ring** -- 7 680 B, and measurably faster at `blockSize` 3
+///        (D-22, X-23).
 /// @param corners Caller-owned output array, also the candidate buffer.
 /// @param capacity Entries in `corners`. **Read selectGoodFeatures' capacity
 ///        contract**: this is not `maxCorners`.
@@ -832,6 +844,395 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
                                         Corner* corners, size_t capacity) {
     cornerMinEigenVal<WordType>(dx, dy, params.blockSize, scratch);
     return selectGoodFeatures(ConstResponseMap(scratch), params, corners, capacity);
+}
+
+
+// ---------------------------------------------------------------------------
+// STAGE 4 -- THE STREAMING SHAPE (T3.11, E-10, EXPERIMENTS.md X-23)
+//
+// WHY A SECOND SHAPE EXISTS AT ALL, AND WHAT IT IS NOT
+//
+// X-20 measured the whole VIO frontend's peak working set at 640x480 as
+// 1 721 568 B, of which the `float` response map above is 1 228 800 B -- 71.4%,
+// more than every other stage combined, at 4 BYTES per pixel where every image
+// plane in the frontend is one or two BITS. The streaming form keeps only the
+// three rows the 3x3 NMS reads and never materialises the frame-sized map.
+//
+// It is NOT a replacement. `cornerMinEigenVal` + `selectGoodFeatures` stay,
+// because a caller who wants to select twice over one map, to mask it (the
+// documented route for a mask), or to hand the map to something else still needs
+// the map. T3.7 made the map caller-provided rather than deciding this; T3.11
+// adds the other shape beside it.
+//
+// THE HARD PART: THE SELECTION IS NOT LOCAL, AND A THREE-ROW RING GIVES NONE OF
+// THAT FOR FREE
+//
+// Two properties of `goodFeaturesToTrack` are GLOBAL, and both are load-bearing:
+//
+//   * the quality threshold is `qualityLevel * the maximum over the WHOLE map`,
+//     border included -- which is not known until the last row is evaluated;
+//   * the greedy spacing filter needs the survivors ordered across the whole
+//     frame, under CornerStronger's exact tie rule.
+//
+// The obvious repair is a second pass -- evaluate every response once to find the
+// maximum, then again to threshold and suppress. THAT IS NOT WHAT THIS DOES, and
+// the reason is an exact argument rather than an approximation:
+//
+//   1. **The threshold is a pure POST-FILTER over the raw 3x3 maxima.** The
+//      selection above already rests on this -- it fuses the threshold into the
+//      NMS scan precisely because a thresholded neighbour can never beat an
+//      above-threshold centre. So the candidate set is
+//      `{raw 3x3 maxima} filtered by response > threshold`, and the filter can be
+//      applied last instead of first.
+//   2. **The set the caller's buffer must hold is a TOP-K, and the threshold only
+//      removes the WEAK end.** Let `A` be the raw 3x3 maxima and
+//      `S = {a in A : a.response > threshold}`. `CornerStronger` orders on
+//      response first, so `S` is UPWARD CLOSED in `A`: anything stronger than a
+//      member of `S` is itself in `S`. For an up-set,
+//      `topK(A) intersect S == topK(S)` when `|S| > K`, and `== S` when
+//      `|S| <= K`. **So keeping the K strongest RAW maxima and thresholding
+//      afterwards yields exactly the candidate set the frame-map form ranks** --
+//      not a similar one. `K` is the caller's `capacity`, the same buffer the
+//      frame-map form already uses, so the carry for the global sort is ZERO
+//      EXTRA BYTES.
+//   3. **`candidatesTruncated` survives the same way, from ONE float.** The flag
+//      means `|S| > capacity`. Let `D = A \ topK(A)` be the discarded maxima. If
+//      some `d` in `D` is above the threshold then every retained candidate is at
+//      least as strong, hence also above it, so `|S| >= capacity + 1`; and if
+//      none is, then `S` is contained in the retained set, so `|S| <= capacity`.
+//      Therefore `truncated == (max response over D > threshold)` -- exactly, and
+//      it costs one running `float`.
+//   4. **The plateau problem is handled by a RUNNING threshold, and the prune is
+//      provably answer-preserving.** Un-thresholded, every pixel of a flat plateau
+//      is a 3x3 maximum, and a zero plateau is most of an edge map -- so feeding
+//      the heap every raw maximum would be `(w-2)*(h-2)` heap operations. The
+//      running maximum is monotone non-decreasing, `x -> float(double(x)*q)` is
+//      monotone for `q > 0`, so the running threshold NEVER EXCEEDS the final one
+//      and anything it rejects is permanently below the final threshold, i.e. not
+//      in `S`. Removing non-members of `S` from `A` changes neither
+//      `topK(A) intersect S` nor the discarded-maximum test in item 3, because
+//      both arguments only ever used `S`'s up-set property inside whatever `A`
+//      is. **So the prune is a speed device with no effect on the answer**, which
+//      is why it can be as aggressive as the running maximum allows.
+//
+// The result is ONE evaluation per pixel, one pass, a three-row ring, and a carry
+// of one `float` on top of the candidate array the frame-map form already owns.
+// `Corner.Streaming_*` proves equality element for element rather than asserting
+// this argument.
+//
+// WHAT IT COSTS AND WHAT IT SAVES -- MEASURED, ON THE REFERENCE DEVICE
+//
+// See D-22 in ARCHITECTURE 8 and X-23 in EXPERIMENTS.md for the full table and
+// for the pre-registered rule the numbers were judged against. 640x480,
+// `uint32_t`, `blockSize` 3 (SEAL's own value), medians of 11 interleaved
+// batches, spreads 0.10-0.19%, arm order swapped and re-run:
+//
+//     form        whole detector   response stage    corner peak    frontend peak
+//     frame map   131.1 ns/px       105.4 ns/px      1 333 848 B      1 721 568 B
+//     streaming   100.2 ns/px        74.7 ns/px        112 744 B        500 464 B
+//                 T = 0.76x                             11.8x            3.44x
+//
+// **THE STREAMING FORM IS FASTER, NOT 2x SLOWER AS THIS TASK WAS SCHEDULED ON**,
+// and 3.44x smaller across the whole frontend. TASKS.md T3.11, ARCHITECTURE 9's
+// E-10 row and X-20's decision 3 all said "roughly 2x the response compute"; all
+// three are corrected by name in X-23 rather than quietly. The reason is the
+// traversal: a ring FORCES a row-major sweep, and X-18 already measured the
+// shipped column-major sliding sweep 1.19x slower than row-major recomputation at
+// `blockSize` 3 -- the streaming form collects that discount before paying for
+// anything.
+//
+// It costs where the sliding accumulator earns its keep, which is LARGE blocks:
+// T = 0.76x at 3, 0.91x at 7, 1.00x at 15, 1.08x at 31. The crossover is between
+// 15 and 31, not between 3 and 7. A caller running a large block and wanting the
+// last 8% should take the frame-map form -- and will usually want the map anyway.
+//
+// The two-pass shape the estimate described was measured too (X-23's arm S2) and
+// is 1.34x at `blockSize` 3 for the SAME footprint. It is not shipped: the
+// second pass buys nothing, which is the substantive finding of the experiment.
+// ---------------------------------------------------------------------------
+
+/// @brief Rows the streaming form's ring must have.
+/// @note THREE, whatever `blockSize` is. The suppression `goodFeaturesToTrack`
+///       performs is a 3x3 `dilate` (gftt.cpp step 3) and does not grow with the
+///       covariance window: the window that grows with `blockSize` is read out of
+///       the BIT planes, which the streaming form does not stream.
+constexpr size_t kResponseRingRows = 3;
+
+/// @brief One ROW of the minimum-eigenvalue response map. **API TIER 2** -- the
+///        same numbers `cornerMinEigenVal` writes into row `y`, bit for bit.
+/// @tparam WordType The views' word type (D-1).
+/// @param magX Magnitude plane of the x-derivative -- `dx.constMagnitude(0)`.
+/// @param magY Magnitude plane of the y-derivative -- `dy.constMagnitude(0)`.
+/// @param signX Sign plane of the x-derivative -- `dx.constSign()`; set is NEGATIVE.
+/// @param signY Sign plane of the y-derivative -- `dy.constSign()`.
+/// @param blockSize Side of the square covariance window, >= 1.
+/// @param y Row of the frame to evaluate, in `[0, height)`.
+/// @param dstRow Caller-owned array of at least `magX.width` floats.
+///
+/// @note **The building block a caller streams with**, and the one the rolling
+///       form below uses. A caller with a camera and no megabyte can size a
+///       `kResponseRingRows`-row buffer and drive this directly.
+/// @note **Row-major, and therefore RECOMPUTED rather than slid.** Nothing in
+///       ops/reduce.hpp slides SIDEWAYS, and the downward accumulator
+///       `cornerMinEigenVal` uses would need one instance per column -- a
+///       `width`-long scratch array, which is exactly the shape X-11 declined and
+///       exactly the carry T3.11 was told to count. One fused `countCovariance`
+///       per pixel needs none, and X-18 measured that recomputation FASTER than
+///       the sliding form at `blockSize` 3. It is slower at 15 and 31; X-23 has
+///       the crossover.
+/// @note **Bit-identical to `cornerMinEigenVal`'s row `y`, not merely close.**
+///       Both feed `impl::minEigenValue` the same exact integers -- the sums are
+///       popcounts and cannot differ between a slid and a recomputed traversal.
+///       `Corner.Streaming_RowMatchesFrameMap_*` compares every pixel.
+/// @note Windows CLIP at the frame edge (T3.6 promise 2, D-13), as above.
+/// @note Never throws; allocates nothing; no scratch at all.
+template <typename WordType>
+inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView<WordType> magY,
+                                 BinMatConstView<WordType> signX, BinMatConstView<WordType> signY,
+                                 int blockSize, int y, float* dstRow) {
+    BINCV_ASSERT(magX.width == magY.width && magX.height == magY.height &&
+                     magX.width == signX.width && magX.height == signX.height &&
+                     magX.width == signY.width && magX.height == signY.height,
+                 "corner: the four derivative planes must have the same dimensions");
+    BINCV_ASSERT(blockSize > 0, "corner: blockSize must be positive");
+    if (magX.width == 0 || magX.height == 0) return;
+    BINCV_ASSERT(dstRow != nullptr, "corner: a non-empty row needs a non-null destination");
+    BINCV_ASSERT(y >= 0 && y < static_cast<int>(magX.height),
+                 "corner: the row index must be inside the frame");
+
+    const int width = static_cast<int>(magX.width);
+    for (int x = 0; x < width; ++x) {
+        // The fused four-popcount form (D-15): one traversal, no scratch, no
+        // selector plane. The sliding form's `countAndSplit` + two slid row counts
+        // produce the same three integers by a different route.
+        const CovarianceCount c = countCovariance<WordType>(magX, magY, signX, signY,
+                                                            impl::blockWindow(x, y, blockSize));
+        dstRow[static_cast<size_t>(x)] =
+            impl::minEigenValue(static_cast<long long>(c.xx), static_cast<long long>(c.yy),
+                                c.crossTerm());
+    }
+}
+
+/// @brief `goodFeaturesToTrack` over a THREE-ROW ring instead of a frame-sized
+///        response map. **API TIER 2**, and **bit-for-bit the same corners** as
+///        the frame-map spelling above.
+/// @tparam WordType The views' word type (D-1).
+/// @param magX Magnitude plane of the x-derivative -- `dx.constMagnitude(0)`.
+/// @param magY Magnitude plane of the y-derivative -- `dy.constMagnitude(0)`.
+/// @param signX Sign plane of the x-derivative -- `dx.constSign()`.
+/// @param signY Sign plane of the y-derivative -- `dy.constSign()`.
+/// @param params Defaults are SEAL/seal_params.yaml's four values.
+/// @param ring Caller-owned scratch: `magX.width` wide, **at least
+///        `kResponseRingRows` rows**, any stride covering a row. 7 680 B at
+///        640 px against the frame map's 1 228 800 B. Written, then read; nothing
+///        is read from it first, and its contents on return are unspecified.
+/// @param corners Caller-owned output array, also the candidate buffer.
+/// @param capacity Entries in `corners`. **The capacity contract on
+///        selectGoodFeatures applies UNCHANGED**, including which counts are
+///        exact and when `candidatesTruncated` is set.
+/// @return `{count, candidatesRanked, candidatesTruncated}` -- the same triple,
+///         with the same corners in the same order, as
+///         `goodFeaturesToTrack(dx, dy, params, frameMap, corners, capacity)`.
+///
+/// @note **EQUALITY IS THE CONTRACT, NOT A RESEMBLANCE.** Same count, same
+///        coordinates, same order, same triple, on every frame -- ties included,
+///        which is where a changed traversal order would show. Why that is exact
+///        rather than approximate is the four-item argument in the section
+///        comment above; `Corner.Streaming_*` proves it by comparing the full
+///        arrays at four word types, six block sizes, several frame sizes and
+///        capacities that truncate.
+/// @note **One pass, not two.** The global maximum is carried as a running
+///        maximum and the threshold applied after the last row; the candidate
+///        heap is a top-K over RAW 3x3 maxima, which the threshold then filters.
+///        See the section comment for why that is the same answer.
+/// @note **The whole extra carry is ONE `float`** (the strongest discarded
+///        candidate, which is what `candidatesTruncated` is computed from). No
+///        per-column accumulator, no second candidate array, no carried
+///        derivative rows -- so the true peak is `3 * width * 4` bytes plus the
+///        candidate array the frame-map form already owns.
+/// @note **It does not have a mask parameter either**, for T3.7's reason. And the
+///        documented mask route -- zero the masked pixels of the map, then select
+///        -- needs the map, so a masking caller wants the frame-map spelling.
+/// @note **TERNARY PLANES ONLY, and this overload cannot check it** -- a
+///        `BinMatConstView` carries no plane count. Prefer the container
+///        spelling.
+/// @note Never throws; allocates nothing; the ring is the caller's.
+template <typename WordType>
+inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
+                                                 BinMatConstView<WordType> magY,
+                                                 BinMatConstView<WordType> signX,
+                                                 BinMatConstView<WordType> signY,
+                                                 const GoodFeaturesParams& params,
+                                                 ResponseMap ring, Corner* corners,
+                                                 size_t capacity) {
+    BINCV_ASSERT(magX.width == magY.width && magX.height == magY.height &&
+                     magX.width == signX.width && magX.height == signX.height &&
+                     magX.width == signY.width && magX.height == signY.height,
+                 "corner: the four derivative planes must have the same dimensions");
+    BINCV_ASSERT(params.blockSize > 0, "corner: blockSize must be positive");
+    BINCV_ASSERT(params.qualityLevel > 0.0, "corner: qualityLevel must be positive");
+    BINCV_ASSERT(params.minDistance >= 0.0, "corner: minDistance must not be negative");
+    BINCV_ASSERT(corners != nullptr || capacity == 0,
+                 "corner: a non-zero capacity needs a non-null corner array");
+
+    CornerResult out;
+    if (magX.width == 0 || magX.height == 0) return out;
+
+    BINCV_ASSERT(ring.data != nullptr, "corner: the streaming form needs a non-null ring");
+    BINCV_ASSERT(ring.width == magX.width, "corner: the ring must be as wide as the frame");
+    BINCV_ASSERT(ring.height >= kResponseRingRows,
+                 "corner: the ring needs kResponseRingRows rows -- three, at every blockSize");
+    BINCV_ASSERT(ring.stride >= ring.width, "corner: the ring's stride must cover a whole row");
+
+    const int width = static_cast<int>(magX.width);
+    const int height = static_cast<int>(magX.height);
+    const int blockSize = params.blockSize;
+
+    // Row 0 seeds the running maximum, so that no per-pixel "have we seen one
+    // yet" branch is needed and the seed is the same pixel `selectGoodFeatures`
+    // seeds `maxVal` from.
+    float* first = ring.row(0);
+    cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, 0, first);
+    float runningMax = first[0];
+    for (int x = 1; x < width; ++x) {
+        if (first[static_cast<size_t>(x)] > runningMax) runningMax = first[static_cast<size_t>(x)];
+    }
+
+    // The whole carry, beside the caller's two buffers: the number of retained
+    // candidates and the strongest response this call THREW AWAY. The second is
+    // what `candidatesTruncated` is reconstructed from -- see item 3 of the
+    // section comment. -1 is below every possible threshold, since a response is
+    // never negative (PRECISION, at the top of this file).
+    size_t retained = 0;
+    float maxDiscarded = -1.0f;
+
+    for (int y = 1; y < height; ++y) {
+        float* cur = ring.row(static_cast<size_t>(y) % kResponseRingRows);
+        cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, y, cur);
+        for (int x = 0; x < width; ++x) {
+            if (cur[static_cast<size_t>(x)] > runningMax) runningMax = cur[static_cast<size_t>(x)];
+        }
+
+        if (y < 2) continue;  // row `y - 1` has no row above it yet
+
+        // The RUNNING threshold. Monotone in `runningMax`, therefore never above
+        // the final threshold, therefore only ever rejects pixels that the final
+        // threshold rejects too. That is the whole reason a one-pass form gives
+        // the two-pass answer.
+        const float running =
+            static_cast<float>(static_cast<double>(runningMax) * params.qualityLevel);
+
+        const int cy = y - 1;
+        const float* above = ring.row(static_cast<size_t>(cy - 1) % kResponseRingRows);
+        const float* mid = ring.row(static_cast<size_t>(cy) % kResponseRingRows);
+        const float* below = cur;
+
+        for (int x = 1; x + 1 < width; ++x) {
+            const float val = mid[static_cast<size_t>(x)];
+            if (!(val > running)) continue;  // permanently dead; see above
+            bool isMax = true;
+            for (int dx = -1; dx <= 1 && isMax; ++dx) {
+                const size_t c = static_cast<size_t>(x + dx);
+                if (above[c] > val || mid[c] > val || below[c] > val) isMax = false;
+            }
+            if (!isMax) continue;
+
+            Corner candidate;
+            candidate.x = x;
+            candidate.y = cy;
+            candidate.response = val;
+
+            if (retained < capacity) {
+                corners[retained++] = candidate;
+                std::push_heap(corners, corners + retained, impl::CornerStronger());
+                continue;
+            }
+            if (capacity == 0) {
+                // Nothing can be retained, so every raw maximum is discarded and
+                // the flag is decided entirely by `maxDiscarded`. No early return:
+                // the threshold this is judged against is not known yet.
+                if (val > maxDiscarded) maxDiscarded = val;
+                continue;
+            }
+            // Full. `corners[0]` is the WEAKEST retained candidate -- the heap is
+            // built with the SORT's comparator, so its maximum is the weakest.
+            // Whichever of the two loses becomes a discarded candidate, and that
+            // is the only place `maxDiscarded` can move once the buffer is full.
+            if (impl::CornerStronger()(candidate, corners[0])) {
+                if (corners[0].response > maxDiscarded) maxDiscarded = corners[0].response;
+                std::pop_heap(corners, corners + retained, impl::CornerStronger());
+                corners[retained - 1] = candidate;
+                std::push_heap(corners, corners + retained, impl::CornerStronger());
+            } else if (val > maxDiscarded) {
+                maxDiscarded = val;
+            }
+        }
+    }
+
+    // The threshold, now that the last row has been seen. Formed exactly as
+    // selectGoodFeatures forms it -- product in `double`, narrowed to `float`,
+    // strictly-greater comparison -- because equality of the two forms is
+    // equality of this number first.
+    const float threshold =
+        static_cast<float>(static_cast<double>(runningMax) * params.qualityLevel);
+
+    // The post-filter of item 1, compacting in place. What survives is exactly
+    // `topK(A) intersect S`, which item 2 shows is the frame-map form's ranked set.
+    size_t ranked = 0;
+    for (size_t i = 0; i < retained; ++i) {
+        if (corners[i].response > threshold) corners[ranked++] = corners[i];
+    }
+    out.candidatesRanked = ranked;
+    out.candidatesTruncated = (maxDiscarded > threshold);  // item 3
+    if (ranked == 0) return out;
+
+    // From here the stages are selectGoodFeatures' 4a and 4b, on the same array
+    // with the same comparator and the same limit.
+    std::sort(corners, corners + ranked, impl::CornerStronger());
+
+    const size_t limit = (params.maxCorners > 0)
+                             ? std::min(capacity, static_cast<size_t>(params.maxCorners))
+                             : capacity;
+    size_t kept = 0;
+    if (params.minDistance >= 1.0) {
+        const double minDistanceSq = params.minDistance * params.minDistance;
+        for (size_t i = 0; i < ranked && kept < limit; ++i) {
+            const Corner candidate = corners[i];
+            bool good = true;
+            for (size_t j = 0; j < kept; ++j) {
+                const double dx = static_cast<double>(candidate.x) - static_cast<double>(corners[j].x);
+                const double dy = static_cast<double>(candidate.y) - static_cast<double>(corners[j].y);
+                if (dx * dx + dy * dy < minDistanceSq) {
+                    good = false;
+                    break;
+                }
+            }
+            if (good) corners[kept++] = candidate;
+        }
+    } else {
+        kept = (ranked < limit) ? ranked : limit;
+    }
+    out.count = kept;
+    return out;
+}
+
+/// @brief The container spelling of the streaming form. **API TIER 2.**
+/// @param dx Horizontal ternary derivative (ops/derivative.hpp, level 0).
+/// @param dy Vertical ternary derivative, with `dx`'s dimensions.
+/// @param ring Caller-owned scratch, `dx.cols()` wide and at least
+///        `kResponseRingRows` rows.
+/// @note **Ternary only** -- `TernaryMat<W>` is `SignedQuantMat<1, W>`, so an
+///       N-bit pyramid level does not match this overload, exactly as it does not
+///       match `goodFeaturesToTrack`.
+/// @note Never throws; allocates nothing.
+template <typename WordType>
+inline CornerResult goodFeaturesToTrackStreaming(const TernaryMat<WordType>& dx,
+                                                 const TernaryMat<WordType>& dy,
+                                                 const GoodFeaturesParams& params, ResponseMap ring,
+                                                 Corner* corners, size_t capacity) {
+    return goodFeaturesToTrackStreaming<WordType>(dx.constMagnitude(0), dy.constMagnitude(0),
+                                                  dx.constSign(), dy.constSign(), params, ring,
+                                                  corners, capacity);
 }
 
 } // inline namespace BINCV_ABI_NAMESPACE
