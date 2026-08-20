@@ -166,10 +166,27 @@ endfunction()
 # reference pipeline's own calcBinarizedDeriv, ported call for call, plus the two
 # probes that pin cv::filter2D's correlation direction and default border --
 # the two properties this operation would otherwise differ on silently.
+# test_covariance (T3.6) is core for the strongest version of the same reason.
+# The LK gradient covariance is TIER 3 -- cv:: has no operation with these
+# semantics (cornerEigenValsAndVecs computes something else, from byte images,
+# with a Sobel and a box filter) -- so there is no bit-exactness promise to a cv::
+# call and no Tier 1 denominator anywhere in it. What stands behind it is a
+# per-pixel FLOAT oracle written before the kernel, swept at every window position
+# from a full window outside each edge to a full window past it, at W = 7, 15 and
+# 31, over four independently built frames per word type. And what it is proving is
+# not one operation's arithmetic but ARCHITECTURE 7.5 -- the claim that the whole
+# 2x2 covariance reduces to masked population counts, which is the project's
+# central technical claim. That has to be checked where the embedded claim runs:
+# core-only, -fno-exceptions, and Debug, the only configuration in which the
+# reduction's BINCV_ASSERT preconditions are live. It also counts `operator new`
+# across the calls, which is what keeps D-15's axis-3 trade honest -- the
+# four-argument selector form was taken over the 11-14% FASTER plane form purely
+# because it needs no scratch, and an implementation that allocated would pass
+# every value check in the file.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
                      test_logic test_shift test_reduce test_bitslice
                      test_denoise test_threshold test_morphology test_resample
-                     test_pyramid test_derivative)
+                     test_pyramid test_derivative test_covariance)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)

@@ -557,10 +557,17 @@ CORRELATES.* The reference is `SEAL/src/keypoint_tracking/gradients.cpp`'s
 `calcBinarizedDeriv`, which is two `cv::filter2D` calls with `[-1, 0, 1]`; with
 the anchor at the centre that computes `dst(x) = src(x+1) − src(x−1)`, not its
 negation. Verified by experiment rather than read off the documentation, and
-pinned by `Derivative.OpenCvFilter2D_Direction`. The inversion is worth naming
-because of what it would and would not break: [§7.5](#75-lk-gradient-covariance)'s
-`ΣIx²` and `ΣIy²` are popcounts of the MAGNITUDE and would be untouched, while
-`ΣIxIy` — the only entry that reads the sign planes — would come out negated.
+pinned by `Derivative.OpenCvFilter2D_Direction` — **which is the only thing that
+pins it.** The tempting claim is that [§7.5](#75-lk-gradient-covariance)'s
+covariance would catch an inversion, since `ΣIx²` and `ΣIy²` are popcounts of the
+MAGNITUDE and `ΣIxIy` is the one entry that reads the sign planes. It would not:
+reversing the taps negates *both* derivatives, and `(−Ix)(−Iy) = IxIy`, so the
+whole 2×2 matrix — cross term included — is **invariant** under the mistake.
+Measured on a diagonal edge through the real derivative: a 31×31 window gives
+`ΣIxIy = −61` before negating both planes and `−61` after; the whole frame gives
+`−124` and `−124`. `tests/test_covariance.cpp` pins that invariance, so the
+sentence cannot quietly revert. What *does* negate the cross term is negating
+**one** derivative and not the other, which no tap-order convention produces.
 
 *The border is `BORDER_REFLECT_101`, not
 [D-12](#d-12-a-shift-carries-a-border-and-the-fill-is-the-callers)'s
@@ -617,7 +624,15 @@ it ([X-11b](EXPERIMENTS.md); X-11 measured 16–18% against the pre-split code);
 nothing *obliges* one to exist.
 
 Sweeping a **column** of window positions — the corner response of §7.6, or a
-search region — calls `SlidingWindowCount` rather than this per position.
+search region — calls `SlidingWindowCount` for `ΣIx²` and `ΣIy²` rather than
+recomputing them per position. **Only those two slide.** `SlidingWindowCount`
+slides one plane's popcount, so the cross term — which needs `mag_x & mag_y` split
+by `sign_x ^ sign_y` — has no incremental form here and is recomputed per
+position. Making it slide would mean materializing two frame-sized planes per
+pyramid level, which is *more* memory than the single selector plane
+[D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)'s
+third item already declined; it is not a free win and is not registered as one.
+The 15.9×/5.96× below are `countNonZero` sweeps, not covariance sweeps.
 
 **Masked and windowed accumulation is in the MVP and shapes the reduction
 interface — it is not a later addition.** That much T2.6 built.
@@ -654,6 +669,25 @@ three window sizes — past T2.10's 15% threshold every time
 (`bincv-cpp/results/window_benchmark.log`). **The covariance has its own entry
 point** (`countCovariance`; D-15, T2.11), returning all four numbers from one
 pass, and T3.6 is written against it.
+
+**[T3.6](TASKS.md) ships that snippet as `ops/covariance.hpp`** —
+`gradientCovariance(dx, dy, window)` returning `{sumXX, sumYY, sumXY}` as signed
+64-bit values, one call, **0 B of scratch**, tier 3. **The identity above is now a
+checked property rather than a claim**: `tests/test_covariance.cpp` compares it
+against a per-pixel **float** covariance — the multiply-and-accumulate formulation
+these popcounts are asserted to replace, written before the kernel and sharing no
+code with it — and requires **exact** agreement, integer and float, at **383 200
+window positions** across four word types, three window sizes and four
+independently built frames, with origins swept from a full window outside every
+edge to a full window past it. The sweep frame is **taller than the largest
+window**, which is a correctness property of the suite and not a sizing choice: at
+its former 11 rows every 15×15 and 31×31 position was clipped, no check anywhere
+reduced a window taller than 11 image rows, and a mutant returning junk for taller
+windows passed the suite unchanged. Every entry of the matrix is an integer, so a
+tolerance would be a place for a real disagreement to hide rather than a rounding
+allowance. The measurement side of T3.6 is not closed: its benchmark is committed
+and its device number is outstanding ([X-17](EXPERIMENTS.md), `PARTIAL`), which
+changes no shipped code because D-15 already decided the shape.
 
 The identity above is exact for ternary derivatives, i.e. pyramid level 0. For
 N-bit levels the same structure holds with **bit-sliced weighted sums**: each

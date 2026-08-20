@@ -38,11 +38,19 @@
 /// so the derivative at column x is the RIGHT neighbour minus the LEFT one. A
 /// convolution would flip every sign. Measured: a 1x8 row that steps 0 -> 255
 /// between columns 3 and 4 gives `dx(3) = +255`, which is `src(4) - src(2)`; a
-/// convolution predicts `-255` there. This matters beyond the sign of a picture
-/// -- T3.6's `sumXX` and `sumYY` are popcounts of the MAGNITUDE and would be
-/// completely unaffected, while `sumXY` -- the cross term, which is the only
-/// entry that reads the sign planes -- would come out negated. A test that
-/// checked only magnitudes would pass.
+/// convolution predicts `-255` there.
+///
+/// **Nothing downstream catches this, and that is why the probe exists.** It is
+/// tempting to say T3.6's cross term would catch it -- `sumXX` and `sumYY` are
+/// popcounts of the MAGNITUDE and a negation cannot touch them, while `sumXY` is
+/// the one entry that reads the sign planes. But the inversion negates BOTH
+/// derivatives, and `(-Ix)(-Iy) = IxIy`: the whole 2x2 covariance, cross term
+/// included, is INVARIANT under it. Measured, on a diagonal edge through the real
+/// derivative: a 31x31 window gives `sumXY = -61` before negating both planes and
+/// `-61` after, and the whole frame gives `-124` and `-124`
+/// (tests/test_covariance.cpp, `Covariance.Identity_*`, the negation case). So
+/// `Derivative.OpenCvFilter2D_Direction` is the ONLY thing guarding the tap
+/// direction -- not a belt-and-braces check on top of a downstream tripwire.
 ///
 /// **2. `filter2D`'s default border is `BORDER_REFLECT_101`, not zero.**
 /// `cv::BORDER_DEFAULT` *is* `BORDER_REFLECT_101` (both are 4, here and in

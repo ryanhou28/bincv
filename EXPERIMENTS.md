@@ -2490,6 +2490,152 @@ zero whatever the content — for binCV exactly as for OpenCV.
 
 ---
 
+### X-17 · The LK gradient covariance, fused against composed at T3.6's own level · `PARTIAL`
+
+**Gates:** nothing that is open. [D-15](ARCHITECTURE.md#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)
+axis 2 is settled and `ops/covariance.hpp` is already written against the fused
+entry point. [T3.6](TASKS.md)'s done-when nevertheless asks for the ratio to be
+measured **at this level** rather than inherited, and CLAUDE.md requires the
+decision rule to exist before the numbers do — so this entry exists, and says
+plainly that it is a confirmation rather than a decision.
+
+**Why it is not simply X-11 axis 2 again.** X-11 measured fused-versus-composed
+one level down, on the reduction entry points, **with a precomputed
+`sign_x ^ sign_y` plane on both sides**. `gradientCovariance` ships neither: it
+calls the **four-argument** `countCovariance`, which XORs the two sign planes
+inside the word loop (axis 3 — memory wins CLAUDE.md's tiebreak). That form loads a
+fourth stream per word, so the redundancy a composition pays is a different
+fraction of a larger number. Inheriting the ratio would be assuming the answer.
+
+**Question:** at the T3.6 call site, on the scratch-free four-argument form, is one
+fused traversal still faster than the three composed calls that produce the same
+three numbers — and by how much, at W = 7, 15 and 31?
+
+**Decision rule** *(written into `benchmark/covariance_benchmark.cpp`'s header
+before any number existed)*:
+
+1. **Fused beats composed at W = 31** → D-15 axis 2 holds where T3.6 calls it;
+   `ops/covariance.hpp`'s "reach for the fused entry point" note is confirmed and
+   nothing moves.
+2. **Fused within noise of composed, or slower** → that **contradicts a documented
+   claim** (D-15 axis 2, ARCHITECTURE §7.5, `ops/reduce.hpp`). CLAUDE.md's rule for
+   that case is explicit: report it, do not adjust the code to fit the doc. T3.6
+   would then be resting on a ratio that does not exist at its own level, and the
+   spec's "built on the fused entry point" would need re-deciding.
+
+No threshold is attached, deliberately. T2.10's 15% line selected an interface that
+did not exist yet; this checks that an already-selected interface behaves as
+recorded where it is actually called, so the question is direction and magnitude
+against the measured spread, not a gate.
+
+**Variants:** `fused` (`gradientCovariance` — what T3.6 ships, 0 B scratch);
+`composed` (`countNonZero` ×2 + the four-argument `countAndSplit`, three
+traversals, 6 word loads per word index against the fused pass's 4, also 0 B
+scratch — so this pair is speed against speed with **memory held equal**, which is
+what makes it a clean test of axis 2 rather than a mixture of axes 2 and 3);
+`fused+plane` and `composed+plane`, the same two with a caller-held selector plane,
+carried because CLAUDE.md requires memory and speed on one page. The plane's
+formation cost is **not** charged to the timed loop, which flatters the plane forms
+on purpose.
+
+**Workload:** 640×480, 200 keypoints (the reference pipeline's
+`gftt_max_corners`), one window each, scattered so that windows near the border
+clip — the LK access pattern of [§7.5](ARCHITECTURE.md#75-lk-gradient-covariance).
+Windows are deliberately **not** swept in a column: a caller that sweeps a column
+should be calling `SlidingWindowCount` for `sumXX` and `sumYY` (X-11b axis 1,
+5.96×–15.9×, which are single-plane `countNonZero` sweeps and not covariance
+sweeps — the cross term has no incremental form and is recomputed per position),
+and `ops/covariance.hpp` says so in its docstring. `uint32_t` and `uint64_t`,
+W ∈ {7, 15, 31}, four rotating inputs, batches calibrated to 50 ms, 11 batches,
+variants interleaved, spread reported beside every median. All four variants are
+compared window for window and must agree before anything is timed.
+
+**Metric:** ns per window, and the scratch each form needs, together.
+
+**Method:** `bincv-cpp/benchmark/covariance_benchmark.cpp`.
+
+**Status: THE DEVICE NUMBER IS NOT TAKEN, and nothing below is recorded as a
+result.** `./scripts/run_on_pi.sh pi4` refused the run at preflight:
+`throttled=0x80000` — the **soft temperature limit has occurred** bit, sticky since
+a previous session (the device was idle at 45.7 °C and clocked at 1.8 GHz when
+queried, so it is not throttling *now*; the flag records that it once did). The
+flag clears only on a reboot, which this session was not permitted to perform. That
+is the same wall the [X-16 amendment](#x-16-amendment--the-n-bit-ladder-had-no-denominator--open)
+hit, and the same conclusion follows: a throttled measurement is wrong rather than
+merely slow, so no number is recorded and the entry stays `PARTIAL`.
+
+**The x86 run is INDICATIVE ONLY** ("Measurement platforms"), and doubly so here:
+X-7 measured that on binCV's shipped x86 baseline `__builtin_popcountll` is a
+libgcc CALL per word, which is the single instruction every variant in this table
+is dominated by. It is written as a shape, not a result
+(`bincv-cpp/results/covariance_benchmark_x86_indicative.log`):
+
+```
+x86_64, INDICATIVE ONLY -- not a result, do not quote
+                fused    composed  composed/  fused+plane  comp+plane   plane/   spread
+word      W   ns/window  ns/window     fused    ns/window   ns/window     4arg    f / c
+uint32_t  7       99.8      128.4     1.29x         97.9       115.3    1.02x  36.0% / 37.5%
+uint32_t  15     247.2      280.2     1.13x        260.3       291.0    0.95x  39.7% / 24.3%
+uint32_t  31     712.0      756.2     1.06x        643.0       698.1    1.11x  38.8% / 69.4%
+uint64_t  7       89.6      114.5     1.28x         92.2       108.7    0.97x  67.1% / 38.1%
+uint64_t  15     203.0      244.7     1.21x        219.5       224.0    0.92x  33.2% / 69.0%
+uint64_t  31     482.4      560.3     1.16x        508.5       573.2    0.95x  41.8% / 62.1%
+
+The plane/4arg column does not even hold its SIGN here -- 0.92x to 1.11x,
+straddling 1.00 -- which is most of why the table is not a result. The
+composed/fused column is no better founded: every one of its ratios is
+INSIDE its own within-run spread (the tightest row, uint32_t W=31, is 1.06x
+against 38.8% / 69.4%), so the table is CONSISTENT WITH the direction D-15
+axis 2 predicts and establishes nothing about it. An earlier run of the same
+committed binary on the same host reported 1.14x/1.20x/1.06x/1.23x/1.18x/1.13x
+with spreads to 124%: the ranking is not stable run to run, which is the
+finding, not the ratios.
+```
+
+**MEMORY, which is measured rather than timed and therefore stands.** The scratch
+column is arithmetic — a plane's size is not in doubt — and the `0 B` rows are now
+an `operator new` count taken over one pass of each variant inside the benchmark
+binary itself, plain and over-aligned forms both, with the counter's own teeth
+printed beside the table. Printed as a literal it would have read `0 B` for a
+`gradientCovariance` that allocated on every call, which is the one number D-15
+axis 3 traded 11–14% of speed for:
+
+```
+fused (SHIPPED)        0 B        beyond the four derivative planes it reads
+composed               0 B
+fused+plane        38400 B        one sign_x^sign_y plane at 640x480
+composed+plane     38400 B        ... and one at EVERY pyramid level: ~51 kB
+                                  over four levels, a FIFTH plane on top of the
+                                  four the covariance already reads, +25% of the
+                                  derivative working set, held for the frame
+```
+
+**What closes it:** reboot the device (which is what clears the sticky flag), let
+it reach a cold start, and run
+
+```
+./scripts/run_on_pi.sh pi4 './benchmark/covariance_benchmark > covariance_benchmark.log'
+```
+
+then commit `bincv-cpp/results/covariance_benchmark_pi4.log` and fill the table
+above. The benchmark needs no OpenCV — it compares binCV against binCV — so the
+device's default core-only build produces it.
+
+**What this does NOT block.** T3.6's correctness bar is closed and is the part that
+carries the project's central claim: the popcount identity of §7.5 agrees
+**exactly** with a per-pixel float oracle at **383 200** window positions (95 800
+per word type: four full-frame sweeps × W ∈ {7, 15, 31} × origins from a full
+window outside each edge to a full window past it, on a frame taller than the
+largest window so every size has fully-interior positions as well as clipped
+ones), with **459 280** further positions checked against an invariant, in all
+four verification configurations.
+The no-scratch property that D-15 axis 3 traded speed for is checked by an
+`operator new` counter and is **0 allocations**. Neither of those is a device
+question.
+
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

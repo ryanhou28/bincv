@@ -179,9 +179,30 @@ info "arch: $ARCH"
 # 2. Throttle state BEFORE the run. Non-zero means undervoltage or thermal
 #    throttling has already occurred, so anything measured now is invalid.
 THROTTLE_BEFORE="$(remote 'vcgencmd get_throttled 2>/dev/null || echo unavailable' | tr -d '\r')"
+# vcgencmd's bitmask has TWO halves and they mean different things:
+#   bits 0-3   currently active  (under-voltage, freq capped, throttled, soft temp)
+#   bits 16-19 HAS OCCURRED since boot -- STICKY, and cleared only by a reboot
+# An earlier version rejected any non-zero value, which conflated the two: a
+# soft-temperature event from a previous session (0x80000) blocked every later
+# measurement on a device sitting idle at 45 C, and the only documented remedy was
+# a reboot. What actually invalidates a run is (a) a currently-active bit, or
+# (b) a sticky bit that CHANGES during the run -- meaning the event happened while
+# we were measuring. Stale history is not evidence about this measurement.
+throttle_current() { printf '0x%x\n' $(( ${1#throttled=} & 0xF )); }
+
 case "$THROTTLE_BEFORE" in
     throttled=0x0)  info "throttle before: 0x0 (clean)" ;;
     unavailable)    info "throttle before: vcgencmd unavailable (not a Pi? continuing)" ;;
+    throttled=*)
+        if [[ "$(throttle_current "$THROTTLE_BEFORE")" != "0x0" ]]; then
+            fail "device is throttling RIGHT NOW ($THROTTLE_BEFORE, active bits $(throttle_current "$THROTTLE_BEFORE"))
+
+  A currently-active bit means the device is under-volted or hot as we speak.
+  Use the official 5.1V 3A supply, add cooling, let it settle, and re-run."
+        fi
+        info "throttle before: $THROTTLE_BEFORE (sticky history only, no active bit)"
+        info "                 a run is invalidated by a CHANGE during it, not by stale history"
+        ;;
     *)              fail "device is already throttled ($THROTTLE_BEFORE)
 
   Non-zero means undervoltage or thermal throttling. Measurements taken in this
@@ -245,8 +266,15 @@ hr
 THROTTLE_AFTER="$(remote 'vcgencmd get_throttled 2>/dev/null || echo unavailable' | tr -d '\r')"
 INVALID=0
 case "$THROTTLE_AFTER" in
-    throttled=0x0|unavailable) ;;
-    *) INVALID=1 ;;
+    unavailable) ;;
+    *)
+        # Invalid if a bit went active, or if the sticky history GREW during the run.
+        if [[ "$(throttle_current "$THROTTLE_AFTER")" != "0x0" ]]; then
+            INVALID=1
+        elif [[ "$THROTTLE_AFTER" != "$THROTTLE_BEFORE" ]]; then
+            INVALID=1
+        fi
+        ;;
 esac
 
 # --------------------------------------------------------------------------
@@ -281,7 +309,8 @@ rsync -az -e 'ssh -4 -o BatchMode=yes' \
 
 printf '\n'
 if [[ $INVALID -eq 1 ]]; then
-    printf '  RESULTS INVALID -- device throttled during the run (%s)\n' "$THROTTLE_AFTER" >&2
+    printf '  RESULTS INVALID -- throttling during the run (before %s, after %s)\n' \
+        "$THROTTLE_BEFORE" "$THROTTLE_AFTER" >&2
     printf '  Do NOT record these numbers. Add cooling, check the power supply,\n' >&2
     printf '  and re-run. A throttled measurement is wrong, not merely slow.\n' >&2
     exit 1

@@ -7,11 +7,15 @@
 // are the kind that produce a plausible-looking image when got backwards:
 //
 //   * filter2D CORRELATES. dst(x) = src(x+1) - src(x-1). A convolution would
-//     negate every gradient -- and would leave T3.6's sumXX and sumYY correct
-//     while silently negating the cross term, so a magnitude-only test cannot
-//     see it. Derivative.OpenCvFilter2D_Direction pins the direction against the
-//     real cv::filter2D on a single step edge, where the two readings differ by
-//     sign at a known column.
+//     negate every gradient -- and NOTHING DOWNSTREAM WOULD NOTICE. It is
+//     tempting to say T3.6's cross term would catch it, since sumXX and sumYY are
+//     magnitude popcounts and sumXY is the only entry that reads the sign planes;
+//     but the inversion negates BOTH derivatives and (-Ix)(-Iy) = IxIy, so the
+//     whole 2x2 covariance is invariant under it (pinned in
+//     tests/test_covariance.cpp). Derivative.OpenCvFilter2D_Direction is
+//     therefore the ONLY guard on the direction. It pins it against the real
+//     cv::filter2D on a single step edge, where the two readings differ by sign
+//     at a known column.
 //   * filter2D's default border is BORDER_REFLECT_101, NOT zero.
 //     Derivative.OpenCvFilter2D_BorderDefault pins that too, by running the same
 //     input through the default and through all three of BORDER_CONSTANT,
@@ -927,9 +931,11 @@ DERIVATIVE_WORD_CASES(uint64_t)
 
 BINCV_TEST(Derivative, OpenCvFilter2D_Direction) {
     // filter2D CORRELATES. A 1x8 row stepping 0 -> 255 between columns 3 and 4
-    // gives dx(3) = src(4) - src(2) = +255; a convolution predicts -255. This is
-    // the property whose inversion would leave sumXX and sumYY correct and negate
-    // T3.6's cross term.
+    // gives dx(3) = src(4) - src(2) = +255; a convolution predicts -255. This
+    // check is the ONLY guard on the direction: the inversion negates both
+    // derivatives, and T3.6's covariance -- cross term included -- is invariant
+    // under that, so no downstream test can see it (test_covariance.cpp pins the
+    // invariance).
     cv::Mat src = cv::Mat::zeros(1, 8, CV_8U);
     for (int x = 4; x < 8; ++x) src.at<uchar>(0, x) = 255;
     cv::Mat kernelX = (cv::Mat_<int>(1, 3) << -1, 0, 1);

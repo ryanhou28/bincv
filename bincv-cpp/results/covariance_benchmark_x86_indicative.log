@@ -1,0 +1,40 @@
+=== T3.6: the LK gradient covariance -- fused against composed ===
+target: not aarch64 -- INDICATIVE ONLY. Every variant here is popcount-bound,
+        and the x86 popcount lowering (X-7: a libgcc CALL per word on the
+        shipped baseline) can change the ranking outright.
+640x480, 200 keypoints, one window each -- the LK access pattern of
+ARCHITECTURE 7.5. The rule this is measured against is in this file's
+header, written before measuring.
+
+"composed/fused" > 1.00x means the FUSED entry point T3.6 ships is faster,
+confirming D-15 axis 2 at this level. "plane/4arg" > 1.00x means the
+precomputed selector plane is faster than the four-argument form -- which it
+is expected to be, and is the speed T3.6 spends to save the plane.
+
+  word      W           fused     composed   composed/  fused+plane   comp+plane      plane/       spread f / c
+                    ns/window    ns/window       fused    ns/window    ns/window        4arg
+  uint32_t  7            99.8        128.4       1.29x         97.9        115.3       1.02x     36.0% / 37.5%
+  uint32_t  15          247.2        280.2       1.13x        260.3        291.0       0.95x     39.7% / 24.3%
+  uint32_t  31          712.0        756.2       1.06x        643.0        698.1       1.11x     38.8% / 69.4%
+
+  word      W           fused     composed   composed/  fused+plane   comp+plane      plane/       spread f / c
+                    ns/window    ns/window       fused    ns/window    ns/window        4arg
+  uint64_t  7            89.6        114.5       1.28x         92.2        108.7       0.97x     67.1% / 38.1%
+  uint64_t  15          203.0        244.7       1.21x        219.5        224.0       0.92x     33.2% / 69.0%
+  uint64_t  31          482.4        560.3       1.16x        508.5        573.2       0.95x     41.8% / 62.1%
+
+  MEMORY (uint32_t), beyond the four derivative planes every form reads.
+  "allocs/pass" is operator new calls COUNTED over one pass of 200 windows
+  at W=31 -- the 0 B is a measurement of this binary, not a printed claim.
+  (counter self-check: plain new counted 1, over-aligned new counted 1; both must be 1)
+                       scratch  allocs/pass
+    fused                  0 B            0      <- T3.6 SHIPS THIS
+    composed               0 B            0
+    fused+plane        38400 B            0      one sign_x^sign_y plane at 640x480
+    composed+plane     38400 B            0
+    A plane is needed at EVERY pyramid level, not once: ~51000 B over a
+    four-level pyramid, a FIFTH plane on top of the four the covariance
+    already reads -- +25% of the derivative working set, held for the
+    frame's lifetime.
+
+sink: 27043404780 (printed so nothing above can be optimized away)

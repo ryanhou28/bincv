@@ -1,0 +1,110 @@
+
+------------------------------------------------------------
+  binCV reference-device run
+------------------------------------------------------------
+  target:  pi4
+  command: ./benchmark/covariance_benchmark
+
+  preflight
+  arch: aarch64
+  throttle before: throttled=0x80000 (sticky history only, no active bit)
+                   a run is invalidated by a CHANGE during it, not by stale history
+  governor: ondemand -> performance
+
+  sync
+  repository synced to bincv-measure
+
+  build (Release, core-only)
+[  3%] Built target test_assert_abort
+[ 10%] Built target test_error_abort
+[ 10%] Built target alignment_benchmark
+[ 13%] Built target gtest
+[ 20%] Built target covariance_benchmark
+[ 20%] Built target morphology_path_benchmark
+[ 23%] Built target decimate_benchmark
+[ 26%] Built target pyramid_benchmark
+[ 30%] Built target reduce_target_benchmark
+[ 33%] Built target window_benchmark
+[ 36%] Built target wordwidth_benchmark
+[ 40%] Built target test_binMat
+[ 43%] Built target test_quantMat
+[ 46%] Built target test_storage
+[ 50%] Built target test_error
+[ 53%] Built target test_error_checked
+[ 60%] Built target test_logic
+[ 60%] Built target test_shift
+[ 63%] Built target test_reduce
+[ 66%] Built target test_bitslice
+[ 70%] Built target test_denoise
+[ 73%] Built target test_threshold
+[ 76%] Built target test_morphology
+[ 80%] Built target test_resample
+[ 83%] Built target test_pyramid
+[ 86%] Built target test_derivative
+[ 90%] Built target test_covariance
+[ 93%] Built target test_harness
+[ 96%] Built target test_harness_failing
+[100%] Built target gtest_main
+  build complete
+
+  run
+------------------------------------------------------------
+=== T3.6: the LK gradient covariance -- fused against composed ===
+target: aarch64 -- AUTHORITATIVE (the reference device is where this closes)
+640x480, 200 keypoints, one window each -- the LK access pattern of
+ARCHITECTURE 7.5. The rule this is measured against is in this file's
+header, written before measuring.
+
+"composed/fused" > 1.00x means the FUSED entry point T3.6 ships is faster,
+confirming D-15 axis 2 at this level. "plane/4arg" > 1.00x means the
+precomputed selector plane is faster than the four-argument form -- which it
+is expected to be, and is the speed T3.6 spends to save the plane.
+
+  word      W           fused     composed   composed/  fused+plane   comp+plane      plane/       spread f / c
+                    ns/window    ns/window       fused    ns/window    ns/window        4arg
+  uint32_t  7           226.9        296.9       1.31x        163.1        240.6       1.39x      4.1% / 3.8%
+  uint32_t  15          452.6        540.0       1.19x        351.5        465.8       1.29x      0.8% / 4.2%
+  uint32_t  31          945.7       1108.9       1.17x        789.3       1004.0       1.20x      0.8% / 1.5%
+
+  word      W           fused     composed   composed/  fused+plane   comp+plane      plane/       spread f / c
+                    ns/window    ns/window       fused    ns/window    ns/window        4arg
+  uint64_t  7           217.3        268.8       1.24x        150.6        248.5       1.44x      1.3% / 2.0%
+  uint64_t  15          435.1        476.4       1.10x        314.7        436.0       1.38x      1.5% / 1.2%
+  uint64_t  31          857.6        937.3       1.09x        671.8        852.4       1.28x      0.8% / 0.6%
+
+  MEMORY (uint32_t), beyond the four derivative planes every form reads.
+  "allocs/pass" is operator new calls COUNTED over one pass of 200 windows
+  at W=31 -- the 0 B is a measurement of this binary, not a printed claim.
+  (counter self-check: plain new counted 1, over-aligned new counted 1; both must be 1)
+                       scratch  allocs/pass
+    fused                  0 B            0      <- T3.6 SHIPS THIS
+    composed               0 B            0
+    fused+plane        38400 B            0      one sign_x^sign_y plane at 640x480
+    composed+plane     38400 B            0
+    A plane is needed at EVERY pyramid level, not once: ~51000 B over a
+    four-level pyramid, a FIFTH plane on top of the four the covariance
+    already reads -- +25% of the derivative working set, held for the
+    frame's lifetime.
+
+sink: 16086698624 (printed so nothing above can be optimized away)
+------------------------------------------------------------
+
+------------------------------------------------------------
+  ENVIRONMENT -- record this with any measurement
+------------------------------------------------------------
+  device:           pi4
+  cpu:              Raspberry Pi 4 Model B Rev 1.5
+  arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+  compiler:         g++ (Debian 14.2.0-19) 14.2.0
+  governor:         performance (restored to ondemand on exit)
+  core pinning:     taskset -c 3
+  throttled before: throttled=0x80000
+  throttled after:  throttled=0x80000
+  commit:           f2908d2
+------------------------------------------------------------
+
+  OK -- command succeeded, device state valid throughout
+  Timings from this device ARE authoritative (unlike emulation).
+  Record the environment block above in EXPERIMENTS.md.
+
+  governor restored to ondemand

@@ -615,6 +615,67 @@
 #             The 'default border' row is small for a
 #             different reason: only the cases that take the default can see it,
 #             and most of the sweep passes a border explicitly.
+#   test_covariance  3604 in ALL FOUR configurations, and the equality is itself
+#             informative: T3.6 is API TIER 3 -- cv:: has no operation with these
+#             semantics -- so the suite has no OpenCV half to add rows in the
+#             `opencv` column. What stands behind ARCHITECTURE 7.5's identity is a
+#             per-pixel FLOAT oracle, and it has to run in the three
+#             configurations that have no OpenCV, including Debug where the
+#             reduction's BINCV_ASSERT preconditions are live.
+#             The 3604 are: 4 word types x 4 full-frame sweeps (a generated
+#             ternary pair, a pair produced by T3.5's real derivative, the same
+#             pair with every zero-magnitude sign bit dirtied, and a narrow VIEW
+#             onto a wider dense frame) x one check per (window size, row of
+#             positions) from a full window OUTSIDE each edge to a full window past
+#             it at W = 7, 15 and 31; plus the invariance sweeps (dirty signs,
+#             dirty padding, container-versus-view, dx-against-itself, derivative
+#             negation, the column sweep against SlidingWindowCount), the
+#             degenerate windows, the N-bit overload check and the allocation
+#             counter.
+#             ONE CHECK PER (window size, ROW of positions), not per position:
+#             95800 positions per word type go through the oracle and 114820 more
+#             through an invariant, which would be 842000 checks for what is one
+#             property. Each row reports its MISMATCH COUNT and its first bad
+#             window, so a failure still says where.
+#             THE POSITION COUNT IS ITSELF CHECKED against the arithmetic that
+#             defines it (expectedSweepPositions). This suite's one failure mode
+#             that a check count cannot see is a sweep whose MARGIN shrank -- still
+#             green, just proving less -- and that check is what closes it.
+#
+#             IT WAS 2372, AND THE 1232 ADDED ARE A REVIEW FINDING TURNED INTO
+#             CASES. SWEEP_HEIGHT was 11 -- SMALLER THAN TWO OF THE THREE WINDOW
+#             SIZES -- so every swept position of a 15x15 or 31x31 window was
+#             clipped to 11 rows and no value check in the file ever reduced a
+#             window taller than 11 image rows. The 31x31 reference LK window was
+#             only ever evaluated clipped. Measured: a mutant returning junk for
+#             any window taller than 11 clipped rows passed 2372/2372, exit 0.
+#             The frame is now 35 rows (two static_asserts pin it against
+#             MAX_WINDOW_SIZE), sweepAgainstOracle counts the FULLY INTERIOR
+#             positions per window size and requires them, and the same mutant now
+#             fails 1148 checks. The rest of the addition is one case per finding:
+#             negating BOTH derivatives leaves the whole matrix unchanged (the
+#             filter2D tap-order claim ARCHITECTURE 7.4 had backwards) while
+#             negating one negates the cross term; SlidingWindowCount reproduces
+#             sumXX and sumYY down a column and cannot deliver sumXY; the
+#             container overload rejects SignedQuantMat<N> for N > 1 while the view
+#             overload cannot; and the allocation counter registers a plain AND an
+#             over-aligned new.
+#             The floor has teeth, measured by mutating ops/covariance.hpp (checks
+#             passed out of 3604):
+#               cross term negated                     1136
+#               sumXX and sumYY swapped                1740
+#               junk for windows over 11 clipped rows  2456
+#               over-aligned scratch allocated         3600
+#             The last of those passed 3604/3604 before the counter was extended to
+#             C++17's over-aligned operator new: `new` of an alignas(64) type does
+#             not go through the plain replacement, so the form of scratch a
+#             vectorized kernel would allocate was invisible to the check that is
+#             the sole evidence for D-15 axis 3's trade.
+#             A further mutation -- dropping the sign-plane XOR by calling the
+#             three-argument countCovariance with signX alone -- never reaches a
+#             test: it leaves `signY` unused and the project's warning policy
+#             fails the build (-Werror=unused-parameter). Recorded because it is
+#             the mutation a reader expects to see a number for.
 #   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
 #             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
 #             through constPlane() -> unpackTo8U, and that conversion was the one
@@ -658,6 +719,7 @@ opencv	test_morphology	299181	0
 opencv	test_resample	245312	0
 opencv	test_pyramid	262321	0
 opencv	test_derivative	48526	0
+opencv	test_covariance	3604	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	32	0
 opencv	test_equivalence	16403	0
@@ -677,6 +739,7 @@ core	test_morphology	172632	0
 core	test_resample	245312	0
 core	test_pyramid	236429	0
 core	test_derivative	47675	0
+core	test_covariance	3604	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -694,6 +757,7 @@ noexcept	test_morphology	172632	0
 noexcept	test_resample	245312	0
 noexcept	test_pyramid	236429	0
 noexcept	test_derivative	47675	0
+noexcept	test_covariance	3604	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -711,5 +775,6 @@ debug	test_morphology	172632	0
 debug	test_resample	245312	0
 debug	test_pyramid	236429	0
 debug	test_derivative	47675	0
+debug	test_covariance	3604	0
 debug	test_harness	8	0
 

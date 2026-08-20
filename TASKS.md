@@ -2335,7 +2335,7 @@ headline result above is unaffected — it comes from the main size table, and r
 
 ---
 
-### T3.6 · LK gradient covariance · `TODO`
+### T3.6 · LK gradient covariance · `DONE`
 
 **Depends:** T3.5 and **T2.11** (`DONE`). E-3 is settled (T2.10, [X-11](EXPERIMENTS.md)) and it went the way this line was written to guard against: incremental state and a fused covariance entry point both won, so T2.6's original shape was **not** the one to build on. T2.11 landed the extended interface, so this task is now unblocked on that side and writes against `countCovariance(dx.constMagnitude(0), dy.constMagnitude(0), dx.constSign(), dy.constSign(), window)` — one traversal, no scratch.
 **Files:** `include/bincv-cpp/ops/covariance.hpp` (new)
@@ -2372,8 +2372,11 @@ faster when it does, but it is not what this operation requires (X-11 axis 3,
 memory wins).
 
 Where a caller sweeps a column of window positions — the corner response of T3.7,
-and any search sweep — reach for T2.11's **INC-ROW** incremental form rather than
-calling this per position.
+and any search sweep — reach for T2.11's **INC-ROW** incremental form for `sumXX`
+and `sumYY` rather than recomputing them per position. **Only those two slide:**
+`SlidingWindowCount` slides a single plane's popcount, and no incremental form of
+the `mag_x & mag_y` split exists, so `sumXY` is recomputed per position. T3.7 has
+to know that before it is written.
 
 **Done when**
 - Matches a per-pixel float reference exactly (all values are integers, so exact
@@ -2383,6 +2386,144 @@ calling this per position.
   forms, so the T2.11 entry point's advantage is confirmed at this level too
 
 **Verify:** V-ALL
+
+**STATUS — the operation is shipped and verified; ONE done-when bullet is
+outstanding, and it is the benchmark's device number.** `IN PROGRESS` rather than
+`DONE` for that one reason, and the reason is external: `run_on_pi.sh` refused
+preflight with `throttled=0x80000`, the sticky *soft temperature limit has
+occurred* flag, which clears only on a reboot this session could not perform. No
+number was taken and none is recorded — [X-17](EXPERIMENTS.md) is `PARTIAL` and
+carries the command that closes it. The x86 run is **consistent with, but does not
+establish, the direction**: every composed/fused ratio (1.06×–1.29×) is inside its
+own within-run spread — the tightest row, `uint32_t` W=31, is 1.06× against
+38.8%/69.4% — and re-running the same committed binary on the same host moves the
+ratios and does not preserve the ranking. It is written down as a shape and
+explicitly not quotable; it establishes nothing, not even sign.
+
+**RESULT — shipped as `ops/covariance.hpp`: one call, no scratch, and the identity
+holds exactly.**
+
+`gradientCovariance(dx, dy, window)` → `{sumXX, sumYY, sumXY}`, **API tier 3** (no
+`cv::` equivalent, so no OpenCV name is borrowed). Two spellings: the container one
+above, which is T3.6's spec, and the view one (`magX, magY, signX, signY, window`)
+it forwards to, for a caller whose planes do not come from one container — D-5's
+rule that kernels take views, with the container knowing which of its planes is
+which.
+
+**It is written against T2.11's fused, four-argument entry point, and is therefore
+one call:**
+
+```cpp
+const CovarianceCount c = countCovariance(dx.constMagnitude(0), dy.constMagnitude(0),
+                                          dx.constSign(), dy.constSign(), window);
+```
+
+one `visitRowWords` pass returning `xx`, `yy`, `whenClear`, `whenSet`; the two sign
+planes XOR-ed **inside the word loop**, so the operation needs **no scratch at
+all** — 0 B beyond the four derivative planes it must read anyway. `sumXY` is
+`crossTerm()`, never `whenClear - whenSet` spelled out, so the one signed
+subtraction has one implementation. Both halves of
+[D-15](ARCHITECTURE.md#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)
+land here, and the earlier version of this spec — three composed calls plus a
+caller-formed frame-sized selector plane — is exactly what E-3 rejected.
+
+**THE IDENTITY IS PROVEN, NOT ASSUMED, AND THAT IS THE POINT OF THE TASK.**
+`tests/test_covariance.cpp` (core suite, so it runs in all four verification
+configurations including Debug and `-fno-exceptions`) carries a **per-pixel FLOAT
+oracle written before the kernel**: it reads each ternary value as a float in
+{−1, 0, +1} and accumulates `xx += a*a; yy += b*b; xy += a*b`, one pixel at a time,
+sharing no code, no clipping ladder and no word arithmetic with the library. That
+is the formulation §7.5 *claims* the masked popcounts equal, so agreement is
+evidence about the claim rather than about two spellings of one popcount.
+
+**Agreement is exact — integer equality AND float equality of the same pair, no
+tolerance — at 383 200 window positions**, 95 800 per word type: four full-frame
+sweeps (a generated ternary pair; a pair produced by T3.5's real `derivativeX` /
+`derivativeY`; the same pair with every zero-magnitude sign bit dirtied; and a
+narrow **view onto a wider dense frame**) × W ∈ {7, 15, 31} × origins from a full
+window **outside** every edge to a full window past it. **459 280 further positions**
+are checked against an invariant (dirty signs, dirty padding, container-versus-view,
+`dx` against itself, derivative negation, a column sweep against
+`SlidingWindowCount`). The position count is itself a checked quantity, because the
+one failure mode a check count cannot see is a sweep whose margin quietly shrank.
+
+**The sweep frame is taller than the largest window, and that is load-bearing.** It
+was 11 rows — smaller than two of the three window sizes — so every swept position
+of a 15×15 or 31×31 window was clipped to 11 rows and *nothing in the suite ever
+reduced a window taller than 11 image rows*. The 31×31 reference LK window was only
+ever evaluated clipped. Measured: a mutant returning junk for any window taller
+than 11 clipped rows passed 2372/2372 checks, exit 0. The frame is now 35 rows,
+two `static_assert`s pin it against the largest window size, and the sweep counts
+its **fully interior** positions per window size and requires them; that mutant now
+fails 1148 checks.
+
+**Clipping, padding and canonical zero are properties of the operation, not of its
+callers.** Windows wholly outside, clipped on one to three edges, 1×1, an empty
+container, null views and an origin near `INT_MAX` all give `{0, 0, 0}` without
+dereferencing anything. A bit at or past `width` is never counted
+([D-13](ARCHITECTURE.md#d-13-a-reduction-counts-pixels-never-padding)) — checked
+with every padding bit of all four planes set, and again where the pixels past the
+view's width are a neighbour's *live* pixels. The sign planes are read only where
+**both** magnitudes are set, so dirtying every sign bit over a zero magnitude moves
+nothing, which is the canonical-zero rule turned into a property of this operation.
+
+**The no-scratch claim is measured, not asserted.** An `operator new` counter across
+both spellings over three window sizes reports **0 allocations** — the plain *and*
+the C++17 over-aligned forms, since replacing only the plain pair left `new` of an
+`alignas(64)` type uncounted and a mutant allocating over-aligned scratch passed
+3604/3604; the counter is itself exercised on one allocation of each kind, so the
+zero is a reading rather than a blind spot. That check is
+load-bearing rather than decorative, because the four-argument selector form was
+taken over the 11–14% *faster* plane form purely because it needs no plane. An
+implementation that quietly allocated would have given up the speed and kept the
+memory, and every value check in the suite would still have passed.
+
+**Callers that sweep a COLUMN of positions must not call this per position — but
+only two of the three numbers slide.** T3.7's corner response and any search sweep
+want `SlidingWindowCount` for `sumXX` and `sumYY` (X-11b axis 1: 5.96× on a search
+sweep, 15.9× on a dense scan at 31×31 — those are `countNonZero` sweeps, since
+`SlidingWindowCount` slides a single plane's popcount). **`sumXY` has no incremental
+form:** nothing in `ops/reduce.hpp` slides the `mag_x & mag_y` split, so the cross
+term is recomputed per position, and making it slide would cost two frame-sized
+planes per pyramid level — more than the one plane D-15 axis 3 already declined.
+The docstring says all of this, a test pins the sliding half, and T3.7 depends on
+knowing it. One window, by contrast, is a `countNonZero`: the incremental form wins
+nothing there.
+
+**N > 1 does not compile through the CONTAINER spelling, deliberately — and the
+VIEW spelling cannot make that promise.** The identity is exact for ternary, i.e.
+pyramid level 0; an N-bit level needs bit-sliced weighted sums
+([§7.5](ARCHITECTURE.md#75-lk-gradient-covariance)), which is a different kernel.
+`gradientCovariance(dx, dy, w)` takes `TernaryMat<W>` = `SignedQuantMat<1, W>`, so
+an N-bit level is "no matching function" — pinned by a trait check in the suite. The
+five-argument view form takes `BinMatConstView`s, which carry no plane count, so
+passing an N-bit level's planes to it compiles and returns the LSB plane's
+covariance: measured `{183, 183, 6}` on a `SignedQuantMat<3, uint32_t>` whose true
+covariance is `{1275, 1283, 64}`. The docstring says so at the parameter.
+
+**Gate:** `./scripts/verify.sh` — ALL CONFIGURATIONS GREEN; `test_covariance` adds
+3604 checks in each of the four configurations (equal across them because a tier 3
+operation has no OpenCV half), floors recorded in `tests/expected-checks.txt` with
+the mutation numbers that give them teeth.
+
+**REVIEW TRIAGE.** Four reviewers examined T3.6. **No disagreement with the
+per-pixel reference was found, by them or by re-checking**: 389 735 further
+positions on frames of 70×35, 97×71, 133×96 and 64×64 — including 75 785 in which
+the window is fully interior — agree exactly with an independently written oracle.
+Every confirmed finding was in the suite's *teeth* or in the *documentation*, and
+all are fixed:
+
+| Finding | Verdict | Fix |
+|---|---|---|
+| `SWEEP_HEIGHT = 11` is smaller than two of three window sizes, so no check ever reduced a window taller than 11 rows | **confirmed** — a mutant returning junk for taller windows passed 2372/2372 | frame raised to 35, two `static_assert`s, interior positions counted and required; mutant now fails 1148 |
+| `ops/covariance.hpp` states "X-17 reproduces it AT THIS LEVEL" as fact | **confirmed** — X-17 is `PARTIAL`, no device number, x86 table marked "do not quote" | clause rewritten to say the ratios are one level down and the confirmation is outstanding |
+| §7.4 / `derivative.hpp` / `test_derivative.cpp`: a tap-order inversion "would negate ΣIxIy" | **confirmed false** — it negates *both* derivatives, and `(−Ix)(−Iy) = IxIy`, so the whole matrix is invariant (measured: ΣIxIy −61 before and −61 after) | all four copies corrected; `Derivative.OpenCvFilter2D_Direction` named as the *only* guard; the invariance is now pinned by a test |
+| "Sweeping a column? use `SlidingWindowCount`", with 15.9×/5.96× attached | **confirmed misleading** — that class slides one plane's popcount, so only `sumXX`/`sumYY` slide; `sumXY` has no incremental form | docstring, §7.5 and this spec now say which two slide and which recomputes; a test pins the sliding half |
+| Promise 1's "`SignedQuantMat<N>` for N > 1 does not match these overloads" | **confirmed half-true** — the container overload rejects it, the view overload silently returns the LSB covariance (`{183,183,6}` vs `{1275,1283,64}`) | claim scoped to the container spelling, note added at the view form's parameters, trait check added |
+| The `operator new` counter misses C++17 over-aligned allocations | **confirmed** — `new` of an `alignas(64)` type counted 0 | aligned forms replaced; counter's own teeth exercised in-suite; a mutant allocating over-aligned scratch went from 3604/3604 to 3600/3604 |
+| `reportMemory()` prints `0 B` as a literal; nothing measures allocation | **confirmed** | the benchmark counts `operator new` over one pass of each variant and prints it beside the byte figures |
+| "The x86 shape agrees in direction at every window size and word width" | **confirmed overstated** — every ratio is inside its own within-run spread, and re-running the committed binary moves them | reworded here and in X-17 to "consistent with, but does not establish"; the log was regenerated from the current benchmark |
+| `verify.sh`'s check harvest reports "printed no check summary" for a suite that crashed or was killed | **confirmed as a code property** — the harvest discards stderr and exit status | **not fixed:** `scripts/` is outside this task's permitted work area. It did not fire in either gate run here. Left as a standing recommendation: capture the suite's status and distinguish "exited N / no output" from "no check summary" |
 
 ---
 
