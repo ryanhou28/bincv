@@ -2975,7 +2975,7 @@ only the real-frame case is behind `BINCV_WITH_OPENCV`).
 
 ---
 
-### T3.9 · E-4 · Generic-N cost versus specialized paths · `TODO`
+### T3.9 · E-4 · Generic-N cost versus specialized paths · `MEASURED — decision open`
 
 **Depends:** T3.5
 **Gates:** whether N stays arbitrary or gets capped
@@ -2994,7 +2994,25 @@ specializations, versus a hand-written binary-only reference.
 **Workload:** T3.5's derivative and T2.5's reductions.
 **Metric:** ns/pixel and code size (`size` on the built object).
 
-**Done when:** logged as X-6, specialization strategy confirmed or revised.
+**Done when:** logged as X-21 — **not X-6**, which is stale: X-6 is the T2.2
+logic-speedup entry, written long before this task came up for scheduling. X-1…X-20
+and X-7b were taken, so the entry took the next free number and recorded the
+correction, exactly as the Phase 2 batch did for T2.9's identically stale
+"logged as X-4".
+
+**Measured, and the specialization strategy is NOT yet confirmed or revised —
+deliberately.** [X-21](EXPERIMENTS.md) ran on the reference device and the rule's
+**second band fired**: the specialized paths sit 8–43% above a hand-written
+binary-only control in time and 2.84× in code size. That band says *report before
+acting*, and the report is that **neither remedy it names can work** — generic-N
+and the specialization compile to the **same 567 aarch64 instructions** at N = 1
+and time to within 0.1%, so capping N or strengthening the specialization would
+target a cost measured at zero. The cost is the ops/ kernel's generic SHAPE at
+N = 1 (the by-reference `a[N]`/`b[N]`/`srcRow[N]` arrays and the `for p < N` loops,
+which the specialized path carries too) at +15% per word and **+93% per row**, plus
+a flat 3–5% for the container. Three questions went to review rather than being
+settled in the task; see X-21's **Decision**. E-4 is **not** marked resolved and no
+D-record was promoted.
 
 ---
 

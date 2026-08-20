@@ -3215,18 +3215,20 @@ the same review:
 
 ---
 
-# Pre-registered — rule recorded, no measurement code yet
+# Pre-registered — rule recorded first, then measured
 
 The entry below was written **before any benchmark for it existed** and committed
 on its own, so the history shows the rule predates the data — the same discipline
 [X-9, X-10 and X-11](#phase-2-experiments--rules-recorded-first-then-measured)
 were held to at 4245210. Its **Decision rule** is copied **verbatim** from its
-[TASKS.md](TASKS.md) task entry and is not to be re-scaled, re-scoped or softened
-once numbers arrive.
+[TASKS.md](TASKS.md) task entry and was not re-scaled, re-scoped or softened once
+the numbers arrived — which matters here, because the numbers landed partly
+outside the bands the rule anticipated and the entry says so rather than bending
+one of them to fit.
 
 ---
 
-### X-21 · Does generic-N cost the specialized N=1 and ternary paths anything? · `TODO`
+### X-21 · Does generic-N cost the specialized N=1 and ternary paths anything? · `DONE`
 
 **Gates:** [E-4](ARCHITECTURE.md#9-open-questions-and-planned-experiments) · task
 [T3.9](TASKS.md) — whether N
@@ -3239,8 +3241,7 @@ logic-speedup entry, written long before this task came up for scheduling. This
 entry therefore takes the **next free X-number, X-21** — X-1…X-20 and X-7b are
 taken — exactly as the Phase 2 batch did for the same kind of staleness ("T2.9's
 older 'logged as X-4' is likewise superseded — X-4 is taken"). TASKS.md T3.9's
-Done-when is left as it stands until this experiment closes it; the number to
-quote is X-21.
+Done-when has since been corrected to X-21, which is the number to quote.
 
 **Question:** Does the bit-sliced generic-N implementation regress the
 specialized N=1 and ternary paths?
@@ -3255,6 +3256,15 @@ speed-equivalent are not size-equivalent, and every extra instantiation is
 charged against the constraint [ARCHITECTURE §2](ARCHITECTURE.md#2-target-platforms)
 names as *often binding before RAM* on Tier 2. A null on ns/pixel and a
 regression on bytes is a live outcome of this experiment, not an unexpected one.
+
+> **The hypothesis was right about the mechanism and wrong about the size.** `N`
+> being a compile-time parameter does collapse the plane loop — further than
+> predicted: the two routes compile to the *same instructions*, not merely to
+> equally fast ones. But the anticipated "null on ns/pixel, regression on bytes"
+> did **not** happen between generic-N and the specialization; generic-N's object
+> is 90 B **smaller**. The size regression the hypothesis was watching for turned
+> up somewhere it was not looking — against the hand-written control, at 2.84×,
+> on both binCV routes equally.
 
 **Decision rule** *(written before measuring; verbatim from
 [T3.9](TASKS.md))*:
@@ -3316,14 +3326,277 @@ N-bit paths that matter for **accuracy**, not only for footprint. Whether
 generic-N is cheap is a live question about the next phase's design, not a
 retrospective on this one.
 
-**Method:** *pending* — the benchmark does not exist yet. It will be committed
-before it is run, and this entry names it then.
+**Method:** three arms, **one translation unit each**, committed at `066a339`
+**before a single number was taken** — `benchmark/genericn_arms.hpp` (the shared
+interface), `genericn_arm_generic.cpp`, `genericn_arm_specialized.cpp`,
+`genericn_arm_handwritten.cpp`, driven by `benchmark/genericn_benchmark.cpp`.
 
-**Result:** *pending — no measurement has been taken.*
+The separation is not tidiness. `size` on one object per arm is a number **per
+arm** rather than for the sum, which the code-size half of the metric needs; and
+[morphology_path_benchmark.cpp](bincv-cpp/benchmark/morphology_path_benchmark.cpp)
+records, measured, that two instantiations of one kernel in a single object move
+each other's timings by ~10% through code layout alone. The cost — no arm inlines
+into the timing loop — is paid identically by all three, one call per frame
+against 307 200 pixels of work inside it.
 
-**Conclusion:** *pending.*
+**What the hand-written arm actually is**, since the experiment is worthless if it
+is the specialization under another name: it includes **no binCV header**. No
+`QuantMat`, no `BinMatView`, no template over `N`, no template over the word type,
+no route selector, no `BINCV_ASSERT` contract, no `impl::` helpers —
+`BORDER_REFLECT_101` and `uint32_t` are compiled in, and `bitMask`, `rowTailMask`,
+`minRowWords`, `borderIndex` and `regionFromExtent` are re-derived inline as the
+two or three lines of arithmetic they are. The word-level **arithmetic** is
+necessarily equal across the arms — there is no second way to compute
+`mag = a ^ b`, `sign = b & ~a` — and that is precisely what makes the arm a fair
+control: with the arithmetic held equal, a difference is the machinery around it.
+Its popcount is deliberately spelled `__builtin_popcountll` exactly as
+`impl::popcountWord` is, because X-7/X-7b's no-`-march` lowering is a confound to
+**hold fixed**, not to vary; two arms differing in the builtin would be measuring
+the builtin.
 
-**Decision:** *pending.*
+**A fourth measurement point, `views only`, was added afterwards** in
+`benchmark/genericn_diag.cpp` (`abf3504`) and is **not an arm of the rule
+comparison** — the rule and the three arms are untouched, and the comparison the
+rule is written against was run and recorded before that file existed. It exists
+because the rule's second band makes the remedy depend on *where the cost comes
+from*, and the headline run localizes nothing. It calls the same kernel the
+specialized arm calls, through the public view entry points, with the container
+removed, so
+
+```
+views_only  − hand_written  =  the kernel's generic SHAPE at N = 1
+specialized − views_only    =  the CONTAINER
+```
+
+**Reproducing it.** All of it runs on the device from the committed tree:
+
+```
+./scripts/run_on_pi.sh pi4 './benchmark/genericn_benchmark'
+./scripts/run_on_pi.sh pi4 'size    benchmark/CMakeFiles/genericn_arms.dir/genericn_arm_*.cpp.o'
+./scripts/run_on_pi.sh pi4 'size -A benchmark/CMakeFiles/genericn_arms.dir/genericn_arm_*.cpp.o'
+./scripts/run_on_pi.sh pi4 'nm -C -S --size-sort benchmark/CMakeFiles/genericn_arms.dir/genericn_arm_*.cpp.o'
+```
+
+and the byte-identity claim in conclusion 1 is `objdump -d --no-show-raw-insn` on
+the two objects, sliced to `derivativeGeneric` / `derivativeSpecialized`, stripped
+of addresses and diffed. **Code size and the disassembly were taken on the device
+too, not on x86** — `size` on an aarch64 object answers a different question.
+
+**Validity.** Volatile sink; four rotated pseudo-random frames; padding kept clear
+so no arm over-counts; and all three arms **and both decomposition points**
+required to produce bit-identical `dx`/`dy` buffers and identical counts and
+covariances on every input before anything is timed — a disagreement prints as a
+defect and nothing is timed. Batches are interleaved round-robin. The three
+destination buffers are re-filled from one input before the covariance rows,
+because popcount cost is content-dependent and the derivative rows leave each
+buffer holding whichever frame ran last.
+
+**Environment** (the run this entry reports, `abf3504`):
+
+```
+device:           pi4
+cpu:              Raspberry Pi 4 Model B Rev 1.5
+arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+compiler:         g++ (Debian 14.2.0-19) 14.2.0
+governor:         performance (restored to ondemand on exit)
+core pinning:     taskset -c 3
+throttled before: throttled=0x0
+throttled after:  throttled=0x0
+build:            Release, core-only, no -march (X-7 confound held fixed)
+```
+
+Throttle clean before **and** after, and unchanged across the run. The headline
+rows were measured twice, at `066a339` and again at `abf3504` with the
+decomposition present, and **reproduced to within 0.1%** — so the numbers below
+are stable across an independent build, an independent run and a changed binary.
+
+---
+
+**Result — speed. ns/pixel, median of 15 batches, `uint32_t`, Pi 4.**
+
+Batch spread `(max − min)/median` was **0.1–1.3%** on every row. Every difference
+called real below is an order of magnitude outside it.
+
+*640×480 (stride 20 words):*
+
+| workload | hand-written | specialized | generic-N | spec ÷ hand | **generic ÷ spec** |
+|---|---|---|---|---|---|
+| derivative dx+dy | 0.1706 | 0.2058 | 0.2059 | **1.207×** | **1.000×** |
+| count whole frame | 0.0722 | 0.0638 | 0.0638 | **0.883×** | 1.001× |
+| covariance 31×31 ×200 | 0.9311 | 1.0045 | 1.0108 | **1.079×** | 1.006× |
+
+*94×60 — pyramid level 3, the level LK touches every frame (stride 3 words):*
+
+| workload | hand-written | specialized | generic-N | spec ÷ hand | **generic ÷ spec** |
+|---|---|---|---|---|---|
+| derivative dx+dy | 0.2508 | 0.3580 | 0.3579 | **1.427×** | **1.000×** |
+| count whole frame | 0.0896 | 0.0844 | 0.0846 | **0.942×** | 1.002× |
+| covariance 31×31 ×200 | 0.6592 | 0.7316 | 0.7321 | **1.110×** | 1.001× |
+
+**Result — code size. `size` on one aarch64 object per arm.**
+
+| arm | text | data | dec |
+|---|---|---|---|
+| hand-written | 1809 | 32 | 1841 |
+| specialized | 5144 | 40 | 5184 |
+| generic-N | 5054 | 40 | 5094 |
+
+| comparison | text |
+|---|---|
+| specialized ÷ hand-written | **2.84×** |
+| generic-N ÷ hand-written | **2.79×** |
+| **generic-N ÷ specialized** | **0.98× — generic-N is 90 B SMALLER** |
+
+Per function, `nm -S` on the same objects (bytes):
+
+| function | hand-written | specialized | generic-N |
+|---|---|---|---|
+| derivative dx+dy | 568 | **2264** | **2264** |
+| covariance window | 812 | 1256 | 1216 |
+| count whole frame | 184 | 344 | 320 |
+| `QuantMat<1>` wrapping ctor, out of line | — | 380 | 380 |
+
+`size -A` on the same objects splits the container arms' extra bytes: `.text`
+1580 (hand) against 3876 (specialized) and 3812 (generic), plus **972 B of
+plumbing the hand-written arm has no throw site to need** — the out-of-line
+`QuantMat` constructor (380 B), `.gcc_except_table` (116 B), its `.rodata`
+message strings (236 B) and 240 B more `.eh_frame`.
+
+**Result — memory.** Peak working set is **identical across the three arms by
+construction** and is therefore reported once, not per arm: the hand-written arm
+indexes the *same* `SignedQuantMat<1>` buffer layout the containers name. At
+640×480, `uint32_t`: source 38 400 B + `dx` 76 800 B + `dy` 76 800 B = **192 000 B**
+for all three.
+
+**Result — the decomposition, i.e. where the gap actually is.**
+
+| workload / size | hand | views only | specialized | **kernel SHAPE** | **container** |
+|---|---|---|---|---|---|
+| derivative, 640×480 | 0.1706 | 0.1997 | 0.2059 | **+17.0%** | +3.6% |
+| derivative, 94×60 | 0.2508 | 0.3498 | 0.3578 | **+39.5%** | +3.2% |
+| covariance, 640×480 | 0.9306 | 0.9730 | 1.0093 | +4.6% | +3.9% |
+| covariance, 94×60 | 0.6593 | 0.6994 | 0.7315 | +6.1% | +4.9% |
+
+Solving the two derivative sizes as `t_row = a·words + b` (an exact two-point fit,
+not a validated model — two equations, two unknowns, no residual to check):
+
+| | per word | per row |
+|---|---|---|
+| hand-written | 5.04 ns | 8.47 ns |
+| specialized | 5.77 ns | 16.35 ns |
+| ratio | **1.15×** | **1.93×** |
+
+**Bound check.** The whole-frame count reads 37.5 KiB at **1.73 GB/s** — roughly a
+third of the Pi 4's ~4–6 GB/s DRAM figure and far below L2, on a frame that fits
+in the 1 MiB L2 but not the 32 KiB L1D. So the count is popcount-throughput bound,
+not memory bound, exactly as X-7b predicts for a no-`-march` build, and nothing
+here is above a physical bound — which is what a dead-code-eliminated loop would
+have looked like.
+
+---
+
+**Conclusion**
+
+**1. The question E-4 registered has a clean null answer, and it is stronger than
+a null.** Generic-N and the specialization are not merely within noise — at
+N = 1 they compile to **the same machine code**. `objdump -d` on the two objects
+gives **567 instructions each** for the derivative, and every one of the five
+differing lines is a symbol *name* or a branch target *offset* that shifts only
+because the enclosing function sits 0x40 bytes further into `.text`; the offsets
+*within* the function (`+0x870`, `+0x420`) are identical. `nm -S` agrees to the
+byte: 2264 = 2264. The timings agree to 0.1%, and generic-N's whole object is
+90 B *smaller*. **Bit-sliced generic-N does not regress the specialized N = 1 and
+ternary paths — it is the same code.**
+
+That is worth stating the other way round too, because it is the uncomfortable
+half: `impl::signedDifference`'s `if constexpr (N == 1)` branch — the ternary
+spelling the specialization exists for — **buys nothing measurable**. GCC 14.2 at
+`-O3` (CMake's Release default, which is what the gate and every benchmark
+build) already reduces the N-generic ripple to it. The specialization is not
+harmful; it is, on this evidence, redundant. It is also what
+`Derivative.RoutesAgree_*` compares against, so removing it would remove a test.
+
+**2. The rule's second band fired, on four of six rows, and it fired on something
+the rule was not aimed at.** Specialized against hand-written: **+20.7%** and
+**+42.7%** on the derivative, **+7.9%** and **+11.0%** on the covariance — all
+far outside the 5% band and far outside the 0.1–1.3% spread. On code size the gap
+is larger still: **2.84×**.
+
+**But both remedies the rule names — "stronger specialization" or "capping N" —
+target genericity in N, and this experiment measures genericity in N at exactly
+zero.** Capping N cannot recover a nanosecond of a gap that is byte-identical
+across the N-generic and N-specialized routes. Stronger specialization cannot
+either: the specialization already produces the same instructions. **The rule's
+two options do not fit the cause, and the honest thing is to say so rather than
+pick the nearer one.** The decomposition says where the cost really is:
+
+* **the kernel's generic SHAPE at N = 1 — 17.0 of the 20.7 points at 640×480 and
+  39.5 of 42.7 at 94×60.** The per-plane arrays `a[N]`, `b[N]`, `m[N]`,
+  `srcRow[N]`, `magRow[N]`, `prev[N]` are declared as arrays and passed **by
+  reference**, and the `for p < N` loops wrap every word and every row. `N` being
+  1 does not make an address-taken array a register. **This shape is in the
+  specialized path too** — `ForceGeneric` changes only the arithmetic *inside*
+  `signedDifference`, never the array plumbing around it, which is precisely why
+  the two routes are byte-identical;
+* **the container — a flat 3.2–4.9%** at both sizes and both workloads. Small,
+  and notably *not* the part that grows on small frames.
+
+**3. Two rows land outside BOTH bands, and the rule has no branch for them.** The
+whole-frame count has the library **11.7% and 5.8% FASTER** than the hand-written
+control. That is neither "within 5%" nor "a regression", so the rule as written
+does not classify it. Recorded rather than rounded into the nearer band:
+`impl::visitRowWords`' head/interior/tail skeleton, with the interior mask a
+compile-time all-ones constant, beats the straightforward hand-written loop. **The
+generic machinery is not uniformly a tax** — on the operation D-6 is built around,
+it is a win.
+
+**4. The size dependence is the finding with teeth for Phase 4.** The derivative
+gap **doubles** from 640×480 to 94×60, and the decomposition puts all of that
+growth in the kernel shape (17.0 → 39.5 points), none in the container
+(3.6 → 3.2). The two-point fit says why: the generic shape costs **+15% per word
+but +93% per row**, and a pyramid level 3 row is 3 words. **The frames that pay
+most are the upper pyramid levels, which LK touches every frame** — the same
+levels [X-20](#x-20--hybrid-lk-accuracy-against-ground-truth-and-the-frontends-peak-footprint--done)
+found cannot localise sub-pixel motion, promoting
+[E-7](ARCHITECTURE.md#9-open-questions-and-planned-experiments) from an optimisation to a
+precondition. [T4.1](TASKS.md)'s N-bit paths will run on
+exactly these levels, so this is a live constraint on the next phase's design, not
+a retrospective on this one.
+
+**5. What this does NOT license.** The rule was written for a null and this is not
+one, so band 1's sentence — "arbitrary N confirmed at no cost to the common
+cases" — is **not** claimed here, however much conclusion 1 looks like it. Against
+*binCV's own specialized path* arbitrary N is free, provably. Against *code with
+no genericity at all* the common cases pay 8–43% in time and 2.8× in size, and
+that is a cost to the common cases whatever its cause. Both halves are true and
+the entry states both.
+
+**Decision:** **none — and that is what the rule instructs.** Its second band says
+*report before acting*, and acting would mean choosing between two remedies this
+measurement has shown cannot work. Three questions go to review rather than being
+settled here, per [CLAUDE.md](CLAUDE.md)'s stop-and-ask rule:
+
+1. **Is `impl::signedDifference`'s `N == 1` specialization worth keeping** now that
+   it is measured to compile to the same instructions as the generic route?
+   Deleting it is a simplification with no measured cost; it also deletes what
+   `Derivative.RoutesAgree_*` compares. **A code-size and maintenance question,
+   not a speed one.**
+2. **Is the 2.84× code-size figure acceptable on Tier 2**, where
+   [ARCHITECTURE §2](ARCHITECTURE.md#2-target-platforms) names code size as often
+   binding before RAM? 972 B of it is exception plumbing that
+   `-fno-exceptions` — the configuration the Tier 2 claim rests on — does not
+   emit, so the figure should be re-measured in that configuration before anyone
+   acts on it. **This entry did not measure it there.**
+3. **Does the per-row generic-shape cost want a fix at all**, given it is +93%
+   per row against a hand-written control and the upper pyramid levels are where
+   T4.1 and E-7 both live? The candidate is scalarizing the `N`-indexed arrays at
+   `N == 1` rather than capping `N` — but that is a new experiment with its own
+   pre-registered rule, not a conclusion this one earned.
+
+No **D-record** is promoted and **E-4 is not marked resolved**: the question it
+asked is answered (generic-N costs nothing), but the answer arrived attached to a
+larger cost the E-register never named, and closing E-4 on this would file the
+finding under a question it does not belong to.
 
 ---
 
