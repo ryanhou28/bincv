@@ -615,14 +615,51 @@
 #             The 'default border' row is small for a
 #             different reason: only the cases that take the default can see it,
 #             and most of the sweep passes a border explicitly.
-#   test_covariance  3604 in ALL FOUR configurations, and the equality is itself
-#             informative: T3.6 is API TIER 3 -- cv:: has no operation with these
-#             semantics -- so the suite has no OpenCV half to add rows in the
-#             `opencv` column. What stands behind ARCHITECTURE 7.5's identity is a
-#             per-pixel FLOAT oracle, and it has to run in the three
+#   test_covariance  17704 in ALL FOUR configurations, and the equality is itself
+#             informative: T3.6 and T3.10 are API TIER 3 -- cv:: has no operation
+#             with these semantics -- so the suite has no OpenCV half to add rows in
+#             the `opencv` column. What stands behind ARCHITECTURE 7.5's identity is
+#             a per-pixel oracle, and it has to run in the three
 #             configurations that have no OpenCV, including Debug where the
 #             reduction's BINCV_ASSERT preconditions are live.
-#             The 3604 are: 4 word types x 4 full-frame sweeps (a generated
+#
+#             14100 OF THE 17704 ARE T3.10's N-BIT COVARIANCE, and they are a
+#             SECOND oracle rather than the first one widened. The float oracle
+#             reads a TERNARY pixel; an N-bit pixel is +/- SUM 2^i m[i], so
+#             widening would have made the ternary and N-bit sweeps share a
+#             reconstruction and a fault in it cancel against itself twice. The
+#             N-bit oracle is written from the plane bits upward in INTEGERS, with
+#             multiplies, and agreement is required exactly -- integer AND float,
+#             the float half being exact because (2^N-1)^2 * 961 = 15499969 at the
+#             largest swept N = 7 is inside float's 24-bit integer range, which two
+#             static_asserts pin -- one on MAX_BIT_DEPTH and one inside the sweep on
+#             its OWN N, so a depth added without touching the constant cannot
+#             silently turn that half into a tolerance.
+#             They are: 4 word types x (SEVEN bit depths x 2 full-frame sweeps -- a
+#             generated N-bit pair and a pair from T3.5's real N-bit derivative)
+#             plus the N = 3 contract sweeps (dirty signs, dirty padding, a narrow
+#             view onto a wider dense frame), the hand-worked weight cases, the
+#             degenerate windows, the dispatch traits and the allocation counter at
+#             EVERY depth 1..7 -- 383200 oracle positions per word type, 1532800 in
+#             all, up from 958000 when the sweep stopped at 4.
+#             THE DEPTHS ARE DRIVEN BY MAX_BIT_DEPTH, not hand-unrolled, and the
+#             constant is 7 rather than 4 because X-15 superseded X-2's "1/3/4/5
+#             bits" frame statistic with the alphabet the arithmetic can REACH --
+#             1/3/5/7 -- which is what T4.1 will run. At 4 the suite never
+#             instantiated N = 5 or N = 7 at all. 7 is also SignedQuantMat's own
+#             limit.
+#             THE SINGLE MOST IMPORTANT ROW IS THE N = 1 IDENTITY: 61232 positions
+#             per word type at which T3.10's bit-sliced kernel and T3.6's ternary
+#             kernel are required to return the SAME THREE INTEGERS. Ternary is the
+#             N = 1 instance, so if they can differ anywhere one of them is wrong.
+#             The two calls are spelled so that neither can BE the other -- five
+#             loose views with one explicit template argument reaches only the T3.6
+#             overload, plane ARRAYS with <1, WordType> only the T3.10 one -- so
+#             deleting the ternary overload breaks the build instead of quietly
+#             turning the check into one kernel compared against itself. A second
+#             check requires the agreed matrices to be non-zero at most positions,
+#             since two functions returning {0,0,0} everywhere would also agree.
+#             The 3604 that came before are: 4 word types x 4 full-frame sweeps (a generated
 #             ternary pair, a pair produced by T3.5's real derivative, the same
 #             pair with every zero-magnitude sign bit dirtied, and a narrow VIEW
 #             onto a wider dense frame) x one check per (window size, row of
@@ -630,7 +667,7 @@
 #             it at W = 7, 15 and 31; plus the invariance sweeps (dirty signs,
 #             dirty padding, container-versus-view, dx-against-itself, derivative
 #             negation, the column sweep against SlidingWindowCount), the
-#             degenerate windows, the N-bit overload check and the allocation
+#             degenerate windows, the overload-dispatch check and the allocation
 #             counter.
 #             ONE CHECK PER (window size, ROW of positions), not per position:
 #             95800 positions per word type go through the oracle and 114820 more
@@ -660,10 +697,30 @@
 #             container overload rejects SignedQuantMat<N> for N > 1 while the view
 #             overload cannot; and the allocation counter registers a plain AND an
 #             over-aligned new.
-#             The floor has teeth, measured by mutating ops/covariance.hpp (checks
-#             passed out of 3604):
-#               cross term negated                     1136
-#               sumXX and sumYY swapped                1740
+#             **THAT LAST ONE IS DELIBERATELY REVERSED BY T3.10.** The container
+#             spelling now ACCEPTS SignedQuantMat<N> for N > 1 and dispatches to the
+#             bit-sliced kernel, because X-20 made an N-bit level a precondition
+#             rather than a future generalisation. What replaced the rejection check
+#             is a dispatch check: both container overloads exist, and the N-bit
+#             VIEW form takes plane ARRAYS so that a loose view and a
+#             wrong-length array both fail to compile -- the promise the
+#             five-argument view form still cannot make.
+#             The floor has teeth, measured by mutating ops/covariance.hpp. The
+#             T3.10 rows are checks passed out of 12428, and the two ternary rows
+#             re-measured against the same suite:
+#               off-diagonal plane pair not doubled     7444
+#               cross-term weight 2^i instead of 2^(i+j) 7516
+#               selector forced to zero (signs ignored)  6284
+#               magnitude words not masked (D-13)        6192
+#               ternary cross term negated               9936
+#               ternary sumXX and sumYY swapped         10544
+#             The last two moved (they were 1136 and 1740 out of 3604) because the
+#             N = 1 identity now fails alongside the oracle rows: a ternary kernel
+#             mutated on its own stops agreeing with the bit-sliced one.
+#             Two older rows are quoted against the PRE-T3.10 suite and were not
+#             re-measured, because reproducing them needs the exact mutant text and
+#             a guessed mutant is worse than a dated number (checks passed out of
+#             3604):
 #               junk for windows over 11 clipped rows  2456
 #               over-aligned scratch allocated         3600
 #             The last of those passed 3604/3604 before the counter was extended to
@@ -810,7 +867,7 @@ opencv	test_morphology	299181	0
 opencv	test_resample	245312	0
 opencv	test_pyramid	262321	0
 opencv	test_derivative	48526	0
-opencv	test_covariance	3604	0
+opencv	test_covariance	17704	0
 opencv	test_corner	2749	0
 opencv	test_opticalflow	234	0
 opencv	test_harness	8	0
@@ -832,7 +889,7 @@ core	test_morphology	172632	0
 core	test_resample	245312	0
 core	test_pyramid	236429	0
 core	test_derivative	47675	0
-core	test_covariance	3604	0
+core	test_covariance	17704	0
 core	test_corner	2749	0
 core	test_opticalflow	148	0
 core	test_harness	8	0
@@ -852,7 +909,7 @@ noexcept	test_morphology	172632	0
 noexcept	test_resample	245312	0
 noexcept	test_pyramid	236429	0
 noexcept	test_derivative	47675	0
-noexcept	test_covariance	3604	0
+noexcept	test_covariance	17704	0
 noexcept	test_corner	2749	0
 noexcept	test_opticalflow	148	0
 noexcept	test_harness	8	0
@@ -872,7 +929,7 @@ debug	test_morphology	172632	0
 debug	test_resample	245312	0
 debug	test_pyramid	236429	0
 debug	test_derivative	47675	0
-debug	test_covariance	3604	0
+debug	test_covariance	17704	0
 debug	test_corner	2749	0
 debug	test_opticalflow	148	0
 debug	test_harness	8	0

@@ -3807,6 +3807,277 @@ softened to fit.
 
 ---
 
+### X-22 · What an N-bit pyramid level costs the LK covariance · `DONE`
+
+**Gates:** [T3.10](TASKS.md) — the price
+[T4.1](TASKS.md) / [E-7](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
+has to weigh a per-level bit depth against · spawned
+[E-13](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
+**Question:** How much does the bit-sliced covariance of
+[§7.5](ARCHITECTURE.md#75-lk-gradient-covariance) cost per LK window at N = 1, 2, 3
+and 4, on the reference device?
+
+**Why it exists.** [X-20](#x-20--hybrid-lk-accuracy-against-ground-truth-and-the-frontends-peak-footprint--done)
+found the tracker's accuracy failure **is the 1-bit pyramid** — on windows that
+never clip, four 1-bit levels are still ~600× worse than one — and
+[X-2](#x-2--pyramid-bit-growth--done) had measured the levels needing 1/3/4/5 bits.
+So T4.1 has to choose a bit depth per level, and a choice needs a price. Until
+T3.10 there was no N-bit covariance to price.
+
+**Hypothesis:** the cost is **quadratic in N**, because a product of two N-bit
+values is a sum over plane PAIRS. That is inherent, not an implementation choice:
+anything linear in N computes a different quantity.
+[D-21](ARCHITECTURE.md#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle)
+closed E-4 for **N = 1 only** and flagged exactly this asymmetry — the derivative
+is linear in N where the covariance is quadratic — so "generic-N is free" must not
+be read onto this table.
+
+**The cost model, written out before measuring.** Counting the popcounts the
+shipped kernel issues per word, with the two diagonal entries counted on the upper
+triangle and doubled:
+
+```
+N(N+1)/2  for sumXX  +  N(N+1)/2  for sumYY  +  2N^2 for sumXY  =  3N^2 + N
+N = 1: 4     N = 2: 14     N = 3: 30     N = 4: 52
+ratio: 1.00        3.50          7.50          13.00
+```
+
+At N = 1 that is exactly `countCovariance`'s four popcounts, which is the
+arithmetic statement of "ternary is the N = 1 instance".
+
+**Decision rule** *(written before measuring, in
+`bincv-cpp/benchmark/covariance_nbit_benchmark.cpp`'s header)*. **Nothing here
+chooses between two implementations**, so the rule is a falsifiable prediction
+about the curve rather than a selection between arms:
+- **Band A — ratios within ±25% of 1.00 / 3.50 / 7.50 / 13.00:** the popcount count
+  IS the cost model; T4.1 may price a bit depth with `3N² + N` and no code moves.
+- **Band B — ratios systematically BELOW:** the kernel is not purely popcount-bound
+  (the N² pairs come off 2N+2 loads, so there is ILP the count does not model).
+  Report the measured curve as the price and mark `3N² + N` an upper bound.
+- **Band C — ratios ABOVE:** something is quadratic that should not be. That
+  contradicts the shipped kernel's documented cost and
+  [CLAUDE.md](CLAUDE.md)'s rule applies — report it, do not adjust the doc.
+
+**Variants:** the T3.6 ternary entry point; the T3.10 bit-sliced entry point at
+N = 1, 2, 3, 4; and — added after the first run, see the caveat — the same
+bit-sliced kernel with its **per-row partial accumulator replaced by a
+window-wide one**, which is the shipped code with exactly one thing changed.
+**The N = 1 bit-sliced arm is the same kernel as the N = 2..4 arms**, not the
+ternary one, so the ratio column is one kernel's curve rather than a change of
+kernel at the first column.
+**Workload:** 640×480, 200 keypoints (the reference pipeline's
+`gftt_max_corners`), one window each, scattered so border windows clip;
+W = 7, 15, 31; `uint32_t` and `uint64_t`. The same frame, keypoint count and
+window generator [X-11](#x-11--incremental-versus-recomputed-window-reductions--done)
+and X-17 use.
+**Metric:** ns per window (median of 11 interleaved batches, spread reported),
+**and bytes per level beside it** — an N-bit level is (N+1) bits per pixel per
+derivative against ternary's 2, which is the other half of the trade.
+**Method:** `benchmark/covariance_nbit_benchmark.cpp` through
+`measure_util.hpp`'s protocol. Every arm's ANSWER is checked against a per-pixel
+reference at every timed window before anything is timed. Log:
+[`bincv-cpp/results/covariance_nbit_benchmark_pi4.log`](bincv-cpp/results/covariance_nbit_benchmark_pi4.log).
+
+**Result — reference device, `./scripts/run_on_pi.sh pi4 ./benchmark/covariance_nbit_benchmark`,
+ns per window, W = 31, `throttled=0x0` before and after:**
+
+| arm | uint32_t ns | vs N=1 | uint64_t ns | vs N=1 | predicted | bits/px/deriv |
+|---|---|---|---|---|---|---|
+| ternary (T3.6) | 977.0 | 1.08× | 797.4 | 1.06× | 1.00× | 2 |
+| bit-sliced N=1 | 903.3 | 1.00× | 754.7 | 1.00× | 1.00× | 2 |
+| bit-sliced N=2 | 3186.7 | 3.53× | 3161.1 | 4.19× | 3.50× | 3 |
+| bit-sliced N=3 | 5906.8 | 6.54× | 6803.4 | 9.01× | 7.50× | 4 |
+| bit-sliced N=4 | 11023.1 | 12.20× | 11719.8 | 15.53× | 13.00× | 5 |
+
+The footprint column is flat in W: 153 600 B at N = 1 against 384 000 B at N = 4
+for both derivatives of one 640×480 level.
+
+Spreads are **0.4–4.1%** on every row of the quoted run (run 3, the same binary,
+reaches 5.0%), so the differences above are far outside the noise they were
+measured against.
+
+**THE BAND VERDICT IS PER CELL, NOT PER WORD TYPE — and the first version of this
+entry got it wrong in BOTH directions.** The pre-registered band is ±25% of
+1.00 / 3.50 / 7.50 / 13.00, and applying that arithmetic to every measured cell of
+the quoted run gives:
+
+| ratio vs N=1 | `uint32_t` N=2 | N=3 | N=4 | `uint64_t` N=2 | N=3 | N=4 |
+|---|---|---|---|---|---|---|
+| W = 7  | **4.76× (C, +36%)** | 7.22× (A) | 12.96× (A) | **4.89× (C, +40%)** | **9.68× (C, +29%)** | 15.69× (A) |
+| W = 15 | 4.06× (A) | 6.61× (A) | 12.02× (A) | **4.52× (C, +29%)** | 9.24× (A) | 15.31× (A) |
+| W = 31 | 3.53× (A) | 6.54× (A) | 12.20× (A) | 4.19× (A) | 9.01× (A) | 15.53× (A) |
+
+Two corrections follow, and both are corrections to this entry rather than to the
+kernel:
+
+1. **"Band A holds at `uint32_t` at every window size and every N" was false.**
+   `uint32_t` / W = 7 / N = 2 is 4.76× against 3.50× predicted — +36%, past band A's
+   upper edge of 4.375× and squarely in **band C**, whose pre-registered rule is
+   "something is quadratic that should not be … report it, do not adjust the doc."
+   It reproduces inside the binary (4.65×, run 3), so it is not noise.
+2. **"It does not hold at `uint64_t`: N = 3 at +20% and N = 4 at +19%" was also
+   false, in the opposite direction.** ±20% is *inside* ±25%. Those W = 31 cells
+   are band A by the rule this entry wrote down before measuring, and calling them
+   band C was fitting the verdict to an impression instead of to the rule. The
+   genuine `uint64_t` band-C cells are at the SMALL windows: W = 7 at N = 2 and
+   N = 3, and W = 15 at N = 2.
+
+**WHAT THE BAND-C CELLS ARE, AND WHY THEY ARE NOT ATTRIBUTED HERE.** Every one of
+them is at W = 7 or W = 15 and concentrated at N = 2 — the corner where a window is
+1–3 words per row, so the per-window and per-row FIXED costs (the clip ladder, the
+row prologue, the 4N² per-row counters E-13 is registered against) are largest
+relative to the word work the model counts. They are also the cells the code-layout
+effect below moves most: the same `uint32_t` / W = 7 / N = 2 cell reads **3.27×**
+in the five-arm binary, i.e. band A. So the band-C readings are **reported and left
+open**, not explained — the same treatment the `uint64_t` crossover gets, and for
+the same reason.
+
+What survives all of it and does not depend on a band label: at W = 31 the 64-bit
+word is **SLOWER in absolute terms than the 32-bit one at N = 4** (11 720 ns
+against 11 023 ns) after being faster at every N below. That crossover is the
+finding with the most consequence for [E-9](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
+and for T4.1, which will be choosing bit depth and word width on the same levels.
+
+**THE OBVIOUS EXPLANATION IS WRONG, AND IT WAS MEASURED RATHER THAN ASSUMED.**
+Register pressure — 2N = 8 live magnitude words at N = 4, a 64-bit word being a
+whole GPR where two 32-bit words are not — predicts spills at exactly that corner.
+[`scripts/covariance_nbit_codegen.sh`](scripts/covariance_nbit_codegen.sh) compiles
+the kernel out of line per (N, word type) on the device and counts stack traffic in
+its own instruction stream
+([log](bincv-cpp/results/covariance_nbit_codegen_pi4.log)):
+
+| word | N=1 | N=2 | N=3 | N=4 |
+|---|---|---|---|---|
+| `uint32_t` stack ld/st | 20 | 60 | 69 | 69 |
+| `uint64_t` stack ld/st | 15 | 60 | 69 | 70 |
+
+Identical within one instruction, and the instruction counts within 2% (399 against
+406 at N = 4). **The hypothesis is rejected**; whatever `uint64_t` is paying at
+N ≥ 3 is not extra spill code. What remains is that a 31-pixel window is 1–2
+`uint64_t` words per row against 2–3 `uint32_t` words, so per-ROW costs are
+amortized over less work — which is what the next paragraph is about, and which
+this entry does **not** close.
+
+**THE PER-ROW ACCUMULATOR IS O(N²) PER ROW, AND THAT IS AN OPEN OBSERVATION RATHER
+THAN A RESULT.** The shipped kernel gives each row its own `BitSlicedPairCounts<N>`
+and folds it in — the per-row-partial shape T2.11 item 4 adopted on measurement at
+N = 1 (X-11b: 1.08× at W = 31). At N = 4 that is 4N² = 64 counters zeroed and 64
+added **per row**, independent of how many words the row has. The window-accumulator
+arm removes exactly that and nothing else:
+
+| W = 31 | uint32_t shipped | uint32_t window-acc | uint64_t shipped | uint64_t window-acc |
+|---|---|---|---|---|
+| N=1 | 903.3 | 898.1 | 754.7 | 766.0 |
+| N=2 | 3186.7 | 2739.8 | 3161.1 | 2323.7 |
+| N=3 | 5906.8 | 4835.7 | 6803.4 | 4266.2 |
+| N=4 | 11023.1 | 8791.2 | 11719.8 | 8431.8 |
+
+**That is 1.14–1.60× and it is NOT claimed as a result**, for a reason this entry
+found the hard way and reports rather than hides. See the caveat.
+
+**THE CAVEAT, AND IT LIMITS EVERY ABSOLUTE NUMBER ABOVE.** The first run of this
+benchmark had five arms — the shipped kernel only. Adding the four
+window-accumulator arms to the same translation unit **moved the shipped arms'
+timings, with no change to their source**: `uint64_t`, N = 3, W = 31 went from
+4652.6 ns to 6803.4 ns (**1.46×**), and its ratio column from 6.06× to 9.01×.
+A third run of the *same binary* as the second reproduces it to ~1% on every row,
+so this is **code layout between binaries, not run-to-run noise** — the effect
+`benchmark/morphology_path_benchmark.cpp` already recorded at ~10%, here at up to
+1.46×. All four runs are in the committed log with the caveat at the top.
+
+Three consequences, and they are the honest reading:
+1. **Within a binary this benchmark is reproducible to ~1%; between binaries the
+   same kernel's cost moves by up to ~1.5×.** T4.1 must re-measure in its own
+   binary rather than quote a number from this one.
+2. **The `uint64_t` band-C reading is not safe to attribute.** It is present in the
+   nine-arm binary and absent in the five-arm one (6.06× at N = 3 there, inside
+   band A). **And it is not only `uint64_t` that moves**: the `uint32_t` /
+   W = 7 / N = 2 cell goes 3.27× → 4.76× between the two binaries, a 1.46× swing
+   that crosses the band boundary — the same magnitude this caveat first attributed
+   to `uint64_t` alone. What is stable across both binaries is `uint32_t` at
+   **W = 15 and W = 31**, inside band A in both (though N = 2 still moves 1.18–1.31×
+   between them). Nothing at W = 7 is stable.
+3. **The window-accumulator comparison is confounded by the same effect** and
+   cannot be settled here: it is an interleaved within-binary comparison, and
+   interleaving controls for machine state, not for how the two arms' code was
+   laid out. The part that survives both binaries is `uint32_t` at N = 4, where the
+   shipped arm measured 11 393 ns (five-arm binary) and 11 023 ns (nine-arm)
+   against the window-accumulator's 8791 ns — a gap larger than the layout drift
+   between the two shipped readings.
+
+**RUN 4 — THE SHIPPED KERNEL AFTER TRIAGE, RE-MEASURED SO THIS TABLE DESCRIBES IT.**
+Triage removed dead work from `impl::BitSlicedPairCounts<N>::add()`: it folded the
+full N × N of `xx` and `yy` per window ROW, where the row body only ever writes the
+upper triangle and the combine only ever reads it — N² − N adds per row with two
+provably-zero operands, 12 of 64 at N = 4. The answers are bit-identical by
+construction. The benchmark was re-run on the device (`throttled=0x0` before and
+after) so that no number here describes code that is no longer shipped:
+
+| W = 31, `uint32_t` | N=1 | N=2 | N=3 | N=4 |
+|---|---|---|---|---|
+| run 2 (pre-triage) | 903.3 | 3186.7 | 5906.8 | 11023.1 |
+| run 4 (shipped) | 895.7 | 2929.7 | 6188.5 | 10551.3 |
+
+**Run 4 is NOT an A/B of that change and must not be read as one** — it is a fourth
+binary, so the 1.46× layout effect applies in full, and it moves in both directions
+(−4.3% at N = 4, **+4.8% at N = 3**), which a removal of dead work cannot do. What
+run 4 is good for is confirming the curve and the corrected band verdicts, and it
+does: the only band-C cells are again W = 7 at N = 2 (+26% at `uint32_t`, +30% at
+`uint64_t`); `uint64_t` at W = 31 is inside the band at every N (4.03× / 8.47× /
+15.18×), as the pre-registered rule says; and the ternary arm is again slower than
+the generic arm at N = 1 in all six of its rows. Pricing the per-row accumulator
+itself is still [E-13](ARCHITECTURE.md#9-open-questions-and-planned-experiments)'s
+job and still needs a binary per arm.
+
+**Conclusion.**
+1. **The covariance is quadratic in N and the quadratic is the popcount count.**
+   At the shipped word width and the LK window size the measured curve is 3.5×,
+   6.5×, 12.2× at N = 2, 3, 4 against a predicted 3.50×, 7.50×, 13.00× — band A,
+   and inside it on the low side at N = 3 and 4, which is band B's direction.
+   **`3N² + N` is a good model and a slight over-estimate AT W = 15 AND W = 31,
+   and an under-estimate at N = 2 on a 7×7 window** (+36%, band C, above). A price
+   quoted from this entry has to carry the window size it was measured at; T4.1's
+   interpolation to N = 5 is licensed at W = 15 and W = 31 and not below.
+2. **The price of the fix X-20 called for, stated plainly.** Going from a 1-bit to
+   a 4-bit level costs **12.2× the covariance time and 2.5× the derivative
+   footprint** (153 600 B → 384 000 B per level at 640×480). That is the number
+   T4.1 weighs against X-20's accuracy finding; **this entry takes no bit-depth
+   decision**, because the accuracy side of that trade is T4.1's to measure.
+3. **The ternary kernel is not made redundant — but level 0 PAYS 3–8% for it, and
+   the sign of that difference was buried by an absolute value.** "Within 1.08×"
+   is true and uninformative: in **all 24 measured rows** (4 runs × 2 word types ×
+   3 window sizes, three different binaries) the T3.6 ternary arm is **SLOWER** than the generic bit-sliced
+   arm at N = 1, by 3–8%, with the direction unanimous and the worst case
+   `uint32_t` / W = 31 / run 2 at 977.0 ns against 903.3 ns (8.2%, spreads 0.7–0.8%).
+   The two arms are like-for-like — `benchmark/covariance_nbit_benchmark.cpp` feeds
+   the ternary arm the same `LevelSet<1>` planes and the same window list inside the
+   same interleaved batch — so this is a real, if small, cost of routing level 0
+   through the specialization. **The table therefore does not support keeping the
+   ternary path for SPEED**, and it is not kept for speed:
+   [D-21](ARCHITECTURE.md#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle)
+   keeps it as a **test oracle**, which is exactly the property T3.10's 61 232
+   bit-identical positions per word type exercise. Whether the frontend should
+   *dispatch* level 0 to the bit-sliced kernel is left open here rather than decided:
+   it is one binary's reading of a 3–8% difference in the presence of a 1.46×
+   layout effect, and it belongs with E-13 in T4.1's own binary.
+
+**Decision.**
+1. **No shipped code changes**, and no D-record is promoted: the formulation was
+   already decided in [§7.5](ARCHITECTURE.md#75-lk-gradient-covariance) and this
+   entry priced it rather than choosing it.
+2. **[E-13](ARCHITECTURE.md#9-open-questions-and-planned-experiments) is registered
+   and gated on T4.1** — does the per-row partial accumulator still pay above
+   N = 1, where it is O(N²) per row against work that is O(N²) per word? It needs a
+   binary per arm to escape the layout confound this entry hit, which is why it is
+   an experiment and not a patch.
+3. **The layout sensitivity is recorded against
+   [E-12](ARCHITECTURE.md#9-open-questions-and-planned-experiments) as well.** X-21
+   sized the kernel-shape cost from a two-point fit on one binary each; this entry
+   is evidence that such a fit can move by 1.5× for reasons that are not in the
+   source, and E-12's design should account for it.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
@@ -3826,6 +4097,7 @@ no open experiment left, and the project has no provisional decision left.
 
 | ID | Question | Task | Runs during |
 |---|---|---|---|
+| E-13 | Does the per-row partial accumulator still pay above N = 1, where it is O(N²) per row against work that is O(N²) per word — and can the answer be measured free of the code-layout drift [X-22](#x-22--what-an-n-bit-pyramid-level-costs-the-lk-covariance--done) hit? | T4.1 | Phase 4 |
 | E-12 | How much of the `ops/` kernel's per-row cost is genericity that is not in N — runtime `BorderType`, the word type, the argument contract — and which of them? | T4.1 | Phase 4 |
 | E-7 | Bits needed per pyramid level | T4.1 | Phase 4 |
 | E-6 | Hybrid LK versus binary block matching | T4.2 | Phase 4 |

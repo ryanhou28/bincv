@@ -3049,17 +3049,19 @@ reproducible with `./scripts/run_on_pi.sh pi4 '../../scripts/genericn_evidence.s
 
 ---
 
-### T3.10 · N-bit gradient covariance · `TODO`
+### T3.10 · N-bit gradient covariance · `DONE`
 
 **Depends:** T3.6 (ternary case), T3.5 (N-bit derivative)
-**Gates:** [T4.1](#t41--e-7--pyramid-level-bit-depths--todo), which cannot measure
-bit depths for a frontend that cannot form the matrix above 1 bit
+**Gates:** [T4.1](#t41--e-7--pyramid-level-bit-depths--todo), which could not measure
+bit depths for a frontend that could not form the matrix above 1 bit — **unblocked**
 **Files:** `include/bincv-cpp/ops/covariance.hpp`
 
 **Why this exists.** [X-20](EXPERIMENTS.md) found the accuracy failure is the
 **1-bit pyramid**, not any kernel — a level whose pixels are bits cannot localise
 sub-pixel motion better than its own quantisation, and that error is multiplied by
-2^level. [X-2](EXPERIMENTS.md) measured levels needing 1/3/4/5 bits. So the fix is
+2^level. [X-2](EXPERIMENTS.md) measured levels needing 1/3/4/5 bits — a frame
+statistic [X-15](EXPERIMENTS.md) later superseded with the alphabet the arithmetic
+can REACH, **1/3/5/7**, which is what the suite sweeps. So the fix is
 N-bit levels — and **binCV cannot form the LK covariance at an N-bit level at
 all today.** T3.6 covers only `TernaryMat`; `SignedQuantMat<N>` for N>1
 deliberately matches no overload.
@@ -3088,13 +3090,87 @@ E-4 for N=1 only and said so explicitly, flagging that the covariance is quadrat
 in N where the derivative is linear. This task is where that matters.
 
 **Done when**
-- Matches a per-pixel reference EXACTLY at N = 1, 2, 3, 4 — integers, no tolerance
-- The N=1 path is bit-identical to T3.6's ternary result, proven by comparison
-- Correct for windows clipped at frame edges
-- No heap; views per D-5; D-13 for the reduction
-- Cost in N measured and recorded, so T4.1 can price a bit-depth choice
+- Matches a per-pixel reference EXACTLY at N = 1..7 — integers, no tolerance ✔
+- The N=1 path is bit-identical to T3.6's ternary result, proven by comparison ✔
+- Correct for windows clipped at frame edges ✔
+- No heap; views per D-5; D-13 for the reduction ✔
+- Cost in N measured and recorded, so T4.1 can price a bit-depth choice ✔
 
-**Verify:** V-ALL, plus the device
+**Verify:** V-ALL, plus the device ✔
+
+**Landed.** `gradientCovariance` gained two overloads — a plane-ARRAY view form
+`(const BinMatConstView<W> (&magX)[N], ..., signX, signY, window)` and the
+`SignedQuantMat<N, W>` container form — and the ternary pair is unchanged, more
+specialized, and still selected at N = 1. Cost is `3N² + N` popcounts per word
+(4 / 14 / 30 / 52 at N = 1..4), one traversal whatever N is, **no heap and no
+caller scratch**: the 4N² per-pair counters are automatic storage and the sign
+planes are still XORed in the word loop, so D-15 axis 3's no-plane property
+survives at N > 1. `int64_t` bounds every entry by `(2^N − 1)²·P`, which is
+216 225 at N = 4 and a 31×31 window.
+
+`tests/test_covariance.cpp` grew from 3604 checks to **17 704**, against a
+SECOND, integer, per-pixel oracle written from the plane bits upward — not the
+ternary float oracle widened, so a fault in the reconstruction cannot cancel
+against itself. **1 532 800 window positions** compared at **every N from 1 to 7** across all
+four word types — the depths driven by `MAX_BIT_DEPTH` rather than hand-unrolled,
+so the sweep and the float-exactness guard cannot drift apart, and raised from 4 to
+7 in triage because X-15 superseded X-2's "1/3/4/5" with the reachable alphabet
+**1/3/5/7**, i.e. the depths T4.1 will actually run — from a full window outside
+every edge to a full window past it;
+**61 232 positions per word type** require T3.10's kernel at N = 1 to be
+bit-identical to T3.6's, with the two calls spelled so that neither can be the
+other. Four mutations of the new kernel fail 4900–6200 checks each — re-measured
+against the widened sweep in triage, an undoubled off-diagonal now fails **8716**
+and a `2^(i·j)` cross-term weight **8572**. The one change triage made to the
+kernel itself, dropping N² − N provably-zero adds per row from the accumulator's
+`add()`, leaves the suite at **17 704/17 704** when reverted — which is the point:
+it is a no-op arithmetically, so the sweeps are the check that it is.
+
+[X-22](EXPERIMENTS.md) is the price: **3.5× / 6.5× / 12.2×** at N = 2, 3, 4 for
+**1.5× / 2× / 2.5×** the derivative footprint, on the reference device. It takes no
+bit-depth decision and carries two caveats T4.1 must read — a `uint64_t` band-C
+reading whose obvious cause was measured and rejected, and a **1.46× code-layout
+drift between binaries built from unchanged source**. It registered
+[E-13](ARCHITECTURE.md#9-open-questions-and-planned-experiments): the per-row
+partial accumulator D-15 item 4 adopted at N = 1 is O(N²) per row here.
+
+**TRIAGE (post-review), and what it changed.** Four things in the kernel and its
+suite, none of them a disagreement with the oracle:
+
+1. **The plane-ARRAY overload had no bound on `N`**, unlike every sibling
+   (`QuantMat` 1..8, `SignedQuantMat` 1..7, `pyrDownRoute`, `derivativeX`), so a
+   hand-assembled 33-plane view array reached `int64_t(1) << (i + j)` with a shift
+   exponent of 64 — undefined behaviour, reproduced under `-fsanitize=undefined`.
+   Fixed with a `static_assert(N >= 1 && N <= 8)`, and the guard has its own ctest
+   case: `tests/test_covariance_n_bound.cpp` is a translation unit that MUST NOT
+   compile, built by a `WILL_FAIL` test. Watched go red with the assert removed.
+2. **The sweep now runs `1..MAX_BIT_DEPTH` with `MAX_BIT_DEPTH = 7`**, driven by the
+   constant rather than hand-unrolled. It stopped at 4 on X-2's "1/3/4/5 bits",
+   which [X-15](EXPERIMENTS.md) had already superseded: the reachable alphabet is
+   **1/3/5/7**, so N = 5 and N = 7 — the depths T4.1 runs — were never instantiated.
+   A second `static_assert` inside the sweep is keyed to its OWN N, so the depths
+   swept and the float-exactness guard cannot drift apart again.
+3. **The no-heap counter now runs at every depth 1..7**, not only 3 and 4. N = 1 and
+   N = 2 are the depths the lowest levels run at and were the ones left unmeasured.
+4. **`BitSlicedPairCounts::add()` folded the full N × N of `xx`/`yy` per row** where
+   the row body writes and the combine reads only the upper triangle — N² − N adds
+   per row with two provably-zero operands, 12 of 64 at N = 4, paid per window row.
+   Removed. Answers are bit-identical by construction and the suite is green with
+   the change reverted; [X-22](EXPERIMENTS.md) run 4 re-measured the shipped kernel
+   on the device so no number in the docs describes code that is not in the tree.
+
+**What this task did NOT do.** `ops/corner.hpp` is still ternary-only — it reads
+`countAndSplit` and `SlidingWindowCount` directly rather than going through
+`gradientCovariance`, so widening it is its own piece of work. **And neither is
+`ops/opticalFlow.hpp`, which matters more, because T4.1's metric is tracking
+accuracy.** The tracker is 1-bit END TO END and swapping in the new covariance
+overload is not sufficient: `lkLevel()` takes `TernaryMat` and rejects
+`SignedQuantMat<3, W>` outright ("template argument '3' does not match '1'");
+`LKLevel` holds ONE `dxMag`/`dyMag` view and 1-bit `prev`/`next` frames; and
+`residualSums` / `windowMeanAbsDiff` are built on `signedMaskedSum` and the
+identity `|J_interp − I| = I + (1 − 2I)·J_interp`, which holds only because `I` is
+a BIT. **An N-bit tracker — N-bit frames plus a bit-sliced residual — is a separate
+task**, and T4.1 inherits the covariance half only.
 
 ---
 
@@ -3165,13 +3241,51 @@ precondition, is that the bit-parallel arithmetic is not the cause — it agrees
 a per-pixel float implementation to 0.000e+00 px — and that a stationary frame
 tracks exactly at every level count.
 
-**This task therefore also has to build the kernel that makes an N-bit level
-usable**: `ops/covariance.hpp` is exact only for a TERNARY derivative, so binCV
-cannot currently form the 2×2 matrix at an N-bit level at all. That is the
-bit-sliced weighted-sum covariance of
-[ARCHITECTURE §7.5](ARCHITECTURE.md#75-lk-gradient-covariance) — each magnitude
-plane pair contributing at its binary weight — and it is a new kernel, not a wider
-version of the existing one.
+~~**This task therefore also has to build the kernel that makes an N-bit level
+usable**~~ — **[T3.10](#t310--n-bit-gradient-covariance--done) built it, so this
+task no longer has to.** `ops/covariance.hpp` now has the bit-sliced weighted-sum
+covariance of [ARCHITECTURE §7.5](ARCHITECTURE.md#75-lk-gradient-covariance),
+exact at every N, bit-identical to the ternary kernel at N = 1, and priced on the
+reference device by [X-22](EXPERIMENTS.md).
+
+**WHAT T3.10 / X-22 HANDS THIS TASK, AND THE TWO CAVEATS THAT COME WITH IT.**
+**It hands this task the COVARIANCE and nothing else.** `ops/opticalFlow.hpp` is
+still 1-bit end to end — `lkLevel()` takes `TernaryMat`, `LKLevel` holds one
+magnitude plane per derivative and 1-bit frames, and `residualSums` /
+`windowMeanAbsDiff` rest on `|J_interp − I| = I + (1 − 2I)·J_interp`, an identity
+that holds only because `I` is a bit. Measuring accuracy per bit depth therefore
+still needs an N-bit tracker, which is a task of its own; T3.10 removed the kernel
+blocker, not the tracker one.
+
+- **The price of a bit depth, per LK window** (`uint32_t`, 640×480, 31×31, the
+  shipped default word width): **3.5× / 6.5× / 12.2×** the 1-bit covariance time at
+  N = 2, 3, 4, for **1.5× / 2× / 2.5×** the derivative footprint per level
+  (153 600 B → 384 000 B at N = 4). Those two columns are the cost side of E-7's
+  trade; the accuracy side is this task's to measure.
+- **`3N² + N` popcounts per word is the model, AND IT HAS A WINDOW SIZE ATTACHED.**
+  At W = 15 and W = 31 it is inside X-22's ±25% band and slightly over-estimates,
+  which is the safe direction. **At W = 7 it UNDER-predicts N = 2 by ~36%**
+  (4.76× measured against 3.50×, `uint32_t`) — a band-C reading, reported rather
+  than absorbed, and layout-confounded (the same cell reads 3.27× in the five-arm
+  binary). So it is usable for interpolating to N = 5 **at the LK window sizes it
+  was measured at**; at small windows treat it as a lower bound and re-measure.
+- **Caveat 1: do not quote X-22's absolute nanoseconds, and this is NOT only a
+  `uint64_t` problem.** The same kernel's cost moved **1.46×** between two binaries
+  built from unchanged source — code layout, reproduced to ~1% within each binary.
+  The `uint32_t` column moves too: W = 7, N = 2 reads 3.27× in one binary and
+  4.76× in the other, **crossing the band boundary**. Only `uint32_t` at W = 15 and
+  W = 31 stayed inside band A in both. Re-measure in this task's own binary.
+- **Caveat 2: `uint64_t` runs ~20% ABOVE the model at N ≥ 3 and is SLOWER than
+  `uint32_t` in absolute terms at N = 4**, reversing at N = 4 the ordering it holds
+  at every N below. Register pressure was the obvious cause and was measured and
+  **rejected**. If this task is also choosing a per-level word width
+  ([E-9](ARCHITECTURE.md#9-open-questions-and-planned-experiments)), the two choices
+  interact and cannot be taken independently.
+- **[E-13](ARCHITECTURE.md#9-open-questions-and-planned-experiments) is registered
+  against this task**: D-15 item 4's per-row partial accumulator is O(N²) per row in
+  the new kernel, and a window-wide accumulator measured 1.14–1.60× faster at
+  N > 1 — in one binary, confounded by caveat 1, which is why it is an experiment
+  and not a patch.
 
 **WHAT T3.9 / [X-21](EXPERIMENTS.md) HANDS THIS TASK.** T3.9 closed E-4 while this
 task was still `TODO`, and it changes what T4.1 has to worry about and what it has
@@ -3197,8 +3311,11 @@ any of it is measured**, which is the only time a rule may be touched.
    each magnitude **plane pair** contributing at its binary weight. That is
    **quadratic in `N`** where the derivative's ripple-borrow work is linear.
    **"Generic-N is free" is a statement about `N = 1` and must not be read as
-   "N-bit levels are free."** Nothing in the project has measured an `N > 1`
-   per-pixel cost, and this task is the first that can.
+   "N-bit levels are free."** ~~Nothing in the project has measured an `N > 1`
+   per-pixel cost, and this task is the first that can.~~ **T3.10 wrote that kernel
+   and [X-22](EXPERIMENTS.md) measured it** — 12.2× at N = 4 — so the quadratic is
+   now a number rather than a warning. The rest of this item stands: it is a cost to
+   weigh, not a reason not to raise N.
 
 3. **The per-row cost X-21 found is worst exactly on the levels this task targets.**
    The shipped derivative runs **+93% per row** against a hand-written binary-only

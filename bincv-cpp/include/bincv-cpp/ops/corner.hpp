@@ -348,10 +348,16 @@
 ///     `blockSize`, a stride too short for a row and a null map are programming
 ///     errors reported by BINCV_ASSERT in debug builds and undefined in release.
 ///     There is no error return.
-///  4. **Ternary planes only, i.e. pyramid level 0** -- ops/covariance.hpp's
-///     promise 1, inherited unchanged. The container spelling takes `TernaryMat`
-///     and rejects `SignedQuantMat<N>` for `N > 1` at compile time; the view
-///     spelling cannot and does not.
+///  4. **Ternary planes only, i.e. pyramid level 0.** The container spelling takes
+///     `TernaryMat` and rejects `SignedQuantMat<N>` for `N > 1` at compile time;
+///     the view spelling cannot and does not.
+///     **THIS IS NOW T3.7's OWN LIMIT AND NOT ops/covariance.hpp's.** That file's
+///     promise 1 used to say the same thing and no longer does: T3.10 gave the
+///     covariance a bit-sliced N-bit kernel, because X-20 found the tracker's
+///     accuracy failure IS the 1-bit pyramid. The corner response has not been
+///     widened to match -- it reads `countAndSplit` and `SlidingWindowCount`
+///     directly rather than going through `gradientCovariance`, so widening it is
+///     its own piece of work and not a re-export of T3.10's.
 ///  5. **Padding is never counted** (D-13), inherited from the reductions.
 
 #include <algorithm>  // std::sort, push_heap, pop_heap -- none of which allocates

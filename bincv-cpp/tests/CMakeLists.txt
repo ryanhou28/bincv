@@ -236,6 +236,32 @@ foreach(TEST_NAME ${BINCV_CORE_TESTS})
 endforeach()
 
 # ---------------------------------------------------------------------------
+# A translation unit that MUST NOT COMPILE (T3.10 triage)
+#
+# The plane-ARRAY overload of gradientCovariance() is templated on the plane count
+# and shipped without a bound on it, so a hand-assembled 33-plane view array reached
+# `int64_t(1) << (i + j)` with a shift exponent of 64 -- undefined behaviour,
+# reproduced under -fsanitize=undefined before the fix. The fix is a static_assert
+# bounding N at QuantMat's 1..8, matching pyrDownRoute and derivativeX.
+#
+# A static_assert inside a function body is invisible to SFINAE, so the detection
+# traits test_covariance.cpp uses for its other dispatch cases cannot test this one.
+# What can is a target that is EXCLUDE_FROM_ALL -- an ordinary build never touches
+# it -- and a ctest case whose command BUILDS it, registered WILL_FAIL. ctest passes
+# only when the compile fails. Remove the static_assert and the file compiles, links
+# and runs, `cmake --build` exits 0, and the case goes red.
+#
+# Excluded from the check-count harvest twice over: verify.sh skips WILL_FAIL tests
+# and skips tests whose command is not a single executable. No expected-checks row.
+# ---------------------------------------------------------------------------
+bincv_add_test_target(test_covariance_n_bound test_covariance_n_bound.cpp)
+set_target_properties(test_covariance_n_bound PROPERTIES EXCLUDE_FROM_ALL TRUE)
+add_test(NAME test_covariance_n_bound
+         COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+                                  --target test_covariance_n_bound)
+set_tests_properties(test_covariance_n_bound PROPERTIES WILL_FAIL TRUE)
+
+# ---------------------------------------------------------------------------
 # The harness's own regression check
 #
 # T1.7 asks that a deliberately failing assertion still produce a non-zero exit

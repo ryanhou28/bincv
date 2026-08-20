@@ -1,0 +1,28 @@
+# X-22 supporting evidence: where the N-bit covariance's registers go.
+#
+# Produced by scripts/covariance_nbit_codegen.sh on the reference device. It tests
+# the obvious explanation for the ONE place the measured curve sits ABOVE the
+# 3N^2+N model -- N = 4 with uint64_t words, 15.5x against a predicted 13.0x --
+# namely register pressure, and REJECTS it: stack traffic and instruction count are
+# within 2% of the uint32_t instantiation at every N, and the uint32_t N = 4 arm
+# sits BELOW the model.
+covariance N-bit codegen: stack traffic inside the kernel
+  arch: aarch64   compiler: g++ (Debian 14.2.0-19) 14.2.0
+
+  word       N         insns stack ld/st      bytes
+  uint32_t   1           230         20        920
+  uint32_t   2           382         60        860
+  uint32_t   3           392         69        912
+  uint32_t   4           399         69        948
+  uint64_t   1           211         15        844
+  uint64_t   2           382         60        856
+  uint64_t   3           396         69        912
+  uint64_t   4           406         70        944
+
+  "stack ld/st" counts every load/store through sp or x29, prologue and
+  epilogue included, so the number to read is its GROWTH with N rather than
+  its absolute value.
+
+# Environment: pi4, Raspberry Pi 4 Model B Rev 1.5, aarch64 / 6.18.34+rpt-rpi-v8,
+# g++ (Debian 14.2.0-19) 14.2.0, performance governor, taskset -c 3,
+# throttled=0x0 before and after.

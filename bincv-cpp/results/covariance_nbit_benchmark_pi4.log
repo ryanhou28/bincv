@@ -1,0 +1,377 @@
+# X-22 -- the N-bit LK covariance cost curve, reference device (pi4)
+#
+# FOUR RUNS, IN THREE DIFFERENT BINARIES. Read the caveat before quoting any
+# absolute ns figure out of this file.
+#
+#   RUN 1  benchmark/covariance_nbit_benchmark.cpp with FIVE arms -- the shipped
+#          kernel only (ternary + bit-sliced N=1..4). This source is not the one in
+#          the tree: the four `window-acc` arms were added afterwards.
+#   RUN 2  the committed source, NINE arms. This is the run X-22's tables quote.
+#   RUN 3  the SAME BINARY as run 2, re-run, to separate code layout from run-to-run
+#          noise. It reproduces run 2 to ~1% on every row.
+#   RUN 4  the nine arms again after the T3.10 triage removed dead work from the
+#          per-row accumulator's add(). A third binary; see its own header.
+#
+# Runs 2 and 3 agree to ~1%; run 1 disagrees with both by up to 46% on arms whose
+# SOURCE did not change (uint64_t, N=3, W=31: 4652.6 ns in run 1 against 6803.4 and
+# 6771.5 ns in runs 2 and 3). Same device, same governor, same pinning, clean
+# throttle state throughout all three. What differs is the number of template
+# instantiations in one translation unit -- the code-layout effect
+# benchmark/morphology_path_benchmark.cpp already recorded at ~10%, here at up to
+# 1.46x. So: within a binary this benchmark is reproducible to ~1%, and between
+# binaries the same kernel's absolute cost moves by up to ~1.5x. X-22's conclusions
+# are written against that, and T4.1 must re-measure in its own binary rather than
+# quote a number from this one.
+#
+# Environment (identical for all four runs):
+#   device:           pi4
+#   cpu:              Raspberry Pi 4 Model B Rev 1.5
+#   arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+#   compiler:         g++ (Debian 14.2.0-19) 14.2.0
+#   governor:         performance (restored to ondemand on exit)
+#   core pinning:     taskset -c 3
+#   throttled before: throttled=0x0
+#   throttled after:  throttled=0x0
+#
+# ---------------------------------------------------------------------------
+# RUN 1 -- five arms, shipped kernel only (source not in the tree)
+# ---------------------------------------------------------------------------
+=== T3.10 / X-22: what an N-bit level costs per LK window ===
+target: aarch64 -- AUTHORITATIVE (the reference device is where this closes)
+640x480, 200 keypoints, one window each -- the LK access pattern of
+ARCHITECTURE 7.5. The cost model and the rule are in this file's header,
+written before measuring. 'predicted' is (3N^2+N)/4, the popcount count
+per word; 'vs N=1' is measured against the BIT-SLICED N=1 arm, so the
+column is one kernel's curve in N and not a change of kernel.
+
+  === uint32_t ===
+  W    arm               ns/window     vs N=1  predicted    spread bits/px/deriv
+  7    ternary (T3.6)        207.7       1.03x      1.00x      4.6%            2
+  7    bit-sliced N=1        201.8       1.00x      1.00x      3.4%            2
+  7    bit-sliced N=2        660.5       3.27x      3.50x      2.2%            3
+  7    bit-sliced N=3       1311.8       6.50x      7.50x      1.0%            4
+  7    bit-sliced N=4       2496.6      12.37x     13.00x      0.6%            5
+  W=7: operator new across 1000 kernel calls: 0 (no scratch at any N)
+  15   ternary (T3.6)        446.3       1.05x      1.00x      1.6%            2
+  15   bit-sliced N=1        425.6       1.00x      1.00x      2.1%            2
+  15   bit-sliced N=2       1314.8       3.09x      3.50x      1.0%            3
+  15   bit-sliced N=3       2672.6       6.28x      7.50x      0.5%            4
+  15   bit-sliced N=4       5138.0      12.07x     13.00x      0.5%            5
+  W=15: operator new across 1000 kernel calls: 0 (no scratch at any N)
+  31   ternary (T3.6)        986.7       1.08x      1.00x      0.8%            2
+  31   bit-sliced N=1        914.6       1.00x      1.00x      1.0%            2
+  31   bit-sliced N=2       2736.7       2.99x      3.50x      0.6%            3
+  31   bit-sliced N=3       5825.4       6.37x      7.50x      0.6%            4
+  31   bit-sliced N=4      11393.0      12.46x     13.00x      0.4%            5
+  W=31: operator new across 1000 kernel calls: 0 (no scratch at any N)
+
+  footprint at 640x480, both derivatives, one level:
+    N=1 (ternary)   153600 B     N=2   230400 B     N=3   307200 B     N=4   384000 B
+
+  === uint64_t ===
+  W    arm               ns/window     vs N=1  predicted    spread bits/px/deriv
+  7    ternary (T3.6)        199.0       1.04x      1.00x      2.3%            2
+  7    bit-sliced N=1        192.2       1.00x      1.00x      2.7%            2
+  7    bit-sliced N=2        647.0       3.37x      3.50x      0.5%            3
+  7    bit-sliced N=3       1196.3       6.22x      7.50x      2.9%            4
+  7    bit-sliced N=4       2911.7      15.15x     13.00x      0.6%            5
+  W=7: operator new across 1000 kernel calls: 0 (no scratch at any N)
+  15   ternary (T3.6)        398.7       1.05x      1.00x      1.8%            2
+  15   bit-sliced N=1        381.3       1.00x      1.00x      2.3%            2
+  15   bit-sliced N=2       1201.9       3.15x      3.50x      1.1%            3
+  15   bit-sliced N=3       2311.3       6.06x      7.50x      1.1%            4
+  15   bit-sliced N=4       5802.5      15.22x     13.00x      0.3%            5
+  W=15: operator new across 1000 kernel calls: 0 (no scratch at any N)
+  31   ternary (T3.6)        811.7       1.06x      1.00x      0.7%            2
+  31   bit-sliced N=1        767.2       1.00x      1.00x      0.7%            2
+  31   bit-sliced N=2       2332.3       3.04x      3.50x      0.6%            3
+  31   bit-sliced N=3       4652.6       6.06x      7.50x      0.8%            4
+  31   bit-sliced N=4      12064.9      15.73x     13.00x      0.6%            5
+  W=31: operator new across 1000 kernel calls: 0 (no scratch at any N)
+
+  footprint at 640x480, both derivatives, one level:
+    N=1 (ternary)   153600 B     N=2   230400 B     N=3   307200 B     N=4   384000 B
+
+sink: 43712821660 (printed so nothing above can be optimized away)
+
+# ---------------------------------------------------------------------------
+# RUN 2 -- nine arms, the committed source. X-22's tables quote this run.
+# ---------------------------------------------------------------------------
+=== T3.10 / X-22: what an N-bit level costs per LK window ===
+target: aarch64 -- AUTHORITATIVE (the reference device is where this closes)
+640x480, 200 keypoints, one window each -- the LK access pattern of
+ARCHITECTURE 7.5. The cost model and the rule are in this file's header,
+written before measuring. 'predicted' is (3N^2+N)/4, the popcount count
+per word; 'vs N=1' is measured against the BIT-SLICED N=1 arm, so the
+column is one kernel's curve in N and not a change of kernel.
+
+  === uint32_t ===
+  W    arm               ns/window     vs N=1  predicted    spread bits/px/deriv
+  7    ternary (T3.6)        189.0       1.03x      1.00x      2.1%            2
+  7    bit-sliced N=1        183.6       1.00x      1.00x      3.0%            2
+  7    bit-sliced N=2        874.8       4.76x      3.50x      0.9%            3
+  7    bit-sliced N=3       1325.8       7.22x      7.50x      1.1%            4
+  7    bit-sliced N=4       2379.6      12.96x     13.00x      0.7%            5
+  7    window-acc N=1        187.0       1.02x      1.00x      3.3%            2
+  7    window-acc N=2        683.7       3.72x      3.50x      1.8%            3
+  7    window-acc N=3       1101.3       6.00x      7.50x      1.3%            4
+  7    window-acc N=4       1940.0      10.57x     13.00x      1.3%            5
+  W=7: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  15   ternary (T3.6)        428.4       1.05x      1.00x      1.5%            2
+  15   bit-sliced N=1        408.1       1.00x      1.00x      1.2%            2
+  15   bit-sliced N=2       1656.7       4.06x      3.50x      2.5%            3
+  15   bit-sliced N=3       2696.4       6.61x      7.50x      0.9%            4
+  15   bit-sliced N=4       4905.6      12.02x     13.00x      0.6%            5
+  15   window-acc N=1        405.1       0.99x      1.00x      0.9%            2
+  15   window-acc N=2       1327.9       3.25x      3.50x      0.8%            3
+  15   window-acc N=3       2211.9       5.42x      7.50x      1.0%            4
+  15   window-acc N=4       3931.7       9.63x     13.00x      1.0%            5
+  W=15: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  31   ternary (T3.6)        977.0       1.08x      1.00x      0.7%            2
+  31   bit-sliced N=1        903.3       1.00x      1.00x      0.8%            2
+  31   bit-sliced N=2       3186.7       3.53x      3.50x      1.4%            3
+  31   bit-sliced N=3       5906.8       6.54x      7.50x      0.5%            4
+  31   bit-sliced N=4      11023.1      12.20x     13.00x      0.5%            5
+  31   window-acc N=1        898.1       0.99x      1.00x      0.8%            2
+  31   window-acc N=2       2739.8       3.03x      3.50x      0.8%            3
+  31   window-acc N=3       4835.7       5.35x      7.50x      0.8%            4
+  31   window-acc N=4       8791.2       9.73x     13.00x      0.9%            5
+  W=31: operator new across 1800 kernel calls: 0 (no scratch at any N)
+
+  footprint at 640x480, both derivatives, one level:
+    N=1 (ternary)   153600 B     N=2   230400 B     N=3   307200 B     N=4   384000 B
+
+  === uint64_t ===
+  W    arm               ns/window     vs N=1  predicted    spread bits/px/deriv
+  7    ternary (T3.6)        184.0       1.04x      1.00x      2.5%            2
+  7    bit-sliced N=1        177.5       1.00x      1.00x      2.5%            2
+  7    bit-sliced N=2        867.3       4.89x      3.50x      0.9%            3
+  7    bit-sliced N=3       1718.6       9.68x      7.50x      1.1%            4
+  7    bit-sliced N=4       2784.2      15.69x     13.00x      0.5%            5
+  7    window-acc N=1        189.9       1.07x      1.00x      4.1%            2
+  7    window-acc N=2        627.7       3.54x      3.50x      1.0%            3
+  7    window-acc N=3       1108.9       6.25x      7.50x      2.0%            4
+  7    window-acc N=4       2054.6      11.58x     13.00x      1.5%            5
+  W=7: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  15   ternary (T3.6)        382.7       1.05x      1.00x      1.3%            2
+  15   bit-sliced N=1        364.5       1.00x      1.00x      1.4%            2
+  15   bit-sliced N=2       1648.9       4.52x      3.50x      0.6%            3
+  15   bit-sliced N=3       3368.1       9.24x      7.50x      2.1%            4
+  15   bit-sliced N=4       5579.1      15.31x     13.00x      0.8%            5
+  15   window-acc N=1        376.7       1.03x      1.00x      1.4%            2
+  15   window-acc N=2       1182.8       3.24x      3.50x      0.7%            3
+  15   window-acc N=3       2096.1       5.75x      7.50x      1.1%            4
+  15   window-acc N=4       4021.3      11.03x     13.00x      0.8%            5
+  W=15: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  31   ternary (T3.6)        797.4       1.06x      1.00x      0.6%            2
+  31   bit-sliced N=1        754.7       1.00x      1.00x      1.1%            2
+  31   bit-sliced N=2       3161.1       4.19x      3.50x      0.6%            3
+  31   bit-sliced N=3       6803.4       9.01x      7.50x      1.6%            4
+  31   bit-sliced N=4      11719.8      15.53x     13.00x      0.7%            5
+  31   window-acc N=1        766.0       1.01x      1.00x      0.5%            2
+  31   window-acc N=2       2323.7       3.08x      3.50x      0.4%            3
+  31   window-acc N=3       4266.2       5.65x      7.50x      0.4%            4
+  31   window-acc N=4       8431.8      11.17x     13.00x      0.5%            5
+  W=31: operator new across 1800 kernel calls: 0 (no scratch at any N)
+
+  footprint at 640x480, both derivatives, one level:
+    N=1 (ternary)   153600 B     N=2   230400 B     N=3   307200 B     N=4   384000 B
+
+sink: 91197161269 (printed so nothing above can be optimized away)
+
+# ---------------------------------------------------------------------------
+# RUN 3 -- the same binary as run 2, re-run. Layout against noise.
+# ---------------------------------------------------------------------------
+=== T3.10 / X-22: what an N-bit level costs per LK window ===
+target: aarch64 -- AUTHORITATIVE (the reference device is where this closes)
+640x480, 200 keypoints, one window each -- the LK access pattern of
+ARCHITECTURE 7.5. The cost model and the rule are in this file's header,
+written before measuring. 'predicted' is (3N^2+N)/4, the popcount count
+per word; 'vs N=1' is measured against the BIT-SLICED N=1 arm, so the
+column is one kernel's curve in N and not a change of kernel.
+
+  === uint32_t ===
+  W    arm               ns/window     vs N=1  predicted    spread bits/px/deriv
+  7    ternary (T3.6)        189.1       1.03x      1.00x      1.3%            2
+  7    bit-sliced N=1        182.9       1.00x      1.00x      1.5%            2
+  7    bit-sliced N=2        850.6       4.65x      3.50x      2.0%            3
+  7    bit-sliced N=3       1307.9       7.15x      7.50x      1.0%            4
+  7    bit-sliced N=4       2408.0      13.17x     13.00x      0.6%            5
+  7    window-acc N=1        188.1       1.03x      1.00x      2.4%            2
+  7    window-acc N=2        653.0       3.57x      3.50x      2.9%            3
+  7    window-acc N=3       1063.7       5.82x      7.50x      1.4%            4
+  7    window-acc N=4       1929.2      10.55x     13.00x      1.0%            5
+  W=7: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  15   ternary (T3.6)        424.8       1.06x      1.00x      1.5%            2
+  15   bit-sliced N=1        402.1       1.00x      1.00x      1.1%            2
+  15   bit-sliced N=2       1637.0       4.07x      3.50x      1.7%            3
+  15   bit-sliced N=3       2682.3       6.67x      7.50x      0.8%            4
+  15   bit-sliced N=4       4961.2      12.34x     13.00x      0.5%            5
+  15   window-acc N=1        399.2       0.99x      1.00x      1.5%            2
+  15   window-acc N=2       1299.9       3.23x      3.50x      1.2%            3
+  15   window-acc N=3       2180.0       5.42x      7.50x      1.8%            4
+  15   window-acc N=4       3911.0       9.73x     13.00x      0.8%            5
+  W=15: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  31   ternary (T3.6)        972.6       1.08x      1.00x      0.9%            2
+  31   bit-sliced N=1        897.8       1.00x      1.00x      0.7%            2
+  31   bit-sliced N=2       3119.0       3.47x      3.50x      3.2%            3
+  31   bit-sliced N=3       5888.4       6.56x      7.50x      0.4%            4
+  31   bit-sliced N=4      11101.8      12.37x     13.00x      0.5%            5
+  31   window-acc N=1        893.3       1.00x      1.00x      0.7%            2
+  31   window-acc N=2       2727.5       3.04x      3.50x      0.7%            3
+  31   window-acc N=3       4801.9       5.35x      7.50x      0.6%            4
+  31   window-acc N=4       8739.5       9.73x     13.00x      0.5%            5
+  W=31: operator new across 1800 kernel calls: 0 (no scratch at any N)
+
+  footprint at 640x480, both derivatives, one level:
+    N=1 (ternary)   153600 B     N=2   230400 B     N=3   307200 B     N=4   384000 B
+
+  === uint64_t ===
+  W    arm               ns/window     vs N=1  predicted    spread bits/px/deriv
+  7    ternary (T3.6)        184.3       1.04x      1.00x      3.4%            2
+  7    bit-sliced N=1        176.7       1.00x      1.00x      2.4%            2
+  7    bit-sliced N=2        845.2       4.78x      3.50x      1.2%            3
+  7    bit-sliced N=3       1710.8       9.68x      7.50x      1.5%            4
+  7    bit-sliced N=4       2798.2      15.83x     13.00x      0.4%            5
+  7    window-acc N=1        190.5       1.08x      1.00x      2.0%            2
+  7    window-acc N=2        617.7       3.49x      3.50x      5.0%            3
+  7    window-acc N=3       1103.2       6.24x      7.50x      0.7%            4
+  7    window-acc N=4       2065.3      11.69x     13.00x      1.0%            5
+  W=7: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  15   ternary (T3.6)        380.4       1.05x      1.00x      2.1%            2
+  15   bit-sliced N=1        362.9       1.00x      1.00x      2.4%            2
+  15   bit-sliced N=2       1637.9       4.51x      3.50x      2.4%            3
+  15   bit-sliced N=3       3366.9       9.28x      7.50x      1.3%            4
+  15   bit-sliced N=4       5599.0      15.43x     13.00x      0.4%            5
+  15   window-acc N=1        376.1       1.04x      1.00x      1.0%            2
+  15   window-acc N=2       1191.4       3.28x      3.50x      2.0%            3
+  15   window-acc N=3       2097.0       5.78x      7.50x      0.8%            4
+  15   window-acc N=4       4026.7      11.10x     13.00x      0.7%            5
+  W=15: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  31   ternary (T3.6)        794.5       1.06x      1.00x      1.2%            2
+  31   bit-sliced N=1        748.6       1.00x      1.00x      1.2%            2
+  31   bit-sliced N=2       3154.1       4.21x      3.50x      0.6%            3
+  31   bit-sliced N=3       6771.5       9.05x      7.50x      1.6%            4
+  31   bit-sliced N=4      11681.8      15.60x     13.00x      0.6%            5
+  31   window-acc N=1        762.5       1.02x      1.00x      1.3%            2
+  31   window-acc N=2       2369.4       3.16x      3.50x      1.1%            3
+  31   window-acc N=3       4262.6       5.69x      7.50x      0.5%            4
+  31   window-acc N=4       8419.4      11.25x     13.00x      0.9%            5
+  W=31: operator new across 1800 kernel calls: 0 (no scratch at any N)
+
+  footprint at 640x480, both derivatives, one level:
+    N=1 (ternary)   153600 B     N=2   230400 B     N=3   307200 B     N=4   384000 B
+
+sink: 91417737808 (printed so nothing above can be optimized away)
+
+# ---------------------------------------------------------------------------
+# RUN 4 -- the SAME nine arms, rebuilt after the T3.10 triage
+#
+# WHAT CHANGED IN THE SOURCE, AND WHAT DID NOT. Triage removed dead work from
+# impl::BitSlicedPairCounts<N>::add(): it was folding the FULL N x N of xx and yy
+# per window row, where bitSlicedPairRowRegion only ever writes the upper triangle
+# and combineBitSlicedPairs only ever reads it -- N^2 - N adds per row whose two
+# operands were provably both zero (12 of 64 at N = 4). The answers are
+# bit-identical by construction, which is what tests/test_covariance.cpp's N = 1..7
+# sweeps check; this run is here so that X-22's table describes the kernel that
+# actually ships. Nothing else moved, and the window-acc arms are untouched.
+#
+# AND IT IS NOT A MEASUREMENT OF THAT CHANGE. This is a fourth binary, so the
+# ~1.5x code-layout effect above applies to it in full: against run 2 the shipped
+# arm is 4.3% FASTER at uint32_t/W=31/N=4 and 4.8% SLOWER at uint32_t/W=31/N=3.
+# A dead-work removal cannot be both. Read this run as a re-confirmation of the
+# CURVE, not as an A/B -- the A/B that would price the per-row accumulator at all
+# is E-13, and it needs a binary per arm.
+#
+# WHAT IT CONFIRMS. (a) The band-C cells stay where the corrected X-22 puts them:
+# W = 7 at N = 2 for both word types (+26%, +30%) and nowhere at W = 31.
+# (b) uint64_t at W = 31 is inside the +/-25% band at every N (4.03x / 8.47x /
+# 15.18x), as the pre-registered rule says and as the first version of X-22 denied.
+# (c) The ternary arm is again SLOWER than the generic bit-sliced arm at N = 1 in
+# every one of its six rows, by 3-8% -- a third binary, same direction.
+# (d) operator new across 1800 kernel calls per window size: 0, at every N.
+#
+# Environment: as above; throttled=0x0 before and after.
+# ---------------------------------------------------------------------------
+
+=== T3.10 / X-22: what an N-bit level costs per LK window ===
+target: aarch64 -- AUTHORITATIVE (the reference device is where this closes)
+640x480, 200 keypoints, one window each -- the LK access pattern of
+ARCHITECTURE 7.5. The cost model and the rule are in this file's header,
+written before measuring. 'predicted' is (3N^2+N)/4, the popcount count
+per word; 'vs N=1' is measured against the BIT-SLICED N=1 arm, so the
+column is one kernel's curve in N and not a change of kernel.
+
+  === uint32_t ===
+  W    arm               ns/window     vs N=1  predicted    spread bits/px/deriv
+  7    ternary (T3.6)        185.7       1.03x      1.00x      2.3%            2
+  7    bit-sliced N=1        180.2       1.00x      1.00x      1.7%            2
+  7    bit-sliced N=2        796.7       4.42x      3.50x      1.7%            3
+  7    bit-sliced N=3       1414.1       7.85x      7.50x      1.5%            4
+  7    bit-sliced N=4       2229.0      12.37x     13.00x      1.6%            5
+  7    window-acc N=1        184.5       1.02x      1.00x      2.5%            2
+  7    window-acc N=2        667.9       3.71x      3.50x      2.3%            3
+  7    window-acc N=3       1115.3       6.19x      7.50x      1.3%            4
+  7    window-acc N=4       1908.8      10.59x     13.00x      0.9%            5
+  W=7: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  15   ternary (T3.6)        421.6       1.06x      1.00x      0.9%            2
+  15   bit-sliced N=1        399.0       1.00x      1.00x      1.8%            2
+  15   bit-sliced N=2       1528.5       3.83x      3.50x      0.8%            3
+  15   bit-sliced N=3       2853.6       7.15x      7.50x      2.8%            4
+  15   bit-sliced N=4       4659.3      11.68x     13.00x      0.6%            5
+  15   window-acc N=1        396.7       0.99x      1.00x      1.6%            2
+  15   window-acc N=2       1314.1       3.29x      3.50x      2.0%            3
+  15   window-acc N=3       2228.7       5.59x      7.50x      0.7%            4
+  15   window-acc N=4       3904.7       9.79x     13.00x      0.5%            5
+  W=15: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  31   ternary (T3.6)        971.1       1.08x      1.00x      0.9%            2
+  31   bit-sliced N=1        895.7       1.00x      1.00x      1.1%            2
+  31   bit-sliced N=2       2929.7       3.27x      3.50x      0.7%            3
+  31   bit-sliced N=3       6188.5       6.91x      7.50x      2.8%            4
+  31   bit-sliced N=4      10551.3      11.78x     13.00x      0.4%            5
+  31   window-acc N=1        890.0       0.99x      1.00x      1.0%            2
+  31   window-acc N=2       2728.4       3.05x      3.50x      0.8%            3
+  31   window-acc N=3       4836.3       5.40x      7.50x      1.0%            4
+  31   window-acc N=4       8766.2       9.79x     13.00x      0.8%            5
+  W=31: operator new across 1800 kernel calls: 0 (no scratch at any N)
+
+  footprint at 640x480, both derivatives, one level:
+    N=1 (ternary)   153600 B     N=2   230400 B     N=3   307200 B     N=4   384000 B
+
+  === uint64_t ===
+  W    arm               ns/window     vs N=1  predicted    spread bits/px/deriv
+  7    ternary (T3.6)        180.7       1.04x      1.00x      1.8%            2
+  7    bit-sliced N=1        174.3       1.00x      1.00x      2.3%            2
+  7    bit-sliced N=2        793.0       4.55x      3.50x      0.7%            3
+  7    bit-sliced N=3       1617.5       9.28x      7.50x      1.6%            4
+  7    bit-sliced N=4       2743.3      15.74x     13.00x      0.6%            5
+  7    window-acc N=1        187.6       1.08x      1.00x      2.5%            2
+  7    window-acc N=2        628.1       3.60x      3.50x      1.0%            3
+  7    window-acc N=3       1110.4       6.37x      7.50x      0.5%            4
+  7    window-acc N=4       2063.8      11.84x     13.00x      0.4%            5
+  W=7: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  15   ternary (T3.6)        377.2       1.05x      1.00x      1.2%            2
+  15   bit-sliced N=1        358.6       1.00x      1.00x      1.2%            2
+  15   bit-sliced N=2       1565.3       4.36x      3.50x      1.4%            3
+  15   bit-sliced N=3       3154.5       8.80x      7.50x      1.5%            4
+  15   bit-sliced N=4       5478.6      15.28x     13.00x      0.5%            5
+  15   window-acc N=1        373.5       1.04x      1.00x      1.4%            2
+  15   window-acc N=2       1183.4       3.30x      3.50x      1.8%            3
+  15   window-acc N=3       2121.2       5.91x      7.50x      0.8%            4
+  15   window-acc N=4       4044.3      11.28x     13.00x      0.7%            5
+  W=15: operator new across 1800 kernel calls: 0 (no scratch at any N)
+  31   ternary (T3.6)        791.9       1.06x      1.00x      1.1%            2
+  31   bit-sliced N=1        747.8       1.00x      1.00x      0.8%            2
+  31   bit-sliced N=2       3017.0       4.03x      3.50x      0.6%            3
+  31   bit-sliced N=3       6335.0       8.47x      7.50x      1.1%            4
+  31   bit-sliced N=4      11348.6      15.18x     13.00x      0.6%            5
+  31   window-acc N=1        759.9       1.02x      1.00x      0.5%            2
+  31   window-acc N=2       2324.8       3.11x      3.50x      0.6%            3
+  31   window-acc N=3       4285.4       5.73x      7.50x      0.5%            4
+  31   window-acc N=4       8433.2      11.28x     13.00x      0.6%            5
+  W=31: operator new across 1800 kernel calls: 0 (no scratch at any N)
+
+  footprint at 640x480, both derivatives, one level:
+    N=1 (ternary)   153600 B     N=2   230400 B     N=3   307200 B     N=4   384000 B
+
+sink: 92531642239 (printed so nothing above can be optimized away)

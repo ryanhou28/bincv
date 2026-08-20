@@ -695,6 +695,40 @@ plane pair contributes at its binary weight, so the covariance is a weighted
 combination of the same masked popcounts rather than a single one. The reduction
 interface is therefore specified over plane pairs, not over a single mask.
 
+**[T3.10](TASKS.md) ships that**, and it is no longer a generalisation waiting for
+a caller. [X-20](EXPERIMENTS.md) found the tracker's accuracy failure **is** the
+1-bit pyramid — on windows that never clip, four 1-bit levels are still ~600×
+worse than one — so an N-bit level became a precondition rather than an
+optimisation, and until T3.10 binCV could not form this matrix above one bit at
+all. For magnitude planes `m[0..N-1]` and sign plane `s`:
+
+```
+sumXX = Σ_i Σ_j 2^(i+j) · popcount(m_x[i] & m_x[j])          // sign squares away
+sumYY = Σ_i Σ_j 2^(i+j) · popcount(m_y[i] & m_y[j])
+sumXY = Σ_i Σ_j 2^(i+j) · [ popcount(m_x[i] & m_y[j] & ~(s_x^s_y))
+                          - popcount(m_x[i] & m_y[j] &  (s_x^s_y)) ]
+```
+
+**It is quadratic in N where §7.4's derivative is linear**, and that is inherent to
+a product of two N-bit values rather than a formulation to be optimised away —
+[D-21](#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle)
+closed E-4 for N = 1 only and flagged exactly this. Exploiting the symmetry of the
+two diagonal entries, the cost is `3N² + N` popcounts per word — 4 at N = 1, which
+is precisely `countCovariance`'s four, so **ternary is the N = 1 instance and is
+required to be bit-identical to it**, checked at 61 232 window positions per word
+type rather than argued. One traversal whatever N is, no heap, and no caller
+scratch: the N² per-pair counters are automatic storage and the sign planes are
+still XORed inside the word loop, so D-15 axis 3's no-plane property survives.
+[X-22](EXPERIMENTS.md) priced it on the reference device — **3.5× / 6.5× / 12.2×
+at N = 2, 3, 4 against a 1-bit level, for 1.5× / 2× / 2.5× the derivative
+footprint** — and that table is what [T4.1](TASKS.md) weighs a per-level bit depth
+against. X-22 takes no bit-depth decision, and it carries two caveats worth reading
+before quoting it: the same kernel's absolute cost moved by up to 1.46× between
+two binaries built from unchanged source, and **`3N² + N` is a model with a window
+size attached** — it is inside X-22's ±25% band at W = 15 and W = 31 but
+under-predicts N = 2 by ~36% at W = 7, where the per-window and per-row fixed costs
+are largest relative to the word work.
+
 ### 7.6 Corner response
 
 Built from the same covariance machinery as §7.5.
@@ -1761,7 +1795,8 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-4**~~ **RESOLVED** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | **Answered: no. At N = 1 the generic route and the specialization produce a derivative of the SAME SIZE to the byte (2264 B) and the SAME instruction count (567), time to within 0.1%, and generic-N's whole object is 90 B smaller — they are not literally the same instruction stream (GCC allocates different registers), and the equality holds for the derivative only; the covariance and count differ by 40 B and 24 B and time inside the batch spread. `N` STAYS ARBITRARY; no cap.** [D-21](#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle), [X-21](EXPERIMENTS.md) · **This is an N = 1 result and closes only the N = 1 question** — every arm was `QuantMat<1>`/`TernaryMat`, and it says nothing about N = 3 or N = 5, where §7.5's covariance contributes plane PAIRS and is quadratic in N where the derivative is linear. **The larger cost X-21 found while answering this is [E-12](#9-open-questions-and-planned-experiments), not this row** — both binCV routes sit 8–43% in time and 2.63× in code size (`-fno-exceptions`; 2.84× with exceptions on) above a hand-written binary-only control, and the decomposition puts most of it in genericity that is NOT in N. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | Phase 3 (T3.9) ✔ |
 | ~~**E-8**~~ **RESOLVED** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | **Answered, and the question was leading: there is no tiebreak. A third route the register did not list — the WORD-LOCAL unshuffle — is word-parallel and costs zero bytes, and beat the gather loop by 14.6×/26.4× and the frame-masked route by 11.3×/8.3×. `ops/` gains a word-local resample primitive taking `(src, dst)`; no plan, no scratch.** [D-17](#d-17-horizontal-decimation-is-word-local), [X-14](EXPERIMENTS.md) | T3.4 | Phase 3 (T3.4) ✔ |
 | **E-12** | How much of the `ops/` kernel's **per-row** cost is genericity that is **not** in N — the runtime `BorderType`, the word type, the `BINCV_ASSERT` contract — and which of the three dominates? | [X-21](EXPERIMENTS.md) measured the shipped derivative at **+15% per word and +93% per row** against a hand-written binary-only control (an exact two-point fit over 640×480 and 94×60 — two equations, two unknowns, no residual; a third frame size would test it). Scalarizing N's `a[N]`/`b[N]`/`srcRow[N]` arrays was measured at triage and recovers only **+19.8 of the 93 points**; **+70.6 points is the genericity X-21 did not separate**, and the fix for a runtime `BorderType` is not the fix for a templated word type. A per-row cost is paid 5.4× more often per pixel at 94×60 than at 640×480, so **the frames that pay most are the upper pyramid levels** — the same levels [E-7](#9-open-questions-and-planned-experiments) and T4.1 live on. | Whether `ops/` kernels get a compile-time border form, a monomorphic word-width path, or neither. | T3.5's derivative and every `ops/` kernel with a per-row prologue; **T4.1's N-bit paths run on the levels that pay most** | **Phase 4** (T4.1) |
-| **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | The reference never chose its depths — they fell out of using `CV_8U`. **NO LONGER DEFERRABLE, AND NO LONGER AN OPTIMISATION.** [X-20](EXPERIMENTS.md) measured tracking accuracy on the reference pipeline's own edge-map content degrading MONOTONICALLY as 1-bit levels are added — 0.0017 px RMS at one level to 3.25 px at four for a 1 px translation, and 0.0024 → 1.47 px on the subset of windows that never clip, so the effect survives the clipping control — because a level whose pixels are bits cannot localise a sub-pixel motion better than its own quantisation, and that error is multiplied by 2^level on the way down. **It is a precondition but NOT the whole of T3.8's miss**: X-20 also separates a level-0 stationary point (no pyramid involved) and the clipped coarse-level window (about half of the four-level error), neither of which a deeper alphabet fixes. 1 bit is all binCV can build today (the popcount covariance is exact only for a ternary derivative), so T4.1 must ALSO produce §7.5's bit-sliced weighted-sum covariance. Footprint axis already measured ([X-15](EXPERIMENTS.md)): uncapped to re-binarized is 1.65×, because level 0 dominates. X-15 also corrected this row's old premise — the reachable alphabet is 1/3/5/7 bits; 1/3/4/5 was one 256² frame's contents. | Pyramid level bit depths, and whether the hybrid tracker is usable at all on real content. | T3.4 (parameterized), **T3.8 (blocked on it for real content)** | **Phase 4** (T4.1) |
+| **E-13** | Does the **per-row partial accumulator** still pay above N = 1? In [§7.5](#75-lk-gradient-covariance)'s bit-sliced covariance it costs 8N² operations **per row** — 128 at N = 4 — against work that is O(N²) **per word**, and a 31-pixel window is 1–2 `uint64_t` words per row. | [X-22](EXPERIMENTS.md) measured a window-wide accumulator **1.14–1.60× faster at N = 2, 3, 4** and level with the shipped form at N = 1 — but in one binary, and that same entry measured the shipped arm's own cost moving **1.46× between binaries built from unchanged source**, so the comparison is confounded by code layout and X-22 declines to close on it. The shape being questioned is [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)'s item 4, which was decided on measurement **at N = 1** (X-11b: 1.08× at W = 31), where the per-row cost is 8 operations rather than 128. | Whether the N-bit covariance keeps per-row partials, and whether D-15 item 4 is N-dependent. | T3.10's kernel; **T4.1 runs on the levels where N > 1** | **Phase 4** (T4.1) |
+| **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | The reference never chose its depths — they fell out of using `CV_8U`. **NO LONGER DEFERRABLE, AND NO LONGER AN OPTIMISATION.** [X-20](EXPERIMENTS.md) measured tracking accuracy on the reference pipeline's own edge-map content degrading MONOTONICALLY as 1-bit levels are added — 0.0017 px RMS at one level to 3.25 px at four for a 1 px translation, and 0.0024 → 1.47 px on the subset of windows that never clip, so the effect survives the clipping control — because a level whose pixels are bits cannot localise a sub-pixel motion better than its own quantisation, and that error is multiplied by 2^level on the way down. **It is a precondition but NOT the whole of T3.8's miss**: X-20 also separates a level-0 stationary point (no pyramid involved) and the clipped coarse-level window (about half of the four-level error), neither of which a deeper alphabet fixes. ~~1 bit is all binCV can build today ... so T4.1 must ALSO produce §7.5's bit-sliced weighted-sum covariance~~ — **[T3.10](TASKS.md) built it and [X-22](EXPERIMENTS.md) priced it**, so the kernel is no longer part of this row's scope: `ops/covariance.hpp` has the bit-sliced weighted-sum form, exact at every N and bit-identical to the ternary kernel at N = 1, at **3.5× / 6.5× / 12.2×** the 1-bit covariance time for N = 2, 3, 4 (`uint32_t`, W = 31, and read X-22's per-cell band table and its two caveats before interpolating). **What is left for T4.1 is the accuracy side of the trade, and the TRACKER** — `ops/opticalFlow.hpp` is still 1-bit end to end (`LKLevel` holds one magnitude plane per derivative and 1-bit frames; `residualSums` and `windowMeanAbsDiff` are built on the identity `|J − I| = I + (1 − 2I)·J`, which holds only because `I` is a bit), so swapping in the new covariance overload is not by itself an N-bit tracker. Footprint axis already measured ([X-15](EXPERIMENTS.md)): uncapped to re-binarized is 1.65×, because level 0 dominates. X-15 also corrected this row's old premise — the reachable alphabet is 1/3/5/7 bits; 1/3/4/5 was one 256² frame's contents. | Pyramid level bit depths, and whether the hybrid tracker is usable at all on real content. | T3.4 (parameterized), **T3.8 (blocked on it for real content)** | **Phase 4** (T4.1) |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |
 | **E-10** | Does the corner response need a frame-sized float map, or a rolling ring? | **CONFIRMED AND QUANTIFIED AT THE FRONTEND LEVEL BY [X-20](EXPERIMENTS.md), AND NOT MARGINAL: the float response map is 1 228 800 B of a 1 721 568 B frontend — 71.4%, MORE THAN EVERYTHING ELSE COMBINED**, where every other plane is one or two BITS per pixel and the tracker itself is 0.2%. A rolling three-row ring would take the frontend from 1.72 MB to ~0.49 MB, **3.5×**, for roughly 2× the response compute. On a project whose tiebreak is memory this is now the single largest lever left. (The 1.72 MB is a per-frame reading in one term — the candidate array, 8 754 survivors at 640×480 and 9 774 on the real frame — and it is measured against no `CV_8U` denominator; that comparison is E-5's.) | Whether `cornerMinEigenVal` keeps a caller-provided frame map or gains a streaming form. | T3.7 (made caller-provided rather than decided) | **should be scheduled** |
@@ -1786,6 +1821,18 @@ is gated on T4.1 for the reason the **Gates** column exists: the cost is worst o
 the upper pyramid levels, which is exactly where T4.1's N-bit paths will run, so
 measuring it afterward would mean either rewriting them or keeping a shape the data
 does not support.
+
+**E-13 arrived the same way, out of T3.10.** [X-22](EXPERIMENTS.md) priced the
+N-bit covariance so that T4.1 could weigh a bit depth, and found on the way that a
+decision D-15 took on measurement **at N = 1** — one accumulator per row — is being
+carried into a kernel where its cost grows as N² while the work it is amortized
+over grows as N² per *word*. The measurement that would settle it is confounded, in
+that same entry, by a code-layout effect large enough (1.46× on unchanged source)
+to swamp the difference. **Neither half of that belongs in a log**: the question is
+real, the evidence is not conclusive, and the experiment that closes it has to be
+designed to escape the confound rather than repeat it. It is gated on T4.1 for
+E-12's reason — T4.1 is what runs at N > 1, so a shape change afterward is a
+rewrite.
 
 The **Gates** column is why the **Runs** column is not simply "Phase 4". E-1, E-2
 and E-3 constrained code written in Phases 1–2; running them afterward would have
