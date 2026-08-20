@@ -1864,6 +1864,279 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
 // never fires on real content.
 // ===========================================================================
 
+
+// ---------------------------------------------------------------------------
+// T4.1 / E-7: the N-BIT TRACKER.
+//
+// ops/opticalFlow.hpp grew a generic-N path so that E-7 can ask its question at
+// all -- a pyramid level deeper than one bit was not previously trackable. Two
+// things have to be true before any accuracy number measured on it means
+// anything, and both are checked here rather than argued:
+//
+//   1. AT N == 1 THE GENERIC PATH MUST BE THE HAND-WRITTEN PATH. Not close --
+//      identical. The 1-bit tracker is the one every result in X-20 was measured
+//      on, so if the generic route disagreed with it at the depth both express,
+//      every depth comparison would be measuring the rewrite rather than the
+//      depth.
+//   2. AT N > 1 THE BIT-SLICED RESIDUAL MUST BE EXACT. There is no hand-written
+//      path to compare against there, so the control is a per-pixel loop in
+//      `long long` that knows nothing about bit-slicing -- the same shape of
+//      control `refTrack` is for the 1-bit residual.
+// ---------------------------------------------------------------------------
+namespace {
+
+/// @brief Per-pixel `sum(V * G)` over a clipped window, in exact integers.
+/// @note Deliberately naive and deliberately NOT bit-sliced: it reads pixel
+///       VALUES through QuantMat::at and multiplies them. It reproduces
+///       displacedRow's BORDER_REPLICATE by clamping, which is the one piece of
+///       the kernel's behaviour a per-pixel control still has to model.
+template <size_t N, typename WordType>
+unsigned replicatedAt(const bincv::QuantMat<N, WordType>& m, long long x, long long y) {
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x > m.cols() - 1) x = m.cols() - 1;
+    if (y > m.rows() - 1) y = m.rows() - 1;
+    return m.at(static_cast<int>(y), static_cast<int>(x));
+}
+
+/// @brief The ten sums `impl::residualSums` produces, computed pixel by pixel.
+template <size_t N, typename WordType>
+void referenceResidualSums(const bincv::QuantMat<N, WordType>& prev,
+                           const bincv::QuantMat<N, WordType>& next,
+                           const bincv::SignedQuantMat<N, WordType>& dx,
+                           const bincv::SignedQuantMat<N, WordType>& dy, const bincv::Rect& window,
+                           long long tapX, long long tapY, long long (&outX)[5],
+                           long long (&outY)[5]) {
+    for (int k = 0; k < 5; ++k) { outX[k] = 0; outY[k] = 0; }
+    const int x0 = std::max(0, window.x);
+    const int y0 = std::max(0, window.y);
+    const int x1 = std::min(prev.cols(), window.x + window.width);
+    const int y1 = std::min(prev.rows(), window.y + window.height);
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const long long gx = dx.at(y, x);
+            const long long gy = dy.at(y, x);
+            const long long taps[5] = {
+                replicatedAt(next, x + tapX, y + tapY),
+                replicatedAt(next, x + tapX + 1, y + tapY),
+                replicatedAt(next, x + tapX, y + tapY + 1),
+                replicatedAt(next, x + tapX + 1, y + tapY + 1),
+                prev.at(y, x)};
+            for (int k = 0; k < 5; ++k) {
+                outX[k] += taps[k] * gx;
+                outY[k] += taps[k] * gy;
+            }
+        }
+    }
+}
+
+/// @brief `2N^2` popcounts per word against `2N` multiplies per pixel, at one N.
+template <size_t N, typename WordType>
+size_t checkResidualAtDepth(uint64_t seed) {
+    const int width = 77, height = 53;
+    bincv::QuantMat<N, WordType> prev(width, height), next(width, height);
+    const unsigned maxValue = (1u << N) - 1u;
+    uint64_t state = seed;
+    auto nextRandom = [&state]() {
+        state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+        return static_cast<unsigned>(state >> 33);
+    };
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            prev.set(y, x, nextRandom() % (maxValue + 1u));
+            next.set(y, x, nextRandom() % (maxValue + 1u));
+        }
+    }
+    bincv::SignedQuantMat<N, WordType> dx(width, height), dy(width, height);
+    bincv::derivativeX(prev, dx);
+    bincv::derivativeY(prev, dy);
+    const auto level = bincv::lkLevel<N>(prev, next, dx, dy);
+
+    size_t mismatches = 0;
+    for (int trial = 0; trial < 60; ++trial) {
+        const bincv::Rect window(static_cast<int>(nextRandom() % 60u) - 4,
+                                 static_cast<int>(nextRandom() % 40u) - 4,
+                                 3 + static_cast<int>(nextRandom() % 20u),
+                                 3 + static_cast<int>(nextRandom() % 20u));
+        // Taps run negative and past the right edge on purpose: that is the only
+        // way the control exercises the replicate border the kernel implements
+        // with mask-selects rather than with a clamp.
+        const long long tapX = static_cast<long long>(nextRandom() % 11u) - 5;
+        const long long tapY = static_cast<long long>(nextRandom() % 11u) - 5;
+        const auto region = bincv::impl::clipRegion<WordType>(
+            static_cast<size_t>(width), static_cast<size_t>(height), window);
+        if (region.isEmpty) continue;
+
+        bincv::impl::TapSums sumsX, sumsY;
+        bincv::impl::residualSums(level, region, tapX, tapY, sumsX, sumsY);
+        long long wantX[5], wantY[5];
+        referenceResidualSums(prev, next, dx, dy, window, tapX, tapY, wantX, wantY);
+        const long long gotX[5] = {sumsX.t00, sumsX.t01, sumsX.t10, sumsX.t11, sumsX.self};
+        const long long gotY[5] = {sumsY.t00, sumsY.t01, sumsY.t10, sumsY.t11, sumsY.self};
+        for (int k = 0; k < 5; ++k) {
+            if (gotX[k] != wantX[k] || gotY[k] != wantY[k]) ++mismatches;
+        }
+    }
+    return mismatches;
+}
+
+} // namespace
+
+BINCV_TEST(Flow, GenericNAtOneBitIsTheHandWrittenPath_uint32_t) {
+    // BinMat<W> IS QuantMat<1, W> and TernaryMat<W> IS SignedQuantMat<1, W>, so
+    // both lkLevel overloads accept these arguments. Partial ordering picks the
+    // MORE SPECIALIZED 1-bit one for a bare call; `lkLevel<1>` names the generic
+    // one, because binding `1` to the 1-bit overload's `typename WordType` is
+    // ill-formed and removes it from the set. That is what makes this comparison
+    // possible at all, and it is checked here so a future change to either
+    // signature fails loudly rather than silently comparing a path with itself.
+    Frontend<uint32_t> fe(160, 120, 3);
+    renderWarped(fe.prev[0], Warp{});
+    renderWarped(fe.next[0], translation(1.3, -0.7));
+    fe.build();
+
+    static_assert(std::is_same<decltype(bincv::lkLevel(fe.prev[0], fe.next[0], fe.dx[0], fe.dy[0])),
+                               bincv::LKLevel<uint32_t>>::value,
+                  "a bare lkLevel call must select the 1-bit overload");
+    static_assert(
+        std::is_same<decltype(bincv::lkLevel<1>(fe.prev[0], fe.next[0], fe.dx[0], fe.dy[0])),
+                     bincv::LKLevelN<1, uint32_t>>::value,
+        "lkLevel<1> must select the generic-N overload");
+
+    std::vector<bincv::LKLevelN<1, uint32_t>> generic;
+    for (size_t i = 0; i < fe.levels.size(); ++i) {
+        generic.push_back(bincv::lkLevel<1>(fe.prev[i], fe.next[i], fe.dx[i], fe.dy[i]));
+    }
+
+    std::vector<Point2f> points;
+    for (int y = 24; y < 120 - 24; y += 6) {
+        for (int x = 24; x < 160 - 24; x += 6) {
+            points.push_back(Point2f{static_cast<float>(x), static_cast<float>(y)});
+        }
+    }
+    std::vector<Point2f> handWritten(points.size()), genericOut(points.size());
+    std::vector<uint8_t> handStatus(points.size()), genericStatus(points.size());
+    std::vector<float> handErr(points.size()), genericErr(points.size());
+    LKParams params;
+
+    bincv::calcOpticalFlowPyrLK<uint32_t>(fe.levels.data(), fe.levels.size(), points.data(),
+                                          handWritten.data(), handStatus.data(), handErr.data(),
+                                          points.size(), params);
+    bincv::calcOpticalFlowPyrLK<1, uint32_t>(generic.data(), generic.size(), points.data(),
+                                             genericOut.data(), genericStatus.data(),
+                                             genericErr.data(), points.size(), params);
+
+    size_t statusDiff = 0, positionDiff = 0, errDiff = 0, tracked = 0;
+    for (size_t i = 0; i < points.size(); ++i) {
+        if (handStatus[i] != genericStatus[i]) ++statusDiff;
+        if (handStatus[i] != 0) ++tracked;
+        // EXACT equality, deliberately. Both paths do the same double arithmetic
+        // in the same order; anything but a bit-for-bit match is a real difference.
+        if (handWritten[i].x != genericOut[i].x || handWritten[i].y != genericOut[i].y) {
+            ++positionDiff;
+        }
+        // `err` is the interesting one: the 1-bit path uses the collapsed identity
+        // `|J - I| = I + (1 - 2I)*J` and the generic path evaluates |.| per pixel,
+        // so this compares two DIFFERENT computations of the same quantity.
+        if (handErr[i] != genericErr[i]) ++errDiff;
+    }
+    std::printf("  generic-N at N=1 vs hand-written: %zu points, %zu tracked,"
+                " status/pos/err differences %zu/%zu/%zu\n",
+                points.size(), tracked, statusDiff, positionDiff, errDiff);
+    BINCV_CHECK(tracked > 100);
+    BINCV_CHECK_EQ(statusDiff, size_t{0});
+    BINCV_CHECK_EQ(positionDiff, size_t{0});
+    BINCV_CHECK_EQ(errDiff, size_t{0});
+}
+
+BINCV_TEST(Flow, NBitResidualIsExactAgainstPerPixel_uint32_t) {
+    // N = 1 is in the sweep even though the test above already covers that depth:
+    // here it is the generic kernel against a per-pixel control rather than
+    // against the other kernel, so a fault shared by both bit-sliced paths would
+    // still show up.
+    const size_t n1 = checkResidualAtDepth<1, uint32_t>(11);
+    const size_t n2 = checkResidualAtDepth<2, uint32_t>(22);
+    const size_t n3 = checkResidualAtDepth<3, uint32_t>(33);
+    const size_t n4 = checkResidualAtDepth<4, uint32_t>(44);
+    const size_t n5 = checkResidualAtDepth<5, uint32_t>(55);
+    std::printf("  bit-sliced residual vs per-pixel, mismatching sums at N=1..5:"
+                " %zu %zu %zu %zu %zu\n", n1, n2, n3, n4, n5);
+    BINCV_CHECK_EQ(n1, size_t{0});
+    BINCV_CHECK_EQ(n2, size_t{0});
+    BINCV_CHECK_EQ(n3, size_t{0});
+    BINCV_CHECK_EQ(n4, size_t{0});
+    BINCV_CHECK_EQ(n5, size_t{0});
+}
+
+BINCV_TEST(Flow, MixedDepthLadderTracksAndIsNotTheUniformOne_uint32_t) {
+    // The mixed-depth ladder is the form E-7's question needs, so it has to run
+    // before E-7 can be measured. This checks the PLUMBING -- that every level is
+    // visited coarse-to-fine at its own depth and that points come back tracked --
+    // not the accuracy, which is X-24's to measure.
+    const int width = 160, height = 120;
+    bincv::QuantMat<1, uint32_t> p0(width, height), n0(width, height);
+    bincv::QuantMat<3, uint32_t> p1(80, 60), n1(80, 60);
+    bincv::QuantMat<4, uint32_t> p2(40, 30), n2(40, 30);
+    // Level 0 is the frame; the coarse levels here are a decimation of it, which
+    // is enough for a plumbing check and is NOT how X-24 will build them.
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const bool a = field(static_cast<double>(x), static_cast<double>(y)) > 0.0;
+            const bool b = field(static_cast<double>(x) - 1.0, static_cast<double>(y)) > 0.0;
+            p0.set(y, x, a ? 1u : 0u);
+            n0.set(y, x, b ? 1u : 0u);
+        }
+    }
+    for (int y = 0; y < 60; ++y) {
+        for (int x = 0; x < 80; ++x) {
+            p1.set(y, x, static_cast<unsigned>(x + y) % 8u);
+            n1.set(y, x, static_cast<unsigned>(x + y + 1) % 8u);
+        }
+    }
+    for (int y = 0; y < 30; ++y) {
+        for (int x = 0; x < 40; ++x) {
+            p2.set(y, x, static_cast<unsigned>(x * 2 + y) % 16u);
+            n2.set(y, x, static_cast<unsigned>(x * 2 + y + 1) % 16u);
+        }
+    }
+    bincv::SignedQuantMat<1, uint32_t> dx0(width, height), dy0(width, height);
+    bincv::SignedQuantMat<3, uint32_t> dx1(80, 60), dy1(80, 60);
+    bincv::SignedQuantMat<4, uint32_t> dx2(40, 30), dy2(40, 30);
+    bincv::derivativeX(p0, dx0); bincv::derivativeY(p0, dy0);
+    bincv::derivativeX(p1, dx1); bincv::derivativeY(p1, dy1);
+    bincv::derivativeX(p2, dx2); bincv::derivativeY(p2, dy2);
+
+    bincv::LKLevels<uint32_t, 1, 3, 4> ladder;
+    ladder.get<0>() = bincv::lkLevel<1>(p0, n0, dx0, dy0);
+    ladder.get<1>() = bincv::lkLevel<3>(p1, n1, dx1, dy1);
+    ladder.get<2>() = bincv::lkLevel<4>(p2, n2, dx2, dy2);
+    static_assert(bincv::LKLevels<uint32_t, 1, 3, 4>::Levels == 3, "three levels");
+
+    std::vector<Point2f> points;
+    for (int y = 20; y < height - 20; y += 8) {
+        for (int x = 20; x < width - 20; x += 8) {
+            points.push_back(Point2f{static_cast<float>(x), static_cast<float>(y)});
+        }
+    }
+    std::vector<Point2f> out(points.size());
+    std::vector<uint8_t> outStatus(points.size());
+    LKParams params;
+    params.winWidth = 11;
+    params.winHeight = 11;
+    bincv::calcOpticalFlowPyrLK(ladder, points.data(), out.data(), outStatus.data(), nullptr,
+                                points.size(), params);
+
+    size_t tracked = 0, moved = 0;
+    for (size_t i = 0; i < points.size(); ++i) {
+        if (outStatus[i] != 0) ++tracked;
+        if (out[i].x != points[i].x || out[i].y != points[i].y) ++moved;
+    }
+    std::printf("  mixed 1/3/4 ladder: %zu points, %zu tracked, %zu moved\n", points.size(),
+                tracked, moved);
+    BINCV_CHECK(tracked > 0);
+    BINCV_CHECK(moved > 0);
+}
+
 #ifdef BINCV_WITH_OPENCV
 BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
     const cv::Mat gray = loadRealFrame();

@@ -303,6 +303,18 @@ struct LKLevel {
     BinMatConstView<WordType> dxSign;  ///< `dx.constSign()`; a set bit is NEGATIVE (D-3)
     BinMatConstView<WordType> dyMag;   ///< `dy.constMagnitude(0)`
     BinMatConstView<WordType> dySign;  ///< `dy.constSign()`
+
+    /// Bits per pixel at this level -- one, by construction. `LKLevelN<N>` below
+    /// is the same level at N, and the tracking body is written against this
+    /// surface so that ONE body serves both (D-21: genericity in N is not paid
+    /// for at N == 1).
+    static constexpr size_t Bits = 1;
+
+    /// The storage word type, so a body templated on the LEVEL can still name it.
+    using Word = WordType;
+
+    size_t width() const { return prev.width; }
+    size_t height() const { return prev.height; }
 };
 
 /// @brief Names a level's containers into an LKLevel. **API TIER 2.**
@@ -322,6 +334,60 @@ inline LKLevel<WordType> lkLevel(const BinMat<WordType>& prev, const BinMat<Word
     return lv;
 }
 
+/// @brief One pyramid level at **N bits per pixel**: both frames' bit-planes, and
+///        the previous frame's N-bit signed derivative. The generic-N form of
+///        `LKLevel`, which is this at `N == 1`.
+/// @note Views, not containers (D-5). All `4N + 2` planes must share the level's
+///       dimensions.
+/// @note `prev[i]` / `next[i]` are bit-plane `i`, **plane 0 being the LEAST
+///       significant bit** -- QuantMat's own convention, unchanged. `dxMag[j]` is
+///       magnitude plane `j` and `dxSign` is the shared sign plane, a set bit
+///       meaning NEGATIVE (D-3).
+/// @note The derivative of an N-bit level is N-bit: `I(x+1) - I(x-1)` over an
+///       alphabet of `2^N` values lands in `[-(2^N - 1), 2^N - 1]`, which is
+///       exactly `SignedQuantMat<N, WordType>`'s range. So one `N` describes the
+///       whole level and there is no second depth parameter.
+template <size_t N, typename WordType>
+struct LKLevelN {
+    static_assert(N >= 1 && N <= 7, "LKLevelN: N outside SignedQuantMat's supported range");
+
+    /// Bits per pixel at this level. The tracker reads it to scale `minEigThreshold`.
+    static constexpr size_t Bits = N;
+
+    /// The storage word type, so a body templated on the LEVEL can still name it.
+    using Word = WordType;
+
+    BinMatConstView<WordType> prev[N];    ///< previous frame's planes, LSB first
+    BinMatConstView<WordType> next[N];    ///< next frame's planes, LSB first
+    BinMatConstView<WordType> dxMag[N];   ///< `dx.constMagnitude(j)`
+    BinMatConstView<WordType> dxSign;     ///< `dx.constSign()`; set bit is NEGATIVE (D-3)
+    BinMatConstView<WordType> dyMag[N];   ///< `dy.constMagnitude(j)`
+    BinMatConstView<WordType> dySign;     ///< `dy.constSign()`
+
+    size_t width() const { return prev[0].width; }
+    size_t height() const { return prev[0].height; }
+};
+
+/// @brief Names an N-bit level's containers into an LKLevelN. **API TIER 2.**
+/// @note The generic-N counterpart of the `lkLevel` above, in the same shape: the
+///       container knows which plane is which, the kernel does not (D-5).
+template <size_t N, typename WordType>
+inline LKLevelN<N, WordType> lkLevel(const QuantMat<N, WordType>& prev,
+                                     const QuantMat<N, WordType>& next,
+                                     const SignedQuantMat<N, WordType>& dx,
+                                     const SignedQuantMat<N, WordType>& dy) {
+    LKLevelN<N, WordType> lv;
+    for (size_t i = 0; i < N; ++i) {
+        lv.prev[i] = prev.constPlane(i);
+        lv.next[i] = next.constPlane(i);
+        lv.dxMag[i] = dx.constMagnitude(i);
+        lv.dyMag[i] = dy.constMagnitude(i);
+    }
+    lv.dxSign = dx.constSign();
+    lv.dySign = dy.constSign();
+    return lv;
+}
+
 namespace impl {
 
 /// @brief The factor the raw `[-1, 0, 1]` tap needs to become a central
@@ -334,6 +400,35 @@ constexpr double kCentralDifferenceScale = 2.0;
 /// @note Written as the quotient of the two integers it comes from, so that a
 ///       reader can check the derivation rather than recognise 15.875244140625.
 constexpr double kReferenceMinEigScale = (16.0 * 255.0) * (16.0 * 255.0) / 1048576.0;
+
+/// @brief `kReferenceMinEigScale` at an arbitrary bit depth.
+/// @param bits Bits per pixel at the level, `>= 1`.
+///
+/// **THIS IS WHAT KEEPS `minEigThreshold` MEANING THE SAME THING AT EVERY N, AND
+/// WITHOUT IT E-7's ACCURACY CURVE WOULD COMPARE DIFFERENT POINT SETS.** The
+/// derivation above fixes binCV's full-scale intensity at 1 because a bit is the
+/// whole alphabet; at N bits the alphabet runs `[0, 2^N - 1]` and the SAME
+/// physical intensity is now `2^N - 1` LSBs rather than 1. The reference's
+/// `ixval = 16 * 255 * Ix` is quoted per unit of ITS full scale, so the conversion
+/// is `16 * 255 / (2^N - 1)` per binCV LSB, squared because `A11` is a sum of
+/// squares, and divided by `2^20` exactly as before.
+///
+/// Getting this wrong is not a small error and it is not a visible one: an N-bit
+/// level's `sumXX` is roughly `(2^N - 1)^2` times a 1-bit level's for the same
+/// image content, so holding the 1-bit constant would raise the effective
+/// rejection threshold by that factor -- 225x at N = 4 -- and REJECT MORE POINTS
+/// AT HIGHER N. The accuracy curve would then be measured over a different (and
+/// progressively better-conditioned) subset at every depth, which would make deeper
+/// levels look better for a reason that has nothing to do with their depth.
+constexpr double referenceMinEigScale(size_t bits) {
+    return (16.0 * 255.0 / static_cast<double>((size_t{1} << bits) - 1)) *
+           (16.0 * 255.0 / static_cast<double>((size_t{1} << bits) - 1)) / 1048576.0;
+}
+
+// The generic form must reproduce the derived 1-bit constant exactly, not nearly:
+// both are the same expression with the same operands at bits == 1.
+static_assert(referenceMinEigScale(1) == kReferenceMinEigScale,
+              "referenceMinEigScale(1) must be kReferenceMinEigScale");
 
 /// @brief `floor(a / b)` for integers with `b > 0`, rounding toward MINUS
 ///        infinity.
@@ -474,6 +569,47 @@ inline long long signedMaskedSum(WordType mag, WordType sign, WordType m) {
     return total - 2 * opposing;
 }
 
+/// @brief `sum over the window of V(z) * G(z)` for an N-bit value `V` against an
+///        N-bit SIGN-MAGNITUDE gradient `G`, from `2N^2` popcounts. **INTERNAL.**
+/// @param maskedMag The gradient's N magnitude plane words, ALREADY masked to the
+///        region -- masked once by the caller rather than `N^2` times here.
+/// @param sign The gradient's sign plane word, unmasked: it is only ever ANDed
+///        with an already-masked magnitude.
+/// @param val The value's N plane words, LSB first.
+///
+/// `V = sum_i 2^i V_i` and `G = +/- sum_j 2^j M_j`, so
+///
+///     sum V*G = sum_{i,j} 2^(i+j) * [ popcount(V_i & M_j) - 2*popcount(V_i & M_j & S) ]
+///
+/// -- the same `total - 2*set` spelling `signedMaskedSum` uses, for the same two
+/// reasons (one popcount cheaper than forming both halves, and it never forms
+/// `~sign`, which would set every padding bit of a trailing word, D-13). This is
+/// the generalization of `signedMaskedSum`, which it reduces to exactly at N = 1.
+///
+/// @note The weight is a MULTIPLY, not a shift. `(total - 2*opposing)` is signed
+///       and routinely negative, and left-shifting a negative value is undefined
+///       before C++20. ops/covariance.hpp's `combineBitSlicedPairs` multiplies by
+///       `int64_t(1) << (i + j)` for the same reason.
+/// @note One accumulator, not `N^2` of them. The per-(i,j) counts are weighted and
+///       folded immediately, so the register footprint does NOT grow with N and
+///       E-13's O(N^2)-per-row accumulator concern -- which is about
+///       `BitSlicedPairCounts<N>` in ops/covariance.hpp -- does not arise here.
+template <size_t N, typename WordType>
+inline long long slicedSignedSum(const WordType (&maskedMag)[N], WordType sign,
+                                 const WordType (&val)[N]) {
+    long long acc = 0;
+    for (size_t j = 0; j < N; ++j) {
+        for (size_t i = 0; i < N; ++i) {
+            const WordType both = static_cast<WordType>(val[i] & maskedMag[j]);
+            const long long total = static_cast<long long>(popcountWord<WordType>(both));
+            const long long opposing =
+                static_cast<long long>(popcountWord<WordType>(static_cast<WordType>(both & sign)));
+            acc += (total - 2 * opposing) * (1LL << (i + j));
+        }
+    }
+    return acc;
+}
+
 /// @brief The five integer sums one gradient component's residual needs.
 /// @note `sum(T * Ix)` for each of the four tap planes, and `sum(I * Ix)` for the
 ///       previous frame. The four bilinear weights combine them ONCE per window --
@@ -554,6 +690,98 @@ inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType
     }
 }
 
+/// @brief `b = sum(diff * grad)` at **N bits per pixel**, as ten exact integers.
+///        **INTERNAL, and the generic-N form of the function above.**
+///
+/// **THE RESIDUAL IDENTITY SURVIVES AN N-BIT ALPHABET UNCHANGED, AND THAT IS THE
+/// WHOLE REASON AN N-BIT TRACKER IS AFFORDABLE AT ALL.** Item 3 of THE BOUNDARY
+/// rests on bilinear interpolation being LINEAR in the four taps -- not on the
+/// taps being bits. A linear functional of a bit-sliced value is the weighted sum
+/// of its planes' popcounts, so widening the alphabet moves `sum(T * Ix)` from two
+/// popcounts to `2N^2` and changes nothing else: the four weights still leave the
+/// per-pixel loop, still combine five exact integers ONCE per window per
+/// iteration, and still round nothing before they are applied.
+///
+/// @note **`20 N^2` popcounts per word**, against 20 at N = 1, which this reduces
+///       to exactly: five plane sums (four taps and the previous frame) for each
+///       of two gradient components, `2N^2` popcounts each. That quadratic is the
+///       cost side of E-7 and it is the same `3N^2 + N`-shaped growth
+///       ops/covariance.hpp pays -- both come from the SAME source, a product of
+///       two bit-sliced values needing every plane pair.
+/// @note The per-row partial sums are the same ten `long long`s at every N, for
+///       the reason the 1-bit form has them (D-15, X-11b): a single accumulator
+///       across every row is one serialized dependency chain through the popcount
+///       latency. The count does not grow with N because `slicedSignedSum` folds
+///       its `N^2` terms internally.
+/// @note `4N` displaced row readers per row, not `4`. They are built once per row
+///       and are word-aligned reads of the same two next-frame rows per plane, so
+///       item 5 of THE BOUNDARY also survives: still no gather, still no per-pixel
+///       address arithmetic.
+template <size_t N, typename WordType>
+inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
+                         long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY) {
+    for (size_t y = r.y0; y < r.y1; ++y) {
+        const WordType* mx[N];
+        const WordType* my[N];
+        const WordType* ip[N];
+        for (size_t k = 0; k < N; ++k) {
+            mx[k] = lv.dxMag[k].row(y);
+            my[k] = lv.dyMag[k].row(y);
+            ip[k] = lv.prev[k].row(y);
+        }
+        const WordType* sx = lv.dxSign.row(y);
+        const WordType* sy = lv.dySign.row(y);
+
+        const long long srcY = static_cast<long long>(y) + tapY;
+        ReplicatedShiftedRow<WordType> taps[4][N];
+        for (size_t k = 0; k < N; ++k) {
+            taps[0][k] = displacedRow<WordType>(lv.next[k], srcY, tapX);
+            taps[1][k] = displacedRow<WordType>(lv.next[k], srcY, tapX + 1);
+            taps[2][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX);
+            taps[3][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX + 1);
+        }
+
+        TapSums rowX;
+        TapSums rowY;
+        visitRowWords<WordType>(r, [&](size_t i, WordType mask) {
+            WordType t00[N], t01[N], t10[N], t11[N], self[N];
+            for (size_t k = 0; k < N; ++k) {
+                t00[k] = taps[0][k].word(i);
+                t01[k] = taps[1][k].word(i);
+                t10[k] = taps[2][k].word(i);
+                t11[k] = taps[3][k].word(i);
+                self[k] = ip[k][i];
+            }
+
+            // Masked ONCE per plane here, then reused across every value plane
+            // inside slicedSignedSum -- N masks rather than N^2.
+            WordType magX[N], magY[N];
+            for (size_t k = 0; k < N; ++k) {
+                magX[k] = static_cast<WordType>(mx[k][i] & mask);
+                magY[k] = static_cast<WordType>(my[k][i] & mask);
+            }
+            const WordType signX = sx[i];
+            const WordType signY = sy[i];
+
+            rowX.t00 += slicedSignedSum<N, WordType>(magX, signX, t00);
+            rowX.t01 += slicedSignedSum<N, WordType>(magX, signX, t01);
+            rowX.t10 += slicedSignedSum<N, WordType>(magX, signX, t10);
+            rowX.t11 += slicedSignedSum<N, WordType>(magX, signX, t11);
+            rowX.self += slicedSignedSum<N, WordType>(magX, signX, self);
+
+            rowY.t00 += slicedSignedSum<N, WordType>(magY, signY, t00);
+            rowY.t01 += slicedSignedSum<N, WordType>(magY, signY, t01);
+            rowY.t10 += slicedSignedSum<N, WordType>(magY, signY, t10);
+            rowY.t11 += slicedSignedSum<N, WordType>(magY, signY, t11);
+            rowY.self += slicedSignedSum<N, WordType>(magY, signY, self);
+        });
+        sumsX.t00 += rowX.t00; sumsX.t01 += rowX.t01; sumsX.t10 += rowX.t10;
+        sumsX.t11 += rowX.t11; sumsX.self += rowX.self;
+        sumsY.t00 += rowY.t00; sumsY.t01 += rowY.t01; sumsY.t10 += rowY.t10;
+        sumsY.t11 += rowY.t11; sumsY.self += rowY.self;
+    }
+}
+
 /// @brief Mean absolute residual over the window, in binCV's {0, 1} intensity
 ///        units. **INTERNAL.**
 /// @note `|Jinterp - I| = I + (1 - 2I)*Jinterp` because `I` is a BIT and
@@ -615,10 +843,468 @@ inline float windowMeanAbsDiff(const LKLevel<WordType>& lv, const RegionWords<Wo
     return static_cast<float>(total / static_cast<double>(pixels));
 }
 
+/// @brief Mean absolute residual over the window at **N bits per pixel**.
+///        **INTERNAL.**
+///
+/// ===========================================================================
+/// THIS IS THE ONE PIECE OF THE BIT-PARALLEL BOUNDARY THAT DOES NOT SURVIVE
+/// N > 1, AND IT IS STATED RATHER THAN QUIETLY APPROXIMATED
+/// ===========================================================================
+/// Items 1, 2, 3 and 5 of THE BOUNDARY at the top of this file all carry over to
+/// an N-bit alphabet unchanged, because every one of them is LINEAR in the
+/// intensity and a linear functional of a bit-sliced value is a weighted sum of
+/// its planes' popcounts. **Item 4 is the exception, and it is the only one.**
+/// `|Jinterp - I|` collapsed to `I + (1 - 2I)*Jinterp` because `I` is a BIT: with
+/// `Jinterp` in `[0, 1]` the SIGN of `Jinterp - I` is fixed by `I` alone, so the
+/// one nonlinearity in the operation never has to be evaluated. At N > 1 the sign
+/// depends on both operands, and bit-slicing does not recover it -- `Jinterp` is a
+/// convex combination of four integers with floating-point weights, so it is not
+/// an integer and there is no comparator to slice. Rounding it to fixed point
+/// first, as the reference does per pixel, would make a comparator available but
+/// would need a bit-sliced multiply-accumulate to build its planes, which costs
+/// more than the scalar loop it would replace.
+///
+/// So this is computed PER PIXEL, and that is a real and acknowledged asymmetry
+/// with the 1-bit form above. It is not a hole in the tracker's claim, for four
+/// reasons that are properties of where `err` sits rather than excuses: it is an
+/// OPTIONAL output (`err == nullptr` is the frontend's own call and skips this
+/// entirely), it is computed at level 0 ONLY, it runs once per point per frame and
+/// never inside the iteration loop, and nothing in the solve reads it -- `status`
+/// does not depend on it, deliberately (deviation (vii)). **The per-pixel cost of
+/// TRACKING at N bits remains integers and popcounts only.**
+///
+/// @note **UNITS: LSBs, so the scale depends on N.** The 1-bit form returns a mean
+///       in `{0, 1}` intensity units; this returns one in `[0, 2^N - 1]` units,
+///       because that is the level's alphabet. Divide by `2^N - 1` to compare
+///       across depths, or multiply by `255 / (2^N - 1)` to reach the reference's
+///       `{0, 255}` scale. At N = 1 both statements are the old one.
+/// @note The denominator is the CLIPPED pixel count, exactly as above and for the
+///       same reason.
+template <size_t N, typename WordType>
+inline float windowMeanAbsDiff(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
+                               long long tapX, long long tapY, double w00, double w01, double w10,
+                               double w11) {
+    const double w[4] = {w00, w01, w10, w11};
+    size_t pixels = 0;
+    double total = 0.0;
+
+    for (size_t y = r.y0; y < r.y1; ++y) {
+        const WordType* ip[N];
+        for (size_t k = 0; k < N; ++k) ip[k] = lv.prev[k].row(y);
+
+        const long long srcY = static_cast<long long>(y) + tapY;
+        ReplicatedShiftedRow<WordType> taps[4][N];
+        for (size_t k = 0; k < N; ++k) {
+            taps[0][k] = displacedRow<WordType>(lv.next[k], srcY, tapX);
+            taps[1][k] = displacedRow<WordType>(lv.next[k], srcY, tapX + 1);
+            taps[2][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX);
+            taps[3][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX + 1);
+        }
+
+        visitRowWords<WordType>(r, [&](size_t i, WordType mask) {
+            WordType iw[N];
+            WordType tw[4][N];
+            for (size_t k = 0; k < N; ++k) {
+                iw[k] = ip[k][i];
+                for (size_t t = 0; t < 4; ++t) tw[t][k] = taps[t][k].word(i);
+            }
+            for (size_t b = 0; b < bitsPerWord<WordType>(); ++b) {
+                const WordType bit = bitMask<WordType>(b);
+                if ((mask & bit) == 0) continue;
+                unsigned iv = 0;
+                for (size_t k = 0; k < N; ++k) {
+                    if ((iw[k] & bit) != 0) iv |= (1u << k);
+                }
+                double j = 0.0;
+                for (size_t t = 0; t < 4; ++t) {
+                    unsigned jv = 0;
+                    for (size_t k = 0; k < N; ++k) {
+                        if ((tw[t][k] & bit) != 0) jv |= (1u << k);
+                    }
+                    j += w[t] * static_cast<double>(jv);
+                }
+                total += std::fabs(j - static_cast<double>(iv));
+                ++pixels;
+            }
+        });
+    }
+    if (pixels == 0) return 0.0f;
+    return static_cast<float>(total / static_cast<double>(pixels));
+}
+
 /// @brief `floor(v)` as a `long long`, for a value already known to be finite and
 ///        within the frame's range.
 inline long long floorToLL(float v) { return static_cast<long long>(std::floor(v)); }
 
+} // namespace impl
+
+namespace impl {
+
+/// @brief Everything the per-level tracking body needs that does not vary with the
+///        level. **INTERNAL.**
+/// @note Not templated on WordType: nothing in it is a view or a word. The level
+///       is the only WordType-dependent argument `trackOneLevel` takes, which is
+///       what lets one body serve a ladder whose levels have DIFFERENT types.
+struct LKContext {
+    const Point2f* prevPts = nullptr;
+    Point2f* nextPts = nullptr;
+    uint8_t* status = nullptr;
+    float* err = nullptr;
+    size_t pointCount = 0;
+    size_t usableLevels = 0;
+    int winW = 0;
+    int winH = 0;
+    float halfWinX = 0.0f;
+    float halfWinY = 0.0f;
+    int maxIterations = 0;
+    double eps2 = 0.0;
+    double minEigThreshold = 0.0;
+};
+
+/// @brief A level's planes all share its dimensions. **INTERNAL.**
+template <typename WordType>
+inline void checkLevelPlanes(const LKLevel<WordType>& lv) {
+    BINCV_ASSERT(lv.prev.width == lv.next.width && lv.prev.height == lv.next.height &&
+                     lv.prev.width == lv.dxMag.width && lv.prev.height == lv.dxMag.height &&
+                     lv.prev.width == lv.dxSign.width && lv.prev.height == lv.dxSign.height &&
+                     lv.prev.width == lv.dyMag.width && lv.prev.height == lv.dyMag.height &&
+                     lv.prev.width == lv.dySign.width && lv.prev.height == lv.dySign.height,
+                 "opticalFlow: a level's six planes must share its dimensions");
+    (void)lv;
+}
+
+/// @brief The same check over an N-bit level's `4N + 2` planes. **INTERNAL.**
+template <size_t N, typename WordType>
+inline void checkLevelPlanes(const LKLevelN<N, WordType>& lv) {
+    const size_t w = lv.prev[0].width;
+    const size_t h = lv.prev[0].height;
+    for (size_t k = 0; k < N; ++k) {
+        BINCV_ASSERT(lv.prev[k].width == w && lv.prev[k].height == h &&
+                         lv.next[k].width == w && lv.next[k].height == h &&
+                         lv.dxMag[k].width == w && lv.dxMag[k].height == h &&
+                         lv.dyMag[k].width == w && lv.dyMag[k].height == h,
+                     "opticalFlow: a level's planes must share its dimensions");
+    }
+    BINCV_ASSERT(lv.dxSign.width == w && lv.dxSign.height == h && lv.dySign.width == w &&
+                     lv.dySign.height == h,
+                 "opticalFlow: a level's sign planes must share its dimensions");
+    (void)w;
+    (void)h;
+}
+
+/// @brief The 2x2 normal-equations matrix for a level of any depth. **INTERNAL.**
+/// @note Two overloads over one name so that `trackOneLevel` names the operation
+///       rather than the representation. The N-bit one is ops/covariance.hpp's
+///       bit-sliced weighted-sum form (T3.10), which is bit-identical to the
+///       ternary one at N == 1 -- so this dispatch changes which code runs but
+///       cannot change the answer at the depth both can express.
+template <typename WordType>
+inline GradientCovariance levelCovariance(const LKLevel<WordType>& lv, Rect window) {
+    return gradientCovariance<WordType>(lv.dxMag, lv.dyMag, lv.dxSign, lv.dySign, window);
+}
+template <size_t N, typename WordType>
+inline GradientCovariance levelCovariance(const LKLevelN<N, WordType>& lv, Rect window) {
+    return gradientCovariance<N, WordType>(lv.dxMag, lv.dyMag, lv.dxSign, lv.dySign, window);
+}
+
+/// @brief Track every point through ONE pyramid level. **INTERNAL, and the whole
+///        of the tracker's per-level logic.**
+/// @tparam LevelT `LKLevel<W>` or `LKLevelN<N, W>` -- the body is written against
+///         `width()`, `height()`, `Bits` and the two dispatched helpers above, so
+///         it is identical for both and cannot drift between them.
+/// @note `Bits` enters in exactly one place: the `minEigThreshold` conversion.
+///       Everything else about the level's depth is inside `levelCovariance` and
+///       `residualSums`.
+template <typename LevelT, typename WordType = typename LevelT::Word>
+inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
+    // The one place the level's depth reaches the tracking logic. See
+    // referenceMinEigScale for why holding the 1-bit constant here would silently
+    // reject more points at higher N and confound E-7's accuracy curve.
+    constexpr double kLevelMinEigScale = referenceMinEigScale(LevelT::Bits);
+
+    const bool coarsest = (li + 1 == c.usableLevels);
+    const bool finest = (li == 0);
+    const float scale = 1.0f / static_cast<float>(1u << li);
+
+    checkLevelPlanes(lv);
+
+    // PASS 1 -- propagate every point's estimate into this level's
+    // coordinates, before any point is tracked. The reference does this in its
+    // own first loop, and it applies to skipped points too.
+    for (size_t p = 0; p < c.pointCount; ++p) {
+        if (coarsest) {
+            c.nextPts[p].x = c.prevPts[p].x * scale;
+            c.nextPts[p].y = c.prevPts[p].y * scale;
+        } else {
+            c.nextPts[p].x *= 2.0f;
+            c.nextPts[p].y *= 2.0f;
+        }
+    }
+
+    const long long levelWidth = static_cast<long long>(lv.width());
+    const long long levelHeight = static_cast<long long>(lv.height());
+
+    // PASS 2 -- track.
+    for (size_t p = 0; p < c.pointCount; ++p) {
+        const float prevX = c.prevPts[p].x * scale - c.halfWinX;
+        const float prevY = c.prevPts[p].y * scale - c.halfWinY;
+        const long long anchorX = floorToLL(prevX);
+        const long long anchorY = floorToLL(prevY);
+
+        // LOSS RULE 1 -- the window's origin is out of range. The reference's
+        // own bounds, which allow a window almost entirely outside; what is
+        // outside is then clipped away rather than padded (deviation (ii)).
+        if (anchorX < -static_cast<long long>(c.winW) || anchorX >= levelWidth ||
+            anchorY < -static_cast<long long>(c.winH) || anchorY >= levelHeight) {
+            if (finest) c.status[p] = 0;
+            continue;
+        }
+
+        const Rect window(static_cast<int>(anchorX), static_cast<int>(anchorY), c.winW, c.winH);
+        const RegionWords<WordType> region =
+            clipRegion<WordType>(lv.width(), lv.height(), window);
+        if (region.isEmpty) {
+            if (finest) c.status[p] = 0;
+            continue;
+        }
+
+        // BIT-PARALLEL: the 2x2 matrix, one fused traversal, zero scratch.
+        const GradientCovariance a = levelCovariance(lv, window);
+        const double a11 = static_cast<double>(a.sumXX);
+        const double a22 = static_cast<double>(a.sumYY);
+        const double a12 = static_cast<double>(a.sumXY);
+        const double det = a11 * a22 - a12 * a12;
+
+        // LOSS RULE 2 -- a degenerate window. `det` is a difference of
+        // products of exact popcounts, so it is 0 or at least 1 and the test
+        // needs no epsilon (deviation (iv)).
+        const double minEig = static_cast<double>(minEigenValue(a.sumXX, a.sumYY,
+                                                                      a.sumXY));
+        const double referenceMinEig = kLevelMinEigScale * minEig /
+                                       static_cast<double>(c.winW * c.winH);
+        if (det <= 0.0 || referenceMinEig < static_cast<double>(c.minEigThreshold)) {
+            if (finest) c.status[p] = 0;
+            continue;
+        }
+
+        float nextX = c.nextPts[p].x - c.halfWinX;
+        float nextY = c.nextPts[p].y - c.halfWinY;
+        double prevDeltaX = 0.0;
+        double prevDeltaY = 0.0;
+        bool inRange = true;
+
+        // The tap offset and the four weights live INSIDE the loop, and
+        // deliberately do not survive it. They used to be declared here so
+        // that the error term below could reuse them, which made `err` the
+        // residual at the previous ITERATE rather than at the position
+        // actually returned -- measured 134% high at c.maxIterations = 1, and
+        // wrong by a whole half-step whenever the oscillation rule fired.
+        // The reference recomputes them in a separate pass after the loop
+        // (LKTrackerInvoker.cpp:222-259); so does this, below.
+        for (int it = 0; it < c.maxIterations; ++it) {
+            const long long originX = floorToLL(nextX);
+            const long long originY = floorToLL(nextY);
+
+            // LOSS RULE 3 -- the estimate walked out of range mid-iteration.
+            if (originX < -static_cast<long long>(c.winW) || originX >= levelWidth ||
+                originY < -static_cast<long long>(c.winH) || originY >= levelHeight) {
+                if (finest) c.status[p] = 0;
+                inRange = false;
+                break;
+            }
+
+            // FLOAT, once per iteration: split the displacement of the whole
+            // window into an integer tap offset and a fraction. Every pixel of
+            // the window shares both, which is exactly why the four weights
+            // can leave the per-pixel loop.
+            // THE DISPLACEMENT IS MEASURED FROM `prevX`, NOT FROM THE
+            // INTEGER ANCHOR. `nextX - anchorX` looks equivalent and is not:
+            // it differs by `frac(prevX)`, which is zero at level 0 for
+            // integer keypoints and is NOT zero at any coarser level, where
+            // `prevPt / 2^level` is fractional. Anchoring the window on the
+            // grid moves which pixels the aperture covers (deviation (i));
+            // it must not move what the residual is a residual OF, which is
+            // `I(z)` against `J(z + d)` for `d` the full-precision flow.
+            // Measured on the repo's real frame with prev == next: the wrong
+            // spelling put a stationary point up to 1.4 px off through four
+            // levels, because each level converged to `d - frac` and handed
+            // twice that error to the next one down.
+            const double offX = static_cast<double>(nextX) - static_cast<double>(prevX);
+            const double offY = static_cast<double>(nextY) - static_cast<double>(prevY);
+            const long long tapX = static_cast<long long>(std::floor(offX));
+            const long long tapY = static_cast<long long>(std::floor(offY));
+            const double fx = offX - static_cast<double>(tapX);
+            const double fy = offY - static_cast<double>(tapY);
+            const double w00 = (1.0 - fx) * (1.0 - fy);
+            const double w01 = fx * (1.0 - fy);
+            const double w10 = (1.0 - fx) * fy;
+            const double w11 = fx * fy;
+
+            // BIT-PARALLEL: ten exact integers, twenty popcounts per word.
+            TapSums sumsX;
+            TapSums sumsY;
+            residualSums(lv, region, tapX, tapY, sumsX, sumsY);
+
+            const double b1 = sumsX.combine(w00, w01, w10, w11);
+            const double b2 = sumsY.combine(w00, w01, w10, w11);
+
+            // FLOAT, once per iteration: the 2x2 solve. The factor of 2 turns
+            // the raw [-1, 0, 1] tap into a central difference; see UNITS.
+            const double deltaX = kCentralDifferenceScale * (a12 * b2 - a22 * b1) / det;
+            const double deltaY = kCentralDifferenceScale * (a12 * b1 - a11 * b2) / det;
+
+            nextX += static_cast<float>(deltaX);
+            nextY += static_cast<float>(deltaY);
+            c.nextPts[p].x = nextX + c.halfWinX;
+            c.nextPts[p].y = nextY + c.halfWinY;
+
+            // TERMINATION 1 -- converged.
+            if (deltaX * deltaX + deltaY * deltaY <= c.eps2) break;
+
+            // TERMINATION 2 -- oscillation: this step almost exactly undoes
+            // the last one. Back off by half a step and stop. The reference's
+            // rule, thresholds included.
+            if (it > 0 && std::fabs(deltaX + prevDeltaX) < 0.01 &&
+                std::fabs(deltaY + prevDeltaY) < 0.01) {
+                c.nextPts[p].x -= static_cast<float>(deltaX * 0.5);
+                c.nextPts[p].y -= static_cast<float>(deltaY * 0.5);
+                nextX = c.nextPts[p].x - c.halfWinX;
+                nextY = c.nextPts[p].y - c.halfWinY;
+                break;
+            }
+            prevDeltaX = deltaX;
+            prevDeltaY = deltaY;
+        }
+
+        // THE FINAL PASS, AND IT IS THE REFERENCE'S OWN SEPARATE PASS. Two
+        // things happen here and both are ABOUT THE POSITION THAT IS
+        // RETURNED, not about the last iterate: the range test is re-applied
+        // to it, and -- only if it survives -- the error term is measured
+        // there, from taps and weights recomputed from `c.nextPts[p]`.
+        if (finest && c.status[p] != 0 && inRange) {
+            const float finalX = c.nextPts[p].x - c.halfWinX;
+            const float finalY = c.nextPts[p].y - c.halfWinY;
+            const long long finalOriginX = floorToLL(finalX);
+            const long long finalOriginY = floorToLL(finalY);
+            if (finalOriginX < -static_cast<long long>(c.winW) || finalOriginX >= levelWidth ||
+                finalOriginY < -static_cast<long long>(c.winH) || finalOriginY >= levelHeight) {
+                // LOSS RULE 3, applied to the RETURNED estimate. The last
+                // iteration's step can carry the point out of range after the
+                // in-loop test has already passed, and `status` describes the
+                // position the caller gets. The reference makes this same test
+                // in this same place -- but only when `err` was requested,
+                // which makes its `status` depend on whether the caller wanted
+                // an error value. That quirk is not reproduced (deviation
+                // (vii)); the test is unconditional here.
+                c.status[p] = 0;
+            } else if (c.err != nullptr) {
+                const double offX = static_cast<double>(finalX) - static_cast<double>(prevX);
+                const double offY = static_cast<double>(finalY) - static_cast<double>(prevY);
+                const long long tapX = static_cast<long long>(std::floor(offX));
+                const long long tapY = static_cast<long long>(std::floor(offY));
+                const double fx = offX - static_cast<double>(tapX);
+                const double fy = offY - static_cast<double>(tapY);
+                c.err[p] = windowMeanAbsDiff(lv, region, tapX, tapY, (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy),
+                    (1.0 - fx) * fy, fx * fy);
+            }
+        }
+    }
+}
+
+/// @brief Shared prologue: argument checks, and the "every entry is written"
+///        contract. **INTERNAL.**
+/// @return false when the call is already complete -- no points, or no levels.
+inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextPts,
+                       uint8_t* status, float* err, size_t pointCount, const LKParams& params,
+                       LKContext& c) {
+    if (pointCount == 0) return false;
+    BINCV_ASSERT(prevPts != nullptr && nextPts != nullptr && status != nullptr,
+                 "opticalFlow: prevPts, nextPts and status must be non-null");
+    // PASS 1 writes `nextPts[p]` before PASS 2 reads `prevPts[p]`, so an in-place
+    // call is not merely inexact, it tracks from the wrong anchor -- measured at up
+    // to 23 px of divergence on a three-level frontend. Every other kernel in the
+    // library carries an explicit D-11 predicate; this is that predicate, on the
+    // destination array rather than on a view.
+    BINCV_ASSERT(byteRangesDisjoint(prevPts, pointCount * sizeof(Point2f), nextPts,
+                                    pointCount * sizeof(Point2f)),
+                 "opticalFlow: nextPts must not overlap prevPts");
+    BINCV_ASSERT(params.winWidth > 2 && params.winHeight > 2,
+                 "opticalFlow: the window must be more than 2 pixels on a side");
+
+    c.prevPts = prevPts;
+    c.nextPts = nextPts;
+    c.status = status;
+    c.err = err;
+    c.pointCount = pointCount;
+    c.winW = params.winWidth;
+    c.winH = params.winHeight;
+    c.halfWinX = static_cast<float>(c.winW - 1) * 0.5f;
+    c.halfWinY = static_cast<float>(c.winH - 1) * 0.5f;
+
+    // The reference clamps both criteria before use; so does this, for the same
+    // reason -- they arrive from a YAML file.
+    c.maxIterations = params.maxIterations;
+    if (c.maxIterations < 0) c.maxIterations = 0;
+    if (c.maxIterations > 100) c.maxIterations = 100;
+    float eps = params.epsilon;
+    if (eps < 0.0f) eps = 0.0f;
+    if (eps > 10.0f) eps = 10.0f;
+    c.eps2 = static_cast<double>(eps) * static_cast<double>(eps);
+    c.minEigThreshold = static_cast<double>(params.minEigThreshold);
+
+    // Written BEFORE the degenerate exit below, not after it: "every entry is
+    // written" is the documented contract, and a caller that reads `status` after
+    // a zero-level call must not be reading its own uninitialised buffer.
+    for (size_t i = 0; i < pointCount; ++i) {
+        status[i] = 1;
+        if (err != nullptr) err[i] = 0.0f;
+    }
+
+    // Degenerate but legal, and a VALUE rather than an error (ARCHITECTURE 5.3):
+    // with no levels there is nothing to track on, so every point is lost and its
+    // last estimate is the point itself.
+    if (levelCount == 0) {
+        for (size_t i = 0; i < pointCount; ++i) {
+            nextPts[i] = prevPts[i];
+            status[i] = 0;
+        }
+        return false;
+    }
+    return true;
+}
+
+/// @brief THE REFERENCE'S PYRAMID CAP, REPRODUCED (deviation (vi)).
+///        **INTERNAL.**
+///
+/// `buildOpticalFlowPyramid` refuses to build a level that is not strictly larger
+/// than the window -- `if (sz.width <= winSize.width || sz.height <=
+/// winSize.height) { maxLevel = level; break; }` -- and truncates `maxLevel` to
+/// what it built. binCV cannot decline to BUILD a level, because the caller owns
+/// the pyramid (D-5), so it declines to USE one: levels are consumed as a prefix,
+/// coarsest usable first, and anything at or below the window size is ignored. It
+/// matters MORE here than in the reference, because binCV clips where the
+/// reference pads: on a level no larger than the window every point's window
+/// covers nearly the whole level, so every point gets nearly the same `A` and `b`
+/// -- one estimate for the entire image, multiplied by 2^level on the way down.
+/// Level 0 is always used, whatever its size; it is the frame.
+///
+/// @note Written against `widthAt`/`heightAt` callables so that the array form and
+///       the heterogeneous ladder share ONE copy of the rule.
+/// A level's extent, so `usableLevelCount` needs no <utility>.
+struct LevelDims {
+    size_t width = 0;
+    size_t height = 0;
+};
+
+template <typename DimFn>
+inline size_t usableLevelCount(size_t levelCount, int winW, int winH, DimFn dims) {
+    size_t usable = 1;
+    while (usable < levelCount && dims(usable).width > static_cast<size_t>(winW) &&
+           dims(usable).height > static_cast<size_t>(winH)) {
+        ++usable;
+    }
+    return usable;
+}
 } // namespace impl
 
 /// @brief Pyramidal Lucas-Kanade tracking of sparse keypoints between two binary
@@ -655,9 +1341,12 @@ inline long long floorToLL(float v) { return static_cast<long long>(std::floor(v
 ///       caller's and nothing else is needed; tests/test_opticalflow.cpp counts
 ///       `operator new` across this call -- the plain and the over-aligned forms --
 ///       and requires zero.
-/// @note **Every level is ONE bit deep**, because the popcount covariance is exact
-///       only for a ternary derivative. E-7 / T4.1 is where per-level bit depth is
-///       chosen and measured; see deviation (v) at the top of the file.
+/// @note **Every level of THIS overload is one bit deep.** For deeper levels see
+///       the `LKLevelN<N, WordType>` overload below (a ladder all at one depth)
+///       and `LKLevels<WordType, LevelBits...>` (a ladder of MIXED depths, which
+///       is the form E-7 / T4.1 needs). All three run the same body; the depth
+///       reaches it in exactly two places, `impl::referenceMinEigScale` and
+///       `impl::levelCovariance`.
 /// @note **Windows clip at the frame edge** (deviation (ii)) and next-frame taps
 ///       outside the frame replicate (deviation (iii)). Neither is the reference's
 ///       border, and both are consequences of declining its `winSize`-wide padded
@@ -670,271 +1359,144 @@ inline void calcOpticalFlowPyrLK(const LKLevel<WordType>* levels, size_t levelCo
                                  const Point2f* prevPts, Point2f* nextPts, uint8_t* status,
                                  float* err, size_t pointCount,
                                  const LKParams& params = LKParams()) {
-    if (pointCount == 0) return;
-    BINCV_ASSERT(prevPts != nullptr && nextPts != nullptr && status != nullptr,
-                 "opticalFlow: prevPts, nextPts and status must be non-null");
-    // PASS 1 below writes `nextPts[p]` before PASS 2 reads `prevPts[p]`, so an
-    // in-place call is not merely inexact, it tracks from the wrong anchor --
-    // measured at up to 23 px of divergence on a three-level frontend. Every
-    // other kernel in the library carries an explicit D-11 predicate; this is
-    // that predicate, on the destination array rather than on a view.
-    BINCV_ASSERT(impl::byteRangesDisjoint(prevPts, pointCount * sizeof(Point2f), nextPts,
-                                          pointCount * sizeof(Point2f)),
-                 "opticalFlow: nextPts must not overlap prevPts");
-    BINCV_ASSERT(params.winWidth > 2 && params.winHeight > 2,
-                 "opticalFlow: the window must be more than 2 pixels on a side");
+    impl::LKContext c;
+    if (!impl::lkPrologue(levelCount, prevPts, nextPts, status, err, pointCount, params, c)) return;
+    BINCV_ASSERT(levels != nullptr, "opticalFlow: levels must be non-null");
+    c.usableLevels = impl::usableLevelCount(levelCount, c.winW, c.winH, [&](size_t i) {
+        return impl::LevelDims{levels[i].width(), levels[i].height()};
+    });
+    for (size_t li = c.usableLevels; li-- > 0;) impl::trackOneLevel(levels[li], li, c);
+}
 
-    const int winW = params.winWidth;
-    const int winH = params.winHeight;
-    const float halfWinX = static_cast<float>(winW - 1) * 0.5f;
-    const float halfWinY = static_cast<float>(winH - 1) * 0.5f;
 
-    // The reference clamps both criteria before use; so does this, for the same
-    // reason -- they arrive from a YAML file.
-    int maxIterations = params.maxIterations;
-    if (maxIterations < 0) maxIterations = 0;
-    if (maxIterations > 100) maxIterations = 100;
-    float eps = params.epsilon;
-    if (eps < 0.0f) eps = 0.0f;
-    if (eps > 10.0f) eps = 10.0f;
-    const double eps2 = static_cast<double>(eps) * static_cast<double>(eps);
+/// @brief Pyramidal Lucas-Kanade over a ladder of levels that are all the SAME
+///        depth `N`. **API TIER 2.**
+/// @param levels `levelCount` levels, **LEVEL 0 FIRST**, each `N` bits per pixel.
+/// @note Identical in every respect to the 1-bit entry point above -- same
+///       contracts, same deviations, same loss rules, same `err` denominator --
+///       because it runs the same body. The two differences are consequences of
+///       the depth and are documented where they live:
+///       `impl::referenceMinEigScale` (the `minEigThreshold` conversion, which
+///       is what keeps the threshold meaning one thing across depths) and
+///       `impl::windowMeanAbsDiff` (the `err` term, the one piece of THE BOUNDARY
+///       that does not survive `N > 1`).
+/// @note `N == 1` here is the same computation as `LKLevel` above, through the
+///       generic code path rather than the hand-written one, and
+///       tests/test_opticalflow.cpp requires the two to agree exactly.
+template <size_t N, typename WordType>
+inline void calcOpticalFlowPyrLK(const LKLevelN<N, WordType>* levels, size_t levelCount,
+                                 const Point2f* prevPts, Point2f* nextPts, uint8_t* status,
+                                 float* err, size_t pointCount,
+                                 const LKParams& params = LKParams()) {
+    impl::LKContext c;
+    if (!impl::lkPrologue(levelCount, prevPts, nextPts, status, err, pointCount, params, c)) return;
+    BINCV_ASSERT(levels != nullptr, "opticalFlow: levels must be non-null");
+    c.usableLevels = impl::usableLevelCount(levelCount, c.winW, c.winH, [&](size_t i) {
+        return impl::LevelDims{levels[i].width(), levels[i].height()};
+    });
+    for (size_t li = c.usableLevels; li-- > 0;) impl::trackOneLevel(levels[li], li, c);
+}
 
-    // Written BEFORE the degenerate exit below, not after it: "every entry is
-    // written" is the documented contract, and a caller that reads `status` after
-    // a zero-level call must not be reading its own uninitialised buffer.
-    for (size_t i = 0; i < pointCount; ++i) {
-        status[i] = 1;
-        if (err != nullptr) err[i] = 0.0f;
+/// @brief A tracking ladder whose levels have **DIFFERENT bit depths**, level 0
+///        first. **API TIER 2.**
+/// @tparam LevelBits One depth per level -- `LKLevels<uint32_t, 1, 3, 4, 5>` is
+///         the ladder ARCHITECTURE 7.2 measured on the reference pipeline.
+///
+/// @note **The depths are a template parameter list, not a runtime vector, and
+///       that is `Pyramid`'s decision rather than a new one.** `QuantMat` is
+///       templated on N, so levels of different depths have different TYPES; a
+///       runtime container of them would need type erasure, and the `N^2` inner
+///       loops of `impl::slicedSignedSum` would become runtime-bounded, which
+///       would confound exactly the ns/pixel axis E-7 has to report. This mirrors
+///       `Pyramid<WordType, LevelBits...>` one-for-one so that a pyramid and the
+///       tracker that reads it are declared the same way.
+/// @note Holds VIEWS, not containers (D-5), so it owns nothing and allocates
+///       nothing. The caller owns the two pyramids and the derivative planes.
+template <typename WordType, size_t... LevelBits>
+struct LKLevels;
+
+template <typename WordType, size_t N0>
+struct LKLevels<WordType, N0> {
+    static constexpr size_t Levels = 1;
+    LKLevelN<N0, WordType> level;
+
+    template <size_t I>
+    LKLevelN<N0, WordType>& get() {
+        static_assert(I == 0, "LK ladder level index out of range");
+        return level;
+    }
+    template <size_t I>
+    const LKLevelN<N0, WordType>& get() const {
+        static_assert(I == 0, "LK ladder level index out of range");
+        return level;
+    }
+    impl::LevelDims dimsAt(size_t i) const {
+        (void)i;
+        return impl::LevelDims{level.width(), level.height()};
+    }
+    template <typename Fn>
+    void visitCoarseToFine(size_t usable, Fn& f, size_t index) const {
+        (void)usable;
+        f(level, index);
+    }
+};
+
+template <typename WordType, size_t N0, size_t N1, size_t... Rest>
+struct LKLevels<WordType, N0, N1, Rest...> {
+    static constexpr size_t Levels = 2 + sizeof...(Rest);
+    LKLevelN<N0, WordType> level;
+    LKLevels<WordType, N1, Rest...> rest;
+
+    template <size_t I>
+    auto& get() {
+        if constexpr (I == 0) {
+            return level;
+        } else {
+            return rest.template get<I - 1>();
+        }
+    }
+    template <size_t I>
+    const auto& get() const {
+        if constexpr (I == 0) {
+            return level;
+        } else {
+            return rest.template get<I - 1>();
+        }
+    }
+    impl::LevelDims dimsAt(size_t i) const {
+        return i == 0 ? impl::LevelDims{level.width(), level.height()} : rest.dimsAt(i - 1);
     }
 
-    // Degenerate but legal, and a VALUE rather than an error (ARCHITECTURE 5.3):
-    // with no levels there is nothing to track on, so every point is lost and its
-    // last estimate is the point itself.
-    if (levelCount == 0) {
-        for (size_t i = 0; i < pointCount; ++i) {
-            nextPts[i] = prevPts[i];
-            status[i] = 0;
-        }
+    /// @note Recurses to the coarsest USABLE level and calls `f` on the way back
+    ///       out, so the visit order is coarse-to-fine -- the tracker's order --
+    ///       with no array of pointers and no type erasure.
+    template <typename Fn>
+    void visitCoarseToFine(size_t usable, Fn& f, size_t index) const {
+        if (index + 1 < usable) rest.visitCoarseToFine(usable, f, index + 1);
+        f(level, index);
+    }
+};
+
+/// @brief Pyramidal Lucas-Kanade over a ladder of **mixed-depth** levels.
+///        **API TIER 2.**
+/// @note Same contracts, deviations and loss rules as the two entry points above;
+///       each level runs the same body at its own depth. This is the form E-7
+///       needs, because the question it asks -- how many bits does EACH level need
+///       -- only has an answer a mixed ladder can express.
+template <typename WordType, size_t... LevelBits>
+inline void calcOpticalFlowPyrLK(const LKLevels<WordType, LevelBits...>& levels,
+                                 const Point2f* prevPts, Point2f* nextPts, uint8_t* status,
+                                 float* err, size_t pointCount,
+                                 const LKParams& params = LKParams()) {
+    impl::LKContext c;
+    if (!impl::lkPrologue(sizeof...(LevelBits), prevPts, nextPts, status, err, pointCount, params,
+                          c)) {
         return;
     }
-    BINCV_ASSERT(levels != nullptr, "opticalFlow: levels must be non-null");
-
-    // THE REFERENCE'S PYRAMID CAP, REPRODUCED (deviation (vi)).
-    // `buildOpticalFlowPyramid` refuses to build a level that is not strictly
-    // larger than the window -- `if (sz.width <= winSize.width || sz.height <=
-    // winSize.height) { maxLevel = level; break; }` -- and truncates `maxLevel`
-    // to what it built. binCV cannot decline to BUILD a level, because the caller
-    // owns the pyramid (D-5), so it declines to USE one: levels are consumed as a
-    // prefix, coarsest usable first, and anything at or below the window size is
-    // ignored. It matters MORE here than in the reference, because binCV clips
-    // where the reference pads: on a level no larger than the window every point's
-    // window covers nearly the whole level, so every point gets nearly the same
-    // `A` and `b` -- one estimate for the entire image, multiplied by 2^level on
-    // the way down. Level 0 is always used, whatever its size; it is the frame.
-    size_t usableLevels = 1;
-    while (usableLevels < levelCount &&
-           levels[usableLevels].prev.width > static_cast<size_t>(winW) &&
-           levels[usableLevels].prev.height > static_cast<size_t>(winH)) {
-        ++usableLevels;
-    }
-
-    for (size_t li = usableLevels; li-- > 0;) {
-        const LKLevel<WordType>& lv = levels[li];
-        const bool coarsest = (li + 1 == usableLevels);
-        const bool finest = (li == 0);
-        const float scale = 1.0f / static_cast<float>(1u << li);
-
-        BINCV_ASSERT(lv.prev.width == lv.next.width && lv.prev.height == lv.next.height &&
-                         lv.prev.width == lv.dxMag.width && lv.prev.height == lv.dxMag.height &&
-                         lv.prev.width == lv.dxSign.width && lv.prev.height == lv.dxSign.height &&
-                         lv.prev.width == lv.dyMag.width && lv.prev.height == lv.dyMag.height &&
-                         lv.prev.width == lv.dySign.width && lv.prev.height == lv.dySign.height,
-                     "opticalFlow: a level's six planes must share its dimensions");
-
-        // PASS 1 -- propagate every point's estimate into this level's
-        // coordinates, before any point is tracked. The reference does this in its
-        // own first loop, and it applies to skipped points too.
-        for (size_t p = 0; p < pointCount; ++p) {
-            if (coarsest) {
-                nextPts[p].x = prevPts[p].x * scale;
-                nextPts[p].y = prevPts[p].y * scale;
-            } else {
-                nextPts[p].x *= 2.0f;
-                nextPts[p].y *= 2.0f;
-            }
-        }
-
-        const long long levelWidth = static_cast<long long>(lv.prev.width);
-        const long long levelHeight = static_cast<long long>(lv.prev.height);
-
-        // PASS 2 -- track.
-        for (size_t p = 0; p < pointCount; ++p) {
-            const float prevX = prevPts[p].x * scale - halfWinX;
-            const float prevY = prevPts[p].y * scale - halfWinY;
-            const long long anchorX = impl::floorToLL(prevX);
-            const long long anchorY = impl::floorToLL(prevY);
-
-            // LOSS RULE 1 -- the window's origin is out of range. The reference's
-            // own bounds, which allow a window almost entirely outside; what is
-            // outside is then clipped away rather than padded (deviation (ii)).
-            if (anchorX < -static_cast<long long>(winW) || anchorX >= levelWidth ||
-                anchorY < -static_cast<long long>(winH) || anchorY >= levelHeight) {
-                if (finest) status[p] = 0;
-                continue;
-            }
-
-            const Rect window(static_cast<int>(anchorX), static_cast<int>(anchorY), winW, winH);
-            const impl::RegionWords<WordType> region =
-                impl::clipRegion<WordType>(lv.prev.width, lv.prev.height, window);
-            if (region.isEmpty) {
-                if (finest) status[p] = 0;
-                continue;
-            }
-
-            // BIT-PARALLEL: the 2x2 matrix, one fused traversal, zero scratch.
-            const GradientCovariance a = gradientCovariance<WordType>(
-                lv.dxMag, lv.dyMag, lv.dxSign, lv.dySign, window);
-            const double a11 = static_cast<double>(a.sumXX);
-            const double a22 = static_cast<double>(a.sumYY);
-            const double a12 = static_cast<double>(a.sumXY);
-            const double det = a11 * a22 - a12 * a12;
-
-            // LOSS RULE 2 -- a degenerate window. `det` is a difference of
-            // products of exact popcounts, so it is 0 or at least 1 and the test
-            // needs no epsilon (deviation (iv)).
-            const double minEig = static_cast<double>(impl::minEigenValue(a.sumXX, a.sumYY,
-                                                                          a.sumXY));
-            const double referenceMinEig = impl::kReferenceMinEigScale * minEig /
-                                           static_cast<double>(winW * winH);
-            if (det <= 0.0 || referenceMinEig < static_cast<double>(params.minEigThreshold)) {
-                if (finest) status[p] = 0;
-                continue;
-            }
-
-            float nextX = nextPts[p].x - halfWinX;
-            float nextY = nextPts[p].y - halfWinY;
-            double prevDeltaX = 0.0;
-            double prevDeltaY = 0.0;
-            bool inRange = true;
-
-            // The tap offset and the four weights live INSIDE the loop, and
-            // deliberately do not survive it. They used to be declared here so
-            // that the error term below could reuse them, which made `err` the
-            // residual at the previous ITERATE rather than at the position
-            // actually returned -- measured 134% high at maxIterations = 1, and
-            // wrong by a whole half-step whenever the oscillation rule fired.
-            // The reference recomputes them in a separate pass after the loop
-            // (LKTrackerInvoker.cpp:222-259); so does this, below.
-            for (int it = 0; it < maxIterations; ++it) {
-                const long long originX = impl::floorToLL(nextX);
-                const long long originY = impl::floorToLL(nextY);
-
-                // LOSS RULE 3 -- the estimate walked out of range mid-iteration.
-                if (originX < -static_cast<long long>(winW) || originX >= levelWidth ||
-                    originY < -static_cast<long long>(winH) || originY >= levelHeight) {
-                    if (finest) status[p] = 0;
-                    inRange = false;
-                    break;
-                }
-
-                // FLOAT, once per iteration: split the displacement of the whole
-                // window into an integer tap offset and a fraction. Every pixel of
-                // the window shares both, which is exactly why the four weights
-                // can leave the per-pixel loop.
-                // THE DISPLACEMENT IS MEASURED FROM `prevX`, NOT FROM THE
-                // INTEGER ANCHOR. `nextX - anchorX` looks equivalent and is not:
-                // it differs by `frac(prevX)`, which is zero at level 0 for
-                // integer keypoints and is NOT zero at any coarser level, where
-                // `prevPt / 2^level` is fractional. Anchoring the window on the
-                // grid moves which pixels the aperture covers (deviation (i));
-                // it must not move what the residual is a residual OF, which is
-                // `I(z)` against `J(z + d)` for `d` the full-precision flow.
-                // Measured on the repo's real frame with prev == next: the wrong
-                // spelling put a stationary point up to 1.4 px off through four
-                // levels, because each level converged to `d - frac` and handed
-                // twice that error to the next one down.
-                const double offX = static_cast<double>(nextX) - static_cast<double>(prevX);
-                const double offY = static_cast<double>(nextY) - static_cast<double>(prevY);
-                const long long tapX = static_cast<long long>(std::floor(offX));
-                const long long tapY = static_cast<long long>(std::floor(offY));
-                const double fx = offX - static_cast<double>(tapX);
-                const double fy = offY - static_cast<double>(tapY);
-                const double w00 = (1.0 - fx) * (1.0 - fy);
-                const double w01 = fx * (1.0 - fy);
-                const double w10 = (1.0 - fx) * fy;
-                const double w11 = fx * fy;
-
-                // BIT-PARALLEL: ten exact integers, twenty popcounts per word.
-                impl::TapSums sumsX;
-                impl::TapSums sumsY;
-                impl::residualSums<WordType>(lv, region, tapX, tapY, sumsX, sumsY);
-
-                const double b1 = sumsX.combine(w00, w01, w10, w11);
-                const double b2 = sumsY.combine(w00, w01, w10, w11);
-
-                // FLOAT, once per iteration: the 2x2 solve. The factor of 2 turns
-                // the raw [-1, 0, 1] tap into a central difference; see UNITS.
-                const double deltaX = impl::kCentralDifferenceScale * (a12 * b2 - a22 * b1) / det;
-                const double deltaY = impl::kCentralDifferenceScale * (a12 * b1 - a11 * b2) / det;
-
-                nextX += static_cast<float>(deltaX);
-                nextY += static_cast<float>(deltaY);
-                nextPts[p].x = nextX + halfWinX;
-                nextPts[p].y = nextY + halfWinY;
-
-                // TERMINATION 1 -- converged.
-                if (deltaX * deltaX + deltaY * deltaY <= eps2) break;
-
-                // TERMINATION 2 -- oscillation: this step almost exactly undoes
-                // the last one. Back off by half a step and stop. The reference's
-                // rule, thresholds included.
-                if (it > 0 && std::fabs(deltaX + prevDeltaX) < 0.01 &&
-                    std::fabs(deltaY + prevDeltaY) < 0.01) {
-                    nextPts[p].x -= static_cast<float>(deltaX * 0.5);
-                    nextPts[p].y -= static_cast<float>(deltaY * 0.5);
-                    nextX = nextPts[p].x - halfWinX;
-                    nextY = nextPts[p].y - halfWinY;
-                    break;
-                }
-                prevDeltaX = deltaX;
-                prevDeltaY = deltaY;
-            }
-
-            // THE FINAL PASS, AND IT IS THE REFERENCE'S OWN SEPARATE PASS. Two
-            // things happen here and both are ABOUT THE POSITION THAT IS
-            // RETURNED, not about the last iterate: the range test is re-applied
-            // to it, and -- only if it survives -- the error term is measured
-            // there, from taps and weights recomputed from `nextPts[p]`.
-            if (finest && status[p] != 0 && inRange) {
-                const float finalX = nextPts[p].x - halfWinX;
-                const float finalY = nextPts[p].y - halfWinY;
-                const long long finalOriginX = impl::floorToLL(finalX);
-                const long long finalOriginY = impl::floorToLL(finalY);
-                if (finalOriginX < -static_cast<long long>(winW) || finalOriginX >= levelWidth ||
-                    finalOriginY < -static_cast<long long>(winH) || finalOriginY >= levelHeight) {
-                    // LOSS RULE 3, applied to the RETURNED estimate. The last
-                    // iteration's step can carry the point out of range after the
-                    // in-loop test has already passed, and `status` describes the
-                    // position the caller gets. The reference makes this same test
-                    // in this same place -- but only when `err` was requested,
-                    // which makes its `status` depend on whether the caller wanted
-                    // an error value. That quirk is not reproduced (deviation
-                    // (vii)); the test is unconditional here.
-                    status[p] = 0;
-                } else if (err != nullptr) {
-                    const double offX = static_cast<double>(finalX) - static_cast<double>(prevX);
-                    const double offY = static_cast<double>(finalY) - static_cast<double>(prevY);
-                    const long long tapX = static_cast<long long>(std::floor(offX));
-                    const long long tapY = static_cast<long long>(std::floor(offY));
-                    const double fx = offX - static_cast<double>(tapX);
-                    const double fy = offY - static_cast<double>(tapY);
-                    err[p] = impl::windowMeanAbsDiff<WordType>(
-                        lv, region, tapX, tapY, (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy),
-                        (1.0 - fx) * fy, fx * fy);
-                }
-            }
-        }
-    }
+    c.usableLevels = impl::usableLevelCount(sizeof...(LevelBits), c.winW, c.winH,
+                                            [&](size_t i) { return levels.dimsAt(i); });
+    auto visit = [&](const auto& lv, size_t li) { impl::trackOneLevel(lv, li, c); };
+    levels.visitCoarseToFine(c.usableLevels, visit, 0);
 }
 
 } // inline namespace BINCV_ABI_NAMESPACE
