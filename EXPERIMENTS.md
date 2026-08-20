@@ -3226,6 +3226,15 @@ the numbers arrived — which matters here, because the numbers landed partly
 outside the bands the rule anticipated and the entry says so rather than bending
 one of them to fit.
 
+**That paragraph describes X-21, and X-22 and X-23 have since joined this section.**
+X-22 is likewise closed. **[X-23](#x-23--the-rolling-response-ring-against-the-frame-sized-response-map--todo)
+is still open and is the reason this section is not simply part of "Completed":** its
+rule is committed and **nothing it measures exists yet**. Its Decision rule is NOT
+copied from [TASKS.md](TASKS.md) — [T3.11](TASKS.md#t311--rolling-response-map-e-10--todo)
+deliberately states only that a rule must be written first, so the bands, their
+numbers and the justification for those numbers are written in the entry itself, and
+are what a later reader should hold the result to.
+
 ---
 
 ### X-21 · Does generic-N cost the specialized N=1 and ternary paths anything? · `DONE`
@@ -4078,6 +4087,306 @@ job and still needs a binary per arm.
 
 ---
 
+### X-23 · The rolling response ring against the frame-sized response map · `TODO`
+
+> **PRE-REGISTERED. Written and committed BEFORE the streaming form exists** —
+> nothing in `ops/corner.hpp` implements it at this commit, and this commit touches
+> this file and nothing else, so the history shows the rule predates the data. Same
+> discipline as [X-9, X-10 and X-11](#phase-2-experiments--rules-recorded-first-then-measured)
+> at 4245210 and as [X-21](#x-21--does-generic-n-cost-the-specialized-n1-and-ternary-paths-anything--done).
+> **Result, Conclusion and Decision are deliberately empty below.**
+
+**Numbering:** X-1…X-22 and X-7b are taken, so this entry is **X-23**. (Duplicates
+have happened here — X-21 records two tasks whose Done-when pointed at an X-number
+that was already in use.)
+
+**Gates:** [E-10](ARCHITECTURE.md#9-open-questions-and-planned-experiments) · task
+[T3.11](TASKS.md#t311--rolling-response-map-e-10--todo) — whether
+`cornerMinEigenVal` / `goodFeaturesToTrack` gain a streaming form, and if so whether
+it becomes the recommended path or a second shape.
+
+**Question:** What does replacing [T3.7](TASKS.md)'s frame-sized `float` response
+map with a rolling three-row ring cost in time, and what does it actually save once
+everything the streaming form must carry to preserve the selection's **global**
+properties is counted against the ring?
+
+**Why it exists.**
+[X-20](#x-20--hybrid-lk-accuracy-against-ground-truth-and-the-frontends-peak-footprint--done)
+measured the frontend's peak working set at **1 721 568 B**, of which T3.7's
+response map is **1 228 800 B — 71.4%, more than everything else combined** — at
+4 bytes per pixel where every other plane in the frontend is one or two BITS and the
+tracker itself is 0.2%. On a project whose thesis is footprint, the largest buffer
+in the frontend is a float scratch.
+
+**And the trade is NOT settled by that fact.** [CLAUDE.md](CLAUDE.md)'s "memory
+wins" is the tiebreak for a conflict **where no explicit choice has been made**;
+this entry is where the choice gets made, so the tiebreak applies only if the
+measurement leaves it genuinely close — and the bands below say what "close" is
+before any number exists.
+
+---
+
+**TWO PRECONDITIONS, STATED FIRST, BECAUSE NEITHER IS ON THE TRADE CURVE.**
+
+**1. Corner equality is a precondition, not a tradeable metric.** The streaming form
+must return **identical** corners to the frame-map form: same count, same
+coordinates, in the same order, with the same `CornerResult` triple (`count`,
+`candidatesRanked`, `candidatesTruncated`). Proven by comparing the full output
+arrays element for element over whole frames — not by sampling, not by counting how
+many matched, not by a displacement tolerance. **An arm that returns different
+corners has not solved the problem and is disqualified whatever its bytes and
+nanoseconds say.** There is no band below that trades a corner for a byte or for a
+nanosecond.
+
+That is not pedantry, because **the selection pipeline is not local** and a
+three-row ring gives none of it for free:
+
+- the quality threshold is `qualityLevel × the maximum over the WHOLE map`, border
+  included (`cv::minMaxLoc`'s region, `gftt.cpp` step 1);
+- the greedy minimum-distance filter needs the survivors in descending order across
+  the **whole frame**, with the reference's own tie rule — response descending, then
+  `y` descending, then `x` descending, which is `greaterThanPtr` on pointers into a
+  contiguous map spelled on coordinates (`impl::CornerStronger`).
+
+Ties are common in this operation rather than exotic — a checkerboard makes the
+entire interior tie, and a 3×3 window of popcounts takes few distinct values — so a
+streaming implementation that changes which corner wins a tie changes real output on
+real content. NMS ordering has teeth too: `Corner.SelectionOrder_PinsNmsBeforeDistance`
+already pins a case where two stage orders give different survivors.
+
+**2. The kernel rules are preconditions too**, not things to be bought back with
+speed: views and never owning containers (D-5); **never throws**; **no heap
+anywhere in the kernel** — the `operator new` counter T3.7's suite already runs
+(plain and C++17 over-aligned) stays at zero; padding never counted
+([D-13](ARCHITECTURE.md#d-13-a-reduction-counts-pixels-never-padding)), inherited
+from the reductions. An arm that buys its numbers with an allocation is not an arm.
+
+---
+
+**WHAT COUNTS AS THE STREAMING FORM'S TRUE PEAK — defined now, so it cannot be
+defined afterwards to flatter a result.** The peak is every byte alive at the
+operation's high-water mark, namely:
+
+1. **the response ring** — however many rows the implementation actually needs, not
+   the three NMS needs in principle;
+2. **everything carried to preserve the global properties.** The candidate/heap
+   array, which the frame-map form also carries and which the streaming form may
+   need **larger** (see the hypothesis); any per-column accumulator array a
+   row-major sweep needs to keep an incremental form — `width` counters is 5 120 B
+   at 640 px, and [X-11](#x-11--incremental-versus-recomputed-window-reductions--done)
+   declined exactly that shape once already; any carried derivative rows or per-row
+   bookkeeping;
+3. counted the way X-20 counted it: `operator new` instrumented, every
+   measurement-only buffer **scoped and destroyed before the accounting point** —
+   the mistake X-20 caught in its own first table, where a `W·H` sizing buffer
+   2.1× the reported total was still live — and the frontend total re-stated in
+   X-20's five-row stage table so the 71.4% row can be read directly against its
+   replacement.
+
+**The frame-map form is re-measured in the same binary**, not quoted from X-20, so
+both sides of the ratio come from one build.
+
+**The arithmetic the ring estimate rests on, written out so the measurement can
+contradict it.** Three `float` rows at 640 px is **7 680 B**; TASKS.md's "~15 kB"
+budgets roughly twice that, and the difference is precisely the carry this entry
+insists on counting rather than a disagreement about the ring. If the candidate
+carry stays at X-20's 105 048 B (8 754 survivors), the corner stage goes
+1 333 848 B → **112 728 B** and the frontend 1 721 568 B → **500 448 B, 3.44×** —
+which would put the measured frontend **under**
+[§4.6](ARCHITECTURE.md#46-memory-arithmetic)'s own "~0.6 MiB" projection for two
+frames plus derivatives, a figure written before anything in this project counted a
+float scratch. The frame-map frontend is **2.7×** that projection. That is the size
+of the claim at stake, and **every byte of carry comes off it**.
+
+---
+
+**Hypothesis — two-sided on purpose, because the "~2× compute" estimate rests on an
+assumption that may not hold.**
+
+- **The second pass may not be forced.** The estimate assumes the global max
+  requires evaluating every response twice. The shipped `selectGoodFeatures` already
+  proves the threshold is a **pure post-filter** over the raw 3×3 maxima — its NMS
+  is fused with the threshold on exactly that argument ("val > threshold and val is
+  the maximum of its 3×3 neighbourhood in the RAW map"). So a single pass that
+  carries raw maxima and applies `qualityLevel × max` after the last row is possible
+  in principle: the pass count is an implementation choice, not a property of the
+  operation.
+- **The reason it may cost two passes anyway is memory, and it lands on the carry.**
+  Un-thresholded, **every pixel of a flat plateau is a 3×3 maximum**, and a zero
+  plateau is most of an edge-map response — so the raw-maxima set can be far larger
+  than X-20's 8 754 thresholded survivors, with a structural worst case of
+  `(w−2)(h−2)` candidates = **3 659 568 B** at 640×480, three times the map the
+  streaming form set out to remove. A one-pass arm therefore has to prune against a
+  **running** maximum (monotone non-decreasing, so anything below
+  `qualityLevel × running max` is permanently dead) or degenerate into the two-pass
+  arm. Whichever way it goes, the bytes land in the peak defined above.
+- **And the traversal cuts the other way.** A ring forces a **row-major** sweep, and
+  [X-18](#x-18--does-the-incremental-window-form-still-pay-inside-t37s-dense-sweep--done)
+  measured the shipped column-major sliding sweep **1.19× SLOWER than a plain
+  row-major recomputation at `blockSize` 3** — the reference pipeline's own block
+  size. So the streaming form gets a discount on the shape change before it pays for
+  any extra pass.
+- **Expectation:** two-pass near 1.7–2.0× (two evaluations, less what row-major gives
+  back); one-pass at or below 1.0× **if** its carry stays bounded. The outcome the
+  bands are written to catch is a one-pass arm that is *faster* and yet saves *less*
+  than 3.4×, because of what it carries.
+
+---
+
+**Decision rule** *(written before measuring; nothing below is evaluated against
+data that exists at this commit).*
+
+Define, all on the reference device, `uint32_t`, 640×480, `blockSize` 3 — SEAL's own
+value and the point the decision is taken at:
+
+- **`T`** = (streaming arm) ÷ (frame-map arm) for one whole `goodFeaturesToTrack`
+  call, response **and** selection, medians of interleaved batches;
+- **`P_frame`, `P_stream`** = the frontend peak under X-20's accounting with each
+  form, the streaming one including all carry as defined above; **`R = P_frame ÷ P_stream`**.
+
+**Gate on the saving, evaluated FIRST.** If **`P_stream > 750 000 B`** at 640×480
+(equivalently `R < 2.3×`), the carry has eaten the saving E-10 was registered on,
+**none of the time bands apply**, and the streaming form does not become the
+recommended path on a footprint claim it does not have. *Why 750 000 B:* X-20's
+non-corner stages total 387 720 B and are fixed by the frame size, so this line
+leaves the whole corner stage ≤ ~362 000 B — under a third of the frontend instead
+of 71.4%, and the float scratch no longer its dominant term. It also keeps the
+result inside §4.6's "~0.6 MiB"-class projection rather than merely below the
+status quo. Above that line the experiment has measured a different trade from the
+one it set out to measure, and says so.
+
+**The time bands, evaluated only if the saving gate passes.**
+
+- **Band A — `T ≤ 1.25`: the streaming form ships AND becomes the recommended path.**
+  The frame-map entry point stays — T3.7 made the map caller-provided, and a caller
+  who wants to select twice over one map, or to mask it (the documented route for a
+  mask), still needs it.
+  *Why 1.25 and not 1.00:* this operation **already pays 1.19× at this exact block
+  size** for a shape chosen on ergonomics rather than on a measurement — X-18 found
+  the shipped column-major sliding sweep 20% slower than row-major recomputation at
+  `blockSize` 3, and it ships that way because the alternative wanted a width-long
+  accumulator array the caller would have to own. A project that has accepted 1.19×
+  on this kernel to avoid a 5 kB scratch cannot coherently refuse a ~3.4× frontend
+  footprint cut at 1.25×. *Why the floor is set by relevance and not by resolution:*
+  anything under ~1.10 is not distinguishable from the code-layout effect this
+  repository has measured twice (~10% between two instantiations in one TU; **1.46×**
+  between binaries, [X-22](#x-22--what-an-n-bit-pyramid-level-costs-the-lk-covariance--done)).
+
+- **Band B — `1.25 < T ≤ 2.20`: it ships as a second shape, and the recommended path
+  does NOT move.** Both peaks and both times go in the D-record and in the header, so
+  a caller picks with the numbers in front of them.
+  *Why it ships at all:* a caller who cannot fit 1 228 800 B has **no** alternative
+  today, and CLAUDE.md's benchmarking rule is that a target either fits or it does
+  not. For that caller a 2× is unambiguously worth paying, and refusing to ship the
+  shape would be deciding for them.
+  *Why the recommendation does not move:* at `blockSize` 3 and 640×480 the response
+  sweep alone measures ~101 ns/pixel on the reference device (X-18) — about **31 ms
+  for one frame**. Beyond 1.25× the added time is a material fraction of a whole
+  frame, and a caller with the megabyte to spare should not pay it silently.
+  *Why 2.20 is the top:* the estimate this task was scheduled on is ~2×
+  (TASKS.md T3.11, ARCHITECTURE §9's E-10 row, X-20's decision 3). 2.20 is that
+  estimate plus roughly one layout-effect's margin, so a reading marginally above the
+  estimate is judged against the estimate rather than against noise.
+
+- **Band C — `T > 2.20`: it does not ship.** The measurement is recorded, `ops/corner.hpp`
+  keeps only the caller-provided frame map, and E-10 closes as *"not at this price"*
+  rather than as unanswered.
+  *Why there is a ceiling at all:* memory-first is a **tiebreak, not a licence for an
+  unbounded slowdown** — a rule that accepts any cost is not a rule.
+  *Why it sits at 2.20:* past the estimate, the trade on offer is not the trade the
+  project agreed to weigh. And this is already the operation furthest from
+  [ROADMAP](ROADMAP.md#success-criteria) success criterion 4:
+  [X-19](#x-19--the-tier-2-denominator-goodfeaturestotrack-against-opencv--done)
+  measured binCV's whole detector **1.82× slower** than the byte-per-pixel OpenCV
+  denominator (for 2.23× less memory, 5.71× once both candidate buffers are sized).
+  At `T = 2.2` that becomes ~4× slower than the denominator; trading a stated success
+  criterion that far against another one is a decision to be taken deliberately and in
+  the open, not absorbed inside a footprint task.
+
+- **Tie between two passing streaming arms:** the smaller true peak wins, unless it is
+  more than **1.10×** slower than the other arm, in which case the faster one wins.
+  That is CLAUDE.md's tiebreak applied at the resolution the layout effect leaves.
+
+- **The outcome the rule must not silently swallow: `T < 1.00`.** If the streaming
+  form is *faster*, then the "~2× the response compute" figure is wrong, and **three
+  documents state it** — X-20's decision 3, ARCHITECTURE §9's E-10 row, and TASKS.md
+  T3.11. CLAUDE.md's rule for a measurement that contradicts a documented claim
+  applies to a claim this project made about itself: all three get corrected to the
+  measured number, and the correction is **named**, not quietly applied. It is a live
+  possibility rather than a courtesy — see the traversal bullet in the hypothesis.
+
+---
+
+**Variants — three arms, and each one lives in its OWN translation unit.**
+
+1. **F, the control:** the shipped `goodFeaturesToTrack`, caller's 1 228 800 B map,
+   column-major sliding sweep.
+2. **S2, streaming two-pass:** three-row ring; pass 1 evaluates every response purely
+   to find the global maximum; pass 2 re-evaluates, thresholds, runs the 3×3 NMS over
+   the ring, and feeds the existing bounded heap.
+3. **S1, streaming one-pass:** three-row ring; one evaluation per pixel; running global
+   maximum; raw 3×3 maxima carried and pruned against that running maximum; the final
+   threshold, the sort and the spacing filter applied after the last row.
+
+Arms 2 and 3 answer different halves of the question and neither does alone: **S2
+prices the naive shape the estimate describes; S1 prices whether the second pass is
+needed at all.** If S1's carry is unbounded in practice it shows up as a truncation
+against the equality precondition — which is a result, not a failure of the
+experiment.
+
+**"Own TU" is in this list rather than in an implementation note because the hazard
+has been measured twice here:** ~10% between two instantiations of one kernel in a
+single translation unit, and 1.46× for the same kernel between two binaries (X-22),
+with T3.10 seeing 1.46× from adding arms to a shared TU. X-21 split its arms across
+`genericn_arm_*.cpp` for exactly this reason and this entry copies that shape. The
+A/B is additionally **re-run with the arm order in the batch swapped**; a band verdict
+that moves when the order moves is reported as layout, not as a result.
+
+**Workload:** 640×480 — X-20's own frontend configuration, so the footprint table
+lines up row for row — and the repository's real 752×480 frame, whose survivor count
+X-20 measured separately at 9 774 **because the candidate row is a per-frame reading
+and not a bound**. `blockSize` 3 for the decision, with 7, 15 and 31 reported beside
+it, because X-18 found the traversal and incremental effects cross over at different
+sizes and a streaming form changes exactly the traversal. `uint32_t` (the shipped
+default) and `uint64_t`. Selection parameters are `GoodFeaturesParams`' defaults —
+`SEAL/seal_params.yaml` verbatim.
+
+**Metric — memory and speed together (CLAUDE.md), with equality as a pass/fail beside
+them:**
+- ns/pixel for the whole detector call **and** for the response stage alone; medians
+  of 11 interleaved batches, spreads reported;
+- **ms/frame at 640×480 beside the ratio**, because a ratio does not say whether the
+  frame budget moved;
+- the **true peak** in bytes, as defined above, for every arm, at both frame sizes,
+  with the structural `(w−2)(h−2)` candidate worst case stated beside the measured
+  per-frame reading;
+- the frontend total in X-20's five-row stage table;
+- corner equality: pass/fail, with the compared counts printed.
+
+**Method:** `benchmark/corner_streaming_benchmark.cpp` plus one file per arm, through
+`measure_util.hpp`'s protocol, Release only. Every arm's ANSWER is checked against the
+frame-map form before anything is timed. **Equality lives in `tests/test_corner.cpp`
+as core-suite cases**, so it runs in all four `verify.sh` configurations rather than
+only where a benchmark builds. Footprint via the `operator new` counter T3.7 and X-20
+already use. Device:
+`./scripts/run_on_pi.sh pi4 ./benchmark/corner_streaming_benchmark`, with
+architecture, compiler, governor, core pinning and `vcgencmd get_throttled` **before
+and after** recorded — a non-zero value, or one that CHANGES during the run,
+invalidates it, and **exit 77 is a skip, not a pass**. Log:
+`bincv-cpp/results/corner_streaming_benchmark_pi4.log`.
+
+**Result:** *pending — nothing is measured at this commit, and no streaming form
+exists to measure.*
+
+**Conclusion:** *pending.*
+
+**Decision:** *pending.* If band A or B fires it promotes to a D-record in
+[ARCHITECTURE §8](ARCHITECTURE.md#8-design-decisions) and closes E-10 in §9; if band
+C fires, E-10 closes as "not at this price" and the register row says so. Either way
+X-20's footprint table is restated with the number this experiment measures.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
@@ -4097,6 +4406,7 @@ no open experiment left, and the project has no provisional decision left.
 
 | ID | Question | Task | Runs during |
 |---|---|---|---|
+| E-10 | Does the corner response need a frame-sized `float` map, or a rolling ring — and what does the ring's carry cost once the selection's global properties are preserved exactly? **Pre-registered as [X-23](#x-23--the-rolling-response-ring-against-the-frame-sized-response-map--todo)**, rule committed, not yet measured | T3.11 | Phase 3 |
 | E-13 | Does the per-row partial accumulator still pay above N = 1, where it is O(N²) per row against work that is O(N²) per word — and can the answer be measured free of the code-layout drift [X-22](#x-22--what-an-n-bit-pyramid-level-costs-the-lk-covariance--done) hit? | T4.1 | Phase 4 |
 | E-12 | How much of the `ops/` kernel's per-row cost is genericity that is not in N — runtime `BorderType`, the word type, the argument contract — and which of them? | T4.1 | Phase 4 |
 | E-7 | Bits needed per pyramid level | T4.1 | Phase 4 |
