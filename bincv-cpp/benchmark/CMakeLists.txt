@@ -16,6 +16,33 @@
 
 file(GLOB BENCHMARK_SOURCES CONFIGURE_DEPENDS *.cpp)
 
+# ---------------------------------------------------------------------------
+# T3.9 / E-4 (X-21): the one MULTI-FILE benchmark here.
+#
+# genericn_benchmark compares three arms -- the generic-N route, the shipped
+# specialization, and a hand-written binary-only reference with no binCV in it at
+# all -- and each arm gets its OWN translation unit for two measured reasons,
+# both spelled out in benchmark/genericn_arms.hpp:
+#
+#   * code size is half of that experiment's metric, and `size` on one object per
+#     arm is a number per arm rather than a number for the sum;
+#   * morphology_path_benchmark.cpp records, measured, that two instantiations of
+#     one kernel in a single object move each other's timings by ~10% through code
+#     layout alone.
+#
+# So the arms are carved out of the one-executable-per-source glob and built as an
+# OBJECT library, whose per-arm .o files are exactly what `size` is run on.
+# ---------------------------------------------------------------------------
+set(BINCV_GENERICN_ARMS
+    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_generic.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_specialized.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_handwritten.cpp)
+list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_GENERICN_ARMS})
+
+add_library(genericn_arms OBJECT ${BINCV_GENERICN_ARMS})
+target_link_libraries(genericn_arms PRIVATE bincv_core bincv_warnings)
+target_include_directories(genericn_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 set(BINCV_BENCH_CORE "")
 set(BINCV_BENCH_OPENCV "")
 foreach(benchmark_src ${BENCHMARK_SOURCES})
@@ -44,4 +71,8 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
     add_executable(${benchmark_name} ${benchmark_src})
     target_link_libraries(${benchmark_name} PRIVATE bincv_core bincv_warnings)
     target_include_directories(${benchmark_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    if(benchmark_name STREQUAL "genericn_benchmark")
+        target_link_libraries(${benchmark_name} PRIVATE genericn_arms)
+    endif()
 endforeach()
