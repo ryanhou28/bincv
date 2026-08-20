@@ -37,7 +37,8 @@ set(BINCV_GENERICN_ARMS
     ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_generic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_specialized.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_handwritten.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_diag.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_diag.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_diag_accum.cpp)
 list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_GENERICN_ARMS})
 
 add_library(genericn_arms OBJECT ${BINCV_GENERICN_ARMS})

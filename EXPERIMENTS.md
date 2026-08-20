@@ -3230,6 +3230,34 @@ one of them to fit.
 
 ### X-21 · Does generic-N cost the specialized N=1 and ternary paths anything? · `DONE`
 
+> **CORRECTED AND COMPLETED AT TRIAGE.** The first version of this entry was run
+> and reported without a committed device log, and three of its claims did not
+> survive review. All three are corrected below **in place, with the correction
+> named**, because a log that quietly reads differently on a second visit is worse
+> than one that was wrong:
+>
+> 1. **"the same machine code" / "the same 567 aarch64 instructions"** — the
+>    derivative pair is the same instruction COUNT (567) and the same function SIZE
+>    (2264 B, `nm` to the byte), but the streams are **not identical**: GCC allocates
+>    different registers in the row loop. And the claim was only ever about the
+>    derivative — the covariance and count functions differ in size and in
+>    instruction count. Both are now shown by a committed script rather than asserted.
+> 2. **the attribution of the kernel-shape gap to the `a[N]`/`b[N]`/`srcRow[N]`
+>    arrays** — measured at triage with a new decomposition point that removes N's
+>    array plumbing **and nothing else**. The arrays are a MINORITY of the gap:
+>    about a fifth of the per-row cost and a third of the per-word cost. The rest is
+>    genericity the entry never separated — runtime `BorderType`, the word type, the
+>    argument contract.
+> 3. **"2.84× in code size"** — an exceptions-enabled figure, weighed against a
+>    Tier 2 claim that rests on `-fno-exceptions`. Measured there at triage: **2.63×**.
+>
+> Two further claims were checked and **stand**: the hand-written arm is a genuinely
+> independent control, and the decision rule was not softened — band 2 fired, was
+> reported, and nothing was acted on. One reviewer hypothesis was **rejected on
+> evidence**; see conclusion 3. Every number in this entry is reproducible from
+> [`bincv-cpp/results/genericn_benchmark_pi4.log`](bincv-cpp/results/genericn_benchmark_pi4.log),
+> produced by [`scripts/genericn_evidence.sh`](scripts/genericn_evidence.sh).
+
 **Gates:** [E-4](ARCHITECTURE.md#9-open-questions-and-planned-experiments) · task
 [T3.9](TASKS.md) — whether N
 stays arbitrary or gets capped, and whether the specialization strategy chosen at
@@ -3285,8 +3313,13 @@ Only arm 3 shows whether genericity *costs* anything, and the rule is written
 against arm 3 ("within 5% of a hand-written binary-only implementation"), so
 omitting it would leave the rule unevaluable.
 
-**Workload:** [T3.5](TASKS.md)'s derivative and [T2.5](TASKS.md)'s reductions,
-at the frame sizes those entries already use so the numbers sit alongside
+**Workload:** [T3.5](TASKS.md)'s derivative and the reductions — [T2.5](TASKS.md)'s
+whole-frame `countNonZero` and, because the LK covariance is the reduction the
+frontend actually spends its time in, [T3.6](TASKS.md)'s fused `countCovariance`.
+T3.9's spec says "T2.5's reductions"; only the count row is a T2.5 kernel, and
+**that is stated rather than left for a reader to notice** — four of the six rule
+comparisons below are carried by the T3.6 entry point.
+At the frame sizes those entries already use so the numbers sit alongside
 [X-16](#x-16--t35-derivative-against-cvfilter2d--done) and
 [X-7b](#x-7b--the-same-question-on-aarch64-where-d-6-comes-from--done) rather
 than beside a workload invented here. Inputs varied and results consumed through
@@ -3345,18 +3378,28 @@ is the specialization under another name: it includes **no binCV header**. No
 no route selector, no `BINCV_ASSERT` contract, no `impl::` helpers —
 `BORDER_REFLECT_101` and `uint32_t` are compiled in, and `bitMask`, `rowTailMask`,
 `minRowWords`, `borderIndex` and `regionFromExtent` are re-derived inline as the
-two or three lines of arithmetic they are. The word-level **arithmetic** is
-necessarily equal across the arms — there is no second way to compute
-`mag = a ^ b`, `sign = b & ~a` — and that is precisely what makes the arm a fair
-control: with the arithmetic held equal, a difference is the machinery around it.
+two or three lines of arithmetic they are. **The word-level arithmetic is equal across the arms — and at triage that was
+checked rather than asserted.** The first version of this entry said "there is no
+second way to compute `mag = a ^ b`", which is plainly false as prose: the library
+spells it `pos = a & ~b; neg = b & ~a; mag = pos | neg` and the hand-written arm
+spells it `mag = a ^ b`, the same function in four operations and in two. Whether
+those are the same *instructions* is a question about the compiler, so it is now
+compiled: § 6 of the committed log builds both spellings at `-O3` and GCC 14.2
+emits **`eor` + `bic` for each**, differing only in the operand order of a
+commutative `eor`. So the premise holds — with the arithmetic held equal in the
+machine code, a difference is the machinery around it — but it holds **because the
+compiler folds the spellings**, not because there is one way to write them, and
+that is a fact about this toolchain at this optimisation level rather than a
+tautology.
 Its popcount is deliberately spelled `__builtin_popcountll` exactly as
 `impl::popcountWord` is, because X-7/X-7b's no-`-march` lowering is a confound to
 **hold fixed**, not to vary; two arms differing in the builtin would be measuring
 the builtin.
 
-**A fourth measurement point, `views only`, was added afterwards** in
-`benchmark/genericn_diag.cpp` (`abf3504`) and is **not an arm of the rule
-comparison** — the rule and the three arms are untouched, and the comparison the
+**Three further measurement points were added afterwards** — `views only` in
+`benchmark/genericn_diag.cpp` (`abf3504`), then at triage `scalarized` in the same
+file and the accumulator twins in `benchmark/genericn_diag_accum.cpp`. **None is an
+arm of the rule comparison** — the rule and the three arms are untouched, and the comparison the
 rule is written against was run and recorded before that file existed. It exists
 because the rule's second band makes the remedy depend on *where the cost comes
 from*, and the headline run localizes nothing. It calls the same kernel the
@@ -3368,19 +3411,65 @@ views_only  − hand_written  =  the kernel's generic SHAPE at N = 1
 specialized − views_only    =  the CONTAINER
 ```
 
-**Reproducing it.** All of it runs on the device from the committed tree:
+**`scalarized` splits the first of those, and it is the point the original entry
+needed and did not have.** The hand-written arm drops *three* kinds of genericity at
+once — genericity in **N**, genericity in the **BorderType** (a runtime parameter in
+`ops/`, which pays for itself inside the word loop: `derivativeYRoute`'s
+`a[p] = haveA ? rowA[p][i] : fill` select exists only so `BORDER_CONSTANT` can be
+asked for at run time) and genericity in the **word type** (`B - 1` from
+`bitsPerWord<WordType>()` where the hand-written arm writes the literal `31`).
+Nothing in the original run separated them, and the entry nevertheless charged the
+whole gap to N's array plumbing. `scalarized` is the shipped kernel with the plane
+arrays replaced by scalars and the `for p < N` loops deleted, and **nothing else
+changed** — same views, same `impl::` helpers, same `BINCV_ASSERT` contract, same
+runtime `BorderType`, same template over `WordType`, same `ternaryDifference`. So
 
 ```
-./scripts/run_on_pi.sh pi4 './benchmark/genericn_benchmark'
-./scripts/run_on_pi.sh pi4 'size    benchmark/CMakeFiles/genericn_arms.dir/genericn_arm_*.cpp.o'
-./scripts/run_on_pi.sh pi4 'size -A benchmark/CMakeFiles/genericn_arms.dir/genericn_arm_*.cpp.o'
-./scripts/run_on_pi.sh pi4 'nm -C -S --size-sort benchmark/CMakeFiles/genericn_arms.dir/genericn_arm_*.cpp.o'
+scalarized − hand_written  =  every OTHER kind of genericity
+views_only − scalarized    =  N's array plumbing, alone
 ```
 
-and the byte-identity claim in conclusion 1 is `objdump -d --no-show-raw-insn` on
-the two objects, sliced to `derivativeGeneric` / `derivativeSpecialized`, stripped
-of addresses and diffed. **Code size and the disassembly were taken on the device
-too, not on x86** — `size` on an aarch64 object answers a different question.
+It is also exactly the remedy this entry's Decision Q3 named as a candidate, so
+measuring it costs one decomposition point and says whether that remedy is worth an
+experiment at all.
+
+**The accumulator twins** exist because conclusion 3 originally explained the
+library's count *win* by `impl::visitRowWords`' head/interior/tail skeleton — which
+the hand-written count already has, running its interior unmasked and masking only
+the tail. The variable the original run never isolated is D-15's **per-row partial
+sum**: `impl::countRowRegion` returns a value that `countViewRegion` adds, so a
+640×480 count is 480 independent popcount chains against the hand-written arm's one
+9600-long chain, and X-11b measured that shape separately at 1.03–1.09× on a target
+where popcount latency is the bottleneck (D-6). `genericn_diag_accum.cpp` holds two
+pairs of twins — a count and a covariance, each in a one-chain and a per-row
+spelling, identical in every other character — **both twins of a pair in one object**,
+so the A/B cannot be a code-layout artefact, and the one-chain copies double as a
+layout control against the arm they were copied from
+
+**Reproducing it — one command, and a committed log.** The original entry gave
+four shell commands and described the disassembly comparison in prose, with no
+script and no diff output in the tree; every other reference-device entry in this
+file cites a committed `results/*_pi4.log`, and this file twice records an entry
+being faulted for the omission ([X-6](#x-6--is-the-t22-logic-speedup-real--done),
+[X-8](#x-8--what-composing-the-lk-covariance-out-of-t26-costs--done)). It is
+repaired the same way:
+
+```
+./scripts/run_on_pi.sh pi4 '../../scripts/genericn_evidence.sh'
+```
+
+[`scripts/genericn_evidence.sh`](scripts/genericn_evidence.sh) emits, in one
+stream, the benchmark, `size`, `size -A`, `nm -C -S`, the address-stripped
+instruction-identity diff for **all three** generic/specialized function pairs, the
+hand-written instruction counts, the arithmetic-spelling check, and the
+`-fno-exceptions` sizes — and writes them to
+[`bincv-cpp/results/genericn_benchmark_pi4.log`](bincv-cpp/results/genericn_benchmark_pi4.log),
+which is committed. Its normalisation is documented in the script and removes only
+the instruction address, the redundant hex branch target, and the arm's name inside
+a symbol; a differing register, mnemonic or within-function offset survives and
+diffs — which is how the correction to conclusion 1 was found.
+**Code size and the disassembly are taken on the device, not on x86** — `size` on an
+aarch64 object answers a different question.
 
 **Validity.** Volatile sink; four rotated pseudo-random frames; padding kept clear
 so no arm over-counts; and all three arms **and both decomposition points**
@@ -3391,7 +3480,10 @@ destination buffers are re-filled from one input before the covariance rows,
 because popcount cost is content-dependent and the derivative rows leave each
 buffer holding whichever frame ran last.
 
-**Environment** (the run this entry reports, `abf3504`):
+**Environment** (the committed triage run, whose full output is
+[`bincv-cpp/results/genericn_benchmark_pi4.log`](bincv-cpp/results/genericn_benchmark_pi4.log);
+the two earlier runs at `066a339` and `abf3504` were taken on the same device with
+the same block and agree to within 0.5%):
 
 ```
 device:           pi4
@@ -3406,32 +3498,43 @@ build:            Release, core-only, no -march (X-7 confound held fixed)
 ```
 
 Throttle clean before **and** after, and unchanged across the run. The headline
-rows were measured twice, at `066a339` and again at `abf3504` with the
-decomposition present, and **reproduced to within 0.1%** — so the numbers below
-are stable across an independent build, an independent run and a changed binary.
+rows have now been measured **three** times — `066a339`, `abf3504`, and the triage
+run whose log is committed — across three different binaries, and reproduce to
+**within 0.5% worst case**, on the specialized covariance row at 640×480 (1.0045,
+1.0093, 1.0068); every other row agrees to within 0.15%. The first version of this
+entry claimed 0.1%, which its own two tables already contradicted on that row. 0.5%
+is still inside the 0.1–1.3% batch spread and no band moves, but the smaller
+number was not true and is not what a later reader should plan a re-run against.
+The arm most sensitive to a rebuild is the one whose object layout moves when a
+decomposition point joins `genericn_arms` — the ~10% layout effect
+`morphology_path_benchmark` records, showing up here as half a percent.
 
 ---
 
 **Result — speed. ns/pixel, median of 15 batches, `uint32_t`, Pi 4.**
 
-Batch spread `(max − min)/median` was **0.1–1.3%** on every row. Every difference
-called real below is an order of magnitude outside it.
+Batch spread `(max − min)/median` was **0.0–0.4%** on every row of the committed
+triage run (0.1–1.3% on the two earlier runs). The original entry called every
+difference "an order of magnitude outside it"; against the worst spread of 1.3%
+the real margins are **4.5× to 33×** — the 94×60 count row at 5.8% is 4.5× and the
+640×480 covariance at 7.6% is 5.8×, not 10×. Both are still far outside it and no
+band moves, but the overstatement is corrected rather than kept.
 
 *640×480 (stride 20 words):*
 
 | workload | hand-written | specialized | generic-N | spec ÷ hand | **generic ÷ spec** |
 |---|---|---|---|---|---|
-| derivative dx+dy | 0.1706 | 0.2058 | 0.2059 | **1.207×** | **1.000×** |
-| count whole frame | 0.0722 | 0.0638 | 0.0638 | **0.883×** | 1.001× |
-| covariance 31×31 ×200 | 0.9311 | 1.0045 | 1.0108 | **1.079×** | 1.006× |
+| derivative dx+dy | 0.1704 | 0.2060 | 0.2061 | **1.209×** | **1.000×** |
+| count whole frame | 0.0723 | 0.0637 | 0.0636 | **0.881×** | 0.998× |
+| covariance 31×31 ×200 | 0.9359 | 1.0068 | 1.0059 | **1.076×** | 0.999× |
 
 *94×60 — pyramid level 3, the level LK touches every frame (stride 3 words):*
 
 | workload | hand-written | specialized | generic-N | spec ÷ hand | **generic ÷ spec** |
 |---|---|---|---|---|---|
-| derivative dx+dy | 0.2508 | 0.3580 | 0.3579 | **1.427×** | **1.000×** |
-| count whole frame | 0.0896 | 0.0844 | 0.0846 | **0.942×** | 1.002× |
-| covariance 31×31 ×200 | 0.6592 | 0.7316 | 0.7321 | **1.110×** | 1.001× |
+| derivative dx+dy | 0.2508 | 0.3579 | 0.3580 | **1.427×** | **1.000×** |
+| count whole frame | 0.0897 | 0.0844 | 0.0846 | **0.941×** | 1.002× |
+| covariance 31×31 ×200 | 0.6592 | 0.7314 | 0.7321 | **1.109×** | 1.001× |
 
 **Result — code size. `size` on one aarch64 object per arm.**
 
@@ -3441,11 +3544,23 @@ called real below is an order of magnitude outside it.
 | specialized | 5144 | 40 | 5184 |
 | generic-N | 5054 | 40 | 5094 |
 
-| comparison | text |
-|---|---|
-| specialized ÷ hand-written | **2.84×** |
-| generic-N ÷ hand-written | **2.79×** |
-| **generic-N ÷ specialized** | **0.98× — generic-N is 90 B SMALLER** |
+| comparison | text (default build) | text (`-fno-exceptions`) |
+|---|---|---|
+| hand-written | 1809 | 1809 |
+| specialized | 5144 | 4767 |
+| generic-N | 5054 | 4677 |
+| specialized ÷ hand-written | **2.84×** | **2.63×** |
+| **generic-N ÷ specialized** | **0.98× — generic-N is 90 B SMALLER** | 0.98× |
+
+**The right-hand column is the one the Tier 2 constraint is about, and the original
+entry did not measure it.** [ARCHITECTURE §2](ARCHITECTURE.md#2-target-platforms)
+names code size as often binding before RAM on Tier 2, and the Tier 2 claim rests
+on the core-only `-fno-exceptions` build `verify.sh` already builds — which emits
+none of the `.gcc_except_table`, message strings or `.eh_frame` the split below
+attributes 972 B to. Measured there, the gap is **2.63×**, not 2.84×. The
+hand-written object is byte-for-byte unchanged between the two configurations,
+having no throw site; both binCV arms lose ~377 B. Every quotation of this figure
+must carry which build it came from.
 
 Per function, `nm -S` on the same objects (bytes):
 
@@ -3468,23 +3583,48 @@ indexes the *same* `SignedQuantMat<1>` buffer layout the containers name. At
 640×480, `uint32_t`: source 38 400 B + `dx` 76 800 B + `dy` 76 800 B = **192 000 B**
 for all three.
 
-**Result — the decomposition, i.e. where the gap actually is.**
+**Result — the decomposition, i.e. where the gap actually is.** The `scalarized`
+column is the triage addition; without it the two right-hand columns are one
+undifferentiated "kernel shape", which is what the original entry reported.
 
-| workload / size | hand | views only | specialized | **kernel SHAPE** | **container** |
-|---|---|---|---|---|---|
-| derivative, 640×480 | 0.1706 | 0.1997 | 0.2059 | **+17.0%** | +3.6% |
-| derivative, 94×60 | 0.2508 | 0.3498 | 0.3578 | **+39.5%** | +3.2% |
-| covariance, 640×480 | 0.9306 | 0.9730 | 1.0093 | +4.6% | +3.9% |
-| covariance, 94×60 | 0.6593 | 0.6994 | 0.7315 | +6.1% | +4.9% |
+| workload / size | hand | scalarized | views only | specialized | **not-N genericity** | **N's arrays** | **container** |
+|---|---|---|---|---|---|---|---|
+| derivative, 640×480 | 0.1707 | 0.1894 | 0.1999 | 0.2062 | **+11.0%** | **+6.2%** | +3.7% |
+| derivative, 94×60 | 0.2508 | 0.3239 | 0.3498 | 0.3579 | **+29.1%** | **+10.3%** | +3.2% |
+| covariance, 640×480 | 0.9357 | — | 0.9744 | 1.0062 | \*+4.1% | \*combined | +3.4% |
+| covariance, 94×60 | 0.6592 | — | 0.6993 | 0.7315 | \*+6.1% | \*combined | +4.9% |
 
-Solving the two derivative sizes as `t_row = a·words + b` (an exact two-point fit,
-not a validated model — two equations, two unknowns, no residual to check):
+The three right-hand columns are **percentage points of the total gap**, not
+ratios — they sum to `specialized ÷ hand − 1` — and the original entry printed
+them with a `%` sign and then quoted them in prose as ratios. \*The covariance rows
+have no `scalarized` point, so their kernel-shape column is still the two effects
+combined; only the derivative is split.
+
+Solving the two derivative sizes as `t_row = a·words + b` — **an exact two-point
+fit, not a validated model: two equations, two unknowns, no residual to check, and
+a third frame size is what would test it.** This caveat travels with the numbers
+wherever they are quoted:
 
 | | per word | per row |
 |---|---|---|
-| hand-written | 5.04 ns | 8.47 ns |
-| specialized | 5.77 ns | 16.35 ns |
-| ratio | **1.15×** | **1.93×** |
+| hand-written | 5.04 ns | 8.46 ns |
+| `scalarized` (all genericity but N) | 5.34 ns | 14.43 ns |
+| `views only` (+ N's arrays) | 5.59 ns | 16.10 ns |
+| specialized (+ container) | 5.78 ns | 16.29 ns |
+| **total ratio** | **1.15×** | **1.93×** |
+| of which N's arrays | +5.0 pts | +19.7 pts |
+| of which everything else generic | +6.0 pts | **+70.5 pts** |
+| of which the container | +3.4 pts | +2.2 pts |
+
+**Result — the accumulator, isolated.** Two pairs of twins differing only in where
+the popcount sum lands, both twins of a pair in one object:
+
+| workload / size | one chain | per row (D-15) | ratio | the arm it was copied from |
+|---|---|---|---|---|
+| count, 640×480 | 0.0722 | 0.0722 | **1.000×** | 0.0723 (layout control agrees to 0.1%) |
+| count, 94×60 | 0.0895 | 0.1917 | **2.141×** | 0.0897 (agrees to 0.2%) |
+| covariance, 640×480 | 0.9402 | 0.8959 | **0.953×** | 0.9357 (agrees to 0.5%) |
+| covariance, 94×60 | 0.6441 | 0.6022 | **0.935×** | 0.6592 (agrees to 2.3%) |
 
 **Bound check.** The whole-frame count reads 37.5 KiB at **1.73 GB/s** — roughly a
 third of the Pi 4's ~4–6 GB/s DRAM figure and far below L2, on a frame that fits
@@ -3497,106 +3637,173 @@ have looked like.
 
 **Conclusion**
 
-**1. The question E-4 registered has a clean null answer, and it is stronger than
-a null.** Generic-N and the specialization are not merely within noise — at
-N = 1 they compile to **the same machine code**. `objdump -d` on the two objects
-gives **567 instructions each** for the derivative, and every one of the five
-differing lines is a symbol *name* or a branch target *offset* that shifts only
-because the enclosing function sits 0x40 bytes further into `.text`; the offsets
-*within* the function (`+0x870`, `+0x420`) are identical. `nm -S` agrees to the
-byte: 2264 = 2264. The timings agree to 0.1%, and generic-N's whole object is
-90 B *smaller*. **Bit-sliced generic-N does not regress the specialized N = 1 and
-ternary paths — it is the same code.**
+**1. The question E-4 registered has a clean null answer — and the answer is
+"same size, same instruction count, same time", not "the same code".** At N = 1 the
+generic route and the specialization produce a derivative of **2264 B in both
+objects, `nm` to the byte, and 567 instructions each**, and they time to within
+0.1%. They are **not** the same instruction stream: the address-stripped diff in
+§ 4 of the committed log shows GCC allocating different registers through the row
+loop (`mov x3, x17` against `mov x2, x17`, and the stores that follow). The first
+version of this entry said every differing line was "a symbol name or a branch
+target offset"; that was read off a comparison this entry never committed, and it
+is wrong. The claim was also **only ever true of the derivative** — the same entry's
+own `nm` table showed the covariance at 1256 B against 1216 B and the count at
+344 B against 320 B, which the log now confirms as 314 against 304 instructions and
+86 against 80. Those two functions time within 0.2%, inside the batch spread.
 
-That is worth stating the other way round too, because it is the uncomfortable
-half: `impl::signedDifference`'s `if constexpr (N == 1)` branch — the ternary
-spelling the specialization exists for — **buys nothing measurable**. GCC 14.2 at
-`-O3` (CMake's Release default, which is what the gate and every benchmark
-build) already reduces the N-generic ripple to it. The specialization is not
-harmful; it is, on this evidence, redundant. It is also what
+What survives is the finding, in its correct and slightly weaker form:
+**bit-sliced generic-N does not regress the specialized N = 1 and ternary paths.
+Same bytes, same instruction count, same time, and generic-N's whole object is
+90 B smaller.** `N` being a compile-time parameter collapses the plane loop exactly
+as the hypothesis said. **N is not capped**, and nothing in this measurement
+argues for capping it.
+
+The uncomfortable half stands too: `impl::signedDifference`'s `if constexpr (N == 1)`
+branch — the ternary spelling the specialization exists for — **buys nothing
+measurable**. GCC 14.2 at `-O3` already reduces the N-generic ripple to it. The
+specialization is not harmful; it is, on this evidence, redundant. It is also what
 `Derivative.RoutesAgree_*` compares against, so removing it would remove a test.
 
-**2. The rule's second band fired, on four of six rows, and it fired on something
-the rule was not aimed at.** Specialized against hand-written: **+20.7%** and
-**+42.7%** on the derivative, **+7.9%** and **+11.0%** on the covariance — all
-far outside the 5% band and far outside the 0.1–1.3% spread. On code size the gap
-is larger still: **2.84×**.
+**2. The rule's second band fired, on four of six rows, and neither remedy it names
+fits the cause — but the cause is not what this entry first said it was.**
+Specialized against hand-written: **+20.9%** and **+42.7%** on the derivative,
+**+7.6%** and **+10.9%** on the covariance; on code size **2.84×** with exceptions
+and **2.63×** without. Capping N cannot recover a nanosecond of a gap the N-generic
+and N-specialized routes pay equally, and strengthening the specialization cannot
+either. That part is unchanged.
 
-**But both remedies the rule names — "stronger specialization" or "capping N" —
-target genericity in N, and this experiment measures genericity in N at exactly
-zero.** Capping N cannot recover a nanosecond of a gap that is byte-identical
-across the N-generic and N-specialized routes. Stronger specialization cannot
-either: the specialization already produces the same instructions. **The rule's
-two options do not fit the cause, and the honest thing is to say so rather than
-pick the nearer one.** The decomposition says where the cost really is:
+**What changed is the attribution.** The original entry named the per-plane arrays
+`a[N]`, `b[N]`, `m[N]`, `srcRow[N]`, `magRow[N]`, `prev[N]` and the `for p < N`
+loops as the cost, on an argument rather than a measurement — and the argument had
+a hole its own conclusion 1 should have made visible: if those arrays were the
+cost, and the N-generic and N-specialized routes are byte-identical *because
+`ForceGeneric` never touches them*, then the arrays are common to both arms and no
+comparison in the run could isolate them. The `scalarized` point isolates them, and
+they are a **minority** of the gap:
 
-* **the kernel's generic SHAPE at N = 1 — 17.0 of the 20.7 points at 640×480 and
-  39.5 of 42.7 at 94×60.** The per-plane arrays `a[N]`, `b[N]`, `m[N]`,
-  `srcRow[N]`, `magRow[N]`, `prev[N]` are declared as arrays and passed **by
-  reference**, and the `for p < N` loops wrap every word and every row. `N` being
-  1 does not make an address-taken array a register. **This shape is in the
-  specialized path too** — `ForceGeneric` changes only the arithmetic *inside*
-  `signedDifference`, never the array plumbing around it, which is precisely why
-  the two routes are byte-identical;
-* **the container — a flat 3.2–4.9%** at both sizes and both workloads. Small,
-  and notably *not* the part that grows on small frames.
+* **everything generic EXCEPT N — +11.0 points at 640×480 and +29.1 at 94×60**,
+  which is 64% and 74% of the kernel-shape gap. Runtime `BorderType`, the word
+  type, the `BINCV_ASSERT` contract, and the view structs, **not separated from one
+  another here** — three candidates, one measurement, and this entry does not
+  pretend to rank them;
+* **N's array plumbing — +6.2 points and +10.3 points.** Real, and worth about a
+  fifth of the per-row cost. This is Decision Q3's candidate remedy, now sized:
+  it is worth having, and it is not the fix;
+* **the container — a flat 3.2–4.9%** at both sizes and both workloads. Unchanged.
 
-**3. Two rows land outside BOTH bands, and the rule has no branch for them.** The
-whole-frame count has the library **11.7% and 5.8% FASTER** than the hand-written
-control. That is neither "within 5%" nor "a regression", so the rule as written
-does not classify it. Recorded rather than rounded into the nearer band:
-`impl::visitRowWords`' head/interior/tail skeleton, with the interior mask a
-compile-time all-ones constant, beats the straightforward hand-written loop. **The
+**3. Two rows land outside BOTH bands, the rule has no branch for them, and the
+reviewer's explanation for them is REJECTED on evidence.** The whole-frame count
+has the library **11.9% and 5.9% FASTER** than the hand-written control. The
+original entry credited `impl::visitRowWords`' head/interior/tail skeleton; review
+objected that the hand-written count already has that skeleton and that the real
+untested difference is D-15's per-row partial sum, worth 1.03–1.09× at X-11b.
+**Measured, the accumulator is not it.** Isolated in a twin pair, the per-row form
+is *exactly* even at 640×480 (1.000×) and **2.141× SLOWER** at 94×60 — the wrong
+sign, by a wide margin, on the row the library wins. A variable that costs time
+cannot explain a win.
+
+So the count win is **real, reproduced across three runs, and unexplained**. What
+is known: the library issues *more* instructions for it — 86 against the
+hand-written arm's 47 — and is faster anyway, which on a target where the popcount
+is a four-instruction NEON round trip (X-7b, D-6) points at scheduling and
+dependency structure rather than at work done. Both the skeleton hypothesis and the
+accumulator hypothesis are now measured or eliminated, and neither is the answer.
+Recorded as an open observation rather than rounded into the nearer band. **The
 generic machinery is not uniformly a tax** — on the operation D-6 is built around,
-it is a win.
+it is a win, whatever the mechanism.
 
-**4. The size dependence is the finding with teeth for Phase 4.** The derivative
-gap **doubles** from 640×480 to 94×60, and the decomposition puts all of that
-growth in the kernel shape (17.0 → 39.5 points), none in the container
-(3.6 → 3.2). The two-point fit says why: the generic shape costs **+15% per word
-but +93% per row**, and a pyramid level 3 row is 3 words. **The frames that pay
-most are the upper pyramid levels, which LK touches every frame** — the same
-levels [X-20](#x-20--hybrid-lk-accuracy-against-ground-truth-and-the-frontends-peak-footprint--done)
+**3b. The covariance regression was UNDERSTATED, and the correction makes it
+larger.** The hand-written covariance carries its four sums across all 31 window
+rows where the library builds a fresh `CovarianceCount` per row, and the twin pair
+measures that shape at **0.953× and 0.935×** — so the control is ~5–6% slower than
+a hand-written kernel written with the library's accumulator. Against that fairer
+control the library sits **+12.3%** and **+21.5%** rather than +7.6% and +10.9%.
+Band 2 fired either way; the point of recording it is that **the direction of every
+correction in this triage is against the library**, not for it.
+
+**4. The size dependence is the finding with teeth for Phase 4, and the split
+sharpens it.** The derivative gap **doubles** from 640×480 to 94×60, and all of the
+growth is in the kernel shape (17.2 → 39.5 points), none in the container
+(3.7 → 3.2). The two-point fit — **exact, unvalidated, two equations and two
+unknowns** — puts it at **+15% per word but +93% per row**, and now says which
+genericity: **+70.5 of those 93 points are the not-N genericity, +19.7 are N's
+arrays, +2.2 the container.** A pyramid level 3 row is 3 words, so a per-row cost
+is paid 640×480/94×60 = 5.4× more often per pixel up there. **The frames that pay
+most are the upper pyramid levels, which LK touches every frame** — the same levels
+[X-20](#x-20--hybrid-lk-accuracy-against-ground-truth-and-the-frontends-peak-footprint--done)
 found cannot localise sub-pixel motion, promoting
-[E-7](ARCHITECTURE.md#9-open-questions-and-planned-experiments) from an optimisation to a
-precondition. [T4.1](TASKS.md)'s N-bit paths will run on
-exactly these levels, so this is a live constraint on the next phase's design, not
-a retrospective on this one.
+[E-7](ARCHITECTURE.md#9-open-questions-and-planned-experiments) from an optimisation
+to a precondition. [T4.1](TASKS.md)'s N-bit paths run on exactly these levels.
 
-**5. What this does NOT license.** The rule was written for a null and this is not
-one, so band 1's sentence — "arbitrary N confirmed at no cost to the common
-cases" — is **not** claimed here, however much conclusion 1 looks like it. Against
-*binCV's own specialized path* arbitrary N is free, provably. Against *code with
-no genericity at all* the common cases pay 8–43% in time and 2.8× in size, and
-that is a cost to the common cases whatever its cause. Both halves are true and
-the entry states both.
+**5. What this does NOT license.**
 
-**Decision:** **none — and that is what the rule instructs.** Its second band says
-*report before acting*, and acting would mean choosing between two remedies this
-measurement has shown cannot work. Three questions go to review rather than being
-settled here, per [CLAUDE.md](CLAUDE.md)'s stop-and-ask rule:
+* **Band 1's sentence is not claimed.** The rule was written for a null and this is
+  not one. Against *binCV's own specialized path* arbitrary N is free, provably.
+  Against *code with no genericity at all* the common cases pay 8–43% in time and
+  2.6–2.8× in size, and that is a cost to the common cases whatever its cause.
+* **This is an N = 1 result and only an N = 1 result.** Every arm here is
+  `QuantMat<1>` / `TernaryMat`, because that is the question E-4 asked. It says
+  nothing about what N = 3 or N = 5 costs — and the shapes differ in kind, not only
+  in degree: the derivative's ripple-borrow work is linear in N, while §7.5's
+  bit-sliced covariance contributes plane **pairs** and is quadratic. **"Generic-N
+  is free" means "free against the specialization at N = 1". It does not mean
+  N-bit levels are free**, and T4.1 must not read it that way.
+* **The three genericity axes are not separated.** +11.0 and +29.1 points are
+  charged to "runtime `BorderType`, word type, contract and views" as a group. Which
+  of them dominates is unmeasured, and the fix for one is not the fix for another.
 
-1. **Is `impl::signedDifference`'s `N == 1` specialization worth keeping** now that
-   it is measured to compile to the same instructions as the generic route?
-   Deleting it is a simplification with no measured cost; it also deletes what
-   `Derivative.RoutesAgree_*` compares. **A code-size and maintenance question,
-   not a speed one.**
-2. **Is the 2.84× code-size figure acceptable on Tier 2**, where
-   [ARCHITECTURE §2](ARCHITECTURE.md#2-target-platforms) names code size as often
-   binding before RAM? 972 B of it is exception plumbing that
-   `-fno-exceptions` — the configuration the Tier 2 claim rests on — does not
-   emit, so the figure should be re-measured in that configuration before anyone
-   acts on it. **This entry did not measure it there.**
-3. **Does the per-row generic-shape cost want a fix at all**, given it is +93%
-   per row against a hand-written control and the upper pyramid levels are where
-   T4.1 and E-7 both live? The candidate is scalarizing the `N`-indexed arrays at
-   `N == 1` rather than capping `N` — but that is a new experiment with its own
-   pre-registered rule, not a conclusion this one earned.
+**Decision:** **E-4 is RESOLVED on the question it asked, and the larger cost it
+uncovered is re-registered as its own open question rather than left in a log.**
+The rule's second band says *report before acting*; the report was made, nothing
+was acted on, and this triage did not act either — it measured what the report
+said it could not localize, and the localization moved the remedy.
 
-No **D-record** is promoted and **E-4 is not marked resolved**: the question it
-asked is answered (generic-N costs nothing), but the answer arrived attached to a
-larger cost the E-register never named, and closing E-4 on this would file the
-finding under a question it does not belong to.
+1. **E-4 → resolved. `N` stays arbitrary; no cap.** The question was "does
+   bit-sliced generic-N ever regress the specialized N = 1 and ternary paths", and
+   the answer is no, at the strongest resolution this project can measure: same
+   function size to the byte, same instruction count, same time, smaller object.
+   Promoted to **[D-21](ARCHITECTURE.md#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle)**,
+   which also amends **[D-2](ARCHITECTURE.md#d-2-bit-planes-over-swar-packing)**:
+   D-2's "1-bit case | the base case" cell was an argument, and it is now a
+   measurement.
+2. **The `N == 1` specialization is KEPT, on a test-oracle argument rather than a
+   speed one** (Q1). It is measured redundant for speed and costs 90 B; what it
+   buys is `Derivative.RoutesAgree_*`, which compares two independent formulations
+   of the same operation and would otherwise compare a route against itself. That
+   is a cheap oracle for a bit-parallel kernel, and D-21 records the reason so a
+   later reader does not delete it as dead weight.
+3. **The code-size figure is 2.63×, not 2.84×, wherever the Tier 2 constraint is
+   what is being weighed** (Q2) — measured at triage in the core-only
+   `-fno-exceptions` configuration. Both numbers are recorded and each carries its
+   build. No decision is taken on whether 2.63× is acceptable on Tier 2: it is a
+   ratio against a control that supports one border and one word width, which is
+   not the library binCV is, and turning it into a budget needs a target and a
+   denominator this experiment does not have.
+4. **The kernel-shape cost becomes [E-12](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
+   gated on [T4.1](TASKS.md)** (Q3). E-4 could not close on it — it is a different
+   question from the one E-4 asked, and closing E-4 on it would have filed the
+   finding under the wrong heading, which is why the first version of this entry
+   left the row open. Registering it fixes that properly: **+93% per row against a
+   hand-written control, of which +70.5 points is genericity that is not in N**,
+   worst on the upper pyramid levels E-7 and T4.1 both live on. Its pre-registered
+   rule is E-12's to write, not this entry's; what this entry hands it is the
+   sizing — scalarizing N's arrays recovers about a fifth, so the experiment worth
+   running is the one that separates `BorderType`, word type and contract, and
+   whichever it finds is the fix.
+5. **The count win goes with it as an open observation**, not as a claim: the
+   library beats a hand-written control by 5.9–11.9% on the whole-frame count with
+   *more* instructions, both proposed explanations are eliminated, and it reproduces
+   across three runs on the reference device.
+
+**What did NOT change, and was checked because it is the failure that would matter
+most.** The hand-written arm is a genuinely independent control — it includes no
+binCV header, and its derivative is 142 instructions against the library's 567, a
+different function by any measure. The decision rule is the one written in
+TASKS.md T3.9 before any code existed, quoted verbatim, with no threshold moved:
+band 2 fired at 5%, and every correction made here moved a number **away** from the
+library (the covariance regression grew from +7.6/+10.9% to +12.3/+21.5%, the
+"same code" claim weakened, the "0.1% reproduction" claim weakened). Nothing was
+softened to fit.
 
 ---
 
@@ -3619,11 +3826,18 @@ no open experiment left, and the project has no provisional decision left.
 
 | ID | Question | Task | Runs during |
 |---|---|---|---|
-| E-4 | Does generic-N regress the specialized paths? | T3.9 | Phase 3 |
+| E-12 | How much of the `ops/` kernel's per-row cost is genericity that is not in N — runtime `BorderType`, the word type, the argument contract — and which of them? | T4.1 | Phase 4 |
 | E-7 | Bits needed per pyramid level | T4.1 | Phase 4 |
 | E-6 | Hybrid LK versus binary block matching | T4.2 | Phase 4 |
 | E-5 | End-to-end accuracy, footprint, speed | T4.3 | Phase 4 |
 | E-9 | Per-level word width down the pyramid | — | unscheduled; spun out of [X-10](#x-10--default-word-width--done), which priced both sides |
 
 (E-8 was registered in ARCHITECTURE §9 and never listed here until it was
-about to run; it is now closed and has left the table.)
+about to run; it is now closed and has left the table. **E-4 has now left it
+too** — [X-21](#x-21--does-generic-n-cost-the-specialized-n1-and-ternary-paths-anything--done)
+closed it and [D-21](ARCHITECTURE.md#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle)
+records the decision. **E-12 is what X-21 found while answering E-4** and could not
+close on, because it is a different question: the cost is real, it is worst on the
+upper pyramid levels T4.1 targets, and it is not genericity in N. It runs in the
+phase whose code it gates, alongside E-7, rather than being carried as a note in a
+log.)

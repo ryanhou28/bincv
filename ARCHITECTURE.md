@@ -876,6 +876,25 @@ than an oddity.
 is the workload where SWAR would win, and declaring it out of scope prevents a
 future argument for changing the representation on those grounds.
 
+**The "1-bit case | the base case" cell is now measured, not argued.** It was the
+one row of the table above that made a claim about generated code rather than about
+an operation count, and it stood on reasoning for two phases.
+[X-21](EXPERIMENTS.md) measured it on the reference device, at the strongest
+resolution available: the N-generic derivative route and the hand-written `N == 1`
+specialization compile to a function of **the same size to the byte — 2264 B, `nm`
+on both objects — and the same instruction count, 567**, and time to within 0.1%.
+The two are not literally the same instruction stream; GCC allocates different
+registers through the row loop. But nothing distinguishes them in size, in
+instruction count or in time, which is what "base case rather than special case"
+asserts. The corollary is uncomfortable and is recorded with it:
+`impl::signedDifference`'s `if constexpr (N == 1)` branch is **measured redundant
+for speed** — `-O3` already reduces the N-generic ripple to it — and is kept for a
+different reason, which [D-21](#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle)
+states. **What this does not say:** it is an N = 1 measurement and does not price
+N = 3 or N = 5, and it compares binCV against binCV — against code with no
+genericity at all the same kernel pays 8–43% in time, for reasons that are mostly
+not about N ([E-12](#9-open-questions-and-planned-experiments)).
+
 ### D-3: Sign-magnitude over two's complement
 
 See [§4.2](#42-signed-values-sign-magnitude). Chosen because the LK covariance
@@ -1639,6 +1658,61 @@ test, which looks like "slightly worse accuracy" rather than like a bug.
 
 ---
 
+### D-21: generic-`N` is not capped, and the `N == 1` specialization is kept as a test oracle
+
+`QuantMat<N>` keeps arbitrary `N` in [1, 8]. **No cap.**
+
+The promise D-2 rests on is that bit-planes make the 1-bit case the *base* case
+rather than a special case — so the interesting risk was never that N-bit costs
+something, but that carrying `N` costs the 1-bit and ternary paths the frontend
+actually runs. [E-4](#9-open-questions-and-planned-experiments) registered that
+question and [X-21](EXPERIMENTS.md) measured it on the reference device against
+three arms, the third of which — a hand-written binary-only control that includes
+no binCV header — is what makes the comparison mean anything.
+
+**Measured:** at `N = 1` the generic route and the specialization produce a
+derivative of **the same size to the byte (2264 B) and the same instruction count
+(567)**, time to within 0.1%, and generic-N's whole object is **90 B smaller**. They
+are *not* the same instruction stream — GCC allocates different registers — and the
+equality is the derivative's; the covariance and count functions differ by 40 B and
+24 B and time inside the batch spread. Nothing distinguishes the two routes in
+size, instruction count or time. **Carrying `N` is free at `N = 1`, so capping `N`
+would buy nothing.**
+
+**`impl::signedDifference`'s `if constexpr (N == 1)` branch is kept, and not for
+speed.** It is measured redundant — `-O3` already reduces the N-generic ripple to
+the ternary spelling — and deleting it would save 90 B. What it buys is
+`Derivative.RoutesAgree_*`, which compares two independently written formulations
+of one operation image for image; delete the branch and that test compares a route
+against itself. **For a bit-parallel kernel whose failure mode is a silently wrong
+bit, an independent second formulation is a cheap oracle**, and the same device is
+used elsewhere in the project (`ops/pyramid.hpp`'s rejected box sum). The reason is
+recorded here so a later reader does not remove it as dead weight — it is dead
+weight, for the purpose it was written for, and live for another.
+
+**What this decision does NOT cover, stated because the register row is what gets
+cited:**
+
+- **It is an `N = 1` result.** Every arm was `QuantMat<1>` / `TernaryMat`. It does
+  not price `N = 3` or `N = 5`, and the shapes differ in kind: the derivative's
+  ripple-borrow work is linear in `N`, while [§7.5](#75-lk-gradient-covariance)'s
+  bit-sliced covariance contributes plane **pairs** and is quadratic. "Generic-N is
+  free" means "free against the specialization at `N = 1`".
+- **It compares binCV against binCV.** Against the hand-written control both binCV
+  routes pay **8–43% in time** and **2.63× in code size** (`-fno-exceptions`, the
+  configuration the Tier 2 claim rests on; 2.84× with exceptions on). X-21's
+  decomposition puts most of that in genericity that is **not** in `N` — runtime
+  `BorderType`, the word type, the argument contract — which is
+  [E-12](#9-open-questions-and-planned-experiments) and is **not settled by this
+  record**. Scalarizing `N`'s per-plane arrays was measured and recovers about a
+  fifth of the per-row cost: worth having, and not the fix.
+
+**Supersedes nothing.** It confirms the specialization strategy chosen at T1.5 and
+amends [D-2](#d-2-bit-planes-over-swar-packing), whose "1-bit case | the base case"
+cell was an argument until X-21.
+
+---
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -1684,8 +1758,9 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-1**~~ **RESOLVED** | Does row alignment beyond word granularity measurably help any kernel on NEON? | [D-4](#d-4-word-granularity-alignment-by-default) was decided on a memory measurement plus an untested weak-benefit assumption. | **Answered: no — best of twelve combinations was 1.015×, inside its spread; over-aligning costs 3.3–4.8× on `bitwiseAnd`. D-4 confirmed, no profile system, D-4 no longer provisional.** [X-9](EXPERIMENTS.md) | T1.3 and every kernel | Phase 2 (T2.8) ✔ |
 | ~~**E-2**~~ **RESOLVED** | Word width: is `uint64_t` the best default on aarch64, or does `uint32_t` win on cache and register pressure? | Default word type affects every kernel. | **Answered: `uint32_t` stays. `uint64_t` reduces 1.94× faster but costs +33% at 94×60, and the rule is a conjunction — memory wins.** [D-14](#d-14-uint32_t-is-the-default-word-type), [X-10](EXPERIMENTS.md) | all kernels | Phase 2 (T2.9) ✔ |
 | ~~**E-3**~~ **RESOLVED** | Three questions about the same interface: (a) at what window size does incremental/sliding popcount beat recomputation for the LK covariance? (b) does a fused covariance entry point beat composing it from three T2.6 calls? (c) frame-sized selector plane versus a four-argument `countAndSplit` — memory against speed. | The 31×31 window is recomputed per keypoint; windows overlap heavily; and §7.5's covariance needs four numbers that today cost three traversals. | **Answered, and all three moved off the simpler shape: (a) 7.3×–20× for the adopted sliding form → expose incremental state; (b) 1.27–1.29× → add a covariance entry point; (c) plane 16–18% faster but a fifth plane at every level → four-argument form, memory wins.** Re-measured against the shipped code by [X-11b](EXPERIMENTS.md) — 5.96×/15.9×, 1.20–1.27×, 11–14% — with no branch changing. [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance), [X-11](EXPERIMENTS.md) | T2.6, T3.6 | Phase 2 (T2.10) ✔ |
-| **E-4** **MEASURED, NOT RESOLVED** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | **Answered on the narrow question, with the strongest form of a null: at N = 1 the generic route and the specialization compile to the SAME 567 aarch64 instructions and time to within 0.1%, and generic-N's object is 90 B smaller. Generic-N costs nothing, so N is not capped on this evidence.** But the row is left OPEN because the answer arrived attached to a cost this register never named: BOTH binCV routes sit 8–43% in time and **2.84× in code size** above a hand-written binary-only control, and the decomposition puts it in the ops/ kernel's generic SHAPE at N = 1 (+15% per word, **+93% per row**, worst on the pyramid levels [E-7](#9-open-questions-and-planned-experiments) and T4.1 live on) plus a flat 3–5% for the container. The decision rule's second band fired and says *report before acting*; neither remedy it names — stronger specialization, capping N — addresses a cost measured at zero. Three questions went to review; see X-21's **Decision**. [X-21](EXPERIMENTS.md) | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | Phase 3 (T3.9) ✔ measured |
+| ~~**E-4**~~ **RESOLVED** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | **Answered: no. At N = 1 the generic route and the specialization produce a derivative of the SAME SIZE to the byte (2264 B) and the SAME instruction count (567), time to within 0.1%, and generic-N's whole object is 90 B smaller — they are not literally the same instruction stream (GCC allocates different registers), and the equality holds for the derivative only; the covariance and count differ by 40 B and 24 B and time inside the batch spread. `N` STAYS ARBITRARY; no cap.** [D-21](#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle), [X-21](EXPERIMENTS.md) · **This is an N = 1 result and closes only the N = 1 question** — every arm was `QuantMat<1>`/`TernaryMat`, and it says nothing about N = 3 or N = 5, where §7.5's covariance contributes plane PAIRS and is quadratic in N where the derivative is linear. **The larger cost X-21 found while answering this is [E-12](#9-open-questions-and-planned-experiments), not this row** — both binCV routes sit 8–43% in time and 2.63× in code size (`-fno-exceptions`; 2.84× with exceptions on) above a hand-written binary-only control, and the decomposition puts most of it in genericity that is NOT in N. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | Phase 3 (T3.9) ✔ |
 | ~~**E-8**~~ **RESOLVED** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | **Answered, and the question was leading: there is no tiebreak. A third route the register did not list — the WORD-LOCAL unshuffle — is word-parallel and costs zero bytes, and beat the gather loop by 14.6×/26.4× and the frame-masked route by 11.3×/8.3×. `ops/` gains a word-local resample primitive taking `(src, dst)`; no plan, no scratch.** [D-17](#d-17-horizontal-decimation-is-word-local), [X-14](EXPERIMENTS.md) | T3.4 | Phase 3 (T3.4) ✔ |
+| **E-12** | How much of the `ops/` kernel's **per-row** cost is genericity that is **not** in N — the runtime `BorderType`, the word type, the `BINCV_ASSERT` contract — and which of the three dominates? | [X-21](EXPERIMENTS.md) measured the shipped derivative at **+15% per word and +93% per row** against a hand-written binary-only control (an exact two-point fit over 640×480 and 94×60 — two equations, two unknowns, no residual; a third frame size would test it). Scalarizing N's `a[N]`/`b[N]`/`srcRow[N]` arrays was measured at triage and recovers only **+19.7 of the 93 points**; **+70.5 points is the genericity X-21 did not separate**, and the fix for a runtime `BorderType` is not the fix for a templated word type. A per-row cost is paid 5.4× more often per pixel at 94×60 than at 640×480, so **the frames that pay most are the upper pyramid levels** — the same levels [E-7](#9-open-questions-and-planned-experiments) and T4.1 live on. | Whether `ops/` kernels get a compile-time border form, a monomorphic word-width path, or neither. | T3.5's derivative and every `ops/` kernel with a per-row prologue; **T4.1's N-bit paths run on the levels that pay most** | **Phase 4** (T4.1) |
 | **E-7** | How many bits does each pyramid level actually need to preserve tracking accuracy? | The reference never chose its depths — they fell out of using `CV_8U`. **NO LONGER DEFERRABLE, AND NO LONGER AN OPTIMISATION.** [X-20](EXPERIMENTS.md) measured tracking accuracy on the reference pipeline's own edge-map content degrading MONOTONICALLY as 1-bit levels are added — 0.0017 px RMS at one level to 3.25 px at four for a 1 px translation, and 0.0024 → 1.47 px on the subset of windows that never clip, so the effect survives the clipping control — because a level whose pixels are bits cannot localise a sub-pixel motion better than its own quantisation, and that error is multiplied by 2^level on the way down. **It is a precondition but NOT the whole of T3.8's miss**: X-20 also separates a level-0 stationary point (no pyramid involved) and the clipped coarse-level window (about half of the four-level error), neither of which a deeper alphabet fixes. 1 bit is all binCV can build today (the popcount covariance is exact only for a ternary derivative), so T4.1 must ALSO produce §7.5's bit-sliced weighted-sum covariance. Footprint axis already measured ([X-15](EXPERIMENTS.md)): uncapped to re-binarized is 1.65×, because level 0 dominates. X-15 also corrected this row's old premise — the reachable alphabet is 1/3/5/7 bits; 1/3/4/5 was one 256² frame's contents. | Pyramid level bit depths, and whether the hybrid tracker is usable at all on real content. | T3.4 (parameterized), **T3.8 (blocked on it for real content)** | **Phase 4** (T4.1) |
 | **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |

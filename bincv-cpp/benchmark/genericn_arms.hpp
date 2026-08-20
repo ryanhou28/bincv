@@ -109,4 +109,21 @@ void derivativeViewsOnly(const Word* src, size_t strideWords, int width, int hei
 Cov covarianceWindowViewsOnly(const Word* dx, const Word* dy, size_t strideWords, int width,
                               int height, int wx, int wy, int wsize);
 
+// The shipped kernel with ONLY the N-plane array plumbing removed -- see
+// genericn_diag.cpp's header. Splits what X-21 called "the kernel's generic SHAPE"
+// into the part that is genericity in N and the part that is not.
+void derivativeScalarized(const Word* src, size_t strideWords, int width, int height, Word* dstX,
+                          Word* dstY);
+
+// The accumulator decomposition, from genericn_diag_accum.cpp. Two pairs of twins
+// differing ONLY in where the popcount sum lands -- one chain per frame/window
+// against D-15's per-row partial. Also not arms; they test X-21 conclusion 3's
+// attribution of the library's count WIN.
+size_t countWholeOneChain(const Word* src, size_t strideWords, int width, int height);
+size_t countWholePerRow(const Word* src, size_t strideWords, int width, int height);
+Cov covarianceWindowOneChain(const Word* dx, const Word* dy, size_t strideWords, int width,
+                             int height, int wx, int wy, int wsize);
+Cov covarianceWindowPerRow(const Word* dx, const Word* dy, size_t strideWords, int width,
+                           int height, int wx, int wy, int wsize);
+
 }  // namespace t39

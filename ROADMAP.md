@@ -217,8 +217,14 @@ closed in Phase 2 where they belonged**, on the reference device — the alignme
 default stands and no profile system is built ([X-9](EXPERIMENTS.md)), `uint32_t`
 stays the default word type ([X-10](EXPERIMENTS.md)), and the reduction API grows
 incremental state and a fused covariance ([X-11](EXPERIMENTS.md)). What remains for
-Phase 4 is E-5, E-6 and E-7, with E-4 still to run in Phase 3 (T3.9) and E-9
-unscheduled. **E-8 closed in Phase 3**, in T3.4 and before the code it gates was
+Phase 4 is E-5, E-6 and E-7, with E-9 unscheduled. **E-4 closed in Phase 3**, in
+T3.9: generic-`N` costs the specialized `N = 1` path nothing — same function size to
+the byte, same instruction count, same time — so `N` is not capped
+([X-21](EXPERIMENTS.md), [D-21](ARCHITECTURE.md#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle)).
+It closed having found a **larger** cost that is not about `N` at all — the shipped
+kernels run +93% per row against a hand-written binary-only control, worst on the
+upper pyramid levels — which is registered as **E-12** and runs in Phase 4 alongside
+E-7, since T4.1's N-bit paths live on exactly those levels. **E-8 closed in Phase 3**, in T3.4 and before the code it gates was
 written: horizontal decimation is word-local, and the speed-against-footprint
 trade the register was built on turned out not to exist
 ([X-14](EXPERIMENTS.md), [D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local)).

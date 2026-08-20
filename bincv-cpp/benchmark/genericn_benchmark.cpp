@@ -169,7 +169,9 @@ bool runSize(int width, int height) {
 
     // One destination pair per arm, so the agreement check below compares whole
     // buffers rather than trusting that a later arm overwrote an earlier one.
-    Dest dests[3] = {makeDest(frames[0]), makeDest(frames[0]), makeDest(frames[0])};
+    // Four: three arms, plus one for whichever decomposition point is running.
+    Dest dests[4] = {makeDest(frames[0]), makeDest(frames[0]), makeDest(frames[0]),
+                     makeDest(frames[0])};
 
     std::printf("\n  %dx%d, uint32_t, stride %zu words\n", width, height, frames[0].stride);
 
@@ -241,10 +243,59 @@ bool runSize(int width, int height) {
                         f);
             return false;
         }
+
+        std::memset(dests[3].dx.data(), 0, dests[3].dx.size() * sizeof(Word));
+        std::memset(dests[3].dy.data(), 0, dests[3].dy.size() * sizeof(Word));
+        t39::derivativeScalarized(fr.src.data(), fr.stride, fr.width, fr.height,
+                                  dests[3].dx.data(), dests[3].dy.data());
+        if (dests[3].dx != dests[0].dx || dests[3].dy != dests[0].dy) {
+            std::printf("  DEFECT: the 'scalarized' decomposition point computes a different"
+                        " derivative on input %d -- nothing timed.\n",
+                        f);
+            return false;
+        }
+
+        // The accumulator twins must agree with the arm they are copies of, and
+        // with each other: summing per row cannot change a total, and if it did
+        // the pair would be measuring two operations rather than one variable.
+        const size_t handCount =
+            arms[0]->countWhole(fr.src.data(), fr.stride, fr.width, fr.height);
+        if (t39::countWholeOneChain(fr.src.data(), fr.stride, fr.width, fr.height) != handCount ||
+            t39::countWholePerRow(fr.src.data(), fr.stride, fr.width, fr.height) != handCount) {
+            std::printf("  DEFECT: an accumulator decomposition point disagrees on the count"
+                        " on input %d -- nothing timed.\n",
+                        f);
+            return false;
+        }
+        Cov chainCov;
+        Cov perRowCov;
+        for (const auto& w : windows) {
+            const Cov c1 = t39::covarianceWindowOneChain(dests[0].dx.data(), dests[0].dy.data(),
+                                                         fr.stride, fr.width, fr.height, w.first,
+                                                         w.second, kWindow);
+            const Cov c2 = t39::covarianceWindowPerRow(dests[0].dx.data(), dests[0].dy.data(),
+                                                       fr.stride, fr.width, fr.height, w.first,
+                                                       w.second, kWindow);
+            chainCov.xx += c1.xx;
+            chainCov.yy += c1.yy;
+            chainCov.whenClear += c1.whenClear;
+            chainCov.whenSet += c1.whenSet;
+            perRowCov.xx += c2.xx;
+            perRowCov.yy += c2.yy;
+            perRowCov.whenClear += c2.whenClear;
+            perRowCov.whenSet += c2.whenSet;
+        }
+        const Cov handCov = sweepCovariance(*arms[0], dests[0], fr, windows);
+        if (chainCov != handCov || perRowCov != handCov) {
+            std::printf("  DEFECT: an accumulator decomposition point disagrees on the"
+                        " covariance sweep on input %d -- nothing timed.\n",
+                        f);
+            return false;
+        }
     }
 
-    std::printf("  agreement: all three arms and both decomposition points produce identical"
-                " dx, dy, counts and covariances on %d inputs\n\n",
+    std::printf("  agreement: all three arms and all five decomposition points produce"
+                " identical dx, dy, counts and covariances on %d inputs\n\n",
                 kInputs);
     std::printf("  %-22s %-13s %8s  %-18s %6s   %6s\n", "workload", "arm", "ns/px",
                 "[min, max] ns/px", "spread", "vs hand");
@@ -320,6 +371,16 @@ bool runSize(int width, int height) {
                                }});
         }
         {
+            Dest* dst = &dests[3];
+            benches.push_back({"scalarized", [dst, &frames](int i) {
+                                   const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                                   t39::derivativeScalarized(fr.src.data(), fr.stride, fr.width,
+                                                             fr.height, dst->dx.data(),
+                                                             dst->dy.data());
+                                   measure::g_sink += dst->dx[0] + dst->dy[0];
+                               }});
+        }
+        {
             Dest* dst = &dests[1];
             benches.push_back({"views only", [dst, &frames](int i) {
                                    const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
@@ -341,7 +402,7 @@ bool runSize(int width, int height) {
         }
         const std::vector<measure::Timing> t =
             measure::measureInterleaved(benches, kRepeats, kTargetMs);
-        for (size_t a = 0; a < 3; ++a) {
+        for (size_t a = 0; a < benches.size(); ++a) {
             printRow("  decomp: derivative", benches[a].name.c_str(), t[a], framePixels,
                      t[0].medianNs);
         }
@@ -351,7 +412,7 @@ bool runSize(int width, int height) {
     // last, which differs per arm. Popcount cost is content-dependent, so the
     // covariance rows below are given IDENTICAL content in all three buffers
     // first -- otherwise a timing difference could be a difference in the data.
-    for (int a = 0; a < 3; ++a) {
+    for (int a = 0; a < 4; ++a) {
         arms[0]->derivative(frames[0].src.data(), frames[0].stride, frames[0].width,
                             frames[0].height, dests[a].dx.data(), dests[a].dy.data());
     }
@@ -422,6 +483,75 @@ bool runSize(int width, int height) {
             measure::measureInterleaved(benches, kRepeats, kTargetMs);
         for (size_t a = 0; a < 3; ++a) {
             printRow("  decomp: covariance", benches[a].name.c_str(), t[a], windowPixels,
+                     t[0].medianNs);
+        }
+    }
+
+    // ---- decomposition: the ACCUMULATOR, isolated ---------------------------
+    // Added at triage. X-21 attributed the library's count WIN to
+    // impl::visitRowWords' head/interior/tail skeleton, but the hand-written arm
+    // already has that skeleton -- what it does not have is D-15's PER-ROW partial
+    // sum. These two pairs of twins differ in that and nothing else, and both twins
+    // of a pair live in one object so the A/B is not a code-layout artefact
+    // (genericn_diag_accum.cpp's header). The `one chain` rows are exact copies of
+    // the hand-written arm's bodies and double as the layout control: they should
+    // reproduce that arm's row above.
+    {
+        std::vector<measure::Bench> benches;
+        benches.push_back({"one chain", [&frames](int i) {
+                               const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                               measure::g_sink += t39::countWholeOneChain(
+                                   fr.src.data(), fr.stride, fr.width, fr.height);
+                           }});
+        benches.push_back({"per row (D-15)", [&frames](int i) {
+                               const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                               measure::g_sink += t39::countWholePerRow(fr.src.data(), fr.stride,
+                                                                        fr.width, fr.height);
+                           }});
+        const std::vector<measure::Timing> t =
+            measure::measureInterleaved(benches, kRepeats, kTargetMs);
+        for (size_t a = 0; a < benches.size(); ++a) {
+            printRow("  decomp: count accum", benches[a].name.c_str(), t[a], framePixels,
+                     t[0].medianNs);
+        }
+    }
+    {
+        std::vector<measure::Bench> benches;
+        const Dest* dst = &dests[0];
+        benches.push_back({"one chain", [dst, &frames, &windows](int i) {
+                               const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                               Cov total;
+                               for (const auto& w : windows) {
+                                   const Cov c = t39::covarianceWindowOneChain(
+                                       dst->dx.data(), dst->dy.data(), fr.stride, fr.width,
+                                       fr.height, w.first, w.second, kWindow);
+                                   total.xx += c.xx;
+                                   total.yy += c.yy;
+                                   total.whenClear += c.whenClear;
+                                   total.whenSet += c.whenSet;
+                               }
+                               measure::g_sink +=
+                                   total.xx + total.yy + total.whenClear + total.whenSet;
+                           }});
+        benches.push_back({"per row (D-15)", [dst, &frames, &windows](int i) {
+                               const Frame& fr = frames[static_cast<size_t>(i % kInputs)];
+                               Cov total;
+                               for (const auto& w : windows) {
+                                   const Cov c = t39::covarianceWindowPerRow(
+                                       dst->dx.data(), dst->dy.data(), fr.stride, fr.width,
+                                       fr.height, w.first, w.second, kWindow);
+                                   total.xx += c.xx;
+                                   total.yy += c.yy;
+                                   total.whenClear += c.whenClear;
+                                   total.whenSet += c.whenSet;
+                               }
+                               measure::g_sink +=
+                                   total.xx + total.yy + total.whenClear + total.whenSet;
+                           }});
+        const std::vector<measure::Timing> t =
+            measure::measureInterleaved(benches, kRepeats, kTargetMs);
+        for (size_t a = 0; a < benches.size(); ++a) {
+            printRow("  decomp: cov accum", benches[a].name.c_str(), t[a], windowPixels,
                      t[0].medianNs);
         }
     }

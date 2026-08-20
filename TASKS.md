@@ -2975,7 +2975,7 @@ only the real-frame case is behind `BINCV_WITH_OPENCV`).
 
 ---
 
-### T3.9 · E-4 · Generic-N cost versus specialized paths · `MEASURED — decision open`
+### T3.9 · E-4 · Generic-N cost versus specialized paths · `DONE`
 
 **Depends:** T3.5
 **Gates:** whether N stays arbitrary or gets capped
@@ -2991,28 +2991,61 @@ N=1 and ternary paths?
 
 **Variants:** `QuantMat<1>` and `TernaryMat` through the generic path versus their
 specializations, versus a hand-written binary-only reference.
-**Workload:** T3.5's derivative and T2.5's reductions.
+**Workload:** T3.5's derivative and T2.5's reductions — as run, T2.5's whole-frame
+`countNonZero` **and T3.6's fused `countCovariance`**, which is the reduction the
+frontend spends its time in and which carries four of the six rule comparisons.
+Recorded because the spec says "T2.5's reductions" and only one of the two rows is.
 **Metric:** ns/pixel and code size (`size` on the built object).
 
 **Done when:** logged as X-21 — **not X-6**, which is stale: X-6 is the T2.2
 logic-speedup entry, written long before this task came up for scheduling. X-1…X-20
 and X-7b were taken, so the entry took the next free number and recorded the
 correction, exactly as the Phase 2 batch did for T2.9's identically stale
-"logged as X-4".
+"logged as X-4" — **and the specialization strategy confirmed or revised.**
 
-**Measured, and the specialization strategy is NOT yet confirmed or revised —
-deliberately.** [X-21](EXPERIMENTS.md) ran on the reference device and the rule's
+**Both clauses are now met, and the second one was carried unmet for a while
+rather than deleted.** An earlier revision of this line dropped "specialization
+strategy confirmed or revised" in the same commit that reported a result which did
+not meet it. Removing the half of a completion bar that a measurement failed is
+exactly the edit this file exists to prevent, so it is restored above and answered
+below.
+
+**Result.** [X-21](EXPERIMENTS.md) ran on the reference device and the rule's
 **second band fired**: the specialized paths sit 8–43% above a hand-written
-binary-only control in time and 2.84× in code size. That band says *report before
-acting*, and the report is that **neither remedy it names can work** — generic-N
-and the specialization compile to the **same 567 aarch64 instructions** at N = 1
-and time to within 0.1%, so capping N or strengthening the specialization would
-target a cost measured at zero. The cost is the ops/ kernel's generic SHAPE at
-N = 1 (the by-reference `a[N]`/`b[N]`/`srcRow[N]` arrays and the `for p < N` loops,
-which the specialized path carries too) at +15% per word and **+93% per row**, plus
-a flat 3–5% for the container. Three questions went to review rather than being
-settled in the task; see X-21's **Decision**. E-4 is **not** marked resolved and no
-D-record was promoted.
+binary-only control in time and **2.63×** in code size (`-fno-exceptions`, the
+configuration the Tier 2 claim rests on; 2.84× with exceptions on — the figure the
+first report quoted without saying which build it came from). That band says
+*report before acting*; the report was made, nothing was acted on, and a triage
+pass then measured what the report said it could not localize.
+
+**The specialization strategy is CONFIRMED.** Generic-N and the specialization
+produce a derivative of the **same size to the byte (2264 B) and the same
+instruction count (567)**, timing within 0.1%, with generic-N's object 90 B
+*smaller* — so capping `N` or strengthening the specialization would target a cost
+measured at zero. `N` stays arbitrary; the `if constexpr (N == 1)` branch is kept,
+not for speed (it is measured redundant) but as `Derivative.RoutesAgree_*`'s
+independent second formulation. **[D-21](ARCHITECTURE.md#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle)**,
+and [D-2](ARCHITECTURE.md#d-2-bit-planes-over-swar-packing) is amended: its
+"1-bit case | the base case" cell was an argument and is now a measurement. **E-4 is
+resolved.**
+
+**What the gap actually is — and it is NOT what the first report said.** That report
+charged the whole kernel-shape cost to the by-reference `a[N]`/`b[N]`/`srcRow[N]`
+arrays and the `for p < N` loops, on an argument rather than a measurement. Triage
+added a decomposition point that removes N's array plumbing **and nothing else**,
+and the arrays are a **minority**: of the derivative's **+93% per row** (an exact
+two-point fit over 640×480 and 94×60 — two equations, two unknowns, no residual to
+check; a third frame size would test it), **+19.7 points are N's arrays, +70.5 are
+genericity that is not in N** — runtime `BorderType`, the word type, the argument
+contract, which X-21 did not separate from one another. That is registered as
+**E-12** and gated on T4.1, because the levels it hurts most are the ones T4.1 runs
+on. Two rows also land outside both bands — the library beats the hand-written
+control on the whole-frame count by 5.9–11.9%, with *more* instructions, and both
+proposed explanations for it are now measured and eliminated.
+
+Full evidence, including the raw device log the first report did not commit:
+[`bincv-cpp/results/genericn_benchmark_pi4.log`](bincv-cpp/results/genericn_benchmark_pi4.log),
+reproducible with `./scripts/run_on_pi.sh pi4 '../../scripts/genericn_evidence.sh'`.
 
 ---
 
@@ -3060,14 +3093,71 @@ bit-sliced weighted-sum covariance of
 plane pair contributing at its binary weight — and it is a new kernel, not a wider
 version of the existing one.
 
+**WHAT T3.9 / [X-21](EXPERIMENTS.md) HANDS THIS TASK.** T3.9 closed E-4 while this
+task was still `TODO`, and it changes what T4.1 has to worry about and what it has
+to measure. Three things, and the third amends this task's decision rule **before
+any of it is measured**, which is the only time a rule may be touched.
+
+1. **The N-bit paths do not need a parallel 1-bit implementation, and that is
+   measured rather than hoped.** The worry D-2 always carried was that making `N`
+   arbitrary would tax the 1-bit and ternary paths the frontend actually runs.
+   It does not: at `N = 1` the generic route and the hand-written specialization
+   produce a derivative of **the same size to the byte and the same instruction
+   count**, timing within 0.1%
+   ([D-21](ARCHITECTURE.md#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle)).
+   So T4.1 builds **one** kernel per operation, generic in `N`, and level 0 keeps
+   running at 1 bit through it at no cost. No cap on `N`, and no second code path
+   to keep in sync.
+
+2. **But that null is an `N = 1` null, and the kernel this task must WRITE is the
+   one it transfers to least.** Every arm in X-21 was `QuantMat<1>` / `TernaryMat`.
+   `ops/covariance.hpp` is exact only for a ternary derivative, so binCV cannot form
+   the 2×2 matrix at an N-bit level at all today, and the replacement is
+   [§7.5](ARCHITECTURE.md#75-lk-gradient-covariance)'s bit-sliced weighted-sum form —
+   each magnitude **plane pair** contributing at its binary weight. That is
+   **quadratic in `N`** where the derivative's ripple-borrow work is linear.
+   **"Generic-N is free" is a statement about `N = 1` and must not be read as
+   "N-bit levels are free."** Nothing in the project has measured an `N > 1`
+   per-pixel cost, and this task is the first that can.
+
+3. **The per-row cost X-21 found is worst exactly on the levels this task targets.**
+   The shipped derivative runs **+93% per row** against a hand-written binary-only
+   control, and a per-row cost is paid 5.4× more often per pixel at 94×60 than at
+   640×480 — so the upper pyramid levels, which LK touches every frame and which
+   [X-20](EXPERIMENTS.md) showed cannot localise sub-pixel motion at 1 bit, are
+   where both problems land. Only **+19.7 of those 93 points are genericity in
+   `N`**; the rest is runtime `BorderType`, the word type and the argument contract,
+   unseparated — registered as **E-12** and gated on this task. A row prologue is
+   also paid **per plane**, so it is the term most likely to grow with `N`. If T4.1
+   picks a depth per level, it is picking how often that prologue runs.
+
+**Decision rule** — *amended here, before any measurement, on the strength of point
+2 above and [CLAUDE.md](CLAUDE.md)'s standing requirement to report memory and
+speed together:* adopt the smallest per-level depth whose tracking accuracy is
+within the Phase-4 tolerance of the full-precision pipeline **and whose per-pixel
+cost is affordable at that level**. Report the accuracy/footprint **/speed** curve,
+not just the chosen point. Where accuracy ties, footprint decides
+([CLAUDE.md](CLAUDE.md)'s tiebreak); where footprint ties, speed decides.
+
+**Why the rule needed amending:** as written it measured "trajectory accuracy
+versus pyramid footprint" and had **no speed axis at all**, which
+[ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments) and
+CLAUDE.md both forbid — "a result that reports one alone cannot be weighed against
+goals that trade off against each other". That was survivable while every level was
+1 bit and the per-pixel cost did not vary with the choice. Point 2 makes it vary
+quadratically, so a depth chosen on accuracy and bytes alone could be unaffordable
+in time and nothing in the rule would have caught it. **Amended before the
+experiment runs, not after seeing a number.**
+
 **Question:** How many bits does each pyramid level need to preserve tracking
 accuracy? Measured natural growth is 1/3/4/5 bits
 ([X-2](EXPERIMENTS.md)), but the reference never chose that — it fell out of
 using `CV_8U`.
-**Decision rule** — *before measuring:* adopt the smallest per-level depth whose
-tracking accuracy is within the Phase-4 tolerance of the full-precision pipeline.
-Report the accuracy/footprint curve, not just the chosen point.
-**Metric:** trajectory accuracy versus pyramid footprint, per configuration.
+**Metric:** trajectory accuracy, pyramid footprint **and ns/pixel**, per
+configuration. The speed axis is measured on the reference device at **640×480 and
+at an upper-level size (94×60)** — X-21's own pair, so the numbers sit beside it —
+and at **at least one `N > 1` point**, because no measurement in the project has
+one. That third figure is what E-4's null does not cover.
 **Also:** re-run X-2 against the real reference pyramid path, closing that entry's
 caveat.
 
