@@ -4883,6 +4883,118 @@ device is where this is closed.
 
 ---
 
+### X-24 · Pyramid level bit depths · `TODO`
+
+**THIS RULE IS COMMITTED ON ITS OWN, BEFORE THE HARNESS THAT MEASURES IT EXISTS.**
+Same discipline as X-9/X-10/X-11 and X-23. The kernel that makes the question
+askable at all — the generic-`N` tracker — landed first and is measured only for
+*correctness* in that commit; not one accuracy, footprint or timing number below
+had been produced when this was written.
+
+**Gates:** [E-7](ARCHITECTURE.md#register) ·
+[T4.1](TASKS.md#t41--e-7--pyramid-level-bit-depths--todo)
+**Question:** How many bits does each pyramid level need to preserve tracking
+accuracy, and what do those bits cost in footprint and in time?
+
+**Hypothesis** — three parts, and the third is the one most likely to be wrong:
+
+1. **Accuracy improves with coarse-level depth**, because that is what
+   [X-20](#x-20--hybrid-lk-accuracy-against-ground-truth-and-the-frontends-peak-footprint--done)
+   diagnosed: a level whose pixels are BITS cannot localise a sub-pixel motion
+   better than its own quantisation, and that error is multiplied by `2^level` on
+   the way down. Deepening the coarse levels should remove exactly that term.
+2. **It will NOT reach the one-level number** (0.0017 px). X-20 separated two other
+   terms that a deeper alphabet does not touch — a **level-0 stationary point** with
+   no pyramid in the picture, and the **clipped coarse-level window** (deviation
+   (ii)), about half of the four-level error. So the expected outcome is "inside
+   X-20's tolerance", not "as good as one level", and a result that merely fails to
+   reach 0.0017 px is NOT a failure of this experiment.
+3. **The two cost terms weight the levels OPPOSITELY, and the expensive one is
+   time, not bytes.** Stated now because it determines which end of the ladder is
+   worth deepening and it would be easy to rationalise afterwards:
+   * the **pyramid build** and the **derivative** are per-pixel, so level `l` costs
+     `1/4^l` as much — deepening the COARSE levels is nearly free in both bytes and
+     build time, and X-15 already measured the whole uncapped ladder at just
+     **1.65×** the re-binarized one, because level 0 dominates the footprint;
+   * the **tracker** is per-point-per-window, and **every level tracks the same
+     points through the same 31×31 window**, so `residualSums`' `20N²` popcounts
+     per word are paid IN FULL at every level regardless of how small it is. A
+     `1/3/5/7` ladder pays `1 + 9 + 25 + 49 = 84` units of tracking popcount against
+     `4` for `1/1/1/1` — **21×** — while costing only 1.65× the pyramid bytes.
+
+   So the cheapest passing ladder is expected to be the one that deepens the coarse
+   levels **as little as possible**, and the binding constraint is expected to be
+   TRACKER TIME rather than footprint. If that inverts — if footprint binds first —
+   it means the tracking cost model above is wrong and the entry must say so.
+
+**Decision rule** *(written before measuring)*
+
+**The accuracy gate is [X-20](#x-20--hybrid-lk-accuracy-against-ground-truth-and-the-frontends-peak-footprint--done)'s,
+inherited verbatim, and NOTHING in it may be widened by this entry:** RMS endpoint
+error ≤ 0.25 px, max endpoint error ≤ 1.0 px, ≥ 80% of eligible points tracked, and
+no tracked point STUCK, with X-20's derived model-error allowance for rotation and
+scale. It is evaluated at **four levels on the reference pipeline's own edge maps**
+— the configuration that MISSED in X-20 — **and** on X-20's synthetic cases, so a
+ladder cannot pass by trading real-content accuracy for synthetic.
+
+Among ladders that pass:
+
+* **Band A — a shallow ladder suffices.** Some ladder with no level deeper than
+  **3 bits** passes. Adopt the smallest such ladder by frontend peak footprint;
+  where footprints tie within 2%, the faster wins ([CLAUDE.md](CLAUDE.md): memory
+  wins, then speed). E-7 closes and the fix is cheap.
+* **Band B — depth is needed but bounded.** No ≤3-bit ladder passes, but some ladder
+  within the natural growth `1/3/5/7` does. Adopt the smallest-footprint passing
+  ladder and report the whole curve. **If that ladder's tracker time at 640×480
+  exceeds 2× the `1/1/1/1` ladder's, that goes in the conclusion as a headline, not
+  a footnote** — a 2× tracker is a real cost against the project's speed goal and
+  the decision to pay it must be explicit rather than absorbed.
+* **Band C — nothing passes.** No ladder up to `1/3/5/7` brings the four-level
+  tracker inside X-20's tolerance. Then **depth is not the whole cause**, X-20's
+  other two terms dominate, and the required output is (i) the best achievable
+  curve, (ii) an explicit statement that a deeper alphabet does not fix T3.8's
+  miss, and (iii) a new experiment registered for the remainder. **The tolerance is
+  not widened and the kernel is not tuned to fit it.**
+* **Band D — accuracy is NON-MONOTONIC in depth.** Pre-declared because it is
+  plausible rather than perverse: depth changes `sumXX`/`sumYY`/`sumXY` and
+  therefore which points the `minEigThreshold` test rejects, so a deeper ladder can
+  end up tracking a *different and harder* point set. If this fires, the tracked
+  point SETS must be reported beside the errors — **a curve measured over different
+  point sets is not a curve** — and the comparison re-run over the intersection.
+
+**Reporting is mandatory in every band**, per [CLAUDE.md](CLAUDE.md)'s "report
+memory and speed together": pyramid + derivative bytes, frontend peak bytes,
+tracker ns/frame and pyramid-build ns/frame.
+
+**Variants:** `1` (single level — X-20's best case, the control), `1/1/1/1` (what
+ships today — X-20's failing case), `1/2/2/2`, `1/3/3/3`, `1/3/4/4`, `1/3/5/5`,
+`1/3/5/7` (natural growth, uncapped). Level 0 is 1 bit in every ladder and is not a
+variable: it is the binary frame, which is the project's premise.
+**Workload:** X-20's, unchanged — 320×240 synthetic and the repo's real 752×480
+test image binarized by the reference pipeline's own `rl_fast_edge_filter_wide` at
+`edge_threshold 17`; 31×31 windows, `lk_max_level 3`, 20 iterations, eps 0.03,
+minEig 0.001, `seal_params.yaml` verbatim. Timing at 640×480 and at 94×60.
+**Metric:** RMS and max endpoint error in px against ANALYTIC ground truth, percent
+tracked and stuck count; bytes by stage with `operator new` counted; ns/frame.
+**Method:** `Pyramid<WordType, LevelBits...>` for both frames, per-level
+`derivativeX`/`derivativeY` into `SignedQuantMat<N, WordType>`, assembled into
+`LKLevels<WordType, LevelBits...>` and run through `calcOpticalFlowPyrLK`. Harness
+committed with the entry.
+
+**PLATFORM, AND WHY THIS ENTRY WILL BE `PARTIAL` BEFORE IT IS `DONE`.** The
+accuracy and footprint axes are **exact and device-independent** — deterministic
+integer and `double` arithmetic, and byte counts — so they close on the development
+machine and are authoritative there. The **ns/frame axis is the reference
+device's** and nothing else may close it: X-22's caveat 1 measured the same kernel
+moving **1.46×** between two binaries built from unchanged source, so a timing
+taken anywhere else would not survive contact with the ladder that has to be chosen
+on it. This entry therefore stays **PARTIAL** until the speed axis runs on the Pi,
+and a ladder is not adopted into a D-record until it does.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
