@@ -4483,13 +4483,16 @@ count is a statement about a sweep that actually entered those paths.
 
 **AND IT IS PROVEN ON THE PRIMARY TARGET, NOT ONLY ON x86-64.** The whole suite was
 re-run on the reference device (`throttled=0x0` before and after, exit 0, commit
-`f253a2e`; log `bincv-cpp/results/corner_streaming_tests_pi4.log`): **3655/3655
-checks passed**, with the four `IdenticalCorners` cases reporting the **same 1 080
+`6fa1a91` — re-run at triage, over the whole of `test_corner` **and** the whole of
+`test_opticalflow` rather than one filtered case; log
+`bincv-cpp/results/corner_streaming_tests_pi4.log`): **3655/3655 checks passed**,
+`test_opticalflow` **169/169**, with the four `IdenticalCorners` cases reporting the **same 1 080
 cells, 133 098 records, 476 truncating cells and 82 tie-containing cells** as the
 x86-64 run, `LargeFrames` the same 566 270 records at each word type, the row kernel
 bit-identical over the same 65 910 positions, and `operator new` = 0.
-`Flow.FrontendFootprint_640x480` reports the same 1 721 568 B → 500 464 B on aarch64
-as on x86-64. That is what makes the equality a property of the *operation* rather
+`Flow.FrontendFootprint_640x480` reads the same peaks on aarch64 as on x86-64 —
+**1 723 232 B → 502 112 B**, i.e. the same 1 721 568 B → 500 464 B attribution plus
+the same 1 664 B of bookkeeping — with the accounting identities holding on both. That is what makes the equality a property of the *operation* rather
 than of one compiler's floating-point code generation — which matters here, because
 the response's one rounding is a `std::sqrt` that IEEE-754 requires to be correctly
 rounded and D-20 declines to promise cross-ISA bit-identity for the LK solve.
