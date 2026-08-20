@@ -2741,7 +2741,7 @@ number of NMS survivors that differ between the two maps.
 
 ---
 
-### T3.8 · Hybrid LK tracking · `DONE`
+### T3.8 · Hybrid LK tracking · `DONE` — ⚠️ **accuracy criterion MISSED on real content, see [X-20](EXPERIMENTS.md)**
 
 **Depends:** T3.7
 **Files:** `include/bincv-cpp/ops/opticalFlow.hpp` (new)
