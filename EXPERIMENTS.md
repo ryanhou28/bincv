@@ -3215,6 +3215,118 @@ the same review:
 
 ---
 
+# Pre-registered — rule recorded, no measurement code yet
+
+The entry below was written **before any benchmark for it existed** and committed
+on its own, so the history shows the rule predates the data — the same discipline
+[X-9, X-10 and X-11](#phase-2-experiments--rules-recorded-first-then-measured)
+were held to at 4245210. Its **Decision rule** is copied **verbatim** from its
+[TASKS.md](TASKS.md) task entry and is not to be re-scaled, re-scoped or softened
+once numbers arrive.
+
+---
+
+### X-21 · Does generic-N cost the specialized N=1 and ternary paths anything? · `TODO`
+
+**Gates:** [E-4](ARCHITECTURE.md#9-open-questions-and-planned-experiments) · task
+[T3.9](TASKS.md) — whether N
+stays arbitrary or gets capped, and whether the specialization strategy chosen at
+T1.5 is confirmed or revised.
+
+**Numbering, and a correction.** T3.9's Done-when says "logged as **X-6**". That
+is **stale**: [X-6](#x-6--is-the-t22-logic-speedup-real--done) is the T2.2
+logic-speedup entry, written long before this task came up for scheduling. This
+entry therefore takes the **next free X-number, X-21** — X-1…X-20 and X-7b are
+taken — exactly as the Phase 2 batch did for the same kind of staleness ("T2.9's
+older 'logged as X-4' is likewise superseded — X-4 is taken"). TASKS.md T3.9's
+Done-when is left as it stands until this experiment closes it; the number to
+quote is X-21.
+
+**Question:** Does the bit-sliced generic-N implementation regress the
+specialized N=1 and ternary paths?
+
+**Hypothesis:** it should not, and the reason is structural rather than hopeful —
+`N` is a compile-time template parameter, so a generic loop over `N` planes is
+fully unrolled at `N = 1` and the specialization exists to remove work the
+compiler may already have removed. The interesting outcome is therefore the null
+result, which under the rule's first band confirms arbitrary N at no cost. The
+side this hypothesis does **not** cover is **code size**: three routes that are
+speed-equivalent are not size-equivalent, and every extra instantiation is
+charged against the constraint [ARCHITECTURE §2](ARCHITECTURE.md#2-target-platforms)
+names as *often binding before RAM* on Tier 2. A null on ns/pixel and a
+regression on bytes is a live outcome of this experiment, not an unexpected one.
+
+**Decision rule** *(written before measuring; verbatim from
+[T3.9](TASKS.md))*:
+- Specialized paths within 5% of a hand-written binary-only implementation →
+  arbitrary N confirmed at no cost to the common cases
+- Regression > 5% → report before acting; options are stronger specialization or
+  capping N, and which is right depends on where the cost comes from
+
+**Variants — three arms, and the third is the one that makes this meaningful:**
+1. `QuantMat<1>` and `TernaryMat` through the **generic** path (`ForceGeneric`);
+2. the same content through their **specializations**, i.e. the routes
+   `ops/derivative.hpp` and `ops/reduce.hpp` select by default;
+3. a **hand-written binary-only reference** — the same operation written with no
+   genericity at all, no `N`, no plane loop, no route selection.
+
+Arms 1 and 2 alone would only show whether the specialization is *selected*.
+Only arm 3 shows whether genericity *costs* anything, and the rule is written
+against arm 3 ("within 5% of a hand-written binary-only implementation"), so
+omitting it would leave the rule unevaluable.
+
+**Workload:** [T3.5](TASKS.md)'s derivative and [T2.5](TASKS.md)'s reductions,
+at the frame sizes those entries already use so the numbers sit alongside
+[X-16](#x-16--t35-derivative-against-cvfilter2d--done) and
+[X-7b](#x-7b--the-same-question-on-aarch64-where-d-6-comes-from--done) rather
+than beside a workload invented here. Inputs varied and results consumed through
+a `volatile` sink, per the Rules above; all three arms compared for identical
+output on every image before anything is timed.
+
+**Metric: ns/pixel AND code size — both, and neither alone settles it.**
+`size` on the built object, reported per arm, because
+[D-2](ARCHITECTURE.md#d-2-bit-planes-over-swar-packing) rests on bit-planes
+making "the 1-bit case the base case rather than a special case" and
+[ARCHITECTURE §2](ARCHITECTURE.md#2-target-platforms) names code size as often
+the binding constraint on Tier 2, before RAM — so a speed result alone cannot
+close E-4. Peak working set is identical across the three arms by construction
+(same containers, same buffers) and is reported once rather than per arm.
+
+**Platform: the reference device closes this.** Pi 4 / Cortex-A72, via
+`scripts/run_on_pi.sh pi4`, with architecture, governor, core pinning and
+`vcgencmd get_throttled` **before and after** recorded per the "Measuring on the
+Pi 4" rules. **Code size is measured there too, not on x86** — `size` on an
+aarch64 object answers a different question from `size` on an x86_64 one, and
+aarch64 is the tier the answer is for. An x86 pre-run is a cheap signal only and
+cannot close E-4.
+
+**The X-7 / X-7b confound applies and is not to be "fixed".** binCV builds with
+no `-march` flags, so `__builtin_popcountll` lowers to `call __popcountdi2@PLT`
+per word on x86_64 and to `fmov`/`cnt`/`uaddlv`/`fmov` on aarch64. The reduction
+arm is therefore measuring that lowering as much as the design variant under
+test. **No `-march` flag and no intrinsics enter the library to settle this** —
+baseline-ISA dispatch is an unsettled decision (ROADMAP 2.3), and changing it
+mid-experiment would confound precisely the three-arm comparison above.
+
+**Why this is not a tidy-up.** [X-20](#x-20--hybrid-lk-accuracy-against-ground-truth-and-the-frontends-peak-footprint--done)
+found that a 1-bit pyramid cannot localise sub-pixel motion, promoting E-7 from
+an optimisation to a **precondition**, and recorded that binCV cannot form the LK
+covariance at an N-bit level at all today. [T4.1](TASKS.md) must therefore build
+N-bit paths that matter for **accuracy**, not only for footprint. Whether
+generic-N is cheap is a live question about the next phase's design, not a
+retrospective on this one.
+
+**Method:** *pending* — the benchmark does not exist yet. It will be committed
+before it is run, and this entry names it then.
+
+**Result:** *pending — no measurement has been taken.*
+
+**Conclusion:** *pending.*
+
+**Decision:** *pending.*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
