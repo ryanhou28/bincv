@@ -3612,9 +3612,9 @@ wherever they are quoted:
 | `views only` (+ N's arrays) | 5.59 ns | 16.10 ns |
 | specialized (+ container) | 5.78 ns | 16.29 ns |
 | **total ratio** | **1.15×** | **1.93×** |
-| of which N's arrays | +5.0 pts | +19.7 pts |
-| of which everything else generic | +6.0 pts | **+70.5 pts** |
-| of which the container | +3.4 pts | +2.2 pts |
+| of which N's arrays | +5.0 pts | +19.8 pts |
+| of which everything else generic | +6.0 pts | **+70.6 pts** |
+| of which the container | +3.8 pts | +2.2 pts |
 
 **Result — the accumulator, isolated.** Two pairs of twins differing only in where
 the popcount sum lands, both twins of a pair in one object:
@@ -3723,10 +3723,10 @@ correction in this triage is against the library**, not for it.
 
 **4. The size dependence is the finding with teeth for Phase 4, and the split
 sharpens it.** The derivative gap **doubles** from 640×480 to 94×60, and all of the
-growth is in the kernel shape (17.2 → 39.5 points), none in the container
+growth is in the kernel shape (17.2 → 39.4 points), none in the container
 (3.7 → 3.2). The two-point fit — **exact, unvalidated, two equations and two
 unknowns** — puts it at **+15% per word but +93% per row**, and now says which
-genericity: **+70.5 of those 93 points are the not-N genericity, +19.7 are N's
+genericity: **+70.6 of those 93 points are the not-N genericity, +19.8 are N's
 arrays, +2.2 the container.** A pyramid level 3 row is 3 words, so a per-row cost
 is paid 640×480/94×60 = 5.4× more often per pixel up there. **The frames that pay
 most are the upper pyramid levels, which LK touches every frame** — the same levels
@@ -3784,7 +3784,7 @@ said it could not localize, and the localization moved the remedy.
    question from the one E-4 asked, and closing E-4 on it would have filed the
    finding under the wrong heading, which is why the first version of this entry
    left the row open. Registering it fixes that properly: **+93% per row against a
-   hand-written control, of which +70.5 points is genericity that is not in N**,
+   hand-written control, of which +70.6 points is genericity that is not in N**,
    worst on the upper pyramid levels E-7 and T4.1 both live on. Its pre-registered
    rule is E-12's to write, not this entry's; what this entry hands it is the
    sizing — scalarizing N's arrays recovers about a fifth, so the experiment worth

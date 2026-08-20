@@ -3035,7 +3035,7 @@ arrays and the `for p < N` loops, on an argument rather than a measurement. Tria
 added a decomposition point that removes N's array plumbing **and nothing else**,
 and the arrays are a **minority**: of the derivative's **+93% per row** (an exact
 two-point fit over 640×480 and 94×60 — two equations, two unknowns, no residual to
-check; a third frame size would test it), **+19.7 points are N's arrays, +70.5 are
+check; a third frame size would test it), **+19.8 points are N's arrays, +70.6 are
 genericity that is not in N** — runtime `BorderType`, the word type, the argument
 contract, which X-21 did not separate from one another. That is registered as
 **E-12** and gated on T4.1, because the levels it hurts most are the ones T4.1 runs
@@ -3125,7 +3125,7 @@ any of it is measured**, which is the only time a rule may be touched.
    control, and a per-row cost is paid 5.4× more often per pixel at 94×60 than at
    640×480 — so the upper pyramid levels, which LK touches every frame and which
    [X-20](EXPERIMENTS.md) showed cannot localise sub-pixel motion at 1 bit, are
-   where both problems land. Only **+19.7 of those 93 points are genericity in
+   where both problems land. Only **+19.8 of those 93 points are genericity in
    `N`**; the rest is runtime `BorderType`, the word type and the argument contract,
    unseparated — registered as **E-12** and gated on this task. A row prologue is
    also paid **per plane**, so it is the term most likely to grow with `N`. If T4.1
