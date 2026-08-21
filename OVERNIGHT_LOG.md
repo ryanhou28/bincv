@@ -73,3 +73,30 @@ have silently redefined the content every prior entry was measured on.
 
 T4.3a therefore runs on the **raw** V1_02_medium frames through the corrected
 two-stage preprocessing, which is self-consistent and matches the reference source.
+
+---
+
+## 2 · E-16 / X-27 — the level-0 floor · **DONE, Band A**
+
+**The representation was never the limit, which is the opposite of what E-16
+supposed.** A 31×31 window of 1-bit reference content resolves **29.3 distinct
+binary states per pixel of displacement** — floor **0.025 px** noise-free,
+**0.10 px** at σ = 1 gray level, **0.174 px** even at σ = 4.
+
+**X-20's 0.25 px criterion therefore stands unchanged.** This was the entry most
+likely to end in a widened tolerance and it did not need one.
+
+The rule's proposed method had to be replaced before measuring: it formed
+candidates the same way as the observation, so the Hamming-nearest candidate would
+have *been* the observation and the floor would have read exactly zero by
+construction. The replacement measures the **partition** of displacement into
+intervals indistinguishable from the bits, inverting nothing. Bands untouched.
+
+Band D fired: from 11×11 to 41×41 set pixels grow **7.3×** while distinct states
+grow only **1.8×**. The crossings lie on connected contours and an edge constrains
+only motion perpendicular to itself, so **a bigger window buys almost no
+localisation** — window sizing cannot be justified by averaging.
+
+What remains is a factor of **2.5–3 that belongs to the tracker**, now a located
+problem: [E-17](ARCHITECTURE.md#register), prime suspect **deviation (i)**, the
+integer-grid previous window. Recorded as D-25.

@@ -5588,7 +5588,7 @@ solve on the points both find.
 
 ---
 
-### X-27 · The 1-bit level-0 localisation floor · `TODO`
+### X-27 · The 1-bit level-0 localisation floor · `DONE`
 
 **COMMITTED BEFORE THE HARNESS EXISTS.**
 
@@ -5669,7 +5669,81 @@ preprocessing, on EuRoC V1_02_medium frames.
 window. Accuracy only — this is a property of the representation, so there is no
 speed axis and none is reported.
 
-**Result:** *(not yet measured)*
+**PLATFORM:** development machine. Accuracy only — this is a property of the
+representation, so there is no speed axis, as pre-registered.
+
+**METHOD CHANGED BEFORE MEASURING, AND THE REASON IS THAT THE RULE'S SKETCH WAS
+DEGENERATE.** X-27's rule proposed an oracle that formed candidates *the same way
+as the observation*; the Hamming-nearest candidate is then the observation itself
+and the floor would have been **exactly zero by construction**. The flaw was found
+while writing the harness, before any number existed. The replacement inverts no
+forward model, so it cannot recover `d` trivially. **The decision bands were not
+touched.**
+
+**Arm 1 — the partition method.** As `d` varies continuously the binarized window
+changes only when some pixel's gradient crosses the threshold, so over `d ∈ [0,1)`
+the observation takes finitely many values and `d` is partitioned into intervals
+that are *indistinguishable from the bits alone*. That partition is the floor: the
+best any estimator can do is report an interval's midpoint. 250 samples at
+0.004 px; the repo's real frame through the corrected two-stage preprocessing.
+
+| window | windows | mean set px | **distinct states / px** | mean interval | **FLOOR rms** | max |
+|---|---|---|---|---|---|---|
+| 11×11 | 50 | 44.2 | 17.3 | 0.0578 | 0.0648 px | 0.5000 |
+| 21×21 | 64 | 127.4 | 27.2 | 0.0368 | 0.0231 px | 0.2980 |
+| **31×31** | 85 | 217.5 | **29.3** | 0.0341 | **0.0254 px** | 0.3440 |
+| 41×41 | 95 | 323.7 | 30.8 | 0.0324 | 0.0131 px | 0.1400 |
+
+**Arm 2 — with sensor noise**, since arm 1 is noise-free and some of its state
+transitions might be uninformative in practice. Observation binarized from a
+**noisy** frame, candidates from clean ones, 31×31, 204 windows:
+
+| σ (gray levels) | FLOOR rms | max | median |
+|---|---|---|---|
+| 0.0 | 0.0625 px | 0.6500 | 0.0100 |
+| 0.5 | 0.0730 px | 0.6500 | 0.0200 |
+| **1.0** | **0.1000 px** | 0.7100 | 0.0300 |
+| 2.0 | 0.1120 px | 0.6500 | 0.0500 |
+| 4.0 | **0.1742 px** | 0.8400 | 0.0900 |
+
+**Conclusion — BAND A, and it is the opposite of what E-16 supposed.**
+
+1. **THE 0.25 px TOLERANCE WAS ALWAYS REACHABLE, AND BY A WIDE MARGIN.** The
+   representation permits **0.025 px** noise-free and **0.10 px at σ = 1** gray
+   level — a realistic figure for the global-shutter sensor this content comes
+   from. Even at **σ = 4**, which is a poor sensor, the floor is **0.174 px**,
+   still inside the tolerance. **No tolerance is restated and none is weakened.**
+2. **X-20's "four independent crossings" WAS WRONG — BUT CONSERVATIVE BY ~7×.** A
+   31×31 window on real reference content resolves **29.3 distinct binary states
+   per pixel of displacement**, not 4. The derivation's suspect half was suspect in
+   the right place and wrong in the safe direction, which is why nothing downstream
+   of it broke.
+3. **BAND D FIRED: THE CROSSINGS ARE NOT INDEPENDENT, AND THE FLOOR PLATEAUS.**
+   From 11×11 to 41×41 the set pixels grow **7.3×** (44 → 324) while distinct
+   states grow only **1.8×** (17.3 → 30.8). Averaging does not go as `1/√area`,
+   because the set pixels lie on **connected contours** and an edge constrains
+   motion only perpendicular to itself. So a bigger window buys very little
+   localisation — which matters for window sizing, and is registered rather than
+   acted on here. *(It happens not to matter for the tolerance question, because
+   the floor is already an order of magnitude below it at every window size
+   measured.)*
+4. **THEREFORE THE TRACKER IS THE LIMIT, AND THAT IS NOW A LOCATED PROBLEM RATHER
+   THAN A DIFFUSE ONE.** The tracker delivers 0.25–0.29 px where the representation
+   permits 0.10. **The gap is a factor of 2.5–3 and it belongs to the algorithm.**
+   Registered as **[E-17](ARCHITECTURE.md#register)**, with the prime suspect named:
+   **deviation (i)**, the previous window anchored on the integer grid.
+   `ops/opticalFlow.hpp` already calls that "the concrete thing route (b) trades
+   away", and it displaces the aperture by up to half a pixel — the right order of
+   magnitude for a 2.5× gap on a sub-pixel measurement.
+
+**Decision:** **T3.8's criterion STANDS UNCHANGED at 0.25 px RMS.** E-16 is closed
+with the answer that the representation was never the constraint. The residual is
+handed to E-17 as a tracker question, which is where three experiments' worth of
+elimination now points. Recorded as
+[D-25](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/level0_floor.cpp` (arm 1) and
+`benchmark/level0_floor_noise.cpp` (arm 2).
 
 ---
 
