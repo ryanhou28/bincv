@@ -52,6 +52,23 @@ add_library(corner_streaming_arms OBJECT ${BINCV_CORNER_STREAMING_ARMS})
 target_link_libraries(corner_streaming_arms PRIVATE bincv_core bincv_warnings)
 target_include_directories(corner_streaming_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# ---------------------------------------------------------------------------
+# X-29 / E-13: the THIRD multi-file benchmark here, and the one that measures the
+# reason the others exist. covacc_arm_perrow.cpp and covacc_arm_perrow_b.cpp share
+# a body by inclusion and are therefore BIT-IDENTICAL ALGORITHMS in different
+# objects: their timing spread is the code-layout noise floor, which X-29 judges
+# the real comparison against. See benchmark/covacc_arms.hpp.
+# ---------------------------------------------------------------------------
+set(BINCV_COVACC_ARMS
+    ${CMAKE_CURRENT_SOURCE_DIR}/covacc_arm_perrow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/covacc_arm_perrow_b.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/covacc_arm_window.cpp)
+list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_COVACC_ARMS})
+
+add_library(covacc_arms OBJECT ${BINCV_COVACC_ARMS})
+target_link_libraries(covacc_arms PRIVATE bincv_core bincv_warnings)
+target_include_directories(covacc_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 set(BINCV_GENERICN_ARMS
     ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_generic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_specialized.cpp
@@ -99,5 +116,9 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
 
     if(benchmark_name STREQUAL "corner_streaming_benchmark")
         target_link_libraries(${benchmark_name} PRIVATE corner_streaming_arms)
+    endif()
+
+    if(benchmark_name STREQUAL "covacc_benchmark")
+        target_link_libraries(${benchmark_name} PRIVATE covacc_arms)
     endif()
 endforeach()

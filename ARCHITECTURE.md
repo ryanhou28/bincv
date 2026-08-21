@@ -1318,6 +1318,18 @@ axis 1 on the argument that the sliding path never executes there.
 > costs no memory and no interface and is a gain at both window sizes LK uses —
 > but 1.03–1.09× is the number to quote.
 
+> **AMENDED BY [X-29](EXPERIMENTS.md) (E-13): ITEM 4 IS AN `N = 1` RESULT.** Every
+> number above was measured at one bit per pixel, where `BitSlicedPairCounts` is
+> four counters. At `N = 4` it is **sixty-four**, and the per-row zero-and-add
+> costs `~3N² + N` adds plus `4N²` words of zeroing per row against 1–2 `uint64_t`
+> words of real work. On the reference device the window-wide shape is
+> **1.114× / 1.348× / 1.248×** faster at `N = 2 / 3 / 4` while per-row still wins
+> at `N = 1` (0.917×), so `gradientCovariance<N>` selects on `N` at compile time
+> ([D-26](#d-26-the-covariance-accumulator-shape-is-chosen-on-n-and-the-noise-floor-is-measured)).
+> **The item-4 decision stands for the operations it was measured on**, which are
+> the `N = 1` reductions in ops/reduce.hpp; what changed is that it does not
+> generalize to a structure sixteen times larger.
+
 **Two things that follow from that, and were not lost between here and T2.11.**
 The 1.32× belongs to this finding alone; quoting it for item 1 as well counts one
 measurement twice. (X-11b then showed the 1.32× does not belong entirely to this
@@ -2025,6 +2037,51 @@ already calls "the concrete thing route (b) trades away" and which displaces the
 aperture by up to half a pixel. That is the right order of magnitude for the gap,
 and it is a hypothesis for E-17 to test rather than a conclusion.
 
+
+### D-26: the covariance accumulator shape is chosen on N, and the noise floor is measured
+
+[D-15](#8-design-decisions) item 4 gives window reductions a **per-row partial
+accumulator**, to break the serialized dependency chain through popcount latency.
+That was measured — [X-11b](EXPERIMENTS.md), 1.08× at W = 31 — **at `N = 1`, where
+`BitSlicedPairCounts` is four counters.** At `N = 4` it is **sixty-four**, and the
+per-row zero-and-add costs `~3N² + N` adds plus `4N²` words of zeroing **per row**
+against 1–2 `uint64_t` words of real work per row.
+
+**[X-29](EXPERIMENTS.md) measured both shapes on the reference device:**
+
+| N | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| window-wide vs per-row | **0.917×** | **1.114×** | **1.348×** | **1.248×** |
+
+So the per-row shape **pays at `N = 1` and costs above it**, and the crossover sits
+between 1 and 2 rather than somewhere in the middle. `gradientCovariance<N>` now
+selects with `if constexpr`, which is free because `N` is already a template
+parameter, and **D-15 item 4 is amended to be an `N = 1` statement**.
+
+Both forms add the same integers in a different order, and `size_t` addition is
+associative, so **results are bit-identical by construction** — this changes timing
+and nothing else.
+
+**It lands where the frontend spends its time.** [D-23](#8-design-decisions)
+adopted the `1/2/2/2` ladder, so three of four levels run at `N = 2` and take the
+1.114×, while level 0 keeps the per-row shape that suits it.
+
+**THE NOISE FLOOR WAS MEASURED, NOT ASSUMED, AND THAT IS THE PART WORTH COPYING.**
+X-29 compiled the *same* arm into two translation units and timed both, so their
+spread is pure code layout. On the Cortex-A72 it is **0.0–0.3%**; on an x86_64
+development machine it reaches **10.6% at N = 2 — larger than the entire effect at
+that N**, which reads `IN NOISE` there and `W wins` on the device.
+[X-22](EXPERIMENTS.md) declined to close this question on a single-binary A/B and
+was right to.
+
+**A corollary worth recording:** every prior code-layout caution in this repository
+— X-22's 1.46× between binaries, `morphology_path_benchmark`'s ~10% within one
+object — was measured **on x86**. The device's noise floor is an order of magnitude
+smaller. That does **not** retire the discipline of splitting arms across
+translation units; these device numbers are trustworthy *because* they were split.
+It does add a reason to prefer the reference device for A/B work, alongside the ISA
+argument already in [EXPERIMENTS.md](EXPERIMENTS.md)'s "Measurement platforms".
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -2073,7 +2130,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-4**~~ **RESOLVED** | Does bit-sliced generic-N ever regress the specialized N=1 and ternary paths? | The promise is arbitrary N at no cost to the common cases. | **Answered: no. At N = 1 the generic route and the specialization produce a derivative of the SAME SIZE to the byte (2264 B) and the SAME instruction count (567), time to within 0.1%, and generic-N's whole object is 90 B smaller — they are not literally the same instruction stream (GCC allocates different registers), and the equality holds for the derivative only; the covariance and count differ by 40 B and 24 B and time inside the batch spread. `N` STAYS ARBITRARY; no cap.** [D-21](#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle), [X-21](EXPERIMENTS.md) · **This is an N = 1 result and closes only the N = 1 question** — every arm was `QuantMat<1>`/`TernaryMat`, and it says nothing about N = 3 or N = 5, where §7.5's covariance contributes plane PAIRS and is quadratic in N where the derivative is linear. **The larger cost X-21 found while answering this is [E-12](#9-open-questions-and-planned-experiments), not this row** — both binCV routes sit 8–43% in time and 2.63× in code size (`-fno-exceptions`; 2.84× with exceptions on) above a hand-written binary-only control, and the decomposition puts most of it in genericity that is NOT in N. | Whether N is capped rather than arbitrary. | T1.5 specialization strategy | Phase 3 (T3.9) ✔ |
 | ~~**E-8**~~ **RESOLVED** | Horizontal decimation for `pyrDown` ([§6.1](#61-bit-parallel-primitives)): a per-pixel gather loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant masks? | The pyramid's subsample half has no primitive, and the two routes sit on opposite sides of the project's speed/footprint tiebreak — masks measured in frames against a loop measured in ns/px. | **Answered, and the question was leading: there is no tiebreak. A third route the register did not list — the WORD-LOCAL unshuffle — is word-parallel and costs zero bytes, and beat the gather loop by 14.6×/26.4× and the frame-masked route by 11.3×/8.3×. `ops/` gains a word-local resample primitive taking `(src, dst)`; no plan, no scratch.** [D-17](#d-17-horizontal-decimation-is-word-local), [X-14](EXPERIMENTS.md) | T3.4 | Phase 3 (T3.4) ✔ |
 | **E-12** | How much of the `ops/` kernel's **per-row** cost is genericity that is **not** in N — the runtime `BorderType`, the word type, the `BINCV_ASSERT` contract — and which of the three dominates? | [X-21](EXPERIMENTS.md) measured the shipped derivative at **+15% per word and +93% per row** against a hand-written binary-only control (an exact two-point fit over 640×480 and 94×60 — two equations, two unknowns, no residual; a third frame size would test it). Scalarizing N's `a[N]`/`b[N]`/`srcRow[N]` arrays was measured at triage and recovers only **+19.8 of the 93 points**; **+70.6 points is the genericity X-21 did not separate**, and the fix for a runtime `BorderType` is not the fix for a templated word type. A per-row cost is paid 5.4× more often per pixel at 94×60 than at 640×480, so **the frames that pay most are the upper pyramid levels** — the same levels [E-7](#9-open-questions-and-planned-experiments) and T4.1 live on. | Whether `ops/` kernels get a compile-time border form, a monomorphic word-width path, or neither. | T3.5's derivative and every `ops/` kernel with a per-row prologue; **T4.1's N-bit paths run on the levels that pay most** | **Phase 4** (T4.1) |
-| **E-13** | Does the **per-row partial accumulator** still pay above N = 1? In [§7.5](#75-lk-gradient-covariance)'s bit-sliced covariance it costs 8N² operations **per row** — 128 at N = 4 — against work that is O(N²) **per word**, and a 31-pixel window is 1–2 `uint64_t` words per row. | [X-22](EXPERIMENTS.md) measured a window-wide accumulator **1.14–1.60× faster at N = 2, 3, 4** and level with the shipped form at N = 1 — but in one binary, and that same entry measured the shipped arm's own cost moving **1.46× between binaries built from unchanged source**, so the comparison is confounded by code layout and X-22 declines to close on it. The shape being questioned is [D-15](#d-15-window-reductions-get-incremental-state-and-a-fused-covariance)'s item 4, which was decided on measurement **at N = 1** (X-11b: 1.08× at W = 31), where the per-row cost is 8 operations rather than 128. | Whether the N-bit covariance keeps per-row partials, and whether D-15 item 4 is N-dependent. | T3.10's kernel; **T4.1 runs on the levels where N > 1** | **Phase 4** (T4.1) |
+| ~~**E-13**~~ **RESOLVED — IT IS AN N = 1 RESULT** | Does the **per-row partial accumulator** still pay above N = 1? | D-15 item 4 was measured at N = 1, where `BitSlicedPairCounts` is four counters; at N = 4 it is sixty-four. | **Answered: it pays at N = 1 and costs above it.** [X-29](EXPERIMENTS.md) on the reference device: window-wide vs per-row is **0.917× / 1.114× / 1.348× / 1.248×** at N = 1/2/3/4, so the crossover is between 1 and 2. `gradientCovariance<N>` selects with `if constexpr` (free — N is already a template parameter) and results are **bit-identical** by construction. It lands on the adopted `1/2/2/2` ladder, where three of four levels run at N = 2. **The noise floor was MEASURED**: the same arm in two translation units spreads **0.0–0.3% on the Cortex-A72** and **up to 10.6% on x86_64** — larger than the whole effect at N = 2, which reads IN NOISE there and W wins on the device. X-22 declined to close on a single-binary A/B and was right to. [D-26](#d-26-the-covariance-accumulator-shape-is-chosen-on-n-and-the-noise-floor-is-measured). | Whether the N-bit covariance keeps per-row partials. **Only at N = 1.** | — | **Phase 4** (X-29) ✔ |
 | ~~**E-14**~~ **RESOLVED — NO** | Does the tracker need a border on its coarse pyramid levels — the reference's `winSize`-wide reflected pad, a cheaper replicate pad, or a keypoint policy that never places a window near a coarse-level edge? | X-24 read the clipped coarse window as the dominant term. | **Answered: no, and the question rested on a statistic that does not fit the data.** [X-25](EXPERIMENTS.md) measured yield — eligible keypoints tracked within 1.0 px — instead of RMS, and **a padded pyramid is worse than or equal to clipping in five of seven cases for 1.38× the bytes**. **Deviation (ii) is vindicated and is now MEASURED rather than argued.** The finding underneath it corrects X-24: arm A on `(1,0)` has `rms(all)` 0.8356 px but **98.6% yield at 0.0009 px** — 139 of 141 keypoints tracked to a thousandth of a pixel and two catastrophically wrong — so **clipping costs about two keypoints out of 141, not the 59% X-24 attributed to it**; the never-clipping subset simply excluded the outliers. What remains is the **level-0 1-bit floor** (`rms(usable)` 0.25–0.32 px in EVERY arm including the padded one, against X-20's own no-pyramid single-level 0.2860 px), which is [E-16](#register) and is not a pyramid parameter at all. | Whether pyramid levels gain a border. **They do not.** | — | **Phase 4** (X-25) ✔ |
 | **E-15** | Why does tracking accuracy PEAK AT 2 BITS and degrade with more? | [X-24](EXPERIMENTS.md) measured it and did not explain it: on `(1,0)` unclipped, 1/2/3/5 bits give 1.4742 / **0.0010** / 0.5334 / 0.8567 px, and on `(2,−3)` the ladder is exact at 2 and 3 bits and fails from 4. Two explanations remain open and were NOT separated. **(i)** The bit-sliced covariance and residual weight plane pairs by `2^(i+j)`, so a few high-magnitude pixels dominate a window whose sub-pixel accuracy comes from averaging many edge crossings — this predicts degradation at SMALL motion and none at large, which is the observed pattern (`(12,−8)` is exact at every depth, `(2,−3)` fails from 4 bits, `(1,0)` from 3). **(ii)** `1/2/2/2`'s upper levels collapse to two distinct values anyway, so its advantage may be density preservation rather than precision. `requantizeBoxSum` is already excluded as the cause: it is a faithful rescaled average at every depth. | Whether the weighting in [§7.5](#75-lk-gradient-covariance)'s bit-sliced form is right for TRACKING as opposed to for corner response, and whether a depth cap belongs in the pyramid API. | E-7's final ladder | **Phase 4** |
 | **E-17** | Where does the tracker lose the factor of **2.5–3** between the representation's 0.10 px floor and its own 0.25–0.29 px? | [X-27](EXPERIMENTS.md) closed off the representation, and X-24/X-25 closed off three pyramid parameters, so this is what is left of T3.8's MISS — and it is now a located problem rather than a diffuse one. **The prime suspect is deviation (i)**: the previous window is anchored on the integer grid because a bit-plane derivative cannot be interpolated, which displaces the aperture by up to half a pixel. `ops/opticalFlow.hpp` already calls that "the concrete thing route (b) trades away", and half a pixel of aperture displacement is the right order of magnitude for a 2.5× gap on a sub-pixel measurement. Two other candidates are untested: the single linearization per iteration on binary content, and the asymmetry that `I` is read at integer positions while `J` is interpolated. | Whether deviation (i) is a trade worth reversing, and at what cost — reversing it needs an interpolatable previous-frame gradient, which is a representation change. | T3.8's standing accuracy MISS | **Phase 4** |

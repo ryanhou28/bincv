@@ -132,3 +132,34 @@ caught). And corner capacity was passed as `maxCorners`, truncating the NMS pool
 before the spacing filter: capacity 200 gives **61** corners, capacity 20 000 gives
 **193**. The first reading looked like a 3.3× detection shortfall in binCV.
 `CornerResult::candidatesTruncated` had been reporting it all along.
+
+---
+
+## 4a · E-13 / X-29 — the per-row accumulator above N = 1 · **DONE, Band A**
+
+**Per-row pays at N = 1 and costs above it**, with the crossover between 1 and 2
+rather than somewhere in the middle. Reference device, window-wide vs per-row:
+
+| N | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| W vs P | **0.917×** | **1.114×** | **1.348×** | **1.248×** |
+
+`gradientCovariance<N>` now selects with `if constexpr` — free, since `N` is
+already a template parameter — and results are **bit-identical** (same integers,
+different order, associative addition). D-15 item 4 amended to be an `N = 1`
+statement. It lands on the adopted `1/2/2/2` ladder, where three of four levels run
+at N = 2.
+
+**The noise-floor arm is the part worth copying.** X-29 compiled the *same*
+algorithm into two translation units, so their spread is pure code layout:
+
+* **Cortex-A72: 0.0–0.3%**
+* **x86_64: 0.0–10.6%** — at N = 2 the layout noise is *larger than the entire
+  effect*, which reads `IN NOISE` on the laptop and `W wins` on the device.
+
+X-22 declined to close this question on a single-binary A/B and was right to. The
+corollary: every prior code-layout caution in this repo (X-22's 1.46×,
+`morphology_path_benchmark`'s ~10%) was measured **on x86**, and the device's floor
+is an order of magnitude smaller. That does not retire the split-arms discipline —
+these numbers are trustworthy *because* the arms were split — but it is a further
+reason to prefer the device for A/B work.

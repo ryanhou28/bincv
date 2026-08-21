@@ -5844,7 +5844,7 @@ LOOKED EXACTLY LIKE A binCV DEFECT.**
 
 ---
 
-### X-29 · The per-row partial accumulator above N = 1 · `TODO`
+### X-29 · The per-row partial accumulator above N = 1 · `DONE`
 
 **COMMITTED BEFORE EITHER ARM EXISTS.**
 
@@ -5912,7 +5912,79 @@ window positions so the region masks vary.
 **Method:** one translation unit per arm; `benchmark/` following
 `corner_streaming_arms`' shape. Reference device closes it.
 
-**Result:** *(not yet measured)*
+**PLATFORM:** reference device — Pi 4 Model B Rev 1.5, governor `performance`,
+`taskset -c 3`, `throttled=0x0` before and after. The development machine's run is
+reported beside it because **the difference between the two platforms is itself a
+result**.
+
+**Result — `W vs P` is the ratio `P / W`, so above 1.0 means window-wide is
+faster. `L` is `|P − P'| / min(P, P')`: the same algorithm in two translation
+units, i.e. pure code layout.**
+
+**Reference device (Cortex-A72):**
+
+| N | P (per-row) µs | P′ µs | W (window-wide) µs | **L** | W vs P | verdict |
+|---|---|---|---|---|---|---|
+| 1 | 288.6 | 289.4 | 314.8 | **0.3%** | 0.917× | **P wins** |
+| 2 | 924.4 | 923.8 | 829.8 | **0.1%** | **1.114×** | W wins |
+| 3 | 2420.5 | 2421.5 | 1795.3 | **0.0%** | **1.348×** | W wins |
+| 4 | 4355.0 | 4353.5 | 3489.0 | **0.0%** | **1.248×** | W wins |
+
+**Development machine (x86_64), same source, same binary layout discipline:**
+
+| N | **L** | W vs P | verdict |
+|---|---|---|---|
+| 1 | 5.8% | 0.846× | P wins |
+| 2 | **10.6%** | 1.017× | **IN NOISE** |
+| 3 | 4.3% | 1.208× | W wins |
+| 4 | 0.0% | 1.116× | W wins |
+
+**Conclusion — BAND A, cleanly, and the noise-floor arm earned its place.**
+
+1. **THE PER-ROW SHAPE PAYS AT `N = 1` AND COSTS ABOVE IT.** The crossover is
+   between 1 and 2, not somewhere in the middle: 0.917× at N = 1 and 1.114× at
+   N = 2, against a noise floor of 0.3% and 0.1%. **D-15 item 4 becomes an `N = 1`
+   statement**, and the kernel now selects with `if constexpr` — free, since `N` is
+   already a template parameter.
+2. **THE MECHANISM MATCHES THE STRUCTURE.** `BitSlicedPairCounts<N>` is `4N²`
+   counters — 4 at N = 1, **64 at N = 4**. Per-row costs `~3N² + N` adds plus `4N²`
+   words of zeroing **per row**, against 1–2 `uint64_t` words of real work per row.
+   At four counters that is cheap enough for the dependency-chain break X-11b
+   measured to win; at sixty-four it is not.
+3. **X-22 WAS RIGHT TO DECLINE, AND FOR THE RIGHT REASON.** It measured
+   1.14–1.60× and would not close because the same kernel moved 1.46× between
+   binaries. Measured directly here, **the code-layout noise floor on the
+   development machine reaches 10.6% at N = 2 — larger than the entire effect at
+   that N**, which reads `IN NOISE` there and `W wins` on the device. A
+   single-binary A/B would have been indistinguishable from a result.
+4. **AND THE CONFOUND IS LARGELY AN x86 PHENOMENON, WHICH IS NEW.** `L` is
+   **0.0–0.3% on the Cortex-A72** and **0.0–10.6% on x86_64** — a difference of an
+   order of magnitude in the *noise*, not the signal. Every prior caution about
+   code layout in this repository (X-22's 1.46×,
+   `morphology_path_benchmark`'s ~10%) was measured on x86. **That does not retire
+   the caution** — the arms must still be split, and this entry's own device
+   numbers were only trustworthy because they were — but it does explain why the
+   device has consistently given tighter spreads, and it is a reason to prefer the
+   device for A/B work beyond the ISA argument already in "Measurement platforms".
+5. **IT LANDS ON THE ADOPTED LADDER.** [D-23](ARCHITECTURE.md) adopted `1/2/2/2`,
+   so **three of four levels run at N = 2 and take the 1.114×**, while level 0 at
+   N = 1 keeps the per-row shape that suits it. The change is worth having exactly
+   where the frontend spends its time.
+
+**Bit-identity:** both forms add the same integers in a different order and
+`size_t` addition is associative, so results are identical by construction.
+`tests/test_covariance.cpp` passes 17 704 checks unchanged, and
+`tests/test_opticalflow.cpp` 194.
+
+**Decision:** `gradientCovariance<N>` selects the accumulator on `N`.
+[D-15](ARCHITECTURE.md#8-design-decisions) item 4 is amended to say it is an
+`N = 1` result. E-13 closes. Recorded as
+[D-26](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/covacc_benchmark.cpp` with `covacc_arm_perrow.cpp`,
+`covacc_arm_perrow_b.cpp` (the noise-floor arm) and `covacc_arm_window.cpp`, one
+translation unit each; the two per-row arms share a body by inclusion so they
+cannot drift.
 
 ---
 

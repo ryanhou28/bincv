@@ -689,9 +689,43 @@ inline GradientCovariance gradientCovariance(const BinMatConstView<WordType> (&m
             rowX[p] = magX[p].row(y);
             rowY[p] = magY[p].row(y);
         }
-        impl::BitSlicedPairCounts<N> row;
-        impl::bitSlicedPairRowRegion<N, WordType>(rowX, rowY, signX.row(y), signY.row(y), r, row);
-        total.add(row);
+        // ===================================================================
+        // THE ACCUMULATOR SHAPE IS CHOSEN ON N, AND IT IS MEASURED (X-29, E-13).
+        //
+        // D-15 item 4 gives window reductions a PER-ROW partial accumulator, to
+        // break the serialized dependency chain through popcount latency. X-11b
+        // measured that worth 1.08x -- AT N = 1, where BitSlicedPairCounts is four
+        // counters. At N = 4 it is SIXTY-FOUR, and the per-row zero-and-add is
+        // ~3N^2+N adds plus 4N^2 words of zeroing against 1-2 uint64_t words of
+        // real work per row. X-29 measured both shapes on the reference device:
+        //
+        //     N        1        2        3        4
+        //     W vs P   0.917x   1.114x   1.348x   1.248x
+        //
+        // So the per-row shape PAYS at N = 1 and COSTS above it, and the crossover
+        // is between 1 and 2 rather than somewhere in the middle. The selection is
+        // `if constexpr` and therefore free: N is already a template parameter.
+        //
+        // Both forms produce BIT-IDENTICAL results -- they add the same integers in
+        // a different order, and size_t addition is associative -- so this changes
+        // timing and nothing else. tests/test_covariance.cpp's N sweeps are what
+        // hold that.
+        //
+        // The noise floor was measured rather than assumed: X-29 compiled the SAME
+        // arm into two translation units and timed both. On the device that spread
+        // is 0.0-0.3%, so the numbers above are real; on an x86 development machine
+        // it reaches 10.6%, which is why X-22 declined to close this question on a
+        // single-binary A/B and was right to.
+        // ===================================================================
+        if constexpr (N == 1) {
+            impl::BitSlicedPairCounts<N> row;
+            impl::bitSlicedPairRowRegion<N, WordType>(rowX, rowY, signX.row(y), signY.row(y), r,
+                                                      row);
+            total.add(row);
+        } else {
+            impl::bitSlicedPairRowRegion<N, WordType>(rowX, rowY, signX.row(y), signY.row(y), r,
+                                                      total);
+        }
     }
     return impl::combineBitSlicedPairs<N>(total);
 }
