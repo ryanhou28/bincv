@@ -6556,6 +6556,82 @@ the log as a number rather than in the tree as a second implementation.
 
 ---
 
+### X-34 · The straddling window · `TODO`
+
+**COMMITTED BEFORE THE ARM EXISTS. A CEILING IS MEASURED FIRST AND CAN CANCEL IT** —
+X-33's procedure, which X-32 is the argument for.
+
+**Gates:** [X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial)'s
+unmet criterion 4, on the kernel that is **94.7% of the real frontend**.
+**Question:** A 31-pixel window at an arbitrary offset spans **1.94 `uint32_t`
+words on average** — it fits in one only when `x0 % 32 ≤ 1`, which is 2 cases in
+32. So `residualSums` issues **twice the popcounts it needs**, each covering 15.5
+useful pixels instead of 31. What does aligning the window into a single word buy?
+
+**WHERE THIS CAME FROM.** An LK-against-LK measurement — same points, same window,
+same bits, OpenCV pinned to one thread — put binCV at **4.11× slower** on the
+shipped `1/2/2/2` ladder and **2.00×** on `1/1/1/1`, against an op-count model of
+**1.29 popcounts per pixel at N = 1** where OpenCV spends ~0.4–0.9 SIMD ops. The
+model matches the N = 1 measurement almost exactly. **1.29 rather than 0.625 is the
+straddle**, and it is the one factor of the four that is pure waste rather than a
+design choice:
+
+* **the straddle — 1.94× of pure waste**, this entry;
+* the **five-tap decomposition** — ten accumulated sums where OpenCV does two —
+  which is [D-20](ARCHITECTURE.md)'s boundary being paid for and is *not* waste;
+* the **N² plane pairs**, 2.06× measured for the `1/2/2/2` ladder
+  ([D-23](ARCHITECTURE.md) bought that with accuracy);
+* OpenCV being vectorized, which [D-30](ARCHITECTURE.md) has started answering.
+
+**The mechanism.** Extract the window's 31 bits into bits `[0, 30]` of one word:
+`(row[w0] >> s) | (row[w0+1] << (32 - s))` with `s = x0 % 32`, masked to 31 bits and
+**guarded at `s == 0`, where the second shift is undefined**. Then every popcount
+covers the whole window instead of half of it. **For the four taps the alignment is
+FREE** — `ReplicatedShiftedRow` already shifts, so it only has to shift by a
+different amount. Only `magX`, `magY`, `signX`, `signY` and `prev` need explicit
+alignment: **8 planes at N = 2**, about 32 operations per row, against 80 popcounts
+saved per row.
+
+**THE CEILING, AND IT IS CHEAP BECAUSE THE HARDWARE ALREADY OFFERS IT.** Windows at
+`x0 % 32 == 0` already occupy one word; windows at `x0 % 32 == 5` occupy two. Timing
+`residualSums` on each is an upper bound on this optimisation **with the alignment
+cost removed entirely**, and it needs no new kernel. **If that bound is under 1.3×,
+the arm is not written.**
+
+**Decision rule** *(written before measuring)* — `R` = unaligned / aligned on
+`residualSums`, reference device, `N = 2`, bit-exact sums.
+
+* **Band A — `R` ≥ 1.3×.** Adopt, and re-measure the LK stage and the frontend
+  rather than quoting the kernel ratio.
+* **Band B — 1.1× ≤ `R` < 1.3×.** Adopt only if the alignment stays inside
+  `residualSums` and adds no interface. The window extraction is fiddly at `s == 0`
+  and at the row's last word, and below 1.3× that risk has to be earned.
+* **Band C — `R` < 1.1×.** **Do not ship**, and record that the straddle is not
+  where the model said it was — which would make the *third* op-count inference in
+  this project to fail against measurement, after S3's tap extraction and the
+  9.4-cycles reading.
+* **Band D — the aligned case is SLOWER.** Then the two-word path is being helped by
+  something the one-word path loses — most plausibly that `visitRowWords`'
+  head/tail masking is cheaper than a shift-based extraction — and that needs
+  saying before the arm is written.
+
+**Also to be reported, because it is now a different question than when it was
+decided:** [D-23](ARCHITECTURE.md) adopted the `1/2/2/2` ladder on accuracy, with
+its speed cost *estimated* at 1.35× from a confounded measurement. Isolated, it is
+**2.06×**, and it was chosen when corner detection was believed to be 52.7% of the
+frontend rather than 2%. **That decision is not reversed here** — it was an
+accuracy decision and this entry measures speed — but the corrected price is put on
+the record next to it.
+
+**Variants:** aligned vs straddling windows (the ceiling); then shipped vs aligning
+kernel, `N` = 1, 2.
+**Workload:** 31×31 windows over a 640×480 level.
+**Metric:** ns per window on the reference device, bit-exact sums, then the LK stage.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
