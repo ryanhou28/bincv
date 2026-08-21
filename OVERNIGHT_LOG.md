@@ -214,3 +214,33 @@ thread over the same 400 frames:
 like-for-like deficit is **6.3×**, and that is the number to quote. Both are
 reported because neither is honest alone — a multi-core denominator is what a user
 actually has, a single-thread one is what isolates the code.
+
+---
+
+## 5 · X-31 — the corner response as bit-sliced box sums · **DONE, Band A, with a correction**
+
+**Kernel: 6.98× on the reference device, bit-exact.** Per-pixel 37.93 ms →
+bit-sliced 7.89 ms (4.81×) → with the sparsity skip 5.43 ms (6.98×), on real
+reference content. `test_corner` passes 3 655 checks unchanged.
+
+The `A + B·bs²` fit predicted 84% addressing overhead; removing it delivered ~5–7×.
+The cost model was right about the kernel.
+
+**I nearly discarded the sparsity skip on one frame.** The first real frame I
+sampled was 26.67% set — an outlier against the ~13% average — and skipped 1.7% of
+words. On three typical frames it skips 22–39% and is worth 1.2–1.45×. Separating
+B1 from B2, which the rule required, is what made that visible.
+
+**AND THEN IT MOVED THE FRONTEND BY 1.04%.** X-30's profile timed **one detection
+per frame**; the real frontend re-detects on a **3.0% duty cycle** (12 in 399
+frames). Detection is **under 2%** of frontend time, not 52.7% — the profile
+over-weighted it ~33×. D-27's ordering is corrected by D-28.
+
+**Third time in this project a summary statistic has misdirected effort**, after
+X-25's RMS over a tailed distribution and X-24's clipping attribution. Same failure
+each time: a number measured on something *adjacent* to the real thing, with
+nothing in the number itself to say so.
+
+**What survives:** both hot kernels are addressing-bound, so SIMD is still not the
+first move; and the real target is `residualSums` at ~97%, where tap extraction
+costs ~9.4 cycles per popcount against a 1-cycle throughput.

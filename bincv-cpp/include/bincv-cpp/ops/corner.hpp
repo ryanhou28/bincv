@@ -1011,6 +1011,184 @@ constexpr size_t kResponseRingRows = 3;
 ///       `Corner.Streaming_RowMatchesFrameMap_*` compares every pixel.
 /// @note Windows CLIP at the frame edge (T3.6 promise 2, D-13), as above.
 /// @note Never throws; allocates nothing; no scratch at all.
+namespace impl {
+
+// ===========================================================================
+// THE BLOCKSIZE-3 FAST PATH: 3x3 BOX SUMS, BIT-SLICED (X-31).
+//
+// The per-pixel form below issues one `clipRegion` and ~12 popcounts PER PIXEL,
+// over a window three bits wide in a word of 32 or 64. Sweeping `blockSize`
+// 3/5/7/9 and fitting `T = A + B*bs^2` measured **A ~ 12.1 ms against B*9 ~ 2.3 ms
+// at 640x480** -- nine times the window work costs 2.29x, so the kernel was **84%
+// per-pixel addressing** and only 16% window work. Vectorizing the popcounts would
+// therefore have been worth about 1.2x; this is the other 84%.
+//
+// Every quantity the response needs is a 3x3 BOX SUM OF A BIT-PLANE:
+//
+//     xx        = sum over the window of magX
+//     yy        = sum over the window of magY
+//     crossTerm = sum(magX & magY & ~sel) - sum(magX & magY & sel),  sel = sX ^ sY
+//
+// and a box sum of bits is word-parallel. Horizontally `a(x-1) + a(x) + a(x+1)` is
+// ONE FULL ADDER into two planes (0..3); vertically three of those sum into four
+// planes (0..9, and 3+3+3 = 9 fits exactly). So a whole word of pixels is summed
+// at once. This is [D-2](../../../ARCHITECTURE.md)'s technique and the same shape
+// `pyrDown`'s `boxSum4` already uses; it was simply never applied here, to the
+// largest kernel in the frontend.
+//
+// **EXACT, NOT APPROXIMATE, AND THE BORDER IS WHERE THAT IS EARNED.** A clipped
+// window counts only pixels inside the frame. Here a row outside the frame is a
+// null pointer and therefore a ZERO plane; a bit shifted in from a word that does
+// not exist is 0, so the `x-1` term vanishes at x = 0 and the `x+1` term at the
+// right edge; and bits past `width` in the trailing word are zero by D-13. The
+// three counts are the same EXACT INTEGERS the per-pixel form produces, and
+// `minEigenValue` turns the same integers into the same `float` -- so the response
+// map is bit-identical and therefore so are the corners, their order and their
+// count. tests/test_corner.cpp holds that.
+//
+// Measured on the reference device, 752x480 real reference content:
+// **per-pixel 37.93 ms, bit-sliced 7.89 ms (4.81x), with the sparsity skip
+// 5.43 ms (6.98x)**.
+// ===========================================================================
+
+/// @brief `h = L + C + R` for one bit-plane: one full adder, two output planes.
+template <typename WordType>
+inline void boxHorizontal3(WordType l, WordType c, WordType r, WordType& h0, WordType& h1) {
+    h0 = static_cast<WordType>(l ^ c ^ r);
+    h1 = static_cast<WordType>((l & c) | (c & r) | (l & r));
+}
+
+/// @brief Sum three 2-bit numbers into four planes (0..9).
+template <typename WordType>
+inline void boxVertical3(const WordType (&a)[2], const WordType (&b)[2], const WordType (&c)[2],
+                         WordType (&out)[4]) {
+    const WordType s0 = static_cast<WordType>(a[0] ^ b[0]);
+    const WordType k0 = static_cast<WordType>(a[0] & b[0]);
+    const WordType s1 = static_cast<WordType>(a[1] ^ b[1] ^ k0);
+    const WordType k1 = static_cast<WordType>((a[1] & b[1]) | (b[1] & k0) | (a[1] & k0));
+    out[0] = static_cast<WordType>(s0 ^ c[0]);
+    const WordType m0 = static_cast<WordType>(s0 & c[0]);
+    out[1] = static_cast<WordType>(s1 ^ c[1] ^ m0);
+    const WordType m1 = static_cast<WordType>((s1 & c[1]) | (c[1] & m0) | (s1 & m0));
+    out[2] = static_cast<WordType>(k1 ^ m1);
+    out[3] = static_cast<WordType>(k1 & m1);
+}
+
+/// @brief The 0..9 value carried by four bit-planes at bit `bit`.
+template <typename WordType>
+inline long long boxValueAt(const WordType (&p)[4], size_t bit) {
+    const WordType m = static_cast<WordType>(static_cast<WordType>(1) << bit);
+    return static_cast<long long>(((p[0] & m) != 0 ? 1 : 0) + ((p[1] & m) != 0 ? 2 : 0) +
+                                  ((p[2] & m) != 0 ? 4 : 0) + ((p[3] & m) != 0 ? 8 : 0));
+}
+
+/// @brief A word of `row`, or 0 when the row or the index does not exist.
+template <typename WordType>
+inline WordType boxWordAt(const WordType* row, size_t words, long long w) {
+    if (row == nullptr || w < 0 || static_cast<size_t>(w) >= words) return 0;
+    return row[static_cast<size_t>(w)];
+}
+
+/// @brief One row of `cornerMinEigenVal` at `blockSize == 3`, bit-sliced.
+/// @note Bit-identical to the per-pixel form; see the section comment above.
+template <typename WordType>
+inline void cornerMinEigenValRowSliced(BinMatConstView<WordType> magX,
+                                       BinMatConstView<WordType> magY,
+                                       BinMatConstView<WordType> signX,
+                                       BinMatConstView<WordType> signY, size_t y, float* dstRow) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    const size_t width = magX.width;
+    const size_t height = magX.height;
+    const size_t words = minRowWords<WordType>(width);
+
+    const WordType* mxr[3];
+    const WordType* myr[3];
+    const WordType* sxr[3];
+    const WordType* syr[3];
+    for (int k = -1; k <= 1; ++k) {
+        const long long r = static_cast<long long>(y) + k;
+        const bool ok = r >= 0 && r < static_cast<long long>(height);
+        const size_t i = static_cast<size_t>(k + 1);
+        mxr[i] = ok ? magX.row(static_cast<size_t>(r)) : nullptr;
+        myr[i] = ok ? magY.row(static_cast<size_t>(r)) : nullptr;
+        sxr[i] = ok ? signX.row(static_cast<size_t>(r)) : nullptr;
+        syr[i] = ok ? signY.row(static_cast<size_t>(r)) : nullptr;
+    }
+
+    for (size_t w = 0; w < words; ++w) {
+        // THE SPARSITY SKIP. A word's outputs depend on source columns
+        // [kBits*w - 1, kBits*w + kBits], which live in words w-1, w and w+1. If
+        // `magX | magY` is zero across all three in all three rows, every box sum
+        // is zero, so minEig is exactly 0 for a whole word of pixels and no sqrt is
+        // taken. Measured skip rate on the reference pipeline's own content:
+        // 22-39% of words, and it is worth 1.45x on top of the reformulation
+        // (X-31). It is data-dependent by nature -- a dense frame skips nothing.
+        WordType any = 0;
+        for (size_t i = 0; i < 3; ++i) {
+            for (long long d = -1; d <= 1; ++d) {
+                const long long ww = static_cast<long long>(w) + d;
+                any = static_cast<WordType>(any | boxWordAt<WordType>(mxr[i], words, ww) |
+                                            boxWordAt<WordType>(myr[i], words, ww));
+            }
+        }
+        const size_t lo = w * kBits;
+        const size_t hi = (lo + kBits < width) ? (lo + kBits) : width;
+        if (any == 0) {
+            for (size_t x = lo; x < hi; ++x) dstRow[x] = 0.0f;
+            continue;
+        }
+
+        WordType hA[3][2], hB[3][2], hP[3][2], hN[3][2];
+        for (size_t i = 0; i < 3; ++i) {
+            WordType ca = 0, cb = 0, cp = 0, cn = 0;
+            WordType pa = 0, pb = 0, pp = 0, pn = 0;
+            WordType na = 0, nb = 0, np = 0, nn = 0;
+            auto load = [&](long long ww, WordType& oa, WordType& ob, WordType& op,
+                            WordType& on) {
+                const WordType a = boxWordAt<WordType>(mxr[i], words, ww);
+                const WordType b = boxWordAt<WordType>(myr[i], words, ww);
+                const WordType sel = static_cast<WordType>(boxWordAt<WordType>(sxr[i], words, ww) ^
+                                                           boxWordAt<WordType>(syr[i], words, ww));
+                const WordType both = static_cast<WordType>(a & b);
+                oa = a;
+                ob = b;
+                on = static_cast<WordType>(both & sel);
+                op = static_cast<WordType>(both ^ on);
+            };
+            load(static_cast<long long>(w), ca, cb, cp, cn);
+            load(static_cast<long long>(w) - 1, pa, pb, pp, pn);
+            load(static_cast<long long>(w) + 1, na, nb, np, nn);
+            // Pixel x lives at bit x % kBits, so column x-1 is one bit lower: a LEFT
+            // shift brings it to x, pulling in the previous word's top bit.
+            auto sl = [kBits](WordType cur, WordType prev) {
+                return static_cast<WordType>((cur << 1) | (prev >> (kBits - 1)));
+            };
+            auto sr = [kBits](WordType cur, WordType next) {
+                return static_cast<WordType>((cur >> 1) | (next << (kBits - 1)));
+            };
+            boxHorizontal3<WordType>(sl(ca, pa), ca, sr(ca, na), hA[i][0], hA[i][1]);
+            boxHorizontal3<WordType>(sl(cb, pb), cb, sr(cb, nb), hB[i][0], hB[i][1]);
+            boxHorizontal3<WordType>(sl(cp, pp), cp, sr(cp, np), hP[i][0], hP[i][1]);
+            boxHorizontal3<WordType>(sl(cn, pn), cn, sr(cn, nn), hN[i][0], hN[i][1]);
+        }
+
+        WordType vA[4], vB[4], vP[4], vN[4];
+        boxVertical3<WordType>(hA[0], hA[1], hA[2], vA);
+        boxVertical3<WordType>(hB[0], hB[1], hB[2], vB);
+        boxVertical3<WordType>(hP[0], hP[1], hP[2], vP);
+        boxVertical3<WordType>(hN[0], hN[1], hN[2], vN);
+
+        for (size_t x = lo; x < hi; ++x) {
+            const size_t bit = x - lo;
+            dstRow[x] = minEigenValue(boxValueAt<WordType>(vA, bit), boxValueAt<WordType>(vB, bit),
+                                      boxValueAt<WordType>(vP, bit) -
+                                          boxValueAt<WordType>(vN, bit));
+        }
+    }
+}
+
+} // namespace impl
+
 template <typename WordType>
 inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView<WordType> magY,
                                  BinMatConstView<WordType> signX, BinMatConstView<WordType> signY,
@@ -1024,6 +1202,16 @@ inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView
     BINCV_ASSERT(dstRow != nullptr, "corner: a non-empty row needs a non-null destination");
     BINCV_ASSERT(y >= 0 && y < static_cast<int>(magX.height),
                  "corner: the row index must be inside the frame");
+
+    // blockSize 3 is `seal_params.yaml`'s value and the whole frontend's, and it
+    // is the case the bit-sliced box sums above cover. Other block sizes keep the
+    // per-pixel form -- the same shape D-22 uses, where the fast path serves the
+    // shipped configuration and the general one stays for the rest.
+    if (blockSize == 3) {
+        impl::cornerMinEigenValRowSliced<WordType>(magX, magY, signX, signY,
+                                                   static_cast<size_t>(y), dstRow);
+        return;
+    }
 
     const int width = static_cast<int>(magX.width);
     for (int x = 0; x < width; ++x) {

@@ -59,6 +59,17 @@ target_include_directories(corner_streaming_arms PRIVATE ${CMAKE_CURRENT_SOURCE_
 # objects: their timing spread is the code-layout noise floor, which X-29 judges
 # the real comparison against. See benchmark/covacc_arms.hpp.
 # ---------------------------------------------------------------------------
+# X-31: the corner response's three arms, one TU each (see cornerresp_arms.hpp).
+set(BINCV_CORNERRESP_ARMS
+    ${CMAKE_CURRENT_SOURCE_DIR}/cornerresp_arm_perpixel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cornerresp_arm_sliced.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cornerresp_arm_sliced_skip.cpp)
+list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_CORNERRESP_ARMS})
+
+add_library(cornerresp_arms OBJECT ${BINCV_CORNERRESP_ARMS})
+target_link_libraries(cornerresp_arms PRIVATE bincv_core bincv_warnings)
+target_include_directories(cornerresp_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 set(BINCV_COVACC_ARMS
     ${CMAKE_CURRENT_SOURCE_DIR}/covacc_arm_perrow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/covacc_arm_perrow_b.cpp
@@ -120,5 +131,9 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
 
     if(benchmark_name STREQUAL "covacc_benchmark")
         target_link_libraries(${benchmark_name} PRIVATE covacc_arms)
+    endif()
+
+    if(benchmark_name STREQUAL "cornerresp_benchmark")
+        target_link_libraries(${benchmark_name} PRIVATE cornerresp_arms)
     endif()
 endforeach()

@@ -6070,7 +6070,7 @@ as [D-27](ARCHITECTURE.md#8-design-decisions).
 
 ---
 
-### X-31 · The corner response as bit-sliced box sums · `TODO`
+### X-31 · The corner response as bit-sliced box sums · `DONE`
 
 **COMMITTED BEFORE THE KERNEL EXISTS.**
 
@@ -6168,7 +6168,96 @@ synthetic control.
 **Metric:** ms/frame on the reference device; skip rate; and corner-array equality
 against C.
 
-**Result:** *(not yet measured)*
+**PLATFORM:** reference device for the kernel timings (Pi 4, governor
+`performance`, `throttled=0x0` before and after); development machine for the
+sequence-level frontend measurement, which is a ratio against OpenCV on the same
+machine.
+
+**BIT-EXACTNESS — the precondition, met.** B1 and B2 are **bit-identical to the
+control over the whole response map**, compared as raw `float` bits, on synthetic
+texture and on four real reference frames spanning 8.69%–26.67% set. The library's
+own `test_corner` passes **3 655/3 655** with the fast path wired in, including the
+frame-map-versus-streaming equality suites.
+
+**Result — kernel, reference device, 752×480 real reference content (10.23% set):**
+
+| arm | ms | vs C |
+|---|---|---|
+| C — per-pixel (shipped) | 37.934 | 1.00× |
+| B1 — bit-sliced box sums | 7.886 | **4.81×** |
+| B2 — B1 + sparsity skip | **5.433** | **6.98×** |
+
+Skip rate **39.3%** of words. **Band A fires** (R = 6.98 ≥ 2.0).
+
+**The skip is real, and I nearly discarded it on one frame.** The first real frame I
+sampled was **26.67% set** — an outlier against the sequence's ~13% average — and
+skipped **1.7%** of words, so B2 looked like a dud. On three typical frames
+(8.69–10.23% set) the skip fires **22.4%, 30.2% and 39.3%** of the time and is worth
+**1.2–1.45× on top of the reformulation**. Separating B1 from B2, which the rule
+required, is what made the correction visible rather than folded into one number.
+
+**Result — the frontend. AND THIS IS WHERE THE ENTRY STOPS BEING GOOD NEWS.**
+
+The streaming detector — the path the frontend uses — went **31.14 → 13.66 ms**
+(2.28×) on the device. But the **sequence-level frontend barely moved**: 22.82 →
+22.01 ms/frame over 400 real frames, **1.04×**.
+
+**X-30's PROFILE WAS MEASURED AT AN OPERATING POINT THE FRONTEND DOES NOT RUN AT,
+AND THAT INVALIDATES D-27's TARGET ORDERING.** X-30 timed **one detection and one
+track per frame**. A real frontend re-detects only when tracks run down: measured
+here, **12 re-detections in 399 frames — a 3.0% duty cycle**. So detection
+contributes `13.66 × 0.030 ≈ 0.41 ms` of the 22.0 ms/frame — **under 2%**, not the
+52.7% X-30 reported. The profile over-weighted it by roughly **33×**.
+
+Corrected weighting of the real frontend:
+
+| stage | share of real frontend |
+|---|---|
+| **LK tracking (`residualSums`)** | **~97%** |
+| corner detection (amortized at 3% duty) | ~2% |
+| build | ~2% |
+
+**Conclusion.**
+
+1. **The kernel result stands and the code ships.** 6.98× on the response, bit-exact,
+   and `test_corner` unchanged at 3 655 checks. It is free at runtime and it is a
+   large win for any caller that detects often — a frontend re-seeding every frame,
+   or `goodFeaturesToTrack` used directly. It also validates the *method*: the
+   `A + B·bs²` fit predicted 84% addressing overhead and removing it delivered
+   ~5–7×, so the cost model was right about the kernel.
+2. **BUT IT MOVES THE FRONTEND BY 1.04%, AND THE REASON IS THAT I PROFILED THE
+   WRONG WORKLOAD.** This is the third time in this project a summary statistic has
+   misdirected effort — after X-25's RMS-over-a-tailed-distribution and X-24's
+   clipping attribution — and it is the same failure each time: **a number measured
+   on something adjacent to the real thing.** X-30's per-frame profile was not the
+   frontend's duty cycle, and nothing in it said so.
+3. **D-27 IS CORRECTED, NOT DELETED.** Its ordering was wrong; its method was not.
+   The right target is **`residualSums`, at ~97% of real frontend time**, and the
+   diagnostic that matters is the one already measured: **~9.4 cycles per popcount**
+   where a popcount is 1 cycle throughput, i.e. that kernel is also
+   addressing-bound, by tap extraction. **S3 — deriving `t01` from `t00` and `t11`
+   from `t10` by one shift instead of four independent extractions — is now the
+   whole ballgame.**
+4. **The SIMD conclusion is unchanged and strengthened.** Both kernels are
+   addressing-bound; vectorizing popcounts still attacks ~10–15%. S3 comes first.
+
+**Decision:** adopt the fast path — `cornerMinEigenValRow` dispatches to it at
+`blockSize == 3`, which is `seal_params.yaml`'s value and the frontend's; other
+block sizes keep the per-pixel form, the same shape D-22 uses. **The frame-map
+`cornerMinEigenVal` has its own column-major sliding implementation and is
+deliberately untouched** — it is not on the frontend's path and changing it would
+be a second equality surface for no measured gain. Recorded as
+[D-28](ARCHITECTURE.md#8-design-decisions).
+
+**Not done, and named rather than left implicit:** the rule asked for `blockSize` 5
+as well. The bit-sliced form implements **3 only**; a 5×5 box sum needs wider adder
+networks (0..25, five planes) and the frontend does not use it. That is a scope cut,
+not an oversight.
+
+**Method:** `benchmark/cornerresp_benchmark.cpp` with `cornerresp_arm_perpixel.cpp`,
+`cornerresp_arm_sliced.cpp` and `cornerresp_arm_sliced_skip.cpp`, one translation
+unit each; B1 and B2 share a body by inclusion so the `Skip` template argument is
+their only difference.
 
 ---
 

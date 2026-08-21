@@ -2085,6 +2085,14 @@ argument already in [EXPERIMENTS.md](EXPERIMENTS.md)'s "Measurement platforms".
 
 ### D-27: Phase 5.1 vectorizes two functions, and they are the same kernel shape
 
+> **SUPERSEDED IN ITS ORDERING BY [D-28](#d-28-the-corner-response-uses-bit-sliced-33-box-sums-and-d-27s-ordering-was-wrong).**
+> The profile below timed **one detection per frame**; a real frontend re-detects on
+> a **3.0% duty cycle**, so corner detection is **under 2%** of frontend time rather
+> than 52.7%, and **`residualSums` is ~97%**. The finding that both kernels are
+> **addressing-bound rather than arithmetic-bound** — and therefore that SIMD is not
+> the first move — is unaffected and is what this record is still good for.
+
+
 [ROADMAP Phase 5](../ROADMAP.md#phase-5--platform-hardening) says NEON kernels but
 deliberately left the target list to be "detailed once Phase 4 produces numbers".
 [X-30](EXPERIMENTS.md) produced them, on the reference device at the frontend's real
@@ -2124,6 +2132,76 @@ decision: selection is 2.5% of detection, the response sweep 97.5%.
 slower** than a SIMD, 12-threaded OpenCV on the same binary content. That criterion
 was not restated, and this record is what makes it actionable rather than a
 standing complaint.
+
+
+### D-28: the corner response uses bit-sliced 3×3 box sums, and D-27's ordering was wrong
+
+`cornerMinEigenValRow` dispatches at `blockSize == 3` — `seal_params.yaml`'s value
+and the frontend's — to a form that computes the 3×3 covariance as **box sums of
+bit-planes**, word-at-a-time, with full adders. Other block sizes keep the
+per-pixel form, the same shape [D-22](#8-design-decisions) uses. The frame-map
+`cornerMinEigenVal` has its own column-major sliding implementation and is
+deliberately untouched: it is not on the frontend's path, and changing it would add
+an equality surface for no measured gain.
+
+**Measured on the reference device, 752×480 real reference content, bit-exact:**
+
+| arm | ms | vs shipped |
+|---|---|---|
+| per-pixel (was shipped) | 37.934 | 1.00× |
+| bit-sliced box sums | 7.886 | **4.81×** |
+| + word-level sparsity skip | **5.433** | **6.98×** |
+
+**Why it was there to be had.** The per-pixel form issued one `clipRegion` and ~12
+popcounts **per pixel** over a window **three bits wide in a 32-bit word**.
+Sweeping `blockSize` 3/5/7/9 and fitting `T = A + B·bs²` gave **A ≈ 12.1 ms against
+B·9 ≈ 2.3 ms**: the kernel was **84% addressing**. This is
+[D-2](#8-design-decisions)'s own technique — the one `pyrDown`'s `boxSum4` already
+uses — applied to the kernel it had never been applied to.
+
+**Exact, not approximate.** Box sums of bits are exact integers and
+`minEigenValue` takes the same integers, so the response is bit-identical and
+therefore so are the corners, their order and their count. Verified on synthetic
+texture and four real frames from 8.69% to 26.67% set; `test_corner` passes 3 655
+checks unchanged.
+
+---
+
+**AND [D-27](#d-27-phase-51-vectorizes-two-functions-and-they-are-the-same-kernel-shape)'s
+TARGET ORDERING WAS WRONG. This record corrects it.**
+
+D-27 put the corner response at **52.7%** of the frontend and `residualSums` at
+43.7%, from [X-30](EXPERIMENTS.md)'s profile. **X-30 timed one detection and one
+track per frame.** A real frontend re-detects only when tracks run down —
+**measured: 12 re-detections in 399 frames, a 3.0% duty cycle**. So detection is
+**under 2%** of real frontend time, not 52.7%, and this 6.98× kernel win moves the
+sequence-level frontend by **1.04%** (22.82 → 22.01 ms/frame).
+
+Corrected weighting:
+
+| stage | share of the real frontend |
+|---|---|
+| **LK tracking (`residualSums`)** | **~97%** |
+| corner detection, amortized | ~2% |
+| build | ~2% |
+
+**D-27's method was sound and its arithmetic was sound; its workload was not.** The
+profile measured something adjacent to the frontend rather than the frontend. That
+is the same failure as X-25's RMS over a tailed distribution and X-24's clipping
+attribution — **a number measured on the wrong thing, with nothing in the number
+itself to say so**.
+
+**What survives from D-27:** both hot kernels are **addressing-bound, not
+arithmetic-bound**, so SIMD is still not the first move. `residualSums` was measured
+at **~9.4 cycles per popcount** where a popcount is 1 cycle throughput; its overhead
+is tap extraction. **The next target is deriving `t01` from `t00` and `t11` from
+`t10` by one shift instead of four independent extractions**, and it is now
+~97% of the frontend rather than 43.7%.
+
+**What survives from this entry:** the kernel is free at runtime, bit-exact, and a
+real win for any caller that detects often — `goodFeaturesToTrack` used directly,
+or a frontend that re-seeds every frame. It is kept on those grounds, not on a
+frontend number it does not deliver.
 
 ## 9. Open Questions and Planned Experiments
 

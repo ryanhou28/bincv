@@ -3538,6 +3538,14 @@ behind 4.3b.
 
 # Phase 5 — Platform Hardening
 
+> **CORRECTED — [D-28](ARCHITECTURE.md#8-design-decisions).** The table below came
+> from a profile that timed **one detection per frame**. A real frontend re-detects
+> on a **3.0% duty cycle**, so corner detection is **under 2%** of frontend time and
+> **`residualSums` is ~97%**. X-31 made the corner response **6.98× faster,
+> bit-exact** — and moved the sequence-level frontend by **1.04%**. The target is
+> `residualSums`, and the lever is **tap extraction**, measured at **~9.4 cycles per
+> popcount** where a popcount is 1 cycle throughput.
+
 **THE NUMBERS ARE IN, AND THE TARGET LIST IS TWO FUNCTIONS**
 ([X-30](EXPERIMENTS.md), [D-27](ARCHITECTURE.md#8-design-decisions)). Measured on
 the reference device at the frontend's real operating point:
