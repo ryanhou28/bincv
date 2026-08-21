@@ -2684,6 +2684,280 @@ BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
     BINCV_CHECK(true);
 }
 
+
+// ---------------------------------------------------------------------------
+// X-25 / E-14 -- THE COARSE-LEVEL WINDOW BORDER.
+//
+// X-24 left E-7 blocked here: 1/2/2/2 is 0.8356 px over all 141 real-frame
+// keypoints and 0.0010 px over the 58 that never clip. The metric below is
+// YIELD, pre-registered, because three of the four arms trade points for
+// accuracy and a per-point error alone would reward throwing points away.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct Yield {
+    size_t eligible = 0;   ///< the denominator: ALL eligible keypoints, always
+    size_t attempted = 0;  ///< how many the arm even tried (arm D tries fewer)
+    size_t usable = 0;     ///< tracked AND within X-20's 1.0 px
+    double rmsUsable = 0.0;
+    double rmsAll = 0.0;
+    size_t bytes = 0;
+    double fraction() const {
+        return eligible ? static_cast<double>(usable) / static_cast<double>(eligible) : 0.0;
+    }
+};
+
+/// @brief One arm: a ladder, a point subset, and an entry-level policy.
+/// @param eligibleTotal The DENOMINATOR -- every eligible keypoint in the frame,
+///        including the ones this arm declined to attempt. That is what makes arm
+///        D's 59% discard count against it.
+template <typename WordType, size_t... LevelBits>
+Yield runArm(const char* label, const BinMat<WordType>& prevSrc, const BinMat<WordType>& nextSrc,
+             const Warp& warp, const std::vector<Point2f>& pts, size_t eligibleTotal,
+             bincv::LKEntryLevel policy, double modelError) {
+    LadderFrontend<WordType, LevelBits...> fe(prevSrc.cols(), prevSrc.rows());
+    seedLevelZero(fe, prevSrc, nextSrc);
+    fe.build();
+
+    LKParams params;  // seal_params.yaml verbatim, except the policy under test
+    params.entryLevel = policy;
+    std::vector<Point2f> out(pts.size());
+    std::vector<uint8_t> status(pts.size());
+    bincv::calcOpticalFlowPyrLK(fe.levels, pts.data(), out.data(), status.data(), nullptr,
+                                pts.size(), params);
+
+    Yield y;
+    y.eligible = eligibleTotal;
+    y.attempted = pts.size();
+    y.bytes = fe.bytes();
+    const double bound = kMaxTolerance + modelError;
+    double sumSqUsable = 0.0, sumSqAll = 0.0;
+    size_t counted = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        if (status[i] == 0) continue;
+        double gx = 0.0, gy = 0.0;
+        warp.forward(static_cast<double>(pts[i].x), static_cast<double>(pts[i].y), gx, gy);
+        const double ex = static_cast<double>(out[i].x) - gx;
+        const double ey = static_cast<double>(out[i].y) - gy;
+        const double e = std::sqrt(ex * ex + ey * ey);
+        sumSqAll += e * e;
+        ++counted;
+        if (e <= bound) {
+            ++y.usable;
+            sumSqUsable += e * e;
+        }
+    }
+    y.rmsUsable = y.usable ? std::sqrt(sumSqUsable / static_cast<double>(y.usable)) : 0.0;
+    y.rmsAll = counted ? std::sqrt(sumSqAll / static_cast<double>(counted)) : 0.0;
+    std::printf("    %-28s attempted=%3zu  usable=%3zu/%3zu  YIELD=%5.1f%%  "
+                "rms(usable)=%7.4f  rms(all)=%8.4f  bytes=%7zu\n",
+                label, y.attempted, y.usable, y.eligible, 100.0 * y.fraction(), y.rmsUsable,
+                y.rmsAll, y.bytes);
+    return y;
+}
+
+
+/// @brief The bytes the REFERENCE's per-level border scheme would actually cost.
+/// @note Reported separately from arm B's measurement scaffold because they are
+///       NOT the same thing -- see runArmB. `buildOpticalFlowPyramid` allocates
+///       every level with a `winSize`-wide border on all four sides, so level l
+///       is (w_l + 2*win) x (h_l + 2*win). The relative cost is WORST at the
+///       coarse levels, which is the opposite of where intuition puts it.
+size_t referenceBorderBytes(int width, int height, int levels, const std::vector<size_t>& bits,
+                            int win) {
+    size_t words = 0;
+    int w = width, h = height;
+    for (int l = 0; l < levels; ++l) {
+        const int pw = w + 2 * win, ph = h + 2 * win;
+        const size_t rowWords = (static_cast<size_t>(pw) + 31) / 32;
+        // two frames at `bits[l]` planes, two derivatives at bits[l]+1 planes each
+        const size_t planes = 2 * bits[static_cast<size_t>(l)] + 2 * (bits[static_cast<size_t>(l)] + 1);
+        words += rowWords * static_cast<size_t>(ph) * planes;
+        w = static_cast<int>(bincv::pyrDownWidth(static_cast<size_t>(w)));
+        h = static_cast<int>(bincv::pyrDownHeight(static_cast<size_t>(h)));
+    }
+    return words * sizeof(uint32_t);
+}
+
+/// @brief ARM B -- a padded pyramid, measured WITHOUT touching the kernel.
+///
+/// **HOW, AND WHY IT IS AN UPPER BOUND RATHER THAN THE REFERENCE'S SCHEME.**
+/// The reference pads every level by `winSize` after building it, which needs a
+/// per-level coordinate origin the tracker does not have. Padding LEVEL 0 by
+/// `win * 2^(levels-1)` instead gives level l a margin of `win * 2^(levels-1-l)`
+/// -- exactly `win` at the deepest level and MORE at every finer one -- and it
+/// costs nothing in the kernel, because a single level-0 offset survives the
+/// `* scale` propagation intact. So this arm answers "what does having the window
+/// always inside BUY", which is what band B needs to know, and it answers it
+/// generously: if even this does not reach the gate, no padding scheme does.
+/// Its footprint is NOT the reference's and is not reported as such --
+/// `referenceBorderBytes` computes that separately.
+///
+/// The padding is reflect-101 on the GRAYSCALE, the reference's own border, applied
+/// before binarization so the border carries plausible edge content rather than a
+/// manufactured constant.
+template <typename WordType, size_t... LevelBits>
+Yield runArmB(const cv::Mat& gray, const Warp& warp, const std::vector<Point2f>& pts,
+              size_t eligibleTotal, double modelError, int pad) {
+    cv::Mat warped;
+    cv::warpAffine(gray, warped, affineOf(warp), gray.size(), cv::INTER_CUBIC,
+                   cv::BORDER_REFLECT_101);
+    cv::Mat gp, wp;
+    cv::copyMakeBorder(gray, gp, pad, pad, pad, pad, cv::BORDER_REFLECT_101);
+    cv::copyMakeBorder(warped, wp, pad, pad, pad, pad, cv::BORDER_REFLECT_101);
+    const cv::Mat bin0 = referenceEdgeFilter(gp, 17);
+    const cv::Mat bin1 = referenceEdgeFilter(wp, 17);
+
+    BinMat<WordType> prevSrc(gp.cols, gp.rows), nextSrc(gp.cols, gp.rows);
+    prevSrc.fromCVMat(bin0);
+    nextSrc.fromCVMat(bin1);
+
+    LadderFrontend<WordType, LevelBits...> fe(gp.cols, gp.rows);
+    seedLevelZero(fe, prevSrc, nextSrc);
+    fe.build();
+
+    // The SAME keypoints, in padded coordinates. A constant level-0 offset is the
+    // one thing that survives `prevPts * scale` at every level without the kernel
+    // knowing about it.
+    std::vector<Point2f> shifted;
+    shifted.reserve(pts.size());
+    for (const Point2f& q : pts) {
+        shifted.push_back(Point2f{q.x + static_cast<float>(pad), q.y + static_cast<float>(pad)});
+    }
+
+    LKParams params;
+    std::vector<Point2f> out(shifted.size());
+    std::vector<uint8_t> status(shifted.size());
+    bincv::calcOpticalFlowPyrLK(fe.levels, shifted.data(), out.data(), status.data(), nullptr,
+                                shifted.size(), params);
+
+    Yield y;
+    y.eligible = eligibleTotal;
+    y.attempted = pts.size();
+    y.bytes = fe.bytes();
+    const double bound = kMaxTolerance + modelError;
+    double sumSqUsable = 0.0, sumSqAll = 0.0;
+    size_t counted = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        if (status[i] == 0) continue;
+        // Ground truth in UNPADDED coordinates, then offset -- the warp is a
+        // property of the original frame and must not be evaluated in the padded
+        // frame's coordinates, where its centre of rotation would move.
+        double gx = 0.0, gy = 0.0;
+        warp.forward(static_cast<double>(pts[i].x), static_cast<double>(pts[i].y), gx, gy);
+        const double ex = static_cast<double>(out[i].x) - (gx + pad);
+        const double ey = static_cast<double>(out[i].y) - (gy + pad);
+        const double e = std::sqrt(ex * ex + ey * ey);
+        sumSqAll += e * e;
+        ++counted;
+        if (e <= bound) {
+            ++y.usable;
+            sumSqUsable += e * e;
+        }
+    }
+    y.rmsUsable = y.usable ? std::sqrt(sumSqUsable / static_cast<double>(y.usable)) : 0.0;
+    y.rmsAll = counted ? std::sqrt(sumSqAll / static_cast<double>(counted)) : 0.0;
+    std::printf("    %-28s attempted=%3zu  usable=%3zu/%3zu  YIELD=%5.1f%%  "
+                "rms(usable)=%7.4f  rms(all)=%8.4f  bytes=%7zu*\n",
+                "B  padded pyramid (bound)", y.attempted, y.usable, y.eligible,
+                100.0 * y.fraction(), y.rmsUsable, y.rmsAll, y.bytes);
+    return y;
+}
+
+template <typename WordType, size_t... LevelBits>
+void x25Case(const cv::Mat& gray, const char* ladderName, const char* caseName, const Warp& warp,
+             double modelError) {
+    cv::Mat warped;
+    cv::warpAffine(gray, warped, affineOf(warp), gray.size(), cv::INTER_CUBIC,
+                   cv::BORDER_REFLECT_101);
+    const cv::Mat bin0 = referenceEdgeFilter(gray, 17);
+    const cv::Mat bin1 = referenceEdgeFilter(warped, 17);
+    BinMat<WordType> prevSrc(gray.cols, gray.rows), nextSrc(gray.cols, gray.rows);
+    prevSrc.fromCVMat(bin0);
+    nextSrc.fromCVMat(bin1);
+
+    Frontend<WordType> base(gray.cols, gray.rows, 4);
+    base.prev[0].fromCVMat(bin0);
+    base.next[0].fromCVMat(bin1);
+    base.build();
+    LKParams params;
+    const std::vector<Point2f> all = eligiblePoints(base.dx[0], base.dy[0], gray.cols, gray.rows,
+                                                    warp, params.winWidth, params.winHeight);
+    const std::vector<Point2f> unclipped =
+        unclippedAtEveryLevel(base, all, params.winWidth, params.winHeight);
+
+    std::printf("\n  %s  ladder %s  --  %zu eligible (%zu never clip), usable bound %.2f px\n",
+                caseName, ladderName, all.size(), unclipped.size(), kMaxTolerance + modelError);
+    runArm<WordType, LevelBits...>("A  clip, all levels (ships)", prevSrc, nextSrc, warp, all,
+                                   all.size(), bincv::LKEntryLevel::Coarsest, modelError);
+    runArm<WordType, LevelBits...>("C  per-point entry level", prevSrc, nextSrc, warp, all,
+                                   all.size(), bincv::LKEntryLevel::DeepestFitting, modelError);
+    runArm<WordType, LevelBits...>("D  reject anything clipping", prevSrc, nextSrc, warp,
+                                   unclipped, all.size(), bincv::LKEntryLevel::Coarsest,
+                                   modelError);
+    // Band B of X-25's rule: arms C and D did not both clear the gate, so B is
+    // built. `pad` gives the DEEPEST level exactly a winSize margin.
+    runArmB<WordType, LevelBits...>(gray, warp, all, all.size(), modelError,
+                                    params.winWidth * (1 << 3));
+    std::printf("      * arm B's bytes are its SCAFFOLD's, not the reference scheme's;"
+                " that is %zu B\n",
+                referenceBorderBytes(gray.cols, gray.rows, 4,
+                                     std::vector<size_t>{LevelBits...}, params.winWidth));
+}
+
+} // namespace
+
+BINCV_TEST(Flow, X25_CoarseLevelBorder_uint32_t) {
+    const cv::Mat gray = loadRealFrame();
+    if (gray.empty()) {
+        std::printf("  (skipped: sample image not found)\n");
+        BINCV_CHECK(true);
+        return;
+    }
+    LKParams params;
+    const double halfWin = 0.5 * static_cast<double>(params.winWidth - 1);
+    const double rotModel = halfWin * 1.0 * 3.14159265358979323846 / 180.0;
+    const double scaleModel = halfWin * 0.02;
+
+    std::printf("\n  ===================================================================\n"
+                "  X-25 / E-14: the coarse-level window border.\n"
+                "  YIELD = eligible keypoints tracked within %.2f px, over ALL eligible\n"
+                "  keypoints -- a point DROPPED by policy counts as not usable, which\n"
+                "  is what makes arm D's discard count against it.\n"
+                "  Arms A and C see every point; arm D sees only the never-clipping ones.\n"
+                "  ===================================================================\n",
+                kMaxTolerance);
+
+    const char* kL1 = "1/1/1/1";
+    const char* kL2 = "1/2/2/2";
+    struct Case { const char* name; Warp warp; double model; };
+    std::printf("\n  ---- ladder 1/1/1/1 (ships) ----\n");
+    x25Case<uint32_t, 1, 1, 1, 1>(gray, kL1, "shift (1, 0)", translation(1.0, 0.0), 0.0);
+    x25Case<uint32_t, 1, 1, 1, 1>(gray, kL1, "shift (0.25, 0.25)", translation(0.25, 0.25), 0.0);
+    x25Case<uint32_t, 1, 1, 1, 1>(gray, kL1, "shift (0.75, 0.75)", translation(0.75, 0.75), 0.0);
+    x25Case<uint32_t, 1, 1, 1, 1>(gray, kL1, "shift (2, -3)", translation(2.0, -3.0), 0.0);
+    x25Case<uint32_t, 1, 1, 1, 1>(gray, kL1, "shift (6, 4)", translation(6.0, 4.0), 0.0);
+    x25Case<uint32_t, 1, 1, 1, 1>(gray, kL1, "rotate 1 deg",
+                                  rotation(1.0, gray.cols * 0.5, gray.rows * 0.5), rotModel);
+    x25Case<uint32_t, 1, 1, 1, 1>(gray, kL1, "scale 1.02",
+                                  scaling(1.02, gray.cols * 0.5, gray.rows * 0.5), scaleModel);
+
+    std::printf("\n  ---- ladder 1/2/2/2 (X-24's leader) ----\n");
+    x25Case<uint32_t, 1, 2, 2, 2>(gray, kL2, "shift (1, 0)", translation(1.0, 0.0), 0.0);
+    x25Case<uint32_t, 1, 2, 2, 2>(gray, kL2, "shift (0.25, 0.25)", translation(0.25, 0.25), 0.0);
+    x25Case<uint32_t, 1, 2, 2, 2>(gray, kL2, "shift (0.75, 0.75)", translation(0.75, 0.75), 0.0);
+    x25Case<uint32_t, 1, 2, 2, 2>(gray, kL2, "shift (2, -3)", translation(2.0, -3.0), 0.0);
+    x25Case<uint32_t, 1, 2, 2, 2>(gray, kL2, "shift (6, 4)", translation(6.0, 4.0), 0.0);
+    x25Case<uint32_t, 1, 2, 2, 2>(gray, kL2, "rotate 1 deg",
+                                  rotation(1.0, gray.cols * 0.5, gray.rows * 0.5), rotModel);
+    x25Case<uint32_t, 1, 2, 2, 2>(gray, kL2, "scale 1.02",
+                                  scaling(1.02, gray.cols * 0.5, gray.rows * 0.5), scaleModel);
+
+    // X-25's bands are evaluated in EXPERIMENTS.md from the whole table; deciding
+    // one inside the measurement that produces it would be circular.
+    BINCV_CHECK(true);
+}
+
 #endif // BINCV_WITH_OPENCV
 
 BINCV_TEST_MAIN("test_opticalflow")

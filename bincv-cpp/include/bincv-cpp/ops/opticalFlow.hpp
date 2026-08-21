@@ -280,12 +280,35 @@ struct Point2f {
 ///       because the caller owns the pyramid (D-5).
 ///       `lk_use_initial_flow: 0` is not a field either -- there is no initial-flow
 ///       mode, since an unused mode is an untested one.
+/// @brief Which pyramid level a keypoint ENTERS at. **X-25 / E-14.**
+/// @note Not a border and not a padding scheme: it is a policy about which levels
+///       a given point is allowed to be tracked on at all. binCV clips where the
+///       reference pads (deviation (ii)), and a window that is mostly outside a
+///       coarse level yields an ill-conditioned `A` and a one-sided `b` whose
+///       error is then multiplied by `2^level` on the way down. X-24 measured that
+///       cost: `1/2/2/2` is 0.8356 px over all 141 real-frame keypoints and
+///       **0.0010 px over the 58 that never clip**.
+enum class LKEntryLevel {
+    /// Every point enters at the coarsest usable level. **What ships**, and the
+    /// reference's behaviour given a padded pyramid it always has enough of.
+    Coarsest,
+    /// A point enters at the coarsest level whose window lies **fully inside that
+    /// level**, and is not tracked above it. Costs **no memory and no keypoints**:
+    /// a point near the edge gets a shallower pyramid rather than a padded one or
+    /// a rejection. Level 0 is always used, whatever it clips -- it is the frame.
+    DeepestFitting,
+};
+
 struct LKParams {
     int winWidth = 31;     ///< window width in pixels, > 2
     int winHeight = 31;    ///< window height in pixels, > 2
     int maxIterations = 20;      ///< per level, clamped to [0, 100] as the reference clamps
     float epsilon = 0.03f;       ///< converged when |delta| <= this, in pixels
     float minEigThreshold = 0.001f;  ///< IN THE REFERENCE'S UNITS; see UNITS above
+
+    /// Which level each keypoint enters the pyramid at (X-25 / E-14). Defaults to
+    /// the shipped behaviour; nothing changes unless a caller asks for it.
+    LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
 };
 
 /// @brief One pyramid level's six planes: both frames, and the previous frame's
@@ -940,6 +963,17 @@ inline long long floorToLL(float v) { return static_cast<long long>(std::floor(v
 
 namespace impl {
 
+/// The most pyramid levels the tracker will consume. `seal_params.yaml`'s
+/// `lk_max_level: 3` is four; a 640x480 frame stalls at 1 pixel after 10. Fixed so
+/// that `LKContext` can carry every level's extent WITHOUT a scratch allocation.
+constexpr size_t kMaxLevels = 16;
+
+/// A level's extent, so `usableLevelCount` needs no <utility>.
+struct LevelDims {
+    size_t width = 0;
+    size_t height = 0;
+};
+
 /// @brief Everything the per-level tracking body needs that does not vary with the
 ///        level. **INTERNAL.**
 /// @note Not templated on WordType: nothing in it is a view or a word. The level
@@ -959,7 +993,46 @@ struct LKContext {
     int maxIterations = 0;
     double eps2 = 0.0;
     double minEigThreshold = 0.0;
+    LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
+
+    /// Every usable level's extent, so that a point's entry level can be RECOMPUTED
+    /// rather than cached. A per-point array would be scratch, and this operation
+    /// has none -- not one byte (CLAUDE.md: no heap allocation inside kernels).
+    /// The recomputation is at most `kMaxLevels` comparisons per point per level,
+    /// against a 31x31 window's worth of popcounts.
+    LevelDims dims[kMaxLevels];
 };
+
+/// @brief Is point `p`'s window entirely inside level `li`?
+/// @note **This is `unclippedAtEveryLevel`'s predicate in tests/test_opticalflow.cpp,
+///       deliberately spelled the same way.** X-25 measures a policy against a
+///       point set defined by clipping; if the kernel's notion of "fits" and the
+///       harness's disagreed, the experiment would be comparing two definitions
+///       rather than two policies.
+inline bool windowFitsAtLevel(const LKContext& c, const Point2f& point, size_t li) {
+    const double scale = 1.0 / static_cast<double>(size_t{1} << li);
+    const double x = static_cast<double>(point.x) * scale;
+    const double y = static_cast<double>(point.y) * scale;
+    return x - static_cast<double>(c.halfWinX) >= 0.0 &&
+           y - static_cast<double>(c.halfWinY) >= 0.0 &&
+           x + static_cast<double>(c.halfWinX) < static_cast<double>(c.dims[li].width) &&
+           y + static_cast<double>(c.halfWinY) < static_cast<double>(c.dims[li].height);
+}
+
+/// @brief The coarsest usable level whose window contains point `p`, or 0.
+/// @note Fitting is MONOTONE in the level index -- the window's half-extent is
+///       fixed in pixels while the level halves, so `x >= halfWin * 2^l` tightens
+///       as `l` grows -- which is what makes "the coarsest level that fits" also
+///       "every level below it fits", and therefore makes a single scan correct.
+/// @note Returns 0 when nothing fits: level 0 is always tracked, whatever it clips,
+///       because it is the frame. So this policy loses NO keypoints.
+inline size_t entryLevelFor(const LKContext& c, size_t p) {
+    if (c.entryLevel == LKEntryLevel::Coarsest) return c.usableLevels - 1;
+    for (size_t li = c.usableLevels; li-- > 0;) {
+        if (windowFitsAtLevel(c, c.prevPts[p], li)) return li;
+    }
+    return 0;
+}
 
 /// @brief A level's planes all share its dimensions. **INTERNAL.**
 template <typename WordType>
@@ -1022,7 +1095,6 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
     // reject more points at higher N and confound E-7's accuracy curve.
     constexpr double kLevelMinEigScale = referenceMinEigScale(LevelT::Bits);
 
-    const bool coarsest = (li + 1 == c.usableLevels);
     const bool finest = (li == 0);
     const float scale = 1.0f / static_cast<float>(1u << li);
 
@@ -1031,8 +1103,17 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
     // PASS 1 -- propagate every point's estimate into this level's
     // coordinates, before any point is tracked. The reference does this in its
     // own first loop, and it applies to skipped points too.
+    //
+    // A point's ENTRY level is where the propagation starts rather than continues.
+    // Under the shipped policy that is the coarsest usable level for every point
+    // and this is exactly the old two-branch loop; under DeepestFitting it is per
+    // point, and a point is left alone entirely above its own entry level -- so
+    // `nextPts` must not be doubled there either, which is why the skip is in this
+    // pass and not only in the tracking one.
     for (size_t p = 0; p < c.pointCount; ++p) {
-        if (coarsest) {
+        const size_t entry = entryLevelFor(c, p);
+        if (li > entry) continue;
+        if (li == entry) {
             c.nextPts[p].x = c.prevPts[p].x * scale;
             c.nextPts[p].y = c.prevPts[p].y * scale;
         } else {
@@ -1046,6 +1127,7 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
 
     // PASS 2 -- track.
     for (size_t p = 0; p < c.pointCount; ++p) {
+        if (li > entryLevelFor(c, p)) continue;
         const float prevX = c.prevPts[p].x * scale - c.halfWinX;
         const float prevY = c.prevPts[p].y * scale - c.halfWinY;
         const long long anchorX = floorToLL(prevX);
@@ -1251,6 +1333,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
     if (eps > 10.0f) eps = 10.0f;
     c.eps2 = static_cast<double>(eps) * static_cast<double>(eps);
     c.minEigThreshold = static_cast<double>(params.minEigThreshold);
+    c.entryLevel = params.entryLevel;
 
     // Written BEFORE the degenerate exit below, not after it: "every entry is
     // written" is the documented contract, and a caller that reads `status` after
@@ -1290,12 +1373,6 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
 ///
 /// @note Written against `widthAt`/`heightAt` callables so that the array form and
 ///       the heterogeneous ladder share ONE copy of the rule.
-/// A level's extent, so `usableLevelCount` needs no <utility>.
-struct LevelDims {
-    size_t width = 0;
-    size_t height = 0;
-};
-
 template <typename DimFn>
 inline size_t usableLevelCount(size_t levelCount, int winW, int winH, DimFn dims) {
     size_t usable = 1;
@@ -1365,6 +1442,10 @@ inline void calcOpticalFlowPyrLK(const LKLevel<WordType>* levels, size_t levelCo
     c.usableLevels = impl::usableLevelCount(levelCount, c.winW, c.winH, [&](size_t i) {
         return impl::LevelDims{levels[i].width(), levels[i].height()};
     });
+    if (c.usableLevels > impl::kMaxLevels) c.usableLevels = impl::kMaxLevels;
+    for (size_t i = 0; i < c.usableLevels; ++i) {
+        c.dims[i] = impl::LevelDims{levels[i].width(), levels[i].height()};
+    }
     for (size_t li = c.usableLevels; li-- > 0;) impl::trackOneLevel(levels[li], li, c);
 }
 
@@ -1394,6 +1475,10 @@ inline void calcOpticalFlowPyrLK(const LKLevelN<N, WordType>* levels, size_t lev
     c.usableLevels = impl::usableLevelCount(levelCount, c.winW, c.winH, [&](size_t i) {
         return impl::LevelDims{levels[i].width(), levels[i].height()};
     });
+    if (c.usableLevels > impl::kMaxLevels) c.usableLevels = impl::kMaxLevels;
+    for (size_t i = 0; i < c.usableLevels; ++i) {
+        c.dims[i] = impl::LevelDims{levels[i].width(), levels[i].height()};
+    }
     for (size_t li = c.usableLevels; li-- > 0;) impl::trackOneLevel(levels[li], li, c);
 }
 
@@ -1495,6 +1580,8 @@ inline void calcOpticalFlowPyrLK(const LKLevels<WordType, LevelBits...>& levels,
     }
     c.usableLevels = impl::usableLevelCount(sizeof...(LevelBits), c.winW, c.winH,
                                             [&](size_t i) { return levels.dimsAt(i); });
+    if (c.usableLevels > impl::kMaxLevels) c.usableLevels = impl::kMaxLevels;
+    for (size_t i = 0; i < c.usableLevels; ++i) c.dims[i] = levels.dimsAt(i);
     auto visit = [&](const auto& lv, size_t li) { impl::trackOneLevel(lv, li, c); };
     levels.visitCoarseToFine(c.usableLevels, visit, 0);
 }

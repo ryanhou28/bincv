@@ -5156,7 +5156,7 @@ and `Flow.X24_LadderSweep_Synthetic_uint32_t`, built on `LadderFrontend` /
 
 ---
 
-### X-25 · The coarse-level window border · `TODO`
+### X-25 · The coarse-level window border · `DONE`
 
 **COMMITTED ON ITS OWN, BEFORE ANY ARM EXISTS.** Arms C and B are not written at
 the time of writing; arms A and D can be evaluated from code that already ships.
@@ -5260,7 +5260,85 @@ binarization, 141 eligible keypoints, 31×31 windows, four levels,
 development machine (exact, device-independent); ns/frame on the reference device
 (`pi4`).
 
-**Result:** *(not yet measured)*
+**PLATFORM:** development machine. Accuracy and byte counts only, both exact and
+device-independent. **No speed axis was needed and none is reported**, because the
+decision below is *keep what ships* — there is no new code on the default path to
+time. Arm C's cost is discussed under "what is offered" and is **not measured**.
+
+**Result — ladder `1/2/2/2` (X-24's leader), 752×480 real frame, 141 eligible
+keypoints of which 58 never clip. YIELD %, then RMS over the usable set:**
+
+| case | A clip *(ships)* | C per-point entry | D reject clipping | B padded *(bound)* |
+|---|---|---|---|---|
+| shift (1, 0) | 98.6 / 0.0009 | **100.0** / 0.0010 | 41.1 / 0.0010 | 97.9 / 0.0009 |
+| shift (0.25, 0.25) | 92.9 / 0.2502 | **95.7** / 0.2490 | 39.0 / 0.2172 | 93.6 / 0.2513 |
+| shift (0.75, 0.75) | 89.4 / 0.2609 | 87.2 / 0.2543 | 37.6 / 0.2577 | **90.1** / 0.2705 |
+| shift (2, −3) | 94.3 / 0.0010 | 85.8 / 0.0010 | 41.1 / 0.0014 | **95.7** / 0.0010 |
+| shift (6, 4) | **99.3** / 0.0006 | 77.9 / 0.0002 | 41.4 / 0.0002 | 93.6 / 0.0003 |
+| rotate 1° | **89.2** / 0.3208 | 78.4 / 0.3027 | 41.0 / 0.3240 | 85.6 / 0.3011 |
+| scale 1.02 | **88.7** / 0.3157 | 81.2 / 0.2950 | 42.1 / 0.3299 | 85.7 / 0.3162 |
+| **bytes** | **427 680** | **427 680** | **427 680** | **589 968** |
+
+Arm B's byte figure is the **reference's own per-level `winSize` border scheme**,
+computed analytically; the measurement scaffold that produced its accuracy column
+pads level 0 instead and is larger still (1 425 936 B), which is why the two are
+reported separately and the scaffold's number is not used for comparison.
+
+**Conclusion — BAND C, and the answer to E-14 is NO.**
+
+1. **THE BIGGEST FINDING IS METHODOLOGICAL, AND IT CORRECTS X-24 RATHER THAN
+   EXTENDING IT.** `rms(all)` — the statistic X-20, X-24 and this project's whole
+   reading of T3.8's "miss" rested on — describes a distribution it does not fit.
+   Arm A on `(1, 0)` has **rms(all) = 0.8356 px and yield 98.6% at rms(usable)
+   = 0.0009 px**: 139 of 141 keypoints are tracked to a *thousandth of a pixel* and
+   two are catastrophically wrong. The tracker was never broadly inaccurate. It has
+   a small catastrophic tail, and an RMS over everything reports the tail as though
+   it were the body.
+2. **THAT INVALIDATES X-24's CLIPPING CONCLUSION, WHICH THIS ENTRY WITHDRAWS.**
+   X-24 concluded clipping was "essentially all" of the error because restricting to
+   the 58 never-clipping points moved `rms(all)` from 0.8356 to 0.0010. Measured by
+   yield, **clipping costs about two keypoints out of 141 on that case, not 59%** —
+   81 of the 83 clipped points are perfectly usable. The unclipped subset simply
+   happened to exclude the outliers. The 59% figure was real as a count of clipped
+   points and wrong as an attribution of error.
+3. **A BORDER BUYS NOTHING, AND THAT VINDICATES DEVIATION (ii).** Arm B is
+   **worse than or equal to arm A on yield in five of seven cases** and better by at
+   most 1.4 points in the other two, for **1.38× the bytes** under the reference's
+   own scheme. binCV declined the reference's `winSize`-wide padded copy of every
+   level as an argued footprint decision; it is now a measured one. **Keep clipping.**
+4. **Arm C is a real trade and is offered rather than adopted.** It is the best arm
+   on small motion — **100% yield at 0.0010 px on `(1, 0)`, the only cell in the
+   whole table that is perfect** — and the worst on large motion (77.9% at
+   `(6, 4)` against arm A's 99.3%). The mechanism is not mysterious and was not
+   anticipated: a point denied its coarse levels cannot capture a large
+   displacement, which is what the pyramid is *for*. So `LKEntryLevel::DeepestFitting`
+   ships as an option with that trade documented, and `Coarsest` stays the default.
+   **Band D did not fire** — C beats D everywhere, so a partial pyramid is better
+   than no pyramid, which is what band D was watching for.
+5. **WHAT IS ACTUALLY LEFT IS THE LEVEL-0 FLOOR, AND IT IS NOT A PYRAMID
+   PARAMETER.** `rms(usable)` sits at **0.25–0.32 px on the sub-pixel and
+   non-translational cases in every arm**, including the padded one. X-20's own
+   single-level real-frame number for `(0.25, 0.25)` — **no pyramid in the picture
+   at all** — is 0.2860 px. So this residual is what a 1-bit level 0 gives on real
+   edge maps, and no border, depth or entry policy moves it. X-20's 0.25 px
+   tolerance was derived from "an effective count of four independent crossings" in
+   a 31×31 window; on a 10.36%-set edge map that assumption is the thing now in
+   doubt. Registered as **[E-16](ARCHITECTURE.md#register)**.
+6. **Two relocations in a row is itself the finding.** X-24 moved the cause from
+   quantisation to clipping; this entry moves it from clipping to a statistic and a
+   representation floor. X-25's rule pre-declared that a second relocation should be
+   read as evidence the failure is in the pyramid's *use* rather than in any of its
+   parameters, and that is how it is read: **three pyramid parameters have now been
+   measured and none of them is the problem.**
+
+**Decision:** **E-14 answered NO — no border, no padding; deviation (ii) stands and
+is now measured.** `LKEntryLevel` ships with `Coarsest` as the default and
+`DeepestFitting` as a documented option. **E-7 unblocks**: with yield as the metric
+`1/2/2/2` delivers 88.7–99.3% usable keypoints against `1/1/1/1`'s 75.9–88.7% at
+1.17× the bytes and 1.35× the tracking time, so X-24's leader is confirmed on the
+metric that matters. Promoted to [D-23](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `tests/test_opticalflow.cpp`, `Flow.X25_CoarseLevelBorder_uint32_t`.
 
 ---
 

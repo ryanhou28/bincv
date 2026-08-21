@@ -3315,11 +3315,13 @@ was written against a cause the measurement does not support.
   bytes — and the pre-registered "more than 2× is a headline" condition does not
   fire.
 
-**Why this is `DONE` with no ladder adopted:** all three axes are measured and the
-experiment is complete. The choice E-7 exists to make is blocked on
-[E-14](ARCHITECTURE.md#register) — the coarse-level window border, which X-24
-promoted from a secondary term to the dominant one and which no depth can address.
-That is band C's prescribed outcome, not an unfinished task.
+**The ladder is now adopted, by [X-25](EXPERIMENTS.md).** E-14 came back **NO** —
+no border is needed — and measured on **yield** rather than RMS, `1/2/2/2` delivers
+**88.7–99.3% usable keypoints against `1/1/1/1`'s 75.9–88.7%**. X-25 also withdrew
+X-24's clipping attribution: clipping costs about two keypoints out of 141, not 59%,
+and the 59% was an artifact of RMS over a distribution with a small catastrophic
+tail. `1/2/2/2` is the recommended ladder
+([D-23](ARCHITECTURE.md#d-23-the-tracker-clips-its-window-and-does-not-pad-its-levels--measured-not-argued)).
 
 
 **T3.8 CHANGED THIS TASK'S STANDING, AND ITS SCOPE.** [X-20](EXPERIMENTS.md)
