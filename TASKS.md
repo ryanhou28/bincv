@@ -3463,14 +3463,35 @@ one. That third figure is what E-4's null does not cover.
 **Also:** re-run X-2 against the real reference pyramid path, closing that entry's
 caveat.
 
-### T4.2 · E-6 · Hybrid LK versus binary block matching · `TODO`
+### T4.2 · E-6 · Hybrid LK versus binary block matching · `DONE`
 
 **Depends:** T4.1
 **Question:** Does fully bit-parallel tracking (census/Hamming) match hybrid LK's
 accuracy, and what does it cost?
-**Decision rule** — *before measuring:* switch only if accuracy is within
-tolerance **and** the footprint or speed win is material; otherwise hybrid stands
-and route (a) is closed.
+
+**THE ONE-LINE RULE BELOW WAS REPLACED BEFORE MEASURING, AND THE REPLACEMENT IS
+[X-26](EXPERIMENTS.md).** As written it said *switch only if accuracy is within
+tolerance and the win is material; otherwise hybrid stands and route (a) is
+closed* — which has no branch for "route (a) is much cheaper and somewhat worse",
+and that is precisely what happened. A rule that can only adopt or close would
+have closed a route that is **3.2× more keypoint-efficient per byte**.
+
+**Answered: neither wins, and both ship** ([D-24](ARCHITECTURE.md#8-design-decisions)).
+`ops/blockMatch.hpp` is route (a).
+
+* **Yield 56.7–75.0% against route (b)'s 75.9–99.3%** — worse on the *same* ladder,
+  so it is an algorithm difference and not a representation one.
+* **102 240 B against 306 720 B (3.00× smaller)**, because route (a) forms no
+  derivative at all; **1.45× cheaper build**; **0.93×** the tracking time at R = 2.
+* **3.2× more usable keypoints per KB at equal keypoints per millisecond.**
+* The derived integer floor was confirmed to two figures: 0.3873 px measured
+  against 0.408 px derived, and exactly 0.0000 px on integer motion.
+* `searchRadius` fails twice over when enlarged — R = 4 is 2.90× LK *and* less
+  accurate in aggregate, because a wider search finds more false minima.
+* **It refines [D-20](ARCHITECTURE.md#d-20-the-trackers-per-pixel-work-is-all-popcounts-only-the-solve-is-float):**
+  a parabolic fit to a Hamming surface is MORE precise than the Gauss-Newton solve
+  on the points both find (0.2347–0.2594 px against 0.2502–0.3208), so LK's
+  continuity buys **robustness**, not precision.
 
 ### T4.3 · E-5 · End-to-end validation · `TODO`
 

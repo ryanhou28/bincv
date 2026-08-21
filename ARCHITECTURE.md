@@ -1922,6 +1922,54 @@ arm shares, padded included; X-20's own single-level figure with no pyramid at a
 is 0.2860 px. That is [E-16](#register) and it is a question about the
 representation, not about the pyramid.
 
+
+### D-24: both tracking routes ship; route (b) is the default and route (a) is the memory-constrained one
+
+[§7.9](#79-known-hard-problems) named two routes for tracking on binary frames and
+expected one of them to win. [X-26](EXPERIMENTS.md) built route (a) and measured
+both, and **the split resolves to both routes existing**, which is not what either
+arm anticipated.
+
+| | route (b) hybrid LK | route (a) Hamming block matching |
+|---|---|---|
+| yield (real frame) | **75.9–99.3%** | 56.7–75.0% |
+| `rms(usable)`, sub-pixel cases | 0.2502–0.3208 px | **0.2347–0.2594 px** |
+| pyramid-stage bytes | 306 720 | **102 240 (3.00× smaller)** |
+| build | 285.0 µs | **196.9 µs (1.45× cheaper)** |
+| track | 14 024.5 µs | **13 006.3 µs (0.93×)** |
+| usable points per KB | 0.32 | **1.04 (3.2×)** |
+| usable points per ms | **8.2** | 8.0 |
+
+**Route (a) needs no derivative at all**, which is where the 3.00× comes from: route
+(b) carries two frames *and* two `SignedQuantMat` ladders, route (a) carries two
+frames. That is a footprint result, not an implementation detail.
+
+**Route (b) is the default because yield is what a frontend produces.** Route (a)
+loses 15–25 points of it, on the *same* ladder, so it is an algorithm difference and
+not a representation one.
+
+**Route (a) is not closed, and shipping it is not hedging.** It is **3.2× more
+keypoint-efficient per byte at equal keypoint-efficiency per millisecond**.
+[CLAUDE.md](../CLAUDE.md)'s "memory wins" tiebreak covers *speed against footprint*;
+this is *accuracy against footprint*, and §1 puts that on the integrating pipeline's
+side of the boundary — a VIO frontend that RANSACs its correspondences may
+rationally prefer more, cheaper, noisier points. This repo supplies both and states
+the trade rather than making the caller's choice for them.
+
+**`searchRadius` is route (a)'s whole cost story, and enlarging it fails twice
+over:** R = 4 costs 2.90× LK against R = 2's 0.93× *and* is less accurate in
+aggregate, because a wider search finds more false minima. There is no radius at
+which route (a) wins by searching harder.
+
+**This refines [D-20](#d-20-the-trackers-per-pixel-work-is-all-popcounts-only-the-solve-is-float)
+rather than contradicting it.** A parabolic fit to a Hamming surface — integer
+arithmetic, four extra window scores — is **more precise than LK's Gauss-Newton
+solve on the points both find** (0.2347–0.2594 against 0.2502–0.3208 px). So the
+continuous formulation does not buy precision; it buys **robustness**. §7.9's
+"LK's accuracy comes from its continuous formulation" was too coarse, and the
+correction is that continuity is load-bearing for *which* points match, not for how
+well the matched ones are located.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -1975,7 +2023,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | **E-15** | Why does tracking accuracy PEAK AT 2 BITS and degrade with more? | [X-24](EXPERIMENTS.md) measured it and did not explain it: on `(1,0)` unclipped, 1/2/3/5 bits give 1.4742 / **0.0010** / 0.5334 / 0.8567 px, and on `(2,−3)` the ladder is exact at 2 and 3 bits and fails from 4. Two explanations remain open and were NOT separated. **(i)** The bit-sliced covariance and residual weight plane pairs by `2^(i+j)`, so a few high-magnitude pixels dominate a window whose sub-pixel accuracy comes from averaging many edge crossings — this predicts degradation at SMALL motion and none at large, which is the observed pattern (`(12,−8)` is exact at every depth, `(2,−3)` fails from 4 bits, `(1,0)` from 3). **(ii)** `1/2/2/2`'s upper levels collapse to two distinct values anyway, so its advantage may be density preservation rather than precision. `requantizeBoxSum` is already excluded as the cause: it is a faithful rescaled average at every depth. | Whether the weighting in [§7.5](#75-lk-gradient-covariance)'s bit-sliced form is right for TRACKING as opposed to for corner response, and whether a depth cap belongs in the pyramid API. | E-7's final ladder | **Phase 4** |
 | **E-16** | Is X-20's **0.25 px RMS tolerance** reachable at all with a 1-bit level 0 on real edge maps — and if not, what IS the representation's floor? | **Three pyramid parameters have now been measured and none of them is the cause.** [X-24](EXPERIMENTS.md) ruled out level bit depth, [X-25](EXPERIMENTS.md) ruled out the border and the entry policy, and in every arm of X-25 — including the PADDED one — `rms(usable)` sits at **0.25–0.32 px** on the sub-pixel and non-translational cases. X-20's own single-level real-frame figure, with no pyramid in the picture at all, is **0.2860 px** at `(0.25, 0.25)`. The tolerance was derived from a 31×31 window averaging "an effective count of four independent crossings"; on a 10.36%-set edge map that assumption is what is now in doubt, not the kernels. **The right output is a DERIVED floor for 1-bit level 0 on real content, and then either the tolerance is restated against it with its derivation or level 0 stops being 1 bit** — and the second would be a change to the project's premise, so it needs a measurement and not a preference. | Whether T3.8's tolerance is achievable as stated, and whether level 0's depth is a variable at all. | T3.8's Done-when; T4.3a's frame-level agreement criterion | **Phase 4** |
 | ~~**E-7**~~ **ANSWERED — BUT THE QUESTION PRESUPPOSED THE WRONG CAUSE** | How many bits does each pyramid level actually need to preserve tracking accuracy? | The reference never chose its depths — they fell out of using `CV_8U`. [X-20](EXPERIMENTS.md) promoted this from an optimisation to a precondition on the reading that a 1-bit level cannot localise sub-pixel motion. | **[X-24](EXPERIMENTS.md) measured it and the premise does not survive. BAND C: no ladder up to `1/3/5/7` brings the four-level tracker inside X-20's tolerance on the full 141-point set — a deeper alphabet is NOT what fixes T3.8's miss.** Three things were learned instead, and two of them contradict this row's old text. **(1) Accuracy is PEAKED AT 2 BITS, not monotone in depth** — on `(1,0)` over the points that never clip, 1 bit gives 1.4742 px, **2 bits gives 0.0010 px (1474×)**, and 5 bits gives back 0.8567 px. Band D's own check excludes the artifact: every ladder tracked every point (141/141, 58/58), so the rows share identical point sets and `minEigThreshold` rejection is not involved. **(2) The dominant residual is CLIPPING, not quantisation** — the same ladder goes 0.8356 → **0.0010** px when restricted to the **58 of 141 points (41%)** whose 31×31 window is inside every level, so deviation (ii) is essentially all of that ladder's error rather than X-20's estimated half. That is now **[E-14](#register)**. **(3) 1-bit coarse levels ARE broken, so X-20 was half right — but not for its stated reason**: down a 1-bit ladder the edge map is THINNED AWAY (level 3 keeps 154 set pixels of 5 640 against `1/2/2/2`'s 1 028), so the second bit buys **content survival**, not precision. Why more than two bits then HURTS is **[E-15](#register)** and is not settled here. `1/2/2/2` is the leader on all three axes and is **cheap**: measured on the reference device it costs **1.35× the shipped ladder's tracking time, 1.51× its build and 1.17× its bytes** — against a pre-written cost model that predicted 3.25×, so the `20N²` popcounts per word do not dominate a tracked frame. The pre-registered "more than 2× is a headline" condition does not fire. **[X-25](EXPERIMENTS.md) then unblocked the adoption by answering E-14 NO**: measured on yield rather than RMS, `1/2/2/2` delivers **88.7–99.3% usable keypoints against `1/1/1/1`'s 75.9–88.7%**, so X-24's leader is confirmed on the metric that matters and is the recommended ladder ([D-23](#d-23-the-tracker-clips-its-window-and-does-not-pad-its-levels--measured-not-argued)). Footprint axis unchanged from [X-15](EXPERIMENTS.md). | Pyramid level bit depths. | T3.4, **T3.8**, T3.10 (the N-bit tracker, T4.1) | **Phase 4** (T4.1) ✔ |
-| **E-6** | Route (b) hybrid LK versus route (a) binary block matching: accuracy and cost. | [§7.9](#79-the-known-hard-problem-subpixel-interpolation). | Whether the frontend stays hybrid or goes fully bit-parallel. | frontend architecture | **Phase 4** (T4.2) |
+| ~~**E-6**~~ **RESOLVED — BOTH** | Does fully bit-parallel tracking (census/Hamming) match hybrid LK's accuracy, and what does it cost? | Only route (b) of [§7.9](#79-known-hard-problems)'s two-route split had ever been built. | **Answered: it does not match, it costs 3.00× LESS, and the split resolves to BOTH routes shipping.** [X-26](EXPERIMENTS.md) built route (a) and measured both: yield **56.7–75.0%** against route (b)'s 75.9–99.3% — an algorithm difference, since route (a) loses on the SAME ladder — but **102 240 B against 306 720 B** because it forms no derivative, a **1.45× cheaper build**, **0.93×** the tracking time at R=2, and **3.2× more usable keypoints per KB at equal keypoints per millisecond**. Route (b) stays the default; route (a) ships as the memory-constrained alternative, because CLAUDE.md's tiebreak covers speed against footprint and this is accuracy against footprint, which §1 puts on the integrating pipeline's side. The derived floor was confirmed to two figures (0.3873 px measured against 0.408 px derived; exactly 0.0000 px on integer motion). **It also refines [D-20](#d-20-the-trackers-per-pixel-work-is-all-popcounts-only-the-solve-is-float)**: a parabolic fit to a Hamming surface is MORE precise than the Gauss-Newton solve on the points both find, so LK's continuity buys robustness, not precision. | Whether route (a) replaces route (b). **Neither: both ship.** | — | **Phase 4** (T4.2) ✔ |
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |
 | ~~**E-10**~~ **RESOLVED** | Does the corner response need a frame-sized float map, or a rolling ring — and what does the ring's carry cost once the selection's global properties are preserved exactly? | **Answered: it does not need the map, and the ring is not a trade. The frontend goes 1 721 568 B → 500 464 B (3.44×) and the corner stage 1 333 848 B → 112 744 B (11.83×), with corners IDENTICAL to the byte and the whole detector 0.774× the time** — 40.79 → 31.59 ms/frame at 640×480. [D-22](#d-22-the-corner-response-streams-over-a-three-row-ring-and-that-is-the-recommended-path), [X-23](EXPERIMENTS.md). **~~for roughly 2× the response compute~~ — THIS ROW SAID THAT AND IT WAS WRONG, and X-23's rule pre-declared the correction rather than allowing it to be absorbed.** A ring forces a row-major sweep, which X-18 had already measured as the *faster* traversal at `blockSize` 3; the measured figure is **0.774×** (0.764× in the other device run), and even the two-pass shape the estimate described is 1.33×. The whole carry for the two GLOBAL properties — a frame-wide maximum and a frame-wide ordering — is **16 B**, because the threshold is a pure post-filter and the survivors are an up-set of the raw 3×3 maxima, so a top-K over the caller's existing candidate array is exactly the frame-map form's ranked set. It costs at large blocks — above `blockSize` 15 at `uint32_t` (1.08× at 31) and from `blockSize` 15 at `uint64_t` (1.03× at 15, 1.13× at 31) — and the frame-map form stays for that and for callers who want the map. (The corner stage's dominant term is now the CANDIDATE ARRAY — 8 754 survivors at 640×480, 9 774 on the real frame, structural maximum 3 659 568 B — which is a contract question and is deliberately left open. Still measured against no `CV_8U` denominator; that comparison is E-5's.) | Whether `cornerMinEigenVal` keeps a caller-provided frame map or gains a streaming form. | T3.7 (made caller-provided rather than decided) | Phase 3 (T3.11) ✔ |
 | **E-11** | Should `cornerMinEigenVal` select its window strategy on `blockSize`? | [X-18](EXPERIMENTS.md) measured the incremental form **losing** below `blockSize` 15 — 0.84× at 3, which is what `seal_params.yaml` actually configures. But one device at one frame size is thin, and x86 showed the *opposite sign* there. | Whether the sliding form is unconditional or `blockSize`-gated. | T3.7 (left unconditional, qualified in the docs) | unscheduled |

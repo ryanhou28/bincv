@@ -130,6 +130,7 @@
 #include "bincv-cpp/ops/covariance.hpp"
 #include "bincv-cpp/ops/denoise.hpp"
 #include "bincv-cpp/ops/derivative.hpp"
+#include "bincv-cpp/ops/blockMatch.hpp"
 #include "bincv-cpp/ops/opticalFlow.hpp"
 #include "bincv-cpp/ops/pyramid.hpp"
 #include "bincv-cpp/quantMat.hpp"
@@ -2955,6 +2956,137 @@ BINCV_TEST(Flow, X25_CoarseLevelBorder_uint32_t) {
 
     // X-25's bands are evaluated in EXPERIMENTS.md from the whole table; deciding
     // one inside the measurement that produces it would be circular.
+    BINCV_CHECK(true);
+}
+
+
+// ---------------------------------------------------------------------------
+// X-26 / E-6 -- ROUTE (a) AGAINST ROUTE (b).
+//
+// Same frame, same keypoints, same window, same ladder, same yield metric. The
+// two differ in the SEARCH and in nothing else, which is what makes this a
+// comparison of algorithms rather than of border behaviours.
+// ---------------------------------------------------------------------------
+namespace {
+
+/// @brief Route (a) over a 1-bit ladder built by the existing Frontend.
+Yield runBlockMatch(const char* label, Frontend<uint32_t>& fe, const Warp& warp,
+                    const std::vector<Point2f>& pts, size_t eligibleTotal, double modelError,
+                    int radius, bool subPixel) {
+    std::vector<bincv::BlockMatchLevel<uint32_t>> levels;
+    levels.reserve(fe.prev.size());
+    for (size_t i = 0; i < fe.prev.size(); ++i) {
+        levels.push_back(bincv::blockMatchLevel(fe.prev[i], fe.next[i]));
+    }
+    bincv::BlockMatchParams params;
+    params.searchRadius = radius;
+    params.subPixel = subPixel;
+
+    std::vector<Point2f> out(pts.size());
+    std::vector<uint8_t> status(pts.size());
+    bincv::calcOpticalFlowBlockMatch(levels.data(), levels.size(), pts.data(), out.data(),
+                                     status.data(), pts.size(), params);
+
+    Yield y;
+    y.eligible = eligibleTotal;
+    y.attempted = pts.size();
+    // ROUTE (a)'s FOOTPRINT IS THE TWO FRAME LADDERS AND NOTHING ELSE. It forms no
+    // derivative, so the two SignedQuantMat ladders route (b) carries do not exist
+    // here -- that is a real saving and it is counted, not assumed.
+    size_t words = 0;
+    for (size_t i = 0; i < fe.prev.size(); ++i) {
+        words += fe.prev[i].sizeInWords() + fe.next[i].sizeInWords();
+    }
+    y.bytes = words * sizeof(uint32_t);
+
+    const double bound = kMaxTolerance + modelError;
+    double sumSqUsable = 0.0, sumSqAll = 0.0;
+    size_t counted = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        if (status[i] == 0) continue;
+        double gx = 0.0, gy = 0.0;
+        warp.forward(static_cast<double>(pts[i].x), static_cast<double>(pts[i].y), gx, gy);
+        const double ex = static_cast<double>(out[i].x) - gx;
+        const double ey = static_cast<double>(out[i].y) - gy;
+        const double e = std::sqrt(ex * ex + ey * ey);
+        sumSqAll += e * e;
+        ++counted;
+        if (e <= bound) {
+            ++y.usable;
+            sumSqUsable += e * e;
+        }
+    }
+    y.rmsUsable = y.usable ? std::sqrt(sumSqUsable / static_cast<double>(y.usable)) : 0.0;
+    y.rmsAll = counted ? std::sqrt(sumSqAll / static_cast<double>(counted)) : 0.0;
+    std::printf("    %-28s attempted=%3zu  usable=%3zu/%3zu  YIELD=%5.1f%%  "
+                "rms(usable)=%7.4f  rms(all)=%8.4f  bytes=%7zu\n",
+                label, y.attempted, y.usable, y.eligible, 100.0 * y.fraction(), y.rmsUsable,
+                y.rmsAll, y.bytes);
+    return y;
+}
+
+void x26Case(const cv::Mat& gray, const char* caseName, const Warp& warp, double modelError) {
+    cv::Mat warped;
+    cv::warpAffine(gray, warped, affineOf(warp), gray.size(), cv::INTER_CUBIC,
+                   cv::BORDER_REFLECT_101);
+    const cv::Mat bin0 = referenceEdgeFilter(gray, 17);
+    const cv::Mat bin1 = referenceEdgeFilter(warped, 17);
+
+    Frontend<uint32_t> fe(gray.cols, gray.rows, 4);
+    fe.prev[0].fromCVMat(bin0);
+    fe.next[0].fromCVMat(bin1);
+    fe.build();
+    LKParams lkParams;
+    const std::vector<Point2f> pts = eligiblePoints(fe.dx[0], fe.dy[0], gray.cols, gray.rows, warp,
+                                                    lkParams.winWidth, lkParams.winHeight);
+
+    BinMat<uint32_t> prevSrc(gray.cols, gray.rows), nextSrc(gray.cols, gray.rows);
+    prevSrc.fromCVMat(bin0);
+    nextSrc.fromCVMat(bin1);
+
+    std::printf("\n  %s  --  %zu eligible, usable bound %.2f px\n", caseName, pts.size(),
+                kMaxTolerance + modelError);
+    // Route (b), SAME 1/1/1/1 ladder -- the algorithm question.
+    runArm<uint32_t, 1, 1, 1, 1>("(b) LK, ladder 1/1/1/1", prevSrc, nextSrc, warp, pts, pts.size(),
+                                 bincv::LKEntryLevel::Coarsest, modelError);
+    // Route (b) on its best ladder -- the practical question. Route (a) cannot
+    // enter this comparison without an N-bit cost function.
+    runArm<uint32_t, 1, 2, 2, 2>("(b) LK, ladder 1/2/2/2", prevSrc, nextSrc, warp, pts, pts.size(),
+                                 bincv::LKEntryLevel::Coarsest, modelError);
+    runBlockMatch("(a1) block, R=2, integer", fe, warp, pts, pts.size(), modelError, 2, false);
+    runBlockMatch("(a2) block, R=2, subpixel", fe, warp, pts, pts.size(), modelError, 2, true);
+    runBlockMatch("(a2) block, R=4, subpixel", fe, warp, pts, pts.size(), modelError, 4, true);
+}
+
+} // namespace
+
+BINCV_TEST(Flow, X26_BlockMatchVersusLK_uint32_t) {
+    const cv::Mat gray = loadRealFrame();
+    if (gray.empty()) {
+        std::printf("  (skipped: sample image not found)\n");
+        BINCV_CHECK(true);
+        return;
+    }
+    LKParams params;
+    const double halfWin = 0.5 * static_cast<double>(params.winWidth - 1);
+    const double rotModel = halfWin * 1.0 * 3.14159265358979323846 / 180.0;
+    const double scaleModel = halfWin * 0.02;
+
+    std::printf("\n  ===================================================================\n"
+                "  X-26 / E-6: route (a) Hamming block matching vs route (b) hybrid LK.\n"
+                "  Derived BEFORE measuring: an integer-only matcher returns round(d),\n"
+                "  so its error is min(q, 1-q) per axis -- 0.2887 px per axis and\n"
+                "  0.408 px over two, for q uniform. (a1) landing near that is a\n"
+                "  confirmation the search works, NOT a finding about accuracy.\n"
+                "  ===================================================================\n");
+
+    x26Case(gray, "shift (1, 0)", translation(1.0, 0.0), 0.0);
+    x26Case(gray, "shift (0.25, 0.25)", translation(0.25, 0.25), 0.0);
+    x26Case(gray, "shift (0.75, 0.75)", translation(0.75, 0.75), 0.0);
+    x26Case(gray, "shift (2, -3)", translation(2.0, -3.0), 0.0);
+    x26Case(gray, "shift (6, 4)", translation(6.0, 4.0), 0.0);
+    x26Case(gray, "rotate 1 deg", rotation(1.0, gray.cols * 0.5, gray.rows * 0.5), rotModel);
+    x26Case(gray, "scale 1.02", scaling(1.02, gray.cols * 0.5, gray.rows * 0.5), scaleModel);
     BINCV_CHECK(true);
 }
 

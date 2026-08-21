@@ -5342,7 +5342,7 @@ metric that matters. Promoted to [D-23](ARCHITECTURE.md#8-design-decisions).
 
 ---
 
-### X-26 · Hybrid LK against binary block matching · `TODO`
+### X-26 · Hybrid LK against binary block matching · `DONE`
 
 **COMMITTED BEFORE `ops/blockMatch.hpp` EXISTS.** Route (a) is not written at the
 time of writing.
@@ -5425,7 +5425,89 @@ binarization, 141 eligible keypoints, 31×31 windows, four levels, the same warp
 Coarse-to-fine over the same ladder route (b) uses, so the two differ in the SEARCH
 and in nothing else.
 
-**Result:** *(not yet measured)*
+**PLATFORM:** accuracy and bytes on the development machine (exact,
+device-independent); **speed on the reference device** — Pi 4 Model B Rev 1.5,
+governor `performance`, `taskset -c 3`, `throttled=0x0` before and after, 0% batch
+spread.
+
+**Result (a) — accuracy, 752×480 real frame, YIELD % / `rms(usable)`:**
+
+| case | (b) LK `1/1/1/1` | (b) LK `1/2/2/2` | (a1) R=2 integer | (a2) R=2 sub-pixel | (a2) R=4 |
+|---|---|---|---|---|---|
+| shift (1, 0) | 85.1 / 0.0014 | **98.6** / 0.0009 | 68.8 / 0.0000 | 68.8 / 0.0180 | 73.8 / 0.0181 |
+| shift (0.25, 0.25) | 88.7 / 0.2900 | **92.9** / 0.2502 | 70.9 / 0.3873 | 69.5 / **0.2408** | 70.9 / 0.2420 |
+| shift (0.75, 0.75) | 75.9 / 0.2725 | **89.4** / 0.2609 | 57.4 / 0.3869 | 56.7 / **0.2347** | 60.3 / 0.2410 |
+| shift (2, −3) | 81.6 / 0.0006 | **94.3** / 0.0010 | 73.8 / 0.0981 | 73.8 / 0.0999 | 66.7 / 0.0193 |
+| shift (6, 4) | 87.1 / 0.0015 | **99.3** / 0.0006 | 73.6 / 0.0000 | 73.6 / 0.0190 | 75.0 / 0.0180 |
+| rotate 1° | 76.3 / 0.3036 | **89.2** / 0.3208 | 63.3 / 0.4449 | 63.3 / **0.2594** | 64.7 / 0.2804 |
+| scale 1.02 | 75.9 / 0.3122 | **88.7** / 0.3157 | 62.4 / 0.4583 | 62.4 / **0.2504** | 63.2 / 0.2446 |
+| **bytes** | 367 200 | 427 680 | **122 400** | **122 400** | **122 400** |
+
+**Result (b) — speed, reference device, 640×480, 140 keypoints, same binary:**
+
+| stage | route (b) LK | route (a) R=2 | route (a) R=4 |
+|---|---|---|---|
+| build | 285.0 µs | **196.9 µs** (1.45× cheaper) | 196.9 µs |
+| track | 14 024.5 µs | **13 006.3 µs** (0.93×) | 40 674.2 µs (2.90×) |
+| pyramid-stage bytes | 306 720 | **102 240** (3.00×) | 102 240 |
+
+**Conclusion — BAND B, the outcome the rule called most likely, and the one the old
+one-line rule in TASKS.md would have discarded.**
+
+1. **THE DERIVED FLOOR IS CONFIRMED, WHICH IS HOW THE SEARCH IS KNOWN TO WORK.**
+   X-26 derived, before any code existed, that an integer matcher's error is
+   `min(q, 1−q)` per axis — **0.408 px over two axes for uniform `q`**. Measured:
+   (a1) gives **0.3873 and 0.3869 px** on the two sub-pixel translations, and
+   **exactly 0.0000 px** on both integer translations. That is the prediction, to
+   two figures, from both ends.
+2. **ROUTE (a) IS 3.00× SMALLER AND THAT IS ITS REAL RESULT.** It forms no
+   derivative, so it carries two frame ladders where route (b) carries two frames
+   *and* two `SignedQuantMat` ladders. 122 400 B against 367 200 B at 752×480;
+   102 240 against 306 720 on the device at 640×480. Its build is **1.45× cheaper**
+   for the same reason.
+3. **BUT IT LOSES ON THE FRONTEND'S PRODUCT.** Yield is **56.7–75.0%** against
+   route (b)'s 75.9–88.7% on the *same* `1/1/1/1` ladder and 88.7–99.3% on
+   `1/2/2/2`. Route (a) is worse than route (b) even where the representation is
+   identical, so this is an algorithm result and not a ladder artefact — which is
+   exactly why both comparisons were pre-registered.
+4. **PER MILLISECOND THEY ARE A WASH; PER BYTE ROUTE (a) WINS OUTRIGHT.** On
+   `(2, −3)`, route (b) at `1/1/1/1` returns 115 usable points in 14.02 ms
+   (**8.2 pts/ms**) and route (a) at R=2 returns 104 in 13.01 ms (**8.0 pts/ms**).
+   Per byte: **1.04 usable points per KB against 0.32** — route (a) is **3.2× more
+   keypoint-efficient per byte** at equal keypoint-efficiency per millisecond.
+   *(The `1/2/2/2` timing is X-24's, from a different binary; per X-22's caveat 1 a
+   cross-binary ratio can move 1.46×, so it is indicative and the same-binary
+   `1/1/1/1` comparison is the one to read.)*
+5. **`searchRadius` IS THE WHOLE COST STORY AND BIGGER IS WORSE TWICE OVER.**
+   R = 4 costs **2.90× LK** against R = 2's 0.93× — the `O(R²)` was predicted — and
+   it is also LESS accurate in aggregate (`rms(all)` 10.3–13.4 px against R = 2's
+   5.5–7.9), because a wider search finds more false minima. There is no radius at
+   which route (a) becomes competitive by searching harder.
+6. **BAND D PARTIALLY FIRED, AND IT REFINES [D-20](ARCHITECTURE.md#d-20-the-trackers-per-pixel-work-is-all-popcounts-only-the-solve-is-float)
+   RATHER THAN OVERTURNING IT.** A parabolic fit to a Hamming cost surface —
+   integer arithmetic and four extra window scores — reaches `rms(usable)` of
+   **0.2347–0.2594 px, BETTER than route (b)'s 0.2502–0.3208** on every sub-pixel
+   and non-translational case. So **LK's continuous formulation does not buy
+   PRECISION on the points it matches; it buys ROBUSTNESS — which points match at
+   all.** §7.9's claim that "LK's accuracy comes from its continuous formulation"
+   is too coarse: the continuity is load-bearing for the 20–30 points per frame
+   that route (a) loses, not for the localisation of the ones both find.
+
+**Decision:** **NEITHER IS ADOPTED AS THE ONE TRACKER, and route (a) is NOT closed.**
+Route (b) stays the default because yield is what a frontend produces and it is
+materially higher. `ops/blockMatch.hpp` ships as the memory-constrained
+alternative, documented with its 3.00× footprint advantage, its equal
+yield-per-millisecond, and its 15–25 point yield deficit — because
+[CLAUDE.md](CLAUDE.md)'s tiebreak covers speed against footprint and **this is
+accuracy against footprint, which is the integrating pipeline's call and not this
+repo's**: a VIO frontend that RANSACs its correspondences may rationally prefer
+more, cheaper, noisier points, and ARCHITECTURE §1 puts that decision on the other
+side of the boundary. Recorded as
+[D-24](ARCHITECTURE.md#8-design-decisions). §7.9's two-route split **resolves to
+both routes existing**, which is not what either arm of it anticipated.
+
+**Method:** `ops/blockMatch.hpp`; `tests/test_opticalflow.cpp`,
+`Flow.X26_BlockMatchVersusLK_uint32_t`; `benchmark/blockmatch_benchmark.cpp`.
 
 ---
 

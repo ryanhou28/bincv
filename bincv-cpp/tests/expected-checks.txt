@@ -906,7 +906,7 @@ opencv	test_pyramid	262321	0
 opencv	test_derivative	48526	0
 opencv	test_covariance	17704	0
 opencv	test_corner	3655	0
-opencv	test_opticalflow	282	0
+opencv	test_opticalflow	283	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	40	0
 opencv	test_equivalence	16403	0
