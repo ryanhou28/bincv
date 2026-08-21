@@ -3276,7 +3276,7 @@ Each task produces a committed measurement and a written conclusion, and each ma
 invalidate a decision — **that is the point.** A contradicted claim gets reported,
 not worked around.
 
-### T4.1 · E-7 · Pyramid level bit depths · `DONE` — all three axes measured; the ladder choice is blocked on E-14, not on this task
+### T4.1 · E-7 · Pyramid level bit depths · `DONE` — all three axes measured; ladder adopted once X-25 answered E-14
 
 **Depends:** T3.8
 
