@@ -100,3 +100,35 @@ localisation** — window sizing cannot be justified by averaging.
 What remains is a factor of **2.5–3 that belongs to the tracker**, now a located
 problem: [E-17](ARCHITECTURE.md#register), prime suspect **deviation (i)**, the
 integer-grid previous window. Recorded as D-25.
+
+---
+
+## 3 · T4.3a / E-5 — the frontend end to end · **PARTIAL**
+
+EuRoC V1_02_medium, **all 1709 frame pairs**, both frontends on bit-identical
+input, each detecting and tracking independently so lifetime is comparable.
+
+| criterion | binCV | OpenCV | verdict |
+|---|---|---|---|
+| 2 · detection | 193 corners | 200 | agrees to 3.5% |
+| 2 · median track lifetime | **11 frames** | 12 | agrees to one frame |
+| 2 · per-frame survival | 96.4% | 96.6% | agrees to 0.2 pt |
+| 2 · flow | **median 0.0437 px, p90 0.1614** | — | 95.6% within 1 px |
+| 3 · peak footprint | **436 704 B** | 2 719 832 B | **MET, 6.23×** |
+| 4 · speed | 21.43 ms/frame | 1.54 | **NOT MET, 14× slower** |
+
+Criterion 4 is unmet and is **not restated**. binCV is scalar and single-threaded
+against a SIMD, 12-threaded OpenCV. Phase 5 is the answer and the target is already
+located: 99% of frontend time sits in two windowed popcount reductions.
+
+Flow is reported as **percentiles, not RMS** — the RMS is 7.03 px and describes
+nothing, because the body is at 0.04 px and a ~1% tail is beyond 22 px. That is
+X-25's lesson applied to a new measurement rather than re-learned.
+
+**Two harness defects found, and the second nearly became a false binCV finding.**
+Flow pairs were matched by array index (two independent detectors share no
+ordering — it reported zero comparisons rather than wrong ones, which is how it was
+caught). And corner capacity was passed as `maxCorners`, truncating the NMS pool
+before the spacing filter: capacity 200 gives **61** corners, capacity 20 000 gives
+**193**. The first reading looked like a 3.3× detection shortfall in binCV.
+`CornerResult::candidatesTruncated` had been reporting it all along.

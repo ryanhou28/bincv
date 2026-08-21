@@ -5747,6 +5747,103 @@ elimination now points. Recorded as
 
 ---
 
+### X-28 · T4.3a — the frontend end to end, over a real sequence · `PARTIAL`
+
+**Gates:** [E-5](ARCHITECTURE.md#register) · [T4.3a](TASKS.md) — three of the four
+[ROADMAP success criteria](ROADMAP.md#success-criteria).
+**Decision rule:** **the ROADMAP's success criteria, unchanged.** They were written
+before Phase 1 and are not restated here; this entry reports against them verbatim
+so there is no opportunity to shape a criterion around a result.
+**Workload:** EuRoC **V1_02_medium, all 1709 frame pairs**, 752×480, through the
+reference pipeline's **two-stage** preprocessing (`median_filter` then
+`rl_fast_edge_filter_wide(17)`). `seal_params.yaml` parameters verbatim.
+**Denominator:** [CLAUDE.md](CLAUDE.md)'s — OpenCV doing the same semantic
+operation **on the same binary content stored as `CV_8U`**. Both frontends see
+bit-identical input, detect their own corners, maintain their own track sets and
+re-detect on their own schedule, so **track lifetime is comparable** rather than
+being one frontend's points scored by the other.
+
+**Result — criterion 2, agreement with the reference frontend:**
+
+| | binCV | OpenCV |
+|---|---|---|
+| corners detected (first frame, `maxCorners` 200) | 193 | 200 |
+| tracks observed over the sequence | 10 279 | 10 108 |
+| **median track lifetime** | **11 frames** | **12 frames** |
+| per-frame track survival | 96.4% | 96.6% |
+
+Flow-vector difference over 2 029 matched pairs: **median 0.0437 px, p90 0.1614 px,
+p99 22.49 px, max 213.80 px**; **95.6% agree within 1 px**.
+
+**REPORTED AS PERCENTILES, AND THAT IS THIS PROJECT'S OWN LESSON APPLIED.** The RMS
+over all comparisons is **7.03 px** and it describes nothing: the body of the
+distribution is at 0.04 px and a ~1% tail is at 22 px and beyond.
+[X-25](#x-25--the-coarse-level-window-border--done) established that an RMS over
+this distribution reports the tail as though it were the body, and that error cost
+two experiments' worth of misattribution before it was caught. The RMS is printed
+for completeness and is not the summary.
+
+**Result — criterion 3, peak footprint over the frontend operation set:**
+
+| | bytes |
+|---|---|
+| binCV — `1/2/2/2` pyramid ×2, derivative ladders, 3-row response ring | **436 704** |
+| OpenCV — `CV_8U` pyramid ×2 with a 31 px border per level, `CV_32F` eigen map | 2 719 832 |
+| **ratio** | **6.23× smaller** |
+
+**Result — criterion 4, speed against the byte-per-pixel denominator:**
+
+| | ms/frame |
+|---|---|
+| binCV | 21.43 |
+| OpenCV | 1.54 |
+| **ratio** | **0.07× — binCV is 14× SLOWER** |
+
+**Conclusion.**
+
+1. **CRITERION 3 IS MET, AND COMFORTABLY: 6.23×.** "Several-fold smaller peak
+   footprint over the frontend operation set" is the criterion; 6.23× is several
+   fold. Most of it is structural rather than clever — binCV carries no
+   `winSize` border on any level ([D-23](ARCHITECTURE.md), measured) and no
+   frame-sized float response map ([D-22](ARCHITECTURE.md)).
+2. **CRITERION 2 IS MET FOR THE BODY OF THE DISTRIBUTION AND HAS A 1% TAIL.**
+   Detection agrees to 3.5%, track lifetime to one frame in twelve, survival to
+   0.2 points, and 90% of flow vectors agree to **0.16 px**. The ~1% beyond 22 px
+   is the same catastrophic tail X-25 found and
+   [E-17](ARCHITECTURE.md#register) is chartered to explain; it is not a new
+   phenomenon and it is not swept up here.
+3. **CRITERION 4 IS NOT MET, AND NOT NEARLY.** binCV is **14× slower**. The
+   comparison is honest and unflattering: **binCV is scalar and single-threaded**,
+   while OpenCV's `calcOpticalFlowPyrLK` and `goodFeaturesToTrack` are
+   SIMD-vectorized and were running on **12 threads**. That is a like-for-like
+   measurement of what ships today and it must be read that way — it is not a
+   comparison of the two algorithms. **Phase 5 is exactly the work this number
+   demands**, and the earlier device profiling says where: 99% of frontend time is
+   in two windowed popcount reductions, and the per-pixel primitives are under 1%.
+   **The criterion stays open and is NOT restated.**
+
+**Why `PARTIAL`.** Criterion 4 is unmet, so E-5 cannot close. Criteria 2 and 3 are
+measured and reported. This entry re-runs once Phase 5.1 exists.
+
+**TWO HARNESS DEFECTS WERE FOUND AND FIXED WHILE BUILDING THIS, AND THE SECOND
+LOOKED EXACTLY LIKE A binCV DEFECT.**
+* Flow pairs were matched **by array index**. Two independently-detecting frontends
+  share no ordering, so this compared unrelated points. It reported **zero**
+  comparisons rather than wrong ones, which is how it was caught — a failure mode
+  worth preferring.
+* Corner capacity was passed as `maxCorners`. `goodFeaturesToTrack` ranks NMS
+  survivors into the caller's array and applies the `minDistance` spacing filter
+  **afterwards**, so a capacity of `maxCorners` truncates the pool before spacing
+  thins it: capacity 200 yields **61** corners, capacity 20 000 yields **193**.
+  The first reading looked like a 3.3× detection shortfall in binCV and was
+  nearly recorded as one. **`CornerResult::candidatesTruncated` was reporting the
+  truncation the whole time** — T3.11 added that flag for precisely this, and it
+  was ignored. The harness now allocates 20 000 and reports the flag every run.
+
+**Method:** `benchmark/frontend_sequence.cpp`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
