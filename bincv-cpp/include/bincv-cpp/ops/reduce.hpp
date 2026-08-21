@@ -485,6 +485,14 @@ struct RegionWords {
     WordType headMask = 0; ///< bits of firstWord that are inside the region
     WordType tailMask = 0; ///< bits of lastWord that are inside the region
     bool isEmpty = true;   ///< true when the clipped region covers no pixel
+
+    /// The CLIPPED column range, half-open. Carried because a kernel that extracts
+    /// the whole region into ONE aligned word needs the pixel bounds, and
+    /// `regionFromExtent` is handed them anyway -- recovering them from the masks
+    /// afterwards would cost a count-trailing-zeros to rediscover what was already
+    /// known (X-34).
+    size_t x0 = 0;
+    size_t x1 = 0;
 };
 
 /// @brief Region geometry from an already-clipped, non-empty pixel extent.
@@ -514,6 +522,8 @@ inline RegionWords<WordType> regionFromExtent(size_t x0, size_t x1, size_t y0, s
     out.lastWord = (x1 - 1) / wordBits;
     out.headMask = static_cast<WordType>(~lowBitsMask<WordType>(x0 % wordBits));
     out.tailMask = lowBitsMask<WordType>(((x1 - 1) % wordBits) + 1);
+    out.x0 = x0;
+    out.x1 = x1;
     out.isEmpty = false;
     return out;
 }

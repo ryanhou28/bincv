@@ -28,12 +28,15 @@ int main() {
     const auto lv = bincv::lkLevel<2>(prev, next, dx, dy);
 
     std::vector<bincv::impl::RegionWords<W>> regs;
+    std::vector<size_t> x0s, x1s;
     std::vector<long long> tx, ty;
     for (int y = 40; y + 31 < h - 40; y += 37) {
         for (int x = 40; x + 31 < w - 40; x += 41) {
             regs.push_back(bincv::impl::clipRegion<W>(static_cast<size_t>(w),
                                                       static_cast<size_t>(h),
                                                       bincv::Rect(x, y, 31, 31)));
+            x0s.push_back(static_cast<size_t>(x));
+            x1s.push_back(static_cast<size_t>(x + 31));
             tx.push_back(static_cast<long long>(rnd() % 7u) - 3);
             ty.push_back(static_cast<long long>(rnd() % 7u) - 3);
         }
@@ -43,9 +46,17 @@ int main() {
 
     size_t bad = 0;
     for (size_t k = 0; k < regs.size(); ++k) {
-        bincv::impl::TapSums a1, a2, b1, b2;
+        bincv::impl::TapSums a1, a2, b1, b2, a3, b3;
         residual::shipped(lv, regs[k], tx[k], ty[k], a1, b1);
         residual::hoisted(lv, regs[k], tx[k], ty[k], a2, b2);
+        residual::aligned(lv, regs[k], x0s[k], x1s[k], tx[k], ty[k], a3, b3);
+        if (a1.t00 != a3.t00 || a1.t01 != a3.t01 || a1.t10 != a3.t10 || a1.t11 != a3.t11 ||
+            a1.self != a3.self || b1.t00 != b3.t00 || b1.t01 != b3.t01 || b1.t10 != b3.t10 ||
+            b1.t11 != b3.t11 || b1.self != b3.self) {
+            if (bad < 3) std::printf("  ALIGNED MISMATCH window %zu: x.t01 %lld vs %lld\n", k,
+                                     a1.t01, a3.t01);
+            ++bad;
+        }
         if (a1.t00 != a2.t00 || a1.t01 != a2.t01 || a1.t10 != a2.t10 || a1.t11 != a2.t11 ||
             a1.self != a2.self || b1.t00 != b2.t00 || b1.t01 != b2.t01 || b1.t10 != b2.t10 ||
             b1.t11 != b2.t11 || b1.self != b2.self) {
@@ -71,6 +82,12 @@ int main() {
         {"SCALAR  slicedSignedSum per pair", [&](int) {
             bincv::impl::TapSums a, c;
             for (size_t k = 0; k < regs.size(); ++k) residual::hoisted(lv, regs[k], tx[k], ty[k], a, c);
+            measure::g_sink += static_cast<size_t>(a.t00);
+        }},
+        {"ALIGNED one word per row (X-34)", [&](int) {
+            bincv::impl::TapSums a, c;
+            for (size_t k = 0; k < regs.size(); ++k)
+                residual::aligned(lv, regs[k], x0s[k], x1s[k], tx[k], ty[k], a, c);
             measure::g_sink += static_cast<size_t>(a.t00);
         }},
     };

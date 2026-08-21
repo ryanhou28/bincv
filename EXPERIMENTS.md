@@ -6556,7 +6556,7 @@ the log as a number rather than in the tree as a second implementation.
 
 ---
 
-### X-34 · The straddling window · `TODO`
+### X-34 · The straddling window · `DONE`
 
 **COMMITTED BEFORE THE ARM EXISTS. A CEILING IS MEASURED FIRST AND CAN CANCEL IT** —
 X-33's procedure, which X-32 is the argument for.
@@ -6628,7 +6628,80 @@ kernel, `N` = 1, 2.
 **Workload:** 31×31 windows over a 640×480 level.
 **Metric:** ns per window on the reference device, bit-exact sums, then the LK stage.
 
-**Result:** *(not yet measured)*
+**Ceiling, measured first as the rule required:** aligned windows (`x0 % 32 == 0`,
+one word) against straddling ones (`x0 % 32 == 5`, two words), shipped kernel
+unchanged — word-visits **2.00×**, time **1.463×**. Above the 1.3× gate, so the arm
+was written.
+
+**Result — BAND A, and it EXCEEDS its own ceiling.**
+
+| arm | device µs | vs shipped |
+|---|---|---|
+| shipped (NEON, per-word loop) | 2147.8 | 1.000× |
+| **aligned, one word per row** | **1007.1** | **2.133×** |
+
+Bit-exact: **0 of 130 windows differ**, and on-device `ctest` passes with the path
+live.
+
+**It beats the ceiling because the ceiling only measured the word count.** Halving
+the words was worth 1.463×; the aligned kernel also deletes the **per-word loop and
+its head/tail mask construction** — `visitRowWords` is gone from this path — and
+that is the rest. A ceiling that bounds one mechanism does not bound a change that
+happens to remove two.
+
+**Stage and end-to-end effect, reference device and 400 real frames:**
+
+| | before X-33 | after X-33 | **after X-34** |
+|---|---|---|---|
+| LK stage | 25.540 ms | 21.088 ms | **11.638 ms** |
+| frontend | — | 22.01 ms/frame | **13.55 ms/frame** |
+| vs OpenCV, 1 thread | — | 0.17× | **0.26×** |
+
+**LK against LK, same points, same bits, OpenCV pinned to one thread:**
+
+| | before | now |
+|---|---|---|
+| binCV `1/2/2/2` | 4.11× slower | **3.08× slower** |
+| binCV `1/1/1/1` | 2.00× slower | **1.34× slower** |
+| cost of the N=2 ladder | 2.06× | **2.30×** |
+
+Accuracy is untouched — median track lifetime **18 vs OpenCV's 18**, flow median
+**0.0348 px** — because every change in this sequence is bit-exact.
+
+**Conclusion.**
+
+1. **The straddle was real waste and removing it is the largest single win so far:
+   2.13× on the kernel, 1.81× on the LK stage, 1.62× on the frontend.** The
+   op-count model that predicted it — 1.29 popcounts per pixel at `N = 1` against a
+   packed-word ideal of 0.625 — was right, and this is the first op-count inference
+   in this project to survive measurement after S3's and the 9.4-cycles reading both
+   failed.
+2. **AT `1/1/1/1` binCV IS NOW 1.34× SLOWER THAN SIMD OpenCV WHILE USING 8× LESS
+   MEMORY.** That is close to the honest statement of what bit-parallelism buys on
+   this workload, and it is a very different claim than "14× slower", which is where
+   this began.
+3. **THE LADDER IS NOW THE DOMINANT SPEED FACTOR, AND IT WAS CHOSEN UNDER A
+   MISTAKEN PROFILE.** [D-23](ARCHITECTURE.md) adopted `1/2/2/2` on accuracy, with
+   its speed cost estimated at 1.35×. Isolated, it is **2.30×** — and it was chosen
+   when corner detection was believed to be 52.7% of the frontend rather than 2%.
+   **The decision is not reversed here**: it bought real accuracy (yield 88.7–99.3%
+   against `1/1/1/1`'s 75.9–88.7%, [X-25](#x-25--the-coarse-level-window-border--done))
+   and this entry measures speed, not accuracy. But it is now **the single largest
+   speed lever left**, larger than [E-18](ARCHITECTURE.md#register), and it should
+   be re-decided against the corrected profile rather than left standing on the old
+   one. Registered as **[E-19](ARCHITECTURE.md#register)**.
+4. **`RegionWords` gained `x0`/`x1`.** `regionFromExtent` is handed them and threw
+   them away; recovering them from the masks afterwards would have cost a
+   count-trailing-zeros to rediscover what was already known.
+
+**Decision:** adopt. `residualSums` dispatches to the aligned path when the clipped
+region fits one word — which at `seal_params.yaml`'s 31×31 is every window at every
+word type binCV supports — and keeps the general path for wider windows. Recorded as
+[D-31](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/straddle_ceiling.cpp` (the bound) and
+`benchmark/residual_benchmark.cpp` with `residual_arm_aligned.cpp`;
+`benchmark/lk_headtohead.cpp` for the OpenCV comparison.
 
 ---
 

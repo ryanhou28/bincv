@@ -310,3 +310,41 @@ across the window is the remaining 2–3×, registered as **E-18**.
 compiles its whole body out on x86, leaving `scalarSum` unused and
 `-Wunused-function` fatal. `cmake --build --target` never compiled that file on x86;
 `verify.sh`'s clean build of every target did.
+
+---
+
+## 8 · X-34 — the straddling window · **DONE, Band A, and it beat its ceiling**
+
+A 31-pixel window at an arbitrary offset spans **1.94 `uint32_t` words** — it fits
+in one only when `x0 % 32 ≤ 1`. So `residualSums` was issuing **twice the popcounts
+it needed**, each covering 15.5 useful pixels instead of 31.
+
+| | device |
+|---|---|
+| kernel | **2.13×** |
+| LK stage | 21.088 → **11.638 ms** (1.81×) |
+| frontend | 22.01 → **13.55 ms/frame** (1.62×) |
+
+Bit-exact — 0 of 130 windows differ, on-device `ctest` green, track lifetime
+unchanged at 18 vs OpenCV's 18.
+
+**It beat its own 1.463× ceiling** because the ceiling measured only the word count;
+the aligned path also deletes the per-word loop and its head/tail masking. A bound
+on one mechanism does not bound a change that removes two.
+
+**vs OpenCV, LK against LK, one thread:**
+
+| ladder | before | now |
+|---|---|---|
+| `1/2/2/2` | 4.11× slower | **3.08×** |
+| `1/1/1/1` | 2.00× slower | **1.34×** |
+
+**At `1/1/1/1` binCV is within 1.34× of SIMD OpenCV while using 8× less memory.**
+That is a very different claim from the 14× this sequence started at.
+
+**And it makes the ladder the dominant speed factor.** D-23 chose `1/2/2/2` on
+accuracy with its speed cost *estimated* at 1.35×; isolated it is **2.30×**, and it
+was chosen when corner detection was believed to be 52.7% of the frontend rather
+than 2%. Not reversed — it bought real accuracy — but registered as **E-19**, and it
+is now a larger lever than E-18. The intermediate ladders (`1/2/1/1`, `1/2/2/1`)
+have never been measured for speed at all.

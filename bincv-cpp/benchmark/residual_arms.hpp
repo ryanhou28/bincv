@@ -24,6 +24,13 @@ namespace residual {
 void shipped(const bincv::LKLevelN<2, uint32_t>& lv,
              const bincv::impl::RegionWords<uint32_t>& r, long long tapX, long long tapY,
              bincv::impl::TapSums& sx, bincv::impl::TapSums& sy);
+/// X-34 arm A -- the window extracted into ONE aligned word per row.
+/// `x0`/`x1` are the CLIPPED column range; the caller has them from the Rect and
+/// RegionWords does not carry them.
+void aligned(const bincv::LKLevelN<2, uint32_t>& lv,
+             const bincv::impl::RegionWords<uint32_t>& r, size_t x0, size_t x1, long long tapX,
+             long long tapY, bincv::impl::TapSums& sx, bincv::impl::TapSums& sy);
+
 void hoisted(const bincv::LKLevelN<2, uint32_t>& lv,
              const bincv::impl::RegionWords<uint32_t>& r, long long tapX, long long tapY,
              bincv::impl::TapSums& sx, bincv::impl::TapSums& sy);

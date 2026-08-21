@@ -767,6 +767,63 @@ inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType
     }
 }
 
+
+/// @brief Bits `[x0, x0 + bitsPerWord)` of a row, aligned to bit 0. **INTERNAL.**
+/// @note The `s == 0` guard is not decoration: shifting a word by its own width is
+///       undefined, and that case is 1 in 32 rather than exotic.
+template <typename WordType>
+inline WordType alignedWord(const WordType* row, size_t words, size_t x0) {
+    constexpr size_t bits = bitsPerWord<WordType>();
+    const size_t w0 = x0 / bits;
+    const size_t s = x0 % bits;
+    const WordType lo = (w0 < words) ? row[w0] : static_cast<WordType>(0);
+    if (s == 0) return lo;
+    const WordType hi = (w0 + 1 < words) ? row[w0 + 1] : static_cast<WordType>(0);
+    return static_cast<WordType>((lo >> s) | (hi << (bits - s)));
+}
+
+/// @brief `residualSums` for a region that fits in ONE word. **INTERNAL** -- see
+///        the fast-path comment in `residualSums`.
+template <size_t N, typename WordType, bool UseNeon>
+inline void alignedResidualSums(const LKLevelN<N, WordType>& lv,
+                                const RegionWords<WordType>& r, long long tapX, long long tapY,
+                                TapSums& sumsX, TapSums& sumsY) {
+    const size_t width = r.x1 - r.x0;
+    if (width == 0) return;
+    const size_t words = minRowWords<WordType>(lv.prev[0].width);
+    const WordType mask = lowBitsMask<WordType>(width);
+    const long long x0 = static_cast<long long>(r.x0);
+
+    for (size_t y = r.y0; y < r.y1; ++y) {
+        WordType t00[N], t01[N], t10[N], t11[N], self[N], magX[N], magY[N];
+        const long long srcY = static_cast<long long>(y) + tapY;
+        for (size_t k = 0; k < N; ++k) {
+            t00[k] = displacedRow<WordType>(lv.next[k], srcY, x0 + tapX).word(0);
+            t01[k] = displacedRow<WordType>(lv.next[k], srcY, x0 + tapX + 1).word(0);
+            t10[k] = displacedRow<WordType>(lv.next[k], srcY + 1, x0 + tapX).word(0);
+            t11[k] = displacedRow<WordType>(lv.next[k], srcY + 1, x0 + tapX + 1).word(0);
+            self[k] = alignedWord<WordType>(lv.prev[k].row(y), words, r.x0);
+            magX[k] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dxMag[k].row(y), words, r.x0) & mask);
+            magY[k] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dyMag[k].row(y), words, r.x0) & mask);
+        }
+        const WordType signX = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
+        const WordType signY = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
+
+        sumsX.t00 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t00);
+        sumsX.t01 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t01);
+        sumsX.t10 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t10);
+        sumsX.t11 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t11);
+        sumsX.self += slicedSignedSum<N, WordType, UseNeon>(magX, signX, self);
+        sumsY.t00 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t00);
+        sumsY.t01 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t01);
+        sumsY.t10 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t10);
+        sumsY.t11 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t11);
+        sumsY.self += slicedSignedSum<N, WordType, UseNeon>(magY, signY, self);
+    }
+}
+
 /// @brief `b = sum(diff * grad)` at **N bits per pixel**, as ten exact integers.
 ///        **INTERNAL, and the generic-N form of the function above.**
 ///
@@ -797,6 +854,30 @@ inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType
 template <size_t N, typename WordType, bool UseNeon = true>
 inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
                          long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY) {
+    // ===================================================================
+    // THE ALIGNED FAST PATH (X-34). A 31-pixel window at an arbitrary offset
+    // spans 1.94 `uint32_t` words on average -- it fits in one only when
+    // `x0 % 32 <= 1`, two cases in thirty-two -- so the general path below issues
+    // TWICE THE POPCOUNTS IT NEEDS, each covering 15.5 useful pixels instead of
+    // 31. Extracting the region into bits [0, width) of a single word makes every
+    // popcount cover the whole window, and removes the per-word loop and its
+    // head/tail masking with it.
+    //
+    // THE TAPS COST NOTHING EXTRA: `ReplicatedShiftedRow` already shifts, so
+    // asking it for `word(0)` with `off = x0 + tapX` returns exactly the source
+    // bits at the window's left edge, aligned. Only the previous-frame planes need
+    // an explicit extraction, and the region is already clipped, so every bit that
+    // survives the mask is inside the frame and no border handling arises.
+    //
+    // Measured on the reference device: **2.13x**, bit-exact.
+    //
+    // Guarded on the window fitting a word -- `LKParams` allows any `winWidth`,
+    // and at 31x31 (`seal_params.yaml`) it fits at every word type binCV supports.
+    // ===================================================================
+    if (r.x1 - r.x0 <= bitsPerWord<WordType>()) {
+        alignedResidualSums<N, WordType, UseNeon>(lv, r, tapX, tapY, sumsX, sumsY);
+        return;
+    }
     for (size_t y = r.y0; y < r.y1; ++y) {
         const WordType* mx[N];
         const WordType* my[N];

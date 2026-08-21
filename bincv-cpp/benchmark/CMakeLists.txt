@@ -62,7 +62,8 @@ target_include_directories(corner_streaming_arms PRIVATE ${CMAKE_CURRENT_SOURCE_
 # X-32: residualSums' tap extraction, one TU per arm (see residual_arms.hpp).
 set(BINCV_RESIDUAL_ARMS
     ${CMAKE_CURRENT_SOURCE_DIR}/residual_arm_shipped.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/residual_arm_hoisted.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/residual_arm_hoisted.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/residual_arm_aligned.cpp)
 list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_RESIDUAL_ARMS})
 
 add_library(residual_arms OBJECT ${BINCV_RESIDUAL_ARMS})
