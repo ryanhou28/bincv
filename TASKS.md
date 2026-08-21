@@ -3538,8 +3538,31 @@ behind 4.3b.
 
 # Phase 5 — Platform Hardening
 
-Detailed once Phase 4 produces numbers — measurements determine which kernels are
-worth vectorizing. Scope is fixed
+**THE NUMBERS ARE IN, AND THE TARGET LIST IS TWO FUNCTIONS**
+([X-30](EXPERIMENTS.md), [D-27](ARCHITECTURE.md#8-design-decisions)). Measured on
+the reference device at the frontend's real operating point:
+
+| stage | ms/frame | share |
+|---|---|---|
+| **`cornerMinEigenVal`'s response sweep** | **30.367** | **52.7%** |
+| **`residualSums` × iterations** | **25.182** | **43.7%** |
+| `gradientCovariance` + LK setup | 0.833 | 1.4% |
+| corner selection | 0.773 | 1.3% |
+| `pyrDown` ×2 + both derivative ladders | 0.424 | 0.7% |
+
+**Two functions are 96.5% of the frontend, and they are the SAME KERNEL SHAPE** — a
+windowed popcount reduction, which is what [D-6](ARCHITECTURE.md#d-6-bulk-only-reductions)
+reserved the NEON domain for. So 5.1 is one piece of work applied twice, in that
+order, not a catalogue.
+
+**What is ruled OUT matters as much:** the per-pixel primitives (`pyrDown`,
+`derivativeX/Y`, threshold) are the intuitive NEON targets and are **0.7%** —
+vectorizing all of them perfectly caps the frontend gain at **1.007×**. E-12 closed
+on that basis.
+
+The motivation is [X-28](EXPERIMENTS.md)'s **unmet criterion 4**: binCV is **14×
+slower** than a SIMD, 12-threaded OpenCV on the same binary content. That criterion
+was not restated. Scope is fixed
 ([ROADMAP Phase 5](ROADMAP.md#phase-5--platform-hardening)): NEON reference
 kernels, aarch64 cross-compilation and on-hardware validation, x86 portability,
 and Tier 2 correctness in CI.

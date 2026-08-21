@@ -163,3 +163,35 @@ corollary: every prior code-layout caution in this repo (X-22's 1.46×,
 is an order of magnitude smaller. That does not retire the split-arms discipline —
 these numbers are trustworthy *because* the arms were split — but it is a further
 reason to prefer the device for A/B work.
+
+---
+
+## 4b · E-12 / X-30 — where the time goes, and Phase 5.1's target list · **DONE**
+
+**E-12's registered target turned out to be worth almost nothing, and that is
+reported rather than quietly substituted.** It was registered against T3.5's
+derivative (+93% per row) *and* against "every `ops/` kernel with a per-row
+prologue". The derivative sits in a build stage worth **0.7%** — eliminating the
+whole stage caps the frontend gain at **1.0062×** — so the question was asked of
+the 99% instead.
+
+Reference device, 640×480, ladder `1/2/2/2`, 140 keypoints. Splits taken **by
+difference**, so nothing is perturbed by a timer inside a loop:
+
+| stage | ms/frame | share |
+|---|---|---|
+| **corner response sweep** | **30.367** | **52.7%** |
+| **LK residual + solve** | **25.182** | **43.7%** |
+| LK covariance + setup | 0.833 | 1.4% |
+| corner selection | 0.773 | 1.3% |
+| build | 0.424 | 0.7% |
+
+**Two functions are 96.5% of the frontend and they are the same kernel shape** — a
+windowed popcount reduction, exactly what D-6 reserved the NEON domain for. Phase
+5.1 is one piece of work applied twice, recorded as D-27.
+
+**Two of my own results get re-weighted, and I would rather say so than not.**
+X-29's accumulator win (last night's work) is 1.114× on a stage worth 1.4% —
+**~0.17% end to end**. It was the right answer to E-13 and it was not a big lever.
+And D-22's streaming corner ring is confirmed as a *footprint* decision: selection
+is 2.5% of detection, the response sweep 97.5%.

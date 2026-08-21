@@ -5988,6 +5988,81 @@ cannot drift.
 
 ---
 
+### X-30 · Where the frontend's time goes, and Phase 5.1's target list · `DONE`
+
+**Gates:** [E-12](ARCHITECTURE.md#register) — its second half — and
+[X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial)'s unmet
+criterion 4.
+**Question:** How much of an `ops/` kernel's per-row cost is genericity that is not
+in `N`, and which kernels is that worth asking about?
+
+**THE REGISTERED TARGET TURNED OUT TO BE WORTH ALMOST NOTHING, AND THAT IS REPORTED
+RATHER THAN QUIETLY SUBSTITUTED.** E-12 was registered against T3.5's derivative
+(**+93% per row** against a hand-written control) *and* against "every `ops/` kernel
+with a per-row prologue". X-28 then measured the frontend end to end, and the
+derivative sits inside a build stage worth **0.7%**: **eliminating the entire build
+stage caps the frontend gain at 1.0062×.** Answering E-12 precisely on the
+derivative would be optimising six tenths of a percent. So this entry asks E-12's
+question of the 99% instead, which is the half of its registration that still bites.
+
+**Method:** splits taken **by difference**, so nothing is perturbed by a timer
+inside a loop. `maxIterations = 0` runs LK's per-point setup, clipping, covariance
+and `minEig` test and **no residual**; subtracting it from the full call separates
+the 2×2 matrix from the iteration. `cornerMinEigenVal` is the response sweep alone;
+`goodFeaturesToTrackStreaming` adds NMS, ranking and the spacing filter.
+
+**Result — reference device, 640×480, ladder `1/2/2/2`, 140 keypoints, 31×31
+window, four levels. Governor `performance`, `throttled=0x0`, spread ≤ 1%.**
+
+| stage | ms/frame | share |
+|---|---|---|
+| **corner: response sweep** (`cornerMinEigenVal`) | **30.367** | **52.7%** |
+| **LK: residual + solve** (`residualSums` × iterations) | **25.182** | **43.7%** |
+| LK: covariance + setup (`gradientCovariance`, `minEig`, clipping) | 0.833 | 1.4% |
+| corner: selection (NMS, ranking, spacing) | 0.773 | 1.3% |
+| build: `pyrDown` ×2 + both derivative ladders | 0.424 | 0.7% |
+| **total** | **57.579** | |
+
+**Conclusion — PHASE 5.1's TARGET LIST IS TWO FUNCTIONS, AND THEY ARE THE SAME
+SHAPE.**
+
+1. **`cornerMinEigenVal`'s response sweep is 52.7% and `residualSums` is 43.7% —
+   together 96.4% of the frontend.** Everything else in the operation set,
+   summed, is 3.6%. Both are **windowed popcount reductions**, which is precisely
+   what [D-6](ARCHITECTURE.md#d-6-bulk-only-reductions) reserved the NEON domain
+   for: on aarch64 `CNT` lives in the vector registers and every word currently
+   pays two register-domain crossings. **Phase 5.1 is one kernel shape, not a
+   catalogue.**
+2. **THE COVARIANCE IS 1.4%, WHICH PUTS [X-29](#x-29--the-per-row-partial-accumulator-above-n--1--done)
+   IN PERSPECTIVE AND THE ENTRY SAYS SO.** X-29's accumulator win is real,
+   device-measured and bit-identical — and at 1.114× on 1.4% of the frontend it is
+   worth about **0.17% end to end**. It was the right answer to E-13's question; it
+   was not the biggest lever available, and reporting it as though it were would
+   misrepresent the profile that was measured immediately afterwards.
+3. **The LK iteration, not the matrix, is what costs.** The residual is **96.8% of
+   LK time** — `20N²` popcounts per word paid once per iteration per level, against
+   the covariance's `3N² + N` paid once. Any further work on LK's arithmetic belongs
+   in `residualSums`.
+4. **X-23's streaming ring is confirmed as a footprint decision, not a speed one.**
+   Corner selection — NMS, ranking, spacing — is **2.5% of detection**; the response
+   sweep is 97.5%. [D-22](ARCHITECTURE.md) claimed the ring cost nothing in time and
+   saved 11.83× in bytes, and this profile is consistent with that from the other
+   direction.
+5. **E-12's original question is answered by not needing an answer.** The
+   derivative's +93% per-row genericity cost stands as measured by
+   [X-21](#x-21--does-generic-n-cost-the-specialized-n1-and-ternary-paths-anything--done);
+   it is simply not worth removing, because the whole stage it lives in is 0.7%.
+   **That is a real result about where NOT to spend effort**, and it is the kind of
+   thing a profile is for.
+
+**Decision:** **E-12 closes.** No change is made to the derivative. Phase 5.1's
+scope is fixed to the two windowed reductions above, in that order, and is recorded
+as [D-27](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/frontend_profile.cpp`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
