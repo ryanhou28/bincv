@@ -143,6 +143,11 @@ struct Stats {
     size_t compared = 0, agreeWithin1px = 0;
     std::vector<double> flowErrs;   // X-25's lesson: this distribution has a tail
     double bincvMs = 0.0, opencvMs = 0.0;
+    // PER-STAGE, INSIDE THE REAL LOOP. X-30 profiled one detection and one track
+    // per frame; the real frontend re-detects on a few percent of frames, and that
+    // over-weighted detection ~33x and sent D-27's target list to the wrong kernel.
+    // These timers are taken at the ACTUAL duty cycle.
+    double msBuild = 0.0, msDetect = 0.0, msTrack = 0.0;
     std::vector<int> bincvLifetimes, opencvLifetimes;
 };
 
@@ -180,6 +185,10 @@ int main(int argc, char** argv) {
                 "rl_fast_edge_filter_wide(17)\n\n");
 
     bincv::LKParams lk;                       // seal_params.yaml verbatim
+    // The iteration cap is seal_params.yaml's 20. Nothing in this project has ever
+    // measured how many iterations the tracker actually NEEDS, and at 94.7% of
+    // frontend time an unnecessary iteration is the most expensive thing there is.
+    if (const char* it = std::getenv("BINCV_LK_ITERS")) lk.maxIterations = std::atoi(it);
     bincv::GoodFeaturesParams gftt;           // ditto
     const int kMinTracks = 60;
 
@@ -210,8 +219,11 @@ int main(int argc, char** argv) {
 
         // ---------------- binCV ----------------
         auto t0 = Clock::now();
+        auto tStage = t0;
         fe.loadLevel0(binPrev, binNext);
         fe.build();
+        st.msBuild += std::chrono::duration<double, std::milli>(Clock::now() - tStage).count();
+        tStage = Clock::now();
         if (bPts.size() < static_cast<size_t>(kMinTracks)) {
             bincv::ResponseMap ringMap{fe.ring.data(), static_cast<size_t>(w),
                                        bincv::kResponseRingRows, static_cast<size_t>(w)};
@@ -227,12 +239,15 @@ int main(int argc, char** argv) {
             if (r.candidatesTruncated) ++truncatedDetections;
             ++st.detections;
         }
+        st.msDetect += std::chrono::duration<double, std::milli>(Clock::now() - tStage).count();
+        tStage = Clock::now();
         std::vector<bincv::Point2f> bOut(bPts.size());
         std::vector<uint8_t> bStatus(bPts.size());
         if (!bPts.empty()) {
             bincv::calcOpticalFlowPyrLK(fe.levels, bPts.data(), bOut.data(), bStatus.data(),
                                         nullptr, bPts.size(), lk);
         }
+        st.msTrack += std::chrono::duration<double, std::milli>(Clock::now() - tStage).count();
         st.bincvMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 
         // ---------------- OpenCV, same binary content as CV_8U ----------------
@@ -371,6 +386,18 @@ int main(int argc, char** argv) {
     std::printf("  RATIO  : %.2fx smaller\n",
                 static_cast<double>(ocvBytes) / static_cast<double>(bcvBytes));
 
+    std::printf("\n--- binCV per-stage, AT THE REAL DUTY CYCLE ---\n");
+    {
+        const double f = static_cast<double>(st.frames);
+        const double tot = st.msBuild + st.msDetect + st.msTrack;
+        std::printf("  %-28s %8.3f ms/frame  %5.1f%%   (%zu detections in %zu frames = %.1f%%)\n",
+                    "detect", st.msDetect / f, 100.0 * st.msDetect / tot, st.detections,
+                    st.frames, 100.0 * static_cast<double>(st.detections) / f);
+        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "track (LK)", st.msTrack / f,
+                    100.0 * st.msTrack / tot);
+        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "build (pyrDown + derivatives)",
+                    st.msBuild / f, 100.0 * st.msBuild / tot);
+    }
     std::printf("\n--- CRITERION 4: speed against the byte-per-pixel denominator ---\n");
     std::printf("  binCV  : %8.3f ms/frame\n", st.bincvMs / static_cast<double>(st.frames));
     std::printf("  OpenCV : %8.3f ms/frame\n", st.opencvMs / static_cast<double>(st.frames));

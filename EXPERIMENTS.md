@@ -6261,6 +6261,95 @@ their only difference.
 
 ---
 
+### X-32 · `residualSums`' tap extraction · `TODO`
+
+**COMMITTED BEFORE THE ARM EXISTS.**
+
+**Gates:** [D-28](ARCHITECTURE.md#8-design-decisions)'s corrected target list, and
+[X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial)'s unmet
+criterion 4.
+**Question:** `residualSums` is **94.7% of the real frontend**. Its four bilinear
+taps are extracted independently per word, but `t01` **is** `t00` shifted one pixel
+and `t11` **is** `t10` shifted one pixel. What does deriving two from the other two
+buy?
+
+**THE TARGET IS CORRECTED, AND THE CORRECTION IS THE POINT.**
+[X-30](#x-30--where-the-frontends-time-goes-and-phase-51s-target-list--done) timed
+**one detection and one track per frame** and reported corner detection at 52.7%;
+[X-31](#x-31--the-corner-response-as-bit-sliced-box-sums--done) then made that
+kernel **6.98× faster, bit-exact**, and moved the frontend **1.04%**. Measured
+inside the real sequence loop at the actual duty cycle — 25 re-detections in 599
+frames — the split is:
+
+| stage | ms/frame | share |
+|---|---|---|
+| **track (LK)** | **21.725** | **94.7%** |
+| build | 1.036 | 4.5% |
+| detect | 0.173 | 0.8% |
+
+**Every optimisation from here is judged against this table, not against X-30's.**
+
+**The mechanism, and why it should be nearly free.** `t01`'s pixel `x` is
+`next[x + tapX + 1]`, which is `t00`'s pixel `x + 1`. On the word grid that is
+`t01_i = (t00_i >> 1) | (t00_{i+1} << (bits-1))` — **exact**, including the
+replicate border, because both taps clamp on the same absolute column. So two of
+the four `ReplicatedShiftedRow::word()` calls per word can become a shift and an
+or, and `t00_{i+1}` is the next iteration's `t00_i`, so it is computed once.
+
+**Why it should matter:** `residualSums` was measured directly at **~9.4 cycles per
+popcount** where a popcount is 1 cycle throughput, so ~90% of it is tap extraction
+and addressing, not arithmetic. Halving the extraction should therefore be worth
+substantially more than vectorizing the popcounts would.
+
+**Decision rule** *(written before measuring)* — `R` = shipped / hoisted on
+`residualSums`, reference device, and **bit-exact sums** as a precondition (the
+derivation is an identity, so the ten integers must be identical, not close).
+
+* **Band A — `R` ≥ 1.4×.** Adopt, and re-measure the frontend end to end rather
+  than quoting the kernel ratio, because X-31 has just demonstrated how far those
+  two can diverge.
+* **Band B — 1.15× ≤ `R` < 1.4×.** Adopt if bit-exact and not materially harder to
+  hold correct, and state that the ~90%-extraction reading over-predicted.
+* **Band C — `R` < 1.15×.** **Do not ship.** The ~9.4-cycles-per-popcount reading
+  would then not localise to tap extraction, and the entry must say where it does
+  go before anything else is tried — including SIMD, which rests on the same
+  reading.
+* **Band D — slower.** The extra `word(i+1)` costs more than the `word(i)` it
+  saves, i.e. the calls were already being CSE'd or inlined away. That would mean
+  the cost is elsewhere in the loop and would invalidate the tap-extraction
+  hypothesis outright.
+
+**REPORTED ALONGSIDE, AND IT IS A CALLER-FACING TRADE RATHER THAN AN
+OPTIMISATION:** `maxIterations` is the single largest speed lever in the frontend
+and nothing had measured it. Over 599 real frames, LK time against track quality:
+
+| iterations | track ms/frame | median track lifetime | flow within 1 px |
+|---|---|---|---|
+| 1 | 6.078 | 8 frames | 90.1% |
+| 2 | 11.090 | 9 | 97.1% |
+| 3 | 14.457 | 11 | 95.1% |
+| 5 | 16.943 | 12 | 96.8% |
+| **20** *(`seal_params.yaml`)* | **21.246** | **13** | **97.5%** |
+
+**It is not free**: 3 iterations is **1.47× faster for 15% shorter tracks**. Track
+lifetime is what a VIO estimator consumes, so this is accuracy against speed —
+[CLAUDE.md](CLAUDE.md)'s tiebreak covers speed against footprint and
+[§1](ARCHITECTURE.md#what-bincv-is-not) puts this one on the integrating pipeline's
+side, exactly as [D-24](ARCHITECTURE.md) put route (a) there. **binCV keeps
+`seal_params.yaml`'s 20 and documents the curve.** It is recorded here because a
+caller cannot make that trade without the numbers, and because the points that
+consume all 20 iterations are presumably the ones that never converge — the same
+~1% tail [E-17](ARCHITECTURE.md#register) is chartered on.
+
+**Variants:** shipped vs hoisted × `N` = 1, 2; `uint32_t`.
+**Workload:** 31×31 windows over a 640×480 level, the shipped default.
+**Metric:** ns per window on the reference device, bit-exact sums, then the frontend
+end to end.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
