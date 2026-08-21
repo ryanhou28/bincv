@@ -6414,6 +6414,85 @@ again. Recorded as [D-29](ARCHITECTURE.md#8-design-decisions).
 
 ---
 
+### X-33 · NEON for the bit-sliced signed sum · `TODO`
+
+**COMMITTED BEFORE THE KERNEL EXISTS.** Phase 5.1's first vectorized kernel.
+
+**Gates:** [D-29](ARCHITECTURE.md#8-design-decisions) — which established that
+`residualSums` is arithmetic-bound and therefore *is* a SIMD target, unlike the
+corner response — and [X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial)'s
+unmet criterion 4.
+**Question:** What does keeping the window's popcounts in NEON registers buy
+`residualSums`, which is **94.7% of the real frontend**?
+
+**WHY THIS KERNEL AND NOT THE OTHER ONE, WHICH IS THE WHOLE POINT OF THE LAST TWO
+ENTRIES.** [X-31](#x-31--the-corner-response-as-bit-sliced-box-sums--done) showed the
+corner response was **84% removable per-pixel overhead** — reformulating gave 6.98×
+where vectorizing would have given ~1.2×. [X-32](#x-32--residualsums-tap-extraction--done)
+showed `residualSums` is **not** like that: tap extraction is **13.7%**, there is no
+comparable dead weight, and the work is masks, popcounts and accumulates that all
+vectorize. **Same question, opposite answers, and the difference is measured.**
+
+**The design, and it is [D-6](ARCHITECTURE.md#d-6-bulk-only-reductions)'s own
+argument spent rather than restated.** aarch64 has no scalar popcount: `CNT` lives
+in the vector registers, so every scalar `popcountWord` pays `fmov` in and `fmov`
+out. `slicedSignedSum<N>` issues `2N²` popcounts per call — **8 at `N = 2`**, which
+is the depth three of four levels of the adopted `1/2/2/2` ladder run at. Batching
+them means:
+
+* form the `N²` plane-pair ANDs in vector lanes rather than one at a time;
+* `vcntq_u8` → `vpaddlq_u8` → `vpaddlq_u16` to get four per-word counts in four
+  `u32` lanes;
+* accumulate lane-wise, and **cross the register domain ONCE per call instead of
+  `2N²` times**.
+
+**This is why D-6 forbade a per-word popcount in the public API in the first
+place** — so that the reductions would be shaped to allow exactly this later. This
+entry is the first time that reservation is cashed in.
+
+**BIT-EXACTNESS IS A PRECONDITION.** The sums are exact integers and the vector path
+computes the same integers in the same weighting, so `residualSums`' ten values must
+be **identical**, not close. Checked against the scalar path before any timing.
+
+**Decision rule** *(written before measuring)* — `R` = scalar / NEON on
+`residualSums` at `N = 2`, reference device, bit-exact.
+
+* **Band A — `R` ≥ 1.5×.** Adopt behind `BINCV_HAVE_NEON`, keep the scalar path as
+  the portable one and as the equality oracle, and **re-measure the frontend end to
+  end** rather than quoting the kernel ratio — X-31 demonstrated how far those two
+  can diverge.
+* **Band B — 1.15× ≤ `R` < 1.5×.** Adopt only if the scalar path stays the
+  reference and the NEON path is confined to one function. A dual implementation is
+  a permanent correctness cost, and below 1.5× it has to earn that.
+* **Band C — `R` < 1.15×.** **Do not ship.** Two implementations of one identity,
+  for nothing, on the library's hottest kernel. Report where the time went instead
+  — and note that this would be the *third* reading in a row (after S3 and after
+  the 9.4-cycles inference) to say the cost is not where it was expected.
+* **Band D — NEON is slower.** Then the scalar `popcountWord` is already being
+  compiled to something better than the hand-written intrinsics — plausible, since
+  GCC can auto-vectorize and the operands are contiguous — and **that is worth
+  knowing before any further Phase 5.1 work**, because the whole phase assumes hand
+  vectorization beats the compiler here.
+
+**A CEILING IS MEASURED FIRST, AND IT CAN CANCEL THE ARM.** Before the real kernel,
+a stripped loop that performs only the vector popcounts and accumulates — no taps,
+no masks, no weighting — gives an upper bound on what any vectorization of this
+inner loop can deliver. **If the ceiling is under 1.5×, the arm is not written**;
+[X-32](#x-32--residualsums-tap-extraction--done) was a day spent on an optimisation
+whose ceiling was 1.07× and which a five-minute bound would have killed.
+
+**Variants:** scalar vs NEON × `N` = 1, 2 × `uint32_t`, `uint64_t`.
+**Workload:** 31×31 windows over a 640×480 level, the shipped default.
+**Metric:** ns per window on the reference device; bit-exact sums; then the frontend
+end to end at the real duty cycle.
+**Platform note:** the development machine is x86_64 and **cannot measure this at
+all**. Correctness is checkable there only through the scalar fallback; every number
+in this entry comes from the reference device.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
