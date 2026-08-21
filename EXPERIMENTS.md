@@ -5588,6 +5588,91 @@ solve on the points both find.
 
 ---
 
+### X-27 · The 1-bit level-0 localisation floor · `TODO`
+
+**COMMITTED BEFORE THE HARNESS EXISTS.**
+
+**Gates:** [E-16](ARCHITECTURE.md#register) — and through it
+[T3.8](TASKS.md)'s standing accuracy criterion, which has been a documented MISS
+since X-20 and which three separate experiments have now failed to explain.
+**Question:** Is X-20's **0.25 px RMS** tolerance reachable at all from a 1-bit
+edge map — and if not, what is the representation's actual floor?
+
+**Why it has come to this.** Three pyramid parameters have been measured and none
+is the cause: [X-24](#x-24--pyramid-level-bit-depths--done) ruled out level bit
+depth, [X-25](#x-25--the-coarse-level-window-border--done) ruled out the border and
+the entry policy, and in every arm of X-25 — **including the padded one** —
+`rms(usable)` sits at **0.25–0.29 px** on the sub-pixel and non-translational
+cases. X-20's own single-level figure, with no pyramid in the picture at all, is
+**0.2860 px**. The residual has stopped moving when the pyramid changes, which is
+the signature of a limit that is not in the pyramid.
+
+**WHERE THE 0.25 CAME FROM, AND WHICH HALF OF IT IS IN DOUBT.** X-20 derived it as:
+*"A 1-bit frame locates an edge crossing to ±0.5 px; a 31×31 window averages many
+crossings, so the aggregate must beat the single-crossing bound by at least a
+factor of two (an effective count of four independent crossings — the modest form
+of the claim)."* The ±0.5 px half is sound — it is quantisation. **The suspect half
+is "four independent crossings"**, which was asserted, never measured, and has two
+ways of being wrong on a 13%-set edge map: the set pixels lie on **connected
+contours** rather than being independent samples, and an edge constrains motion
+only **perpendicular to itself** (the aperture problem), so `N` edge pixels do not
+supply `N` independent one-dimensional constraints.
+
+**Method — AN ORACLE ESTIMATOR, WITH THE TRACKER ENTIRELY OUT OF THE LOOP.** For a
+window and a known sub-pixel displacement `d`, the only thing a binary frontend
+observes is `B_d = binarize(warp(gray, d))`. Sweep candidate displacements `δ` on a
+fine grid, form `B_δ` the same way, and take `δ* = argmin_δ Hamming(B_δ, B_d)` over
+the window. That is the maximum-likelihood estimate **under the exact forward
+model**, from the binary observation alone.
+
+**It is deliberately unfair to the tracker, and that is the point.** The oracle
+knows the grayscale, the warp family and the binarization; no real estimator does.
+So `RMS|δ* − d|` is a **floor**: it is what the representation permits, and nothing
+that sees only the bits can do better. If the oracle cannot reach 0.25 px, the
+tolerance was never reachable by anything.
+
+**Decision rule** *(written before measuring)* — let `F` be the oracle RMS at the
+shipped 31×31 window on the reference pipeline's own content.
+
+* **Band A — `F` ≤ 0.20 px.** The tolerance WAS reachable and the tracker is
+  leaving accuracy on the table. T3.8's criterion stands unchanged, the residual
+  becomes a **tracker** question, and it is registered as one rather than being
+  absorbed here.
+* **Band B — 0.20 < `F` ≤ 0.35 px.** The tolerance sat inside the representation's
+  own noise. Restate T3.8's criterion at a bound **derived from `F`** — not fitted
+  to any tracker output — recording that X-20's number rested on an assumption this
+  entry measured and contradicted. Report the split: how much of the tracker's
+  0.25–0.29 px is representation and how much is tracker.
+* **Band C — `F` > 0.35 px.** The tolerance was badly unreachable AND `F` would
+  then exceed the tracker's own measured error, which is **impossible**: an
+  estimator cannot beat the floor of the data it sees. **A band-C reading is
+  therefore a bug in the oracle, not a finding**, and the entry must report a
+  methodology failure and stop rather than restate any tolerance on the strength of
+  it. Written down now so that the most flattering-looking outcome — "the
+  representation is even worse than we thought" — cannot be reported as a result.
+* **Band D — the scaling law, measured alongside.** `F` is also measured at 11×11,
+  21×21, 31×31 and 41×41. If `F` falls as `1/√(area)` the independent-crossings
+  model is right in KIND and only its constant was wrong. If `F` **plateaus**, the
+  model is wrong in kind — the crossings are not independent — and that is the more
+  interesting statement, because it means a bigger window buys nothing and
+  [D-15](ARCHITECTURE.md#8-design-decisions)'s window sizing is affected.
+
+**Also measured, because the derivation turns on it:** the actual count of set
+pixels per 31×31 window on real content, and the count of distinct edge
+ORIENTATIONS in it — the two numbers "four independent crossings" was standing in
+for.
+
+**Variants:** window 11/21/31/41; displacements spanning a full pixel in both axes.
+**Workload:** the reference pipeline's own content through the corrected two-stage
+preprocessing, on EuRoC V1_02_medium frames.
+**Metric:** RMS and max of `|δ* − d|` in px; set-pixels and orientation count per
+window. Accuracy only — this is a property of the representation, so there is no
+speed axis and none is reported.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
