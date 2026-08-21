@@ -794,14 +794,54 @@ inline void alignedResidualSums(const LKLevelN<N, WordType>& lv,
     const WordType mask = lowBitsMask<WordType>(width);
     const long long x0 = static_cast<long long>(r.x0);
 
+    // ===================================================================
+    // TWO THINGS THE ALIGNMENT MADE POSSIBLE (X-35).
+    //
+    // (T) THE `+1` TAP IS A SHIFT, AND X-34 IS WHAT MADE THAT TRUE.
+    // X-32 tried exactly this identity in the per-word path and it LOST: `t01` at
+    // word `i` needed a bit from word `i + 1`, and the extra read cost more than
+    // it saved. Aligned, the window is `width` pixels and one read covers
+    // `bitsPerWord`, so `t01`'s bits for positions `0..width-1` are source columns
+    // `[c+1, c+width]` -- entirely inside the word `t00` already holds whenever
+    // `width < bitsPerWord`. So `t01 = t00 >> 1`, one operation, and TWO OF THE
+    // FOUR displaced-row constructions disappear.
+    //
+    // (I) THE INTERIOR FAST PATH. `displacedRow` builds the replicate border
+    // unconditionally -- two `edgeFill` calls, each a load and a test. A window
+    // whose displaced extent is entirely inside the frame needs none of it and can
+    // use the same `alignedWord` the previous-frame planes use. Most windows are
+    // interior, so the border machinery was being paid for the minority.
+    //
+    // Both are guarded, and the general path below is what runs when they do not
+    // hold.
+    // ===================================================================
+    const bool tapIsShift = width < bitsPerWord<WordType>();
+    const long long srcX = x0 + tapX;
+    const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
+    const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
+
     for (size_t y = r.y0; y < r.y1; ++y) {
         WordType t00[N], t01[N], t10[N], t11[N], self[N], magX[N], magY[N];
         const long long srcY = static_cast<long long>(y) + tapY;
+        const bool rowsInside = srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
+        const bool interior = colsInside && rowsInside;
         for (size_t k = 0; k < N; ++k) {
-            t00[k] = displacedRow<WordType>(lv.next[k], srcY, x0 + tapX).word(0);
-            t01[k] = displacedRow<WordType>(lv.next[k], srcY, x0 + tapX + 1).word(0);
-            t10[k] = displacedRow<WordType>(lv.next[k], srcY + 1, x0 + tapX).word(0);
-            t11[k] = displacedRow<WordType>(lv.next[k], srcY + 1, x0 + tapX + 1).word(0);
+            if (interior) {
+                t00[k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY)), words,
+                                               static_cast<size_t>(srcX));
+                t10[k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY) + 1),
+                                               words, static_cast<size_t>(srcX));
+            } else {
+                t00[k] = displacedRow<WordType>(lv.next[k], srcY, srcX).word(0);
+                t10[k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX).word(0);
+            }
+            if (tapIsShift) {
+                t01[k] = static_cast<WordType>(t00[k] >> 1);
+                t11[k] = static_cast<WordType>(t10[k] >> 1);
+            } else {
+                t01[k] = displacedRow<WordType>(lv.next[k], srcY, srcX + 1).word(0);
+                t11[k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX + 1).word(0);
+            }
             self[k] = alignedWord<WordType>(lv.prev[k].row(y), words, r.x0);
             magX[k] = static_cast<WordType>(
                 alignedWord<WordType>(lv.dxMag[k].row(y), words, r.x0) & mask);

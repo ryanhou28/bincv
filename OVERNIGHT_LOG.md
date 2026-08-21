@@ -348,3 +348,42 @@ was chosen when corner detection was believed to be 52.7% of the frontend rather
 than 2%. Not reversed — it bought real accuracy — but registered as **E-19**, and it
 is now a larger lever than E-18. The intermediate ladders (`1/2/1/1`, `1/2/2/1`)
 have never been measured for speed at all.
+
+---
+
+## 9 · X-35 — the tap machinery · **DONE, Band A, and it reaches parity**
+
+The arithmetic was already ahead of OpenCV after X-34 — 0.65 popcounts/pixel at
+`N = 1` against ~1.2 SIMD ops — and binCV was still slower. **The whole remaining
+gap was machinery: ~5 ops/pixel of addressing around 0.65 ops/pixel of work.**
+
+**Arm T: the `+1` tap is a shift — and X-34 is what made that true.** X-32 tried
+this identity and lost at 0.974×, because in the per-word path `t01` needed a bit
+from the next word. Aligned, `t01`'s bits are inside the word `t00` already holds.
+**A rejected optimisation became correct because an unrelated change moved the
+ground under it.**
+
+**Arm I: an interior fast path**, since `displacedRow` built the replicate border
+unconditionally for windows that are mostly interior.
+
+**LK stage, reference device, cumulative: 25.540 → 7.421 ms, 3.44×.**
+
+**LK vs LK, OpenCV 1 thread, median of seven repeats on an idle machine:**
+
+| | median ms |
+|---|---|
+| binCV `1/2/2/2` | 9.819 |
+| **binCV `1/1/1/1`** | **4.216** |
+| **OpenCV `CV_8U`** | **4.134** |
+
+**Parity — 1.02× — on an eighth of the memory.** From 14× slower at the start of
+the session.
+
+**A wrong number was nearly reported.** An earlier run of this comparison, taken
+while `verify.sh` was building in the background, said 1.00× — and OpenCV's own time
+swung **4.425 → 3.803 → 5.480 ms on identical code**, a 1.44× spread from load
+alone, larger than most effects this project measures. The numbers above are medians
+of seven repeats at load ~1.2.
+
+**All that remains at the shipped ladder is the ladder.** `1/2/2/2` costs 2.33×,
+which is now the entire difference between parity and 2.38× slower. E-19.

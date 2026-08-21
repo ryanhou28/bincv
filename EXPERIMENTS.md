@@ -6705,7 +6705,7 @@ word type binCV supports — and keeps the general path for wider windows. Recor
 
 ---
 
-### X-35 · The tap machinery around the arithmetic · `TODO`
+### X-35 · The tap machinery around the arithmetic · `DONE`
 
 **COMMITTED BEFORE THE ARMS EXIST.**
 
@@ -6777,7 +6777,75 @@ the remaining gap is attributable rather than merely smaller.
 **Metric:** ns per window on the reference device; bit-exact sums; then the LK stage
 and the frontend.
 
-**Result:** *(not yet measured)*
+**Result — BAND A, and the arms are separated as the rule required.**
+
+Reference device, LK stage: **11.638 → 7.421 ms, 1.57×**; residual + solve
+**10.516 → 6.267 ms, 1.68×**. Bit-exact — `test_opticalflow`'s per-pixel oracle
+compares `residualSums` against a `long long` control at `N = 1..5` over random
+windows with **negative and out-of-range taps**, which is exactly what exercises
+the non-interior path, and on-device `ctest` is green.
+
+**Arm T fired, and it is X-32's rejected identity working because X-34 moved the
+ground under it.** In the per-word path `t01` at word `i` needed a bit from word
+`i + 1` and the extra read cost more than it saved — 0.974×, rejected. Aligned,
+the window is 31 pixels and one `uint32_t` read covers 32, so `t01`'s bits are
+**already inside the word `t00` holds**: `t01 = t00 >> 1`, and two of four
+displaced-row constructions vanish.
+
+**Arm I fired too.** `displacedRow` built the replicate border unconditionally —
+two `edgeFill` calls, each a load and a test — for windows that are mostly interior.
+
+**Cumulative effect of the whole sequence on the LK stage (reference device):**
+
+| | ms | |
+|---|---|---|
+| before X-33 | 25.540 | |
+| after X-33 (NEON) | 21.088 | 1.21× |
+| after X-34 (alignment) | 11.638 | 2.19× |
+| **after X-35 (tap machinery)** | **7.421** | **3.44×** |
+
+**LK AGAINST LK, SAME POINTS, SAME BITS, OpenCV PINNED TO ONE THREAD — median of
+seven repeats on an otherwise idle machine:**
+
+| arm | median ms | min | max |
+|---|---|---|---|
+| binCV `1/2/2/2` (shipped) | 9.819 | 9.377 | 11.878 |
+| **binCV `1/1/1/1`** | **4.216** | 4.040 | 4.470 |
+| **OpenCV, `CV_8U`, 1 thread** | **4.134** | 3.896 | 7.708 |
+
+**binCV at `1/1/1/1` is 1.02× of single-threaded SIMD OpenCV — level — on 8× less
+memory.** Against 2.00× at the start of this sequence and 14× where the session
+began.
+
+**AN EARLIER READING OF THIS SAME COMPARISON WAS CONTAMINATED AND IS WITHDRAWN.**
+A run taken while `verify.sh` was building in the background reported 1.00×, and
+OpenCV's own time had swung 4.425 → 3.803 → 5.480 ms across runs **on identical
+code**. That is a 1.44× spread from machine load, larger than most of the effects
+this project measures. The numbers above are medians of seven repeats at load
+average ~1.2. **A single timing run on a busy development machine is not a
+measurement**, and this is the second time in this project that a number measured
+on the wrong conditions nearly became a result.
+
+**Conclusion.**
+
+1. **The machinery was the gap, and the accounting was right.** Per row at `N = 1`,
+   arithmetic was 0.65 popcounts/pixel against machinery of ~5 ops/pixel. Removing
+   two of four displaced-row constructions and the border work for interior windows
+   took 1.57× off the stage. **This is the second op-count inference in a row to
+   survive measurement**, after four in this project that did not.
+2. **At `N = 1` the original expectation is now met: bit-parallel tracking is level
+   with vectorized byte-per-pixel tracking, at an eighth of the memory.** The
+   arithmetic was always ahead — 0.65 popcounts/pixel against ~1.2 SIMD ops — and
+   what stood in the way was addressing, not the idea.
+3. **ALL of the remaining gap at the shipped ladder is the ladder.** `1/2/2/2` costs
+   **2.33×**, and that is now the entire difference between parity and 2.38× slower.
+   [E-19](ARCHITECTURE.md#register) is no longer one lever among several; it is the
+   only one left of this size.
+
+**Decision:** adopt both arms. Recorded as
+[D-32](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/lk_headtohead.cpp`, `benchmark/frontend_profile.cpp`.
 
 ---
 

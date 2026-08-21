@@ -2331,6 +2331,56 @@ it is now the largest single speed lever left, and [E-19](#register) exists to
 re-decide it against the corrected profile rather than leave it standing on the old
 one.
 
+
+### D-32: the tap machinery, and bit-parallel tracking reaching parity with SIMD OpenCV
+
+After [D-31](#8-design-decisions) aligned the window, `residualSums`' **arithmetic
+was already ahead of OpenCV's** — 0.65 popcounts per pixel at `N = 1` against
+~1.2 SIMD ops — and binCV was still slower. The remaining gap was entirely
+machinery: per window row, ~5 ops/pixel of addressing around 0.65 ops/pixel of work.
+
+Two changes, both bit-exact ([X-35](EXPERIMENTS.md)):
+
+* **The `+1` tap is a shift.** Aligned, `t01`'s bits lie inside the word `t00`
+  already holds, so `t01 = t00 >> 1` and **two of four displaced-row constructions
+  disappear**. [X-32](EXPERIMENTS.md) tried this identity in the per-word path and
+  it LOST at 0.974×, because there `t01` needed a bit from the next word.
+  **D-31 is what made it true** — a rejected optimisation became correct because an
+  unrelated change moved the ground under it.
+* **An interior fast path.** `displacedRow` built the replicate border
+  unconditionally, two `edgeFill` loads per tap, for windows that are mostly
+  interior.
+
+**Cumulative on the LK stage, reference device: 25.540 → 7.421 ms, 3.44×**
+(D-30 1.21×, D-31 2.19×, this 3.44×).
+
+**AND IT REACHES THE RESULT THE PROJECT WAS FOR.** LK against LK, same points, same
+bits, OpenCV pinned to one thread, median of seven repeats on an idle machine:
+
+| | median ms |
+|---|---|
+| binCV `1/2/2/2` (shipped) | 9.819 |
+| **binCV `1/1/1/1`** | **4.216** |
+| **OpenCV `CV_8U`, 1 thread** | **4.134** |
+
+**At `N = 1`, bit-parallel tracking is level with vectorized byte-per-pixel tracking
+— 1.02× — on an eighth of the memory.** The arithmetic was always ahead; what stood
+in the way was addressing, not the idea. That is the honest form of the claim
+[§1](#the-motivating-result) opens with.
+
+**What remains is the ladder, and only the ladder.** `1/2/2/2` costs **2.33×**, and
+that is now the entire difference between parity and 2.38× slower. It was adopted on
+accuracy under a profile that has since been corrected twice, and
+[E-19](#register) is no longer one lever among several — it is the only remaining
+one of this size.
+
+**A methodological note that cost a wrong number.** An earlier reading of this same
+comparison, taken while `verify.sh` was building in the background, reported 1.00×
+— and OpenCV's own time swung **4.425 → 3.803 → 5.480 ms on identical code**, a
+1.44× spread from machine load alone, larger than most effects this project
+measures. **A single timing run on a busy development machine is not a
+measurement.**
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
