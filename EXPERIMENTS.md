@@ -6261,7 +6261,7 @@ their only difference.
 
 ---
 
-### X-32 · `residualSums`' tap extraction · `TODO`
+### X-32 · `residualSums`' tap extraction · `DONE`
 
 **COMMITTED BEFORE THE ARM EXISTS.**
 
@@ -6346,7 +6346,71 @@ consume all 20 iterations are presumably the ones that never converge — the sa
 **Metric:** ns per window on the reference device, bit-exact sums, then the frontend
 end to end.
 
-**Result:** *(not yet measured)*
+**PLATFORM:** development machine. The arm was rejected before it earned a device
+run — see below.
+
+**Result — BAND D. The hoisted form is SLOWER, and bit-exact.**
+
+| arm | µs | vs S |
+|---|---|---|
+| S — shipped, 4 `word()` per word | 1861.3 | 1.000× |
+| H — hoisted, 2 `word()` + 2 shifts | 1911.0 | **0.974×** |
+
+Equality: **0 of 130 windows differ**, so the identity holds exactly as derived —
+the derivation was right and the *premise* was wrong.
+
+**Band D required finding where the time actually goes before anything else is
+tried, including SIMD. It goes nowhere in particular:**
+
+| variant | µs | share of full |
+|---|---|---|
+| full `residualSums` | 1878.1 | 100% |
+| **taps only, no popcounts** | 257.9 | **13.7%** |
+| popcounts only, no taps | 355.2 | 18.9% |
+
+**TAP EXTRACTION IS 13.7%, NOT ~90%.** Halving it caps the kernel gain at ~1.07×,
+and the branch that carries `word(i+1)` between iterations costs more than that.
+The arm is **not shipped**.
+
+**HOW I GOT THAT WRONG, BECAUSE THE ERROR IS REUSABLE.** I measured
+`residualSums` at **~9.4 cycles per popcount**, observed that a popcount is 1 cycle
+throughput, and concluded that ~90% of the kernel was "addressing". That inference
+does not follow. The loop issues roughly `20N²` popcounts *and* a comparable number
+of masks, ANDs and accumulates: at `N = 2` that is ~240 operations per word of which
+popcounts are ~33%. **9.4 cycles per popcount is what a loop with ~5 other
+operations per popcount plus dependency stalls looks like — it is not evidence that
+any one thing dominates.** The ratio was real; the localisation was invented.
+
+*(The two isolations sum to 32.6%, not 100%. The remainder is the two combined —
+the dependency chain from `word()` through the mask and popcount into the
+accumulator, and the register pressure of ten live tap words at `N = 2`. The
+`popcounts only` arm reuses one word for all five taps, so it is register-friendly
+in a way the real kernel is not; **18.9% is a floor on the arithmetic, not a
+measurement of it**, and this entry does not claim otherwise.)*
+
+**Conclusion — and it inverts the SIMD recommendation FOR THIS KERNEL.**
+
+1. **`residualSums` is not addressing-bound the way the corner response was.** The
+   corner response was **84% pure per-pixel overhead** producing nothing, which is
+   why removing it gave 6.98×. This kernel has no comparable dead weight: it is
+   doing a large amount of distributed work — masks, popcounts, accumulates —
+   spread across a long dependency chain.
+2. **So SIMD is now the reasonable lever HERE, and it was not there.** Masks,
+   popcounts and accumulates all vectorize, and NEON would additionally relieve the
+   register pressure by holding four words per vector. That is the opposite of the
+   conclusion for the corner response, and the difference is measured rather than
+   assumed: 84% removable overhead against 13.7%.
+3. **The `9.4 cycles per popcount` figure should not be cited again as evidence of
+   addressing cost**, in this entry or elsewhere. It appears in X-31's rationale and
+   in [D-27](ARCHITECTURE.md#8-design-decisions); both are annotated.
+
+**Decision:** **S3 is rejected and not shipped.** No change to `residualSums`.
+`benchmark/residual_benchmark.cpp` and its two arms are committed anyway, because a
+rejected optimisation with a measurement attached is what stops it being tried
+again. Recorded as [D-29](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/residual_benchmark.cpp` with `residual_arm_shipped.cpp` and
+`residual_arm_hoisted.cpp`, one translation unit each.
 
 ---
 

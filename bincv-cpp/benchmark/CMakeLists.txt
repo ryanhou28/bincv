@@ -59,6 +59,16 @@ target_include_directories(corner_streaming_arms PRIVATE ${CMAKE_CURRENT_SOURCE_
 # objects: their timing spread is the code-layout noise floor, which X-29 judges
 # the real comparison against. See benchmark/covacc_arms.hpp.
 # ---------------------------------------------------------------------------
+# X-32: residualSums' tap extraction, one TU per arm (see residual_arms.hpp).
+set(BINCV_RESIDUAL_ARMS
+    ${CMAKE_CURRENT_SOURCE_DIR}/residual_arm_shipped.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/residual_arm_hoisted.cpp)
+list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_RESIDUAL_ARMS})
+
+add_library(residual_arms OBJECT ${BINCV_RESIDUAL_ARMS})
+target_link_libraries(residual_arms PRIVATE bincv_core bincv_warnings)
+target_include_directories(residual_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 # X-31: the corner response's three arms, one TU each (see cornerresp_arms.hpp).
 set(BINCV_CORNERRESP_ARMS
     ${CMAKE_CURRENT_SOURCE_DIR}/cornerresp_arm_perpixel.cpp
@@ -135,5 +145,9 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
 
     if(benchmark_name STREQUAL "cornerresp_benchmark")
         target_link_libraries(${benchmark_name} PRIVATE cornerresp_arms)
+    endif()
+
+    if(benchmark_name STREQUAL "residual_benchmark")
+        target_link_libraries(${benchmark_name} PRIVATE residual_arms)
     endif()
 endforeach()

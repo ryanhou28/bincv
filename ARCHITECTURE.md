@@ -2193,8 +2193,9 @@ itself to say so**.
 
 **What survives from D-27:** both hot kernels are **addressing-bound, not
 arithmetic-bound**, so SIMD is still not the first move. `residualSums` was measured
-at **~9.4 cycles per popcount** where a popcount is 1 cycle throughput; its overhead
-is tap extraction. **The next target is deriving `t01` from `t00` and `t11` from
+at ~9.4 cycles per popcount — **and [D-29](#8-design-decisions) shows that figure was
+over-interpreted: tap extraction is 13.7%, not 90%. That kernel is arithmetic-bound
+and SIMD IS its lever.** **The next target is deriving `t01` from `t00` and `t11` from
 `t10` by one shift instead of four independent extractions**, and it is now
 ~97% of the frontend rather than 43.7%.
 
@@ -2202,6 +2203,47 @@ is tap extraction. **The next target is deriving `t01` from `t00` and `t11` from
 real win for any caller that detects often — `goodFeaturesToTrack` used directly,
 or a frontend that re-seeds every frame. It is kept on those grounds, not on a
 frontend number it does not deliver.
+
+
+### D-29: `residualSums` is arithmetic-bound, so SIMD is its lever — unlike the corner response
+
+[X-32](EXPERIMENTS.md) tried the obvious reformulation and it **lost**. `t01` is
+`t00` shifted one pixel and `t11` is `t10` shifted one pixel, so two of four
+`ReplicatedShiftedRow::word()` calls per word can be replaced by a shift and an or.
+The identity holds exactly — **0 of 130 windows differ** — and the result is
+**0.974×**, i.e. slower.
+
+**Because tap extraction is 13.7% of the kernel, not ~90%:**
+
+| variant | share of full |
+|---|---|
+| full `residualSums` | 100% |
+| taps only, no popcounts | **13.7%** |
+| popcounts only, no taps | 18.9% (a floor, not a measurement — see X-32) |
+
+**THE ~9.4-CYCLES-PER-POPCOUNT FIGURE DOES NOT MEAN WHAT IT WAS USED TO MEAN.** It
+was measured correctly and then over-interpreted: a popcount is 1 cycle throughput,
+so 9.4 was read as "90% is addressing". But the loop issues `20N²` popcounts *and* a
+comparable number of masks, ANDs and accumulates — at `N = 2`, ~240 operations per
+word of which popcounts are ~33%. **9.4 cycles per popcount is simply what a loop
+with ~5 other operations per popcount and a long dependency chain looks like.** The
+ratio was real; the localisation was invented. It is cited in
+[D-27](#8-design-decisions) and in X-31's rationale, and both are annotated.
+
+**THIS SPLITS THE SIMD RECOMMENDATION BY KERNEL, WHICH IS THE USEFUL RESULT.**
+
+* **The corner response WAS addressing-bound** — 84% per-pixel overhead producing
+  nothing — so reformulating beat vectorizing, and did:
+  [D-28](#8-design-decisions), 6.98× bit-exact.
+* **`residualSums` is NOT.** It has no comparable dead weight; it is doing a large
+  amount of distributed work. Masks, popcounts and accumulates all vectorize, and
+  NEON would additionally relieve the register pressure of ten live tap words at
+  `N = 2`. **SIMD is the right lever here, and it was the wrong one there** — 84%
+  removable overhead against 13.7%.
+
+**S3 is rejected and not shipped.** `benchmark/residual_benchmark.cpp` and its arms
+are committed regardless: a rejected optimisation with a measurement attached is
+what stops it being tried again.
 
 ## 9. Open Questions and Planned Experiments
 

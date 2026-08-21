@@ -244,3 +244,37 @@ nothing in the number itself to say so.
 **What survives:** both hot kernels are addressing-bound, so SIMD is still not the
 first move; and the real target is `residualSums` at ~97%, where tap extraction
 costs ~9.4 cycles per popcount against a 1-cycle throughput.
+
+---
+
+## 6 · X-32 — S3 rejected, and the SIMD recommendation splits by kernel
+
+**S3 lost.** Deriving `t01` from `t00` and `t11` from `t10` by one shift is
+bit-exact (0 of 130 windows differ) and **0.974× — slower**. Not shipped.
+
+**Because the premise was wrong, and the premise was mine.**
+
+| variant | share of `residualSums` |
+|---|---|
+| taps only, no popcounts | **13.7%** |
+| popcounts only, no taps | 18.9% (a floor, not a measurement) |
+
+Tap extraction is **13.7%, not ~90%**. I had measured ~9.4 cycles per popcount,
+noted a popcount is 1 cycle throughput, and concluded "90% is addressing". **That
+inference does not follow**: the loop issues `20N²` popcounts *and* a comparable
+number of masks, ANDs and accumulates — ~240 ops per word at `N = 2`, of which
+popcounts are ~33%. 9.4 cycles per popcount is just what a loop with ~5 other ops
+per popcount and a long dependency chain looks like. The ratio was real; the
+localisation was invented.
+
+**The useful result is that the SIMD answer is per-kernel, and now measured both
+ways:**
+
+* **corner response — 84% removable per-pixel overhead** → reformulate, not
+  vectorize. Did: **6.98× bit-exact** (D-28).
+* **`residualSums` — 13.7%** → no comparable dead weight, work is distributed
+  across masks/popcounts/accumulates that all vectorize. **SIMD is the lever here**
+  (D-29).
+
+So "should we go SIMD?" has two different right answers depending on which kernel,
+and the difference is 84% against 13.7%.
