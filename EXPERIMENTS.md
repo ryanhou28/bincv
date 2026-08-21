@@ -5342,6 +5342,93 @@ metric that matters. Promoted to [D-23](ARCHITECTURE.md#8-design-decisions).
 
 ---
 
+### X-26 · Hybrid LK against binary block matching · `TODO`
+
+**COMMITTED BEFORE `ops/blockMatch.hpp` EXISTS.** Route (a) is not written at the
+time of writing.
+
+**Gates:** [E-6](ARCHITECTURE.md#register) · [T4.2](TASKS.md) — and it closes
+[ARCHITECTURE §7.9](#79-known-hard-problems)'s two-route split, of which only
+route (b) has ever been built.
+**Question:** Does fully bit-parallel tracking — census/Hamming block matching at
+integer pixels — match hybrid LK's accuracy, and what does it cost?
+
+**Scope note, because [CLAUDE.md](CLAUDE.md) forbids template matching.** It does,
+as an *operation*: `cv::matchTemplate` is deliberately out of scope. This is not
+that. Route (a) is an internal tracker search named in §7.9 and scheduled as T4.2
+since the roadmap was written, and nothing here exposes a template-matching API.
+
+**THE FLOOR OF ROUTE (a) IS DERIVABLE BEFORE MEASURING, AND IS WRITTEN DOWN HERE SO
+THE EXPERIMENT CANNOT BE READ AS DISCOVERING IT.** A matcher restricted to whole
+pixels returns `round(d)`, so on a translation with fractional part `q` its per-axis
+error is exactly `min(q, 1−q)`. Over `q` uniform on `[0, 1)` the per-axis RMS is
+`sqrt(2 ∫₀^0.5 q² dq)` = **0.2887 px**, and over two independent axes
+**0.408 px**. So **arm (a1) cannot meet X-20's 0.25 px tolerance, by construction
+and not by implementation quality** — and any measurement of it near 0.41 px is a
+confirmation that the search works, not a finding about accuracy.
+
+**What makes this worth running anyway is [X-25](#x-25--the-coarse-level-window-border--done).**
+Route (b)'s `rms(usable)` on real edge maps is **0.25–0.32 px**, not the 0.0009 px
+its best cells suggest — so the gap between "irreducibly continuous" LK and a
+whole-pixel matcher is **much smaller on real content than the tolerance implies**,
+and route (a) pays no floating point at all. That comparison was not available
+before X-25 and is the reason this entry is worth the kernel.
+
+**Hypothesis.** (a1) lands near 0.41 px and fails the tolerance as derived. (a2) —
+the same search with a **parabolic fit to the Hamming cost surface** around the
+integer minimum, three costs per axis, no extra search — recovers most of the
+sub-pixel term for a handful of arithmetic operations per point and lands close to
+route (b). Route (a) is expected to WIN on speed at small search radii and lose
+badly as the radius grows, because its cost is `O(R²)` per level where LK's is
+`O(iterations)`.
+
+**THE ASYMMETRY THAT MUST NOT BE HIDDEN.** Hamming distance is defined on bits, so
+route (a) is a **1-bit** algorithm; route (b) has just been shown to do better on
+X-25's `1/2/2/2` ladder than on `1/1/1/1`. Comparing route (a) against route (b)'s
+best ladder would therefore be comparing an algorithm against a representation. So
+**both comparisons are reported**: route (a) against route (b) on the SAME `1/1/1/1`
+ladder (the algorithm question) and against route (b) on `1/2/2/2` (the practical
+question, which route (a) cannot enter without an N-bit cost function).
+
+**Decision rule** *(written before measuring)* — metric is
+[X-25](#x-25--the-coarse-level-window-border--done)'s **yield** (eligible keypoints
+tracked within X-20's 1.0 px, over ALL eligible keypoints) with `rms(usable)`
+beside it, plus peak bytes and ns/frame on the reference device.
+
+* **Band A — route (a) wins outright.** An arm of (a) reaches yield within 2 points
+  of route (b) on the same ladder **and** `rms(usable)` within tolerance **and** a
+  material win — ≥ 1.3× — on footprint or speed. Then route (a) replaces route (b)
+  and §7.9's route (b) becomes the fallback.
+* **Band B — route (a) is cheaper but less accurate.** It wins speed or bytes
+  materially but loses accuracy. Then **neither is adopted blindly**: report the
+  yield-per-millisecond of both, and record that the choice belongs to the
+  integrating pipeline, since a VIO frontend that RANSACs its correspondences may
+  rationally prefer more, cheaper, noisier points. This is the outcome the old
+  one-line rule in TASKS.md ("switch only if accuracy is within tolerance and the
+  win is material; otherwise hybrid stands") would have thrown away, and it is the
+  most likely one.
+* **Band C — route (a) is not cheaper.** Then route (a) is **closed**, §7.9's split
+  resolves to route (b), and the roadmap stops carrying it.
+* **Band D — (a2) beats route (b) on accuracy.** Pre-declared because it would
+  overturn §7.9's central claim that LK's accuracy comes from its continuous
+  formulation. If a parabolic fit to a Hamming surface matches a Gauss-Newton solve
+  on real content, then the continuity was never load-bearing and D-20 needs
+  revisiting.
+
+**Variants:** (a1) integer block matching, (a2) + parabolic sub-pixel, (b) hybrid LK
+— on ladders `1/1/1/1` and, for (b) only, `1/2/2/2`. Search radius swept, since it
+is route (a)'s whole cost story.
+**Workload:** X-25's, unchanged — the repo's real 752×480 frame, reference
+binarization, 141 eligible keypoints, 31×31 windows, four levels, the same warps.
+**Metric:** yield, `rms(usable)`, peak bytes, ns/frame.
+**Method:** `ops/blockMatch.hpp` and a harness, both committed with the entry.
+Coarse-to-fine over the same ladder route (b) uses, so the two differ in the SEARCH
+and in nothing else.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
