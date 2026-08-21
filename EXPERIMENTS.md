@@ -6414,7 +6414,7 @@ again. Recorded as [D-29](ARCHITECTURE.md#8-design-decisions).
 
 ---
 
-### X-33 · NEON for the bit-sliced signed sum · `TODO`
+### X-33 · NEON for the bit-sliced signed sum · `DONE`
 
 **COMMITTED BEFORE THE KERNEL EXISTS.** Phase 5.1's first vectorized kernel.
 
@@ -6489,7 +6489,70 @@ end to end at the real duty cycle.
 all**. Correctness is checkable there only through the scalar fallback; every number
 in this entry comes from the reference device.
 
-**Result:** *(not yet measured)*
+**PLATFORM:** reference device throughout. The development machine is x86_64 and
+cannot measure or even compile this path; its only role was checking that the
+scalar fallback still builds and passes.
+
+**The ceiling, measured FIRST as the rule required:** batched NEON popcount with
+lane accumulators against scalar `__builtin_popcount`, everything else stripped —
+**3.42×**, bit-identical. Above the 1.5× cancel threshold, so the arm was written.
+
+**Result — BAND B.**
+
+| arm | µs | vs NEON |
+|---|---|---|
+| NEON, `slicedSignedSum` batched | **2104.8** | 1.000× |
+| scalar, per plane pair | 2618.5 | 0.804× |
+
+**`R` = 1.24×**, and **0 of 130 windows differ**. On-device `ctest` passes
+`test_opticalflow` with the vector path live — 194 checks including the per-pixel
+oracle that compares the bit-sliced residual against a `long long` control at
+`N = 1..5`.
+
+**Stage effect, reference device:**
+
+| | before | after | |
+|---|---|---|---|
+| LK, `maxIterations` 20 | 25.540 ms | **21.088 ms** | **1.21×** |
+| LK residual + solve | 24.710 ms | 20.258 ms | 1.22× |
+
+LK is 94.7% of the real frontend, so this is **~1.20× end to end**.
+
+**Conclusion.**
+
+1. **It works, it is bit-exact, and it is worth 1.24× — not 3.42×.** The ceiling
+   measured the popcounts alone; the real kernel dilutes them with tap extraction
+   (13.7%, [X-32](#x-32--residualsums-tap-extraction--done)), masks, accumulator
+   updates and the loop structure. **The ceiling did its job — it authorised the
+   work and it correctly bounded it** — and quoting 3.42× as the result would have
+   been the same error as quoting X-31's 6.98× kernel win as a frontend number.
+2. **Band B's condition is met, so it ships.** The vector path is confined to **one
+   function**, the scalar path remains the reference *and* the equality oracle, and
+   `UseNeon` exists so both spellings can be compared on the same machine. That
+   flag is not a tuning knob — it is how the bit-exactness claim is checkable.
+3. **[D-6](ARCHITECTURE.md#d-6-bulk-only-reductions) is cashed in, and this is the
+   first time.** D-6 forbade exposing a per-word popcount so that reductions would
+   be *shaped* to allow batching later. None of this would have been possible if
+   callers held `popcountWord`: the eight plane-pair counts had to be inside one
+   function for the domain crossing to be collapsible from eight to one.
+4. **MOST OF THE CEILING IS STILL ON THE TABLE, AND WHERE IT IS IS KNOWN.** The
+   horizontal add still runs **once per call** — ~620 domain crossings per window
+   — where the ceiling amortized its extraction across the whole buffer. Carrying
+   **vector accumulators across the window**, and reducing once per window instead
+   of once per word per tap, is the remaining 2–3×. It is a larger change: `TapSums`
+   becomes vector state and `residualSums` restructures around it. Registered as
+   **[E-18](ARCHITECTURE.md#register)** rather than attempted here.
+
+**Decision:** adopt. `slicedSignedSum` gains a NEON path at `N == 2, uint32_t`
+behind `BINCV_HAVE_NEON && __aarch64__`; every other `N`, word type and platform
+keeps the scalar path unchanged. Recorded as
+[D-30](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/neon_ceiling.cpp` (the bound) and
+`benchmark/residual_benchmark.cpp` with `residual_arm_shipped.cpp` /
+`residual_arm_hoisted.cpp`, one translation unit each — the latter repurposed from
+X-32's rejected arm into the scalar arm, since a rejected optimisation belongs in
+the log as a number rather than in the tree as a second implementation.
 
 ---
 

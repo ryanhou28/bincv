@@ -278,3 +278,35 @@ ways:**
 
 So "should we go SIMD?" has two different right answers depending on which kernel,
 and the difference is 84% against 13.7%.
+
+---
+
+## 7 · X-33 — NEON for the sliced signed sum · **DONE, Band B, adopted**
+
+**Ceiling measured first, as X-33's rule required, and it authorised the work:**
+batched NEON popcount with lane accumulators against scalar, everything else
+stripped — **3.42×**, bit-identical. Above the 1.5× cancel threshold.
+
+**Result: 1.24× on `residualSums`, 1.21× on the LK stage** (25.540 → 21.088 ms),
+and LK is 94.7% of the real frontend, so **~1.20× end to end**. Bit-exact: 0 of 130
+windows differ, and on-device `ctest` passes `test_opticalflow` with the vector path
+live, including the per-pixel oracle at `N = 1..5`.
+
+**The ceiling did its job twice** — it authorised the arm, and it bounded it. The
+real kernel gets 1.24× not 3.42× because the popcounts are diluted by tap extraction
+(13.7%), masks and accumulator updates. **3.42× is not quoted as the result**; that
+would repeat D-28's error exactly.
+
+**D-6 is cashed in for the first time.** It forbade exposing a per-word popcount so
+that reductions would be *shaped* to allow batching later. The eight plane-pair
+counts had to be inside one function for the domain crossing to collapse from eight
+to one — impossible if callers held `popcountWord`.
+
+**Most of the ceiling is still there and its location is known:** the horizontal add
+runs once per call, ~620 domain crossings per window. Vector accumulators carried
+across the window is the remaining 2–3×, registered as **E-18**.
+
+**The gate caught a build failure my targeted builds could not.** `neon_ceiling.cpp`
+compiles its whole body out on x86, leaving `scalarSum` unused and
+`-Wunused-function` fatal. `cmake --build --target` never compiled that file on x86;
+`verify.sh`'s clean build of every target did.

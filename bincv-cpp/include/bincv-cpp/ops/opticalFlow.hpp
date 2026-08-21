@@ -244,6 +244,10 @@
 #include <cstddef>
 #include <cstdint>
 
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 #include "../core/error.hpp"
 #include "../core/types.hpp"
 #include "../core/view.hpp"
@@ -617,9 +621,59 @@ inline long long signedMaskedSum(WordType mag, WordType sign, WordType m) {
 ///       folded immediately, so the register footprint does NOT grow with N and
 ///       E-13's O(N^2)-per-row accumulator concern -- which is about
 ///       `BitSlicedPairCounts<N>` in ops/covariance.hpp -- does not arise here.
-template <size_t N, typename WordType>
+/// @tparam UseNeon False forces the portable scalar path even where NEON exists.
+///         That is not a tuning knob: it is how the vector path is held to
+///         BIT-EXACTNESS, by giving the benchmark and the tests both spellings to
+///         compare on the same machine (X-33).
+template <size_t N, typename WordType, bool UseNeon = true>
 inline long long slicedSignedSum(const WordType (&maskedMag)[N], WordType sign,
                                  const WordType (&val)[N]) {
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    if constexpr (UseNeon) {
+    // ===================================================================
+    // NEON: THE PLANE-PAIR POPCOUNTS BATCHED INTO LANES (X-33, Phase 5.1).
+    //
+    // This is [D-6](../../../ARCHITECTURE.md)'s reservation being cashed in.
+    // aarch64 has NO SCALAR POPCOUNT: `CNT` lives in the vector registers, so
+    // every scalar `popcountWord` pays `fmov` in and `fmov` out. This call issues
+    // `2N^2` of them -- EIGHT at N = 2, the depth three of four levels of the
+    // adopted 1/2/2/2 ladder run at (D-23). Batching the four plane pairs into
+    // lanes crosses the register domain ONCE, at the horizontal add, instead of
+    // eight times.
+    //
+    // D-6 forbade a per-word popcount in the public API precisely so that the
+    // reductions would be shaped to allow this; nothing here would be possible if
+    // callers had been handed `popcountWord`.
+    //
+    // BIT-EXACT: the same integers, weighted the same way. The scalar path below
+    // is the portable one AND the equality oracle, and
+    // tests/test_opticalflow.cpp compares them.
+    //
+    // N == 2 only. At N == 1 there are two popcounts and nothing to batch; above
+    // 2 the pair count is not a multiple of the lane count and the scalar path is
+    // clearer than the packing would be.
+    if constexpr (N == 2 && sizeof(WordType) == 4) {
+        // The four ordered plane pairs (i, j), weights 2^(i+j) = 1, 2, 2, 4.
+        const uint32_t both[4] = {
+            static_cast<uint32_t>(val[0] & maskedMag[0]),
+            static_cast<uint32_t>(val[1] & maskedMag[0]),
+            static_cast<uint32_t>(val[0] & maskedMag[1]),
+            static_cast<uint32_t>(val[1] & maskedMag[1])};
+        const uint32x4_t vb = vld1q_u32(both);
+        const uint32x4_t vs = vandq_u32(vb, vdupq_n_u32(static_cast<uint32_t>(sign)));
+        // CNT is per byte; two pairwise widenings give one count per 32-bit lane.
+        const uint32x4_t cTotal =
+            vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(vb))));
+        const uint32x4_t cOpp =
+            vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(vs))));
+        // total - 2*opposing, per lane, then weighted and reduced ONCE.
+        const int32x4_t diff = vsubq_s32(vreinterpretq_s32_u32(cTotal),
+                                         vshlq_n_s32(vreinterpretq_s32_u32(cOpp), 1));
+        const int32_t w[4] = {1, 2, 2, 4};
+        return static_cast<long long>(vaddvq_s32(vmulq_s32(diff, vld1q_s32(w))));
+    }
+    }
+#endif
     long long acc = 0;
     for (size_t j = 0; j < N; ++j) {
         for (size_t i = 0; i < N; ++i) {
@@ -740,7 +794,7 @@ inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType
 ///       and are word-aligned reads of the same two next-frame rows per plane, so
 ///       item 5 of THE BOUNDARY also survives: still no gather, still no per-pixel
 ///       address arithmetic.
-template <size_t N, typename WordType>
+template <size_t N, typename WordType, bool UseNeon = true>
 inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
                          long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY) {
     for (size_t y = r.y0; y < r.y1; ++y) {
@@ -786,17 +840,17 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
             const WordType signX = sx[i];
             const WordType signY = sy[i];
 
-            rowX.t00 += slicedSignedSum<N, WordType>(magX, signX, t00);
-            rowX.t01 += slicedSignedSum<N, WordType>(magX, signX, t01);
-            rowX.t10 += slicedSignedSum<N, WordType>(magX, signX, t10);
-            rowX.t11 += slicedSignedSum<N, WordType>(magX, signX, t11);
-            rowX.self += slicedSignedSum<N, WordType>(magX, signX, self);
+            rowX.t00 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t00);
+            rowX.t01 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t01);
+            rowX.t10 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t10);
+            rowX.t11 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t11);
+            rowX.self += slicedSignedSum<N, WordType, UseNeon>(magX, signX, self);
 
-            rowY.t00 += slicedSignedSum<N, WordType>(magY, signY, t00);
-            rowY.t01 += slicedSignedSum<N, WordType>(magY, signY, t01);
-            rowY.t10 += slicedSignedSum<N, WordType>(magY, signY, t10);
-            rowY.t11 += slicedSignedSum<N, WordType>(magY, signY, t11);
-            rowY.self += slicedSignedSum<N, WordType>(magY, signY, self);
+            rowY.t00 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t00);
+            rowY.t01 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t01);
+            rowY.t10 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t10);
+            rowY.t11 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t11);
+            rowY.self += slicedSignedSum<N, WordType, UseNeon>(magY, signY, self);
         });
         sumsX.t00 += rowX.t00; sumsX.t01 += rowX.t01; sumsX.t10 += rowX.t10;
         sumsX.t11 += rowX.t11; sumsX.self += rowX.self;

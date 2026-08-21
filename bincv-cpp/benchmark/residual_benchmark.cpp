@@ -38,7 +38,7 @@ int main() {
             ty.push_back(static_cast<long long>(rnd() % 7u) - 3);
         }
     }
-    std::printf("=== X-32: residualSums tap extraction, N=2, %zu windows of 31x31 ===\n\n",
+    std::printf("=== X-33: residualSums, NEON vs scalar sliced signed sum, N=2, %zu windows of 31x31 ===\n\n",
                 regs.size());
 
     size_t bad = 0;
@@ -58,24 +58,24 @@ int main() {
     }
     std::printf("  EQUALITY: %zu of %zu windows differ\n", bad, regs.size());
     if (bad != 0) {
-        std::printf("  The derivation is an IDENTITY (X-32). Not timing a wrong kernel.\n");
+        std::printf("  Bit-exactness is a PRECONDITION (X-33). Not timing a wrong kernel.\n");
         return 1;
     }
 
     std::vector<measure::Bench> b = {
-        {"S  shipped (4 word() per word)", [&](int) {
+        {"NEON  slicedSignedSum batched", [&](int) {
             bincv::impl::TapSums a, c;
             for (size_t k = 0; k < regs.size(); ++k) residual::shipped(lv, regs[k], tx[k], ty[k], a, c);
             measure::g_sink += static_cast<size_t>(a.t00);
         }},
-        {"H  hoisted (2 word() + 2 shifts)", [&](int) {
+        {"SCALAR  slicedSignedSum per pair", [&](int) {
             bincv::impl::TapSums a, c;
             for (size_t k = 0; k < regs.size(); ++k) residual::hoisted(lv, regs[k], tx[k], ty[k], a, c);
             measure::g_sink += static_cast<size_t>(a.t00);
         }},
     };
     const auto t = measure::measureInterleaved(b, 9, 60.0);
-    std::printf("\n  %-34s %10s %8s\n", "arm", "us", "vs S");
+    std::printf("\n  %-34s %10s %8s\n", "arm", "us", "vs NEON");
     for (size_t i = 0; i < b.size(); ++i) {
         std::printf("  %-34s %10.1f %7.3fx\n", b[i].name.c_str(), t[i].medianNs / 1000.0,
                     t[0].medianNs / t[i].medianNs);
