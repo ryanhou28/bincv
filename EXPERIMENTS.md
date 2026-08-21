@@ -5156,6 +5156,114 @@ and `Flow.X24_LadderSweep_Synthetic_uint32_t`, built on `LadderFrontend` /
 
 ---
 
+### X-25 · The coarse-level window border · `TODO`
+
+**COMMITTED ON ITS OWN, BEFORE ANY ARM EXISTS.** Arms C and B are not written at
+the time of writing; arms A and D can be evaluated from code that already ships.
+
+**Gates:** [E-14](ARCHITECTURE.md#register) — and through it
+[E-7](ARCHITECTURE.md#register)'s ladder, which
+[X-24](#x-24--pyramid-level-bit-depths--done) could not adopt because this is the
+binding constraint.
+**Question:** Does the tracker need a border on its coarse pyramid levels — and if
+so, is it the reference's padded copy, or something that costs nothing?
+
+**Why this is now the main event.** X-24 measured `1/2/2/2` at **0.8356 px over all
+141 real-frame keypoints and 0.0010 px over the 58 that never clip**. The ladder is
+not the problem and the arithmetic is not the problem; **83 of 141 keypoints (59%)
+have a 31×31 window that leaves some pyramid level**, and on those the clipped
+window gives an ill-conditioned `A` and a one-sided `b` whose error is then
+multiplied by `2^level` on the way down. binCV declined the reference's
+`winSize`-wide reflected border deliberately — 1.24× per level at 640×480 — and
+this entry is where that decision is re-examined against a measurement rather than
+an argument.
+
+**Hypothesis.** A point near a coarse level's edge does not need that level: it
+needs to not be *ruined* by it. So the cheap arm (C) is expected to recover most of
+the gap at zero bytes, because the information a clipped coarse window supplies is
+worse than no information. The reference's border is expected to win on raw
+per-point accuracy and to lose on footprint — and the coarse levels are where the
+padding is most expensive in RELATIVE terms, which is the opposite of where
+intuition puts it: at 640×480 a 31-pixel border is 1.24× the level, and at 80×60 it
+is **3.6×**.
+
+**Metric — pre-registered, and it must PENALIZE LOSING KEYPOINTS, because three of
+the four arms trade points for accuracy and a per-point error alone would reward
+throwing points away.**
+
+* **YIELD** = (eligible keypoints whose endpoint error ≤ **1.0 px**, X-20's max
+  tolerance) / (eligible keypoints). A keypoint dropped by policy counts as **not
+  usable**. A keypoint returned but tracked badly also counts as **not usable**.
+  This is the frontend's actual product.
+* **RMS over the usable set**, reported beside it — a policy that yields many
+  marginal points is not obviously better than one that yields fewer excellent
+  ones, and neither number alone shows that.
+* **Peak bytes** of the tracking stage, and **ns/frame** on the reference device.
+
+**This is a deliberate strengthening of X-20's "≥ 80% of eligible points tracked",
+and it is written down rather than slipped in.** That criterion counted a point as
+tracked if `status == 1`, which on real content is **vacuous — 141 of 141 come back
+tracked in every configuration X-24 ran, including ones with 18 px of error.** Yield
+asks the question the old criterion was trying to ask.
+
+**Arms:**
+* **A — clip, all levels.** What ships. The baseline.
+* **B — per-level `winSize` border, REPLICATE fill.** The reference's shape, with
+  binCV's cheaper border: reflect-101 is a per-pixel index map, replicate is two
+  mask-selects per word (deviation (iii) already made this choice for taps).
+* **C — per-point start level.** A keypoint enters the pyramid at the **coarsest
+  level whose window fully contains it** and is simply not tracked above that. No
+  padding, no keypoint loss, **zero bytes**. This is the arm that did not exist
+  before this entry.
+* **D — reject any keypoint that would clip at any level.** Costs nothing and
+  discards 59% of them. The honest lower bound on yield and upper bound on
+  per-point accuracy.
+
+**ORDER, AND IT IS PART OF THE RULE.** C and D cost **zero bytes**, so they are
+measured FIRST, and **B is built only if neither reaches the gate below**. That is
+[CLAUDE.md](CLAUDE.md)'s memory-wins tiebreak applied to the experiment's own scope
+rather than only to its conclusion: a padded pyramid is a large, invasive change and
+building it before knowing whether a free arm suffices would bias the comparison
+toward using it. **If C reaches the gate, B is not built and this entry says so
+explicitly rather than leaving it looking unexamined.**
+
+**Decision rule** *(written before measuring)* — the accuracy gate stays X-20's,
+unwidened: RMS ≤ 0.25 px over the usable set, max ≤ 1.0 px (which is yield's own
+definition), on the real reference edge maps at four levels, measured on **both**
+the shipped `1/1/1/1` ladder and X-24's `1/2/2/2` leader so E-14's answer and E-7's
+cannot be chosen independently.
+
+* **Band A — a free arm wins.** C or D reaches RMS ≤ 0.25 px at **yield ≥ 0.80**.
+  Adopt it; B is not built; E-7's ladder unblocks and X-24's leader is adopted with
+  it.
+* **Band B — the border has to be paid for.** No free arm reaches it but B does.
+  Then measure B's real peak footprint — including the coarse levels, where the
+  relative cost is worst — and decide against CLAUDE.md's memory-wins rule **with
+  the numbers in front of us**, reporting the yield-per-byte of all four arms.
+* **Band C — nothing reaches it.** Then the border is not the whole story either,
+  and this entry reports what remains rather than widening anything. Given X-24
+  already relocated the cause once, a second relocation must be treated as evidence
+  that the failure is in the pyramid's *use* rather than in any of its parameters.
+* **Band D — D beats C.** Pre-declared because it would be surprising and
+  informative: D discards points C keeps, so D can only win if C's retained points
+  are tracked so badly they fall outside tolerance — which would mean **a partial
+  pyramid is worse for a point than no pyramid at all**, and would make the
+  per-point start level a bad idea rather than a cheap one.
+
+**Variants:** ladders `1/1/1/1` and `1/2/2/2` × arms A, C, D (and B only under the
+order rule above).
+**Workload:** X-24's, unchanged — the repo's real 752×480 frame under the reference
+binarization, 141 eligible keypoints, 31×31 windows, four levels,
+`seal_params.yaml` verbatim; the same warps X-24 reports.
+**Metric:** yield, RMS over the usable set, peak bytes, ns/frame.
+**Method:** harness committed with the entry. Accuracy and footprint on the
+development machine (exact, device-independent); ns/frame on the reference device
+(`pi4`).
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
