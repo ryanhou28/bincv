@@ -5844,6 +5844,78 @@ LOOKED EXACTLY LIKE A binCV DEFECT.**
 
 ---
 
+### X-29 · The per-row partial accumulator above N = 1 · `TODO`
+
+**COMMITTED BEFORE EITHER ARM EXISTS.**
+
+**Gates:** [E-13](ARCHITECTURE.md#register) ·
+[D-15](ARCHITECTURE.md#8-design-decisions) item 4.
+**Question:** Does the per-row partial accumulator still pay above `N = 1` in
+[§7.5](ARCHITECTURE.md#75-lk-gradient-covariance)'s bit-sliced covariance?
+
+**Why it is worth the effort now, and it is a different reason than when E-13 was
+registered.** [X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial)
+measured the frontend end to end: **criterion 4 is unmet by 14×**, and the device
+profiling says **99% of frontend time sits in two windowed popcount reductions** —
+the corner response and LK's covariance/residual. This accumulator is inside one of
+them. It is no longer a tidy-up; it is the first piece of Phase 5.1's target.
+
+**What is in question.** `BitSlicedPairCounts<N>` is `4N²` counters — **4 at
+`N = 1`, 64 at `N = 4`**. The per-row form zeroes all of them per row, fills them,
+and adds them into the window total: roughly `3N² + N` adds plus `4N²` words of
+zeroing **per row**, against work that is `O(N²)` **per word** — and a 31-pixel
+window is **1–2 `uint64_t` words per row**. [D-15](ARCHITECTURE.md) item 4 chose the
+per-row shape on X-11b's measurement **at `N = 1`** (1.08× at W = 31), where the
+structure is 4 counters. Nothing has re-tested it at 64.
+
+**THE CONFOUND IS THE POINT OF THIS ENTRY, AND IT IS MEASURED RATHER THAN
+ASSUMED.** [X-22](#x-22--what-an-n-bit-pyramid-level-costs-the-lk-covariance--done)
+already measured a window-wide accumulator **1.14–1.60× faster at N = 2, 3, 4** —
+and declined to close on it, because that same entry measured **the same kernel
+moving 1.46× between two binaries built from unchanged source**, and
+`morphology_path_benchmark` records two instantiations in one object moving each
+other ~10%. A 1.14× reading inside a 1.46× confound is not a result.
+
+So this entry **measures the noise floor first**: the *same* arm is compiled into
+**two different translation units** and both are timed. Call the resulting spread
+**`L`**. Every comparison below is judged against `L`, not against zero. Each arm
+also gets its own translation unit, the pattern `genericn_arms` and
+`corner_streaming_arms` already use for exactly this reason.
+
+**Decision rule** *(written before measuring)* — arms: **per-row** (ships) and
+**window-wide**, at `N = 1, 2, 3, 4`, `uint32_t` and `uint64_t`, on the reference
+device.
+
+* **Band A — the choice is N-dependent.** Window-wide beats per-row at `N ≥ 2` by
+  more than `L`, and per-row is not beaten by more than `L` at `N = 1`. Then
+  `D-15` item 4 becomes **an `N = 1` statement** and the kernel selects on `N` at
+  compile time — which costs nothing, since `N` is already a template parameter.
+* **Band B — window-wide wins everywhere.** Faster by more than `L` at every `N`
+  including 1. Then D-15 item 4 is **revised outright** and X-11b's 1.08× is
+  re-examined, because it would mean the per-row shape never paid in this kernel.
+* **Band C — inside the noise.** `|difference| ≤ L` at every `N`. Then **D-15 item 4
+  stands, E-13 closes as "no measurable effect", and X-22's 1.14–1.60× is
+  attributed to code layout** — which is the outcome X-22 itself suspected.
+* **Band D — per-row wins at `N > 1`.** The opposite of X-22's reading. Then X-22's
+  number was layout, and that gets recorded prominently as a caution: **a
+  single-binary A/B in this codebase can invert a real ordering**, and two entries
+  would then have demonstrated it.
+
+**`L` IS REPORTED IN EVERY BAND, INCLUDING THE ONES WHERE IT IS NOT DECISIVE.** A
+comparison whose noise floor is not stated cannot be checked by a reader.
+
+**Variants:** per-row vs window-wide × `N` ∈ {1,2,3,4} × `uint32_t`, `uint64_t`;
+plus the same-arm-twice pair that measures `L`.
+**Workload:** 31×31 windows over a 640×480 level, the shipped default; sweep of
+window positions so the region masks vary.
+**Metric:** ns per window, interleaved round-robin, median with spread.
+**Method:** one translation unit per arm; `benchmark/` following
+`corner_streaming_arms`' shape. Reference device closes it.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
