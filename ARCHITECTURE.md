@@ -1902,7 +1902,10 @@ ladder `1/2/2/2`).
 prior reading of this operation — X-20's, X-24's, and this document's own E-14 row —
 used RMS over all points. On `(1, 0)` the shipped tracker has `rms(all)` **0.8356 px**
 and yield **98.6% at `rms(usable)` 0.0009 px**: 139 of 141 keypoints tracked to a
-thousandth of a pixel, two catastrophically wrong. RMS over everything reports a
+thousandth of a pixel, two catastrophically wrong. *(Re-measured on the corrected
+two-stage preprocessing 2026-08-21: 98.0% at 0.0013 px over 102 eligible keypoints —
+the same statement, and the padded arm now ties or loses in every cell rather than
+winning two. See [X-26](EXPERIMENTS.md)'s correction.)* RMS over everything reports a
 small catastrophic tail as though it were the body of the distribution. Restricting
 to never-clipping points moved the RMS because it excluded the outliers, not because
 clipping caused them — **clipping costs about two keypoints out of 141, not the 59%
@@ -1945,11 +1948,25 @@ arm anticipated.
 frames. That is a footprint result, not an implementation detail.
 
 **Route (b) is the default because yield is what a frontend produces.** Route (a)
-loses 15–25 points of it, on the *same* ladder, so it is an algorithm difference and
+loses **2–12 points** of it on the *same* ladder, so it is an algorithm difference and
 not a representation one.
 
+> **CORRECTED 2026-08-21.** The table above and an earlier "15–25 points" figure
+> were measured with the reference **denoise stage missing** from the harness —
+> `SEALProcessor::temporal_process` runs `median_filter` then
+> `rl_fast_edge_filter_wide` and only the second was implemented. Re-measured on
+> the correct content, **route (a)'s yield rises from 56.7–75.0% to 68.6–88.1%**
+> and it wins one cell outright. The correction is **not symmetric**: a median
+> filter removes isolated noise, and isolated noise is what manufactures false
+> minima on a Hamming surface, which route (a) takes at face value where route
+> (b) averages it over a 31×31 window. The decision is unchanged — route (b)
+> leads on yield, route (a) keeps its 3.00× footprint advantage — but the trade
+> is materially more favourable to route (a) than first recorded. See
+> [X-26](EXPERIMENTS.md).
+
 **Route (a) is not closed, and shipping it is not hedging.** It is **3.2× more
-keypoint-efficient per byte at equal keypoint-efficiency per millisecond**.
+keypoint-efficient per byte at equal keypoint-efficiency per millisecond**, and on
+the corrected content it is within 2–12 yield points of route (b) rather than 15–25.
 [CLAUDE.md](../CLAUDE.md)'s "memory wins" tiebreak covers *speed against footprint*;
 this is *accuracy against footprint*, and §1 puts that on the integrating pipeline's
 side of the boundary — a VIO frontend that RANSACs its correspondences may

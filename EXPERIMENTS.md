@@ -5511,6 +5511,83 @@ both routes existing**, which is not what either arm of it anticipated.
 
 ---
 
+## CORRECTION, 2026-08-21 — RE-MEASURED ON THE REFERENCE PIPELINE'S ACTUAL CONTENT
+
+**The numbers above were measured with the DENOISE STAGE MISSING.**
+`SEALProcessor::temporal_process` runs `median_filter(THREE_PIX_MEDIAN)` *then*
+`rl_fast_edge_filter_wide`, and `seal_params.yaml` enables both;
+`tests/test_opticalflow.cpp` implemented only the second until it was fixed. Over
+1710 EuRoC V1_02_medium frames the stage moves the content from **14.14% set to
+13.04% set**. The eligible keypoint count on the repo's frame drops **141 → 102**,
+because a median filter removes exactly the isolated noise that was manufacturing
+corners.
+
+**BOTH ENTRIES' CONCLUSIONS SURVIVE, AND THE RE-RUN WAS DONE BEFORE THAT WAS
+ASSERTED.** Every arm was compared *within* one content set, so the rankings were
+predicted to hold; they do. What moved is stated below rather than quietly
+substituted.
+
+### X-25 — the conclusion sharpens
+
+| case | A clip | C per-point | D reject | B padded |
+|---|---|---|---|---|
+| shift (1, 0) | **98.0** / 0.0013 | **98.0** / 0.0013 | 42.2 / 0.0016 | **98.0** / 0.0013 |
+| shift (0.25, 0.25) | **95.1** / 0.2779 | **95.1** / 0.2744 | 42.2 / 0.2393 | **95.1** / 0.2780 |
+| shift (0.75, 0.75) | 90.2 / 0.2552 | **91.2** / 0.2569 | 41.2 / 0.2428 | **91.2** / 0.2551 |
+| shift (2, −3) | **97.1** / 0.0008 | 92.2 / 0.0008 | 42.2 / 0.0010 | **97.1** / 0.0008 |
+| shift (6, 4) | **97.0** / 0.0001 | 84.2 / 0.0001 | 41.6 / 0.0000 | 94.1 / 0.0001 |
+| rotate 1° | **93.1** / 0.2921 | 84.2 / 0.2766 | 41.6 / 0.2919 | **93.1** / 0.2923 |
+| scale 1.02 | **86.6** / 0.2647 | 82.5 / 0.2483 | 40.2 / 0.1914 | 84.5 / 0.2634 |
+
+**Arm B now equals arm A exactly in four of seven cases and loses the other
+three.** The padded pyramid does not win a single cell. E-14's answer — *no border*
+— is unchanged and now rests on a cleaner comparison. Arm C's large-motion
+weakness is unchanged and so is its mechanism.
+
+`rms(usable)` still sits at **0.25–0.29 px** on every sub-pixel and
+non-translational case in every arm including the padded one, so
+[E-16](ARCHITECTURE.md#register) — the level-0 floor — is untouched by the
+correction. That is the finding this entry ended on and it survives intact.
+
+### X-26 — ROUTE (a) IS SUBSTANTIALLY BETTER THAN REPORTED
+
+| case | (b) `1/1/1/1` | (b) `1/2/2/2` | (a1) R=2 int | (a2) R=2 sub | (a2) R=4 sub |
+|---|---|---|---|---|---|
+| shift (1, 0) | 91.2 / 0.0015 | **98.0** / 0.0013 | 82.4 / 0.1543 | 80.4 / 0.0244 | 85.3 / 0.0241 |
+| shift (0.25, 0.25) | 93.1 / 0.2809 | **95.1** / 0.2779 | 81.4 / 0.4233 | 80.4 / 0.2800 | 80.4 / 0.2784 |
+| shift (0.75, 0.75) | 86.3 / 0.2737 | **90.2** / 0.2552 | 69.6 / 0.3914 | 69.6 / **0.2512** | 68.6 / **0.2432** |
+| shift (2, −3) | 85.3 / 0.0012 | **97.1** / 0.0008 | 83.3 / 0.0000 | 83.3 / 0.0244 | 78.4 / 0.0236 |
+| shift (6, 4) | 87.1 / 0.0002 | **97.0** / 0.0001 | 83.2 / 0.0000 | 83.2 / 0.0245 | **88.1** / 0.0242 |
+| rotate 1° | 83.2 / 0.2535 | **93.1** / 0.2921 | 74.3 / 0.4590 | 74.3 / **0.2704** | 70.3 / **0.2650** |
+| scale 1.02 | 81.4 / **0.2238** | **86.6** / 0.2647 | 74.2 / 0.4849 | 74.2 / 0.2857 | 71.1 / 0.2948 |
+
+**Route (a)'s yield rises from 56.7–75.0% to 68.6–88.1%**, and the gap to route (b)
+on the SAME `1/1/1/1` ladder narrows from 15–25 points to **2–12**. On `(6, 4)` at
+R = 4 route (a) reaches **88.1% against route (b)'s 87.1%** — the first cell where
+route (a) wins on the same ladder.
+
+**The mechanism is the obvious one and it cuts route (a)'s way**: a median filter
+removes isolated noise pixels, and isolated noise is exactly what manufactures
+false minima on a Hamming cost surface. Route (b)'s gradient-based solve was
+already averaging that noise away over a 31×31 window; route (a), which takes the
+single lowest score, was not. **So the previous measurement understated route (a)
+specifically, not both routes equally** — the correction is not a wash and it would
+have been wrong to assume it was.
+
+D-24's decision is **unchanged**: route (b) still leads on yield everywhere but one
+cell, and route (a) still holds its **3.00× footprint** advantage, so both still
+ship with route (b) as the default. But the trade is **materially more favourable
+to route (a)** than D-24 recorded, and its claimed 15–25 point yield deficit is
+corrected to **2–12 points**.
+
+Band D's finding is reinforced: (a2)'s `rms(usable)` beats route (b)'s on
+`(0.75, 0.75)`, `rotate` and — at R = 4 — several others, on a cleaner content set.
+A parabolic fit to a Hamming surface remains more precise than the Gauss-Newton
+solve on the points both find.
+
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

@@ -954,6 +954,28 @@ constexpr int kH = 240;
 // ---------------------------------------------------------------------------
 
 /// @brief `rl_fast_edge_filter_wide`, ported call for call.
+/// @brief `three_pix_median_filter`, ported line for line from
+///        `SEAL/src/temporal_processing/denoise.cpp`. **STAGE ONE of the reference
+///        preprocessing, and it was missing from this file until 2026-08-21.**
+/// @note p1 is the pixel ABOVE, p2 the centre, p3 the pixel to the RIGHT:
+///       `median = max(min(p1,p2), min(max(p1,p2), p3))`. Borders are ZERO-filled,
+///       which is what the reference's `cv::Mat::zeros` + `copyTo` does -- not a
+///       replicate or a reflect, and the difference shows on the first row and the
+///       last column.
+cv::Mat referenceDenoise(const cv::Mat& img) {
+    cv::Mat rightPixels = cv::Mat::zeros(img.size(), img.type());
+    cv::Mat abovePixels = cv::Mat::zeros(img.size(), img.type());
+    img.colRange(1, img.cols).copyTo(rightPixels.colRange(0, img.cols - 1));
+    img.rowRange(0, img.rows - 1).copyTo(abovePixels.rowRange(1, img.rows));
+    cv::Mat minP1P2, maxP1P2, minMax, out;
+    cv::min(abovePixels, img, minP1P2);
+    cv::max(abovePixels, img, maxP1P2);
+    cv::min(maxP1P2, rightPixels, minMax);
+    cv::max(minP1P2, minMax, out);
+    return out;
+}
+
+/// @brief `rl_fast_edge_filter_wide`. **STAGE TWO.**
 cv::Mat referenceEdgeFilter(const cv::Mat& gray, int edgeThreshold) {
     const cv::Mat kernelX = (cv::Mat_<float>(1, 3) << -1, 0, 1);
     const cv::Mat kernelY = (cv::Mat_<float>(3, 1) << -1, 0, 1);
@@ -966,6 +988,28 @@ cv::Mat referenceEdgeFilter(const cv::Mat& gray, int edgeThreshold) {
     cv::Mat out = cv::Mat::zeros(gray.size(), CV_8U);
     out.setTo(255, mask);
     return out;
+}
+
+/// @brief THE REFERENCE PREPROCESSING, BOTH STAGES, in the order
+///        `SEALProcessor::temporal_process` runs them.
+///
+/// ```
+/// if (cfg.seal_denoiser_on)    median_filter(img, cfg.denoiser_type);
+/// if (cfg.seal_edge_filter_on) rl_fast_edge_filter_wide(img, cfg.edge_threshold);
+/// ```
+///
+/// `seal_params.yaml` sets `seal_denoiser_on: 1`, `denoiser_type:
+/// "THREE_PIX_MEDIAN"`, `edge_threshold: 17` -- so both stages run and this is the
+/// content the reference frontend actually sees.
+///
+/// **THIS FILE RAN ONLY STAGE TWO UNTIL 2026-08-21**, which means X-20, X-24, X-25
+/// and X-26 measured the right filter applied to an un-denoised frame. Measured
+/// over 1710 EuRoC V1_02_medium frames the stage is real but small: **14.14% set
+/// without it against 13.04% with it**. Every one of those entries compared its
+/// arms WITHIN one content set, so their rankings were expected to survive the
+/// correction -- and that was re-run rather than assumed; see OVERNIGHT_LOG.md.
+cv::Mat referencePreprocess(const cv::Mat& gray, int edgeThreshold) {
+    return referenceEdgeFilter(referenceDenoise(gray), edgeThreshold);
 }
 
 /// @brief cv::warpAffine's 2x3 for `p' = A (p - c) + c + t`, i.e. the forward map
@@ -995,8 +1039,8 @@ void buildRealFrontend(const cv::Mat& gray, const Warp& warp, int levelCount,
     cv::Mat warped;
     cv::warpAffine(gray, warped, affineOf(warp), gray.size(), cv::INTER_CUBIC,
                    cv::BORDER_REFLECT_101);
-    const cv::Mat bin0 = referenceEdgeFilter(gray, 17);
-    const cv::Mat bin1 = referenceEdgeFilter(warped, 17);
+    const cv::Mat bin0 = referencePreprocess(gray, 17);
+    const cv::Mat bin1 = referencePreprocess(warped, 17);
     fe.prev[0].fromCVMat(bin0);
     fe.next[0].fromCVMat(bin1);
     fe.build();
@@ -2332,7 +2376,7 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
         BINCV_CHECK(true);
         return;
     }
-    const cv::Mat bin = referenceEdgeFilter(gray, 17);
+    const cv::Mat bin = referencePreprocess(gray, 17);
     std::printf("\n  the repo's real test image, %dx%d, binarized by the reference\n"
                 "  pipeline's own rl_fast_edge_filter_wide(edge_threshold = 17):"
                 " %.2f%% set\n", gray.cols, gray.rows,
@@ -2570,8 +2614,8 @@ void x24RealCase(const cv::Mat& gray, const char* label, const Warp& warp, doubl
     cv::Mat warped;
     cv::warpAffine(gray, warped, affineOf(warp), gray.size(), cv::INTER_CUBIC,
                    cv::BORDER_REFLECT_101);
-    const cv::Mat bin0 = referenceEdgeFilter(gray, 17);
-    const cv::Mat bin1 = referenceEdgeFilter(warped, 17);
+    const cv::Mat bin0 = referencePreprocess(gray, 17);
+    const cv::Mat bin1 = referencePreprocess(warped, 17);
 
     BinMat<WordType> prevSrc(gray.cols, gray.rows), nextSrc(gray.cols, gray.rows);
     prevSrc.fromCVMat(bin0);
@@ -2669,7 +2713,7 @@ BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
     // which is the content the frontend sees, and closes X-2's caveat.
     {
         bincv::Pyramid<uint32_t, 1, 3, 5, 7> deep(gray.cols, gray.rows);
-        const cv::Mat bin0 = referenceEdgeFilter(gray, 17);
+        const cv::Mat bin0 = referencePreprocess(gray, 17);
         deep.level<0>().fromCVMat(bin0);
         deep.build();
         std::printf("\n  ---- X-2 re-run: the UNCAPPED ladder's real alphabet ----\n");
@@ -2806,8 +2850,8 @@ Yield runArmB(const cv::Mat& gray, const Warp& warp, const std::vector<Point2f>&
     cv::Mat gp, wp;
     cv::copyMakeBorder(gray, gp, pad, pad, pad, pad, cv::BORDER_REFLECT_101);
     cv::copyMakeBorder(warped, wp, pad, pad, pad, pad, cv::BORDER_REFLECT_101);
-    const cv::Mat bin0 = referenceEdgeFilter(gp, 17);
-    const cv::Mat bin1 = referenceEdgeFilter(wp, 17);
+    const cv::Mat bin0 = referencePreprocess(gp, 17);
+    const cv::Mat bin1 = referencePreprocess(wp, 17);
 
     BinMat<WordType> prevSrc(gp.cols, gp.rows), nextSrc(gp.cols, gp.rows);
     prevSrc.fromCVMat(bin0);
@@ -2871,8 +2915,8 @@ void x25Case(const cv::Mat& gray, const char* ladderName, const char* caseName, 
     cv::Mat warped;
     cv::warpAffine(gray, warped, affineOf(warp), gray.size(), cv::INTER_CUBIC,
                    cv::BORDER_REFLECT_101);
-    const cv::Mat bin0 = referenceEdgeFilter(gray, 17);
-    const cv::Mat bin1 = referenceEdgeFilter(warped, 17);
+    const cv::Mat bin0 = referencePreprocess(gray, 17);
+    const cv::Mat bin1 = referencePreprocess(warped, 17);
     BinMat<WordType> prevSrc(gray.cols, gray.rows), nextSrc(gray.cols, gray.rows);
     prevSrc.fromCVMat(bin0);
     nextSrc.fromCVMat(bin1);
@@ -3029,8 +3073,8 @@ void x26Case(const cv::Mat& gray, const char* caseName, const Warp& warp, double
     cv::Mat warped;
     cv::warpAffine(gray, warped, affineOf(warp), gray.size(), cv::INTER_CUBIC,
                    cv::BORDER_REFLECT_101);
-    const cv::Mat bin0 = referenceEdgeFilter(gray, 17);
-    const cv::Mat bin1 = referenceEdgeFilter(warped, 17);
+    const cv::Mat bin0 = referencePreprocess(gray, 17);
+    const cv::Mat bin1 = referencePreprocess(warped, 17);
 
     Frontend<uint32_t> fe(gray.cols, gray.rows, 4);
     fe.prev[0].fromCVMat(bin0);
