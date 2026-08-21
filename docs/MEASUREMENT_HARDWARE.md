@@ -58,7 +58,24 @@ straight to headless.
    *Lite* — no desktop session means less background noise during benchmarks.
 
 2. **Ctrl+Shift+X** (advanced options), before writing:
-   - **Hostname:** `bincv-pi`
+   - **Hostname:** anything; this doc writes `bincv-pi` for the DEVICE hostname
+
+> **THE SSH ALIAS AND THE DEVICE HOSTNAME ARE DIFFERENT THINGS, AND CONFUSING THEM
+> COSTS A SESSION.** Everything below spells the alias `bincv-pi` because that is
+> what this document sets up. **This repo's actual device is reached as `pi4`
+> (mDNS `ryan-pi4.local`) or `pi4ip` (pinned `10.0.0.240`)** — see `~/.ssh/config`,
+> which is the only authority. `ssh bincv-pi` fails with *"Could not resolve
+> hostname"*, and that failure is indistinguishable from a powered-off device if
+> you have not checked the config first. **Read `~/.ssh/config` before concluding
+> the device is down.** Measured cost of not doing so: one session's speed axis
+> deferred on a device that was up the whole time.
+>
+> If the pinned-IP alias fails with *"Host key verification failed"* while the
+> mDNS one works, the IP simply has no `known_hosts` entry — the two names are
+> keyed separately. Fix with
+> `ssh-keyscan -4 -t ed25519 <ip> >> ~/.ssh/known_hosts`, not by reinstalling
+> anything.
+
    - **Enable SSH → "Allow public-key authentication only"**
    - Paste the contents of `~/.ssh/id_ed25519.pub`
    - Set username

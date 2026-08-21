@@ -4883,7 +4883,7 @@ device is where this is closed.
 
 ---
 
-### X-24 · Pyramid level bit depths · `PARTIAL`
+### X-24 · Pyramid level bit depths · `DONE`
 
 **THIS RULE IS COMMITTED ON ITS OWN, BEFORE THE HARNESS THAT MEASURES IT EXISTS.**
 Same discipline as X-9/X-10/X-11 and X-23. The kernel that makes the question
@@ -4991,10 +4991,10 @@ taken anywhere else would not survive contact with the ladder that has to be cho
 on it. This entry therefore stays **PARTIAL** until the speed axis runs on the Pi,
 and a ladder is not adopted into a D-record until it does.
 
-**PLATFORM:** development machine (x86_64). Accuracy and footprint only — both are
-exact and device-independent, which is why they close here. **The ns/frame axis has
-NOT been measured**, so this entry is `PARTIAL` and no ladder is promoted to a
-D-record, exactly as the rule pre-declared.
+**PLATFORM:** accuracy and footprint on the development machine (x86_64) — both are
+exact and device-independent, which is why they close there. **The ns/frame axis is
+the reference device's and ran there**, environment block in result (c). The entry
+was `PARTIAL` between those two runs, exactly as the rule pre-declared.
 
 **Harness validity, checked before any row was read.** Every `1/1/1/1` row below
 reproduces [X-20](#x-20--hybrid-lk-accuracy-against-ground-truth-and-the-frontends-peak-footprint--done)'s
@@ -5033,6 +5033,60 @@ inside EVERY level (X-20's own control for deviation (ii)):**
 | 1/3/5/7 | 0.8595 | 0.3443 | 0.8484 | 2.0641 | **0.0003** | **0.0001** |
 
 Bold is inside tolerance. 58/58 tracked in every cell.
+
+**Result (c) — THE SPEED AXIS, on the reference device.**
+
+Raspberry Pi 4 Model B Rev 1.5, aarch64, kernel 6.18.34+rpt-rpi-v8, g++ 14.2.0,
+governor `performance`, pinned `taskset -c 3`, `throttled=0x0` **before and
+after**, commit `110bf22`. Batch spread 0% on every cell. Harness
+`benchmark/pyramid_depth_benchmark.cpp`, interleaved round-robin.
+
+Level 0 = 640×480, four levels, 140 keypoints, 31×31 window — the only block in
+which the coarse levels are actually used:
+
+| ladder | Σ N² | build µs | vs 1 bit | track µs | vs 1 bit | **predicted** | bytes |
+|---|---|---|---|---|---|---|---|
+| 1/1/1/1 | 4 | 282.2 | 1.00× | 20 485.6 | 1.00× | 1.00× | 306 720 |
+| **1/2/2/2** | 13 | 427.1 | 1.51× | 27 571.5 | **1.35×** | *3.25×* | 357 600 |
+| 1/3/3/3 | 28 | 537.2 | 1.90× | 82 229.1 | 4.01× | *7.00×* | 408 480 |
+| 1/3/4/4 | 42 | 588.8 | 2.09× | 82 358.0 | 4.02× | *10.50×* | 420 960 |
+| 1/3/5/5 | 60 | 745.2 | 2.64× | 95 682.3 | 4.67× | *15.00×* | 433 440 |
+| 1/3/5/7 | 84 | 790.9 | 2.80× | 117 898.4 | 5.76× | *21.00×* | 439 200 |
+
+**THE COST MODEL WAS WRONG, AND IN THE DIRECTION THAT MATTERS FOR THE DECISION.**
+Hypothesis 3 predicted tracking time scaling as `Σ_l N_l²` — 3.25× at `1/2/2/2`
+and 21× at `1/3/5/7`. Measured: **1.35× and 5.76×**, an over-prediction of 2.4×
+at the low end and 3.6× at the high end. The `20N²` popcounts per word are real
+(they are counted in the kernel) but they do **not** dominate a tracked frame.
+Three terms dilute them, and the entry does not claim to have separated them:
+per-level work independent of `N` (region clipping, the 2×2 float solve, the
+iteration and oscillation tests), the `4N` displaced row readers per row which are
+**linear** in N, and — the one that is not a cost at all — **iteration count is
+data-dependent and the ladders converge differently**, so this is an end-to-end
+frame cost rather than a per-iteration one. End-to-end is the right metric for the
+decision; it is simply not the same quantity the model predicted.
+
+**The 94×60 block's track column is 1.00× at every ladder, exactly as
+pre-declared, and it is not a refutation** — at that size the next level down is
+47×30, whose height is under the 31-pixel window, so `usableLevelCount` stops at
+one and the tracker never reads a level deeper than level 0 ([deviation
+(vi)](../bincv-cpp/include/bincv-cpp/ops/opticalFlow.hpp)). Its informative column
+is BUILD, where the per-row prologue [X-21](#x-21--does-generic-n-cost-the-specialized-n1-and-ternary-paths-anything--done)
+flagged shows up slightly worse than at full frame — **3.06× against 2.80×** at
+`1/3/5/7` — because a per-row cost is paid 5.4× more often per pixel there.
+
+**The development machine gives a different set of ratios** — 1.94 / 6.51 / 6.93 /
+8.04 / 10.66 against the device's 1.35 / 4.01 / 4.02 / 4.67 / 5.76 — consistently
+higher, which is what D-6 predicts (aarch64 has no scalar popcount; `CNT` runs in
+the NEON domain) and is why the device closes this axis and the laptop does not.
+
+**What this changes:** `1/2/2/2`, X-24's accuracy leader, is **also cheap** —
+1.35× the shipped ladder's tracking time, 1.51× its build, 1.17× its bytes. The
+pre-registered band-B headline condition (*"if the chosen ladder's tracker exceeds
+2× the 1/1/1/1 ladder, say so as a headline"*) **does not fire**. The binding
+constraint on E-7 is therefore neither footprint nor speed; it is
+[E-14](ARCHITECTURE.md#register), the coarse-level window border, which no depth
+can address.
 
 **Conclusion — and the hypothesis was wrong in BOTH directions, which is why the
 rule was written down first.**

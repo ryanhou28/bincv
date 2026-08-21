@@ -9,7 +9,13 @@
 # M-series core.
 #
 #   ./scripts/run_on_pi.sh <target> <command...>
-#   ./scripts/run_on_pi.sh bincv-pi ./tests/test_binMat
+#   ./scripts/run_on_pi.sh pi4 ./tests/test_binMat
+#
+# The target is an ssh-config ALIAS, not the device hostname. This repo uses
+# pi4 (mDNS ryan-pi4.local) and pi4ip (pinned IP); docs/MEASUREMENT_HARDWARE.md
+# writes bincv-pi for the device hostname and that name does NOT resolve.
+# ~/.ssh/config is the only authority -- read it before concluding the device is
+# down.
 #
 # <target> is any ssh destination -- a ~/.ssh/config alias is strongly preferred,
 # and pass -4 (see remote() below): mDNS .local resolves dual-stack and the IPv6
@@ -131,7 +137,7 @@ if [[ $# -lt 1 ]]; then
     [[ -n "$TARGET" ]] || skip "no target given and BINCV_PI_TARGET is unset
 
   usage: ./scripts/run_on_pi.sh <ssh-target> <command...>
-     eg: ./scripts/run_on_pi.sh bincv-pi ./tests/test_binMat"
+     eg: ./scripts/run_on_pi.sh pi4 ./tests/test_binMat"
 else
     TARGET="$1"; shift
 fi

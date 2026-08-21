@@ -3276,7 +3276,7 @@ Each task produces a committed measurement and a written conclusion, and each ma
 invalidate a decision — **that is the point.** A contradicted claim gets reported,
 not worked around.
 
-### T4.1 · E-7 · Pyramid level bit depths · `PARTIAL` — accuracy and footprint measured; speed axis pending the reference device
+### T4.1 · E-7 · Pyramid level bit depths · `DONE` — all three axes measured; the ladder choice is blocked on E-14, not on this task
 
 **Depends:** T3.8
 
@@ -3307,11 +3307,19 @@ was written against a cause the measurement does not support.
   contents. Density RISES down the uncapped ladder (10.36% → 38.94% non-zero) where
   the 1-bit ladder thins to 2.7% — the same finding from the other side.
 
-**Still open, and why this is `PARTIAL` rather than `DONE`:** the **ns/frame axis
-has not been measured** — the reference device was unreachable for this session, and
-X-22's caveat 1 (the same kernel moving 1.46× between binaries built from unchanged
-source) is why no other platform may close it. X-24's rule pre-declared that no
-ladder is promoted to a D-record until it runs there.
+* **The speed axis ran on the reference device and the cost model was wrong in the
+  good direction.** Hypothesis 3 predicted tracking time scaling as `Σ_l N_l²`
+  (3.25× at `1/2/2/2`, 21× at `1/3/5/7`); measured **1.35× and 5.76×**. The
+  `20N²` popcounts per word are real but do not dominate a tracked frame. So
+  `1/2/2/2` is cheap as well as accurate — 1.35× tracking, 1.51× build, 1.17×
+  bytes — and the pre-registered "more than 2× is a headline" condition does not
+  fire.
+
+**Why this is `DONE` with no ladder adopted:** all three axes are measured and the
+experiment is complete. The choice E-7 exists to make is blocked on
+[E-14](ARCHITECTURE.md#register) — the coarse-level window border, which X-24
+promoted from a secondary term to the dominant one and which no depth can address.
+That is band C's prescribed outcome, not an unfinished task.
 
 
 **T3.8 CHANGED THIS TASK'S STANDING, AND ITS SCOPE.** [X-20](EXPERIMENTS.md)
