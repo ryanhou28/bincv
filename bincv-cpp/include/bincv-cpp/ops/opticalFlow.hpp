@@ -782,6 +782,116 @@ inline WordType alignedWord(const WordType* row, size_t words, size_t x0) {
     return static_cast<WordType>((lo >> s) | (hi << (bits - s)));
 }
 
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+/// @brief The aligned residual at **N == 1**, batching across the FOUR TAPS and
+///        carrying the counts in vector lanes across the WHOLE WINDOW. **INTERNAL.**
+///
+/// ===========================================================================
+/// WHY THIS EXISTS SEPARATELY FROM `slicedSignedSum`'s NEON PATH
+///
+/// That path batches the `N^2` PLANE PAIRS. At `N == 1` there is exactly one pair,
+/// so it does nothing -- and `N == 1` is level 0, the largest level of every
+/// ladder, which was therefore running fully scalar even on aarch64 (X-36).
+///
+/// The structure that exists at EVERY depth is the five taps: `t00`, `t01`, `t10`,
+/// `t11` and `self`, all counted against the same magnitude and sign. Four of them
+/// fit one 128-bit register.
+///
+/// AND BECAUSE D-31 ALIGNED THE WINDOW, EACH ROW IS ONE WORD -- so the lane
+/// accumulators can carry across all 31 rows and cross the register domain **once
+/// per window** instead of once per row. That is what makes this worth more than
+/// the plane-pair batching: X-33 got 1.24x while still extracting per call, and
+/// the ceiling for batching itself is 2.41x.
+///
+/// `self` stays scalar: there are five taps and four lanes, and a fifth lane would
+/// cost a second register pair for one twentieth of the work.
+/// ===========================================================================
+template <typename WordType>
+inline void alignedResidualSumsNeon1(const LKLevelN<1, WordType>& lv,
+                                     const RegionWords<WordType>& r, long long tapX,
+                                     long long tapY, TapSums& sumsX, TapSums& sumsY) {
+    const size_t width = r.x1 - r.x0;
+    const size_t words = minRowWords<WordType>(lv.prev[0].width);
+    const WordType mask = lowBitsMask<WordType>(width);
+    const long long x0 = static_cast<long long>(r.x0);
+    const bool tapIsShift = width < bitsPerWord<WordType>();
+    const long long srcX = x0 + tapX;
+    const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
+    const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
+
+    uint32x4_t totX = vdupq_n_u32(0), oppX = vdupq_n_u32(0);
+    uint32x4_t totY = vdupq_n_u32(0), oppY = vdupq_n_u32(0);
+    long long selfTotX = 0, selfOppX = 0, selfTotY = 0, selfOppY = 0;
+
+    for (size_t y = r.y0; y < r.y1; ++y) {
+        const long long srcY = static_cast<long long>(y) + tapY;
+        const bool rowsInside = srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
+        const bool interior = colsInside && rowsInside;
+        WordType t00, t10;
+        if (interior) {
+            t00 = alignedWord<WordType>(lv.next[0].row(static_cast<size_t>(srcY)), words,
+                                        static_cast<size_t>(srcX));
+            t10 = alignedWord<WordType>(lv.next[0].row(static_cast<size_t>(srcY) + 1), words,
+                                        static_cast<size_t>(srcX));
+        } else {
+            t00 = displacedRow<WordType>(lv.next[0], srcY, srcX).word(0);
+            t10 = displacedRow<WordType>(lv.next[0], srcY + 1, srcX).word(0);
+        }
+        const WordType t01 = tapIsShift
+            ? static_cast<WordType>(t00 >> 1)
+            : displacedRow<WordType>(lv.next[0], srcY, srcX + 1).word(0);
+        const WordType t11 = tapIsShift
+            ? static_cast<WordType>(t10 >> 1)
+            : displacedRow<WordType>(lv.next[0], srcY + 1, srcX + 1).word(0);
+
+        const WordType selfW = alignedWord<WordType>(lv.prev[0].row(y), words, r.x0);
+        const WordType magX = static_cast<WordType>(
+            alignedWord<WordType>(lv.dxMag[0].row(y), words, r.x0) & mask);
+        const WordType magY = static_cast<WordType>(
+            alignedWord<WordType>(lv.dyMag[0].row(y), words, r.x0) & mask);
+        const WordType sgnX = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
+        const WordType sgnY = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
+
+        const uint32_t taps[4] = {static_cast<uint32_t>(t00), static_cast<uint32_t>(t01),
+                                  static_cast<uint32_t>(t10), static_cast<uint32_t>(t11)};
+        const uint32x4_t vt = vld1q_u32(taps);
+
+        // Four taps against one magnitude, counts straight into lanes. No
+        // extraction here -- the accumulators run to the end of the window.
+        const uint32x4_t bx = vandq_u32(vt, vdupq_n_u32(static_cast<uint32_t>(magX)));
+        totX = vaddq_u32(totX, vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(bx)))));
+        const uint32x4_t sx = vandq_u32(bx, vdupq_n_u32(static_cast<uint32_t>(sgnX)));
+        oppX = vaddq_u32(oppX, vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(sx)))));
+
+        const uint32x4_t by = vandq_u32(vt, vdupq_n_u32(static_cast<uint32_t>(magY)));
+        totY = vaddq_u32(totY, vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(by)))));
+        const uint32x4_t sy = vandq_u32(by, vdupq_n_u32(static_cast<uint32_t>(sgnY)));
+        oppY = vaddq_u32(oppY, vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(sy)))));
+
+        const WordType bsX = static_cast<WordType>(selfW & magX);
+        selfTotX += static_cast<long long>(popcountWord<WordType>(bsX));
+        selfOppX += static_cast<long long>(popcountWord<WordType>(
+            static_cast<WordType>(bsX & sgnX)));
+        const WordType bsY = static_cast<WordType>(selfW & magY);
+        selfTotY += static_cast<long long>(popcountWord<WordType>(bsY));
+        selfOppY += static_cast<long long>(popcountWord<WordType>(
+            static_cast<WordType>(bsY & sgnY)));
+    }
+
+    // ONE domain crossing per window per component, not one per row.
+    auto lane = [](uint32x4_t t, uint32x4_t o, int i) {
+        return static_cast<long long>(vgetq_lane_u32(t, i)) -
+               2 * static_cast<long long>(vgetq_lane_u32(o, i));
+    };
+    sumsX.t00 += lane(totX, oppX, 0); sumsX.t01 += lane(totX, oppX, 1);
+    sumsX.t10 += lane(totX, oppX, 2); sumsX.t11 += lane(totX, oppX, 3);
+    sumsX.self += selfTotX - 2 * selfOppX;
+    sumsY.t00 += lane(totY, oppY, 0); sumsY.t01 += lane(totY, oppY, 1);
+    sumsY.t10 += lane(totY, oppY, 2); sumsY.t11 += lane(totY, oppY, 3);
+    sumsY.self += selfTotY - 2 * selfOppY;
+}
+#endif
+
 /// @brief `residualSums` for a region that fits in ONE word. **INTERNAL** -- see
 ///        the fast-path comment in `residualSums`.
 template <size_t N, typename WordType, bool UseNeon>
@@ -915,6 +1025,15 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
     // and at 31x31 (`seal_params.yaml`) it fits at every word type binCV supports.
     // ===================================================================
     if (r.x1 - r.x0 <= bitsPerWord<WordType>()) {
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+        // N == 1 is level 0 of every ladder and got NOTHING from the plane-pair
+        // batching, because at N == 1 there is one pair. Batching across the four
+        // TAPS is what applies here (X-36).
+        if constexpr (UseNeon && N == 1 && sizeof(WordType) == 4) {
+            alignedResidualSumsNeon1<WordType>(lv, r, tapX, tapY, sumsX, sumsY);
+            return;
+        }
+#endif
         alignedResidualSums<N, WordType, UseNeon>(lv, r, tapX, tapY, sumsX, sumsY);
         return;
     }

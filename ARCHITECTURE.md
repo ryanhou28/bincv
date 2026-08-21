@@ -2381,6 +2381,52 @@ comparison, taken while `verify.sh` was building in the background, reported 1.0
 measures. **A single timing run on a busy development machine is not a
 measurement.**
 
+
+### D-33: the residual batches across TAPS at N = 1, and the footprint buys no speed
+
+Two results, and **the second matters more than the first**.
+
+**LK IS COMPUTE-BOUND. THE 8× FOOTPRINT ADVANTAGE DOES NOT CONVERT INTO TRACKING
+SPEED.** [X-36](EXPERIMENTS.md) measured it on the reference device: **33× more
+points and 36× more data move the per-point cost by under 13%.** A 31×31 window is
+**120 bytes at one bit** — two to four cache lines either way — and the compute per
+window dwarfs the load.
+
+This project has carried an implicit assumption that the footprint result and the
+speed result reinforce each other. **They are independent.** The footprint decides
+what fits on a device — [D-31](#8-design-decisions)'s 6.23× end to end is real and
+is the stronger of binCV's two claims — but further speed has to come from doing
+less work, not from touching less data. Anyone reasoning about this library's
+performance should start from that.
+
+**The optimisation.** `impl::slicedSignedSum`'s NEON path batches the `N²` plane
+pairs, so at `N = 1` there is exactly one pair and it does nothing — meaning
+**level 0, the largest level of every ladder, ran fully scalar even on aarch64**.
+The structure that exists at *every* depth is the five taps, and four fit one
+128-bit register. And because [D-31](#8-design-decisions) aligned the window, each
+row is one word, so the lane accumulators **run the whole window and cross the
+register domain once per window** instead of once per row.
+
+**1.736× on the kernel at `N = 1`, bit-exact.** `N == 2` keeps the plane-pair
+batching, which is the better shape at that depth — the two batchings compete for
+the same registers and do not compose.
+
+**BUT THE LADDER GATES IT.** The LK stage moved only **1.04×**, because `1/2/2/2`
+has one level at `N = 1` and three at `N = 2`, and every level costs the same in LK.
+At `1/1/1/1` all four levels would take the 1.736×. So [E-19](#register) is no
+longer only about the `N²` arithmetic: **the ladder also decides how much of the
+vectorized path is reachable at all.**
+
+**Cumulative, reference device, LK track:**
+
+| ladder | before D-30 | now | |
+|---|---|---|---|
+| `1/1/1/1` | 20 485.6 µs | **5 479.8** | **3.74×** |
+| `1/2/2/2` | 27 571.5 µs | **9 639.6** | **2.86×** |
+
+**And binCV still has no x86 vector path at all**, so [D-32](#8-design-decisions)'s
+parity result was binCV **scalar** against OpenCV **SSE**.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

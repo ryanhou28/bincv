@@ -387,3 +387,31 @@ of seven repeats at load ~1.2.
 
 **All that remains at the shipped ladder is the ladder.** `1/2/2/2` costs 2.33×,
 which is now the entire difference between parity and 2.38× slower. E-19.
+
+---
+
+## 10 · X-36 — the footprint buys no speed, and tap batching · **DONE**
+
+**The important half is the negative result.** LK is **compute-bound**: 33× more
+points and 36× more data move the per-point cost **under 13%**. A 31×31 window is
+120 bytes at one bit — two to four cache lines either way. **The 8× footprint
+advantage does not convert into tracking speed.** This project had been carrying the
+opposite assumption implicitly; the two results are independent.
+
+**The optimisation.** The NEON path batched `N²` plane pairs, so at `N = 1` — level
+0 of every ladder — it did **nothing**, and that level ran fully scalar on aarch64.
+Batching across the four **taps** works at every depth, and D-31's alignment lets the
+lane accumulators run the whole window rather than extracting per row.
+
+**1.736× on the kernel, bit-exact.** But **1.04× on the LK stage**, because
+`1/2/2/2` has one level at `N = 1` and three at `N = 2`.
+
+**Cumulative, reference device, LK track:**
+
+| ladder | before X-33 | now | |
+|---|---|---|---|
+| `1/1/1/1` | 20 485.6 µs | **5 479.8** | **3.74×** |
+| `1/2/2/2` | 27 571.5 µs | **9 639.6** | **2.86×** |
+
+**The ladder now gates the optimisation, not just the arithmetic** — at `1/1/1/1`
+all four levels would take the 1.736×. E-19 grew accordingly.

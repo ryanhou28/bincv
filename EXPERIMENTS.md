@@ -6849,7 +6849,7 @@ on the wrong conditions nearly became a result.
 
 ---
 
-### X-36 · Batching across TAPS, and what the footprint does not buy · `TODO`
+### X-36 · Batching across TAPS, and what the footprint does not buy · `DONE`
 
 **COMMITTED BEFORE THE ARM EXISTS.**
 
@@ -6936,7 +6936,69 @@ scalar popcounts. **Under 1.4× and the arm is not written.**
 **Metric:** ns per window on the reference device; bit-exact sums; then the LK stage
 and the OpenCV comparison.
 
-**Result:** *(not yet measured)*
+**Ceiling, measured first:** four popcounts against one mask, scalar against vector
+— **2.414×**, bit-identical. Above the 1.4× gate, so the arm was written.
+
+**Result — BAND A on the kernel, and a small effect on the stage. Both are
+reported, because the difference between them is the finding.**
+
+| | device µs | |
+|---|---|---|
+| `residualSums` at `N = 1`, scalar | 354.2 | 1.000× |
+| **`residualSums` at `N = 1`, tap-batched** | **204.0** | **1.736×** |
+
+Bit-exact: 0 of 130 windows differ, on-device `ctest` green.
+
+**LK stage: 7.421 → 7.129 ms, only 1.04×** — because the shipped `1/2/2/2` ladder
+has **one level at `N = 1` and three at `N = 2`**, and every level costs the same in
+LK (same points, same window). A 1.736× on a quarter of the work is 1.13× at best,
+and the measured 1.04× is inside that.
+
+**Ladder sweep on the reference device with the new kernel:**
+
+| ladder | track µs | vs `1/1/1/1` |
+|---|---|---|
+| **`1/1/1/1`** | **5 479.8** | 1.00× |
+| `1/2/2/2` *(shipped)* | 9 639.6 | **1.76×** |
+| `1/3/3/3` | 29 608.4 | 5.40× |
+
+**Cumulative across the whole optimisation sequence, reference device, LK track:**
+
+| ladder | before X-33 | now | |
+|---|---|---|---|
+| `1/1/1/1` | 20 485.6 µs | **5 479.8** | **3.74×** |
+| `1/2/2/2` | 27 571.5 µs | **9 639.6** | **2.86×** |
+
+**Conclusion.**
+
+1. **PART ONE'S FINDING IS THE MORE IMPORTANT ONE: LK IS COMPUTE-BOUND AND THE 8×
+   FOOTPRINT BUYS NO TRACKING SPEED.** 33× more points and 36× more data moved the
+   per-point cost under 13%. This project has carried an implicit assumption that
+   the two results reinforce each other. **They do not — they are independent**, and
+   saying so is worth more than the optimisation below it.
+2. **The arm works and is adopted, at 1.736× on the kernel.** `N = 1` is level 0 of
+   every ladder and had been running **fully scalar even on aarch64**, because the
+   existing NEON path batches `N²` plane pairs and at `N = 1` there is one.
+   Batching across the four **taps** is the structure that exists at every depth,
+   and D-31's alignment is what lets the lane accumulators run the whole window
+   instead of extracting per row.
+3. **THE LADDER NOW GATES THE OPTIMISATION, NOT JUST THE ARITHMETIC.** At `1/1/1/1`
+   all four levels would take the 1.736×; at `1/2/2/2` one does. So
+   [E-19](ARCHITECTURE.md#register) is no longer only about the `N²` cost — the
+   ladder also decides how much of the vectorized path is reachable at all. The
+   measured ladder cost is now **1.76×** on the device track.
+4. **Two gaps stay open and are named rather than left implicit.** `N = 2` gets
+   nothing from tap batching — the two batchings compete for the same registers, and
+   band D anticipated that they might not compose. And **binCV still has no x86
+   vector path at all**, so [X-35](#x-35--the-tap-machinery-around-the-arithmetic--done)'s
+   parity was binCV-scalar against OpenCV-SSE.
+
+**Decision:** adopt for `N == 1, uint32_t` on aarch64; `N == 2` keeps the plane-pair
+batching, which is the better shape at that depth. Recorded as
+[D-33](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/tapbatch_ceiling.cpp`, `benchmark/residual_n1.cpp`,
+`benchmark/lk_memorybound.cpp`, `benchmark/pyramid_depth_benchmark.cpp`.
 
 ---
 
