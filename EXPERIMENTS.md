@@ -6849,6 +6849,97 @@ on the wrong conditions nearly became a result.
 
 ---
 
+### X-36 · Batching across TAPS, and what the footprint does not buy · `TODO`
+
+**COMMITTED BEFORE THE ARM EXISTS.**
+
+**Gates:** [X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial)'s
+criterion 4, and a standing expectation this entry settles first.
+
+---
+
+**PART ONE — MEASURED BEFORE ANY OPTIMISATION, BECAUSE IT DETERMINES WHETHER THE
+OPTIMISATION IS THE RIGHT KIND: IS LK MEMORY-BOUND?**
+
+The project's footprint result is **6.23×** end to end, and the natural expectation
+is that moving 8× less data makes tracking faster. **It does not, and this is
+measured rather than reasoned.** Reference device, `N = 1`, one level, 31×31:
+
+| points | µs per point | | frame | KB @ 1 bit | µs per point |
+|---|---|---|---|---|---|
+| 35 | 21.91 | | 320×240 | 9.4 | 22.93 |
+| 140 | 21.38 | | 640×480 | 37.5 | 21.38 |
+| 560 | 22.26 | | 1280×960 | 150.0 | 24.19 |
+| 1160 | 22.96 | | 1920×1440 | 337.5 | 24.23 |
+
+**33× more points and 36× more data move the per-point cost by under 13%.** A 31×31
+window is **120 bytes at 1 bit** — two to four cache lines either way — and the
+compute per window dwarfs the load. **LK is compute-bound, and the 8× footprint
+advantage does not convert into tracking speed.**
+
+That is worth stating plainly because it has been implicit in this project's framing
+and is wrong: **the memory result and the speed result are independent.** The
+footprint matters for what fits on a device; it does not make this kernel faster.
+Any further speed has to come from doing less work, not from touching less data.
+
+---
+
+**PART TWO — THE ARM.**
+
+**Question:** `slicedSignedSum` batches its popcounts across the **`N²` plane
+pairs**. At `N = 1` there is exactly one pair, so **the NEON path does nothing and
+level 0 — the largest level of every ladder — runs fully scalar even on aarch64.**
+What does batching across the **five taps** instead buy, given that they exist at
+every `N`?
+
+**The structure being exploited.** The residual needs, per component, five sums:
+`t00`, `t01`, `t10`, `t11` and `self`, each against the same magnitude and sign.
+**Four of them fit one 128-bit vector.** So at `N = 1` a row's 20 popcounts become
+~4 vector operations plus 4 scalar, instead of 20 scalar — and the grouping is by
+TAP, which exists at every depth, rather than by plane pair, which does not exist
+at `N = 1`.
+
+**Two further facts frame what this can and cannot do.**
+* **binCV has NO x86 vector path at all.** The parity result in
+  [X-35](#x-35--the-tap-machinery-around-the-arithmetic--done) —
+  binCV 4.216 ms against OpenCV's 4.134 ms — was **binCV SCALAR against OpenCV
+  SSE**. Anything this arm gains on x86 comes from instruction-level parallelism
+  alone.
+* [ROADMAP Phase 5.3](ROADMAP.md#phase-5--platform-hardening) makes x86 a
+  comparison platform, not a deployment target, so **the arm is judged on the
+  reference device** and any x86 gain is reported as a secondary observation.
+
+**Decision rule** *(written before measuring)* — `R` = shipped / batched on
+`residualSums`, reference device, **`N = 1`** (the case that currently gets nothing)
+and `N = 2`, bit-exact sums as a precondition.
+
+* **Band A — `R` ≥ 1.4× at `N = 1`.** Adopt. Re-measure the LK stage, the frontend
+  and the OpenCV comparison, and report the `N = 2` effect separately — the two
+  depths use different batching and one may regress.
+* **Band B — 1.15× ≤ `R` < 1.4×.** Adopt only if `N = 2` does not regress. The
+  restructure replaces a small, well-tested function with a wider one, and below
+  1.4× that has to be earned.
+* **Band C — `R` < 1.15×.** **Do not ship.** The remaining cost is then not the
+  popcounts at all, and the entry must locate it before any further work — the
+  five-tap decomposition itself would become the thing to question, and that is
+  [D-20](ARCHITECTURE.md)'s boundary rather than an implementation detail.
+* **Band D — the batched form is SLOWER at `N = 2`.** Then batching across pairs and
+  batching across taps are in conflict and only one can be had; report which and
+  why, and keep the better per depth rather than forcing one shape on both.
+
+**A ceiling is measured first**, per the procedure X-33 established and X-32 argued
+for: a stripped loop that batches four popcounts against one mask, against four
+scalar popcounts. **Under 1.4× and the arm is not written.**
+
+**Variants:** shipped vs tap-batched × `N` = 1, 2.
+**Workload:** 31×31 windows over 640×480.
+**Metric:** ns per window on the reference device; bit-exact sums; then the LK stage
+and the OpenCV comparison.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
