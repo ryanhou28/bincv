@@ -5812,7 +5812,14 @@ for completeness and is not the summary.
    is the same catastrophic tail X-25 found and
    [E-17](ARCHITECTURE.md#register) is chartered to explain; it is not a new
    phenomenon and it is not swept up here.
-3. **CRITERION 4 IS NOT MET, AND NOT NEARLY.** binCV is **14× slower**. The
+3. **CRITERION 4 IS NOT MET, AND NOT NEARLY — BUT THE FIRST NUMBER CONFLATED TWO
+   THINGS AND HAS BEEN SPLIT.** binCV is **14× slower** than OpenCV as it runs by
+   default, and **6.3× slower than OpenCV pinned to ONE thread** (22.82 vs
+   3.64 ms/frame over the same 400 frames). So **threading accounts for ~2.1× of
+   the gap and SIMD plus algorithm for the remaining 6.3×**, which is the
+   like-for-like figure and the one to quote. Both are reported because neither is
+   honest alone: a multi-core denominator is what a user actually has, and a
+   single-thread one is what isolates the code. The
    comparison is honest and unflattering: **binCV is scalar and single-threaded**,
    while OpenCV's `calcOpticalFlowPyrLK` and `goodFeaturesToTrack` are
    SIMD-vectorized and were running on **12 threads**. That is a like-for-like

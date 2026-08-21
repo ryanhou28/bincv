@@ -31,6 +31,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -165,6 +166,12 @@ int main(int argc, char** argv) {
     std::sort(files.begin(), files.end());
     if (maxFrames && files.size() > maxFrames) files.resize(maxFrames);
     if (files.size() < 2) { std::printf("need at least 2 frames\n"); return 2; }
+
+    // THREAD CONTROL. The default comparison lets OpenCV use every core while
+    // binCV runs on one, which conflates "OpenCV has more cores" with "OpenCV has
+    // better code". Setting BINCV_OPENCV_THREADS=1 separates them. Neither run is
+    // the honest one on its own -- both are reported.
+    if (const char* t = std::getenv("BINCV_OPENCV_THREADS")) cv::setNumThreads(std::atoi(t));
 
     const cv::Mat first = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
     const int w = first.cols, h = first.rows;

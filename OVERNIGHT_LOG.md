@@ -195,3 +195,22 @@ X-29's accumulator win (last night's work) is 1.114× on a stage worth 1.4% —
 **~0.17% end to end**. It was the right answer to E-13 and it was not a big lever.
 And D-22's streaming corner ring is confirmed as a *footprint* decision: selection
 is 2.5% of detection, the response sweep 97.5%.
+
+---
+
+## Follow-up · criterion 4, with threading separated from SIMD
+
+The 14× figure compared binCV on one thread against OpenCV on twelve, which
+conflates "OpenCV has more cores" with "OpenCV has better code". Pinned to one
+thread over the same 400 frames:
+
+| | ms/frame | ratio |
+|---|---|---|
+| binCV (scalar, 1 thread) | 22.82 | — |
+| OpenCV, **1 thread** | 3.64 | **6.3× faster** |
+| OpenCV, 12 threads | 1.72 | 14× faster |
+
+**Threading is ~2.1× of the gap; SIMD plus algorithm is the remaining 6.3×.** The
+like-for-like deficit is **6.3×**, and that is the number to quote. Both are
+reported because neither is honest alone — a multi-core denominator is what a user
+actually has, a single-thread one is what isolates the code.
