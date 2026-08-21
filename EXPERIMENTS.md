@@ -6070,6 +6070,108 @@ as [D-27](ARCHITECTURE.md#8-design-decisions).
 
 ---
 
+### X-31 · The corner response as bit-sliced box sums · `TODO`
+
+**COMMITTED BEFORE THE KERNEL EXISTS.**
+
+**Gates:** [D-27](ARCHITECTURE.md#8-design-decisions)'s Phase 5.1 target list, and
+through it [X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial)'s
+**unmet criterion 4**.
+**Question:** `cornerMinEigenVal` is **52.7% of the frontend**. How much of it is
+recoverable by computing the 3×3 covariance **row-at-a-time in bit-sliced form**
+instead of per pixel, and how much more by skipping words with no gradient?
+
+**WHY THIS AND NOT SIMD, MEASURED RATHER THAN ARGUED.** The obvious response to
+"14× slower" is to vectorize. Two diagnostics say that would be the wrong first
+move:
+
+* **The corner response is 84% per-pixel FIXED cost.** Sweeping `blockSize`
+  3/5/7/9 gives 14.42 / 18.40 / 24.99 / 32.97 ms while the window area goes
+  1× / 2.8× / 5.4× / 9×. Fitting `T = A + B·bs²`: **A ≈ 12.1 ms, B·9 ≈ 2.3 ms.**
+  Nine times the window work costs 2.29×. The fixed part is `clipRegion` +
+  `blockWindow` + mask construction + call, **once per pixel**; the `sqrt` is only
+  ~0.5 ms of it.
+* **`residualSums` spends ~9.4 cycles per popcount** (measured directly), where a
+  popcount is 1 cycle throughput — so it too is dominated by addressing, not
+  arithmetic.
+
+**Vectorizing the popcounts therefore attacks 10–16% of either kernel, and Amdahl
+caps it near 1.2×.** The overhead has to go first, and removing it is portable
+where SIMD is not.
+
+**The reformulation, and it is the library's own existing technique.** For
+`blockSize` 3 every quantity the response needs is a **3×3 box sum of a bit-plane**:
+`xx = Σ magX`, `yy = Σ magY`, and `crossTerm = Σ(magX & magY & ~sel) −
+Σ(magX & magY & sel)` with `sel = signX ^ signY`. A box sum of bits is computed
+word-at-a-time with shifts and **full adders** — `h = a₋₁ + a₀ + a₊₁` is one full
+adder into two planes, then three of those sum vertically into four planes (0..9).
+**32 pixels per word instead of one**, against a current form that issues ~12
+popcounts per pixel with **3 valid bits out of 32** in each.
+[D-2](ARCHITECTURE.md) is this technique and `pyrDown`'s `boxSum4`
+(`boxSumFullAdders(n) = 3n + 1`) is it already in the library; it was simply never
+applied to the biggest kernel.
+
+**BIT-EXACTNESS IS A PRECONDITION, NOT A BAND.** Box sums of bits are **exact
+integers**, and `minEigenValue` takes the same three integers, so the `float` it
+returns is identical *by construction* rather than to a tolerance — and therefore
+so are the corners, their order and their count, exactly as
+[D-22](ARCHITECTURE.md) held the streaming ring. **If exact equality turns out not
+to be achievable, that is a finding to stop and report on, not a reason to relax to
+a tolerance.** The border is where it will fail if it fails: a clipped window counts
+only pixels inside the frame, which the bit-sliced form must reproduce by
+zero-filling rows above/below the frame and relying on D-13's guarantee that
+padding bits past `width` are zero.
+
+**Arms, each in its OWN translation unit** — house practice, and
+[X-29](#x-29--the-per-row-partial-accumulator-above-n--1--done) has just
+demonstrated why (`morphology_path_benchmark` measured two instantiations in one
+object moving each other ~10%):
+
+* **C** — the shipped per-pixel `countCovariance` form. The control.
+* **B1** — bit-sliced box sums, **no** sparsity skip.
+* **B2** — bit-sliced box sums **plus** a word-level skip: if `magX | magY` is zero
+  across the 3×3 neighbourhood of a word, all four box sums are zero, so `minEig`
+  is exactly 0 for **32 pixels at once** and their `sqrt` is never taken. On a
+  6.5–13%-set edge map that should fire often.
+
+**Separating B1 from B2 is deliberate**: they are independent ideas and a combined
+number would not say which one worked.
+
+**Decision rule** *(written before measuring)* — `R` = C/B2 on `cornerMinEigenVal`
+at `blockSize` 3, on the reference device, with bit-exact corners.
+
+* **Band A — `R` ≥ 2.0×.** Adopt. Report B1 and B2 separately so the split between
+  reformulation and sparsity is on the record, and re-run
+  [X-30](#x-30--where-the-frontends-time-goes-and-phase-51s-target-list--done)'s
+  profile, because the frontend's shape will have changed and Phase 5.1's target
+  list may need reordering.
+* **Band B — 1.2× ≤ `R` < 2.0×.** Adopt if the code is not materially harder to
+  hold correct, and **state that the 84%-fixed-cost model over-predicted**, with
+  where the remaining time went.
+* **Band C — `R` < 1.2×.** **Do not ship it.** The cost model was wrong, a more
+  complex kernel would be being adopted for nothing, and the entry reports that the
+  A/B fit misled — which is the outcome the `blockSize` sweep was supposed to
+  protect against and would mean it did not.
+* **Band D — B1 is SLOWER than C.** Pre-declared because it would contradict
+  `pyrDown`'s precedent: it would mean the full-adder network costs more than the
+  per-pixel popcounts it replaces, and that needs explaining before S3 or SIMD is
+  attempted, since both rest on the same reading of where time goes.
+
+**The sparsity skip rate is reported as a number, not implied by the timing**, and
+on real reference content as well as synthetic — a skip rate is a property of the
+data, and synthetic texture would flatter or punish it arbitrarily.
+
+**Variants:** C, B1, B2 × `uint32_t`, `uint64_t`; `blockSize` 3 (the shipped
+default) and 5.
+**Workload:** 640×480, the reference pipeline's own binarized content and the
+synthetic control.
+**Metric:** ms/frame on the reference device; skip rate; and corner-array equality
+against C.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
