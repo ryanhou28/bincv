@@ -6705,6 +6705,82 @@ word type binCV supports — and keeps the general path for wider windows. Recor
 
 ---
 
+### X-35 · The tap machinery around the arithmetic · `TODO`
+
+**COMMITTED BEFORE THE ARMS EXIST.**
+
+**Gates:** [X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial)'s
+unmet criterion 4.
+**Question:** After [X-34](#x-34--the-straddling-window--done), `residualSums`'
+**arithmetic is already better than OpenCV's** — 0.65 popcounts per pixel at `N = 1`
+against OpenCV's ~1.2 SIMD ops. binCV is nonetheless 1.34× slower at `1/1/1/1`.
+**All of the remaining gap is machinery around the arithmetic. What is it, and how
+much comes off?**
+
+**The accounting, per window row at `N = 1` on the aligned path:**
+
+| | ops |
+|---|---|
+| 4 × `displacedRow` construction | **60** — clamp, `row()`, `minRowWords`, `rowTailMask`, **`edgeFill` twice (two loads)** |
+| 4 × `word(0)` | 24 |
+| 5 × `alignedWord` (prev, mag, sign) | 20 |
+| **10 × `slicedSignedSum`** | **60** ← the actual arithmetic |
+| 10 × accumulate | 10 |
+| **total** | **~174 for 31 pixels = 5.6 ops/pixel** |
+
+**The machinery is eight times the arithmetic.** That is the whole remaining
+answer to "why isn't a 1-bit tracker faster than a byte-per-pixel one".
+
+**Arm T — the `+1` tap is a shift, and X-34 is what makes that TRUE.**
+[X-32](#x-32--residualsums-tap-extraction--done) tried exactly this identity and it
+**lost**, because in the per-word path `t01` at word `i` needs a bit from word
+`i + 1` and the extra read cost more than it saved. **Alignment removes that.** The
+window is 31 pixels and a `uint32_t` read covers 32, so `t01`'s bits for window
+positions `0..30` are source columns `[c+1, c+31]` — **entirely inside the word
+`t00` already read**. So `t01 = t00 >> 1` exactly, one operation, and **two of the
+four `displacedRow` constructions disappear**. A rejected optimisation becoming
+correct because an unrelated change moved the ground under it is worth recording as
+such.
+
+**Arm I — the interior fast path.** `displacedRow` builds the replicate border
+unconditionally: two `edgeFill` calls, each a load and a test. **A window whose
+displaced extent is entirely inside the frame needs none of it** and can use the
+same cheap `alignedWord` the previous-frame planes use. Most windows are interior;
+the border machinery is being paid for the minority.
+
+**Arms are separated deliberately** — they are independent, and a combined number
+would not say which worked. **Guarded on `width < bitsPerWord`** for arm T (at
+`width == bits` the `+1` tap leaves the word); at `seal_params.yaml`'s 31 with
+`uint32_t` that holds, and the general path remains for anything else.
+
+**Decision rule** *(written before measuring)* — `R` = shipped / (T+I) on
+`residualSums`, reference device, `N = 1` **and** `N = 2`, **bit-exact sums as a
+precondition**.
+
+* **Band A — `R` ≥ 1.4×.** Adopt both, report T and I separately, and re-measure
+  the LK stage and the frontend.
+* **Band B — 1.15× ≤ `R` < 1.4×.** Adopt whichever arm individually clears 1.1×;
+  drop the other. Neither is worth its complexity below that.
+* **Band C — `R` < 1.15×.** **Do not ship.** The op accounting above would then be
+  wrong in the same way S3's was, and the entry must say where the time really goes
+  before any further work on this kernel.
+* **Band D — arm T is slower, as it was in X-32.** Then alignment did *not* make the
+  identity free and X-32's result stands for a reason not yet understood — which
+  matters more than the optimisation, because the same reasoning is what X-34 rests
+  on.
+
+**Reported regardless:** ops per pixel before and after, against OpenCV's ~1.2, so
+the remaining gap is attributable rather than merely smaller.
+
+**Variants:** shipped, +T, +I, +both × `N` = 1, 2.
+**Workload:** 31×31 windows over 640×480.
+**Metric:** ns per window on the reference device; bit-exact sums; then the LK stage
+and the frontend.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
