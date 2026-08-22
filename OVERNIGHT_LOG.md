@@ -492,3 +492,43 @@ space lands.
 
 **Caveat:** 692 frames not 1710 — the Windows drive holding the dataset dropped
 mid-copy (`/mnt/g` → `d?????????`). Frames are consecutive so lifetimes are intact.
+
+---
+
+## 13 · X-39 / E-21 — the pyramid design space
+
+Filters built with a **reference implementation**, deliberately: the question was
+whether the filter matters at all, and if it did not, no bit-sliced kernel needed
+writing. Mean yield across six warps:
+
+| filter | N=2 | N=3 | N=5 | N=7 | vs anchor | gain N=2→7 |
+|---|---|---|---|---|---|---|
+| **`GAUSSIAN_5x5` (anchor)** | 93.10% | 96.22% | **96.87%** | 97.03% | — | **+3.93** |
+| `BOX_3x3` | 92.80% | 95.73% | 96.07% | 96.07% | −0.80 | +3.27 |
+| `GAUSSIAN_3x3` | 94.43% | 95.73% | 95.58% | 95.58% | −1.28 | +1.15 |
+| **`BOX_2x2` (shipped)** | **93.78%** | 94.77% | 94.60% | 94.60% | **−2.27** | **+0.82** |
+| `MEDIAN_3x3` | 89.33% | 89.33% | 89.33% | 89.33% | −7.53 | +0.00 |
+| `DIRECT_SUBSAMPLE` | 77.18% | 77.18% | 77.18% | 77.18% | **−19.68** | +0.00 |
+
+**THE AXES ARE NOT INDEPENDENT — that is the finding.** `BOX_2x2` gains **+0.82**
+from N=2→7; `GAUSSIAN_5x5` gains **+3.93**. A 2×2 box sum has five possible
+outcomes, so past 3 bits there is nothing to store. **The filter determines how much
+depth is useful**, and every bit-depth result in this project was measured at the
+filter that benefits least from depth.
+
+**Band D fires mildly.** The shipped config is 2.27 points below the anchor (up to 5
+on large motion), so aliasing is real — but box does not *fail* where Gaussian
+succeeds. X-24, X-25 and X-27 stand, with the caveat that they were measured at the
+filter least sensitive to their own axis.
+
+**`DIRECT_SUBSAMPLE` confirms the paper on binCV's content**: 63.7% / 59.4% on the
+two largest motions against 94–100% filtered — the mechanism behind SEAL §4.2.2's
+">2.5 cm worse".
+
+**`MEDIAN_3x3` is the surprise: worse than box and flat in N.** A median of a
+mostly-zero neighbourhood returns zero, so it **erodes** a sparse edge map rather
+than blurring it. It belongs in the temporal denoiser, where SEAL uses it.
+
+**No decision yet, deliberately**: the bands weigh accuracy against cost, and the
+cost side does not exist until the filters have bit-sliced kernels. The points worth
+pricing are `GAUSSIAN_5x5 @ N=3` (0.65 below anchor at 3 bits) and `BOX_3x3 @ N=3`.

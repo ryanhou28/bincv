@@ -3134,6 +3134,241 @@ BINCV_TEST(Flow, X26_BlockMatchVersusLK_uint32_t) {
     BINCV_CHECK(true);
 }
 
+
+// ---------------------------------------------------------------------------
+// X-39 / E-21: DOES THE DOWNSAMPLING FILTER CHANGE THE ACCURACY STORY?
+//
+// Every accuracy number in this project was measured on a BOX-DOWNSAMPLED
+// pyramid, because BOX_2x2 is the only one of the reference's six
+// LKPyrDownFilterType variants binCV implements. A 2x2 box is a poor lowpass and
+// aliases, and aliasing at coarse levels is a classic cause of pyramid-LK failure
+// -- so it is a candidate cause X-24, X-25 and X-27 could not see.
+//
+// THE FILTERS ARE BUILT HERE WITH A REFERENCE IMPLEMENTATION, NOT A BIT-SLICED
+// KERNEL, AND DELIBERATELY SO. The question is whether the filter matters at all.
+// If it does not, no fast kernel needs writing; if it does, the kernel is worth the
+// work and this arm is the accuracy target it must reproduce. Same discipline as
+// X-33's and X-34's ceilings.
+//
+// Each level is built by filtering the PREVIOUS level and subsampling by 2, then
+// quantizing to N bits -- which is what the paper's Fig. 12 describes and what
+// pyrDown does, differing only in the filter.
+// ---------------------------------------------------------------------------
+namespace {
+
+enum class PyrFilter { Box2x2, Gaussian5x5, Gaussian3x3, Box3x3, Median3x3, DirectSubsample };
+
+const char* filterName(PyrFilter f) {
+    switch (f) {
+        case PyrFilter::Box2x2: return "BOX_2x2 (shipped)";
+        case PyrFilter::Gaussian5x5: return "GAUSSIAN_5x5 (anchor)";
+        case PyrFilter::Gaussian3x3: return "GAUSSIAN_3x3";
+        case PyrFilter::Box3x3: return "BOX_3x3";
+        case PyrFilter::Median3x3: return "MEDIAN_3x3";
+        default: return "DIRECT_SUBSAMPLE";
+    }
+}
+
+/// One pyramid level: filter `src` (CV_32F, values in [0,1]) then subsample by 2.
+cv::Mat downOnce(const cv::Mat& src, PyrFilter f) {
+    cv::Mat filtered;
+    switch (f) {
+        case PyrFilter::Gaussian5x5: {
+            // The [1,4,6,4,1] binomial cv::pyrDown applies -- what standard LK uses.
+            cv::Mat k = (cv::Mat_<float>(5, 1) << 1, 4, 6, 4, 1) / 16.0f;
+            cv::sepFilter2D(src, filtered, CV_32F, k, k, cv::Point(-1, -1), 0,
+                            cv::BORDER_REFLECT_101);
+            break;
+        }
+        case PyrFilter::Gaussian3x3: {
+            cv::Mat k = (cv::Mat_<float>(3, 1) << 1, 2, 1) / 4.0f;
+            cv::sepFilter2D(src, filtered, CV_32F, k, k, cv::Point(-1, -1), 0,
+                            cv::BORDER_REFLECT_101);
+            break;
+        }
+        case PyrFilter::Box3x3:
+            cv::blur(src, filtered, cv::Size(3, 3), cv::Point(-1, -1), cv::BORDER_REFLECT_101);
+            break;
+        case PyrFilter::Median3x3: {
+            // Median of a 3x3 on values in [0,1]; cv::medianBlur needs 8U at this
+            // aperture, so scale, filter, scale back.
+            cv::Mat u8;
+            src.convertTo(u8, CV_8U, 255.0);
+            cv::Mat m;
+            cv::medianBlur(u8, m, 3);
+            m.convertTo(filtered, CV_32F, 1.0 / 255.0);
+            break;
+        }
+        case PyrFilter::Box2x2:
+            // The shipped filter: mean of the 2x2 block. A 2x2 box with the anchor
+            // pyrDown uses is a plain average of the block being subsampled.
+            filtered = src;
+            break;
+        case PyrFilter::DirectSubsample:
+            filtered = src;  // no filtering at all -- maximum aliasing
+            break;
+    }
+    const int dw = (src.cols + 1) / 2, dh = (src.rows + 1) / 2;
+    cv::Mat out(dh, dw, CV_32F);
+    for (int y = 0; y < dh; ++y) {
+        for (int x = 0; x < dw; ++x) {
+            if (f == PyrFilter::Box2x2) {
+                const int y0 = 2 * y, x0 = 2 * x;
+                const int y1 = std::min(y0 + 1, src.rows - 1);
+                const int x1 = std::min(x0 + 1, src.cols - 1);
+                out.at<float>(y, x) = 0.25f * (filtered.at<float>(y0, x0) +
+                                               filtered.at<float>(y0, x1) +
+                                               filtered.at<float>(y1, x0) +
+                                               filtered.at<float>(y1, x1));
+            } else {
+                out.at<float>(y, x) = filtered.at<float>(std::min(2 * y, src.rows - 1),
+                                                         std::min(2 * x, src.cols - 1));
+            }
+        }
+    }
+    return out;
+}
+
+/// Quantize [0,1] to N bits and write into a QuantMat level.
+template <size_t N, typename WordType>
+void quantizeInto(const cv::Mat& f, bincv::QuantMat<N, WordType>& dst) {
+    const unsigned maxV = (1u << N) - 1u;
+    for (int y = 0; y < dst.rows(); ++y) {
+        for (int x = 0; x < dst.cols(); ++x) {
+            const float v = f.at<float>(y, x);
+            const long r = std::lroundf(v * static_cast<float>(maxV));
+            dst.set(y, x, static_cast<unsigned>(std::max<long>(0, std::min<long>(maxV, r))));
+        }
+    }
+}
+
+} // namespace
+
+
+namespace {
+
+/// Builds a LadderFrontend whose levels 1..3 come from `filter` rather than from
+/// pyrDown, so the FILTER is the only thing that varies. Level 0 is the binary
+/// frame in every arm -- it is the input, not a choice.
+template <typename WordType, size_t... LevelBits>
+void seedFiltered(LadderFrontend<WordType, LevelBits...>& fe, const cv::Mat& binPrev,
+                  const cv::Mat& binNext, PyrFilter f) {
+    cv::Mat p, n;
+    binPrev.convertTo(p, CV_32F, 1.0 / 255.0);
+    binNext.convertTo(n, CV_32F, 1.0 / 255.0);
+    // Level 0 is the binary frame itself.
+    for (int y = 0; y < binPrev.rows; ++y) {
+        for (int x = 0; x < binPrev.cols; ++x) {
+            fe.prev.template level<0>().set(y, x, binPrev.at<uchar>(y, x) ? 1u : 0u);
+            fe.next.template level<0>().set(y, x, binNext.at<uchar>(y, x) ? 1u : 0u);
+        }
+    }
+    p = downOnce(p, f); n = downOnce(n, f);
+    quantizeInto(p, fe.prev.template level<1>());
+    quantizeInto(n, fe.next.template level<1>());
+    p = downOnce(p, f); n = downOnce(n, f);
+    quantizeInto(p, fe.prev.template level<2>());
+    quantizeInto(n, fe.next.template level<2>());
+    p = downOnce(p, f); n = downOnce(n, f);
+    quantizeInto(p, fe.prev.template level<3>());
+    quantizeInto(n, fe.next.template level<3>());
+    fe.template buildDeriv<0>();
+    fe.template bind<0>();
+}
+
+/// Yield for one (filter, ladder) point.
+template <typename WordType, size_t... LevelBits>
+Yield runFilterArm(const cv::Mat& binPrev, const cv::Mat& binNext, const Warp& warp,
+                   const std::vector<Point2f>& pts, double modelError, PyrFilter f) {
+    LadderFrontend<WordType, LevelBits...> fe(binPrev.cols, binPrev.rows);
+    seedFiltered(fe, binPrev, binNext, f);
+    LKParams params;
+    std::vector<Point2f> out(pts.size());
+    std::vector<uint8_t> status(pts.size());
+    bincv::calcOpticalFlowPyrLK(fe.levels, pts.data(), out.data(), status.data(), nullptr,
+                                pts.size(), params);
+    Yield y;
+    y.eligible = pts.size();
+    y.attempted = pts.size();
+    y.bytes = fe.bytes();
+    const double bound = kMaxTolerance + modelError;
+    double sq = 0.0;
+    size_t counted = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        if (!status[i]) continue;
+        double gx = 0.0, gy = 0.0;
+        warp.forward(pts[i].x, pts[i].y, gx, gy);
+        const double ex = out[i].x - gx, ey = out[i].y - gy;
+        const double e = std::sqrt(ex * ex + ey * ey);
+        ++counted;
+        if (e <= bound) { ++y.usable; sq += e * e; }
+    }
+    y.rmsUsable = y.usable ? std::sqrt(sq / static_cast<double>(y.usable)) : 0.0;
+    (void)counted;
+    return y;
+}
+
+} // namespace
+
+BINCV_TEST(Flow, X39_PyramidFilterDesignSpace_uint32_t) {
+    const cv::Mat gray = loadRealFrame();
+    if (gray.empty()) { std::printf("  (skipped: sample image not found)\n"); BINCV_CHECK(true); return; }
+
+    struct Case { const char* name; Warp warp; double model; };
+    LKParams lkp;
+    const double halfWin = 0.5 * (lkp.winWidth - 1);
+    const std::vector<Case> cases = {
+        {"shift (1, 0)", translation(1.0, 0.0), 0.0},
+        {"shift (0.25,0.25)", translation(0.25, 0.25), 0.0},
+        {"shift (0.75,0.75)", translation(0.75, 0.75), 0.0},
+        {"shift (2, -3)", translation(2.0, -3.0), 0.0},
+        {"shift (6, 4)", translation(6.0, 4.0), 0.0},
+        {"rotate 1 deg", rotation(1.0, gray.cols * 0.5, gray.rows * 0.5),
+         halfWin * 3.14159265358979323846 / 180.0},
+    };
+    const PyrFilter filters[] = {PyrFilter::Gaussian5x5, PyrFilter::Gaussian3x3,
+                                 PyrFilter::Box3x3,      PyrFilter::Median3x3,
+                                 PyrFilter::Box2x2,      PyrFilter::DirectSubsample};
+
+    std::printf("\n  ===================================================================\n"
+                "  X-39 / E-21: the pyramid design space, FILTER x BIT DEPTH.\n"
+                "  Filters built with a REFERENCE implementation, not a bit-sliced\n"
+                "  kernel: the question is whether the filter matters at all.\n"
+                "  ANCHOR is GAUSSIAN_5x5 -- what cv::buildOpticalFlowPyramid applies.\n"
+                "  Level 0 is the binary frame in every arm; only levels 1-3 vary.\n"
+                "  ===================================================================\n");
+
+    for (const Case& c : cases) {
+        cv::Mat warped;
+        cv::warpAffine(gray, warped, affineOf(c.warp), gray.size(), cv::INTER_CUBIC,
+                       cv::BORDER_REFLECT_101);
+        const cv::Mat b0 = referencePreprocess(gray, 17);
+        const cv::Mat b1 = referencePreprocess(warped, 17);
+        Frontend<uint32_t> base(gray.cols, gray.rows, 4);
+        base.prev[0].fromCVMat(b0); base.next[0].fromCVMat(b1); base.build();
+        const std::vector<Point2f> pts = eligiblePoints(base.dx[0], base.dy[0], gray.cols,
+                                                        gray.rows, c.warp, lkp.winWidth,
+                                                        lkp.winHeight);
+        std::printf("\n  %s  --  %zu eligible, bound %.2f px\n", c.name, pts.size(),
+                    kMaxTolerance + c.model);
+        // N is capped at 7: the derivative of an N-bit level is SignedQuantMat<N>,
+            // which needs N+1 planes and QuantMat tops out at 8. The paper stores 8 bits
+            // for its Gaussian; 7 is the closest binCV can represent.
+            std::printf("    %-24s %10s %10s %10s %10s\n", "filter", "N=2", "N=3", "N=5", "N=7");
+        for (PyrFilter f : filters) {
+            const Yield y2 = runFilterArm<uint32_t, 1, 2, 2, 2>(b0, b1, c.warp, pts, c.model, f);
+            const Yield y3 = runFilterArm<uint32_t, 1, 3, 3, 3>(b0, b1, c.warp, pts, c.model, f);
+            const Yield y5 = runFilterArm<uint32_t, 1, 5, 5, 5>(b0, b1, c.warp, pts, c.model, f);
+            const Yield y8 = runFilterArm<uint32_t, 1, 7, 7, 7>(b0, b1, c.warp, pts, c.model, f);
+            std::printf("    %-24s %9.1f%% %9.1f%% %9.1f%% %9.1f%%\n", filterName(f),
+                        100.0 * y2.fraction(), 100.0 * y3.fraction(), 100.0 * y5.fraction(),
+                        100.0 * y8.fraction());
+        }
+    }
+    std::printf("\n  Values are YIELD: eligible keypoints tracked within the bound.\n");
+    BINCV_CHECK(true);
+}
+
 #endif // BINCV_WITH_OPENCV
 
 BINCV_TEST_MAIN("test_opticalflow")

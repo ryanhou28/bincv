@@ -7160,7 +7160,7 @@ so track lifetimes are intact.)*
 
 ---
 
-### X-39 · The pyramid design space: downsampling filter × bit depth · `TODO`
+### X-39 · The pyramid design space: downsampling filter × bit depth · `PARTIAL`
 
 **COMMITTED BEFORE ANY FILTER BEYOND `BOX_2x2` EXISTS.**
 
@@ -7248,7 +7248,75 @@ per-pixel integer reference.
 **Metric:** yield and flow agreement ([X-25](#x-25--the-coarse-level-window-border--done)'s),
 peak bytes, and ms/frame on the reference device.
 
-**Result:** *(not yet measured)*
+**PARTIAL — accuracy and footprint measured; the SPEED axis needs the bit-sliced
+kernels, which is the point of measuring accuracy first.** If the filter had not
+mattered, no kernel would need writing.
+
+**Method note:** the filters are built with a **reference implementation**
+(`cv::sepFilter2D` on the binarized frame, then subsample and quantize), not a
+bit-sliced kernel. Level 0 is the binary frame in every arm; **only levels 1–3
+vary**. `N` is capped at **7**, not 8: the derivative of an `N`-bit level is
+`SignedQuantMat<N>`, which needs `N+1` planes.
+
+**Result — mean YIELD across six warps on the repo's real frame:**
+
+| filter | N=2 | N=3 | N=5 | N=7 | vs anchor | gain N=2→7 |
+|---|---|---|---|---|---|---|
+| **`GAUSSIAN_5x5` (anchor)** | 93.10% | 96.22% | **96.87%** | 97.03% | — | **+3.93** |
+| `BOX_3x3` | 92.80% | 95.73% | 96.07% | 96.07% | −0.80 | +3.27 |
+| `GAUSSIAN_3x3` | 94.43% | 95.73% | 95.58% | 95.58% | −1.28 | +1.15 |
+| **`BOX_2x2` (shipped)** | **93.78%** | 94.77% | 94.60% | 94.60% | **−2.27** | **+0.82** |
+| `MEDIAN_3x3` | 89.33% | 89.33% | 89.33% | 89.33% | −7.53 | +0.00 |
+| `DIRECT_SUBSAMPLE` | 77.18% | 77.18% | 77.18% | 77.18% | **−19.68** | +0.00 |
+
+**Conclusion.**
+
+1. **THE TWO AXES ARE NOT INDEPENDENT, AND THAT IS THE FINDING.** Look at the last
+   column. **`BOX_2x2` gains +0.82 points from N=2 to N=7; `GAUSSIAN_5x5` gains
+   +3.93.** A 2×2 box sum of four values has **five possible outcomes** — past 3
+   bits there is nothing left to store, and the table shows it saturating exactly
+   there. A 5×5 Gaussian produces a genuinely graded value and keeps paying to 5
+   bits. **The filter determines how much depth is USEFUL**, so E-19's ladder
+   question was never separable from the filter it was asked about, and every
+   bit-depth result in this project was measured at the one filter that benefits
+   least from depth.
+2. **BAND D FIRES, BUT MILDLY — AND THAT MATTERS FOR THE EARLIER ENTRIES.** The
+   filter does affect accuracy: the shipped `BOX_2x2 @ N=2` sits **2.27 points**
+   below the anchor, and up to 5 points on individual large-motion cases
+   (`(6,4)`: 94.1% against 100.0%). **But it is not the hidden cause of T3.8's
+   miss.** Box does not fail where Gaussian succeeds; it is a few points worse.
+   **[X-24](#x-24--pyramid-level-bit-depths--done),
+   [X-25](#x-25--the-coarse-level-window-border--done) and
+   [X-27](#x-27--the-1-bit-level-0-localisation-floor--done) stand**, with the
+   caveat that they were measured on the filter least sensitive to the axis they
+   were varying.
+3. **`DIRECT_SUBSAMPLE` is catastrophic and the paper is confirmed on binCV's own
+   content.** 77.18% mean, and **63.7% / 59.4%** on the two largest motions against
+   94–100% for every filtered arm. SEAL §4.2.2 reports ">2.5 cm worse" ATE for this
+   arm; the mechanism is visible here — with no lowpass, coarse levels alias and
+   large-motion capture collapses.
+4. **`MEDIAN_3x3` is the surprise, and it is bad.** 7.53 points below the anchor and
+   **completely flat in N** — worse than `BOX_2x2`. A median is an order statistic,
+   so on a sparse edge map a 3×3 median of mostly-zero neighbourhoods returns zero:
+   it **erodes the edges** rather than blurring them. It is in the reference's
+   option set for *denoising*, where it is the right tool (SEAL uses it in the
+   temporal processor, Table 3), and this measures it somewhere it does not belong.
+5. **The cheapest point that nearly matches the anchor is the anchor at lower
+   depth.** `GAUSSIAN_5x5 @ N=3` is **0.65 below** `@ N=5` — 3 bits instead of 5, so
+   materially less footprint for almost no accuracy. `BOX_3x3 @ N=3` is 1.14 below
+   the anchor and is a cheaper filter.
+
+**Decision: NONE YET, and deliberately.** The rule's bands are about accuracy
+*against cost*, and **the cost side does not exist until the filters have bit-sliced
+kernels**. What is established is the accuracy frontier and that
+`GAUSSIAN_5x5 @ N=3` and `BOX_3x3 @ N=3` are the points worth pricing. Writing the
+kernels is now justified — which is what measuring accuracy first was for.
+
+**Still owed:** the full 1710-frame sequence (the Windows drive holding it dropped
+mid-session), and the flow-agreement metric alongside yield.
+
+**Method:** `tests/test_opticalflow.cpp`,
+`Flow.X39_PyramidFilterDesignSpace_uint32_t`.
 
 ---
 
