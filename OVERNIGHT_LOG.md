@@ -415,3 +415,47 @@ lane accumulators run the whole window rather than extracting per row.
 
 **The ladder now gates the optimisation, not just the arithmetic** — at `1/1/1/1`
 all four levels would take the 1.736×. E-19 grew accordingly.
+
+---
+
+## 11 · X-37 — the comparison on the DEPLOYMENT TARGET reverses the sign
+
+**Every previous reading of criterion 4 was taken on x86, where binCV has no vector
+path at all.** X-35's "parity" was binCV **scalar** against OpenCV **SSE**. On the
+Pi, binCV has NEON and so does OpenCV (`Baseline: NEON FP16`, verified before
+trusting it).
+
+**binCV is faster at every iteration count:**
+
+| iterations | `1/1/1/1` | `1/2/2/2` |
+|---|---|---|
+| 1 | **11.1×** | 3.4× |
+| 4 | **8.4×** | 2.7× |
+| 20 | **5.0×** | 1.7× |
+
+**And the advantage is located, not just measured.** Fitting
+`T = setup + iters × slope`:
+
+| arm | setup ms | ms/iteration |
+|---|---|---|
+| binCV `1/1/1/1` | **1.077** | **0.2264** |
+| OpenCV `CV_8U` | **13.810** | **0.7065** |
+
+**OpenCV's setup is 12.8× binCV's.** It copies the warped patch into
+`IWinBuf`/`derivIWinBuf` — 961 px × 3 shorts per point per level — before iterating.
+**binCV copies nothing**; it reads the frame in place.
+
+**That is the data-movement advantage, and X-36 is what makes it legible.** The
+kernel is compute-bound, so 8× less data does not speed the *arithmetic* — it
+**removes an entire stage**. The two entries only make sense together.
+
+**The harness threw away the first run and was right to**: building OpenCV on four
+cores drove the Pi into its soft temperature limit mid-run (`0x0` → `0x80000`).
+Re-run at 53 °C with the sticky bit unchanged before and after.
+
+**Iteration count was controlled** — both trackers stop early on their own rules, so
+at `maxIterations = 20` they do different work and the ratio would not be of the
+kernels.
+
+**Not claimed:** this is LK against LK. The *frontend* comparison has never run on
+the device (the EuRoC sequence is not there). E-20.

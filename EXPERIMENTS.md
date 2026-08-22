@@ -7002,6 +7002,94 @@ batching, which is the better shape at that depth. Recorded as
 
 ---
 
+### X-37 · binCV against OpenCV on the DEPLOYMENT TARGET, SIMD against SIMD · `DONE`
+
+**Gates:** [ROADMAP](ROADMAP.md#success-criteria) criterion 4, and it **reverses the
+sign of every previous reading of it**.
+**Question:** Every binCV-versus-OpenCV tracking comparison in this project has been
+taken on **x86, where binCV has no vector path at all** — so "parity" in
+[X-35](#x-35--the-tap-machinery-around-the-arithmetic--done) was binCV **scalar**
+against OpenCV **SSE**. On the reference device binCV has NEON
+([D-30](ARCHITECTURE.md), [D-33](ARCHITECTURE.md)) and OpenCV has NEON. What is the
+answer there?
+
+**Platform check first, because assuming it is what bites.** The Pi's OpenCV 4.10
+reports `Baseline: NEON FP16` with `Dispatched: NEON_DOTPROD NEON_FP16 NEON_BF16`.
+It is genuinely vectorized. Pinned to one thread.
+
+**THE FIRST RUN WAS THROWN AWAY BY THE HARNESS AND THAT WAS CORRECT.** Building
+OpenCV's benchmarks on four cores drove the device into its soft temperature limit —
+`throttled` went `0x0` → `0x80000` **during** the run — and `run_on_pi.sh` refused
+the numbers. Re-run after cooling to 53 °C, with `throttled` unchanged at `0x80000`
+(sticky history, no active bit) before and after. Every figure below is from a run
+the harness certified valid.
+
+**ITERATION COUNT IS A CONFOUND AND IS CONTROLLED.** Both trackers stop early on
+their own convergence rules, so at `maxIterations = 20` they may do different amounts
+of work and the ratio would not be of the kernels. `epsilon = 0` forces both to run
+exactly the stated count.
+
+**Result — reference device, 140 points, 31×31, four levels, ms:**
+
+| iterations | binCV `1/1/1/1` | binCV `1/2/2/2` | OpenCV `CV_8U` |
+|---|---|---|---|
+| 1 | **0.961** | 2.849 | 11.989 |
+| 2 | **1.390** | 4.281 | 14.326 |
+| 4 | **2.226** | 6.986 | 18.307 |
+| 8 | **3.317** | 10.855 | 22.582 |
+| 20 | **5.416** | 15.326 | 26.575 |
+
+**Linear fit `T = setup + iterations × slope`:**
+
+| arm | setup ms | ms/iteration |
+|---|---|---|
+| binCV `1/1/1/1` | **1.077** | **0.2264** |
+| binCV `1/2/2/2` | 3.666 | 0.6276 |
+| OpenCV `CV_8U` | **13.810** | **0.7065** |
+
+**binCV is faster at every iteration count:**
+
+| iterations | `1/1/1/1` | `1/2/2/2` |
+|---|---|---|
+| 1 | **11.1× faster** | 3.4× |
+| 4 | **8.4×** | 2.7× |
+| 20 | **5.0×** | 1.7× |
+| 50 | **4.0×** | 1.4× |
+
+**Conclusion — and it locates the advantage precisely.**
+
+1. **ON THE DEPLOYMENT TARGET binCV IS 1.4×–11× FASTER THAN SINGLE-THREADED SIMD
+   OpenCV**, depending on ladder and iteration count, **while using 6.23× less
+   memory**. Every prior reading of criterion 4 — 14× slower, then 6.3×, then
+   3.8×, then parity — was taken on x86 where binCV runs **scalar**. Those readings
+   were correct about x86 and **wrong as statements about the product**, whose
+   target is Cortex-A.
+2. **OpenCV's SETUP IS 12.8× binCV's, AND THAT IS THE REAL ADVANTAGE.** OpenCV copies
+   the warped patch into `IWinBuf`/`derivIWinBuf` — **961 pixels × 3 shorts per point
+   per level** — before iterating. binCV **copies nothing**; it reads the frame in
+   place through the region walk. That is a data-movement win, and
+   [X-36](#x-36--batching-across-taps-and-what-the-footprint-does-not-buy--done)
+   is what makes it legible: the kernel is compute-bound, so the footprint does not
+   speed up the *arithmetic* — it removes an entire **stage**.
+3. **The per-iteration advantage is real but smaller: 3.1×.** So the shape of the
+   win is "no setup, and cheaper steady state", and the first term dominates at the
+   iteration counts a frontend actually uses.
+4. **The ladder costs 1.7×–3.4× here**, consistent with the 1.76× measured on the
+   track alone, and [E-19](ARCHITECTURE.md#register) is unaffected as a question.
+
+**WHAT THIS DOES NOT SHOW.** This is **LK against LK**, not the whole frontend.
+[X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial)'s
+end-to-end comparison ran on x86 and included detection, build and preprocessing.
+**The frontend comparison has never been run on the device**, because the EuRoC
+sequence is not there. Until it is, criterion 4 is answered **for the tracker on the
+deployment target** and not for the frontend. Registered as
+[E-20](ARCHITECTURE.md#register).
+
+**Method:** `benchmark/lk_headtohead.cpp` with `BINCV_FORCE_ITERS` / `BINCV_ITERS`,
+run through `scripts/run_on_pi.sh pi4` with `BINCV_PI_OPENCV=1`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

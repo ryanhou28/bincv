@@ -22,6 +22,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -51,7 +52,16 @@ int main() {
             bPts.push_back(bincv::Point2f{static_cast<float>(x), static_cast<float>(y)});
         }
     }
-    const int levels = 4, win = 31, iters = 20;
+    // ITERATION COUNT IS A CONFOUND AND IS CONTROLLED HERE. Both trackers stop
+    // early on their own convergence rules, so at maxIterations = 20 they may do
+    // DIFFERENT amounts of work and the ratio would not be of the kernels. Sweeping
+    // a fixed low count with epsilon 0 forces both to run exactly that many.
+    const int levels = 4, win = 31;
+    int iters = 20;
+    if (const char* e = std::getenv("BINCV_ITERS")) iters = std::atoi(e);
+    const bool forceAll = std::getenv("BINCV_FORCE_ITERS") != nullptr;
+    const float epsB = forceAll ? 0.0f : 0.03f;
+    const double epsC = forceAll ? 0.0 : 0.03;
 
     // ---- binCV, the shipped 1/2/2/2 ladder ----
     bincv::Pyramid<W, 1, 2, 2, 2> p(w, h), n(w, h);
@@ -88,6 +98,7 @@ int main() {
     L1.get<3>() = bincv::lkLevel<1>(p1.level<3>(), n1.level<3>(), e3, f3);
 
     bincv::LKParams lk; lk.winWidth = win; lk.winHeight = win; lk.maxIterations = iters;
+    lk.epsilon = epsB;
     std::vector<bincv::Point2f> out(bPts.size());
     std::vector<uint8_t> stt(bPts.size());
 
@@ -101,8 +112,9 @@ int main() {
         return ms;
     };
 
-    std::printf("=== LK vs LK: %zu points, %dx%d window, %d levels, %d iterations,"
-                " OpenCV 1 thread ===\n\n", bPts.size(), win, win, levels, iters);
+    std::printf("=== LK vs LK: %zu points, %dx%d window, %d levels, %d iterations%s,"
+                " OpenCV 1 thread ===\n\n", bPts.size(), win, win, levels, iters,
+                forceAll ? " FORCED (eps=0)" : "");
     const double tB2 = timeIt("binCV LK, ladder 1/2/2/2 (shipped)", [&] {
         bincv::calcOpticalFlowPyrLK(L, bPts.data(), out.data(), stt.data(), nullptr,
                                     bPts.size(), lk); }, 20);
@@ -114,10 +126,16 @@ int main() {
         cv::calcOpticalFlowPyrLK(b0, b1, cvPts, cvOut, cvSt, cvErr, cv::Size(win, win),
                                  levels - 1,
                                  cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS,
-                                                  iters, 0.03), 0, 1e-4); }, 20);
+                                                  iters, epsC), 0, 1e-4); }, 20);
 
-    std::printf("\n  binCV 1/2/2/2 vs OpenCV : %.2fx slower\n", tB2 / tCV);
-    std::printf("  binCV 1/1/1/1 vs OpenCV : %.2fx slower\n", tB1 / tCV);
+    auto ratio = [](double a, double b) {
+        // Printing "0.29x slower" is a trap: below 1.0 it means FASTER. Say which.
+        return a <= b ? std::string("FASTER") : std::string("slower");
+    };
+    std::printf("\n  binCV 1/2/2/2 vs OpenCV : %.2fx  (%s)\n", tB2 <= tCV ? tCV / tB2 : tB2 / tCV,
+                ratio(tB2, tCV).c_str());
+    std::printf("  binCV 1/1/1/1 vs OpenCV : %.2fx  (%s)\n", tB1 <= tCV ? tCV / tB1 : tB1 / tCV,
+                ratio(tB1, tCV).c_str());
     std::printf("  cost of the N=2 ladder  : %.2fx\n", tB2 / tB1);
 
     const double wordsPerWin = 2.0 * 31.0;
