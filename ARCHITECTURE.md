@@ -2479,23 +2479,47 @@ device**, because the EuRoC sequence is not there. Criterion 4 is answered for t
 ### D-35: all four ROADMAP success criteria are met, on the deployment target
 
 [X-38](EXPERIMENTS.md) ran the **whole frontend** — detection, pyramid build,
-preprocessing and tracking — against OpenCV on the reference device, 692 consecutive
-EuRoC frames, both frontends on bit-identical input, OpenCV pinned to one thread.
+preprocessing and tracking — against OpenCV on the reference device, the **full
+1710-frame** EuRoC V1_02_medium sequence, both frontends on bit-identical input,
+OpenCV pinned to one thread.
 
 | criterion | binCV | OpenCV | |
 |---|---|---|---|
 | 1 · tier 1 bit-exact | enforced per operation | — | ✔ |
-| 2 · median track lifetime | **13 frames** | 13 | equal |
-| 2 · per-frame survival | **97.1%** | 97.1% | equal |
-| 2 · flow difference | **median 0.0386 px** | — | 97.4% within 1 px |
+| 2 · median track lifetime | **11 frames** | 12 | one frame short |
+| 2 · per-frame survival | **96.4%** | 96.6% | 0.2 points short |
+| 2 · flow difference | **median 0.0434 px** | — | 95.4% within 1 px |
 | 3 · peak footprint | **436 704 B** | 2 719 832 B | **6.23× smaller** |
-| **4 · speed** | **11.169 ms/frame** | 16.509 ms/frame | **1.48× FASTER** |
+| **4 · speed** | **11.198 ms/frame** | 16.324 ms/frame | **1.46× FASTER** |
 
-**1.48× faster and 6.23× smaller simultaneously.** That is the result
+**1.46× faster and 6.23× smaller simultaneously.** That is the result
 [§1](#the-motivating-result) opens by asking for.
 
+**THE EARLIER "EQUAL ON CRITERION 2" WAS AN ARTIFACT OF AN EASY PREFIX.** This
+record previously read 13 vs 13 frames and 97.1% vs 97.1% — *equal* — from the first
+**692** frames, which were all that had transferred before the dataset drive dropped.
+Re-running that prefix on the current commit reproduces those accuracy figures
+**exactly** (13/13, 97.1%/97.1%, median 0.0386 px, 97.4% within 1 px), so nothing
+regressed: the remaining 1018 frames are simply harder, and **both** frontends
+degrade on them. binCV degrades slightly more. Backing the prefix out of the totals
+puts the tail at roughly **95.9% survival for binCV against 96.3% for OpenCV** — a
+0.34-point gap where the prefix had none. Criterion 2 asks for *agreement frame by
+frame*, and one lifetime frame out of twelve still meets it; **parity does not, and
+is no longer claimed.**
+
+Where the gap opens is informative rather than mysterious: it opens on **large
+motion**, which is where coarse pyramid levels carry the estimate, and coarse levels
+are exactly what the downsampling filter builds. [X-39](EXPERIMENTS.md) measured the
+filter arms spreading furthest apart at its largest shifts — `DIRECT_SUBSAMPLE` falls
+to 59.4% yield at `shift (6, 4)` against 94.1% for the shipped box — so
+[D-36](#d-36-box_2x2-stays-the-default-the-filter-set-ships-as-options)'s
+`BOX_2x2`/`BOX_3x3` trade and this 0.34-point tail plausibly meet. **Plausibly** is
+the honest word: nothing has yet measured the filter arms *through the frontend* on a
+sequence, and the connection is a hypothesis this record is registering, not a
+finding.
+
 **EVERY PREVIOUS READING OF CRITERION 4 WAS A FACT ABOUT x86, NOT ABOUT THE
-PRODUCT.** 14× slower → 6.3× → 3.8× → parity → **1.48× faster**. The first four were
+PRODUCT.** 14× slower → 6.3× → 3.8× → parity → **1.46× faster**. The first four were
 measured on a platform where binCV has **no vector path at all** — ROADMAP 5.3 is
 still unwritten — against an SSE-vectorized OpenCV. **The measurements were correct
 and the platform was wrong**, and it took [X-37](EXPERIMENTS.md) to notice after
@@ -2507,19 +2531,19 @@ disclaimer it carried had quietly gone false the moment D-30 landed.
 
 | stage | ms/frame | share |
 |---|---|---|
-| track (LK) | 7.774 | 69.6% |
-| **build (`pyrDown` + derivatives)** | **2.884** | **25.8%** |
-| detect | 0.511 | 4.6% |
+| track (LK) | 7.815 | 69.8% |
+| **build (`pyrDown` + derivatives)** | **2.811** | **25.1%** |
+| detect | 0.571 | 5.1% |
 
 **`pyrDown` is now a quarter of the frontend**, up from 4.5%, because LK got 3.44×
 faster ([D-32](#8-design-decisions)) and the build did not. That is precisely where
 the downsampling-filter design space ([E-21](#register)) lands, so the next piece of
 work and the next hot stage are the same thing.
 
-**Caveat on scope:** 692 frames rather than 1710, because the drive holding the
-dataset dropped mid-copy. The frames are consecutive so track lifetimes are intact,
-and it is more data than any x86 comparison used, but the full-sequence run is still
-owed.
+**On the speed figures.** binCV lands at **11.169 / 11.195 / 11.198 ms** across the
+three runs of this experiment — 0.26% spread. OpenCV moves 16.324–17.060 ms (±2.3%)
+on identical input, so the *ratio* carries OpenCV's variance, not binCV's: 1.46× and
+1.52× are the same measurement. The conservative figure is the one quoted.
 
 
 ### D-36: `BOX_2x2` stays the default; the filter set ships as options
@@ -2625,7 +2649,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | **E-19** | Is the `1/2/2/2` ladder still the right operating point now that LK is 94.7% of the frontend and the ladder costs **2.30×**? | [D-23](#8-design-decisions) adopted it on ACCURACY — yield 88.7–99.3% against `1/1/1/1`'s 75.9–88.7% ([X-25](EXPERIMENTS.md)) — with its speed cost **estimated at 1.35×** from a confounded measurement, and chosen when corner detection was believed to be **52.7%** of the frontend rather than 2%. Isolated after [X-34](EXPERIMENTS.md) it is **2.30×**, and at `1/1/1/1` binCV is **1.34× slower than single-threaded SIMD OpenCV** against 3.08× at `1/2/2/2`. **This is the largest single speed lever left, larger than E-18.** The intermediate ladders were never measured for speed at all: `1/2/1/1` and `1/2/2/1` may buy most of the accuracy for a fraction of the cost, since the coarse levels track the same points through the same window and each N=2 level costs the same 4× regardless of how few pixels it has. | The shipped ladder, and whether the accuracy/speed trade belongs to the caller as `LKLevels` already lets it be. | D-23 | **Phase 5** |
 | **E-22** | How much of `pyrDownFilteredRoute`'s cost is GENERICITY rather than the filter? | [X-39](EXPERIMENTS.md) measured the generic route running `BOX_2x2` at **2.96×** the hand-written one **computing the same function**, so roughly three quarters of every filtered number is framework. `BOX_3x3`'s 4.25× is about **1.4× of filter and 3× of genericity**, and a hand-written `BOX_3x3` would plausibly land near 130 µs — **+0.15 ms on the frontend rather than +0.8**, which would change whether the accuracy/speed trade is worth offering at all. The suspects are the same ones [E-12](#register) named and then found not to matter for the derivative: the tap loop is runtime-bounded where the shipped route unrolls, and `weightedAxis` rebuilds a shifted operand per weight bit. | Whether `pyrDown` keeps two routes or the generic one replaces the hand-written default. | D-36's frontier, which is measured on an unoptimised framework | **Phase 5** |
 | ~~**E-21**~~ **RESOLVED** | What does the downsampling-filter axis look like? | binCV implemented one of six variants, so every accuracy result sat at one point of a two-dimensional space. | **Answered, and the axes are NOT independent.** `BOX_2x2` saturates at 3 bits (+0.82 yield points N=2→7) where `GAUSSIAN_5x5` gains +3.93 — **the filter decides how much depth is useful**. Standard-LK accuracy is reachable and **costs criterion 4**: `GAUSSIAN_5x5` is 25.10× the shipped route and would put binCV behind OpenCV. `BOX_3x3` recovers **65% of the gap for +0.8 ms** and dominates `GAUSSIAN_3x3`. `DIRECT_SUBSAMPLE` is −19.68 points, confirming the paper's ">2.5 cm worse". [D-36](#d-36-box_2x2-stays-the-default-the-filter-set-ships-as-options). | The pyramid's default filter. **`BOX_2x2` stays; the set ships as options.** | E-19 | **Phase 5** (X-39) ✔ |
-| ~~**E-20**~~ **RESOLVED — CRITERION 4 MET** | What is the WHOLE FRONTEND's speed against OpenCV on the reference device? | Every end-to-end reading had been taken on x86 where binCV runs scalar. | **Answered: binCV is 1.48× FASTER end to end** — 11.169 against 16.509 ms/frame over 692 EuRoC frames, OpenCV pinned to one thread — **while using 6.23× less memory**, with track lifetime and per-frame survival EQUAL to OpenCV's. [X-38](EXPERIMENTS.md), [D-35](#d-35-all-four-roadmap-success-criteria-are-met-on-the-deployment-target). The profile also moved: build is now **25.8%** of the frontend, up from 4.5%, which is where [E-21](#register) lands. | Whether ROADMAP criterion 4 can be closed. **It is.** | — | **Phase 5** (X-38) ✔ |
+| ~~**E-20**~~ **RESOLVED — CRITERION 4 MET** | What is the WHOLE FRONTEND's speed against OpenCV on the reference device? | Every end-to-end reading had been taken on x86 where binCV runs scalar. | **Answered: binCV is 1.46× FASTER end to end** — 11.198 against 16.324 ms/frame over the FULL 1710-frame EuRoC sequence, OpenCV pinned to one thread — **while using 6.23× less memory**, with track lifetime one frame short of OpenCV's (11 vs 12) and per-frame survival 0.2 points short (96.4% vs 96.6%); the earlier EQUAL reading came from the easy 692-frame prefix, which still reproduces exactly. [X-38](EXPERIMENTS.md), [D-35](#d-35-all-four-roadmap-success-criteria-are-met-on-the-deployment-target). The profile also moved: build is now **25.8%** of the frontend, up from 4.5%, which is where [E-21](#register) lands. | Whether ROADMAP criterion 4 can be closed. **It is.** | — | **Phase 5** (X-38) ✔ |
 | **E-17** | Where does the tracker lose the factor of **2.5–3** between the representation's 0.10 px floor and its own 0.25–0.29 px? | [X-27](EXPERIMENTS.md) closed off the representation, and X-24/X-25 closed off three pyramid parameters, so this is what is left of T3.8's MISS — and it is now a located problem rather than a diffuse one. **The prime suspect is deviation (i)**: the previous window is anchored on the integer grid because a bit-plane derivative cannot be interpolated, which displaces the aperture by up to half a pixel. `ops/opticalFlow.hpp` already calls that "the concrete thing route (b) trades away", and half a pixel of aperture displacement is the right order of magnitude for a 2.5× gap on a sub-pixel measurement. Two other candidates are untested: the single linearization per iteration on binary content, and the asymmetry that `I` is read at integer positions while `J` is interpolated. | Whether deviation (i) is a trade worth reversing, and at what cost — reversing it needs an interpolatable previous-frame gradient, which is a representation change. | T3.8's standing accuracy MISS | **Phase 4** |
 | ~~**E-16**~~ **RESOLVED — THE REPRESENTATION IS NOT THE LIMIT** | Is X-20's 0.25 px RMS tolerance reachable at all with a 1-bit level 0 on real edge maps — and if not, what IS the representation's floor? | Three pyramid parameters had been eliminated without explaining T3.8's MISS, leaving the representation as the natural suspect. | **Answered: reachable, by a wide margin.** [X-27](EXPERIMENTS.md) measured a 31×31 window resolving **29.3 distinct binary states per pixel of displacement** — floor **0.025 px** noise-free, **0.10 px** at σ = 1 gray level, **0.174 px** even at σ = 4. **The 0.25 px criterion stands unchanged and no tolerance was widened.** X-20's "four independent crossings" was wrong but **conservative by ~7×**. Band D fired: from 11×11 to 41×41 set pixels grow 7.3× while distinct states grow only 1.8×, so the crossings lie on connected contours, are not independent, and **a bigger window buys almost no localisation** — window sizing cannot be justified by averaging. The remaining factor of 2.5–3 is the TRACKER's and is [E-17](#register). | Whether T3.8's tolerance is achievable as stated (**yes**), and whether level 0's depth is a variable (**it need not be**). | — | **Phase 4** (X-27) ✔ |
 | ~~**E-7**~~ **ANSWERED — BUT THE QUESTION PRESUPPOSED THE WRONG CAUSE** | How many bits does each pyramid level actually need to preserve tracking accuracy? | The reference never chose its depths — they fell out of using `CV_8U`. [X-20](EXPERIMENTS.md) promoted this from an optimisation to a precondition on the reading that a 1-bit level cannot localise sub-pixel motion. | **[X-24](EXPERIMENTS.md) measured it and the premise does not survive. BAND C: no ladder up to `1/3/5/7` brings the four-level tracker inside X-20's tolerance on the full 141-point set — a deeper alphabet is NOT what fixes T3.8's miss.** Three things were learned instead, and two of them contradict this row's old text. **(1) Accuracy is PEAKED AT 2 BITS, not monotone in depth** — on `(1,0)` over the points that never clip, 1 bit gives 1.4742 px, **2 bits gives 0.0010 px (1474×)**, and 5 bits gives back 0.8567 px. Band D's own check excludes the artifact: every ladder tracked every point (141/141, 58/58), so the rows share identical point sets and `minEigThreshold` rejection is not involved. **(2) The dominant residual is CLIPPING, not quantisation** — the same ladder goes 0.8356 → **0.0010** px when restricted to the **58 of 141 points (41%)** whose 31×31 window is inside every level, so deviation (ii) is essentially all of that ladder's error rather than X-20's estimated half. That is now **[E-14](#register)**. **(3) 1-bit coarse levels ARE broken, so X-20 was half right — but not for its stated reason**: down a 1-bit ladder the edge map is THINNED AWAY (level 3 keeps 154 set pixels of 5 640 against `1/2/2/2`'s 1 028), so the second bit buys **content survival**, not precision. Why more than two bits then HURTS is **[E-15](#register)** and is not settled here. `1/2/2/2` is the leader on all three axes and is **cheap**: measured on the reference device it costs **1.35× the shipped ladder's tracking time, 1.51× its build and 1.17× its bytes** — against a pre-written cost model that predicted 3.25×, so the `20N²` popcounts per word do not dominate a tracked frame. The pre-registered "more than 2× is a headline" condition does not fire. **[X-25](EXPERIMENTS.md) then unblocked the adoption by answering E-14 NO**: measured on yield rather than RMS, `1/2/2/2` delivers **88.7–99.3% usable keypoints against `1/1/1/1`'s 75.9–88.7%**, so X-24's leader is confirmed on the metric that matters and is the recommended ladder ([D-23](#d-23-the-tracker-clips-its-window-and-does-not-pad-its-levels--measured-not-argued)). Footprint axis unchanged from [X-15](EXPERIMENTS.md). | Pyramid level bit depths. | T3.4, **T3.8**, T3.10 (the N-bit tracker, T4.1) | **Phase 4** (T4.1) ✔ |

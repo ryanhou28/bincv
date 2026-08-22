@@ -310,12 +310,19 @@ start until it produces numbers.
 
 ## Success Criteria
 
-> **ALL FOUR ARE MET**, on the reference device, measured end to end over 692
-> consecutive EuRoC frames with OpenCV pinned to one thread
+> **ALL FOUR ARE MET**, on the reference device, measured end to end over the **full
+> 1710-frame** EuRoC V1_02_medium sequence with OpenCV pinned to one thread
 > ([X-38](EXPERIMENTS.md), [D-35](ARCHITECTURE.md#8-design-decisions)):
-> **1.48× faster and 6.23× smaller simultaneously**, with median track lifetime and
-> per-frame survival **equal** to OpenCV's and flow agreeing to **0.0386 px** at the
-> median.
+> **1.46× faster and 6.23× smaller simultaneously**, with median track lifetime one
+> frame short of OpenCV's (11 vs 12), per-frame survival 0.2 points short (96.4% vs
+> 96.6%) and flow agreeing to **0.0434 px** at the median.
+>
+> Criterion 2 read **equal** here until the full sequence ran. That reading came from
+> the first 692 frames — all that had transferred before the dataset drive dropped —
+> and re-running that prefix on the current commit reproduces it **exactly**, so
+> nothing regressed: the remaining 1018 frames are harder and both frontends degrade
+> on them. Criterion 2 asks for agreement frame by frame, which one lifetime frame
+> out of twelve meets; **parity is no longer claimed.**
 >
 > Criterion 4 read 14× SLOWER for most of this project's life. Every one of those
 > readings was taken on **x86, where binCV has no vector path at all** (5.3 below is

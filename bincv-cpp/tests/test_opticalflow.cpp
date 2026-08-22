@@ -3369,6 +3369,176 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpace_uint32_t) {
     BINCV_CHECK(true);
 }
 
+// ---------------------------------------------------------------------------
+// X-39, SEQUENCE ARM: the same design space over MANY frames.
+//
+// The table above is ONE image and ~102 eligible keypoints per case. D-36 chose
+// between BOX_2x2 and BOX_3x3 on a 1.47-point yield difference measured at that
+// sample size, which is not obviously larger than the frame-to-frame spread --
+// so the ranking is worth re-reading over a sequence before anyone leans on it.
+//
+// Gated on the environment, and DELIBERATELY so: the gate must stay hermetic and
+// must not depend on a dataset that is not in the repository. With no variable
+// set this test skips in one check, which is what verify.sh sees. Set
+//
+//   BINCV_X39_FRAMES=<dir>   directory of frames (PNG), sorted by name
+//   BINCV_X39_STRIDE=<n>     sample every n-th frame (default 1)
+//   BINCV_X39_SHARD=<i>/<k>  run only frames congruent to i mod k
+//
+// and it sweeps. Each arm prints one machine-readable ROW line so shards merge
+// by summation -- yields are ratios and cannot be averaged across frames with
+// different eligible counts.
+// ---------------------------------------------------------------------------
+BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
+    const char* dir = std::getenv("BINCV_X39_FRAMES");
+    if (!dir) {
+        std::printf("  (skipped: set BINCV_X39_FRAMES=<frame-dir> to run the sequence arm)\n");
+        BINCV_CHECK(true);
+        return;
+    }
+    size_t stride = 1;
+    if (const char* sv = std::getenv("BINCV_X39_STRIDE")) {
+        const long v = std::atol(sv);
+        if (v > 0) stride = static_cast<size_t>(v);
+    }
+    size_t shard = 0, shards = 1;
+    if (const char* sh = std::getenv("BINCV_X39_SHARD")) {
+        long a = 0, b = 1;
+        if (std::sscanf(sh, "%ld/%ld", &a, &b) == 2 && b > 0 && a >= 0 && a < b) {
+            shard = static_cast<size_t>(a);
+            shards = static_cast<size_t>(b);
+        }
+    }
+
+    std::vector<std::filesystem::path> files;
+    for (const auto& e : std::filesystem::directory_iterator(dir)) {
+        if (e.path().extension() == ".png") files.push_back(e.path());
+    }
+    std::sort(files.begin(), files.end());
+    if (files.empty()) {
+        std::printf("  (skipped: no .png frames under %s)\n", dir);
+        BINCV_CHECK(true);
+        return;
+    }
+
+    struct Case { const char* name; Warp warp; double model; };
+    LKParams lkp;
+    const double halfWin = 0.5 * (lkp.winWidth - 1);
+    const cv::Mat probe = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
+    if (probe.empty()) {
+        std::printf("  (skipped: could not read %s)\n", files[0].string().c_str());
+        BINCV_CHECK(true);
+        return;
+    }
+    const std::vector<Case> cases = {
+        {"shift (1, 0)", translation(1.0, 0.0), 0.0},
+        {"shift (0.25,0.25)", translation(0.25, 0.25), 0.0},
+        {"shift (0.75,0.75)", translation(0.75, 0.75), 0.0},
+        {"shift (2, -3)", translation(2.0, -3.0), 0.0},
+        {"shift (6, 4)", translation(6.0, 4.0), 0.0},
+        {"rotate 1 deg", rotation(1.0, probe.cols * 0.5, probe.rows * 0.5),
+         halfWin * 3.14159265358979323846 / 180.0},
+    };
+    const PyrFilter filters[] = {PyrFilter::Gaussian5x5, PyrFilter::Gaussian3x3,
+                                 PyrFilter::Box3x3,      PyrFilter::Median3x3,
+                                 PyrFilter::Box2x2,      PyrFilter::DirectSubsample};
+    static const size_t kDepths[4] = {2, 3, 5, 7};
+
+    // [filter][depth] totals, summed over every frame and every warp case.
+    size_t elig[6][4] = {}, usable[6][4] = {};
+    // Per-frame yield, kept so the SPREAD is reportable rather than only the mean.
+    std::vector<double> perFrame[6][4];
+    size_t frames = 0;
+
+    std::printf("\n  ===================================================================\n"
+                "  X-39 sequence arm: FILTER x BIT DEPTH over a frame sequence.\n"
+                "  dir %s\n"
+                "  %zu frames present, stride %zu, shard %zu/%zu\n"
+                "  ===================================================================\n",
+                dir, files.size(), stride, shard, shards);
+
+    for (size_t fi = 0; fi < files.size(); fi += stride) {
+        if ((fi / stride) % shards != shard) continue;
+        const cv::Mat gray = cv::imread(files[fi].string(), cv::IMREAD_GRAYSCALE);
+        if (gray.empty() || gray.cols != probe.cols || gray.rows != probe.rows) continue;
+        const cv::Mat b0 = referencePreprocess(gray, 17);
+
+        size_t fElig[6][4] = {}, fUsable[6][4] = {};
+        for (const Case& c : cases) {
+            cv::Mat warped;
+            cv::warpAffine(gray, warped, affineOf(c.warp), gray.size(), cv::INTER_CUBIC,
+                           cv::BORDER_REFLECT_101);
+            const cv::Mat b1 = referencePreprocess(warped, 17);
+            Frontend<uint32_t> base(gray.cols, gray.rows, 4);
+            base.prev[0].fromCVMat(b0); base.next[0].fromCVMat(b1); base.build();
+            const std::vector<Point2f> pts =
+                eligiblePoints(base.dx[0], base.dy[0], gray.cols, gray.rows, c.warp,
+                               lkp.winWidth, lkp.winHeight);
+            if (pts.empty()) continue;
+            for (size_t k = 0; k < 6; ++k) {
+                const PyrFilter f = filters[k];
+                const Yield y[4] = {runFilterArm<uint32_t, 1, 2, 2, 2>(b0, b1, c.warp, pts, c.model, f),
+                                    runFilterArm<uint32_t, 1, 3, 3, 3>(b0, b1, c.warp, pts, c.model, f),
+                                    runFilterArm<uint32_t, 1, 5, 5, 5>(b0, b1, c.warp, pts, c.model, f),
+                                    runFilterArm<uint32_t, 1, 7, 7, 7>(b0, b1, c.warp, pts, c.model, f)};
+                for (size_t d = 0; d < 4; ++d) {
+                    fElig[k][d] += y[d].eligible;
+                    fUsable[k][d] += y[d].usable;
+                }
+            }
+        }
+        for (size_t k = 0; k < 6; ++k) {
+            for (size_t d = 0; d < 4; ++d) {
+                elig[k][d] += fElig[k][d];
+                usable[k][d] += fUsable[k][d];
+                if (fElig[k][d]) {
+                    perFrame[k][d].push_back(static_cast<double>(fUsable[k][d]) /
+                                             static_cast<double>(fElig[k][d]));
+                }
+            }
+        }
+        ++frames;
+        if (frames % 25 == 0) std::printf("  ... %zu frames\n", frames);
+    }
+
+    std::printf("\n  %zu frames measured (shard %zu/%zu)\n", frames, shard, shards);
+    std::printf("\n    %-24s %10s %10s %10s %10s\n", "filter", "N=2", "N=3", "N=5", "N=7");
+    for (size_t k = 0; k < 6; ++k) {
+        std::printf("    %-24s", filterName(filters[k]));
+        for (size_t d = 0; d < 4; ++d) {
+            const double y = elig[k][d] ? 100.0 * static_cast<double>(usable[k][d]) /
+                                              static_cast<double>(elig[k][d])
+                                        : 0.0;
+            std::printf(" %9.2f%%", y);
+        }
+        std::printf("\n");
+    }
+    // Frame-to-frame spread of the two arms D-36 chose between: if the 10th-90th
+    // bands overlap heavily, the ranking is a claim about the mean, not about
+    // any individual frame, and the entry has to say so.
+    std::printf("\n  per-frame spread (p10 / median / p90), N=3:\n");
+    for (size_t k = 0; k < 6; ++k) {
+        std::vector<double> v = perFrame[k][1];
+        if (v.empty()) continue;
+        std::sort(v.begin(), v.end());
+        const auto q = [&v](double p) {
+            return v[std::min(v.size() - 1, static_cast<size_t>(p * static_cast<double>(v.size())))];
+        };
+        std::printf("    %-24s %8.2f%% %8.2f%% %8.2f%%\n", filterName(filters[k]),
+                    100.0 * q(0.10), 100.0 * q(0.50), 100.0 * q(0.90));
+    }
+    // Machine-readable, for merging shards by SUMMATION. Yields are ratios; a
+    // mean of per-shard yields is not the yield of the union unless every shard
+    // has the same eligible count, which they do not.
+    for (size_t k = 0; k < 6; ++k) {
+        for (size_t d = 0; d < 4; ++d) {
+            std::printf("ROW %zu %zu %zu %zu\n", k, kDepths[d], elig[k][d], usable[k][d]);
+        }
+    }
+    std::printf("FRAMES %zu\n", frames);
+    BINCV_CHECK(true);
+}
+
 #endif // BINCV_WITH_OPENCV
 
 BINCV_TEST_MAIN("test_opticalflow")

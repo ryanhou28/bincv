@@ -7100,63 +7100,109 @@ measured **LK against LK** on the device and found binCV 1.4×–11× faster. Ev
 was taken on **x86 where binCV runs scalar**. What does the whole frontend —
 detection, pyramid build, preprocessing and tracking — do on the reference device?
 
-**Workload:** EuRoC V1_02_medium, **692 consecutive frames**, 752×480, both
+**Workload:** EuRoC V1_02_medium, the **full 1710-frame sequence**, 752×480, both
 frontends on bit-identical input through the reference pipeline's two-stage
 preprocessing, each detecting and tracking independently, OpenCV pinned to **one
 thread**. Pi 4, governor `performance`, `throttled` unchanged at `0x80000` (sticky
-history, no active bit) before and after, `taskset -c 3`, commit `0cde718`.
+history, no active bit) before and after, `taskset -c 3`, commit `82daca6`.
 
-*(692 rather than 1710: the Windows drive holding the dataset dropped mid-copy —
-`/mnt/g` went to `d?????????` — and 692 contiguous frames had already transferred.
-That is more than the 400 every x86 comparison used, and the frames are consecutive,
-so track lifetimes are intact.)*
+*(This entry first closed on **692** frames — all that had transferred before the
+Windows drive holding the dataset dropped mid-copy, `/mnt/g` going to `d?????????`.
+The drive is back; the full sequence has now run, and so has the 692-frame prefix
+again, as a control. Both are reported below because they **disagree**.)*
 
-**Result.**
+**Result — full sequence.**
 
 | criterion | binCV | OpenCV | |
 |---|---|---|---|
-| 2 · median track lifetime | **13 frames** | 13 | equal |
-| 2 · per-frame survival | **97.1%** | 97.1% | equal |
-| 2 · tracks observed | 3 688 | 3 766 | within 2% |
-| 2 · flow difference | **median 0.0386 px, p90 0.1177** | — | **97.4% within 1 px** |
+| 2 · median track lifetime | **11 frames** | 12 | one frame short |
+| 2 · per-frame survival | **96.4%** | 96.6% | 0.2 points short |
+| 2 · tracks observed | 10 279 | 10 129 | within 2% |
+| 2 · flow difference | **median 0.0434 px, p90 0.1614** | — | **95.4% within 1 px** |
 | 3 · peak footprint | **436 704 B** | 2 719 832 B | **6.23× smaller** |
-| **4 · speed** | **11.169 ms/frame** | 16.509 ms/frame | **1.48× FASTER** |
+| **4 · speed** | **11.198 ms/frame** | 16.324 ms/frame | **1.46× FASTER** |
 
-**binCV per stage, at the real duty cycle** (28 re-detections in 691 frames):
+**THE 692-FRAME PREFIX WAS AN EASY ONE, AND CRITERION 2's "EQUAL" WAS ITS ARTIFACT.**
+Re-running the prefix on the current commit is the control, and it reproduces the
+original accuracy figures **exactly**:
+
+| over | lifetime | survival | flow median | p90 | p99 | within 1 px |
+|---|---|---|---|---|---|---|
+| 692 prefix, first run (`0cde718`) | 13 vs 13 | 97.1 vs 97.1 | 0.0386 | 0.1177 | 14.478 | 97.4% |
+| **692 prefix, control (`82daca6`)** | **13 vs 13** | **97.1 vs 97.1** | **0.0386** | **0.1177** | **14.478** | **97.4%** |
+| **full 1710** | **11 vs 12** | **96.4 vs 96.6** | **0.0434** | **0.1614** | **22.494** | **95.4%** |
+
+Nothing regressed between the two commits — **the extra 1018 frames are harder**, and
+**both** frontends degrade on them (OpenCV's own lifetime drops 13 → 12, its survival
+97.1% → 96.6%). binCV degrades slightly more. Backing the prefix out of the totals
+puts the tail at roughly **95.9% survival for binCV against 96.3% for OpenCV** — a
+0.34-point gap where the prefix had exactly none. That is an inference from
+aggregates, not a measurement: `frontend_sequence` reports whole-run statistics, so
+the split is arithmetic on the two runs rather than a third run over frames 693–1710.
+
+**binCV per stage, at the real duty cycle** (82 re-detections in 1709 frames):
 
 | stage | ms/frame | share |
 |---|---|---|
-| track (LK) | 7.774 | 69.6% |
-| **build (`pyrDown` + derivatives)** | **2.884** | **25.8%** |
-| detect | 0.511 | 4.6% |
+| track (LK) | 7.815 | 69.8% |
+| **build (`pyrDown` + derivatives)** | **2.811** | **25.1%** |
+| detect | 0.571 | 5.1% |
+
+**The speed figures barely moved, and the ratio's movement is OpenCV's.** binCV lands
+at **11.169 / 11.195 / 11.198 ms** across the three runs — a **0.26%** spread, well
+inside this device's noise floor. OpenCV moves **16.324–17.060 ms** (±2.3%) on
+identical input. So 1.46× and 1.52× are the same measurement seen through OpenCV's
+run-to-run variance, and the conservative one is quoted. The duty cycle also held:
+4.8% here against 4.1% on the prefix, both far from the 100% X-30 assumed (D-28).
 
 **Conclusion — ROADMAP CRITERION 4 IS MET, AND ALL FOUR NOW ARE.**
 
-1. **1.48× faster and 6.23× smaller, simultaneously, on the deployment target.**
+1. **1.46× faster and 6.23× smaller, simultaneously, on the deployment target.**
    Criterion 4 asked for "faster execution on the bit-parallel operations against
    the byte-per-pixel denominator" and it is now satisfied end to end, not just for
    the tracker.
 2. **Every previous reading of this criterion was a fact about x86, not about the
-   product.** 14× slower → 6.3× → 3.8× → parity → **1.48× faster**: the first four
+   product.** 14× slower → 6.3× → 3.8× → parity → **1.46× faster**: the first four
    were measured where binCV has **no vector path at all** (ROADMAP 5.3 is
    unwritten). The measurements were correct; **the platform was wrong**, and it
    took X-37 to notice. `frontend_sequence` now prints which case it is in rather
    than a fixed disclaimer that had gone false.
-3. **Criterion 2 holds end to end**: lifetime and survival are *equal* to OpenCV's,
-   flow agrees to 0.0386 px at the median. The ~2.6% beyond 1 px is the same tail
-   [E-17](ARCHITECTURE.md#register) is chartered on and is not new.
+3. **Criterion 2 holds end to end, but NOT at parity — and the parity claim was
+   this entry's own, so its withdrawal is recorded here rather than quietly edited.**
+   Over the full sequence binCV's median track lifetime is **11 against OpenCV's 12**
+   and survival **96.4% against 96.6%**, with flow agreeing to 0.0434 px at the
+   median. Criterion 2 asks for *agreement frame by frame* — one lifetime frame out
+   of twelve, 0.2 survival points and a 0.043 px median meet that. **Equality was a
+   property of the 692-frame prefix, which the control above reproduces exactly.**
+   The 4.6% beyond 1 px is the same tail [E-17](ARCHITECTURE.md#register) is
+   chartered on, now measured over 2.5× the data and correspondingly heavier
+   (p99 14.5 → 22.5 px).
 4. **THE PROFILE HAS MOVED AGAIN, AND THIS TIME IT MOVES THE NEXT TARGET.** Tracking
-   is 69.6% and **build is 25.8%** — up from 4.5%, because LK got 3.44× faster
+   is 69.8% and **build is 25.1%** — up from 4.5%, because LK got 3.44× faster
    ([D-32](ARCHITECTURE.md)) and `pyrDown` did not. **`pyrDown` is now a quarter of
    the frontend**, which is exactly where the downsampling-filter design space
-   ([E-21](ARCHITECTURE.md#register)) lands. Detection is 4.6% and stays
+   ([E-21](ARCHITECTURE.md#register)) lands. Detection is 5.1% and stays
    uninteresting.
+5. **WHERE THE GAP OPENS IS A LEAD, NOT A MYSTERY.** It opens on the harder,
+   faster-motion tail — and large motion is exactly what coarse pyramid levels carry,
+   which is exactly what the downsampling filter builds.
+   [X-39](#x-39--the-pyramid-design-space-downsampling-filter--bit-depth--done) found
+   the filter arms spreading furthest apart at its **largest** shifts:
+   `DIRECT_SUBSAMPLE` collapses to 59.4% yield at `shift (6, 4)` where the shipped box
+   holds 94.1%, and `BOX_3x3` reaches 100%. So
+   [D-36](ARCHITECTURE.md#8-design-decisions)'s `BOX_2x2`/`BOX_3x3` trade and this
+   0.34-point tail plausibly meet. **Plausibly**: no measurement has yet run the
+   filter arms *through the frontend over a sequence*, and this is a hypothesis being
+   registered, not a result.
 
 **Decision:** criterion 4 closed; E-20 closed. Recorded as
-[D-35](ARCHITECTURE.md#8-design-decisions).
+[D-35](ARCHITECTURE.md#8-design-decisions). **Criterion 2's parity claim is
+withdrawn**; criterion 2 itself still holds.
 
 **Method:** `benchmark/frontend_sequence.cpp` via `scripts/run_on_pi.sh pi4` with
-`BINCV_PI_OPENCV=1` and `BINCV_OPENCV_THREADS=1`.
+`BINCV_PI_OPENCV=1` and `BINCV_OPENCV_THREADS=1`, run twice — once over the whole
+directory and once with the `692` argument, which selects the same prefix the
+original run saw.
 
 ---
 
@@ -7349,6 +7395,11 @@ and flat in `N`, so a kernel for it would price something already excluded.
 | `BOX_3x3` | 11.968 | 1.38× faster |
 | `GAUSSIAN_3x3` | 12.230 | 1.35× faster |
 | **`GAUSSIAN_5x5`** | **17.099** | **0.97× — SLOWER** |
+
+*(Baselines are X-38's 692-frame figures, 11.169 against 16.509 ms, which were the
+numbers on record when this ran. X-38 has since re-measured over the full 1710-frame
+sequence at 11.198 against 16.324 — the "vs OpenCV" column shifts by about 0.02× and
+`GAUSSIAN_5x5` stays on the slow side of parity, so nothing here changes.)*
 
 **Conclusion — BAND C: the anchor is not affordable, and the frontier is clear.**
 
