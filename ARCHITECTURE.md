@@ -2521,6 +2521,55 @@ dataset dropped mid-copy. The frames are consecutive so track lifetimes are inta
 and it is more data than any x86 comparison used, but the full-sequence run is still
 owed.
 
+
+### D-36: `BOX_2x2` stays the default; the filter set ships as options
+
+[X-39](EXPERIMENTS.md) mapped the pyramid's two-dimensional design space —
+downsampling filter × bit depth — and `impl::pyrDownFilteredRoute` now implements
+five of the reference's six `LKPyrDownFilterType` variants as bit-sliced kernels,
+**verified exact against a per-pixel integer reference**.
+
+| filter | µs (640×480→320×240) | vs shipped | yield vs anchor | est. frontend |
+|---|---|---|---|---|
+| **`BOX_2x2` (default)** | **93.7** | 1.00× | −2.27 | **11.169 ms, 1.48× faster** |
+| `DIRECT_SUBSAMPLE` | 20.9 | 0.22× | −19.68 | 10.978 ms |
+| `BOX_3x3` | 398.0 | 4.25× | **−0.80** | 11.968 ms, 1.38× faster |
+| `GAUSSIAN_3x3` | 497.7 | 5.31× | −1.28 | *dominated by `BOX_3x3`* |
+| **`GAUSSIAN_5x5`** (anchor) | **2 352.9** | **25.10×** | 0.00 | **17.099 ms — SLOWER than OpenCV** |
+
+**THE TWO AXES ARE NOT INDEPENDENT, WHICH IS THE FINDING BENEATH THE TABLE.** A 2×2
+box sum of four values has five possible outcomes, so it **saturates at 3 bits** and
+gains only **+0.82** yield points from N=2 to N=7; a 5×5 Gaussian keeps paying and
+gains **+3.93**. **The filter decides how much depth is useful**, so
+[E-19](#register)'s ladder question was never separable from the filter it was asked
+about — and every bit-depth result in this project was measured at the filter that
+benefits least from depth.
+
+**Standard-LK accuracy is reachable and costs more than it is worth here.**
+`GAUSSIAN_5x5` adds ~5.9 ms and puts binCV **behind** OpenCV, forfeiting
+[D-35](#8-design-decisions)'s criterion-4 result. SEAL §4.2.2 reached the same
+conclusion by a different route (SRAM), so the two agree on the choice while
+disagreeing on the binding constraint.
+
+**`BOX_3x3` is the point nobody had listed**: 65% of the gap to standard LK for
++0.8 ms, still 1.38× faster than OpenCV — and it **dominates `GAUSSIAN_3x3`**, being
+both cheaper and more accurate.
+
+**Three quarters of every filtered number is framework, not filter.** The generic
+route runs `BOX_2x2` at **2.96×** the hand-written one **computing the same
+function**, so `BOX_3x3`'s 4.25× is roughly 1.4× of filter and 3× of genericity.
+The frontier is measured on a framework that has had no optimisation at all
+([E-22](#register)).
+
+**`MEDIAN_3x3` is deliberately not implemented.** X-39 measured it **7.53 points
+below the box** and flat in `N`: a median of a mostly-zero neighbourhood returns
+zero, so it **erodes** a sparse edge map rather than blurring it. It is the right
+tool in the temporal denoiser, which is where SEAL uses it.
+
+**The `BOX_2x2`/`BOX_3x3` trade — 1.47 yield points for ~0.8 ms — is the caller's**,
+as [D-24](#8-design-decisions) put route (a) and [D-32](#8-design-decisions) put
+`maxIterations`. binCV ships the default and the options, not a decision.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -2574,7 +2623,8 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | **E-15** | Why does tracking accuracy PEAK AT 2 BITS and degrade with more? | [X-24](EXPERIMENTS.md) measured it and did not explain it: on `(1,0)` unclipped, 1/2/3/5 bits give 1.4742 / **0.0010** / 0.5334 / 0.8567 px, and on `(2,−3)` the ladder is exact at 2 and 3 bits and fails from 4. Two explanations remain open and were NOT separated. **(i)** The bit-sliced covariance and residual weight plane pairs by `2^(i+j)`, so a few high-magnitude pixels dominate a window whose sub-pixel accuracy comes from averaging many edge crossings — this predicts degradation at SMALL motion and none at large, which is the observed pattern (`(12,−8)` is exact at every depth, `(2,−3)` fails from 4 bits, `(1,0)` from 3). **(ii)** `1/2/2/2`'s upper levels collapse to two distinct values anyway, so its advantage may be density preservation rather than precision. `requantizeBoxSum` is already excluded as the cause: it is a faithful rescaled average at every depth. | Whether the weighting in [§7.5](#75-lk-gradient-covariance)'s bit-sliced form is right for TRACKING as opposed to for corner response, and whether a depth cap belongs in the pyramid API. | E-7's final ladder | **Phase 4** |
 | **E-18** | Can `residualSums` carry **vector accumulators across the window**, reducing once per window instead of once per call? | [X-33](EXPERIMENTS.md) measured a **3.42× ceiling** for batched NEON popcounts and delivered **1.24×**. The gap is the horizontal add: it runs once per `slicedSignedSum` call — **~620 register-domain crossings per window** — where the ceiling amortized its extraction across the whole buffer. Collapsing that to one crossing per window is the remaining **2–3×** on a kernel that is **94.7% of the real frontend**, which makes it the largest single item left in Phase 5.1. | Whether `TapSums` becomes vector state and `residualSums` restructures around it — a real interface change, and the scalar path has to keep working. | X-28's unmet criterion 4 | **Phase 5** |
 | **E-19** | Is the `1/2/2/2` ladder still the right operating point now that LK is 94.7% of the frontend and the ladder costs **2.30×**? | [D-23](#8-design-decisions) adopted it on ACCURACY — yield 88.7–99.3% against `1/1/1/1`'s 75.9–88.7% ([X-25](EXPERIMENTS.md)) — with its speed cost **estimated at 1.35×** from a confounded measurement, and chosen when corner detection was believed to be **52.7%** of the frontend rather than 2%. Isolated after [X-34](EXPERIMENTS.md) it is **2.30×**, and at `1/1/1/1` binCV is **1.34× slower than single-threaded SIMD OpenCV** against 3.08× at `1/2/2/2`. **This is the largest single speed lever left, larger than E-18.** The intermediate ladders were never measured for speed at all: `1/2/1/1` and `1/2/2/1` may buy most of the accuracy for a fraction of the cost, since the coarse levels track the same points through the same window and each N=2 level costs the same 4× regardless of how few pixels it has. | The shipped ladder, and whether the accuracy/speed trade belongs to the caller as `LKLevels` already lets it be. | D-23 | **Phase 5** |
-| **E-21** | What does the **downsampling-filter** axis of the pyramid design space look like? | binCV implements **one** of the reference's six `LKPyrDownFilterType` variants — `BOX_2x2` — because that is what `seal_params.yaml` selects. **Every accuracy number in this project** (X-20's tolerance, X-24's ladders, X-25's borders, X-27's floor) was therefore measured on a box-downsampled pyramid, and a 2×2 box is a poor lowpass that aliases. **There has never been a Gaussian reference point**, so how much of the tracking difficulty is aliasing is unknown. The SEAL paper §4.2.2 explores this axis explicitly: Gaussian 5×5 → **8 bits/pixel**, Box 2×2 → **3 bits**, direct subsample → **1 bit** but **>2.5 cm worse** ATE. binCV ships `1/2/2/2` — **2 bits — which is not the paper's configuration either.** And [X-38](EXPERIMENTS.md) makes it urgent: `pyrDown` is now **25.8%** of the frontend. **The deliverable is a MAP of (filter × bit depth) against accuracy, footprint and speed, with a default chosen to match standard-LK accuracy and the rest offered as documented trade points.** | The pyramid's default filter, and whether `pyrDown` gains a filter parameter beside the depth it already has. | E-19, and every accuracy result to date | **Phase 5** |
+| **E-22** | How much of `pyrDownFilteredRoute`'s cost is GENERICITY rather than the filter? | [X-39](EXPERIMENTS.md) measured the generic route running `BOX_2x2` at **2.96×** the hand-written one **computing the same function**, so roughly three quarters of every filtered number is framework. `BOX_3x3`'s 4.25× is about **1.4× of filter and 3× of genericity**, and a hand-written `BOX_3x3` would plausibly land near 130 µs — **+0.15 ms on the frontend rather than +0.8**, which would change whether the accuracy/speed trade is worth offering at all. The suspects are the same ones [E-12](#register) named and then found not to matter for the derivative: the tap loop is runtime-bounded where the shipped route unrolls, and `weightedAxis` rebuilds a shifted operand per weight bit. | Whether `pyrDown` keeps two routes or the generic one replaces the hand-written default. | D-36's frontier, which is measured on an unoptimised framework | **Phase 5** |
+| ~~**E-21**~~ **RESOLVED** | What does the downsampling-filter axis look like? | binCV implemented one of six variants, so every accuracy result sat at one point of a two-dimensional space. | **Answered, and the axes are NOT independent.** `BOX_2x2` saturates at 3 bits (+0.82 yield points N=2→7) where `GAUSSIAN_5x5` gains +3.93 — **the filter decides how much depth is useful**. Standard-LK accuracy is reachable and **costs criterion 4**: `GAUSSIAN_5x5` is 25.10× the shipped route and would put binCV behind OpenCV. `BOX_3x3` recovers **65% of the gap for +0.8 ms** and dominates `GAUSSIAN_3x3`. `DIRECT_SUBSAMPLE` is −19.68 points, confirming the paper's ">2.5 cm worse". [D-36](#d-36-box_2x2-stays-the-default-the-filter-set-ships-as-options). | The pyramid's default filter. **`BOX_2x2` stays; the set ships as options.** | E-19 | **Phase 5** (X-39) ✔ |
 | ~~**E-20**~~ **RESOLVED — CRITERION 4 MET** | What is the WHOLE FRONTEND's speed against OpenCV on the reference device? | Every end-to-end reading had been taken on x86 where binCV runs scalar. | **Answered: binCV is 1.48× FASTER end to end** — 11.169 against 16.509 ms/frame over 692 EuRoC frames, OpenCV pinned to one thread — **while using 6.23× less memory**, with track lifetime and per-frame survival EQUAL to OpenCV's. [X-38](EXPERIMENTS.md), [D-35](#d-35-all-four-roadmap-success-criteria-are-met-on-the-deployment-target). The profile also moved: build is now **25.8%** of the frontend, up from 4.5%, which is where [E-21](#register) lands. | Whether ROADMAP criterion 4 can be closed. **It is.** | — | **Phase 5** (X-38) ✔ |
 | **E-17** | Where does the tracker lose the factor of **2.5–3** between the representation's 0.10 px floor and its own 0.25–0.29 px? | [X-27](EXPERIMENTS.md) closed off the representation, and X-24/X-25 closed off three pyramid parameters, so this is what is left of T3.8's MISS — and it is now a located problem rather than a diffuse one. **The prime suspect is deviation (i)**: the previous window is anchored on the integer grid because a bit-plane derivative cannot be interpolated, which displaces the aperture by up to half a pixel. `ops/opticalFlow.hpp` already calls that "the concrete thing route (b) trades away", and half a pixel of aperture displacement is the right order of magnitude for a 2.5× gap on a sub-pixel measurement. Two other candidates are untested: the single linearization per iteration on binary content, and the asymmetry that `I` is read at integer positions while `J` is interpolated. | Whether deviation (i) is a trade worth reversing, and at what cost — reversing it needs an interpolatable previous-frame gradient, which is a representation change. | T3.8's standing accuracy MISS | **Phase 4** |
 | ~~**E-16**~~ **RESOLVED — THE REPRESENTATION IS NOT THE LIMIT** | Is X-20's 0.25 px RMS tolerance reachable at all with a 1-bit level 0 on real edge maps — and if not, what IS the representation's floor? | Three pyramid parameters had been eliminated without explaining T3.8's MISS, leaving the representation as the natural suspect. | **Answered: reachable, by a wide margin.** [X-27](EXPERIMENTS.md) measured a 31×31 window resolving **29.3 distinct binary states per pixel of displacement** — floor **0.025 px** noise-free, **0.10 px** at σ = 1 gray level, **0.174 px** even at σ = 4. **The 0.25 px criterion stands unchanged and no tolerance was widened.** X-20's "four independent crossings" was wrong but **conservative by ~7×**. Band D fired: from 11×11 to 41×41 set pixels grow 7.3× while distinct states grow only 1.8×, so the crossings lie on connected contours, are not independent, and **a bigger window buys almost no localisation** — window sizing cannot be justified by averaging. The remaining factor of 2.5–3 is the TRACKER's and is [E-17](#register). | Whether T3.8's tolerance is achievable as stated (**yes**), and whether level 0's depth is a variable (**it need not be**). | — | **Phase 4** (X-27) ✔ |

@@ -624,6 +624,138 @@ inline void gatherPhases(WordType w0, WordType w1, WordType& evenPhase,
 
 } // namespace impl
 
+// ===========================================================================
+// THE DOWNSAMPLING FILTER AXIS (X-39 / E-21)
+//
+// The reference defines SIX `LKPyrDownFilterType` variants and binCV implemented
+// exactly one, `BOX_2x2`, because that is what `seal_params.yaml` selects. Every
+// accuracy result in this project was therefore measured at one point of a
+// two-dimensional design space -- and [X-39](../../../EXPERIMENTS.md) showed the
+// two axes are NOT independent: a 2x2 box sum of four values has five possible
+// outcomes, so it saturates at 3 bits and gains +0.82 yield points from N=2 to
+// N=7, where a 5x5 Gaussian gains +3.93. **The filter decides how much depth is
+// useful.**
+//
+// FIVE OF THE SIX ARE SEPARABLE WEIGHTED SUMS and share this one framework;
+// only the tap offsets and weights change:
+//
+//     DIRECT_SUBSAMPLE   offsets { 0}            weights [1]           sum   1
+//     BOX_2x2            offsets { 0, +1}        weights [1,1]         sum   2
+//     BOX_3x3            offsets {-1, 0, +1}     weights [1,1,1]       sum   3
+//     GAUSSIAN_3x3       offsets {-1, 0, +1}     weights [1,2,1]       sum   4
+//     GAUSSIAN_5x5       offsets {-2..+2}        weights [1,4,6,4,1]   sum  16
+//
+// (`MEDIAN_3x3` is an order statistic, not a weighted sum, and is not here.
+// X-39 measured it 7.53 points BELOW the box anyway: a median of a mostly-zero
+// neighbourhood returns zero, so it erodes a sparse edge map rather than blurring
+// it. It belongs in the temporal denoiser, which is where SEAL uses it.)
+//
+// WHY THE TAPS ARE CHEAP. Output column x reads source column 2x + dx, and
+// `gatherPhases` already separates a source row into its even and odd column
+// phases packed at destination stride. So source column 2x+2k is the EVEN phase at
+// output column x+k, and 2x+2k+1 is the ODD phase at x+k -- every tap is one of
+// two phase words shifted by a whole number of OUTPUT columns. No gather is needed
+// beyond the one `pyrDown` already does.
+//
+// A bit-sliced shift is free (it is an index offset into the plane array), so a
+// weight of 2^k costs nothing and a weight of 6 = 4+2 costs one extra add. That is
+// why the weighted sum is barely more expensive than the box.
+// ===========================================================================
+
+/// @brief Which downsampling filter `pyrDown` applies. Names match the reference's
+///        `LKPyrDownFilterType` so a configuration can be carried across.
+enum class PyrDownFilter {
+    DirectSubsample,  ///< no lowpass; X-39 measured -19.68 yield points. Aliases badly.
+    Box2x2,           ///< the shipped default and the reference's
+    Box3x3,           ///< -0.80 from the Gaussian anchor at N=3
+    Gaussian3x3,      ///< -1.28
+    Gaussian5x5,      ///< the ANCHOR: what cv::buildOpticalFlowPyramid applies
+};
+
+namespace impl {
+
+/// @brief Tap offsets and weights for one separable filter.
+/// @note `Radius` is the half-extent, so the tap count is `2*Radius + 1` except for
+///       the even-sized `Box2x2`, whose taps are {0, +1} and which is handled by
+///       `evenOnly`.
+struct FilterTaps {
+    int lo;            ///< lowest tap offset
+    int hi;            ///< highest tap offset
+    unsigned w[5];     ///< weights, indexed from `lo`
+    unsigned sum;      ///< sum of the weights, per axis
+};
+
+constexpr FilterTaps filterTaps(PyrDownFilter f) {
+    switch (f) {
+        case PyrDownFilter::DirectSubsample: return FilterTaps{0, 0, {1, 0, 0, 0, 0}, 1};
+        case PyrDownFilter::Box2x2:          return FilterTaps{0, 1, {1, 1, 0, 0, 0}, 2};
+        case PyrDownFilter::Box3x3:          return FilterTaps{-1, 1, {1, 1, 1, 0, 0}, 3};
+        case PyrDownFilter::Gaussian3x3:     return FilterTaps{-1, 1, {1, 2, 1, 0, 0}, 4};
+        default:                             return FilterTaps{-2, 2, {1, 4, 6, 4, 1}, 16};
+    }
+}
+
+/// @brief Planes needed to hold one axis of the weighted sum of `NIn`-bit values.
+constexpr size_t axisPlanes(size_t nIn, unsigned weightSum) {
+    size_t bits = 0;
+    // max value is weightSum * (2^nIn - 1); count its bits.
+    unsigned long long maxV = static_cast<unsigned long long>(weightSum) *
+                              ((1ull << nIn) - 1ull);
+    while (maxV > 0) { ++bits; maxV >>= 1; }
+    return bits == 0 ? 1 : bits;
+}
+
+/// @brief `acc += (v << shift)`, bit-sliced. A shift is free: it is an index
+///        offset, so this is one ripple add.
+template <typename WordType>
+inline void addShifted(WordType* acc, size_t accN, const WordType* v, size_t vN, size_t shift,
+                       WordType* tmp) {
+    // Build the shifted operand in `tmp`: planes [0, shift) are zero.
+    for (size_t p = 0; p < shift; ++p) tmp[p] = 0;
+    for (size_t p = 0; p < vN; ++p) tmp[shift + p] = v[p];
+    WordType carry = 0;
+    const size_t n = accN;
+    for (size_t p = 0; p < n; ++p) {
+        const WordType y = (p < shift + vN) ? tmp[p] : static_cast<WordType>(0);
+        const WordType x = acc[p];
+        acc[p] = static_cast<WordType>(static_cast<WordType>(x ^ y) ^ carry);
+        carry = maj3<WordType>(x, y, carry);
+    }
+    // The caller sizes `acc` so the top carry cannot be lost; see axisPlanes.
+}
+
+/// @brief One axis of a separable weighted sum, bit-sliced.
+/// @param taps `tapCount` operands, each `nIn` planes, in tap order.
+/// @param out `outN` planes, zeroed by this function then filled.
+template <size_t NIn, typename WordType>
+inline void weightedAxis(const WordType (*taps)[NIn], size_t tapCount, const unsigned* weights,
+                         WordType* out, size_t outN) {
+    for (size_t p = 0; p < outN; ++p) out[p] = 0;
+    WordType tmp[NIn + 8];
+    for (size_t t = 0; t < tapCount; ++t) {
+        unsigned w = weights[t];
+        // Decompose the weight into set bits: each is a free shift plus one add.
+        for (size_t bit = 0; w != 0; ++bit, w >>= 1) {
+            if ((w & 1u) != 0) addShifted<WordType>(out, outN, taps[t], NIn, bit, tmp);
+        }
+    }
+}
+
+/// @brief `requantizeBoxSum` for an arbitrary kernel weight sum.
+/// @note The box version is this with `KSum == 4`. Same three steps: scale to the
+///       output's full range, add half the divisor to round to nearest, divide.
+template <size_t NOut, size_t NIn, size_t SumPlanes, typename WordType>
+inline void requantizeWeighted(const WordType* sum, unsigned kSum, WordType* out) {
+    constexpr unsigned maxIn = (1u << NIn) - 1u;
+    constexpr size_t width = SumPlanes + NOut;
+    WordType scaled[width];
+    multiplyByAllOnes<WordType>(sum, SumPlanes, NOut, scaled);
+    addConstant<WordType>(scaled, width, (kSum / 2) * maxIn);
+    divideByConstant<WordType>(scaled, width, kSum * maxIn, out, NOut);
+}
+
+} // namespace impl
+
 // ---------------------------------------------------------------------------
 // The kernel (D-5: views, never containers)
 // ---------------------------------------------------------------------------
@@ -1001,6 +1133,155 @@ public:
 private:
     impl::PyramidLevels<WordType, LevelBits...> levels_;
 };
+
+namespace impl {
+
+/// @brief The value at output column x-1, and at x+1, of a phase word.
+/// @note Output column x lives at bit `x % B`, so the value at `x-1` is one bit
+///       LOWER and reaching it is a left shift. The bit crossing the word boundary
+///       comes from the neighbouring phase word.
+template <typename WordType>
+inline WordType phaseAtMinus1(WordType cur, WordType prev) {
+    constexpr size_t B = bitsPerWord<WordType>();
+    return static_cast<WordType>((cur << 1) | (prev >> (B - 1)));
+}
+template <typename WordType>
+inline WordType phaseAtPlus1(WordType cur, WordType next) {
+    constexpr size_t B = bitsPerWord<WordType>();
+    return static_cast<WordType>((cur >> 1) | (next << (B - 1)));
+}
+
+/// @brief One pyramid level under an arbitrary SEPARABLE filter. **INTERNAL.**
+///
+/// See the filter-axis section above for why every tap is a phase word shifted by a
+/// whole number of output columns, and why a weight of `2^k` is free.
+///
+/// **BORDER: source outside the frame reads as ZERO**, which is the rule the shipped
+/// `pyrDown` already applies to source words past the row. It is NOT the
+/// reference's `BORDER_REFLECT_101`, and the difference shows on a `Radius`-pixel
+/// rim of each level. Reflect-101 is a per-pixel index map and is not word-parallel
+/// -- the same reason deviation (iii) rejected it for the LK taps. X-39's rule asks
+/// each filter to reproduce **its own** definition exactly, and
+/// tests/test_pyramid.cpp checks that against a per-pixel integer reference using
+/// this same border.
+template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType>
+inline void pyrDownFilteredRoute(const BinMatConstView<WordType> (&src)[NIn],
+                                 BinMatView<WordType> (&dst)[NOut]) {
+    static_assert(NIn >= 1 && NIn <= 8, "pyrDown: NIn outside QuantMat's supported range");
+    static_assert(NOut >= 1 && NOut <= 8, "pyrDown: NOut outside QuantMat's supported range");
+    checkPyrDownArgs<NOut, NIn, WordType>(src, dst);
+
+    constexpr FilterTaps T = filterTaps(F);
+    constexpr size_t kTaps = static_cast<size_t>(T.hi - T.lo + 1);
+    constexpr size_t hPlanes = axisPlanes(NIn, T.sum);
+    constexpr size_t vPlanes = axisPlanes(hPlanes, T.sum);
+
+    const size_t dstWidth = dst[0].width;
+    const size_t dstHeight = dst[0].height;
+    if (dstWidth == 0 || dstHeight == 0) return;
+
+    constexpr size_t B = bitsPerWord<WordType>();
+    const size_t srcHeight = src[0].height;
+    const size_t srcWords = minRowWords<WordType>(src[0].width);
+    const size_t dstWords = minRowWords<WordType>(dstWidth);
+    const WordType tail = rowTailMask<WordType>(dstWidth);
+
+    auto srcWord = [&](const WordType* row, long long w) -> WordType {
+        if (row == nullptr || w < 0 || static_cast<size_t>(w) >= srcWords) {
+            return static_cast<WordType>(0);
+        }
+        return row[static_cast<size_t>(w)];
+    };
+
+    for (size_t y = 0; y < dstHeight; ++y) {
+        WordType* dstRow[NOut];
+        for (size_t q = 0; q < NOut; ++q) dstRow[q] = dst[q].row(y);
+
+        // The vertical support: source rows 2y + dy. Outside the frame reads zero.
+        const WordType* vRows[kTaps][NIn];
+        for (size_t t = 0; t < kTaps; ++t) {
+            const long long r = static_cast<long long>(2 * y) + T.lo + static_cast<long long>(t);
+            const bool ok = r >= 0 && r < static_cast<long long>(srcHeight);
+            for (size_t p = 0; p < NIn; ++p) {
+                vRows[t][p] = ok ? src[p].row(static_cast<size_t>(r)) : nullptr;
+            }
+        }
+
+        for (size_t i = 0; i < dstWords; ++i) {
+            // One horizontally-filtered value per vertical tap.
+            WordType hRes[kTaps][hPlanes];
+            for (size_t t = 0; t < kTaps; ++t) {
+                // Even/odd phases at output words i-1, i, i+1 -- everything the
+                // horizontal taps need, from the gather pyrDown already does.
+                WordType ev[3][NIn], od[3][NIn];
+                for (size_t p = 0; p < NIn; ++p) {
+                    for (int k = -1; k <= 1; ++k) {
+                        const long long j = static_cast<long long>(i) + k;
+                        const long long lo = 2 * j;
+                        gatherPhases<WordType>(srcWord(vRows[t][p], lo),
+                                               srcWord(vRows[t][p], lo + 1),
+                                               ev[k + 1][p], od[k + 1][p]);
+                    }
+                }
+                // Source column 2x+2k is the EVEN phase at x+k; 2x+2k+1 is the ODD
+                // phase at x+k. So each tap is one shift of one phase word.
+                WordType hTaps[kTaps][NIn];
+                for (size_t p = 0; p < NIn; ++p) {
+                    for (size_t t2 = 0; t2 < kTaps; ++t2) {
+                        const int dx = T.lo + static_cast<int>(t2);
+                        const int k = (dx >= 0) ? (dx / 2) : ((dx - 1) / 2);
+                        const bool odd = ((dx - 2 * k) != 0);
+                        const WordType cur = odd ? od[1][p] : ev[1][p];
+                        if (k == 0) {
+                            hTaps[t2][p] = cur;
+                        } else if (k == -1) {
+                            hTaps[t2][p] = phaseAtMinus1<WordType>(cur, odd ? od[0][p] : ev[0][p]);
+                        } else {
+                            hTaps[t2][p] = phaseAtPlus1<WordType>(cur, odd ? od[2][p] : ev[2][p]);
+                        }
+                    }
+                }
+                weightedAxis<NIn, WordType>(hTaps, kTaps, T.w, hRes[t], hPlanes);
+            }
+
+            WordType vSum[vPlanes];
+            weightedAxis<hPlanes, WordType>(hRes, kTaps, T.w, vSum, vPlanes);
+
+            WordType outPlanes[NOut];
+            requantizeWeighted<NOut, NIn, vPlanes, WordType>(vSum, T.sum * T.sum, outPlanes);
+            const bool last = (i + 1 == dstWords);
+            for (size_t q = 0; q < NOut; ++q) {
+                dstRow[q][i] = last ? static_cast<WordType>(outPlanes[q] & tail) : outPlanes[q];
+            }
+        }
+    }
+    (void)B;
+}
+
+} // namespace impl
+
+/// @brief One pyramid level under a chosen downsampling filter. **API TIER 3.**
+/// @tparam F Which separable filter (X-39 / E-21). `Box2x2` is the shipped default
+///         and the reference's; `Gaussian5x5` is what `cv::buildOpticalFlowPyramid`
+///         applies and is X-39's accuracy anchor.
+/// @note The existing `pyrDown` is this at `Box2x2`, through a hand-written route
+///       that stays because it is what every prior result was measured on and
+///       tests/test_pyramid.cpp holds the two to agreement.
+template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType>
+inline void pyrDownFiltered(const BinMatConstView<WordType> (&src)[NIn],
+                            BinMatView<WordType> (&dst)[NOut]) {
+    impl::pyrDownFilteredRoute<F, NOut, NIn, WordType>(src, dst);
+}
+
+/// @brief Container spelling of `pyrDownFiltered`.
+template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType>
+inline void pyrDownFiltered(const QuantMat<NIn, WordType>& src, QuantMat<NOut, WordType>& dst) {
+    BinMatConstView<WordType> s[NIn];
+    BinMatView<WordType> d[NOut];
+    for (size_t p = 0; p < NIn; ++p) s[p] = src.constPlane(p);
+    for (size_t q = 0; q < NOut; ++q) d[q] = dst.plane(q);
+    pyrDownFiltered<F, NOut, NIn, WordType>(s, d);
+}
 
 } // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv

@@ -532,3 +532,32 @@ than blurring it. It belongs in the temporal denoiser, where SEAL uses it.
 **No decision yet, deliberately**: the bands weigh accuracy against cost, and the
 cost side does not exist until the filters have bit-sliced kernels. The points worth
 pricing are `GAUSSIAN_5x5 @ N=3` (0.65 below anchor at 3 bits) and `BOX_3x3 @ N=3`.
+
+---
+
+## 14 · X-39 speed axis — the design space closes
+
+Five of six filters are now bit-sliced kernels, **verified exact against a per-pixel
+integer reference** at several `(NIn, NOut)` pairs. `MEDIAN_3x3` was deliberately not
+implemented — X-39 measured it 7.53 points below the box and flat in N.
+
+| filter | µs | vs shipped | yield vs anchor | est. frontend |
+|---|---|---|---|---|
+| **`BOX_2x2` (default)** | **93.7** | 1.00× | −2.27 | **11.169 ms, 1.48× faster** |
+| `DIRECT_SUBSAMPLE` | 20.9 | 0.22× | −19.68 | 10.978 ms |
+| `BOX_3x3` | 398.0 | 4.25× | **−0.80** | 11.968 ms, 1.38× faster |
+| `GAUSSIAN_3x3` | 497.7 | 5.31× | −1.28 | *dominated by `BOX_3x3`* |
+| **`GAUSSIAN_5x5`** | **2 352.9** | **25.10×** | 0.00 | **17.099 ms — SLOWER** |
+
+**Standard-LK accuracy is reachable and costs criterion 4.** The anchor would put
+binCV behind OpenCV. SEAL §4.2.2 reached the same choice by a different route.
+
+**`BOX_3x3` is the point nobody had listed** — 65% of the gap for +0.8 ms, and it
+**dominates `GAUSSIAN_3x3`** on both axes.
+
+**Three quarters of every filtered number is framework**: the generic route runs
+`BOX_2x2` at 2.96× the hand-written one *computing the same function*. The frontier
+is measured on a framework with no optimisation at all (E-22).
+
+`BOX_2x2` stays the default; the set ships as options, and the `BOX_2x2`/`BOX_3x3`
+trade is the caller's. D-36.

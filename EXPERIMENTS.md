@@ -7160,7 +7160,7 @@ so track lifetimes are intact.)*
 
 ---
 
-### X-39 · The pyramid design space: downsampling filter × bit depth · `PARTIAL`
+### X-39 · The pyramid design space: downsampling filter × bit depth · `DONE`
 
 **COMMITTED BEFORE ANY FILTER BEYOND `BOX_2x2` EXISTS.**
 
@@ -7317,6 +7317,75 @@ mid-session), and the flow-agreement metric alongside yield.
 
 **Method:** `tests/test_opticalflow.cpp`,
 `Flow.X39_PyramidFilterDesignSpace_uint32_t`.
+
+---
+
+**THE SPEED AXIS — measured, and it settles the entry.**
+
+Five of the six filters are now real bit-sliced kernels
+(`impl::pyrDownFilteredRoute`), verified **exact against a per-pixel integer
+reference** at several `(NIn, NOut)` pairs — X-39's rule asked each filter to
+reproduce *its own* definition, not OpenCV's border, and it does.
+`MEDIAN_3x3` was not implemented: X-39 measured it **7.53 points below the box**
+and flat in `N`, so a kernel for it would price something already excluded.
+
+**Reference device, 640×480 → 320×240, `NIn = 1`:**
+
+| arm | µs | vs shipped | mean yield vs anchor |
+|---|---|---|---|
+| `pyrDown` (shipped hand-written `BOX_2x2` route) N=3 | **93.7** | 1.00× | −2.27 |
+| filtered `DIRECT_SUBSAMPLE` N=1 | 20.9 | 0.22× | −19.68 |
+| filtered `BOX_2x2` N=3 | 277.8 | 2.96× | −2.27 |
+| filtered `BOX_3x3` N=3 | 398.0 | 4.25× | **−0.80** |
+| filtered `GAUSSIAN_3x3` N=3 | 497.7 | 5.31× | −1.28 |
+| filtered **`GAUSSIAN_5x5`** N=3 (anchor) | **2 352.9** | **25.10×** | 0.00 |
+
+**Estimated frontend effect**, scaling the single-level cost by the level geometry
+(3 transitions × 2 frames, each level ¼ the pixels) against X-38's 11.169 ms:
+
+| filter | frontend ms | vs OpenCV |
+|---|---|---|
+| `BOX_2x2` shipped | **11.169** | **1.48× faster** |
+| `BOX_3x3` | 11.968 | 1.38× faster |
+| `GAUSSIAN_3x3` | 12.230 | 1.35× faster |
+| **`GAUSSIAN_5x5`** | **17.099** | **0.97× — SLOWER** |
+
+**Conclusion — BAND C: the anchor is not affordable, and the frontier is clear.**
+
+1. **`GAUSSIAN_5x5` WOULD COST THE ENTIRE CRITERION-4 RESULT.** At 25.10× it adds
+   ~5.9 ms to an 11.169 ms frontend and puts binCV **behind** OpenCV again. Standard-LK
+   accuracy is reachable and **it costs more than it is worth here** — which is the
+   answer the paper reached too, by a different route and for different reasons
+   (SRAM, §4.2.2).
+2. **`BOX_3x3` IS THE INTERESTING POINT AND IT WAS NOT ON ANYONE'S LIST.** It
+   recovers **1.47 of the 2.27 yield points** the shipped filter gives up — 65% of
+   the gap to standard LK — for **+0.8 ms**, leaving binCV at **1.38× faster** than
+   OpenCV. It is also *cheaper and more accurate than `GAUSSIAN_3x3`*, which is
+   therefore **dominated** and can be dropped from consideration.
+3. **BUT 3× OF EVERY FILTERED NUMBER IS FRAMEWORK, NOT FILTER.** The generic route
+   runs `BOX_2x2` at **2.96×** the hand-written one **computing the same
+   function**. So the honest reading of `BOX_3x3`'s 4.25× is roughly **1.4× of
+   filter and 3× of genericity**, and a hand-written `BOX_3x3` would likely land
+   near 130 µs — about +0.15 ms on the frontend rather than +0.8. **The frontier
+   above is measured, and it is measured on a framework that has not been optimised
+   at all.**
+4. **`DIRECT_SUBSAMPLE` is 0.22× and −19.68 points.** It is on the frontier only in
+   the sense that nothing is cheaper; the paper's ">2.5 cm worse" is the same
+   verdict.
+
+**Decision: the shipped `BOX_2x2` stays the default, and `pyrDownFiltered` ships as
+the option set.** Nothing else is within reach of the anchor at a cost that
+preserves criterion 4, and **the accuracy/speed trade between `BOX_2x2` and
+`BOX_3x3` — 1.47 yield points for ~0.8 ms — is the caller's**, exactly as
+[D-24](ARCHITECTURE.md) put route (a) and [D-32](ARCHITECTURE.md) put
+`maxIterations` there. Recorded as [D-36](ARCHITECTURE.md#8-design-decisions).
+
+**Owed, and named rather than implied:** the frontend figures are **estimates** from
+a single-level measurement scaled by geometry, not a measured frontend run; the
+framework's 3× genericity is unexamined ([E-22](ARCHITECTURE.md#register)); and the
+full 1710-frame accuracy sweep still needs the dataset drive, which dropped
+mid-session.
+
 
 ---
 

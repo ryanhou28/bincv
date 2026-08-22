@@ -1170,4 +1170,78 @@ BINCV_TEST(Pyramid, ReferencePipeline_uint64_t) {
 }
 #endif
 
+
+// ---------------------------------------------------------------------------
+// X-39 / E-21: the FILTERED pyrDown routes against a per-pixel integer reference.
+//
+// X-39's rule asks each filter to reproduce ITS OWN definition exactly -- not
+// OpenCV's, since these deliberately compute different functions and the border
+// rule is binCV's (zero outside, the same rule the shipped route applies to source
+// words past the row). That is what this checks, at several (NIn, NOut) pairs,
+// because the requantization interacts with both.
+// ---------------------------------------------------------------------------
+namespace {
+
+using FilterWord = uint32_t;
+
+template <size_t NOut, size_t NIn>
+size_t checkFilter(bincv::PyrDownFilter f, const char* name, int lo, int hi, const unsigned* w, unsigned ksum) {
+    const int sw = 64, sh = 48;                      // even, so no replicate branch
+    bincv::QuantMat<NIn, FilterWord> src(sw, sh);
+    uint64_t st = 11;
+    auto rnd=[&st]{ st=st*6364136223846793005ULL+1442695040888963407ULL; return (unsigned)(st>>33); };
+    const unsigned maxIn = (1u << NIn) - 1u;
+    for (int y = 0; y < sh; ++y)
+        for (int x = 0; x < sw; ++x) src.set(y, x, rnd() % (maxIn + 1u));
+    bincv::QuantMat<NOut, FilterWord> dst(32, 24);
+    switch (f) {
+      case bincv::PyrDownFilter::DirectSubsample: bincv::pyrDownFiltered<bincv::PyrDownFilter::DirectSubsample,NOut,NIn,FilterWord>(src,dst); break;
+      case bincv::PyrDownFilter::Box2x2:          bincv::pyrDownFiltered<bincv::PyrDownFilter::Box2x2,NOut,NIn,FilterWord>(src,dst); break;
+      case bincv::PyrDownFilter::Box3x3:          bincv::pyrDownFiltered<bincv::PyrDownFilter::Box3x3,NOut,NIn,FilterWord>(src,dst); break;
+      case bincv::PyrDownFilter::Gaussian3x3:     bincv::pyrDownFiltered<bincv::PyrDownFilter::Gaussian3x3,NOut,NIn,FilterWord>(src,dst); break;
+      default:                             bincv::pyrDownFiltered<bincv::PyrDownFilter::Gaussian5x5,NOut,NIn,FilterWord>(src,dst); break;
+    }
+    const unsigned maxOut = (1u << NOut) - 1u;
+    const unsigned long long K2 = (unsigned long long)ksum * ksum;
+    int bad = 0;
+    for (int y = 0; y < dst.rows(); ++y) {
+        for (int x = 0; x < dst.cols(); ++x) {
+            unsigned long long sum = 0;
+            for (int dy = lo; dy <= hi; ++dy)
+                for (int dx = lo; dx <= hi; ++dx) {
+                    const int sy = 2*y+dy, sx = 2*x+dx;
+                    if (sy < 0 || sy >= sh || sx < 0 || sx >= sw) continue;   // zero outside
+                    sum += (unsigned long long)w[dy-lo] * w[dx-lo] * src.at(sy, sx);
+                }
+            const unsigned long long num = sum * maxOut + (K2 / 2) * maxIn;
+            const unsigned want = (unsigned)(num / (K2 * maxIn));
+            const unsigned got = dst.at(y, x);
+            if (got != want) {
+                if (bad < 3) std::printf("    MISMATCH %s N=%zu->%zu at (%d,%d): got %u want %u\n",
+                                    name, NIn, NOut, x, y, got, want);
+                ++bad;
+            }
+        }
+    }
+    std::printf("  %-18s NIn=%zu NOut=%zu : %s\n", name, NIn, NOut, bad ? "FAIL" : "exact");
+    return static_cast<size_t>(bad);
+}
+
+
+} // namespace
+
+BINCV_TEST(Pyramid, FilteredRoutesMatchAPerPixelReference_uint32_t) {
+    const unsigned w1[5]={1,0,0,0,0}, w2[5]={1,1,0,0,0}, w3[5]={1,1,1,0,0},
+                   g3[5]={1,2,1,0,0}, g5[5]={1,4,6,4,1};
+    size_t bad = 0;
+    bad += checkFilter<1,1>(bincv::PyrDownFilter::DirectSubsample,"DIRECT_SUBSAMPLE",0,0,w1,1);
+    bad += checkFilter<3,1>(bincv::PyrDownFilter::Box2x2,"BOX_2x2",0,1,w2,2);
+    bad += checkFilter<3,1>(bincv::PyrDownFilter::Box3x3,"BOX_3x3",-1,1,w3,3);
+    bad += checkFilter<5,1>(bincv::PyrDownFilter::Gaussian3x3,"GAUSSIAN_3x3",-1,1,g3,4);
+    bad += checkFilter<7,1>(bincv::PyrDownFilter::Gaussian5x5,"GAUSSIAN_5x5",-2,2,g5,16);
+    bad += checkFilter<5,3>(bincv::PyrDownFilter::Gaussian5x5,"GAUSSIAN_5x5",-2,2,g5,16);
+    bad += checkFilter<2,2>(bincv::PyrDownFilter::Box3x3,"BOX_3x3",-1,1,w3,3);
+    BINCV_CHECK_EQ(bad, size_t{0});
+}
+
 BINCV_TEST_MAIN("test_pyramid")
