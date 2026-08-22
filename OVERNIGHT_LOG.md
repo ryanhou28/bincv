@@ -459,3 +459,36 @@ kernels.
 
 **Not claimed:** this is LK against LK. The *frontend* comparison has never run on
 the device (the EuRoC sequence is not there). E-20.
+
+---
+
+## 12 · X-38 / E-20 — ALL FOUR ROADMAP CRITERIA MET
+
+Whole frontend against OpenCV **on the reference device**, 692 consecutive EuRoC
+frames, bit-identical input, OpenCV pinned to one thread, `throttled` unchanged
+either side.
+
+| criterion | binCV | OpenCV | |
+|---|---|---|---|
+| 2 · median track lifetime | **13 frames** | 13 | equal |
+| 2 · per-frame survival | **97.1%** | 97.1% | equal |
+| 2 · flow difference | **median 0.0386 px** | — | 97.4% within 1 px |
+| 3 · peak footprint | **436 704 B** | 2 719 832 B | **6.23×** |
+| **4 · speed** | **11.169 ms/frame** | 16.509 | **1.48× FASTER** |
+
+**1.48× faster and 6.23× smaller, simultaneously.**
+
+**Criterion 4 read 14× SLOWER for most of this project's life.** 14× → 6.3× → 3.8×
+→ parity → **1.48× faster**. The first four were all measured on **x86, where binCV
+has no vector path at all**. The measurements were right; the platform was wrong,
+and it took X-37 to notice after four entries had reported the gap as a property of
+the library. `frontend_sequence` now prints which case it is in — the fixed
+disclaimer it carried had gone false the moment D-30 landed.
+
+**The profile moved and so did the next target:** track 69.6%, **build 25.8%**
+(up from 4.5%, because LK got 3.44× faster and `pyrDown` did not), detect 4.6%.
+`pyrDown` is now a quarter of the frontend — exactly where E-21's filter design
+space lands.
+
+**Caveat:** 692 frames not 1710 — the Windows drive holding the dataset dropped
+mid-copy (`/mnt/g` → `d?????????`). Frames are consecutive so lifetimes are intact.

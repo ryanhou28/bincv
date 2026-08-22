@@ -310,6 +310,17 @@ start until it produces numbers.
 
 ## Success Criteria
 
+> **ALL FOUR ARE MET**, on the reference device, measured end to end over 692
+> consecutive EuRoC frames with OpenCV pinned to one thread
+> ([X-38](EXPERIMENTS.md), [D-35](ARCHITECTURE.md#8-design-decisions)):
+> **1.48× faster and 6.23× smaller simultaneously**, with median track lifetime and
+> per-frame survival **equal** to OpenCV's and flow agreeing to **0.0386 px** at the
+> median.
+>
+> Criterion 4 read 14× SLOWER for most of this project's life. Every one of those
+> readings was taken on **x86, where binCV has no vector path at all** (5.3 below is
+> unwritten). The measurements were right; the platform was wrong.
+
 binCV ships **kernels**, so its success criteria are kernel-level and do not
 depend on a VIO framework existing. On Tier 1 hardware:
 

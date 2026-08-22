@@ -404,8 +404,13 @@ int main(int argc, char** argv) {
     std::printf("  RATIO  : %.2fx\n", st.opencvMs / st.bincvMs);
     std::printf("  NOTE: OpenCV threads = %d, and its LK and gftt are SIMD-vectorized.\n",
                 cv::getNumThreads());
-    std::printf("        binCV is SCALAR and SINGLE-THREADED -- Phase 5 (NEON/SSE) has not\n"
-                "        run. This ratio is a like-for-like measurement of what ships today,\n"
-                "        not of the two algorithms, and it must be read that way.\n");
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    std::printf("        binCV has its NEON path here (D-30, D-33), so this is SIMD against\n"
+                "        SIMD on the deployment target -- the comparison criterion 4 is about.\n");
+#else
+    std::printf("        binCV has NO VECTOR PATH ON x86 (ROADMAP 5.3 is unwritten), so this\n"
+                "        is binCV SCALAR against OpenCV SSE. It is a fact about this machine,\n"
+                "        not about the product, whose target is Cortex-A. See X-37.\n");
+#endif
     return 0;
 }

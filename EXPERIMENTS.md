@@ -7090,6 +7090,76 @@ run through `scripts/run_on_pi.sh pi4` with `BINCV_PI_OPENCV=1`.
 
 ---
 
+### X-38 · E-20 — the WHOLE FRONTEND against OpenCV, on the deployment target · `DONE`
+
+**Gates:** [E-20](ARCHITECTURE.md#register) · [T4.3a](TASKS.md) · **ROADMAP
+criterion 4**, which this closes.
+**Question:** [X-37](#x-37--bincv-against-opencv-on-the-deployment-target-simd-against-simd--done)
+measured **LK against LK** on the device and found binCV 1.4×–11× faster. Every
+*end-to-end* reading, including [X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial)'s,
+was taken on **x86 where binCV runs scalar**. What does the whole frontend —
+detection, pyramid build, preprocessing and tracking — do on the reference device?
+
+**Workload:** EuRoC V1_02_medium, **692 consecutive frames**, 752×480, both
+frontends on bit-identical input through the reference pipeline's two-stage
+preprocessing, each detecting and tracking independently, OpenCV pinned to **one
+thread**. Pi 4, governor `performance`, `throttled` unchanged at `0x80000` (sticky
+history, no active bit) before and after, `taskset -c 3`, commit `0cde718`.
+
+*(692 rather than 1710: the Windows drive holding the dataset dropped mid-copy —
+`/mnt/g` went to `d?????????` — and 692 contiguous frames had already transferred.
+That is more than the 400 every x86 comparison used, and the frames are consecutive,
+so track lifetimes are intact.)*
+
+**Result.**
+
+| criterion | binCV | OpenCV | |
+|---|---|---|---|
+| 2 · median track lifetime | **13 frames** | 13 | equal |
+| 2 · per-frame survival | **97.1%** | 97.1% | equal |
+| 2 · tracks observed | 3 688 | 3 766 | within 2% |
+| 2 · flow difference | **median 0.0386 px, p90 0.1177** | — | **97.4% within 1 px** |
+| 3 · peak footprint | **436 704 B** | 2 719 832 B | **6.23× smaller** |
+| **4 · speed** | **11.169 ms/frame** | 16.509 ms/frame | **1.48× FASTER** |
+
+**binCV per stage, at the real duty cycle** (28 re-detections in 691 frames):
+
+| stage | ms/frame | share |
+|---|---|---|
+| track (LK) | 7.774 | 69.6% |
+| **build (`pyrDown` + derivatives)** | **2.884** | **25.8%** |
+| detect | 0.511 | 4.6% |
+
+**Conclusion — ROADMAP CRITERION 4 IS MET, AND ALL FOUR NOW ARE.**
+
+1. **1.48× faster and 6.23× smaller, simultaneously, on the deployment target.**
+   Criterion 4 asked for "faster execution on the bit-parallel operations against
+   the byte-per-pixel denominator" and it is now satisfied end to end, not just for
+   the tracker.
+2. **Every previous reading of this criterion was a fact about x86, not about the
+   product.** 14× slower → 6.3× → 3.8× → parity → **1.48× faster**: the first four
+   were measured where binCV has **no vector path at all** (ROADMAP 5.3 is
+   unwritten). The measurements were correct; **the platform was wrong**, and it
+   took X-37 to notice. `frontend_sequence` now prints which case it is in rather
+   than a fixed disclaimer that had gone false.
+3. **Criterion 2 holds end to end**: lifetime and survival are *equal* to OpenCV's,
+   flow agrees to 0.0386 px at the median. The ~2.6% beyond 1 px is the same tail
+   [E-17](ARCHITECTURE.md#register) is chartered on and is not new.
+4. **THE PROFILE HAS MOVED AGAIN, AND THIS TIME IT MOVES THE NEXT TARGET.** Tracking
+   is 69.6% and **build is 25.8%** — up from 4.5%, because LK got 3.44× faster
+   ([D-32](ARCHITECTURE.md)) and `pyrDown` did not. **`pyrDown` is now a quarter of
+   the frontend**, which is exactly where the downsampling-filter design space
+   ([E-21](ARCHITECTURE.md#register)) lands. Detection is 4.6% and stays
+   uninteresting.
+
+**Decision:** criterion 4 closed; E-20 closed. Recorded as
+[D-35](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/frontend_sequence.cpp` via `scripts/run_on_pi.sh pi4` with
+`BINCV_PI_OPENCV=1` and `BINCV_OPENCV_THREADS=1`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

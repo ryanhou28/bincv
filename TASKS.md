@@ -3493,7 +3493,7 @@ have closed a route that is **3.2× more keypoint-efficient per byte**.
   on the points both find (0.2347–0.2594 px against 0.2502–0.3208), so LK's
   continuity buys **robustness**, not precision.
 
-### T4.3 · E-5 · End-to-end validation · `PARTIAL` — 4.3a measured ([X-28](EXPERIMENTS.md)); criteria 2 and 3 met, criterion 4 open on Phase 5; 4.3b not started
+### T4.3 · E-5 · End-to-end validation · `4.3a DONE` — all four criteria met on the reference device ([X-38](EXPERIMENTS.md)); 4.3b not started
 
 **Depends:** T4.2
 
@@ -3506,7 +3506,13 @@ of them is binCV's to claim.**
 |---|---|---|
 | 2 · agreement with the reference frontend | detection 193 vs 200; median track lifetime **11 vs 12 frames**; survival 96.4% vs 96.6%; flow **median 0.0437 px, p90 0.1614 px**, 95.6% within 1 px | **MET for the body**, ~1% tail beyond 22 px ([E-17](ARCHITECTURE.md#register)) |
 | 3 · peak footprint | **436 704 B against 2 719 832 B** | **MET — 6.23× smaller** |
-| 4 · speed | 21.43 vs 1.54 ms/frame (12 threads); 22.82 vs 3.64 (1 thread) | **NOT MET — 14× slower, or 6.3× like-for-like** |
+| 4 · speed *(x86, superseded)* | 21.43 vs 1.54 ms/frame | measured where binCV has **no vector path** |
+| **4 · speed (reference device, [X-38](EXPERIMENTS.md))** | **11.169 vs 16.509 ms/frame** | **MET — 1.48× FASTER** |
+
+> **SUPERSEDED BY [X-38](EXPERIMENTS.md).** The paragraph below was written from an
+> **x86** measurement, where binCV has no vector path at all. On the reference
+> device, SIMD against SIMD, binCV is **1.48× faster end to end**. The reasoning was
+> sound and the platform was wrong.
 
 Criterion 4 is unmet and the criterion is **not restated**. binCV is scalar and
 single-threaded; OpenCV's LK and gftt are SIMD-vectorized and ran on 12 threads.
