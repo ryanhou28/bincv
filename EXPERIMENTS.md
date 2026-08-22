@@ -7160,6 +7160,98 @@ so track lifetimes are intact.)*
 
 ---
 
+### X-39 · The pyramid design space: downsampling filter × bit depth · `TODO`
+
+**COMMITTED BEFORE ANY FILTER BEYOND `BOX_2x2` EXISTS.**
+
+**Gates:** [E-21](ARCHITECTURE.md#register), and it re-opens
+[E-19](ARCHITECTURE.md#register) as one axis of a larger question.
+
+**Question:** binCV implements **one** of the reference's six
+`LKPyrDownFilterType` variants. What does the full space of
+**(downsampling filter × bit depth)** look like in accuracy, footprint and speed —
+and which point matches standard-LK accuracy?
+
+**WHY THIS IS NOT A TIDY-UP.**
+
+1. **EVERY ACCURACY NUMBER IN THIS PROJECT WAS MEASURED ON A BOX-DOWNSAMPLED
+   PYRAMID.** X-20's 0.25 px tolerance and its miss, X-24's ladder sweep, X-25's
+   border arms, X-27's representation floor — all of them. **A 2×2 box is a poor
+   lowpass and aliases**, and aliasing at coarse levels is a classic cause of
+   pyramid-LK failure. So a cause this project chased through bit depth, borders and
+   the representation itself **has never been excluded**, because the filter was
+   never a variable.
+2. **There has never been a Gaussian reference point**, so "how much worse than
+   standard LK is this?" has never had an answer on binCV's own content.
+3. **[X-38](#x-38--e-20--the-whole-frontend-against-opencv-on-the-deployment-target--done)
+   makes it the hot stage**: `pyrDown` is now **25.8%** of the frontend, up from
+   4.5%, because LK got 3.44× faster and the build did not.
+4. **binCV's shipped `1/2/2/2` is not the paper's configuration either.** SEAL
+   §4.2.2 stores **3 bits** for Box 2×2 (a box sum of four bits is 0..4); binCV caps
+   at 2. The paper's own axis: Gaussian 5×5 → **8 bits/pixel**, Box 2×2 → **3 bits**
+   at "comparable accuracy (~1 cm)", direct subsample → **1 bit** but **>2.5 cm
+   worse** ATE.
+
+**Arms — all six variants, as `LKPyrDownFilterType` defines them.** Five are
+weighted sums of shifted taps and share one bit-sliced framework — the same full
+adders `boxSum4` already uses (D-2); only the weights and the tap count change:
+
+| filter | weights | sum range on 1-bit input |
+|---|---|---|
+| `DIRECT_SUBSAMPLE` | pick one of four | 0..1 |
+| `BOX_2x2` *(shipped)* | 1,1,1,1 | 0..4 |
+| `BOX_3x3` | nine 1s | 0..9 |
+| `GAUSSIAN_3x3` | `[1,2,1] ⊗ [1,2,1]`, Σ=16 | 0..16 |
+| `GAUSSIAN_5x5` | `[1,4,6,4,1] ⊗ [1,4,6,4,1]`, Σ=256 | 0..256 |
+
+`MEDIAN_3x3` is **structurally different** — an order statistic, not a weighted sum.
+At `NIn = 1` it collapses to a **majority vote** (popcount ≥ 5), which is cheap; at
+`NIn > 1` it needs a bit-sliced sorting network and is priced separately.
+
+**Output depth stays the existing `NOut` requantization**, so the space is genuinely
+two-dimensional: any filter can be stored at any depth, and the paper's
+"Gaussian needs 8 bits" is a *consequence* of its sum range rather than a
+constraint.
+
+**Decision rule** *(written before measuring)*
+
+**The accuracy anchor is `GAUSSIAN_5x5` at its natural depth**, because that is what
+`cv::buildOpticalFlowPyramid` applies and therefore what "standard LK accuracy"
+means. Everything else is reported as a displacement from it.
+
+* **Band A — a cheap point matches the anchor.** Some (filter, depth) within 1
+  accuracy point of `GAUSSIAN_5x5` costs materially less in footprint or time.
+  **Make it the default**, expose the rest, and record the anchor's numbers beside
+  it so the trade is legible.
+* **Band B — nothing matches, and the anchor is affordable.** Then the **default
+  becomes `GAUSSIAN_5x5`** — the user's framing, and the paper's baseline — with the
+  cheaper points offered as documented trade-downs. binCV would then ship
+  standard-LK accuracy by default and low-bitwidth options by choice.
+* **Band C — nothing matches and the anchor is NOT affordable** at `pyrDown`'s 25.8%
+  share. Then report the frontier and **bring the choice to the caller**, as
+  [D-24](ARCHITECTURE.md) did for route (a) and [D-32](ARCHITECTURE.md) for
+  `maxIterations`. **Do not pick silently.**
+* **Band D — the filter changes X-20's accuracy story.** Pre-declared as the most
+  consequential outcome: if `GAUSSIAN_5x5` materially improves the tracking accuracy
+  that X-24/X-25/X-27 chased elsewhere, then **aliasing from the box filter was a
+  cause those entries could not see**, and their conclusions need re-reading — not
+  retracting, since each was correct about its own variable, but re-weighting.
+
+**Bit-exactness is NOT a precondition here** — unlike every optimisation entry in
+this project, these filters compute **different functions on purpose**. What must
+hold instead: each filter reproduces its *own* definition exactly, checked against a
+per-pixel integer reference.
+
+**Variants:** 6 filters × depths {1, 2, 3, 5, natural}.
+**Workload:** the repo's real frame and the 692 EuRoC frames already on the device.
+*(The full 1710-frame sequence needs the Windows drive back.)*
+**Metric:** yield and flow agreement ([X-25](#x-25--the-coarse-level-window-border--done)'s),
+peak bytes, and ms/frame on the reference device.
+
+**Result:** *(not yet measured)*
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
