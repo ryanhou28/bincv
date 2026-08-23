@@ -7679,7 +7679,7 @@ signs; on x86 it compares the scalar path with itself and says so, and
 
 ---
 
-### X-41 · E-23 — what the extraction is actually spending · `RULE ONLY`
+### X-41 · E-23 — what the extraction is actually spending · `DONE`
 
 **COMMITTED BEFORE THE ARM IS WRITTEN.** Ceiling before arm — and this time with
 [D-37](ARCHITECTURE.md#8-design-decisions)'s correction applied: **the ceiling bounds
@@ -7738,6 +7738,68 @@ means the number cannot be quietly inflated afterwards.
 
 **Method:** `benchmark/residual_n2.cpp`, a new hoisted arm beside the existing floor
 arm; reference device via `scripts/run_on_pi.sh pi4`.
+
+**RESULT — BAND C, TWICE. THE HYPOTHESIS WAS WRONG, AND SO WAS THE BAND'S OWN
+PREDICTION ABOUT WHY.**
+
+| arm | µs | vs shipped |
+|---|---|---|
+| scalar (`UseNeon=false`) | 832.6 | 0.719× |
+| shipped NEON | 598.6 | 1.000× |
+| X-40, reduce per window | 559.9 | 1.069× |
+| extraction only | 264.5 | 2.263× |
+| **X-41 extraction, hoisted + strided** | **258.9** | **2.312×** |
+
+**Hoisting bought 1.023×.** Every loop-invariant the hypothesis named — the two
+`(w0, s)` descriptors, their `s == 0` case, their bounds test, the `.row(y)`
+multiplies, the split y-loop that removes the `interior` branch from the bulk — is
+worth **two percent**. Either the compiler was already doing it, or it was never the
+cost. **Band C: the arm is not written.**
+
+**SO THE BAND C BRANCH SAID "IT IS LOADS, NOT ADDRESSING", AND THAT IS ALSO WRONG.**
+The rule pre-committed a successor — a memory-layout question — on the strength of a
+prediction, so the prediction was tested rather than adopted. A 31×31 window touches
+31 rows of **ten separate planes** (`prev`×2, `next`×2, `dxMag`×2, `dyMag`×2, two sign
+planes); consecutive rows of one plane are a stride apart, so that is **310 distinct
+cache lines, ~19.8 KB fetched for ~2.5 KB of useful bits** — an 8× overfetch against a
+32 KB L1D. If the layout were the cost, shrinking the level until all ten planes fit
+in L1 together should collapse it:
+
+| same extraction, same window count | µs | vs large |
+|---|---|---|
+| 640×480 level (384 KB working set) | 264.8 | 1.000× |
+| **128×96 level (~15 KB, inside L1D)** | **234.4** | **1.129×** |
+
+**Fitting the entire working set in L1 buys 13%.** The 8× overfetch is real and it is
+**not** what the kernel is waiting on.
+
+**WHAT IT IS.** 264.5 µs over 130 windows is 2.035 µs per window; at the
+`performance` governor's 1.8 GHz that is **~3 660 cycles per window, ~118 cycles per
+row** for roughly a hundred instructions of shifts, ors, masks, branches and border
+machinery. Neither the address arithmetic (2%) nor the memory system (13%) is the
+constraint — **the instruction stream is**. The only remaining lever on this kernel is
+to *issue fewer instructions*, and there is an obvious one: the twelve `alignedWord`
+extractions in a row share exactly **two** `(w0, s)` descriptors, so they are twelve
+scalar load-shift-or sequences that could be about **three vector ones**. That is
+[E-24](ARCHITECTURE.md#register), and it is a different kind of change from anything
+X-41 tried.
+
+**Decision:** **Band C — nothing is written.** The hoisted arm stays in the benchmark
+as the evidence, not in the kernel. **E-23 is resolved NEGATIVELY on its stated
+hypothesis**, and the layout successor its own rule pre-committed is **withdrawn
+before it was started** — which is the whole point of writing the rule down and then
+testing its prediction instead of acting on it. Recorded as
+[D-38](ARCHITECTURE.md#8-design-decisions); successor registered as
+[E-24](ARCHITECTURE.md#register).
+
+**The declared limit still stands and still binds.** X-40 capped this kernel at
+**2.205×** if counting were free; X-41 now adds that extraction is not cheaply
+removable either. Whatever E-24 delivers, the frontend cannot pass **~1.9× against
+OpenCV** from `residualSums` alone.
+
+**Method:** `benchmark/residual_n2.cpp` via `scripts/run_on_pi.sh pi4`. Both new arms
+are checked for equality against the shipped extraction before anything is timed —
+**0 of 130 windows differ.**
 
 ---
 

@@ -656,3 +656,40 @@ bounds the shape, not the kernel.**
 Frontend effect: **1.52× against OpenCV**, from 1.46× — under four percent, and
 quoted that way. E-18 resolved negative (D-37); successor **E-23** is the
 extraction, whose first task is collapsing the three copies of the block.
+
+---
+
+## 17 · E-23: the extraction is instruction-bound — both hypotheses wrong
+
+X-40 left 45.4% of `residualSums` as extraction with zero counting in it. X-41
+asked what that is made of. **Two pre-registered hypotheses, both false.**
+
+| what was removed | result |
+|---|---|
+| every loop-invariant — both `(w0, s)` descriptors, their `s == 0` case, their bounds test, the `.row(y)` multiplies, the `interior` branch | **1.023×** |
+| the memory system — same code on a level small enough that all ten planes fit **L1D** | **1.129×** |
+
+A 31×31 window touches 31 rows of **ten separate planes**: 310 distinct cache
+lines, **~19.8 KB fetched for ~2.5 KB of useful bits**. That 8× overfetch is real
+— and removing it entirely buys **13%**.
+
+**What binds is the instruction stream.** ~3 660 cycles/window, ~118 per row, for
+about a hundred instructions of shifts, ors, masks and border machinery. Neither
+address arithmetic (2%) nor memory (13%) is the constraint.
+
+**A prediction withdrawn before it was acted on.** X-41's Band C pre-committed a
+successor — *"it is loads, not addressing; the successor is a layout question"*.
+The second measurement **tested that prediction instead of adopting it**, and it
+is false. Writing the rule down is what made the difference visible.
+
+**Third relocation in a row, and the pattern is now the finding.** D-28 moved the
+target detection → tracking; D-35 tracking → `pyrDown`; D-37 counting →
+extraction; D-38 finds extraction isn't addressable by either obvious means.
+**Every optimisation this project lands relocates the bottleneck rather than
+removing it** — which is what a kernel with no remaining stalls looks like from
+the inside.
+
+**Budget closed:** 2.205× on this kernel even with counting free, so
+`residualSums` cannot take the frontend past **~1.9× against OpenCV**. E-24 (the
+twelve scalar extractions per row share two descriptors → could be three vector
+ones) is the only lever left, and it is bounded by that.
