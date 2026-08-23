@@ -8089,7 +8089,7 @@ checked exact against arm A before timing — 0 of 130 windows differ.
 
 ---
 
-### X-44 · E-26 — is INTERLEAVED a layout binCV should support? · `MEASURED — DECISION ESCALATED`
+### X-44 · E-26 — is INTERLEAVED a layout binCV should support? · `DONE — DECLINED`
 
 **COMMITTED BEFORE ANY OF IT IS WRITTEN.**
 
@@ -8203,13 +8203,19 @@ under 1.10× on the affected consumers. Striding by four words touches one usefu
 per cache line and discards the rest — **interleaving cannot be binCV's general layout
 on this device**, and that is now measured rather than argued.
 
-**2. THE CROSSOVER, WHICH IS THE OUTPUT THIS ENTRY OWES REGARDLESS OF BAND.**
+**2. THE CROSSOVER — ONE DATA POINT, AND DELIBERATELY NOT PROMOTED TO A CRITERION.**
 Conversion costs 23.7 µs; interleaving saves `(255.7 − 177.0)/130 = 0.605 µs` per
-31-row window. **It pays after ≈ 39 windows on that level** — about 1 500 row
-extractions. The frontend evaluates roughly **600 windows per level per frame**, so it
-amortises by **~15×**. *That number, not this kernel's verdict, is what the next
-operation wanting this layout should be handed:* **interleave when a level is re-read
-more than ~40 windows' worth; stay planar otherwise.**
+31-row window, so **on this level it paid after ≈ 39 windows**. The frontend evaluates
+roughly 600 windows per level per frame, amortising ~15×.
+
+**This entry's rule promised to "report the measured crossover" as something the next
+operation could use. It is reported, and the promotion is withdrawn.** One level size
+(376×240), one plane count, one word type, one cache hierarchy — and the conversion
+scales with level *area* while the saving scales with *window count*, two quantities
+that vary independently, so the ratio is not portable. What generalises is the
+*shape* of the argument — a conversion amortises when the converted data is re-read
+many times — **not the number**. Any future operation asking this gets measured on its
+own terms.
 
 **3. THE NET FRONTEND ESTIMATE LANDS ON THE BAND BOUNDARY, AND SAYS SO.** N = 2 levels
 are ~6/7 of LK by [X-34](#x-34--the-ladder-in-isolation--done)'s ladder ratio, so
@@ -8232,9 +8238,10 @@ memory wins.** X-44's bands were written on speed alone and therefore **cannot s
 this**. Under [CLAUDE.md](../CLAUDE.md)'s "stop and ask" — *a decision is needed that
 isn't recorded in ARCHITECTURE §8* — **this is escalated rather than decided.**
 
-**Decision: NOT TAKEN.** The measurements are complete and recorded; the choice
-between +21% footprint and +8% speed is a goals question, not a measurement question,
-and no prior D-record settles it. What *is* decided, on arm 4's 5.17×:
+**Decision: the trade is DECLINED.** Escalated as a goals question rather than
+decided by a band — and answered: **binCV does not spend 21% of its footprint
+advantage on 8% of speed.** The measurements stand as the record of what was on offer
+and at what price. What *is* decided, on arm 4's 5.17×:
 **interleaving will not become binCV's general storage layout** — any adoption is
 variant (C), a conversion confined to the operation that benefits. Recorded as
 [D-41](ARCHITECTURE.md#8-design-decisions); the open half stays as
