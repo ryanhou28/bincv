@@ -7968,7 +7968,7 @@ twice; `tests/test_pyramid.cpp` unchanged as the exactness oracle.
 
 ---
 
-### X-43 · E-24 — can the extraction be vectorised, and what stops it? · `RULE ONLY`
+### X-43 · E-24 — can the extraction be vectorised, and what stops it? · `DONE`
 
 **COMMITTED BEFORE THE ARM IS WRITTEN.**
 
@@ -8029,6 +8029,63 @@ written — so the ceiling runs first, in the benchmark, touching no kernel.
 
 **Method:** `benchmark/residual_n2.cpp`, two new arms beside X-41's floor arm;
 reference device via `scripts/run_on_pi.sh pi4`.
+
+**RESULT — BAND C. The prediction written above held, and the two halves of it
+separate cleanly.**
+
+| arm | µs | vs shipped | vs extraction A |
+|---|---|---|---|
+| shipped NEON | 596.8 | 1.000× | |
+| X-40, reduce per window | 552.1 | 1.081× | |
+| **A — scalar extraction** | **254.8** | 2.342× | **1.000×** |
+| X-41 hoisted + strided | 247.7 | 2.410× | 1.029× |
+| **B — vector, real gather** | **288.0** | 2.072× | **0.885× — SLOWER** |
+| **C — vector, gather removed** | **155.6** | 3.836× | **1.638×** |
+
+Arm B reproduces arm A exactly over 130 windows; arm C is a **cost model, not a
+computation**, and is labelled as one in the code.
+
+**1. THE SHIFTS ARE CHEAP AND THE GATHER IS NOT.** Removing the gather makes the
+extraction **1.638×** faster — the vector spelling of "twelve load-shift-ors become
+three" is real and large. Paying for the gather makes it **0.885×**, i.e. **13%
+slower than scalar.** Eight scalar loads plus eight lane inserts cost more than the
+eight shift-or sequences they replace. **Arm B is not written.**
+
+**2. THE OBSTACLE IS THE LAYOUT, EXACTLY AS THE RULE PREDICTED — and this time the
+prediction is worth noting, because [X-41](#x-41--e-23--what-the-extraction-is-actually-spending--done)'s
+was wrong.** `QuantMat` stacks planes at word offset `p × height × stride`
+([§4.1](ARCHITECTURE.md)), so the eight words a vector wants are in eight unrelated
+lines and aarch64 has no gather instruction. The rule named that mechanism before the
+measurement and the measurement confirmed it.
+
+**3. THIS IS AN INSTRUCTION-COUNT ARGUMENT FOR RELAYOUT, NOT A CACHE ONE — AND THE
+TWO MUST NOT BE CONFLATED.** X-41 refuted the *cache* case at **1.129×**: fitting the
+entire working set in L1 buys 13%. This is a different case for a different reason and
+is worth **1.638×** on the extraction. The rule pre-registered the distinction so that
+the successor could not inherit X-41's refutation by association.
+
+**4. THE PRIZE, AND WHY ARM C IS AN UPPER BOUND AND NOT A TARGET.** At arm C the
+kernel would run 552.1 → 452.9 µs, **1.219×**, which is about **1.18× on LK** and
+would put the frontend near **9.6 ms, ~1.70× against OpenCV** from 1.52×. **But arm C
+assumes all eight words are contiguous, and they belong to FIVE SEPARATE CONTAINERS** —
+`prev`, `dxMag`, `dyMag` (three `QuantMat`s) and `dxSign`, `dySign` (two `BinMat`s).
+Interleaving *within* a `QuantMat` gives 2-wide contiguity at best, a fraction of arm
+C's benefit. **The full 1.638× requires merging the five containers of an `LKLevelN`
+into one interleaved allocation** — a far larger change than "interleave the planes",
+and one that would make every single-plane bulk operation stride instead of stream.
+**Arm C is the ceiling for a design that does not exist, and D-38's lesson applies to
+it: a ceiling bounds the shape, not the kernel.**
+
+**Decision: Band C — arm B is not written, and the three-copy collapse is not
+triggered** (its justification was to be the change, and there is no change). E-24
+resolved. Recorded as [D-40](ARCHITECTURE.md#8-design-decisions). The successor —
+whether an `LKLevelN` should be one interleaved allocation — is registered as
+[E-26](ARCHITECTURE.md#register) **with its cost side named**: every kernel that reads
+one plane contiguously would then stride, and [CLAUDE.md](../CLAUDE.md)'s rule is that
+the alternatives get measured together, not the winner alone.
+
+**Method:** `benchmark/residual_n2.cpp` via `scripts/run_on_pi.sh pi4`. Arm B is
+checked exact against arm A before timing — 0 of 130 windows differ.
 
 ---
 

@@ -2767,6 +2767,60 @@ hand-written `pyrDown` is now a **deletion candidate** at 1.19% overhead over th
 generic route — a separate decision, registered as [E-25](#register), not taken here,
 because it is the route every prior result in this project was measured on.
 
+### D-40: the extraction's obstacle is the plane layout, and `residualSums` is done
+
+[X-43](EXPERIMENTS.md) took [D-38](#8-design-decisions)'s one remaining lever —
+issue fewer instructions — and measured it three ways.
+
+| arm | µs | vs scalar extraction |
+|---|---|---|
+| **A — scalar extraction** (shipped) | 254.8 | 1.000× |
+| **B — vector, real gather** | 288.0 | **0.885× — SLOWER** |
+| **C — vector, gather removed** | 155.6 | **1.638×** |
+
+**The shifts are cheap; the gather is not.** Twelve scalar load-shift-ors really do
+become three vector ones, and that is worth **1.638×** — but `QuantMat` stacks its
+planes at word offset `p × height × stride` ([§4.1](#41-storage-layout)), so the eight
+words a vector wants sit in eight unrelated cache lines, and **aarch64 has no gather
+instruction**. Eight scalar loads plus eight lane inserts cost *more* than the eight
+shift-or sequences they replace. **Arm B is not written.**
+
+**THE MECHANISM WAS PREDICTED BEFORE THE MEASUREMENT, which is worth recording because
+[X-41](EXPERIMENTS.md)'s prediction was wrong.** X-43's rule named the stacked-plane
+layout and the missing gather as the likely obstacle, and named the consequence — that
+the finding would be *"the layout forbids it"* rather than *"vectorisation does not
+work"*. Both held.
+
+**THIS IS AN INSTRUCTION-COUNT ARGUMENT FOR RELAYOUT, NOT A CACHE ONE.** D-38 refuted
+the *cache* case at **1.129×** — fitting the whole working set in L1 buys 13%. This is
+a different case, for a different reason, worth **1.638×** on the extraction. The two
+must not be conflated, and the rule pre-registered the distinction so the successor
+could not inherit the refutation by association.
+
+**WHY THE PRIZE IS SMALLER THAN ARM C.** At arm C the kernel would run 552.1 → 452.9 µs
+(**1.219×**), about **1.18× on LK**, putting the frontend near **9.6 ms, ~1.70× against
+OpenCV**. But arm C assumes the eight words are contiguous, and they belong to **five
+separate containers** — `prev`, `dxMag`, `dyMag` as `QuantMat`s and `dxSign`, `dySign`
+as `BinMat`s. Interleaving *within* a `QuantMat` yields 2-wide contiguity at best.
+**The full 1.638× needs an `LKLevelN`'s five containers merged into one interleaved
+allocation**, which would make every single-plane bulk operation stride instead of
+stream. **Arm C is the ceiling for a design that does not exist**, and D-38's lesson
+applies: a ceiling bounds the shape, not the kernel. Registered as [E-26](#register)
+with its cost side attached.
+
+**`residualSums` IS FINISHED under the current layout.** The account closes:
+
+| | |
+|---|---|
+| [D-37](#d-37-residualsums-is-extraction-bound-not-count-bound): cap if counting were free | **2.205×** |
+| D-37: collected by reshaping the counts | **1.069×** |
+| D-38: available from addressing / from cache | **1.023× / 1.129×** |
+| D-40: available from vectorising the extraction **as laid out today** | **0.885×** |
+
+Four experiments, one small win, and the remainder is behind a container redesign. The
+frontend stands at **1.52× against OpenCV**; this kernel cannot move it further without
+E-26.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -2820,7 +2874,8 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | **E-15** | Why does tracking accuracy PEAK AT 2 BITS and degrade with more? | [X-24](EXPERIMENTS.md) measured it and did not explain it: on `(1,0)` unclipped, 1/2/3/5 bits give 1.4742 / **0.0010** / 0.5334 / 0.8567 px, and on `(2,−3)` the ladder is exact at 2 and 3 bits and fails from 4. Two explanations remain open and were NOT separated. **(i)** The bit-sliced covariance and residual weight plane pairs by `2^(i+j)`, so a few high-magnitude pixels dominate a window whose sub-pixel accuracy comes from averaging many edge crossings — this predicts degradation at SMALL motion and none at large, which is the observed pattern (`(12,−8)` is exact at every depth, `(2,−3)` fails from 4 bits, `(1,0)` from 3). **(ii)** `1/2/2/2`'s upper levels collapse to two distinct values anyway, so its advantage may be density preservation rather than precision. `requantizeBoxSum` is already excluded as the cause: it is a faithful rescaled average at every depth. | Whether the weighting in [§7.5](#75-lk-gradient-covariance)'s bit-sliced form is right for TRACKING as opposed to for corner response, and whether a depth cap belongs in the pyramid API. | E-7's final ladder | **Phase 4** |
 | ~~**E-18**~~ **RESOLVED — NEGATIVE** | Can `residualSums` carry **vector accumulators across the window**, reducing once per window instead of once per call? | [X-33](EXPERIMENTS.md) measured a **3.42× ceiling** for batched NEON popcounts and delivered **1.24×**. The gap is the horizontal add: it runs once per `slicedSignedSum` call — **~310 register-domain crossings per window**. | **Answered: YES it can, and NO it is not worth 2–3×.** [X-40](EXPERIMENTS.md) built it (`impl::alignedResidualSumsNeon2`, bit-exact, gate-enforced) and it delivers **1.069×** against a 1.461× ceiling — about **1.52× against OpenCV** on the frontend, from 1.46×. **The floor arm is the finding**: the per-row tap machinery with the counting REMOVED is **45.4%** of the kernel, so **if counting were free the cap would be 2.205×**. The 2–3× this question was chartered on is not in the counting. [D-37](#d-37-residualsums-is-extraction-bound-not-count-bound); successor is [E-23](#register). | Whether `TapSums` becomes vector state. **It did, and the profile moved instead.** | X-28's unmet criterion 4 | **Phase 5** (X-40) ✔ |
 | ~~**E-23**~~ **RESOLVED — NEGATIVE** | `residualSums` is extraction-bound: 45.4% of the kernel is addressing with zero counting. How much of it is addressable? | [X-40](EXPERIMENTS.md) measured it with a floor arm; it was 13.7% at [D-29](#8-design-decisions) and grew because D-30, D-31, D-33 and X-35 made the counting ~3× faster and never touched it. | **Answered: almost none of it, by either obvious route.** [X-41](EXPERIMENTS.md) hoisted every loop-invariant — both `(w0, s)` descriptors, their branches, the `.row(y)` multiplies, the `interior` test — for **1.023×**; and fitting all ten planes in L1D together for **1.129×**. The 8× cache-line overfetch is real and is **not** the constraint. **The instruction stream is**: ~118 cycles per row for ~100 instructions. [D-38](#d-38-residualsums-extraction-is-instruction-bound--not-addressing-not-layout). | Whether the three copies of the extraction block collapse. **They should, but for maintenance — not for speed.** | D-37 | **Phase 5** (X-41) ✔ |
-| **E-24** | The twelve `alignedWord` extractions in a row share exactly **two** `(w0, s)` descriptors. Can twelve scalar load-shift-or sequences become about **three vector** ones? | [X-41](EXPERIMENTS.md) ruled out addressing (1.023×) and memory (1.129×) and left instruction count as the only lever. The descriptors being shared is what makes a vector extraction possible at all: one `vshlq` pair can serve four planes that differ only in which row they read. | **Bounded before it starts:** X-40 capped this kernel at **2.205×** even with counting free, so E-24 cannot take the frontend past **~1.9× against OpenCV**. Worth doing only if it is a large fraction of that. | Whether the aligned path vectorises its loads as well as its counts — and the three-copy duplication has to be paid down first, since this changes exactly that block. | D-38 | **Phase 5** |
+| ~~**E-24**~~ **RESOLVED — NEGATIVE** | The twelve `alignedWord` extractions in a row share two `(w0, s)` descriptors. Can twelve scalar load-shift-ors become three vector ones? | [X-41](EXPERIMENTS.md) ruled out addressing (1.023×) and cache (1.129×), leaving instruction count as the only lever. | **Answered: the shifts YES, the loads NO.** [X-43](EXPERIMENTS.md): removing the gather makes the extraction **1.638×** faster, but paying for it makes it **0.885× — slower than scalar**. `QuantMat` stacks planes, so the eight words are in eight unrelated lines and **aarch64 has no gather**; eight loads plus eight lane inserts cost more than the shift-ors they replace. **The obstacle is the layout, and the rule predicted that before measuring.** [D-40](#d-40-the-extractions-obstacle-is-the-plane-layout-and-residualsums-is-done). | Whether the aligned path vectorises its loads. **It cannot, as laid out.** | D-38 | **Phase 5** (X-43) ✔ |
+| **E-26** | Should an `LKLevelN`'s five containers — `prev`, `dxMag`, `dyMag`, `dxSign`, `dySign` — be **one interleaved allocation**, so the eight words a row needs are contiguous? | [X-43](EXPERIMENTS.md) arm C measured **1.638×** on the extraction with the gather removed, which is **1.219×** on `residualSums`, **~1.18×** on LK and about **1.70× against OpenCV** on the frontend, from 1.52×. **This is an INSTRUCTION-COUNT argument, not the cache argument D-38 refuted at 1.129×.** | **The cost side must be measured, not assumed** ([CLAUDE.md](../CLAUDE.md): alternatives together, never the winner alone). Interleaving makes every **single-plane bulk operation stride instead of stream** — `bitwiseAnd`, the derivative kernels, `pyrDown`, the reductions — and D-2's bit-plane layout is what makes those a straight loop in the first place. Arm C is also a **ceiling for a design that does not exist**: interleaving within one `QuantMat` gives 2-wide contiguity at best, so the 1.638× needs the full five-container merge. | Whether D-2's storage layout survives contact with the tracker's access pattern — the largest open structural question in the project. | D-40 | **Phase 5 / 6** |
 | **E-19** | Is the `1/2/2/2` ladder still the right operating point now that LK is 94.7% of the frontend and the ladder costs **2.30×**? | [D-23](#8-design-decisions) adopted it on ACCURACY — yield 88.7–99.3% against `1/1/1/1`'s 75.9–88.7% ([X-25](EXPERIMENTS.md)) — with its speed cost **estimated at 1.35×** from a confounded measurement, and chosen when corner detection was believed to be **52.7%** of the frontend rather than 2%. Isolated after [X-34](EXPERIMENTS.md) it is **2.30×**, and at `1/1/1/1` binCV is **1.34× slower than single-threaded SIMD OpenCV** against 3.08× at `1/2/2/2`. **This is the largest single speed lever left, larger than E-18.** The intermediate ladders were never measured for speed at all: `1/2/1/1` and `1/2/2/1` may buy most of the accuracy for a fraction of the cost, since the coarse levels track the same points through the same window and each N=2 level costs the same 4× regardless of how few pixels it has. | The shipped ladder, and whether the accuracy/speed trade belongs to the caller as `LKLevels` already lets it be. | D-23 | **Phase 5** |
 | ~~**E-22**~~ **RESOLVED** | How much of `pyrDownFilteredRoute`'s cost is genericity rather than filter? | [X-39](EXPERIMENTS.md) measured the generic route running `BOX_2x2` at **2.96×** the hand-written one **computing the same function**, so that tax rides on every filter in the set. | **Answered: nearly all of it, and it was never necessary.** [X-42](EXPERIMENTS.md) made three helper signatures take their already-`constexpr` values as template parameters instead of runtime arguments — **no algorithm change** — and the generic route went **2.96× → 1.19×**, `GAUSSIAN_5x5` **4.28× faster**. **This reverses D-36:** the standard-LK anchor now costs +1.20 ms and leaves binCV **1.32× FASTER** than OpenCV, where D-36 recorded 0.97× — slower. [D-39](#d-39-the-filter-frameworks-3-tax-was-genericity-and-d-36-is-restated). | Whether D-36's filter prices are real. **They were not.** | D-36 | **Phase 5** (X-42) ✔ |
 | **E-25** | The hand-written `pyrDown` is now only **1.19×** faster than the generic route computing the same function. Should it be deleted, leaving one implementation for all six filters? | [X-42](EXPERIMENTS.md) closed the gap from 2.96×. Two implementations of `BOX_2x2` is a standing correctness liability that `tests/test_pyramid.cpp` currently pays for by holding them to agreement. | **Not a free call.** The hand-written route is what **every prior result in this project was measured on**, including D-35's criterion-4 numbers, so deleting it re-bases the whole speed record by 1.19% — small, but it must be re-measured rather than assumed. Against that: one implementation, one place for the next optimisation, and the three structural costs (serial accumulation, materialised intermediate, worst-case widths) become worth attacking because they would then be on the shipped path. | Whether binCV ships one pyramid kernel or two. | D-39 | **Phase 5** |

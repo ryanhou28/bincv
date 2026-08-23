@@ -736,3 +736,46 @@ this is a correction, not a hidden error.
 Effect on binCV **as shipped: exactly zero** — the default calls the hand-written
 route. What changed is the price of the options. That route is now a deletion
 candidate at 1.19× (**E-25**).
+
+---
+
+## 19 · E-24: the shifts are cheap, the gather is not
+
+| arm | µs | vs scalar extraction |
+|---|---|---|
+| **A — scalar extraction** (shipped) | 254.8 | 1.000× |
+| **B — vector, real gather** | 288.0 | **0.885× — SLOWER** |
+| **C — vector, gather removed** | 155.6 | **1.638×** |
+
+Twelve scalar load-shift-ors really do become three vector ones, and that's worth
+**1.638×**. But `QuantMat` stacks planes, so the eight words a vector wants sit in
+eight unrelated cache lines — and **aarch64 has no gather**. Eight loads plus eight
+lane inserts cost *more* than the shift-ors they replace. **Arm B is not written.**
+
+**The mechanism was predicted before measuring**, which matters because X-41's
+prediction was wrong. The rule named the stacked-plane layout and the missing
+gather, and named the consequence — *"the layout forbids it"*, not *"vectorisation
+doesn't work"*. Both held.
+
+**This is an instruction-count argument for relayout, not a cache one.** X-41
+refuted the cache case at 1.129×. This is a different case for a different reason,
+worth 1.638×. The rule pre-registered the distinction so the successor couldn't
+inherit that refutation by association.
+
+**Why the prize is smaller than arm C.** The eight words belong to **five separate
+containers**. Interleaving within one `QuantMat` gives 2-wide contiguity at best;
+the full 1.638× needs an `LKLevelN`'s five containers merged into one allocation —
+which makes every single-plane bulk op stride instead of stream. **Arm C is the
+ceiling for a design that does not exist.**
+
+### `residualSums` is finished under the current layout
+
+| | |
+|---|---|
+| cap if counting were free (D-37) | **2.205×** |
+| collected by reshaping counts | **1.069×** |
+| available from addressing / cache (D-38) | 1.023× / 1.129× |
+| available from vectorising extraction as laid out (D-40) | **0.885×** |
+
+Four experiments, one small win, and the remainder sits behind a container
+redesign (**E-26**) whose cost side is unmeasured.

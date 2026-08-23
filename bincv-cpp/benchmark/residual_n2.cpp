@@ -19,6 +19,10 @@
 #include "bincv-cpp/ops/opticalFlow.hpp"
 #include "measure_util.hpp"
 
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 using W = uint32_t;
 
 int main() {
@@ -208,12 +212,125 @@ int main() {
         return sink;
     };
 
+    // ---------------------------------------------------------------------
+    // X-43's ARMS B and C. Both extract the SAME twelve words per row as arm A,
+    // and both use the fact that those twelve share only TWO (w0, s) descriptors.
+    //
+    //   B  the real thing: eight words gathered from eight unrelated plane rows by
+    //      scalar load + lane insert, then ONE vshlq pair per descriptor.
+    //   C  the same shifts with the gather REMOVED -- the words are already
+    //      contiguous. Not implementable on QuantMat's stacked-plane layout; it is
+    //      the upper bound a word-interleaved layout would unlock.
+    //
+    // Both fall back to arm A's scalar spelling off the NEON path so the benchmark
+    // still builds and still checks equality on x86.
+    // ---------------------------------------------------------------------
+    auto extractVec = [&](const bincv::impl::RegionWords<W>& r, long long tapX,
+                          long long tapY, bool freeGather) {
+        const size_t width = r.x1 - r.x0;
+        const size_t words = bincv::impl::minRowWords<W>(lv.prev[0].width);
+        const W mask = bincv::impl::lowBitsMask<W>(width);
+        constexpr size_t B = bincv::impl::bitsPerWord<W>();
+        const long long x0 = static_cast<long long>(r.x0);
+        const bool tapIsShift = width < B;
+        const long long srcX = x0 + tapX;
+        const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
+        const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
+        const size_t wSelf = r.x0 / B, sSelf = r.x0 % B;
+        const bool hiSelf = (wSelf + 1) < words;
+        W sink = 0;
+        // The eight "self-descriptor" planes, in a fixed order.
+        const bincv::BinMatConstView<W>* selfPlanes[8] = {
+            &lv.prev[0], &lv.prev[1], &lv.dxMag[0], &lv.dxMag[1],
+            &lv.dyMag[0], &lv.dyMag[1], &lv.dxSign, &lv.dySign};
+        // Arm C's staging buffer: filled once, OUTSIDE the timed shift work, so the
+        // arm measures the shifts with the gather charged to nobody.
+        W staged[8];
+        for (size_t i = 0; i < 8; ++i) staged[i] = 0;
+
+        for (size_t y = r.y0; y < r.y1; ++y) {
+            const long long srcY = static_cast<long long>(y) + tapY;
+            const bool rowsInside =
+                srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
+            const bool interior = colsInside && rowsInside;
+            // The four tap words keep arm A's spelling: they are only four, and two
+            // of them are a shift of the other two.
+            for (size_t k = 0; k < 2; ++k) {
+                W t00, t10;
+                if (interior) {
+                    t00 = bincv::impl::alignedWord<W>(lv.next[k].row(static_cast<size_t>(srcY)),
+                                                      words, static_cast<size_t>(srcX));
+                    t10 = bincv::impl::alignedWord<W>(lv.next[k].row(static_cast<size_t>(srcY) + 1),
+                                                      words, static_cast<size_t>(srcX));
+                } else {
+                    t00 = bincv::impl::displacedRow<W>(lv.next[k], srcY, srcX).word(0);
+                    t10 = bincv::impl::displacedRow<W>(lv.next[k], srcY + 1, srcX).word(0);
+                }
+                const W t01 = tapIsShift ? static_cast<W>(t00 >> 1)
+                    : bincv::impl::displacedRow<W>(lv.next[k], srcY, srcX + 1).word(0);
+                const W t11 = tapIsShift ? static_cast<W>(t10 >> 1)
+                    : bincv::impl::displacedRow<W>(lv.next[k], srcY + 1, srcX + 1).word(0);
+                sink = static_cast<W>(sink ^ t00 ^ t01 ^ t10 ^ t11);
+            }
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+            uint32_t lo[8], hi[8];
+            if (freeGather) {
+                // Arm C: the words are "already" contiguous. The staging read is a
+                // straight-line copy from one small array, not eight plane rows.
+                for (size_t i = 0; i < 8; ++i) { lo[i] = staged[i]; hi[i] = staged[i]; }
+            } else {
+                // Arm B: the gather QuantMat's stacked planes actually require.
+                for (size_t i = 0; i < 8; ++i) {
+                    const W* row = selfPlanes[i]->row(y);
+                    lo[i] = static_cast<uint32_t>(row[wSelf]);
+                    hi[i] = hiSelf ? static_cast<uint32_t>(row[wSelf + 1]) : 0u;
+                }
+            }
+            const int32_t sh = -static_cast<int32_t>(sSelf);
+            const int32_t up = static_cast<int32_t>(B - sSelf) & 31;
+            uint32_t out8[8];
+            for (size_t q = 0; q < 8; q += 4) {
+                const uint32x4_t vlo = vld1q_u32(lo + q);
+                const uint32x4_t vhi = vld1q_u32(hi + q);
+                const uint32x4_t v = (sSelf == 0)
+                    ? vlo
+                    : vorrq_u32(vshlq_u32(vlo, vdupq_n_s32(sh)),
+                                vshlq_u32(vhi, vdupq_n_s32(up)));
+                vst1q_u32(out8 + q, v);
+            }
+            // magX/magY are masked; prev and the signs are not. Same set as arm A.
+            sink = static_cast<W>(sink ^ out8[0] ^ out8[1]);
+            sink = static_cast<W>(sink ^ (out8[2] & mask) ^ (out8[3] & mask));
+            sink = static_cast<W>(sink ^ (out8[4] & mask) ^ (out8[5] & mask));
+            sink = static_cast<W>(sink ^ out8[6] ^ out8[7]);
+            if (freeGather) {
+                // Keep the staging live so it cannot be hoisted out of the loop.
+                staged[y % 8] = static_cast<W>(staged[y % 8] + 1u);
+            }
+#else
+            (void)freeGather; (void)hiSelf; (void)staged;
+            for (size_t i = 0; i < 8; ++i) {
+                const W v = bincv::impl::alignedWord<W>(selfPlanes[i]->row(y), words, r.x0);
+                sink = static_cast<W>(sink ^ ((i >= 2 && i <= 5) ? (v & mask) : v));
+            }
+            (void)wSelf; (void)sSelf;
+#endif
+        }
+        return sink;
+    };
+
     // Equality before timing, as everywhere else in this project.
-    size_t badX = 0;
-    for (size_t k = 0; k < regs.size(); ++k)
-        if (extractOnly(regs[k], tx[k], ty[k]) != extractHoisted(regs[k], tx[k], ty[k])) ++badX;
-    std::printf("  EXTRACTION EQUALITY: %zu of %zu windows differ\n", badX, regs.size());
-    if (badX) return 1;
+    size_t badX = 0, badV = 0;
+    for (size_t k = 0; k < regs.size(); ++k) {
+        const W ref = extractOnly(regs[k], tx[k], ty[k]);
+        if (ref != extractHoisted(regs[k], tx[k], ty[k])) ++badX;
+        // Arm B must reproduce arm A exactly; arm C cannot, because its staging
+        // buffer holds fabricated words -- it is a COST model, not a computation.
+        if (ref != extractVec(regs[k], tx[k], ty[k], false)) ++badV;
+    }
+    std::printf("  EXTRACTION EQUALITY: hoisted %zu, vector-gather %zu of %zu windows differ\n",
+                badX, badV, regs.size());
+    if (badX || badV) return 1;
 
     std::vector<measure::Bench> b = {
         {"scalar (UseNeon=false)", [&](int) { bincv::impl::TapSums a, c;
@@ -233,6 +350,14 @@ int main() {
              measure::g_sink += static_cast<size_t>(s2); }},
         {"X-41 extraction, hoisted+strided", [&](int) { W s2 = 0;
              for (size_t k = 0; k < regs.size(); ++k) s2 ^= extractHoisted(regs[k], tx[k], ty[k]);
+             measure::g_sink += static_cast<size_t>(s2); }},
+        {"X-43 B: vector, real gather", [&](int) { W s2 = 0;
+             for (size_t k = 0; k < regs.size(); ++k)
+                 s2 ^= extractVec(regs[k], tx[k], ty[k], false);
+             measure::g_sink += static_cast<size_t>(s2); }},
+        {"X-43 C: vector, gather removed", [&](int) { W s2 = 0;
+             for (size_t k = 0; k < regs.size(); ++k)
+                 s2 ^= extractVec(regs[k], tx[k], ty[k], true);
              measure::g_sink += static_cast<size_t>(s2); }},
     };
     const auto t = measure::measureInterleaved(b, 9, 60.0);
