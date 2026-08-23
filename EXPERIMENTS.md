@@ -8089,7 +8089,7 @@ checked exact against arm A before timing — 0 of 130 windows differ.
 
 ---
 
-### X-44 · E-26 — is INTERLEAVED a layout binCV should support? · `RULE ONLY`
+### X-44 · E-26 — is INTERLEAVED a layout binCV should support? · `MEASURED — DECISION ESCALATED`
 
 **COMMITTED BEFORE ANY OF IT IS WRITTEN.**
 
@@ -8170,6 +8170,83 @@ kernel's verdict, is what the next operation will need.
 
 **Method:** `benchmark/interleave_layout.cpp` (new) and `benchmark/residual_n2.cpp`;
 reference device via `scripts/run_on_pi.sh pi4`.
+
+**RESULT — BAND B on speed, and THE RULE ITSELF HAS A HOLE that has to be reported
+before any band is applied.**
+
+**Arm 3 — the real kernel** (`residual_n2`, 130 windows of 31×31, N=2):
+
+| arm | µs | vs planar extraction |
+|---|---|---|
+| extraction, planar (shipped) | 255.7 | 1.000× |
+| [X-43](#x-43--e-24--can-the-extraction-be-vectorised-and-what-stops-it--done) C, fabricated buffer | 155.4 | *1.645× — the old ceiling* |
+| **arm 3, REAL interleaved buffer** | **177.0** | **1.445×** |
+
+Bit-exact against the planar path over 130 windows. **The fabricated buffer overstated
+by 1.14×** — much closer than [D-37](ARCHITECTURE.md#8-design-decisions)'s and
+[D-40](ARCHITECTURE.md#8-design-decisions)'s ceilings, because this one differed from
+the real thing only in where the memory lived.
+
+Kernel: extraction 255.7 → 177.0 with counting unchanged at 294.5 µs, so
+**550.2 → 471.5 µs = 1.167×.**
+
+**Arms 1, 4 and 5 — the cost side** (`interleave_layout`, 376×240 level, 8 planes):
+
+| | |
+|---|---|
+| **arm 1** conversion, planar → interleaved | **23.7 µs** per level per frame |
+| **arm 4** streaming one plane: planar 0.605 µs, interleaved 3.129 µs | **5.17× COST** |
+| **arm 5** interleaved buffer for the largest N=2 level | **92 160 B** |
+
+**1. THE STREAMING COST IS 5.17×, WHICH ELIMINATES BAND A OUTRIGHT.** Band A required
+under 1.10× on the affected consumers. Striding by four words touches one useful word
+per cache line and discards the rest — **interleaving cannot be binCV's general layout
+on this device**, and that is now measured rather than argued.
+
+**2. THE CROSSOVER, WHICH IS THE OUTPUT THIS ENTRY OWES REGARDLESS OF BAND.**
+Conversion costs 23.7 µs; interleaving saves `(255.7 − 177.0)/130 = 0.605 µs` per
+31-row window. **It pays after ≈ 39 windows on that level** — about 1 500 row
+extractions. The frontend evaluates roughly **600 windows per level per frame**, so it
+amortises by **~15×**. *That number, not this kernel's verdict, is what the next
+operation wanting this layout should be handed:* **interleave when a level is re-read
+more than ~40 windows' worth; stay planar otherwise.**
+
+**3. THE NET FRONTEND ESTIMATE LANDS ON THE BAND BOUNDARY, AND SAYS SO.** N = 2 levels
+are ~6/7 of LK by [X-34](#x-34--the-ladder-in-isolation--done)'s ladder ratio, so
+6.32 of 7.374 ms improves 1.167× → saving **0.90 ms**, less 0.031 ms of conversion
+across the three levels: frontend **10.757 → 9.89 ms, ≈ 1.65× against OpenCV** from
+1.52×. **Band B's threshold is 1.65×.** The estimate chains three prior measurements
+and its uncertainty straddles the boundary — **it is not a measured frontend number**,
+and this entry does not pretend otherwise. Band A is excluded on arm 4 regardless, so
+the boundary does not change the verdict.
+
+**4. THE RULE DID NOT PRE-REGISTER A FOOTPRINT BAND. THAT IS A DEFECT IN THE RULE AND
+IT IS DECISIVE.** [CLAUDE.md](../CLAUDE.md): *"Performance and memory footprint are
+co-equal goals. When they conflict and no explicit choice has been made, memory
+wins."* Converting one level at a time and reusing the buffer needs the largest N = 2
+level only — **+92 160 B on a 436 704 B peak, +21%**, taking criterion 3 from
+**6.23× to 5.15×**.
+
+**So the trade is +21% footprint for +8% speed, and the project's own tie-breaker says
+memory wins.** X-44's bands were written on speed alone and therefore **cannot settle
+this**. Under [CLAUDE.md](../CLAUDE.md)'s "stop and ask" — *a decision is needed that
+isn't recorded in ARCHITECTURE §8* — **this is escalated rather than decided.**
+
+**Decision: NOT TAKEN.** The measurements are complete and recorded; the choice
+between +21% footprint and +8% speed is a goals question, not a measurement question,
+and no prior D-record settles it. What *is* decided, on arm 4's 5.17×:
+**interleaving will not become binCV's general storage layout** — any adoption is
+variant (C), a conversion confined to the operation that benefits. Recorded as
+[D-41](ARCHITECTURE.md#8-design-decisions); the open half stays as
+[E-26](ARCHITECTURE.md#register), reduced to a single yes/no with both numbers on it.
+
+**A premise this entry confirms.** The conversion **does** amortise, by ~15×, exactly
+as the rule argued and against the earlier note that priced it against a single
+window. The amortisation was never the problem; the footprint is.
+
+**Method:** `benchmark/interleave_layout.cpp` and `benchmark/residual_n2.cpp` via
+`scripts/run_on_pi.sh pi4`. Arm 3 is bit-exact against the planar extraction over 130
+windows; `interleave_layout`'s two extractions agree over 2 695 cases.
 
 ---
 

@@ -779,3 +779,36 @@ ceiling for a design that does not exist.**
 
 Four experiments, one small win, and the remainder sits behind a container
 redesign (**E-26**) whose cost side is unmeasured.
+
+---
+
+## 20 · E-26 measured on both sides — and escalated, not decided
+
+| | measured |
+|---|---|
+| extraction, planar → **real** interleaved (bit-exact) | 255.7 → **177.0 µs, 1.445×** |
+| `residualSums` overall | 550.2 → **471.5 µs, 1.167×** |
+| conversion, per level per frame | **23.7 µs** |
+| **streaming one plane** | 0.605 → **3.129 µs, 5.17× COST** |
+| interleaved buffer, largest N=2 level | **92 160 B** |
+
+**Decided:** interleaving does **not** become binCV's general layout. The 5.17×
+streaming cost settles it — striding by four uses one word per cache line and
+throws the rest away.
+
+**The reusable output — the crossover.** Conversion costs 23.7 µs; each 31-row
+window saves 0.605 µs. It pays after **≈40 windows** on a level. The frontend does
+~600 per level per frame → amortises **~15×**. *Rule for any future operation:
+interleave when a level is re-read more than ~40 windows' worth; stay planar
+otherwise.*
+
+**Not decided, and not mine to decide.** Net frontend **~1.65×** from 1.52× —
+**+8% speed for +21% peak footprint** (criterion 3: 6.23× → 5.15×). CLAUDE.md makes
+these co-equal and gives memory the tie-break absent an explicit choice. **X-44's
+bands were written on speed alone** — a defect in my own rule — so the experiment
+cannot settle its own question.
+
+**A ceiling that behaved, and a sharper rule.** X-43's fabricated buffer overstated
+by only **1.14×**, against D-37's 1.37×. It differed from the real thing only in
+where the memory lived. **A ceiling's accuracy tracks how few things it abstracts
+away** — better than "ceilings overstate".

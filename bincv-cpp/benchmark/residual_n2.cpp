@@ -319,18 +319,119 @@ int main() {
         return sink;
     };
 
+    // ---------------------------------------------------------------------
+    // X-44 ARM 3. The extraction again, with the eight "self-descriptor" words
+    // read from a REAL interleaved buffer instead of gathered from eight stacked
+    // planes. Everything else -- the four tap words, the border machinery, the
+    // masks -- is arm A's code untouched, so the difference is the layout and
+    // nothing else. This is what X-44's rule asks for and what a chain of
+    // estimates off benchmark/interleave_layout.cpp cannot give.
+    // ---------------------------------------------------------------------
+    constexpr size_t kIlPlanes = 8, kIlGroup = 4, kIlGroups = kIlPlanes / kIlGroup;
+    const size_t ilWords = bincv::impl::minRowWords<W>(lv.prev[0].width);
+    const size_t ilRows = static_cast<size_t>(lv.prev[0].height);
+    std::vector<W> ilBuf(kIlGroups * ilRows * ilWords * kIlGroup);
+    {
+        const bincv::BinMatConstView<W>* src[kIlPlanes] = {
+            &lv.prev[0], &lv.prev[1], &lv.dxMag[0], &lv.dxMag[1],
+            &lv.dyMag[0], &lv.dyMag[1], &lv.dxSign, &lv.dySign};
+        for (size_t g = 0; g < kIlGroups; ++g) {
+            W* dst = ilBuf.data() + g * ilRows * ilWords * kIlGroup;
+            for (size_t y = 0; y < ilRows; ++y) {
+                W* row = dst + y * ilWords * kIlGroup;
+                for (size_t i = 0; i < ilWords; ++i)
+                    for (size_t p = 0; p < kIlGroup; ++p)
+                        row[i * kIlGroup + p] = src[g * kIlGroup + p]->row(y)[i];
+            }
+        }
+    }
+    auto extractInterleavedKernel = [&](const bincv::impl::RegionWords<W>& r, long long tapX,
+                                        long long tapY) {
+        const size_t width = r.x1 - r.x0;
+        const size_t words = ilWords;
+        const W mask = bincv::impl::lowBitsMask<W>(width);
+        constexpr size_t B = bincv::impl::bitsPerWord<W>();
+        const long long x0 = static_cast<long long>(r.x0);
+        const bool tapIsShift = width < B;
+        const long long srcX = x0 + tapX;
+        const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
+        const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
+        const size_t w0 = r.x0 / B, sh = r.x0 % B;
+        const bool hasHi = (w0 + 1) < words;
+        W sink = 0;
+        for (size_t y = r.y0; y < r.y1; ++y) {
+            const long long srcY = static_cast<long long>(y) + tapY;
+            const bool rowsInside =
+                srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
+            const bool interior = colsInside && rowsInside;
+            for (size_t k = 0; k < 2; ++k) {   // the four tap words: arm A's code
+                W t00, t10;
+                if (interior) {
+                    t00 = bincv::impl::alignedWord<W>(lv.next[k].row(static_cast<size_t>(srcY)),
+                                                      words, static_cast<size_t>(srcX));
+                    t10 = bincv::impl::alignedWord<W>(lv.next[k].row(static_cast<size_t>(srcY) + 1),
+                                                      words, static_cast<size_t>(srcX));
+                } else {
+                    t00 = bincv::impl::displacedRow<W>(lv.next[k], srcY, srcX).word(0);
+                    t10 = bincv::impl::displacedRow<W>(lv.next[k], srcY + 1, srcX).word(0);
+                }
+                const W t01 = tapIsShift ? static_cast<W>(t00 >> 1)
+                    : bincv::impl::displacedRow<W>(lv.next[k], srcY, srcX + 1).word(0);
+                const W t11 = tapIsShift ? static_cast<W>(t10 >> 1)
+                    : bincv::impl::displacedRow<W>(lv.next[k], srcY + 1, srcX + 1).word(0);
+                sink = static_cast<W>(sink ^ t00 ^ t01 ^ t10 ^ t11);
+            }
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+            for (size_t g = 0; g < kIlGroups; ++g) {
+                const W* row = ilBuf.data() + g * ilRows * ilWords * kIlGroup
+                             + y * ilWords * kIlGroup;
+                const uint32x4_t vlo = vld1q_u32(row + w0 * kIlGroup);
+                uint32x4_t v;
+                if (sh == 0) {
+                    v = vlo;
+                } else {
+                    const uint32x4_t vhi = hasHi ? vld1q_u32(row + (w0 + 1) * kIlGroup)
+                                                 : vdupq_n_u32(0);
+                    v = vorrq_u32(vshlq_u32(vlo, vdupq_n_s32(-static_cast<int32_t>(sh))),
+                                  vshlq_u32(vhi, vdupq_n_s32(static_cast<int32_t>(32 - sh))));
+                }
+                // Group 0 is prev/dxMag, group 1 dyMag/signs; the two magnitude
+                // pairs are masked exactly as arm A masks them.
+                W tmp[4];
+                vst1q_u32(tmp, v);
+                if (g == 0) sink = static_cast<W>(sink ^ tmp[0] ^ tmp[1] ^ (tmp[2] & mask) ^ (tmp[3] & mask));
+                else        sink = static_cast<W>(sink ^ (tmp[0] & mask) ^ (tmp[1] & mask) ^ tmp[2] ^ tmp[3]);
+            }
+#else
+            for (size_t g = 0; g < kIlGroups; ++g) {
+                const W* row = ilBuf.data() + g * ilRows * ilWords * kIlGroup
+                             + y * ilWords * kIlGroup;
+                for (size_t p = 0; p < kIlGroup; ++p) {
+                    const W lo = row[w0 * kIlGroup + p];
+                    const W hi = hasHi ? row[(w0 + 1) * kIlGroup + p] : static_cast<W>(0);
+                    const W v = (sh == 0) ? lo : static_cast<W>((lo >> sh) | (hi << (B - sh)));
+                    const size_t idx = g * kIlGroup + p;
+                    sink = static_cast<W>(sink ^ ((idx >= 2 && idx <= 5) ? (v & mask) : v));
+                }
+            }
+#endif
+        }
+        return sink;
+    };
+
     // Equality before timing, as everywhere else in this project.
-    size_t badX = 0, badV = 0;
+    size_t badX = 0, badV = 0, badI = 0;
     for (size_t k = 0; k < regs.size(); ++k) {
         const W ref = extractOnly(regs[k], tx[k], ty[k]);
         if (ref != extractHoisted(regs[k], tx[k], ty[k])) ++badX;
         // Arm B must reproduce arm A exactly; arm C cannot, because its staging
         // buffer holds fabricated words -- it is a COST model, not a computation.
         if (ref != extractVec(regs[k], tx[k], ty[k], false)) ++badV;
+        if (ref != extractInterleavedKernel(regs[k], tx[k], ty[k])) ++badI;
     }
-    std::printf("  EXTRACTION EQUALITY: hoisted %zu, vector-gather %zu of %zu windows differ\n",
-                badX, badV, regs.size());
-    if (badX || badV) return 1;
+    std::printf("  EXTRACTION EQUALITY: hoisted %zu, vector-gather %zu, interleaved %zu"
+                " of %zu windows differ\n", badX, badV, badI, regs.size());
+    if (badX || badV || badI) return 1;
 
     std::vector<measure::Bench> b = {
         {"scalar (UseNeon=false)", [&](int) { bincv::impl::TapSums a, c;
@@ -358,6 +459,10 @@ int main() {
         {"X-43 C: vector, gather removed", [&](int) { W s2 = 0;
              for (size_t k = 0; k < regs.size(); ++k)
                  s2 ^= extractVec(regs[k], tx[k], ty[k], true);
+             measure::g_sink += static_cast<size_t>(s2); }},
+        {"X-44 arm 3: real interleaved buffer", [&](int) { W s2 = 0;
+             for (size_t k = 0; k < regs.size(); ++k)
+                 s2 ^= extractInterleavedKernel(regs[k], tx[k], ty[k]);
              measure::g_sink += static_cast<size_t>(s2); }},
     };
     const auto t = measure::measureInterleaved(b, 9, 60.0);
