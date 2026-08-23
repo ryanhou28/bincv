@@ -7968,6 +7968,70 @@ twice; `tests/test_pyramid.cpp` unchanged as the exactness oracle.
 
 ---
 
+### X-43 · E-24 — can the extraction be vectorised, and what stops it? · `RULE ONLY`
+
+**COMMITTED BEFORE THE ARM IS WRITTEN.**
+
+**Gates:** [E-24](ARCHITECTURE.md#register). Bounded before it starts:
+[X-40](#x-40--e-18--window-carried-vector-accumulators-at-n--2--done) capped
+`residualSums` at **2.205×** even with counting free, so **nothing here can take the
+frontend past ~1.9× against OpenCV.**
+
+**Question.** [X-41](#x-41--e-23--what-the-extraction-is-actually-spending--done) ruled
+out addressing (1.023×) and the memory system (1.129×) and left **instruction count**
+as the only lever on the 45.4% of `residualSums` that is extraction. The twelve
+`alignedWord` calls in a row share exactly **two** `(w0, s)` descriptors — eight on
+`r.x0` (`prev`×2, `dxMag`×2, `dyMag`×2, two sign planes) and four on `srcX`
+(`next`×2 at two rows) — so twelve scalar load-shift-or sequences look like they should
+be about three vector ones. **Should they?**
+
+**THE OBSTACLE, NAMED BEFORE MEASURING.** `QuantMat` stacks its planes: they share one
+stride and plane `p` begins at word offset `p × height × stride`
+([§4.1](ARCHITECTURE.md)). So the eight words a vector would want are in **eight
+unrelated cache lines**, and **aarch64 NEON has no gather** — each element costs a
+scalar load plus a lane insert. That is ~2 instructions per element against a scalar
+extraction's ~6 for the whole word, so the gather plausibly costs more than the shifts
+it saves. **If that is what happens, the finding is not "vectorisation does not work"
+— it is "the layout forbids it", which is a different and more useful answer.**
+
+**ARMS.** All three compute the same sink, equality checked before timing.
+
+| arm | what it is |
+|---|---|
+| **A** | the shipped scalar extraction — X-41's floor arm, 263–265 µs |
+| **B** | vector extraction with a **real gather**: scalar loads plus lane inserts, then one `vshlq` pair per descriptor. **This is what could actually be written today.** |
+| **C** | vector extraction from **contiguous** memory — the same shifts with the gather removed by staging the words beforehand. Not implementable on today's layout; it is the **upper bound a word-interleaved plane layout would unlock.** |
+
+**DECISION RULE, WRITTEN BEFORE MEASURING**, with each band's implication stated now —
+[D-38](ARCHITECTURE.md#8-design-decisions)'s lesson from X-41's false Band C
+prediction:
+
+- **Band A — B ≥ 1.4× over A.** Write it. **And only then** collapse the three copies
+  of the extraction block, since that is the block being changed. The refactor is
+  justified by the change, not the reverse.
+- **Band B — 1.15× ≤ B < 1.4×.** Marginal against the ~1.9× frontend cap. Write it
+  **only** as part of the three-copy collapse, so the churn buys maintenance as well
+  as speed.
+- **Band C — B < 1.15×, and C is materially better than B.** **The gather is the
+  obstacle and the layout is the cause.** Do not write B. The successor is a
+  **word-interleaved plane layout** question — and note that this would be an
+  *instruction-count* argument for relayout, which is **not** the cache argument X-41
+  already refuted at 1.129×. Those must not be conflated.
+- **Band D — B < 1.15× and C is no better either.** The extraction is irreducible on
+  this ISA at this word width. **Close the whole line of work**, and say plainly that
+  `residualSums` is finished: 2.205× was never reachable and what remains is not
+  reachable at all.
+
+**The refactor is deliberately NOT done first.** X-41's Band C already recorded that
+the three-copy collapse is worth doing *for maintenance, not for speed*. Doing it
+before knowing whether E-24 pays would be refactoring for a change that may never be
+written — so the ceiling runs first, in the benchmark, touching no kernel.
+
+**Method:** `benchmark/residual_n2.cpp`, two new arms beside X-41's floor arm;
+reference device via `scripts/run_on_pi.sh pi4`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
