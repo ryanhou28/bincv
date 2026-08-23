@@ -8089,6 +8089,90 @@ checked exact against arm A before timing — 0 of 130 windows differ.
 
 ---
 
+### X-44 · E-26 — is INTERLEAVED a layout binCV should support? · `RULE ONLY`
+
+**COMMITTED BEFORE ANY OF IT IS WRITTEN.**
+
+**Gates:** [E-26](ARCHITECTURE.md#register). This is a **storage-layout** question, not
+a tracker optimisation, and the framing is deliberate: if more than one operation
+wants planes interleaved, binCV should support the pattern rather than special-case
+`residualSums`.
+
+**A PREMISE THIS ENTRY CORRECTS BEFORE USING IT.** Earlier drafts of this question
+argued that binCV's design "rests on" planar bit-planes and that interleaving reopens
+[D-2](ARCHITECTURE.md#8-design-decisions). **That is wrong and is withdrawn.**
+Bit-planes are the representation this project *started* from, not its thesis — which
+is processing low-bit-width frames at their true bit width. A layout is a means. So
+the question is not whether interleaving is permissible; it is what it costs and what
+it buys, measured on both sides.
+
+**Question.** [X-43](#x-43--e-24--can-the-extraction-be-vectorised-and-what-stops-it--done)
+found the extraction **1.638×** faster once its eight words are contiguous, and
+**0.885× — slower** when they are gathered from `QuantMat`'s stacked planes. Arm C was
+a **cost model with a fabricated buffer**. What does a **real** interleaved layout
+cost and buy, end to end, including the conversion and including the operations it
+makes worse?
+
+**WHY A CONVERSION CAN PAY, WHICH AN EARLIER ESTIMATE GOT WRONG.** A conversion pass
+is per **level per frame**; the window extractions that benefit are per **keypoint per
+iteration**. [X-38](#x-38--e-20--the-whole-frontend-against-opencv-on-the-deployment-target--done)'s
+LK time divided by this benchmark's per-window cost puts the frontend at roughly
+**1 800 window-evaluations per frame**, so each converted word is re-read by hundreds
+of windows. An earlier note priced the conversion as marginal by comparing it against
+a single window. **It amortises, and by a large factor.** That is the thing this
+experiment must confirm rather than assume.
+
+**ARMS.**
+
+| # | measures | why it decides something |
+|---|---|---|
+| **1** | **conversion cost**, planar → interleaved, one N=2 level, per frame | the price of entry; if this dominates, nothing else matters |
+| **2** | **extraction from a REAL interleaved buffer** | replaces X-43 arm C's fabricated buffer with the real thing |
+| **3** | **`residualSums` end to end** on interleaved input, conversion included | the only number that is actually about the kernel |
+| **4** | **a streaming single-plane consumer** reading planar vs interleaved | the cost side — what every other operation pays |
+| **5** | **footprint**, computed exactly, both variants | co-equal with speed ([CLAUDE.md](../CLAUDE.md)) |
+
+Arms 2 and 3 must be **bit-exact** against the planar path before being timed.
+
+**Two variants are priced, not one.** **(P) Producers write interleaved** — `pyrDown`
+and the derivative kernels emit the layout directly, so there is no conversion and no
+extra memory, and arm 4's cost lands on whoever reads those planes.
+**(C) Conversion** — storage stays planar and the tracker converts per level per
+frame, so arm 4's cost is zero and arm 1's is not. **These have opposite cost
+profiles and the rule must not collapse them.**
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.** `N` is the **net** frontend ratio against
+OpenCV including every cost above; today's baseline is **1.52×**, and
+[X-40](#x-40--e-18--window-carried-vector-accumulators-at-n--2--done)'s cap says
+`residualSums` alone cannot pass ~1.9×.
+
+- **Band A — N ≥ 1.65× and arm 4 costs < 1.10× on the affected consumers.**
+  Interleaved becomes a **supported layout**: a documented `QuantMat` storage order
+  with the conversion in the public API, not a private tracker buffer. Adopt the
+  cheaper of (P) and (C) and say which and why.
+- **Band B — N ≥ 1.65× but arm 4 costs ≥ 1.10×.** The gain is real and it is **paid
+  for elsewhere**. Adopt **(C) only**, because a conversion confines the cost to the
+  one operation that benefits. Interleaved stays internal, and the entry states the
+  cost it would have imposed had it gone global.
+- **Band C — 1.58× ≤ N < 1.65×.** Under a 4% frontend gain for a storage-layout
+  change. **Do not adopt.** Record the measured numbers so the next operation that
+  wants this layout inherits them rather than re-deriving them.
+- **Band D — N < 1.58×, or the conversion does not amortise.** The premise above is
+  wrong and the correction is the finding: report **why** the amortisation argument
+  failed, since it is the load-bearing part of the case.
+
+**A SEPARATE OUTPUT THIS EXPERIMENT OWES REGARDLESS OF BAND.** The recurrence
+criterion, stated as a rule rather than case by case: **an operation wants interleaved
+when it re-reads the same words many times to reconstruct pixel values, and planar
+when it streams one plane.** X-44 must report the measured crossover — **how many
+re-reads a word needs before conversion pays** — because that number, not this one
+kernel's verdict, is what the next operation will need.
+
+**Method:** `benchmark/interleave_layout.cpp` (new) and `benchmark/residual_n2.cpp`;
+reference device via `scripts/run_on_pi.sh pi4`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
