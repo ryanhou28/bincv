@@ -7537,6 +7537,65 @@ reaching the Gaussian anchor rather than 65% of the way to it.
 
 ---
 
+### X-40 · E-18 — window-carried vector accumulators at N = 2 · `RULE ONLY`
+
+**COMMITTED BEFORE THE ARM IS WRITTEN.** Ceiling before arm, as
+[X-33](#x-33--the-ceiling-for-batched-neon-popcounts--done) and
+[X-36](#x-36--batching-across-taps-and-what-the-footprint-does-not-buy--done)
+established: measure the bound, then decide whether the code gets written.
+
+**Gates:** [E-18](ARCHITECTURE.md#register).
+
+**Question.** [D-33](ARCHITECTURE.md#8-design-decisions) gave **N = 1** lane
+accumulators that carry across the whole window, crossing the register domain
+**once per window** instead of once per row. **N = 2 never got it.** Three of the
+four levels of the shipped `1/2/2/2` ladder run at N = 2, so the depth that does most
+of the tracking is still on the older shape: `slicedSignedSum` batches the `N²` plane
+pairs into lanes and then does `vaddvq_s32` **per call** — ten calls per row, 31 rows,
+**310 domain crossings per window** where D-33's shape needs about ten.
+
+**The two shapes, precisely.** Both compute the same ten integers.
+
+| | lanes hold | accumulators | reduces per window |
+|---|---|---|---|
+| **A — shipped** | the 4 plane pairs `(i, j)` | none; scalar after each call | **310** |
+| **B — proposed** | the 4 taps `t00 t01 t10 t11` | **one `int32x4_t` per component** | **~10** |
+
+B loops the four plane pairs *inside* the row and folds each into the same
+accumulator with `vmlaq_n_s32(acc, diff_ij, 2^(i+j))`. That is exact, not
+approximate: the weight is constant across rows, so
+`Σ_rows Σ_pairs w·d = Σ_pairs w·Σ_rows d`. Two accumulator registers total, so
+**no spill risk** — the naive "16 accumulators, one per (tap, pair)" layout is
+rejected before measuring for that reason.
+
+**Range check, so the arm cannot be wrong silently.** Per lane and pair,
+`diff ∈ [−32, 32]` at `uint32_t`; weighted ≤ 4 and summed over 4 pairs and 31 rows
+gives **|acc| ≤ 15 872**, comfortably inside `int32`.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.** The benchmark runs both shapes on the
+same data and **asserts all ten sums equal** — a ceiling that is also a
+correctness check, which X-36's was not.
+
+- **Band A — B/A ≥ 2.0×:** write the arm in `ops/opticalFlow.hpp` for N = 2.
+- **Band B — 1.4× ≤ B/A < 2.0×:** write it, and report the frontend effect as
+  modest rather than quoting the kernel ratio.
+- **Band C — B/A < 1.4×:** **do not write it.** Record why and close E-18 negative.
+  This is X-36's own threshold, reused deliberately.
+- **Band D — B is SLOWER:** the domain-crossing account in E-18 is wrong, which is a
+  finding about the cost model and not just about this kernel. Report it as such.
+
+**A correction this entry carries.** E-18 was registered saying LK is *"94.7% of the
+real frontend"*. [X-38](#x-38--e-20--the-whole-frontend-against-opencv-on-the-deployment-target--done)
+measured the real duty cycle and LK is **69.8%** (7.815 of 11.198 ms). So a 2× on this
+kernel is worth about **1.53×** on the frontend, not 1.9×, and a 3× is worth **1.87×**.
+Still the largest item left in Phase 5.1 — but priced honestly before the work, not
+after.
+
+**Method:** `benchmark/windowaccum_ceiling.cpp`, reference device, via
+`scripts/run_on_pi.sh pi4`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
