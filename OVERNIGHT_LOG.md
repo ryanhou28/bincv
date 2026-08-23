@@ -693,3 +693,46 @@ the inside.
 `residualSums` cannot take the frontend past **~1.9× against OpenCV**. E-24 (the
 twelve scalar extractions per row share two descriptors → could be three vector
 ones) is the only lever left, and it is bounded by that.
+
+---
+
+## 18 · E-22: the framework tax was genericity — and it overturns D-36
+
+Three **signatures** changed, no algorithm: `addShifted`'s extents and shift,
+`weightedAxis`' tap count/weights/width, `requantizeWeighted`'s divisor. `F` was
+**already** a template parameter — the helpers were throwing the constants away.
+`test_pyramid` passes with the **identical** 262 322 checks.
+
+| arm | X-39 | **X-42** | speedup |
+|---|---|---|---|
+| hand-written `pyrDown` *(control)* | 93.7 | 93.8 | 1.00× |
+| **generic `BOX_2x2`** | 277.8 | **111.9** | **2.48×** |
+| `BOX_3x3` | 398.0 | **228.0** | 1.75× |
+| `GAUSSIAN_3x3` | 497.7 | **225.7** | 2.21× |
+| **`GAUSSIAN_5x5`** (anchor) | 2 352.9 | **549.8** | **4.28×** |
+
+**The generic route ran `BOX_2x2` at 2.96× the hand-written one; it now runs it at
+1.19×.** Band A.
+
+**THE STANDARD-LK ANCHOR IS AFFORDABLE.** D-36 said it *"costs more than it is
+worth"* and would put binCV **behind** OpenCV at 0.97×:
+
+| filter | D-36 recorded | **now** |
+|---|---|---|
+| `BOX_3x3` | 11.968 ms, 1.38× | **11.550 ms, 1.41×** — +0.35 ms, was +0.80 |
+| **`GAUSSIAN_5x5`** | **17.099 ms, 0.97× SLOWER** | **12.395 ms, 1.32× FASTER** |
+
+**binCV can have standard-LK pyramid accuracy *and* criterion 4** — 0.14× of speed
+for 1.25 yield points. That was the exact trade D-36 declared unavailable.
+
+`BOX_3x3` also no longer *dominates* `GAUSSIAN_3x3` on cost — 228.0 vs 225.7, one
+percent the other way. Still preferable, on accuracy, at **equal cost**.
+
+**The caveat was larger than the effect being decided.** X-39 mapped a design space
+on an unoptimised framework and two of its four conclusions don't survive. The
+registration is what saved it — the number was flagged provisional at the time, so
+this is a correction, not a hidden error.
+
+Effect on binCV **as shipped: exactly zero** — the default calls the hand-written
+route. What changed is the price of the options. That route is now a deletion
+candidate at 1.19× (**E-25**).

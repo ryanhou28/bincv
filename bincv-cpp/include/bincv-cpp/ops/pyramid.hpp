@@ -705,18 +705,21 @@ constexpr size_t axisPlanes(size_t nIn, unsigned weightSum) {
     return bits == 0 ? 1 : bits;
 }
 
-/// @brief `acc += (v << shift)`, bit-sliced. A shift is free: it is an index
+/// @brief `acc += (v << Shift)`, bit-sliced. A shift is free: it is an index
 ///        offset, so this is one ripple add.
-template <typename WordType>
-inline void addShifted(WordType* acc, size_t accN, const WordType* v, size_t vN, size_t shift,
-                       WordType* tmp) {
-    // Build the shifted operand in `tmp`: planes [0, shift) are zero.
-    for (size_t p = 0; p < shift; ++p) tmp[p] = 0;
-    for (size_t p = 0; p < vN; ++p) tmp[shift + p] = v[p];
+/// @note X-42: `AccN`, `VN` and `Shift` are TEMPLATE parameters and there is no
+///       staging buffer. The earlier signature took all three at runtime and built
+///       the shifted operand in a `tmp` array first -- which at `Shift == 0`, the
+///       common case, copied the operand onto itself before adding. With the extents
+///       known the loop unrolls and the out-of-range planes fold away: below `Shift`
+///       the addend is literally zero, so the stage degenerates to
+///       `acc[p] ^= carry; carry &= acc_old[p]` with no operand read at all.
+template <size_t AccN, size_t VN, size_t Shift, typename WordType>
+inline void addShifted(WordType* acc, const WordType* v) {
     WordType carry = 0;
-    const size_t n = accN;
-    for (size_t p = 0; p < n; ++p) {
-        const WordType y = (p < shift + vN) ? tmp[p] : static_cast<WordType>(0);
+    for (size_t p = 0; p < AccN; ++p) {
+        const WordType y = (p >= Shift && p - Shift < VN) ? v[p - Shift]
+                                                          : static_cast<WordType>(0);
         const WordType x = acc[p];
         acc[p] = static_cast<WordType>(static_cast<WordType>(x ^ y) ^ carry);
         carry = maj3<WordType>(x, y, carry);
@@ -724,34 +727,77 @@ inline void addShifted(WordType* acc, size_t accN, const WordType* v, size_t vN,
     // The caller sizes `acc` so the top carry cannot be lost; see axisPlanes.
 }
 
-/// @brief One axis of a separable weighted sum, bit-sliced.
-/// @param taps `tapCount` operands, each `nIn` planes, in tap order.
-/// @param out `outN` planes, zeroed by this function then filled.
-template <size_t NIn, typename WordType>
-inline void weightedAxis(const WordType (*taps)[NIn], size_t tapCount, const unsigned* weights,
-                         WordType* out, size_t outN) {
-    for (size_t p = 0; p < outN; ++p) out[p] = 0;
-    WordType tmp[NIn + 8];
-    for (size_t t = 0; t < tapCount; ++t) {
-        unsigned w = weights[t];
-        // Decompose the weight into set bits: each is a free shift plus one add.
-        for (size_t bit = 0; w != 0; ++bit, w >>= 1) {
-            if ((w & 1u) != 0) addShifted<WordType>(out, outN, taps[t], NIn, bit, tmp);
+/// @brief One (tap, weight-bit) stage of `weightedAxis`, unrolled at compile time.
+/// @note The recursion exists because the decomposition is over TWO compile-time
+///       ranges -- taps and the set bits of each tap's weight -- and C++17 has no
+///       constexpr for-loop that can instantiate `addShifted` per iteration. Weights
+///       in `FilterTaps` never exceed 6, so four bit positions cover every filter.
+template <PyrDownFilter F, size_t NIn, size_t OutN, size_t Tap, size_t Bit, typename WordType>
+inline void weightedAxisStage(const WordType (*taps)[NIn], WordType* out) {
+    constexpr FilterTaps T = filterTaps(F);
+    constexpr size_t kTapCount = static_cast<size_t>(T.hi - T.lo + 1);
+    if constexpr (Tap < kTapCount) {
+        if constexpr (Bit < 4) {
+            if constexpr (((T.w[Tap] >> Bit) & 1u) != 0u) {
+                addShifted<OutN, NIn, Bit, WordType>(out, taps[Tap]);
+            }
+            weightedAxisStage<F, NIn, OutN, Tap, Bit + 1, WordType>(taps, out);
+        } else {
+            weightedAxisStage<F, NIn, OutN, Tap + 1, 0, WordType>(taps, out);
         }
     }
+}
+
+/// @brief One axis of a separable weighted sum, bit-sliced.
+/// @param taps The filter's tap count operands, each `NIn` planes, in tap order.
+/// @param out `OutN` planes, zeroed by this function then filled.
+/// @note X-42: the tap count, the weights and the output width all come from `F`,
+///       which is a template parameter, so none of them are passed at runtime any
+///       more. The previous signature took them as arguments and looped over them --
+///       decomposing compile-time weights into set bits at run time, once per output
+///       word.
+template <PyrDownFilter F, size_t NIn, size_t OutN, typename WordType>
+inline void weightedAxis(const WordType (*taps)[NIn], WordType* out) {
+    for (size_t p = 0; p < OutN; ++p) out[p] = 0;
+    weightedAxisStage<F, NIn, OutN, 0, 0, WordType>(taps, out);
 }
 
 /// @brief `requantizeBoxSum` for an arbitrary kernel weight sum.
 /// @note The box version is this with `KSum == 4`. Same three steps: scale to the
 ///       output's full range, add half the divisor to round to nearest, divide.
-template <size_t NOut, size_t NIn, size_t SumPlanes, typename WordType>
-inline void requantizeWeighted(const WordType* sum, unsigned kSum, WordType* out) {
+/// @brief One quotient bit of `divideByConstantT`, unrolled at compile time.
+template <unsigned Divisor, size_t N, size_t Q, typename WordType>
+inline void divideStage(WordType* value, WordType* quotient) {
+    if constexpr (Q > 0) {
+        constexpr unsigned kScaled = Divisor << (Q - 1);
+        const WordType fits = thresholdGE<WordType>(value, N, kScaled);
+        quotient[Q - 1] = fits;
+        subtractConstantWhere<WordType>(value, N, kScaled, fits);
+        divideStage<Divisor, N, Q - 1, WordType>(value, quotient);
+    }
+}
+
+/// @brief `divideByConstant` with the divisor and the quotient width known at
+///        compile time.
+/// @note X-42. Same restoring division, same order, same result -- but
+///       `Divisor << q` is a literal at every step, so each `thresholdGE` and each
+///       `subtractConstantWhere` specialises against its own constant instead of
+///       shifting a runtime value. The runtime spelling stays for callers that have
+///       a genuinely runtime divisor.
+template <unsigned Divisor, size_t N, size_t NQ, typename WordType>
+inline void divideByConstantT(WordType* value, WordType* quotient) {
+    static_assert(Divisor != 0u, "divideByConstantT: the divisor must be non-zero");
+    divideStage<Divisor, N, NQ, WordType>(value, quotient);
+}
+
+template <size_t NOut, size_t NIn, size_t SumPlanes, unsigned KSum, typename WordType>
+inline void requantizeWeighted(const WordType* sum, WordType* out) {
     constexpr unsigned maxIn = (1u << NIn) - 1u;
     constexpr size_t width = SumPlanes + NOut;
     WordType scaled[width];
     multiplyByAllOnes<WordType>(sum, SumPlanes, NOut, scaled);
-    addConstant<WordType>(scaled, width, (kSum / 2) * maxIn);
-    divideByConstant<WordType>(scaled, width, kSum * maxIn, out, NOut);
+    addConstant<WordType>(scaled, width, (KSum / 2) * maxIn);
+    divideByConstantT<KSum * maxIn, width, NOut, WordType>(scaled, out);
 }
 
 } // namespace impl
@@ -1241,14 +1287,14 @@ inline void pyrDownFilteredRoute(const BinMatConstView<WordType> (&src)[NIn],
                         }
                     }
                 }
-                weightedAxis<NIn, WordType>(hTaps, kTaps, T.w, hRes[t], hPlanes);
+                weightedAxis<F, NIn, hPlanes, WordType>(hTaps, hRes[t]);
             }
 
             WordType vSum[vPlanes];
-            weightedAxis<hPlanes, WordType>(hRes, kTaps, T.w, vSum, vPlanes);
+            weightedAxis<F, hPlanes, vPlanes, WordType>(hRes, vSum);
 
             WordType outPlanes[NOut];
-            requantizeWeighted<NOut, NIn, vPlanes, WordType>(vSum, T.sum * T.sum, outPlanes);
+            requantizeWeighted<NOut, NIn, vPlanes, T.sum * T.sum, WordType>(vSum, outPlanes);
             const bool last = (i + 1 == dstWords);
             for (size_t q = 0; q < NOut; ++q) {
                 dstRow[q][i] = last ? static_cast<WordType>(outPlanes[q] & tail) : outPlanes[q];

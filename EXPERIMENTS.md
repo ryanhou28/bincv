@@ -7403,6 +7403,16 @@ sequence at 11.198 against 16.324 — the "vs OpenCV" column shifts by about 0.0
 
 **Conclusion — BAND C: the anchor is not affordable, and the frontier is clear.**
 
+> **THE BAND C VERDICT WAS LATER OVERTURNED — see
+> [X-42](#x-42--e-22--is-the-filter-frameworks-cost-genericity-or-structure--done).**
+> Every speed number below was measured on a framework carrying a **3× genericity
+> tax**, which this entry names as a caveat and registers as E-22. Removing that tax
+> made `GAUSSIAN_5x5` **4.28× faster**, so the anchor costs **+1.20 ms** and leaves
+> binCV **1.32× faster than OpenCV** rather than 0.97× slower. **The caveat was larger
+> than the effect being decided.** The accuracy axis is unaffected; the speed axis and
+> the Band C verdict are superseded.
+
+
 1. **`GAUSSIAN_5x5` WOULD COST THE ENTIRE CRITERION-4 RESULT.** At 25.10× it adds
    ~5.9 ms to an 11.169 ms frontend and puts binCV **behind** OpenCV again. Standard-LK
    accuracy is reachable and **it costs more than it is worth here** — which is the
@@ -7803,7 +7813,7 @@ are checked for equality against the shipped extraction before anything is timed
 
 ---
 
-### X-42 · E-22 — is the filter framework's cost genericity, or structure? · `RULE ONLY`
+### X-42 · E-22 — is the filter framework's cost genericity, or structure? · `DONE`
 
 **COMMITTED BEFORE THE CHANGE IS WRITTEN**, and with
 [D-38](ARCHITECTURE.md#8-design-decisions)'s correction applied twice over: a rule
@@ -7878,6 +7888,83 @@ is. That is the whole claim, and it is not a speed claim about binCV as shipped.
 **Method:** `benchmark/pyrfilter_benchmark.cpp`, reference device via
 `scripts/run_on_pi.sh pi4`; `tests/test_pyramid.cpp` unchanged, as the exactness
 oracle.
+
+**RESULT — BAND A, AND IT OVERTURNS [D-36](ARCHITECTURE.md#8-design-decisions)'s
+CENTRAL CLAIM.**
+
+Three signatures changed — `addShifted` (extents and shift become template
+parameters, staging buffer deleted), `weightedAxis` (tap count, weights and output
+width come from `F`), `requantizeWeighted` + new `divideByConstantT` (the divisor
+becomes a template parameter so each restoring-division step folds to a literal).
+**No algorithm changed.** `tests/test_pyramid.cpp` passes with the **identical**
+262 322 checks, still exact against the per-pixel integer reference.
+
+| arm | X-39 | **X-42** | speedup | vs hand-written |
+|---|---|---|---|---|
+| hand-written `pyrDown` N=3 *(control, untouched)* | 93.7 | **93.8** | 1.00× | 1.00× |
+| **generic `BOX_2x2` N=3** | 277.8 | **111.9** | **2.48×** | **1.19×** |
+| `BOX_3x3` N=3 | 398.0 | **228.0** | 1.75× | 2.43× |
+| `GAUSSIAN_3x3` N=3 | 497.7 | **225.7** | 2.21× | 2.41× |
+| **`GAUSSIAN_5x5` N=3** (anchor) | 2 352.9 | **549.8** | **4.28×** | 5.86× |
+
+Reproduced across two runs to within 0.2 µs. The control moved 93.7 → 93.8 µs,
+confirming nothing outside the generic route changed.
+
+**1. THE TAX WAS GENERICITY, AND IT WAS NEVER NECESSARY.** The generic route ran
+`BOX_2x2` at **2.96×** the hand-written one; it now runs it at **1.19×** — Band A.
+`F` was a template parameter the whole time; the helpers simply threw the constants
+away at their own signatures. **This bought a 2.48× speedup with no algorithm change,
+no accuracy change and no loss of flexibility.** The residual 1.19× is the three
+structural costs named in the rule, and *only* those.
+
+**2. THE STANDARD-LK ANCHOR IS NOW AFFORDABLE, WHICH IS THE OPPOSITE OF WHAT X-39
+CONCLUDED.** Scaling by the level geometry as X-39 did (2 frames × (1 + ¼ + ¹⁄₁₆) =
+2.625) against X-38's full-sequence 11.198 ms and OpenCV's 16.324 ms:
+
+| filter | X-39 said | **X-42 says** | |
+|---|---|---|---|
+| `BOX_2x2` shipped | 11.169 ms, 1.48× | **11.198 ms, 1.46×** | unchanged |
+| `BOX_3x3` | 11.968 ms, 1.38× | **11.550 ms, 1.41×** | +0.35 ms, was +0.80 |
+| `GAUSSIAN_3x3` | 12.230 ms, 1.35× | **11.544 ms, 1.41×** | |
+| **`GAUSSIAN_5x5`** | **17.099 ms, 0.97× — SLOWER** | **12.395 ms, 1.32× FASTER** | **+1.20 ms, was +5.93** |
+
+**X-39 closed in Band C — "the anchor is not affordable" — and that is now false.**
+The Gaussian anchor costs **+1.20 ms** and leaves binCV **1.32× faster than OpenCV**,
+not 0.97×. **binCV can have standard-LK pyramid accuracy *and* criterion 4 at the same
+time**, giving up 0.14× of speed for 1.25 yield points
+([X-39 sequence arm](#x-39-sequence-arm--the-same-design-space-over-1710-frames--done):
+95.83% against `BOX_2x2`'s 94.58%). That was the central trade D-36 declared
+unavailable.
+
+**3. `BOX_3x3` NO LONGER DOMINATES `GAUSSIAN_3x3` ON COST.** D-36 recorded it as
+"both cheaper and more accurate". It is now **228.0 against 225.7 µs — one percent
+the other way.** More accurate still (−0.10 against −0.37 vs the anchor), so it
+remains the one to prefer, but **at equal cost rather than at a 1.25× discount**, and
+the recorded reason was wrong.
+
+**4. A METHODOLOGICAL POINT THIS PROJECT SHOULD KEEP.** X-39 measured a design space
+**on an unoptimised framework** and drew a decision from it, naming the framework tax
+as a caveat and registering E-22 — and the caveat turned out to be **larger than the
+effect being decided**. Two of X-39's four conclusions do not survive. The
+registration is what saved it: the number was flagged as provisional at the time, so
+this is a correction rather than a discovery of a hidden error. **Measure the
+framework before mapping a design space on it**, or say loudly that the map is
+provisional.
+
+**Decision: Band A.** D-36 is **restated** — see
+[D-39](ARCHITECTURE.md#8-design-decisions) — with the anchor's affordability reversed
+and the caller's `BOX_2x2`/`BOX_3x3` trade re-priced from **+0.8 ms to +0.35 ms**.
+E-22 resolved. **The hand-written `pyrDown` is now a deletion candidate at 1.19×**;
+that is a separate decision and is *not* taken here, because it is the route every
+prior result in this project was measured on. Registered as
+[E-25](ARCHITECTURE.md#register).
+
+**What this does NOT claim.** The shipped default calls the hand-written route, so
+**the effect on binCV as shipped is exactly zero** — as the rule said in advance. What
+changed is the price of the *options*, and therefore what D-36's trade is worth.
+
+**Method:** `benchmark/pyrfilter_benchmark.cpp` via `scripts/run_on_pi.sh pi4`, run
+twice; `tests/test_pyramid.cpp` unchanged as the exactness oracle.
 
 ---
 

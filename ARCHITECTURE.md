@@ -2548,6 +2548,14 @@ on identical input, so the *ratio* carries OpenCV's variance, not binCV's: 1.46�
 
 ### D-36: `BOX_2x2` stays the default; the filter set ships as options
 
+> **PARTLY SUPERSEDED BY [D-39](#d-39-the-filter-frameworks-3-tax-was-genericity-and-d-36-is-restated).**
+> The decision below stands — `BOX_2x2` is still the default and the set still ships
+> as options — but **two of its stated reasons do not.** [X-42](EXPERIMENTS.md) removed
+> the framework tax this record names as a caveat, and with it removed the
+> `GAUSSIAN_5x5` anchor is **affordable** (1.32× faster than OpenCV, not 0.97× slower)
+> and `BOX_3x3` no longer costs less than `GAUSSIAN_3x3`. Read the speed column here
+> as history; D-39 carries the current prices.
+
 [X-39](EXPERIMENTS.md) mapped the pyramid's two-dimensional design space —
 downsampling filter × bit depth — and `impl::pyrDownFilteredRoute` now implements
 five of the reference's six `LKPyrDownFilterType` variants as bit-sliced kernels,
@@ -2699,6 +2707,66 @@ kernel with no remaining stalls looks like from the inside.
 counting were free; X-41 adds that extraction is not cheaply removable either. From
 this kernel alone the frontend cannot pass **~1.9× against OpenCV**.
 
+### D-39: the filter framework's 3× tax was genericity, and D-36 is restated
+
+[X-42](EXPERIMENTS.md) changed **three signatures** in `impl` — `addShifted`'s extents
+and shift, `weightedAxis`' tap count and weights and output width, and
+`requantizeWeighted`'s divisor via a new `divideByConstantT` — from runtime arguments
+to template parameters. `F` was **already** a template parameter, so every one of
+those values was a compile-time constant that the helpers were discarding at their own
+signatures. **No algorithm changed**, and `tests/test_pyramid.cpp` passes with the
+identical 262 322 checks, still exact against the per-pixel reference.
+
+| arm | [X-39](EXPERIMENTS.md) | **X-42** | speedup |
+|---|---|---|---|
+| hand-written `pyrDown` N=3 *(control)* | 93.7 | 93.8 | 1.00× |
+| **generic `BOX_2x2` N=3** | 277.8 | **111.9** | **2.48×** |
+| `BOX_3x3` N=3 | 398.0 | **228.0** | 1.75× |
+| `GAUSSIAN_3x3` N=3 | 497.7 | **225.7** | 2.21× |
+| **`GAUSSIAN_5x5` N=3** (anchor) | 2 352.9 | **549.8** | **4.28×** |
+
+**The generic route ran `BOX_2x2` at 2.96× the hand-written one; it now runs it at
+1.19×.** There was never a genericity/speed trade here to make — only a signature that
+threw the constants away.
+
+**THE STANDARD-LK ANCHOR IS AFFORDABLE, WHICH REVERSES
+[D-36](#d-36-box_2x2-stays-the-default-the-filter-set-ships-as-options)'s CENTRAL
+CLAIM.** Scaled by the level geometry against X-38's 11.198 ms and OpenCV's 16.324:
+
+| filter | D-36 recorded | **now** |
+|---|---|---|
+| `BOX_2x2` shipped | 11.169 ms, 1.48× | 11.198 ms, **1.46×** |
+| `BOX_3x3` | 11.968 ms, 1.38× | **11.550 ms, 1.41×** — **+0.35 ms, was +0.80** |
+| **`GAUSSIAN_5x5`** | **17.099 ms, 0.97× — SLOWER than OpenCV** | **12.395 ms, 1.32× FASTER** |
+
+D-36 said standard-LK accuracy *"costs more than it is worth here"* and would forfeit
+[D-35](#d-35-all-four-roadmap-success-criteria-are-met-on-the-deployment-target)'s
+criterion-4 result. **It would not.** The anchor costs **+1.20 ms** and leaves binCV
+**1.32× faster than OpenCV** — so binCV can have standard-LK pyramid accuracy *and*
+criterion 4, trading 0.14× of speed for 1.25 yield points. **`BOX_2x2` stays the
+default** on the footprint and speed grounds that have not changed, but the reason the
+anchor is not the default is now *"the default should be cheap"*, not *"the anchor is
+unaffordable"*.
+
+**`BOX_3x3` no longer dominates `GAUSSIAN_3x3` on cost.** D-36 recorded it as both
+cheaper and more accurate; it is now **228.0 against 225.7 µs, one percent the other
+way**. Still the one to prefer, on accuracy (−0.10 against −0.37) — but at **equal
+cost**, not at a 1.25× discount.
+
+**THE CAVEAT WAS LARGER THAN THE EFFECT BEING DECIDED.** X-39 mapped a design space on
+an **unoptimised framework**, named the tax as a caveat and registered E-22 — and two
+of its four conclusions do not survive the caveat being removed. **The registration is
+what saved it**: the number was flagged provisional at the time, so this is a
+correction and not a hidden error. The rule this project should keep is *measure the
+framework before mapping a design space on it, or say loudly that the map is
+provisional.*
+
+**Scope:** the shipped default calls the hand-written route, so **the effect on binCV
+as shipped is exactly zero.** What changed is the price of the options. The
+hand-written `pyrDown` is now a **deletion candidate** at 1.19% overhead over the
+generic route — a separate decision, registered as [E-25](#register), not taken here,
+because it is the route every prior result in this project was measured on.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -2754,7 +2822,8 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-23**~~ **RESOLVED — NEGATIVE** | `residualSums` is extraction-bound: 45.4% of the kernel is addressing with zero counting. How much of it is addressable? | [X-40](EXPERIMENTS.md) measured it with a floor arm; it was 13.7% at [D-29](#8-design-decisions) and grew because D-30, D-31, D-33 and X-35 made the counting ~3× faster and never touched it. | **Answered: almost none of it, by either obvious route.** [X-41](EXPERIMENTS.md) hoisted every loop-invariant — both `(w0, s)` descriptors, their branches, the `.row(y)` multiplies, the `interior` test — for **1.023×**; and fitting all ten planes in L1D together for **1.129×**. The 8× cache-line overfetch is real and is **not** the constraint. **The instruction stream is**: ~118 cycles per row for ~100 instructions. [D-38](#d-38-residualsums-extraction-is-instruction-bound--not-addressing-not-layout). | Whether the three copies of the extraction block collapse. **They should, but for maintenance — not for speed.** | D-37 | **Phase 5** (X-41) ✔ |
 | **E-24** | The twelve `alignedWord` extractions in a row share exactly **two** `(w0, s)` descriptors. Can twelve scalar load-shift-or sequences become about **three vector** ones? | [X-41](EXPERIMENTS.md) ruled out addressing (1.023×) and memory (1.129×) and left instruction count as the only lever. The descriptors being shared is what makes a vector extraction possible at all: one `vshlq` pair can serve four planes that differ only in which row they read. | **Bounded before it starts:** X-40 capped this kernel at **2.205×** even with counting free, so E-24 cannot take the frontend past **~1.9× against OpenCV**. Worth doing only if it is a large fraction of that. | Whether the aligned path vectorises its loads as well as its counts — and the three-copy duplication has to be paid down first, since this changes exactly that block. | D-38 | **Phase 5** |
 | **E-19** | Is the `1/2/2/2` ladder still the right operating point now that LK is 94.7% of the frontend and the ladder costs **2.30×**? | [D-23](#8-design-decisions) adopted it on ACCURACY — yield 88.7–99.3% against `1/1/1/1`'s 75.9–88.7% ([X-25](EXPERIMENTS.md)) — with its speed cost **estimated at 1.35×** from a confounded measurement, and chosen when corner detection was believed to be **52.7%** of the frontend rather than 2%. Isolated after [X-34](EXPERIMENTS.md) it is **2.30×**, and at `1/1/1/1` binCV is **1.34× slower than single-threaded SIMD OpenCV** against 3.08× at `1/2/2/2`. **This is the largest single speed lever left, larger than E-18.** The intermediate ladders were never measured for speed at all: `1/2/1/1` and `1/2/2/1` may buy most of the accuracy for a fraction of the cost, since the coarse levels track the same points through the same window and each N=2 level costs the same 4× regardless of how few pixels it has. | The shipped ladder, and whether the accuracy/speed trade belongs to the caller as `LKLevels` already lets it be. | D-23 | **Phase 5** |
-| **E-22** | How much of `pyrDownFilteredRoute`'s cost is GENERICITY rather than the filter? | [X-39](EXPERIMENTS.md) measured the generic route running `BOX_2x2` at **2.96×** the hand-written one **computing the same function**, so roughly three quarters of every filtered number is framework. `BOX_3x3`'s 4.25× is about **1.4× of filter and 3× of genericity**, and a hand-written `BOX_3x3` would plausibly land near 130 µs — **+0.15 ms on the frontend rather than +0.8**, which would change whether the accuracy/speed trade is worth offering at all. The suspects are the same ones [E-12](#register) named and then found not to matter for the derivative: the tap loop is runtime-bounded where the shipped route unrolls, and `weightedAxis` rebuilds a shifted operand per weight bit. | Whether `pyrDown` keeps two routes or the generic one replaces the hand-written default. | D-36's frontier, which is measured on an unoptimised framework | **Phase 5** |
+| ~~**E-22**~~ **RESOLVED** | How much of `pyrDownFilteredRoute`'s cost is genericity rather than filter? | [X-39](EXPERIMENTS.md) measured the generic route running `BOX_2x2` at **2.96×** the hand-written one **computing the same function**, so that tax rides on every filter in the set. | **Answered: nearly all of it, and it was never necessary.** [X-42](EXPERIMENTS.md) made three helper signatures take their already-`constexpr` values as template parameters instead of runtime arguments — **no algorithm change** — and the generic route went **2.96× → 1.19×**, `GAUSSIAN_5x5` **4.28× faster**. **This reverses D-36:** the standard-LK anchor now costs +1.20 ms and leaves binCV **1.32× FASTER** than OpenCV, where D-36 recorded 0.97× — slower. [D-39](#d-39-the-filter-frameworks-3-tax-was-genericity-and-d-36-is-restated). | Whether D-36's filter prices are real. **They were not.** | D-36 | **Phase 5** (X-42) ✔ |
+| **E-25** | The hand-written `pyrDown` is now only **1.19×** faster than the generic route computing the same function. Should it be deleted, leaving one implementation for all six filters? | [X-42](EXPERIMENTS.md) closed the gap from 2.96×. Two implementations of `BOX_2x2` is a standing correctness liability that `tests/test_pyramid.cpp` currently pays for by holding them to agreement. | **Not a free call.** The hand-written route is what **every prior result in this project was measured on**, including D-35's criterion-4 numbers, so deleting it re-bases the whole speed record by 1.19% — small, but it must be re-measured rather than assumed. Against that: one implementation, one place for the next optimisation, and the three structural costs (serial accumulation, materialised intermediate, worst-case widths) become worth attacking because they would then be on the shipped path. | Whether binCV ships one pyramid kernel or two. | D-39 | **Phase 5** |
 | ~~**E-21**~~ **RESOLVED** | What does the downsampling-filter axis look like? | binCV implemented one of six variants, so every accuracy result sat at one point of a two-dimensional space. | **Answered, and the axes are NOT independent.** `BOX_2x2` saturates at 3 bits (+0.82 yield points N=2→7) where `GAUSSIAN_5x5` gains +3.93 — **the filter decides how much depth is useful**. Standard-LK accuracy is reachable and **costs criterion 4**: `GAUSSIAN_5x5` is 25.10× the shipped route and would put binCV behind OpenCV. `BOX_3x3` recovers **65% of the gap for +0.8 ms** and dominates `GAUSSIAN_3x3`. `DIRECT_SUBSAMPLE` is −19.68 points, confirming the paper's ">2.5 cm worse". [D-36](#d-36-box_2x2-stays-the-default-the-filter-set-ships-as-options). | The pyramid's default filter. **`BOX_2x2` stays; the set ships as options.** | E-19 | **Phase 5** (X-39) ✔ |
 | ~~**E-20**~~ **RESOLVED — CRITERION 4 MET** | What is the WHOLE FRONTEND's speed against OpenCV on the reference device? | Every end-to-end reading had been taken on x86 where binCV runs scalar. | **Answered: binCV is 1.46× FASTER end to end** — 11.198 against 16.324 ms/frame over the FULL 1710-frame EuRoC sequence, OpenCV pinned to one thread — **while using 6.23× less memory**, with track lifetime one frame short of OpenCV's (11 vs 12) and per-frame survival 0.2 points short (96.4% vs 96.6%); the earlier EQUAL reading came from the easy 692-frame prefix, which still reproduces exactly. [X-38](EXPERIMENTS.md), [D-35](#d-35-all-four-roadmap-success-criteria-are-met-on-the-deployment-target). The profile also moved: build is now **25.8%** of the frontend, up from 4.5%, which is where [E-21](#register) lands. | Whether ROADMAP criterion 4 can be closed. **It is.** | — | **Phase 5** (X-38) ✔ |
 | **E-17** | Where does the tracker lose the factor of **2.5–3** between the representation's 0.10 px floor and its own 0.25–0.29 px? | [X-27](EXPERIMENTS.md) closed off the representation, and X-24/X-25 closed off three pyramid parameters, so this is what is left of T3.8's MISS — and it is now a located problem rather than a diffuse one. **The prime suspect is deviation (i)**: the previous window is anchored on the integer grid because a bit-plane derivative cannot be interpolated, which displaces the aperture by up to half a pixel. `ops/opticalFlow.hpp` already calls that "the concrete thing route (b) trades away", and half a pixel of aperture displacement is the right order of magnitude for a 2.5× gap on a sub-pixel measurement. Two other candidates are untested: the single linearization per iteration on binary content, and the asymmetry that `I` is read at integer positions while `J` is interpolated. | Whether deviation (i) is a trade worth reversing, and at what cost — reversing it needs an interpolatable previous-frame gradient, which is a representation change. | T3.8's standing accuracy MISS | **Phase 4** |
