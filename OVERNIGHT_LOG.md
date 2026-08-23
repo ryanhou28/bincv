@@ -615,3 +615,44 @@ depth for that filter.
 
 **The per-frame spread is ~7 points, six times the gap being measured.** No single
 frame could have decided this, which is exactly why the first table was wrong.
+
+---
+
+## 16 · E-18 answered — and answered negatively
+
+X-40 gave N = 2 the window-carried lane accumulators D-33 gave N = 1. Three of
+the four levels of the shipped ladder run at N = 2, so this was the depth doing
+most of the tracking.
+
+**Ceiling, the two shapes alone: 1.461×.** Band B → write the arm. Written,
+bit-exact, and the gate now proves it (`ResidualNeonMatchesScalar_{N1,N2,N3}`,
+728 windows per depth, **0 differ on aarch64**).
+
+**Delivered, in the real kernel:**
+
+| arm | µs | vs shipped |
+|---|---|---|
+| scalar (`UseNeon=false`) | 842.3 | 0.721× |
+| shipped NEON, reduce per call | 607.6 | 1.000× |
+| **X-40, reduce per window** | **568.5** | **1.069×** |
+| **extraction only, no counting** | **275.6** | **2.205×** |
+
+**The floor arm is the finding.** The per-row tap machinery with the counting
+**removed** is **45.4%** of the kernel. So if counting were *free*, the cap is
+**2.205×** — and E-18 was chartered on a remaining "2–3×". **That does not exist
+in the counting.**
+
+D-29 put tap extraction at **13.7%**. It is now **45.4%** — not because it got
+slower, but because D-30, D-31, D-33 and X-35 made the counting ~3× faster and
+never touched the addressing. **The same thing that happened to `pyrDown` in
+X-38 has happened inside `residualSums`.**
+
+**Two ceilings in a row have overstated the delivered result.** X-33: 3.42× →
+1.24×. X-40: 1.461× → 1.069×, and this ceiling was built deliberately close to
+the real shape. Even isolating the counting it gained only 1.133×, because *in
+situ* the accumulators compete for registers with the tap machinery. **A ceiling
+bounds the shape, not the kernel.**
+
+Frontend effect: **1.52× against OpenCV**, from 1.46× — under four percent, and
+quoted that way. E-18 resolved negative (D-37); successor **E-23** is the
+extraction, whose first task is collapsing the three copies of the block.

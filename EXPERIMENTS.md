@@ -7537,7 +7537,7 @@ reaching the Gaussian anchor rather than 65% of the way to it.
 
 ---
 
-### X-40 · E-18 — window-carried vector accumulators at N = 2 · `RULE ONLY`
+### X-40 · E-18 — window-carried vector accumulators at N = 2 · `DONE`
 
 **COMMITTED BEFORE THE ARM IS WRITTEN.** Ceiling before arm, as
 [X-33](#x-33--the-ceiling-for-batched-neon-popcounts--done) and
@@ -7593,6 +7593,89 @@ after.
 
 **Method:** `benchmark/windowaccum_ceiling.cpp`, reference device, via
 `scripts/run_on_pi.sh pi4`.
+
+**RESULT — BAND B, the arm was written, and the interesting number is not the one
+the rule was about.**
+
+**Ceiling, the two shapes alone** (20 windows, `benchmark/windowaccum_ceiling.cpp`):
+
+| arm | ns / 20 windows | vs A |
+|---|---|---|
+| A — shipped, reduce per call | 57 655.0 | 1.000× |
+| **B — proposed, reduce per window** | **39 458.4** | **1.461×** |
+
+All ten sums identical over 20 windows. **1.461× → Band B: write the arm, price the
+frontend effect as modest.** It was written as `impl::alignedResidualSumsNeon2`.
+
+**Delivered, in the real kernel** (130 windows of 31×31 on an N = 2 level,
+`benchmark/residual_n2.cpp`):
+
+| arm | µs | vs scalar | vs shipped |
+|---|---|---|---|
+| scalar (`UseNeon=false`) | 842.3 | 1.000× | 0.721× |
+| shipped NEON, reduce per call | 607.6 | 1.386× | 1.000× |
+| **X-40, reduce per window** | **568.5** | **1.482×** | **1.069×** |
+| **extraction only, no counting** | **275.6** | **3.057×** | **2.205×** |
+
+**1. THE CEILING OVERPROMISED AGAIN, AND BY ABOUT THE SAME FACTOR AS LAST TIME.**
+1.461× measured on the shapes, **1.069×** delivered. [X-33](#x-33--the-ceiling-for-batched-neon-popcounts--done)
+got 1.24× against a 3.42× ceiling. **Two ceilings in a row have overstated the
+delivered result**, and this one did so even after being built to be as close to the
+real shape as possible — same window layout, same per-row data, same loads in both
+arms. Isolating the counting does not rescue it either: the counting portion is
+607.6 − 275.6 = 332.0 µs shipped against 568.5 − 275.6 = 292.9 µs here, a **1.133×**
+on the part the reshaping actually touches. **In situ the accumulators compete for
+registers with the tap machinery**, and no ceiling that omits the tap machinery can
+see that. The lesson is not "stop measuring ceilings" — it is that a ceiling bounds
+the *shape*, not the *kernel*, and this project should stop reading it as the latter.
+
+**2. THE BINDING CONSTRAINT IS NO LONGER THE COUNTING. IT IS THE EXTRACTION, AND
+THAT IS NOW MEASURED RATHER THAN INFERRED.** The floor arm runs the entire per-row
+tap machinery — `alignedWord`, the interior test, the `t01 = t00 >> 1` identity, the
+masks — with the counting removed and the words XORed into a sink. It costs
+**275.6 µs, 45.4% of the shipped kernel**. So:
+
+- **If counting became FREE, the kernel would gain 2.205× and no more.**
+- E-18 was chartered on a remaining **"2–3×"**. That is not available from reshaping
+  counts: **2.205× is the whole budget**, and this reshaping collected 1.069× of it.
+- [D-29](ARCHITECTURE.md#8-design-decisions) measured tap extraction at **13.7%**.
+  It is now **45.4%** — not because extraction got slower, but because
+  [D-30](ARCHITECTURE.md), [D-31](ARCHITECTURE.md), [D-33](ARCHITECTURE.md) and
+  [X-35](#x-35--the-tap-machinery-two-identities-the-alignment-made-true--done) made
+  the counting roughly three times faster and left it alone. **The same thing that
+  happened to `pyrDown` in [X-38](#x-38--e-20--the-whole-frontend-against-opencv-on-the-deployment-target--done)
+  has now happened inside `residualSums`.**
+
+**3. THE FRONTEND EFFECT IS SMALL, AND IS QUOTED AS SUCH.** At 1.069× on N = 2 —
+levels 1–3 of the shipped ladder, roughly 6/7 of LK time by
+[X-34](#x-34--the-ladder-in-isolation--done)'s 2.30× ladder ratio — LK improves about
+**1.06×**, 7.815 → 7.374 ms, and the frontend 11.198 → **10.757 ms**, or **1.52×
+against OpenCV** from 1.46×. **Under four percent.** Worth keeping because it is
+exact, tested and free at runtime; not worth quoting as 1.5×.
+
+**4. A COST THIS ENTRY DECLARES RATHER THAN HIDES.** `alignedResidualSumsNeon2`
+duplicates the per-row tap-extraction block from `alignedResidualSums`, as
+`alignedResidualSumsNeon1` already did — so **the extraction code now exists in three
+copies, and extraction is exactly what the next optimisation must change.** That is a
+real tax on the work item this entry just identified, and it is named here so the
+next entry starts by paying it down rather than discovering it.
+
+**Decision:** the arm ships. **E-18 is resolved, and resolved NEGATIVELY on its own
+terms**: the 2–3× it was chartered on does not exist in the counting. Recorded as
+[D-37](ARCHITECTURE.md#8-design-decisions). The extraction question it uncovers is
+registered as [E-23](ARCHITECTURE.md#register).
+
+**Bit-exactness** is now enforced by the gate rather than asserted in a comment.
+`slicedSignedSum`, `alignedResidualSumsNeon1` and `alignedResidualSumsNeon2` all said
+"the scalar path is the equality oracle and `tests/test_opticalflow.cpp` compares
+them" — **and it did not.** The comparison existed only in `benchmark/residual_n1.cpp`,
+which nothing in `verify.sh` runs. `Flow.ResidualNeonMatchesScalar_{N1,N2,N3}` now
+sweeps 728 windows per depth across the borders and the interior with taps of both
+signs; on x86 it compares the scalar path with itself and says so, and
+`scripts/verify_arm.sh` gives it teeth. **0 of 728 differ at every depth on aarch64.**
+
+**Method:** `benchmark/windowaccum_ceiling.cpp` and `benchmark/residual_n2.cpp` via
+`scripts/run_on_pi.sh pi4`; `tests/test_opticalflow.cpp` for the equality oracle.
 
 ---
 

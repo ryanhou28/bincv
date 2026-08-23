@@ -890,6 +890,137 @@ inline void alignedResidualSumsNeon1(const LKLevelN<1, WordType>& lv,
     sumsY.t10 += lane(totY, oppY, 2); sumsY.t11 += lane(totY, oppY, 3);
     sumsY.self += selfTotY - 2 * selfOppY;
 }
+
+/// @brief The aligned residual at **N == 2**, batching across the FOUR TAPS with a
+///        SINGLE accumulator per component carried across the WHOLE WINDOW.
+///        **INTERNAL.**
+///
+/// ===========================================================================
+/// WHY THIS EXISTS SEPARATELY FROM BOTH OF THE OTHER TWO PATHS
+///
+/// `slicedSignedSum` batches the `N^2` PLANE PAIRS and reduces ONCE PER CALL:
+/// ten calls per row over 31 rows is **~310 register-domain crossings per window**.
+/// `alignedResidualSumsNeon1` fixed that at `N == 1` by putting the four TAPS in
+/// lanes and carrying the counts to the end of the window -- but at `N == 1` there
+/// is one plane pair, so it had nothing to fold.
+///
+/// **THREE OF THE FOUR LEVELS OF THE SHIPPED `1/2/2/2` LADDER RUN AT `N == 2`**
+/// (D-23), so the depth doing most of the tracking was still reducing per call.
+/// This puts the four taps in lanes AND folds the four plane pairs inside the row:
+///
+///     acc += diff(i, j) * 2^(i+j)          -- vmlaq_n_s32, one per pair
+///
+/// **That is exact, not approximate.** The weight is constant across rows, so
+/// `sum_rows sum_pairs w*d == sum_pairs w*sum_rows d`. `slicedSignedSum`'s scalar
+/// spelling remains the equality oracle and tests/test_opticalflow.cpp compares them.
+///
+/// ONE `int32x4_t` per component, so there is no spill: the obvious alternative --
+/// sixteen accumulators, one per `(tap, pair)` -- was rejected before measuring for
+/// that reason (X-40).
+///
+/// RANGE. Per lane and pair `diff` is in `[-32, 32]` at `uint32_t`; weighted by at
+/// most 4, over 4 pairs and 31 rows, `|acc| <= 15872`. `int32` holds it with three
+/// orders of magnitude to spare, and a wider window would have to grow 135-fold
+/// before that stopped being true.
+///
+/// `self` keeps the per-call shape, exactly as the `N == 1` path leaves it scalar:
+/// five taps do not fit four lanes, and a fifth lane would cost a second register
+/// pair for one fifth of the work.
+///
+/// Measured ceiling for this reshaping: **1.461x**, bit-exact (X-40).
+/// ===========================================================================
+template <typename WordType>
+inline void alignedResidualSumsNeon2(const LKLevelN<2, WordType>& lv,
+                                     const RegionWords<WordType>& r, long long tapX,
+                                     long long tapY, TapSums& sumsX, TapSums& sumsY) {
+    constexpr size_t N = 2;
+    const size_t width = r.x1 - r.x0;
+    const size_t words = minRowWords<WordType>(lv.prev[0].width);
+    const WordType mask = lowBitsMask<WordType>(width);
+    const long long x0 = static_cast<long long>(r.x0);
+    const bool tapIsShift = width < bitsPerWord<WordType>();
+    const long long srcX = x0 + tapX;
+    const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
+    const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
+
+    int32x4_t accX = vdupq_n_s32(0), accY = vdupq_n_s32(0);
+    long long selfX = 0, selfY = 0;
+
+    for (size_t y = r.y0; y < r.y1; ++y) {
+        WordType t00[N], t01[N], t10[N], t11[N], self[N], magX[N], magY[N];
+        const long long srcY = static_cast<long long>(y) + tapY;
+        const bool rowsInside = srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
+        const bool interior = colsInside && rowsInside;
+        for (size_t k = 0; k < N; ++k) {
+            if (interior) {
+                t00[k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY)), words,
+                                               static_cast<size_t>(srcX));
+                t10[k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY) + 1),
+                                               words, static_cast<size_t>(srcX));
+            } else {
+                t00[k] = displacedRow<WordType>(lv.next[k], srcY, srcX).word(0);
+                t10[k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX).word(0);
+            }
+            if (tapIsShift) {
+                t01[k] = static_cast<WordType>(t00[k] >> 1);
+                t11[k] = static_cast<WordType>(t10[k] >> 1);
+            } else {
+                t01[k] = displacedRow<WordType>(lv.next[k], srcY, srcX + 1).word(0);
+                t11[k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX + 1).word(0);
+            }
+            self[k] = alignedWord<WordType>(lv.prev[k].row(y), words, r.x0);
+            magX[k] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dxMag[k].row(y), words, r.x0) & mask);
+            magY[k] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dyMag[k].row(y), words, r.x0) & mask);
+        }
+        const WordType signX = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
+        const WordType signY = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
+
+        // The four taps' plane k, in lanes. Built once and used by both components.
+        const uint32_t p0[4] = {static_cast<uint32_t>(t00[0]), static_cast<uint32_t>(t01[0]),
+                                static_cast<uint32_t>(t10[0]), static_cast<uint32_t>(t11[0])};
+        const uint32_t p1[4] = {static_cast<uint32_t>(t00[1]), static_cast<uint32_t>(t01[1]),
+                                static_cast<uint32_t>(t10[1]), static_cast<uint32_t>(t11[1])};
+        const uint32x4_t vp0 = vld1q_u32(p0), vp1 = vld1q_u32(p1);
+
+        // One plane pair: count the four taps against magnitude plane j, subtract
+        // twice the opposing count, weight, and fold. No extraction.
+        const auto fold = [](int32x4_t acc, uint32x4_t vp, uint32_t m, uint32_t sg,
+                             int32_t w) {
+            const uint32x4_t b = vandq_u32(vp, vdupq_n_u32(m));
+            const uint32x4_t sv = vandq_u32(b, vdupq_n_u32(sg));
+            const uint32x4_t ct = vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(b))));
+            const uint32x4_t co = vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(sv))));
+            const int32x4_t d = vsubq_s32(vreinterpretq_s32_u32(ct),
+                                          vshlq_n_s32(vreinterpretq_s32_u32(co), 1));
+            return vmlaq_n_s32(acc, d, w);
+        };
+        const uint32_t sgX = static_cast<uint32_t>(signX), sgY = static_cast<uint32_t>(signY);
+        const uint32_t mx0 = static_cast<uint32_t>(magX[0]), mx1 = static_cast<uint32_t>(magX[1]);
+        const uint32_t my0 = static_cast<uint32_t>(magY[0]), my1 = static_cast<uint32_t>(magY[1]);
+        // weights 2^(i+j) for (i, j) = (0,0) (1,0) (0,1) (1,1)
+        accX = fold(accX, vp0, mx0, sgX, 1);
+        accX = fold(accX, vp1, mx0, sgX, 2);
+        accX = fold(accX, vp0, mx1, sgX, 2);
+        accX = fold(accX, vp1, mx1, sgX, 4);
+        accY = fold(accY, vp0, my0, sgY, 1);
+        accY = fold(accY, vp1, my0, sgY, 2);
+        accY = fold(accY, vp0, my1, sgY, 2);
+        accY = fold(accY, vp1, my1, sgY, 4);
+
+        selfX += slicedSignedSum<N, WordType, true>(magX, signX, self);
+        selfY += slicedSignedSum<N, WordType, true>(magY, signY, self);
+    }
+
+    // ONE domain crossing per component, not one per call.
+    sumsX.t00 += vgetq_lane_s32(accX, 0); sumsX.t01 += vgetq_lane_s32(accX, 1);
+    sumsX.t10 += vgetq_lane_s32(accX, 2); sumsX.t11 += vgetq_lane_s32(accX, 3);
+    sumsX.self += selfX;
+    sumsY.t00 += vgetq_lane_s32(accY, 0); sumsY.t01 += vgetq_lane_s32(accY, 1);
+    sumsY.t10 += vgetq_lane_s32(accY, 2); sumsY.t11 += vgetq_lane_s32(accY, 3);
+    sumsY.self += selfY;
+}
 #endif
 
 /// @brief `residualSums` for a region that fits in ONE word. **INTERNAL** -- see
@@ -1032,6 +1163,15 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
         if constexpr (UseNeon && N == 1 && sizeof(WordType) == 4) {
             alignedResidualSumsNeon1<WordType>(lv, r, tapX, tapY, sumsX, sumsY);
             return;
+        }
+        // N == 2 is levels 1-3 of the shipped ladder, and had the plane pairs in
+        // lanes but still reduced once per call. X-40 folds the pairs into a
+        // window-carried accumulator instead.
+        if constexpr (UseNeon && N == 2 && sizeof(WordType) == 4) {
+            if (r.x1 > r.x0) {
+                alignedResidualSumsNeon2<WordType>(lv, r, tapX, tapY, sumsX, sumsY);
+                return;
+            }
         }
 #endif
         alignedResidualSums<N, WordType, UseNeon>(lv, r, tapX, tapY, sumsX, sumsY);
