@@ -7803,6 +7803,84 @@ are checked for equality against the shipped extraction before anything is timed
 
 ---
 
+### X-42 · E-22 — is the filter framework's cost genericity, or structure? · `RULE ONLY`
+
+**COMMITTED BEFORE THE CHANGE IS WRITTEN**, and with
+[D-38](ARCHITECTURE.md#8-design-decisions)'s correction applied twice over: a rule
+must state not just its bands but **what each band implies**, because
+[X-41](#x-41--e-23--what-the-extraction-is-actually-spending--done)'s Band C
+pre-committed a successor on a prediction that turned out false.
+
+**Gates:** [E-22](ARCHITECTURE.md#register), and it re-prices
+[D-36](ARCHITECTURE.md#8-design-decisions).
+
+**Question.** [X-39](#x-39--the-pyramid-design-space-downsampling-filter--bit-depth--done)
+measured `impl::pyrDownFilteredRoute` running `BOX_2x2` at **2.96× the hand-written
+`pyrDown` computing the same function**. That factor is the tax on every filter in the
+set, so `BOX_3x3`'s 4.25× is roughly 1.4× of filter and 3× of framework. **Is that tax
+genericity, or is it structure?**
+
+**IT SHOULD NOT BE GENERICITY, AND THAT IS WHY THIS IS WORTH MEASURING.** `F` is
+already a **template parameter**; `filterTaps(F)` is `constexpr`, and `T`, `kTaps`,
+`hPlanes`, `vPlanes` are all compile-time constants in the route. **The helpers then
+throw that away at their own signatures:**
+
+| helper | discards | consequence |
+|---|---|---|
+| `weightedAxis(taps, tapCount, weights, out, outN)` | `tapCount`, `weights`, `outN` as runtime arguments | the weight-bit decomposition loops at runtime over compile-time values |
+| `requantizeWeighted(sum, kSum, out)` | `kSum` as a runtime `unsigned` | restoring division cannot fold `divisor << q` into literals, and `thresholdGE` cannot specialise |
+| `addShifted(acc, accN, v, vN, shift, tmp)` | `accN`, `vN`, `shift` | every add stages its operand through a 9-word `tmp` and ripples with a per-plane bounds test — and at `shift == 0` the "shifted operand" **is** the operand, so the copy is pure overhead |
+
+**The change is therefore a signature change, not an algorithm change**: make those
+parameters template parameters, and drop `tmp` by indexing directly. **It costs zero
+flexibility** — `F` was always compile-time — which is what distinguishes this from a
+genericity/speed trade. There isn't one to make.
+
+**Structural costs it CANNOT remove**, named in advance so they are not later
+mistaken for a failure of the change:
+
+1. **Serial accumulation instead of an adder tree.** `weightedAxis` folds taps one at
+   a time into a worst-case-width accumulator; `boxSum4` pairs them, `(a+b) + (c+d)`,
+   in 3N+1 stages.
+2. **A materialised intermediate.** The route runs horizontal-then-vertical through
+   `hRes`; `boxSum4` fuses both axes in one tree.
+3. **Worst-case plane widths** from `axisPlanes`, which a filter-specific kernel sizes
+   exactly.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.** Arms are the generic `BOX_2x2` route
+before and after, against the hand-written `pyrDown` as the control, all three exact
+against each other (`tests/test_pyramid.cpp` already proves the route exact against a
+per-pixel reference, and that test must still pass unchanged).
+
+- **Band A — generic route lands within 1.3× of hand-written.** The tax was
+  genericity. **Implication, stated now:** `BOX_3x3` re-prices from ~398 µs toward
+  ~130 µs, D-36's caller trade drops from **+0.8 ms to roughly +0.15 ms**, and the
+  hand-written `pyrDown` becomes a **candidate for deletion** — one implementation
+  covering all filters. That last consequence needs its own decision and is *not*
+  taken by this experiment.
+- **Band B — 1.3× to 2.0×.** Partial. Re-price D-36 with the measured number; keep
+  both implementations; record which of the three structural costs the residual is,
+  measured and not guessed.
+- **Band C — still above 2.0×.** The tax is **structural, not genericity**. Say so
+  plainly, leave the framework alone, and D-36's `BOX_3x3` estimate stands as measured
+  rather than being revised downward on a hope.
+- **Band D — slower after the change.** Constant-folding hurt, most likely through
+  code growth from full specialisation. That would be a fact about this compiler on
+  this target and must be reported as one, not generalised.
+
+**A limit declared in advance.** `pyrDown` is **25.1%** of the frontend
+([X-38](#x-38--e-20--the-whole-frontend-against-opencv-on-the-deployment-target--done)).
+This experiment changes the **generic** route, which the shipped default does **not**
+call — so **its effect on the shipped frontend is exactly zero.** What it buys is the
+price of the *options*, and therefore whether D-36's trade is worth what D-36 says it
+is. That is the whole claim, and it is not a speed claim about binCV as shipped.
+
+**Method:** `benchmark/pyrfilter_benchmark.cpp`, reference device via
+`scripts/run_on_pi.sh pi4`; `tests/test_pyramid.cpp` unchanged, as the exactness
+oracle.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
