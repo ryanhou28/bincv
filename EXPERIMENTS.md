@@ -8257,6 +8257,69 @@ windows; `interleave_layout`'s two extractions agree over 2 695 cases.
 
 ---
 
+### X-45 · `pyrDown` against `cv::pyrDown` across BIT WIDTH · `DONE`
+
+**A CHARACTERISATION, NOT A DECISION — and therefore deliberately without a
+pre-registered rule.** [CLAUDE.md](../CLAUDE.md) requires the rule before a
+*measurement that settles a choice*. Nothing is chosen here: this measures a property
+of the representation. It **informs** the open `pyrDown`-default question, and if that
+question is settled by numbers, its rule gets written separately and on top of these.
+
+**Question.** binCV's footprint claim obviously vanishes at 8 bits per pixel — both
+sides store a byte. **What happens to the SPEED claim?** Bit-slicing pays per bit of
+intermediate precision where SIMD pays a flat rate per vector, so the two should cross
+somewhere. **Where?**
+
+**Workload:** 640×480 → 320×240, reference device, `cv::pyrDown` pinned to one thread
+as the denominator ([CLAUDE.md](../CLAUDE.md): OpenCV doing the same semantic
+operation). `pyrDownFiltered<Gaussian5x5, 8, 8>` is **verified exact** against a
+per-pixel integer reference before being timed — it is the framework's widest point
+(12-plane horizontal accumulator, 16-plane vertical, divisor 256×255), so if anything
+overflowed it would overflow there. `tests/test_pyramid.cpp` now carries that case.
+
+| arm | µs | **vs `cv::pyrDown`** |
+|---|---|---|
+| **`cv::pyrDown`, 8U** (denominator) | **517.8** | **1.00×** |
+| binCV `BOX_2x2`, **1 → 3** *(shipped)* | **93.8** | **5.52× FASTER** |
+| binCV `GAUSSIAN_5x5`, **1 → 3** | 549.7 | 0.94× — **parity** |
+| binCV `BOX_2x2`, **8 → 8** | 2 614.3 | 0.20× — 5.0× slower |
+| **binCV `GAUSSIAN_5x5`, 8 → 8** *(cv::pyrDown's exact shape)* | **7 111.7** | **0.073× — 13.7× SLOWER** |
+
+**1. THE CROSSOVER IS BIT WIDTH, AND IT IS STEEP.** Same filter, same image, same
+device: **1 → 3 bits costs 549.7 µs and 8 → 8 costs 7 111.7 µs — 12.9×.** Bit width
+dominates filter choice by roughly five to one (filter alone, at fixed 8 → 8, is
+2.7×). This is the project's thesis stated as a single measurement: **binCV is 5.5×
+faster than OpenCV at the bit width it exists for, and 13.7× slower at OpenCV's.**
+
+**2. WHY, AND IT IS STRUCTURAL RATHER THAN AN OPTIMISATION GAP.** A bit-sliced
+weighted sum's cost scales with the *number of planes in the accumulator*, which
+`axisPlanes` puts at `bits(weightSum × (2^N − 1))` — 5 and 9 planes at N = 1, **12 and
+16 at N = 8**. SIMD pays the same price for an 8-bit lane as for a 1-bit one, because
+the lane is 8 bits wide either way. **Bit-slicing buys its advantage by not paying for
+bits it does not use, and at 8 bits there are none to skip.**
+
+**3. THE CONSEQUENCE FOR API COMPATIBILITY IS SHARP AND SHOULD NOT BE SOFTENED.** An
+`8 → 8` `cv::pyrDown`-compatible call has **no footprint advantage by construction**
+and is **13.7× slower**. It is worth shipping — an API that borrows a name should mean
+it — but it must be documented as **correct, not fast**, in the docstring and not only
+in this log. A user who benchmarks that configuration and concludes binCV is pointless
+would be reading it correctly.
+
+**4. AND AT binCV's OWN BIT WIDTHS, OPENCV's FILTER IS AFFORDABLE.** `GAUSSIAN_5x5` at
+1 → 3 is **0.94× of `cv::pyrDown`** — parity in time, at **⅜ the stored bits** and with
+[X-39](#x-39-sequence-arm--the-same-design-space-over-1710-frames--done)'s accuracy
+1.26 yield points above the shipped box. So *matching OpenCV's filter* costs binCV
+nothing against OpenCV; only *matching OpenCV's bit width* does. **Those two are
+routinely conflated and this entry separates them.**
+
+**Decision:** none — see the header. What it establishes is the price list the
+`pyrDown`-default question needs.
+
+**Method:** `benchmark/pyrfilter_benchmark.cpp` via `scripts/run_on_pi.sh pi4` with
+`BINCV_PI_OPENCV=1`; `tests/test_pyramid.cpp` for the 8 → 8 exactness case.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

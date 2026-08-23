@@ -20,6 +20,10 @@
 #include "bincv-cpp/ops/pyramid.hpp"
 #include "measure_util.hpp"
 
+#if defined(BINCV_WITH_OPENCV)
+#include <opencv2/opencv.hpp>
+#endif
+
 using W = uint32_t;
 using bincv::PyrDownFilter;
 
@@ -29,6 +33,20 @@ int main() {
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
             src.set(y, x, ((x * 7 + y * 13) % 29 == 0 || (x + y) % 37 == 0) ? 1u : 0u);
+
+    // The 8-bit source for the compatibility point: same content, 8 bpp.
+    bincv::QuantMat<8, W> src8(w, h), d8(320, 240);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            src8.set(y, x, static_cast<unsigned>((x * 7 + y * 13) % 256));
+
+#if defined(BINCV_WITH_OPENCV)
+    cv::Mat cvSrc8(h, w, CV_8U), cvDst8;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            cvSrc8.at<uchar>(y, x) = static_cast<uchar>((x * 7 + y * 13) % 256);
+    cv::setNumThreads(1);
+#endif
 
     bincv::QuantMat<3, W> d3(320, 240);
     bincv::QuantMat<2, W> d2(320, 240);
@@ -48,6 +66,22 @@ int main() {
              bincv::pyrDownFiltered<PyrDownFilter::Gaussian3x3, 3, 1, W>(src, d3); }},
         {"filtered GAUSSIAN_5x5            N=3", [&](int) {
              bincv::pyrDownFiltered<PyrDownFilter::Gaussian5x5, 3, 1, W>(src, d3); }},
+        // THE OPENCV-COMPATIBILITY POINT: 8 bits in, 8 bits out, cv::pyrDown's
+        // filter. Neither binCV claim applies here -- footprint is 8 bpp on both
+        // sides by construction, and this is the configuration where bit-slicing
+        // is at its worst, since the accumulators are 12 and 16 planes wide.
+        // Measured so the docs can state the cost rather than imply there is none.
+        {"filtered GAUSSIAN_5x5   8 -> 8  (cv::pyrDown shape)", [&](int) {
+             bincv::pyrDownFiltered<PyrDownFilter::Gaussian5x5, 8, 8, W>(src8, d8); }},
+        {"filtered BOX_2x2        8 -> 8", [&](int) {
+             bincv::pyrDownFiltered<PyrDownFilter::Box2x2, 8, 8, W>(src8, d8); }},
+#if defined(BINCV_WITH_OPENCV)
+        // THE DENOMINATOR (CLAUDE.md): OpenCV doing the same semantic operation on
+        // the same content. At 8 -> 8 this is literally the same function, so it is
+        // the only fair comparison for the compatibility point.
+        {"cv::pyrDown  8U 640x480 (the denominator)", [&](int) {
+             cv::pyrDown(cvSrc8, cvDst8); }},
+#endif
     };
     const auto t = measure::measureInterleaved(b, 7, 60.0);
     std::printf("  %-38s %10s %9s\n", "arm", "us", "vs shipped");

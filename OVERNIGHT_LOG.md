@@ -812,3 +812,33 @@ cannot settle its own question.
 by only **1.14×**, against D-37's 1.37×. It differed from the real thing only in
 where the memory lived. **A ceiling's accuracy tracks how few things it abstracts
 away** — better than "ceilings overstate".
+
+---
+
+## 21 · The thesis, as one measurement
+
+`pyrDown` against `cv::pyrDown`, 640×480 → 320×240, OpenCV pinned to one thread:
+
+| arm | µs | **vs `cv::pyrDown`** |
+|---|---|---|
+| **`cv::pyrDown`, 8U** (denominator) | **517.8** | **1.00×** |
+| binCV `BOX_2x2`, **1 → 3** *(shipped)* | **93.8** | **5.52× FASTER** |
+| binCV `GAUSSIAN_5x5`, **1 → 3** | 549.7 | 0.94× — **parity** |
+| binCV `BOX_2x2`, **8 → 8** | 2 614.3 | 5.0× slower |
+| **binCV `GAUSSIAN_5x5`, 8 → 8** | **7 111.7** | **13.7× SLOWER** |
+
+**The crossover is bit width, and it is steep.** Same filter, same image, same
+device: 1→3 bits is 549.7 µs, 8→8 is 7 111.7 — **12.9×**. Bit width dominates
+filter choice by ~5:1.
+
+**Why it's structural, not an optimisation gap.** A bit-sliced accumulator is
+`bits(weightSum × (2^N − 1))` planes wide — 5 and 9 at N=1, **12 and 16 at N=8**.
+SIMD pays the same for an 8-bit lane as a 1-bit one. **Bit-slicing buys its
+advantage by not paying for bits it doesn't use; at 8 bits there are none to skip.**
+
+**Two things routinely conflated, now separated:** matching OpenCV's *filter* costs
+binCV nothing (parity at 1→3, at ⅜ the bits and +1.26 yield points). Matching
+OpenCV's *bit width* costs 13.7×.
+
+The 8→8 path is **verified exact** — it's the framework's widest point (12/16-plane
+accumulators, divisor 256×255), so if anything overflowed it would be there.

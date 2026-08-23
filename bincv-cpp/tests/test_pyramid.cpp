@@ -1241,6 +1241,12 @@ BINCV_TEST(Pyramid, FilteredRoutesMatchAPerPixelReference_uint32_t) {
     bad += checkFilter<7,1>(bincv::PyrDownFilter::Gaussian5x5,"GAUSSIAN_5x5",-2,2,g5,16);
     bad += checkFilter<5,3>(bincv::PyrDownFilter::Gaussian5x5,"GAUSSIAN_5x5",-2,2,g5,16);
     bad += checkFilter<2,2>(bincv::PyrDownFilter::Box3x3,"BOX_3x3",-1,1,w3,3);
+    // 8 -> 8 GAUSSIAN_5x5 is cv::pyrDown's exact shape, and it is the widest point
+    // the framework has: axisPlanes puts the horizontal accumulator at 12 planes and
+    // the vertical at 16, with a divisor of 256*255. If anything in the framework
+    // overflows, it overflows here -- so the compatibility path is verified before
+    // it is quoted.
+    bad += checkFilter<8,8>(bincv::PyrDownFilter::Gaussian5x5,"GAUSSIAN_5x5",-2,2,g5,16);
     BINCV_CHECK_EQ(bad, size_t{0});
 }
 
