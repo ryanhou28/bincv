@@ -7679,6 +7679,68 @@ signs; on x86 it compares the scalar path with itself and says so, and
 
 ---
 
+### X-41 · E-23 — what the extraction is actually spending · `RULE ONLY`
+
+**COMMITTED BEFORE THE ARM IS WRITTEN.** Ceiling before arm — and this time with
+[D-37](ARCHITECTURE.md#8-design-decisions)'s correction applied: **the ceiling bounds
+the shape, not the kernel**, so the bands below are set on the *extraction floor arm*,
+which is the thing being changed, and the delivered kernel number is expected to be
+lower.
+
+**Gates:** [E-23](ARCHITECTURE.md#register).
+
+**Question.** [X-40](#x-40--e-18--window-carried-vector-accumulators-at-n--2--done)
+measured the per-row tap machinery at **275.6 µs, 45.4% of `residualSums`**, with
+zero counting in it. What is that 275.6 µs *made of*, and how much of it survives an
+attempt to remove it?
+
+**THE HYPOTHESIS, WRITTEN BEFORE MEASURING.** Almost everything `alignedWord` decides
+is **invariant across the whole window**, and the kernel decides it again every row:
+
+| quantity | recomputed | distinct values per window |
+|---|---|---|
+| `w0 = x / bits`, `s = x % bits`, `bits - s` | ~12× per row × 31 rows = **372×** | **2** — one for `r.x0`, one for `srcX` |
+| `s == 0` branch | per call | **2**, both loop-invariant |
+| `w0 + 1 < words` bounds test | per call | **2**, both loop-invariant |
+| `interior` (`colsInside && rowsInside`) | per row | `colsInside` invariant; `rowsInside` false only on the **first and last few rows** |
+| `.row(y)` → `data + y * stride` | 12 multiplies per row | consecutive rows differ by **one stride add** |
+
+So the arm is: hoist the two `(w0, s)` pairs and their branches out of the y-loop,
+carry **strided row pointers** instead of recomputing `.row(y)`, and **split the
+y-loop** into border/interior/border so the bulk pays no `interior` test at all.
+
+**Why the compiler may not already do this.** The row pointers come from *different
+objects* (`lv.next[k]`, `lv.prev[k]`, `lv.dxMag[k]`, `lv.dyMag[k]`, `lv.dxSign`), so
+hoisting the address arithmetic requires proving they do not alias — which nothing in
+the signature says. That is the part most likely to pay, and the part a ceiling can
+confirm cheaply before any of it is written.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.** Bands are on the **extraction arm**
+(hoisted vs the X-40 floor arm), both computing the same sink so equality is checked
+first:
+
+- **Band A — ≥ 1.6×:** write it into the kernel. At 45.4% of `residualSums` this is
+  worth ≥ 1.2× on the kernel even after D-37's delivery discount.
+- **Band B — 1.3× ≤ … < 1.6×:** write it **only as part of collapsing the three
+  copies**, never as a fourth. The refactor has to pay for itself.
+- **Band C — < 1.3×:** do not write it. **The extraction is loads, not addressing**,
+  and E-23's successor is a memory-layout question rather than an arithmetic one —
+  which would be a more valuable answer than a small speedup.
+- **Band D — hoisting is SLOWER:** the compiler was already doing it and the
+  three-copy duplication bought nothing. Say so, and drop the refactor's speed
+  justification while keeping its maintenance one.
+
+**A LIMIT DECLARED IN ADVANCE.** Even if extraction became **free**, X-40 measured the
+cap at **2.205×** on `residualSums`, which is about **1.55×** on LK and **1.29×** on
+the frontend — reaching **1.9× against OpenCV**. That is the *entire* remaining budget
+for this kernel, and no result from this experiment can exceed it. Stating it now
+means the number cannot be quietly inflated afterwards.
+
+**Method:** `benchmark/residual_n2.cpp`, a new hoisted arm beside the existing floor
+arm; reference device via `scripts/run_on_pi.sh pi4`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
