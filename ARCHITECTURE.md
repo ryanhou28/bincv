@@ -2555,19 +2555,26 @@ five of the reference's six `LKPyrDownFilterType` variants as bit-sliced kernels
 
 | filter | µs (640×480→320×240) | vs shipped | yield vs anchor | est. frontend |
 |---|---|---|---|---|
-| **`BOX_2x2` (default)** | **93.7** | 1.00× | −2.27 | **11.169 ms, 1.48× faster** |
-| `DIRECT_SUBSAMPLE` | 20.9 | 0.22× | −19.68 | 10.978 ms |
-| `BOX_3x3` | 398.0 | 4.25× | **−0.80** | 11.968 ms, 1.38× faster |
-| `GAUSSIAN_3x3` | 497.7 | 5.31× | −1.28 | *dominated by `BOX_3x3`* |
+| **`BOX_2x2` (default)** | **93.7** | 1.00× | −1.26 | **11.169 ms, 1.48× faster** |
+| `DIRECT_SUBSAMPLE` | 20.9 | 0.22× | −12.65 | 10.978 ms |
+| `BOX_3x3` | 398.0 | 4.25× | **−0.10** | 11.968 ms, 1.38× faster |
+| `GAUSSIAN_3x3` | 497.7 | 5.31× | −0.37 | *dominated by `BOX_3x3`* |
 | **`GAUSSIAN_5x5`** (anchor) | **2 352.9** | **25.10×** | 0.00 | **17.099 ms — SLOWER than OpenCV** |
 
+*(Yields are N=3 over the **full 1710-frame** sequence, 1.18 M eligible keypoint-cases
+per cell — X-39's sequence arm. The single-frame table this record first carried
+overstated every gap by 1.8× to 8× while getting the **ordering exactly right**; the
+speed column is unchanged.)*
+
 **THE TWO AXES ARE NOT INDEPENDENT, WHICH IS THE FINDING BENEATH THE TABLE.** A 2×2
-box sum of four values has five possible outcomes, so it **saturates at 3 bits** and
-gains only **+0.82** yield points from N=2 to N=7; a 5×5 Gaussian keeps paying and
-gains **+3.93**. **The filter decides how much depth is useful**, so
-[E-19](#register)'s ladder question was never separable from the filter it was asked
-about — and every bit-depth result in this project was measured at the filter that
-benefits least from depth.
+box sum of four values has five possible outcomes, so it **saturates immediately**:
+over the sequence it gains **+0.02** yield points across the whole N=2→7 axis, a flat
+line. A 5×5 Gaussian keeps paying and gains **+0.73**. **The filter decides how much
+depth is useful**, so [E-19](#register)'s ladder question was never separable from the
+filter it was asked about — and every bit-depth result in this project was measured at
+the filter that benefits least from depth. The corollary is a load-bearing one for the
+shipped configuration: **binCV's 2-bit levels give up essentially nothing under
+`BOX_2x2`**, so `1/2/2/2` is not a compromise, it is the right depth for that filter.
 
 **Standard-LK accuracy is reachable and costs more than it is worth here.**
 `GAUSSIAN_5x5` adds ~5.9 ms and puts binCV **behind** OpenCV, forfeiting
@@ -2575,9 +2582,13 @@ benefits least from depth.
 conclusion by a different route (SRAM), so the two agree on the choice while
 disagreeing on the binding constraint.
 
-**`BOX_3x3` is the point nobody had listed**: 65% of the gap to standard LK for
-+0.8 ms, still 1.38× faster than OpenCV — and it **dominates `GAUSSIAN_3x3`**, being
-both cheaper and more accurate.
+**`BOX_3x3` IS THE GAUSSIAN ANCHOR, FOR PRACTICAL PURPOSES**: **−0.10 points at
+1.18 M samples**, for +0.8 ms, still 1.38× faster than OpenCV — and it **dominates
+`GAUSSIAN_3x3`**, being both cheaper and more accurate at every depth from N=3 up.
+The single frame read this as closing 65% of the gap to standard LK; the sequence
+reads it as **92%**, at a **sixth** of the anchor's cost. **Standard-LK accuracy is
+available in a bit-sliced kernel** — that is a stronger claim than this record
+originally made, and it survives 1 900× more data than it was first measured on.
 
 **Three quarters of every filtered number is framework, not filter.** The generic
 route runs `BOX_2x2` at **2.96×** the hand-written one **computing the same
@@ -2585,14 +2596,22 @@ function**, so `BOX_3x3`'s 4.25× is roughly 1.4× of filter and 3× of generici
 The frontier is measured on a framework that has had no optimisation at all
 ([E-22](#register)).
 
-**`MEDIAN_3x3` is deliberately not implemented.** X-39 measured it **7.53 points
-below the box** and flat in `N`: a median of a mostly-zero neighbourhood returns
+**`MEDIAN_3x3` is deliberately not implemented.** X-39 measured it **5.07 points
+below the box** and *exactly* flat in `N`: a median of a mostly-zero neighbourhood returns
 zero, so it **erodes** a sparse edge map rather than blurring it. It is the right
 tool in the temporal denoiser, which is where SEAL uses it.
 
-**The `BOX_2x2`/`BOX_3x3` trade — 1.47 yield points for ~0.8 ms — is the caller's**,
+**The `BOX_2x2`/`BOX_3x3` trade — 1.16 yield points for ~0.8 ms — is the caller's**,
 as [D-24](#8-design-decisions) put route (a) and [D-32](#8-design-decisions) put
 `maxIterations`. binCV ships the default and the options, not a decision.
+
+**The per-frame spread is six times the gap, which is why this needed a sequence.**
+At N=3, per-frame yield runs p10 ≈ 89% / median ≈ 94.4% / p90 ≈ 98.4% for `BOX_2x2`
+and p10 ≈ 92% / median ≈ 95.5% / p90 ≈ 98.8% for `BOX_3x3`. The bands separate
+cleanly when whole samples are compared and **overlap almost entirely frame to
+frame** — so the ranking is a claim about the mean, and **no single frame could have
+established it.** Ten independent stride-10 shards reproduce every percentile of
+every arm to within 0.7 points.
 
 ## 9. Open Questions and Planned Experiments
 

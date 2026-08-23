@@ -7432,11 +7432,108 @@ preserves criterion 4, and **the accuracy/speed trade between `BOX_2x2` and
 `maxIterations` there. Recorded as [D-36](ARCHITECTURE.md#8-design-decisions).
 
 **Owed, and named rather than implied:** the frontend figures are **estimates** from
-a single-level measurement scaled by geometry, not a measured frontend run; the
-framework's 3× genericity is unexamined ([E-22](ARCHITECTURE.md#register)); and the
-full 1710-frame accuracy sweep still needs the dataset drive, which dropped
-mid-session.
+a single-level measurement scaled by geometry, not a measured frontend run; and the
+framework's 3× genericity is unexamined ([E-22](ARCHITECTURE.md#register)). *(The
+third item — the full-sequence accuracy sweep — is no longer owed; see immediately
+below.)*
 
+---
+
+### X-39, sequence arm · the same design space over 1710 frames · `DONE`
+
+**Question:** every accuracy number above came from **one image**, six warps and
+about 102 eligible keypoints per cell.
+[D-36](ARCHITECTURE.md#8-design-decisions) chose between `BOX_2x2` and `BOX_3x3` on a
+**1.47-point** difference measured at that sample size, which is not obviously larger
+than the frame-to-frame spread. **Does the ranking survive a sequence?**
+
+**Rule, written before the merge.** The ordering is what D-36 rests on, so:
+**(A)** ordering preserved and gaps of the same order → D-36 stands as written;
+**(B)** ordering preserved but gaps materially different → D-36's *decision* stands
+and its *numbers* are restated from the sequence; **(C)** ordering changes → D-36 is
+re-opened.
+
+**Workload:** EuRoC V1_02_medium, **all 1710 frames**, the same six warps and the
+same six filters as above, run as **10 stride-10 shards** merged by summation —
+yields are ratios and do not average. **1 180 133 eligible keypoint-cases per cell**,
+against 611 in the single-frame table: a **1 900× larger sample**. Accuracy is
+deterministic arithmetic, so this runs on the development machine; only speed needs
+the reference device.
+
+**Result — yield, 1710 frames.**
+
+| filter | N=2 | N=3 | N=5 | N=7 |
+|---|---|---|---|---|
+| `GAUSSIAN_5x5` (anchor) | 95.22% | **95.83%** | 95.95% | 95.95% |
+| `GAUSSIAN_3x3` | 95.39% | 95.46% | 95.61% | 95.58% |
+| **`BOX_3x3`** | 95.27% | **95.73%** | 95.69% | 95.69% |
+| `MEDIAN_3x3` | 90.76% | 90.76% | 90.76% | 90.76% |
+| **`BOX_2x2`** (shipped) | 94.49% | **94.58%** | 94.55% | 94.51% |
+| `DIRECT_SUBSAMPLE` | 83.18% | 83.18% | 83.18% | 83.18% |
+
+**Yield relative to the anchor — one frame against 1710, at N=3:**
+
+| filter | single frame | **1710 frames** | |
+|---|---|---|---|
+| `GAUSSIAN_3x3` | −1.28 | **−0.37** | gap shrinks 3.5× |
+| **`BOX_3x3`** | −0.80 | **−0.10** | gap shrinks 8× |
+| `MEDIAN_3x3` | −7.53 | **−5.07** | |
+| **`BOX_2x2`** (shipped) | −2.27 | **−1.26** | gap shrinks 1.8× |
+| `DIRECT_SUBSAMPLE` | −19.68 | **−12.65** | |
+
+**Conclusion — BAND B: the ordering is exactly preserved, every gap is smaller, and
+one of them collapses.**
+
+1. **THE SINGLE FRAME OVERSTATED EVERY DIFFERENCE, BY 1.8× TO 8×.** Not one arm
+   changed rank — the ordering `GAUSSIAN_5x5 > BOX_3x3 > GAUSSIAN_3x3 > BOX_2x2 >
+   MEDIAN_3x3 > DIRECT_SUBSAMPLE` is reproduced at N=3, N=5 and N=7 — but the whole
+   table compresses toward the anchor. **This is the ordinary failure mode of a
+   design-space table read off one image**, and it is worth recording that the
+   *decision* survived it while the *numbers* did not.
+2. **`BOX_3x3` IS THE GAUSSIAN ANCHOR, FOR PRACTICAL PURPOSES.** −0.10 points at
+   1.18 M samples. X-39 read it as closing 65% of the gap to standard LK; over the
+   sequence it closes **92%**, at **4.25×** the filter cost rather than **25.10×**.
+   The strongest claim this project can now make about its pyramid is that
+   **standard-LK accuracy is available in a bit-sliced kernel at a sixth of the
+   anchor's cost** — and that is a *stronger* result than the entry above reported.
+3. **`BOX_2x2`'s DEFICIT IS HALF WHAT WAS THOUGHT: 1.26 points, not 2.27.** D-36
+   priced the `BOX_2x2` → `BOX_3x3` upgrade at 1.47 yield points for ~0.8 ms; the
+   sequence prices it at **1.16** for the same 0.8 ms. **The decision does not move —
+   it moves slightly in the default's favour** — but the number a caller weighs does,
+   so D-36 is restated rather than left standing on the single frame.
+4. **`GAUSSIAN_3x3` IS DOMINATED MORE CLEANLY THAN BEFORE.** It is below `BOX_3x3` at
+   every depth from N=3 up *and* costs 1.25× more (497.7 vs 398.0 µs). One image
+   suggested it; 1710 confirm it. It stays in the option set because it is what a
+   caller asking for "a Gaussian" will reach for, and being told it is dominated is
+   more useful than not offering it.
+5. **BIT DEPTH IS SETTLED AT N=3 AND FLAT FOR THE SHIPPED FILTER.** The anchor gains
+   0.61 points from N=2→3, **0.12** from 3→5 and **0.00** from 5→7. `BOX_2x2` is flat
+   across the whole axis (94.49 / 94.58 / 94.55 / 94.51, a 0.09-point band) —
+   **binCV's shipped 2-bit levels lose nothing**, which the single frame could not
+   have established. SEAL §4.2.2's 3 bits for Box 2×2 and this measurement agree.
+   `MEDIAN_3x3` and `DIRECT_SUBSAMPLE` are exactly flat in N, as they must be: a
+   median or a sample of 1-bit values is a 1-bit value, so the extra planes carry
+   nothing. **That exactness is a self-check on the harness**, not a finding.
+6. **NO SINGLE FRAME COULD HAVE DECIDED THIS, AND THE SPREAD SAYS SO.** Per-frame
+   yield at N=3 runs p10 88.7–89.5 / median 94.1–94.6 / p90 98.3–98.6 for `BOX_2x2`
+   against 91.4–92.3 / 95.2–95.7 / 98.7–98.8 for `BOX_3x3` (ranges across the 10
+   shards). **The percentile bands separate cleanly across shards and overlap almost
+   entirely within one** — the frame-to-frame spread is ~7 points wide, six times the
+   1.16-point gap being measured. The ranking is a claim about the mean, and it takes
+   a sequence to make it.
+7. **The ten shards are a free replication.** Each is an independent stride-10 sample
+   of 171 frames and they reproduce every percentile of every arm to within 0.7
+   points. Nothing here rests on one draw.
+
+**Decision: BAND B — [D-36](ARCHITECTURE.md#8-design-decisions) stands, restated on
+the sequence.** `BOX_2x2` remains the default; the option set ships; the trade a
+caller weighs is **1.16 yield points for ~0.8 ms**, and `BOX_3x3` is now reported as
+reaching the Gaussian anchor rather than 65% of the way to it.
+
+**Method:** `tests/test_opticalflow.cpp`,
+`Flow.X39_PyramidFilterDesignSpaceSequence_uint32_t`, gated on `BINCV_X39_FRAMES` so
+`verify.sh` stays hermetic and independent of a dataset outside the repository;
+`BINCV_X39_SHARD=i/10` for the shards.
 
 ---
 

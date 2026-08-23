@@ -561,3 +561,57 @@ is measured on a framework with no optimisation at all (E-22).
 
 `BOX_2x2` stays the default; the set ships as options, and the `BOX_2x2`/`BOX_3x3`
 trade is the caller's. D-36.
+
+---
+
+## 15 · The drive comes back — and takes a claim with it
+
+Two things were owed on the dataset. Both are now measured, and **each moved a
+number this project had already written down.**
+
+### X-38, full 1710 frames: criterion 2's *parity* is withdrawn
+
+| over | lifetime | survival | flow median | p99 | <1 px |
+|---|---|---|---|---|---|
+| 692 prefix, first run (`0cde718`) | 13 vs 13 | 97.1 / 97.1 | 0.0386 | 14.478 | 97.4% |
+| **692 prefix, control (`82daca6`)** | **13 vs 13** | **97.1 / 97.1** | **0.0386** | **14.478** | **97.4%** |
+| **full 1710** | **11 vs 12** | **96.4 / 96.6** | **0.0434** | **22.494** | **95.4%** |
+
+The control reproduces the prefix **exactly**, so nothing regressed — the extra
+1018 frames are harder and **both** frontends degrade (OpenCV's own lifetime drops
+13 → 12). binCV degrades slightly more: backing the prefix out puts the tail near
+**95.9% vs 96.3%** survival, a 0.34-point gap where the prefix had none.
+
+**"Equal" was an artifact of an easy prefix.** It was this project's own claim, in
+ROADMAP's banner and D-35's table, so the withdrawal is recorded where the claim
+was made. Criterion 2 still holds; **parity is no longer asserted.**
+
+Criteria 3 and 4 are unchanged — 6.23× smaller, **1.46× faster**. binCV lands at
+11.169 / 11.195 / 11.198 ms across three runs (0.26% spread) while OpenCV moves
+±2.3%, so **the ratio's movement is OpenCV's variance, not binCV's.**
+
+### X-39, sequence arm: the single frame overstated everything by 1.8×–8×
+
+1710 frames, **1.18 M eligible keypoint-cases per cell** against 611 — a 1900×
+larger sample. Yield vs the Gaussian anchor at N=3:
+
+| filter | one frame | **1710 frames** |
+|---|---|---|
+| `GAUSSIAN_3x3` | −1.28 | **−0.37** |
+| **`BOX_3x3`** | −0.80 | **−0.10** |
+| `MEDIAN_3x3` | −7.53 | −5.07 |
+| **`BOX_2x2`** (shipped) | −2.27 | **−1.26** |
+| `DIRECT_SUBSAMPLE` | −19.68 | −12.65 |
+
+**Not one arm changed rank** — the decision survived; the numbers did not. Band B.
+
+**`BOX_3x3` IS the Gaussian anchor**, −0.10 points at 1.18 M samples: standard-LK
+accuracy in a bit-sliced kernel at a **sixth** of the anchor's cost. That is a
+*stronger* result than D-36 first recorded.
+
+**binCV's 2-bit levels give up nothing**: `BOX_2x2` is flat across N=2→7 (+0.02),
+while the Gaussian gains +0.73. `1/2/2/2` is not a compromise — it is the right
+depth for that filter.
+
+**The per-frame spread is ~7 points, six times the gap being measured.** No single
+frame could have decided this, which is exactly why the first table was wrong.
