@@ -8387,6 +8387,71 @@ key on `N == 8`.
 
 ---
 
+### X-47 · Interop or specialisation above the crossover? · `RULE ONLY`
+
+**COMMITTED BEFORE THE CONVERSION EXISTS.** Unlike
+[X-45](#x-45--pyrdown-against-cvpyrdown-across-bit-width--done) and
+[X-46](#x-46--where-does-bit-slicing-stop-paying--done), this one **settles a
+choice**, so it gets a rule first.
+
+**Gates:** the wide-`N` question X-46 priced. binCV's operations are 2.5–14× slower
+than OpenCV above the (filter-dependent) crossover. The proposal on the table was to
+**specialise** wide-`N` cases internally to a byte representation; the counter-proposal
+is **interop** — make `QuantMat<N>` ↔ `cv::Mat` conversion first-class, and let callers
+hand wide intermediates to OpenCV, which already exists and is already optimal at
+8 bits. Specialising internally would mean a second storage layout and a second
+implementation of every kernel — OpenCV rebuilt inside binCV — so it has to beat
+interop by a margin that pays for that, not merely tie it.
+
+**What gets built first (and is the experiment's subject):** `fromCVMat` / `toCVMat` /
+`toCVMatNormalized` on the general `QuantMat<N>`, today `QuantMat<1>`-only. The
+conversion is **transpose-based, not per-pixel** — an 8×8 bit-matrix transpose
+(three delta-swaps) moves 8 pixels × 8 planes per step. This is deliberate and is
+[X-42](#x-42--e-22--is-the-filter-frameworks-cost-genericity-or-structure--done)'s
+lesson applied in advance: measuring the round trip through a naive per-pixel
+conversion would price the *strawman*, and the caveat would exceed the effect.
+The transpose's orientation and the quantise/dequantise round-trip law
+(`round(round(v·255/maxV)·maxV/255) == v`, exact for every `v` at every `N`, no ties
+because 255 and `2^N−1` are odd) are **verified numerically before the C++ exists**.
+
+**Semantics, fixed before measuring.** `toCVMat` = raw values 0..`MaxValue` (exact,
+one-way at `N < 8`); `toCVMatNormalized` = `round(v·255/maxV)` (the OpenCV bridge);
+`fromCVMat` = `round(v·maxV/255)` (its exact inverse). **The `QuantMat<1>`
+specialisation keeps its established nonzero-threshold `fromCVMat`** — the two
+disagree for bytes 1..127 at N = 1, recorded as a deliberate difference, not
+unified retroactively.
+
+**Measurement:** reference device, one arm per process (X-46's method note), OpenCV
+at one thread. `R` = the 8→8 round trip `toCVMatNormalized` → `cv::pyrDown` →
+`fromCVMat`, against `B` = native `pyrDownFiltered<Gaussian5x5, 8, 8>` = **7 094 µs**
+(X-46) and the floor `cv::pyrDown` ≈ 505 µs. Conversion is also timed per direction at
+N = 8 and N = 3, because that per-frame tax `T` is what generalises: **any operation's
+interop decision is `native_binCV − native_OpenCV` against `T`**, which is the
+"per-operation crossover" published as a formula instead of a table.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.**
+
+- **Band A — R ≤ B/2 (≤ ~3 550 µs):** **interop is the answer.** No internal wide-`N`
+  specialisation, ever, on this evidence; the conversion ships as the documented
+  pattern for wide intermediates. D-record.
+- **Band B — B/2 < R < B:** interop wins but by under 2×. Still no specialisation —
+  a parallel byte implementation of the library cannot be justified by less than 2× —
+  but the thin margin is stated, and a NEON transpose is named as the follow-up if a
+  real pipeline needs more.
+- **Band C — R ≥ B:** the conversion is too expensive and the interop recommendation
+  was wrong as offered. **Contingency named now:** first check whether the conversion
+  dominates `R` and whether a vector transpose plausibly moves the band — the
+  conversion is new code and X-42 showed new-framework numbers can carry a 3×
+  removable tax. Only if that fails does specialisation come back on the table.
+
+**Method:** `QuantMat<N>` conversions in `quantMat.hpp` (OpenCV-guarded); exactness
+tests in `tests/test_opencv_interop.cpp` — transpose vs per-pixel reference, the
+round-trip law at every `N`, padding-bit invariant after `fromCVMat`;
+`benchmark/interop_roundtrip.cpp` via `scripts/run_on_pi.sh pi4` with
+`BINCV_PI_OPENCV=1`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
