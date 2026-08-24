@@ -879,3 +879,36 @@ Exactness verified before timing: the transpose orientation and round-trip law w
 checked numerically *before the C++ existed*; the tests then hold the code to them at
 N ∈ {2,3,5,7,8} across four word types, plus the padding-bit invariant and all 256
 byte values.
+
+---
+
+## 23 · The review caught me repeating X-44's error
+
+An adversarial review of the X-47 work confirmed **ten findings**, including a real
+code bug and — worst of the lot — that **X-47's rule was written on speed alone,
+which is the exact defect X-44 reported in its own rule one experiment earlier.**
+
+**Corrections now in the record, not folded away:**
+
+| | |
+|---|---|
+| **Footprint** | interop **844 800 B** vs native **384 000 B** — **2.20×**, 81% of L2 vs 37%. The interop path materialises a byte-per-pixel frame, which is what binCV exists to avoid. Doesn't reverse Band A (at 8 bits there is no footprint advantage to protect, and the buffers are transient) — **but that is an argument the rule should have made in advance.** |
+| **Ordering** | `specialisation (516 µs) < interop (1 906) < native (7 093)`. **A specialisation would be FASTER.** The reason not to build one is the pre-registered cost model, not the clock. The first table let interop look like the speed winner; it isn't. |
+| **Agreement** | R and B differ on **1 114 of 76 800 pixels, ZERO interior**, max |Δ| 73/255 — exactly the `BORDER_REFLECT_101` vs zero-fill rim. `measure_util`'s hazard 4 requires this check; the benchmark didn't have one. |
+| **Spread** | every median now carries it — all arms under **1%**. Hazard 3; the first version printed medians alone to 0.1 µs. |
+| **The tax `T`** | "≈1.4 ms" had **no arm behind it** — it mixed a 640×480 export with a 320×240 import that was only ever hidden inside R. Both now measured; a size-preserving 640×480 op pays **2 569 µs**, not 1.4 ms — 1.8× under-counted. |
+| **Causal claim** | "`fromCVMat` is 1.7× slower *because* it allocates" — **withdrawn**, not separable by this design. |
+
+**And a real bug.** `fromCVMat` read `empty() ? DefaultRowAlignment : getRowAlignment()`,
+silently downgrading an opt-in row alignment. The guard was redundant, and the trigger
+was **buffer reuse** — a moved-from matrix is empty but keeps its alignment, so
+`dst = std::move(src); src.fromCVMat(f);` rebuilt at word granularity and dropped a
+Tier 2 / DMA stride. No test saw it: every destination in the suite was
+default-aligned. Fixed; the regression test **fails on the old code and passes on the
+new**, verified by reverting.
+
+Also fixed: three missing API-tier statements (a CLAUDE.md hard rule), the stale
+"differs in exactly two observable ways" docstring (it is three now), an
+"exact inverse" claim that asserted the false direction, an undocumented
+allocate-and-detach, a vacuous half of the padding check, and an untested
+empty-matrix branch.

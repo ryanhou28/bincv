@@ -433,9 +433,17 @@ void quantConvertOne(int w, int h) {
     BINCV_CHECK_EQ(badRaw, static_cast<size_t>(0));
     BINCV_CHECK_EQ(badNorm, static_cast<size_t>(0));
 
-    // 2. The exact round trip.
-    bincv::QuantMat<N, WordType> back;
+    // 2. The exact round trip. `back` carries a NON-DEFAULT row alignment, which
+    //    does double duty: it is the only way the padding check below sees any
+    //    alignment words past the used ones (with a default-aligned destination
+    //    that half of the check is vacuous), and it is what catches a fromCVMat
+    //    that rebuilds at word granularity instead of preserving the caller's
+    //    stride. An `empty() ? DefaultRowAlignment : getRowAlignment()` guard in
+    //    fromCVMat did exactly that, and no test saw it.
+    bincv::QuantMat<N, WordType> back(0, 0, 64);
+    BINCV_CHECK_EQ(back.getRowAlignment(), static_cast<size_t>(64));
     back.fromCVMat(norm);
+    BINCV_CHECK_EQ(back.getRowAlignment(), static_cast<size_t>(64));
     BINCV_CHECK_EQ(back.cols(), w);
     BINCV_CHECK_EQ(back.rows(), h);
     size_t badTrip = 0;
@@ -459,6 +467,15 @@ void quantConvertOne(int w, int h) {
         }
     }
     BINCV_CHECK_EQ(badPad, static_cast<size_t>(0));
+
+    // 4. Empty in, empty out -- the branch both exports carry and which no test
+    //    reached before.
+    bincv::QuantMat<N, WordType> none;
+    cv::Mat emptyOut(3, 3, CV_8U);
+    none.toCVMat(emptyOut);
+    BINCV_CHECK(emptyOut.empty());
+    none.toCVMatNormalized(emptyOut);
+    BINCV_CHECK(emptyOut.empty());
 }
 
 void testQuantMatConversions() {
@@ -507,12 +524,47 @@ void testQuantMatFromCVMatQuantizes() {
     std::cout << "  fromCVMat quantizes all 256 byte values correctly; N=8 is the identity\n";
 }
 
+void testQuantMatAlignmentSurvivesReuse() {
+    // THE REALISTIC TRIGGER for the alignment bug, which is buffer reuse rather
+    // than the degenerate constructor: a moved-from matrix is empty but keeps its
+    // alignment, so a fromCVMat that consulted empty() rebuilt it at word
+    // granularity and silently dropped an opt-in Tier 2 / DMA stride.
+    cv::Mat m(4, 100, CV_8U);
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 100; ++x) m.at<uint8_t>(y, x) = static_cast<uint8_t>(x);
+
+    bincv::QuantMat<4, uint32_t> src(100, 4, 64);
+    const size_t wantAlign = src.getRowAlignment();
+    const size_t wantStride = src.getAlignedWidth();
+    BINCV_CHECK_EQ(wantAlign, static_cast<size_t>(64));
+
+    bincv::QuantMat<4, uint32_t> moved = std::move(src);
+    BINCV_CHECK(src.empty());
+    BINCV_CHECK_EQ(src.getRowAlignment(), wantAlign);
+    src.fromCVMat(m);
+    BINCV_CHECK_EQ(src.getRowAlignment(), wantAlign);
+    BINCV_CHECK_EQ(src.getAlignedWidth(), wantStride);
+
+    // And the values still land correctly at the wider stride.
+    size_t bad = 0;
+    for (int x = 0; x < 100; ++x)
+        if (src.at(0, x) != (static_cast<unsigned>(x) * 15u + 127u) / 255u) ++bad;
+    BINCV_CHECK_EQ(bad, static_cast<size_t>(0));
+    std::cout << "  fromCVMat preserves an opt-in row alignment across buffer reuse\n";
+}
+
 void testQuantMatConversionErrors() {
     bincv::QuantMat<4, uint32_t> q;
     BINCV_CHECK_THROWS(q.fromCVMat(cv::Mat()), std::invalid_argument);
     cv::Mat wrongType(4, 4, CV_32F);
     BINCV_CHECK_THROWS(q.fromCVMat(wrongType), std::invalid_argument);
-    // A failed fromCVMat must leave the matrix untouched (commit-last).
+    // A rejected fromCVMat leaves the matrix untouched. NOTE WHAT THIS DOES AND
+    // DOES NOT COVER: the throw comes from the CV_8UC1 type check, BEFORE any
+    // allocation, so this exercises argument validation rather than the
+    // commit-last property proper. Commit-last is about a FAILED ALLOCATION
+    // mid-conversion, which needs an injected bad_alloc -- see
+    // testFromCVMatAllocationFailure for the N == 1 shape of that test. Claiming
+    // this case proved commit-last would be claiming coverage that is not here.
     bincv::QuantMat<4, uint32_t> keep(5, 5);
     keep.set(2, 2, 9u);
     BINCV_CHECK_THROWS(keep.fromCVMat(wrongType), std::invalid_argument);
@@ -530,5 +582,6 @@ BINCV_TEST(OpenCVInterop, RealFrameCorners)          { testRealFrameCorners(); }
 BINCV_TEST(OpenCVInterop, QuantMatConversions)       { testQuantMatConversions(); }
 BINCV_TEST(OpenCVInterop, QuantMatQuantizeLaw)       { testQuantMatFromCVMatQuantizes(); }
 BINCV_TEST(OpenCVInterop, QuantMatConversionErrors)  { testQuantMatConversionErrors(); }
+BINCV_TEST(OpenCVInterop, QuantMatAlignmentReuse)    { testQuantMatAlignmentSurvivesReuse(); }
 
 BINCV_TEST_MAIN("BinMat OpenCV interop tests")

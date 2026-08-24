@@ -8450,58 +8450,118 @@ round-trip law at every `N`, padding-bit invariant after `fromCVMat`;
 `benchmark/interop_roundtrip.cpp` via `scripts/run_on_pi.sh pi4` with
 `BINCV_PI_OPENCV=1`.
 
-**RESULT — BAND A, BY A FACTOR THAT LEAVES NO ROOM FOR ARGUMENT.**
+**RESULT — BAND A, but the entry that first recorded it had SIX DEFECTS an
+adversarial review caught, and the corrections are below rather than folded away.**
 
-Reference device, one arm per process, OpenCV at one thread, sticky-throttle bits
-unchanged across the run:
+Reference device, one arm per process, OpenCV at one thread, throttle bits unchanged
+across the run. **Spread across repeat batches is reported next to every median** —
+`measure_util.hpp`'s own hazard 3, which the first version of this benchmark violated
+by printing medians alone to 0.1 µs:
 
-| arm | µs | |
+| arm | µs (median) | spread |
 |---|---|---|
-| `toCVMatNormalized`, N=8, 640×480 | 953.5 | the export tax |
-| `fromCVMat`, N=8, 640×480 | 1 619.3 | the import tax (includes its allocation, by API contract) |
-| **R — round trip `to` → `cv::pyrDown` → `from`** | **1 901.5** | **the number the bands are on** |
-| **B — native `GAUSSIAN_5x5` 8→8** | **7 101.8** | reproduces X-46's 7 093.6 |
-| `cv::pyrDown` alone (floor) | 514.2 | |
-| `toCVMatNormalized`, N=3 | 748.2 | |
-| `fromCVMat`, N=3 | 877.1 | |
+| `toCVMatNormalized`, N=8, 640×480 | 952.6 | 0.2% |
+| `fromCVMat`, N=8, 640×480 | 1 616.6 | 0.8% |
+| **`fromCVMat`, N=8, 320×240** | **389.3** | 0.2% |
+| **R — round trip `to` → `cv::pyrDown` → `from`** | **1 906.2** | 0.7% |
+| **B — native `GAUSSIAN_5x5` 8→8** | **7 092.8** | 0.9% |
+| `cv::pyrDown` alone (floor) | 516.1 | 0.2% |
+| `toCVMatNormalized`, N=3, 640×480 | 748.1 | 0.1% |
+| `fromCVMat`, N=3, 640×480 | 875.3 | 0.3% |
 
-**R = 1 901.5 ≤ B/2 = 3 550.9 — Band A fires with R at 0.27·B.** The round trip —
-convert out, run OpenCV, convert back — is **3.7× faster than binCV's own bit-sliced
-path** at the configuration where binCV is weakest. It is even cheaper than the
-*box* at 8→8 (X-46: 2 616 µs), while computing the more accurate Gaussian.
+**R = 1 906.2 ≤ B/2 = 3 546.4 — Band A, at 0.27·B.** All spreads under 1%, so every
+gap here is far outside the noise.
 
-**1. INTEROP IS THE ANSWER ABOVE THE CROSSOVER, AND SPECIALISATION IS CLOSED.** An
-internal byte-representation specialisation would need to beat 1 901.5 µs *and* pay
-for a second storage layout plus a second implementation of every kernel. Its
-theoretical best — matching OpenCV exactly — saves at most the ~1.4 ms conversion
-tax, once, per operation *chain* (intermediate chains pay the tax only at the ends;
-consecutive OpenCV-side operations pay nothing between them). **The margin cannot
-fund the machinery.**
+**1. THE ROUND TRIP IS 3.7× FASTER THAN binCV's OWN PATH — AND 3.7× SLOWER THAN A
+SPECIALISATION'S CEILING. BOTH HALVES MATTER.** The floor arm is the ceiling any
+internal byte specialisation could reach: **516.1 µs**. So the honest ordering is
+`specialisation (516) < interop (1 906) < native bit-sliced (7 093)`. **A
+specialisation would be faster, and the reason not to build one is the cost model,
+not the speed** — that model was pre-registered above ("a second storage layout and a
+second implementation of every kernel — OpenCV rebuilt inside binCV"), so the argument
+is not post-hoc, but the first version of this entry let its table imply interop won
+on time. It does not. It wins on **time-per-unit-of-machinery**.
 
-**2. THE GENERAL ANSWER IS A FORMULA, NOT A TABLE.** The conversion tax `T` at
-640×480 is 0.75–1.0 ms out and 0.9–1.6 ms back, mildly `N`-dependent. **An operation
-is worth sending to OpenCV when `native_binCV − native_OpenCV > T`** — for the 8→8
-Gaussian that is 7 102 − 514 = 6 588 µs against T ≈ 1.4 ms, five times over. For a
-*chain* of wide operations `T` amortises across the whole chain, so the case only
-strengthens. X-46's per-width table plus this formula answers every such question
-without another sweep.
+**2. FOOTPRINT — THE HALF THIS ENTRY ORIGINALLY OMITTED, WHICH IS THE SAME DEFECT
+[X-44](#x-44--e-26--is-interleaved-a-layout-bincv-should-support--done--declined)
+REPORTED IN ITS OWN RULE, ONE EXPERIMENT LATER.** Peak live bytes, computed exactly:
 
-**3. THE TAX IS ASYMMETRIC AND THE IMPORT SIDE SAYS WHY.** `fromCVMat` (1 619 µs)
-costs 1.7× `toCVMatNormalized` (953): it allocates fresh storage per call — the
-commit-last contract inherited from the N=1 specialisation — and its plane writes are
-read-modify-write ORs. Named as the first place to look if the tax ever matters; not
-optimised now, because at 0.27·B nothing turns on it.
+| path | peak | |
+|---|---|---|
+| native bit-sliced 8→8 | **384 000 B** | 37% of the device's 1 MiB L2 |
+| **interop round trip** | **844 800 B** | **2.20×**, 81% of L2 |
 
-**4. WHAT THE CONVERSION ALSO BUYS, BEYOND THIS EXPERIMENT.** `QuantMat<N>` was
-previously unreachable from `cv::Mat` at any `N > 1` — a user with an 8-bit
-intermediate had **no way in at all**. The bridge is now first-class, tested for
-exactness (transpose vs per-pixel reference, the round-trip law at every `N`,
-padding-bit invariant, all-256-byte LUT coverage), and documented in the header as
-the wide-intermediate pattern.
+**The interop path materialises a full byte-per-pixel frame, which is precisely what
+binCV exists to avoid.** [CLAUDE.md](../CLAUDE.md) makes footprint co-equal and gives
+memory the tie-break — so this number had to be on the record **before** the decision,
+not after. It does not reverse Band A, because at 8 bits binCV has **no footprint
+advantage to protect** ([X-45](#x-45--pyrdown-against-cvpyrdown-across-bit-width--done):
+8 bpp on both sides by construction) and the byte buffers are transient rather than
+pipeline-resident. **But that is an argument, and it should have been made in the
+rule.** Recorded as a rule defect, not silently repaired.
 
-**Decision: BAND A.** No internal wide-`N` specialisation, on this evidence, ever —
-the option is closed, not deferred. Interop ships as the documented pattern.
-Recorded as [D-42](ARCHITECTURE.md#8-design-decisions).
+**3. R AND B DO NOT COMPUTE THE SAME ANSWER, AND NOW THAT IS QUANTIFIED RATHER THAN
+UNSTATED.** `measure_util.hpp`'s hazard 4 requires that whatever is compared agrees
+before it is timed; this benchmark did not check. It does now:
+
+> **1 114 of 76 800 destination pixels differ — and ZERO of them are interior.**
+> Max |Δ| 73 of 255, entirely on a 2-pixel rim.
+
+Exactly the predicted deviation: `cv::pyrDown` uses `BORDER_REFLECT_101`,
+`pyrDownFiltered` reads outside the frame as zero (Tier 3, documented in
+`ops/pyramid.hpp`). **The substitute changes the answer at the border and nowhere
+else** — which for a caller sending a wide intermediate to OpenCV is an *improvement*,
+since OpenCV's border is the reference one. But "3.7× faster" without this line was an
+incomplete claim.
+
+**4. THE TAX `T` NOW HAS AN ARM PER GEOMETRY, WHERE THE FIRST VERSION QUOTED ONE
+NUMBER THAT NO ARM MEASURED.** "T ≈ 1.4 ms" was 953.5 (export at 640×480) plus a
+320×240 import that only existed inside R and was never timed. Measured directly:
+
+| | export | import |
+|---|---|---|
+| 640×480 | 952.6 | 1 616.6 |
+| 320×240 | — | 389.3 |
+
+R's decomposition now closes: 952.6 + 516.1 + 389.3 = **1 858.0 against 1 906.2
+measured**, a 2.5% residual. **A size-preserving 640×480 operation pays 2 569 µs both
+ways, not 1.4 ms** — the original figure under-counted by 1.8× for that case, because
+it silently mixed a full-size export with a decimated import.
+
+**The formula, now stated with its geometry:** send an operation to OpenCV when
+`native_binCV − native_OpenCV > T(in) + T(out)`, each term taken at the size that
+side actually processes. For the 8→8 Gaussian: 7 093 − 516 = 6 577 against 1 342 —
+**4.9× over**, and for a chain of wide operations the tax is paid once at each end
+rather than per operation.
+
+**5. `fromCVMat` COSTS 1.7× `toCVMatNormalized`, AND THIS BENCHMARK CANNOT SAY WHY.**
+The first version attributed it to the per-call allocation. That is **not separable
+here**: the export arms hoist their destination so `cv::Mat::create` is a no-op from
+warm-up on, while the import allocates every call by API contract. The asymmetry is
+real and is the first place to look if the tax ever matters; **the causal claim is
+withdrawn** as unmeasured.
+
+**6. WHAT THE CONVERSION BUYS BEYOND THIS EXPERIMENT.** `QuantMat<N>` was previously
+unreachable from `cv::Mat` at any `N > 1` — a caller holding a wide intermediate had
+**no way in at all**.
+
+**Decision: BAND A.** No internal wide-`N` specialisation on this evidence — closed,
+not deferred. Interop ships as the documented pattern.
+[D-42](ARCHITECTURE.md#8-design-decisions).
+
+**A DEFECT IN THE CODE, FOUND BY THE SAME REVIEW AND FIXED.** `fromCVMat` read
+`empty() ? DefaultRowAlignment : getRowAlignment()`, silently downgrading an opt-in
+row alignment. The guard was **redundant** — every constructor establishes a valid
+alignment — and the trigger was **buffer reuse**, not the degenerate case: a moved-from
+matrix is empty but keeps its alignment, so `dst = std::move(src); src.fromCVMat(f);`
+rebuilt `src` at word granularity and dropped a Tier 2 / DMA stride. No test saw it,
+because every destination in the suite was default-aligned. Fixed, and
+`OpenCVInterop.QuantMatAlignmentReuse` **fails on the old code and passes on the
+new** — checked by reverting.
+
+**Method:** `benchmark/interop_roundtrip.cpp` + `benchmark/interop_sweep.sh` via
+`scripts/run_on_pi.sh pi4` with `BINCV_PI_OPENCV=1`; exactness in
+`tests/test_opencv_interop.cpp`.
 
 ---
 

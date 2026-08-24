@@ -2881,23 +2881,40 @@ table was an internal byte-representation specialisation for wide `N`.
 step — now first-class for every `N`, exactness-tested (round-trip law exact at every
 `N`, padding invariant held, verified numerically before the C++ existed).
 
-| | µs (640×480, reference device) |
-|---|---|
-| round trip `toCVMatNormalized` → `cv::pyrDown` → `fromCVMat`, 8→8 | **1 901.5** |
-| native bit-sliced `GAUSSIAN_5x5` 8→8 | 7 101.8 |
-| conversion tax, out / back | 953.5 / 1 619.3 |
+| | time | peak bytes |
+|---|---|---|
+| round trip `toCVMatNormalized` → `cv::pyrDown` → `fromCVMat`, 8→8 | **1 906.2 µs** | **844 800** |
+| native bit-sliced `GAUSSIAN_5x5` 8→8 | 7 092.8 µs | 384 000 |
+| `cv::pyrDown` alone — a specialisation's ceiling | 516.1 µs | — |
 
-**The round trip is 3.7× faster than binCV's own path at the configuration where
-binCV is weakest** — cheaper even than the native *box* at 8→8, while computing the
-Gaussian. A specialisation's theoretical best saves only the ~1.4 ms tax, once per
-operation **chain** (consecutive OpenCV-side operations pay nothing between them),
-and would cost a second storage layout plus a second implementation of every kernel.
-**The margin cannot fund the machinery. The option is closed, not deferred.**
+All spreads under 1%. **The honest ordering is `specialisation (516) < interop
+(1 906) < native bit-sliced (7 093)`: a specialisation would be FASTER, and the reason
+not to build one is the cost model — a second storage layout plus a second
+implementation of every kernel — not the clock.** That model was pre-registered.
+Interop wins on time-per-unit-of-machinery, and the margin cannot fund the
+alternative. **Closed, not deferred.**
+
+**Footprint is 2.20× against the native path** — the interop route materialises a full
+byte-per-pixel frame, exactly what binCV exists to avoid. It does not reverse the
+decision, because at 8 bits binCV has **no footprint advantage to protect**
+([X-45](EXPERIMENTS.md): 8 bpp on both sides by construction) and the byte buffers are
+transient rather than pipeline-resident — **but that is an argument, and X-47's rule
+failed to make it in advance.** The rule was written on speed alone, which is the
+defect [X-44](EXPERIMENTS.md) reported in its own rule one experiment earlier;
+recorded there as a rule defect rather than repaired silently.
+
+**The two paths differ on the border and nowhere else:** 1 114 of 76 800 destination
+pixels, **zero of them interior**, max |Δ| 73/255 — `cv::pyrDown`'s
+`BORDER_REFLECT_101` against `pyrDownFiltered`'s zero-fill. For a caller sending a
+wide intermediate out, that is an improvement; it is recorded because "3.7× faster"
+without it is an incomplete claim.
 
 **The decision rule for callers is a formula:** send an operation to OpenCV when
-`native_binCV − native_OpenCV > T`, `T` ≈ 0.75–1.6 ms per direction at 640×480,
-amortised across a chain. With [X-46](EXPERIMENTS.md)'s table this answers every
-wide-`N` question without another sweep.
+`native_binCV − native_OpenCV > T(in) + T(out)`, each term at the size that side
+processes — 952.6 µs out and 1 616.6 µs back at 640×480, 389.3 µs back at 320×240. For
+the 8→8 Gaussian that is 6 577 against 1 342, **4.9× over**; a chain pays the tax once
+at each end. With [X-46](EXPERIMENTS.md)'s table this answers every wide-`N` question
+without another sweep.
 
 **Scope note:** this is also the first time `QuantMat<N>` is *reachable* from
 `cv::Mat` at `N > 1` — the interop existed only for `QuantMat<1>` before. The

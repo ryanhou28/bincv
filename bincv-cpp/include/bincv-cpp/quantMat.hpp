@@ -96,16 +96,22 @@ inline uint64_t transpose8x8(uint64_t x) {
 /// @note N == 1 does NOT come here. QuantMat<1, WordType> is a separate,
 ///       hand-written specialization (binMat.hpp, spelled BinMat) with no plane
 ///       loop and no delegation anywhere on its per-pixel path. It differs from
-///       this template in exactly two observable ways, both of them consequences
-///       of the binary case deserving `bool`:
+///       this template in THREE observable ways. Two are consequences of the
+///       binary case deserving `bool`:
 ///         - at() returns bool rather than a one-bit unsigned;
 ///         - set() takes bool, so its value-range precondition is checked by a
 ///           separate integral overload rather than falling out of the parameter
 ///           type. Passing 2 to QuantMat<1>::set is diagnosed there, exactly as
 ///           passing 2^N to this one is here.
+///       The third is a deliberate semantic difference, not a spelling one:
+///         - fromCVMat at N == 1 reads any NONZERO byte as 1; this template
+///           quantizes to NEAREST, so the two disagree for input bytes 1..127
+///           (X-47, and the block comment on the conversions below).
 ///       Everything else -- Planes, MaxValue, planeWords(), plane(), constPlane()
 ///       and the plane index contract -- reads the same at N == 1 as it does here,
-///       so code generic over QuantMat<N> is testable at N == 1.
+///       so code generic over QuantMat<N> is testable at N == 1 EXCEPT on the
+///       fromCVMat path, where the third difference above makes N == 1 a genuinely
+///       different function rather than the same one at a smaller N.
 template <size_t N, typename WordType_>
 class QuantMat {
     static_assert(N >= 1 && N <= 8, "N outside supported range");
@@ -372,11 +378,20 @@ public:
     // fromCVMat (any set byte reads 1); this general form quantizes to nearest,
     // so the two disagree for bytes 1..127 at N == 1. Recorded difference
     // (X-47), not retroactively unified -- N == 1 callers depend on the
-    // threshold reading.
+    // threshold reading. THIS IS THE THIRD DIVERGENCE the class docstring
+    // counts, and the one that makes generic-over-N code NOT testable at N == 1
+    // on the conversion path specifically.
 
     /// @brief Replaces this matrix with a quantized copy of an 8-bit cv::Mat:
-    ///        each byte v becomes round(v * MaxValue / 255).
+    ///        each byte v becomes round(v * MaxValue / 255). **API TIER 3** --
+    ///        no cv:: equivalent, since OpenCV has no packed sub-byte image type.
     /// @throws std::invalid_argument if the input is empty or not CV_8UC1.
+    /// @note ALLOCATES, and therefore DETACHES a wrapped buffer: a matrix built on
+    ///       the wrapping constructor stops referring to the caller's memory here
+    ///       and owns its storage afterwards, exactly as the N == 1 specialization
+    ///       does. The row alignment IS preserved.
+    /// @note Container-level, not a kernel -- CLAUDE.md's no-heap rule binds
+    ///       kernels, and this has the same shape as the N == 1 fromCVMat.
     /// @note Commit-last, as the N == 1 specialization and resize(): the new
     ///       storage is built completely before this object's dimensions change,
     ///       so a failed allocation leaves the matrix as it was.
@@ -395,8 +410,15 @@ public:
         for (unsigned v = 0; v < 256u; ++v) {
             lut[v] = static_cast<uint8_t>((v * MaxValue + 127u) / 255u);
         }
-        QuantMat fresh(input.cols, input.rows,
-                       empty() ? DefaultRowAlignment : getRowAlignment());
+        // Alignment is carried through UNCONDITIONALLY, as the N == 1
+        // specialization and resize() do. An `empty() ? DefaultRowAlignment : ...`
+        // guard here was a bug: every constructor establishes a valid alignment, so
+        // it protected against nothing and silently downgraded an opt-in Tier 2 /
+        // DMA stride. It bit on buffer REUSE rather than the degenerate case -- a
+        // moved-from matrix is empty but keeps its alignment, so
+        // `dst = std::move(src); src.fromCVMat(frame);` rebuilt src at word
+        // granularity.
+        QuantMat fresh(input.cols, input.rows, getRowAlignment());
         const size_t w = static_cast<size_t>(input.cols);
         const size_t pitch = fresh.planeWords();
         for (size_t y = 0; y < static_cast<size_t>(input.rows); ++y) {
@@ -422,6 +444,7 @@ public:
     }
 
     /// @brief Writes this matrix as CV_8U holding the RAW values 0..MaxValue.
+    ///        **API TIER 3** -- see fromCVMat.
     /// @note One-way at N < 8 -- see the block comment above.
     void toCVMat(cv::Mat& output) const {
         uint8_t lut[MaxValue + 1u];
@@ -430,7 +453,12 @@ public:
     }
 
     /// @brief Writes this matrix as CV_8U scaled to the full byte range:
-    ///        round(v * 255 / MaxValue). The exact inverse of fromCVMat.
+    ///        round(v * 255 / MaxValue). **API TIER 3** -- see fromCVMat.
+    /// @note `fromCVMat(toCVMatNormalized(m)) == m` exactly, at every pixel and
+    ///       every N -- a LEFT inverse. THE OTHER COMPOSITION IS NOT THE IDENTITY
+    ///       and no claim is made about it: fromCVMat is not injective for N < 8
+    ///       (at N = 3 the bytes 0..18 all quantize to 0), so it has no inverse in
+    ///       that direction.
     void toCVMatNormalized(cv::Mat& output) const {
         uint8_t lut[MaxValue + 1u];
         for (unsigned v = 0; v <= MaxValue; ++v) {
