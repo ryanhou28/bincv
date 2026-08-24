@@ -8320,6 +8320,73 @@ routinely conflated and this entry separates them.**
 
 ---
 
+### X-46 · WHERE does bit-slicing stop paying? · `DONE`
+
+**A CHARACTERISATION, like [X-45](#x-45--pyrdown-against-cvpyrdown-across-bit-width--done),
+and for the same reason: it measures a property of the representation and settles
+nothing by itself.**
+
+**Question.** X-45 gave two endpoints — 5.5× faster at 1 → 3 bits, 13.7× slower at
+8 → 8. **Where is the line?** It decides what "low bit width" means as an engineering
+claim rather than a slogan, and it is the number any 8-bit-specialisation proposal has
+to be argued against.
+
+**Workload:** 640×480 → 320×240, reference device, `cv::pyrDown` on `CV_8U` at one
+thread as the flat denominator. **One process per arm** — see the method note below.
+
+| N | **box 2×2** N→N | vs `cv::pyrDown` | **Gaussian 5×5** N→N | vs `cv::pyrDown` |
+|---|---|---|---|---|
+| **1** | **84.5 µs** | **5.98× faster** | 447.5 µs | **1.13× faster** |
+| **2** | 197.1 | **2.56× faster** | 1 285.7 | 0.39× |
+| **3** | 299.3 | **1.69× faster** | 1 909.3 | 0.26× |
+| **4** | 434.5 | **1.16× faster** | 2 454.9 | 0.21× |
+| **5** | 632.2 | 0.80× | 4 159.0 | 0.12× |
+| **8** | 2 616.0 | 0.19× | 7 093.6 | 0.07× |
+
+Binary input, which is binCV's actual shape: **box 1 → 3 = 111.9 µs (4.52× faster)**,
+gauss 1 → 3 = 550.0 (0.92×), gauss 1 → 5 = 566.1 (0.89×). `cv::pyrDown` = 505.5 µs.
+
+**1. THERE IS NO SINGLE CROSSOVER — IT IS FILTER-DEPENDENT, AND THE SPREAD IS THREE
+BITS.** The box crosses **between 4 and 5 bits**; the Gaussian crosses **between 1 and
+2**. Any rule of the form *"specialise at N = k"* is wrong for one of them. What sets
+the line is the accumulator width `bits(weightSum × (2^N − 1))`, so the filter's weight
+sum and the bit depth trade against each other directly.
+
+**2. INPUT WIDTH DOMINATES OUTPUT WIDTH BY ABOUT 7:1.** Gaussian **1 → 5 costs 566 µs;
+5 → 5 costs 4 159** — same output, 7.3× apart. The horizontal pass runs over `NIn`
+planes per tap, so **what binCV charges for is the precision it READS**, not the
+precision it writes. That is a more useful statement of the library's advantage than
+"low bit width": **binCV is fast when its INPUT is narrow.** The shipped ladder
+(binary in, 2–3 bits out) sits exactly there, and it is not a coincidence — it is what
+the representation is good at.
+
+**3. THE SHIPPED CONFIGURATION IS 4.5× FASTER THAN OPENCV** at the operation OpenCV
+would have to do at 8 bits regardless. The denominator is flat across the whole sweep
+**because OpenCV has no cheaper mode for a caller who only needs three bits**, and that
+asymmetry is the entire product.
+
+**METHOD NOTE — THE FIRST VERSION OF THIS BENCHMARK WAS WRONG AND IS RECORDED AS
+WRONG.** It declared all eight source widths up front — 1 + 2 + … + 8 planes of
+640×480, about **1.4 MB against this device's 1 MB L2** — and `measureInterleaved`
+pumped that whole set between samples. Every cheap arm ran cache-cold: it reported
+`box 1 → 3` at **352.7 µs** where `pyrfilter_benchmark` measures the *identical call*
+at **112.1 µs**, a **3.1× inflation**, and it would have put the box crossover at 2
+bits instead of 4–5. **The disagreement between two benchmarks measuring the same call
+is what caught it**, which is an argument for keeping overlapping arms rather than
+trimming them. A second version scoped the matrices per arm and left the lambdas
+holding dangling references, aborting in `malloc`. The shipped version runs **one arm
+per process** (`benchmark/crossover_sweep.sh`), and its `box 1 → 3` reads 111.9 µs
+against the independent 112.1.
+
+**Decision:** none — see the header. It is the price list that any proposal to
+specialise wide-`N` paths has to be argued against, and it says such a proposal cannot
+key on `N == 8`.
+
+**Method:** `benchmark/bitwidth_crossover.cpp` + `benchmark/crossover_sweep.sh` via
+`scripts/run_on_pi.sh pi4` with `BINCV_PI_OPENCV=1`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
