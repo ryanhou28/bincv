@@ -387,6 +387,138 @@ void testRealFrameCorners() {
               << " pixels\n";
 }
 
+// ===========================================================================
+// QuantMat<N> conversions (X-47) -- the wide-intermediate bridge
+//
+// Above the (filter-dependent) bit-width crossover X-46 measured, the fast
+// implementation of an 8-bit operation is OpenCV's, and these conversions are
+// the way there. Three properties, each load-bearing:
+//   1. The transpose-based loops equal a per-pixel reference -- any bit-order
+//      slip in transpose8x8's wiring shows here.
+//   2. fromCVMat(toCVMatNormalized(m)) == m, exactly, at every N. X-47's rule
+//      derives this (255 and MaxValue odd, so no rounding ties); the test is
+//      what makes the derivation checkable rather than trusted.
+//   3. Padding bits are zero after fromCVMat (D-13) -- a conversion that set
+//      them would make every later word-wise reduction over-count.
+// ===========================================================================
+
+template <size_t N, typename WordType>
+void quantConvertOne(int w, int h) {
+    constexpr unsigned maxV = (1u << N) - 1u;
+    bincv::QuantMat<N, WordType> m(w, h);
+    uint64_t st = 0x9E3779B97F4A7C15ULL ^ (static_cast<uint64_t>(N) << 32) ^ sizeof(WordType);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+            m.set(y, x, static_cast<unsigned>(st >> 33) % (maxV + 1u));
+        }
+    }
+
+    // 1. Both exports against the per-pixel definition.
+    cv::Mat raw, norm;
+    m.toCVMat(raw);
+    m.toCVMatNormalized(norm);
+    BINCV_CHECK_EQ(raw.cols, w);
+    BINCV_CHECK_EQ(raw.rows, h);
+    BINCV_CHECK_EQ(raw.type(), CV_8UC1);
+    size_t badRaw = 0, badNorm = 0;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const unsigned v = m.at(y, x);
+            if (raw.at<uint8_t>(y, x) != v) ++badRaw;
+            const unsigned want = (v * 255u + (maxV >> 1)) / maxV;
+            if (norm.at<uint8_t>(y, x) != want) ++badNorm;
+        }
+    }
+    BINCV_CHECK_EQ(badRaw, static_cast<size_t>(0));
+    BINCV_CHECK_EQ(badNorm, static_cast<size_t>(0));
+
+    // 2. The exact round trip.
+    bincv::QuantMat<N, WordType> back;
+    back.fromCVMat(norm);
+    BINCV_CHECK_EQ(back.cols(), w);
+    BINCV_CHECK_EQ(back.rows(), h);
+    size_t badTrip = 0;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            if (back.at(y, x) != m.at(y, x)) ++badTrip;
+    BINCV_CHECK_EQ(badTrip, static_cast<size_t>(0));
+
+    // 3. Padding bits zero after fromCVMat, in every plane of every row --
+    //    both the tail bits of the last used word and any alignment words past it.
+    const WordType tail = bincv::impl::rowTailMask<WordType>(static_cast<size_t>(w));
+    const size_t used = bincv::impl::minRowWords<WordType>(static_cast<size_t>(w));
+    size_t badPad = 0;
+    for (size_t p = 0; p < N; ++p) {
+        const auto plane = back.constPlane(p);
+        for (int y = 0; y < h; ++y) {
+            const WordType* row = plane.row(static_cast<size_t>(y));
+            if ((row[used - 1] & static_cast<WordType>(~tail)) != 0) ++badPad;
+            for (size_t k = used; k < plane.stride; ++k)
+                if (row[k] != 0) ++badPad;
+        }
+    }
+    BINCV_CHECK_EQ(badPad, static_cast<size_t>(0));
+}
+
+void testQuantMatConversions() {
+    // Odd widths so the tail-group path runs; widths past one word so the group
+    // loop crosses word boundaries at every word type.
+    quantConvertOne<2, uint8_t>(37, 11);
+    quantConvertOne<2, uint32_t>(37, 11);
+    quantConvertOne<3, uint32_t>(130, 7);
+    quantConvertOne<3, uint64_t>(130, 7);
+    quantConvertOne<5, uint16_t>(51, 9);
+    quantConvertOne<5, uint64_t>(64, 5);
+    quantConvertOne<7, uint32_t>(96, 4);
+    quantConvertOne<8, uint32_t>(33, 9);
+    quantConvertOne<8, uint64_t>(257, 3);
+    std::cout << "  QuantMat<N> conversions: transpose == per-pixel reference, "
+                 "round trip exact, padding clear, at N in {2,3,5,7,8}\n";
+}
+
+void testQuantMatFromCVMatQuantizes() {
+    // Every byte value, so the LUT is exercised end to end: 256 columns hit
+    // 0..255 exactly once per row.
+    cv::Mat all(3, 256, CV_8U);
+    for (int y = 0; y < 3; ++y)
+        for (int x = 0; x < 256; ++x) all.at<uint8_t>(y, x) = static_cast<uint8_t>(x);
+
+    bincv::QuantMat<3, uint32_t> q3;
+    q3.fromCVMat(all);
+    size_t bad = 0;
+    for (int x = 0; x < 256; ++x) {
+        const unsigned want = (static_cast<unsigned>(x) * 7u + 127u) / 255u;
+        if (q3.at(0, x) != want) ++bad;
+    }
+    BINCV_CHECK_EQ(bad, static_cast<size_t>(0));
+
+    // N == 8 is the identity in BOTH directions: fromCVMat then toCVMat must
+    // reproduce the input byte for byte -- the interop configuration X-47 times.
+    bincv::QuantMat<8, uint32_t> q8;
+    q8.fromCVMat(all);
+    cv::Mat out;
+    q8.toCVMat(out);
+    size_t badId = 0;
+    for (int y = 0; y < 3; ++y)
+        for (int x = 0; x < 256; ++x)
+            if (out.at<uint8_t>(y, x) != all.at<uint8_t>(y, x)) ++badId;
+    BINCV_CHECK_EQ(badId, static_cast<size_t>(0));
+    std::cout << "  fromCVMat quantizes all 256 byte values correctly; N=8 is the identity\n";
+}
+
+void testQuantMatConversionErrors() {
+    bincv::QuantMat<4, uint32_t> q;
+    BINCV_CHECK_THROWS(q.fromCVMat(cv::Mat()), std::invalid_argument);
+    cv::Mat wrongType(4, 4, CV_32F);
+    BINCV_CHECK_THROWS(q.fromCVMat(wrongType), std::invalid_argument);
+    // A failed fromCVMat must leave the matrix untouched (commit-last).
+    bincv::QuantMat<4, uint32_t> keep(5, 5);
+    keep.set(2, 2, 9u);
+    BINCV_CHECK_THROWS(keep.fromCVMat(wrongType), std::invalid_argument);
+    BINCV_CHECK_EQ(keep.at(2, 2), 9u);
+}
+
 } // namespace
 
 BINCV_TEST(OpenCVInterop, RoundTrip)                 { testRoundTrip(); }
@@ -395,5 +527,8 @@ BINCV_TEST(OpenCVInterop, InvalidInput)              { testInvalidInput(); }
 BINCV_TEST(OpenCVInterop, FromCVMatAllocationFailure) { testFromCVMatAllocationFailure(); }
 BINCV_TEST(OpenCVInterop, SampleImage)               { testSampleImage(); }
 BINCV_TEST(OpenCVInterop, RealFrameCorners)          { testRealFrameCorners(); }
+BINCV_TEST(OpenCVInterop, QuantMatConversions)       { testQuantMatConversions(); }
+BINCV_TEST(OpenCVInterop, QuantMatQuantizeLaw)       { testQuantMatFromCVMatQuantizes(); }
+BINCV_TEST(OpenCVInterop, QuantMatConversionErrors)  { testQuantMatConversionErrors(); }
 
 BINCV_TEST_MAIN("BinMat OpenCV interop tests")

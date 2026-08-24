@@ -2871,6 +2871,40 @@ overstated by only **1.14×** — far better than [D-37](#8-design-decisions)'s 
 the memory lived. **A ceiling's accuracy tracks how few things it abstracts away**,
 which is a sharper rule than "ceilings overstate".
 
+### D-42: above the bit-width crossover, the answer is interop — not specialisation
+
+[X-46](EXPERIMENTS.md) measured binCV 2.5–14× slower than OpenCV above the
+filter-dependent crossover (box: 4–5 bits; Gaussian 5×5: 1–2). The proposal on the
+table was an internal byte-representation specialisation for wide `N`.
+[X-47](EXPERIMENTS.md) built the alternative first and priced both:
+`QuantMat<N>` ↔ `cv::Mat` conversions — transpose-based, 8 pixels × 8 planes per
+step — now first-class for every `N`, exactness-tested (round-trip law exact at every
+`N`, padding invariant held, verified numerically before the C++ existed).
+
+| | µs (640×480, reference device) |
+|---|---|
+| round trip `toCVMatNormalized` → `cv::pyrDown` → `fromCVMat`, 8→8 | **1 901.5** |
+| native bit-sliced `GAUSSIAN_5x5` 8→8 | 7 101.8 |
+| conversion tax, out / back | 953.5 / 1 619.3 |
+
+**The round trip is 3.7× faster than binCV's own path at the configuration where
+binCV is weakest** — cheaper even than the native *box* at 8→8, while computing the
+Gaussian. A specialisation's theoretical best saves only the ~1.4 ms tax, once per
+operation **chain** (consecutive OpenCV-side operations pay nothing between them),
+and would cost a second storage layout plus a second implementation of every kernel.
+**The margin cannot fund the machinery. The option is closed, not deferred.**
+
+**The decision rule for callers is a formula:** send an operation to OpenCV when
+`native_binCV − native_OpenCV > T`, `T` ≈ 0.75–1.6 ms per direction at 640×480,
+amortised across a chain. With [X-46](EXPERIMENTS.md)'s table this answers every
+wide-`N` question without another sweep.
+
+**Scope note:** this is also the first time `QuantMat<N>` is *reachable* from
+`cv::Mat` at `N > 1` — the interop existed only for `QuantMat<1>` before. The
+`QuantMat<1>` specialisation keeps its established nonzero-threshold `fromCVMat`;
+the general form quantises to nearest, and the two disagree for bytes 1..127 at
+N = 1 — a recorded difference, not a bug to unify.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

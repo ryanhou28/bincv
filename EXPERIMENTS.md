@@ -8387,7 +8387,7 @@ key on `N == 8`.
 
 ---
 
-### X-47 · Interop or specialisation above the crossover? · `RULE ONLY`
+### X-47 · Interop or specialisation above the crossover? · `DONE`
 
 **COMMITTED BEFORE THE CONVERSION EXISTS.** Unlike
 [X-45](#x-45--pyrdown-against-cvpyrdown-across-bit-width--done) and
@@ -8449,6 +8449,59 @@ tests in `tests/test_opencv_interop.cpp` — transpose vs per-pixel reference, t
 round-trip law at every `N`, padding-bit invariant after `fromCVMat`;
 `benchmark/interop_roundtrip.cpp` via `scripts/run_on_pi.sh pi4` with
 `BINCV_PI_OPENCV=1`.
+
+**RESULT — BAND A, BY A FACTOR THAT LEAVES NO ROOM FOR ARGUMENT.**
+
+Reference device, one arm per process, OpenCV at one thread, sticky-throttle bits
+unchanged across the run:
+
+| arm | µs | |
+|---|---|---|
+| `toCVMatNormalized`, N=8, 640×480 | 953.5 | the export tax |
+| `fromCVMat`, N=8, 640×480 | 1 619.3 | the import tax (includes its allocation, by API contract) |
+| **R — round trip `to` → `cv::pyrDown` → `from`** | **1 901.5** | **the number the bands are on** |
+| **B — native `GAUSSIAN_5x5` 8→8** | **7 101.8** | reproduces X-46's 7 093.6 |
+| `cv::pyrDown` alone (floor) | 514.2 | |
+| `toCVMatNormalized`, N=3 | 748.2 | |
+| `fromCVMat`, N=3 | 877.1 | |
+
+**R = 1 901.5 ≤ B/2 = 3 550.9 — Band A fires with R at 0.27·B.** The round trip —
+convert out, run OpenCV, convert back — is **3.7× faster than binCV's own bit-sliced
+path** at the configuration where binCV is weakest. It is even cheaper than the
+*box* at 8→8 (X-46: 2 616 µs), while computing the more accurate Gaussian.
+
+**1. INTEROP IS THE ANSWER ABOVE THE CROSSOVER, AND SPECIALISATION IS CLOSED.** An
+internal byte-representation specialisation would need to beat 1 901.5 µs *and* pay
+for a second storage layout plus a second implementation of every kernel. Its
+theoretical best — matching OpenCV exactly — saves at most the ~1.4 ms conversion
+tax, once, per operation *chain* (intermediate chains pay the tax only at the ends;
+consecutive OpenCV-side operations pay nothing between them). **The margin cannot
+fund the machinery.**
+
+**2. THE GENERAL ANSWER IS A FORMULA, NOT A TABLE.** The conversion tax `T` at
+640×480 is 0.75–1.0 ms out and 0.9–1.6 ms back, mildly `N`-dependent. **An operation
+is worth sending to OpenCV when `native_binCV − native_OpenCV > T`** — for the 8→8
+Gaussian that is 7 102 − 514 = 6 588 µs against T ≈ 1.4 ms, five times over. For a
+*chain* of wide operations `T` amortises across the whole chain, so the case only
+strengthens. X-46's per-width table plus this formula answers every such question
+without another sweep.
+
+**3. THE TAX IS ASYMMETRIC AND THE IMPORT SIDE SAYS WHY.** `fromCVMat` (1 619 µs)
+costs 1.7× `toCVMatNormalized` (953): it allocates fresh storage per call — the
+commit-last contract inherited from the N=1 specialisation — and its plane writes are
+read-modify-write ORs. Named as the first place to look if the tax ever matters; not
+optimised now, because at 0.27·B nothing turns on it.
+
+**4. WHAT THE CONVERSION ALSO BUYS, BEYOND THIS EXPERIMENT.** `QuantMat<N>` was
+previously unreachable from `cv::Mat` at any `N > 1` — a user with an 8-bit
+intermediate had **no way in at all**. The bridge is now first-class, tested for
+exactness (transpose vs per-pixel reference, the round-trip law at every `N`,
+padding-bit invariant, all-256-byte LUT coverage), and documented in the header as
+the wide-intermediate pattern.
+
+**Decision: BAND A.** No internal wide-`N` specialisation, on this evidence, ever —
+the option is closed, not deferred. Interop ships as the documented pattern.
+Recorded as [D-42](ARCHITECTURE.md#8-design-decisions).
 
 ---
 

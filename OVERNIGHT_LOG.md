@@ -842,3 +842,40 @@ OpenCV's *bit width* costs 13.7×.
 
 The 8→8 path is **verified exact** — it's the framework's widest point (12/16-plane
 accumulators, divisor 256×255), so if anything overflowed it would be there.
+
+---
+
+## 22 · Interop beats specialisation, 3.7×
+
+X-46 left a question: binCV is 2.5–14× slower than OpenCV above the crossover, so
+should wide-`N` cases be **specialised** internally to a byte representation? X-47
+built the alternative first and priced both.
+
+`QuantMat<N>` ↔ `cv::Mat` conversion is now first-class for every `N` — previously
+`QuantMat<1>` only, so a caller with an 8-bit intermediate had **no way in at all**.
+Transpose-based (8 pixels × 8 planes per step), not per-pixel: pricing the round
+trip through a naive conversion would have measured the strawman.
+
+| arm | µs |
+|---|---|
+| **round trip `to` → `cv::pyrDown` → `from`, 8→8** | **1 901.5** |
+| native bit-sliced `GAUSSIAN_5x5` 8→8 | 7 101.8 |
+| conversion tax, out / back | 953.5 / 1 619.3 |
+| `cv::pyrDown` alone (floor) | 514.2 |
+
+**R = 0.27·B — Band A.** Converting out, running OpenCV, and converting back is
+**3.7× faster than binCV's own path** at the configuration where binCV is weakest —
+cheaper even than the native *box* at 8→8, while computing the Gaussian.
+
+**Specialisation is closed, not deferred.** Its theoretical best saves only the
+~1.4 ms tax, once per operation *chain*, and would cost a second storage layout plus
+a second implementation of every kernel. The margin cannot fund the machinery.
+
+**The general answer is a formula, not a table:** send an operation to OpenCV when
+`native_binCV − native_OpenCV > T`. With X-46's per-width table that settles every
+wide-`N` question without another sweep.
+
+Exactness verified before timing: the transpose orientation and round-trip law were
+checked numerically *before the C++ existed*; the tests then hold the code to them at
+N ∈ {2,3,5,7,8} across four word types, plus the padding-bit invariant and all 256
+byte values.

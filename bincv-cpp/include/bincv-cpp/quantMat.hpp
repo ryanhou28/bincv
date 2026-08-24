@@ -34,6 +34,27 @@ constexpr unsigned signedMagnitude(int value) {
     return value < 0 ? 0u - static_cast<unsigned>(value) : static_cast<unsigned>(value);
 }
 
+#ifdef BINCV_WITH_OPENCV
+/// @brief 8x8 bit-matrix transpose: bit (8r + c) moves to bit (8c + r).
+/// @note The pivot of QuantMat's cv::Mat conversions (X-47). One call moves 8
+///       pixels x 8 planes between the two layouts -- byte r holding plane r's
+///       bits in, byte c holding pixel c's value out -- so the conversion runs at
+///       ~3 ops per pixel for ALL planes instead of one bit test per (pixel,
+///       plane). Three delta-swaps (Hacker's Delight 7-3); an involution, so both
+///       conversion directions call the same function.
+/// @note Planes p >= N hold zero bytes on the way in, so value bits >= N are zero
+///       on the way out -- the N < 8 case needs no masking.
+inline uint64_t transpose8x8(uint64_t x) {
+    uint64_t t = (x ^ (x >> 7)) & 0x00AA00AA00AA00AAULL;
+    x ^= t ^ (t << 7);
+    t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCCULL;
+    x ^= t ^ (t << 14);
+    t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0ULL;
+    x ^= t ^ (t << 28);
+    return x;
+}
+#endif // BINCV_WITH_OPENCV
+
 } // namespace impl
 
 /// @brief An N-bit image, stored as N bit-planes in ONE contiguous allocation.
@@ -328,6 +349,131 @@ public:
             }
         }
     }
+
+#ifdef BINCV_WITH_OPENCV
+    // OpenCV interoperability (only when BINCV_WITH_OPENCV is defined).
+    //
+    // THE VALUE MAPPING IS FIXED AND DELIBERATELY ASYMMETRIC (X-47):
+    //
+    //   toCVMat            raw values 0..MaxValue. Exact -- and ONE-WAY at N < 8:
+    //                      run back through fromCVMat, raw values would be
+    //                      re-quantized toward zero. For masks and inspection.
+    //   toCVMatNormalized  round(v * 255 / MaxValue) -- the OpenCV bridge. What
+    //                      to call before handing a wide intermediate to an
+    //                      OpenCV operation (X-46: above the crossover, OpenCV is
+    //                      the faster implementation and this is the way there).
+    //   fromCVMat          round(v * MaxValue / 255) -- toCVMatNormalized's EXACT
+    //                      inverse: fromCVMat(toCVMatNormalized(m)) == m at every
+    //                      pixel and every N. No rounding ties exist: 255 and
+    //                      MaxValue are both odd, so v*255/MaxValue and
+    //                      v*MaxValue/255 are never half-integers.
+    //
+    // The QuantMat<1> SPECIALIZATION keeps its established nonzero-threshold
+    // fromCVMat (any set byte reads 1); this general form quantizes to nearest,
+    // so the two disagree for bytes 1..127 at N == 1. Recorded difference
+    // (X-47), not retroactively unified -- N == 1 callers depend on the
+    // threshold reading.
+
+    /// @brief Replaces this matrix with a quantized copy of an 8-bit cv::Mat:
+    ///        each byte v becomes round(v * MaxValue / 255).
+    /// @throws std::invalid_argument if the input is empty or not CV_8UC1.
+    /// @note Commit-last, as the N == 1 specialization and resize(): the new
+    ///       storage is built completely before this object's dimensions change,
+    ///       so a failed allocation leaves the matrix as it was.
+    /// @note Padding bits are zero on return: the fresh storage starts zeroed and
+    ///       only real pixels are written (D-13).
+    void fromCVMat(const cv::Mat& input) {
+        if (input.empty()) {
+            BINCV_THROW(std::invalid_argument, "Input cv::Mat is empty");
+        }
+        if (input.type() != CV_8UC1) {
+            BINCV_THROW(std::invalid_argument, "Input cv::Mat must be of type CV_8UC1");
+        }
+        // Quantize once into a table, not once per pixel: 256 bytes, and the
+        // per-pixel work drops to one load.
+        uint8_t lut[256];
+        for (unsigned v = 0; v < 256u; ++v) {
+            lut[v] = static_cast<uint8_t>((v * MaxValue + 127u) / 255u);
+        }
+        QuantMat fresh(input.cols, input.rows,
+                       empty() ? DefaultRowAlignment : getRowAlignment());
+        const size_t w = static_cast<size_t>(input.cols);
+        const size_t pitch = fresh.planeWords();
+        for (size_t y = 0; y < static_cast<size_t>(input.rows); ++y) {
+            const uint8_t* in = input.ptr<uint8_t>(static_cast<int>(y));
+            WordType* row0 = fresh.data() + y * fresh.getAlignedWidth();
+            for (size_t x0 = 0; x0 < w; x0 += 8) {
+                const size_t n = (w - x0 < 8) ? (w - x0) : size_t{8};
+                uint64_t m = 0;
+                for (size_t i = 0; i < n; ++i) {
+                    m |= static_cast<uint64_t>(lut[in[x0 + i]]) << (8 * i);
+                }
+                const uint64_t t = impl::transpose8x8(m);
+                // A group of 8 never straddles words: WordBits is a multiple of 8.
+                const size_t wi = impl::wordIndex<WordType>(x0);
+                const size_t shift = x0 % WordBits;
+                for (size_t p = 0; p < N; ++p) {
+                    const uint64_t bits = (t >> (8 * p)) & 0xFFu;
+                    row0[p * pitch + wi] |= static_cast<WordType>(bits << shift);
+                }
+            }
+        }
+        *this = std::move(fresh);
+    }
+
+    /// @brief Writes this matrix as CV_8U holding the RAW values 0..MaxValue.
+    /// @note One-way at N < 8 -- see the block comment above.
+    void toCVMat(cv::Mat& output) const {
+        uint8_t lut[MaxValue + 1u];
+        for (unsigned v = 0; v <= MaxValue; ++v) lut[v] = static_cast<uint8_t>(v);
+        toCVMatWith(output, lut);
+    }
+
+    /// @brief Writes this matrix as CV_8U scaled to the full byte range:
+    ///        round(v * 255 / MaxValue). The exact inverse of fromCVMat.
+    void toCVMatNormalized(cv::Mat& output) const {
+        uint8_t lut[MaxValue + 1u];
+        for (unsigned v = 0; v <= MaxValue; ++v) {
+            lut[v] = static_cast<uint8_t>((v * 255u + (MaxValue >> 1)) / MaxValue);
+        }
+        toCVMatWith(output, lut);
+    }
+#endif // BINCV_WITH_OPENCV
+
+private:
+#ifdef BINCV_WITH_OPENCV
+    /// @brief The shared export loop: 8 pixels x N planes per transpose, then a
+    ///        table lookup per pixel. `lut` maps a raw value to its output byte.
+    void toCVMatWith(cv::Mat& output, const uint8_t (&lut)[MaxValue + 1u]) const {
+        if (empty()) {
+            output = cv::Mat();
+            return;
+        }
+        output.create(rows(), cols(), CV_8U);
+        const size_t w = getWidth();
+        const size_t pitch = planeWords();
+        for (size_t y = 0; y < getHeight(); ++y) {
+            const WordType* row0 = data() + y * getAlignedWidth();
+            uint8_t* out = output.ptr<uint8_t>(static_cast<int>(y));
+            for (size_t x0 = 0; x0 < w; x0 += 8) {
+                const size_t wi = impl::wordIndex<WordType>(x0);
+                const size_t shift = x0 % WordBits;
+                uint64_t m = 0;
+                for (size_t p = 0; p < N; ++p) {
+                    m |= ((static_cast<uint64_t>(row0[p * pitch + wi]) >> shift) & 0xFFu)
+                         << (8 * p);
+                }
+                const uint64_t t = impl::transpose8x8(m);
+                // The tail group reads padding bits, which are zero by invariant,
+                // and writes only the real pixels.
+                const size_t n = (w - x0 < 8) ? (w - x0) : size_t{8};
+                for (size_t i = 0; i < n; ++i) {
+                    out[x0 + i] = lut[static_cast<size_t>((t >> (8 * i)) & 0xFFu)];
+                }
+            }
+        }
+    }
+#endif // BINCV_WITH_OPENCV
 
 private:
     /// @brief Rows the plane stack needs: N per image row.
