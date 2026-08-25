@@ -82,6 +82,36 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|aarch64|ARM|AARCH64")
         set(BINCV_SIMD "NEON")
     endif()
 else()
+    # -------------------------------------------------------------------------
+    # POPCNT. THE SINGLE LARGEST x86 FACTOR IN THIS PROJECT, AND IT IS A FLAG.
+    #
+    # Baseline x86-64 does NOT include POPCNT (it arrived with SSE4.2 / Nehalem
+    # 2008, Barcelona 2007), so `__builtin_popcountll` compiles to a SOFTWARE
+    # fallback in the portable build -- measured: zero `popcnt` instructions in
+    # the shipped binary. X-57 priced that at **3.75x on the whole frontend**:
+    # binCV goes 12.9 -> 3.4 ms and from 3.8x SLOWER than OpenCV to 0.91x, near
+    # parity, at 6.23x less memory. binCV counts bits for a living, so it pays
+    # for this instruction more than almost any other library would.
+    #
+    # OFF by default because turning it on RAISES THE MINIMUM CPU, which is a
+    # product decision rather than a build tweak. Every x86-64 part since ~2008
+    # has it; a caller who knows their target should turn it on, and
+    # GETTING_STARTED says so. The principled fix is runtime dispatch
+    # (ROADMAP 2.3), which this does not pre-empt.
+    # -------------------------------------------------------------------------
+    option(BINCV_X86_POPCNT "Build with -mpopcnt (needs SSE4.2-era x86; worth 3.75x, X-57)" OFF)
+    if(BINCV_X86_POPCNT)
+        check_cxx_compiler_flag("-mpopcnt" HAVE_MPOPCNT)
+        if(HAVE_MPOPCNT)
+            target_compile_options(bincv_core INTERFACE -mpopcnt)
+            set(BINCV_POPCNT_STATUS "ON (-mpopcnt)")
+        else()
+            set(BINCV_POPCNT_STATUS "requested but the compiler refused -mpopcnt")
+        endif()
+    else()
+        set(BINCV_POPCNT_STATUS "OFF -- software fallback, ~3.75x slower (X-57)")
+    endif()
+
     check_cxx_compiler_flag("-mavx512f" HAVE_AVX512)
     check_cxx_compiler_flag("-mavx2" HAVE_AVX2)
     # Detection only: the flags are applied per-kernel once runtime dispatch lands
@@ -153,6 +183,9 @@ else()
         message(STATUS "            OpenCV-comparison benchmarks skipped; the E-1/E-2/E-3")
         message(STATUS "            experiment benchmarks build (binCV vs binCV, no OpenCV)")
     endif()
+endif()
+if(DEFINED BINCV_POPCNT_STATUS)
+    message(STATUS "x86 POPCNT: ${BINCV_POPCNT_STATUS}")
 endif()
 message(STATUS "=========================================")
 message(STATUS "")

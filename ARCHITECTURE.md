@@ -3113,6 +3113,43 @@ spacing filter, so what survives is the first found rather than the strongest.
 
 Successor: [E-30](#register).
 
+### D-47: binCV's x86 deficit was a missing instruction, not a missing vector path
+
+[X-52](EXPERIMENTS.md) found LK to be the whole x86 deficit and proposed porting
+D-33/X-40's NEON tap batching to AVX2. [X-57](EXPERIMENTS.md) shows **no AVX2 code was
+needed**, and the proposed port is **cancelled**.
+
+**The NEON batching exists because aarch64 has no scalar popcount** — `CNT` is a vector
+instruction, so every scalar count pays `fmov` in and out ([D-6](#8-design-decisions)).
+**x86-64 has `POPCNT` as a scalar instruction**, so that trick answers a problem x86
+does not have — *if the instruction is emitted*. **It was not:** baseline x86-64
+predates SSE4.2, so `__builtin_popcountll` compiled to a software fallback, and the
+shipped binary contained **zero `popcnt` instructions**.
+
+| build | binCV | OpenCV | ratio |
+|---|---|---|---|
+| default (portable) | 12.92 ms | 3.43 | **0.27×** |
+| **`-mpopcnt`** | **3.45** | 3.15 | **0.91×** |
+
+**3.75× from one flag**, and from 3.8× slower than OpenCV to near parity — at 6.23×
+less memory. The stage profile snaps to the aarch64 shape (track 67.3 / build 26.7 /
+detect 6.0 against 68.3 / 26.3 / 5.4). **The library was never mis-shaped on x86; it
+was mis-compiled.**
+
+**`BINCV_X86_POPCNT` is OFF by default.** Turning it on raises the minimum CPU to
+SSE4.2-era (2007–08), which is a **product decision rather than a build tweak**, so it
+is offered, measured and documented rather than taken unilaterally. The configure
+summary prints which side it is on, because a 3.75× factor should not be invisible.
+
+**A lesson worth more than the flag.** X-52 predicted LK near 2.7 ms and the frontend
+near 3.9 ms at parity, and flagged it as an extrapolation after three failures.
+Measured: **2.307 ms and 3.43 ms.** The number was right and **the mechanism was
+wrong** — a correct prediction is not evidence of a correct model, and had the AVX2 port
+been written it would have "confirmed" the hypothesis while the real cause went
+unfound.
+
+Successor: [E-31](#register).
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -3164,6 +3201,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-13**~~ **RESOLVED — IT IS AN N = 1 RESULT** | Does the **per-row partial accumulator** still pay above N = 1? | D-15 item 4 was measured at N = 1, where `BitSlicedPairCounts` is four counters; at N = 4 it is sixty-four. | **Answered: it pays at N = 1 and costs above it.** [X-29](EXPERIMENTS.md) on the reference device: window-wide vs per-row is **0.917× / 1.114× / 1.348× / 1.248×** at N = 1/2/3/4, so the crossover is between 1 and 2. `gradientCovariance<N>` selects with `if constexpr` (free — N is already a template parameter) and results are **bit-identical** by construction. It lands on the adopted `1/2/2/2` ladder, where three of four levels run at N = 2. **The noise floor was MEASURED**: the same arm in two translation units spreads **0.0–0.3% on the Cortex-A72** and **up to 10.6% on x86_64** — larger than the whole effect at N = 2, which reads IN NOISE there and W wins on the device. X-22 declined to close on a single-binary A/B and was right to. [D-26](#d-26-the-covariance-accumulator-shape-is-chosen-on-n-and-the-noise-floor-is-measured). | Whether the N-bit covariance keeps per-row partials. **Only at N = 1.** | — | **Phase 4** (X-29) ✔ |
 | ~~**E-14**~~ **RESOLVED — NO** | Does the tracker need a border on its coarse pyramid levels — the reference's `winSize`-wide reflected pad, a cheaper replicate pad, or a keypoint policy that never places a window near a coarse-level edge? | X-24 read the clipped coarse window as the dominant term. | **Answered: no, and the question rested on a statistic that does not fit the data.** [X-25](EXPERIMENTS.md) measured yield — eligible keypoints tracked within 1.0 px — instead of RMS, and **a padded pyramid is worse than or equal to clipping in five of seven cases for 1.38× the bytes**. **Deviation (ii) is vindicated and is now MEASURED rather than argued.** The finding underneath it corrects X-24: arm A on `(1,0)` has `rms(all)` 0.8356 px but **98.6% yield at 0.0009 px** — 139 of 141 keypoints tracked to a thousandth of a pixel and two catastrophically wrong — so **clipping costs about two keypoints out of 141, not the 59% X-24 attributed to it**; the never-clipping subset simply excluded the outliers. What remains is the **level-0 1-bit floor** (`rms(usable)` 0.25–0.32 px in EVERY arm including the padded one, against X-20's own no-pyramid single-level 0.2860 px), which is [E-16](#register) and is not a pyramid parameter at all. | Whether pyramid levels gain a border. **They do not.** | — | **Phase 4** (X-25) ✔ |
 | **E-15** | Why does tracking accuracy PEAK AT 2 BITS and degrade with more? | [X-24](EXPERIMENTS.md) measured it and did not explain it: on `(1,0)` unclipped, 1/2/3/5 bits give 1.4742 / **0.0010** / 0.5334 / 0.8567 px, and on `(2,−3)` the ladder is exact at 2 and 3 bits and fails from 4. Two explanations remain open and were NOT separated. **(i)** The bit-sliced covariance and residual weight plane pairs by `2^(i+j)`, so a few high-magnitude pixels dominate a window whose sub-pixel accuracy comes from averaging many edge crossings — this predicts degradation at SMALL motion and none at large, which is the observed pattern (`(12,−8)` is exact at every depth, `(2,−3)` fails from 4 bits, `(1,0)` from 3). **(ii)** `1/2/2/2`'s upper levels collapse to two distinct values anyway, so its advantage may be density preservation rather than precision. `requantizeBoxSum` is already excluded as the cause: it is a faithful rescaled average at every depth. | Whether the weighting in [§7.5](#75-lk-gradient-covariance)'s bit-sliced form is right for TRACKING as opposed to for corner response, and whether a depth cap belongs in the pyramid API. | E-7's final ladder | **Phase 4** |
+| **E-31** | Should binCV get runtime POPCNT dispatch on x86, or simply require the instruction? | [X-57](EXPERIMENTS.md) measured the software fallback costing **3.75× on the whole frontend**, and `BINCV_X86_POPCNT` currently makes that a caller's opt-in. | **Genuinely awkward:** `popcountWord` is an inline function in hot loops, so a dispatch that defeats inlining could cost more than it saves — the usual IFUNC/function-pointer answer does not obviously apply. The pragmatic alternative is to **require a 2008-era instruction**, which several vision libraries already do, and which costs nothing but a documented minimum. | Whether binCV's portable build is portable at a 3.75× price, and whether that is the right trade. | D-47 | **Phase 5** |
 | ~~**E-18**~~ **RESOLVED — NEGATIVE** | Can `residualSums` carry **vector accumulators across the window**, reducing once per window instead of once per call? | [X-33](EXPERIMENTS.md) measured a **3.42× ceiling** for batched NEON popcounts and delivered **1.24×**. The gap is the horizontal add: it runs once per `slicedSignedSum` call — **~310 register-domain crossings per window**. | **Answered: YES it can, and NO it is not worth 2–3×.** [X-40](EXPERIMENTS.md) built it (`impl::alignedResidualSumsNeon2`, bit-exact, gate-enforced) and it delivers **1.069×** against a 1.461× ceiling — about **1.52× against OpenCV** on the frontend, from 1.46×. **The floor arm is the finding**: the per-row tap machinery with the counting REMOVED is **45.4%** of the kernel, so **if counting were free the cap would be 2.205×**. The 2–3× this question was chartered on is not in the counting. [D-37](#d-37-residualsums-is-extraction-bound-not-count-bound); successor is [E-23](#register). | Whether `TapSums` becomes vector state. **It did, and the profile moved instead.** | X-28's unmet criterion 4 | **Phase 5** (X-40) ✔ |
 | ~~**E-23**~~ **RESOLVED — NEGATIVE** | `residualSums` is extraction-bound: 45.4% of the kernel is addressing with zero counting. How much of it is addressable? | [X-40](EXPERIMENTS.md) measured it with a floor arm; it was 13.7% at [D-29](#8-design-decisions) and grew because D-30, D-31, D-33 and X-35 made the counting ~3× faster and never touched it. | **Answered: almost none of it, by either obvious route.** [X-41](EXPERIMENTS.md) hoisted every loop-invariant — both `(w0, s)` descriptors, their branches, the `.row(y)` multiplies, the `interior` test — for **1.023×**; and fitting all ten planes in L1D together for **1.129×**. The 8× cache-line overfetch is real and is **not** the constraint. **The instruction stream is**: ~118 cycles per row for ~100 instructions. [D-38](#d-38-residualsums-extraction-is-instruction-bound--not-addressing-not-layout). | Whether the three copies of the extraction block collapse. **They should, but for maintenance — not for speed.** | D-37 | **Phase 5** (X-41) ✔ |
 | ~~**E-24**~~ **RESOLVED — NEGATIVE** | The twelve `alignedWord` extractions in a row share two `(w0, s)` descriptors. Can twelve scalar load-shift-ors become three vector ones? | [X-41](EXPERIMENTS.md) ruled out addressing (1.023×) and cache (1.129×), leaving instruction count as the only lever. | **Answered: the shifts YES, the loads NO.** [X-43](EXPERIMENTS.md): removing the gather makes the extraction **1.638×** faster, but paying for it makes it **0.885× — slower than scalar**. `QuantMat` stacks planes, so the eight words are in eight unrelated lines and **aarch64 has no gather**; eight loads plus eight lane inserts cost more than the shift-ors they replace. **The obstacle is the layout, and the rule predicted that before measuring.** [D-40](#d-40-the-extractions-obstacle-is-the-plane-layout-and-residualsums-is-done). | Whether the aligned path vectorises its loads. **It cannot, as laid out.** | D-38 | **Phase 5** (X-43) ✔ |

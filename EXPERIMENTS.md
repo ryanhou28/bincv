@@ -9318,6 +9318,65 @@ detection policies.
 
 ---
 
+### X-57 · The entire x86 deficit is a compile flag · `DONE`
+
+**[X-52](#x-52--bincv-on-x86-the-whole-deficit-is-one-stage--done) SCOPED THIS WRONG,
+AND THE CORRECTION IS THE RESULT.** X-52 found LK to be the whole x86 deficit and
+concluded the fix was porting D-33/X-40's NEON tap batching to AVX2 — reasoning that
+those wins were vector wins and had not transferred. **They are not vector wins on
+x86, and no AVX2 code was needed.**
+
+**The NEON batching exists because aarch64 has NO SCALAR POPCOUNT** — `CNT` lives in
+the vector registers, so every scalar count pays `fmov` in and out (D-6). **x86-64 has
+`POPCNT` as a scalar instruction.** So the trick that wins on aarch64 answers a problem
+x86 does not have — *provided the instruction is actually emitted.*
+
+**IT IS NOT.** Baseline x86-64 predates SSE4.2, so `POPCNT` is not in the default ISA
+and `__builtin_popcountll` compiles to a **software fallback**. Measured directly:
+**zero `popcnt` instructions in the shipped `frontend_sequence` binary.** binCV counts
+bits for a living, and it was doing it in software.
+
+**RESULT.** Full 1710-frame sequence, same machine, two runs of each build back to
+back because the first pass showed OpenCV itself moving 27% between runs:
+
+| build | binCV | OpenCV | ratio |
+|---|---|---|---|
+| default (portable) | 12.851 / 12.991 ms | 3.454 / 3.396 | **0.27× / 0.26×** |
+| **`-mpopcnt`** | **3.398 / 3.507** | 3.108 / 3.185 | **0.91× / 0.91×** |
+
+**One flag: binCV 12.92 → 3.45 ms, a 3.75× speedup, and from 3.8× slower than OpenCV
+to 0.91× — near parity, at 6.23× less memory.** The stage profile also snaps to the
+aarch64 shape: track 67.3% / build 26.7% / detect 6.0% against aarch64's 68.3 / 26.3 /
+5.4. **The library was never mis-shaped on x86; it was mis-compiled.**
+
+**X-52's EXTRAPOLATION WAS RIGHT ABOUT THE DESTINATION AND WRONG ABOUT THE ROUTE.** It
+predicted LK near ~2.7 ms and the frontend near ~3.9 ms at parity, flagged as an
+extrapolation after three failures. Measured: LK **2.307 ms**, frontend **3.43 ms**,
+parity. **The number was right and the mechanism was wrong**, which is worth recording
+as its own lesson — a correct prediction is not evidence of a correct model.
+
+**WHAT SHIPS, AND WHAT DOES NOT.** `BINCV_X86_POPCNT` is a CMake option, **OFF by
+default**. Turning it on **raises the minimum CPU** to SSE4.2-era (Nehalem 2008,
+Barcelona 2007), and that is a product decision rather than a build tweak — so it is
+offered, measured and documented rather than taken unilaterally. The configure summary
+now prints which side it is on, because a 3.75× factor should not be invisible.
+
+**The principled fix is runtime dispatch** (ROADMAP 2.3), which this does not pre-empt.
+It is genuinely awkward for `popcountWord`: it is an inline function in hot loops, so a
+dispatch that defeats inlining could cost more than it saves. **Registered as
+[E-31](ARCHITECTURE.md#register)**, with the note that the pragmatic alternative —
+simply requiring a 2008-era instruction — is what several vision libraries already do
+and deserves weighing against the machinery.
+
+**Decision:** no AVX2 work for LK on this evidence; the accumulator port X-52 proposed
+is **cancelled**. Recorded as [D-47](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/frontend_sequence.cpp` built twice from the same tree, once with
+`-mpopcnt`; `objdump | grep popcnt` to confirm the instruction is present or absent
+rather than inferring it from timings.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

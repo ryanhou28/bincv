@@ -1127,3 +1127,44 @@ because it needs ground truth, which is what makes it unrepresentative.**
 **The rule tightened rather than relaxed:** no accuracy conclusion from that harness
 becomes a shipped default, corrected cascade or not. Frontend accuracy is measured at
 the frontend. **E-28** carries the open half.
+
+---
+
+## 29 · T4.3b, and then the x86 deficit turns out to be a compile flag
+
+### The VIO frontend loop runs — and inverts the profile
+
+`examples/vio_frontend.cpp`, modelled on HybVIO's: persistent track set,
+`FAILED_FLOW`/`FLOW_OUT_OF_RANGE` culling, top-up detection with `applyMinDistance`
+against survivors. **1710 frames, no gap requiring an operation binCV lacks.**
+
+| | `frontend_sequence` | **top up below target** | **60% hysteresis** |
+|---|---|---|---|
+| detections | 4.8% of frames | **91.0%** | 45.0% |
+| **detect** | 0.570 ms | **18.070** | 7.831 |
+| **binCV total** | 10.644 | **31.641** | **19.996** |
+
+**Detection is 39–57% of a real frontend, against D-28's 4.8%** — that figure was a
+property of the benchmark's re-detect policy, and every optimisation priority since
+X-31 rested on it. **The policy alone is worth 1.58×** and lives outside binCV.
+
+### The x86 deficit: one flag, 3.75×
+
+X-52 said port the NEON accumulators to AVX2. **Wrong — and the correction is the
+result.** The NEON batching exists because aarch64 has *no scalar popcount*. x86 has
+`POPCNT`… except baseline x86-64 predates SSE4.2, so it wasn't being emitted:
+**zero `popcnt` instructions in the shipped binary.**
+
+| build | binCV | OpenCV | ratio |
+|---|---|---|---|
+| default | 12.92 ms | 3.43 | **0.27×** |
+| **`-mpopcnt`** | **3.45** | 3.15 | **0.91×** |
+
+**3.75× from one flag**, from 3.8× slower than OpenCV to near parity — at 6.23× less
+memory. The stage profile snaps to the aarch64 shape. **binCV was never mis-shaped on
+x86; it was mis-compiled.** The AVX2 port is cancelled.
+
+**And a lesson worth more than the flag:** X-52 predicted LK ≈2.7 ms and the frontend
+≈3.9 ms at parity. Measured: **2.307 and 3.43.** The number was right and **the
+mechanism was wrong** — had the AVX2 port been written, it would have "confirmed" the
+hypothesis while the real cause went unfound.
