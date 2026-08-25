@@ -1050,3 +1050,45 @@ whose convergence is real.** (E-19's own "2.30×" ladder cost was inflated the s
 
 **Not yet enacted:** switching re-bases every performance number, so it needs X-49's
 treatment first — a frontend re-measure confirming accuracy and re-stating criterion 4.
+
+---
+
+## 27 · The frontend refuted X-50 — and the accuracy harness is why
+
+X-50 said `1/2/2/1` + `BOX_3x3` dominates on all three axes, and required a frontend
+confirmation before switching. **That run refuted it.**
+
+| config | within 1 px | lifetime | speed |
+|---|---|---|---|
+| **`1/2/2/2` + `BOX_2x2`** *(shipped)* | **95.4%** | **11** | **10.644 ms** |
+| `1/2/2/2` + `BOX_3x3` | 95.2% | 11 | 10.879 |
+| **`1/2/2/1` + `BOX_3x3`** *(X-50's winner)* | **90.6%** | **9** | 10.787 |
+
+Both of X-50's accuracy claims fail in the same direction:
+
+| | harness said | frontend says |
+|---|---|---|
+| `BOX_3x3` at `1/2/2/2` | **+0.78** points | **−0.2**, and +0.235 ms |
+| dropping level 3's bit | −0.69 points | **−4.6**, lifetime 11 → 9 |
+
+**The mechanism is a harness defect, not noise.** `seedFiltered` builds the pyramid
+**entirely in floating point** and quantizes each level *from the float chain*.
+binCV's pyramid quantizes level 1, then filters **that quantized level** to make
+level 2. **The harness models a pyramid with no cascaded quantization error; the
+shipped one has three rounds of it** — so it systematically **understates the cost of
+removing bits**, here by **6.7×**.
+
+**D-43 withdrawn before it shipped.** D-23 stands, now on a frontend measurement
+instead of a proxy. X-50's speed and footprint tables are sound — track *did* fall
+7.270 → 6.753 as predicted; only the accuracy proxy failed.
+
+**X-39's accuracy axis rests on the same harness**, so D-36/D-39's yield figures
+describe the idealised chain. Flagged on those records rather than left. Their speed
+figures were measured on real kernels and are unaffected.
+
+**E-27**: rebuild the harness on binCV's own `pyrDownFiltered` cascade. Until then, no
+accuracy conclusion from it may become a shipped default without a frontend
+confirmation — **the rule that caught this one.**
+
+Also: `BOX_3x3`'s build cost was estimated at +0.35 ms by scaling; measured in place it
+is **+0.565 ms**. Another argument against scaling.

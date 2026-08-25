@@ -8851,6 +8851,80 @@ operating point; it does not claim the frontend has moved.**
 
 ---
 
+### X-51 · The frontend REFUTES X-50, and the accuracy harness is why · `DONE`
+
+**A CONFIRMING RUN THAT DID NOT CONFIRM.** [X-50](#x-50--e-19--is-1222--box_2x2-still-the-operating-point--done)
+concluded `1/2/2/1` + `BOX_3x3` dominates the shipped point on all three axes and
+[D-43](ARCHITECTURE.md#8-design-decisions) recorded it. X-50 also said, in its own
+words, that the switch *"does not claim the frontend has moved"* and needed
+[X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done)'s
+treatment first. **That measurement was run and it refutes the conclusion.**
+
+Full 1710-frame sequence, reference device, OpenCV at one thread:
+
+| config | within 1 px | lifetime | p90 / p99 | speed | build | track |
+|---|---|---|---|---|---|---|
+| **`1/2/2/2` + `BOX_2x2`** *(shipped)* | **95.4%** | **11** | 0.161 / 22.5 | **10.644 ms** | 2.805 | 7.270 |
+| `1/2/2/2` + `BOX_3x3` | 95.2% | 11 | 0.218 / 25.8 | 10.879 | 3.370 | 6.926 |
+| **`1/2/2/1` + `BOX_3x3`** *(X-50's winner)* | **90.6%** | **9** | 0.648 / 50.6 | 10.787 | 3.371 | 6.753 |
+
+**BOTH of X-50's accuracy claims fail, in the same direction.**
+
+| | X-50's harness said | the frontend says |
+|---|---|---|
+| `BOX_3x3` at `1/2/2/2` | **+0.78** yield points | **−0.2** points, and **+0.235 ms** |
+| dropping level 3's bit | −0.69 points | **−4.6 points**, lifetime **11 → 9** |
+
+**THE MECHANISM, AND IT IS A DEFECT IN THE HARNESS RATHER THAN NOISE.**
+`seedFiltered` builds the pyramid **entirely in floating point** — `p = downOnce(p, f)`
+cascading on `CV_32F` — and quantizes **each level from the float chain**
+(`tests/test_opticalflow.cpp`). binCV's real pyramid quantizes level 1 to N₁ bits,
+then filters **that quantized level** to make level 2, and so on. **The harness models
+a pyramid with no cascaded quantization error; the shipped one has three rounds of it.**
+
+That explains the direction exactly: the harness **systematically understates the cost
+of taking bits away**, because in the harness a coarse level is a fresh quantization of
+an exact float, while in the pipeline it is a quantization of a quantization of a
+quantization. At `1/2/2/1` the coarsest level is 1 bit at the end of that chain, and
+the real loss is **6.7× larger** than the harness predicted.
+
+**WHAT THIS DOES AND DOES NOT INVALIDATE.**
+
+- **D-43 is WITHDRAWN.** `1/2/2/2` + `BOX_2x2` is the operating point;
+  [D-23](ARCHITECTURE.md#8-design-decisions) stands, now on a frontend measurement
+  rather than on X-50's proxy. The frontend is reverted to the exact file X-49
+  measured, verified by diff rather than re-run.
+- **E-19 is still answered**, but the answer is the opposite of X-50's: the shipped
+  point is **not** dominated. Every coarse level's second bit earns its place *by more
+  than X-50 could see*.
+- **[X-39](#x-39-sequence-arm--the-same-design-space-over-1710-frames--done)'s accuracy
+  axis rests on the same harness**, so [D-36](ARCHITECTURE.md) and
+  [D-39](ARCHITECTURE.md)'s accuracy figures — including *"`BOX_3x3` is −0.10 from the
+  Gaussian anchor"* — describe the **idealised** chain, not binCV's. Their *relative*
+  filter comparisons at fixed ladder are less affected, because the idealisation is
+  symmetric across filters; their absolute yields are not binCV's yields. **Flagged on
+  those records, not quietly left.** The speed axes of D-36/D-39 are unaffected —
+  those were measured on the real kernels.
+- **X-50's speed and footprint tables are unaffected**: they were measured on the real
+  kernels and reproduce here (track *did* fall, 7.270 → 6.753). What failed is the
+  accuracy proxy, and it failed hard enough to invert a three-axis dominance claim.
+
+**AND ONE COST ESTIMATE WAS LOW.** `BOX_3x3` was priced at **+0.35 ms** on build from
+X-42/X-48 scaling; measured in place it is **+0.565 ms** (2.805 → 3.370). The scaling
+used a 640×480 single-level number against a 752×480 three-transition two-frame build.
+Another argument for measuring in place rather than scaling.
+
+**Registered as [E-27](ARCHITECTURE.md#register): make the accuracy harness build its
+levels with binCV's own `pyrDownFiltered` cascade**, so that ladder and filter accuracy
+are measured on the pipeline that ships. Until then, **no accuracy conclusion from that
+harness should be promoted to a shipped default without a frontend confirmation** —
+which is the rule X-50 followed and is the only reason this was caught.
+
+**Method:** `benchmark/frontend_sequence.cpp` via `scripts/run_on_pi.sh pi4` with
+`BINCV_PI_OPENCV=1`, three configurations over the full sequence.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
