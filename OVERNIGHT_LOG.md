@@ -955,3 +955,49 @@ separate.
 checked under both borders at even *and* odd extents. The odd ones matter: that's where
 the last output column reads a source column that doesn't exist, and the even-only test
 that shipped before couldn't see it.
+
+---
+
+## 25 · `pyrDown` means `cv::pyrDown` — and the headline moves to 1.53×
+
+| name | what it is |
+|---|---|
+| **`pyrDown`** | 5×5 `[1,4,6,4,1]` Gaussian, `BORDER_REFLECT_101`. **Exactly `cv::pyrDown`** — Tier 1 at 8→8, proven at even, odd and both-odd extents |
+| **`pyrDownBox`** | 2×2 box, `BORDER_REPLICATE` — what `pyrDown` used to be, and binCV's own operating point |
+| `Pyramid::build<F, Bo>()` | defaults to the OpenCV pair; the frontend asks for the box explicitly |
+
+**A third border existed and nobody had noticed.** The hand-optimised box route
+implements `BORDER_REPLICATE`, not the `Zero` the filtered route used — at 63×47 it
+differs from `Zero` in 39 of 768 pixels and from `Reflect101` in 35. Without adding
+`Replicate`, dispatching into that route would have silently changed the generic
+route's meaning at odd extents.
+
+**It was nearly missed.** My first check used `(x*7+y*13)%2`, which makes adjacent
+columns exact complements, so replicate and reflect sums coincide — it reported *zero*
+differences everywhere but one corner. **Periodic test data can hide a border bug
+completely.**
+
+**Per-filter specialization is now the shape**, which was the right architectural
+call: `F` is a closed enum, so `pyrDownFiltered` dispatches at compile time —
+`Box2x2`+`Replicate` to the hand-optimised route, everything else generic until
+someone measures a case worth specialising. **E-25 answered without deleting
+anything**: the fast path is kept and demoted from a competing public API to an
+internal dispatch.
+
+**The swap compiled silently at all 25 call sites** — only `test_pyramid` caught it.
+So "the migration is complete" had to be measured:
+
+| 692-frame control | before | after |
+|---|---|---|
+| flow median / p90 / p99, within 1 px | 0.0386 / 0.1177 / 14.478, 97.4% | **identical** |
+| lifetime, survival, footprint | 13v13, 97.1%, 6.23× | **identical** |
+| **build (`pyrDown` + derivatives)** | 2.884 ms | **2.887 ms** |
+
+**And X-40's forecast confirmed end to end**: it predicted ~1.06× on LK from a 1.069×
+kernel gain; measured **7.774 → 7.342 ms, 1.059×**.
+
+### Criterion 4 is now 1.53×
+
+Full 1710 frames: **10.644 ms vs OpenCV's 16.289**, with **every criterion-2 figure
+bit-identical to X-38**. Pure speed, no accuracy cost — from the accumulators, not
+from the pyramid work.

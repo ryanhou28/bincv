@@ -2490,10 +2490,14 @@ OpenCV pinned to one thread.
 | 2 · per-frame survival | **96.4%** | 96.6% | 0.2 points short |
 | 2 · flow difference | **median 0.0434 px** | — | 95.4% within 1 px |
 | 3 · peak footprint | **436 704 B** | 2 719 832 B | **6.23× smaller** |
-| **4 · speed** | **11.198 ms/frame** | 16.324 ms/frame | **1.46× FASTER** |
+| **4 · speed** | **10.644 ms/frame** | 16.289 ms/frame | **1.53× FASTER** |
 
-**1.46× faster and 6.23× smaller simultaneously.** That is the result
+**1.53× faster and 6.23× smaller simultaneously.** That is the result
 [§1](#the-motivating-result) opens by asking for.
+
+*(Speed re-measured by [X-49](EXPERIMENTS.md) after [D-37](#8-design-decisions)'s
+window-carried accumulators landed: 11.198 → 10.644 ms, with **every criterion-2
+figure bit-identical**. The accuracy rows below are X-38's and are unchanged.)*
 
 **THE EARLIER "EQUAL ON CRITERION 2" WAS AN ARTIFACT OF AN EASY PREFIX.** This
 record previously read 13 vs 13 frames and 97.1% vs 97.1% — *equal* — from the first

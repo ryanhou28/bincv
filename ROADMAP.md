@@ -313,7 +313,7 @@ start until it produces numbers.
 > **ALL FOUR ARE MET**, on the reference device, measured end to end over the **full
 > 1710-frame** EuRoC V1_02_medium sequence with OpenCV pinned to one thread
 > ([X-38](EXPERIMENTS.md), [D-35](ARCHITECTURE.md#8-design-decisions)):
-> **1.46× faster and 6.23× smaller simultaneously**, with median track lifetime one
+> **1.53× faster and 6.23× smaller simultaneously**, with median track lifetime one
 > frame short of OpenCV's (11 vs 12), per-frame survival 0.2 points short (96.4% vs
 > 96.6%) and flow agreeing to **0.0434 px** at the median.
 >

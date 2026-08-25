@@ -8639,6 +8639,56 @@ fixup); `tests/test_pyramid.cpp`; `benchmark/pyrfilter_benchmark.cpp` via
 
 ---
 
+### X-49 · The frontend after the API swap: a control, and a new headline · `DONE`
+
+**A CONTROL, not a new question.** `pyrDown` changed meaning
+([X-48](#x-48--border_reflect_101-and-the-tier-1-claim-made-good--done) and the API
+swap): it is now `cv::pyrDown`, and the frontend asks for `pyrDownBox` explicitly.
+**The swap compiled silently at all 25 call sites**, so "the migration was complete"
+is a claim that has to be measured, not asserted.
+
+**Result 1 — the swap cost the frontend NOTHING.** 692-frame prefix, against the same
+prefix at `82daca6`:
+
+| | before | after |
+|---|---|---|
+| flow median / p90 / p99 | 0.0386 / 0.1177 / 14.4781 | **identical** |
+| within 1 px | 97.4% | **97.4%** |
+| lifetime, survival | 13 vs 13, 97.1%/97.1% | **identical** |
+| footprint | 6.23× | **6.23×** |
+| **build (`pyrDown` + derivatives)** | 2.884 ms | **2.887 ms** |
+
+Build moved by **0.1%**, which is noise. Every accuracy figure reproduces to the last
+digit. The migration is complete and the box path is byte-for-byte what it was.
+
+**Result 2 — X-40 landed exactly as forecast, and this is the first end-to-end
+confirmation of it.** [X-40](#x-40--e-18--window-carried-vector-accumulators-at-n--2--done)
+measured a **1.069×** kernel gain on the N = 2 levels and predicted **~1.06× on LK**
+from the ladder share. Measured on the prefix: **track 7.774 → 7.342 ms, 1.059×.**
+A forecast from a micro-benchmark, confirmed end to end, within 0.001.
+
+**Result 3 — the criterion-4 headline improves.** Full 1710-frame sequence:
+
+| criterion | binCV | OpenCV | |
+|---|---|---|---|
+| 2 · lifetime, survival, flow median | 11 / 96.4% / 0.0434 px | 12 / 96.6% | **unchanged from X-38** |
+| 3 · peak footprint | 436 704 B | 2 719 832 B | **6.23× smaller** |
+| **4 · speed** | **10.644 ms/frame** | 16.289 ms/frame | **1.53× FASTER** (was 1.46×) |
+
+**Every criterion-2 figure is bit-identical to X-38's full-sequence run**, so the
+gain is pure speed with no accuracy cost. The stage profile: track 68.3%, build
+26.3%, detect 5.4%.
+
+**Decision:** none. This is the record that
+[D-35](ARCHITECTURE.md#d-35-all-four-roadmap-success-criteria-are-met-on-the-deployment-target)'s
+criterion-4 figure now points at.
+
+**Method:** `benchmark/frontend_sequence.cpp` via `scripts/run_on_pi.sh pi4` with
+`BINCV_PI_OPENCV=1`, run twice — the whole directory, and the `692` prefix as the
+control.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
