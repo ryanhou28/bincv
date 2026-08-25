@@ -2552,14 +2552,14 @@ on identical input, so the *ratio* carries OpenCV's variance, not binCV's: 1.46�
 
 ### D-36: `BOX_2x2` stays the default; the filter set ships as options
 
-> **ACCURACY FIGURES REST ON AN IDEALISED PYRAMID ([X-51](EXPERIMENTS.md)).** The
-> harness behind every yield number here builds its levels in floating point and
-> quantizes each from the float chain, so it models a pyramid with **no cascaded
-> quantization error** while binCV's has three rounds. Relative comparisons **between
-> filters at a fixed ladder** are the least affected, since the idealisation is
-> symmetric across filters; the **absolute** yields are not binCV's. The **speed**
-> figures are unaffected — those were measured on the real kernels. E-27 fixes the
-> harness.
+> **ACCURACY FIGURES RE-MEASURED ON THE SHIPPED PIPELINE ([X-53](EXPERIMENTS.md)).**
+> The harness behind these yield numbers used to build its levels in floating point;
+> it now runs binCV's own `pyrDownFiltered` cascade. **The filter rankings moved by at
+> most 0.16 points and stand as first-hand** — the hedge that relative comparisons at a
+> fixed ladder would survive the idealisation was correct. What did NOT survive is the
+> harness's pricing of *ladder depth*, which [D-44](#d-44-the-accuracy-harness-measures-a-different-question-from-the-frontend)
+> shows disagrees with the frontend by 4.2 points for reasons still unknown. The speed
+> figures were always measured on the real kernels.
 >
 > **PARTLY SUPERSEDED BY [D-39](#d-39-the-filter-frameworks-3-tax-was-genericity-and-d-36-is-restated).**
 > The decision below stands — `BOX_2x2` is still the default and the set still ships
@@ -2995,6 +2995,49 @@ first — a frontend re-measure confirming accuracy is unchanged and re-stating 
 4. **This record establishes the operating point; it does not claim the frontend has
 moved.**
 
+### D-44: the accuracy harness measures a different question from the frontend
+
+[E-27](#register) held that the accuracy harness misled X-50 because it built its
+pyramid in floating point. [X-53](EXPERIMENTS.md) fixed exactly that — the harness now
+runs **binCV's own `pyrDownFiltered` cascade**, quantizing each level from the quantized
+level above — and **the fix did not close the gap.**
+
+| level 3's second bit, `1/2/2/1` vs `1/2/2/2` at `BOX_3x3` | |
+|---|---|
+| old float-cascade harness | −0.30 points |
+| **corrected harness** | **−0.42** |
+| **frontend** ([X-51](EXPERIMENTS.md)) | **−4.60** |
+
+**Removing the cascade moved the number by 0.12 where the gap is 4.2**, and the
+corrections ran in **both directions** — `1/1/1/1`, the ladder with the *most* cascaded
+quantization, moved **up** 1.89 points where the mechanism predicted the largest fall.
+**[X-51](EXPERIMENTS.md)'s mechanism is withdrawn.**
+
+**What the fix DID settle:** the filter axis moved by **at most 0.16 points**, exactly
+as X-51 hedged it would. [D-36](#8-design-decisions) and
+[D-39](#d-39-the-filter-frameworks-3-tax-was-genericity-and-d-36-is-restated)'s filter
+rankings stand and are now first-hand rather than proxied. Their warnings narrow from
+*"the accuracy figures rest on an idealised pyramid"* to **"the ladder figures did; the
+filter figures did not."**
+
+**The likely cause is structural and is NOT measured, so it is not claimed.** The
+harness warps a single frame and asks whether LK recovers a known warp, so `prev` and
+`next` are binarizations of *the same image* with near-identical edge maps. The
+frontend tracks **real consecutive frames**, whose binarizations differ wherever a pixel
+sits near the threshold, over a sequence where error compounds and tracks are
+re-detected. **Those are different questions.** And the tension is fundamental rather
+than a bug: the harness uses synthetic warps **because it needs ground truth**, which is
+precisely what makes it unrepresentative.
+
+**THE RULE, TIGHTENED RATHER THAN RELAXED:**
+
+> **No accuracy conclusion from the synthetic-warp harness may be promoted to a shipped
+> default** — with or without a corrected cascade. It answers a *sensitivity* question,
+> not a *tracking* one. **Frontend accuracy is measured at the frontend.**
+
+That rule, in its weaker form, is what caught [D-43](#d-43-withdrawn-the-operating-point-stays-1222--box_2x2)
+before it shipped. Successor: [E-28](#register).
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -3051,7 +3094,8 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-24**~~ **RESOLVED — NEGATIVE** | The twelve `alignedWord` extractions in a row share two `(w0, s)` descriptors. Can twelve scalar load-shift-ors become three vector ones? | [X-41](EXPERIMENTS.md) ruled out addressing (1.023×) and cache (1.129×), leaving instruction count as the only lever. | **Answered: the shifts YES, the loads NO.** [X-43](EXPERIMENTS.md): removing the gather makes the extraction **1.638×** faster, but paying for it makes it **0.885× — slower than scalar**. `QuantMat` stacks planes, so the eight words are in eight unrelated lines and **aarch64 has no gather**; eight loads plus eight lane inserts cost more than the shift-ors they replace. **The obstacle is the layout, and the rule predicted that before measuring.** [D-40](#d-40-the-extractions-obstacle-is-the-plane-layout-and-residualsums-is-done). | Whether the aligned path vectorises its loads. **It cannot, as laid out.** | D-38 | **Phase 5** (X-43) ✔ |
 | ~~**E-26**~~ **RESOLVED — NO** | Should the tracker convert a level to interleaved layout per frame — **+8% frontend speed for +21% peak footprint**? | [X-44](EXPERIMENTS.md) measured both sides: extraction **1.445×**, `residualSums` **1.167×**, net frontend **~1.65×** from 1.52×; cost **+92 160 B on a 436 704 B peak**, criterion 3 **6.23× → 5.15×**. | **Answered: NO — the trade is declined.** binCV does not spend 21% of its footprint advantage on 8% of speed. The measurements stand as the record of what was on offer. Interleaving as a general layout was already ruled out separately by the 5.17× streaming cost ([D-41](#d-41-interleaving-will-not-be-bincvs-general-layout-the-rest-is-escalated)). | **Settled by the project's goals, not by a measurement** — which is why X-44 escalated it rather than picking a band. `residualSums` is now closed at every level: counting, addressing, cache, vectorisation and layout have each been priced and each declined or exhausted. | D-41 | **CLOSED** |
 | ~~**E-19**~~ **RESOLVED — the shipped point STANDS** | Is the `1/2/2/2` ladder still the right operating point? | [X-50](EXPERIMENTS.md) swept ladder × filter on three axes and concluded `1/2/2/1` + `BOX_3x3` dominated. [X-51](EXPERIMENTS.md) ran the frontend confirmation X-50 required and **refuted it**: 90.6% within 1 px against 95.4%, lifetime 9 vs 11, and slower. | **Answered: YES, `1/2/2/2` + `BOX_2x2` stands** — and every coarse level's second bit earns its place by MORE than the proxy could see. X-50's accuracy harness builds the pyramid in float and so understates the cost of removing bits by ~6.7×. Speed and footprint from X-50 are sound; the accuracy proxy is not. [D-43 withdrawn](#d-43-withdrawn-the-operating-point-stays-1222--box_2x2). | Whether the shipped ladder changes. **It does not.** | D-23 | **Phase 5** (X-50, X-51) ✔ |
-| **E-27** | The accuracy harness behind X-24, X-25, X-39 and X-50 builds pyramid levels in FLOATING POINT and quantizes each from the float chain. binCV's pyramid quantizes level 1, then filters THAT to make level 2. Should the harness build its levels with binCV's own `pyrDownFiltered` cascade? | [X-51](EXPERIMENTS.md) measured the consequence: the harness priced level 3's bit at −0.69 yield points where the frontend measures **−4.6**, a 6.7× understatement that inverted a three-axis dominance claim. It **systematically understates the cost of removing bits**, because a coarse level in the harness is a fresh quantization of an exact float rather than a quantization of a quantization. | **Until this is fixed, no accuracy conclusion from that harness may be promoted to a shipped default without a frontend confirmation.** That rule is what caught D-43 before it shipped. Fixing it is cheap now that `pyrDownFiltered` covers five filters and three borders; the cost is re-running X-39's and X-50's sweeps. | Whether the project's accuracy numbers describe the pipeline that ships. | X-51 | **Phase 5** |
+| ~~**E-27**~~ **RESOLVED — fix shipped, purpose NOT achieved** | Should the accuracy harness build its levels with binCV's own `pyrDownFiltered` cascade instead of in floating point? | [X-51](EXPERIMENTS.md) blamed the float cascade for the harness mispricing level 3's bit by 6.7×. | **Answered: YES it should, and it was — but that was not the cause.** [X-53](EXPERIMENTS.md): the corrected harness prices the bit at **−0.42** points where the frontend measures **−4.60**, and its corrections run in BOTH directions. X-51's mechanism is withdrawn. The filter axis moved ≤0.16 points, vindicating X-51's hedge and letting D-36/D-39's filter figures stand as first-hand. [D-44](#d-44-the-accuracy-harness-measures-a-different-question-from-the-frontend). | Whether the harness can be trusted for shipped defaults. **It cannot, and the rule tightened.** | X-51 | **Phase 5** (X-53) ✔ |
+| **E-28** | The synthetic-warp harness and the frontend disagree by **4.2 yield points** on the same configuration, and it is **not** the float cascade. What is it? | [X-53](EXPERIMENTS.md) eliminated the leading hypothesis. The remaining structural difference: the harness warps ONE frame, so `prev` and `next` are binarizations of the same image with near-identical edge maps; the frontend tracks REAL consecutive frames, whose binarizations differ near the threshold, over a sequence where error compounds and tracks are re-detected. | **The tension may be irreducible**: the harness uses synthetic warps BECAUSE it needs ground truth, which is what makes it unrepresentative. A candidate resolution is a harness on consecutive real frames with OpenCV's flow as the reference rather than a known warp — trading exact ground truth for representativeness, which is a different bargain rather than a strictly better one. | Whether binCV can price an accuracy trade without a full frontend run. | D-44 | **Phase 5** |
 | ~~**E-22**~~ **RESOLVED** | How much of `pyrDownFilteredRoute`'s cost is genericity rather than filter? | [X-39](EXPERIMENTS.md) measured the generic route running `BOX_2x2` at **2.96×** the hand-written one **computing the same function**, so that tax rides on every filter in the set. | **Answered: nearly all of it, and it was never necessary.** [X-42](EXPERIMENTS.md) made three helper signatures take their already-`constexpr` values as template parameters instead of runtime arguments — **no algorithm change** — and the generic route went **2.96× → 1.19×**, `GAUSSIAN_5x5` **4.28× faster**. **This reverses D-36:** the standard-LK anchor now costs +1.20 ms and leaves binCV **1.32× FASTER** than OpenCV, where D-36 recorded 0.97× — slower. [D-39](#d-39-the-filter-frameworks-3-tax-was-genericity-and-d-36-is-restated). | Whether D-36's filter prices are real. **They were not.** | D-36 | **Phase 5** (X-42) ✔ |
 | **E-25** | The hand-written `pyrDown` is now only **1.19×** faster than the generic route computing the same function. Should it be deleted, leaving one implementation for all six filters? | [X-42](EXPERIMENTS.md) closed the gap from 2.96×. Two implementations of `BOX_2x2` is a standing correctness liability that `tests/test_pyramid.cpp` currently pays for by holding them to agreement. | **Not a free call.** The hand-written route is what **every prior result in this project was measured on**, including D-35's criterion-4 numbers, so deleting it re-bases the whole speed record by 1.19% — small, but it must be re-measured rather than assumed. Against that: one implementation, one place for the next optimisation, and the three structural costs (serial accumulation, materialised intermediate, worst-case widths) become worth attacking because they would then be on the shipped path. | Whether binCV ships one pyramid kernel or two. | D-39 | **Phase 5** |
 | ~~**E-21**~~ **RESOLVED** | What does the downsampling-filter axis look like? | binCV implemented one of six variants, so every accuracy result sat at one point of a two-dimensional space. | **Answered, and the axes are NOT independent.** `BOX_2x2` saturates at 3 bits (+0.82 yield points N=2→7) where `GAUSSIAN_5x5` gains +3.93 — **the filter decides how much depth is useful**. Standard-LK accuracy is reachable and **costs criterion 4**: `GAUSSIAN_5x5` is 25.10× the shipped route and would put binCV behind OpenCV. `BOX_3x3` recovers **65% of the gap for +0.8 ms** and dominates `GAUSSIAN_3x3`. `DIRECT_SUBSAMPLE` is −19.68 points, confirming the paper's ">2.5 cm worse". [D-36](#d-36-box_2x2-stays-the-default-the-filter-set-ships-as-options). | The pyramid's default filter. **`BOX_2x2` stays; the set ships as options.** | E-19 | **Phase 5** (X-39) ✔ |

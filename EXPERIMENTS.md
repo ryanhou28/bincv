@@ -8995,6 +8995,96 @@ with `BINCV_OPENCV_THREADS=1`.
 
 ---
 
+### X-53 · E-27 — the harness now measures the shipped pipeline, and it STILL does not predict the frontend · `DONE`
+
+**THIS ENTRY REFUTES [X-51](#x-51--the-frontend-refutes-x-50-and-the-accuracy-harness-is-why--done)'s
+OWN DIAGNOSIS.** X-51 traced the frontend's disagreement with X-50 to the accuracy
+harness building its pyramid in floating point. E-27 fixed exactly that — `seedFiltered`
+now runs **binCV's own `pyrDownFiltered` cascade**, quantizing each level from the
+quantized level above it, which is the pipeline that ships. **The fix is right and the
+diagnosis was wrong.**
+
+**THE TEST, and it fails.** Level 3's second bit, `1/2/2/1` against `1/2/2/2` at
+`BOX_3x3`:
+
+| | says |
+|---|---|
+| old float-cascade harness | **−0.30** points |
+| **corrected harness** | **−0.42** points |
+| **frontend** ([X-51](#x-51--the-frontend-refutes-x-50-and-the-accuracy-harness-is-why--done)) | **−4.60** points |
+
+**Removing the cascade moved the number by 0.12 where the gap is 4.2.** The float
+cascade was not the cause, or was a small part of it.
+
+**AND THE CORRECTIONS RUN IN BOTH DIRECTIONS**, which the proposed mechanism does not
+predict. X-51 argued the float harness *understates the cost of removing bits*, so
+correcting it should push low-bit ladders **down**. Full sequence, 1.18 M
+keypoint-cases per cell:
+
+| ladder | filter | corrected | old harness | Δ |
+|---|---|---|---|---|
+| `1/1/1/1` | `BOX_2x2` | 92.58% | 90.69% | **+1.89** |
+| `1/1/1/1` | `BOX_3x3` | 90.73% | 90.67% | +0.06 |
+| `1/2/1/1` | `BOX_2x2` | 93.15% | 92.39% | +0.76 |
+| `1/2/1/1` | `BOX_3x3` | 93.39% | 93.71% | −0.32 |
+| `1/2/2/1` | `BOX_2x2` | 94.32% | 93.80% | +0.52 |
+| `1/2/2/1` | `BOX_3x3` | 94.84% | 94.97% | −0.13 |
+| `1/2/2/2` | `BOX_2x2` | 94.72% | 94.49% | +0.23 |
+| `1/2/2/2` | `BOX_3x3` | 95.26% | 95.27% | −0.01 |
+
+**`1/1/1/1` — the ladder with the MOST cascaded quantization — moved UP by 1.89
+points.** Under X-51's mechanism it should have moved down hardest. **The mechanism is
+withdrawn.**
+
+**THE FILTER AXIS BARELY MOVED, WHICH VINDICATES ONE HEDGE.** X-51 flagged D-36/D-39's
+filter figures as resting on the idealised chain but predicted that *relative
+comparisons between filters at a fixed ladder* would be least affected, "since the
+idealisation is symmetric across filters." Measured against the `GAUSSIAN_5x5` anchor
+at N=3:
+
+| filter | corrected | old |
+|---|---|---|
+| `GAUSSIAN_3x3` | −0.37 | −0.37 |
+| `BOX_3x3` | **−0.09** | −0.10 |
+| `BOX_2x2` | −1.10 | −1.26 |
+| `DIRECT_SUBSAMPLE` | −12.65 | −12.65 |
+
+**Nothing moved by more than 0.16 points.** D-36 and D-39's filter rankings stand, now
+on the shipped pipeline rather than a proxy, and their flags can be narrowed from "the
+accuracy figures are suspect" to "the ladder figures were, the filter figures were not."
+
+**SO WHAT DOES EXPLAIN THE FRONTEND?** Not measured here, and therefore not claimed.
+The leading candidate is structural rather than numerical: **the harness warps a single
+frame and asks whether LK can recover a known warp**, so `prev` and `next` are
+binarizations of *the same image* and their edge maps are nearly identical. The
+frontend tracks **real consecutive frames**, whose binarizations differ wherever a
+pixel sits near the threshold, across a sequence where errors compound and tracks are
+re-detected. **Those are different questions**, and coarse-level quality plausibly
+matters far more for the second — but "plausibly" is the honest word and this entry
+stops there.
+
+**The tension is fundamental, not a bug:** the harness uses synthetic warps *because
+it needs ground truth*, and that is exactly what makes it unrepresentative.
+
+**Decision: E-27's fix SHIPS** — the harness measuring the pipeline that ships is
+strictly better than measuring a float idealisation, and the filter numbers are now
+first-hand. **But E-27's PURPOSE is not achieved.** The rule tightens rather than
+relaxes:
+
+> **No accuracy conclusion from the synthetic-warp harness may be promoted to a
+> shipped default, with or without a corrected cascade.** It answers a sensitivity
+> question — can LK recover a known warp — not a tracking one. Frontend accuracy is
+> measured at the frontend.
+
+Recorded as [D-44](ARCHITECTURE.md#8-design-decisions); the open half is
+[E-28](ARCHITECTURE.md#register).
+
+**Method:** `tests/test_opticalflow.cpp` (`seedPyramid` replacing the float cascade,
+`downOnce`/`quantizeInto` deleted); both sequence sweeps re-run over the full 1710
+frames in 10 shards.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

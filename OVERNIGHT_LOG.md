@@ -1092,3 +1092,38 @@ confirmation — **the rule that caught this one.**
 
 Also: `BOX_3x3`'s build cost was estimated at +0.35 ms by scaling; measured in place it
 is **+0.565 ms**. Another argument against scaling.
+
+---
+
+## 28 · E-27 shipped the fix — and refuted the diagnosis that motivated it
+
+X-51 blamed the accuracy harness's float cascade for mispricing level 3's bit by
+6.7×. E-27 fixed exactly that: `seedFiltered` now runs **binCV's own
+`pyrDownFiltered` cascade**. **The fix is right and the diagnosis was wrong.**
+
+| level 3's second bit, `1/2/2/1` vs `1/2/2/2` at `BOX_3x3` | |
+|---|---|
+| old float-cascade harness | −0.30 pts |
+| **corrected harness** | **−0.42** |
+| **frontend** | **−4.60** |
+
+**0.12 points of movement against a 4.2-point gap.** And the corrections ran in
+**both directions** — `1/1/1/1`, the ladder with the *most* cascaded quantization,
+moved **up 1.89 points** where the mechanism predicted the largest fall. Mechanism
+withdrawn.
+
+**What the fix did settle:** the filter axis moved by **≤0.16 points**, exactly as
+X-51 hedged. D-36/D-39's filter rankings stand and are now first-hand. Their warning
+narrows from *"the accuracy figures are suspect"* to **"the ladder figures were; the
+filter figures were not."**
+
+**What's left is structural and not measured, so not claimed.** The harness warps
+**one frame** — `prev` and `next` are binarizations of the same image with
+near-identical edge maps. The frontend tracks **real consecutive frames**, whose
+binarizations differ near the threshold, over a sequence where error compounds. Those
+are different questions. And it may be irreducible: **the harness uses synthetic warps
+because it needs ground truth, which is what makes it unrepresentative.**
+
+**The rule tightened rather than relaxed:** no accuracy conclusion from that harness
+becomes a shipped default, corrected cascade or not. Frontend accuracy is measured at
+the frontend. **E-28** carries the open half.
