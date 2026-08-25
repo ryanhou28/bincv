@@ -118,8 +118,8 @@ struct Ladder {
 
     /// The measured BUILD stage: pyrDown both ladders, derivative every level.
     void buildStage() {
-        prev.build();
-        next.build();
+        prev.template build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
+        next.template build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
         deriv<0>();
     }
     template <size_t I>

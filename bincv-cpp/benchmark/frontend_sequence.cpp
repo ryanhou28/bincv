@@ -99,8 +99,8 @@ struct BincvFrontend {
         next.level<0>().fromCVMat(binNext);
     }
     void build() {
-        prev.build();
-        next.build();
+        prev.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
+        next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
         bincv::derivativeX(prev.level<0>(), dx0); bincv::derivativeY(prev.level<0>(), dy0);
         bincv::derivativeX(prev.level<1>(), dx1); bincv::derivativeY(prev.level<1>(), dy1);
         bincv::derivativeX(prev.level<2>(), dx2); bincv::derivativeY(prev.level<2>(), dy2);

@@ -71,8 +71,8 @@ struct Frames {
     /// Route (a)'s build: pyrDown only. NO derivative.
     void buildBlock() {
         for (size_t i = 1; i < prev.size(); ++i) {
-            bincv::pyrDown<1, 1, W>(prev[i - 1], prev[i]);
-            bincv::pyrDown<1, 1, W>(next[i - 1], next[i]);
+            bincv::pyrDownBox<1, 1, W>(prev[i - 1], prev[i]);
+            bincv::pyrDownBox<1, 1, W>(next[i - 1], next[i]);
         }
     }
     /// Route (b) additionally needs both derivative ladders.

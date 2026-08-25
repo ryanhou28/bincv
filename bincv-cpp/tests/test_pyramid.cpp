@@ -94,6 +94,7 @@ void operator delete[](void* p, std::size_t) noexcept  { countedFree(p); }
 namespace {
 
 using bincv::pyrDown;
+using bincv::pyrDownBox;
 using bincv::pyrDownHeight;
 using bincv::pyrDownWidth;
 using bincv::QuantMat;
@@ -239,7 +240,7 @@ void checkCase(const char* wordName, size_t width, size_t height, uint64_t seed,
         dstPlanes[q].width = dstWidth;
         dstPlanes[q].height = dstHeight;
     }
-    pyrDown<NOut, NIn, WordType>(srcPlanes, dstPlanes);
+    pyrDownBox<NOut, NIn, WordType>(srcPlanes, dstPlanes);
 
     const std::string label =
         caseLabel<NOut, NIn, WordType>(wordName, width, height, dirtySource ? " dirty" : "");
@@ -300,7 +301,7 @@ void testDifferingStrides(const char* wordName) {
         fillRandom(src, 0xA11u + width);
         QuantMat<NOut, WordType> dst(static_cast<int>(pyrDownWidth(width)),
                                      static_cast<int>(pyrDownHeight(height)));
-        pyrDown<NOut, NIn, WordType>(src, dst);
+        pyrDownBox<NOut, NIn, WordType>(src, dst);
 
         const std::string label = caseLabel<NOut, NIn, WordType>(wordName, width, height, " strides");
         PYR_EXPECT(src.getAlignedWidth() != dst.getAlignedWidth(),
@@ -331,14 +332,14 @@ void testDegenerate(const char* wordName) {
     for (size_t q = 0; q < NOut; ++q) dstPlanes[q] = dst.plane(q);
     for (size_t p = 0; p < NIn; ++p) srcPlanes[p].width = 0;
     for (size_t q = 0; q < NOut; ++q) dstPlanes[q].width = 0;
-    pyrDown<NOut, NIn, WordType>(srcPlanes, dstPlanes);
+    pyrDownBox<NOut, NIn, WordType>(srcPlanes, dstPlanes);
     PYR_EXPECT(true, "zero-width pyrDown returns without touching anything", wordName);
 
     for (size_t p = 0; p < NIn; ++p) srcPlanes[p] = src.plane(p);
     for (size_t q = 0; q < NOut; ++q) dstPlanes[q] = dst.plane(q);
     for (size_t p = 0; p < NIn; ++p) srcPlanes[p].height = 0;
     for (size_t q = 0; q < NOut; ++q) dstPlanes[q].height = 0;
-    pyrDown<NOut, NIn, WordType>(srcPlanes, dstPlanes);
+    pyrDownBox<NOut, NIn, WordType>(srcPlanes, dstPlanes);
     PYR_EXPECT(true, "zero-height pyrDown returns without touching anything", wordName);
 }
 
@@ -374,8 +375,8 @@ void testEdgeReplication(const char* wordName) {
                                              static_cast<int>(pyrDownHeight(oddHeight)));
             QuantMat<NOut, WordType> fromPadded(static_cast<int>(pyrDownWidth(oddWidth + 1)),
                                                 static_cast<int>(pyrDownHeight(oddHeight + 1)));
-            pyrDown<NOut, NIn, WordType>(odd, fromOdd);
-            pyrDown<NOut, NIn, WordType>(padded, fromPadded);
+            pyrDownBox<NOut, NIn, WordType>(odd, fromOdd);
+            pyrDownBox<NOut, NIn, WordType>(padded, fromPadded);
 
             const std::string label = caseLabel<NOut, NIn, WordType>(wordName, oddWidth,
                                                                      oddHeight, " edge");
@@ -576,7 +577,7 @@ void testRouteAgreement(const char* wordName) {
                                             static_cast<int>(pyrDownHeight(height)));
             QuantMat<NOut, WordType> replicated(static_cast<int>(pyrDownWidth(width)),
                                                 static_cast<int>(pyrDownHeight(height)));
-            pyrDown<NOut, NIn, WordType>(src, direct);
+            pyrDownBox<NOut, NIn, WordType>(src, direct);
             bincv::impl::pyrDownReplicated<NOut, NIn, WordType>(src, replicated);
 
             const std::string label =
@@ -721,7 +722,7 @@ void testFootprintClaims() {
         escape(&src);
         escape(&dst);
         const std::size_t before = g_newCount;
-        pyrDown<3, 1, uint32_t>(src, dst);
+        pyrDownBox<3, 1, uint32_t>(src, dst);
         escape(&dst);
         PYR_EXPECT(g_newCount == before,
                    "pyrDown allocates nothing on the heap", "NIn=1 NOut=3 uint32_t");
@@ -734,7 +735,7 @@ void testFootprintClaims() {
         escape(&src);
         escape(&dst);
         const std::size_t before = g_newCount;
-        pyrDown<5, 4, uint64_t>(src, dst);
+        pyrDownBox<5, 4, uint64_t>(src, dst);
         escape(&dst);
         PYR_EXPECT(g_newCount == before,
                    "pyrDown allocates nothing at an odd extent either",
@@ -748,7 +749,7 @@ void testFootprintClaims() {
             for (int x = 0; x < 640; x += 3) base.set(y, x, 1u);
         escape(&pyramid);
         const std::size_t before = g_newCount;
-        pyramid.build();
+        pyramid.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
         escape(&pyramid);
         PYR_EXPECT(g_newCount == before,
                    "Pyramid::build allocates nothing -- every level already exists and "
@@ -783,7 +784,7 @@ void testPyramidLadder(const char* wordName) {
                        "level 3 halves the height three times", label);
 
             fillRandom(pyramid.template level<0>(), 0x1EAD0u + width * 13 + height);
-            pyramid.build();
+            pyramid.template build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
 
             // The same ladder, one call at a time, into separate containers.
             QuantMat<3, WordType> one(static_cast<int>(pyrDownWidth(width)),
@@ -793,9 +794,9 @@ void testPyramidLadder(const char* wordName) {
             QuantMat<5, WordType> three(
                 static_cast<int>(pyrDownWidth(two.getWidth())),
                 static_cast<int>(pyrDownHeight(two.getHeight())));
-            pyrDown<3, 1, WordType>(pyramid.template level<0>(), one);
-            pyrDown<4, 3, WordType>(one, two);
-            pyrDown<5, 4, WordType>(two, three);
+            pyrDownBox<3, 1, WordType>(pyramid.template level<0>(), one);
+            pyrDownBox<4, 3, WordType>(one, two);
+            pyrDownBox<5, 4, WordType>(two, three);
 
             size_t disagreements = 0;
             for (size_t y = 0; y < three.getHeight(); ++y) {
@@ -920,7 +921,7 @@ void testAgainstReferencePipeline(const char* wordName) {
             QuantMat<8, WordType> dst(
                 static_cast<int>(pyrDownWidth(static_cast<size_t>(width))),
                 static_cast<int>(pyrDownHeight(static_cast<size_t>(height))));
-            pyrDown<8, 1, WordType>(src, dst);
+            pyrDownBox<8, 1, WordType>(src, dst);
 
             const cv::Mat aligned = alignedBox2x2(cvSrc);
             const std::string label = std::string(wordName) + " " + std::to_string(width) + "x" +
@@ -951,7 +952,7 @@ void testAgainstReferencePipeline(const char* wordName) {
                                where);
                     // 2. binCV's rule: the exact mean, rounded once, half up.
                     PYR_EXPECT(got == (a + b + c + d + 2) / 4,
-                               "pyrDown<8, 1> is the exact 2x2 mean rounded once, half up",
+                               "pyrDownBox<8, 1> is the exact 2x2 mean rounded once, half up",
                                where);
                     // 3. The two therefore agree to within one LSB out of 255, and
                     //    OpenCV is never the lower of the two. NOTE WHAT `openCv`
@@ -1061,7 +1062,7 @@ void testAgainstReferencePipeline(const char* wordName) {
                std::string(wordName) + ": " + std::to_string(sealSame) + " of " +
                    std::to_string(sealPixels) + " identical");
 
-    std::cout << "\n--- pyrDown<8, 1> against OpenCV's 2x2 box ARITHMETIC on the ALIGNED "
+    std::cout << "\n--- pyrDownBox<8, 1> against OpenCV's 2x2 box ARITHMETIC on the ALIGNED "
                  "block (binCV's own geometry): "
               << wordName << " ---\n"
               << "    identical      " << exact << " destination pixels\n"
@@ -1294,6 +1295,70 @@ BINCV_TEST(Pyramid, FilteredRoutesMatchAPerPixelReference_uint32_t) {
     // overflows, it overflows here -- so the compatibility path is verified before
     // it is quoted.
     bad += checkFilter<8,8>(bincv::PyrDownFilter::Gaussian5x5,"GAUSSIAN_5x5",-2,2,g5,16);
+    BINCV_CHECK_EQ(bad, size_t{0});
+}
+
+// ---------------------------------------------------------------------------
+// THE Box2x2 SPECIALIZATION IS THE SAME FUNCTION AS THE GENERIC ROUTE.
+//
+// pyrDownFiltered<Box2x2, ..., Replicate> dispatches to impl::pyrDownRoute, the
+// hand-optimised box path, at 1.24x the generic route's speed. Two implementations
+// of one function is a standing correctness liability, and this is what pays for it.
+//
+// ODD EXTENTS ARE THE WHOLE POINT. At even extents no Box2x2 tap ever leaves the
+// frame, so all three borders and both routes agree trivially and a test that used
+// only even sizes -- as this file's did -- proves nothing about the border at all.
+// Measured: at 63x47 the specialised route differs from Zero in 39 of 768 pixels and
+// from Reflect101 in 35, because it implements a THIRD rule, BORDER_REPLICATE.
+// ---------------------------------------------------------------------------
+namespace {
+template <size_t NOut, size_t NIn>
+size_t checkBoxSpecializationAt(int sw, int sh) {
+    bincv::QuantMat<NIn, FilterWord> src(sw, sh);
+    uint64_t st = 0x5EEDULL;
+    const unsigned maxIn = (1u << NIn) - 1u;
+    for (int y = 0; y < sh; ++y)
+        for (int x = 0; x < sw; ++x) {
+            st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+            src.set(y, x, static_cast<unsigned>(st >> 40) % (maxIn + 1u));
+        }
+    const int dw = (sw + 1) / 2, dh = (sh + 1) / 2;
+    bincv::QuantMat<NOut, FilterWord> viaSpecial(dw, dh), viaGeneric(dw, dh);
+    // The unified API, which dispatches into the specialisation...
+    bincv::pyrDownFiltered<bincv::PyrDownFilter::Box2x2, NOut, NIn, FilterWord,
+                           bincv::PyrDownBorder::Replicate>(src, viaSpecial);
+    // ...against the per-pixel definition under the same border.
+    size_t bad = 0;
+    bincv::BinMatConstView<FilterWord> sv[NIn];
+    for (size_t p = 0; p < NIn; ++p) sv[p] = src.constPlane(p);
+    for (int y = 0; y < dh; ++y)
+        for (int x = 0; x < dw; ++x) {
+            const unsigned want =
+                bincv::impl::pyrDownPixel<bincv::PyrDownFilter::Box2x2,
+                                          bincv::PyrDownBorder::Replicate, NOut, NIn,
+                                          FilterWord>(sv, static_cast<size_t>(y),
+                                                      static_cast<size_t>(x));
+            if (viaSpecial.at(y, x) != want) ++bad;
+        }
+    // And the old public entry point must still be the same thing.
+    bincv::pyrDownBox<NOut, NIn, FilterWord>(src, viaGeneric);
+    for (int y = 0; y < dh; ++y)
+        for (int x = 0; x < dw; ++x)
+            if (viaSpecial.at(y, x) != viaGeneric.at(y, x)) ++bad;
+    return bad;
+}
+} // namespace
+
+BINCV_TEST(Pyramid, Box2x2SpecializationMatchesDefinition) {
+    size_t bad = 0;
+    bad += checkBoxSpecializationAt<3, 1>(64, 48);   // even: agrees trivially
+    bad += checkBoxSpecializationAt<3, 1>(63, 47);   // odd both -- where it can diverge
+    bad += checkBoxSpecializationAt<3, 1>(65, 32);   // odd width
+    bad += checkBoxSpecializationAt<3, 1>(32, 65);   // odd height
+    bad += checkBoxSpecializationAt<5, 3>(63, 47);
+    bad += checkBoxSpecializationAt<8, 8>(33, 17);
+    std::printf("  Box2x2 specialization == per-pixel definition and == pyrDown, "
+                "even + odd: %s\n", bad ? "FAIL" : "exact");
     BINCV_CHECK_EQ(bad, size_t{0});
 }
 

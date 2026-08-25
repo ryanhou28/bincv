@@ -1,16 +1,38 @@
 #pragma once
 
 /// @file pyramid.hpp
-/// @brief Pyramid downsample -- 2x2 box mean, then subsample (T3.4,
-///        ARCHITECTURE 7.2). **API TIER 2**: `pyrDown` has cv::pyrDown's name and
-///        role and deliberately different numerics (ARCHITECTURE 5.1), so it is
-///        NOT bit-exact against OpenCV and is not meant to be. What it is checked
-///        against is stated in "WHAT CORRECTNESS MEANS HERE" below.
+/// @brief Pyramid downsample: filter, then subsample by 2 (T3.4, ARCHITECTURE 7.2).
 ///
-///   pyrDownWidth / pyrDownHeight     destination extent, ceil(n / 2)
-///   pyrDown(srcPlanes, dstPlanes)    the kernel (views, D-5)
-///   pyrDown(QuantMat, QuantMat)      the container wrapper that names the planes
-///   Pyramid<W, N0, N1, ...>          a ladder of levels, one bit depth each
+///   pyrDown            5x5 [1,4,6,4,1] Gaussian, BORDER_REFLECT_101.
+///                      **EXACTLY cv::pyrDown.** API TIER 1 at NIn == NOut == 8,
+///                      proven against OpenCV in tests/test_pyramid.cpp; TIER 2 at
+///                      narrower N, where the caller has asked for a precision
+///                      OpenCV cannot express and there is nothing to be exact
+///                      against.
+///   pyrDownBox         2x2 box mean, BORDER_REPLICATE. **binCV's own operating
+///                      point**, 4.4x faster than cv::pyrDown at low bit widths
+///                      (X-46), and what every performance result here is measured
+///                      on. NOT cv::pyrDown and does not claim to be.
+///   pyrDownFiltered<F, ..., Bo>   any of the five filters x three borders.
+///   pyrDownWidth / pyrDownHeight  destination extent, ceil(n / 2)
+///   Pyramid<W, N0, N1, ...>       a ladder of levels, one bit depth each;
+///                      `build<F, Bo>()` defaults to the OpenCV pair.
+///
+/// **WHY THE DEFAULT IS THE SLOW ONE.** A function carrying `cv::pyrDown`'s name
+/// computing a different filter is a trap however well documented, so `pyrDown` is
+/// OpenCV's function and the cheap one has its own name. The gap is large and is
+/// the whole point of the library rather than an embarrassment -- X-46, 640x480 ->
+/// 320x240, against cv::pyrDown at one thread:
+///
+///     pyrDownBox   1 -> 3 bits      116 us     4.4x FASTER
+///     pyrDown      1 -> 3 bits      599 us     0.86x, rough parity
+///     pyrDown      8 -> 8 bits     7349 us     13.7x SLOWER
+///
+/// binCV is fast when its INPUT is narrow; at 8 bits it has no advantage to offer
+/// and no footprint advantage either, since matching OpenCV's output means storing
+/// OpenCV's 8 bits. For wide intermediates hand the data to OpenCV --
+/// QuantMat<N>::toCVMatNormalized / fromCVMat make that round trip 3.7x faster than
+/// binCV's own 8-bit path (D-42).
 ///
 /// This is the operation where **output precision exceeds input precision**: a
 /// 2x2 mean of 1-bit pixels has five values, and five values do not fit in one
@@ -685,7 +707,13 @@ enum class PyrDownFilter {
 ///       word-parallel -- but it only touches output columns whose source support
 ///       crosses an edge, at most `ceil(Radius/2)` of them per side, so it is fixed
 ///       up per pixel on that rim while the interior keeps the word-parallel path.
-enum class PyrDownBorder { Reflect101, Zero };
+enum class PyrDownBorder {
+    Reflect101,  ///< cv::BORDER_REFLECT_101, what cv::pyrDown applies. THE DEFAULT.
+    Replicate,   ///< cv::BORDER_REPLICATE -- and what the hand-optimised Box2x2
+                 ///< route has always done, so it is the border under which that
+                 ///< route is reachable and every pre-X-48 measurement was taken.
+    Zero,        ///< read outside as 0. The cheapest, and a deviation from both.
+};
 
 namespace impl {
 
@@ -715,6 +743,14 @@ constexpr FilterTaps filterTaps(PyrDownFilter f) {
 ///        which are not repeated -- `-1 -> 1`, `n -> n-2`.
 /// @note Loops because a tap can reach past the far edge on a level only a few
 ///       pixels wide; at every size this project uses it folds once.
+/// @brief `cv::BORDER_REPLICATE`: clamp to the edge pixel.
+inline size_t replicateIndex(long long i, size_t n) {
+    if (n == 0) return 0;
+    if (i < 0) return 0;
+    const long long last = static_cast<long long>(n) - 1;
+    return static_cast<size_t>(i > last ? last : i);
+}
+
 inline size_t reflect101(long long i, size_t n) {
     if (n <= 1) return 0;
     const long long last = static_cast<long long>(n) - 1;
@@ -1026,9 +1062,14 @@ inline void pyrDownReplicated(const BinMatConstView<WordType> (&src)[NIn],
 /// @param src NIn source plane views, least significant plane first.
 /// @param dst NOut destination plane views, `pyrDownWidth(src.width)` by
 ///        `pyrDownHeight(src.height)`. Must share no word with any source plane.
+/// @note RETIRED AS `pyrDown`. `pyrDown` now means what `cv::pyrDown` means -- a 5x5
+///       Gaussian with BORDER_REFLECT_101 -- and this box route is reached as
+///       `pyrDownBox`, or as `pyrDownFiltered<Box2x2, ..., Replicate>` which
+///       dispatches here. The rename is deliberate: a function carrying OpenCV's
+///       name computing a different filter was a trap, however documented.
 template <size_t NOut, size_t NIn, typename WordType>
-inline void pyrDown(const BinMatConstView<WordType> (&src)[NIn],
-                    BinMatView<WordType> (&dst)[NOut]) {
+inline void pyrDownBoxViews(const BinMatConstView<WordType> (&src)[NIn],
+                            BinMatView<WordType> (&dst)[NOut]) {
     impl::pyrDownRoute<NOut, NIn, WordType, false>(src, dst);
 }
 
@@ -1058,17 +1099,25 @@ inline void pyrDownReplicated(const QuantMat<NIn, WordType>& src,
 /// @note NIn == 1 comes here too: BinMat IS QuantMat<1> (core/types.hpp), so a
 ///       binary level 0 needs no separate entry point.
 template <size_t NOut, size_t NIn, typename WordType>
-inline void pyrDown(const QuantMat<NIn, WordType>& src, QuantMat<NOut, WordType>& dst) {
+inline void pyrDownBoxContainers(const QuantMat<NIn, WordType>& src,
+                                 QuantMat<NOut, WordType>& dst) {
     BinMatConstView<WordType> srcPlanes[NIn];
     BinMatView<WordType> dstPlanes[NOut];
     for (size_t p = 0; p < NIn; ++p) srcPlanes[p] = src.plane(p);
     for (size_t q = 0; q < NOut; ++q) dstPlanes[q] = dst.plane(q);
-    pyrDown<NOut, NIn, WordType>(srcPlanes, dstPlanes);
+    pyrDownBoxViews<NOut, NIn, WordType>(srcPlanes, dstPlanes);
 }
 
 // ---------------------------------------------------------------------------
 // The ladder
 // ---------------------------------------------------------------------------
+
+/// Forward declaration: the ladder is defined above `pyrDownFiltered` because it is
+/// a container and that is a kernel, and the file is ordered kernels-then-containers
+/// everywhere else. Declaring rather than reordering keeps that order.
+template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType,
+          PyrDownBorder Bo = PyrDownBorder::Reflect101>
+inline void pyrDownFiltered(const QuantMat<NIn, WordType>& src, QuantMat<NOut, WordType>& dst);
 
 namespace impl {
 
@@ -1112,6 +1161,7 @@ struct PyramidLevels<WordType, N0> {
     }
 
     size_t words() const { return mat.sizeInWords(); }
+    template <PyrDownFilter, PyrDownBorder>
     void buildDown() {}
 };
 
@@ -1146,9 +1196,10 @@ struct PyramidLevels<WordType, N0, N1, Rest...> {
 
     size_t words() const { return mat.sizeInWords() + rest.words(); }
 
+    template <PyrDownFilter F, PyrDownBorder Bo>
     void buildDown() {
-        pyrDown<N1, N0, WordType>(mat, rest.mat);
-        rest.buildDown();
+        pyrDownFiltered<F, N1, N0, WordType, Bo>(mat, rest.mat);
+        rest.template buildDown<F, Bo>();
     }
 };
 
@@ -1222,7 +1273,20 @@ public:
     ///       every level already exists, and pyrDown takes no scratch buffer.
     ///       tests/test_pyramid.cpp counts operator new across this call and
     ///       requires zero.
-    void build() { levels_.buildDown(); }
+    /// @brief Fills levels 1.. from level 0.
+    /// @tparam F Which downsampling filter. Defaults to `Gaussian5x5`, so that a
+    ///         bare `build()` matches `cv::buildOpticalFlowPyramid`'s filter, for
+    ///         the same reason `pyrDown` defaults to it.
+    /// @tparam Bo Border rule, defaulting to OpenCV's `BORDER_REFLECT_101`.
+    /// @note **A LOW-BIT-WIDTH PIPELINE SHOULD NOT USE THE DEFAULT.**
+    ///       `build<PyrDownFilter::Box2x2, PyrDownBorder::Replicate>()` is what the
+    ///       VIO frontend runs and what every binCV performance result is measured
+    ///       on: X-46 puts it **4.4x faster than cv::pyrDown** where the Gaussian
+    ///       sits at rough parity. The default is here so the container's meaning
+    ///       matches OpenCV's, not because it is the right operating point.
+    template <PyrDownFilter F = PyrDownFilter::Gaussian5x5,
+              PyrDownBorder Bo = PyrDownBorder::Reflect101>
+    void build() { levels_.template buildDown<F, Bo>(); }
 
     /// @brief Total words across every level -- the pyramid's whole footprint.
     /// @note This is the number E-7 (T4.1) weighs. It is a peak, not a per-buffer
@@ -1288,13 +1352,17 @@ inline unsigned pyrDownPixel(const BinMatConstView<WordType> (&src)[NIn], size_t
         if (Bo == PyrDownBorder::Zero && (sy0 < 0 || sy0 >= h)) continue;
         const size_t sy = (Bo == PyrDownBorder::Reflect101)
                               ? reflect101(sy0, static_cast<size_t>(h))
-                              : static_cast<size_t>(sy0);
+                              : (Bo == PyrDownBorder::Replicate)
+                                    ? replicateIndex(sy0, static_cast<size_t>(h))
+                                    : static_cast<size_t>(sy0);
         for (int dx = T.lo; dx <= T.hi; ++dx) {
             const long long sx0 = 2 * static_cast<long long>(x) + dx;
             if (Bo == PyrDownBorder::Zero && (sx0 < 0 || sx0 >= w)) continue;
             const size_t sx = (Bo == PyrDownBorder::Reflect101)
                                   ? reflect101(sx0, static_cast<size_t>(w))
-                                  : static_cast<size_t>(sx0);
+                                  : (Bo == PyrDownBorder::Replicate)
+                                        ? replicateIndex(sx0, static_cast<size_t>(w))
+                                        : static_cast<size_t>(sx0);
             sum += static_cast<unsigned long long>(T.w[dy - T.lo]) *
                    static_cast<unsigned long long>(T.w[dx - T.lo]) *
                    srcPixelValue<NIn, WordType>(src, sy, sx);
@@ -1371,8 +1439,10 @@ inline void pyrDownFilteredRoute(const BinMatConstView<WordType> (&src)[NIn],
             const bool inside = r >= 0 && r < static_cast<long long>(srcHeight);
             const size_t sy = (Bo == PyrDownBorder::Reflect101)
                                   ? reflect101(r, srcHeight)
-                                  : static_cast<size_t>(inside ? r : 0);
-            const bool use = (Bo == PyrDownBorder::Reflect101) ? true : inside;
+                                  : (Bo == PyrDownBorder::Replicate)
+                                        ? replicateIndex(r, srcHeight)
+                                        : static_cast<size_t>(inside ? r : 0);
+            const bool use = (Bo != PyrDownBorder::Zero) || inside;
             for (size_t p = 0; p < NIn; ++p) {
                 vRows[t][p] = use ? src[p].row(sy) : nullptr;
             }
@@ -1432,7 +1502,7 @@ inline void pyrDownFilteredRoute(const BinMatConstView<WordType> (&src)[NIn],
         // Box2x2 and DirectSubsample, so those filters pay nothing on the left, and
         // the right rim also absorbs the odd-width case where the last output column
         // reads a source column that does not exist.
-        if (Bo == PyrDownBorder::Reflect101) {
+        if (Bo != PyrDownBorder::Zero) {
             const size_t leftRim = leftRimColumns(F) < dstWidth ? leftRimColumns(F) : dstWidth;
             for (size_t x = 0; x < leftRim; ++x) {
                 setPixelValue<NOut, WordType>(
@@ -1461,18 +1531,103 @@ template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType,
           PyrDownBorder Bo = PyrDownBorder::Reflect101>
 inline void pyrDownFiltered(const BinMatConstView<WordType> (&src)[NIn],
                             BinMatView<WordType> (&dst)[NOut]) {
+    // PER-FILTER SPECIALIZATION, dispatched at compile time. `F` is a closed enum,
+    // not a caller-supplied functor, so specialising the cases that earn it is the
+    // design rather than an exception -- the same shape ops/opticalFlow.hpp uses to
+    // reach alignedResidualSumsNeon1/2.
+    //
+    // Box2x2 + Replicate is the one specialisation that exists today: the
+    // hand-optimised route through boxSum4 and requantizeBoxSum, 1.24x the generic
+    // route computing the same function (X-42), and the border it has always
+    // implemented. The other four filters and the other two borders take the generic
+    // route until someone measures a case worth specialising.
+    //
+    // The two are held to agreement by tests/test_pyramid.cpp at ODD extents
+    // specifically, which is the only place they can differ.
+    if constexpr (F == PyrDownFilter::Box2x2 && Bo == PyrDownBorder::Replicate) {
+        impl::pyrDownRoute<NOut, NIn, WordType, false>(src, dst);
+        return;
+    }
     impl::pyrDownFilteredRoute<F, NOut, NIn, WordType, Bo>(src, dst);
 }
 
 /// @brief Container spelling of `pyrDownFiltered`.
-template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType,
-          PyrDownBorder Bo = PyrDownBorder::Reflect101>
+template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType, PyrDownBorder Bo>
 inline void pyrDownFiltered(const QuantMat<NIn, WordType>& src, QuantMat<NOut, WordType>& dst) {
     BinMatConstView<WordType> s[NIn];
     BinMatView<WordType> d[NOut];
     for (size_t p = 0; p < NIn; ++p) s[p] = src.constPlane(p);
     for (size_t q = 0; q < NOut; ++q) d[q] = dst.plane(q);
     pyrDownFiltered<F, NOut, NIn, WordType, Bo>(s, d);
+}
+
+/// @brief One pyramid level by 2x2 box mean, `BORDER_REPLICATE`. **API TIER 2.**
+/// @note THIS IS WHAT `pyrDown` USED TO BE, and it is what the VIO frontend wants:
+///       X-46 measured it **4.4x faster than cv::pyrDown** at binCV's own bit widths,
+///       against the OpenCV-matching Gaussian's rough parity. It is not `cv::pyrDown`
+///       and does not claim to be -- different filter, different border -- which is
+///       why it no longer holds that name.
+/// @note Dispatches to the hand-optimised box route (`impl::pyrDownRoute`), 1.24x the
+///       generic framework computing the same function (X-42).
+///       tests/test_pyramid.cpp holds the two to agreement at ODD extents, which is
+///       the only place they can differ.
+template <size_t NOut, size_t NIn, typename WordType>
+inline void pyrDownBox(const QuantMat<NIn, WordType>& src, QuantMat<NOut, WordType>& dst) {
+    pyrDownFiltered<PyrDownFilter::Box2x2, NOut, NIn, WordType,
+                    PyrDownBorder::Replicate>(src, dst);
+}
+
+/// @brief One pyramid level by 2x2 box mean, `BORDER_REPLICATE`, on views.
+///        **API TIER 2** -- see the container overload.
+template <size_t NOut, size_t NIn, typename WordType>
+inline void pyrDownBox(const BinMatConstView<WordType> (&src)[NIn],
+                       BinMatView<WordType> (&dst)[NOut]) {
+    pyrDownFiltered<PyrDownFilter::Box2x2, NOut, NIn, WordType,
+                    PyrDownBorder::Replicate>(src, dst);
+}
+
+/// @brief One pyramid level, EXACTLY as `cv::pyrDown` computes it: a 5x5
+///        `[1,4,6,4,1]` Gaussian with `BORDER_REFLECT_101`, subsampled by 2.
+///        **API TIER 1 at `NIn == NOut == 8`** -- bit-exact against `cv::pyrDown`,
+///        proven by tests/test_pyramid.cpp at even, odd and both-odd extents.
+///        **API TIER 2 elsewhere**: the same operation carried out at the caller's
+///        chosen precision, where OpenCV has no answer to be exact against.
+///
+/// @note WHY THE DEFAULT IS THE EXPENSIVE ONE. A function carrying OpenCV's name
+///       must compute OpenCV's function; anything else is a trap however well
+///       documented. binCV's own operating point is `pyrDownBox`, and the difference
+///       is not small -- X-46, 640x480 -> 320x240 against `cv::pyrDown` at one
+///       thread:
+///
+///         pyrDownBox        1 -> 3 bits     116 us    4.4x FASTER than cv::pyrDown
+///         pyrDown (this)    1 -> 3 bits     599 us    0.86x -- rough parity
+///         pyrDown (this)    8 -> 8 bits    7349 us    13.7x SLOWER
+///
+///       **A pipeline should call `pyrDownBox`**, or `pyrDownFiltered` with the
+///       filter it wants; this exists so that `pyrDown` MEANS `cv::pyrDown`.
+///
+/// @note AT 8 -> 8 THERE IS NO FOOTPRINT ADVANTAGE, by construction: matching
+///       OpenCV's output means storing 8 bits per pixel, exactly as OpenCV does.
+///       That configuration is CORRECT, NOT FAST, and a user who benchmarks it and
+///       concludes binCV is pointless has read it correctly -- binCV's claim is
+///       about low-bit-width INPUT (X-46: cost scales with the precision READ), not
+///       about being a faster byte-image library.
+/// @note Above the bit-width crossover, hand the data to OpenCV instead --
+///       `QuantMat<N>::toCVMatNormalized` / `fromCVMat` make that a round trip that
+///       is **3.7x faster than this function** at 8 -> 8 (D-42).
+template <size_t NOut, size_t NIn, typename WordType>
+inline void pyrDown(const QuantMat<NIn, WordType>& src, QuantMat<NOut, WordType>& dst) {
+    pyrDownFiltered<PyrDownFilter::Gaussian5x5, NOut, NIn, WordType,
+                    PyrDownBorder::Reflect101>(src, dst);
+}
+
+/// @brief `cv::pyrDown`'s operation on views. **API TIER 1 at 8 -> 8**, see the
+///        container overload for the full contract.
+template <size_t NOut, size_t NIn, typename WordType>
+inline void pyrDown(const BinMatConstView<WordType> (&src)[NIn],
+                    BinMatView<WordType> (&dst)[NOut]) {
+    pyrDownFiltered<PyrDownFilter::Gaussian5x5, NOut, NIn, WordType,
+                    PyrDownBorder::Reflect101>(src, dst);
 }
 
 } // inline namespace BINCV_ABI_NAMESPACE

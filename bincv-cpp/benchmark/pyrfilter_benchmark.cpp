@@ -54,8 +54,8 @@ int main() {
 
     std::printf("=== X-39 speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===\n\n");
     std::vector<measure::Bench> b = {
-        {"pyrDown (shipped BOX_2x2 route)  N=2", [&](int) { bincv::pyrDown<2, 1, W>(src, d2); }},
-        {"pyrDown (shipped BOX_2x2 route)  N=3", [&](int) { bincv::pyrDown<3, 1, W>(src, d3); }},
+        {"pyrDown (shipped BOX_2x2 route)  N=2", [&](int) { bincv::pyrDownBox<2, 1, W>(src, d2); }},
+        {"pyrDown (shipped BOX_2x2 route)  N=3", [&](int) { bincv::pyrDownBox<3, 1, W>(src, d3); }},
         {"filtered DIRECT_SUBSAMPLE        N=1", [&](int) {
              bincv::pyrDownFiltered<PyrDownFilter::DirectSubsample, 1, 1, W>(src, d1); }},
         {"filtered BOX_2x2                 N=3", [&](int) {

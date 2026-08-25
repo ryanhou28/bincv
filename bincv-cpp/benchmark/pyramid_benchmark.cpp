@@ -241,7 +241,7 @@ void addCostBenches(std::vector<measure::Bench>& benches,
 
     // Agreement before timing -- validity hazard 4.
     for (int i = 0; i < kInputs; ++i) {
-        bincv::pyrDown<NOut, NIn, Word>(src[static_cast<size_t>(i)], *direct);
+        bincv::pyrDownBox<NOut, NIn, Word>(src[static_cast<size_t>(i)], *direct);
         bincv::impl::pyrDownReplicated<NOut, NIn, Word>(src[static_cast<size_t>(i)],
                                                         *replicated);
         for (int y = 0; y < direct->rows(); ++y) {
@@ -258,7 +258,7 @@ void addCostBenches(std::vector<measure::Bench>& benches,
 
     benches.push_back({"NIn=" + std::to_string(NIn) + " linear adder",
                        [&src, direct](int i) {
-                           bincv::pyrDown<NOut, NIn, Word>(
+                           bincv::pyrDownBox<NOut, NIn, Word>(
                                src[static_cast<size_t>(i) % kInputs], *direct);
                            measure::g_sink += direct->data()[0];
                        }});

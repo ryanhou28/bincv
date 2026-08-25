@@ -73,7 +73,7 @@
 /// ---------------------------------------------------------------------------
 /// WHAT pyrDown STILL NEEDS, AND WHY IT IS NOT HERE
 ///
-/// T3.4's `pyrDown<NOut, NIn>` is "box 2x2 sum, then subsample" over a QuantMat.
+/// T3.4's `pyrDownBox<NOut, NIn>` is "box 2x2 sum, then subsample" over a QuantMat.
 /// Two of its three parts have no primitive anywhere in ops/ yet. Both were found
 /// by review of THIS file, and are recorded here rather than left for T3.4 to
 /// discover, because the header used to read as though the pyramid step were

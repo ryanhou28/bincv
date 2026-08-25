@@ -337,8 +337,8 @@ struct Frontend {
     ///        derivative of every previous level. Allocates nothing.
     void runKernels() {
         for (size_t i = 1; i < prev.size(); ++i) {
-            bincv::pyrDown<1, 1, WordType>(prev[i - 1], prev[i]);
-            bincv::pyrDown<1, 1, WordType>(next[i - 1], next[i]);
+            bincv::pyrDownBox<1, 1, WordType>(prev[i - 1], prev[i]);
+            bincv::pyrDownBox<1, 1, WordType>(next[i - 1], next[i]);
         }
         for (size_t i = 0; i < prev.size(); ++i) {
             bincv::derivativeX(prev[i], dx[i]);
@@ -845,8 +845,8 @@ struct LadderFrontend {
     /// @brief pyrDown down both ladders, then the derivative of every previous
     ///        level, then bind the views. Level 0 of both pyramids is the caller's.
     void build() {
-        prev.build();
-        next.build();
+        prev.template build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
+        next.template build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
         buildDeriv<0>();
         bind<0>();
     }
@@ -2793,7 +2793,7 @@ BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
         bincv::Pyramid<uint32_t, 1, 3, 5, 7> deep(gray.cols, gray.rows);
         const cv::Mat bin0 = referencePreprocess(gray, 17);
         deep.level<0>().fromCVMat(bin0);
-        deep.build();
+        deep.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
         std::printf("\n  ---- X-2 re-run: the UNCAPPED ladder's real alphabet ----\n");
         printLevelAlphabet(deep.level<0>(), 0);
         printLevelAlphabet(deep.level<1>(), 1);
