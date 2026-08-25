@@ -119,6 +119,11 @@ if(BINCV_BUILD_BENCHMARKS)
     add_subdirectory(benchmark)
 endif()
 
+# Worked examples (T4.3b). They exist to be READ as much as run, and they are the
+# only place the kernel set is shown composing into a pipeline shape rather than
+# a benchmark loop.
+add_subdirectory(examples)
+
 # Every first-party target now exists, so the warning policy can be checked.
 # FATAL_ERRORs if any of them compiles without the flags -- see the function's
 # comment for why a build-log scan cannot substitute for this.

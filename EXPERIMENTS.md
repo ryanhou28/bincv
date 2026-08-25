@@ -9244,6 +9244,80 @@ different things, which is worth knowing before reaching for one.
 
 ---
 
+### X-56 · T4.3b — a real VIO frontend loop, and what it says about D-28 · `DONE`
+
+**THE SUFFICIENCY CHECK [T4.3](TASKS.md) SPLIT OFF AND NEVER RAN.** Every end-to-end
+measurement in this project — [X-28](#x-28--t43a--the-frontend-end-to-end-over-a-real-sequence--partial),
+[X-38](#x-38--e-20--the-whole-frontend-against-opencv-on-the-deployment-target--done),
+[X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done) — runs
+a **benchmark loop**: detect wholesale every N frames, track, compare against OpenCV. A
+VIO frontend does something structurally different, and `examples/vio_frontend.cpp` is
+that loop, modelled on HybVIO's (`src/tracker/optical_flow.cpp`,
+`feature_detector_legacy.cpp`) which is what the SEAL paper's pipeline drives.
+
+**What it exercises that a benchmark loop does not:** a **persistent track set** carried
+across frames rather than a per-frame rematch; **culling** on LK status and on leaving
+the frame (HybVIO's `FAILED_FLOW` / `FLOW_OUT_OF_RANGE`); and **topping up** by
+detection only when the count falls below a target, with `applyMinDistance` against the
+**survivors**. binCV has no mask parameter by design — `ops/corner.hpp` documents the
+spacing filter as the route — and this is that route taken.
+
+**RESULT 1 — THE KERNEL SET IS SUFFICIENT.** The loop runs 1710 frames with no gap
+requiring an operation binCV lacks. Sensor stage (median + edge filter) in OpenCV,
+because that is not binCV's claim — in SEAL it is dedicated hardware and binCV's domain
+starts at the binary frame. Everything after is binCV.
+
+**RESULT 2 — D-28's DUTY CYCLE IS A PROPERTY OF THE BENCHMARK'S POLICY, NOT OF A VIO
+FRONTEND.** [D-28](ARCHITECTURE.md) corrected X-30 by measuring detection at a **4.8%
+duty cycle** and concluded it was "uninteresting". That figure comes from
+`frontend_sequence` re-detecting every N frames. A frontend that **maintains a target
+feature count** detects far more often, and the profile inverts:
+
+| | `frontend_sequence` | **VIO loop, top up below target** | **VIO loop, 60% hysteresis** |
+|---|---|---|---|
+| detections | 4.8% of frames | **91.0%** | 45.0% |
+| **detect** | 0.570 ms | **18.070** | 7.831 |
+| track (LK) | 7.270 | 12.062 | 10.658 |
+| build | 2.805 | 1.509 | 1.507 |
+| **binCV total** | 10.644 | **31.641** | **19.996** |
+| mean live features | — | 153.3 | 133.9 |
+| lifetime p50 / p90 | — | 4 / 49 | 5 / 51 |
+
+**Detection is between 39% and 57% of the frontend here, against D-28's 4.8%.** It is
+the largest stage under the aggressive policy and comparable to LK under the relaxed
+one. **D-28 is not wrong — it measured what it measured — but its conclusion does not
+transfer**, and every optimisation priority derived from that profile (D-28's own target
+list, and the reason detection was left alone from X-31 onward) rests on a detection
+policy nobody had written down.
+
+**RESULT 3 — THE POLICY IS WORTH 1.58× AND IT IS NOT binCV's.** Moving the low-water
+mark from 100% to 60% of target takes binCV from **31.6 to 20.0 ms** for a 13% drop in
+mean live features and a **slightly better** lifetime (p50 4 → 5). **A caller tuning one
+number outside the library moves the frontend more than any optimisation this project
+has landed.** That belongs in the documentation, not in a kernel.
+
+**RESULT 4 — A SIZING TRAP THE API'S OWN FLAG CAUGHT.** The first run truncated the NMS
+pool on **all 299 detections**: `candidatesTruncated` was set every frame. The pool peak
+is **70 831 survivors on a 752×480 frame — 19.6% of all pixels.** A binarized
+min-eigenvalue map takes few distinct values, so enormous numbers of pixels tie and
+survive non-maximum suppression. **Size the pool from `candidatesRanked`, not from
+`maxCorners`** — truncation happens *before* the spacing filter, so the corners kept
+are the first found rather than the strongest. The same trap produced a false binCV
+finding once before, and the flag `ops/corner.hpp` added for it is what caught it both
+times.
+
+**Decision:** T4.3b's sufficiency question is **answered YES**. Recorded as
+[D-46](ARCHITECTURE.md#8-design-decisions), together with the correction to D-28's
+scope. The detection-policy sensitivity is registered as
+[E-30](ARCHITECTURE.md#register), because 39–57% of the frontend is now the largest
+unexamined term in it.
+
+**Method:** `bincv-cpp/examples/vio_frontend.cpp` and `examples/vio_sweep.sh` via
+`scripts/run_on_pi.sh pi4` with `BINCV_PI_OPENCV=1`, full 1710-frame sequence at two
+detection policies.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
