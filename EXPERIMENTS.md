@@ -9085,7 +9085,7 @@ frames in 10 shards.
 
 ---
 
-### X-54 · E-9 — should the word type vary down the pyramid? · `RULE ONLY`
+### X-54 · E-9 — should the word type vary down the pyramid? · `DONE`
 
 **Gates:** [E-9](ARCHITECTURE.md#register), unscheduled since
 [X-10](#x-10--e-2--default-word-width--done).
@@ -9142,6 +9142,54 @@ the shipped `1/2/2/2` ladder at `uint32_t` and at `uint64_t`.
 
 **Method:** `benchmark/pyramid_depth_benchmark.cpp`, word-type arms added beside the
 ladder arms; `scripts/run_on_pi.sh pi4`.
+
+**RESULT — BAND B. THE SAME LIBRARY IS 1.66× FASTER AND 1.32× SLOWER AT THE SAME TIME,
+DEPENDING ON WHICH KERNEL YOU ASK.**
+
+Reference device, real-frame seed, spreads 0%:
+
+| `1/2/2/2` | build | track | bytes |
+|---|---|---|---|
+| `uint32_t` | 424.5 µs | 4 838.9 | 357 600 |
+| **`uint64_t`** | **255.5 — 1.66× FASTER** | **6 368.2 — 1.32× SLOWER** | +2.0% |
+| `1/1/1/1` `uint32_t` | 276.1 | 3 059.6 | 306 720 |
+| `1/1/1/1` **`uint64_t`** | **173.4 — 1.59× faster** | 3 410.3 — 1.11× slower | +1.4% |
+
+**1. THE SPLIT IS EXACTLY THE COLLISION THE RULE NAMED.** Build is word-parallel
+kernels — `pyrDown` and the derivatives — and a wider word does strictly less work per
+pixel, so it wins by **1.6×**, which is X-10's reduction result showing up in a real
+stage. Track is `residualSums`, whose three NEON paths are guarded on
+**`sizeof(WordType) == 4`**, so `uint64_t` runs it **fully scalar** and loses **1.32×**.
+**[D-1](ARCHITECTURE.md)'s genericity in the word type is real in the API and not real
+in the tracker's fast path**, and this is that stated as a number instead of left
+implicit in three `if constexpr`s.
+
+**2. AT binCV's OWN BALANCE, `uint64_t` LOSES — but the balance is the whole argument.**
+This benchmark's build:track ratio is 0.088; the frontend's is **0.386**
+([X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done)), so
+it under-weights build **4.4×**. Weighting by the frontend's shares — track 68.3%
+costing +31.6%, build 26.3% saving 39.8% — gives **≈ +11% frontend time**. `uint64_t`
+loses, **but by a margin that a differently-balanced pipeline would reverse.** That
+arithmetic combines two measurements rather than being one, and after three
+extrapolation failures tonight it is offered as a direction, not a number.
+
+**3. THE FOOTPRINT OBJECTION IS DEAD EITHER WAY.** +2.0% on the shipped ladder, +1.4%
+at `1/1/1/1` — X-10's "+33%" was the 94×60 level in isolation and does not survive
+being weighed against the levels above it.
+
+**Decision — BAND B: NO per-level word type, and the reason is the split rather than a
+verdict.** binCV's frontend is track-dominated, so the stage that loses is the stage
+that matters, and E-9's own named cost — kernels walking several levels needing two
+instantiations — buys nothing here. **A build-dominated pipeline would want the
+opposite**, and that is now a documented operating point rather than an unexamined
+assumption. Recorded as [D-45](ARCHITECTURE.md#8-design-decisions).
+
+**What would change the answer:** giving `residualSums` a `uint64_t` NEON path. The
+guards are a specialisation gap, not a property of the ISA — aarch64 counts bits in a
+128-bit register regardless of how the caller sliced them. Registered as
+[E-29](ARCHITECTURE.md#register), and it is the same shape as the x86 work
+([X-52](#x-52--bincv-on-x86-the-whole-deficit-is-one-stage--done)): one kernel,
+missing one specialisation.
 
 ---
 

@@ -3038,6 +3038,42 @@ precisely what makes it unrepresentative.
 That rule, in its weaker form, is what caught [D-43](#d-43-withdrawn-the-operating-point-stays-1222--box_2x2)
 before it shipped. Successor: [E-28](#register).
 
+### D-45: one word type, because the two halves of the frontend want different ones
+
+[X-54](EXPERIMENTS.md) priced `uint64_t` against `uint32_t` on the shipped ladder, and
+the answer is a split rather than a verdict:
+
+| `1/2/2/2` | build | track | bytes |
+|---|---|---|---|
+| `uint32_t` | 424.5 µs | 4 838.9 | 357 600 |
+| **`uint64_t`** | **255.5 — 1.66× FASTER** | **6 368.2 — 1.32× SLOWER** | +2.0% |
+
+**The same library is 1.66× faster and 1.32× slower at the same time.** Build is
+word-parallel — `pyrDown`, the derivatives — and a wider word does strictly less work
+per pixel. Track is `residualSums`, whose three NEON paths are guarded on
+**`sizeof(WordType) == 4`**, so `uint64_t` runs it fully scalar.
+
+**[D-1](#8-design-decisions)'s genericity in the word type is real in the API and NOT
+real in the tracker's fast path.** That was previously implicit in three `if constexpr`
+guards; it is now a measured number.
+
+**binCV's frontend is track-dominated (68.3% against build's 26.3%), so the stage that
+loses is the stage that matters** — weighting by those shares puts `uint64_t` at
+roughly **+11% frontend time**. One word type, `uint32_t`, and E-9's own named cost —
+kernels walking several levels needing two instantiations — buys nothing.
+
+**A build-dominated pipeline would want the opposite**, and that is now a documented
+operating point rather than an unexamined assumption.
+
+**The footprint objection is dead either way:** +2.0% on the shipped ladder. X-10's
+"+33%" was the 94×60 level in isolation and does not survive being weighed against the
+levels above it.
+
+**What would change the answer** is a `uint64_t` NEON path for `residualSums` — the
+guards are a specialisation gap, not a property of the ISA, since aarch64 counts bits
+in a 128-bit register regardless of how the caller sliced them. [E-29](#register), and
+it is the same shape as the x86 gap: one kernel, one missing specialisation.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -3107,100 +3143,5 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | **E-5** | Real speedup and peak-footprint numbers for a binary VIO frontend versus the byte-per-pixel equivalent. | This is the project's headline claim. | Nothing — it is the result the project exists to produce. | — | **Phase 4** (T4.3) |
 | ~~**E-10**~~ **RESOLVED** | Does the corner response need a frame-sized float map, or a rolling ring — and what does the ring's carry cost once the selection's global properties are preserved exactly? | **Answered: it does not need the map, and the ring is not a trade. The frontend goes 1 721 568 B → 500 464 B (3.44×) and the corner stage 1 333 848 B → 112 744 B (11.83×), with corners IDENTICAL to the byte and the whole detector 0.774× the time** — 40.79 → 31.59 ms/frame at 640×480. [D-22](#d-22-the-corner-response-streams-over-a-three-row-ring-and-that-is-the-recommended-path), [X-23](EXPERIMENTS.md). **~~for roughly 2× the response compute~~ — THIS ROW SAID THAT AND IT WAS WRONG, and X-23's rule pre-declared the correction rather than allowing it to be absorbed.** A ring forces a row-major sweep, which X-18 had already measured as the *faster* traversal at `blockSize` 3; the measured figure is **0.774×** (0.764× in the other device run), and even the two-pass shape the estimate described is 1.33×. The whole carry for the two GLOBAL properties — a frame-wide maximum and a frame-wide ordering — is **16 B**, because the threshold is a pure post-filter and the survivors are an up-set of the raw 3×3 maxima, so a top-K over the caller's existing candidate array is exactly the frame-map form's ranked set. It costs at large blocks — above `blockSize` 15 at `uint32_t` (1.08× at 31) and from `blockSize` 15 at `uint64_t` (1.03× at 15, 1.13× at 31) — and the frame-map form stays for that and for callers who want the map. (The corner stage's dominant term is now the CANDIDATE ARRAY — 8 754 survivors at 640×480, 9 774 on the real frame, structural maximum 3 659 568 B — which is a contract question and is deliberately left open. Still measured against no `CV_8U` denominator; that comparison is E-5's.) | Whether `cornerMinEigenVal` keeps a caller-provided frame map or gains a streaming form. | T3.7 (made caller-provided rather than decided) | Phase 3 (T3.11) ✔ |
 | **E-11** | Should `cornerMinEigenVal` select its window strategy on `blockSize`? | [X-18](EXPERIMENTS.md) measured the incremental form **losing** below `blockSize` 15 — 0.84× at 3, which is what `seal_params.yaml` actually configures. But one device at one frame size is thin, and x86 showed the *opposite sign* there. | Whether the sliding form is unconditional or `blockSize`-gated. | T3.7 (left unconditional, qualified in the docs) | unscheduled |
-| **E-9** | Should the word type vary down the pyramid — `uint64_t` where it costs no bytes (L0, L1), `uint32_t` above? | [X-10](EXPERIMENTS.md) measured both sides: `uint64_t` reduces **1.94×** faster and costs **+33%** at 94×60 but **0%** at 640×480, so the right answer may not be one type. The width is already a per-object template parameter (D-1), so this costs no new machinery — only a decision. | Whether the pyramid picks a word type per level, and whether kernels that walk several levels pay for two instantiations. | T3.4's pyramid, [D-14](#d-14-uint32_t-is-the-default-word-type) | unscheduled |
-
-E-8 is the Phase 3 instance of the same discipline, and of the same lesson: it
-gated the *primitive* T3.4 is built from, so it ran before that primitive was
-written rather than after — and the answer was that its own framing of the trade
-was wrong. Running it late would have meant shipping a pyramid built on a
-prepared-plan API that nothing needed.
-
-**E-4 closed in Phase 3 too, and E-12 is what it left behind.** E-4 asked whether
-generic-`N` regresses the specialized paths, and the answer is no — but
-[X-21](EXPERIMENTS.md) could only reach that answer by measuring both binCV routes
-against a hand-written control with no genericity at all, and that control exposed
-a cost E-4 had never named: **+93% per row**, of which only about a fifth is
-genericity in `N`. **A register entry that closes cleanly can still hand back a
-question, and the honest move is to register the new one rather than either widen
-the old entry to swallow it or leave it as prose in a log.** E-12 is that entry. It
-is gated on T4.1 for the reason the **Gates** column exists: the cost is worst on
-the upper pyramid levels, which is exactly where T4.1's N-bit paths will run, so
-measuring it afterward would mean either rewriting them or keeping a shape the data
-does not support.
-
-**E-13 arrived the same way, out of T3.10.** [X-22](EXPERIMENTS.md) priced the
-N-bit covariance so that T4.1 could weigh a bit depth, and found on the way that a
-decision D-15 took on measurement **at N = 1** — one accumulator per row — is being
-carried into a kernel where its cost grows as N² while the work it is amortized
-over grows as N² per *word*. The measurement that would settle it is confounded, in
-that same entry, by a code-layout effect large enough (1.46× on unchanged source)
-to swamp the difference. **Neither half of that belongs in a log**: the question is
-real, the evidence is not conclusive, and the experiment that closes it has to be
-designed to escape the confound rather than repeat it. It is gated on T4.1 for
-E-12's reason — T4.1 is what runs at N > 1, so a shape change afterward is a
-rewrite.
-
-The **Gates** column is why the **Runs** column is not simply "Phase 4". E-1, E-2
-and E-3 constrained code written in Phases 1–2; running them afterward would have
-meant either rewriting that code or quietly keeping a decision the data does not
-support. All three closed in Phase 2, on the reference device, before T3.6 — and
-E-3 is the case in point: it selected the branch that **rejects** the interface
-T2.6 currently ships, which is precisely the rewrite that running it late would
-have made expensive. E-7 is deferrable only because [T3.4](TASKS.md) takes the bit depth as a
-parameter rather than baking it in — **parameterizing a contested choice is what
-buys the right to defer measuring it.**
-
----
-
-## 10. Quality Strategy
-
-### 10.1 What "correct" means
-
-Tier 1 operations are correct when bit-exact against OpenCV on equivalent
-content. Tier 2 operations are correct when the downstream task — VIO trajectory
-accuracy — is preserved. Tier 3 operations are correct against hand-derived
-reference implementations.
-
-### 10.2 Equivalence harness
-
-Every Tier 1 operation ships with a test asserting bit-exactness against the
-equivalent OpenCV expression on the same content. Built early: it is cheap now
-and it is what makes "same accuracy" a claim rather than an assertion.
-
-### 10.3 Benchmark denominator
-
-Performance is measured against **OpenCV performing the same semantic operation
-on the same binary content stored as `CV_8U`** — because that is exactly what a
-user does today without binCV. Not against OpenCV on grayscale (different
-information content), and not against a strawman implementation.
-
-### 10.4 The metric that matters
-
-**Peak working-set footprint of the full frontend, measured end to end** — not
-per-buffer ratios. A target either fits the pipeline in its memory budget or it
-does not. Per-buffer ratios are supporting evidence for that headline number.
-
-### 10.5 Defensible claims
-
-The claims this architecture supports are **kernel-level**, because kernels are
-what binCV ships:
-
-> Tier 1 operations bit-exact against OpenCV; tier 2 operations agreeing with the
-> reference frontend frame by frame; several-fold smaller peak footprint over the
-> frontend operation set; and faster execution on the bit-parallel operations,
-> against the byte-per-pixel denominator.
-
-**Not "equivalent VIO accuracy."** Trajectory error is a property of the whole
-integration — frontend, estimator, IMU fusion and tuning — and this repository
-supplies only the first. binCV can be flawless and a trajectory still poor, or
-sloppy and a trajectory still fine, because the estimator absorbs a great deal.
-Claiming it would also contradict [§1](#what-bincv-is-not), which puts estimation
-out of scope.
-
-Trajectory accuracy is still worth measuring, as **evidence** that these kernels
-are sufficient for the job they were designed for. It is recorded that way — a
-sufficiency check attributed to the integration — never as binCV's own result.
-
-Not "10–100× faster than OpenCV." OpenCV is well optimized; on operations that
-are not bit-parallel it will win, and chasing a throughput crown would pull
-development toward benchmarking operations no real pipeline calls.
+| ~~**E-9**~~ **RESOLVED — NO** | Should the word type vary down the pyramid — `uint64_t` where it costs no bytes, `uint32_t` above? | [X-10](EXPERIMENTS.md) measured `uint64_t` reducing 1.94× faster and costing +33% at 94×60 but 0% at 640×480. | **Answered: NO, and the reason is a split.** [X-54](EXPERIMENTS.md): `uint64_t` is **1.66× faster on build** and **1.32× slower on track**, because build is word-parallel and track's NEON paths are guarded on `sizeof(WordType) == 4`. binCV is track-dominated, so it loses by ≈11% of frontend time. Footprint is +2.0%, not +33% — that figure was one level in isolation. [D-45](#d-45-one-word-type-because-the-two-halves-of-the-frontend-want-different-ones). | Whether the pyramid picks a word type per level. **It does not.** | D-14 | (X-54) ✔ |
+| **E-29** | Should `residualSums` get a `uint64_t` NEON path, so the word type is genuinely free? | [X-54](EXPERIMENTS.md) measured the cost of not having one: `uint64_t` loses 1.32× on track while winning 1.66× on build. The guards are a **specialisation gap, not an ISA property** — aarch64's `CNT` counts a 128-bit register regardless of how the caller sliced it. | Same shape as the x86 gap ([X-52](EXPERIMENTS.md)): one kernel, one missing specialisation. Worth it only if a build-dominated pipeline appears, or if the `uint64_t` build win (1.66×) is wanted without the track loss. | Whether D-1's word-type genericity is real in the hot path or only in the API. | D-45 | unscheduled |

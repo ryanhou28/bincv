@@ -229,9 +229,9 @@ struct Arm {
 };
 
 /// Holds one ladder alive and hands back its two timed bodies.
-template <bincv::PyrDownFilter F, size_t... LevelBits>
+template <typename Word, bincv::PyrDownFilter F, size_t... LevelBits>
 struct ArmHolder {
-    Ladder<W, LevelBits...> lad;
+    Ladder<Word, LevelBits...> lad;
     std::vector<Point2f> pts;
     std::vector<Point2f> out;
     std::vector<uint8_t> status;
@@ -251,10 +251,10 @@ double sumOfSquares(std::initializer_list<size_t> bits) {
     return s;
 }
 
-template <bincv::PyrDownFilter F, size_t... LevelBits>
+template <typename Word, bincv::PyrDownFilter F, size_t... LevelBits>
 void addArm(std::vector<Arm>& arms, std::vector<std::shared_ptr<void>>& keep, const char* name,
             double sumNsq, int w, int h, const std::vector<Point2f>& pts) {
-    auto holder = std::make_shared<ArmHolder<F, LevelBits...>>(w, h, pts);
+    auto holder = std::make_shared<ArmHolder<Word, F, LevelBits...>>(w, h, pts);
     keep.push_back(holder);
     Arm a;
     a.name = name;
@@ -279,23 +279,30 @@ void runAt(int w, int h, int step, int margin, int repeats, double targetMs) {
 
     constexpr auto BOX2 = bincv::PyrDownFilter::Box2x2;
     constexpr auto BOX3 = bincv::PyrDownFilter::Box3x3;
-    addArm<BOX2, 1, 1, 1, 1>(arms, keep, "1/1/1/1 b2", sumOfSquares({1, 1, 1, 1}), w, h, pts);
+    addArm<W, BOX2, 1, 1, 1, 1>(arms, keep, "1/1/1/1 b2", sumOfSquares({1, 1, 1, 1}), w, h, pts);
     // THE INTERMEDIATE LADDERS (X-50). E-19 named these and nobody had ever run
     // them, on either axis. They ask the question 1/2/2/2 answers by assertion:
     // does EVERY coarse level need two bits, or only the first one that is no
     // longer binary? The deepening arms below answer the opposite direction and
     // X-39 has already closed it -- BOX_2x2 is flat from N=2 to N=7 -- so these
     // are where the remaining uncertainty is.
-    addArm<BOX2, 1, 2, 1, 1>(arms, keep, "1/2/1/1 b2", sumOfSquares({1, 2, 1, 1}), w, h, pts);
-    addArm<BOX3, 1, 2, 1, 1>(arms, keep, "1/2/1/1 b3", sumOfSquares({1, 2, 1, 1}), w, h, pts);
-    addArm<BOX2, 1, 2, 2, 1>(arms, keep, "1/2/2/1 b2", sumOfSquares({1, 2, 2, 1}), w, h, pts);
-    addArm<BOX3, 1, 2, 2, 1>(arms, keep, "1/2/2/1 b3", sumOfSquares({1, 2, 2, 1}), w, h, pts);
-    addArm<BOX2, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b2", sumOfSquares({1, 2, 2, 2}), w, h, pts);
-    addArm<BOX3, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b3", sumOfSquares({1, 2, 2, 2}), w, h, pts);
-    addArm<BOX2, 1, 3, 3, 3>(arms, keep, "1/3/3/3 b2", sumOfSquares({1, 3, 3, 3}), w, h, pts);
-    addArm<BOX2, 1, 3, 4, 4>(arms, keep, "1/3/4/4 b2", sumOfSquares({1, 3, 4, 4}), w, h, pts);
-    addArm<BOX2, 1, 3, 5, 5>(arms, keep, "1/3/5/5 b2", sumOfSquares({1, 3, 5, 5}), w, h, pts);
-    addArm<BOX2, 1, 3, 5, 7>(arms, keep, "1/3/5/7 b2", sumOfSquares({1, 3, 5, 7}), w, h, pts);
+    addArm<W, BOX2, 1, 2, 1, 1>(arms, keep, "1/2/1/1 b2", sumOfSquares({1, 2, 1, 1}), w, h, pts);
+    addArm<W, BOX3, 1, 2, 1, 1>(arms, keep, "1/2/1/1 b3", sumOfSquares({1, 2, 1, 1}), w, h, pts);
+    addArm<W, BOX2, 1, 2, 2, 1>(arms, keep, "1/2/2/1 b2", sumOfSquares({1, 2, 2, 1}), w, h, pts);
+    addArm<W, BOX3, 1, 2, 2, 1>(arms, keep, "1/2/2/1 b3", sumOfSquares({1, 2, 2, 1}), w, h, pts);
+    addArm<W, BOX2, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b2", sumOfSquares({1, 2, 2, 2}), w, h, pts);
+    // X-54 / E-9: the SAME ladder and filter at uint64_t. Every NEON path in the
+    // tracker is guarded on sizeof(WordType) == 4, so this arm runs LK fully
+    // scalar -- which is the cost the guards impose and the thing E-9 needs priced.
+    addArm<uint64_t, BOX2, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b2 u64",
+                                       sumOfSquares({1, 2, 2, 2}), w, h, pts);
+    addArm<uint64_t, BOX2, 1, 1, 1, 1>(arms, keep, "1/1/1/1 b2 u64",
+                                       sumOfSquares({1, 1, 1, 1}), w, h, pts);
+    addArm<W, BOX3, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b3", sumOfSquares({1, 2, 2, 2}), w, h, pts);
+    addArm<W, BOX2, 1, 3, 3, 3>(arms, keep, "1/3/3/3 b2", sumOfSquares({1, 3, 3, 3}), w, h, pts);
+    addArm<W, BOX2, 1, 3, 4, 4>(arms, keep, "1/3/4/4 b2", sumOfSquares({1, 3, 4, 4}), w, h, pts);
+    addArm<W, BOX2, 1, 3, 5, 5>(arms, keep, "1/3/5/5 b2", sumOfSquares({1, 3, 5, 5}), w, h, pts);
+    addArm<W, BOX2, 1, 3, 5, 7>(arms, keep, "1/3/5/7 b2", sumOfSquares({1, 3, 5, 7}), w, h, pts);
 
     std::vector<measure::Bench> buildBenches, trackBenches;
     for (const Arm& a : arms) {
