@@ -9085,6 +9085,66 @@ frames in 10 shards.
 
 ---
 
+### X-54 · E-9 — should the word type vary down the pyramid? · `RULE ONLY`
+
+**Gates:** [E-9](ARCHITECTURE.md#register), unscheduled since
+[X-10](#x-10--e-2--default-word-width--done).
+
+**Question.** X-10 measured `uint64_t` reducing **1.94× faster** and costing **+33%**
+at 94×60 but **0%** at 640×480, so the right answer might not be one type.
+[D-1](ARCHITECTURE.md) makes the width a per-object template parameter, so a per-level
+choice costs no new machinery — only a decision.
+
+**THE FOOTPRINT SIDE IS ALREADY SETTLED, BY ARITHMETIC RATHER THAN MEASUREMENT.** A row
+costs `ceil(width/bits) × bits/8` bytes, so `uint64_t` is free wherever the row is a
+multiple of 64 pixels wide and costs at most one word otherwise. Over the shipped
+frontend ladder:
+
+| level | `uint32_t` | `uint64_t` | |
+|---|---|---|---|
+| L0 752×480 | 46 080 B | 46 080 | **+0.0%** |
+| L1 376×240 | 23 040 | 23 040 | **+0.0%** |
+| L2 188×120 | 5 760 | 5 760 | **+0.0%** |
+| L3 94×60 | 1 440 | 1 920 | +33.3% |
+| **whole ladder** | **76 320** | **76 800** | **+0.6%** |
+
+**So this is a speed question**, and X-10's +33% headline is a property of the smallest
+level rather than of the pyramid.
+
+**A COLLISION THIS RULE NAMES BEFORE MEASURING, because it may decide the answer on its
+own.** Every NEON path in the tracker is guarded on **`sizeof(WordType) == 4`** —
+`slicedSignedSum`'s plane-pair batching, `alignedResidualSumsNeon1` (D-33) and
+`alignedResidualSumsNeon2` (X-40). **A `uint64_t` level would silently fall back to
+scalar for the whole of LK.** That is [D-1](ARCHITECTURE.md)'s genericity in the word
+type colliding with D-33's specialisation at one width, and it is visible by reading the
+guards — but *how much it costs* is not, so it is measured.
+
+**Arms** (reference device, real-frame seed, build and track separately, per
+[X-50](#x-50--e-19--is-1222--box_2x2-still-the-operating-point--done)'s method note):
+the shipped `1/2/2/2` ladder at `uint32_t` and at `uint64_t`.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.**
+
+- **Band A — `uint64_t` is faster end to end** (build + track) despite losing NEON.
+  Then the reduction win outweighs the specialisation, and a per-level choice is worth
+  designing: `uint64_t` at L0–L2 where it is byte-free, `uint32_t` at L3.
+- **Band B — `uint64_t` wins on build but loses on track.** The per-level answer is
+  real but the *kernels that walk several levels* would need two instantiations, which
+  E-9 itself names as the cost. Report the split and leave the decision to a caller
+  who knows which stage dominates their pipeline.
+- **Band C — `uint64_t` loses overall.** The NEON guards decide it. **Answer NO**, and
+  record the collision as the reason: binCV's word-type genericity is real in the API
+  and *not* real in the tracker's fast path, which is a fact about the library worth
+  stating plainly rather than leaving implicit in three `if constexpr`s.
+- **Band D — the two are within 5%.** Then the guards are not costing what they appear
+  to, which would mean the NEON paths are worth less than D-33 and X-40 measured, and
+  that contradiction is the finding.
+
+**Method:** `benchmark/pyramid_depth_benchmark.cpp`, word-type arms added beside the
+ladder arms; `scripts/run_on_pi.sh pi4`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
