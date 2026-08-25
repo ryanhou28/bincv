@@ -93,13 +93,17 @@ else()
     # parity, at 6.23x less memory. binCV counts bits for a living, so it pays
     # for this instruction more than almost any other library would.
     #
-    # OFF by default because turning it on RAISES THE MINIMUM CPU, which is a
-    # product decision rather than a build tweak. Every x86-64 part since ~2008
-    # has it; a caller who knows their target should turn it on, and
-    # GETTING_STARTED says so. The principled fix is runtime dispatch
-    # (ROADMAP 2.3), which this does not pre-empt.
+    # ON by default: binCV's x86 baseline is a POPCNT-capable CPU. Nehalem (2008)
+    # and Barcelona (2007) both have it, so this excludes hardware older than
+    # roughly every x86-64 part still in service -- and the alternative is
+    # shipping a bit-counting library that counts bits in software, which is a
+    # worse default than a 2008 minimum. Turn it OFF for pre-SSE4.2 targets
+    # (some Bonnell-era Atom); the build still works, 3.75x slower.
+    #
+    # This does not pre-empt runtime dispatch (ROADMAP 2.3, E-31), which would
+    # remove the minimum entirely.
     # -------------------------------------------------------------------------
-    option(BINCV_X86_POPCNT "Build with -mpopcnt (needs SSE4.2-era x86; worth 3.75x, X-57)" OFF)
+    option(BINCV_X86_POPCNT "Build with -mpopcnt (needs SSE4.2-era x86; worth 3.75x, X-57)" ON)
     if(BINCV_X86_POPCNT)
         check_cxx_compiler_flag("-mpopcnt" HAVE_MPOPCNT)
         if(HAVE_MPOPCNT)
@@ -109,7 +113,7 @@ else()
             set(BINCV_POPCNT_STATUS "requested but the compiler refused -mpopcnt")
         endif()
     else()
-        set(BINCV_POPCNT_STATUS "OFF -- software fallback, ~3.75x slower (X-57)")
+        set(BINCV_POPCNT_STATUS "OFF by request -- software fallback, ~3.75x slower (X-57)")
     endif()
 
     check_cxx_compiler_flag("-mavx512f" HAVE_AVX512)

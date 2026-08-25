@@ -303,23 +303,24 @@ device ([X-46](EXPERIMENTS.md)):
 The crossover is **filter-dependent** — a box stops paying above ~4 bits, a 5×5
 Gaussian above ~1. There is no single number; the table is the shape, not the rule.
 
-**ON x86, BUILD WITH `-DBINCV_X86_POPCNT=ON`.** Baseline x86-64 predates SSE4.2, so
-`POPCNT` is not in the default ISA and `__builtin_popcountll` compiles to a **software
-fallback** — measured: zero `popcnt` instructions in the portable binary. binCV counts
-bits for a living, and the flag is worth **3.75× on the whole frontend**
-([X-57](EXPERIMENTS.md)): 12.9 → 3.4 ms, and from 3.8× slower than OpenCV to **0.91×**,
-near parity at 6.23× less memory. It is OFF by default only because it raises the
-minimum CPU to 2007–08 hardware, which is the caller's call to make.
+**On x86, binCV requires a POPCNT-capable CPU** (Nehalem 2008 / Barcelona 2007) and
+`BINCV_X86_POPCNT` is **ON by default**. Baseline x86-64 predates SSE4.2, so without it
+`__builtin_popcountll` compiles to a **software fallback** — measured: zero `popcnt`
+instructions in the binary — and binCV counts bits for a living. The flag is worth
+**3.75× on the whole frontend** ([X-57](EXPERIMENTS.md)): 12.9 → 3.4 ms, and from 3.8×
+slower than OpenCV to **0.91×**, near parity at 6.23× less memory. Turn it off for
+pre-SSE4.2 targets and accept the 3.75×.
 
 **Two things follow, and they are easy to conflate:**
 
 - **The footprint advantage is universal** — 6.23× over an OpenCV frontend
   ([X-49](EXPERIMENTS.md)), identical on every platform, because it is a property of
   the representation.
-- **The speed advantage is measured on aarch64**, and on x86 it depends entirely on the
-  flag above: **0.27× of OpenCV without it, 0.91× with it** ([X-57](EXPERIMENTS.md)).
-  **Benchmark on your target, with your flags** — the default portable build is not
-  the configuration to judge binCV by.
+- **The speed advantage is measured on aarch64**, where binCV is **1.53× faster**. On
+  x86 it is **0.91× of OpenCV** with POPCNT on ([X-57](EXPERIMENTS.md)) — competitive,
+  not ahead, because **binCV has NEON paths and no x86 vector code**, while OpenCV's
+  x86 LK and gftt are hand-tuned AVX2. That asymmetry is a gap, not a design choice
+  ([E-32](ARCHITECTURE.md#register)). **Benchmark on your target.**
 
 **Above the crossover, hand the data to OpenCV.** `QuantMat<N>::toCVMatNormalized` and
 `fromCVMat` are the bridge, and the round trip is **3.7× faster than binCV's own 8-bit

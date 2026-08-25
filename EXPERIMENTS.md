@@ -9355,11 +9355,12 @@ extrapolation after three failures. Measured: LK **2.307 ms**, frontend **3.43 m
 parity. **The number was right and the mechanism was wrong**, which is worth recording
 as its own lesson — a correct prediction is not evidence of a correct model.
 
-**WHAT SHIPS, AND WHAT DOES NOT.** `BINCV_X86_POPCNT` is a CMake option, **OFF by
-default**. Turning it on **raises the minimum CPU** to SSE4.2-era (Nehalem 2008,
-Barcelona 2007), and that is a product decision rather than a build tweak — so it is
-offered, measured and documented rather than taken unilaterally. The configure summary
-now prints which side it is on, because a 3.75× factor should not be invisible.
+**WHAT SHIPS.** `BINCV_X86_POPCNT` is **ON by default**: binCV's x86 baseline is a
+POPCNT-capable CPU. Nehalem (2008) and Barcelona (2007) both have it, so the minimum
+excludes roughly nothing still in service — and **shipping a bit-counting library that
+counts bits in software is a worse default than a 2008 minimum.** It can be turned OFF
+for pre-SSE4.2 targets (some Bonnell-era Atom), at 3.75×. The configure summary prints
+which side it is on, because a 3.75× factor should not be invisible.
 
 **The principled fix is runtime dispatch** (ROADMAP 2.3), which this does not pre-empt.
 It is genuinely awkward for `popcountWord`: it is an inline function in hot loops, so a
@@ -9368,8 +9369,22 @@ dispatch that defeats inlining could cost more than it saves. **Registered as
 simply requiring a 2008-era instruction — is what several vision libraries already do
 and deserves weighing against the machinery.
 
-**Decision:** no AVX2 work for LK on this evidence; the accumulator port X-52 proposed
-is **cancelled**. Recorded as [D-47](ARCHITECTURE.md#8-design-decisions).
+**Decision:** the **specific** port X-52 proposed — batching taps into lanes to dodge a
+domain crossing — is **cancelled**, because x86 has no such crossing to dodge.
+Recorded as [D-47](ARCHITECTURE.md#8-design-decisions).
+
+**THAT IS NOT "x86 NEEDS NO VECTOR WORK", AND AN EARLIER DRAFT OF THIS ENTRY SAID SO.**
+With the flag on, binCV is **3.429 ms against OpenCV's 3.150** — 9% short of parity —
+and **binCV still has no x86 vector code at all** against an OpenCV whose LK and gftt
+are hand-tuned AVX2. The asymmetry is stark and is the honest summary of where binCV
+stands: **NEON paths exist, x86 paths do not.**
+
+The headroom is concrete rather than hopeful: **binCV processes `uint32_t` words on a
+machine with 256-bit registers — 32 bits per operation where AVX2 offers 256.** The
+build stage (`pyrDown` + derivatives) is **0.915 ms, 26.7%** of the frontend and is
+long contiguous loops over whole planes, which is exactly what a vector unit is for;
+halving it alone is 13% and would flip the ratio. Registered as
+[E-32](ARCHITECTURE.md#register).
 
 **Method:** `benchmark/frontend_sequence.cpp` built twice from the same tree, once with
 `-mpopcnt`; `objdump | grep popcnt` to confirm the instruction is present or absent
