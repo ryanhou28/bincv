@@ -9193,6 +9193,57 @@ missing one specialisation.
 
 ---
 
+### X-55 · E-11 — is the window strategy already gated on `blockSize`? · `DONE`
+
+**A CHARACTERISATION that turned into a stale-premise correction**, so no rule: nothing
+is decided here that the code has not already decided.
+
+**E-11 asked** whether `cornerMinEigenVal` should select its window strategy on
+`blockSize`, because [X-18](#x-18--does-the-incremental-window-form-still-pay-inside-t37s-dense-sweep--done)
+measured the incremental form **losing below blockSize 15** — 0.84× at 3, which is what
+`seal_params.yaml` configures.
+
+**X-18 REPRODUCES, ON HEAVILY CHANGED CODE, TO TWO DECIMAL PLACES.** Reference device,
+within-run spreads 0.05–1.6%:
+
+| blockSize | sliding ns/px | recompute | net | X-18 |
+|---|---|---|---|---|
+| **3** | 103.573 | **88.395** | **0.85×** | 0.84× |
+| 7 | 144.621 | 140.169 | 0.97× | — |
+| 15 | 254.948 | 281.635 | **1.10×** | 1.10× |
+| 31 | 559.895 | 686.000 | **1.23×** | — |
+
+The crossover sits **between 7 and 15**, and it is now measured twice, months apart,
+across D-27…D-45 worth of change.
+
+**BUT E-11's PREMISE IS STALE, AND THAT IS THE ANSWER.** The path the frontend
+*actually* runs is not the one X-18 measured. Since [X-31](#x-31--corner-response-698x-bit-exact--and-d-27s-target-ordering-was-wrong--done),
+`impl::cornerMinEigenValRow` — the streaming row form behind the response ring
+([D-26](ARCHITECTURE.md), E-10) — **already dispatches on `blockSize == 3`** to a
+bit-sliced box-sum path, and its own comment says why: *"blockSize 3 is
+`seal_params.yaml`'s value and the whole frontend's."* **The gating E-11 asks for exists,
+on the path that matters, and has since before E-11 was written.**
+
+What X-18 and this entry measure is the **frame-map** `cornerMinEigenVal`, which keeps
+an unconditional column-major slide. That is deliberate — a frame map slides *down
+columns*, which is a different traversal from the row form — and **no measured path in
+this project calls it**: the frontend uses the ring.
+
+**Decision: E-11 answered YES, and it is already implemented where it counts.** The
+frame-map API keeps its unconditional slide rather than growing a branch no measured
+path exercises; the crossover is recorded in its docstring so a caller sweeping
+`blockSize < 7` densely can choose. **Adding an unexercised branch to buy 1.17× on a
+path nobody takes is churn, not optimisation.**
+
+**A note on what this cost.** The first run for this entry was
+`corner_streaming_benchmark`, which measures E-10's ring against the frame map — a
+different question. Two benchmarks in this repo have "corner" in the name and answer
+different things, which is worth knowing before reaching for one.
+
+**Method:** `benchmark/corner_benchmark.cpp` via `scripts/run_on_pi.sh pi4`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
