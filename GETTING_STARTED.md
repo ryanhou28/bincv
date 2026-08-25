@@ -287,6 +287,38 @@ sanitizer run needs a compiler and nothing else.
 
 ---
 
+## Choosing an operating point
+
+**binCV is fast when its INPUT is narrow.** A bit-sliced kernel's cost scales with the
+precision it *reads*, not the precision it writes — so the advantage is a property of
+the data, not of the operation. `pyrDown` against `cv::pyrDown`, 640×480, reference
+device ([X-46](EXPERIMENTS.md)):
+
+| bits in → out | filter | vs `cv::pyrDown` |
+|---|---|---|
+| 1 → 3 | box 2×2 | **4.4× faster** |
+| 1 → 3 | Gaussian 5×5 | 0.86× — rough parity |
+| 8 → 8 | Gaussian 5×5 | **13.7× SLOWER** |
+
+The crossover is **filter-dependent** — a box stops paying above ~4 bits, a 5×5
+Gaussian above ~1. There is no single number; the table is the shape, not the rule.
+
+**Two things follow, and they are easy to conflate:**
+
+- **The footprint advantage is universal** — 6.23× over an OpenCV frontend
+  ([X-49](EXPERIMENTS.md)), identical on every platform, because it is a property of
+  the representation.
+- **The speed advantage is not.** It is measured on aarch64. On x86 the tracker has no
+  vector path and binCV is currently **3.57× slower** than OpenCV end to end
+  ([X-52](EXPERIMENTS.md)). **Benchmark on your target, not on your laptop.**
+
+**Above the crossover, hand the data to OpenCV.** `QuantMat<N>::toCVMatNormalized` and
+`fromCVMat` are the bridge, and the round trip is **3.7× faster than binCV's own 8-bit
+path** ([D-42](ARCHITECTURE.md)). Send an operation to OpenCV when
+`native_binCV − native_OpenCV` exceeds the conversion tax — which a chain of wide
+operations pays only once at each end. Matching OpenCV's *output precision* is what
+costs; matching its *filter* is nearly free.
+
 ## Benchmarking
 
 ```bash
@@ -346,6 +378,14 @@ reproducing X-9, X-10 or X-11 on the reference device takes no extra flags.
 - [bincv-cpp/include/bincv-cpp/ops/bitslice.hpp](bincv-cpp/include/bincv-cpp/ops/bitslice.hpp) — `maj3`, `bitSlicedSum`, `thresholdGE` and the view-level `majority3` (T2.7). Small-count arithmetic over bit planes, **API tier 3**; its whole per-lane input space is enumerated by `tests/test_bitslice.cpp` rather than sampled
 - [bincv-cpp/include/bincv-cpp/ops/denoise.hpp](bincv-cpp/include/bincv-cpp/ops/denoise.hpp) — `denoiseMedian3` (T3.1), the reference pipeline's three-pixel median. **API tier 3**: the neighbourhood is an asymmetric above/self/right L with a ZERO-FILL border, which is the reference's behaviour and not `cv::medianBlur`'s. One pass, no scratch buffer ([X-12](EXPERIMENTS.md))
 - [bincv-cpp/include/bincv-cpp/ops/threshold.hpp](bincv-cpp/include/bincv-cpp/ops/threshold.hpp) — `threshold` from a `CV_8U` source (**API tier 1**, bit-exact against `cv::threshold` with `THRESH_BINARY`) and `binarize` from a `QuantMat<N>` (**API tier 3**, no OpenCV equivalent) (T3.2). Both compare **strictly greater than**, and the suite enumerates that boundary rather than sampling it
+- [bincv-cpp/include/bincv-cpp/ops/pyramid.hpp](bincv-cpp/include/bincv-cpp/ops/pyramid.hpp) — **three entry points, and picking the wrong one is the easiest mistake in the library.** `pyrDown` is **exactly `cv::pyrDown`** — 5×5 `[1,4,6,4,1]` Gaussian, `BORDER_REFLECT_101`, **API tier 1 at `NIn == NOut == 8`** and proven bit-exact against OpenCV. `pyrDownBox` is the 2×2 box with `BORDER_REPLICATE` — **binCV's own operating point**, and what every performance number here is measured on. `pyrDownFiltered<F, …, Bo>` is the full space: five filters × three borders, dispatching to a per-filter specialisation where one exists. `Pyramid<W, N0, N1, …>::build<F, Bo>()` defaults to the OpenCV pair, so **a pipeline must ask for the box explicitly** (T3.4, [D-39](ARCHITECTURE.md), [X-48](EXPERIMENTS.md))
+- [bincv-cpp/include/bincv-cpp/ops/derivative.hpp](bincv-cpp/include/bincv-cpp/ops/derivative.hpp) — the binarized `[-1, 0, 1]` spatial derivative into a `SignedQuantMat<N>` (T3.5). Sign-magnitude, not two's complement ([D-3](ARCHITECTURE.md)), which is what makes the LK covariance fall out as popcounts
+- [bincv-cpp/include/bincv-cpp/ops/covariance.hpp](bincv-cpp/include/bincv-cpp/ops/covariance.hpp) — the LK gradient covariance over a window (T3.6, T3.10), N-bit
+- [bincv-cpp/include/bincv-cpp/ops/corner.hpp](bincv-cpp/include/bincv-cpp/ops/corner.hpp) — `cornerMinEigenVal` and the `goodFeaturesToTrack` port (T3.7, T3.11), including the streaming three-row response ring that keeps detection off the heap
+- [bincv-cpp/include/bincv-cpp/ops/opticalFlow.hpp](bincv-cpp/include/bincv-cpp/ops/opticalFlow.hpp) — `calcOpticalFlowPyrLK` over an `LKLevels` ladder (T3.8). **The hot kernel**: 68% of the frontend, and where D-30…D-33, X-35 and X-40's NEON work lives. Read [D-37](ARCHITECTURE.md) and [D-40](ARCHITECTURE.md) before optimising it — counting, addressing, cache and layout have each been priced and each declined or exhausted
+- [bincv-cpp/include/bincv-cpp/ops/morphology.hpp](bincv-cpp/include/bincv-cpp/ops/morphology.hpp) — `erode` / `dilate` (T3.3), **API tier 1** against OpenCV for the rectangular structuring elements
+- [bincv-cpp/include/bincv-cpp/ops/resample.hpp](bincv-cpp/include/bincv-cpp/ops/resample.hpp) — nearest-neighbour resize over packed bits
+- [bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp](bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp) — Hamming block matching, E-6's route (a). Kept as the measured alternative to LK, not as the shipped tracker ([D-24](ARCHITECTURE.md))
 - [bincv-cpp/include/bincv-cpp/impl/kernel_util.hpp](bincv-cpp/include/bincv-cpp/impl/kernel_util.hpp) — the row-tail mask, the stride check and the [D-11](ARCHITECTURE.md#d-11-kernels-alias-exactly-or-not-at-all) overlap predicates, shared by every kernel under `ops/`
 
 ### Support
