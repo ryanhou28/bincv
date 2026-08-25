@@ -8941,32 +8941,42 @@ intrinsics. **Where is x86 now, and what is left there?**
 the same binary and the same content as [X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done)'s
 aarch64 run.
 
-| stage | aarch64 (X-49) | **x86** | x86 vs the Pi |
+**THE RESULT, AGAINST THE DENOMINATOR** ([CLAUDE.md](../CLAUDE.md): OpenCV doing the
+same semantic operation) — this is the claim, and the only one:
+
+| platform | binCV | OpenCV | |
 |---|---|---|---|
-| detect | 0.570 ms | 0.223 | **2.56× faster** |
-| build | 2.805 | 0.984 | **2.85× faster** |
-| **track (LK)** | **7.270** | **12.948** | **0.56× — 1.78× SLOWER** |
-| **binCV total** | 10.644 | **14.155** | 0.75× |
-| OpenCV | 16.289 | 3.961 | 4.11× faster |
+| aarch64 ([X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done)) | 10.644 ms | 16.289 | **1.53× FASTER** |
+| **x86** | **14.155 ms** | **3.961** | **3.57× SLOWER** |
 
-**binCV is 3.57× slower than OpenCV on x86** — much better than the 13.9× last
-recorded, and still a real gap.
+Much better than the 13.9× last recorded, and still a real gap.
 
-**1. THE DEFICIT IS ONE STAGE, AND THE PROFILE SAYS SO CLEANLY.** Detect and build are
-**2.56× and 2.85× faster** on the Ryzen than on a 1.5 GHz Cortex-A72 — ordinary
-machine-speed scaling, because both are platform-independent code. **LK alone inverts
-it**: a Cortex-A72 beats the Ryzen at binCV's tracker by **1.78×**. LK is the only
-stage with a NEON-only fast path, and on x86 that path compiles out to scalar. **The
-platform-independent optimisations transferred for free; the vector ones did not
-transfer at all**, and the profile separates the two exactly.
+**1. THE DEFICIT IS ONE STAGE — and OpenCV is what makes that legible.** A
+binCV-on-x86 against binCV-on-Pi comparison would mix machine speed with
+implementation quality and claim nothing about the product. **What makes the
+cross-platform figures diagnostic is that OpenCV is the control for how much faster
+the machine is:**
+
+| | aarch64 | x86 | scaling |
+|---|---|---|---|
+| **OpenCV total — the control** | 16.289 ms | 3.961 | **4.11×** |
+| binCV detect | 0.570 | 0.223 | 2.56× |
+| binCV build | 2.805 | 0.984 | 2.85× |
+| **binCV track (LK)** | **7.270** | **12.948** | **0.56× — INVERTED** |
+
+Everything scales in the machine's direction except **LK**, which goes backwards. LK is
+the only stage with a NEON-only fast path, and on x86 that path compiles out to scalar.
+**The platform-independent optimisations transferred for free; the vector ones did not
+transfer at all**, and measuring each stage against how OpenCV itself moved separates
+the two without asserting anything about one machine versus another.
 
 **2. LK IS 91.5% OF THE x86 FRONTEND** against 68.3% on aarch64 — not because LK got
 worse, but because everything around it got faster and it did not.
 
 **3. THE HYPOTHESIS THIS SETS UP, STATED AS A HYPOTHESIS.** If an AVX2 port of the tap
-batching (D-33, X-40) bought x86 what NEON bought aarch64, LK would scale like its
-neighbours — ~2.7× of the Pi's 7.270 ms, i.e. **~2.7 ms**, putting the frontend near
-**3.9 ms against OpenCV's 3.961: parity.** **That is an extrapolation and this project
+batching (D-33, X-40) bought x86 what NEON bought aarch64, LK would scale in the
+machine's direction like its neighbours rather than against it — landing near
+**~2.7 ms**, and the frontend near **3.9 ms against OpenCV's 3.961: parity.** **That is an extrapolation and this project
 has been wrong three times tonight extrapolating** (the `BOX_3x3` build cost, X-43's
 fabricated buffer, X-50's proxy). It is written down as a target to measure against,
 not a result.

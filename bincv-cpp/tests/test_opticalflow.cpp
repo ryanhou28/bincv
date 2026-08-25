@@ -3247,111 +3247,81 @@ const char* filterName(PyrFilter f) {
     }
 }
 
-/// One pyramid level: filter `src` (CV_32F, values in [0,1]) then subsample by 2.
-cv::Mat downOnce(const cv::Mat& src, PyrFilter f) {
-    cv::Mat filtered;
-    switch (f) {
-        case PyrFilter::Gaussian5x5: {
-            // The [1,4,6,4,1] binomial cv::pyrDown applies -- what standard LK uses.
-            cv::Mat k = (cv::Mat_<float>(5, 1) << 1, 4, 6, 4, 1) / 16.0f;
-            cv::sepFilter2D(src, filtered, CV_32F, k, k, cv::Point(-1, -1), 0,
-                            cv::BORDER_REFLECT_101);
-            break;
-        }
-        case PyrFilter::Gaussian3x3: {
-            cv::Mat k = (cv::Mat_<float>(3, 1) << 1, 2, 1) / 4.0f;
-            cv::sepFilter2D(src, filtered, CV_32F, k, k, cv::Point(-1, -1), 0,
-                            cv::BORDER_REFLECT_101);
-            break;
-        }
-        case PyrFilter::Box3x3:
-            cv::blur(src, filtered, cv::Size(3, 3), cv::Point(-1, -1), cv::BORDER_REFLECT_101);
-            break;
-        case PyrFilter::Median3x3: {
-            // Median of a 3x3 on values in [0,1]; cv::medianBlur needs 8U at this
-            // aperture, so scale, filter, scale back.
-            cv::Mat u8;
-            src.convertTo(u8, CV_8U, 255.0);
-            cv::Mat m;
-            cv::medianBlur(u8, m, 3);
-            m.convertTo(filtered, CV_32F, 1.0 / 255.0);
-            break;
-        }
-        case PyrFilter::Box2x2:
-            // The shipped filter: mean of the 2x2 block. A 2x2 box with the anchor
-            // pyrDown uses is a plain average of the block being subsampled.
-            filtered = src;
-            break;
-        case PyrFilter::DirectSubsample:
-            filtered = src;  // no filtering at all -- maximum aliasing
-            break;
-    }
-    const int dw = (src.cols + 1) / 2, dh = (src.rows + 1) / 2;
-    cv::Mat out(dh, dw, CV_32F);
-    for (int y = 0; y < dh; ++y) {
-        for (int x = 0; x < dw; ++x) {
-            if (f == PyrFilter::Box2x2) {
-                const int y0 = 2 * y, x0 = 2 * x;
-                const int y1 = std::min(y0 + 1, src.rows - 1);
-                const int x1 = std::min(x0 + 1, src.cols - 1);
-                out.at<float>(y, x) = 0.25f * (filtered.at<float>(y0, x0) +
-                                               filtered.at<float>(y0, x1) +
-                                               filtered.at<float>(y1, x0) +
-                                               filtered.at<float>(y1, x1));
-            } else {
-                out.at<float>(y, x) = filtered.at<float>(std::min(2 * y, src.rows - 1),
-                                                         std::min(2 * x, src.cols - 1));
-            }
-        }
-    }
-    return out;
-}
-
-/// Quantize [0,1] to N bits and write into a QuantMat level.
-template <size_t N, typename WordType>
-void quantizeInto(const cv::Mat& f, bincv::QuantMat<N, WordType>& dst) {
-    const unsigned maxV = (1u << N) - 1u;
-    for (int y = 0; y < dst.rows(); ++y) {
-        for (int x = 0; x < dst.cols(); ++x) {
-            const float v = f.at<float>(y, x);
-            const long r = std::lroundf(v * static_cast<float>(maxV));
-            dst.set(y, x, static_cast<unsigned>(std::max<long>(0, std::min<long>(maxV, r))));
-        }
-    }
-}
+// The float-reference filters that used to build this harness's levels are GONE
+// (E-27, X-51). `downOnce` applied cv::sepFilter2D / cv::blur on CV_32F and
+// `quantizeInto` wrote the result into a level, and together they modelled a
+// pyramid with NO CASCADED QUANTIZATION ERROR -- which is the defect X-51 traced.
+// Nothing stands in for them: the filters they approximated are now real bit-sliced
+// kernels, verified exact against a per-pixel integer reference in
+// tests/test_pyramid.cpp, so the harness uses those directly.
 
 } // namespace
 
 
 namespace {
 
-/// Builds a LadderFrontend whose levels 1..3 come from `filter` rather than from
-/// pyrDown, so the FILTER is the only thing that varies. Level 0 is the binary
-/// frame in every arm -- it is the input, not a choice.
-template <typename WordType, size_t... LevelBits>
-void seedFiltered(LadderFrontend<WordType, LevelBits...>& fe, const cv::Mat& binPrev,
-                  const cv::Mat& binNext, PyrFilter f) {
-    cv::Mat p, n;
-    binPrev.convertTo(p, CV_32F, 1.0 / 255.0);
-    binNext.convertTo(n, CV_32F, 1.0 / 255.0);
-    // Level 0 is the binary frame itself.
+/// Builds a LadderFrontend's levels 1.. with **binCV's own `pyrDownFiltered`
+/// cascade** -- the pipeline that ships. Level 0 is the binary frame in every arm;
+/// it is the input, not a choice.
+///
+/// ===========================================================================
+/// THIS REPLACED A FLOAT CASCADE, AND THE REPLACEMENT IS THE POINT (E-27, X-51).
+///
+/// The old seed built the whole pyramid in `CV_32F` -- `p = downOnce(p, f)` three
+/// times -- and quantized EACH LEVEL FROM THE FLOAT CHAIN. binCV quantizes level 1
+/// to N1 bits, then filters THAT QUANTIZED LEVEL to make level 2, and so on. The
+/// harness therefore modelled a pyramid with **no cascaded quantization error**
+/// where the shipped one has three rounds of it, and it **systematically
+/// understated the cost of taking bits away**: a coarse level in the harness was a
+/// fresh quantization of an exact float rather than a quantization of a
+/// quantization of a quantization.
+///
+/// Measured consequence (X-51): it priced level 3's second bit at **-0.69 yield
+/// points** where the frontend measures **-4.6** -- a 6.7x understatement that
+/// inverted a three-axis dominance claim and nearly shipped a worse default. Every
+/// accuracy number from X-24, X-25, X-39 and X-50 came through that seed.
+///
+/// `MEDIAN_3x3` is gone from this path rather than kept on the float reference:
+/// binCV has no median kernel (D-36 declined to write one on X-39's evidence), so
+/// there is nothing to measure the shipped pipeline against. Comparing four real
+/// filters against one idealised one in the same table is exactly the mixing this
+/// entry exists to remove.
+/// ===========================================================================
+template <bincv::PyrDownFilter F, typename WordType, size_t... LevelBits>
+void seedPyramid(LadderFrontend<WordType, LevelBits...>& fe, const cv::Mat& binPrev,
+                 const cv::Mat& binNext) {
     for (int y = 0; y < binPrev.rows; ++y) {
         for (int x = 0; x < binPrev.cols; ++x) {
             fe.prev.template level<0>().set(y, x, binPrev.at<uchar>(y, x) ? 1u : 0u);
             fe.next.template level<0>().set(y, x, binNext.at<uchar>(y, x) ? 1u : 0u);
         }
     }
-    p = downOnce(p, f); n = downOnce(n, f);
-    quantizeInto(p, fe.prev.template level<1>());
-    quantizeInto(n, fe.next.template level<1>());
-    p = downOnce(p, f); n = downOnce(n, f);
-    quantizeInto(p, fe.prev.template level<2>());
-    quantizeInto(n, fe.next.template level<2>());
-    p = downOnce(p, f); n = downOnce(n, f);
-    quantizeInto(p, fe.prev.template level<3>());
-    quantizeInto(n, fe.next.template level<3>());
+    // The shipped cascade: each level is filtered from the QUANTIZED level above it.
+    fe.prev.template build<F, bincv::PyrDownBorder::Reflect101>();
+    fe.next.template build<F, bincv::PyrDownBorder::Reflect101>();
     fe.template buildDeriv<0>();
     fe.template bind<0>();
+}
+
+/// Runtime filter -> compile-time dispatch, so a sweep can loop over filters.
+template <typename WordType, size_t... LevelBits>
+void seedFiltered(LadderFrontend<WordType, LevelBits...>& fe, const cv::Mat& binPrev,
+                  const cv::Mat& binNext, PyrFilter f) {
+    using B = bincv::PyrDownFilter;
+    switch (f) {
+        case PyrFilter::DirectSubsample:
+            seedPyramid<B::DirectSubsample>(fe, binPrev, binNext); break;
+        case PyrFilter::Box2x2:      seedPyramid<B::Box2x2>(fe, binPrev, binNext); break;
+        case PyrFilter::Box3x3:      seedPyramid<B::Box3x3>(fe, binPrev, binNext); break;
+        case PyrFilter::Gaussian3x3: seedPyramid<B::Gaussian3x3>(fe, binPrev, binNext); break;
+        case PyrFilter::Gaussian5x5: seedPyramid<B::Gaussian5x5>(fe, binPrev, binNext); break;
+        case PyrFilter::Median3x3:
+        default:
+            // No binCV kernel exists; callers must not sweep this arm any more.
+            std::fprintf(stderr, "MEDIAN_3x3 has no binCV kernel -- E-27 removed the "
+                                 "float-reference path that used to stand in for it.\n");
+            std::abort();
+    }
 }
 
 /// Yield for one (filter, ladder) point.
@@ -3405,8 +3375,11 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpace_uint32_t) {
          halfWin * 3.14159265358979323846 / 180.0},
     };
     const PyrFilter filters[] = {PyrFilter::Gaussian5x5, PyrFilter::Gaussian3x3,
-                                 PyrFilter::Box3x3,      PyrFilter::Median3x3,
-                                 PyrFilter::Box2x2,      PyrFilter::DirectSubsample};
+                                 PyrFilter::Box3x3,      PyrFilter::Box2x2,
+                                 PyrFilter::DirectSubsample};
+    // MEDIAN_3x3 dropped (E-27): binCV has no median kernel, so there is nothing to
+    // measure the shipped pipeline against. X-39 had already excluded it on
+    // evidence -- 7.53 points below the box and flat in N.
 
     std::printf("\n  ===================================================================\n"
                 "  X-39 / E-21: the pyramid design space, FILTER x BIT DEPTH.\n"
@@ -3638,14 +3611,17 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
          halfWin * 3.14159265358979323846 / 180.0},
     };
     const PyrFilter filters[] = {PyrFilter::Gaussian5x5, PyrFilter::Gaussian3x3,
-                                 PyrFilter::Box3x3,      PyrFilter::Median3x3,
-                                 PyrFilter::Box2x2,      PyrFilter::DirectSubsample};
+                                 PyrFilter::Box3x3,      PyrFilter::Box2x2,
+                                 PyrFilter::DirectSubsample};
+    // MEDIAN_3x3 dropped (E-27): binCV has no median kernel, so there is nothing to
+    // measure the shipped pipeline against. X-39 had already excluded it on
+    // evidence -- 7.53 points below the box and flat in N.
     static const size_t kDepths[4] = {2, 3, 5, 7};
 
     // [filter][depth] totals, summed over every frame and every warp case.
-    size_t elig[6][4] = {}, usable[6][4] = {};
+    size_t elig[5][4] = {}, usable[5][4] = {};
     // Per-frame yield, kept so the SPREAD is reportable rather than only the mean.
-    std::vector<double> perFrame[6][4];
+    std::vector<double> perFrame[5][4];
     size_t frames = 0;
 
     std::printf("\n  ===================================================================\n"
@@ -3661,7 +3637,7 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
         if (gray.empty() || gray.cols != probe.cols || gray.rows != probe.rows) continue;
         const cv::Mat b0 = referencePreprocess(gray, 17);
 
-        size_t fElig[6][4] = {}, fUsable[6][4] = {};
+        size_t fElig[5][4] = {}, fUsable[5][4] = {};
         for (const Case& c : cases) {
             cv::Mat warped;
             cv::warpAffine(gray, warped, affineOf(c.warp), gray.size(), cv::INTER_CUBIC,
@@ -3673,7 +3649,7 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
                 eligiblePoints(base.dx[0], base.dy[0], gray.cols, gray.rows, c.warp,
                                lkp.winWidth, lkp.winHeight);
             if (pts.empty()) continue;
-            for (size_t k = 0; k < 6; ++k) {
+            for (size_t k = 0; k < 5; ++k) {
                 const PyrFilter f = filters[k];
                 const Yield y[4] = {runFilterArm<uint32_t, 1, 2, 2, 2>(b0, b1, c.warp, pts, c.model, f),
                                     runFilterArm<uint32_t, 1, 3, 3, 3>(b0, b1, c.warp, pts, c.model, f),
@@ -3685,7 +3661,7 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
                 }
             }
         }
-        for (size_t k = 0; k < 6; ++k) {
+        for (size_t k = 0; k < 5; ++k) {
             for (size_t d = 0; d < 4; ++d) {
                 elig[k][d] += fElig[k][d];
                 usable[k][d] += fUsable[k][d];
@@ -3701,7 +3677,7 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
 
     std::printf("\n  %zu frames measured (shard %zu/%zu)\n", frames, shard, shards);
     std::printf("\n    %-24s %10s %10s %10s %10s\n", "filter", "N=2", "N=3", "N=5", "N=7");
-    for (size_t k = 0; k < 6; ++k) {
+    for (size_t k = 0; k < 5; ++k) {
         std::printf("    %-24s", filterName(filters[k]));
         for (size_t d = 0; d < 4; ++d) {
             const double y = elig[k][d] ? 100.0 * static_cast<double>(usable[k][d]) /
@@ -3715,7 +3691,7 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
     // bands overlap heavily, the ranking is a claim about the mean, not about
     // any individual frame, and the entry has to say so.
     std::printf("\n  per-frame spread (p10 / median / p90), N=3:\n");
-    for (size_t k = 0; k < 6; ++k) {
+    for (size_t k = 0; k < 5; ++k) {
         std::vector<double> v = perFrame[k][1];
         if (v.empty()) continue;
         std::sort(v.begin(), v.end());
@@ -3728,7 +3704,7 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
     // Machine-readable, for merging shards by SUMMATION. Yields are ratios; a
     // mean of per-shard yields is not the yield of the union unless every shard
     // has the same eligible count, which they do not.
-    for (size_t k = 0; k < 6; ++k) {
+    for (size_t k = 0; k < 5; ++k) {
         for (size_t d = 0; d < 4; ++d) {
             std::printf("ROW %zu %zu %zu %zu\n", k, kDepths[d], elig[k][d], usable[k][d]);
         }
