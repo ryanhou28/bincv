@@ -8689,6 +8689,88 @@ control.
 
 ---
 
+### X-50 · E-19 — is `1/2/2/2` + `BOX_2x2` still the operating point? · `RULE ONLY`
+
+**COMMITTED BEFORE MEASURING.**
+
+**Gates:** [E-19](ARCHITECTURE.md#register), the last open question from the pyramid
+thread.
+
+**THREE CORRECTIONS TO E-19's OWN PREMISE, MADE BEFORE USING IT.** The register entry
+was written in the middle of the x86 era and its framing does not survive:
+
+1. *"LK is 94.7% of the frontend"* — it is **68.3%** ([X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done)),
+   because D-30…D-37 made LK faster and `pyrDown` did not. Build is now **26.3%**, so
+   the ladder's cost is split across two stages rather than concentrated in one.
+2. *"at `1/1/1/1` binCV is 1.34× slower than OpenCV against 3.08× at `1/2/2/2`"* —
+   **both are x86 numbers**, from the era [D-35](ARCHITECTURE.md#8-design-decisions)
+   corrected. On the reference device binCV is **1.53× FASTER** at `1/2/2/2`. The
+   ladder is therefore not buying its way out of a deficit; it is spending a surplus.
+3. *"This is the largest single speed lever left, larger than E-18."* E-18 is closed
+   and delivered 1.069×; this claim was never measured and is not assumed here.
+
+**THE BIT-DEPTH AXIS IS ALREADY ANSWERED, and re-deriving it would be waste.**
+[X-39's sequence arm](#x-39-sequence-arm--the-same-design-space-over-1710-frames--done)
+measured `BOX_2x2` **flat across N = 2→7** — 94.49 / 94.58 / 94.55 / 94.51, a
+0.09-point band over 1.18 M keypoint-cases. **Under the box, bits past 2 buy nothing**,
+so `1/3/3/3` and deeper are excluded on evidence rather than re-measured. What is NOT
+answered is the opposite direction: **`1/2/2/2` says every coarse level needs 2 bits,
+and nobody has ever measured whether they do.** `1/2/1/1` and `1/2/2/1` have never been
+run, on either axis.
+
+**AND THE TWO AXES ARE COUPLED, which is why this is one experiment and not two.**
+X-39 found the *filter* decides how much depth pays: the box saturates immediately, the
+Gaussian keeps paying. [X-42](#x-42--e-22--is-the-filter-frameworks-cost-genericity-or-structure--done)
+then re-priced `BOX_3x3` from +0.8 ms to **+0.35 ms** at **−0.10 yield points from the
+Gaussian anchor**. So the live question is not "which ladder" but **"which (ladder,
+filter) point"** — and a shallower ladder with a better filter may beat a deeper ladder
+with a cheap one. Arms: `{1/1/1/1, 1/2/1/1, 1/2/2/1, 1/2/2/2} × {BOX_2x2, BOX_3x3}`.
+
+**MEASURED ON THREE AXES, NOT TWO.** X-44's rule was written on speed alone and X-47's
+repeated the mistake one experiment later. **The ladder changes footprint directly** —
+fewer planes, fewer bytes — and [CLAUDE.md](../CLAUDE.md) makes footprint co-equal with
+speed and gives it the tie-break. So every arm reports **yield, time and bytes**, and no
+band fires on time alone.
+
+- **Yield**: the X-39 sequence harness over the EuRoC sequence, ≥ 100 frames, six warps,
+  which is the statistic X-25's own conclusions had to be withdrawn for lacking.
+- **Time**: `benchmark/pyramid_depth_benchmark.cpp`, build and track separately, on the
+  reference device.
+- **Bytes**: exact, from the ladder's own `bytes()`.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.** Reference is the shipped point,
+`1/2/2/2` + `BOX_2x2`. An arm **dominates** it if it is no worse on all three axes and
+better on at least one, with "no worse on yield" meaning **within 0.5 points** — a
+tenth of the `1/1/1/1` gap X-25 measured, and comfortably above this harness's
+frame-to-frame noise.
+
+- **Band A — some arm DOMINATES the shipped point.** Switch the default to it. D-23 was
+  chosen on a confounded speed estimate and a single-frame accuracy read; being
+  overturned by a three-axis sequence measurement is the system working.
+- **Band B — no arm dominates, but an arm is within 0.5 yield points at materially
+  lower cost** (≥ 15% on frontend time **or** ≥ 15% on bytes). The frontier is a
+  caller's choice: keep the default, **ship the alternative as a documented operating
+  point** with all three numbers, as [D-24](ARCHITECTURE.md) put route (a) and
+  [D-36](ARCHITECTURE.md) put the filter set.
+- **Band C — the shipped point is on the frontier and nothing comes close.** D-23 is
+  **confirmed on evidence it never had**: its speed basis was confounded and its
+  accuracy basis was seven synthetic warps of one image. Confirming a decision with
+  better evidence is a result, not a null.
+- **Band D — the shipped point is DOMINATED on yield**, i.e. some arm is *more accurate*
+  and cheaper. That would mean `1/2/2/2` is over-provisioned and the extra bits are
+  actively hurting; report the mechanism, not just the number.
+
+**A limit declared in advance.** Track is 68.3% of the frontend and build 26.3%, so even
+eliminating the ladder's entire cost differential cannot move the frontend more than the
+arms' measured spread — this experiment is bounded by what the table shows and no
+extrapolation beyond it will be made.
+
+**Method:** `benchmark/pyramid_depth_benchmark.cpp` (new intermediate arms);
+`tests/test_opticalflow.cpp` X-39 sequence harness (new ladder × filter sweep);
+reference device via `scripts/run_on_pi.sh pi4`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
