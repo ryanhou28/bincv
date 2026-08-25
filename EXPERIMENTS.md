@@ -9392,7 +9392,7 @@ rather than inferring it from timings.
 
 ---
 
-### X-58 · E-32 — x86 vector paths: how much is the compiler's, how much is ours? · `RULE ONLY`
+### X-58 · E-32 — x86 vector paths: how much is the compiler's, how much is ours? · `DONE`
 
 **COMMITTED BEFORE ANY INTRINSIC IS WRITTEN**, because
 [X-57](#x-57--the-entire-x86-deficit-is-a-compile-flag--done) has just shown this
@@ -9449,6 +9449,125 @@ evaluability and honesty, and no x86 number will be promoted to a headline claim
 **Method:** `benchmark/frontend_sequence.cpp` built three ways from one tree;
 `objdump` to confirm the ISA actually present in each binary, as X-57 did, rather than
 inferring it from timings.
+
+**RESULT — BAND C. `-mavx2` CHANGES NOTHING, AND THE REASON IS THE REPRESENTATION.**
+
+Two runs of each arm, all three confirmed by `objdump` (default: **0** `%ymm`; avx2 and
+native: **228** and **227**):
+
+| run | arm | detect | build | track | binCV | OpenCV |
+|---|---|---|---|---|---|---|
+| 1 | default | 0.223 | 1.059 | 2.668 | 3.951 | 3.873 |
+| 1 | `-mavx2` | 0.216 | 1.049 | 2.629 | 3.894 | 3.960 |
+| 1 | `native` | 0.209 | 0.966 | 2.523 | 3.698 | 3.766 |
+| 2 | default | 0.237 | 0.990 | 2.473 | **3.699** | 3.704 |
+| 2 | `-mavx2` | 0.198 | 0.996 | 2.470 | **3.664** | 3.750 |
+| 2 | `native` | 0.214 | 0.972 | 2.515 | 3.701 | 3.751 |
+
+**1–2%, inside the 6.8% run-to-run spread of the SAME binary.** Band D did not fire
+either: `native` and `avx2` are indistinguishable, so nothing outside AVX2 was carrying
+anything.
+
+**WHICH KERNELS THE COMPILER VECTORISED, AND WHICH IT DID NOT:**
+
+| kernel | `%ymm` instructions |
+|---|---|
+| `derivativeX/Y` | **63 — vectorised** |
+| `pyrDownRoute` | **0** |
+| `boxSum4` | **0** |
+| `cornerMinEigenValRow` | **0** |
+| `residualSums` | 2 |
+
+**THE OBSTRUCTION, IN GCC'S OWN WORDS** (`-fopt-info-vec-missed` on a TU instantiating
+`pyrDownBox`): *"not vectorized: **multiple nested loops**"* and *"not vectorized:
+**control flow in loop**"*.
+
+**THAT IS THE BIT-PLANE REPRESENTATION ITSELF.** A bit-sliced kernel's outer loop walks
+**words** — the dimension a vector unit wants — and its **body is a nest over planes**,
+plus the bounds tests `srcWord` needs. GCC will not vectorise an outer loop whose body
+is a loop nest. **The one kernel that is a plain word loop, `derivative`, vectorises
+without being asked.** So:
+
+> **[D-2](ARCHITECTURE.md)'s bit-plane layout, which is what makes binCV fast on scalar
+> hardware, is precisely what stops a compiler from vectorising it.** The
+> auto-vectoriser and the representation want the loop nest in opposite orders.
+
+**This is not a flag and it is not a drop-in intrinsic.** Reaching AVX2 means
+**restructuring each kernel to process 8 destination words at once**, with the plane
+arrays held as vectors rather than as `WordType[N]` locals — a redesign per kernel.
+
+**The upside is that bit-sliced arithmetic is IDEALLY suited to it once restructured:**
+`boxSum4`'s ripple adds are pure `AND`/`XOR`/`OR`, which AVX2 does **256 bits at a
+time** against the current 32. Nothing about the maths resists vectorisation; only the
+loop order does.
+
+**Decision — Band C: no intrinsics on this evidence, and the finding is the
+obstruction.** `-mavx2` is **not** adopted: it would raise the minimum CPU to Haswell
+2013 and buy nothing measurable. The kernel-restructuring work is scoped and registered
+as [E-33](ARCHITECTURE.md#register) rather than started at the end of a long session,
+and it needs a ceiling before an arm — the discipline
+[X-33](#x-33--the-ceiling-for-batched-neon-popcounts--done) established and X-52 forgot.
+
+**Where binCV actually stands on x86:** **3.70 ms against OpenCV's 3.70** in the
+cleaner run — **parity**, from POPCNT alone, at 6.23× less memory. Beating OpenCV needs
+E-33.
+
+**Method:** `benchmark/frontend_sequence.cpp` built three ways from one tree; `objdump`
+per-symbol for the vectorisation audit; `-fopt-info-vec-missed` for GCC's reason.
+
+---
+
+### X-59 · E-33's ceiling: what AVX2 would buy a restructured kernel · `DONE`
+
+**CEILING BEFORE ARM.** [X-58](#x-58--e-32--x86-vector-paths-how-much-is-the-compilers-how-much-is-ours--done)
+localised the x86 obstruction to loop order and registered [E-33](ARCHITECTURE.md#register)
+— restructure the kernels so AVX2 can reach them. That is a redesign per kernel, so it
+gets a ceiling first: the discipline [X-33](#x-33--the-ceiling-for-batched-neon-popcounts--done)
+established, [X-52](#x-52--bincv-on-x86-the-whole-deficit-is-one-stage--done) forgot,
+and [X-57](#x-57--the-entire-x86-deficit-is-a-compile-flag--done) paid for.
+
+**The two operations a restructured kernel rests on**, each against the scalar form
+binCV runs today, each **bit-exact against it before being timed**:
+
+| | scalar | AVX2 | ceiling |
+|---|---|---|---|
+| **adder** — `boxSum4`'s shape, three ripple adds over 1-bit planes | 26.3–30.6 µs | 5.8–6.6 | **≈ 4.7×** |
+| **popcount** — what `residualSums` rests on | 14.0–16.2 | 1.8–2.1 | **≈ 7.9×** |
+
+**1. THE ADDER CEILING IS ~4.7×, AND IT IS THE UNSURPRISING HALF.** Bit-sliced
+arithmetic is pure `AND`/`XOR`/`OR`; AVX2 does 256 bits where binCV does 32. **8× the
+width delivering 4.7× is load/store bound**, not compute bound — which is what a
+restructured `pyrDown` would actually see.
+
+**2. THE POPCOUNT CEILING IS ~7.9×, AND THAT ONE IS A SURPRISE WORTH STATING.** It beats
+**hardware `POPCNT`** — the instruction [X-57](#x-57--the-entire-x86-deficit-is-a-compile-flag--done)
+just enabled and which x86 has natively. Mula's `pshufb` nibble-table counts **32 bytes
+per pass** against `POPCNT`'s 8, so the vector form wins despite the scalar one being a
+single instruction. **This entry set out to check whether a win was even available here
+and expected the answer to be no**; `residualSums` is 67% of the x86 frontend, which
+makes it the opposite of a footnote.
+
+**3. THE HONEST CAVEAT ON THE NUMBERS.** Within-run spreads are **45–165%** — this is a
+noisy desktop, not the reference device, and the reference device is aarch64 so **x86
+ceilings can only be measured here.** What survives that is the **ratio**: three
+independent runs give 4.48 / 4.66 / 4.96 and 7.91 / 8.44 / 7.42. A 4.7× gap against a
+~100% spread is robust — even at scalar's fastest batch it would still be several times
+the vector median — but the absolute times are not quotable and are given as ranges.
+
+**4. AND CEILINGS OVERSTATE — THIS PROJECT HAS MEASURED THAT THREE TIMES.**
+[D-37](ARCHITECTURE.md): 1.461× ceiling, 1.069× delivered. [D-40](ARCHITECTURE.md):
+1.638× ceiling from a fabricated buffer, 0.885× real. [D-41](ARCHITECTURE.md): 1.14×
+overstatement from a buffer that differed only in where it lived. **These are shape
+ceilings, not kernel forecasts**, and E-33 should expect materially less.
+
+**Decision:** none — this is a ceiling. It says E-33 is **worth doing**: both of the
+operations binCV's hot path rests on have real headroom, the arithmetic is ideally
+suited to vectorisation, and only the loop order is in the way. It does **not** say how
+much survives the restructuring.
+
+**Method:** `benchmark/avx2_ceiling.cpp`, `__attribute__((target("avx2")))` so the
+default build stays portable; equality checked on all 16 384 words and on the popcount
+total before timing; three independent runs on an idle machine.
 
 ---
 
