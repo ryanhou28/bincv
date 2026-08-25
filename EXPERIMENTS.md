@@ -9488,13 +9488,19 @@ plus the bounds tests `srcWord` needs. GCC will not vectorise an outer loop whos
 is a loop nest. **The one kernel that is a plain word loop, `derivative`, vectorises
 without being asked.** So:
 
-> **[D-2](ARCHITECTURE.md)'s bit-plane layout, which is what makes binCV fast on scalar
-> hardware, is precisely what stops a compiler from vectorising it.** The
-> auto-vectoriser and the representation want the loop nest in opposite orders.
+> **The KERNELS' loop order stops the compiler; the LAYOUT does not.** An earlier draft
+> of this entry conflated them, which would have sent the next experiment at the
+> representation instead of at the loop.
+
+**THE LAYOUT IS ALREADY WHAT SIMD WANTS.** A plane row is `ptr + y * stride` with
+consecutive words, so eight consecutive words are **32 contiguous bytes — one
+`_mm256_loadu_si256`**. Nothing in the storage resists vectorisation; only the loop
+order does.
 
 **This is not a flag and it is not a drop-in intrinsic.** Reaching AVX2 means
 **restructuring each kernel to process 8 destination words at once**, with the plane
-arrays held as vectors rather than as `WordType[N]` locals — a redesign per kernel.
+arrays held as vectors rather than as `WordType[N]` locals — a redesign per kernel, and
+**no change to the bytes on the heap**.
 
 **The upside is that bit-sliced arithmetic is IDEALLY suited to it once restructured:**
 `boxSum4`'s ripple adds are pure `AND`/`XOR`/`OR`, which AVX2 does **256 bits at a
