@@ -3467,6 +3467,126 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpace_uint32_t) {
 // by summation -- yields are ratios and cannot be averaged across frames with
 // different eligible counts.
 // ---------------------------------------------------------------------------
+// ===========================================================================
+// X-50 / E-19: THE LADDER x FILTER SWEEP, over a sequence.
+//
+// E-19 asked whether 1/2/2/2 is still the operating point. X-39 already closed
+// the DEEPENING direction -- BOX_2x2 is flat from N=2 to N=7 -- so what is left
+// is the opposite one: 1/2/2/2 asserts that EVERY coarse level needs two bits,
+// and 1/2/1/1 and 1/2/2/1 have never been run. X-42 then made BOX_3x3 cheap
+// enough that a shallower ladder with a better filter might beat a deeper ladder
+// with a cheap one, so the two axes are swept together rather than separately.
+//
+// Yield only -- time and bytes come from benchmark/pyramid_depth_benchmark.cpp on
+// the reference device, because a development machine cannot answer either.
+// Gated on BINCV_X50_FRAMES for the same reason the X-39 arm is.
+// ===========================================================================
+BINCV_TEST(Flow, X50_LadderFilterSequence_uint32_t) {
+    const char* dir = std::getenv("BINCV_X50_FRAMES");
+    if (!dir) {
+        std::printf("  (skipped: set BINCV_X50_FRAMES=<frame-dir> to run the ladder sweep)\n");
+        BINCV_CHECK(true);
+        return;
+    }
+    size_t stride = 1;
+    if (const char* sv = std::getenv("BINCV_X50_STRIDE")) {
+        const long v = std::atol(sv);
+        if (v > 0) stride = static_cast<size_t>(v);
+    }
+    size_t shard = 0, shards = 1;
+    if (const char* sh = std::getenv("BINCV_X50_SHARD")) {
+        long a = 0, b = 1;
+        if (std::sscanf(sh, "%ld/%ld", &a, &b) == 2 && b > 0 && a >= 0 && a < b) {
+            shard = static_cast<size_t>(a);
+            shards = static_cast<size_t>(b);
+        }
+    }
+    std::vector<std::filesystem::path> files;
+    for (const auto& e : std::filesystem::directory_iterator(dir)) {
+        if (e.path().extension() == ".png") files.push_back(e.path());
+    }
+    std::sort(files.begin(), files.end());
+    const cv::Mat probe = files.empty() ? cv::Mat()
+                                        : cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
+    if (probe.empty()) {
+        std::printf("  (skipped: no readable frames under %s)\n", dir);
+        BINCV_CHECK(true);
+        return;
+    }
+
+    struct Case { const char* name; Warp warp; double model; };
+    LKParams lkp;
+    const double halfWin = 0.5 * (lkp.winWidth - 1);
+    const std::vector<Case> cases = {
+        {"shift (1, 0)", translation(1.0, 0.0), 0.0},
+        {"shift (0.25,0.25)", translation(0.25, 0.25), 0.0},
+        {"shift (0.75,0.75)", translation(0.75, 0.75), 0.0},
+        {"shift (2, -3)", translation(2.0, -3.0), 0.0},
+        {"shift (6, 4)", translation(6.0, 4.0), 0.0},
+        {"rotate 1 deg", rotation(1.0, probe.cols * 0.5, probe.rows * 0.5),
+         halfWin * 3.14159265358979323846 / 180.0},
+    };
+    // 4 ladders x 2 filters. Bytes are a property of the ladder alone.
+    static const char* kLadder[4] = {"1/1/1/1", "1/2/1/1", "1/2/2/1", "1/2/2/2"};
+    size_t elig[4][2] = {}, usable[4][2] = {}, bytes[4] = {};
+    size_t frames = 0;
+
+    std::printf("\n  =================================================================\n"
+                "  X-50 / E-19: LADDER x FILTER over a sequence.  dir %s\n"
+                "  %zu frames present, stride %zu\n"
+                "  =================================================================\n",
+                dir, files.size(), stride);
+
+    for (size_t fi = 0; fi < files.size(); fi += stride) {
+        if ((fi / stride) % shards != shard) continue;
+        const cv::Mat gray = cv::imread(files[fi].string(), cv::IMREAD_GRAYSCALE);
+        if (gray.empty() || gray.cols != probe.cols || gray.rows != probe.rows) continue;
+        const cv::Mat b0 = referencePreprocess(gray, 17);
+        for (const Case& c : cases) {
+            cv::Mat warped;
+            cv::warpAffine(gray, warped, affineOf(c.warp), gray.size(), cv::INTER_CUBIC,
+                           cv::BORDER_REFLECT_101);
+            const cv::Mat b1 = referencePreprocess(warped, 17);
+            Frontend<uint32_t> base(gray.cols, gray.rows, 4);
+            base.prev[0].fromCVMat(b0); base.next[0].fromCVMat(b1); base.build();
+            const std::vector<Point2f> pts =
+                eligiblePoints(base.dx[0], base.dy[0], gray.cols, gray.rows, c.warp,
+                               lkp.winWidth, lkp.winHeight);
+            if (pts.empty()) continue;
+            for (size_t fk = 0; fk < 2; ++fk) {
+                const PyrFilter f = fk == 0 ? PyrFilter::Box2x2 : PyrFilter::Box3x3;
+                const Yield y0 = runFilterArm<uint32_t, 1, 1, 1, 1>(b0, b1, c.warp, pts, c.model, f);
+                const Yield y1 = runFilterArm<uint32_t, 1, 2, 1, 1>(b0, b1, c.warp, pts, c.model, f);
+                const Yield y2 = runFilterArm<uint32_t, 1, 2, 2, 1>(b0, b1, c.warp, pts, c.model, f);
+                const Yield y3 = runFilterArm<uint32_t, 1, 2, 2, 2>(b0, b1, c.warp, pts, c.model, f);
+                const Yield* ys[4] = {&y0, &y1, &y2, &y3};
+                for (size_t L = 0; L < 4; ++L) {
+                    elig[L][fk] += ys[L]->eligible;
+                    usable[L][fk] += ys[L]->usable;
+                    bytes[L] = ys[L]->bytes;
+                }
+            }
+        }
+        ++frames;
+        if (frames % 25 == 0) std::printf("  ... %zu frames\n", frames);
+    }
+
+    std::printf("\n  %zu frames measured\n", frames);
+    std::printf("\n    %-10s %12s %12s %12s\n", "ladder", "BOX_2x2", "BOX_3x3", "bytes");
+    for (size_t L = 0; L < 4; ++L) {
+        const double a = elig[L][0] ? 100.0 * static_cast<double>(usable[L][0]) /
+                                          static_cast<double>(elig[L][0]) : 0.0;
+        const double b = elig[L][1] ? 100.0 * static_cast<double>(usable[L][1]) /
+                                          static_cast<double>(elig[L][1]) : 0.0;
+        std::printf("    %-10s %11.2f%% %11.2f%% %12zu\n", kLadder[L], a, b, bytes[L]);
+    }
+    for (size_t L = 0; L < 4; ++L)
+        for (size_t fk = 0; fk < 2; ++fk)
+            std::printf("ROW50 %zu %zu %zu %zu %zu\n", L, fk, elig[L][fk], usable[L][fk], bytes[L]);
+    std::printf("FRAMES50 %zu\n", frames);
+    BINCV_CHECK(true);
+}
+
 BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
     const char* dir = std::getenv("BINCV_X39_FRAMES");
     if (!dir) {

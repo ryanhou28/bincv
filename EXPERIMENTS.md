@@ -8689,7 +8689,7 @@ control.
 
 ---
 
-### X-50 · E-19 — is `1/2/2/2` + `BOX_2x2` still the operating point? · `RULE ONLY`
+### X-50 · E-19 — is `1/2/2/2` + `BOX_2x2` still the operating point? · `DONE`
 
 **COMMITTED BEFORE MEASURING.**
 
@@ -8768,6 +8768,86 @@ extrapolation beyond it will be made.
 **Method:** `benchmark/pyramid_depth_benchmark.cpp` (new intermediate arms);
 `tests/test_opticalflow.cpp` X-39 sequence harness (new ladder × filter sweep);
 reference device via `scripts/run_on_pi.sh pi4`.
+
+**RESULT — BAND A. THE SHIPPED POINT IS THE ONLY ONE OF THE SEVEN THAT IS NOT ON THE
+PARETO FRONTIER.**
+
+Yield over the **full 1710-frame sequence**, 1.18 M eligible keypoint-cases per cell;
+time on the reference device, build and track summed, all spreads **0%**; bytes exact.
+
+| ladder | filter | build+track | yield | bytes | vs shipped |
+|---|---|---|---|---|---|
+| `1/1/1/1` | `BOX_2x2` | 3 311 µs | 90.69% | 306 720 | −42.7% t, **−3.80 y** |
+| `1/2/1/1` | `BOX_2x2` | 4 553 | 92.39% | 345 120 | −21.2% t, −2.10 y |
+| `1/2/1/1` | `BOX_3x3` | 5 054 | 93.71% | 345 120 | −12.5% t, −0.78 y, −3.5% b |
+| `1/2/2/1` | `BOX_2x2` | 4 849 | 93.80% | 354 720 | **−16.1% t**, −0.69 y |
+| **`1/2/2/1`** | **`BOX_3x3`** | **5 642** | **94.97%** | **354 720** | **−2.4% t, +0.48 y, −0.8% b** |
+| `1/2/2/2` | `BOX_2x2` | 5 778 | 94.49% | 357 600 | **(shipped)** |
+| `1/2/2/2` | `BOX_3x3` | 6 005 | 95.27% | 357 600 | +3.9% t, +0.78 y |
+
+**`1/2/2/1` + `BOX_3x3` is faster, more accurate AND smaller than the shipped point** —
+all three axes, no trade. Every other arm is on the frontier; **only `1/2/2/2` +
+`BOX_2x2` is dominated.**
+
+**1. WHY THE SHIPPED POINT IS OFF THE FRONTIER, AND IT IS NOT AN ERROR IN D-23.** D-23
+chose the ladder in 2 dimensions at a time when the third was priced differently: the
+filter was fixed at `BOX_2x2` because `BOX_3x3` cost **+0.8 ms**, and
+[X-42](#x-42--e-22--is-the-filter-frameworks-cost-genericity-or-structure--done) re-priced
+it to **+0.35 ms** by removing a genericity tax nobody had looked for. **The decision
+was right on the prices it had.** What moved is that a bit at level 3 and a wider
+filter now buy accuracy at different rates than they did, and the swap — spend the
+level-3 bit, buy the better filter — is *free on time and bytes and positive on yield*.
+
+**2. THE COUPLING X-39 PREDICTED IS VISIBLE IN THE TABLE.** `BOX_3x3` is worth **+1.32
+points at `1/2/1/1`**, **+1.17 at `1/2/2/1`**, **+0.78 at `1/2/2/2`** and **−0.02 at
+`1/1/1/1`**. The better filter pays *more* the shallower the ladder, and **nothing at
+all** when every level is 1 bit — because a 1-bit level cannot represent the smoother
+result. **Filter and depth are substitutes over part of the range**, which is exactly
+why pricing them on separate axes produced a dominated point.
+
+**3. EVERY COARSE LEVEL'S BITS DO MATTER — E-19's OPEN SUB-QUESTION, ANSWERED.**
+`1/2/1/1` loses **2.10** points and `1/2/2/1` **0.69** against `1/2/2/2` at the same
+filter. Both exceed the 0.5-point bar, so **no level's second bit is free**, and
+`1/2/2/2`'s shape was right even though its point is dominated. The gain from
+`BOX_3x3` is what pays for dropping level 3's bit, not the bit being redundant.
+
+**4. A METHODOLOGY FINDING THAT NEARLY INVERTED THIS RESULT.** The depth benchmark
+seeded level 0 from a **synthetic lattice** (`(x*7+y*13)%29==0 || (x+y)%37==0`). LK's
+cost is dominated by **iteration count**, not per-iteration work, and on a lattice the
+coarse levels alias into false minima. Measured that way:
+
+| | lattice seed | **real frame** |
+|---|---|---|
+| `1/1/1/1` track | 1.00× | 1.00× |
+| `1/2/1/1` | **0.61× — FASTER with more bits** | 1.38× |
+| `1/2/2/1` | 1.19× | 1.46× |
+| `1/2/2/2` | 1.34× | 1.77× |
+
+The lattice column is **non-monotonic** and would have made `1/2/1/1` look like a free
+win. The benchmark now seeds from `benchmark/realframe.bin`, the real binarized frame,
+and **refuses to fall back to a synthetic pattern** if it cannot read it. The build
+column never had this problem — it is per-pixel and has no convergence behaviour.
+**A benchmark whose arms differ in convergence needs content whose convergence is
+real.**
+
+**5. AND E-19's OWN COST FIGURE WAS INFLATED.** The register says the ladder costs
+**2.30×**; measured here on real content it is **1.77×** on track and **1.50×** on
+build. Part of that is the x86-era measurement D-35 corrected; part is the lattice.
+
+**Decision — BAND A: `1/2/2/1` + `BOX_3x3` is the new operating point**, and D-23 is
+superseded on evidence it could not have had. Recorded as
+[D-43](ARCHITECTURE.md#8-design-decisions). **The frontier ships as documented operating
+points**, since `1/2/2/1` + `BOX_2x2` at **−16.1% time for −0.69 yield points** is a
+trade a footprint- or power-bound caller may well want, and `1/1/1/1` at −42.7% time
+and −14.2% bytes remains the floor.
+
+**NOT YET DONE, AND NAMED RATHER THAN IMPLIED:** the switch itself. Changing the
+shipped ladder re-bases **every** performance number in this project, exactly as the
+`pyrDown` swap did, so it needs the same treatment
+[X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done) gave
+that one — a frontend re-measure that confirms accuracy is unchanged and re-states
+criterion 4 — before the records can be updated. **This entry establishes the
+operating point; it does not claim the frontend has moved.**
 
 ---
 

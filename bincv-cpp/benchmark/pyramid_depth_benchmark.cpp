@@ -63,7 +63,14 @@
 #include "bincv-cpp/ops/derivative.hpp"
 #include "bincv-cpp/ops/opticalFlow.hpp"
 #include "bincv-cpp/ops/pyramid.hpp"
+#include <cstdio>
+#include <cstdlib>
+
 #include "measure_util.hpp"
+
+namespace {
+int gFrameW = 0, gFrameH = 0;
+}
 
 using bincv::Point2f;
 using W = uint32_t;
@@ -117,9 +124,14 @@ struct Ladder {
     Ladder(int w, int h) : prev(w, h), next(w, h), dx(w, h), dy(w, h) {}
 
     /// The measured BUILD stage: pyrDown both ladders, derivative every level.
+    /// @tparam F The downsampling filter, because X-50 sweeps ladder AND filter --
+    ///         X-39 showed the two are coupled, so pricing them separately would
+    ///         answer neither.
+    template <bincv::PyrDownFilter F = bincv::PyrDownFilter::Box2x2,
+              bincv::PyrDownBorder Bo = bincv::PyrDownBorder::Replicate>
     void buildStage() {
-        prev.template build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
-        next.template build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
+        prev.template build<F, Bo>();
+        next.template build<F, Bo>();
         deriv<0>();
     }
     template <size_t I>
@@ -147,14 +159,53 @@ struct Ladder {
 /// An edge-map-like level 0: ~10% set, one-pixel-wide structure, which is what the
 /// reference binarization produces. Deterministic, so every ladder sees the same
 /// content (validity: the arms must differ in DEPTH and nothing else).
+/// Level 0 from the REAL binarized frame, with `next` a one-pixel shift of it.
+///
+/// THIS REPLACED A SYNTHETIC LATTICE, and the replacement is the point. The old
+/// seed was `(x*7 + y*13) % 29 == 0 || (x + y) % 37 == 0` -- a regular lattice, and
+/// LK's cost is dominated by ITERATION COUNT, not by per-iteration work. On a
+/// lattice, coarse levels alias into false minima and the iteration count stops
+/// tracking anything about the ladder: measured that way, `1/2/1/1` came out at
+/// **0.61x** of `1/1/1/1` -- FASTER with more bits -- while `1/2/2/1`, which only
+/// adds bits to a level with a sixteenth of the pixels, came out **twice as slow**
+/// as `1/2/1/1`. Neither ordering survives real content. A benchmark whose arms
+/// differ in convergence behaviour needs content whose convergence behaviour is
+/// real; the build column never had this problem, because it is per-pixel.
 template <typename WordType, size_t... LevelBits>
 void seed(Ladder<WordType, LevelBits...>& lad, int w, int h) {
+    static const std::vector<uint8_t> frame = [] {
+        std::vector<uint8_t> px;
+        std::FILE* f = std::fopen(BINCV_REALFRAME_PATH, "rb");
+        if (!f) return px;
+        uint32_t fw = 0, fh = 0;
+        if (std::fread(&fw, 4, 1, f) != 1 || std::fread(&fh, 4, 1, f) != 1) {
+            std::fclose(f);
+            return px;
+        }
+        px.resize(static_cast<size_t>(fw) * fh);
+        if (std::fread(px.data(), 1, px.size(), f) != px.size()) px.clear();
+        std::fclose(f);
+        gFrameW = static_cast<int>(fw);
+        gFrameH = static_cast<int>(fh);
+        return px;
+    }();
+    if (frame.empty()) {
+        std::fprintf(stderr, "realframe.bin unreadable -- refusing to fall back to a\n"
+                             "synthetic pattern, which is what made this benchmark wrong.\n");
+        std::abort();
+    }
+    auto at = [&](int y, int x) -> unsigned {
+        // Tile the frame if the requested level 0 is larger; clamp is wrong here
+        // because it would create a constant border with no gradient at all.
+        const int fy = ((y % gFrameH) + gFrameH) % gFrameH;
+        const int fx = ((x % gFrameW) + gFrameW) % gFrameW;
+        return frame[static_cast<size_t>(fy) * static_cast<size_t>(gFrameW) +
+                     static_cast<size_t>(fx)] ? 1u : 0u;
+    };
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            const unsigned a = ((x * 7 + y * 13) % 29 == 0 || (x + y) % 37 == 0) ? 1u : 0u;
-            const unsigned b = (((x - 1) * 7 + y * 13) % 29 == 0 || (x - 1 + y) % 37 == 0) ? 1u : 0u;
-            lad.prev.template level<0>().set(y, x, a);
-            lad.next.template level<0>().set(y, x, b);
+            lad.prev.template level<0>().set(y, x, at(y, x));
+            lad.next.template level<0>().set(y, x, at(y, x - 1));
         }
     }
 }
@@ -178,7 +229,7 @@ struct Arm {
 };
 
 /// Holds one ladder alive and hands back its two timed bodies.
-template <size_t... LevelBits>
+template <bincv::PyrDownFilter F, size_t... LevelBits>
 struct ArmHolder {
     Ladder<W, LevelBits...> lad;
     std::vector<Point2f> pts;
@@ -189,7 +240,7 @@ struct ArmHolder {
     ArmHolder(int w, int h, const std::vector<Point2f>& p)
         : lad(w, h), pts(p), out(p.size()), status(p.size()) {
         seed(lad, w, h);
-        lad.buildStage();
+        lad.template buildStage<F, bincv::PyrDownBorder::Replicate>();
         lad.template bind<0>();
     }
 };
@@ -200,16 +251,18 @@ double sumOfSquares(std::initializer_list<size_t> bits) {
     return s;
 }
 
-template <size_t... LevelBits>
+template <bincv::PyrDownFilter F, size_t... LevelBits>
 void addArm(std::vector<Arm>& arms, std::vector<std::shared_ptr<void>>& keep, const char* name,
             double sumNsq, int w, int h, const std::vector<Point2f>& pts) {
-    auto holder = std::make_shared<ArmHolder<LevelBits...>>(w, h, pts);
+    auto holder = std::make_shared<ArmHolder<F, LevelBits...>>(w, h, pts);
     keep.push_back(holder);
     Arm a;
     a.name = name;
     a.sumNsq = sumNsq;
     a.bytes = holder->lad.bytes();
-    a.buildBody = [holder](int) { holder->lad.buildStage(); };
+    a.buildBody = [holder](int) {
+        holder->lad.template buildStage<F, bincv::PyrDownBorder::Replicate>();
+    };
     a.trackBody = [holder](int) {
         bincv::calcOpticalFlowPyrLK(holder->lad.levels, holder->pts.data(), holder->out.data(),
                                     holder->status.data(), nullptr, holder->pts.size(),
@@ -224,12 +277,25 @@ void runAt(int w, int h, int step, int margin, int repeats, double targetMs) {
     std::vector<Arm> arms;
     std::vector<std::shared_ptr<void>> keep;
 
-    addArm<1, 1, 1, 1>(arms, keep, "1/1/1/1", sumOfSquares({1, 1, 1, 1}), w, h, pts);
-    addArm<1, 2, 2, 2>(arms, keep, "1/2/2/2", sumOfSquares({1, 2, 2, 2}), w, h, pts);
-    addArm<1, 3, 3, 3>(arms, keep, "1/3/3/3", sumOfSquares({1, 3, 3, 3}), w, h, pts);
-    addArm<1, 3, 4, 4>(arms, keep, "1/3/4/4", sumOfSquares({1, 3, 4, 4}), w, h, pts);
-    addArm<1, 3, 5, 5>(arms, keep, "1/3/5/5", sumOfSquares({1, 3, 5, 5}), w, h, pts);
-    addArm<1, 3, 5, 7>(arms, keep, "1/3/5/7", sumOfSquares({1, 3, 5, 7}), w, h, pts);
+    constexpr auto BOX2 = bincv::PyrDownFilter::Box2x2;
+    constexpr auto BOX3 = bincv::PyrDownFilter::Box3x3;
+    addArm<BOX2, 1, 1, 1, 1>(arms, keep, "1/1/1/1 b2", sumOfSquares({1, 1, 1, 1}), w, h, pts);
+    // THE INTERMEDIATE LADDERS (X-50). E-19 named these and nobody had ever run
+    // them, on either axis. They ask the question 1/2/2/2 answers by assertion:
+    // does EVERY coarse level need two bits, or only the first one that is no
+    // longer binary? The deepening arms below answer the opposite direction and
+    // X-39 has already closed it -- BOX_2x2 is flat from N=2 to N=7 -- so these
+    // are where the remaining uncertainty is.
+    addArm<BOX2, 1, 2, 1, 1>(arms, keep, "1/2/1/1 b2", sumOfSquares({1, 2, 1, 1}), w, h, pts);
+    addArm<BOX3, 1, 2, 1, 1>(arms, keep, "1/2/1/1 b3", sumOfSquares({1, 2, 1, 1}), w, h, pts);
+    addArm<BOX2, 1, 2, 2, 1>(arms, keep, "1/2/2/1 b2", sumOfSquares({1, 2, 2, 1}), w, h, pts);
+    addArm<BOX3, 1, 2, 2, 1>(arms, keep, "1/2/2/1 b3", sumOfSquares({1, 2, 2, 1}), w, h, pts);
+    addArm<BOX2, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b2", sumOfSquares({1, 2, 2, 2}), w, h, pts);
+    addArm<BOX3, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b3", sumOfSquares({1, 2, 2, 2}), w, h, pts);
+    addArm<BOX2, 1, 3, 3, 3>(arms, keep, "1/3/3/3 b2", sumOfSquares({1, 3, 3, 3}), w, h, pts);
+    addArm<BOX2, 1, 3, 4, 4>(arms, keep, "1/3/4/4 b2", sumOfSquares({1, 3, 4, 4}), w, h, pts);
+    addArm<BOX2, 1, 3, 5, 5>(arms, keep, "1/3/5/5 b2", sumOfSquares({1, 3, 5, 5}), w, h, pts);
+    addArm<BOX2, 1, 3, 5, 7>(arms, keep, "1/3/5/7 b2", sumOfSquares({1, 3, 5, 7}), w, h, pts);
 
     std::vector<measure::Bench> buildBenches, trackBenches;
     for (const Arm& a : arms) {
@@ -240,14 +306,14 @@ void runAt(int w, int h, int step, int margin, int repeats, double targetMs) {
     const auto tt = measure::measureInterleaved(trackBenches, repeats, targetMs);
 
     std::printf("\n  level 0 = %dx%d, %zu keypoints, 31x31 window, 4 levels\n", w, h, pts.size());
-    std::printf("  %-9s %6s | %11s %7s | %11s %7s %9s | %9s\n", "ladder", "sumN^2", "build us",
+    std::printf("  %-11s %6s | %11s %7s | %11s %7s %9s | %9s\n", "ladder", "sumN^2", "build us",
                 "vs 1bit", "track us", "vs 1bit", "predicted", "bytes");
     std::printf("  ---------------------------------------------------------------"
                 "---------------------\n");
     const double buildBase = bt[0].medianNs;
     const double trackBase = tt[0].medianNs;
     for (size_t i = 0; i < arms.size(); ++i) {
-        std::printf("  %-9s %6.0f | %11.1f %6.2fx | %11.1f %6.2fx %8.2fx | %9zu\n",
+        std::printf("  %-11s %6.0f | %11.1f %6.2fx | %11.1f %6.2fx %8.2fx | %9zu\n",
                     arms[i].name.c_str(), arms[i].sumNsq, bt[i].medianNs / 1000.0,
                     bt[i].medianNs / buildBase, tt[i].medianNs / 1000.0,
                     tt[i].medianNs / trackBase, arms[i].sumNsq / arms[0].sumNsq, arms[i].bytes);

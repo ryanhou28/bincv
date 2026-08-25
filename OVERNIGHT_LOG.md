@@ -1001,3 +1001,52 @@ kernel gain; measured **7.774 → 7.342 ms, 1.059×**.
 Full 1710 frames: **10.644 ms vs OpenCV's 16.289**, with **every criterion-2 figure
 bit-identical to X-38**. Pure speed, no accuracy cost — from the accumulators, not
 from the pyramid work.
+
+---
+
+## 26 · E-19: the shipped point was the only one off the frontier
+
+Swept **ladder × filter** on three axes — yield over all 1710 frames (1.18 M
+keypoint-cases per cell), build+track on the reference device (spreads **0%**),
+exact bytes.
+
+| ladder | filter | build+track | yield | bytes |
+|---|---|---|---|---|
+| **`1/2/2/1`** | **`BOX_3x3`** | **5 642 µs (−2.4%)** | **94.97% (+0.48)** | **354 720 (−0.8%)** |
+| `1/2/2/2` | `BOX_2x2` *(shipped)* | 5 778 | 94.49% | 357 600 |
+| `1/2/2/1` | `BOX_2x2` | 4 849 (**−16.1%**) | 93.80% (−0.69) | 354 720 |
+| `1/1/1/1` | `BOX_2x2` | 3 311 (−42.7%) | 90.69% (−3.80) | 306 720 |
+
+**Faster, more accurate *and* smaller. No trade.** Of the seven points measured,
+**only the shipped one is dominated.**
+
+**D-23 was right on the prices it had.** It fixed the filter at `BOX_2x2` because
+`BOX_3x3` cost +0.8 ms; X-42 re-priced it to +0.35 ms by removing a genericity tax
+nobody had looked for. Spending level 3's bit to buy the wider filter only became
+free when that tax went.
+
+**Filter and depth are substitutes over part of the range** — `BOX_3x3` is worth
++1.32 points at `1/2/1/1`, +1.17 at `1/2/2/1`, +0.78 at `1/2/2/2`, and **−0.02 at
+`1/1/1/1`**, because a 1-bit level can't represent the smoother result. Pricing the
+two axes separately is what produced a dominated point.
+
+### A methodology finding that nearly inverted the result
+
+The depth benchmark seeded level 0 from a **synthetic lattice**. LK's cost is
+dominated by **iteration count**, and on a lattice the coarse levels alias into false
+minima:
+
+| track, vs `1/1/1/1` | lattice seed | **real frame** |
+|---|---|---|
+| `1/2/1/1` | **0.61× — faster with more bits** | 1.38× |
+| `1/2/2/1` | 1.19× | 1.46× |
+| `1/2/2/2` | 1.34× | 1.77× |
+
+The lattice column is non-monotonic and would have made `1/2/1/1` look like a free
+win. The benchmark now seeds from the real binarized frame and **refuses to fall back**
+to a synthetic pattern. **A benchmark whose arms differ in convergence needs content
+whose convergence is real.** (E-19's own "2.30×" ladder cost was inflated the same way
+— it's 1.77× on track.)
+
+**Not yet enacted:** switching re-bases every performance number, so it needs X-49's
+treatment first — a frontend re-measure confirming accuracy and re-stating criterion 4.
