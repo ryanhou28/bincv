@@ -9392,6 +9392,66 @@ rather than inferring it from timings.
 
 ---
 
+### X-58 · E-32 — x86 vector paths: how much is the compiler's, how much is ours? · `RULE ONLY`
+
+**COMMITTED BEFORE ANY INTRINSIC IS WRITTEN**, because
+[X-57](#x-57--the-entire-x86-deficit-is-a-compile-flag--done) has just shown this
+project reaching for hand-written vector code when the answer was a build flag. That
+mistake cost nothing only because the flag was measured first.
+
+**Gates:** [E-32](ARCHITECTURE.md#register). binCV is **0.91× of OpenCV on x86** with
+POPCNT on, and has **no x86 vector code at all** against an OpenCV whose LK and gftt
+are hand-tuned AVX2.
+
+**THE STRUCTURAL OPPORTUNITY, and why it is not the port X-52 proposed.** binCV's
+kernels are loops over `WordType` words. **x86-64's baseline is SSE2 — 128 bits — so
+GCC can already auto-vectorize those loops to 4 `uint32_t` lanes**; `-mavx2` would take
+it to 8. **The question is therefore not "should binCV have AVX2 code" but "how much of
+the available win does the compiler already take, and what is left that only hand-written
+code can reach?"** Asking it the other way round is what X-52 did.
+
+**Arms**, full 1710-frame sequence, each built from the same tree and each confirmed by
+`objdump` to contain the instructions it claims:
+
+| arm | flags | minimum CPU |
+|---|---|---|
+| **A** | today's default (`-mpopcnt`) | Nehalem 2008 |
+| **B** | `+ -mavx2` | Haswell 2013 |
+| **C** | `-march=native` | this machine only |
+
+Reported per stage, because [X-52](#x-52--bincv-on-x86-the-whole-deficit-is-one-stage--done)
+showed the frontend total hiding which stage moved: `build` is long contiguous plane
+loops and should vectorise well; `track` is a 31-pixel window — **one word per row** —
+and may not vectorise at all, which would be the finding.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.**
+
+- **Band A — B reaches or beats OpenCV (≤ 3.15 ms) and the gain is broad.** The
+  compiler had it all along and **no intrinsics get written**. The decision becomes a
+  baseline question — is Haswell-2013 an acceptable x86 minimum — which is the same
+  shape as X-57's and is the caller's, not mine.
+- **Band B — B closes some of the 9% but leaves `track` untouched.** That localises the
+  hand-written work to exactly one kernel and is the outcome that most deserves
+  intrinsics, because a 31-pixel window is precisely what a compiler cannot vectorise
+  and a human can. Write them **for `residualSums` only**, and price them separately.
+- **Band C — B changes little anywhere.** The loops are not auto-vectorisable as
+  written — most likely aliasing or the bit-sliced plane indirection — and the finding
+  is *why*, not a speedup. Report the obstruction before writing code around it.
+- **Band D — C beats B substantially.** Something other than AVX2 is carrying it (BMI2,
+  `tzcnt`, wider shifts). **Identify it before adopting `-march=native`**, which is not
+  a shippable flag and would otherwise smuggle an unattributed win into the record.
+
+**A LIMIT DECLARED IN ADVANCE.** Even a perfect result here makes binCV *competitive*
+on x86, not dominant: the footprint claim (6.23×) is unaffected and universal, and
+**x86 is not the deployment target** — CLAUDE.md targets Cortex-A/M. This work buys
+evaluability and honesty, and no x86 number will be promoted to a headline claim.
+
+**Method:** `benchmark/frontend_sequence.cpp` built three ways from one tree;
+`objdump` to confirm the ISA actually present in each binary, as X-57 did, rather than
+inferring it from timings.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
