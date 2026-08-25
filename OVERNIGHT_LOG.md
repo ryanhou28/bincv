@@ -912,3 +912,46 @@ Also fixed: three missing API-tier statements (a CLAUDE.md hard rule), the stale
 "exact inverse" claim that asserted the false direction, an undocumented
 allocate-and-detach, a vacuous half of the padding check, and an untested
 empty-matrix branch.
+
+---
+
+## 24 · Reflect-101, and `pyrDown` earns OpenCV's name
+
+The file header had rejected reflect-101 once, as *"a per-pixel index map, and not
+word-parallel"*. **That objection applies to one axis and not the other:**
+
+- **Vertical is free** — the filter reads whole rows, so reflecting picks a different
+  **row pointer**. The word-parallel body is untouched.
+- **Horizontal is genuinely per-pixel** — the objection stands — **but reaches only
+  `ceil(Radius/2)` output columns per side**: 1 for the 5×5 Gaussian, **0 on the left**
+  for `Box2x2`. Those get the per-pixel definition; the interior keeps the fast path.
+
+The per-pixel definition is `impl::pyrDownPixel`, and **the shipped path calls it** on
+the rim — so reference and implementation can't drift apart.
+
+### `pyrDownFiltered<Gaussian5x5, 8, 8, Reflect101>` **IS** `cv::pyrDown`
+
+| source | | source | |
+|---|---|---|---|
+| 64×48 even | **0 of 768 differ** | 63×47 odd both | **0 of 768** |
+| 65×32 odd w | **0 of 528** | 32×65 odd h | **0 of 528** |
+| **9×7** — taps fold past **both** edges | **0 of 20** | | |
+
+The 9×7 case is why `reflect101` loops instead of folding once.
+
+### The border costs 9%
+
+| 640×480 → 320×240, 1→3 bits | µs |
+|---|---|
+| `GAUSSIAN_5x5`, `Zero` (old behaviour) | 549.9 |
+| **`GAUSSIAN_5x5`, `Reflect101`** | **599.2 — +9.0%** |
+| `BOX_2x2`, `Reflect101` | 116.3 — no rim, no charge |
+
+**Matching OpenCV's filter *and* border costs ~parity** (0.86× of `cv::pyrDown`, at ⅜
+the bits). **Matching OpenCV's bit width is what costs 13.7×.** Separate axes, kept
+separate.
+
+`Zero` didn't become untested when it stopped being the default — every filter is now
+checked under both borders at even *and* odd extents. The odd ones matter: that's where
+the last output column reads a source column that doesn't exist, and the even-only test
+that shipped before couldn't see it.

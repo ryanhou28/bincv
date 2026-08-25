@@ -8565,6 +8565,80 @@ new** — checked by reverting.
 
 ---
 
+### X-48 · `BORDER_REFLECT_101`, and the Tier 1 claim made good · `DONE`
+
+**IMPLEMENTATION AND VERIFICATION, NOT A DECISION — so no pre-registered rule.** The
+decision was made explicitly: *same-named functions supply OpenCV's behaviour by
+default; our alternatives are documented options.* This builds it and checks it.
+
+**Question.** `pyrDownFiltered` read outside the frame as ZERO; `cv::pyrDown` uses
+`BORDER_REFLECT_101`. Reflect-101 was rejected once in this file's own header as *"a
+per-pixel index map, and not word-parallel"* — the same objection that kept it out of
+the LK taps. **Does that objection actually apply here?**
+
+**IT APPLIES TO ONE AXIS AND NOT THE OTHER, WHICH IS WHY THIS IS AFFORDABLE.**
+
+- **Vertical reflection is FREE.** The filter reads whole rows, so reflecting a row
+  index picks a different **row pointer** and changes nothing per pixel. The
+  word-parallel body is untouched.
+- **Horizontal reflection is genuinely per-pixel** — the original objection stands —
+  **but it only reaches the output columns whose source support crosses an edge**:
+  `ceil(Radius/2)` per side, computed rather than assumed, which is **1** for the 5×5
+  Gaussian and **0 on the left** for `Box2x2` and `DirectSubsample`. Those columns are
+  recomputed from the per-pixel definition; the interior keeps the word-parallel path.
+
+The per-pixel definition is `impl::pyrDownPixel`, and **the shipped path calls it** on
+the rim rather than it being a test scaffold — so the reference and the implementation
+cannot drift apart.
+
+**RESULT 1 — `pyrDownFiltered<Gaussian5x5, 8, 8, W, Reflect101>` IS `cv::pyrDown`,
+BIT FOR BIT.**
+
+| source | destination | |
+|---|---|---|
+| 64×48 (even) | 32×24 | **0 of 768 differ** |
+| 63×47 (odd both) | 32×24 | **0 of 768 differ** |
+| 65×32 (odd width) | 33×16 | **0 of 528 differ** |
+| 32×65 (odd height) | 16×33 | **0 of 528 differ** |
+| **9×7** (taps reach past **both** edges at once) | 5×4 | **0 of 20 differ** |
+
+The 9×7 case is the one that matters: at that size a single tap folds past one edge
+*and then the other*, which is why `reflect101` loops rather than folding once. **The
+Tier 1 claim is now proven rather than asserted**, and `pyrDown` may legitimately
+carry `cv::pyrDown`'s name at that configuration.
+
+**RESULT 2 — the border costs 9%, on the filters that have a rim.** Same run, so drift
+cancels:
+
+| arm (640×480 → 320×240, 1 → 3 bits) | µs | |
+|---|---|---|
+| `GAUSSIAN_5x5`, `Zero` | 549.9 | the previous behaviour |
+| **`GAUSSIAN_5x5`, `Reflect101`** | **599.2** | **+9.0%** |
+| `BOX_2x2`, `Reflect101` | 116.3 | no rim at all — `lo == 0`, and at even width no right rim either |
+
+**Nine percent for exact OpenCV semantics is a good price**, and it is charged only
+where geometry demands it. Against `cv::pyrDown` (516.6 µs in this run), the matching
+Gaussian at binCV's own bit widths is **0.86×** — near parity, at ⅜ the stored bits —
+while the shipped box is **4.44× faster**. **Matching OpenCV's FILTER AND BORDER costs
+binCV roughly parity; matching OpenCV's BIT WIDTH is what costs 13.7×**
+([X-45](#x-45--pyrdown-against-cvpyrdown-across-bit-width--done)). The two remain
+separate, and this entry keeps them separate.
+
+**Both borders are verified, at both parities.** `Zero` did not become untested when it
+stopped being the default: `test_pyramid.cpp` now checks every filter against a
+per-pixel reference under **`Reflect101` and `Zero`, at even and odd extents** — 5
+size/border combinations × 8 `(filter, NIn, NOut)` points. The odd extents are not
+decoration: the right rim is where an odd width makes the last output column read a
+source column that does not exist, and **the even-only test that shipped before could
+not see it**. The test's reflection is spelled independently of `impl::reflect101`, so
+it cannot inherit a fold bug from the code it checks.
+
+**Method:** `ops/pyramid.hpp` (`PyrDownBorder`, `reflect101`, `pyrDownPixel`, the rim
+fixup); `tests/test_pyramid.cpp`; `benchmark/pyrfilter_benchmark.cpp` via
+`scripts/run_on_pi.sh pi4` with `BINCV_PI_OPENCV=1`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

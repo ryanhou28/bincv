@@ -1184,23 +1184,48 @@ namespace {
 
 using FilterWord = uint32_t;
 
-template <size_t NOut, size_t NIn>
-size_t checkFilter(bincv::PyrDownFilter f, const char* name, int lo, int hi, const unsigned* w, unsigned ksum) {
-    const int sw = 64, sh = 48;                      // even, so no replicate branch
+template <size_t NOut, size_t NIn, bincv::PyrDownBorder Bo>
+void runFilter(bincv::PyrDownFilter f, const bincv::QuantMat<NIn, FilterWord>& src,
+               bincv::QuantMat<NOut, FilterWord>& dst) {
+    using bincv::PyrDownFilter;
+    switch (f) {
+      case PyrDownFilter::DirectSubsample:
+        bincv::pyrDownFiltered<PyrDownFilter::DirectSubsample,NOut,NIn,FilterWord,Bo>(src,dst); break;
+      case PyrDownFilter::Box2x2:
+        bincv::pyrDownFiltered<PyrDownFilter::Box2x2,NOut,NIn,FilterWord,Bo>(src,dst); break;
+      case PyrDownFilter::Box3x3:
+        bincv::pyrDownFiltered<PyrDownFilter::Box3x3,NOut,NIn,FilterWord,Bo>(src,dst); break;
+      case PyrDownFilter::Gaussian3x3:
+        bincv::pyrDownFiltered<PyrDownFilter::Gaussian3x3,NOut,NIn,FilterWord,Bo>(src,dst); break;
+      default:
+        bincv::pyrDownFiltered<PyrDownFilter::Gaussian5x5,NOut,NIn,FilterWord,Bo>(src,dst); break;
+    }
+}
+
+/// The per-pixel definition, independently spelled here: `sy`/`sx` are folded with a
+/// straightforward reflect rather than by calling impl::reflect101, so the test does
+/// not inherit a bug from the code it is checking.
+int refReflect(int i, int n) {
+    if (n <= 1) return 0;
+    while (i < 0 || i > n - 1) {
+        if (i < 0) i = -i;
+        if (i > n - 1) i = 2 * (n - 1) - i;
+    }
+    return i;
+}
+
+template <size_t NOut, size_t NIn, bincv::PyrDownBorder Bo>
+size_t checkFilterAt(bincv::PyrDownFilter f, const char* name, int lo, int hi,
+                     const unsigned* w, unsigned ksum, int sw, int sh) {
     bincv::QuantMat<NIn, FilterWord> src(sw, sh);
     uint64_t st = 11;
     auto rnd=[&st]{ st=st*6364136223846793005ULL+1442695040888963407ULL; return (unsigned)(st>>33); };
     const unsigned maxIn = (1u << NIn) - 1u;
     for (int y = 0; y < sh; ++y)
         for (int x = 0; x < sw; ++x) src.set(y, x, rnd() % (maxIn + 1u));
-    bincv::QuantMat<NOut, FilterWord> dst(32, 24);
-    switch (f) {
-      case bincv::PyrDownFilter::DirectSubsample: bincv::pyrDownFiltered<bincv::PyrDownFilter::DirectSubsample,NOut,NIn,FilterWord>(src,dst); break;
-      case bincv::PyrDownFilter::Box2x2:          bincv::pyrDownFiltered<bincv::PyrDownFilter::Box2x2,NOut,NIn,FilterWord>(src,dst); break;
-      case bincv::PyrDownFilter::Box3x3:          bincv::pyrDownFiltered<bincv::PyrDownFilter::Box3x3,NOut,NIn,FilterWord>(src,dst); break;
-      case bincv::PyrDownFilter::Gaussian3x3:     bincv::pyrDownFiltered<bincv::PyrDownFilter::Gaussian3x3,NOut,NIn,FilterWord>(src,dst); break;
-      default:                             bincv::pyrDownFiltered<bincv::PyrDownFilter::Gaussian5x5,NOut,NIn,FilterWord>(src,dst); break;
-    }
+    bincv::QuantMat<NOut, FilterWord> dst((sw + 1) / 2, (sh + 1) / 2);
+    runFilter<NOut, NIn, Bo>(f, src, dst);
+
     const unsigned maxOut = (1u << NOut) - 1u;
     const unsigned long long K2 = (unsigned long long)ksum * ksum;
     int bad = 0;
@@ -1209,24 +1234,46 @@ size_t checkFilter(bincv::PyrDownFilter f, const char* name, int lo, int hi, con
             unsigned long long sum = 0;
             for (int dy = lo; dy <= hi; ++dy)
                 for (int dx = lo; dx <= hi; ++dx) {
-                    const int sy = 2*y+dy, sx = 2*x+dx;
-                    if (sy < 0 || sy >= sh || sx < 0 || sx >= sw) continue;   // zero outside
+                    int sy = 2*y+dy, sx = 2*x+dx;
+                    if (Bo == bincv::PyrDownBorder::Zero) {
+                        if (sy < 0 || sy >= sh || sx < 0 || sx >= sw) continue;
+                    } else {
+                        sy = refReflect(sy, sh);
+                        sx = refReflect(sx, sw);
+                    }
                     sum += (unsigned long long)w[dy-lo] * w[dx-lo] * src.at(sy, sx);
                 }
             const unsigned long long num = sum * maxOut + (K2 / 2) * maxIn;
             const unsigned want = (unsigned)(num / (K2 * maxIn));
             const unsigned got = dst.at(y, x);
             if (got != want) {
-                if (bad < 3) std::printf("    MISMATCH %s N=%zu->%zu at (%d,%d): got %u want %u\n",
-                                    name, NIn, NOut, x, y, got, want);
+                if (bad < 3) std::printf("    MISMATCH %s N=%zu->%zu %dx%d at (%d,%d): got %u want %u\n",
+                                    name, NIn, NOut, sw, sh, x, y, got, want);
                 ++bad;
             }
         }
     }
-    std::printf("  %-18s NIn=%zu NOut=%zu : %s\n", name, NIn, NOut, bad ? "FAIL" : "exact");
     return static_cast<size_t>(bad);
 }
 
+/// Checks a filter under BOTH border rules and at BOTH parities. The odd extents are
+/// not decoration: the right rim is where an odd width makes the last output column
+/// read a source column that does not exist, and the even-only test that shipped
+/// before could not see it.
+template <size_t NOut, size_t NIn>
+size_t checkFilter(bincv::PyrDownFilter f, const char* name, int lo, int hi,
+                   const unsigned* w, unsigned ksum) {
+    using B = bincv::PyrDownBorder;
+    size_t bad = 0;
+    bad += checkFilterAt<NOut, NIn, B::Reflect101>(f, name, lo, hi, w, ksum, 64, 48);
+    bad += checkFilterAt<NOut, NIn, B::Reflect101>(f, name, lo, hi, w, ksum, 63, 47);
+    bad += checkFilterAt<NOut, NIn, B::Reflect101>(f, name, lo, hi, w, ksum, 33, 9);
+    bad += checkFilterAt<NOut, NIn, B::Zero>(f, name, lo, hi, w, ksum, 64, 48);
+    bad += checkFilterAt<NOut, NIn, B::Zero>(f, name, lo, hi, w, ksum, 63, 47);
+    std::printf("  %-18s NIn=%zu NOut=%zu : %s  (reflect101 + zero, even + odd)\n",
+                name, NIn, NOut, bad ? "FAIL" : "exact");
+    return bad;
+}
 
 } // namespace
 
@@ -1249,5 +1296,65 @@ BINCV_TEST(Pyramid, FilteredRoutesMatchAPerPixelReference_uint32_t) {
     bad += checkFilter<8,8>(bincv::PyrDownFilter::Gaussian5x5,"GAUSSIAN_5x5",-2,2,g5,16);
     BINCV_CHECK_EQ(bad, size_t{0});
 }
+
+#ifdef BINCV_WITH_OPENCV
+// ---------------------------------------------------------------------------
+// THE TIER 1 CLAIM: pyrDownFiltered<Gaussian5x5, 8, 8> IS cv::pyrDown.
+//
+// Everything else in this file checks binCV against binCV's own definition. This
+// checks it against OPENCV, at the one configuration where the question is even
+// meaningful: 8 bits in, 8 bits out, cv::pyrDown's filter and cv::pyrDown's border.
+// At any narrower N the caller has explicitly asked for a different precision and
+// there is no OpenCV answer to compare against -- which is why the tier is stated
+// per configuration rather than per function.
+//
+// If this passes, `pyrDown` may legitimately carry cv::pyrDown's name.
+// ---------------------------------------------------------------------------
+namespace {
+size_t cvPyrDownCase(int w, int h) {
+    cv::Mat in(h, w, CV_8U);
+    uint64_t st = 0xA5A5ULL ^ static_cast<uint64_t>(static_cast<unsigned>(w * 7 + h));
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+            in.at<uint8_t>(y, x) = static_cast<uint8_t>(st >> 40);
+        }
+    cv::Mat want;
+    cv::pyrDown(in, want);
+
+    bincv::QuantMat<8, FilterWord> src(w, h);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) src.set(y, x, in.at<uint8_t>(y, x));
+    bincv::QuantMat<8, FilterWord> dst(want.cols, want.rows);
+    bincv::pyrDownFiltered<bincv::PyrDownFilter::Gaussian5x5, 8, 8, FilterWord,
+                           bincv::PyrDownBorder::Reflect101>(src, dst);
+
+    size_t bad = 0, worst = 0;
+    for (int y = 0; y < want.rows; ++y)
+        for (int x = 0; x < want.cols; ++x) {
+            const unsigned got = dst.at(y, x), exp = want.at<uint8_t>(y, x);
+            if (got != exp) {
+                ++bad;
+                const size_t d = got > exp ? got - exp : exp - got;
+                if (d > worst) worst = d;
+            }
+        }
+    std::printf("  %3dx%-3d -> %3dx%-3d vs cv::pyrDown : %s (%zu of %d differ, max |d| %zu)\n",
+                w, h, want.cols, want.rows, bad ? "DIFFERS" : "BIT-EXACT",
+                bad, want.cols * want.rows, worst);
+    return bad;
+}
+} // namespace
+
+BINCV_TEST(Pyramid, Gaussian5x5MatchesCvPyrDown_8to8) {
+    size_t bad = 0;
+    bad += cvPyrDownCase(64, 48);     // even
+    bad += cvPyrDownCase(63, 47);     // odd both
+    bad += cvPyrDownCase(65, 32);     // odd width only
+    bad += cvPyrDownCase(32, 65);     // odd height only
+    bad += cvPyrDownCase(9, 7);       // small enough that taps reach past BOTH edges
+    BINCV_CHECK_EQ(bad, size_t{0});
+}
+#endif // BINCV_WITH_OPENCV
 
 BINCV_TEST_MAIN("test_pyramid")

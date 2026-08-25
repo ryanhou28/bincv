@@ -672,6 +672,21 @@ enum class PyrDownFilter {
     Gaussian5x5,      ///< the ANCHOR: what cv::buildOpticalFlowPyramid applies
 };
 
+/// @brief What a filter reads outside the frame.
+/// @note `Reflect101` is `cv::BORDER_REFLECT_101` -- what `cv::pyrDown` applies --
+///       and it is the DEFAULT, because binCV's same-named functions match OpenCV's
+///       behaviour and the cheaper alternatives are opt-in. `Zero` is the deviation
+///       binCV shipped before, kept because it is genuinely cheaper and because
+///       every measurement up to X-47 was taken on it.
+/// @note THE TWO AXES COST DIFFERENTLY, which is what makes reflect-101 affordable
+///       here after being rejected for the LK taps. VERTICAL reflection is FREE: the
+///       filter reads whole rows, so reflecting is choosing a different row pointer
+///       and nothing else. HORIZONTAL reflection is a per-pixel index map and is not
+///       word-parallel -- but it only touches output columns whose source support
+///       crosses an edge, at most `ceil(Radius/2)` of them per side, so it is fixed
+///       up per pixel on that rim while the interior keeps the word-parallel path.
+enum class PyrDownBorder { Reflect101, Zero };
+
 namespace impl {
 
 /// @brief Tap offsets and weights for one separable filter.
@@ -696,6 +711,48 @@ constexpr FilterTaps filterTaps(PyrDownFilter f) {
 }
 
 /// @brief Planes needed to hold one axis of the weighted sum of `NIn`-bit values.
+/// @brief `cv::BORDER_REFLECT_101`: fold `i` into `[0, n)` about the EDGE PIXELS,
+///        which are not repeated -- `-1 -> 1`, `n -> n-2`.
+/// @note Loops because a tap can reach past the far edge on a level only a few
+///       pixels wide; at every size this project uses it folds once.
+inline size_t reflect101(long long i, size_t n) {
+    if (n <= 1) return 0;
+    const long long last = static_cast<long long>(n) - 1;
+    while (i < 0 || i > last) {
+        if (i < 0) i = -i;
+        if (i > last) i = 2 * last - i;
+    }
+    return static_cast<size_t>(i);
+}
+
+/// @brief One source pixel's value across all NIn planes. **Per pixel** -- only the
+///        border rim and the tests use this.
+template <size_t NIn, typename WordType>
+inline unsigned srcPixelValue(const BinMatConstView<WordType> (&src)[NIn], size_t y, size_t x) {
+    unsigned v = 0;
+    for (size_t p = 0; p < NIn; ++p) {
+        if (src[p].row(y)[wordIndex<WordType>(x)] & bitMask<WordType>(x)) {
+            v |= (1u << p);
+        }
+    }
+    return v;
+}
+
+/// @brief Writes value `v` at `(y, x)` across NOut destination planes.
+template <size_t NOut, typename WordType>
+inline void setPixelValue(BinMatView<WordType> (&dst)[NOut], size_t y, size_t x, unsigned v) {
+    const WordType mask = bitMask<WordType>(x);
+    const size_t wi = wordIndex<WordType>(x);
+    for (size_t q = 0; q < NOut; ++q) {
+        WordType* word = dst[q].row(y) + wi;
+        if ((v >> q) & 1u) {
+            *word |= mask;
+        } else {
+            *word = static_cast<WordType>(*word & static_cast<WordType>(~mask));
+        }
+    }
+}
+
 constexpr size_t axisPlanes(size_t nIn, unsigned weightSum) {
     size_t bits = 0;
     // max value is weightSum * (2^nIn - 1); count its bits.
@@ -1210,7 +1267,67 @@ inline WordType phaseAtPlus1(WordType cur, WordType next) {
 /// each filter to reproduce **its own** definition exactly, and
 /// tests/test_pyramid.cpp checks that against a per-pixel integer reference using
 /// this same border.
-template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType>
+/// @brief The exact output pixel at `(y, x)`, computed PER PIXEL under an explicit
+///        border rule.
+/// @note This is the DEFINITION the word-parallel route reproduces. It is not a test
+///       scaffold: the shipped path calls it on the border rim, so the reference and
+///       the implementation cannot drift apart -- if this is wrong, the rim is wrong,
+///       and the tests compare the interior against it as well.
+template <PyrDownFilter F, PyrDownBorder Bo, size_t NOut, size_t NIn, typename WordType>
+inline unsigned pyrDownPixel(const BinMatConstView<WordType> (&src)[NIn], size_t y, size_t x) {
+    constexpr FilterTaps T = filterTaps(F);
+    constexpr unsigned maxIn = (1u << NIn) - 1u;
+    constexpr unsigned maxOut = (1u << NOut) - 1u;
+    constexpr unsigned long long K2 =
+        static_cast<unsigned long long>(T.sum) * static_cast<unsigned long long>(T.sum);
+    const long long h = static_cast<long long>(src[0].height);
+    const long long w = static_cast<long long>(src[0].width);
+    unsigned long long sum = 0;
+    for (int dy = T.lo; dy <= T.hi; ++dy) {
+        const long long sy0 = 2 * static_cast<long long>(y) + dy;
+        if (Bo == PyrDownBorder::Zero && (sy0 < 0 || sy0 >= h)) continue;
+        const size_t sy = (Bo == PyrDownBorder::Reflect101)
+                              ? reflect101(sy0, static_cast<size_t>(h))
+                              : static_cast<size_t>(sy0);
+        for (int dx = T.lo; dx <= T.hi; ++dx) {
+            const long long sx0 = 2 * static_cast<long long>(x) + dx;
+            if (Bo == PyrDownBorder::Zero && (sx0 < 0 || sx0 >= w)) continue;
+            const size_t sx = (Bo == PyrDownBorder::Reflect101)
+                                  ? reflect101(sx0, static_cast<size_t>(w))
+                                  : static_cast<size_t>(sx0);
+            sum += static_cast<unsigned long long>(T.w[dy - T.lo]) *
+                   static_cast<unsigned long long>(T.w[dx - T.lo]) *
+                   srcPixelValue<NIn, WordType>(src, sy, sx);
+        }
+    }
+    const unsigned long long num = sum * maxOut + (K2 / 2) * maxIn;
+    return static_cast<unsigned>(num / (K2 * maxIn));
+}
+
+/// @brief Output columns at each edge whose source support crosses the frame, and
+///        which therefore need the per-pixel border rule rather than the
+///        word-parallel path.
+/// @note Zero for `Box2x2` and `DirectSubsample` on the left (`lo == 0`), so those
+///       filters pay nothing on that side. Computed rather than assumed: the right
+///       edge also absorbs the odd-width case, where the last output column reads a
+///       source column that does not exist.
+constexpr size_t leftRimColumns(PyrDownFilter f) {
+    const FilterTaps t = filterTaps(f);
+    return t.lo >= 0 ? size_t{0} : static_cast<size_t>((-t.lo + 1) / 2);
+}
+inline size_t rightRimStart(PyrDownFilter f, size_t srcWidth, size_t dstWidth) {
+    const FilterTaps t = filterTaps(f);
+    // Largest x with 2x + hi <= srcWidth - 1.
+    if (srcWidth == 0) return 0;
+    const long long lim = (static_cast<long long>(srcWidth) - 1 - t.hi);
+    const long long lastOk = lim >= 0 ? lim / 2 : -1;
+    const long long start = lastOk + 1;
+    if (start <= 0) return 0;
+    return static_cast<size_t>(start) < dstWidth ? static_cast<size_t>(start) : dstWidth;
+}
+
+template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType,
+          PyrDownBorder Bo = PyrDownBorder::Reflect101>
 inline void pyrDownFilteredRoute(const BinMatConstView<WordType> (&src)[NIn],
                                  BinMatView<WordType> (&dst)[NOut]) {
     static_assert(NIn >= 1 && NIn <= 8, "pyrDown: NIn outside QuantMat's supported range");
@@ -1244,12 +1361,20 @@ inline void pyrDownFilteredRoute(const BinMatConstView<WordType> (&src)[NIn],
         for (size_t q = 0; q < NOut; ++q) dstRow[q] = dst[q].row(y);
 
         // The vertical support: source rows 2y + dy. Outside the frame reads zero.
+        // VERTICAL BORDER IS FREE. The filter reads whole rows, so reflect-101 is a
+        // different row POINTER and costs nothing per pixel -- which is why the
+        // objection that rejected reflect-101 for the LK taps does not apply to this
+        // axis. Only the horizontal axis needs the per-pixel rim below.
         const WordType* vRows[kTaps][NIn];
         for (size_t t = 0; t < kTaps; ++t) {
             const long long r = static_cast<long long>(2 * y) + T.lo + static_cast<long long>(t);
-            const bool ok = r >= 0 && r < static_cast<long long>(srcHeight);
+            const bool inside = r >= 0 && r < static_cast<long long>(srcHeight);
+            const size_t sy = (Bo == PyrDownBorder::Reflect101)
+                                  ? reflect101(r, srcHeight)
+                                  : static_cast<size_t>(inside ? r : 0);
+            const bool use = (Bo == PyrDownBorder::Reflect101) ? true : inside;
             for (size_t p = 0; p < NIn; ++p) {
-                vRows[t][p] = ok ? src[p].row(static_cast<size_t>(r)) : nullptr;
+                vRows[t][p] = use ? src[p].row(sy) : nullptr;
             }
         }
 
@@ -1300,6 +1425,25 @@ inline void pyrDownFilteredRoute(const BinMatConstView<WordType> (&src)[NIn],
                 dstRow[q][i] = last ? static_cast<WordType>(outPlanes[q] & tail) : outPlanes[q];
             }
         }
+
+        // HORIZONTAL BORDER, per pixel, on the rim only. The word-parallel pass
+        // above computed these columns with zero outside the frame; under
+        // Reflect101 they are recomputed from the definition. `leftRim` is 0 for
+        // Box2x2 and DirectSubsample, so those filters pay nothing on the left, and
+        // the right rim also absorbs the odd-width case where the last output column
+        // reads a source column that does not exist.
+        if (Bo == PyrDownBorder::Reflect101) {
+            const size_t leftRim = leftRimColumns(F) < dstWidth ? leftRimColumns(F) : dstWidth;
+            for (size_t x = 0; x < leftRim; ++x) {
+                setPixelValue<NOut, WordType>(
+                    dst, y, x, pyrDownPixel<F, Bo, NOut, NIn, WordType>(src, y, x));
+            }
+            const size_t rStart = rightRimStart(F, src[0].width, dstWidth);
+            for (size_t x = (rStart > leftRim ? rStart : leftRim); x < dstWidth; ++x) {
+                setPixelValue<NOut, WordType>(
+                    dst, y, x, pyrDownPixel<F, Bo, NOut, NIn, WordType>(src, y, x));
+            }
+        }
     }
     (void)B;
 }
@@ -1313,20 +1457,22 @@ inline void pyrDownFilteredRoute(const BinMatConstView<WordType> (&src)[NIn],
 /// @note The existing `pyrDown` is this at `Box2x2`, through a hand-written route
 ///       that stays because it is what every prior result was measured on and
 ///       tests/test_pyramid.cpp holds the two to agreement.
-template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType>
+template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType,
+          PyrDownBorder Bo = PyrDownBorder::Reflect101>
 inline void pyrDownFiltered(const BinMatConstView<WordType> (&src)[NIn],
                             BinMatView<WordType> (&dst)[NOut]) {
-    impl::pyrDownFilteredRoute<F, NOut, NIn, WordType>(src, dst);
+    impl::pyrDownFilteredRoute<F, NOut, NIn, WordType, Bo>(src, dst);
 }
 
 /// @brief Container spelling of `pyrDownFiltered`.
-template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType>
+template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType,
+          PyrDownBorder Bo = PyrDownBorder::Reflect101>
 inline void pyrDownFiltered(const QuantMat<NIn, WordType>& src, QuantMat<NOut, WordType>& dst) {
     BinMatConstView<WordType> s[NIn];
     BinMatView<WordType> d[NOut];
     for (size_t p = 0; p < NIn; ++p) s[p] = src.constPlane(p);
     for (size_t q = 0; q < NOut; ++q) d[q] = dst.plane(q);
-    pyrDownFiltered<F, NOut, NIn, WordType>(s, d);
+    pyrDownFiltered<F, NOut, NIn, WordType, Bo>(s, d);
 }
 
 } // inline namespace BINCV_ABI_NAMESPACE

@@ -75,6 +75,23 @@ int main() {
              bincv::pyrDownFiltered<PyrDownFilter::Gaussian5x5, 8, 8, W>(src8, d8); }},
         {"filtered BOX_2x2        8 -> 8", [&](int) {
              bincv::pyrDownFiltered<PyrDownFilter::Box2x2, 8, 8, W>(src8, d8); }},
+        // WHAT THE BORDER COSTS (X-48). Reflect101 is now the default because it is
+        // what cv::pyrDown does; Zero is the cheaper deviation binCV shipped before
+        // and every measurement up to X-47 was taken on. The vertical axis is free
+        // (a row pointer), so this pair prices the HORIZONTAL rim -- at most
+        // ceil(Radius/2) output columns per side, recomputed per pixel.
+        {"GAUSSIAN_5x5 1->3  border=Reflect101", [&](int) {
+             bincv::pyrDownFiltered<PyrDownFilter::Gaussian5x5, 3, 1, W,
+                                    bincv::PyrDownBorder::Reflect101>(src, d3); }},
+        {"GAUSSIAN_5x5 1->3  border=Zero", [&](int) {
+             bincv::pyrDownFiltered<PyrDownFilter::Gaussian5x5, 3, 1, W,
+                                    bincv::PyrDownBorder::Zero>(src, d3); }},
+        {"BOX_3x3      1->3  border=Reflect101", [&](int) {
+             bincv::pyrDownFiltered<PyrDownFilter::Box3x3, 3, 1, W,
+                                    bincv::PyrDownBorder::Reflect101>(src, d3); }},
+        {"BOX_2x2      1->3  border=Reflect101", [&](int) {
+             bincv::pyrDownFiltered<PyrDownFilter::Box2x2, 3, 1, W,
+                                    bincv::PyrDownBorder::Reflect101>(src, d3); }},
 #if defined(BINCV_WITH_OPENCV)
         // THE DENOMINATOR (CLAUDE.md): OpenCV doing the same semantic operation on
         // the same content. At 8 -> 8 this is literally the same function, so it is

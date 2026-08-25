@@ -902,7 +902,7 @@ opencv	test_denoise	9744	0
 opencv	test_threshold	33112	0
 opencv	test_morphology	299181	0
 opencv	test_resample	245312	0
-opencv	test_pyramid	262322	0
+opencv	test_pyramid	262323	0
 opencv	test_derivative	48526	0
 opencv	test_covariance	17704	0
 opencv	test_corner	3655	0
