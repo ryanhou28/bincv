@@ -256,6 +256,37 @@ remote "cd $REMOTE_DIR && cmake --build bincv-cpp/build-pi -j\$(nproc)" \
 info "build complete"
 
 # --------------------------------------------------------------------------
+# STALE-BINARY GUARD (X-62). A benchmark that includes bench_util.hpp is only
+# built when OpenCV is on; with it off, cmake does not build the target and does
+# not remove the executable a PREVIOUS OpenCV-enabled run left behind. The command
+# then runs, succeeds, and measures code that predates whatever is being tested.
+#
+# That happened, and it is worse than a missing binary. X-62's first reference-device
+# sweep reported its two arms IDENTICAL at every iteration count -- a plausible null
+# result, from a build six hours older than the option under test. benchmark/
+# CMakeLists.txt already warns that "a failed reproduction then looks like a missing
+# binary"; a STALE one looks like a finding.
+#
+# So: stamp the build directory with the flag it was configured for, and when the
+# flag changes, delete the executables under benchmark/. cmake rebuilds what it
+# should have and the run fails loudly on what it should not.
+# --------------------------------------------------------------------------
+STAMP="bincv-cpp/build-pi/.bincv-opencv-flag"
+WANT="${BINCV_PI_OPENCV:-0}"
+PREV="$(remote "cat $REMOTE_DIR/$STAMP 2>/dev/null || echo none" | tr -d '\r')"
+if [[ "$PREV" != "$WANT" ]]; then
+    # `none` is cleared TOO, not skipped. An unstamped build directory is not an
+    # empty one -- it is one built before this guard existed, which is precisely
+    # the case that produced X-62's false null. On a genuinely fresh directory
+    # there is nothing to delete and the rebuild is a no-op.
+    info "OpenCV build flag ($PREV -> $WANT): clearing benchmark binaries it did not build"
+    remote "find $REMOTE_DIR/bincv-cpp/build-pi/benchmark -maxdepth 1 -type f -perm -u+x -delete 2>/dev/null || true"
+    remote "cd $REMOTE_DIR && cmake --build bincv-cpp/build-pi -j\$(nproc) >/dev/null" \
+        || fail "rebuild after clearing stale binaries failed"
+    remote "printf '%s' '$WANT' > $REMOTE_DIR/$STAMP"
+fi
+
+# --------------------------------------------------------------------------
 # Run, pinned to one core
 # --------------------------------------------------------------------------
 printf '\n  run\n'
