@@ -10159,8 +10159,62 @@ which is exact — unlike [X-62](#x-62--e-34--can-the-four-tap-correlations-beco
 this arm computes **the same integers**, and the arms are compared for **equality**
 before they are timed. A mismatch is a bug, not a trade.
 
-**Method:** `benchmark/kpbatch_staged_ceiling.cpp` for the ceiling, `-mavx2`;
-whole-frontend via `benchmark/frontend_sequence.cpp`; both with OpenCV at one thread.
+---
+
+#### THE CEILING: 2.9×, BIT-EXACT — AND THE CREDIT IS NOT WHERE THE PROPOSAL PUT IT
+
+Three runs, idle machine, 20 batches of 8 keypoints, **all arms produce the same ten
+integers per keypoint and are checked for equality before timing**:
+
+| arm | ns / 20 batches | vs A |
+|---|---|---|
+| **A** shipped: scalar, one keypoint at a time, `POPCNT` | 111 586 – 122 727 | 1.000× |
+| **B** staged + **per-row emulated popcount** | 39 174 – 41 569 | **2.85 – 2.95×** |
+| **C** staged + **Harley-Seal CSA tree** | 36 835 – 42 398 | **2.90 – 3.03×** |
+| *(the staging transpose alone)* | 12 363 – 14 031 | — |
+
+**B AND C ARE THE SAME WITHIN NOISE, AND THAT REFUTES HALF OF
+[D-55](ARCHITECTURE.md#8-design-decisions).** The proposal argued that AVX2's missing
+vector popcount was a first-order obstacle and that a CSA tree — pure `AND`/`XOR`,
+replacing 31 emulated popcounts with five — would be worth ~1.7× over emulation.
+**Measured: 0–5%, inside the spread.** Arm B exists precisely to split the credit, and
+it took all of it.
+
+> **CONTIGUITY WAS THE ENTIRE STORY. The popcount was never the bottleneck — the
+> ADDRESSING was**, which is [X-41](#x-41--e-23--is-the-extraction-addressable--done)'s
+> finding arriving from a third direction.
+
+**Amortised over LK iterations** — the transpose is paid once per batch per level, the
+inner loop once per iteration:
+
+| iterations | 1 | 2 | 3 | 5 | 10 | 20 |
+|---|---|---|---|---|---|---|
+| **C + staging, vs A** | **2.18×** | 2.48× | 2.61× | 2.72× | 2.80× | **2.85×** |
+
+**It clears the 2.0× bar at ONE iteration**, so the amortisation argument, which was
+the proposal's load-bearing claim, turns out not to be load-bearing either. Staging
+pays for itself immediately.
+
+**FOOTPRINT: 15 872 B per 8-keypoint batch, one batch live at a time — +3.6% on a
+436 704 B peak.** Under X-66's +5% decline threshold, and an order of magnitude below
+[E-26](ARCHITECTURE.md#register)'s declined +21%.
+
+**A NOTE ON `target("avx2")`, BECAUSE IT IS WHY X-60 LOST AND IT IS NOT ABOUT AVX2.**
+GCC and Clang refuse to inline a callee whose target features are **not a subset of the
+caller's** — the attribute exists for runtime multiversioning, and inlining an AVX2 body
+into a baseline caller would defeat it. X-60 marked leaf helpers, so every one became a
+real call: 310 per window. This benchmark puts `-mavx2` on the **whole translation
+unit** instead, and `nm` confirms `popcnt32`, `harleySeal32` and `csa` have **no
+standalone symbols** while `avx2_ceiling.cpp`'s attribute-marked functions still do.
+**The rule for shipping: mark ONE COARSE entry point, never leaf helpers.**
+
+**Status: the ceiling clears Band A's first half (≥2.0×). The whole-frontend arm
+(≥1.3×) is owed**, and [D-53](ARCHITECTURE.md#8-design-decisions) makes it mandatory
+rather than confirmatory — X-62 was 1.75× in the kernel and 0.31× on the frontend.
+
+**Method:** `benchmark/kpbatch_staged_ceiling.cpp` for the ceiling, `-mavx2` on the
+target rather than on the functions; whole-frontend via
+`benchmark/frontend_sequence.cpp`; both with OpenCV at one thread.
 x86 only — aarch64 has `CNT` and its own measured paths, and this changes nothing there.
 
 ---

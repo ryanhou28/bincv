@@ -156,3 +156,21 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
         target_link_libraries(${benchmark_name} PRIVATE residual_arms)
     endif()
 endforeach()
+
+# ---------------------------------------------------------------------------
+# X-66 / E-36: the staged-keypoint AVX2 ceiling needs -mavx2 on its own translation
+# unit. NOT `__attribute__((target("avx2")))` -- X-60 measured that blocking
+# inlining, which turned `slicedSignedSum` into 310 real calls per window and cost
+# 1.9x. The flag goes on the target so the whole TU is compiled for it and the
+# intrinsics inline like any other code.
+#
+# Guarded on the compiler accepting it, and the benchmark itself compiles to a
+# one-line "nothing to measure" without __AVX2__, so an aarch64 build still builds.
+# ---------------------------------------------------------------------------
+if(TARGET kpbatch_staged_ceiling)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-mavx2" BINCV_HAVE_MAVX2)
+    if(BINCV_HAVE_MAVX2)
+        target_compile_options(kpbatch_staged_ceiling PRIVATE -mavx2)
+    endif()
+endif()
