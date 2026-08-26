@@ -9723,6 +9723,76 @@ ratio being ~1.0 across all three rather than on any single figure.
 
 ---
 
+### X-62 · E-34 — can the four tap correlations become one? · `RULE ONLY`
+
+**COMMITTED BEFORE ANY KERNEL CHANGE, AND WITH A CEILING BEFORE THE ARM.** Five
+ceilings in this project have overstated ([D-49](ARCHITECTURE.md#8-design-decisions)),
+and the last three x86 attempts each cost a working implementation that was then
+reverted. This one gets priced first.
+
+**Gates:** [E-34](ARCHITECTURE.md#register), the largest of the three multipliers
+[D-51](ARCHITECTURE.md#8-design-decisions) identified, in the kernel that is **67% of
+the frontend**.
+
+**THE ACCOUNT THIS COMES FROM.** binCV's LK issues **5.6× OpenCV's operations** per
+window per iteration — 3 720 against 660 — and holds a **2× packing advantage**
+(32 px/op at N = 2 in `uint32_t`, against OpenCV's 16 at `CV_16S`), so it costs **2.8×**.
+Of the three multipliers, **N² is a property of bit-sliced arithmetic** and **×2 is
+sign-magnitude ([D-3](ARCHITECTURE.md))**. **Only the ×5 is a design choice**, and
+[D-20](ARCHITECTURE.md) records it as a consequence of bits not being interpolable
+rather than as an option that was weighed.
+
+**THE IDEA.** Correlation is linear, so
+`Σ(w₀₀t₀₀ + w₀₁t₀₁ + w₁₀t₁₀ + w₁₁t₁₁)·G` may be computed as **one** weighted patch
+correlated **once**, instead of four correlations combined afterwards — *if* the
+bilinear weights are **quantised** so the weighted sum can be formed in bit-sliced
+arithmetic. That is `weightedAxis`'s existing machinery (`ops/pyramid.hpp`), applied to
+taps instead of filter positions.
+
+**THE COLLAPSE IS NOT FREE, AND THE CEILING EXISTS TO PRICE THAT.** Forming the
+weighted patch costs bit-sliced adds over `N + k` planes plus a requantise back to N
+bits, once per row — but **shared across both gradient components**, where the four
+correlations are paid per component. Rough account: **~120 ops/row → ~60**, i.e. **~2×**,
+not the ×5 the tap count alone suggests.
+
+**ARMS** (`benchmark/tapcollapse_ceiling.cpp`, reference device):
+
+| | |
+|---|---|
+| **A** | today: four correlations, combined with float weights afterwards |
+| **B** | quantised weighted patch formed once, then **one** correlation |
+
+Both compute the same residual sums; **B is an approximation of A, not an identity**,
+so the arms are compared for *closeness*, not equality — which is the opposite of every
+other ceiling in this project and is why the accuracy band below is mandatory.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.**
+
+- **Band A — B is ≥1.6× faster AND the weight quantisation costs <0.02 px** of
+  `rms(usable)` at k = 3 bits. Write the arm. **Then measure accuracy on the sequence
+  before it ships** — [X-51](#x-51--the-frontend-refutes-x-50-and-the-accuracy-harness-is-why--done)
+  is the standing reason a proxy does not settle a shipped default.
+- **Band B — ≥1.6× faster but accuracy costs more.** The trade is real and is the
+  caller's, as [D-24](ARCHITECTURE.md) put route (a) and [D-36](ARCHITECTURE.md) put the
+  filter set. Report both axes; do not change the default.
+- **Band C — <1.6×.** The weighted-sum construction eats the tap saving. **Do not write
+  it**, and record where the ops went — that is the useful half, because it would mean
+  bit-sliced weighted sums are too expensive to be worth reaching for elsewhere.
+- **Band D — B is SLOWER.** Then `weightedAxis` at this shape costs more than four
+  popcount correlations, which contradicts the arithmetic above and means the op-count
+  model in D-51 is wrong. **Report the model failure, not the timing.**
+
+**A LIMIT DECLARED IN ADVANCE.** Even Band A leaves binCV at roughly **1.4× OpenCV's
+cost on LK**, not ahead of it — the N² and sign-magnitude factors remain. What it would
+buy is the **frontend**, where LK is 67%: a 2× on LK is roughly **1.5× on the frontend**
+against OpenCV on x86, and correspondingly more on aarch64 where binCV already leads.
+**No claim beyond that will be made from this experiment.**
+
+**Method:** `benchmark/tapcollapse_ceiling.cpp` via `scripts/run_on_pi.sh pi4`;
+accuracy via the X-39 sequence harness if a speed band fires.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
