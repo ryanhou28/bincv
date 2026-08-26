@@ -10263,8 +10263,47 @@ unit** instead, and `nm` confirms `popcnt32`, `harleySeal32` and `csa` have **no
 standalone symbols** while `avx2_ceiling.cpp`'s attribute-marked functions still do.
 **The rule for shipping: mark ONE COARSE entry point, never leaf helpers.**
 
-**Status: the ceiling clears Band A's first half (≥2.0×). The whole-frontend arm
-(≥1.3×) is owed**, and [D-53](ARCHITECTURE.md#8-design-decisions) makes it mandatory
+#### THE GUARD ARM: 2.9× WAS OPTIMISTIC BY 28%, AND THIS WOULD HAVE BEEN THE SIXTH
+
+**ARMS B AND C STAGE EVERYTHING, TAPS INCLUDED. A KERNEL CANNOT.** The four tap words
+depend on each keypoint's own integer displacement `(tapX, tapY)`, which **differs
+across lanes and moves between iterations**. Only the **eight previous-frame words** —
+`self`, `magX`, `magY`, `signX`, `signY` — are genuinely invariant. So arm **D** stages
+those eight and **gathers the four taps**, which is the honest bound on a shipped path.
+
+| arm | ns / 20 batches | vs A |
+|---|---|---|
+| **C** staged **everything** (optimistic) | 38 402 – 43 478 | 2.71 – 3.06× |
+| **D** staged invariants, **taps gathered** | **54 651 – 56 215** | **2.085 / 2.092 / 2.122×** |
+
+**Bit-exact, and tight across three runs.** The difference between C and D is **entirely
+the tap gathers**, which reproduces [X-61](#x-61--batching-across-keypoints-the-third-granularity-and-the-third-refutation--done)'s
+finding at a smaller scale: gathers cost, and every word moved off them is a win.
+
+**[D-49](ARCHITECTURE.md#8-design-decisions) SAYS FIVE CEILINGS HAVE OVERSTATED. THIS
+WOULD HAVE BEEN THE SIXTH** — 2.9× reported where 2.1× is available. It was caught by
+writing the arm that models what the kernel can actually do, before writing the kernel.
+
+**Amortised over LK iterations** — and unlike arm C, here the amortisation *does*
+matter, because arm D's inner loop is slower so the fixed transpose is a larger share:
+
+| iterations | 1 | 2 | 3 | 5 | 10 | 20 |
+|---|---|---|---|---|---|---|
+| **D + staging, vs A** | **1.655×** | 1.837× | 1.907× | 1.967× | 2.015× | **2.039×** |
+
+**Footprint is smaller than the buffer this benchmark declares**: only the eight
+invariant words need staging, 31 × 8 × 32 B = **7 936 B, +1.8%** on a 436 704 B peak.
+The 15 872 B the harness prints includes the taps, which the shipped path would gather.
+
+**WHAT THIS PROJECTS ONTO THE FRONTEND, STATED BEFORE MEASURING IT.**
+[X-41](#x-41--e-23--is-the-extraction-addressable--done) puts `residualSums` at
+**43.7%** of the frontend. At 2.0×, Amdahl gives **1/(0.563 + 0.437/2.0) = 1.28×** —
+**below Band A's 1.3× line, marginally.** So the frontend arm is expected to land on
+the boundary, and Band B (report where it went, do not ship) is a live outcome rather
+than a formality.
+
+**Status: the ceiling clears Band A's first half (≥2.0×) on the implementable arm, but
+only just. The whole-frontend arm (≥1.3×) is owed**, and [D-53](ARCHITECTURE.md#8-design-decisions) makes it mandatory
 rather than confirmatory — X-62 was 1.75× in the kernel and 0.31× on the frontend.
 
 **Method:** `benchmark/kpbatch_staged_ceiling.cpp` for the ceiling, `-mavx2` on the

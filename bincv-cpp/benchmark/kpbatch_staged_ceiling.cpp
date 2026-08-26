@@ -255,6 +255,65 @@ void armStagedCsa(const Staged& s, Sums* out) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ARM D -- THE CONFIGURATION THAT IS ACTUALLY IMPLEMENTABLE, AND THE REASON THIS
+// ARM EXISTS AT ALL.
+//
+// Arms B and C stage EVERYTHING, taps included. A real kernel cannot: the four tap
+// words depend on each keypoint's own integer displacement `(tapX, tapY)`, which
+// DIFFERS ACROSS LANES and MOVES BETWEEN ITERATIONS. Only the eight
+// previous-frame words -- `self`, `magX`, `magY`, `signX`, `signY` -- are genuinely
+// invariant (D-55).
+//
+// So this arm stages those eight and GATHERS the four taps, which is the honest
+// upper bound on the shipped path. D-49 records five ceilings that overstated;
+// arm C would have been the sixth if this one had not been written.
+// ---------------------------------------------------------------------------
+void armStagedTapsGathered(const Staged& s, const Window* w, Sums* out) {
+    // Lane strides into the Window array, in 32-bit units -- the index vector a
+    // gather needs. Constant across the batch, hoisted out of the row loop.
+    alignas(32) int32_t idx[kKp];
+    for (size_t k = 0; k < kKp; ++k)
+        idx[k] = static_cast<int32_t>(k * (sizeof(Window) / sizeof(uint32_t)));
+    const __m256i vidx = _mm256_load_si256(reinterpret_cast<const __m256i*>(idx));
+    const int32_t* base = reinterpret_cast<const int32_t*>(w);
+
+    __m256i tap[kRows][4][kN];
+    for (size_t y = 0; y < kRows; ++y) {
+        for (size_t v = 0; v < 4; ++v) {
+            for (size_t p = 0; p < kN; ++p) {
+                const size_t off = static_cast<size_t>(
+                    reinterpret_cast<const uint32_t*>(&w[0].val[y][v][p]) -
+                    reinterpret_cast<const uint32_t*>(w));
+                tap[y][v][p] = _mm256_i32gather_epi32(base + off, vidx, 4);
+            }
+        }
+    }
+    for (size_t c = 0; c < kComp; ++c) {
+        for (size_t v = 0; v < kVals; ++v) {
+            __m256i acc = _mm256_setzero_si256();
+            for (size_t j = 0; j < kN; ++j) {
+                for (size_t i = 0; i < kN; ++i) {
+                    __m256i sub = _mm256_setzero_si256();
+                    for (size_t y = 0; y < kRows; ++y) {
+                        // `self` (v == 4) is invariant and staged; the four taps are
+                        // gathered. That split is the whole point of this arm.
+                        const __m256i val = (v == 4) ? s.val[y][v][i] : tap[y][v][i];
+                        const __m256i both = _mm256_and_si256(val, s.mag[c][y][j]);
+                        const __m256i opp = _mm256_and_si256(both, s.sgn[c][y]);
+                        sub = _mm256_add_epi32(
+                            sub, _mm256_sub_epi32(popcnt32(both),
+                                                  _mm256_slli_epi32(popcnt32(opp), 1)));
+                    }
+                    acc = _mm256_add_epi32(
+                        acc, _mm256_slli_epi32(sub, static_cast<int>(i + j)));
+                }
+            }
+            scatterLanes(acc, c, v, out);
+        }
+    }
+}
+
 bool same(const Sums* a, const Sums* b) {
     for (size_t k = 0; k < kKp; ++k)
         for (size_t c = 0; c < kComp; ++c)
@@ -297,18 +356,21 @@ int main() {
     for (size_t b = 0; b < kBatches; ++b) stage(&ws[b * kKp], sts[b]);
 
     // EQUALITY BEFORE TIMING. This is an identity, not an approximation.
-    std::vector<Sums> a(kKp), bb(kKp), cc(kKp);
-    bool okB = true, okC = true;
+    std::vector<Sums> a(kKp), bb(kKp), cc(kKp), dd(kKp);
+    bool okB = true, okC = true, okD = true;
     for (size_t b = 0; b < kBatches; ++b) {
         armScalar(&ws[b * kKp], a.data());
         armStagedPopcount(sts[b], bb.data());
         armStagedCsa(sts[b], cc.data());
+        armStagedTapsGathered(sts[b], &ws[b * kKp], dd.data());
         if (!same(a.data(), bb.data())) okB = false;
         if (!same(a.data(), cc.data())) okC = false;
+        if (!same(a.data(), dd.data())) okD = false;
     }
-    std::printf("  EQUALITY over %zu batches: B %s   C %s\n", kBatches,
-                okB ? "exact" : "MISMATCH", okC ? "exact" : "MISMATCH");
-    if (!okB || !okC) {
+    std::printf("  EQUALITY over %zu batches: B %s   C %s   D %s\n", kBatches,
+                okB ? "exact" : "MISMATCH", okC ? "exact" : "MISMATCH",
+                okD ? "exact" : "MISMATCH");
+    if (!okB || !okC || !okD) {
         std::printf("    A: %lld %lld   B: %lld %lld   C: %lld %lld\n", a[0].v[0][0],
                     a[0].v[1][4], bb[0].v[0][0], bb[0].v[1][4], cc[0].v[0][0], cc[0].v[1][4]);
         return 1;
@@ -336,6 +398,13 @@ int main() {
                  measure::g_sink += static_cast<size_t>(o[0].v[0][0]);
              }
          }},
+        {"D  staged invariants + GATHERED taps", [&](int) {
+             Sums o[kKp];
+             for (size_t b = 0; b < kBatches; ++b) {
+                 armStagedTapsGathered(sts[b], &ws[b * kKp], o);
+                 measure::g_sink += static_cast<size_t>(o[0].v[0][0]);
+             }
+         }},
         {"   (the staging transpose alone)", [&](int) {
              for (size_t b = 0; b < kBatches; ++b) {
                  stage(&ws[b * kKp], sts[b]);
@@ -351,9 +420,11 @@ int main() {
 
     // WHAT THE STAGING COSTS, AMORTISED. The transpose is paid once per batch per
     // level; the inner loop once per LK ITERATION.
-    const double stageNs = tt[3].medianNs, aNs = tt[0].medianNs, cNs = tt[2].medianNs;
+    // Amortise arm D, not arm C. D is what a kernel can actually do, and only the
+    // eight INVARIANT words are staged -- so only their transpose is amortised.
+    const double stageNs = tt[4].medianNs, aNs = tt[0].medianNs, cNs = tt[3].medianNs;
     std::printf("\n  amortised over LK iterations (transpose once, inner loop per iteration):\n");
-    std::printf("    %-12s %14s %14s %9s\n", "iterations", "A", "C + staging", "vs A");
+    std::printf("    %-12s %14s %14s %9s\n", "iterations", "A", "D + staging", "vs A");
     for (int it : {1, 2, 3, 5, 10, 20}) {
         const double an = aNs * it, cn = stageNs + cNs * it;
         std::printf("    %-12d %14.1f %14.1f %8.3fx\n", it, an, cn, an / cn);
