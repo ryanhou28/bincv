@@ -10622,7 +10622,7 @@ between each. Gate green on all four configurations, check counts unchanged.
 
 ---
 
-### X-71 · E-40 — the input conversion, on both architectures · `RULE ONLY`
+### X-71 · E-40 — the input conversion, on both architectures · `DONE`
 
 **COMMITTED BEFORE ANY CODE.**
 
@@ -10695,9 +10695,76 @@ the current path is a scalar per-pixel loop on every platform, so a NEON arm is 
 additive and can ship on correctness while its speed number waits for a device window.
 **That difference is the whole reason one waits and this does not.**
 
+---
+
+#### THE RESULT: BAND A, AND THE PORTABLE ARM ALONE IS 10×
+
+**The arms, 752×480 at 10% set — a real edge map's density, because a dense or empty
+image would make arm A's branch predictable and flatter it:**
+
+| arm | ns/frame | vs A | ns/px |
+|---|---|---|---|
+| **A** shipped: per-pixel branch | 401 487 | 1.00× | 1.1123 |
+| **B** portable branchless, **no intrinsics** | 39 131 | **10.26×** | 0.1084 |
+| **C** x86 `movemask` | 8 703 | **46.13×** | 0.0241 |
+| *(allocate + zero, no packing)* | 477 | — | 0.0013 |
+
+**All bit-identical to A.** And **the allocation is 0.1% of arm A** — X-71 required that
+number in advance precisely so a packing win could not be mistaken for a scope failure,
+and it rules out Band D's alternative hypothesis outright: **the packing really was the
+problem.**
+
+**ARM B IS THE RESULT THAT MATTERS MOST.** Ten times faster **with no intrinsics at
+all** — it ships on every target binCV supports, including one with no vector unit, and
+it is the *whole* path there. The `46×` needs AVX2; the `10×` needs nothing.
+
+**THE MANDATORY FRONTEND ARM** ([D-53](ARCHITECTURE.md#8-design-decisions)), V1_02, 900
+frames, two runs each:
+
+| | `fromCVMat` ms | binCV ms | vs 1-thread OpenCV |
+|---|---|---|---|
+| old conversion | 0.878 / 0.899 (32%) | 2.725 / 2.828 | 1.13× / 1.11× |
+| **new conversion** | **0.051 / 0.064 (3%)** | **1.869 / 2.004** | **1.56× / 1.63×** |
+| **new, 4 threads** | 0.055 / 0.053 (5%) | **1.035 / 0.997** | **3.04× / 3.08×** |
+
+**`fromCVMat` 15.5× on the real workload; the frontend 1.43×.** Band A on both halves.
+The conversion falls from **32% of the frontend to 3%**.
+
+> **binCV IS NOW 3.06× SINGLE-THREADED OpenCV ON THE CANONICAL SEQUENCE, AT 6.23× LESS
+> MEMORY.** [X-67](#x-67--build-decomposed--and-e-33-is-worth-almost-nothing--done)
+> projected exactly 3.04× for "conversion excluded" — and now that the conversion is
+> nearly free, **the projection and the measurement agree to two decimals.**
+
+**A BUG THE `uint64_t` ARM CAUGHT AND NOTHING NARROWER COULD HAVE.** The first
+implementation let the vector loop stop at a multiple of **32** and handed the portable
+tail a start that was not word-aligned; at 64-bit words a 32-pixel group is *half* a
+word, so the tail's bits landed at the wrong offsets — 336 set where 398 were expected.
+Fixed by consuming whole **words** (`kGroup`), and the precondition is now a
+`BINCV_ASSERT` rather than a comment. **`-Wconversion` and the four-word-type sweep are
+[CLAUDE.md](../CLAUDE.md)'s load-bearing rule and this is what they are for.**
+
+**HOW AVX2 SHIPS WITHOUT AN `-mavx2` BUILD.** `movemask32` is marked
+`target("avx2")` and selected by a cached `__builtin_cpu_supports`, so **the baseline
+ISA is unchanged** — the project's stated x86 floor is SSE4.2-era
+([D-47](ARCHITECTURE.md#8-design-decisions)), and AVX2 is a 2013 part. This is the rule
+[X-66](#x-66--e-36--staging-not-gathering-the-x86-keypoint-batch-second-attempt--rule-only)
+derived from X-60's failure, applied: **mark one coarse entry point, never leaf
+helpers.** Here the marked function *is* the unit of work — load, compare, movemask, 32
+pixels — not a helper inside one, so nothing that mattered was prevented from inlining.
+
+**aarch64 SHIPS TOO, AND ITS SPEED IS UNMEASURED.** NEON has no move-mask, so the arm
+ANDs per-lane bit weights and folds sixteen bytes with three pairwise adds. **Unlike
+[E-39](ARCHITECTURE.md#register) this displaces no measured optimisation** — the old
+path was a scalar per-pixel loop on every platform — so it is strictly additive and
+ships on correctness. **The number waits for a device window**, and until then no
+aarch64 claim is made.
+
+**Decision: SHIPPED, all three paths.** [D-63](ARCHITECTURE.md#8-design-decisions).
+
 **Method:** `benchmark/convert_ceiling.cpp` for the arms; `benchmark/frontend_sequence.cpp`
 for the mandatory frontend arm; V1_02, OpenCV at one thread. Bit-exactness in
-`tests/test_opencv_interop.cpp`.
+`tests/test_opencv_interop.cpp`, across all four word types. Gate green on all four
+configurations.
 
 ---
 

@@ -3780,6 +3780,46 @@ regression risk on the deployment target, and zero gain there either. The staged
 variants are [E-39](#register), and they wait for a device window rather than being
 written blind.
 
+### D-63: the input conversion is a move-mask, and the portable arm alone is 10×
+
+[X-71](EXPERIMENTS.md) replaced a per-pixel branch with a bit-plane extraction.
+
+| arm | vs shipped | needs |
+|---|---|---|
+| **portable branchless** | **10.3×** | nothing |
+| x86 `movemask` | **46.1×** | AVX2, at run time |
+| aarch64 NEON bitmask | *unmeasured* | NEON (baseline on aarch64) |
+
+**`fromCVMat` is 15.5× on the real workload and falls from 32% of the frontend to 3%;
+the frontend gains 1.43×.** At four threads **binCV is 3.06× single-threaded OpenCV at
+6.23× less memory** — and [X-67](EXPERIMENTS.md)'s "conversion excluded" projection of
+3.04× now matches the measurement to two decimals.
+
+**The portable arm is the one that matters most:** ten times faster with **no intrinsics
+at all**, so every target gets it — including one with no vector unit, where it is the
+whole path.
+
+**AVX2 ships without an `-mavx2` build.** `movemask32` is `target("avx2")` behind a
+cached `__builtin_cpu_supports`, leaving the baseline at the SSE4.2-era floor
+[D-47](#8-design-decisions) set. This is [X-66](EXPERIMENTS.md)'s rule from X-60's
+failure — **mark one coarse entry point, never leaf helpers** — and here the marked
+function *is* the unit of work, so nothing that mattered was blocked from inlining.
+
+**Why the orders line up:** `bitMask(x)` is `1 << (x % WordBits)` and
+`_mm256_movemask_epi8` returns byte `i` in bit `i`, both LSB-first. **The two
+conventions are the same one**, so no shuffle is needed anywhere.
+
+**A bug `uint64_t` caught and nothing narrower could have.** The vector loop first
+stopped at a multiple of 32; at 64-bit words that is *half* a word, so the portable
+tail wrote its bits at the wrong offsets. Fixed by consuming whole **words**, with the
+precondition now a `BINCV_ASSERT`. [CLAUDE.md](CLAUDE.md)'s four-word-type sweep is
+load-bearing and this is what it is for.
+
+**aarch64 ships on correctness, unmeasured on speed.** Unlike [E-39](#register) this
+**displaces no measured optimisation** — the old path was a scalar per-pixel loop
+everywhere — so it is strictly additive. That difference is the whole reason one waits
+for a device window and this does not.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

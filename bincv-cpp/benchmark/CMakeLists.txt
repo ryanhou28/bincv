@@ -174,3 +174,14 @@ if(TARGET kpbatch_staged_ceiling)
         target_compile_options(kpbatch_staged_ceiling PRIVATE -mavx2)
     endif()
 endif()
+
+# X-71 / E-40: the conversion arms need -mavx2 on their own translation unit, for the
+# reason X-66's target does -- `target("avx2")` on individual functions blocks
+# inlining (X-60 measured 1.9x for exactly that).
+if(TARGET convert_ceiling)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-mavx2" BINCV_HAVE_MAVX2_CVT)
+    if(BINCV_HAVE_MAVX2_CVT)
+        target_compile_options(convert_ceiling PRIVATE -mavx2)
+    endif()
+endif()

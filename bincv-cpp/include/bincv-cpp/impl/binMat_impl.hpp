@@ -11,6 +11,17 @@
 // written in terms of these two macros, so the dependency is real. It also
 // carries <stdexcept> in exactly the configuration whose expansion needs it, and
 // BINCV_ABI_NAMESPACE.
+// X-71: the AVX2 row packer is selected at RUN TIME, so the library's baseline ISA is
+// unchanged and no -mavx2 build is required. Guarded on the compiler supporting both
+// the target attribute and the cpu probe.
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+#define BINCV_X86_RUNTIME_AVX2 1
+#include <immintrin.h>
+#endif
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 #include "../core/error.hpp"
 
 // <ostream> is here for operator<< alone, which cannot be expressed without a
@@ -259,6 +270,137 @@ QuantMat<1, WordType_>& QuantMat<1, WordType_>::operator=(QuantMat&& other) noex
 #ifdef BINCV_WITH_OPENCV
 // OpenCV interoperability implementations
 
+namespace impl {
+
+/// @brief Scatters a 32-pixel mask into `WordType` words. **INTERNAL** (X-71).
+/// @note `bitsPerWord` is a power of two, so this is one store, a shifted OR, or a
+///       split -- a 32-pixel group can never straddle a word boundary.
+template <typename WordType>
+inline void scatter32(uint32_t m, size_t x, WordType* rowOut) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    if constexpr (kBits >= 32) {
+        rowOut[x / kBits] |= static_cast<WordType>(static_cast<WordType>(m) << (x % kBits));
+    } else {
+        for (size_t c = 0; c < 32 / kBits; ++c) {
+            rowOut[(x / kBits) + c] |=
+                static_cast<WordType>((m >> (c * kBits)) & lowBitsMask<WordType>(kBits));
+        }
+    }
+}
+
+/// @brief Packs `[from, width)` of a row, branchless and portable. **INTERNAL** (X-71).
+/// @note **Not merely a tail handler.** This is the whole path on any target without a
+///       vector one, and on its own it is **10.3×** the per-pixel loop it replaces
+///       (0.108 ns/px against 1.112). `!= 0` is a set-flag, not a jump.
+template <typename WordType>
+inline void packRowNonZeroPortable(const uint8_t* rowIn, size_t from, size_t width,
+                                   WordType* rowOut) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    // The vector paths consume whole WORDS precisely so this holds; `uint64_t` is
+    // where it first mattered, and nothing narrower could have exposed it.
+    BINCV_ASSERT(from % kBits == 0, "packRowNonZeroPortable: `from` must be word-aligned");
+    size_t x = from;
+    for (; x + kBits <= width; x += kBits) {
+        WordType acc = 0;
+        for (size_t i = 0; i < kBits; ++i)
+            acc |= static_cast<WordType>(static_cast<WordType>(rowIn[x + i] != 0) << i);
+        rowOut[x / kBits] |= acc;
+    }
+    if (x < width) {
+        WordType acc = 0;
+        for (size_t i = 0; x + i < width; ++i)
+            acc |= static_cast<WordType>(static_cast<WordType>(rowIn[x + i] != 0) << i);
+        rowOut[x / kBits] |= acc;
+    }
+}
+
+#if defined(BINCV_X86_RUNTIME_AVX2)
+/// @brief The non-zero-ness of 32 bytes, as 32 bits. **INTERNAL** (X-71).
+///
+/// **ONE COARSE ENTRY POINT, NEVER LEAF HELPERS -- and this is the coarse one.**
+/// `__attribute__((target(...)))` stops a compiler inlining a function into a caller
+/// whose feature set is smaller: that is what the attribute is FOR, since the caller
+/// may run where the callee's instructions do not exist.
+/// [X-60](../../../EXPERIMENTS.md) marked leaf helpers *inside* a hot loop and paid
+/// **310 real calls per window**. Here the call IS the unit of work -- a vector load,
+/// a compare and a movemask for 32 pixels -- not a helper inside one.
+///
+/// This is why binCV uses AVX2 with **no `-mavx2` build**: the baseline ISA is
+/// unchanged and the fast path is chosen at run time.
+__attribute__((target("avx2"))) inline uint32_t movemask32(const uint8_t* p) {
+    const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+    // AVX2 has no "compare not equal": compare against zero and invert once.
+    return ~static_cast<uint32_t>(
+        _mm256_movemask_epi8(_mm256_cmpeq_epi8(v, _mm256_setzero_si256())));
+}
+
+/// @brief Is AVX2 present on this machine? Asked once, not once per row.
+inline bool hasVectorPack() {
+    static const bool kYes = __builtin_cpu_supports("avx2");
+    return kYes;
+}
+#define BINCV_HAVE_VECTOR_PACK 1
+#elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+/// @brief The same 32-bit mask, without a move-mask instruction. **INTERNAL** (X-71).
+/// @note aarch64 has none, so AND per-lane bit weights and let three pairwise adds
+///       fold sixteen bytes into a sixteen-bit mask. NEON is baseline on aarch64, so
+///       unlike the AVX2 path there is nothing to dispatch on.
+inline uint32_t movemask32(const uint8_t* p) {
+    const uint8x16_t weights = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+    uint32_t m = 0;
+    for (size_t half = 0; half < 2; ++half) {
+        const uint8x16_t v = vld1q_u8(p + half * 16);
+        const uint8x16_t w = vandq_u8(vmvnq_u8(vceqzq_u8(v)), weights);
+        uint8x8_t f = vpadd_u8(vget_low_u8(w), vget_high_u8(w));
+        f = vpadd_u8(f, f);
+        f = vpadd_u8(f, f);
+        m |= static_cast<uint32_t>(vget_lane_u16(vreinterpret_u16_u8(f), 0)) << (16 * half);
+    }
+    return m;
+}
+inline bool hasVectorPack() { return true; }
+#define BINCV_HAVE_VECTOR_PACK 1
+#endif
+
+/// @brief Packs one row of bytes to 1 bit per pixel: bit set iff the byte is non-zero.
+///        **INTERNAL** ([X-71](../../../EXPERIMENTS.md)).
+/// @param rowOut Zero-initialised on entry; only bits `[0, width)` are written, so a
+///        row's PADDING BITS STAY ZERO ([CLAUDE.md](../../../CLAUDE.md)'s hard rule --
+///        word-wise reductions over-count otherwise).
+///
+/// **WHAT THIS REPLACES.** A per-pixel `if (rowIn[x]) rowOut[...] |= bitMask(x)`: a
+/// data-dependent branch per pixel and a read-modify-write per set pixel. On an edge
+/// map that branch is unpredictable **by construction** -- being unpredictable is what
+/// an edge map is -- so it was close to a worst case for a scalar loop.
+///
+/// **WHY THE BIT ORDERS LINE UP AND NO SHUFFLE IS NEEDED.** `bitMask(x)` is
+/// `1 << (x % WordBits)`, so pixel `x` lands in bit `x` of its word, LSB first.
+/// `_mm256_movemask_epi8` returns the top bit of each of 32 bytes as 32 bits, byte `i`
+/// in bit `i`, LSB first. **The two conventions are the same one.**
+template <typename WordType>
+inline void packRowNonZero(const uint8_t* rowIn, size_t width, WordType* rowOut) {
+    size_t x = 0;
+#if defined(BINCV_HAVE_VECTOR_PACK)
+    // WHOLE WORDS, NOT WHOLE 32-PIXEL GROUPS. At 64-bit words a 32-pixel group is half
+    // a word, and letting the portable tail start mid-word put its bits at the wrong
+    // offsets -- caught by the `uint64_t` arm of tests/test_opencv_interop.cpp and by
+    // nothing narrower. `kGroup` is a multiple of the word width at every width binCV
+    // supports, so `x` is word-aligned when the loop ends.
+    constexpr size_t kGroup = bitsPerWord<WordType>() > 32 ? bitsPerWord<WordType>()
+                                                           : size_t{32};
+    if (hasVectorPack()) {
+        for (; x + kGroup <= width; x += kGroup) {
+            for (size_t g = 0; g < kGroup / 32; ++g)
+                scatter32<WordType>(movemask32(rowIn + x + g * 32), x + g * 32, rowOut);
+        }
+    }
+#endif
+    packRowNonZeroPortable<WordType>(rowIn, x, width, rowOut);
+}
+
+
+} // namespace impl
+
 template <typename WordType_>
 void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
     if (input.empty()) {
@@ -282,11 +424,7 @@ void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
     for (size_t y = 0; y < newHeight; ++y) {
         const uint8_t* rowIn = input.ptr<uint8_t>(static_cast<int>(y));
         WordType* rowOut = newData.data() + y * newAlignedWidth;
-        for (size_t x = 0; x < newWidth; ++x) {
-            if (rowIn[x]) {
-                rowOut[impl::wordIndex<WordType>(x)] |= impl::bitMask<WordType>(x);
-            }
-        }
+        impl::packRowNonZero<WordType>(rowIn, newWidth, rowOut);
     }
 
     width = newWidth;
