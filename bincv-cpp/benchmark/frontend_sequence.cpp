@@ -41,7 +41,15 @@
 #include "bincv-cpp/ops/opticalFlow.hpp"
 #include "bincv-cpp/ops/pyramid.hpp"
 
-using W = uint32_t;
+// The word type is a build-time choice so the SAME binary shape can be measured
+// at 32 and 64 bits. X-54 measured uint64_t on aarch64 and it LOST on track --
+// but only because every NEON path is guarded on sizeof(WordType) == 4 and
+// compiled out. ON x86 THERE ARE NO SUCH GUARDS, so the 2x packing is not paid
+// for with a lost fast path, and that case had never been measured.
+#ifndef BINCV_BENCH_WORD
+#define BINCV_BENCH_WORD uint32_t
+#endif
+using W = BINCV_BENCH_WORD;
 using Clock = std::chrono::steady_clock;
 
 namespace {

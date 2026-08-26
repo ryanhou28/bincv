@@ -3365,6 +3365,39 @@ that is a design choice rather than a property of bit-sliced arithmetic.
 the kernel that is **67% of the frontend**, and D-20 records it as a consequence of the
 design rather than as a measured choice. [E-34](#register).
 
+### D-52: the 31-pixel window caps the packing advantage at 1.94×
+
+[X-63](EXPERIMENTS.md) tested the packing argument cleanly — `uint64_t` on x86, where
+no NEON guard confounds it — and **track moved 2% for a doubled word.**
+
+> **A 31-pixel window occupies ONE `uint32` word.** Widening the word does not let
+> `residualSums` do more per operation; it only wastes more bits.
+
+| word / register | bits | utilisation at a 31-px window |
+|---|---|---|
+| **`uint32` (shipped)** | 32 | **97%** |
+| `uint64` | 64 | 48% |
+| **AVX2** | 256 | **12%** |
+
+**THIS IS THE COMMON CAUSE BEHIND THREE REFUTATIONS.** [X-58](EXPERIMENTS.md) (compiler
+AVX2), [X-60](EXPERIMENTS.md) (hand-written within a row) and [X-61](EXPERIMENTS.md)
+(across keypoints) each failed for a proximate reason — nested loops, pack/unpack,
+gather cost — and **all three were attempts to fill a 256-bit register from a 31-pixel
+window.** Those reasons were real; this is the one underneath them.
+
+**binCV's real rate in LK is 31 px/op** — not 32, 64 or 256 — against OpenCV's 16.
+**A 1.94× packing advantage, capped by the ALGORITHM rather than by the word type or
+the ISA**, against 5.6× the operations: **2.9× cost, which is the gap, fully accounted.**
+
+**What this rules out:** every widening approach — wider words, wider registers, and
+batching windows to fill them ([X-61](EXPERIMENTS.md) measured that one). **The only
+remaining lever is the operation count**, which is [E-34](#register)'s ×5.
+
+**One thing it does not settle:** `uint64` made `build` **worse on x86 (1.2×)** where
+[X-54](EXPERIMENTS.md) measured it **1.66× better on aarch64**. Build is a bulk pass, so
+the window cap does not apply — that it reverses by platform is unexplained, and it
+weakens the prior on [E-33](#register)'s "restructure `build`" avenue.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

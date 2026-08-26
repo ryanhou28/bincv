@@ -9793,6 +9793,74 @@ accuracy via the X-39 sequence harness if a speed band fires.
 
 ---
 
+### X-63 · The 31-pixel window is the cap, and it explains every failure · `DONE`
+
+**ONE MEASUREMENT THAT UNIFIES FOUR.** `uint64_t` doubles the word and therefore
+doubles the pixels per operation — the packing argument that motivated
+[X-58](#x-58--e-32--x86-vector-paths-how-much-is-the-compilers-how-much-is-ours--done),
+[X-60](#x-60--e-33-attempted-on-residualsums-written-bit-exact-and-188-slower--done)
+and [X-61](#x-61--batching-across-keypoints-the-third-granularity-and-the-third-refutation--done).
+[X-54](#x-54--e-9--should-the-word-type-vary-down-the-pyramid--done) measured it on
+aarch64 and it lost **1.32× on track**, but that was the NEON paths compiling out at
+`sizeof(WordType) != 4`. **On x86 there are no such guards**, so this is the clean test
+of the packing argument with nothing else attached.
+
+Full sequence, idle machine (load 1.53), three runs:
+
+| | build | track | binCV | vs OpenCV | bytes |
+|---|---|---|---|---|---|
+| `uint32` (shipped) | 0.995–1.073 | 2.496–2.641 | 3.709–3.952 | **1.00×** | 436 704 |
+| `uint64` | 1.203–1.227 | **2.447–2.574** | 3.886–4.035 | 0.93–0.97× | 439 104 |
+
+**Track moved 2% for a doubled word.** The packing argument fails cleanly, with no
+guards, no gather and no intrinsics to blame — and the reason is embarrassingly simple:
+
+> **THE WINDOW IS 31 PIXELS WIDE. A 31-pixel window occupies ONE `uint32` word.**
+> Widening the word does not let `residualSums` do more per operation; it only wastes
+> more bits.
+
+| word / register | bits | px used | utilisation |
+|---|---|---|---|
+| **`uint32` (shipped)** | 32 | 31 | **97%** |
+| `uint64` | 64 | 31 | **48%** |
+| SSE2 | 128 | 31 | 24% |
+| **AVX2** | 256 | 31 | **12%** |
+
+**THIS IS THE COMMON CAUSE BEHIND THREE PRIOR REFUTATIONS.** X-58 (compiler AVX2),
+X-60 (hand-written within a row) and X-61 (across keypoints) each failed for a
+proximate reason — nested loops, pack/unpack, gather cost — and **all three were
+attempts to fill a 256-bit register from a 31-pixel window.** The proximate reasons
+were real; **this is the reason underneath them.**
+
+**SO binCV's REAL RATE IN LK IS 31 px/op — NOT 32, 64 OR 256.** Against OpenCV's 16
+(`CV_16S` in AVX2 lanes) that is a **1.94× packing advantage, and it is CAPPED BY THE
+ALGORITHM, not by the word type or the ISA.** Against **5.6×** the operations, that is
+**2.9× cost** — which is the gap, fully accounted, with nothing left over.
+
+**WHAT THIS RULES OUT AND WHAT IT LEAVES.** It rules out *every* widening approach:
+wider words, wider registers, and — since X-61 already measured it — batching windows
+to fill them. **The only remaining lever is the operation count**, which is
+[E-34](ARCHITECTURE.md#register)'s ×5 tap factor. The 2.9× is 1.94 packing against 5.6
+operations; nothing can improve the numerator, so the denominator is the whole game.
+
+**A note on `build`.** `uint64` made build **worse on x86 (1.2×)** where
+[X-54](#x-54--e-9--should-the-word-type-vary-down-the-pyramid--done) measured it
+**1.66× better on aarch64**. Build is a bulk pass over full rows, so the window cap
+does not apply and the packing argument should hold — that it reverses by platform is
+unexplained and is **not** claimed either way here. It does mean the "restructure
+`build` for AVX2" avenue ([E-33](ARCHITECTURE.md#register)) has a weaker prior than
+X-59's adder ceiling suggested.
+
+**Decision:** none — this is an explanation, and its value is that it closes a line of
+enquiry rather than opening one. Recorded as
+[D-52](ARCHITECTURE.md#8-design-decisions). `frontend_sequence` keeps
+`BINCV_BENCH_WORD` so the word type stays measurable without editing source.
+
+**Method:** `benchmark/frontend_sequence.cpp` with `-DBINCV_BENCH_WORD=uint64_t`, full
+1710-frame sequence, three runs each on an idle machine.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
