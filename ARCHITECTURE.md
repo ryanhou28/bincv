@@ -3291,6 +3291,54 @@ bulk contiguous passes — the shape X-59's 4.7× adder ceiling was actually mea
 and `derivative` already auto-vectorises unaided. 27% of the x86 frontend, and the only
 untried avenue.
 
+### D-51: binCV wins at BITWISE work and loses at ARITHMETIC — LK is arithmetic
+
+Three x86 vectorisation attempts failed ([D-50](#d-50-residualsums-resists-simd-because-of-its-access-pattern))
+and the question they were chasing — *why is a 1-bit library not beating an 8-bit one?*
+— has a simpler answer than any of them. **It is not the layout, not the data format
+and not parallelism. It is the operation count.**
+
+**PER 31×31 WINDOW, binCV's LK ISSUES ~12× THE OPERATIONS OpenCV's DOES:**
+
+| | ops per window |
+|---|---|
+| binCV: 120/row × 31 rows | **3 720** |
+| OpenCV: 961 px × ~5 ops ÷ 16 AVX2 lanes | **300** |
+
+Three multipliers, each a recorded decision rather than an accident:
+
+| | why |
+|---|---|
+| **×5** taps | **Bits cannot be interpolated.** OpenCV interpolates the displaced patch ONCE and takes one product; binCV must correlate the four displaced patches separately and combine them afterwards ([D-20](#8-design-decisions)). |
+| **×4** plane pairs | A bit-sliced N-bit × N-bit product needs **N² popcount pairs**. At N = 2 that is 4, where OpenCV does **one multiply**. |
+| **×2** | Sign-magnitude: `total − 2·opposing` is two popcounts ([D-3](#8-design-decisions)). |
+
+**binCV's packing advantage is 8× (256 pixels per AVX2 register against OpenCV's 32).
+An 8× advantage cannot cover a 12× deficit.** 8 ÷ 12 ≈ 0.67, and with binCV's cheaper
+per-op cost that lands near the **1.2×** actually measured. **The arithmetic closes.**
+
+**THE GENERAL SHAPE OF THE LIBRARY, STATED PLAINLY:**
+
+> **binCV is enormously faster at operations that are natively BITWISE, and slower at
+> operations that are natively ARITHMETIC.** `pyrDownBox` is **4.5–6× faster than
+> `cv::pyrDown`** ([X-46](EXPERIMENTS.md)); denoise, morphology and thresholding are the
+> same shape. **LK's residual is a multiply-accumulate**, and bit-slicing multiplies
+> badly — N² popcounts where silicon has a multiplier.
+
+The frontend nets to **1.53× faster on aarch64** because the bitwise stages and the
+6.23× footprint carry the arithmetic one, and because OpenCV's NEON coverage is thinner
+than its AVX2. On x86, where OpenCV's arithmetic is at its strongest, the two cancel.
+
+**THE ALTERNATIVE TRACKER WAS ALREADY MEASURED AND IS NOT A WAY OUT.** Hamming block
+matching is the natively-bitwise tracker — one popcount per candidate row, no N², no
+taps — and [D-24](#8-design-decisions) measured it at **0.93× on track time** while
+losing **2–12 yield points**. Being algorithmically aligned with the representation did
+not make it faster, which is worth knowing before anyone proposes it again.
+
+**WHAT HAS NEVER BEEN QUESTIONED IS THE ×5.** It is the largest multiplier, it sits in
+the kernel that is **67% of the frontend**, and D-20 records it as a consequence of the
+design rather than as a measured choice. [E-34](#register).
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -3342,6 +3390,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-13**~~ **RESOLVED — IT IS AN N = 1 RESULT** | Does the **per-row partial accumulator** still pay above N = 1? | D-15 item 4 was measured at N = 1, where `BitSlicedPairCounts` is four counters; at N = 4 it is sixty-four. | **Answered: it pays at N = 1 and costs above it.** [X-29](EXPERIMENTS.md) on the reference device: window-wide vs per-row is **0.917× / 1.114× / 1.348× / 1.248×** at N = 1/2/3/4, so the crossover is between 1 and 2. `gradientCovariance<N>` selects with `if constexpr` (free — N is already a template parameter) and results are **bit-identical** by construction. It lands on the adopted `1/2/2/2` ladder, where three of four levels run at N = 2. **The noise floor was MEASURED**: the same arm in two translation units spreads **0.0–0.3% on the Cortex-A72** and **up to 10.6% on x86_64** — larger than the whole effect at N = 2, which reads IN NOISE there and W wins on the device. X-22 declined to close on a single-binary A/B and was right to. [D-26](#d-26-the-covariance-accumulator-shape-is-chosen-on-n-and-the-noise-floor-is-measured). | Whether the N-bit covariance keeps per-row partials. **Only at N = 1.** | — | **Phase 4** (X-29) ✔ |
 | ~~**E-14**~~ **RESOLVED — NO** | Does the tracker need a border on its coarse pyramid levels — the reference's `winSize`-wide reflected pad, a cheaper replicate pad, or a keypoint policy that never places a window near a coarse-level edge? | X-24 read the clipped coarse window as the dominant term. | **Answered: no, and the question rested on a statistic that does not fit the data.** [X-25](EXPERIMENTS.md) measured yield — eligible keypoints tracked within 1.0 px — instead of RMS, and **a padded pyramid is worse than or equal to clipping in five of seven cases for 1.38× the bytes**. **Deviation (ii) is vindicated and is now MEASURED rather than argued.** The finding underneath it corrects X-24: arm A on `(1,0)` has `rms(all)` 0.8356 px but **98.6% yield at 0.0009 px** — 139 of 141 keypoints tracked to a thousandth of a pixel and two catastrophically wrong — so **clipping costs about two keypoints out of 141, not the 59% X-24 attributed to it**; the never-clipping subset simply excluded the outliers. What remains is the **level-0 1-bit floor** (`rms(usable)` 0.25–0.32 px in EVERY arm including the padded one, against X-20's own no-pyramid single-level 0.2860 px), which is [E-16](#register) and is not a pyramid parameter at all. | Whether pyramid levels gain a border. **They do not.** | — | **Phase 4** (X-25) ✔ |
 | **E-15** | Why does tracking accuracy PEAK AT 2 BITS and degrade with more? | [X-24](EXPERIMENTS.md) measured it and did not explain it: on `(1,0)` unclipped, 1/2/3/5 bits give 1.4742 / **0.0010** / 0.5334 / 0.8567 px, and on `(2,−3)` the ladder is exact at 2 and 3 bits and fails from 4. Two explanations remain open and were NOT separated. **(i)** The bit-sliced covariance and residual weight plane pairs by `2^(i+j)`, so a few high-magnitude pixels dominate a window whose sub-pixel accuracy comes from averaging many edge crossings — this predicts degradation at SMALL motion and none at large, which is the observed pattern (`(12,−8)` is exact at every depth, `(2,−3)` fails from 4 bits, `(1,0)` from 3). **(ii)** `1/2/2/2`'s upper levels collapse to two distinct values anyway, so its advantage may be density preservation rather than precision. `requantizeBoxSum` is already excluded as the cause: it is a faithful rescaled average at every depth. | Whether the weighting in [§7.5](#75-lk-gradient-covariance)'s bit-sliced form is right for TRACKING as opposed to for corner response, and whether a depth cap belongs in the pyramid API. | E-7's final ladder | **Phase 4** |
+| **E-34** | The five-tap decomposition is a **×5 multiplier on 67% of the frontend** and has never been measured against an alternative. Can the four bilinear correlations become one? | [D-51](#d-51-bincv-wins-at-bitwise-work-and-loses-at-arithmetic--lk-is-arithmetic) accounts for binCV's LK issuing ~12× OpenCV's operations, and **×5 is the largest of the three factors**. [D-20](#8-design-decisions) records it as a consequence of bits not being interpolable, not as a choice weighed against options. | **The candidate:** correlation is linear, so `Σ(Σ wᵢ·tᵢ)·G` could be formed as ONE weighted patch and correlated once — if the bilinear weights are **quantised** to a few bits, making the interpolated patch an N′-bit value and the product **N′×N** pairs instead of **4×N²**. At N′ = N = 2 that is **4 pairs against 16 — a 4× cut on the dominant kernel.** The cost is subpixel precision, which [X-27](EXPERIMENTS.md)'s 0.10 px representation floor and the tracker's own 0.25–0.29 px give a budget for. **Rule and ceiling first** — five ceilings have overstated ([D-49](#8-design-decisions)). | Whether binCV's tracker is fast because of the representation or in spite of it. | D-51 | **Phase 5** |
 | **E-31** | Should binCV get runtime POPCNT dispatch on x86, or simply require the instruction? | [X-57](EXPERIMENTS.md) measured the software fallback costing **3.75×**; `BINCV_X86_POPCNT` now defaults ON, so the question is whether the minimum can be removed. | **[X-60](EXPERIMENTS.md) measured the obvious mechanism and it does not work.** `__attribute__((target(...)))` **blocks inlining**, turning an inline hot function into 310 calls per window and costing 1.9×. So dispatch for `popcountWord` cannot be per-call; it would have to be per-**kernel**, chosen once at a coarse boundary — or the 2008-era minimum simply kept, which is what several vision libraries do. | Whether binCV's portable build is portable at a 3.75× price. | D-47 | **Phase 5** |
 | ~~**E-32**~~ **RESOLVED — the obstruction is the loop order** | binCV has NEON paths and no x86 vector code. Where would AVX2 pay? | [X-57](EXPERIMENTS.md) left binCV at 0.91× of OpenCV with no x86 vector code at all. | **Answered: not from the compiler.** [X-58](EXPERIMENTS.md): `-mavx2` buys **1–2%**, inside the same binary's run-to-run spread. `derivative` vectorises (63 `%ymm`); `pyrDownRoute`, `boxSum4` and `cornerMinEigenValRow` get **zero**, because a bit-sliced kernel's outer loop walks words while its **body is a nest over planes** — GCC: *"multiple nested loops"*. [D-48](#d-48-the-bit-plane-layout-is-what-stops-the-compiler-vectorising-bincv). | Whether x86 needs hand-written kernels. **It does**, and the reason is structural. | D-47 | (X-58) ✔ |
 | **E-33** *(narrowed to `build`)* | Restructure the **bulk** kernels — `pyrDown`, the derivatives — to process 8 words at once so AVX2 can reach them. | [X-59](EXPERIMENTS.md) priced the adder at **≈4.7×** on contiguous data. [X-60](EXPERIMENTS.md) then **refuted the `residualSums` half**: bit-exact and **1.88× slower**, because its eight words are register-resident and the pack/unpack costs more than the `POPCNT`s. | **`build` is the half the ceiling actually applies to** — bulk passes over contiguous plane rows, the shape X-59 measured — and `derivative` already auto-vectorises, so the target is `pyrDown`. It is **27% of the x86 frontend, not 67%**, so the prize is correspondingly smaller. [D-49](#d-49-the-mismatch-is-granularity-not-layout--five-ceilings-say-so) says to expect a ceiling to overstate. | Whether binCV is ahead of OpenCV on x86, and whether the GPU port inherits the restructuring. | D-49 | **Phase 5** |
