@@ -9723,7 +9723,7 @@ ratio being ~1.0 across all three rather than on any single figure.
 
 ---
 
-### X-62 · E-34 — can the four tap correlations become one? · `RULE ONLY`
+### X-62 · E-34 — can the four tap correlations become one? · `DONE`
 
 **COMMITTED BEFORE ANY KERNEL CHANGE, AND WITH A CEILING BEFORE THE ARM.** Five
 ceilings in this project have overstated ([D-49](ARCHITECTURE.md#8-design-decisions)),
@@ -9788,8 +9788,119 @@ buy is the **frontend**, where LK is 67%: a 2× on LK is roughly **1.5× on the 
 against OpenCV on x86, and correspondingly more on aarch64 where binCV already leads.
 **No claim beyond that will be made from this experiment.**
 
-**Method:** `benchmark/tapcollapse_ceiling.cpp` via `scripts/run_on_pi.sh pi4`;
-accuracy via the X-39 sequence harness if a speed band fires.
+---
+
+#### THE RESULT: THE SPEED BAND FIRED, AND THE FRONTEND REFUTED IT ANYWAY
+
+**THE CEILING.** Reference device, three runs, `benchmark/tapcollapse_ceiling.cpp`:
+
+| arm | ns / 20 windows | vs A |
+|---|---|---|
+| **A** shipped: 4 correlations/component | 58 311 – 59 666 | 1.000× |
+| **B** k=3, compile-time weights, generic offset | 30 664 – 32 819 | **1.82 – 1.91×** |
+| **B** k=3, worst offset `(3,3,1,1)` | 33 161 – 34 830 | 1.71 – 1.76× |
+| **B** k=3, **RUNTIME weights — the implementable one** | 33 115 – 33 568 | **1.75 – 1.76×** |
+
+**Band A or B on speed, decisively.** The runtime-weight arm — the only shape a
+real kernel can have, since the subpixel offset moves every iteration — is within
+7% of the compile-time ceiling. **It was priced rather than assumed**, which is
+the correction [D-49](ARCHITECTURE.md#8-design-decisions) demanded.
+
+**THE ACCURACY AXIS,** `Flow.X62_TapCollapseSequence_uint32_t`, 93 frames × 6
+warps, shipped `1/2/2/2` ladder and `BOX_2x2`, `tapCollapseBits` the only
+difference:
+
+| case | yield A | yield B | rms A | rms B | Δrms |
+|---|---|---|---|---|---|
+| shift (1, 0) | 99.27% | 99.26% | 0.0007 | 0.2131 | +0.2124 |
+| shift (0.25,0.25) | 96.85% | 97.11% | 0.2131 | 0.2975 | +0.0844 |
+| shift (0.75,0.75) | 96.11% | 96.34% | 0.2024 | 0.2918 | +0.0894 |
+| shift (2, -3) | 99.31% | 99.26% | 0.0009 | 0.2117 | +0.2108 |
+| shift (6, 4) | 99.42% | 99.46% | 0.0003 | 0.2080 | +0.2077 |
+| rotate 1 deg | 97.49% | 97.65% | 0.2051 | 0.3053 | +0.1002 |
+| **ALL** | **98.07%** | **98.18%** | **0.1455** | **0.2579** | **+0.1124** |
+
+**+0.112 px, which is 5.6× the 0.02 px band — so Band B on the pre-registered
+rule.** Note what is *not* hurt: **yield is unchanged** (98.07 → 98.18%). The
+collapse costs sub-pixel precision, not track survival. And note the integer
+shifts: the exact route returns **0.0007 px** there, because at a whole-pixel
+displacement there is no interpolation to do — the collapse turns that into
+0.21 px, which is the **floor** its requantise imposes at every offset.
+
+#### AND THEN THE FRONTEND, WHICH NO BAND ANTICIPATED
+
+`benchmark/frontend_sequence`, `track (LK)` ms/frame, 400 frames, both platforms:
+
+| `maxIterations` | ref. device A | ref. device B | B vs A | x86 A | x86 B | B vs A |
+|---|---|---|---|---|---|---|
+| 1 | 2.764 | 2.601 | **1.06×** | 0.740 | 0.683 | **1.08×** |
+| 2 | 4.209 | 3.970 | 1.06× | 1.160 | 1.071 | 1.08× |
+| 3 | 5.202 | 5.422 | 0.96× | 1.509 | 1.534 | 0.98× |
+| 5 | 5.827 | 7.572 | 0.77× | 2.218 | 2.431 | 0.91× |
+| 10 | 7.022 | 13.757 | 0.51× | 2.580 | 4.514 | 0.57× |
+| **20 (shipped)** | **7.459** | **24.409** | **0.31×** | **2.766** | **6.736** | **0.41×** |
+
+**AT THE SHIPPED ITERATION CAP THE COLLAPSE IS 3.3× SLOWER ON THE REFERENCE
+DEVICE.** The crossover is between 2 and 3 iterations, on both platforms
+independently.
+
+**THE MECHANISM IS IN THE SHAPE OF THE TWO CURVES.** A's cost *flattens* —
+5.83 → 7.02 → 7.46 across a 4× rise in the cap — because its points **converge and
+stop**. B's keeps climbing linearly — 7.57 → 13.76 → 24.41 — because its points
+**never converge**, so every one of them runs to the cap.
+
+> **ROUNDING THE INTERPOLATED PATCH BACK INTO THE PIXELS' OWN N-BIT ALPHABET
+> DESTROYS EXACTLY THE SIGNAL LK CONVERGES ON.** Sub-pixel displacement lives in
+> the interpolation; that is what [D-20](ARCHITECTURE.md)'s five integer sums keep
+> at full precision. Quantise it away and `delta` never falls under `eps`, so the
+> per-iteration saving is spent several times over on iterations that would not
+> otherwise have happened.
+
+#### WHAT WAS WRONG WITH THE RULE, WHICH IS THE PART WORTH KEEPING
+
+**None of the four pre-registered bands can express this result**, and forcing it
+into one would be fitting the conclusion to the numbers. Every band was a
+statement about a **per-iteration ratio** — Band D is even phrased as "B is
+SLOWER", which B is *not*: at a fixed iteration count it is 1.06–1.08× faster on
+the frontend and 1.75× faster in the kernel, exactly as the op-count model said.
+**[D-51](ARCHITECTURE.md#8-design-decisions)'s model was right. The ceiling's
+SCOPE was wrong.**
+
+This is a new failure mode for this project's ceilings, and it is worse than the
+five [D-49](ARCHITECTURE.md#8-design-decisions) records. Those **mispriced the
+operation** and a careful ceiling catches them — this one **priced the operation
+correctly and mispriced the algorithm**, and no amount of care *inside* the
+ceiling would have caught it. Promoted to
+[D-53](ARCHITECTURE.md#8-design-decisions).
+
+**Decision: E-34 CLOSED NEGATIVE. The arm is reverted; `LKParams` gains nothing.**
+There is no regime worth offering a caller: at `maxIterations ≤ 2` the gain is
+1.06×, inside run-to-run scatter, and at the shipped 20 it is a 3.3× loss. An
+option that never wins is a trap, not a trade — unlike
+[D-24](ARCHITECTURE.md)'s route (a) or [D-36](ARCHITECTURE.md)'s filter set, both
+of which ship because each has a regime.
+
+**The arm itself is recoverable, and deliberately so.** `benchmark/tapcollapse_ceiling.cpp`
+stays in the tree and reproduces the 1.75×. The kernel arm, the `LKParams` field
+and `Flow.X62_TapCollapseSequence_uint32_t` live in commit **`4351bd6`**, reverted
+by the commit that carries this entry — `git revert` it to re-run the accuracy and
+iteration tables above.
+
+**AND ONE WARNING ABOUT THE MEASUREMENT ITSELF.** The first reference-device sweep
+reported the two arms **identical at every iteration count**, which was a **stale
+binary**: `frontend_sequence` needs OpenCV, `run_on_pi.sh` builds core-only unless
+`BINCV_PI_OPENCV=1`, and the run silently executed a build predating the knob
+(`strings … | grep -c BINCV_LK_TAPCOLLAPSE` → 0). It did not fail; it produced a
+plausible null result. `benchmark/CMakeLists.txt` already warns that "a failed
+reproduction then looks like a missing binary" — **a stale one looks like a
+finding**, which is worse.
+
+**Method:** `benchmark/tapcollapse_ceiling.cpp` via `scripts/run_on_pi.sh pi4`,
+three runs; accuracy via `Flow.X62_TapCollapseSequence_uint32_t` on
+`BINCV_X62_FRAMES` at stride 40 (93 frames); frontend via
+`BINCV_LK_TAPCOLLAPSE` × `BINCV_LK_ITERS` on 400 frames, **`BINCV_PI_OPENCV=1`**.
+Reference device: Cortex-A72, `performance` governor, `taskset -c 3`,
+`throttled=0x80000` unchanged across every run.
 
 ---
 

@@ -3331,10 +3331,10 @@ void seedFiltered(LadderFrontend<WordType, LevelBits...>& fe, const cv::Mat& bin
 /// Yield for one (filter, ladder) point.
 template <typename WordType, size_t... LevelBits>
 Yield runFilterArm(const cv::Mat& binPrev, const cv::Mat& binNext, const Warp& warp,
-                   const std::vector<Point2f>& pts, double modelError, PyrFilter f,
-                   LKParams params = LKParams()) {
+                   const std::vector<Point2f>& pts, double modelError, PyrFilter f) {
     LadderFrontend<WordType, LevelBits...> fe(binPrev.cols, binPrev.rows);
     seedFiltered(fe, binPrev, binNext, f);
+    LKParams params;
     std::vector<Point2f> out(pts.size());
     std::vector<uint8_t> status(pts.size());
     bincv::calcOpticalFlowPyrLK(fe.levels, pts.data(), out.data(), status.data(), nullptr,
@@ -3561,151 +3561,6 @@ BINCV_TEST(Flow, X50_LadderFilterSequence_uint32_t) {
         for (size_t fk = 0; fk < 2; ++fk)
             std::printf("ROW50 %zu %zu %zu %zu %zu\n", L, fk, elig[L][fk], usable[L][fk], bytes[L]);
     std::printf("FRAMES50 %zu\n", frames);
-    BINCV_CHECK(true);
-}
-
-BINCV_TEST(Flow, X62_TapCollapseSequence_uint32_t) {
-    // X-62's ACCURACY AXIS. The ceiling fired the speed band on the reference
-    // device (1.75x with runtime weights), and X-62's rule makes the accuracy band
-    // mandatory before anything about the default changes: Band A needs < 0.02 px
-    // of rms(usable); Band B is the same speed at a worse accuracy and leaves the
-    // default alone. X-51 is the standing reason a proxy does not settle this --
-    // there, a per-level error metric and the frontend disagreed by 15x.
-    //
-    // Both arms are the SHIPPED ladder and the SHIPPED filter. The only thing that
-    // differs is LKParams::tapCollapseBits, so the difference is the collapse.
-    const char* dir = std::getenv("BINCV_X62_FRAMES");
-    if (!dir) {
-        std::printf("  (skipped: set BINCV_X62_FRAMES=<frame-dir> to run the tap-collapse arm)\n");
-        BINCV_CHECK(true);
-        return;
-    }
-    size_t stride = 1;
-    if (const char* sv = std::getenv("BINCV_X62_STRIDE")) {
-        const long v = std::atol(sv);
-        if (v > 0) stride = static_cast<size_t>(v);
-    }
-    size_t shard = 0, shards = 1;
-    if (const char* sh = std::getenv("BINCV_X62_SHARD")) {
-        long a = 0, b = 1;
-        if (std::sscanf(sh, "%ld/%ld", &a, &b) == 2 && b > 0 && a >= 0 && a < b) {
-            shard = static_cast<size_t>(a);
-            shards = static_cast<size_t>(b);
-        }
-    }
-    std::vector<std::filesystem::path> files;
-    for (const auto& e : std::filesystem::directory_iterator(dir)) {
-        if (e.path().extension() == ".png") files.push_back(e.path());
-    }
-    std::sort(files.begin(), files.end());
-    const cv::Mat probe =
-        files.empty() ? cv::Mat() : cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
-    if (probe.empty()) {
-        std::printf("  (skipped: no readable frames under %s)\n", dir);
-        BINCV_CHECK(true);
-        return;
-    }
-
-    struct Case { const char* name; Warp warp; double model; };
-    LKParams lkp;
-    const double halfWin = 0.5 * (lkp.winWidth - 1);
-    const std::vector<Case> cases = {
-        {"shift (1, 0)", translation(1.0, 0.0), 0.0},
-        {"shift (0.25,0.25)", translation(0.25, 0.25), 0.0},
-        {"shift (0.75,0.75)", translation(0.75, 0.75), 0.0},
-        {"shift (2, -3)", translation(2.0, -3.0), 0.0},
-        {"shift (6, 4)", translation(6.0, 4.0), 0.0},
-        {"rotate 1 deg", rotation(1.0, probe.cols * 0.5, probe.rows * 0.5),
-         halfWin * 3.14159265358979323846 / 180.0},
-    };
-
-    LKParams exact;                     // tapCollapseBits = 0, the shipped default
-    LKParams collapsed;
-    collapsed.tapCollapseBits = 3;
-
-    // Per case as well as in total: a collapse that is harmless on small shifts and
-    // ruinous on large ones would average to "fine", and the per-case rows are what
-    // make that visible.
-    const size_t kCases = cases.size();
-    std::vector<size_t> elig(kCases, 0), usableA(kCases, 0), usableB(kCases, 0);
-    std::vector<double> sqA(kCases, 0.0), sqB(kCases, 0.0);
-    size_t frames = 0;
-
-    std::printf("\n  =================================================================\n"
-                "  X-62 / E-34: TAP COLLAPSE (k=3) vs the exact route, over a sequence.\n"
-                "  dir %s, %zu frames present, stride %zu, ladder 1/2/2/2, BOX_2x2\n"
-                "  =================================================================\n",
-                dir, files.size(), stride);
-
-    for (size_t fi = 0; fi < files.size(); fi += stride) {
-        if ((fi / stride) % shards != shard) continue;
-        const cv::Mat gray = cv::imread(files[fi].string(), cv::IMREAD_GRAYSCALE);
-        if (gray.empty() || gray.cols != probe.cols || gray.rows != probe.rows) continue;
-        const cv::Mat b0 = referencePreprocess(gray, 17);
-        for (size_t ci = 0; ci < kCases; ++ci) {
-            const Case& c = cases[ci];
-            cv::Mat warped;
-            cv::warpAffine(gray, warped, affineOf(c.warp), gray.size(), cv::INTER_CUBIC,
-                           cv::BORDER_REFLECT_101);
-            const cv::Mat b1 = referencePreprocess(warped, 17);
-            Frontend<uint32_t> base(gray.cols, gray.rows, 4);
-            base.prev[0].fromCVMat(b0);
-            base.next[0].fromCVMat(b1);
-            base.build();
-            const std::vector<Point2f> pts =
-                eligiblePoints(base.dx[0], base.dy[0], gray.cols, gray.rows, c.warp, lkp.winWidth,
-                               lkp.winHeight);
-            if (pts.empty()) continue;
-            const Yield ya = runFilterArm<uint32_t, 1, 2, 2, 2>(b0, b1, c.warp, pts, c.model,
-                                                                PyrFilter::Box2x2, exact);
-            const Yield yb = runFilterArm<uint32_t, 1, 2, 2, 2>(b0, b1, c.warp, pts, c.model,
-                                                                PyrFilter::Box2x2, collapsed);
-            elig[ci] += ya.eligible;
-            usableA[ci] += ya.usable;
-            usableB[ci] += yb.usable;
-            // rms over the sequence is the root of the POOLED mean square, not the
-            // mean of per-frame rms values -- those weight a frame with four usable
-            // points like a frame with four hundred.
-            sqA[ci] += ya.rmsUsable * ya.rmsUsable * static_cast<double>(ya.usable);
-            sqB[ci] += yb.rmsUsable * yb.rmsUsable * static_cast<double>(yb.usable);
-        }
-        ++frames;
-        if (frames % 25 == 0) std::printf("  ... %zu frames\n", frames);
-    }
-
-    std::printf("\n  %zu frames measured\n", frames);
-    std::printf("\n    %-20s %10s %10s %10s %10s %9s\n", "case", "yield A", "yield B", "rms A",
-                "rms B", "d(rms)");
-    size_t eT = 0, uAT = 0, uBT = 0;
-    double sAT = 0.0, sBT = 0.0;
-    for (size_t ci = 0; ci < kCases; ++ci) {
-        const double ya = elig[ci] ? 100.0 * static_cast<double>(usableA[ci]) /
-                                         static_cast<double>(elig[ci]) : 0.0;
-        const double yb = elig[ci] ? 100.0 * static_cast<double>(usableB[ci]) /
-                                         static_cast<double>(elig[ci]) : 0.0;
-        const double ra = usableA[ci] ? std::sqrt(sqA[ci] / static_cast<double>(usableA[ci])) : 0.0;
-        const double rb = usableB[ci] ? std::sqrt(sqB[ci] / static_cast<double>(usableB[ci])) : 0.0;
-        std::printf("    %-20s %9.2f%% %9.2f%% %10.4f %10.4f %9.4f\n", cases[ci].name, ya, yb, ra,
-                    rb, rb - ra);
-        eT += elig[ci];
-        uAT += usableA[ci];
-        uBT += usableB[ci];
-        sAT += sqA[ci];
-        sBT += sqB[ci];
-    }
-    const double yaT = eT ? 100.0 * static_cast<double>(uAT) / static_cast<double>(eT) : 0.0;
-    const double ybT = eT ? 100.0 * static_cast<double>(uBT) / static_cast<double>(eT) : 0.0;
-    const double raT = uAT ? std::sqrt(sAT / static_cast<double>(uAT)) : 0.0;
-    const double rbT = uBT ? std::sqrt(sBT / static_cast<double>(uBT)) : 0.0;
-    std::printf("    %-20s %9.2f%% %9.2f%% %10.4f %10.4f %9.4f\n", "ALL", yaT, ybT, raT, rbT,
-                rbT - raT);
-    std::printf("\n  X-62's band: d(rms) < 0.02 px AND >=1.6x -> Band A (write it, then this\n"
-                "  measurement gates the default); >=1.6x with a larger d(rms) -> Band B, the\n"
-                "  trade is the caller's and the default does NOT change.\n");
-    for (size_t ci = 0; ci < kCases; ++ci)
-        std::printf("ROW62 %zu %zu %zu %zu %.6f %.6f\n", ci, elig[ci], usableA[ci], usableB[ci],
-                    sqA[ci], sqB[ci]);
-    std::printf("FRAMES62 %zu\n", frames);
     BINCV_CHECK(true);
 }
 
