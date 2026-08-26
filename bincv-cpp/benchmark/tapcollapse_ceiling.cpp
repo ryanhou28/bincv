@@ -143,6 +143,49 @@ inline void weightedPatch(const Word (&tap)[kTaps][kN], Word (&out)[kN]) {
     for (size_t p = 0; p < kN; ++p) out[p] = acc[p + K];
 }
 
+/// `acc += tap * q` with q a RUNTIME weight -- the shift stays a template
+/// parameter, only the predicate is runtime.
+/// @note This exists because the compile-time arm above is not implementable as a
+///       kernel: the subpixel offset moves every LK iteration. Dispatching over
+///       the (k+1)^2 quantised offsets would instantiate the whole row loop 81
+///       times at k = 3, so the shipped shape would instead branch on the weight's
+///       bits -- and the weights are CONSTANT over a window, so every one of those
+///       branches predicts perfectly. It is priced here rather than assumed,
+///       because five ceilings in this project have overstated (D-49).
+template <size_t SumPlanes, size_t Bit>
+inline void accumulateWeightedRuntime(Word* acc, const Word* tap, unsigned q) {
+    if constexpr (Bit < 5) {
+        if ((q >> Bit) & 1u) bincv::impl::addShifted<SumPlanes, kN, Bit, Word>(acc, tap);
+        accumulateWeightedRuntime<SumPlanes, Bit + 1>(acc, tap, q);
+    }
+}
+
+template <unsigned K>
+inline void weightedPatchRuntime(const Word (&tap)[kTaps][kN], const unsigned (&q)[kTaps],
+                                 Word (&out)[kN]) {
+    constexpr size_t kSumPlanes = kN + K;
+    Word acc[kSumPlanes];
+    for (size_t p = 0; p < kSumPlanes; ++p) acc[p] = 0;
+    for (size_t t = 0; t < kTaps; ++t) accumulateWeightedRuntime<kSumPlanes, 0>(acc, tap[t], q[t]);
+    const Word ones[1] = {static_cast<Word>(~static_cast<Word>(0))};
+    bincv::impl::addShifted<kSumPlanes, 1, K - 1, Word>(acc, ones);
+    for (size_t p = 0; p < kN; ++p) out[p] = acc[p + K];
+}
+
+template <unsigned K>
+Residual armOneCorrelationRuntime(const Window& w, const unsigned (&q)[kTaps]) {
+    long long bx = 0, by = 0;
+    for (size_t y = 0; y < kRows; ++y) {
+        Word patch[kN];
+        weightedPatchRuntime<K>(w.tap[y], q, patch);
+        bx += bincv::impl::slicedSignedSum<kN, Word>(w.mag[0][y], w.sgn[0][y], patch);
+        bx -= bincv::impl::slicedSignedSum<kN, Word>(w.mag[0][y], w.sgn[0][y], w.self[y]);
+        by += bincv::impl::slicedSignedSum<kN, Word>(w.mag[1][y], w.sgn[1][y], patch);
+        by -= bincv::impl::slicedSignedSum<kN, Word>(w.mag[1][y], w.sgn[1][y], w.self[y]);
+    }
+    return {static_cast<double>(bx), static_cast<double>(by)};
+}
+
 template <unsigned K, unsigned Q00, unsigned Q01, unsigned Q10, unsigned Q11>
 Residual armOneCorrelation(const Window& w) {
     long long bx = 0, by = 0;
@@ -318,6 +361,13 @@ int main() {
         {"B  k=2 generic(1,1,1,1)", [&](int) {
              for (const Window& w : ws) {
                  const Residual r = armOneCorrelation<2, 1, 1, 1, 1>(w);
+                 measure::g_sink += static_cast<size_t>(r.bx + r.by);
+             }
+         }},
+        {"B  k=3 generic, RUNTIME weights", [&](int) {
+             const unsigned q[kTaps] = {2, 1, 3, 2};
+             for (const Window& w : ws) {
+                 const Residual r = armOneCorrelationRuntime<3>(w, q);
                  measure::g_sink += static_cast<size_t>(r.bx + r.by);
              }
          }},
