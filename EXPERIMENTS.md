@@ -10455,6 +10455,58 @@ frames, OpenCV at one thread.
 
 ---
 
+### X-68 · `track` decomposed — 91.5% is iterated `residualSums` · `DONE`
+
+**[D-59](ARCHITECTURE.md#8-design-decisions) SAYS A STAGE TOTAL IS NOT A TARGET, SO
+`track` GETS THE SAME TREATMENT `build` JUST GOT** before anything is written against
+it. `maxIterations = 0` runs every per-point step — covariance, clipping, entry-level
+selection, the min-eigenvalue test — and **no iterations at all**, which isolates setup
+exactly rather than by extrapolation.
+
+V1_02, 600 frames, one thread:
+
+| `maxIterations` | `track` ms | what it adds |
+|---|---|---|
+| **0** | **0.178** | per-point setup, all of it |
+| 1 | 0.626 | +0.448 — one iteration for every point |
+| 2 | 1.039 | +0.413 |
+| **20 (shipped)** | **2.099** | — |
+
+- **Per-point setup is 0.178 ms — 8.5% of `track`.**
+- **Iterated work is 1.921 ms — 91.5%**, and it is `residualSums` plus a 2×2 solve of a
+  handful of flops.
+- **Mean effective iterations = 1.921 / 0.448 = 4.29** per point per level, which is
+  also the amortisation factor [X-66](#x-66--e-36--staging-not-gathering-the-x86-keypoint-batch-second-attempt--rule-only)'s
+  staging gets: its arm D reads **1.967×** at five iterations.
+
+**WHAT [X-66](#x-66--e-36--staging-not-gathering-the-x86-keypoint-batch-second-attempt--rule-only)'s
+2.09× WOULD BE WORTH, COMPUTED BEFORE THE ARM IS WRITTEN.** Applying it to the 91.5%
+and leaving setup alone: `track` 2.099 → **1.093 ms, 1.92×**. On the frontend:
+
+| | binCV now | with X-66 | vs 1-thread OpenCV |
+|---|---|---|---|
+| T=1 | 3.223 | **≈2.16** | 0.94× → **≈1.40×** |
+| T=4 | 1.922 | **≈1.49** | 1.62× → **≈2.03×** |
+
+**That clears X-66's Band A (≥1.3× on the frontend) with room** — where the earlier
+Amdahl estimate using [X-41](#x-41--e-23--is-the-extraction-addressable--done)'s 43.7%
+put it at 1.28×, *below* the line. **The difference is that 43.7% was measured on the
+reference device and this is x86**, where `track` is a larger share. Both are recorded;
+the projection that matters for an x86 decision is this one.
+
+**A caveat kept in view:** these are projections from a decomposition, not a
+measurement of the arm. [D-53](ARCHITECTURE.md#8-design-decisions) exists because a
+kernel ratio pointed the opposite way from the workload, and nothing here substitutes
+for building it.
+
+**Method:** `benchmark/frontend_sequence.cpp`, `BINCV_LK_ITERS` sweep including 0;
+V1_02, 600 frames, OpenCV at one thread. **`perf` is not usable on this kernel** (WSL2
+without matching `linux-tools`), which is why the decomposition is done with an
+iteration sweep rather than a profile — the sweep is a direct measurement, not an
+estimate.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
