@@ -9577,6 +9577,87 @@ total before timing; three independent runs on an idle machine.
 
 ---
 
+### X-60 · E-33 attempted on `residualSums`: written, bit-exact, and 1.88× SLOWER · `DONE`
+
+**THE ARM X-59's CEILING AUTHORISED, BUILT AND MEASURED AND REVERTED.** X-59 priced a
+batched `pshufb` popcount at **≈7.9× — beating hardware `POPCNT`** — on a 16 384-word
+array. This applies it to `slicedSignedSum` at N = 2, the shape three of the four
+shipped ladder levels run, mirroring the NEON path that already wins there.
+
+**IT IS BIT-EXACT AND IT LOSES.** One interleaved run, both arms under identical
+conditions, `Flow.ResidualNeonMatchesScalar_N2` reporting **AVX2 vs scalar, 728 windows,
+0 differ**:
+
+| arm | µs | vs scalar |
+|---|---|---|
+| **scalar** | **182.5** | 1.000× |
+| **AVX2, inlined** | **344.0** | **0.53× — 1.88× SLOWER** |
+
+**TWO SEPARATE FAILURES, AND THE FIRST ONE IS A TRAP WORTH PUBLISHING.**
+
+**1. `__attribute__((target("avx2")))` BLOCKS INLINING.** The first version used it so
+the portable build would still compile the path, with a cached
+`__builtin_cpu_supports` guard. A `target` function **cannot be inlined into callers
+compiled for a different target**, so `slicedSignedSum` — previously inlined into a
+tight row loop — became **310 real calls per window** plus a store and reload of the
+lane array. Confirmed by `objdump`: **20 call sites and a standalone symbol.** That
+version measured **1.9× slower** on the frontend. **The mechanism E-31 proposes for
+runtime dispatch is exactly this, and it is now measured as unusable for an inline hot
+function** — which is the concrete evidence E-31 was registered without.
+
+**2. FIXING THE INLINING DID NOT FIX THE RESULT.** Rebuilt with compile-time `__AVX2__`
+and no `target` attribute, the path inlines — `nm` shows **zero standalone symbols** —
+and it is **still 1.88× slower.** The reason is the one X-43 already found on NEON, in
+a new costume:
+
+> **The eight words are COMPUTED IN REGISTERS, not loaded from memory.** X-59's ceiling
+> used `_mm256_loadu_si256` on a contiguous array. Here the vector must be *assembled*
+> from eight scalar values (`_mm256_setr_epi32` is inserts, not a load) and then
+> *disassembled* through a store and eight scalar reloads. **The pack and unpack cost
+> more than the eight `POPCNT` instructions they replace.**
+
+**THIS IS THE FIFTH CEILING IN THIS PROJECT TO OVERSTATE, AND THE PATTERN IS NOW THE
+FINDING:**
+
+| | ceiling | delivered |
+|---|---|---|
+| [X-33](#x-33--the-ceiling-for-batched-neon-popcounts--done) | 3.42× | 1.24× |
+| [X-40](#x-40--e-18--window-carried-vector-accumulators-at-n--2--done) | 1.461× | 1.069× |
+| [X-43](#x-43--e-24--can-the-extraction-be-vectorised-and-what-stops-it--done) | 1.638× | **0.885×** |
+| [X-44](#x-44--e-26--is-interleaved-a-layout-bincv-should-support--done--declined) | 1.638× | 1.445× |
+| **X-60** | **7.9×** | **0.53×** |
+
+**Every one was measured on bulk contiguous data and applied to a kernel that works on
+a handful of register-resident words.** That is not five unlucky estimates; it is one
+structural mismatch measured five times. **binCV's hot kernels are not array
+operations** — `residualSums` touches one word per row of a 31-row window — and **a
+vector unit wants arrays.** The mismatch is **granularity, not layout**, which is a
+sharper statement than [D-48](ARCHITECTURE.md)'s and supersedes the part of it that
+implicated the representation.
+
+**WHERE THIS LEAVES E-33.** Narrowed, not closed. `residualSums` — **67% of the x86
+frontend** — is refuted for vectorisation at its current granularity. **`build` is
+not**: `pyrDown` and the derivatives are genuine bulk passes over contiguous plane
+rows, which is the shape X-59's adder ceiling (4.7×) was actually measured on, and
+`derivative` already auto-vectorises. **The untested half is the half the ceiling
+applies to**, and it is 27% of the frontend rather than 67%.
+
+**Decision:** the `slicedSignedSum` AVX2 path is **reverted** — bit-exact but 1.88×
+slower, and a 1.88× regression is not worth keeping for a platform binCV does not
+target. E-33 stays open for `build` only. Recorded as
+[D-49](ARCHITECTURE.md#8-design-decisions).
+
+**A note on measurement conditions.** Mid-experiment the machine's load average reached
+**8–10 from processes not mine**, and `frontend_sequence` reported OpenCV alone ranging
+**3.7–10.9 ms** on identical work. Those numbers were discarded rather than reported.
+The verdict above rests on `residual_n2`, which interleaves its arms in one run so both
+see the same conditions — the only measurement shape that survives a loaded machine.
+
+**Method:** `ops/opticalFlow.hpp` (added and reverted), `benchmark/residual_n2.cpp`,
+`tests/test_opticalflow.cpp`'s `ResidualNeonMatchesScalar_N2` for exactness.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

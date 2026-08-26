@@ -1251,8 +1251,12 @@ void residualNeonMatchesScalar(const char* label) {
     }
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     const char* note = "NEON vs scalar";
+#elif defined(__x86_64__) || defined(_M_X64)
+    // Since X-59 the x86 path is real at N == 2, so this comparison has teeth
+    // here too -- it is the AVX2 batched popcount against the scalar oracle.
+    const char* note = (N == 2) ? "AVX2 vs scalar" : "scalar vs scalar (no x86 path at this N)";
 #else
-    const char* note = "scalar vs scalar (no NEON here -- verify_arm.sh has teeth)";
+    const char* note = "scalar vs scalar (no platform path here)";
 #endif
     std::printf("  residual %s  %5zu windows, %zu differ   [%s]\n", label, compared, bad, note);
     BINCV_CHECK(compared > 100);

@@ -1168,3 +1168,55 @@ x86; it was mis-compiled.** The AVX2 port is cancelled.
 ≈3.9 ms at parity. Measured: **2.307 and 3.43.** The number was right and **the
 mechanism was wrong** — had the AVX2 port been written, it would have "confirmed" the
 hypothesis while the real cause went unfound.
+
+---
+
+## 30 · I wrote the x86 vector path. It's bit-exact and 1.88× slower.
+
+X-59's ceiling said a batched `pshufb` popcount would be **7.9×** — beating hardware
+`POPCNT`. I built it for `slicedSignedSum` at N=2 (three of four shipped levels),
+mirroring the NEON path that wins there.
+
+| arm | µs | vs scalar |
+|---|---|---|
+| **scalar** | **182.5** | 1.000× |
+| **AVX2, inlined, bit-exact** | **344.0** | **0.53× — 1.88× SLOWER** |
+
+**Two failures, and the first is a trap worth publishing.**
+`__attribute__((target("avx2")))` **blocks inlining** — `slicedSignedSum` became **310
+real calls per window** (`objdump`: 20 call sites, standalone symbol). That's *exactly*
+the mechanism **E-31** proposes for runtime dispatch, now measured as unusable for an
+inline hot function.
+
+Fixing the inlining didn't fix the result. Compile-time `__AVX2__`, zero standalone
+symbols — **still 1.88× slower**:
+
+> The eight words are **computed in registers**, not loaded from memory. The ceiling
+> used a contiguous-array load. Here the vector must be **assembled** from eight
+> scalars and **disassembled** through a store and eight reloads. **The pack and unpack
+> cost more than the eight `POPCNT`s they replace.**
+
+### Five ceilings have now overstated, and that's the finding
+
+| | ceiling | delivered |
+|---|---|---|
+| X-33 | 3.42× | 1.24× |
+| D-37 | 1.461× | 1.069× |
+| D-40 | 1.638× | **0.885×** |
+| D-41 | 1.638× | 1.445× |
+| **X-60** | **7.9×** | **0.53×** |
+
+**Every one measured on bulk contiguous data, applied to a kernel that works on a
+handful of register-resident words.** Not five unlucky estimates — **one structural
+mismatch measured five times.** The problem is **granularity, not layout**, which
+supersedes the part of D-48 that blamed the representation.
+
+**E-33 narrowed, not closed.** `residualSums` (67%) is refuted. `build` (27%) is *not*
+— `pyrDown` and the derivatives are genuine bulk passes over contiguous rows, which is
+the shape the 4.7× adder ceiling was actually measured on. **The untested half is the
+half the ceiling applies to.**
+
+*Measurement note: mid-experiment the machine hit load average 8–10 from foreign
+processes and `frontend_sequence` reported OpenCV alone ranging 3.7–10.9 ms on
+identical work. Those runs were discarded. The verdict rests on `residual_n2`, which
+interleaves its arms in one run.*
