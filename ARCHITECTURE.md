@@ -3258,6 +3258,39 @@ genuine bulk passes over contiguous rows, which is the shape X-59's **adder** ce
 (4.7×) was actually measured on, and `derivative` already auto-vectorises. **The
 untested half is the half the ceiling applies to.**
 
+### D-50: `residualSums` resists SIMD because of its ACCESS PATTERN
+
+Three attempts, three measured refutations, three different reasons — and the third one
+names the property:
+
+| attempt | granularity | why it failed |
+|---|---|---|
+| [X-59](EXPERIMENTS.md) ceiling | bulk contiguous array | 7.9×, but **not the kernel's shape** |
+| [X-60](EXPERIMENTS.md) | within one window row | values **register-resident**; pack/unpack > 8 `POPCNT`s |
+| [X-61](EXPERIMENTS.md) | **across 8 keypoints** | words **scattered**; gather > the loads it replaces |
+
+**`residualSums` reads scattered single words; SIMD needs contiguous runs.** Not the
+bit-plane layout ([D-48](#d-48-the-bit-plane-layout-is-what-stops-the-compiler-vectorising-bincv)
+corrected that), not granularity alone ([D-49](#d-49-the-mismatch-is-granularity-not-layout--five-ceilings-say-so)
+refined it) — the **access pattern**. Making those words contiguous is what
+[E-26](#register) priced at **+21% footprint** and declined.
+
+**The arithmetic behind it.** binCV holds 31 pixels in a word where OpenCV's AVX2 holds
+32 per lane-row — no advantage at that width — and then spends **~120 operations per
+window row against OpenCV's ~18**: N² = 4 plane pairs × 5 taps ([D-20](#8-design-decisions))
+× 2 components × 2 for sign-magnitude ([D-3](#8-design-decisions)). **8× packing ÷ 6.7×
+op-count ≈ 1.2×**, which is where binCV sits on x86.
+
+**WHAT THIS IS NOT.** It is **not** "binCV cannot beat OpenCV". binCV **is 1.53× faster
+on aarch64** — the deployment target — where the same scattered access is a *win*,
+because `CNT` is cheap there and OpenCV's NEON coverage is thinner than its AVX2. The
+x86 result is a statement about one kernel on one non-target platform.
+
+**And `build` is untested with a favourable prior:** `pyrDown` and the derivatives are
+bulk contiguous passes — the shape X-59's 4.7× adder ceiling was actually measured on —
+and `derivative` already auto-vectorises unaided. 27% of the x86 frontend, and the only
+untried avenue.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

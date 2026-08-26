@@ -9658,6 +9658,71 @@ see the same conditions — the only measurement shape that survives a loaded ma
 
 ---
 
+### X-61 · Batching across KEYPOINTS: the third granularity, and the third refutation · `DONE`
+
+**THE ONE AXIS X-59 AND X-60 BOTH MISSED.** A window row is 31 pixels — **one `uint32`
+word** — so binCV's packing, which can hold **256 pixels in an AVX2 register**, is
+**8/9ths unused at that granularity, and no reshaping inside a row can recover it.**
+But LK tracks **150–200 keypoints doing the identical computation on different
+windows**, and eight of them fill a register exactly. That is the natural vector
+dimension and neither prior attempt used it.
+
+**THE ARITHMETIC THAT MOTIVATED IT.** binCV holds 31 pixels in a word where OpenCV's
+AVX2 holds 32 per lane-row — no advantage — and then spends **~120 operations per
+window row against OpenCV's ~18**: N² = 4 plane pairs × 5 taps ([D-20](ARCHITECTURE.md))
+× 2 components × 2 for sign-magnitude ([D-3](ARCHITECTURE.md)). **An 8× packing
+advantage divided by a ~6.7× op-count disadvantage is ≈1.2×**, which is where binCV
+actually sits. Batching eight keypoints would cash the packing advantage at the level
+where it is real.
+
+**RESULT — PARITY. 1.00× / 0.99× / 1.11× over three runs**, bit-exact against the
+scalar arm:
+
+| arm | ns | vs scalar |
+|---|---|---|
+| A — 8 keypoints, sequential, scalar `POPCNT` | 1 261–1 512 | 1.00× |
+| B — 8 keypoints in 8 lanes, gathered | 1 134–1 535 | **0.99–1.11×** |
+
+**THE GATHER IS THE BLOCKER, AND THE ACCOUNTING IS SIMPLE.** Five
+`_mm256_i32gather_epi32` per row at ~15 cycles each on this core — gathers are
+microcoded — is **~75 cycles, against the ~40 single-cycle loads the scalar arm
+issues for all eight keypoints.** The vector arithmetic *does* win (≈48 vector ops
+against ≈100 scalar), and the gathers give it straight back. **X-43 found gathering a
+net loss when it fed one popcount; here it feeds sixteen per row and is still a net
+loss.**
+
+**THREE ATTEMPTS, THREE MEASURED REFUTATIONS, THREE DIFFERENT REASONS:**
+
+| attempt | granularity | why it failed |
+|---|---|---|
+| [X-59](#x-59--e-33s-ceiling-what-avx2-would-buy-a-restructured-kernel--done) ceiling | bulk contiguous array | **not the kernel's shape** — 7.9× that never applied |
+| [X-60](#x-60--e-33-attempted-on-residualsums-written-bit-exact-and-188-slower--done) | within one window row | values are **register-resident**; pack/unpack > 8 `POPCNT`s |
+| **X-61** | **across 8 keypoints** | words are **scattered**; gather > the loads it replaces |
+
+**The common thread is now unmistakable: `residualSums` reads SCATTERED SINGLE WORDS,
+and SIMD needs CONTIGUOUS RUNS.** That is a property of the **access pattern**, not of
+the bit-plane layout ([D-48](ARCHITECTURE.md) corrected) and not of the granularity
+alone ([D-49](ARCHITECTURE.md) refined). Making those words contiguous is exactly what
+[E-26](ARCHITECTURE.md#register) priced — **+21% footprint, declined.**
+
+**WHAT THIS DOES NOT SAY.** It does not say binCV cannot beat OpenCV. binCV **is**
+1.53× faster on aarch64, the deployment target, where the same scattered access is a
+*win* because `CNT` is cheap and OpenCV's NEON coverage is thinner. And **`build`
+remains untested and is the one shape that should work** — `pyrDown` and the
+derivatives are bulk contiguous passes, exactly what X-59's 4.7× adder ceiling was
+measured on, and `derivative` already auto-vectorises unaided. That is 27% of the x86
+frontend and the only untried avenue with a favourable prior.
+
+**Decision:** `residualSums` is **closed for x86 vectorisation** at every granularity
+tried, and the reason is recorded per attempt rather than as a single verdict.
+[D-50](ARCHITECTURE.md#8-design-decisions). E-33 narrows to `build` alone.
+
+**Method:** `benchmark/kpbatch_ceiling.cpp`, `-mavx2`, equality checked before timing;
+three runs, spreads 33–143% on a loaded machine, which is why the verdict rests on the
+ratio being ~1.0 across all three rather than on any single figure.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
