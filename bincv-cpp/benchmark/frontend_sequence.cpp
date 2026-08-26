@@ -184,7 +184,19 @@ int main(int argc, char** argv) {
     // binCV runs on one, which conflates "OpenCV has more cores" with "OpenCV has
     // better code". Setting BINCV_OPENCV_THREADS=1 separates them. Neither run is
     // the honest one on its own -- both are reported.
-    if (const char* t = std::getenv("BINCV_OPENCV_THREADS")) cv::setNumThreads(std::atoi(t));
+    // ONE THREAD BY DEFAULT, AND THAT IS NOT A HANDICAP ON OPENCV -- it is the
+    // denominator every recorded entry already used and the one the reference device
+    // gets for free, because `run_on_pi.sh` runs under `taskset -c 3` and OpenCV's
+    // threads cannot escape a single pinned core.
+    //
+    // X-64: leaving it unset let the x86 runs compare SINGLE-THREADED binCV against
+    // TWELVE-THREADED OpenCV, and the resulting 0.65x was read as a SIMD deficit for
+    // most of a working session. binCV has no threading at all, so an unpinned x86
+    // box silently changes what the ratio means; the reference device never could.
+    // Set BINCV_OPENCV_THREADS to compare against a multi-core OpenCV deliberately.
+    int cvThreads = 1;
+    if (const char* t = std::getenv("BINCV_OPENCV_THREADS")) cvThreads = std::atoi(t);
+    cv::setNumThreads(cvThreads);
 
     const cv::Mat first = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
     const int w = first.cols, h = first.rows;
@@ -410,15 +422,23 @@ int main(int argc, char** argv) {
     std::printf("  binCV  : %8.3f ms/frame\n", st.bincvMs / static_cast<double>(st.frames));
     std::printf("  OpenCV : %8.3f ms/frame\n", st.opencvMs / static_cast<double>(st.frames));
     std::printf("  RATIO  : %.2fx\n", st.opencvMs / st.bincvMs);
-    std::printf("  NOTE: OpenCV threads = %d, and its LK and gftt are SIMD-vectorized.\n",
+    std::printf("  NOTE: OpenCV threads = %d (binCV is single-threaded, always), and its\n"
+                "        LK and gftt are SIMD-vectorized.\n",
                 cv::getNumThreads());
+    if (cv::getNumThreads() != 1) {
+        std::printf("        *** NOT THE RECORDED DENOMINATOR. Every entry in EXPERIMENTS.md\n"
+                    "        *** that states its thread count states ONE. binCV has no threading,\n"
+                    "        *** so this ratio mixes a parallelism difference into what reads as\n"
+                    "        *** an implementation difference. See X-64.\n");
+    }
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     std::printf("        binCV has its NEON path here (D-30, D-33), so this is SIMD against\n"
                 "        SIMD on the deployment target -- the comparison criterion 4 is about.\n");
 #else
-    std::printf("        binCV has NO VECTOR PATH ON x86 (ROADMAP 5.3 is unwritten), so this\n"
-                "        is binCV SCALAR against OpenCV SSE. It is a fact about this machine,\n"
-                "        not about the product, whose target is Cortex-A. See X-37.\n");
+    std::printf("        binCV has NO VECTOR PATH ON x86 (ROADMAP 5.3 is unwritten), so this is\n"
+                "        binCV SCALAR against OpenCV SSE -- and X-64 measured what that is worth:\n"
+                "        at equal threads binCV LEADS, 1.14-1.19x. The x86 deficit reported\n"
+                "        before X-64 was threads, not vector width.\n");
 #endif
     return 0;
 }

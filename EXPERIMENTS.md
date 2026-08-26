@@ -8937,7 +8937,7 @@ Since then D-31, D-32, X-35 and X-42 landed, and **most of those are
 platform-independent algorithm changes** — only the accumulators (D-33, X-40) are NEON
 intrinsics. **Where is x86 now, and what is left there?**
 
-**Workload:** full 1710-frame sequence, AMD Ryzen 5 5600X, OpenCV pinned to one thread;
+**Workload:** full 1710-frame sequence, x86_64 desktop core, OpenCV pinned to one thread;
 the same binary and the same content as [X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done)'s
 aarch64 run.
 
@@ -9969,6 +9969,82 @@ enquiry rather than opening one. Recorded as
 
 **Method:** `benchmark/frontend_sequence.cpp` with `-DBINCV_BENCH_WORD=uint64_t`, full
 1710-frame sequence, three runs each on an idle machine.
+
+---
+
+### X-64 · The x86 deficit was THREADS, and the benchmark let it drift · `DONE`
+
+**A MEASUREMENT THAT CONTRADICTS WHAT THIS REPOSITORY SAYS, WHICH IS WHY IT IS HERE**
+([CLAUDE.md](../CLAUDE.md): report it rather than adjusting the code to fit the doc).
+`benchmark/frontend_sequence` sets `cv::setNumThreads` **only if
+`BINCV_OPENCV_THREADS` is set**, and it was not set for any x86 run in the session
+that produced [X-63](#x-63--the-31-pixel-window-is-the-cap-and-it-explains-every-failure--done).
+So those runs compared **single-threaded binCV against twelve-threaded OpenCV** —
+**binCV has no threading at all** — and the resulting `0.65–1.00×` was read, for most
+of a working session, as a **SIMD** deficit.
+
+**The reference device never had this problem and that is why it was never noticed:**
+`run_on_pi.sh` runs under `taskset -c 3`, and OpenCV's threads cannot escape a single
+pinned core. Every entry in this file that *states* its thread count states **one**
+([X-37](#x-37--the-frontend-on-the-reference-device--done),
+[X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done),
+[X-52](#x-52--where-x86-is-now--done), [X-38](#x-38--the-full-sequence--done)). The
+x86 runs are the ones that drifted.
+
+**Controlled, full 1710-frame sequence, three runs each, idle machine:**
+
+| OpenCV threads | binCV ms/frame | OpenCV ms/frame | ratio |
+|---|---|---|---|
+| **1** | 2.794 / 2.651 / 3.187 | 3.333 / 3.032 / 3.791 | **1.19× / 1.14× / 1.19×** |
+| 12 | 3.030 / 3.198 / 3.190 | 1.981 / 2.065 / 2.051 | 0.65× / 0.65× / 0.64× |
+
+**binCV IS AHEAD OF OpenCV ON x86 AT EQUAL CORE COUNT — 1.14–1.19×, at 6.23× less
+memory — with no x86 vector code whatsoever.** Both bands are tight across three runs;
+this is not a noise result.
+
+**WHAT THREADING IS WORTH, AND WHAT SIMD IS WORTH.** OpenCV goes 3.33 → 1.98 ms on
+twelve threads: **1.68× from parallelism**. Its SIMD is fully active in *both* rows —
+so the row that isolates the implementations is the one-thread row, and there **scalar
+binCV beats vectorised OpenCV**. That is [D-52](ARCHITECTURE.md#8-design-decisions)'s
+SWAR argument cashing out: one 32-bit `AND` covers 32 pixels, and binCV gets
+**31 px/op** from ordinary integer instructions where OpenCV gets 16 from `CV_16S` in
+AVX2 lanes.
+
+**THIS DOES NOT REOPEN [E-32](ARCHITECTURE.md#register) OR OVERTURN
+[D-52](ARCHITECTURE.md#8-design-decisions).** X-58/X-60/X-61 measured *vector width*
+and D-52 explains why all three failed; none of that is threads, and none of it
+changes. What changes is the **framing**: "binCV is behind on x86" was an artefact of
+an uncontrolled denominator, so the open x86 question is not vector width — it is that
+**binCV is single-threaded and OpenCV is not**, an axis this project has never
+examined.
+
+**Decision — three changes, none of them to a kernel.**
+
+1. **`frontend_sequence` now defaults `cv::setNumThreads(1)`.** This codifies existing
+   practice rather than choosing a new denominator: it is what every recorded entry
+   used and what the pinned reference device gets for free.
+2. **A ratio at any other thread count prints a loud disclaimer** naming this entry. An
+   unpinned x86 box silently changes what the ratio means; the device could not.
+3. **The criterion-4 NOTE is corrected.** It read "binCV has NO VECTOR PATH ON x86 …
+   so this is binCV SCALAR against OpenCV SSE", offering vector width as the cause of a
+   deficit that was threads. The vector-path fact is true and stays; the causal claim
+   is gone.
+
+**WHAT IS DELIBERATELY NOT DECIDED HERE.** Whether **multi-core OpenCV** is the fairer
+denominator for a multi-core target is a real question and a different one — a VIO
+frontend on a phone has more than one core, and binCV using one of them is a genuine
+limitation, not a measurement artefact. **It is left open rather than settled by this
+entry**, because it is a question about the product's shape and no experiment has
+addressed it.
+
+**Also corrected while here:** [X-52](#x-52--where-x86-is-now--done)'s method note
+named a specific x86 part. CLAUDE.md keeps platform language generic and the rest of
+the file says `x86_64`; it now does too.
+
+**Method:** `benchmark/frontend_sequence.cpp`, full 1710-frame sequence,
+`BINCV_OPENCV_THREADS` ∈ {1, 12}, three runs each, load average 0.33 at start.
+**No aarch64 arm, and none is needed** — `taskset -c 3` already pins the reference
+device to one core, which is what makes its recorded ratios unaffected.
 
 ---
 
