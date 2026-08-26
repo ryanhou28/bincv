@@ -3561,10 +3561,36 @@ with a barrier per level.
 
 **Decision: registered as [E-35](#register), and the tiebreak is stated in advance** —
 if a threading arm does multiply the shared working set, [CLAUDE.md](CLAUDE.md)'s rule
-applies and memory wins. It is registered as an **open question**, not as a plan to
-ship threads: whether a library at this level should spawn threads at all, or expose a
-parallel-for hook and let the caller own its thread policy, is a design question this
-project has not asked.
+applies and memory wins.
+
+**THE API SHAPE IS DECIDED PROVISIONALLY AND AHEAD OF THE NUMBERS, WHICH CLAUDE.md
+REQUIRES BE SAID OUT LOUD.** An earlier draft of this record proposed a **serial**
+default on the grounds that a library at this level should not own the caller's thread
+policy — with the reference implementation as evidence, since HybVIO runs
+single-worker pools per stage and takes its parallelism at the pipeline level. That is
+right *for that integrator* and wrong as a default, for a reason this project already
+has in writing: **OpenCV ships parallel by default, so a serial default means every
+casual comparison is single-threaded binCV against multi-threaded OpenCV** — the exact
+trap [X-64](EXPERIMENTS.md) documents, in this repository's own benchmark, for most of
+a working session. **A default that makes the library lose its own benchmark is not
+neutral.**
+
+**The default follows the BUILD PROFILE, which is the only place it can be both honest
+and fast:** hosted builds parallel and sized to hardware concurrency; **core-only,
+`-fno-exceptions` and freestanding stay serial with no pool and no allocation.** That
+is not a compromise but the only shape available — `bincv_core` is allocation-free and
+builds without exceptions, where `std::thread` is not usable, so the pool must live
+outside core whatever the policy is. Surface: `setNumThreads(n)` with `1` serialising,
+a swappable backend, and a `parallelFor` hook for an integrator's existing pool —
+OpenCV's surface, so integrators find what they expect, and HybVIO's model is one
+`setNumThreads(1)` call away.
+
+**Determinism is not a casualty:** keypoints are independent and `build`'s row bands
+write disjoint memory, so a threaded arm is **bit-exact** against serial, and X-65
+makes that a precondition rather than a band.
+
+**Provisional until [X-65](EXPERIMENTS.md) measures it.** If its Band B or D fires, the
+shape ships serial by default however well the argument reads.
 
 ## 9. Open Questions and Planned Experiments
 

@@ -10086,9 +10086,9 @@ applies and **memory wins**, whatever the speed says.
 **DECISION RULE, WRITTEN BEFORE MEASURING.** `T` = threads, on a 4-core device.
 
 - **Band A — arm C reaches ≥ 2.5× at T=4 AND peak working set grows < 5%.** Threading
-  is the frontend's largest remaining lever. Ship it as a **caller-supplied
-  parallel-for hook**, not as threads binCV spawns — a library at this level does not
-  own the caller's thread policy.
+  is the frontend's largest remaining lever. **Ship it ON BY DEFAULT in hosted builds**,
+  with a swappable backend and a `parallelFor` hook — see the amendment below for why
+  this band no longer reads "caller-supplied hook, not threads binCV spawns".
 - **Band B — ≥ 2.5× but the working set grows ≥ 5%.** Report both; **do not ship**
   without an explicit decision from the project owner, because this is exactly the
   conflict CLAUDE.md's tiebreak names and E-26 is the precedent for declining.
@@ -10101,9 +10101,64 @@ applies and **memory wins**, whatever the speed says.
   independent, so parallelism must not change a single flow vector. A difference means
   a data race, and a data race means the timing is meaningless.
 
+#### AMENDMENT, BEFORE ANY MEASUREMENT: the default polarity flips
+
+**This changes a band, and the protocol requires saying exactly when.** X-65 is
+`RULE ONLY` — **no arm has been built and no number collected** — so this is a rule
+being sharpened before measuring, not a rule being fitted to a result. The speed and
+footprint thresholds are untouched; only what Band A *ships* changes.
+
+**THE ORIGINAL BAND SAID "a library at this level does not own the caller's thread
+policy" AND CITED THE REFERENCE IMPLEMENTATION.** HybVIO does run
+`Processor::createThreadPool(1)` per stage — single-worker pools, pipeline parallelism
+across stages, no data parallelism inside a kernel. That is real evidence and it still
+stands **for that integrator**.
+
+**WHAT IT MISSED IS EVERYONE ELSE, AND [X-64](#x-64--the-x86-deficit-was-threads-and-the-benchmark-let-it-drift--done)
+IS THE PROOF.** OpenCV ships parallel by default. If binCV ships serial by default,
+then **every casual comparison anyone runs is single-threaded binCV against
+twelve-threaded OpenCV** — which is precisely the trap X-64 documents this project
+falling into, with its own benchmark, for most of a working session. A default that
+makes the library lose its own benchmark is not a neutral default.
+
+**AND THE OBJECTIONS THAT LOOKED STRUCTURAL MOSTLY ARE NOT:**
+
+- **Determinism survives.** Keypoints are independent and `build`'s row bands write
+  disjoint memory, so both arms are **bit-exact** against serial — which is already a
+  precondition of this experiment, not a new requirement.
+- **The footprint objection is bounded and already gated.** Pyramids and ladders are
+  read-only and shared ([D-56](ARCHITECTURE.md#8-design-decisions)); only per-thread
+  stack and pool state scale. Band B still declines at ≥5% whatever the speed.
+- **The core-only claim is untouched, because the pool cannot live in core anyway.**
+  `bincv_core` is allocation-free and builds `-fno-exceptions`, where `std::thread`
+  is not usable. **That constraint does not argue for a serial default — it argues for
+  a PROFILE-SCOPED one**, and this repository already builds four profiles.
+
+**SO THE DEFAULT FOLLOWS THE BUILD PROFILE, WHICH IS THE ONLY PLACE IT CAN BE BOTH
+HONEST AND FAST:**
+
+| profile | default |
+|---|---|
+| hosted (Release, Release+OpenCV) | **parallel, sized to hardware concurrency** |
+| core-only / `-fno-exceptions` / freestanding | **serial, no pool, no allocation — unchanged** |
+
+with `bincv::setNumThreads(n)` (`1` serialises), a swappable backend, and a
+`parallelFor` hook an integrator installs to hand binCV their existing pool. **That is
+OpenCV's surface, so an integrator finds what they expect — and HybVIO's model is one
+`setNumThreads(1)` call away**, which is exactly what such codebases already do to
+OpenCV.
+
+**PROVISIONAL, AND SAYING SO.** [CLAUDE.md](../CLAUDE.md) requires a decision made
+without the measurement loop to be marked provisional. This is a decision about API
+shape taken **ahead of** X-65's numbers; if Band B or D fires, the shape ships serial
+by default regardless of how good the argument reads.
+
 **Method:** `benchmark/frontend_sequence.cpp` with a thread-count knob; full sequence;
 OpenCV held at **one thread throughout**, per [X-64](#x-64--the-x86-deficit-was-threads-and-the-benchmark-let-it-drift--done),
-so the arms compare against a fixed denominator and against each other.
+so the arms compare against a fixed denominator and against each other. **The headline
+ratio is additionally reported at OpenCV's own default**, because that is the
+comparison a user actually runs and X-64's whole lesson is that leaving it unstated is
+how a denominator drifts.
 
 ---
 
