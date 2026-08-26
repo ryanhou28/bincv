@@ -9937,11 +9937,16 @@ guards, no gather and no intrinsics to blame — and the reason is embarrassingl
 | SSE2 | 128 | 31 | 24% |
 | **AVX2** | 256 | 31 | **12%** |
 
-**THIS IS THE COMMON CAUSE BEHIND THREE PRIOR REFUTATIONS.** X-58 (compiler AVX2),
-X-60 (hand-written within a row) and X-61 (across keypoints) each failed for a
-proximate reason — nested loops, pack/unpack, gather cost — and **all three were
-attempts to fill a 256-bit register from a 31-pixel window.** The proximate reasons
-were real; **this is the reason underneath them.**
+**THIS IS THE COMMON CAUSE BEHIND TWO PRIOR REFUTATIONS** — X-58 (compiler AVX2) and
+X-60 (hand-written within a row). Both fed a 256-bit register **from a 31-pixel
+window**; the proximate reasons were real, and this is the one underneath them.
+
+**IT DOES NOT COVER [X-61](#x-61--batching-across-keypoints-the-third-granularity-and-the-third-refutation--done),
+AND THIS ENTRY ORIGINALLY CLAIMED IT DID.** X-61 put **eight keypoints** in the lanes,
+so window width does not enter — the register is full by construction. Its blocker was
+the **gather**, and X-61 itself records that **the vector arithmetic won** and the
+gathers gave it back. Corrected in [D-52](ARCHITECTURE.md#8-design-decisions); the
+distinction matters because it is the difference between a wall and a layout bug.
 
 **SO binCV's REAL RATE IN LK IS 31 px/op — NOT 32, 64 OR 256.** Against OpenCV's 16
 (`CV_16S` in AVX2 lanes) that is a **1.94× packing advantage, and it is CAPPED BY THE
@@ -10045,6 +10050,118 @@ the file says `x86_64`; it now does too.
 `BINCV_OPENCV_THREADS` ∈ {1, 12}, three runs each, load average 0.33 at start.
 **No aarch64 arm, and none is needed** — `taskset -c 3` already pins the reference
 device to one core, which is what makes its recorded ratios unaffected.
+
+---
+
+### X-65 · E-35 — what does threading the frontend buy, and what does it cost? · `RULE ONLY`
+
+**COMMITTED BEFORE ANY CODE.** The rule is written first because
+[D-53](ARCHITECTURE.md#8-design-decisions) is one day old and its whole content is that
+a kernel ratio can point the opposite way from the workload.
+
+**Gates:** [E-35](ARCHITECTURE.md#register). **binCV has never been threaded, and no
+record anywhere chooses that** ([D-56](ARCHITECTURE.md#8-design-decisions)).
+[X-64](#x-64--the-x86-deficit-was-threads-and-the-benchmark-let-it-drift--done)
+measured OpenCV gaining **1.68×** from threads on the same workload.
+
+**THE ARMS.** `track` is 59.5% of the frontend and `build` 38.8%.
+
+| | |
+|---|---|
+| **A** | shipped: one thread |
+| **B** | `track` parallel over **keypoints**, `build` serial |
+| **C** | B, plus `build` parallel over **row bands** within a level, barrier per level |
+
+**MEASURED ON BOTH, AND THE PROTOCOL HAS TO CHANGE TO ASK THE QUESTION.**
+`run_on_pi.sh` pins with `taskset -c 3`, which makes a threading arm unmeasurable; this
+experiment runs it **unpinned across all four cores**, and reports the single-core
+control from the same binary so the two are comparable. **That is a deviation from the
+standing protocol and is confined to this experiment.**
+
+**BOTH AXES, AND THE MEMORY ONE IS NOT A FORMALITY.** Peak working set is reported per
+arm. The claim under test is that the shared pyramids and ladders are **read-only**, so
+only per-thread stack scales — if that is wrong, [CLAUDE.md](../CLAUDE.md)'s tiebreak
+applies and **memory wins**, whatever the speed says.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.** `T` = threads, on a 4-core device.
+
+- **Band A — arm C reaches ≥ 2.5× at T=4 AND peak working set grows < 5%.** Threading
+  is the frontend's largest remaining lever. Ship it as a **caller-supplied
+  parallel-for hook**, not as threads binCV spawns — a library at this level does not
+  own the caller's thread policy.
+- **Band B — ≥ 2.5× but the working set grows ≥ 5%.** Report both; **do not ship**
+  without an explicit decision from the project owner, because this is exactly the
+  conflict CLAUDE.md's tiebreak names and E-26 is the precedent for declining.
+- **Band C — 1.5–2.5×.** Real but not transformative. Ship the hook for `track` only;
+  `build`'s barrier is not worth its complexity at that return.
+- **Band D — < 1.5× at T=4.** Something dominates that is not compute — most likely
+  memory bandwidth on the shared pyramids, which would be a **finding about the
+  representation**, not about threading, and the far more interesting result.
+- **ANY BAND is void if `track`'s output is not bit-identical to arm A.** Keypoints are
+  independent, so parallelism must not change a single flow vector. A difference means
+  a data race, and a data race means the timing is meaningless.
+
+**Method:** `benchmark/frontend_sequence.cpp` with a thread-count knob; full sequence;
+OpenCV held at **one thread throughout**, per [X-64](#x-64--the-x86-deficit-was-threads-and-the-benchmark-let-it-drift--done),
+so the arms compare against a fixed denominator and against each other.
+
+---
+
+### X-66 · E-36 — staging, not gathering: the x86 keypoint batch, second attempt · `RULE ONLY`
+
+**COMMITTED BEFORE ANY CODE, AND WITH A CEILING BEFORE THE ARM.**
+
+**Gates:** [E-36](ARCHITECTURE.md#register). [X-61](#x-61--batching-across-keypoints-the-third-granularity-and-the-third-refutation--done)
+found the vector arithmetic **wins** (≈48 vector ops against ≈100 scalar) and the
+gathers give it back. [D-55](ARCHITECTURE.md#8-design-decisions) says why that is a
+**data-movement** result rather than the packing wall
+[D-52](ARCHITECTURE.md#8-design-decisions) filed it as.
+
+**TWO CHANGES, NEITHER OF WHICH IS A PORT OF THE NEON PATH.**
+
+1. **STAGE ONCE, REUSE ACROSS ITERATIONS.** Eight of the twelve words read per row —
+   `self`, `magX`, `magY`, `signX`, `signY` — belong to the **previous** frame, which LK
+   linearises about and never re-reads at a new offset. Transpose eight keypoints' worth
+   into `[row][plane][lane]` **once per keypoint per level**; the inner loop then issues
+   `_mm256_loadu_si256`, not `_mm256_i32gather_epi32`. **LK runs up to 20 iterations**,
+   so the movement is paid once rather than twenty times.
+2. **CARRY-SAVE, NOT POPCOUNT-PER-ROW.** AVX2 has no vector popcount and this class of
+   core has no `AVX512-VPOPCNTDQ`, which is what made X-60's emulation lose. But the
+   kernel needs **the sum over 31 rows**, not each row's count — so compress 31
+   one-bit-per-lane values into a **5-plane bit-sliced sum** with `AND`/`XOR` only, then
+   popcount **five** words with weights 1,2,4,8,16. `maj3` and `addShifted` in
+   ops/bitslice.hpp are already the full adder this needs.
+
+**THE FOOTPRINT NUMBER, STATED BEFORE MEASURING.** 8 keypoints × 31 rows × 8 words ×
+4 B ≈ **8 KB on a 436 704 B peak, +1.8%** — transient, not a second copy of anything.
+[E-26](ARCHITECTURE.md#register) declined **+21%** for a whole-level conversion; **this
+is an order of magnitude smaller and that decision does not settle it.** If the measured
+figure exceeds **+5%**, the arm is declined on footprint regardless of speed.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.**
+
+- **Band A — ceiling ≥ 2.0× on `residualSums` AND the whole-frontend arm ≥ 1.3×.**
+  Write it. [D-53](ARCHITECTURE.md#8-design-decisions) makes the frontend arm
+  **mandatory, not confirmatory** — X-62 was 1.75× in the kernel and 0.31× on the
+  frontend.
+- **Band B — ceiling ≥ 2.0× but the frontend gains < 1.3×.** Report where it went. That
+  would mean `residualSums` is no longer the frontend's constraint, which redirects
+  Phase 5 rather than closing it.
+- **Band C — ceiling 1.2–2.0×.** Below what staging plus CSA should deliver on paper;
+  **report the gap between the op-count model and the measurement** before writing
+  anything.
+- **Band D — ceiling < 1.2×, or slower.** Then the operands were never the problem and
+  [D-50](ARCHITECTURE.md#8-design-decisions)'s verdict stands at every granularity.
+  **Record it as the fourth refutation and close E-36.**
+
+**BIT-EXACTNESS IS A PRECONDITION, NOT A BAND.** CSA reassociates a sum of integers,
+which is exact — unlike [X-62](#x-62--e-34--can-the-four-tap-correlations-become-one--done),
+this arm computes **the same integers**, and the arms are compared for **equality**
+before they are timed. A mismatch is a bug, not a trade.
+
+**Method:** `benchmark/kpbatch_staged_ceiling.cpp` for the ceiling, `-mavx2`;
+whole-frontend via `benchmark/frontend_sequence.cpp`; both with OpenCV at one thread.
+x86 only — aarch64 has `CNT` and its own measured paths, and this changes nothing there.
 
 ---
 

@@ -3379,19 +3379,29 @@ no NEON guard confounds it — and **track moved 2% for a doubled word.**
 | `uint64` | 64 | 48% |
 | **AVX2** | 256 | **12%** |
 
-**THIS IS THE COMMON CAUSE BEHIND THREE REFUTATIONS.** [X-58](EXPERIMENTS.md) (compiler
-AVX2), [X-60](EXPERIMENTS.md) (hand-written within a row) and [X-61](EXPERIMENTS.md)
-(across keypoints) each failed for a proximate reason — nested loops, pack/unpack,
-gather cost — and **all three were attempts to fill a 256-bit register from a 31-pixel
-window.** Those reasons were real; this is the one underneath them.
+**THIS IS THE COMMON CAUSE BEHIND TWO REFUTATIONS —** [X-58](EXPERIMENTS.md) (compiler
+AVX2) and [X-60](EXPERIMENTS.md) (hand-written within a row). Both tried to fill a
+256-bit register **from a 31-pixel window**, and both had a proximate reason (nested
+loops, pack/unpack); this is the one underneath them.
+
+**IT DOES NOT COVER [X-61](EXPERIMENTS.md), AND AN EARLIER VERSION OF THIS RECORD
+CLAIMED IT DID.** X-61 batched **eight keypoints** into the lanes, so the window's
+width is irrelevant to it — the register is full by construction. Its blocker was the
+**gather**, and its own entry records that **the vector arithmetic won** (≈48 vector
+ops against ≈100 scalar) and the gathers gave it back. That is a **data-movement**
+failure, not a packing one, and lumping it in here made a fixable engineering problem
+look like an information-theoretic wall. See [D-55](#d-55-the-vector-dimension-is-keypoints-and-the-blocker-is-staging-not-packing).
 
 **binCV's real rate in LK is 31 px/op** — not 32, 64 or 256 — against OpenCV's 16.
 **A 1.94× packing advantage, capped by the ALGORITHM rather than by the word type or
 the ISA**, against 5.6× the operations: **2.9× cost, which is the gap, fully accounted.**
 
-**What this rules out:** every widening approach — wider words, wider registers, and
-batching windows to fill them ([X-61](EXPERIMENTS.md) measured that one). **The only
-remaining lever is the operation count**, which is [E-34](#register)'s ×5.
+**What this rules out:** widening *within a window* — wider words and wider registers
+fed from one 31-pixel row. **It does NOT rule out batching across windows**, where the
+register is full by construction; [X-61](EXPERIMENTS.md) measured **one implementation**
+of that and was blocked by its gather, not by packing. The levers that remain are the
+**operation count** ([E-34](#register)'s ×5, closed negative by
+[X-62](EXPERIMENTS.md)) and the **access pattern** ([E-36](#register)).
 
 **One thing it does not settle:** `uint64` made `build` **worse on x86 (1.2×)** where
 [X-54](EXPERIMENTS.md) measured it **1.66× better on aarch64**. Build is a bulk pass, so
@@ -3476,6 +3486,86 @@ multi-core target. A frontend on a phone has more than one core, and binCV using
 a real limitation rather than a measurement artefact — a question about the product's
 shape, left open rather than settled by a correction.
 
+### D-55: the vector dimension is KEYPOINTS, and the blocker is staging, not packing
+
+Three x86 vector attempts failed and the verdict was recorded as "`residualSums` is
+closed for x86 vectorisation" ([D-50](#8-design-decisions)). **That verdict is too
+broad, and [D-52](#d-52-the-31-pixel-window-caps-the-packing-advantage-at-194)'s
+original wording made it worse** by attributing all three to the 31-pixel window.
+Re-reading the measurements:
+
+| attempt | granularity | what it actually shows |
+|---|---|---|
+| [X-58](EXPERIMENTS.md) | compiler, within a row | the loop nest is not vectorisable — real, and about **shape** |
+| [X-60](EXPERIMENTS.md) | hand-written, within a row | 31 px cannot fill 256 bits — real, and about **packing** |
+| **[X-61](EXPERIMENTS.md)** | **8 keypoints in 8 lanes** | **the arithmetic WON, ≈48 vector ops against ≈100 scalar.** The five `_mm256_i32gather_epi32` per row (~75 cycles) gave it back |
+
+**X-61 is a data-movement result, not a packing result.** Eight keypoints fill the
+register by construction; nothing about a 31-pixel row constrains it. So the question
+is not *can the arithmetic be vectorised* — it was, and it won — but **why the operands
+were gathered at all.**
+
+**THEY WERE GATHERED BECAUSE X-61 GATHERED IN THE INNER LOOP, ONCE PER ROW PER
+ITERATION. Most of what it gathered does not change across iterations.** Of the twelve
+words `alignedResidualSums` reads per row, **eight are iteration-invariant** — `self`,
+`magX`, `magY`, `signX`, `signY` all belong to the **previous** frame and its
+derivative, which LK linearises about and never re-reads at a new offset. Only the tap
+words move, and their *integer* part changes only when the estimate crosses a pixel
+boundary. **LK runs up to twenty iterations per keypoint per level**, so a gather paid
+once and reused twenty times is a twentieth of the cost X-61 measured.
+
+**THIS IS NOT [E-26](#register) AGAIN.** E-26 priced converting **a whole level** to
+interleaved layout: +92 160 B on a 436 704 B peak, **+21%**, declined. Staging **eight
+windows' invariant words** is 8 × 31 × 8 × 4 B ≈ **8 KB, +1.8%** — and it is a
+transient tile, not a second copy of the pyramid. **The two differ by an order of
+magnitude and the earlier decision does not settle the smaller one.**
+
+**AND THE POPCOUNT ITSELF SHOULD PROBABLY NOT BE A POPCOUNT.** AVX2 has no vector
+popcount (this class of core has no `AVX512-VPOPCNTDQ`), so a vectorised reduction must
+emulate it per word — which is why X-60's pack/unpack lost. But the kernel does not
+need each row's count; it needs **the sum of 31 rows' counts**. That is exactly what a
+**carry-save adder tree** computes: compress 31 one-bit-per-lane values into a 5-plane
+bit-sliced sum with `AND`/`XOR` only, then popcount **five** words with weights
+1,2,4,8,16 instead of thirty-one. **binCV already has the primitives** — `maj3` and
+`addShifted` in [ops/bitslice.hpp](bincv-cpp/include/bincv-cpp/ops/bitslice.hpp) are a
+full adder — and CSA is pure boolean work, which is precisely what AVX2 does well and
+what binCV's representation is made of.
+
+**Decision: `residualSums` is REOPENED for x86, at the keypoint granularity only, and
+the next attempt must STAGE rather than gather.** [D-50](#8-design-decisions) stands
+for the two within-row granularities and is narrowed to them. Registered as
+[E-36](#register). **The ceiling must be a whole-frontend arm**
+([D-53](#d-53-a-ceiling-prices-the-operation-not-the-algorithm)), and
+[D-49](#8-design-decisions) says to expect it to overstate.
+
+### D-56: binCV is single-threaded by default, not by decision
+
+There is **no record anywhere in this repository of choosing a single-threaded design.**
+It is an unexamined default, and [X-64](EXPERIMENTS.md) shows what it costs: OpenCV
+gains **1.68×** from threads on the same workload, which was misread as a SIMD deficit
+for a working session.
+
+**The measurement protocol is part of why it went unexamined.** `run_on_pi.sh` pins to
+one core with `taskset -c 3` — correct for isolating a kernel, and it makes a
+parallelism question *invisible* rather than answered. A protocol that hides an axis is
+not neutral about it.
+
+**The obstacles are smaller than they look, and the memory tiebreak mostly does not
+bite.** LK over keypoints has **no shared state**: pyramids and derivative ladders are
+**read-only** and shared, kernels take views ([D-5](#8-design-decisions)) and allocate
+nothing ([CLAUDE.md](CLAUDE.md)), and `residualSums`' scratch is a handful of
+stack words per window. **The 436 704 B working set does not multiply with thread
+count** — only the per-thread stack does. `build` is a dependency chain *down* the
+ladder but its rows within a level are independent, so it parallelises over row bands
+with a barrier per level.
+
+**Decision: registered as [E-35](#register), and the tiebreak is stated in advance** —
+if a threading arm does multiply the shared working set, [CLAUDE.md](CLAUDE.md)'s rule
+applies and memory wins. It is registered as an **open question**, not as a plan to
+ship threads: whether a library at this level should spawn threads at all, or expose a
+parallel-for hook and let the caller own its thread policy, is a design question this
+project has not asked.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -3532,6 +3622,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | ~~**E-32**~~ **RESOLVED — the obstruction is the loop order** | binCV has NEON paths and no x86 vector code. Where would AVX2 pay? | [X-57](EXPERIMENTS.md) left binCV at 0.91× of OpenCV with no x86 vector code at all. | **Answered: not from the compiler.** [X-58](EXPERIMENTS.md): `-mavx2` buys **1–2%**, inside the same binary's run-to-run spread. `derivative` vectorises (63 `%ymm`); `pyrDownRoute`, `boxSum4` and `cornerMinEigenValRow` get **zero**, because a bit-sliced kernel's outer loop walks words while its **body is a nest over planes** — GCC: *"multiple nested loops"*. [D-48](#d-48-the-bit-plane-layout-is-what-stops-the-compiler-vectorising-bincv). | Whether x86 needs hand-written kernels. **It does**, and the reason is structural. | D-47 | (X-58) ✔ |
 | **E-33** *(narrowed to `build`)* | Restructure the **bulk** kernels — `pyrDown`, the derivatives — to process 8 words at once so AVX2 can reach them. | [X-59](EXPERIMENTS.md) priced the adder at **≈4.7×** on contiguous data. [X-60](EXPERIMENTS.md) then **refuted the `residualSums` half**: bit-exact and **1.88× slower**, because its eight words are register-resident and the pack/unpack costs more than the `POPCNT`s. | **`build` is the half the ceiling actually applies to** — bulk passes over contiguous plane rows, the shape X-59 measured — and `derivative` already auto-vectorises, so the target is `pyrDown`. It is **27% of the x86 frontend, not 67%**, so the prize is correspondingly smaller. [D-49](#d-49-the-mismatch-is-granularity-not-layout--five-ceilings-say-so) says to expect a ceiling to overstate. | Whether binCV is ahead of OpenCV on x86, and whether the GPU port inherits the restructuring. | D-49 | **Phase 5** |
 | **E-35** | binCV is **single-threaded**; OpenCV is not. Should the frontend parallelise — across keypoints in LK, across tiles in `build` — and what does that cost in footprint? | [X-64](EXPERIMENTS.md) found the x86 "deficit" was **threads, not vector width**: at one thread binCV **leads 1.14–1.19×**, at twelve it reads 0.65×. OpenCV gains **1.68×** from parallelism. [D-52](#d-52-the-31-pixel-window-caps-the-packing-advantage-at-194) closed every *widening* avenue, so this is the axis that is left — and it is worth more than the 12% register utilisation D-52 ruled out. | **Unmeasured, and not obviously free.** LK over keypoints is embarrassingly parallel and needs no shared state; `build` is a dependency chain down the ladder. Against that, **CLAUDE.md's tiebreak is memory** — per-thread scratch multiplies the footprint that is binCV's strongest claim (6.23×), and a Cortex-A little core is not an x86 core. **Rule and ceiling first**, and the ceiling must be a WHOLE-FRONTEND arm, not a kernel ratio ([D-53](#d-53-a-ceiling-prices-the-operation-not-the-algorithm)). | Whether binCV's single-threaded shape is a deliberate constraint or an unexamined default — and whether multi-core OpenCV is the fairer denominator, which X-64 deliberately left open. | D-54 | **Phase 5** |
+| **E-36** | Re-attempt x86 vectorisation of `residualSums` at the **keypoint** granularity, **staging instead of gathering**, and replacing the per-row popcount with a **carry-save adder tree**. | [X-61](EXPERIMENTS.md)'s vector arithmetic WON (≈48 ops against ≈100) and its **gathers** gave it back — a data-movement result that [D-52](#d-52-the-31-pixel-window-caps-the-packing-advantage-at-194) wrongly filed as a packing wall. | **Two changes, neither of which is a port.** (1) **Stage once, reuse across iterations**: eight of the twelve words read per row belong to the PREVIOUS frame and never move, and LK runs up to 20 iterations — so the gather is paid once, not 20 times. ~8 KB, **+1.8%**, an order of magnitude below [E-26](#register)'s declined +21%. (2) **CSA instead of popcount**: AVX2 has no vector popcount, but the kernel needs the SUM of 31 rows' counts, and a carry-save tree compresses 31 words into 5 planes with AND/XOR alone — `maj3` and `addShifted` already exist. | Whether [D-50](#8-design-decisions)'s "closed for x86" holds at the granularity that was never properly tried. | D-55, D-52 | **Phase 5** |
 | ~~**E-18**~~ **RESOLVED — NEGATIVE** | Can `residualSums` carry **vector accumulators across the window**, reducing once per window instead of once per call? | [X-33](EXPERIMENTS.md) measured a **3.42× ceiling** for batched NEON popcounts and delivered **1.24×**. The gap is the horizontal add: it runs once per `slicedSignedSum` call — **~310 register-domain crossings per window**. | **Answered: YES it can, and NO it is not worth 2–3×.** [X-40](EXPERIMENTS.md) built it (`impl::alignedResidualSumsNeon2`, bit-exact, gate-enforced) and it delivers **1.069×** against a 1.461× ceiling — about **1.52× against OpenCV** on the frontend, from 1.46×. **The floor arm is the finding**: the per-row tap machinery with the counting REMOVED is **45.4%** of the kernel, so **if counting were free the cap would be 2.205×**. The 2–3× this question was chartered on is not in the counting. [D-37](#d-37-residualsums-is-extraction-bound-not-count-bound); successor is [E-23](#register). | Whether `TapSums` becomes vector state. **It did, and the profile moved instead.** | X-28's unmet criterion 4 | **Phase 5** (X-40) ✔ |
 | ~~**E-23**~~ **RESOLVED — NEGATIVE** | `residualSums` is extraction-bound: 45.4% of the kernel is addressing with zero counting. How much of it is addressable? | [X-40](EXPERIMENTS.md) measured it with a floor arm; it was 13.7% at [D-29](#8-design-decisions) and grew because D-30, D-31, D-33 and X-35 made the counting ~3× faster and never touched it. | **Answered: almost none of it, by either obvious route.** [X-41](EXPERIMENTS.md) hoisted every loop-invariant — both `(w0, s)` descriptors, their branches, the `.row(y)` multiplies, the `interior` test — for **1.023×**; and fitting all ten planes in L1D together for **1.129×**. The 8× cache-line overfetch is real and is **not** the constraint. **The instruction stream is**: ~118 cycles per row for ~100 instructions. [D-38](#d-38-residualsums-extraction-is-instruction-bound--not-addressing-not-layout). | Whether the three copies of the extraction block collapse. **They should, but for maintenance — not for speed.** | D-37 | **Phase 5** (X-41) ✔ |
 | ~~**E-24**~~ **RESOLVED — NEGATIVE** | The twelve `alignedWord` extractions in a row share two `(w0, s)` descriptors. Can twelve scalar load-shift-ors become three vector ones? | [X-41](EXPERIMENTS.md) ruled out addressing (1.023×) and cache (1.129×), leaving instruction count as the only lever. | **Answered: the shifts YES, the loads NO.** [X-43](EXPERIMENTS.md): removing the gather makes the extraction **1.638×** faster, but paying for it makes it **0.885× — slower than scalar**. `QuantMat` stacks planes, so the eight words are in eight unrelated lines and **aarch64 has no gather**; eight loads plus eight lane inserts cost more than the shift-ors they replace. **The obstacle is the layout, and the rule predicted that before measuring.** [D-40](#d-40-the-extractions-obstacle-is-the-plane-layout-and-residualsums-is-done). | Whether the aligned path vectorises its loads. **It cannot, as laid out.** | D-38 | **Phase 5** (X-43) ✔ |
