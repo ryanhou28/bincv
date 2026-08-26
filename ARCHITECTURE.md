@@ -3460,10 +3460,13 @@ read as a **SIMD** deficit.
 | **1** | **1.19× / 1.14× / 1.19× — binCV faster** |
 | 12 | 0.65× / 0.65× / 0.64× |
 
-**~~binCV leads OpenCV on x86 at equal core count~~ — WITHDRAWN.** Those runs used
-`MH_01_easy`, off a transient mount. Re-measured on **V1_02**, the sequence
-[X-38](EXPERIMENTS.md), X-49 and X-52 all used, binCV is **0.89× at one thread and
-0.49× at twelve** — *behind* single-threaded OpenCV. V1_02 is harder (`track` 2.28 ms
+**~~binCV leads OpenCV on x86 at equal core count~~ — WITHDRAWN AS CLAIMED, THEN EARNED.**
+Those runs used `MH_01_easy`, off a transient mount. Re-measured on **V1_02**, the
+sequence [X-38](EXPERIMENTS.md), X-49 and X-52 all used, binCV was **0.89× at one
+thread** — *behind* single-threaded OpenCV. It is now **1.04×**, from
+[X-69](EXPERIMENTS.md) and [X-70](EXPERIMENTS.md), which is a different thing entirely:
+**a lead measured on the harder sequence and produced by two changes, not by a choice of
+input.** The withdrawal stands as written; what replaced it was earned. V1_02 is harder (`track` 2.28 ms
 against MH_01's 1.66), and **the ratio moves further than most experiments here
 measure.**
 
@@ -3734,6 +3737,42 @@ ceiling.** That is a lot for a Cortex-M and is stated rather than hidden — the
 ladder is `1/2/2/2`, so the real figure is 4 KB. Both decline above 64 rows rather than
 overrunning, and neither touches the heap ([CLAUDE.md](CLAUDE.md)). A **byte**-bounded
 cap rather than a row-bounded one is [E-38](#register), not a guess made here.
+
+### D-62: where x86 stands, consolidated
+
+Six experiments in one session moved the x86 picture, and the pieces are scattered
+across [X-64](EXPERIMENTS.md) … [X-70](EXPERIMENTS.md). **This is the whole of it**, on
+**V1_02**, full 1710 frames, **OpenCV pinned to one thread throughout**
+([D-58](#d-58-state-the-sequence-or-the-headline-is-not-about-the-library)):
+
+| threads | `track` | `fromCVMat` | binCV | vs OpenCV | *(was, this morning)* |
+|---|---|---|---|---|---|
+| **1** | 1.340 | 0.830 (33%) | 2.499 | **1.04×** | 0.90× |
+| 2 | 0.856 | 0.820 | 2.000 | 1.33× | 1.20× |
+| **4** | 0.542 | 0.822 (49%) | 1.689 | **1.56×** | 1.50× |
+| 12 | 0.392 | 0.818 (**53%**) | 1.539 | 1.71× | 1.75× |
+
+**`track` went 2.19 → 0.39 ms — 5.5×** — 1.46× from staging and the tap cache
+([D-60](#d-60-the-previous-frames-words-are-staged-once-per-point-per-level),
+[D-61](#d-61-the-taps-are-cached-on-the-integer-displacement-and-bincv-crosses-10))
+and 3.7× from threading ([D-57](#d-57-threading-is-the-largest-lever-measured-and-it-moves-the-bottleneck-to-build)).
+**All of it bit-exact**, all of it at unchanged peak working set.
+
+**THE BOTTLENECK HAS MOVED TWICE IN ONE NIGHT AND IS NOW THE INPUT CONVERSION.**
+`fromCVMat` is **53% of the frontend at twelve threads** and does not scale — it was 20%
+at the start. It is also the one item on the list that **a deployed binary-frame
+pipeline would not run at all**
+([D-59](#d-59-eighty-percent-of-build-is-the-input-conversion-not-a-kernel)): excluding
+it, T=4 is **0.867 ms against OpenCV's 2.638 — 3.04×.**
+
+**Both numbers, always.** 1.56× is what this harness measures; 3.04× is what a pipeline
+fed by its sensor would see. Neither is the honest number alone.
+
+**What this does NOT show.** T=12 got slightly *worse* (1.75× → 1.71×) because `track`
+is now small enough that threading has less to bite on — Amdahl arriving on schedule.
+And the aarch64 numbers are **unmeasured**: staging and the tap cache are portable
+scalar code and should carry over, but "should" is not a measurement, and the reference
+device is the deployment target.
 
 ## 9. Open Questions and Planned Experiments
 
