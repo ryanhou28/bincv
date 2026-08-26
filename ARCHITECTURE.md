@@ -3298,12 +3298,24 @@ and the question they were chasing — *why is a 1-bit library not beating an 8-
 — has a simpler answer than any of them. **It is not the layout, not the data format
 and not parallelism. It is the operation count.**
 
-**PER 31×31 WINDOW, binCV's LK ISSUES ~12× THE OPERATIONS OpenCV's DOES:**
+**THE BITWIDTHS BEING COMPARED**, because the question is meaningless without them:
+OpenCV's `LKTrackerInvoker` holds its patch and derivatives in **`CV_16S` — 16-bit** —
+so AVX2 gives it **16 pixels per operation**. binCV works at **N = 2 bits** in
+`uint32_t` words: **32 pixels per operation**. **binCV's packing advantage in the
+shipped build is 2×, not the 8× an AVX2-vs-AVX2 comparison would suggest** — because
+binCV is not using AVX2 at all.
+
+**PER 31×31 WINDOW PER LK ITERATION:**
 
 | | ops per window |
 |---|---|
 | binCV: 120/row × 31 rows | **3 720** |
-| OpenCV: 961 px × ~5 ops ÷ 16 AVX2 lanes | **300** |
+| OpenCV: interpolate patch (360) + residual (300) | **660** |
+| | **5.6×** |
+
+*(An earlier draft said 12×, having omitted OpenCV's bilinear interpolation pass.
+Corrected: 5.6× on operations, and **2.8× on cost** once binCV's 2× packing advantage
+is applied — which is the order of the gap actually measured.)*
 
 Three multipliers, each a recorded decision rather than an accident:
 
@@ -3313,9 +3325,16 @@ Three multipliers, each a recorded decision rather than an accident:
 | **×4** plane pairs | A bit-sliced N-bit × N-bit product needs **N² popcount pairs**. At N = 2 that is 4, where OpenCV does **one multiply**. |
 | **×2** | Sign-magnitude: `total − 2·opposing` is two popcounts ([D-3](#8-design-decisions)). |
 
-**binCV's packing advantage is 8× (256 pixels per AVX2 register against OpenCV's 32).
-An 8× advantage cannot cover a 12× deficit.** 8 ÷ 12 ≈ 0.67, and with binCV's cheaper
-per-op cost that lands near the **1.2×** actually measured. **The arithmetic closes.**
+**LOW BITWIDTH DOES HELP THE ARITHMETIC — ENORMOUSLY — AND STILL DOES NOT WIN.** A
+bit-sliced N×N product costs **N² popcount pairs**: 1 at N=1, **4 at N=2**, 64 at N=8,
+**256 at N=16**. binCV at 2 bits is **64× cheaper than a bit-sliced 16-bit would be**,
+which is the whole reason the representation is viable. **But a hardware multiplier
+costs ONE operation at ANY width** — the silicon is fixed-width, so narrowing the data
+buys OpenCV **nothing** and buys binCV N². binCV narrows its way back to *4 pairs
+against 1 multiply-add*, then pays ×5 for the taps on top.
+
+**That is the whole account:** 2× packing against 5.6× operations is **2.8×**, and
+2.8× is the gap.
 
 **THE GENERAL SHAPE OF THE LIBRARY, STATED PLAINLY:**
 
@@ -3334,6 +3353,13 @@ matching is the natively-bitwise tracker — one popcount per candidate row, no 
 taps — and [D-24](#8-design-decisions) measured it at **0.93× on track time** while
 losing **2–12 yield points**. Being algorithmically aligned with the representation did
 not make it faster, which is worth knowing before anyone proposes it again.
+
+**AND THE ×5 IS THE ONE THAT CAN GO.** Collapsing the four tap correlations into one
+takes binCV toward **~1 800 ops** once the weighted patch is formed — the collapse is
+**not free**, it costs bit-sliced adds and a requantise — which against OpenCV's 660
+with a 2× packing advantage is roughly **1.4× cost instead of 2.8×**. **A ~2× cut on
+the kernel that is 67% of the frontend**, and the only one of the three multipliers
+that is a design choice rather than a property of bit-sliced arithmetic.
 
 **WHAT HAS NEVER BEEN QUESTIONED IS THE ×5.** It is the largest multiplier, it sits in
 the kernel that is **67% of the frontend**, and D-20 records it as a consequence of the
