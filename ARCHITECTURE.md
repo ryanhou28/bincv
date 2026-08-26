@@ -3681,6 +3681,33 @@ threads. **A stage total is not a target.** Decompose before choosing what to op
 [D-53](#d-53-a-ceiling-prices-the-operation-not-the-algorithm) said a ceiling can price
 the wrong thing, and this says a *profile* can too.
 
+### D-60: the previous frame's words are staged once per point per level
+
+[X-66](EXPERIMENTS.md) found **contiguity, not the popcount**, was the whole of its
+2.09×. If the win is addressing it should be available **with no vector code**, and
+[X-69](EXPERIMENTS.md) is that arm: **1.27× on `track`, 1.09% on the frontend,
+bit-exact, 2 048 B of stack and zero heap.**
+
+Eight of the twelve words read per row belong to the **previous** frame, which LK
+linearises about and never re-reads at a new offset, and `region` is fixed per point per
+level — so they are extracted **once** and all
+[X-68](EXPERIMENTS.md)'s **4.29 mean iterations** read from the buffer.
+[D-37](#8-design-decisions) put extraction at 45.4% of the kernel; the model predicted
+**1.30×** and measured **1.27×**.
+
+`stageWindow` **declines** — wider than a word, or taller than 64 rows — rather than
+overrunning a fixed stack buffer, so the unstaged path stays live and correct.
+[CLAUDE.md](CLAUDE.md) forbids a kernel allocating and this operation has no caller
+scratch, which is why the bound exists at all.
+
+**Bit-exactness is pinned by `Flow.StagedMatchesUnstaged_{N1,N2,N3}`, watched to fail**
+on an injected one-bit staging fault (374/487/522 of 624 windows differ).
+
+**This works on aarch64 too**, where [E-36](#register)'s AVX2 batch never would — and it
+**shifts that experiment's baseline**: X-66's 2.09× was measured against the *unstaged*
+scalar arm, so its remaining headroom over this is smaller than 2.09× and is **not yet
+measured**.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

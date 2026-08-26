@@ -1105,6 +1105,154 @@ inline void alignedResidualSums(const LKLevelN<N, WordType>& lv,
     }
 }
 
+/// @brief Rows the staging path handles. The shipped window is 31 ([D-31](../../../ARCHITECTURE.md)).
+/// @note A bound, not a tuning knob: it fixes the size of a STACK buffer, and
+///       [CLAUDE.md](../../../CLAUDE.md) forbids a kernel allocating. At the shipped
+///       `N = 2` the whole struct is 2 048 B; at the `N = 8` ceiling it is 6 656 B.
+///       A taller window declines and takes the unstaged path.
+constexpr size_t kStagedMaxRows = 64;
+
+/// @brief One window's ITERATION-INVARIANT words, extracted once. **INTERNAL** (X-66).
+///
+/// **WHY THIS EXISTS.** [X-68](../../../EXPERIMENTS.md) measured **91.5% of `track`**
+/// to be iterated `residualSums`, at a mean of **4.29 iterations** per point per level.
+/// Of the twelve words `alignedResidualSums` reads per row, **eight belong to the
+/// PREVIOUS frame** — `self`, `magX`, `magY`, `signX`, `signY` — and LK linearises
+/// about the previous frame, so **they are identical on every one of those
+/// iterations** and were being re-extracted on all of them.
+///
+/// The four tap words are not here: they depend on `(tapX, tapY)`, which moves.
+///
+/// @note `region` is fixed per point per level — it is derived from `prevPts`, which
+///       the iteration does not touch — so one staging serves every iteration.
+template <size_t N, typename WordType>
+struct StagedWindow {
+    WordType self[kStagedMaxRows][N];
+    WordType magX[kStagedMaxRows][N];   ///< already masked to the region
+    WordType magY[kStagedMaxRows][N];
+    WordType signX[kStagedMaxRows];
+    WordType signY[kStagedMaxRows];
+};
+
+/// @brief Fill a `StagedWindow`, or decline. **INTERNAL** (X-66).
+/// @return False when this window cannot be staged, leaving the caller on the
+///         unstaged path. Declines are not failures: a window wider than a word uses
+///         `ReplicatedShiftedRow` spans rather than single words, and a taller one
+///         would overrun a fixed stack buffer.
+template <size_t N, typename WordType>
+inline bool stageWindow(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
+                        StagedWindow<N, WordType>& s) {
+    const size_t width = r.x1 - r.x0;
+    if (width == 0 || width > bitsPerWord<WordType>()) return false;
+    const size_t rows = r.y1 - r.y0;
+    if (rows > kStagedMaxRows) return false;
+    const size_t words = minRowWords<WordType>(lv.prev[0].width);
+    const WordType mask = lowBitsMask<WordType>(width);
+    for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
+        for (size_t k = 0; k < N; ++k) {
+            s.self[i][k] = alignedWord<WordType>(lv.prev[k].row(y), words, r.x0);
+            s.magX[i][k] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dxMag[k].row(y), words, r.x0) & mask);
+            s.magY[i][k] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dyMag[k].row(y), words, r.x0) & mask);
+        }
+        s.signX[i] = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
+        s.signY[i] = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
+    }
+    return true;
+}
+
+/// @brief The 1-bit `LKLevel` declines unconditionally. **INTERNAL.**
+/// @note `stageWindow` is written against `LKLevelN`'s plane arrays. Declining keeps
+///       one tracking body serving both level types ([D-21](../../../ARCHITECTURE.md))
+///       without a compile error, exactly as the two `residualSums` overloads do.
+template <typename WordType>
+inline bool stageWindow(const LKLevel<WordType>&, const RegionWords<WordType>&,
+                        StagedWindow<1, WordType>&) {
+    return false;
+}
+
+/// @brief `alignedResidualSums` reading the previous frame from a `StagedWindow`.
+///        **INTERNAL** (X-66).
+/// @note **Bit-exact with `alignedResidualSums` by construction** — the same words in
+///       the same order, differing only in where they are read from. The taps are
+///       still extracted per iteration, because they move.
+template <size_t N, typename WordType, bool UseNeon>
+inline void stagedResidualSums(const LKLevelN<N, WordType>& lv,
+                               const StagedWindow<N, WordType>& s,
+                               const RegionWords<WordType>& r, long long tapX, long long tapY,
+                               TapSums& sumsX, TapSums& sumsY) {
+    const size_t width = r.x1 - r.x0;
+    if (width == 0) return;
+    const long long x0 = static_cast<long long>(r.x0);
+
+    // Both of `alignedResidualSums`' guards, unchanged and for the same reasons.
+    const bool tapIsShift = width < bitsPerWord<WordType>();
+    const long long srcX = x0 + tapX;
+    const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
+    const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
+    const size_t words = minRowWords<WordType>(lv.prev[0].width);
+
+    for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
+        WordType t00[N], t01[N], t10[N], t11[N];
+        const long long srcY = static_cast<long long>(y) + tapY;
+        const bool rowsInside = srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
+        const bool interior = colsInside && rowsInside;
+        for (size_t k = 0; k < N; ++k) {
+            if (interior) {
+                t00[k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY)), words,
+                                               static_cast<size_t>(srcX));
+                t10[k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY) + 1),
+                                               words, static_cast<size_t>(srcX));
+            } else {
+                t00[k] = displacedRow<WordType>(lv.next[k], srcY, srcX).word(0);
+                t10[k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX).word(0);
+            }
+            if (tapIsShift) {
+                t01[k] = static_cast<WordType>(t00[k] >> 1);
+                t11[k] = static_cast<WordType>(t10[k] >> 1);
+            } else {
+                t01[k] = displacedRow<WordType>(lv.next[k], srcY, srcX + 1).word(0);
+                t11[k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX + 1).word(0);
+            }
+        }
+        // THE EIGHT READS THAT USED TO BE EXTRACTIONS ARE NOW LOADS.
+        const WordType(&magX)[N] = s.magX[i];
+        const WordType(&magY)[N] = s.magY[i];
+        const WordType(&self)[N] = s.self[i];
+        const WordType signX = s.signX[i];
+        const WordType signY = s.signY[i];
+
+        sumsX.t00 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t00);
+        sumsX.t01 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t01);
+        sumsX.t10 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t10);
+        sumsX.t11 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t11);
+        sumsX.self += slicedSignedSum<N, WordType, UseNeon>(magX, signX, self);
+        sumsY.t00 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t00);
+        sumsY.t01 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t01);
+        sumsY.t10 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t10);
+        sumsY.t11 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t11);
+        sumsY.self += slicedSignedSum<N, WordType, UseNeon>(magY, signY, self);
+    }
+}
+
+/// @brief Dispatch to the staged path if this level has one. **INTERNAL** (X-66).
+template <size_t N, typename WordType>
+inline void residualSumsStaged(const LKLevelN<N, WordType>& lv,
+                               const StagedWindow<N, WordType>& s,
+                               const RegionWords<WordType>& r, long long tapX, long long tapY,
+                               TapSums& sumsX, TapSums& sumsY) {
+    stagedResidualSums<N, WordType, true>(lv, s, r, tapX, tapY, sumsX, sumsY);
+}
+
+/// @brief Never called — `stageWindow` declines for this level type. **INTERNAL.**
+template <typename WordType>
+inline void residualSumsStaged(const LKLevel<WordType>& lv, const StagedWindow<1, WordType>&,
+                               const RegionWords<WordType>& r, long long tapX, long long tapY,
+                               TapSums& sumsX, TapSums& sumsY) {
+    residualSums(lv, r, tapX, tapY, sumsX, sumsY);
+}
+
 /// @brief `b = sum(diff * grad)` at **N bits per pixel**, as ten exact integers.
 ///        **INTERNAL, and the generic-N form of the function above.**
 ///
@@ -1584,6 +1732,17 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
             continue;
         }
 
+        // X-66: extract the window's ITERATION-INVARIANT words ONCE. X-68 measured
+        // a mean of 4.29 iterations per point per level, every one of which was
+        // re-reading the same eight previous-frame words per row. `region` is fixed
+        // for the whole iteration, so one staging serves all of them.
+        //
+        // The buffer is a STACK local -- 2 048 B at the shipped N = 2 -- because
+        // CLAUDE.md forbids a kernel allocating and this operation has no caller
+        // scratch. `stageWindow` declines rather than overrunning it.
+        StagedWindow<LevelT::Bits, WordType> stagedWindow;
+        const bool staged = stageWindow(lv, region, stagedWindow);
+
         // BIT-PARALLEL: the 2x2 matrix, one fused traversal, zero scratch.
         const GradientCovariance a = levelCovariance(lv, window);
         const double a11 = static_cast<double>(a.sumXX);
@@ -1656,10 +1815,17 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
             const double w10 = (1.0 - fx) * fy;
             const double w11 = fx * fy;
 
-            // BIT-PARALLEL: ten exact integers, twenty popcounts per word.
+                // BIT-PARALLEL: ten exact integers, twenty popcounts per word --
+            // reading the previous frame's eight words from `staged` when this
+            // window could be staged (X-66). Bit-exact either way; the staged
+            // path differs only in where the words come from.
             TapSums sumsX;
             TapSums sumsY;
-            residualSums(lv, region, tapX, tapY, sumsX, sumsY);
+            if (staged) {
+                residualSumsStaged(lv, stagedWindow, region, tapX, tapY, sumsX, sumsY);
+            } else {
+                residualSums(lv, region, tapX, tapY, sumsX, sumsY);
+            }
 
             const double b1 = sumsX.combine(w00, w01, w10, w11);
             const double b2 = sumsY.combine(w00, w01, w10, w11);

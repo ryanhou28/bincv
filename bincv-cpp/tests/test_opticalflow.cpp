@@ -1263,7 +1263,71 @@ void residualNeonMatchesScalar(const char* label) {
     BINCV_CHECK(bad == 0);
 }
 
+/// X-66: the STAGED path against the unstaged one, on the same windows.
+///
+/// The staged path reads the previous frame's eight per-row words from a buffer
+/// extracted once instead of re-extracting them every iteration. It is bit-exact BY
+/// CONSTRUCTION -- same words, same order, different storage -- and this is what pins
+/// that claim, because nothing else does: the tracker-level tests would catch a gross
+/// error but not a stale row or an off-by-one in the staging index.
+///
+/// Windows that DECLINE staging are counted, not skipped. A version that declined
+/// everything would pass a comparison that only looked at the accepted ones.
+template <size_t N>
+void stagedMatchesUnstaged(const char* label) {
+    using W = uint32_t;
+    const int w = 190, h = 150;
+    bincv::QuantMat<N, W> prev(w, h), next(w, h);
+    uint64_t st = 0xBEEF57ULL;
+    auto rnd = [&st]() { st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+                         return static_cast<unsigned>(st >> 33); };
+    const unsigned maxV = (1u << N) - 1u;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            prev.set(y, x, (rnd() % 8u < 3u) ? rnd() % (maxV + 1u) : 0u);
+            next.set(y, x, (rnd() % 8u < 3u) ? rnd() % (maxV + 1u) : 0u);
+        }
+    }
+    bincv::SignedQuantMat<N, W> dx(w, h), dy(w, h);
+    bincv::derivativeX(prev, dx);
+    bincv::derivativeY(prev, dy);
+    const auto lv = bincv::lkLevel<N>(prev, next, dx, dy);
+
+    size_t compared = 0, bad = 0, declined = 0;
+    for (int y = -31; y <= h; y += 13) {
+        for (int x = -31; x <= w; x += 17) {
+            const auto reg = bincv::impl::clipRegion<W>(static_cast<size_t>(w),
+                                                        static_cast<size_t>(h),
+                                                        bincv::Rect(x, y, 31, 31));
+            if (reg.isEmpty) continue;
+            bincv::impl::StagedWindow<N, W> sw;
+            if (!bincv::impl::stageWindow<N, W>(lv, reg, sw)) { ++declined; continue; }
+            for (int k = 0; k < 4; ++k) {
+                const long long tapX = (k % 2) ? -3 : 2;
+                const long long tapY = (k / 2) ? 4 : -1;
+                bincv::impl::TapSums a1, b1, a2, b2;
+                bincv::impl::residualSums<N, W, true>(lv, reg, tapX, tapY, a1, b1);
+                bincv::impl::stagedResidualSums<N, W, true>(lv, sw, reg, tapX, tapY, a2, b2);
+                const bool eq = a1.t00 == a2.t00 && a1.t01 == a2.t01 && a1.t10 == a2.t10 &&
+                                a1.t11 == a2.t11 && a1.self == a2.self && b1.t00 == b2.t00 &&
+                                b1.t01 == b2.t01 && b1.t10 == b2.t10 && b1.t11 == b2.t11 &&
+                                b1.self == b2.self;
+                if (!eq) ++bad;
+                ++compared;
+            }
+        }
+    }
+    std::printf("  staged %s  %5zu windows compared, %zu differ, %zu declined\n", label,
+                compared, bad, declined);
+    BINCV_CHECK(compared > 100);
+    BINCV_CHECK(bad == 0);
+}
+
 } // namespace
+
+BINCV_TEST(Flow, StagedMatchesUnstaged_N1) { stagedMatchesUnstaged<1>("N=1"); }
+BINCV_TEST(Flow, StagedMatchesUnstaged_N2) { stagedMatchesUnstaged<2>("N=2"); }
+BINCV_TEST(Flow, StagedMatchesUnstaged_N3) { stagedMatchesUnstaged<3>("N=3"); }
 
 BINCV_TEST(Flow, ResidualNeonMatchesScalar_N1) { residualNeonMatchesScalar<1>("N=1"); }
 BINCV_TEST(Flow, ResidualNeonMatchesScalar_N2) { residualNeonMatchesScalar<2>("N=2"); }

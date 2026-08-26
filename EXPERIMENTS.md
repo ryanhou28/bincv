@@ -10507,6 +10507,66 @@ estimate.
 
 ---
 
+### X-69 · Staging WITHOUT vectorising — 1.27× on `track`, bit-exact · `DONE`
+
+**[X-66](#x-66--e-36--staging-not-gathering-the-x86-keypoint-batch-second-attempt--rule-only)
+FOUND THAT CONTIGUITY, NOT THE POPCOUNT, WAS THE WHOLE STORY** — its arms B and C were
+identical within noise. If the win is *addressing*, then it should be available
+**without any vector code at all**, and this is that arm.
+
+**THE IDEA, WHICH IS SMALLER THAN X-66's AND SHIPS TODAY.** Of the twelve words
+`alignedResidualSums` reads per row, **eight belong to the previous frame** — `self`,
+`magX`, `magY`, `signX`, `signY` — and LK linearises about the previous frame, so they
+are **identical on every iteration**. `region` is fixed per point per level. So extract
+them **once** into a stack buffer and let all
+[X-68](#x-68--track-decomposed--915-is-iterated-residualsums--done)'s **4.29 mean
+iterations** read from it. No lanes, no batching, no AVX2 — and it therefore works on
+**aarch64 too**, where X-66's AVX2 arm never would.
+
+**A/B on the same binary, V1_02, 900 frames, two runs each:**
+
+| | `track` ms | binCV ms | OpenCV ms | ratio |
+|---|---|---|---|---|
+| unstaged | 2.190 / 2.223 | 3.170 / 3.222 | 2.859 / 2.992 | 0.90× / 0.93× |
+| **staged** | **1.721 / 1.753** | **2.895 / 2.945** | 2.834 / 2.877 | **0.98× / 0.98×** |
+
+**`track` 1.27×, the frontend 1.09×, and the ratio against one-thread OpenCV moves
+0.90–0.93 → 0.98.** Measured as a stash-and-rebuild A/B rather than against an earlier
+run, because OpenCV's own figure drifted 2.86–2.99 between them and that drift is
+larger than some of this project's decisions.
+
+**THE MODEL PREDICTED IT.** [D-37](ARCHITECTURE.md#8-design-decisions) put extraction at
+**45.4%** of the kernel; staging removes 8 of 12 words (30%) on all but the first of
+4.29 iterations (77%) → **1.30× expected, 1.27× measured.** After
+[X-62](#x-62--e-34--can-the-four-tap-correlations-become-one--done) and
+[X-66](#x-66--e-36--staging-not-gathering-the-x86-keypoint-batch-second-attempt--rule-only)
+both broke their models, one that holds is worth noting.
+
+**COST: 2 048 B OF STACK** at the shipped `N = 2` (6 656 B at the `N = 8` ceiling), and
+**zero heap** — [CLAUDE.md](../CLAUDE.md) forbids a kernel allocating and this operation
+has no caller scratch. `stageWindow` **declines** rather than overrunning: windows wider
+than a word, or taller than 64 rows, take the unstaged path unchanged. Peak working set
+is untouched.
+
+**BIT-EXACT, AND PINNED BY A TEST THAT WAS WATCHED TO FAIL.**
+`Flow.StagedMatchesUnstaged_{N1,N2,N3}` compares the staged and unstaged paths over 624
+windows each — swept off every edge, four tap signs. **A one-bit fault injected into one
+staged row makes 374 / 487 / 522 of 624 windows differ.** The tracker-level tests would
+have caught a gross error; they would not have caught a stale row.
+
+**Decision: SHIPPED.** It is the default for any window that can be staged. This is the
+**scalar half** of [E-36](ARCHITECTURE.md#register); X-66's AVX2 keypoint batch stacks
+on top of it and its 2.09× ceiling was measured against the *unstaged* scalar arm, so
+**X-66's remaining headroom over this is smaller than 2.09× and is not yet measured.**
+[D-60](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/frontend_sequence.cpp`, V1_02, 900 frames, OpenCV at one thread;
+A/B by `git stash` on `ops/opticalFlow.hpp` with a full rebuild between arms. Gate green
+on all four configurations, `expected-checks.txt` floors raised by the 6 checks the new
+oracle adds.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
