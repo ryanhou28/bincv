@@ -197,6 +197,13 @@ int main(int argc, char** argv) {
     // measured how many iterations the tracker actually NEEDS, and at 94.7% of
     // frontend time an unnecessary iteration is the most expensive thing there is.
     if (const char* it = std::getenv("BINCV_LK_ITERS")) lk.maxIterations = std::atoi(it);
+    // X-62 / E-34: the tap collapse, off by default exactly as it is in LKParams.
+    // The caller weighing this trade weighs it HERE -- on the frontend, where LK is
+    // 67% -- not on the kernel, so the knob is measurable without editing source.
+    if (const char* tc = std::getenv("BINCV_LK_TAPCOLLAPSE")) {
+        const int v = std::atoi(tc);
+        lk.tapCollapseBits = v > 0 ? static_cast<unsigned>(v) : 0u;
+    }
     bincv::GoodFeaturesParams gftt;           // ditto
     const int kMinTracks = 60;
 

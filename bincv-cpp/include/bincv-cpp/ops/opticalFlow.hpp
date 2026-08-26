@@ -253,6 +253,11 @@
 #include "../core/view.hpp"
 #include "../quantMat.hpp"
 #include "../impl/kernel_util.hpp"
+// impl::addShifted -- the bit-sliced ripple add the collapsed residual builds its
+// weighted patch out of (X-62). It lives in bitslice.hpp, with the other
+// bit-sliced primitives, precisely so the tracker does not have to depend on the
+// pyramid kernel to reach it.
+#include "bitslice.hpp"
 // gradientCovariance: the 2x2 matrix, one fused traversal, zero scratch (T3.6).
 #include "covariance.hpp"
 // impl::minEigenValue -- the SAME (S - sqrt(D))/2 from exact integer operands
@@ -313,6 +318,22 @@ struct LKParams {
     /// Which level each keypoint enters the pyramid at (X-25 / E-14). Defaults to
     /// the shipped behaviour; nothing changes unless a caller asks for it.
     LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
+
+    /// Bits the four bilinear tap weights are quantised to, so the four tap
+    /// correlations can COLLAPSE INTO ONE (X-62 / E-34). **0 is off, and is the
+    /// default**; 3 is the only other supported value.
+    ///
+    /// **THIS TRADES ACCURACY FOR SPEED AND THE TRADE IS THE CALLER'S.** At 0 the
+    /// bilinear interpolation is performed at full precision by five exact integer
+    /// sums (D-20). At 3 the weighted patch is formed in the pixels' own N-bit
+    /// alphabet, which rounds twice -- the weights to `/8`, then each pixel's
+    /// weighted value back to N bits -- and issues four `slicedSignedSum` calls per
+    /// row instead of ten. Measured 1.75x on the reference device; see
+    /// [X-62](../../../EXPERIMENTS.md) for what the rounding costs.
+    ///
+    /// Ignored by the 1-bit `LKLevel` entry point and by windows wider than one
+    /// word; both fall back to the exact route rather than refusing the call.
+    unsigned tapCollapseBits = 0;
 };
 
 /// @brief One pyramid level's six planes: both frames, and the previous frame's
@@ -1105,6 +1126,178 @@ inline void alignedResidualSums(const LKLevelN<N, WordType>& lv,
     }
 }
 
+/// @brief The four bilinear weights, quantised to `/2^K`. **INTERNAL** (X-62).
+/// @param q Receives `q00 q01 q10 q11`, summing to **exactly** `2^K`.
+/// @note The sum is forced, not merely rounded to. It is what makes the requantise
+///       in `collapsedResidualSums` a SHIFT -- add `2^(K-1)`, take planes
+///       `K .. K+N-1` -- instead of `requantizeWeighted`'s restoring division.
+///       The rounding residue goes to the LARGEST weight, where it is the smallest
+///       relative change.
+template <unsigned K>
+inline void quantizeTapWeights(double w00, double w01, double w10, double w11, unsigned (&q)[4]) {
+    const double w[4] = {w00, w01, w10, w11};
+    constexpr double kScale = static_cast<double>(1u << K);
+    int total = 0;
+    size_t big = 0;
+    for (size_t i = 0; i < 4; ++i) {
+        const long r = std::lround(w[i] * kScale);
+        q[i] = static_cast<unsigned>(r < 0 ? 0L : r);
+        total += static_cast<int>(q[i]);
+        if (w[i] > w[big]) big = i;
+    }
+    q[big] = static_cast<unsigned>(static_cast<int>(q[big]) + (static_cast<int>(1u << K) - total));
+}
+
+/// @brief `acc += tap * q`, decomposed over `q`'s set bits. **INTERNAL** (X-62).
+/// @note The SHIFT is a template parameter and the PREDICATE is not. X-42 measured
+///       2.48x for exactly that split, and it is available here because the weights
+///       are constant over a window -- so the four branches per tap are taken the
+///       same way for all 31 rows and predict perfectly.
+template <size_t SumPlanes, size_t N, size_t Bit, typename WordType>
+inline void addWeightedTap(WordType* acc, const WordType* tap, unsigned q) {
+    if constexpr (Bit < 5) {
+        if ((q >> Bit) & 1u) addShifted<SumPlanes, N, Bit, WordType>(acc, tap);
+        addWeightedTap<SumPlanes, N, Bit + 1, WordType>(acc, tap, q);
+    }
+}
+
+/// @brief One row's bilinearly-weighted patch, requantised to `N` bits.
+/// @note The weights sum to `2^K`, so "divide by the weight sum" is `+2^(K-1)`
+///       (round to nearest, an all-ones addend at plane `K-1`) and then a PLANE
+///       SELECTION. Plane selection is free, which is the entire reason a
+///       power-of-two weight sum is the quantisation worth having.
+template <size_t N, unsigned K, typename WordType>
+inline void weightedTapPatch(const WordType (&tap)[4][N], const unsigned (&q)[4],
+                             WordType (&out)[N]) {
+    constexpr size_t kSumPlanes = N + K;
+    WordType acc[kSumPlanes];
+    for (size_t p = 0; p < kSumPlanes; ++p) acc[p] = 0;
+    for (size_t t = 0; t < 4; ++t) addWeightedTap<kSumPlanes, N, 0, WordType>(acc, tap[t], q[t]);
+    const WordType ones[1] = {static_cast<WordType>(~static_cast<WordType>(0))};
+    addShifted<kSumPlanes, 1, K - 1, WordType>(acc, ones);
+    for (size_t p = 0; p < N; ++p) out[p] = acc[p + K];
+}
+
+/// @brief `b = sum(diff * grad)` with the FOUR TAP CORRELATIONS COLLAPSED INTO ONE.
+///        **INTERNAL, and an APPROXIMATION of `alignedResidualSums` -- see below.**
+/// @param q The bilinear weights already quantised to `/2^K` by `quantizeTapWeights`.
+/// @param bx, by The two residual sums, already combined -- there is nothing left
+///        for the caller to weight, which is the point.
+///
+/// **WHAT IS TRADED, STATED PLAINLY.** Correlation is linear in the taps, so
+///
+///     w00*S(T00) + w01*S(T01) + w10*S(T10) + w11*S(T11) == S(w00*T00 + ...)
+///
+/// as an identity over the REALS. `alignedResidualSums` evaluates the left side
+/// and therefore performs the interpolation at FULL PRECISION ([D-20](../../../ARCHITECTURE.md));
+/// this evaluates the right side, which requires forming `w00*T00 + ...` in the
+/// pixels' own N-bit alphabet. So it loses twice: the weights are rounded to
+/// `/2^K`, and each pixel's weighted value is rounded back to N bits.
+///
+/// **WHAT IS BOUGHT.** Ten `slicedSignedSum` calls per row become FOUR, and the
+/// patch is formed ONCE and shared by both gradient components where the four
+/// correlations are paid per component. Measured on the reference device
+/// ([X-62](../../../EXPERIMENTS.md)): **1.75x** with the runtime weights this uses.
+///
+/// @note Aligned windows only -- the caller falls back to `residualSums` otherwise.
+///       That is not a limitation in practice: the shipped 31x31 window fits one
+///       word at every word type binCV supports (D-31).
+template <size_t N, unsigned K, typename WordType, bool UseNeon = true>
+inline void collapsedResidualSums(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
+                                  long long tapX, long long tapY, const unsigned (&q)[4],
+                                  long long& bx, long long& by) {
+    bx = 0;
+    by = 0;
+    const size_t width = r.x1 - r.x0;
+    if (width == 0) return;
+    const size_t words = minRowWords<WordType>(lv.prev[0].width);
+    const WordType mask = lowBitsMask<WordType>(width);
+    const long long x0 = static_cast<long long>(r.x0);
+
+    // Both of `alignedResidualSums`'s guards, unchanged and for the same reasons:
+    // (T) the `+1` tap is a shift once the window is narrower than a word, and
+    // (I) an interior window needs none of `displacedRow`'s border machinery.
+    const bool tapIsShift = width < bitsPerWord<WordType>();
+    const long long srcX = x0 + tapX;
+    const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
+    const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
+
+    for (size_t y = r.y0; y < r.y1; ++y) {
+        WordType tap[4][N], self[N], magX[N], magY[N];
+        const long long srcY = static_cast<long long>(y) + tapY;
+        const bool rowsInside = srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
+        const bool interior = colsInside && rowsInside;
+        for (size_t k = 0; k < N; ++k) {
+            if (interior) {
+                tap[0][k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY)), words,
+                                                  static_cast<size_t>(srcX));
+                tap[2][k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY) + 1),
+                                                  words, static_cast<size_t>(srcX));
+            } else {
+                tap[0][k] = displacedRow<WordType>(lv.next[k], srcY, srcX).word(0);
+                tap[2][k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX).word(0);
+            }
+            if (tapIsShift) {
+                tap[1][k] = static_cast<WordType>(tap[0][k] >> 1);
+                tap[3][k] = static_cast<WordType>(tap[2][k] >> 1);
+            } else {
+                tap[1][k] = displacedRow<WordType>(lv.next[k], srcY, srcX + 1).word(0);
+                tap[3][k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX + 1).word(0);
+            }
+            self[k] = alignedWord<WordType>(lv.prev[k].row(y), words, r.x0);
+            magX[k] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dxMag[k].row(y), words, r.x0) & mask);
+            magY[k] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dyMag[k].row(y), words, r.x0) & mask);
+        }
+        const WordType signX = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
+        const WordType signY = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
+
+        WordType patch[N];
+        weightedTapPatch<N, K, WordType>(tap, q, patch);
+
+        bx += slicedSignedSum<N, WordType, UseNeon>(magX, signX, patch);
+        bx -= slicedSignedSum<N, WordType, UseNeon>(magX, signX, self);
+        by += slicedSignedSum<N, WordType, UseNeon>(magY, signY, patch);
+        by -= slicedSignedSum<N, WordType, UseNeon>(magY, signY, self);
+    }
+}
+
+/// @brief The collapsed route if this level can take it, `false` if it cannot.
+///        **INTERNAL** (X-62).
+/// @note Two overloads rather than a runtime test, because "can this level take
+///       it" is partly a question about the level's TYPE. The 1-bit `LKLevel`
+///       overload declines unconditionally: `collapsedResidualSums` is written
+///       against `LKLevelN`'s plane arrays, and a caller that asked for the
+///       collapse gets the exact route rather than a compile error.
+template <typename WordType>
+inline bool collapsedResidual(const LKLevel<WordType>&, const RegionWords<WordType>&, long long,
+                              long long, unsigned, double, double, double, double, double&,
+                              double&) {
+    return false;
+}
+
+template <size_t N, typename WordType>
+inline bool collapsedResidual(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
+                              long long tapX, long long tapY, unsigned k, double w00, double w01,
+                              double w10, double w11, double& b1, double& b2) {
+    // 3 is the only quantisation X-62 measured, and an unsupported value declines
+    // rather than picking a nearby one -- a silently substituted k would make the
+    // accuracy figure a number about a different kernel.
+    if (k != 3) return false;
+    // Wider windows keep the general path, whose taps are `ReplicatedShiftedRow`
+    // spans rather than single words. D-31's 31x31 fits one word at every word
+    // type binCV supports, so this declines for shapes the tracker does not ship.
+    if (r.x1 - r.x0 > bitsPerWord<WordType>()) return false;
+    unsigned q[4];
+    quantizeTapWeights<3>(w00, w01, w10, w11, q);
+    long long bx = 0, by = 0;
+    collapsedResidualSums<N, 3, WordType>(lv, r, tapX, tapY, q, bx, by);
+    b1 = static_cast<double>(bx);
+    b2 = static_cast<double>(by);
+    return true;
+}
+
 /// @brief `b = sum(diff * grad)` at **N bits per pixel**, as ten exact integers.
 ///        **INTERNAL, and the generic-N form of the function above.**
 ///
@@ -1428,6 +1621,7 @@ struct LKContext {
     double eps2 = 0.0;
     double minEigThreshold = 0.0;
     LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
+    unsigned tapCollapseBits = 0;   ///< LKParams::tapCollapseBits (X-62)
 
     /// Every usable level's extent, so that a point's entry level can be RECOMPUTED
     /// rather than cached. A per-point array would be scratch, and this operation
@@ -1656,13 +1850,22 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
             const double w10 = (1.0 - fx) * fy;
             const double w11 = fx * fy;
 
-            // BIT-PARALLEL: ten exact integers, twenty popcounts per word.
-            TapSums sumsX;
-            TapSums sumsY;
-            residualSums(lv, region, tapX, tapY, sumsX, sumsY);
-
-            const double b1 = sumsX.combine(w00, w01, w10, w11);
-            const double b2 = sumsY.combine(w00, w01, w10, w11);
+            // BIT-PARALLEL: ten exact integers, twenty popcounts per word -- or
+            // FOUR integers if the caller asked for the tap collapse and this
+            // level can take it (X-62). The test is once per window, outside the
+            // 31-row loop, and the exact route is what an unsupported request
+            // falls back to.
+            double b1 = 0.0;
+            double b2 = 0.0;
+            if (c.tapCollapseBits == 0 ||
+                !collapsedResidual(lv, region, tapX, tapY, c.tapCollapseBits, w00, w01, w10, w11,
+                                   b1, b2)) {
+                TapSums sumsX;
+                TapSums sumsY;
+                residualSums(lv, region, tapX, tapY, sumsX, sumsY);
+                b1 = sumsX.combine(w00, w01, w10, w11);
+                b2 = sumsY.combine(w00, w01, w10, w11);
+            }
 
             // FLOAT, once per iteration: the 2x2 solve. The factor of 2 turns
             // the raw [-1, 0, 1] tap into a central difference; see UNITS.
@@ -1756,6 +1959,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
     c.winH = params.winHeight;
     c.halfWinX = static_cast<float>(c.winW - 1) * 0.5f;
     c.halfWinY = static_cast<float>(c.winH - 1) * 0.5f;
+    c.tapCollapseBits = params.tapCollapseBits;
 
     // The reference clamps both criteria before use; so does this, for the same
     // reason -- they arrive from a YAML file.

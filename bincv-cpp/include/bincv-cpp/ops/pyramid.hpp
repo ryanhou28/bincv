@@ -789,6 +789,9 @@ inline void setPixelValue(BinMatView<WordType> (&dst)[NOut], size_t y, size_t x,
     }
 }
 
+/// @note `addShifted`, which consumes this width, lives in ops/bitslice.hpp with
+///       the other bit-sliced primitives -- ops/opticalFlow.hpp needs it too
+///       (X-62) and must not depend on the pyramid kernel to get it.
 constexpr size_t axisPlanes(size_t nIn, unsigned weightSum) {
     size_t bits = 0;
     // max value is weightSum * (2^nIn - 1); count its bits.
@@ -796,28 +799,6 @@ constexpr size_t axisPlanes(size_t nIn, unsigned weightSum) {
                               ((1ull << nIn) - 1ull);
     while (maxV > 0) { ++bits; maxV >>= 1; }
     return bits == 0 ? 1 : bits;
-}
-
-/// @brief `acc += (v << Shift)`, bit-sliced. A shift is free: it is an index
-///        offset, so this is one ripple add.
-/// @note X-42: `AccN`, `VN` and `Shift` are TEMPLATE parameters and there is no
-///       staging buffer. The earlier signature took all three at runtime and built
-///       the shifted operand in a `tmp` array first -- which at `Shift == 0`, the
-///       common case, copied the operand onto itself before adding. With the extents
-///       known the loop unrolls and the out-of-range planes fold away: below `Shift`
-///       the addend is literally zero, so the stage degenerates to
-///       `acc[p] ^= carry; carry &= acc_old[p]` with no operand read at all.
-template <size_t AccN, size_t VN, size_t Shift, typename WordType>
-inline void addShifted(WordType* acc, const WordType* v) {
-    WordType carry = 0;
-    for (size_t p = 0; p < AccN; ++p) {
-        const WordType y = (p >= Shift && p - Shift < VN) ? v[p - Shift]
-                                                          : static_cast<WordType>(0);
-        const WordType x = acc[p];
-        acc[p] = static_cast<WordType>(static_cast<WordType>(x ^ y) ^ carry);
-        carry = maj3<WordType>(x, y, carry);
-    }
-    // The caller sizes `acc` so the top carry cannot be lost; see axisPlanes.
 }
 
 /// @brief One (tap, weight-bit) stage of `weightedAxis`, unrolled at compile time.
