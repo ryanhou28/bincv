@@ -1302,12 +1302,19 @@ void stagedMatchesUnstaged(const char* label) {
             if (reg.isEmpty) continue;
             bincv::impl::StagedWindow<N, W> sw;
             if (!bincv::impl::stageWindow<N, W>(lv, reg, sw)) { ++declined; continue; }
-            for (int k = 0; k < 4; ++k) {
-                const long long tapX = (k % 2) ? -3 : 2;
-                const long long tapY = (k / 2) ? 4 : -1;
+            // ONE cache across the whole tap sequence, deliberately. X-70 reuses the
+            // tap words whenever the integer displacement is unchanged, so the
+            // sequence below drives FILL (a new tap), REUSE (the same tap again) and
+            // INVALIDATION (a different tap, then back to the first). A fresh cache
+            // per call would test only the fill path -- which is the one that cannot
+            // be wrong.
+            bincv::impl::TapCache<N, W> tc;
+            const long long taps[6][2] = {{2, -1}, {2, -1}, {-3, 4}, {-3, 4}, {2, -1}, {-3, -1}};
+            for (const auto& t : taps) {
+                const long long tapX = t[0], tapY = t[1];
                 bincv::impl::TapSums a1, b1, a2, b2;
                 bincv::impl::residualSums<N, W, true>(lv, reg, tapX, tapY, a1, b1);
-                bincv::impl::stagedResidualSums<N, W, true>(lv, sw, reg, tapX, tapY, a2, b2);
+                bincv::impl::stagedResidualSums<N, W, true>(lv, sw, tc, reg, tapX, tapY, a2, b2);
                 const bool eq = a1.t00 == a2.t00 && a1.t01 == a2.t01 && a1.t10 == a2.t10 &&
                                 a1.t11 == a2.t11 && a1.self == a2.self && b1.t00 == b2.t00 &&
                                 b1.t01 == b2.t01 && b1.t10 == b2.t10 && b1.t11 == b2.t11 &&

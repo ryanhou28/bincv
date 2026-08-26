@@ -10567,6 +10567,61 @@ oracle adds.
 
 ---
 
+### X-70 · The taps too — cached on the integer displacement · `DONE`
+
+**[X-69](#x-69--staging-without-vectorising--127-on-track-bit-exact--done) STAGED EIGHT
+OF TWELVE WORDS AND LEFT FOUR** — the taps, because they move. **They move as
+`floor(offX)`, and the iteration is SHRINKING `off`.** Once the estimate settles inside
+a pixel the integer part stops changing, and the same four words per row are
+re-extracted every remaining iteration for nothing.
+
+So the taps are **cached against `(tapX, tapY)`** rather than staged. Sound by
+construction: the tap words are a pure function of `lv.next`, `region` and the integer
+displacement; the first two are fixed for the point, and the third is the key.
+
+**THREE ARMS, ONE SESSION, TWO RUNS EACH** — V1_02, 900 frames, OpenCV at one thread and
+stable at **2.80–2.85 ms** across all six, which is what makes the ratios comparable:
+
+| arm | `track` ms | binCV ms | vs OpenCV |
+|---|---|---|---|
+| **A** unstaged (before tonight) | 2.180 / 2.155 | 3.168 / 3.134 | 0.90× / 0.91× |
+| **B** staged ([X-69](#x-69--staging-without-vectorising--127-on-track-bit-exact--done)) | 1.748 / 1.743 | 2.917 / 2.929 | 0.97× / 0.96× |
+| **C** staged + tap cache | **1.447 / 1.524** | **2.619 / 2.682** | **1.07× / 1.05×** |
+
+- **Tap cache alone: 1.17× on `track`.**
+- **Cumulative A → C: `track` 1.46×, the frontend 1.19×.**
+- **The ratio against single-threaded OpenCV crosses 1.0: 0.905 → 1.06×.**
+
+> **binCV NOW LEADS SINGLE-THREADED OpenCV ON THE CANONICAL SEQUENCE.**
+> [X-64](#x-64--the-x86-deficit-was-threads-and-the-benchmark-let-it-drift--done) claimed
+> that and had to withdraw it — the claim came from an easier sequence. **This time it is
+> V1_02, the sequence every recorded frontend entry uses, and it was earned by two
+> changes rather than by a choice of input.**
+
+**BIT-EXACT, AND THE REUSE PATH IS TESTED — NOT JUST THE FILL PATH.**
+`Flow.StagedMatchesUnstaged_{N1,N2,N3}` now drives **one** cache through a six-tap
+sequence that forces fill, **reuse**, and **invalidation**: `(2,-1) (2,-1) (-3,4)
+(-3,4) (2,-1) (-3,-1)`. A fresh cache per call would have tested only the fill path,
+which is the one that cannot be wrong. **Watched to fail:** a fault that ignores the key
+and always reuses makes **exactly 468 of 936** windows differ — the four taps of six that
+follow a key change.
+
+**COST: STACK, AND IT IS NOT FREE AT HIGH N.** `TapCache` adds 4 × N × 64 words on top of
+`StagedWindow`'s 8 × N × 64. At the **shipped `N = 2` that is 4 KB total**; at the `N = 8`
+ceiling it is **≈15 KB**, which is a lot of stack for a Cortex-M and is **stated rather
+than hidden**. The shipped ladder is `1/2/2/2`, so the real figure is 4 KB. Both
+structures decline above 64 rows rather than overrunning, and **zero heap** either way.
+
+**Decision: SHIPPED**, and [D-61](ARCHITECTURE.md#8-design-decisions) records the
+stack-versus-N trade with it. A byte-bounded cap instead of a row-bounded one is
+registered as [E-38](ARCHITECTURE.md#register) rather than guessed at here.
+
+**Method:** `benchmark/frontend_sequence.cpp`, V1_02, 900 frames, OpenCV at one thread;
+three arms measured back-to-back from `git checkout` of the single header, full rebuild
+between each. Gate green on all four configurations, check counts unchanged.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
