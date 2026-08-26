@@ -10622,6 +10622,85 @@ between each. Gate green on all four configurations, check counts unchanged.
 
 ---
 
+### X-71 · E-40 — the input conversion, on both architectures · `RULE ONLY`
+
+**COMMITTED BEFORE ANY CODE.**
+
+**Gates:** [E-40](ARCHITECTURE.md#register).
+[X-67](#x-67--build-decomposed--and-e-33-is-worth-almost-nothing--done) found
+`fromCVMat` at **20.4%** of the x86 frontend; after
+[X-69](#x-69--staging-without-vectorising--127-on-track-bit-exact--done)/[X-70](#x-70--the-taps-too--cached-on-the-integer-displacement--done)
+shrank `track` it is **33% at one thread and 53% at twelve**, and it does not scale.
+**It is the frontend's largest single item.**
+
+**WHAT IT DOES TODAY.** The 1-bit path — the hot one, since level 0 of the shipped
+ladder is `QuantMat<1>` — is a **per-pixel branch and read-modify-write**:
+
+```
+for (x) if (rowIn[x]) rowOut[wordIndex(x)] |= bitMask(x);
+```
+
+A data-dependent branch per pixel, a load-or-store per set pixel, and nothing a
+vectoriser can touch. The N > 1 path packs 8 pixels, transposes 8×8 and scatters N
+planes — **~34 operations per 8 pixels**, better but still scalar.
+
+**THE OBSERVATION THIS RESTS ON.** Bit-plane extraction from bytes is exactly what a
+**move-mask** instruction does. `_mm256_movemask_epi8` takes the top bit of each of 32
+bytes and returns 32 bits — **one plane of 32 pixels in one instruction.** So the 1-bit
+conversion becomes compare-to-zero, movemask, invert: **three instructions per 32
+pixels.** aarch64 has no movemask, but the AND-with-bit-weights plus pairwise-add idiom
+gives a 16-bit mask in about six.
+
+**ARMS** (`benchmark/convert_ceiling.cpp`, and the shipped paths):
+
+| | |
+|---|---|
+| **A** | today: per-pixel branch (N=1) / 8×8 transpose (N>1) |
+| **B** | portable branchless — no intrinsics, so every platform gets something |
+| **C** | x86 `movemask` |
+| **D** | aarch64 NEON bitmask |
+
+**BIT-EXACTNESS IS A PRECONDITION, NOT A BAND.** Every arm must produce **identical
+bits** to arm A. This is a repacking, not an approximation — unlike
+[X-62](#x-62--e-34--can-the-four-tap-correlations-become-one--done) there is no trade to
+weigh, and a mismatch is a bug.
+
+**DECISION RULE, WRITTEN BEFORE MEASURING.**
+
+- **Band A — ≥5× on the conversion AND ≥1.10× on the frontend.** Ship the platform
+  paths. The frontend arm is **mandatory**, not confirmatory
+  ([D-53](ARCHITECTURE.md#8-design-decisions)).
+- **Band B — ≥5× on the conversion but <1.10× on the frontend.** Then the conversion was
+  not the constraint the profile said it was, and **that** is the finding — report where
+  the frontend time actually went, and ship only the portable arm.
+- **Band C — 2–5×.** Ship whichever arms are bit-exact, and **report arm B separately**:
+  if the portable branchless arm gets most of it, the intrinsics are not worth their
+  maintenance and only B ships.
+- **Band D — <2×.** The per-pixel loop was not the problem. Report where the time goes;
+  the likely candidate is the **allocation** (`fromCVMat` builds a fresh `Storage` and
+  moves it) rather than the packing, which would redirect this to
+  [E-37](ARCHITECTURE.md#register)'s ping-pong instead.
+
+**WHY THE ALLOCATION MATTERS AND IS MEASURED SEPARATELY.** `fromCVMat` **allocates a new
+buffer every call** — commit-last, for the exception-safety reason its comment gives —
+and the frontend calls it **twice per frame, 1710 frames**. An arm that fixes the packing
+and leaves the allocation would hit Band D and look like a failure of the *idea* rather
+than of the *scope*. So arm A is additionally measured with the allocation hoisted, and
+that number is reported whatever the bands say.
+
+**BOTH ARCHITECTURES, AND THE aarch64 HALF IS NOT OPTIONAL** —
+[D-62](ARCHITECTURE.md#8-design-decisions) already carries one unmeasured platform.
+**Unlike [E-39](ARCHITECTURE.md#register), this displaces no measured optimisation**:
+the current path is a scalar per-pixel loop on every platform, so a NEON arm is strictly
+additive and can ship on correctness while its speed number waits for a device window.
+**That difference is the whole reason one waits and this does not.**
+
+**Method:** `benchmark/convert_ceiling.cpp` for the arms; `benchmark/frontend_sequence.cpp`
+for the mandatory frontend arm; V1_02, OpenCV at one thread. Bit-exactness in
+`tests/test_opencv_interop.cpp`.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
