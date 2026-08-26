@@ -1165,6 +1165,30 @@ struct TapCache {
 template <size_t N, typename WordType>
 inline bool stageWindow(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
                         StagedWindow<N, WordType>& s) {
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    // ===================================================================
+    // AARCH64 DECLINES WHERE A MEASURED NEON PATH ALREADY EXISTS (X-69/X-70).
+    //
+    // `residualSums` dispatches N == 1 and N == 2 at `uint32_t` to
+    // `alignedResidualSumsNeon1` / `alignedResidualSumsNeon2` -- D-33's tap batching
+    // and X-40's window-carried accumulator, both measured on the reference device.
+    // The staged path does NOT have those: it calls `slicedSignedSum` per value, so
+    // taking it here would trade a measured optimisation for an unmeasured one.
+    //
+    // That is the shipped 1/2/2/2 ladder's entire depth range, so on aarch64 staging
+    // is currently off for every level. **This is a hold, not a verdict**: the
+    // staged NEON variants are E-39, and the reason they are not written here is
+    // that X-41 already records THREE copies of this extraction block and writing
+    // them blind would make five, on a platform this change cannot be measured on
+    // today.
+    // ===================================================================
+    if constexpr ((N == 1 || N == 2) && sizeof(WordType) == 4) {
+        (void)lv;
+        (void)r;
+        (void)s;
+        return false;
+    }
+#endif
     const size_t width = r.x1 - r.x0;
     if (width == 0 || width > bitsPerWord<WordType>()) return false;
     const size_t rows = r.y1 - r.y0;
