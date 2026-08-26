@@ -10395,6 +10395,66 @@ x86 only — aarch64 has `CNT` and its own measured paths, and this changes noth
 
 ---
 
+### X-67 · `build` decomposed — and E-33 is worth almost nothing · `DONE`
+
+**THIS CORRECTS A CLAIM MADE SIX HOURS EARLIER IN [D-57](ARCHITECTURE.md#8-design-decisions).**
+[X-65](#x-65--e-35--what-does-threading-the-frontend-buy-and-what-does-it-cost--done)
+found `build` rising to **52.2%** of the frontend at twelve threads and concluded that
+[E-33](ARCHITECTURE.md#register) — AVX2 for `pyrDown` — was "the highest-value target
+left." **That inference treated `build` as one thing. It is not.**
+
+Splitting the stage, V1_02, 900 frames:
+
+| | T = 1 | T = 4 |
+|---|---|---|
+| `track` | 2.225 (69.1%) | 0.905 (47.1%) |
+| **`build` total** | **0.813 (25.2%)** | **0.821 (42.7%)** |
+| … `fromCVMat` (the harness's input conversion) | **0.657 (20.4%)** | **0.662 (34.4%)** |
+| … `pyrDown` | **0.117 (3.6%)** | **0.118 (6.1%)** |
+| … derivatives | 0.039 (1.2%) | 0.040 (2.1%) |
+| `detect` | 0.184 (5.7%) | 0.196 (10.2%) |
+
+> **`pyrDown` IS 3.6% OF THE FRONTEND AT ONE THREAD AND 6.1% AT FOUR. An INFINITE
+> speedup on it is worth 1.037× and 1.065×.** [E-33](ARCHITECTURE.md#register) is not
+> the highest-value target; it is close to the lowest.
+
+**EIGHTY PERCENT OF `build` IS `fromCVMat` — THE `CV_8U` → BIT-PLANE CONVERSION.** That
+is the harness's input path, not a kernel: it exists because the reference preprocessing
+emits an OpenCV `Mat`, and **a binary-frame frontend receives bits from its sensor
+stage and never performs it.** OpenCV pays nothing equivalent — it works on the `CV_8U`
+directly — so this is a cost binCV carries **in this comparison only**.
+
+**BOTH NUMBERS, LABELLED, BECAUSE EITHER ALONE MISLEADS** — which is
+[D-58](ARCHITECTURE.md#8-design-decisions) applied to the variable this experiment
+found:
+
+| | binCV | vs 1-thread OpenCV |
+|---|---|---|
+| T=1, **as measured** (conversion included) | 3.223 | **0.94×** |
+| T=1, conversion excluded | 2.566 | 1.18× |
+| T=4, **as measured** | 1.922 | **1.62×** |
+| T=4, conversion excluded | 1.260 | 2.47× |
+
+**Reporting only the second would be self-serving; only the first understates by
+20–34%.** The headline stays the **as-measured** row, and the excluded row is reported
+beside it as what a deployed binary-frame pipeline would see.
+
+**AND A REDUNDANCY THE HARNESS CARRIES.** `loadLevel0` converts **both** `prev` and
+`next` every frame, and `build()` builds **both** pyramids — but this frame's `next` is
+next frame's `prev`. **Roughly half of both costs is recomputation of something already
+computed**, which a ping-pong buffer removes. Registered as
+[E-37](ARCHITECTURE.md#register) rather than fixed here, because changing the harness
+changes every recorded frontend number and that is a decision, not a cleanup.
+
+**Decision: [E-33](ARCHITECTURE.md#register) is DEMOTED, not closed** — `pyrDown` may
+still matter on the reference device, where the profile differs and X-30 put build at
+25.8%. On x86 it is 3.6%. [D-59](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/frontend_sequence.cpp` with per-sub-stage timers; V1_02, 900
+frames, OpenCV at one thread.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

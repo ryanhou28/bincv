@@ -106,17 +106,33 @@ struct BincvFrontend {
           dx3((width + 7) / 8, (height + 7) / 8), dy3((width + 7) / 8, (height + 7) / 8),
           ring(bincv::kResponseRingRows * static_cast<size_t>(width)), w(width), h(height) {}
 
+    double msLoad = 0.0;   ///< the CV_8U -> bit-plane conversion. Timed separately
+                           ///< because it is a property of THIS HARNESS's input, not
+                           ///< of binCV's pipeline: a binary-frame frontend receives
+                           ///< bits from its sensor stage and never does this.
     void loadLevel0(const cv::Mat& binPrev, const cv::Mat& binNext) {
+        const auto t = Clock::now();
         prev.level<0>().fromCVMat(binPrev);
         next.level<0>().fromCVMat(binNext);
+        msLoad += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
     }
+    double msPyrDown = 0.0, msDeriv = 0.0;   ///< X-65 put `build` at 52% of the
+                                            ///< frontend at T=12; this splits it,
+                                            ///< because X-58 found `derivative`
+                                            ///< auto-vectorises and `pyrDown` does
+                                            ///< not, so the two halves have very
+                                            ///< different priors (E-33).
     void build() {
+        auto t = Clock::now();
         prev.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
         next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
+        msPyrDown += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
+        t = Clock::now();
         bincv::derivativeX(prev.level<0>(), dx0); bincv::derivativeY(prev.level<0>(), dy0);
         bincv::derivativeX(prev.level<1>(), dx1); bincv::derivativeY(prev.level<1>(), dy1);
         bincv::derivativeX(prev.level<2>(), dx2); bincv::derivativeY(prev.level<2>(), dy2);
         bincv::derivativeX(prev.level<3>(), dx3); bincv::derivativeY(prev.level<3>(), dy3);
+        msDeriv += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
         levels.get<0>() = bincv::lkLevel<1>(prev.level<0>(), next.level<0>(), dx0, dy0);
         levels.get<1>() = bincv::lkLevel<2>(prev.level<1>(), next.level<1>(), dx1, dy1);
         levels.get<2>() = bincv::lkLevel<2>(prev.level<2>(), next.level<2>(), dx2, dy2);
@@ -549,6 +565,13 @@ int main(int argc, char** argv) {
                     100.0 * st.msTrack / tot);
         std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "build (pyrDown + derivatives)",
                     st.msBuild / f, 100.0 * st.msBuild / tot);
+        // E-33 needs to know which half of `build` it is aiming at.
+        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "    ... fromCVMat (harness)",
+                    fe.msLoad / f, 100.0 * fe.msLoad / tot);
+        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "    ... pyrDown", fe.msPyrDown / f,
+                    100.0 * fe.msPyrDown / tot);
+        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "    ... derivatives",
+                    fe.msDeriv / f, 100.0 * fe.msDeriv / tot);
     }
     if (lkThreads > 1) {
         std::printf("\n--- X-65: binCV track stage on %d threads ---\n", lkThreads);

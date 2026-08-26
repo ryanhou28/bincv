@@ -3623,8 +3623,13 @@ and OpenCV are both 1.674 ms at twelve threads. The 1.50–1.75× figures are ag
 
 > **`build` DOES NOT SCALE AND IS NOW THE BOTTLENECK** — 26.4% of the frontend at one
 > thread, **52.2% at twelve**, and flat in absolute terms (0.89 → 0.86 ms). Threading
-> `track` moved the constraint rather than removing it, which makes
-> [E-33](#register) — AVX2 for the bulk kernels — the highest-value target left.
+> `track` moved the constraint rather than removing it.
+
+**~~which makes [E-33](#register) the highest-value target left~~ — WRONG, and
+[X-67](EXPERIMENTS.md) corrects it.** That inference treated `build` as one thing.
+Decomposed, **`pyrDown` is 3.6% of the frontend and `fromCVMat` is 20.4%**; E-33 is
+close to the *lowest*-value target on x86, not the highest. See
+[D-59](#d-59-eighty-percent-of-build-is-the-input-conversion-not-a-kernel).
 
 ### D-58: state the sequence, or the headline is not about the library
 
@@ -3644,6 +3649,37 @@ canonical one is V1_02* (`~/bincv-data/euroc-v1_02-cam0`) — what X-38, X-49 an
 used. A number from any other sequence is reported **as a comparison**, never as the
 headline. `MH_01_easy` is measurably the easier sequence — `track` 1.66 ms against 2.28 —
 and is not a substitute.
+
+### D-59: eighty percent of `build` is the input conversion, not a kernel
+
+[X-67](EXPERIMENTS.md) decomposed the stage [D-57](#d-57-threading-is-the-largest-lever-measured-and-it-moves-the-bottleneck-to-build)
+had just called the bottleneck:
+
+| | T=1 | T=4 |
+|---|---|---|
+| `fromCVMat` — the `CV_8U` → bit-plane conversion | **20.4%** | **34.4%** |
+| `pyrDown` | **3.6%** | **6.1%** |
+| derivatives | 1.2% | 2.1% |
+
+**An infinite speedup on `pyrDown` is worth 1.037× at one thread.**
+[E-33](#register) is demoted — not closed, since the reference device's profile
+differs and [X-30](EXPERIMENTS.md) put build at 25.8% there, but on x86 it is not a
+lever.
+
+**The conversion is a property of the HARNESS's input, not of binCV's pipeline.** It
+exists because the reference preprocessing emits an OpenCV `Mat`; a binary-frame
+frontend receives bits from its sensor stage and never performs it. OpenCV pays nothing
+equivalent. **So the frontend ratio is reported BOTH ways and labelled** — 0.94×
+as-measured at T=1, 1.18× with the conversion excluded — because reporting only the
+second is self-serving and only the first understates by a fifth.
+[D-58](#d-58-state-the-sequence-or-the-headline-is-not-about-the-library) is the same
+rule about a different variable, and this is its second application in a day.
+
+**A CAUTION THIS RECORD IS ITSELF EVIDENCE FOR.** D-57's wrong inference took six hours
+to catch and was made *from a correct measurement* — `build` really is 52% at twelve
+threads. **A stage total is not a target.** Decompose before choosing what to optimise;
+[D-53](#d-53-a-ceiling-prices-the-operation-not-the-algorithm) said a ceiling can price
+the wrong thing, and this says a *profile* can too.
 
 ## 9. Open Questions and Planned Experiments
 
@@ -3702,6 +3738,7 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | **E-33** *(narrowed to `build`)* | Restructure the **bulk** kernels — `pyrDown`, the derivatives — to process 8 words at once so AVX2 can reach them. | [X-59](EXPERIMENTS.md) priced the adder at **≈4.7×** on contiguous data. [X-60](EXPERIMENTS.md) then **refuted the `residualSums` half**: bit-exact and **1.88× slower**, because its eight words are register-resident and the pack/unpack costs more than the `POPCNT`s. | **`build` is the half the ceiling actually applies to** — bulk passes over contiguous plane rows, the shape X-59 measured — and `derivative` already auto-vectorises, so the target is `pyrDown`. It is **27% of the x86 frontend, not 67%**, so the prize is correspondingly smaller. [D-49](#d-49-the-mismatch-is-granularity-not-layout--five-ceilings-say-so) says to expect a ceiling to overstate. | Whether binCV is ahead of OpenCV on x86, and whether the GPU port inherits the restructuring. | D-49 | **Phase 5** |
 | **E-35** | binCV is **single-threaded**; OpenCV is not. Should the frontend parallelise — across keypoints in LK, across tiles in `build` — and what does that cost in footprint? | [X-64](EXPERIMENTS.md) found the x86 "deficit" was **threads, not vector width**: at one thread binCV **leads 1.14–1.19×**, at twelve it reads 0.65×. OpenCV gains **1.68×** from parallelism. [D-52](#d-52-the-31-pixel-window-caps-the-packing-advantage-at-194) closed every *widening* avenue, so this is the axis that is left — and it is worth more than the 12% register utilisation D-52 ruled out. | **Unmeasured, and not obviously free.** LK over keypoints is embarrassingly parallel and needs no shared state; `build` is a dependency chain down the ladder. Against that, **CLAUDE.md's tiebreak is memory** — per-thread scratch multiplies the footprint that is binCV's strongest claim (6.23×), and a Cortex-A little core is not an x86 core. **Rule and ceiling first**, and the ceiling must be a WHOLE-FRONTEND arm, not a kernel ratio ([D-53](#d-53-a-ceiling-prices-the-operation-not-the-algorithm)). | Whether binCV's single-threaded shape is a deliberate constraint or an unexamined default — and whether multi-core OpenCV is the fairer denominator, which X-64 deliberately left open. | D-54 | **Phase 5** |
 | ~~**E-35**~~ **RESOLVED — BAND A, and the bottleneck moved** | binCV is single-threaded; OpenCV is not. Should the frontend parallelise, and what does it cost in footprint? | [X-64](EXPERIMENTS.md) found the x86 "deficit" was threads. | **Answered: yes, and it is the largest lever this project has measured.** [X-65](EXPERIMENTS.md) split the point array across threads with **no library change** — `calcOpticalFlowPyrLK` already takes an array and the pyramids are read-only — **bit-exact on every one of 300 frames**. `track` scales **2.60× at T=4**, the frontend goes **0.90× → 1.50×** against one-thread OpenCV, and **peak RSS is FLAT (0.07% across T=1..12)**, so the memory tiebreak never engages. **Two limits: arm C (threading `build`) was never built, and at EQUAL thread counts the result is PARITY (1.674 ms each), not a lead.** `build` does not scale and is now **52.2%** of the frontend at T=12, which hands the next move to [E-33](#register). [D-57](#d-57-threading-is-the-largest-lever-measured-and-it-moves-the-bottleneck-to-build). | Whether binCV's single-threaded shape was a constraint or an unexamined default. **Unexamined — and hosted builds now default parallel.** | D-54, D-56 | **Phase 5** (X-65) ✔ |
+| **E-37** | `loadLevel0` converts **both** frames every frame and `build()` builds **both** pyramids — but this frame's `next` is next frame's `prev`. Should the frontend ping-pong? | [X-67](EXPERIMENTS.md) measured `fromCVMat` at **20.4% of the frontend at T=1 and 34.4% at T=4**, and roughly half of it is recomputation. | **Not fixed where it was found, on purpose.** Changing the harness changes every recorded frontend number in [EXPERIMENTS.md](EXPERIMENTS.md) — that is a decision about the denominator, not a cleanup, and it needs its own rule and a restated baseline. Note OpenCV's `calcOpticalFlowPyrLK` also rebuilds both pyramids per call, so the redundancy may be **symmetric** and removing it only on binCV's side would flatter binCV. **Measure both before changing either.** | Whether ~10% of the x86 frontend is recomputation, and whether the denominator moves with it. | D-59 | **Phase 5** |
 | **E-36** | Re-attempt x86 vectorisation of `residualSums` at the **keypoint** granularity, **staging instead of gathering**, and replacing the per-row popcount with a **carry-save adder tree**. | [X-61](EXPERIMENTS.md)'s vector arithmetic WON (≈48 ops against ≈100) and its **gathers** gave it back — a data-movement result that [D-52](#d-52-the-31-pixel-window-caps-the-packing-advantage-at-194) wrongly filed as a packing wall. | **Two changes, neither of which is a port.** (1) **Stage once, reuse across iterations**: eight of the twelve words read per row belong to the PREVIOUS frame and never move, and LK runs up to 20 iterations — so the gather is paid once, not 20 times. ~8 KB, **+1.8%**, an order of magnitude below [E-26](#register)'s declined +21%. (2) **CSA instead of popcount**: AVX2 has no vector popcount, but the kernel needs the SUM of 31 rows' counts, and a carry-save tree compresses 31 words into 5 planes with AND/XOR alone — `maj3` and `addShifted` already exist. | Whether [D-50](#8-design-decisions)'s "closed for x86" holds at the granularity that was never properly tried. | D-55, D-52 | **Phase 5** |
 | ~~**E-18**~~ **RESOLVED — NEGATIVE** | Can `residualSums` carry **vector accumulators across the window**, reducing once per window instead of once per call? | [X-33](EXPERIMENTS.md) measured a **3.42× ceiling** for batched NEON popcounts and delivered **1.24×**. The gap is the horizontal add: it runs once per `slicedSignedSum` call — **~310 register-domain crossings per window**. | **Answered: YES it can, and NO it is not worth 2–3×.** [X-40](EXPERIMENTS.md) built it (`impl::alignedResidualSumsNeon2`, bit-exact, gate-enforced) and it delivers **1.069×** against a 1.461× ceiling — about **1.52× against OpenCV** on the frontend, from 1.46×. **The floor arm is the finding**: the per-row tap machinery with the counting REMOVED is **45.4%** of the kernel, so **if counting were free the cap would be 2.205×**. The 2–3× this question was chartered on is not in the counting. [D-37](#d-37-residualsums-is-extraction-bound-not-count-bound); successor is [E-23](#register). | Whether `TapSums` becomes vector state. **It did, and the profile moved instead.** | X-28's unmet criterion 4 | **Phase 5** (X-40) ✔ |
 | ~~**E-23**~~ **RESOLVED — NEGATIVE** | `residualSums` is extraction-bound: 45.4% of the kernel is addressing with zero counting. How much of it is addressable? | [X-40](EXPERIMENTS.md) measured it with a floor arm; it was 13.7% at [D-29](#8-design-decisions) and grew because D-30, D-31, D-33 and X-35 made the counting ~3× faster and never touched it. | **Answered: almost none of it, by either obvious route.** [X-41](EXPERIMENTS.md) hoisted every loop-invariant — both `(w0, s)` descriptors, their branches, the `.row(y)` multiplies, the `interior` test — for **1.023×**; and fitting all ten planes in L1D together for **1.129×**. The 8× cache-line overfetch is real and is **not** the constraint. **The instruction stream is**: ~118 cycles per row for ~100 instructions. [D-38](#d-38-residualsums-extraction-is-instruction-bound--not-addressing-not-layout). | Whether the three copies of the extraction block collapse. **They should, but for maintenance — not for speed.** | D-37 | **Phase 5** (X-41) ✔ |
