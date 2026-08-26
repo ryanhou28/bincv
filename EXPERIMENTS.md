@@ -10003,9 +10003,38 @@ x86 runs are the ones that drifted.
 | **1** | 2.794 / 2.651 / 3.187 | 3.333 / 3.032 / 3.791 | **1.19× / 1.14× / 1.19×** |
 | 12 | 3.030 / 3.198 / 3.190 | 1.981 / 2.065 / 2.051 | 0.65× / 0.65× / 0.64× |
 
-**binCV IS AHEAD OF OpenCV ON x86 AT EQUAL CORE COUNT — 1.14–1.19×, at 6.23× less
-memory — with no x86 vector code whatsoever.** Both bands are tight across three runs;
-this is not a noise result.
+**~~binCV IS AHEAD OF OpenCV ON x86 AT EQUAL CORE COUNT — 1.14–1.19×~~ — CORRECTED
+BELOW.** The thread-control finding stands. **The headline does not: it was measured on
+`MH_01_easy`, not on the sequence every other entry in this file uses**, and it does not
+survive the change.
+
+#### CORRECTION: THE HEADLINE WAS SEQUENCE-DEPENDENT, AND THE SEQUENCE WAS WRONG
+
+`/mnt/g` dropped, and the local copy that replaced it is **`euroc-v1_02-cam0`** — the
+**V1_02** sequence [X-38](#x-38--the-full-sequence--done),
+[X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done) and
+[X-52](#x-52--where-x86-is-now--done) all used. Re-measured there, two runs:
+
+| OpenCV threads | binCV | OpenCV | ratio on **V1_02** | ratio on MH_01 |
+|---|---|---|---|---|
+| **1** | 3.325 / 3.295 | 2.967 / 2.937 | **0.89× / 0.89×** | 1.14 – 1.19× |
+| 12 | 3.367 / 3.475 | 1.681 / 1.667 | 0.50× / 0.48× | 0.64 – 0.65× |
+
+**On the canonical sequence binCV is BEHIND single-threaded OpenCV, 0.89×.** V1_02 is
+the harder sequence — `track` costs **2.28 ms/frame against MH_01's 1.66**, 37% more
+work — and the ratio moves further than most experiments in this file measure.
+
+**WHAT SURVIVES AND WHAT DOES NOT.** The *reason* X-64 exists is unaffected and is
+confirmed on both sequences: **OpenCV gains 1.68× (MH_01) / 1.77× (V1_02) from threads**,
+so an uncontrolled comparison measures parallelism and reads as implementation. The
+benchmark's one-thread default, the disclaimer and the corrected NOTE all stand.
+**What does not stand is "binCV leads at equal core count"** — true on one sequence,
+false on the other, and stated as if it were a property of the library.
+
+**THIS IS THE SECOND HEADLINE IN TWO DAYS TO REST ON AN UNCONTROLLED VARIABLE** —
+threads, then the sequence. Recorded as such in
+[D-54](ARCHITECTURE.md#8-design-decisions); the rule that follows is in
+[D-57](ARCHITECTURE.md#8-design-decisions).
 
 **WHAT THREADING IS WORTH, AND WHAT SIMD IS WORTH.** OpenCV goes 3.33 → 1.98 ms on
 twelve threads: **1.68× from parallelism**. Its SIMD is fully active in *both* rows —
@@ -10053,7 +10082,7 @@ device to one core, which is what makes its recorded ratios unaffected.
 
 ---
 
-### X-65 · E-35 — what does threading the frontend buy, and what does it cost? · `RULE ONLY`
+### X-65 · E-35 — what does threading the frontend buy, and what does it cost? · `DONE`
 
 **COMMITTED BEFORE ANY CODE.** The rule is written first because
 [D-53](ARCHITECTURE.md#8-design-decisions) is one day old and its whole content is that
@@ -10159,6 +10188,59 @@ so the arms compare against a fixed denominator and against each other. **The he
 ratio is additionally reported at OpenCV's own default**, because that is the
 comparison a user actually runs and X-64's whole lesson is that leaving it unstated is
 how a denominator drifts.
+
+---
+
+#### THE RESULT: BAND A ON ARM B, AND THE PROFILE MOVES TO `build`
+
+**BIT-EXACTNESS FIRST, BECAUSE IT IS A PRECONDITION AND NOT A BAND.** Splitting the
+point array across four threads reproduced the serial result on **every one of 300
+frames, 0 differed.** Keypoints are independent and the pyramids are read-only, so
+this needed **no library change at all** — the arm is a split of the existing
+`calcOpticalFlowPyrLK` call, which is why it could answer the bands before any API was
+designed for it.
+
+**V1_02, full 1710 frames, two passes, OpenCV pinned to one thread:**
+
+| threads | `track` ms | speedup | `build` ms | binCV ms | vs OpenCV |
+|---|---|---|---|---|---|
+| **1** | 2.294 / 2.259 | 1.00× | 0.893 / 0.883 | 3.379 / 3.329 | 0.90× |
+| 2 | 1.355 / 1.331 | 1.70× | 0.852 / 0.833 | 2.401 / 2.344 | 1.20× / 1.22× |
+| **4** | 0.895 / 0.858 | **2.60×** | 0.857 / 0.838 | 1.938 / 1.884 | **1.49× / 1.51×** |
+| 6 | 0.750 / 0.748 | 3.04× | 0.871 / 0.863 | 1.810 / 1.797 | 1.62× / 1.58× |
+| 12 | 0.618 / 0.608 | 3.71× | 0.877 / 0.864 | 1.682 / 1.666 | 1.74× / 1.75× |
+
+**FOOTPRINT: FLAT.** Peak RSS is **29 848 / 29 828 / 29 844 KB** at T = 1 / 4 / 12 — a
+**0.07%** spread, which is noise. [D-56](ARCHITECTURE.md#8-design-decisions)'s claim
+that only per-thread stack scales is confirmed with three orders of magnitude of margin
+against Band A's 5%.
+
+**BAND A FIRES — with one precision.** Its numeric thresholds are met: **2.60× on
+`track` at T=4** against a ≥2.5× bar, footprint growth **0.07%** against <5%, bit-exact.
+But the band names **arm C** (track *and* build), and **only arm B was built.** Arm C is
+**unmeasured**, and the table shows why that now matters more than it did when the rule
+was written.
+
+> **`build` DOES NOT SCALE, AND IT HAS BECOME THE BOTTLENECK.** It is **26.4% of the
+> frontend at one thread and 52.2% at twelve**, essentially unchanged in absolute terms
+> — 0.89 → 0.86 ms. Threading `track` moved the constraint rather than removing it.
+
+**AND THE HONEST COMPARISON AT EQUAL THREAD COUNTS IS PARITY, NOT A LEAD.** binCV at
+12 threads is **1.674 ms**; OpenCV at 12 threads is **1.674 ms**. Threading takes binCV
+from 0.89× to **1.00×** against a like-configured OpenCV — a real and large gain, and
+**not** a lead. The 1.49–1.75× figures above are against **one-thread** OpenCV and must
+always be labelled as such.
+
+**Decision: threading is the largest single lever this project has measured** — 0.89× →
+1.50× against the recorded one-thread denominator, at no footprint cost and bit-exact.
+[D-57](ARCHITECTURE.md#8-design-decisions). The provisional API shape
+([D-56](ARCHITECTURE.md#8-design-decisions)) survives its gate: Band B and Band D did
+not fire, so **hosted builds default parallel**. **Arm C stays owed**, and `build` is now
+the highest-value target in the frontend — which is [E-33](ARCHITECTURE.md#register),
+by a different route.
+
+**Measured on:** V1_02, `~/bincv-data/euroc-v1_02-cam0`, x86_64, 12 cores, unpinned —
+the protocol deviation this experiment declared in advance.
 
 ---
 

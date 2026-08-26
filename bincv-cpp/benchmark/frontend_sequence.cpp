@@ -30,8 +30,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
+#include <mutex>
+#include <thread>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -167,6 +171,103 @@ double median(std::vector<int> v) {
 
 } // namespace
 
+// ---------------------------------------------------------------------------
+// X-65 / E-35: the threading arm, IN THE BENCHMARK ONLY.
+//
+// binCV itself is untouched. `calcOpticalFlowPyrLK` already takes an ARRAY of
+// points and the pyramid levels are READ-ONLY, so splitting the array across
+// threads needs no library change at all -- which is the point: this measures
+// whether there is anything here before any API is designed for it.
+//
+// A PERSISTENT POOL, NOT `std::async` PER FRAME. 1709 frames x T thread creations
+// would price thread creation, not parallelism, and a shipped implementation would
+// have a pool. This one is deliberately minimal.
+//
+// BIT-EXACTNESS IS THE PRECONDITION, NOT A BAND (EXPERIMENTS.md X-65). Keypoints are
+// independent, so splitting the array must not move a single flow vector. The
+// benchmark checks it against the serial result on every frame.
+// ---------------------------------------------------------------------------
+class ThreadPool {
+public:
+    explicit ThreadPool(int n) {
+        for (int i = 0; i < n; ++i) workers.emplace_back([this] { run(); });
+    }
+    ~ThreadPool() {
+        {
+            std::unique_lock<std::mutex> lk(m);
+            stop = true;
+        }
+        cv.notify_all();
+        for (auto& t : workers) t.join();
+    }
+    /// Run `f(i)` for i in [0, n) and wait. Serial when the pool is empty.
+    template <typename Fn>
+    void parallelFor(size_t n, Fn&& f) {
+        if (workers.empty() || n <= 1) {
+            for (size_t i = 0; i < n; ++i) f(i);
+            return;
+        }
+        {
+            std::unique_lock<std::mutex> lk(m);
+            job = [&f](size_t i) { f(i); };
+            total = n;
+            nextIdx = 0;
+            done = 0;
+            ++generation;
+        }
+        cv.notify_all();
+        std::unique_lock<std::mutex> lk(m);
+        doneCv.wait(lk, [this] { return done == total; });
+        job = nullptr;
+    }
+
+private:
+    void run() {
+        size_t seen = 0;
+        for (;;) {
+            std::unique_lock<std::mutex> lk(m);
+            cv.wait(lk, [this, &seen] { return stop || generation != seen; });
+            if (stop) return;
+            seen = generation;
+            for (;;) {
+                if (nextIdx >= total) break;
+                const size_t i = nextIdx++;
+                auto f = job;
+                lk.unlock();
+                f(i);
+                lk.lock();
+                ++done;
+                if (done == total) doneCv.notify_all();
+            }
+        }
+    }
+    std::vector<std::thread> workers;
+    std::mutex m;
+    std::condition_variable cv, doneCv;
+    std::function<void(size_t)> job;
+    size_t total = 0, nextIdx = 0, done = 0, generation = 0;
+    bool stop = false;
+};
+
+/// One LK call, split into `chunks` contiguous slices of the point array.
+template <typename Levels>
+void trackSplit(ThreadPool& pool, size_t chunks, const Levels& levels,
+                const bincv::Point2f* pts, bincv::Point2f* out, uint8_t* status, size_t n,
+                const bincv::LKParams& lk) {
+    if (chunks <= 1 || n == 0) {
+        bincv::calcOpticalFlowPyrLK(levels, pts, out, status, nullptr, n, lk);
+        return;
+    }
+    if (chunks > n) chunks = n;
+    const size_t per = (n + chunks - 1) / chunks;
+    pool.parallelFor(chunks, [&](size_t c) {
+        const size_t b = c * per;
+        if (b >= n) return;
+        const size_t len = (b + per <= n) ? per : (n - b);
+        bincv::calcOpticalFlowPyrLK(levels, pts + b, out + b, status + b, nullptr, len, lk);
+    });
+}
+
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
     if (argc < 2) { std::printf("usage: frontend_sequence <frame-dir> [max-frames]\n"); return 2; }
@@ -194,6 +295,14 @@ int main(int argc, char** argv) {
     // most of a working session. binCV has no threading at all, so an unpinned x86
     // box silently changes what the ratio means; the reference device never could.
     // Set BINCV_OPENCV_THREADS to compare against a multi-core OpenCV deliberately.
+    // X-65: binCV's thread count for the track stage, and the exactness check.
+    int lkThreads = 1;
+    if (const char* t = std::getenv("BINCV_LK_THREADS")) lkThreads = std::atoi(t);
+    if (lkThreads < 1) lkThreads = 1;
+    const bool checkExact = std::getenv("BINCV_LK_THREADS_CHECK") != nullptr;
+    size_t threadMismatches = 0;
+    ThreadPool pool(lkThreads > 1 ? lkThreads : 0);
+
     int cvThreads = 1;
     if (const char* t = std::getenv("BINCV_OPENCV_THREADS")) cvThreads = std::atoi(t);
     cv::setNumThreads(cvThreads);
@@ -264,8 +373,31 @@ int main(int argc, char** argv) {
         std::vector<bincv::Point2f> bOut(bPts.size());
         std::vector<uint8_t> bStatus(bPts.size());
         if (!bPts.empty()) {
-            bincv::calcOpticalFlowPyrLK(fe.levels, bPts.data(), bOut.data(), bStatus.data(),
-                                        nullptr, bPts.size(), lk);
+            if (lkThreads > 1) {
+                if (checkExact) {
+                    // The precondition: identical to serial, every frame, or the
+                    // timing is a number about a data race.
+                    std::vector<bincv::Point2f> refOut(bPts.size());
+                    std::vector<uint8_t> refStatus(bPts.size());
+                    bincv::calcOpticalFlowPyrLK(fe.levels, bPts.data(), refOut.data(),
+                                                refStatus.data(), nullptr, bPts.size(), lk);
+                    trackSplit(pool, static_cast<size_t>(lkThreads), fe.levels, bPts.data(),
+                               bOut.data(), bStatus.data(), bPts.size(), lk);
+                    for (size_t i = 0; i < bPts.size(); ++i) {
+                        if (bOut[i].x != refOut[i].x || bOut[i].y != refOut[i].y ||
+                            bStatus[i] != refStatus[i]) {
+                            ++threadMismatches;
+                            break;
+                        }
+                    }
+                } else {
+                    trackSplit(pool, static_cast<size_t>(lkThreads), fe.levels, bPts.data(),
+                               bOut.data(), bStatus.data(), bPts.size(), lk);
+                }
+            } else {
+                bincv::calcOpticalFlowPyrLK(fe.levels, bPts.data(), bOut.data(), bStatus.data(),
+                                            nullptr, bPts.size(), lk);
+            }
         }
         st.msTrack += std::chrono::duration<double, std::milli>(Clock::now() - tStage).count();
         st.bincvMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
@@ -417,6 +549,17 @@ int main(int argc, char** argv) {
                     100.0 * st.msTrack / tot);
         std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "build (pyrDown + derivatives)",
                     st.msBuild / f, 100.0 * st.msBuild / tot);
+    }
+    if (lkThreads > 1) {
+        std::printf("\n--- X-65: binCV track stage on %d threads ---\n", lkThreads);
+        if (checkExact) {
+            std::printf("  bit-exact vs serial : %s (%zu frames differed)\n",
+                        threadMismatches == 0 ? "YES" : "*** NO -- TIMING IS MEANINGLESS ***",
+                        threadMismatches);
+        } else {
+            std::printf("  bit-exact vs serial : not checked "
+                        "(set BINCV_LK_THREADS_CHECK=1; it doubles track time)\n");
+        }
     }
     std::printf("\n--- CRITERION 4: speed against the byte-per-pixel denominator ---\n");
     std::printf("  binCV  : %8.3f ms/frame\n", st.bincvMs / static_cast<double>(st.frames));
