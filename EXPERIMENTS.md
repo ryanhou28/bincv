@@ -10801,6 +10801,69 @@ configurations.
 
 ---
 
+### X-72 · E-39 — the staged NEON variants: measured 2.13×, code DEFERRED · `PARTIAL`
+
+**THE MEASUREMENT SUCCEEDED AND THE IMPLEMENTATION DID NOT.** Both halves are recorded,
+because the number is worth having and the reason for stopping is worth more.
+
+**WHAT IT IS WORTH ON THE DEPLOYMENT TARGET.** A working prototype — one `RowReader`
+serving scalar and NEON, staged and unstaged — was built, **passed all 298 checks
+including the staged-vs-unstaged oracle at N = 1/2/3 with 0 declined**, and measured on
+the reference device against the shipped hold, same session, two runs each:
+
+| | `track` ms | binCV ms | OpenCV ms | ratio |
+|---|---|---|---|---|
+| **A** hold in place (shipped) | 7.602 / 7.624 | 8.996 / 9.022 | 16.639 / 16.688 | **1.85×** |
+| **B** staging + tap cache active | **6.474 / 6.470** | **7.881 / 7.874** | 16.807 / 16.725 | **2.13×** |
+
+**`track` 1.18×, the frontend 1.14×, and the ratio 1.85× → 2.13× on the reference
+device.** Smaller than x86's 1.46× on `track`, which is expected: D-33's and X-40's NEON
+accumulators had already removed part of the per-row cost that staging targets.
+
+**AND A REAL x86 FINDING THAT COST TWO WRONG GUESSES.** The first refactor — one body
+with a runtime `staged != nullptr` test — cost **17% of `track` on x86** (1.462 → 1.710
+ms). Two hypotheses were measured and **both were wrong**:
+
+| change | x86 `track` | |
+|---|---|---|
+| pointer operands, runtime flag | 1.710 | the regression |
+| `__restrict` on the operands | 1.750 / 1.811 | **no help** |
+| array operands + copy, runtime flag | 1.745 / 1.780 | **no help** |
+| array operands, **compile-time** `Staged` | 1.540 / 1.626 / 1.545 | most of it back |
+| **pointers aliasing + compile-time `Staged`** | **1.465 / 1.458 / 1.473** | **parity** |
+
+> **NEITHER CHANGE ALONE SUFFICED.** A runtime flag stops the compiler specialising the
+> row loop; copying the operands gives back exactly what staging bought. **Both the
+> compile-time flag AND zero-copy aliasing are required**, and that is a fact about the
+> shape any future attempt must have.
+
+**WHY THE CODE IS NOT COMMITTED.** Collapsing four extraction blocks into one is a
+structural edit to functions that **only compile on aarch64**, and this environment has
+**no cross-compiler, no working Docker for `verify_arm.sh`, and a 5–10 minute
+round-trip per device build.** The prototype accumulated brace-level damage inside the
+`#if BINCV_HAVE_NEON` region that x86 cannot see and that three repair attempts did not
+clear. **Continuing to patch blind on a platform that cannot be compiled locally is how
+a subtle bug ships**, so the working tree was reverted to the last gate-green state:
+x86 `track` 1.459 / 1.476 ms, ratio 1.55–1.56×, 298/298 checks.
+
+**WHAT REMAINS TRUE AND SHIPPED:** the aarch64 hold
+([D-60](ARCHITECTURE.md#8-design-decisions)) stays, so the deployment target keeps its
+measured NEON accumulators and loses nothing. **This experiment costs nothing and
+defers a known 1.15× on the device.**
+
+**WHAT THE NEXT ATTEMPT NEEDS, IN ORDER.** (1) A working `verify_arm.sh` — Docker, or a
+cross-compiler — so the NEON region compiles in seconds rather than minutes. (2) The
+row reader written **once, whole**, not spliced into existing bodies. (3) `Staged` as a
+template parameter and operands as aliasing pointers, per the table above. The
+[E-39](ARCHITECTURE.md#register) row records all three.
+
+**Method:** prototype measured on the reference device via `scripts/run_on_pi.sh pi4`,
+`taskset -c 3`, governor `performance`, throttle unchanged; x86 arms by `git checkout`
+of the single header with a full rebuild between each, V1_02, 900 frames, OpenCV at one
+thread.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
