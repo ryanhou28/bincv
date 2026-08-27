@@ -4093,7 +4093,7 @@ That rule settles every case consistently, in both directions:
 - **Raising `N` above 8.** binCV is a *low*-bit-width library; the cap is the thesis,
   not a limitation to be relaxed.
 
-### T5.16 · The AVX2 keypoint batch — the x86 optimisation · `TODO`
+### T5.16 · The AVX2 keypoint batch — the x86 optimisation · `DONE` (X-78, X-79 → D-66)
 
 **Depends:** T5.2 (landed), T5.3 (landed — re-baselined at **2.06–2.14×** against the
 shipped inner loop, clearing the 1.5× bar).

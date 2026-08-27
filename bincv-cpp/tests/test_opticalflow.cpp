@@ -2405,6 +2405,78 @@ BINCV_TEST(Flow, NBitResidualIsExactAgainstPerPixel_uint32_t) {
     BINCV_CHECK_EQ(n5, size_t{0});
 }
 
+// ---------------------------------------------------------------------------
+// X-79 / E-36: THE AVX2 KEYPOINT BATCH IS THE SAME ARITHMETIC OR IT IS A BUG.
+//
+// T5.16 says bit-exactness against the serial path is a PRECONDITION, not a band:
+// the batch computes the same integers from the same words, so any difference is a
+// defect and not a trade-off. `impl::lkBatchEnabled()` exists so that both spellings
+// can be run on identical input in one process -- the pattern `slicedSignedSum`'s
+// `UseNeon` established (X-33), and for the same reason.
+//
+// THE POINT SET IS A GRID OVER THE WHOLE FRAME, BORDERS INCLUDED, and that is what
+// makes this a real test rather than a happy-path one. It exercises:
+//
+//   * lanes of DIFFERENT HEIGHTS batched together, which is what the zero-magnitude
+//     padding is for -- a clipped window's absent rows must contribute exactly zero;
+//   * lanes of different WIDTHS, which the per-lane region mask on `magX`/`magY`
+//     handles with no kernel involvement;
+//   * points rejected before the loop, which must not consume a lane;
+//   * points that converge at different iteration counts, which is the whole reason
+//     the refill exists (X-78).
+// ---------------------------------------------------------------------------
+BINCV_TEST(Flow, X79_KeypointBatchIsBitExact_uint32_t) {
+    const int width = kW, height = kH;
+    BinMat<uint32_t> prevSrc(width, height), nextSrc(width, height);
+    const Warp warp = translation(1.3, -0.7);
+    renderWarped(prevSrc, Warp{});
+    renderWarped(nextSrc, warp);
+
+    LadderFrontend<uint32_t, 1, 2, 2, 2> fe(width, height);
+    seedLevelZero(fe, prevSrc, nextSrc);
+    fe.build();
+
+    std::vector<Point2f> pts;
+    for (int y = 1; y < height - 1; y += 5) {
+        for (int x = 1; x < width - 1; x += 7) {
+            pts.push_back(Point2f{static_cast<float>(x), static_cast<float>(y)});
+        }
+    }
+    const size_t n = pts.size();
+    std::vector<Point2f> outA(n), outB(n);
+    std::vector<uint8_t> stA(n), stB(n);
+    std::vector<float> errA(n), errB(n);
+    LKParams params;
+
+    bincv::impl::lkBatchEnabled() = true;
+    calcOpticalFlowPyrLK(fe.levels, pts.data(), outA.data(), stA.data(), errA.data(), n,
+                         params);
+    bincv::impl::lkBatchEnabled() = false;
+    calcOpticalFlowPyrLK(fe.levels, pts.data(), outB.data(), stB.data(), errB.data(), n,
+                         params);
+    bincv::impl::lkBatchEnabled() = true;
+
+    // BIT comparison, not a tolerance. Two spellings of the same integer arithmetic
+    // feeding the same `double` solve have no licence to differ in the last place.
+    size_t posDiff = 0, statusDiff = 0, errDiff = 0, tracked = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (stA[i] != stB[i]) ++statusDiff;
+        if (stA[i]) ++tracked;
+        if (std::memcmp(&outA[i], &outB[i], sizeof(Point2f)) != 0) ++posDiff;
+        if (std::memcmp(&errA[i], &errB[i], sizeof(float)) != 0) ++errDiff;
+    }
+    std::printf("\n  X-79: %zu points, %zu tracked; batch %s\n", n, tracked,
+                bincv::impl::hasLkBatch() ? "EXERCISED (AVX2 present)"
+                                          : "not available on this machine");
+    std::printf("  batched vs serial: %zu positions differ, %zu status, %zu err\n", posDiff,
+                statusDiff, errDiff);
+    BINCV_CHECK(n > 100);
+    BINCV_CHECK(tracked > 20);
+    BINCV_CHECK_EQ(posDiff, size_t{0});
+    BINCV_CHECK_EQ(statusDiff, size_t{0});
+    BINCV_CHECK_EQ(errDiff, size_t{0});
+}
+
 BINCV_TEST(Flow, X24_LadderSweep_Synthetic_uint32_t) {
     // X-24's synthetic half. X-20 PASSED its synthetic cases at four 1-bit levels;
     // the miss was on the reference pipeline's own edge maps. So this half is not

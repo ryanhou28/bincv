@@ -45,9 +45,18 @@ namespace impl {
 /// one word (a 31-pixel window at `uint32_t`).
 constexpr size_t kLkBatchLanes = 8;
 
-/// Rows a batch can stage, matching `kStagedMaxRows` so a window the scalar path can
-/// stage is one the batch can hold.
-constexpr size_t kLkBatchMaxRows = 64;
+/// Rows a batch can stage. **THIRTY-TWO, AND THAT IS A FOOTPRINT DECISION.**
+///
+/// The batch holds eleven `[row][plane][lane]` arrays; at `N = 2` that is **~20 KB at
+/// 32 rows and ~41 KB at 64**, and the working set has to stay inside L1 or the
+/// transpose the layout exists to avoid comes back as cache traffic.
+/// [CLAUDE.md](../../../CLAUDE.md) says footprint wins a tie, and this one is not even
+/// a tie: the shipped window is 31 rows.
+///
+/// A **taller window is not refused, it is not accelerated** — `trackOnePoint` tracks
+/// it, bit-identically, at the speed it had before this file existed. That is why the
+/// cap can be chosen for the common case rather than the widest one.
+constexpr size_t kLkBatchMaxRows = 32;
 
 #if defined(BINCV_X86_LK_BATCH)
 

@@ -243,6 +243,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <type_traits>
 
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
 #include <arm_neon.h>
@@ -254,6 +256,7 @@
 #include "../core/view.hpp"
 #include "../quantMat.hpp"
 #include "../impl/kernel_util.hpp"
+#include "../impl/lkBatch_impl.hpp"
 // gradientCovariance: the 2x2 matrix, one fused traversal, zero scratch (T3.6).
 #include "covariance.hpp"
 // impl::minEigenValue -- the SAME (S - sqrt(D))/2 from exact integer operands
@@ -1867,6 +1870,437 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
     }
 }
 
+/// @brief Force the scalar path, for the tests. **INTERNAL, and not a tuning knob.**
+///
+/// It is how the batched path is held to BIT-EXACTNESS: the batch and `trackOnePoint`
+/// are two spellings of the same arithmetic, and the only way to hold them equal is to
+/// run both on the same input and compare. `slicedSignedSum`'s `UseNeon` exists for
+/// exactly this reason and says exactly this (X-33).
+///
+/// A shipped build never touches it. It is a plain `bool` and therefore **not
+/// thread-safe to flip while tracking** — tests flip it between calls.
+inline bool& lkBatchEnabled() {
+    static bool on = true;
+    return on;
+}
+
+/// @brief Is this level type the N-bit one, with plane ARRAYS? **INTERNAL.**
+/// @note `LKLevel<W>` and `LKLevelN<1, W>` both report `Bits == 1` and are not
+///       interchangeable: only the second has `prev[]`, which is what the batch stages
+///       from. `Bits` cannot tell them apart, so this does.
+template <typename T>
+struct IsLevelN : std::false_type {};
+template <size_t N, typename WordType>
+struct IsLevelN<LKLevelN<N, WordType>> : std::true_type {};
+
+/// @brief Can this level type be batched AT ALL — asked at COMPILE time. **INTERNAL.**
+/// @note The shipped 1/2/2/2 ladder (D-23) at `uint32_t`. This has to be a compile-time
+///       question and not only a runtime one: `lkBatchResidual` is instantiated for the
+///       level's depth, and a level at `N = 4` would fail to COMPILE a kernel it would
+///       never have called. Whether the machine has AVX2 is the separate, runtime half.
+template <typename T>
+inline constexpr bool kBatchableLevel = IsLevelN<T>::value && (T::Bits == 1 || T::Bits == 2) &&
+                                        sizeof(typename T::Word) == 4;
+
+#if defined(BINCV_X86_LK_BATCH)
+
+/// @brief One lane's tracking state. **INTERNAL** (X-79).
+/// @note Everything here is per-KEYPOINT and scalar, and it stays scalar on purpose.
+///       Only the ten window sums are vectorised; the 2x2 solve, the tap split, the
+///       convergence test and the oscillation rule are computed in `double` exactly as
+///       `trackOnePoint` computes them. **That is what makes the batch bit-exact rather
+///       than merely close** -- there is no second spelling of the floating-point
+///       arithmetic to drift from the first.
+template <typename WordType>
+struct LkLane {
+    RegionWords<WordType> region{};
+    size_t p = 0;
+    size_t rows = 0;
+    float prevX = 0.0f, prevY = 0.0f, nextX = 0.0f, nextY = 0.0f;
+    double a11 = 0.0, a12 = 0.0, a22 = 0.0, det = 0.0;
+    double prevDeltaX = 0.0, prevDeltaY = 0.0;
+    double w00 = 0.0, w01 = 0.0, w10 = 0.0, w11 = 0.0;
+    long long tapX = 0, tapY = 0;
+    int it = 0;
+    bool active = false;
+    bool inRange = true;
+    bool tapValid = false;
+};
+
+/// @brief Eight windows' worth of staged operands, in the ONE layout that makes the
+///        batch worth having. **INTERNAL** (X-79).
+///
+/// `[row][plane][lane]`: eight keypoints' words at the same row and plane are eight
+/// adjacent `uint32_t`, so a `__m256i` load fetches one word from each of eight
+/// keypoints. [X-61](../../../EXPERIMENTS.md) tried the other arrangement and lost --
+/// its vector arithmetic won on operation count and its **gathers** gave the win back.
+/// The fix was never a better gather; it was arranging not to need one.
+template <size_t N, typename WordType>
+struct LkBatchArrays {
+    WordType self[kLkBatchMaxRows][N][kLkBatchLanes];
+    WordType magX[kLkBatchMaxRows][N][kLkBatchLanes];   ///< masked to each lane's region
+    WordType magY[kLkBatchMaxRows][N][kLkBatchLanes];
+    WordType signX[kLkBatchMaxRows][kLkBatchLanes];
+    WordType signY[kLkBatchMaxRows][kLkBatchLanes];
+    WordType t00[kLkBatchMaxRows][N][kLkBatchLanes];
+    WordType t01[kLkBatchMaxRows][N][kLkBatchLanes];
+    WordType t10[kLkBatchMaxRows][N][kLkBatchLanes];
+    WordType t11[kLkBatchMaxRows][N][kLkBatchLanes];
+    WordType splitP[kLkBatchMaxRows][N][kLkBatchLanes];   ///< kernel scratch
+    WordType splitN[kLkBatchMaxRows][N][kLkBatchLanes];
+};
+
+/// @brief Stage ONE lane's iteration-invariant words, and zero-pad it to `winRows`.
+///        **INTERNAL** (X-79).
+///
+/// The scalar `stageWindow` written into a lane of the batch layout — same eight words
+/// per row, same masking, scattered instead of packed.
+///
+/// **THE ZERO PADDING IS WHY CLIPPED WINDOWS NEED NO SPECIAL CASE.** Lanes in a batch
+/// have different heights, and the vector kernel runs the TALLEST. A short lane's
+/// remaining rows are given **zero magnitude**, and a zero magnitude contributes
+/// exactly zero to every one of the ten sums — `popcount(V & 0)` is 0 whatever `V` is.
+/// So a half-clipped window batches with a full one and the answer is unchanged, with
+/// no per-lane row masking anywhere in the kernel.
+///
+/// Column clipping needs nothing at all: the region mask is applied to `magX`/`magY`
+/// here, once, and every product is taken against a masked magnitude.
+template <size_t N, typename WordType>
+inline void stageLane(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
+                      LkBatchArrays<N, WordType>& b, size_t lane, size_t winRows) {
+    const size_t words = minRowWords<WordType>(lv.prev[0].width);
+    const WordType mask = lowBitsMask<WordType>(r.x1 - r.x0);
+    size_t i = 0;
+    for (size_t y = r.y0; y < r.y1; ++y, ++i) {
+        for (size_t k = 0; k < N; ++k) {
+            b.self[i][k][lane] = alignedWord<WordType>(lv.prev[k].row(y), words, r.x0);
+            b.magX[i][k][lane] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dxMag[k].row(y), words, r.x0) & mask);
+            b.magY[i][k][lane] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dyMag[k].row(y), words, r.x0) & mask);
+        }
+        b.signX[i][lane] = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
+        b.signY[i][lane] = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
+    }
+    for (; i < winRows; ++i) {
+        for (size_t k = 0; k < N; ++k) {
+            b.magX[i][k][lane] = 0;
+            b.magY[i][k][lane] = 0;
+        }
+    }
+}
+
+/// @brief Refresh ONE lane's four tap words per row at a new integer displacement.
+///        **INTERNAL** (X-79). `RowReader::extractTaps`, scattered into the lane.
+/// @note X-34's `+1`-tap-is-a-shift and X-35's interior fast path, both preserved:
+///       the taps for row `i+1`'s upper pair are row `i`'s lower pair, and a window
+///       narrower than a word gets its `+1` column by shifting rather than re-reading.
+template <size_t N, typename WordType>
+inline void extractLaneTaps(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
+                            long long tapX, long long tapY, LkBatchArrays<N, WordType>& b,
+                            size_t lane) {
+    const size_t words = minRowWords<WordType>(lv.prev[0].width);
+    const size_t width = r.x1 - r.x0;
+    const bool tapIsShift = width < bitsPerWord<WordType>();
+    const long long srcX = static_cast<long long>(r.x0) + tapX;
+    const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
+    const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
+    const size_t height = lv.next[0].height;
+    // ROW i's LOWER TAP IS ROW i+1's UPPER TAP -- they name the same level row at the
+    // same displacement. Reading it twice is what `RowReader` does, and there it costs
+    // nothing worth naming because the two reads are adjacent in one row's work. Here
+    // the window is walked once per iteration for eight lanes, so halving the reads of
+    // `lv.next` halves the scalar half of the batch's inner loop.
+    //
+    // Sound because the two spellings agree wherever both apply: `alignedWord` is
+    // X-35's interior fast path for exactly the case `displacedRow(...).word(0)` would
+    // compute the same bits more slowly, and outside it both sides take `displacedRow`.
+    const auto readRow = [&](long long sy, size_t k, long long sx) -> WordType {
+        if (colsInside && sy >= 0 && sy < static_cast<long long>(height) && sx == srcX) {
+            return alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(sy)), words,
+                                         static_cast<size_t>(sx));
+        }
+        return displacedRow<WordType>(lv.next[k], sy, sx).word(0);
+    };
+
+    WordType carry[N];
+    WordType carryShift[N];
+    bool haveCarry = false;
+    size_t i = 0;
+    for (size_t y = r.y0; y < r.y1; ++y, ++i) {
+        const long long srcY = static_cast<long long>(y) + tapY;
+        for (size_t k = 0; k < N; ++k) {
+            const WordType upper = haveCarry ? carry[k] : readRow(srcY, k, srcX);
+            const WordType lower = readRow(srcY + 1, k, srcX);
+            carry[k] = lower;
+            b.t00[i][k][lane] = upper;
+            b.t10[i][k][lane] = lower;
+            if (tapIsShift) {
+                b.t01[i][k][lane] = static_cast<WordType>(upper >> 1);
+                b.t11[i][k][lane] = static_cast<WordType>(lower >> 1);
+            } else {
+                const WordType upperR =
+                    haveCarry ? carryShift[k] : readRow(srcY, k, srcX + 1);
+                const WordType lowerR = readRow(srcY + 1, k, srcX + 1);
+                carryShift[k] = lowerR;
+                b.t01[i][k][lane] = upperR;
+                b.t11[i][k][lane] = lowerR;
+            }
+        }
+        haveCarry = true;
+    }
+}
+
+/// @brief Track a RANGE of points through one level, eight at a time, with **lane
+///        refill**. **INTERNAL** (X-79, E-36).
+///
+/// **THE REFILL IS THE DESIGN, NOT A REFINEMENT ON TOP OF IT.**
+/// [X-78](../../../EXPERIMENTS.md) counted the iteration distribution before any of
+/// this was written: **72.6% of point-levels finish in two iterations or fewer, and a
+/// 3.6% tail runs the cap of twenty.** Eight lanes in lockstep cost the MAXIMUM of
+/// eight draws from that distribution, which measured **5.20 against a mean of 3.24 --
+/// 39.9% of every lane slot wasted.** A naive lockstep batch would have turned a 3.1x
+/// kernel into 1.31x on `track`.
+///
+/// So a lane that finishes takes **the next untracked point** instead of idling. That
+/// costs one re-staging, which is the same staging the scalar path does for every
+/// point anyway: the work is not new, it happens at a different time.
+///
+/// @param pFirst,pEnd The half-open range of points this call owns. Splitting the
+///        ARRAY is how the operation threads (T5.1) — each range refills from its own
+///        cursor and writes only its own points' outputs.
+///
+/// @note **Points the batch cannot hold are not skipped, they are tracked here**, by
+///       `trackOnePoint`, at the moment the refill reaches them. A window wider than a
+///       word or taller than `kLkBatchMaxRows` is rare (the shipped window is 31x31)
+///       and correct either way.
+template <size_t N, typename WordType>
+inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const LKContext& c,
+                              bool finest, float scale, long long levelWidth,
+                              long long levelHeight, double kLevelMinEigScale,
+                              size_t pFirst, size_t pEnd) {
+    LkBatchArrays<N, WordType> b;
+    // Zeroed once, not per refill. Padded rows keep whatever a previous occupant of
+    // the lane left in the TAP arrays -- which is harmless, because their magnitude is
+    // zero -- but reading never-written memory is not, so the first pass over each
+    // array must find it defined.
+    std::memset(&b, 0, sizeof(b));
+
+    LkLane<WordType> lane[kLkBatchLanes];
+    const size_t winRows =
+        static_cast<size_t>(c.winH) < kLkBatchMaxRows ? static_cast<size_t>(c.winH)
+                                                      : kLkBatchMaxRows;
+    size_t cursor = pFirst;
+
+    // The tail of `trackOnePoint`: the RETURNED estimate's range test, and the error
+    // term measured there. Same place, same conditions, same deviations.
+    const auto finishLane = [&](size_t L) {
+        LkLane<WordType>& s = lane[L];
+        if (finest && c.status[s.p] != 0 && s.inRange) {
+            const float finalX = c.nextPts[s.p].x - c.halfWinX;
+            const float finalY = c.nextPts[s.p].y - c.halfWinY;
+            const long long fx0 = floorToLL(finalX);
+            const long long fy0 = floorToLL(finalY);
+            if (fx0 < -static_cast<long long>(c.winW) || fx0 >= levelWidth ||
+                fy0 < -static_cast<long long>(c.winH) || fy0 >= levelHeight) {
+                c.status[s.p] = 0;
+            } else if (c.err != nullptr) {
+                const double offX = static_cast<double>(finalX) - static_cast<double>(s.prevX);
+                const double offY = static_cast<double>(finalY) - static_cast<double>(s.prevY);
+                const long long tx = static_cast<long long>(std::floor(offX));
+                const long long ty = static_cast<long long>(std::floor(offY));
+                const double fx = offX - static_cast<double>(tx);
+                const double fy = offY - static_cast<double>(ty);
+                c.err[s.p] = windowMeanAbsDiff(lv, s.region, tx, ty, (1.0 - fx) * (1.0 - fy),
+                                               fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
+            }
+        }
+        s.active = false;
+    };
+
+    // Everything `trackOnePoint` does BEFORE its iteration loop, for the next point
+    // that qualifies. Returns false when the range is exhausted.
+    const auto refill = [&](size_t L) {
+        while (cursor < pEnd) {
+            const size_t p = cursor++;
+            if (li > entryLevelFor(c, p)) continue;
+            const float prevX = c.prevPts[p].x * scale - c.halfWinX;
+            const float prevY = c.prevPts[p].y * scale - c.halfWinY;
+            const long long anchorX = floorToLL(prevX);
+            const long long anchorY = floorToLL(prevY);
+            if (anchorX < -static_cast<long long>(c.winW) || anchorX >= levelWidth ||
+                anchorY < -static_cast<long long>(c.winH) || anchorY >= levelHeight) {
+                if (finest) c.status[p] = 0;
+                continue;
+            }
+            const Rect window(static_cast<int>(anchorX), static_cast<int>(anchorY), c.winW,
+                              c.winH);
+            const RegionWords<WordType> region =
+                clipRegion<WordType>(lv.width(), lv.height(), window);
+            if (region.isEmpty) {
+                if (finest) c.status[p] = 0;
+                continue;
+            }
+            const size_t width = region.x1 - region.x0;
+            const size_t rows = region.y1 - region.y0;
+            if (width == 0 || width > bitsPerWord<WordType>() || rows > kLkBatchMaxRows) {
+                trackOnePoint<LKLevelN<N, WordType>, WordType>(
+                    lv, li, c, p, finest, scale, levelWidth, levelHeight, kLevelMinEigScale);
+                continue;
+            }
+            const GradientCovariance a = levelCovariance(lv, window);
+            const double a11 = static_cast<double>(a.sumXX);
+            const double a22 = static_cast<double>(a.sumYY);
+            const double a12 = static_cast<double>(a.sumXY);
+            const double det = a11 * a22 - a12 * a12;
+            const double minEig =
+                static_cast<double>(minEigenValue(a.sumXX, a.sumYY, a.sumXY));
+            const double referenceMinEig =
+                kLevelMinEigScale * minEig / static_cast<double>(c.winW * c.winH);
+            if (det <= 0.0 || referenceMinEig < static_cast<double>(c.minEigThreshold)) {
+                if (finest) c.status[p] = 0;
+                continue;
+            }
+            LkLane<WordType>& s = lane[L];
+            s.region = region;
+            s.p = p;
+            s.rows = rows;
+            s.prevX = prevX;
+            s.prevY = prevY;
+            s.nextX = c.nextPts[p].x - c.halfWinX;
+            s.nextY = c.nextPts[p].y - c.halfWinY;
+            s.a11 = a11;
+            s.a12 = a12;
+            s.a22 = a22;
+            s.det = det;
+            s.prevDeltaX = 0.0;
+            s.prevDeltaY = 0.0;
+            s.it = 0;
+            s.active = true;
+            s.inRange = true;
+            s.tapValid = false;
+            stageLane<N, WordType>(lv, region, b, L, winRows);
+            return;
+        }
+    };
+
+    int32_t outX[5 * kLkBatchLanes];
+    int32_t outY[5 * kLkBatchLanes];
+
+    for (;;) {
+        bool any = false;
+        for (size_t L = 0; L < kLkBatchLanes; ++L) {
+            if (!lane[L].active) refill(L);
+            any = any || lane[L].active;
+        }
+        if (!any) break;
+
+        // PER-LANE, SCALAR: the range test and the tap split, both of which are
+        // per-keypoint float arithmetic and neither of which is worth vectorising.
+        size_t rowsMax = 0;
+        bool lost = false;
+        for (size_t L = 0; L < kLkBatchLanes; ++L) {
+            LkLane<WordType>& s = lane[L];
+            if (!s.active) continue;
+            const long long originX = floorToLL(s.nextX);
+            const long long originY = floorToLL(s.nextY);
+            // LOSS RULE 3 -- the estimate walked out of range mid-iteration.
+            if (originX < -static_cast<long long>(c.winW) || originX >= levelWidth ||
+                originY < -static_cast<long long>(c.winH) || originY >= levelHeight) {
+                if (finest) c.status[s.p] = 0;
+                s.inRange = false;
+                finishLane(L);
+                lost = true;
+                continue;
+            }
+            // THE DISPLACEMENT IS MEASURED FROM `prevX`, NOT FROM THE INTEGER ANCHOR --
+            // see `trackOnePoint`, where getting this wrong put a stationary point 1.4
+            // px off through four levels.
+            const double offX = static_cast<double>(s.nextX) - static_cast<double>(s.prevX);
+            const double offY = static_cast<double>(s.nextY) - static_cast<double>(s.prevY);
+            const long long tapX = static_cast<long long>(std::floor(offX));
+            const long long tapY = static_cast<long long>(std::floor(offY));
+            const double fx = offX - static_cast<double>(tapX);
+            const double fy = offY - static_cast<double>(tapY);
+            s.w00 = (1.0 - fx) * (1.0 - fy);
+            s.w01 = fx * (1.0 - fy);
+            s.w10 = (1.0 - fx) * fy;
+            s.w11 = fx * fy;
+            // X-70's tap cache, per lane: the iteration SHRINKS the displacement, so
+            // once the estimate settles inside a pixel the integer part stops moving
+            // and the same four words would be re-extracted every remaining iteration.
+            if (!s.tapValid || s.tapX != tapX || s.tapY != tapY) {
+                extractLaneTaps<N, WordType>(lv, s.region, tapX, tapY, b, L);
+                s.tapX = tapX;
+                s.tapY = tapY;
+                s.tapValid = true;
+            }
+            if (s.rows > rowsMax) rowsMax = s.rows;
+        }
+        // A lane lost here would idle through the kernel call. Refill first -- the
+        // whole point of X-78 is that an idle lane is the expensive thing.
+        if (lost) continue;
+
+        lkBatchResidual<N>(&b.self[0][0][0], &b.t00[0][0][0], &b.t01[0][0][0],
+                           &b.t10[0][0][0], &b.t11[0][0][0], &b.magX[0][0][0],
+                           &b.signX[0][0], &b.magY[0][0][0], &b.signY[0][0], rowsMax,
+                           &b.splitP[0][0][0], &b.splitN[0][0][0], outX, outY);
+
+        // PER-LANE, SCALAR AGAIN: the 2x2 solve and both termination rules, in
+        // `double`, exactly as `trackOnePoint` computes them.
+        for (size_t L = 0; L < kLkBatchLanes; ++L) {
+            LkLane<WordType>& s = lane[L];
+            if (!s.active) continue;
+            TapSums sumsX, sumsY;
+            sumsX.t00 = outX[0 * kLkBatchLanes + L];
+            sumsX.t01 = outX[1 * kLkBatchLanes + L];
+            sumsX.t10 = outX[2 * kLkBatchLanes + L];
+            sumsX.t11 = outX[3 * kLkBatchLanes + L];
+            sumsX.self = outX[4 * kLkBatchLanes + L];
+            sumsY.t00 = outY[0 * kLkBatchLanes + L];
+            sumsY.t01 = outY[1 * kLkBatchLanes + L];
+            sumsY.t10 = outY[2 * kLkBatchLanes + L];
+            sumsY.t11 = outY[3 * kLkBatchLanes + L];
+            sumsY.self = outY[4 * kLkBatchLanes + L];
+
+            const double b1 = sumsX.combine(s.w00, s.w01, s.w10, s.w11);
+            const double b2 = sumsY.combine(s.w00, s.w01, s.w10, s.w11);
+            const double deltaX =
+                kCentralDifferenceScale * (s.a12 * b2 - s.a22 * b1) / s.det;
+            const double deltaY =
+                kCentralDifferenceScale * (s.a12 * b1 - s.a11 * b2) / s.det;
+            s.nextX += static_cast<float>(deltaX);
+            s.nextY += static_cast<float>(deltaY);
+            c.nextPts[s.p].x = s.nextX + c.halfWinX;
+            c.nextPts[s.p].y = s.nextY + c.halfWinY;
+            const int it = s.it;
+            ++s.it;
+
+            // TERMINATION 1 -- converged.
+            if (deltaX * deltaX + deltaY * deltaY <= c.eps2) {
+                finishLane(L);
+                continue;
+            }
+            // TERMINATION 2 -- oscillation: this step almost exactly undoes the last.
+            if (it > 0 && std::fabs(deltaX + s.prevDeltaX) < 0.01 &&
+                std::fabs(deltaY + s.prevDeltaY) < 0.01) {
+                c.nextPts[s.p].x -= static_cast<float>(deltaX * 0.5);
+                c.nextPts[s.p].y -= static_cast<float>(deltaY * 0.5);
+                s.nextX = c.nextPts[s.p].x - c.halfWinX;
+                s.nextY = c.nextPts[s.p].y - c.halfWinY;
+                finishLane(L);
+                continue;
+            }
+            s.prevDeltaX = deltaX;
+            s.prevDeltaY = deltaY;
+            // TERMINATION 3 -- the iteration cap.
+            if (s.it >= c.maxIterations) finishLane(L);
+        }
+    }
+}
+
+#endif  // BINCV_X86_LK_BATCH
+
 /// @brief Track every point through ONE pyramid level. **INTERNAL, and the whole
 ///        of the tracker's per-level logic.**
 /// @tparam LevelT `LKLevel<W>` or `LKLevelN<N, W>` -- the body is written against
@@ -1922,6 +2356,28 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
     //
     // Serial unless a caller installs a backend (core/parallel.hpp). On a core-only
     // build this is exactly the loop it replaces.
+#if defined(BINCV_X86_LK_BATCH)
+    // X-79 / E-36: EIGHT KEYPOINTS PER AVX2 REGISTER, WITH LANE REFILL.
+    // Selected at run time, so nothing about the library's baseline ISA changes and a
+    // machine without AVX2 takes the loop below. The split is by RANGE rather than by
+    // point, because each range carries its own refill cursor -- and by at most one
+    // range per thread, since a short final batch is the one thing a range boundary
+    // costs and X-78 measured idle lanes to be expensive.
+    if constexpr (kBatchableLevel<LevelT>) {
+        if (hasLkBatch() && lkBatchEnabled()) {
+            size_t groups = c.pointCount / kLkBatchLanes;
+            const size_t threads = static_cast<size_t>(getNumThreads());
+            if (groups > threads) groups = threads;
+            if (groups < 1) groups = 1;
+            parallelFor(groups, [&](size_t g) {
+                trackRangeBatched<LevelT::Bits, WordType>(
+                    lv, li, c, finest, scale, levelWidth, levelHeight, kLevelMinEigScale,
+                    c.pointCount * g / groups, c.pointCount * (g + 1) / groups);
+            });
+            return;
+        }
+    }
+#endif
     parallelFor(c.pointCount, [&](size_t p) {
         trackOnePoint<LevelT, WordType>(lv, li, c, p, finest, scale, levelWidth,
                                         levelHeight, kLevelMinEigScale);

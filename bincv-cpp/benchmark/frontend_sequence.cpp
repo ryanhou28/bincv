@@ -229,6 +229,18 @@ int main(int argc, char** argv) {
     bincv::ThreadPool pool(lkThreads);
     if (lkThreads > 1) pool.install();
 
+    // X-79 / D-53: the keypoint batch's WHOLE-FRONTEND arm. X-62 measured 1.75x in a
+    // kernel and 0.31x on the frontend, so a kernel number is not a result here --
+    // and lockstep batching changes the very quantity that did that, how many
+    // iterations run. BINCV_LK_BATCH=0 takes the scalar path in the same binary.
+    if (const char* e = std::getenv("BINCV_LK_BATCH")) {
+        if (std::atoi(e) == 0) bincv::impl::lkBatchEnabled() = false;
+    }
+    std::printf("LK keypoint batch: %s\n\n",
+                bincv::impl::hasLkBatch() && bincv::impl::lkBatchEnabled()
+                    ? "ON (AVX2, 8 lanes, lane refill)"
+                    : "off");
+
     int cvThreads = 1;
     if (const char* t = std::getenv("BINCV_OPENCV_THREADS")) cvThreads = std::atoi(t);
     cv::setNumThreads(cvThreads);

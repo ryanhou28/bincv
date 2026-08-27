@@ -11202,6 +11202,135 @@ cell).
 
 ---
 
+### X-79 · The AVX2 keypoint batch, with lane refill · `DONE — SHIPPED` · E-36
+
+**THE LAST LEVER ON x86, AND [X-78](#x-78--lockstep-waste-priced-before-the-batch-is-written--rule-pre-registered)
+SAID IT ONLY WORKS WITH THE REFILL.** Eight keypoints in AVX2 lanes, staged
+`[row][plane][lane]` so eight keypoints' words at the same row and plane are eight
+adjacent `uint32_t` — **one load, no gather.** [X-61](#x-61) lost this fight once with
+vector arithmetic that WON on operation count and gathers that gave it back; the fix
+was never a better gather.
+
+#### THE KERNEL, AND THE TWO THINGS THAT NEARLY MADE IT LOOK 6× FASTER THAN IT IS
+
+| | scalar ×8 | AVX2 batch | ratio |
+|---|---|---|---|
+| N=1, 31 rows | 1 617–2 023 ns | 468–564 ns | **3.0–3.6×** |
+| **N=2, 31 rows (shipped)** | 4 934–5 300 | 1 688–2 970 | **1.8–3.1×** |
+| N=2, 15 rows | 2 443–4 584 | 734–1 372 | **3.2–3.3×** |
+
+**The first denominator was wrong twice, and both errors flattered the vector path:**
+
+1. **The scratch build had no `-mpopcnt`.** binCV's own CMake turns it ON by default
+   (X-57 measured it worth 3.75×), so a scalar arm without it is not the shipped scalar
+   arm — it is calling libgcc's `__popcountdi2`. Reported **6.2–8.4×**; with the flag,
+   **0.6–0.7×**, an inversion.
+2. **Then the scalar arm was dead-code-eliminated.** Only two of its ten sums fed the
+   sink, so the compiler deleted the other eight. **Fixing that alone moved the ratio
+   from 0.7× to 3.0×.**
+
+> **A benchmark whose arms differ in what the OPTIMISER can delete is measuring the
+> optimiser.** Both numbers were believable, and neither was the answer.
+
+The scalar arm also reads a **contiguous** per-keypoint layout, because that is what
+`StagedWindow` actually has. Feeding it the batch's `[row][plane][lane]` arrays would
+have strided it across a cache line per word and measured the transpose.
+
+#### WHAT THE VECTOR PATH ACTUALLY DOES, AND WHY IT WINS WITHOUT A POPCOUNT
+
+**AVX2 HAS NO POPCOUNT AT ALL** — `VPOPCNTDQ` is AVX-512 — so the nibble table through
+`vpshufb` costs **six operations for thirty-two bytes** against `POPCNT`'s one
+instruction for eight. That is a loss per word and a win per keypoint: it covers eight
+keypoints, so it is six operations where the scalar path issues eight.
+
+The rest is arranging not to give that back:
+
+- **The counts stay in BYTES until four plane pairs have been folded.** A weighted byte
+  is at most `8 + 2·16 + 4·8 = 72` at `N = 2`, so the `2^(i+j)` weighting is done with
+  byte adds and the widening happens **once per (row, value, component)** instead of
+  once per popcount. Accumulating bytes *across* rows would overflow at 255 and is not
+  attempted.
+- **The sign is split out of the inner loop** — `P = mag & ~sign`, `N = mag & sign` —
+  so nothing goes negative in the byte domain and the subtraction happens once, on
+  32-bit lane sums.
+- **Ten separate passes over the staged rows, deliberately.** One row loop computing
+  all ten sums needs ten accumulators plus both components' split magnitudes plus four
+  constants — past sixteen `ymm` registers, and the spill costs more than the extra
+  L1 loads do.
+- **`target("avx2")` is on ONE function covering the whole window.** X-60 measured a
+  leaf-level attribute blocking inlining and costing **1.9×**.
+
+#### THE REFILL, WHICH IS THE DESIGN AND NOT A REFINEMENT
+
+X-78 measured **39.9% of lane slots wasted** by naive lockstep. So a lane that converges
+**takes the next untracked point** rather than idling. The refill re-stages one lane —
+**the same staging the scalar path does for every point anyway.** The work is not new,
+it happens at a different time.
+
+**AND CLIPPED WINDOWS NEED NO SPECIAL CASE, WHICH IS THE PART THAT COULD HAVE BEEN A
+MESS.** Lanes in a batch have different heights and the kernel runs the tallest. A short
+lane's remaining rows get **zero magnitude**, and `popcount(V & 0)` is zero whatever `V`
+is — so a half-clipped window batches with a full one and the answer is unchanged, with
+no per-lane row masking anywhere. Column clipping needs even less: the region mask is
+applied to `magX`/`magY` once, at staging, and every product is taken against a masked
+magnitude.
+
+Windows the batch cannot hold — wider than a word, or taller than the 32-row cap — are
+**not skipped, they are tracked by `trackOnePoint` at the moment the refill reaches
+them.** The cap is 32 rows because eleven `[row][plane][lane]` arrays at `N = 2` are
+**~20 KB at 32 and ~41 KB at 64**, and the working set has to stay in L1 or the
+transpose the layout exists to avoid comes back as cache traffic. The shipped window is
+31.
+
+#### THE WHOLE-FRONTEND ARM, WHICH [D-53](ARCHITECTURE.md#8-design-decisions) MAKES MANDATORY
+
+Same binary, `BINCV_LK_BATCH=0/1`, five interleaved repeats over 80 V1_02 frames, one
+thread each side:
+
+| | batch OFF | batch ON | |
+|---|---|---|---|
+| `track` (min) | 1.444 ms | **1.054** | **1.37×** |
+| `track` (median) | 1.563 | 1.179 | 1.33× |
+| frontend (min) | 1.733 | **1.345** | **1.29×** |
+| **ratio vs one-thread OpenCV** | **2.10–2.21×** | **2.76–2.88×** | |
+| tracks observed | 193 | **193** | unchanged |
+
+**At four threads each side: `track` 1.051 → 0.568 ms, and the headline against a
+four-thread OpenCV is 1.67×** (it was 1.35× before this).
+
+> **A 3.1× KERNEL BOUGHT 1.37× ON `track`, AND THE GAP IS THE HONEST PART OF THE
+> RESULT.** Inverting Amdahl on the measured numbers puts the vectorised arithmetic at
+> **~44% of `track`**, not the ~91% [X-68](#x-68--track-decomposed--915-is-iterated-residualsums--done)'s
+> decomposition implied. The other 56% is the scalar half the batch does not touch:
+> staging and tap extraction as **scatters** into the lane layout, the covariance, the
+> per-lane 2×2 solve. X-68's 91.5% counted the tap extraction inside `residualSums` as
+> part of the thing being replaced; only the arithmetic was replaced. **This is the same
+> correction X-78 made to X-68's iteration mean, from the other side.**
+
+#### BIT-EXACTNESS, WHICH T5.16 MAKES A PRECONDITION RATHER THAN A BAND
+
+`impl::lkBatchEnabled()` runs both spellings on identical input in one process — the
+device `slicedSignedSum`'s `UseNeon` established (X-33) and for the same reason.
+**2 208 points on a grid over the whole frame, borders included: 0 positions differ, 0
+status, 0 err**, compared as BITS and not to a tolerance.
+
+**And the test was watched to fail**, twice, because one that never has proves nothing:
+
+| injected fault | caught as |
+|---|---|
+| padded rows given magnitude 1 instead of 0 | **46 positions** differ — and it is 46 rather than 2 208 because only *clipped* windows have padded rows, which is the confirmation that the border cases are in the sample |
+| the `(1,1)` plane pair weighted ×2 instead of ×4 | **2 205 positions** differ |
+
+**Method:** `impl/lkBatch_impl.hpp` (kernel plus its scalar oracle),
+`trackRangeBatched` in ops/opticalFlow.hpp, `Flow.X79_KeypointBatchIsBitExact`,
+`benchmark/frontend_sequence` with `BINCV_LK_BATCH`. Runtime-dispatched on
+`__builtin_cpu_supports("avx2")`, so the baseline ISA is unchanged and no `-mavx2` build
+is asked of a consumer. aarch64 is untouched and still compiles
+(`check_arm_syntax.sh`). **Machine shared with other work** — hence interleaved repeats
+and minima, and hence the kernel table's spread.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
