@@ -3627,6 +3627,12 @@ for it.
 **Bit-exactness against serial is a precondition, not a goal** — keypoints are
 independent, so a difference means a data race and the timing would be meaningless.
 
+**Measured on BOTH architectures before it ships.** [X-65](EXPERIMENTS.md)'s 2.60× is an
+x86 number taken unpinned; the reference device has four cores and every recorded figure
+for it was taken under `taskset -c 3`. **The device number is unknown**, and a threading
+default that has only been measured on the machine binCV does not target is not
+measured.
+
 **Not in scope:** threading `build`. X-65's arm C was never built and
 [X-67](EXPERIMENTS.md) then found `build` is mostly the input conversion anyway.
 
@@ -3731,6 +3737,84 @@ detector nobody asked for.
 A threshold-and-compare over a 16-pixel Bresenham ring — contiguous comparisons against
 a centre, close to bit-parallel already. It is what the ORB-SLAM family detects with,
 so T5.4's descriptors want it.
+
+
+---
+
+## Phase 5.6 — The edges of the pipeline: getting pixels in and out
+
+**THE KERNELS ARE DONE AND THE EDGES ARE NOT.** Everything between "bits are in a
+`QuantMat`" and "keypoints come out" is measured and fast. **Both ends of that
+sentence are weaker than the middle**, and a user meets the ends first.
+
+**What exists today, and its state:**
+
+| path | direction | state |
+|---|---|---|
+| `QuantMat<1>::fromCVMat` | 8-bit → 1 bit | **optimised** ([X-71](EXPERIMENTS.md)), both architectures |
+| `bincv::threshold(cv::Mat, BinMatView, t)` | 8-bit → 1 bit, **fused with the threshold** | assembles whole words, **not vectorised** |
+| `QuantMat<N>::fromCVMat`, N > 1 | 8-bit → N bits | 8×8 transpose, ~4.3 ops/px, **not vectorised** |
+| `toCVMat` / `toCVMatNormalized` | bits → 8-bit | **per-pixel loop**, and carries a `@todo` asking how to do it efficiently |
+
+### T5.6 · A core-only way to get pixels in · `TODO — this is a gap, not an optimisation`
+
+**EVERY INGESTION PATH IS BEHIND `BINCV_WITH_OPENCV`.** `fromCVMat` and
+`bincv::threshold` both take a `cv::Mat`, and there is **no entry point that accepts
+raw 8-bit pixels**. `QuantMat::wrap()` wraps a buffer that is *already bit-packed*,
+which is a different problem.
+
+> **So a core-only build — the configuration the entire memory argument rests on, and
+> one of the four `verify.sh` guards — has no way to receive an image.** An embedded
+> target reading bytes from a sensor must either link OpenCV on its hot path or pack
+> the bits itself.
+
+**Ship:** `bincv::packFrom8Bit(const uint8_t* src, size_t w, size_t h, size_t stride,
+BinMatView<W> dst, unsigned threshold)` in **core**, no OpenCV. The existing
+OpenCV entry points become thin wrappers over it, so there is **one** implementation and
+one place to optimise.
+
+**This subsumes part of T5.7** — do it first, because optimising four separate
+conversion paths before collapsing them would be optimising the wrong thing.
+
+### T5.7 · Optimise the rest of the conversion surface · `TODO`
+
+**Depends:** T5.6 (which decides how many paths there are to optimise).
+
+[X-71](EXPERIMENTS.md) established the technique and the two platform primitives:
+`bitMask(x)` is `1 << (x % WordBits)` and a move-mask returns byte *i* in bit *i*, **the
+same LSB-first convention**, so no shuffle is needed anywhere.
+
+- **`bincv::threshold`** — the same `movemask`, with `cmpgt` against the cutoff instead
+  of `cmpeq` against zero. **This is the path a real pipeline uses**, since it fuses the
+  threshold with the packing and skips a whole 8-bit intermediate.
+- **`toCVMat` / `toCVMatNormalized`** — the reverse: expand one bit per pixel to one
+  byte. `_pdep_u64` (BMI2) or a shuffle-based expand on x86, `vtst`-and-select on NEON,
+  and a branchless byte loop portably. **It is currently the exact shape `fromCVMat` had
+  before X-71 — a per-pixel loop with `wordIndex` and `bitMask` recomputed per pixel.**
+  Debug output and visualisation both run through it.
+- **`QuantMat<N>::fromCVMat`, N > 1** — one move-mask per plane, `cmpeq` on
+  `(v & (1 << p))`.
+
+**Both architectures, and the portable arm is not optional.** X-71 measured the
+branchless scalar arm at **10.3× on x86 and 5.18× on aarch64** with no intrinsics at
+all — that arm is what a target with no vector unit gets, and it did most of the work
+on both.
+
+### T5.8 · Decide who owns the sensor stage · `TODO — a decision, then possibly code`
+
+[ARCHITECTURE §7.3](ARCHITECTURE.md#73-edge-filter--threshold) puts "edge filter /
+threshold" **inside** the MVP set, but `benchmark/frontend_sequence.cpp` and the
+`vio_frontend` example both perform the reference pipeline's `medianBlur` +
+`|d/dx| + |d/dy| > 17` **in OpenCV**, and the benchmark's own comment calls that stage
+"deliberately NOT binCV's claim".
+
+**Those two statements disagree**, and a user following the example ends up with an
+OpenCV dependency binCV's positioning implies they should not need.
+
+**Decide:** either binCV ships the 8-bit gradient-magnitude edge filter — an 8-bit-in,
+1-bit-out kernel, the same shape as T5.6 and naturally fused with it — or
+§7.3 is narrowed and the documentation says plainly that the sensor stage is the
+caller's. **Either is defensible; the current split is not.**
 
 ---
 
