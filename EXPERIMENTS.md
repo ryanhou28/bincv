@@ -11675,3 +11675,56 @@ schedule of `frontend_sequence` exactly, serial (the hook writes from inside
 `parallelFor`). **One sequence only** — V1_02 is the only one on this machine — and
 D-58 applies: **the ratio is a property of this sequence's convergence behaviour**, so
 the batch's own whole-frontend arm still has to be measured, not projected.
+
+---
+
+### X-82 · The keypoint batch on aarch64, and what is left on the device at all · `RULE PRE-REGISTERED`
+
+**x86 HAS OVERTAKEN THE DEPLOYMENT TARGET AND THAT IS THE WRONG WAY ROUND FOR THIS
+PROJECT.** [D-66](ARCHITECTURE.md#8-design-decisions)'s keypoint batch is
+`#if defined(BINCV_X86_LK_BATCH)` — aarch64 got nothing from it — and the frontend ratio
+now reads **2.81× on x86 against 2.48× on the reference device**. The device was the
+faster side for this project's whole history.
+
+**TWO QUESTIONS, AND THE SECOND ONE IS THE HONEST ONE.** Porting the batch is the
+obvious move and it is the one with a prediction against it. So this measures **where
+device time goes first**, and only then prices the port — because
+[X-67](#x-67)/[D-59](ARCHITECTURE.md#8-design-decisions) already caught this project
+optimising a stage that was 3.6% of the frontend while calling it the biggest target.
+
+#### PART A — THE DECOMPOSITION, BEFORE ANY HYPOTHESIS
+
+`frontend_sequence` on the device, 80 V1_02 frames, one thread each side. **No decision
+rule is needed for a decomposition**; it is the input to the rules below, and it can
+kill Part B outright: if `track` is no longer the dominant stage on aarch64, the port is
+not the question worth asking.
+
+#### PART B — THE PORT, WITH A PREDICTION WRITTEN AGAINST IT
+
+> **THE PREDICTION: IT WILL NOT TRANSFER, AND [D-6](ARCHITECTURE.md#8-design-decisions)
+> IS WHY — IN REVERSE.** x86 needed keypoint batching because **AVX2 has no popcount at
+> all**: the nibble-table emulation costs six operations per thirty-two bytes and only
+> pays off spread across eight keypoints. **aarch64 HAS a vector popcount**, and
+> `slicedSignedSum`'s NEON path already fills all four lanes with the four plane pairs
+> ([X-33](#x-33)) and already carries accumulators across the window ([X-40](#x-40)).
+> Batching four keypoints needs **one register per plane pair instead of one register
+> for all four** — the same lane-work, rearranged.
+
+**Arm:** a standalone ceiling in [X-66](#x-66)'s shape — four keypoints in NEON lanes,
+staged `[row][plane][lane]`, against four sequential calls to the shipped
+`slicedSignedSum` on the contiguous layout it actually has. On the device, pinned.
+
+**DECISION RULE, WRITTEN FIRST:**
+
+| ceiling on the residual arithmetic | band | what happens |
+|---|---|---|
+| **≥ 2.0×** | **A** | the prediction is wrong; write the port, whole-frontend arm mandatory (D-53) |
+| **1.5 – 2.0×** | **B** | worth writing **only if** Part A puts `track` above 60% of the device frontend |
+| **1.2 – 1.5×** | **C** | **do not write it.** [X-79](#x-79) got 1.37× on `track` from a **3.1×** kernel; a 1.3× kernel cannot pay for lockstep, refill and a second staging layout |
+| **< 1.2×** | **D** | **the prediction is confirmed and E-45 closes NEGATIVE.** Record it and look elsewhere — Part A says where |
+
+**The denominator is the same trap X-79 fell into twice** and it is named here in
+advance: the scalar arm must (i) be the **shipped** `slicedSignedSum`, NEON path
+included, (ii) read the **contiguous** per-keypoint layout `StagedWindow` really has,
+not the batch's, and (iii) have **all ten of its sums consumed**, or the compiler
+deletes eight of them and the vector arm wins by a factor of four for no reason.
