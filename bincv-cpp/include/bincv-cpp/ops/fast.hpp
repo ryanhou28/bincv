@@ -92,53 +92,69 @@ inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t st
         if (c < minCompass) minCompass = c;
     }
 
+    // THE RING OFFSETS AS FLAT INDICES, COMPUTED ONCE PER IMAGE.
+    // Recomputing `dy * stride + dx` for sixteen neighbours of every pixel was most
+    // of this function: 360 000 pixels x 16 address computations, all of them the
+    // same sixteen numbers.
+    long long ringOff[16];
+    for (int k = 0; k < 16; ++k)
+        ringOff[k] = static_cast<long long>(impl::kFastRingY[k]) * static_cast<long long>(stride) +
+                     impl::kFastRingX[k];
+
     size_t n = 0;
     for (size_t y = 3; y + 3 < height; ++y) {
+        const SrcT* row = img + y * stride;
         for (size_t x = 3; x + 3 < width; ++x) {
-            const long long c = static_cast<long long>(img[y * stride + x]);
+            const SrcT* p = row + x;
+            const long long c = static_cast<long long>(*p);
             const long long hi = c + threshold;
             const long long lo = c - threshold;
 
-            long long ring[16];
-            for (int k = 0; k < 16; ++k) {
-                ring[k] = static_cast<long long>(
-                    img[static_cast<size_t>(static_cast<long long>(y) + impl::kFastRingY[k]) *
-                            stride +
-                        static_cast<size_t>(static_cast<long long>(x) + impl::kFastRingX[k])]);
-            }
-
-            // A cheap reject first: without it every flat pixel walks the full arc
-            // scan. THE BOUND MUST BE THE WORST CASE, NOT THE TYPICAL ONE -- an arc of
-            // `arcLength` contains AT LEAST `minCompass` of the four compass points,
-            // and rejecting on anything stricter throws away real corners. At
-            // arcLength 9 that minimum is TWO, not three: the window 1..9 contains
-            // only indices 4 and 8. Using three cost every corner of a filled square,
-            // whose ring is bright for barely a quarter of its length.
-            const int haveHi = (ring[0] > hi) + (ring[4] > hi) + (ring[8] > hi) + (ring[12] > hi);
-            const int haveLo = (ring[0] < lo) + (ring[4] < lo) + (ring[8] < lo) + (ring[12] < lo);
+            // FOUR LOADS BEFORE SIXTEEN. Most pixels are not corners and this is what
+            // makes that cheap: the compass points alone decide it, and only a
+            // survivor pays for the full ring. Reading all sixteen first -- which this
+            // function did -- cost 16x the loads on every rejected pixel and made
+            // binCV 16x SLOWER than cv::FAST (measured, before this).
+            const long long c0 = static_cast<long long>(p[ringOff[0]]);
+            const long long c4 = static_cast<long long>(p[ringOff[4]]);
+            const long long c8 = static_cast<long long>(p[ringOff[8]]);
+            const long long c12 = static_cast<long long>(p[ringOff[12]]);
+            const int haveHi = (c0 > hi) + (c4 > hi) + (c8 > hi) + (c12 > hi);
+            const int haveLo = (c0 < lo) + (c4 < lo) + (c8 < lo) + (c12 < lo);
+            // THE BOUND MUST BE THE WORST CASE, NOT THE TYPICAL ONE: an arc of
+            // `arcLength` contains at least `minCompass` compass points, and anything
+            // stricter discards real corners. At arcLength 9 that is TWO, not three --
+            // the window 1..9 holds only indices 4 and 8.
             if (haveHi < minCompass && haveLo < minCompass) continue;
 
-            // Contiguity WRAPS, so the scan runs to 16 + arcLength - 1.
+            long long ring[16];
+            uint32_t maskHi = 0, maskLo = 0;
+            for (int k = 0; k < 16; ++k) {
+                const long long v = static_cast<long long>(p[ringOff[k]]);
+                ring[k] = v;
+                if (v > hi) maskHi |= (1u << k);
+                if (v < lo) maskLo |= (1u << k);
+            }
+
+            // CONTIGUITY AS A BIT TRICK, NOT A SCAN. Doubling the 16-bit mask makes
+            // the wrap explicit, and `x &= x >> 1` repeated `arcLength - 1` times
+            // leaves a bit set exactly where a run of that length STARTS. Eight
+            // shift-ands replace a 24-iteration loop with a data-dependent branch in
+            // it -- and the loop was most of what made this function 11x slower than
+            // cv::FAST on a corner-dense image.
+            const auto hasRun = [arcLength](uint32_t m) {
+                uint32_t acc = m | (m << 16);
+                for (int i = 1; i < arcLength; ++i) acc &= acc >> 1;
+                return (acc & 0xFFFFu) != 0u;
+            };
+
             long long bestScore = 0;
-            for (int sign = 0; sign < 2; ++sign) {
-                int run = 0;
-                for (int k = 0; k < 16 + arcLength - 1; ++k) {
-                    const long long v = ring[k & 15];
-                    const bool pass = (sign == 0) ? (v > hi) : (v < lo);
-                    if (pass) {
-                        ++run;
-                        if (run >= arcLength) {
-                            long long s = 0;
-                            for (int j = 0; j < 16; ++j) {
-                                const long long d = (sign == 0) ? (ring[j] - hi) : (lo - ring[j]);
-                                if (d > 0) s += d;
-                            }
-                            if (s > bestScore) bestScore = s;
-                            break;
-                        }
-                    } else {
-                        run = 0;
-                    }
+            const bool runHi = haveHi >= minCompass && hasRun(maskHi);
+            const bool runLo = !runHi && haveLo >= minCompass && hasRun(maskLo);
+            if (runHi || runLo) {
+                for (int j = 0; j < 16; ++j) {
+                    const long long d = runHi ? (ring[j] - hi) : (lo - ring[j]);
+                    if (d > 0) bestScore += d;
                 }
             }
             if (bestScore <= 0) continue;

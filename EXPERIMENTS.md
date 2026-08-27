@@ -11041,6 +11041,63 @@ control five runs at load 0.44 on the same tree.
 
 ---
 
+### X-76 · How fast are the descriptor family and FAST? · `DONE`
+
+**TWO OF THE THREE COMPARISONS ARE FAIR AND ONLY ONE IS WON.** 752×480, 256-bit
+descriptors, OpenCV at one thread, load 0.22:
+
+| | binCV | OpenCV | |
+|---|---|---|---|
+| **matching**, kNN=2 over 1000×1000 | **1.95 ms** | 9.34 (`cv::BFMatcher`) | **4.79× FASTER** |
+| **FAST**, 4144 corners | 1.43 ms | **0.368** (`cv::FAST`) | **3.9× SLOWER** |
+| describe, 1000 keypoints | 0.983 ms | **0.684** (`cv::ORB`) | 1.4× slower |
+
+**MATCHING IS THE FAIR FIGHT AND binCV WINS IT.** Both sides are brute-force Hamming
+over bit strings; OpenCV stores these as bits too, so **for once neither is paying a
+representation penalty** — and binCV is still 4.8× faster. That is `popcount(a ^ b)`
+over contiguous words against a general-purpose matcher.
+
+**FAST IS 3.9× SLOWER AND THAT IS A REAL GAP.** `cv::FAST` is SIMD-vectorised; this is
+scalar. Two fixes during this experiment took it from **16× slower to 3.9×** —
+precomputing the ring offsets once per image instead of sixteen address computations
+per pixel, and replacing the arc scan with a bitmask trick (`acc &= acc >> 1`, repeated
+`arcLength - 1` times, leaves a bit where a run starts) — but the remaining factor is
+vectorisation. Registered as [E-41](ARCHITECTURE.md#register).
+
+**`describe` IS SLOWER THAN AN OPERATION DOING MORE WORK**, which makes it the clearer
+defect of the two: `cv::ORB::compute` additionally derives an intensity-centroid
+orientation and rotates its pattern per keypoint. Hoisting the bounds test out of the
+256-iteration inner loop — it was asking the same question about the same patch 256
+times — bought 1.10 → 0.98 ms and no more. Also [E-41](ARCHITECTURE.md#register).
+
+#### AND A MEASUREMENT THAT WAS MEASURING NOTHING
+
+The first run of this benchmark reported `describe` at **21.8 µs, "1.05× OpenCV"**. It
+was **white noise at threshold 40, which makes 14% of pixels FAST corners** — against
+about **1.1%** in a real frame. Two things followed, and the second is the bad one:
+
+1. the corner-dense image measures the arc scan and almost nothing else;
+2. **the first 1000 corners in scan order were all in the top rows, so their patches
+   fell outside the image and `computeBrief` rejected them after ONE of 256 pairs.**
+   The benchmark was timing early exit and calling it a descriptor.
+
+Smoothing the source to a realistic 1.1% corner density moved `describe` from 21.8 µs
+to **983 µs — a factor of 45** — and only then was it measuring the operation.
+**A benchmark whose input is unrepresentative does not report a pessimistic number; it
+reports a number about something else.**
+
+**Decision:** matching ships as a strength. FAST and `computeBrief` ship as **correct
+and slow**, which is stated rather than omitted, and their vectorisation is
+[E-41](ARCHITECTURE.md#register). `test_fast.cpp` still shows exact set agreement with
+`cv::FAST` (1818 / 1818) through both optimisations, so the speed work cost no
+correctness.
+
+**Method:** `benchmark/feature_benchmark.cpp`, seven interleaved repeats, OpenCV pinned
+to one thread per [D-58](ARCHITECTURE.md#8-design-decisions); source smoothed with a
+5×5 Gaussian to a corner density matching a real frame.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

@@ -23,18 +23,30 @@
 /// byte never exists.
 ///
 /// ---------------------------------------------------------------------------
-/// WHAT THIS IS NOT: OpenCV-COMPATIBLE ORB
+/// WHAT THIS IS NOT (YET): OpenCV-COMPATIBLE ORB
 ///
-/// `cv::ORB` uses a **specific learned 256-pair table** from the ORB paper, plus an
-/// orientation from the intensity centroid. **binCV does not reproduce that table** --
-/// it is data, not an algorithm, and copying it would import a licence question for no
-/// technical gain. A caller who needs descriptors that match OpenCV's must pass
-/// OpenCV's pattern in; `BriefPattern` exists precisely so that is possible.
+/// `cv::ORB` uses a **specific 256-pair table**, `bit_pattern_31_`, plus an
+/// orientation from the intensity centroid. binCV reproduces neither, and the reason
+/// is **practical, not legal** -- an earlier version of this comment said the table
+/// "would import a licence question", which overstated it:
 ///
-/// The default pattern here is a deterministic Gaussian sample, which is the original
-/// BRIEF construction. **Descriptors from two different patterns are not comparable**,
-/// which is true of BRIEF generally and is why the pattern is an explicit argument
-/// rather than a hidden constant.
+///   * the ORB paper (Rublee et al., ICCV 2011) describes how the pattern is
+///     *learned*, and that method is free to reimplement;
+///   * the table as it exists is OpenCV source under **Apache-2.0, which permits
+///     copying with attribution.** Vendoring it is allowed, not forbidden.
+///
+/// **What actually stops it today is that binCV has no licence file** (T6.1), so it
+/// cannot discharge an attribution obligation it would be taking on. Once it has one,
+/// shipping an OpenCV-compatible pattern with proper attribution is a normal thing to
+/// do and would make binCV's descriptors interchangeable with `cv::ORB`'s.
+///
+/// Until then `BriefPattern` is an explicit argument, so a caller **can already pass
+/// OpenCV's table in themselves** and get comparable descriptors.
+///
+/// The default pattern is a deterministic Gaussian sample -- the original BRIEF
+/// construction. **Descriptors from two different patterns are not comparable**, which
+/// is true of BRIEF generally and is why the pattern is an argument rather than a
+/// hidden constant.
 ///
 /// Orientation compensation (ORB's rBRIEF) is **not implemented**: it needs the
 /// intensity centroid and a rotated pattern lookup, and it is a separate piece of work
@@ -126,28 +138,39 @@ inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t st
     BINCV_ASSERT(img != nullptr && keypointsXY != nullptr && out != nullptr,
                  "computeBrief: null argument");
 
+    // THE PATCH EXTENT, ONCE. The bounds test belongs per KEYPOINT, not per pair:
+    // checking eight inequalities inside a 256-iteration loop was most of this
+    // function, and it asks the same question 256 times.
+    int reach = 0;
+    for (size_t i = 0; i < Bits; ++i) {
+        const BriefPair& q = pattern.pair[i];
+        const int e[4] = {q.ax < 0 ? -q.ax : q.ax, q.ay < 0 ? -q.ay : q.ay,
+                          q.bx < 0 ? -q.bx : q.bx, q.by < 0 ? -q.by : q.by};
+        for (int j = 0; j < 4; ++j)
+            if (e[j] > reach) reach = e[j];
+    }
+
     for (size_t k = 0; k < count; ++k) {
         WordType* d = out + k * kWords;
         for (size_t w = 0; w < kWords; ++w) d[w] = 0;
         const long long cx = static_cast<long long>(keypointsXY[2 * k]);
         const long long cy = static_cast<long long>(keypointsXY[2 * k + 1]);
-        bool inside = true;
-        for (size_t i = 0; i < Bits && inside; ++i) {
-            const BriefPair& p = pattern.pair[i];
-            const long long axx = cx + p.ax, ayy = cy + p.ay;
-            const long long bxx = cx + p.bx, byy = cy + p.by;
-            if (axx < 0 || ayy < 0 || bxx < 0 || byy < 0 ||
-                axx >= static_cast<long long>(width) || bxx >= static_cast<long long>(width) ||
-                ayy >= static_cast<long long>(height) || byy >= static_cast<long long>(height)) {
-                inside = false;
-                break;
+        const bool inside = cx - reach >= 0 && cy - reach >= 0 &&
+                            cx + reach < static_cast<long long>(width) &&
+                            cy + reach < static_cast<long long>(height);
+        if (inside) {
+            // Every sample is in range by construction now, so the inner loop is two
+            // loads and a compare -- no bounds test, no early exit, no branch that
+            // depends on the data.
+            const SrcT* centre = img + static_cast<size_t>(cy) * stride +
+                                 static_cast<size_t>(cx);
+            for (size_t i = 0; i < Bits; ++i) {
+                const BriefPair& q = pattern.pair[i];
+                const SrcT va = centre[static_cast<long long>(q.ay) * static_cast<long long>(stride) + q.ax];
+                const SrcT vb = centre[static_cast<long long>(q.by) * static_cast<long long>(stride) + q.bx];
+                if (va < vb)
+                    d[i / kBits] = static_cast<WordType>(d[i / kBits] | (WordType{1} << (i % kBits)));
             }
-            const SrcT va = img[static_cast<size_t>(ayy) * stride + static_cast<size_t>(axx)];
-            const SrcT vb = img[static_cast<size_t>(byy) * stride + static_cast<size_t>(bxx)];
-            if (va < vb) d[i / kBits] = static_cast<WordType>(d[i / kBits] | (WordType{1} << (i % kBits)));
-        }
-        if (!inside) {
-            for (size_t w = 0; w < kWords; ++w) d[w] = 0;
         }
         if (keep != nullptr) keep[k] = inside ? uint8_t{1} : uint8_t{0};
     }

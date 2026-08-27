@@ -3728,6 +3728,13 @@ OpenCV stores these as bits too.
 frontend calls, and this is past that line. It is the most defensible extension
 available, but it is an extension.
 
+**A FOLLOW-UP THIS UNBLOCKS, ONCE T6.1 LANDS.** `cv::ORB`'s `bit_pattern_31_` is
+Apache-2.0 source and **may be vendored with attribution** — the obstacle is that
+binCV has no licence file yet and so cannot discharge that obligation, not that the
+table is off limits. With T6.1 done, shipping it (plus centroid orientation) makes
+binCV's descriptors interchangeable with `cv::ORB`'s, which is worth considerably
+more than a pattern of our own.
+
 ### T5.5 · FAST corner detection · `TODO`
 
 **Depends:** T5.4 — they ship together or not at all. binCV already detects with
