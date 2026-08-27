@@ -3952,46 +3952,60 @@ the slowest thing in the library** (per-pixel loop, T5.7).
 - **`toCVMat` becomes a thin wrapper** over `unpackTo8Bit`, so there is one
   implementation and one place to optimise.
 
-### T5.14 · Encoded image files: what binCV does and does not own · `TODO — DISCUSS FIRST`
+### T5.14 · Encoded image files: `bincv_io`, with the codec as a backend choice · `TODO — DISCUSS FIRST`
 
-**binCV MUST NOT SHIP JPEG OR PNG DECODING.** That is libjpeg/libpng/zlib-scale
-dependency for a library whose entire argument is footprint, and it is not the problem
-binCV is good at.
+**THE SIZES, MEASURED, BECAUSE THE ARGUMENT TURNS ENTIRELY ON THEM.** A stripped
+core-only binary carrying LK, the pyramid, derivatives, corner response, threshold and
+denoise — **binCV's whole frontend**:
 
-**What OpenCV does, for reference:** codecs live in `imgcodecs`, a **separate module**
-that can be switched off (`BUILD_opencv_imgcodecs=OFF`), linking system libjpeg/libpng/
-libtiff/libwebp or **vendored copies under `3rdparty/`**. The structural answer is
-"a separate optional module", not "core carries codecs".
-
-**AND THE USE CASE SPLITS CLEANLY, WHICH IS THE POINT.**
-
-| | needs a codec? | who |
+| | size | vs binCV's own code |
 |---|---|---|
-| **Deployment** — sensor → driver → bytes → binCV | **no** | T5.6 / T5.12 |
-| **Evaluation** — a dataset of PNGs → binCV | yes | tooling |
+| empty C++ binary (the floor) | 13 KB | — |
+| **the frontend, stripped** | **54 KB** → **≈41 KB of binCV** | **1×** |
+| `libpng16` + `libz` | 336 KB | **8×** |
+| `libjpeg` | 510 KB | **12×** |
+| both | 846 KB | **20×** |
+| `libopencv_core` + `imgproc` + `imgcodecs` | 8 510 KB | **200×** |
 
-**Nobody decodes a PNG in a VIO hot loop.** EuRoC ships PNGs because it is a *dataset*;
-a robot does not. So **codec support is a tooling concern, not a library concern**, and
-that is the argument for keeping it out of `bincv_core` entirely.
+> **A PNG DECODER IS EIGHT TIMES THE SIZE OF EVERYTHING binCV DOES.** That is the whole
+> argument, and it is an argument about *linkage*, not about capability.
 
-**Three options, to decide together:**
+**WHY IT IS ABOUT LINKAGE.** On a hosted system `libpng` and `libjpeg` are **already
+resident** — dynamically linking them adds **zero bytes** to a binCV binary and comes
+with the distribution's security updates. On a target with no package manager a
+**vendored header-only decoder is static**: ≈60–120 KB all-formats, ≈30–50 KB PNG-only
+*(estimated from `stb_image.h`'s ~8 000 lines; NOT measured — measure before quoting)*.
+**The two answers are for different targets and neither is wrong.**
 
-| | |
-|---|---|
-| **A — document, ship nothing** | binCV's contract starts at "bytes in memory". Examples show `cv::imread` (or `stb_image`) → `packFrom8Bit`. Smallest, most honest, and leaves an evaluation user to wire it up themselves. |
-| **B — a header-only decoder in `examples/` and `tools/`, never in the library** | `stb_image` is a single public-domain header covering JPEG and PNG. It makes the examples run with **no OpenCV at all**, which is the first time a core-only user could try binCV end to end. The library stays clean because the decoder never enters it. |
-| **C — an optional `bincv-io` module**, OpenCV's shape | off by default; a real module boundary. Most work, and only worth it if binCV is expected to be someone's *only* imaging dependency. |
+**SO: `bincv_io`, OFF BY DEFAULT, WITH A BACKEND CHOICE.**
 
-**Recommendation: B now, C never unless asked.** It gets a core-only user from a
-dataset to keypoints without OpenCV, costs one vendored header outside the library, and
-keeps `bincv_core` exactly as it is.
+| backend | cost | for |
+|---|---|---|
+| **`none`** *(default)* | ~2 KB, **no dependency** — PGM/PNM + raw, in core | embedded, tests, and anyone who already has bytes |
+| **`system`** | **0 bytes added**; links `libpng`/`libjpeg` if `find_package` locates them | hosted evaluation — the common case, and it inherits distro security patching |
+| **`stb`** | ≈60–120 KB, vendored, static | no package manager, no OpenCV, still wants a dataset |
 
-**~~`bincv::imread` wrapping `cv::imread`~~ — WITHDRAWN.** It was proposed as a fusion
-of load and quantise, and **it fuses nothing**: `cv::imread` has already materialised
-the 8-bit `cv::Mat` before binCV sees it, so the "saved" intermediate was never saved.
-What remains is two lines of sugar that only exists when OpenCV is already present.
-**The fusion that IS real is T5.11's** — edge detection straight into bit-planes, where
-the boolean per pixel never becomes a byte at all.
+**`bincv_core` NEVER CONTAINS A CODEC.** The module is a thin wrapper over T5.12's
+`packFrom8Bit` and T5.13's `unpackTo8Bit`, so **the module itself is a few KB** — what
+varies is the backend a user opts into, which is the point of making it a backend.
+
+**ANSWERING "CAN binCV BE SOMEONE'S SOLE IMAGING DEPENDENCY": YES, AND FOR THE TARGET
+USE CASE IT ALREADY IS.** An embedded VIO takes sensor bytes and needs **no codec at
+all** — the question only arises for evaluation on datasets. The two real objections are
+neither of them technical:
+
+1. **Security surface.** Decoders parse untrusted input and `libjpeg`/`libpng` carry a
+   steady stream of CVEs. **Vendoring one means binCV inherits the duty to track and
+   patch it.** `system` avoids that entirely by delegating to the distribution; `stb`
+   does not, and that is the honest cost of `stb`.
+2. **Opportunity.** Every hour on codecs is an hour not on kernels.
+
+**Neither says "cannot". Both say "not core, and not first."**
+
+**Recommendation:** ship `none` with T5.12/T5.13 — it is nearly free and makes
+core-only demonstrable. Add `system` when an evaluation user asks. **Add `stb` only if
+someone actually has no package manager**, because it is the one option that puts a
+CVE-bearing parser inside binCV's release.
 
 
 ---
