@@ -3580,3 +3580,108 @@ was not restated. Scope is fixed
 ([ROADMAP Phase 5](ROADMAP.md#phase-5--platform-hardening)): NEON reference
 kernels, aarch64 cross-compilation and on-hardware validation, x86 portability,
 and Tier 2 correctness in CI.
+
+---
+
+## Phase 5.4 — `track`, which is 80% of the frontend on both architectures
+
+**WHY THESE THREE AND WHY NOW.** After [X-71](EXPERIMENTS.md) the input conversion is
+3% of the frontend, `build` is small, and **`track` is 79.5% on x86 and 84.5% on the
+reference device.** Everything below is `track`. They are listed in the order they
+should be done, which is **not** the order of their headline numbers — T5.1 is first
+because it is the largest AND the least risky.
+
+**A NOTE ON WHY THREE MEASURED WINS ARE NOT IN THE LIBRARY.** They are three different
+situations and lumping them together was a reporting failure:
+
+| | what was measured | what is missing |
+|---|---|---|
+| **threading** | 2.60× on `track` at T=4, bit-exact | **nothing in the kernel.** A caller can already do this — `calcOpticalFlowPyrLK` takes an ARRAY and the pyramids are read-only, which is exactly what the benchmark exploits with zero library change. What is missing is the **API**: a hook, a thread count, a default. |
+| **staged NEON** | 2.13× on the device | the **code**. It was written and worked; it then broke structurally inside the NEON region and was reverted rather than shipped unverified ([X-72](EXPERIMENTS.md)). The blocker was tooling and is now gone. |
+| **AVX2 keypoint batch** | 2.09× in a **standalone ceiling**, against a scalar arm | **both the code and a valid baseline.** See T5.3 — the number is against an arm that predates what now ships. |
+
+---
+
+### T5.1 · Threading, as an API rather than a benchmark trick · `TODO`
+
+**Depends:** [X-65](EXPERIMENTS.md) (done — Band A: 2.60× on `track` at T=4, peak RSS
+flat to 0.07%, bit-exact on every one of 300 frames).
+
+**THE SPEEDUP IS NOT "SITTING UNUSED" — IT IS UNERGONOMIC.** Any caller can split the
+point array across threads today and get X-65's numbers; `benchmark/frontend_sequence.cpp`
+does precisely that in about thirty lines. What binCV does not offer is a way to ask
+for it.
+
+**Ship:**
+
+1. `bincv::parallelFor(size_t n, Fn&&)` as a **customisation point**, default serial.
+2. `bincv::setNumThreads(int)` / `getNumThreads()`, `1` serialising — OpenCV's surface,
+   so an integrator finds what they expect, and HybVIO's model is one call away.
+3. A built-in pool in an **optional module OUTSIDE `bincv_core`** — core is
+   allocation-free and builds `-fno-exceptions`, where `std::thread` is not usable, so
+   the pool *cannot* live there whatever the policy is.
+4. **Default by build profile** ([D-56](ARCHITECTURE.md#8-design-decisions)): hosted
+   builds parallel, core-only / freestanding serial and unchanged.
+5. `calcOpticalFlowPyrLK` uses it internally over keypoints.
+
+**Bit-exactness against serial is a precondition, not a goal** — keypoints are
+independent, so a difference means a data race and the timing would be meaningless.
+
+**Not in scope:** threading `build`. X-65's arm C was never built and
+[X-67](EXPERIMENTS.md) then found `build` is mostly the input conversion anyway.
+
+---
+
+### T5.2 · The staged NEON variants — finish what X-72 reverted · `TODO`
+
+**Depends:** T5.1 is independent; do them in either order. [X-72](EXPERIMENTS.md)
+measured **2.13× on the reference device**, up from 1.85×.
+
+**WHAT IS ACTUALLY LEFT.** The x86 half **ships** ([D-60](ARCHITECTURE.md#8-design-decisions),
+[D-61](ARCHITECTURE.md#8-design-decisions)): staging plus the tap cache, 1.46× on
+`track`. On aarch64 it is **held off**, because `residualSums` sends N ∈ {1,2} at
+`uint32_t` to D-33's and X-40's NEON accumulators and the staged path has neither —
+taking it there would trade a measured optimisation for an unmeasured one.
+
+**The fix is one row reader serving all four paths** (scalar/NEON × staged/unstaged),
+which [X-41](EXPERIMENTS.md) recommended years of experiments ago for maintenance and
+this makes worth doing for speed.
+
+**THREE THINGS X-72 LEARNED THE HARD WAY, ALL OF WHICH ARE REQUIREMENTS:**
+
+1. **`Staged` must be a TEMPLATE parameter.** A runtime `staged != nullptr` test cost
+   **17% of `track` on x86** — the compiler stops specialising the row loop.
+2. **Operands must be ALIASING POINTERS, not copies.** Copying them into a per-row
+   struct gives back exactly what staging bought. Measured: neither fix alone reached
+   parity; both together did (1.465 ms against a 1.462 ms baseline).
+3. **Write the reader once and whole.** X-72's damage came from splicing it into four
+   existing bodies, inside a region x86 never compiles.
+
+**Use `./scripts/check_arm_syntax.sh` as the inner loop — 2.5 s.** Then the device test
+run, then `verify.sh`.
+
+---
+
+### T5.3 · RE-BASELINE the AVX2 keypoint batch before writing it · `TODO`
+
+**Depends:** T5.2 (which changes the baseline again).
+
+**THE 2.09× IS NOT A SPEEDUP OVER WHAT SHIPS, AND THAT IS THE WHOLE POINT OF THIS
+TASK.** [X-66](EXPERIMENTS.md) measured it in a standalone ceiling — 8 keypoints in
+AVX2 lanes, invariants staged, taps gathered, bit-exact — against an arm A that read
+from a pre-extracted per-keypoint buffer. **X-69 and X-70 then shipped something close
+to that arm A**, so the remaining headroom over the CURRENT code is **smaller than
+2.09× and has never been measured.** Two entries in EXPERIMENTS.md describe that
+baseline differently; neither is a measurement of it.
+
+**So: re-run `benchmark/kpbatch_staged_ceiling.cpp` with arm A replaced by the shipped
+staged-plus-tap-cache path.** That number decides whether this is worth writing at all.
+
+**AND IT IS THE HARDEST OF THE THREE, WHICH IS WHY IT IS LAST.** Batching 8 keypoints
+means iterating them in LOCKSTEP: per-lane convergence and early exit, per-lane taps,
+per-lane clipping, and a scalar fallback for windows that cannot be batched. That is a
+restructuring of the tracking loop, not a kernel swap — and
+[D-53](ARCHITECTURE.md#8-design-decisions) requires a whole-frontend arm before it
+ships, because X-62 was 1.75× in the kernel and 0.31× on the frontend.
+
+**Do not start this until T5.2 lands and the re-baseline clears 1.5×.**
