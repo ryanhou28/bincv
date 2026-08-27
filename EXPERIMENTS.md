@@ -11440,6 +11440,77 @@ declines the first and last row of the sweep: a bit-plane row has no stride padd
 
 ---
 
+### X-81 · The bit-plane FAST's score: a crossover, not a winner · `DONE — SHIPPED` · E-44
+
+**[X-80](#x-80--fast-on-a-bit-plane--where-the-thesis-actually-applies--done--shipped--e-43)
+LEFT THE SCORE AT ~40% OF THE OPERATION AND FILED IT INSTEAD OF FIXING IT.** This fixes
+it. Every corner is returned as `{x, y, score}`, and binCV's score is the **longest
+qualifying arc** (9–16) because OpenCV's — the largest surviving threshold — is *the same
+number for every corner* on binary content and therefore orders nothing, which is no use
+to the non-maximum suppression a detector feeds.
+
+Computing it meant, per corner, pulling one bit out of each of sixteen words to rebuild
+that pixel's ring — a bit transpose — then measuring the run. **~78 operations per
+corner, and 2% of pixels are corners on a real binarised frame.**
+
+#### THE SCORE FALLS OUT OF THE DETECTION, WHICH ALREADY COMPUTES MOST OF IT
+
+After the three doublings `v[k]` is `AND(diff[k .. k+7])`, and for any `L` in 9..16
+
+```
+    AND(diff[k .. k+L-1])  ==  v[k] & v[(k + L - 8) & 15]
+```
+
+because two overlapping runs of eight cover any `L <= 16`. So each arc length is one
+pass of sixteen ANDs and an OR-reduce — and the masks are **nested**, so a pixel's score
+is `8 + the number of masks holding its bit`. **A population count instead of a
+transpose**, and `L = 9` is the corner mask the detector wanted anyway.
+
+#### THE MEASUREMENT, AND IT DOES NOT PICK A WINNER
+
+Density swept by moving the binarisation level; one thread, ten interleaved rounds,
+minimum:
+
+| corners | density | **A** per-corner transpose | **B** arc masks | **ADAPTIVE** | scores differ |
+|---|---|---|---|---|---|
+| 246 | 0.07% | **59.1 µs** | 86.0 | 59.5 | 0 |
+| 745 | 0.21% | **70.6** | 94.9 | 70.8 | 0 |
+| 2 860 | 0.79% | 112.0 | 124.8 | **107.3** | 0 |
+| 9 163 | 2.54% | 196.7 | 168.0 | **152.7** | 0 |
+| 13 809 | 3.83% | 257.5 | 198.7 | **186.8** | 0 |
+
+> **THE TWO ARMS CROSS AT ABOUT 1% CORNER DENSITY AND EACH LOSES BY UP TO 1.5× ON THE
+> WRONG SIDE OF IT.** B's seven extra mask passes are ~217 vector operations per chunk
+> **whatever the density**; A's transpose is ~78 scalar operations **per corner**. A
+> library that picked one would be 1.4× slow on half its inputs.
+
+**E-44'S REGISTERED PREDICTION WAS "wins only above roughly 3% corner density"; measured,
+the crossover is nearer 1%.** The shape was right and the number was pessimistic — the
+prediction is recorded here as it was written, not adjusted.
+
+#### SO THE CHOICE IS PER CHUNK, AND THAT BEATS BOTH FIXED ARMS EVERYWHERE
+
+`L = 9` is computed first, its population counted, and the remaining seven masks
+produced only if the chunk holds at least **three** corners — where the arithmetic says
+the crossover is, and where the sweep agrees. **Corner density varies WITHIN an image**,
+so this is not merely picking the better arm per image: at 2.54% the adaptive path is
+**1.10× faster than the better fixed arm**, because it spends the masks only on the
+chunks that pay for them.
+
+**Headline, same benchmark as X-80:** the frontend's own binarised frame **1.39× →
+1.58×** against `cv::FAST`; the sparser thresholded frame unchanged at **1.21×**, which
+is correct — it takes the transpose path.
+
+**Identical output, checked three ways.** `Fast.BitPlaneScoringArmsAgree` forces
+transpose-always and masks-always and compares both against the shipped adaptive path
+over 2 100 corners: **0 differ in position, 0 in score.** The threshold is settable for
+exactly that reason; a shipped build never touches it.
+
+**Method:** `fastBitChunk256` / `fastBitChunk128` (AVX2 and NEON both adaptive),
+`Fast.BitPlaneScoringArmsAgree`, the density sweep above. Quiet machine, load < 0.5.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

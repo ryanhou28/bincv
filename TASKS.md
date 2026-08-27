@@ -4105,8 +4105,12 @@ exactly one meaningful threshold and the detector is boolean algebra.
 for corner and in scan order, **1.21–1.39× on x86, 2.36× on the reference device**, on a seventh of the
 input memory, AVX2 and NEON. Both entry points remain — a caller holding bytes should not have to pack them.
 
-**Left open as [E-44](ARCHITECTURE.md#9-open-questions-and-planned-experiments):** the
-score is ~40% of the operation (1.75× without it).
+**[E-44](ARCHITECTURE.md#9-open-questions-and-planned-experiments) closed by X-81:**
+the score's two spellings **cross at ~1% corner density**, so the shipped path chooses
+**per chunk**. Frontend frame **1.39× → 1.58×**; identical output across all three arms.
+
+**Still open as [E-45](ARCHITECTURE.md#9-open-questions-and-planned-experiments):**
+the LK keypoint batch (T5.16) is **x86 only** — aarch64 got nothing from it.
 
 ### T5.16 · The AVX2 keypoint batch — the x86 optimisation · `DONE` (X-78, X-79 → D-66)
 

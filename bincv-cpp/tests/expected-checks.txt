@@ -912,7 +912,7 @@ opencv	test_pack	40	0
 opencv	test_edge	31	0
 opencv	test_median_wide	6	0
 opencv	test_descriptor	12	0
-opencv	test_fast	33	0
+opencv	test_fast	39	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	169	0
 opencv	test_equivalence	16403	0

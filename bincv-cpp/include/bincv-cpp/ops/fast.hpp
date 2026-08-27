@@ -618,37 +618,79 @@ BINCV_FASTBIT_FN __m256i fastArcAny256(__m256i* v, int arcLength) {
     return any;
 }
 
-/// @brief Corner mask for 256 consecutive pixels, as eight `uint32_t`.
-///        **INTERNAL, and the one function carrying `target`** (X-80).
+/// @brief The arc-length masks `L = 9..16`, for 256 pixels. **INTERNAL** (X-81).
+///
+/// **THE SCORE IS ALREADY HALF-COMPUTED BY THE DETECTION AND THIS COLLECTS IT.** After
+/// the three doublings `v[k]` is `AND(diff[k .. k+7])` — a run of eight — and for any
+/// `L` in 9..16,
+///
+///     AND(diff[k .. k+L-1])  ==  v[k] & v[(k + L - 8) & 15]
+///
+/// because two overlapping runs of eight cover any `L <= 16`. So every arc length costs
+/// one pass of sixteen ANDs and an OR-reduce, and `L = 9` is the corner mask the
+/// detector wanted anyway.
+///
+/// @param first,last Inclusive range of `L` to produce, written to `out[L - 9]`.
+BINCV_FASTBIT_FN void fastArcMasks256(const __m256i* v, int first, int last, uint32_t* out) {
+    for (int L = first; L <= last; ++L) {
+        const int off = L - 8;
+        __m256i a0 = _mm256_and_si256(v[0], v[off & 15]);
+        __m256i a1 = _mm256_and_si256(v[1], v[(1 + off) & 15]);
+        for (int k = 2; k < 16; k += 2) {
+            a0 = _mm256_or_si256(a0, _mm256_and_si256(v[k], v[(k + off) & 15]));
+            a1 = _mm256_or_si256(a1, _mm256_and_si256(v[k + 1], v[(k + 1 + off) & 15]));
+        }
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(out + (L - 9) * 8),
+                            _mm256_or_si256(a0, a1));
+    }
+}
+
+/// @brief One 256-pixel chunk: the corner mask, and the score inputs. **INTERNAL,
+///        and the one function carrying `target`** (X-80, X-81).
 ///
 /// **THIS IS WHERE THE THESIS PAYS.** The scalar word form of this loop does the same
-/// sixteen AND-NOTs and the same AND-tree — and a `uint32_t` holds thirty-two pixels,
-/// which is exactly what an AVX2 register of BYTES holds. **So the bit packing buys
-/// nothing until the boolean algebra itself moves into a vector register**, where one
-/// `vpand` decides two hundred and fifty-six pixels instead of thirty-two.
-/// [X-80](../../../EXPERIMENTS.md) measured both, and the scalar word form loses to the
-/// byte kernel it was meant to beat.
+/// sixteen XORs and the same AND-tree — and a `uint32_t` holds thirty-two pixels, which
+/// is exactly what a vector register of BYTES holds. **So the bit packing buys nothing
+/// until the boolean algebra itself moves into a vector register**, where one `vpand`
+/// decides two hundred and fifty-six pixels instead of thirty-two.
 ///
-/// @param ringOut The sixteen ring words, kept rather than recomputed. Scoring needs
-///        them for the ~1% of pixels that are corners, and rebuilding them scalar for
-///        every word that held one cost **as much as the detection itself** (measured).
-__attribute__((target("avx2"))) inline void fastBitMask256(const uint8_t* const* ringRow,
-                                                           const uint8_t* centreRow,
-                                                           size_t chunkByte, int arcLength,
-                                                           uint32_t* out,
-                                                           uint32_t* diffOut) {
+/// @return True when `masks[1..7]` were filled, so the caller scores from them; false
+///         when it should transpose each corner's ring instead.
+///
+/// **THE CHOICE IS PER CHUNK AND IT IS A MEASURED CROSSOVER, NOT A PREFERENCE.**
+/// [X-81](../../../EXPERIMENTS.md) measured both scoring arms across corner densities:
+/// the seven extra mask passes cost ~217 vector operations per chunk **whatever the
+/// density**, and a per-corner transpose costs ~78 scalar operations **per corner** —
+/// so the masks win above about three corners in a chunk and lose by up to **1.5×**
+/// below it. A library that picked one would be 1.4× slow on half its inputs.
+__attribute__((target("avx2"))) inline bool fastBitChunk256(const uint8_t* const* ringRow,
+                                                            const uint8_t* centreRow,
+                                                            size_t chunkByte, int arcLength,
+                                                            int maskThreshold,
+                                                            uint32_t* masks,
+                                                            uint32_t* diffOut) {
     const __m256i centre =
         _mm256_loadu_si256(reinterpret_cast<const __m256i*>(centreRow + chunkByte));
     __m256i v[16];
     for (int k = 0; k < 16; ++k) {
         v[k] = _mm256_xor_si256(
             centre, fastRing256(ringRow[kFastRingY[k] + 3] + chunkByte, kFastRingX[k]));
-        // Kept for scoring, which needs the ring for the ~1% of pixels that are
-        // corners. Rebuilding them scalar for every word that held one cost as much as
-        // the whole detection (X-80), and about a fifth of words hold one.
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(diffOut + k * 8), v[k]);
     }
-    _mm256_storeu_si256(reinterpret_cast<__m256i*>(out), fastArcAny256(v, arcLength));
+    if (arcLength != 9) {
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(masks),
+                            fastArcAny256(v, arcLength));
+        return false;
+    }
+    fastArcStep256<1>(v);
+    fastArcStep256<2>(v);
+    fastArcStep256<4>(v);
+    fastArcMasks256(v, 9, 9, masks);
+    int corners = 0;
+    for (int i = 0; i < 8; ++i) corners += __builtin_popcount(masks[i]);
+    if (corners < maskThreshold) return false;
+    fastArcMasks256(v, 10, 16, masks);
+    return true;
 }
 
 /// @brief Is AVX2 present? Asked once. (`hasFastAvx2` above serves the byte path.)
@@ -737,18 +779,69 @@ BINCV_FASTBIT_NEON void fastRingLoadNeon(const uint8_t* const* ringRow, size_t c
     }
 }
 
-/// @brief Corner mask for 128 consecutive pixels. **INTERNAL** (X-80).
+/// @brief The arc-length masks `L = first..last`, for 128 pixels. **INTERNAL** (X-81).
+BINCV_FASTBIT_NEON void fastArcMasksNeon(const uint8x16_t* v, int first, int last,
+                                         uint8_t* out) {
+    for (int L = first; L <= last; ++L) {
+        const int off = L - 8;
+        uint8x16_t a0 = vandq_u8(v[0], v[off & 15]);
+        uint8x16_t a1 = vandq_u8(v[1], v[(1 + off) & 15]);
+        for (int k = 2; k < 16; k += 2) {
+            a0 = vorrq_u8(a0, vandq_u8(v[k], v[(k + off) & 15]));
+            a1 = vorrq_u8(a1, vandq_u8(v[k + 1], v[(k + 1 + off) & 15]));
+        }
+        vst1q_u8(out + (L - 9) * 16, vorrq_u8(a0, a1));
+    }
+}
+
+/// @brief One 128-pixel chunk: the corner mask, and the score inputs. **INTERNAL.**
+/// @return True when `masks[1..7]` were filled -- see `fastScoreMaskThreshold`. The
+///         crossover is the same arithmetic here, at half the chunk width.
 /// @note NEON is baseline on aarch64, so unlike the AVX2 form there is nothing to
-///       dispatch on.
-inline void fastBitMask128(const uint8_t* const* ringRow, const uint8_t* centreRow,
-                           size_t chunkByte, int arcLength, uint8_t* out, uint8_t* diffOut) {
+///       dispatch on -- and with THIRTY-TWO vector registers the sixteen the tree needs
+///       fit without spilling, which is why X-80 measured 2.36× here against 1.39× on
+///       x86.
+inline bool fastBitChunk128(const uint8_t* const* ringRow, const uint8_t* centreRow,
+                            size_t chunkByte, int arcLength, int maskThreshold,
+                            uint8_t* masks, uint8_t* diffOut) {
     const uint8x16_t centre = vld1q_u8(centreRow + chunkByte);
     uint8x16_t v[16];
     fastRingLoadNeon<0>(ringRow, chunkByte, centre, v, diffOut);
-    vst1q_u8(out, fastArcAnyNeon(v, arcLength));
+    if (arcLength != 9) {
+        vst1q_u8(masks, fastArcAnyNeon(v, arcLength));
+        return false;
+    }
+    fastArcStepNeon<1>(v);
+    fastArcStepNeon<2>(v);
+    fastArcStepNeon<4>(v);
+    fastArcMasksNeon(v, 9, 9, masks);
+    // Population of the corner mask, from the bytes just written.
+    int corners = 0;
+    for (int i = 0; i < 16; ++i) corners += __builtin_popcount(masks[i]);
+    if (corners < maskThreshold) return false;
+    fastArcMasksNeon(v, 10, 16, masks);
+    return true;
 }
 
 #endif  // BINCV_FAST_NEON
+
+/// @brief Corners in a chunk above which scoring switches to the ARC-LENGTH MASKS.
+///        **INTERNAL** (X-81).
+///
+/// **A MEASURED CROSSOVER, AND THE REASON THERE IS A KNOB AT ALL.** The two ways to
+/// score cost differently in the density: the seven extra mask passes are ~217 vector
+/// operations per chunk **whatever the density**, and transposing a corner's ring is
+/// ~78 scalar operations **per corner**. [X-81](../../../EXPERIMENTS.md) measured both
+/// across a density sweep and they cross at about three corners per chunk — below it
+/// the masks lose by up to 1.5×, above it they win by up to 1.42×.
+///
+/// Three is where the arithmetic says, and the sweep agrees. **Settable so the two arms
+/// can be forced and compared on identical input**: `0` always uses the masks,
+/// a large value never does. A shipped build leaves it alone.
+inline int& fastScoreMaskThreshold() {
+    static int threshold = 3;
+    return threshold;
+}
 
 }  // namespace impl
 
@@ -831,6 +924,33 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
         }
     };
 
+    // X-81's arm B: the score read straight off the nested arc-length masks. A pixel's
+    // score is `8 + the number of masks holding its bit`, because a run of L implies a
+    // run of every shorter length -- so the count IS the maximum, with no transpose and
+    // no run loop.
+    const auto emitScored = [&](const WordType* lens, size_t x0, size_t y, WordType mask) {
+        for (size_t b = 0; b < kBits; ++b) {
+            const size_t x = x0 + b;
+            if (x >= 3 && x + 3 < width) continue;
+            mask = static_cast<WordType>(mask & ~(static_cast<WordType>(1) << b));
+        }
+        while (mask != 0) {
+            const size_t b =
+                static_cast<size_t>(__builtin_ctzll(static_cast<unsigned long long>(mask)));
+            mask = static_cast<WordType>(mask & (mask - 1));
+            if (n >= capacity) {
+                overflow = true;
+                return;
+            }
+            int score = 8;
+            for (int L = 0; L < 8; ++L) score += static_cast<int>((lens[L] >> b) & 1u);
+            out[n].x = static_cast<int>(x0 + b);
+            out[n].y = static_cast<int>(y);
+            out[n].score = score;
+            ++n;
+        }
+    };
+
     for (size_t y = 3; y + 3 < height && !overflow; ++y) {
         const WordType* centreRow = img.row(y);
         const WordType* ringRow[7];
@@ -864,20 +984,35 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
                 ringBytes[d] = reinterpret_cast<const uint8_t*>(ringRow[d]);
             }
             const uint8_t* centreBytes = reinterpret_cast<const uint8_t*>(centreRow);
-            alignas(32) uint8_t maskBuf[kChunkBytes];
+            // EIGHT masks, not one: `masks[0]` is the corner mask (a run of nine) and
+            // `masks[1..7]` are runs of ten to sixteen, from which a score is a
+            // population count rather than a bit transpose.
+            alignas(32) uint8_t maskBuf[8 * kChunkBytes];
             alignas(32) uint8_t diffBuf[16 * kChunkBytes];
             for (; w + kChunkWords <= words; w += kChunkWords) {
 #if defined(BINCV_FAST_RUNTIME_AVX2)
-                impl::fastBitMask256(ringBytes, centreBytes, w * sizeof(WordType), arcLength,
-                                     reinterpret_cast<uint32_t*>(maskBuf),
-                                     reinterpret_cast<uint32_t*>(diffBuf));
+                const bool scored = impl::fastBitChunk256(
+                    ringBytes, centreBytes, w * sizeof(WordType), arcLength,
+                    impl::fastScoreMaskThreshold(),
+                    reinterpret_cast<uint32_t*>(maskBuf),
+                    reinterpret_cast<uint32_t*>(diffBuf));
 #else
-                impl::fastBitMask128(ringBytes, centreBytes, w * sizeof(WordType), arcLength,
-                                     maskBuf, diffBuf);
+                const bool scored = impl::fastBitChunk128(
+                    ringBytes, centreBytes, w * sizeof(WordType), arcLength,
+                    impl::fastScoreMaskThreshold(), maskBuf, diffBuf);
 #endif
                 const WordType* chunk = reinterpret_cast<const WordType*>(maskBuf);
                 for (size_t j = 0; j < kChunkWords && !overflow; ++j) {
                     if (chunk[j] == 0) continue;
+                    if (scored) {
+                        WordType lens[8];
+                        for (int L = 0; L < 8; ++L) {
+                            lens[L] = reinterpret_cast<const WordType*>(
+                                maskBuf + static_cast<size_t>(L) * kChunkBytes)[j];
+                        }
+                        emitScored(lens, (w + j) * kBits, y, chunk[j]);
+                        continue;
+                    }
                     WordType diff[16];
                     for (int k = 0; k < 16; ++k) {
                         diff[k] = reinterpret_cast<const WordType*>(

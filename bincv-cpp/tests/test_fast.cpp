@@ -214,6 +214,55 @@ BINCV_TEST(Fast, BitPlaneMatchesCvFastExactly) {
     }
 }
 
+BINCV_TEST(Fast, BitPlaneScoringArmsAgree) {
+    // X-81: the score can be computed two ways -- by transposing each corner's ring, or
+    // by counting how many of the nested arc-length masks hold that pixel's bit. They
+    // are the same number by construction, and the shipped path CHOOSES BETWEEN THEM
+    // PER CHUNK on a measured density crossover. That choice must not be observable in
+    // the output, which is exactly what this checks.
+    constexpr int kW = 400, kH = 120;
+    cv::Mat img(kH, kW, CV_8U);
+    uint64_t st = UINT64_C(4242);
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            st = st * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+            img.at<uint8_t>(y, x) = ((st >> 41) % 100u) < 66u ? 255 : 0;
+        }
+    }
+    bincv::BinMat<uint32_t> plane(kW, kH);
+    plane.fromCVMat(img);
+
+    std::vector<FastCorner> transposed(200000), masked(200000), adaptive(200000);
+    const int saved = bincv::impl::fastScoreMaskThreshold();
+    bincv::impl::fastScoreMaskThreshold() = 1 << 30;   // never use the masks
+    const size_t nT = detectFast(plane.constView(), transposed.data(), transposed.size());
+    bincv::impl::fastScoreMaskThreshold() = 0;         // always use the masks
+    const size_t nM = detectFast(plane.constView(), masked.data(), masked.size());
+    bincv::impl::fastScoreMaskThreshold() = saved;     // the shipped crossover
+    const size_t nA = detectFast(plane.constView(), adaptive.data(), adaptive.size());
+
+    size_t diffM = 0, diffA = 0, scoreRange = 0;
+    for (size_t i = 0; i < nT; ++i) {
+        if (i < nM && (transposed[i].x != masked[i].x || transposed[i].y != masked[i].y ||
+                       transposed[i].score != masked[i].score)) {
+            ++diffM;
+        }
+        if (i < nA && (transposed[i].x != adaptive[i].x || transposed[i].y != adaptive[i].y ||
+                       transposed[i].score != adaptive[i].score)) {
+            ++diffA;
+        }
+        if (transposed[i].score < 9 || transposed[i].score > 16) ++scoreRange;
+    }
+    std::printf("  X-81 scoring arms: %zu corners; transpose vs masks %zu differ, "
+                "vs adaptive %zu differ\n", nT, diffM, diffA);
+    BINCV_CHECK(nT > 500);
+    BINCV_CHECK_EQ(nM, nT);
+    BINCV_CHECK_EQ(nA, nT);
+    BINCV_CHECK_EQ(diffM, size_t{0});
+    BINCV_CHECK_EQ(diffA, size_t{0});
+    BINCV_CHECK_EQ(scoreRange, size_t{0});
+}
+
 BINCV_TEST(Fast, BitPlaneThresholdIsUniqueOnOneBitContent) {
     // The claim the missing threshold parameter rests on, checked rather than argued:
     // on {0, 255} content every legal `cv::FAST` threshold gives the SAME corners, so
