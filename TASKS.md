@@ -3741,7 +3741,7 @@ so T5.4's descriptors want it.
 
 ---
 
-## Phase 5.6 — The edges of the pipeline: getting pixels in and out
+## Phase 5.6 — The sensor stage: getting pixels in, and the ops that belong there
 
 **THE KERNELS ARE DONE AND THE EDGES ARE NOT.** Everything between "bits are in a
 `QuantMat`" and "keypoints come out" is measured and fast. **Both ends of that
@@ -3800,21 +3800,112 @@ branchless scalar arm at **10.3× on x86 and 5.18× on aarch64** with no intrins
 all — that arm is what a target with no vector unit gets, and it did most of the work
 on both.
 
-### T5.8 · Decide who owns the sensor stage · `TODO — a decision, then possibly code`
+### T5.8 · binCV ships the sensor stage · `TODO`
 
-[ARCHITECTURE §7.3](ARCHITECTURE.md#73-edge-filter--threshold) puts "edge filter /
-threshold" **inside** the MVP set, but `benchmark/frontend_sequence.cpp` and the
-`vio_frontend` example both perform the reference pipeline's `medianBlur` +
-`|d/dx| + |d/dy| > 17` **in OpenCV**, and the benchmark's own comment calls that stage
-"deliberately NOT binCV's claim".
+**THE DECISION IS MADE: binCV PROVIDES IT.**
+[ARCHITECTURE §7.3](ARCHITECTURE.md#73-edge-filter--threshold) already places the edge
+filter inside the MVP set, but `benchmark/frontend_sequence.cpp` and the `vio_frontend`
+example both run the reference pipeline's `medianBlur` + `|d/dx| + |d/dy|` stage **in
+OpenCV**, and the benchmark's comment calls that stage "deliberately NOT binCV's claim".
+**Those disagree, and the disagreement is now resolved in favour of §7.3.** T5.9–T5.11
+are what that costs.
 
-**Those two statements disagree**, and a user following the example ends up with an
-OpenCV dependency binCV's positioning implies they should not need.
+The benchmark's `referencePreprocess` becomes a **control** — the OpenCV spelling binCV
+must match — rather than the thing binCV depends on.
 
-**Decide:** either binCV ships the 8-bit gradient-magnitude edge filter — an 8-bit-in,
-1-bit-out kernel, the same shape as T5.6 and naturally fused with it — or
-§7.3 is narrowed and the documentation says plainly that the sensor stage is the
-caller's. **Either is defensible; the current split is not.**
+### T5.9 · Ingestion with a caller-defined quantisation policy · `TODO`
+
+**Depends:** T5.6 (`packFrom8Bit` in core is the mechanism this parameterises).
+
+**THE POLICY IS ALREADY THERE, TWICE, HARD-CODED AND INCONSISTENT.**
+`QuantMat<1>::fromCVMat` binarises on **non-zero**; `QuantMat<N>::fromCVMat` scales with
+**`round(v · MaxValue / 255)`**. A caller who wants a mid-grey split, or a 0/1-vs-rest
+rule, or a LUT, has to convert and then re-threshold — two passes over the image and an
+8-bit intermediate that the whole library exists to avoid.
+
+**Ship a policy parameter with named defaults:**
+
+| policy | rule | why it exists |
+|---|---|---|
+| `NonZero` | `v > 0 → 1` | today's `QuantMat<1>` behaviour, preserved |
+| `Threshold{t}` | `v > t → 1` | the common case; `bincv::threshold`'s rule |
+| `Scale` | `round(v · MaxValue / 255)` | today's `QuantMat<N>` behaviour, preserved |
+| `Lut{table}` | arbitrary 256-entry map | anything else, including non-monotonic |
+
+**Shape follows OpenCV** ([CLAUDE.md](CLAUDE.md) style): destination as out-parameter, a
+params struct with defaults, `camelCase`. **The defaults must reproduce today's
+behaviour exactly** — both existing rules are load-bearing and one of them
+([D-42](ARCHITECTURE.md#8-design-decisions)) has a recorded divergence from OpenCV at
+bytes 1..127 that a test pins.
+
+**A policy must not cost the 46×.** [X-71](EXPERIMENTS.md)'s move-mask works for any
+policy expressible as *one comparison per pixel* — `NonZero` and `Threshold` both are,
+via `cmpeq`/`cmpgt`. `Lut` cannot vectorise that way and takes the portable path.
+**Make the fast policies compile-time so the branch never enters the loop**, exactly as
+[X-72](EXPERIMENTS.md) found a runtime flag cost 17% elsewhere.
+
+### T5.10 · Median filter with a configurable neighbourhood · `TODO`
+
+**The reference has TWO patterns and binCV implements one of them, for one input type.**
+`SEAL/src/temporal_processing/denoise.cpp` carries `three_pix_median_filter` — the
+asymmetric L, `p1` above / `p2` centre / `p3` right, computed as
+`max(min(p1,p2), min(max(p1,p2), p3))` — **and** `five_pix_median_filter`.
+[ops/denoise.hpp](bincv-cpp/include/bincv-cpp/ops/denoise.hpp) implements the L, for
+**binary** input, where median collapses to `maj3`.
+
+**Two axes are missing:**
+
+1. **The neighbourhood.** Make the pattern a compile-time parameter — a set of
+   `(dy, dx)` offsets — with the reference's L and its 5-pixel form as named defaults.
+   The user's own pattern is then a template argument, not a fork.
+2. **8-bit input.** The reference filters the **grayscale** image, before binarisation.
+   binCV's median is binary-only, so it cannot sit where the reference puts it. A
+   min/max sorting network handles 8-bit; for binary it must still collapse to `maj3`,
+   which is the whole reason the binary case is one expression.
+
+**Tier 3, and it must not borrow `medianBlur`'s name** — the neighbourhood is not
+OpenCV's square and the semantics differ.
+
+### T5.11 · The gradient-threshold edge extractor · `TODO`
+
+**Read out of the reference, not inferred.** `rl_fast_edge_filter_wide`
+(`SEAL/src/temporal_processing/edge_filter.cpp`):
+
+```
+kernel_x = [-1  0  1]      diff_x = |filter2D(img, kernel_x)|
+kernel_y = [-1  0  1]ᵀ     diff_y = |filter2D(img, kernel_y)|
+mask     = (diff_x >= t) OR (diff_y >= t)
+```
+
+**Three details worth stating because they are easy to get wrong:** the combination is
+**OR, not AND**; the relation is **`>=`, not `>`**; and *"wide"* is the `[-1, 0, 1]`
+**central** difference — left neighbour against right neighbour, spanning two pixels —
+not an adjacent `[-1, 1]`. **The defaults must be these**, so the shipped call
+reproduces the reference exactly.
+
+**Four axes the caller should control:**
+
+| axis | options | default |
+|---|---|---|
+| combine | `Or`, `And` | **`Or`** |
+| relation | `Ge`, `Gt` | **`Ge`** |
+| spatial | `Wide` (`[-1,0,1]`), `Forward` (`v[x+1] − v[x]`), `Backward` (`v[x] − v[x−1]`) | **`Wide`** |
+| threshold | integer | — |
+
+**This is 8-bit in, 1-bit out — the same shape as T5.9, and it should fuse with it.**
+Computing an 8-bit edge image and then packing it is two passes and an intermediate;
+the comparison already produces a boolean per pixel, which is a move-mask away from
+being a bit-plane. **Done properly this is the fastest way into binCV, not an extra
+step before it.**
+
+**Tier 3, and no OpenCV name.** There is no `cv::` equivalent — `Sobel` + `threshold` is
+a different computation with different border handling. [CLAUDE.md](CLAUDE.md) forbids
+borrowing a name here.
+
+**The denominator is the reference's own OpenCV spelling** — `filter2D` ×2, `abs` ×2,
+compare, `|`, two `setTo` calls, all in `CV_32F` over a full 8-bit image. binCV should
+win this one by a wide margin, and if it does not, that is the finding.
+
 
 ---
 
