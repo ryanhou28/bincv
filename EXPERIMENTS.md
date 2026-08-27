@@ -10752,7 +10752,40 @@ derived from X-60's failure, applied: **mark one coarse entry point, never leaf
 helpers.** Here the marked function *is* the unit of work — load, compare, movemask, 32
 pixels — not a helper inside one, so nothing that mattered was prevented from inlining.
 
-**aarch64 SHIPS TOO, AND ITS SPEED IS UNMEASURED.** NEON has no move-mask, so the arm
+#### THE aarch64 HALF, MEASURED
+
+**The arms on the reference device**, `taskset -c 3`, governor `performance`,
+`throttled` unchanged:
+
+| arm | ns/px | vs A | *(x86 was)* |
+|---|---|---|---|
+| **A** shipped: per-pixel branch | 3.3819 | 1.00× | 1.1123 |
+| **B** portable branchless | 0.6525 | **5.18×** | 10.26× |
+| **D** NEON bitmask | **0.2416** | **14.00×** | 46.13× (AVX2) |
+
+Both bit-identical to A. **Both clear the ≥5× bar on the deployment target**, and the
+portable arm does it with no intrinsics — which matters most on the platform where a
+Cortex-M variant has no vector unit at all.
+
+**THE FRONTEND ARM**, V1_02, 900 frames, two runs each, OpenCV at one thread:
+
+| | `fromCVMat` ms | binCV ms | OpenCV ms | ratio |
+|---|---|---|---|---|
+| old conversion | 2.304 / 2.303 (**21%**) | 10.965 / 11.024 | 16.804 / 16.824 | 1.53× |
+| **new conversion** | **0.290 / 0.293 (3.2%)** | **9.002 / 9.008** | 16.646 / 16.709 | **1.85×** |
+
+**`fromCVMat` 7.9× on the real workload, the frontend 1.22×, and the ratio against
+OpenCV goes 1.53× → 1.85× on the deployment target** — above
+[X-38](#x-38--the-full-sequence--done)'s recorded 1.46× and
+[X-49](#x-49--the-frontend-after-the-api-swap-a-control-and-a-new-headline--done)'s
+1.53×. **Band A on both architectures.**
+
+**The standalone arm reads 14.0× and the frontend 7.9×**, exactly as x86's 46× read
+15.5×: the gap is the allocation and the `cv::Mat` row-pointer work around the packing,
+not the packing. It is the same ratio on both machines, which is what makes it an
+explanation rather than an excuse.
+
+**~~aarch64 SHIPS TOO, AND ITS SPEED IS UNMEASURED.~~ — NOW MEASURED, ABOVE.** NEON has no move-mask, so the arm
 ANDs per-lane bit weights and folds sixteen bytes with three pairwise adds. **Unlike
 [E-39](ARCHITECTURE.md#register) this displaces no measured optimisation** — the old
 path was a scalar per-pixel loop on every platform — so it is strictly additive and

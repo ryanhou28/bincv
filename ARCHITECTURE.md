@@ -3815,10 +3815,16 @@ tail wrote its bits at the wrong offsets. Fixed by consuming whole **words**, wi
 precondition now a `BINCV_ASSERT`. [CLAUDE.md](CLAUDE.md)'s four-word-type sweep is
 load-bearing and this is what it is for.
 
-**aarch64 ships on correctness, unmeasured on speed.** Unlike [E-39](#register) this
-**displaces no measured optimisation** — the old path was a scalar per-pixel loop
-everywhere — so it is strictly additive. That difference is the whole reason one waits
-for a device window and this does not.
+**aarch64, measured on the reference device:** portable **5.18×**, NEON **14.00×**,
+both bit-exact. On the frontend `fromCVMat` is **7.9×** and falls from **21% to 3.2%**,
+the frontend gains **1.22×**, and **the ratio against OpenCV goes 1.53× → 1.85× on the
+deployment target** — above [X-38](EXPERIMENTS.md)'s recorded 1.46×. **Band A on both
+architectures.**
+
+The standalone arms read 14.0× (aarch64) and 46× (x86) where the frontend reads 7.9×
+and 15.5×: the gap is the allocation and the `cv::Mat` row-pointer work *around* the
+packing, and **it is the same ratio on both machines**, which makes it an explanation
+rather than an excuse.
 
 ## 9. Open Questions and Planned Experiments
 
