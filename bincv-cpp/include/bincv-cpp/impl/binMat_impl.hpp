@@ -511,6 +511,32 @@ inline void packRowCmp(const SrcT* rowIn, size_t width, SrcT t, WordType* rowOut
     }
 }
 
+/// @brief Unpacks one bit per pixel to one byte per pixel. **INTERNAL** (T5.7).
+/// @note Lives here rather than in ops/pack.hpp because impl/binMat_impl.hpp cannot
+///       include that file -- pack.hpp includes binMat.hpp, which includes this one.
+///       ops/pack.hpp's `unpackTo8Bit` is the public spelling and calls straight
+///       through.
+template <typename WordType>
+inline void unpackTo8BitRaw(const WordType* src, size_t srcStride, size_t width,
+                            size_t height, uint8_t* dst, size_t dstStride, uint8_t onValue,
+                            uint8_t zeroValue) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    for (size_t y = 0; y < height; ++y) {
+        const WordType* rowIn = src + y * srcStride;
+        uint8_t* rowOut = dst + y * dstStride;
+        for (size_t x = 0; x < width; x += kBits) {
+            const size_t n = (width - x < kBits) ? (width - x) : kBits;
+            // ONE word load per 32 pixels instead of one per pixel: the shift and
+            // mask stay in a register where they used to be recomputed from `x`.
+            WordType w = rowIn[x / kBits];
+            for (size_t i = 0; i < n; ++i) {
+                rowOut[x + i] = (w & WordType{1}) ? onValue : zeroValue;
+                w = static_cast<WordType>(w >> 1);
+            }
+        }
+    }
+}
+
 } // namespace impl
 
 #ifdef BINCV_WITH_OPENCV
@@ -552,22 +578,23 @@ void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
 
 // Shared unpacking loop for the two cv::Mat conversions; `transform` maps a bit
 // to the output pixel value.
+/// @note ONE IMPLEMENTATION. The unpacking lives in ops/pack.hpp, in CORE, so the
+///       `cv::Mat` wrapper is a shape adapter and nothing more. Before this split it
+///       was a per-pixel loop recomputing `wordIndex` and `bitMask` for every pixel --
+///       the exact shape `fromCVMat` had before [X-71](../../../EXPERIMENTS.md), and
+///       the slowest thing in the library.
 template <typename WordType, typename PixelTransform>
-inline void toCVMatHelper(const BinMat<WordType>& binmat, cv::Mat& output, PixelTransform transform) {
+inline void toCVMatHelper(const BinMat<WordType>& binmat, cv::Mat& output,
+                          PixelTransform transform) {
     if (binmat.empty()) {
         output = cv::Mat();
         return;
     }
-
     output = cv::Mat::zeros(binmat.rows(), binmat.cols(), CV_8U);
-    for (int y = 0; y < binmat.rows(); ++y) {
-        const WordType* rowIn = binmat.ptr(y);
-        uint8_t* rowOut = output.ptr<uint8_t>(y);
-        for (size_t x = 0; x < binmat.getWidth(); ++x) {
-            bool value = (rowIn[impl::wordIndex<WordType>(x)] & impl::bitMask<WordType>(x)) != 0;
-            rowOut[x] = transform(value);
-        }
-    }
+    impl::unpackTo8BitRaw<WordType>(binmat.data(), binmat.getAlignedWidth(),
+                              static_cast<size_t>(binmat.cols()),
+                              static_cast<size_t>(binmat.rows()), output.ptr<uint8_t>(0),
+                              output.step, transform(true), transform(false));
 }
 
 // @todo: could an approach using OpenCV's resize and scaling functions be more efficient?

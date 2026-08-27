@@ -907,8 +907,9 @@ opencv	test_derivative	48526	0
 opencv	test_covariance	17704	0
 opencv	test_corner	3655	0
 opencv	test_opticalflow	298	0
-opencv	test_pack	23	0
+opencv	test_pack	29	0
 opencv	test_edge	31	0
+opencv	test_median_wide	6	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	169	0
 opencv	test_equivalence	16403	0
@@ -931,8 +932,9 @@ core	test_derivative	47675	0
 core	test_covariance	17704	0
 core	test_corner	3655	0
 core	test_opticalflow	206	0
-core	test_pack	23	0
+core	test_pack	29	0
 core	test_edge	30	0
+core	test_median_wide	5	0
 core	test_harness	8	0
 
 noexcept	test_binMat	801	44
@@ -953,8 +955,9 @@ noexcept	test_derivative	47675	0
 noexcept	test_covariance	17704	0
 noexcept	test_corner	3655	0
 noexcept	test_opticalflow	206	0
-noexcept	test_pack	23	0
+noexcept	test_pack	29	0
 noexcept	test_edge	30	0
+noexcept	test_median_wide	5	0
 noexcept	test_harness	8	0
 
 debug	test_binMat	845	0
@@ -975,7 +978,8 @@ debug	test_derivative	47675	0
 debug	test_covariance	17704	0
 debug	test_corner	3655	0
 debug	test_opticalflow	206	0
-debug	test_pack	23	0
+debug	test_pack	29	0
 debug	test_edge	30	0
+debug	test_median_wide	5	0
 debug	test_harness	8	0
 

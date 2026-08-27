@@ -155,4 +155,36 @@ BINCV_TEST(Pack, StridedSourceIsTheYPlaneCase) {
     BINCV_CHECK(diff == 0);
 }
 
+BINCV_TEST(Pack, PgmIsAWholeImageAndSizesItself) {
+    // The only way to LOOK at binCV's output on a target with no OpenCV. Two things
+    // are checked: that calling with cap == 0 reports the size without writing, and
+    // that the bytes are a valid P5 whose payload matches unpackTo8Bit.
+    constexpr size_t kW = 40, kH = 3;
+    std::vector<uint8_t> img(kW * kH);
+    for (size_t i = 0; i < img.size(); ++i) img[i] = static_cast<uint8_t>((i * 11) % 256);
+    BinMat<uint32_t> m(kW, kH);
+    packBits<PackRule::GreaterThan, uint8_t, uint32_t>(img.data(), kW, kH, kW, m.view(), 128);
+
+    const size_t need = writePgm<uint32_t>(m.constView(), nullptr, 0);
+    std::vector<uint8_t> buf(need, 0xEE);
+    const size_t wrote = writePgm<uint32_t>(m.constView(), buf.data(), buf.size());
+    std::printf("  PGM sized %zu, wrote %zu\n", need, wrote);
+    BINCV_CHECK(wrote == need);
+    // "P5\n40 3\n255\n" then w*h payload bytes.
+    BINCV_CHECK(buf[0] == 'P' && buf[1] == '5' && buf[2] == '\n');
+    BINCV_CHECK(need > kW * kH);
+    const size_t header = need - kW * kH;
+    std::vector<uint8_t> direct(kW * kH, 0);
+    unpackTo8Bit<uint32_t>(m.constView(), direct.data(), kW);
+    size_t diff = 0;
+    for (size_t i = 0; i < kW * kH; ++i) if (buf[header + i] != direct[i]) ++diff;
+    std::printf("  PGM payload vs unpackTo8Bit   %zu bytes differ\n", diff);
+    BINCV_CHECK(diff == 0);
+    // A short buffer must report the requirement and write NOTHING.
+    std::vector<uint8_t> tiny(4, 0x11);
+    const size_t again = writePgm<uint32_t>(m.constView(), tiny.data(), tiny.size());
+    BINCV_CHECK(again == need);
+    BINCV_CHECK(tiny[0] == 0x11);
+}
+
 BINCV_TEST_MAIN("test_pack")

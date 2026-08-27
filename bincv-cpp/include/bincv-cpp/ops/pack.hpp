@@ -139,15 +139,50 @@ inline void unpackTo8Bit(BinMatConstView<WordType> src, uint8_t* dst, size_t dst
     BINCV_ASSERT(dst != nullptr || src.height == 0,
                  "unpackTo8Bit: a non-empty image needs a non-null destination");
     if (src.width == 0 || src.height == 0) return;
-    constexpr size_t kBits = impl::bitsPerWord<WordType>();
-    for (size_t y = 0; y < src.height; ++y) {
-        const WordType* rowIn = src.row(y);
-        uint8_t* rowOut = dst + y * dstStride;
-        for (size_t x = 0; x < src.width; ++x) {
-            const WordType w = rowIn[x / kBits];
-            rowOut[x] = ((w >> (x % kBits)) & WordType{1}) ? onValue : zeroValue;
-        }
-    }
+    impl::unpackTo8BitRaw<WordType>(src.ptr, src.stride, src.width, src.height, dst,
+                                    dstStride, onValue, zeroValue);
+}
+
+/// @brief Writes a binary image as a binary PGM (`P5`) to a caller-supplied buffer.
+///        **API TIER 3.**
+/// @return Bytes written, or the bytes REQUIRED if `cap` is too small (and nothing is
+///         written). Call once with `cap == 0` to size the buffer.
+/// @note **This is the only way to look at what binCV produced on a target with no
+///       OpenCV**, and debugging a frontend you cannot see is not debugging. PGM is
+///       chosen because it is the only image format whose encoder is a `printf` and a
+///       `memcpy` -- binCV must not carry a real codec
+///       ([ARCHITECTURE §7.8](../../../ARCHITECTURE.md): a PNG decoder is **eight
+///       times the size of everything binCV does**, measured).
+/// @note Takes a buffer rather than a path: `bincv_core` does no file I/O, has no
+///       allocator and builds without exceptions. Where the bytes go is the caller's.
+template <typename WordType>
+inline size_t writePgm(BinMatConstView<WordType> src, uint8_t* out, size_t cap,
+                       uint8_t onValue = 255, uint8_t zeroValue = 0) {
+    // "P5\n<w> <h>\n255\n" -- built by hand because <cstdio> into a fixed buffer is
+    // the one thing a freestanding target reliably lacks.
+    uint8_t header[32];
+    size_t h = 0;
+    auto put = [&](char c) { if (h < sizeof(header)) header[h++] = static_cast<uint8_t>(c); };
+    auto putNum = [&](size_t v) {
+        char tmp[24];
+        size_t n = 0;
+        if (v == 0) tmp[n++] = '0';
+        while (v > 0) { tmp[n++] = static_cast<char>('0' + (v % 10)); v /= 10; }
+        while (n > 0) put(tmp[--n]);
+    };
+    put('P'); put('5'); put('\n');
+    putNum(src.width); put(' '); putNum(src.height); put('\n');
+    putNum(255); put('\n');
+
+    const size_t need = h + src.width * src.height;
+    if (out == nullptr || cap < need) return need;
+    // `h` is bounded by `header`'s extent by construction (`put` refuses past it),
+    // but saying so explicitly is what lets the compiler prove the copy is in range --
+    // without it, -Warray-bounds cannot see past the early return and the gate is red.
+    const size_t headerBytes = h < sizeof(header) ? h : sizeof(header);
+    for (size_t i = 0; i < headerBytes; ++i) out[i] = header[i];
+    unpackTo8Bit<WordType>(src, out + headerBytes, src.width, onValue, zeroValue);
+    return need;
 }
 
 } // inline namespace BINCV_ABI_NAMESPACE

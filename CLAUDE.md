@@ -150,8 +150,10 @@ distance transform, contours, template matching.
 **The input boundary is a rule, not a list**
 ([ARCHITECTURE §7.8](ARCHITECTURE.md#78-the-input-contract--where-the-operation-set-begins)):
 binCV accepts a **single-channel, integer-typed, strided pixel array** and turns it into
-an N-bit `QuantMat`. Getting to that array is the caller's. **An operation whose output
-is a WIDE image is somebody else's** — demosaicing, colour conversion, decoding.
+an N-bit `QuantMat`. Getting to that array is the caller's. **An operation NOT ON THE PATH
+FROM PIXELS TO BITS is somebody else's** — decoding, demosaicing, colour conversion,
+each of which leaves the caller exactly as far from bits as before. (Narrower than "any
+wide output": §7.1's median is wide-in, wide-out and is an MVP operation.)
 Everything from such an array down to bits is binCV's, **including sources wider than 8
 bits**, because downconverting first destroys small gradients before the threshold can
 see them (§7.8.1).

@@ -894,9 +894,16 @@ case-by-case judgement:
 | float sources | caller | not integer, and no binariser wants one |
 | encoded files (PNG, JPEG) | caller, or `bincv_io` | a decoder is **8× the size of everything binCV does** — measured |
 
-**The general form of the exclusion: an operation whose OUTPUT IS A WIDE IMAGE is
-somebody else's.** binCV's output is always narrower than its input. That is the whole
-library, and it is a rule rather than a list.
+**The general form of the exclusion: an operation that is NOT ON THE PATH FROM PIXELS
+TO BITS is somebody else's** — decoding, demosaicing, colour conversion. Each of those
+turns one wide image into another and leaves the caller exactly as far from bits as
+before.
+
+**That is narrower than "any operation with a wide output", and deliberately so.**
+[§7.1](#71-denoise--median-of-3)'s median filter runs on the **grayscale** image
+immediately before binarisation and is wide-in, wide-out — it is an MVP operation
+([§7.1](#71-denoise--median-of-3)) and a phrasing that excluded it would be wrong. The
+test is *does this step exist to reach bits*, not *what type does it return*.
 
 #### 7.8.1 Why the wide-source path is binCV's, and not the caller's
 
