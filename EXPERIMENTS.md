@@ -11098,10 +11098,40 @@ and only then did it measure the operation, which is also when the real defect b
 visible. **A benchmark whose input is unrepresentative does not report a pessimistic
 number; it reports a number about something else.**
 
-**Decision: all three ship as strengths.** [E-41](ARCHITECTURE.md#register) is narrowed
-to what remains: **the FAST vector path is x86-only**, so aarch64 keeps the scalar one —
-which did get the offset and bitmask fixes, but not the 32×-fewer-loads structure. NEON
-has everything this needs.
+#### THE NEON PATH, AND A COMPASS REJECT BOTH ARCHITECTURES WERE MISSING
+
+**FAST's vector path now exists on aarch64 too**, and NEON makes two parts of it
+cheaper than x86: the unsigned compares are **native** (`vcgtq_u8` / `vcltq_u8`, no
+sign bias, no saturating-subtract trick), and only the final move-mask needs the
+bit-weight fold ops/pack.hpp already carries.
+
+**AND BOTH PATHS WERE PAYING FULL PRICE ON EVERY GROUP.** The scalar loop has rejected
+on the four compass points since it was written; the vector versions loaded all sixteen
+ring positions and ran the whole run-length loop regardless. **About 1% of pixels on a
+real frame are corners**, so nearly every group can be dismissed from four loads — and
+dismissing it there skips twelve loads *and* the 24-step loop, which is most of the
+function.
+
+**Final, both architectures:**
+
+| | binCV | OpenCV | |
+|---|---|---|---|
+| **x86 FAST** | **0.346 ms** | 0.368 (`cv::FAST`) | **1.06×** |
+| **x86 describe** | **0.128–0.136** | 0.660–0.706 (`cv::ORB`) | **5.0 – 5.3×** |
+| **x86 matching** | 1.96–2.04 | 9.46–10.18 (`cv::BFMatcher`) | **4.65 – 5.21×** |
+| **device FAST** | 3.04 | 2.92 | **0.96×** — parity, from 0.75× |
+| **device describe** | **0.653** | 6.97 | **10.7×** |
+| **device matching** | 19.7 | 38.4 | **1.95×** |
+
+**Matching is 4.7× on x86 but 1.95× on the device**, and that asymmetry is
+[D-6](ARCHITECTURE.md#8-design-decisions) showing through from the other side: x86 has a
+**scalar** `POPCNT` that a Hamming loop over contiguous words uses directly, while
+aarch64's `CNT` is a vector instruction whose result must be reduced. The op that most
+suits binCV's thesis is the one where the deployment target's ISA helps least.
+
+**Decision: all three ship as strengths on both architectures.**
+[E-41](ARCHITECTURE.md#register) is closed. **FAST at parity is the honest outcome** --
+`cv::FAST` is a mature vectorised kernel and matching it is the result, not beating it.
 
 **Method:** `benchmark/feature_benchmark.cpp`, seven interleaved repeats, three runs,
 OpenCV pinned to one thread per [D-58](ARCHITECTURE.md#8-design-decisions); source

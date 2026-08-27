@@ -37,6 +37,9 @@
 #if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
 #define BINCV_FAST_RUNTIME_AVX2 1
 #include <immintrin.h>
+#elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+#define BINCV_FAST_NEON 1
+#include <arm_neon.h>
 #endif
 
 namespace bincv {
@@ -81,7 +84,8 @@ namespace impl {
 ///       "nothing is brighter", which is exactly right.
 __attribute__((target("avx2"))) inline uint32_t fastMask32(const uint8_t* p, long long stride,
                                                            const long long* ringOff,
-                                                           int threshold, int arcLength) {
+                                                           int threshold, int arcLength,
+                                                           int minCompass) {
     const __m256i c = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
     const __m256i t = _mm256_set1_epi8(static_cast<char>(threshold));
     const __m256i hi = _mm256_adds_epu8(c, t);
@@ -91,16 +95,41 @@ __attribute__((target("avx2"))) inline uint32_t fastMask32(const uint8_t* p, lon
     const __m256i limit = _mm256_set1_epi8(static_cast<char>(arcLength - 1));
     (void)stride;
 
+    const __m256i allOnes = _mm256_set1_epi8(-1);
     __m256i mHi[16], mLo[16];
+    // FOUR COMPASS POSITIONS BEFORE THE OTHER TWELVE. About 1% of pixels on a real
+    // frame are corners, so nearly every 32-pixel group can be dismissed from four
+    // loads -- and dismissing it here skips twelve loads AND the whole run-length
+    // loop, which is most of this function. The scalar path has had this reject since
+    // it was written; the vector path was paying full price on every group.
+    for (int c4 = 0; c4 < 4; ++c4) {
+        const int k = c4 * 4;
+        const __m256i v =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + ringOff[k]));
+        mHi[k] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(v, hi), zero), allOnes);
+        mLo[k] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(lo, v), zero), allOnes);
+    }
+    {
+        // Per lane, count how many of the four compass points pass. A mask byte is
+        // 0xFF, so `sub` of the mask ADDS one -- four subtracts give the count.
+        __m256i cntHi = zero, cntLo = zero;
+        for (int c4 = 0; c4 < 4; ++c4) {
+            cntHi = _mm256_sub_epi8(cntHi, mHi[c4 * 4]);
+            cntLo = _mm256_sub_epi8(cntLo, mLo[c4 * 4]);
+        }
+        const __m256i need = _mm256_set1_epi8(static_cast<char>(minCompass - 1));
+        const __m256i any = _mm256_or_si256(_mm256_cmpgt_epi8(cntHi, need),
+                                            _mm256_cmpgt_epi8(cntLo, need));
+        if (_mm256_movemask_epi8(any) == 0) return 0;
+    }
     for (int k = 0; k < 16; ++k) {
+        if ((k & 3) == 0) continue;   // already loaded above
         const __m256i v =
             _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + ringOff[k]));
         // v > hi  <=>  subs_epu8(v, hi) != 0
-        mHi[k] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(v, hi), zero),
-                                  _mm256_set1_epi8(-1));
+        mHi[k] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(v, hi), zero), allOnes);
         // v < lo  <=>  subs_epu8(lo, v) != 0
-        mLo[k] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(lo, v), zero),
-                                  _mm256_set1_epi8(-1));
+        mLo[k] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(lo, v), zero), allOnes);
     }
 
     __m256i runH = zero, runL = zero, found = zero;
@@ -119,6 +148,86 @@ inline bool hasFastAvx2() {
     static const bool kYes = __builtin_cpu_supports("avx2");
     return kYes;
 }
+/// @brief Pixels per vector iteration. AVX2 is 32 bytes wide.
+constexpr size_t kFastLanes = 32;
+#elif defined(BINCV_FAST_NEON)
+/// @brief Which of 16 consecutive pixels are FAST corners, as 16 bits. **INTERNAL.**
+///
+/// **THE SAME STRUCTURE AS THE AVX2 PATH, AND NEON MAKES TWO PARTS OF IT CHEAPER.**
+/// The ring loads are contiguous the same way -- ring position `k` is 16 consecutive
+/// bytes at a fixed offset -- so sixteen `vld1q_u8` replace sixteen scalar loads *per
+/// pixel*.
+///
+/// Where x86 needs `subs_epu8(v, hi) != 0` to get an unsigned compare out of signed
+/// instructions, **NEON compares unsigned natively**: `vcgtq_u8` and `vcltq_u8`, one
+/// instruction each and no bias. Saturation is still used for the thresholds
+/// (`vqaddq_u8` / `vqsubq_u8`), because `c + t` stopping at 255 is exactly the rule
+/// "nothing is brighter than a saturated centre".
+///
+/// The only thing NEON lacks is a move-mask, and ops/pack.hpp already carries the
+/// answer: AND per-lane bit weights, then three pairwise adds fold sixteen bytes into
+/// a sixteen-bit mask.
+inline uint32_t fastMask32(const uint8_t* p, long long stride, const long long* ringOff,
+                           int threshold, int arcLength, int minCompass) {
+    (void)stride;
+    const uint8x16_t c = vld1q_u8(p);
+    const uint8x16_t t = vdupq_n_u8(static_cast<uint8_t>(threshold));
+    const uint8x16_t hi = vqaddq_u8(c, t);
+    const uint8x16_t lo = vqsubq_u8(c, t);
+    const uint8x16_t one = vdupq_n_u8(1);
+    const uint8x16_t limit = vdupq_n_u8(static_cast<uint8_t>(arcLength - 1));
+
+    uint8x16_t mHi[16], mLo[16];
+    // FOUR COMPASS POSITIONS BEFORE THE OTHER TWELVE -- see the AVX2 path. On a real
+    // frame about 1% of pixels are corners, so nearly every group is dismissed here
+    // and skips twelve loads plus the whole run-length loop.
+    for (int c4 = 0; c4 < 4; ++c4) {
+        const int k = c4 * 4;
+        const uint8x16_t v = vld1q_u8(p + ringOff[k]);
+        mHi[k] = vcgtq_u8(v, hi);
+        mLo[k] = vcltq_u8(v, lo);
+    }
+    {
+        uint8x16_t cntHi = vdupq_n_u8(0), cntLo = vdupq_n_u8(0);
+        const uint8x16_t one8 = vdupq_n_u8(1);
+        for (int c4 = 0; c4 < 4; ++c4) {
+            cntHi = vaddq_u8(cntHi, vandq_u8(mHi[c4 * 4], one8));
+            cntLo = vaddq_u8(cntLo, vandq_u8(mLo[c4 * 4], one8));
+        }
+        const uint8x16_t need = vdupq_n_u8(static_cast<uint8_t>(minCompass));
+        const uint8x16_t any = vorrq_u8(vcgeq_u8(cntHi, need), vcgeq_u8(cntLo, need));
+        if (vmaxvq_u8(any) == 0) return 0;
+    }
+    for (int k = 0; k < 16; ++k) {
+        if ((k & 3) == 0) continue;   // already loaded above
+        const uint8x16_t v = vld1q_u8(p + ringOff[k]);
+        mHi[k] = vcgtq_u8(v, hi);   // native unsigned compare -- no bias, no saturate
+        mLo[k] = vcltq_u8(v, lo);
+    }
+
+    uint8x16_t runH = vdupq_n_u8(0), runL = vdupq_n_u8(0), found = vdupq_n_u8(0);
+    const int steps = 16 + arcLength - 1;
+    for (int k = 0; k < steps; ++k) {
+        const int idx = k & 15;
+        runH = vandq_u8(vaddq_u8(runH, one), mHi[idx]);
+        runL = vandq_u8(vaddq_u8(runL, one), mLo[idx]);
+        found = vorrq_u8(found, vcgtq_u8(runH, limit));
+        found = vorrq_u8(found, vcgtq_u8(runL, limit));
+    }
+
+    // No move-mask on aarch64: AND bit weights, then fold sixteen bytes to sixteen bits.
+    const uint8x16_t weights = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8x16_t w = vandq_u8(found, weights);
+    uint8x8_t f = vpadd_u8(vget_low_u8(w), vget_high_u8(w));
+    f = vpadd_u8(f, f);
+    f = vpadd_u8(f, f);
+    return static_cast<uint32_t>(vget_lane_u16(vreinterpret_u16_u8(f), 0));
+}
+
+/// @brief NEON is baseline on aarch64, so there is nothing to dispatch on.
+inline bool hasFastAvx2() { return true; }
+/// @brief Pixels per vector iteration. NEON is 16 bytes wide.
+constexpr size_t kFastLanes = 16;
 #endif
 
 } // namespace impl
@@ -174,16 +283,16 @@ inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t st
     for (size_t y = 3; y + 3 < height; ++y) {
         const SrcT* row = img + y * stride;
         size_t x = 3;
-#if defined(BINCV_FAST_RUNTIME_AVX2)
+#if defined(BINCV_FAST_RUNTIME_AVX2) || defined(BINCV_FAST_NEON)
         // The vector path answers "is this a corner" for 32 pixels at a time; the
         // SCORE is still scalar, and that is the right split -- about 1% of pixels are
         // corners on a real frame, so scoring is rare and rejection is everything.
         if constexpr (sizeof(SrcT) == 1) {
             if (impl::hasFastAvx2() && threshold > 0 && threshold < 256) {
-                for (; x + 32 + 3 <= width; x += 32) {
+                for (; x + impl::kFastLanes + 3 <= width; x += impl::kFastLanes) {
                     uint32_t m = impl::fastMask32(
                         reinterpret_cast<const uint8_t*>(row + x), static_cast<long long>(stride),
-                        ringOff, static_cast<int>(threshold), arcLength);
+                        ringOff, static_cast<int>(threshold), arcLength, minCompass);
                     while (m != 0) {
                         const unsigned b = static_cast<unsigned>(__builtin_ctz(m));
                         m &= m - 1;
