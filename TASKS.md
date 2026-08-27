@@ -3919,26 +3919,79 @@ borrowing a name here.
 compare, `|`, two `setTo` calls, all in `CV_32F` over a full 8-bit image. binCV should
 win this one by a wide margin, and if it does not, that is the finding.
 
-### T5.12 · Getting an image in the first place · `TODO`
+### T5.12 · Input paths for systems with no OpenCV · `TODO`
 
-**binCV HAS NO FILE OR STREAM INPUT AT ALL.** Not a reader, not a wrapper, nothing.
-`benchmark/frontend_sequence.cpp` and `examples/vio_frontend.cpp` both open with
-`cv::imread(...)`, so **a user's first line of binCV code is an OpenCV call**, and the
-path from "I have a PNG" to "I have bits" is undocumented and unfused.
+**T5.6's `packFrom8Bit` assumes a WHOLE 8-BIT FRAME ALREADY IN MEMORY.** That is one
+embedded case and not the general one.
 
-**What to ship, and what NOT to:**
+1. **Streaming / line-at-a-time ingestion.** A microcontroller reading a sensor over
+   DMA gets **rows as they arrive** and may not have RAM for a frame — the footprint
+   argument that justifies binCV is the same argument that says it cannot buffer one.
+   Ship `packRows(const uint8_t* rows, size_t n, ...)` so a caller can consume a line
+   buffer, and make the frame-at-once entry point a loop over it. **`ops/` kernels
+   already take views and allocate nothing, so the rest of the pipeline is ready for
+   this; ingestion is the piece that is not.**
+2. **Wider-than-8-bit sensor output.** 10- and 12-bit raw is ordinary on image sensors.
+   A quantisation policy over a `uint16_t` source is the same op with a different
+   operand width; **the Y plane of a YUV buffer is already covered** by
+   `packFrom8Bit`'s stride, and should be documented as such rather than reimplemented.
+3. **The comparison must not require OpenCV either.** Every reference figure in
+   [EXPERIMENTS.md](EXPERIMENTS.md) comes from a harness that calls `cv::imread`. A
+   core-only user cannot reproduce a single one of them.
+
+### T5.13 · Output paths, including without OpenCV · `TODO`
+
+**`toCVMat` / `toCVMatNormalized` are the ONLY way out, they need OpenCV, and they are
+the slowest thing in the library** (per-pixel loop, T5.7).
+
+- **`unpackTo8Bit(...)` in core** — the exact mirror of `packFrom8Bit`, and the thing
+  T5.7 should optimise rather than optimising the `cv::Mat` wrapper directly.
+- **A PGM/PNM writer in core.** Six ASCII bytes of header and the pixel data. **On a
+  target with no OpenCV this is the only way to look at what binCV produced**, and
+  debugging a frontend you cannot see is not debugging.
+- **`toCVMat` becomes a thin wrapper** over `unpackTo8Bit`, so there is one
+  implementation and one place to optimise.
+
+### T5.14 · Encoded image files: what binCV does and does not own · `TODO — DISCUSS FIRST`
+
+**binCV MUST NOT SHIP JPEG OR PNG DECODING.** That is libjpeg/libpng/zlib-scale
+dependency for a library whose entire argument is footprint, and it is not the problem
+binCV is good at.
+
+**What OpenCV does, for reference:** codecs live in `imgcodecs`, a **separate module**
+that can be switched off (`BUILD_opencv_imgcodecs=OFF`), linking system libjpeg/libpng/
+libtiff/libwebp or **vendored copies under `3rdparty/`**. The structural answer is
+"a separate optional module", not "core carries codecs".
+
+**AND THE USE CASE SPLITS CLEANLY, WHICH IS THE POINT.**
+
+| | needs a codec? | who |
+|---|---|---|
+| **Deployment** — sensor → driver → bytes → binCV | **no** | T5.6 / T5.12 |
+| **Evaluation** — a dataset of PNGs → binCV | yes | tooling |
+
+**Nobody decodes a PNG in a VIO hot loop.** EuRoC ships PNGs because it is a *dataset*;
+a robot does not. So **codec support is a tooling concern, not a library concern**, and
+that is the argument for keeping it out of `bincv_core` entirely.
+
+**Three options, to decide together:**
 
 | | |
 |---|---|
-| **`bincv::imread(path, QuantMat&, policy)`** — behind `BINCV_WITH_OPENCV` | wraps `cv::imread` and **fuses T5.9's quantisation into the same pass**. No new dependency, and it removes the 8-bit intermediate the two-step version forces. Mirrors `cv::imread`'s shape ([CLAUDE.md](CLAUDE.md) style). |
-| **A capture adapter** for `cv::VideoCapture` | same argument, for streams. The frame arrives as a `cv::Mat`; quantise it on the way in rather than after. |
-| **A raw / PGM reader in core** | the only file input that adds **no dependency** — useful for core-only tests and for an embedded target with a filesystem. Small, and it makes core-only demonstrable rather than merely buildable. |
-| **~~Codecs~~** | **binCV must not ship JPEG or PNG decoding.** That is libjpeg/libpng/ffmpeg-scale dependency for a library whose entire argument is footprint. If a caller has an encoded file, they have a decoder. |
+| **A — document, ship nothing** | binCV's contract starts at "bytes in memory". Examples show `cv::imread` (or `stb_image`) → `packFrom8Bit`. Smallest, most honest, and leaves an evaluation user to wire it up themselves. |
+| **B — a header-only decoder in `examples/` and `tools/`, never in the library** | `stb_image` is a single public-domain header covering JPEG and PNG. It makes the examples run with **no OpenCV at all**, which is the first time a core-only user could try binCV end to end. The library stays clean because the decoder never enters it. |
+| **C — an optional `bincv-io` module**, OpenCV's shape | off by default; a real module boundary. Most work, and only worth it if binCV is expected to be someone's *only* imaging dependency. |
 
-**And the deployment path is none of these.** An embedded VIO gets bytes from a driver,
-not from `imread` — that is T5.6's `packFrom8Bit`, and it stays the primitive everything
-else is built on. **These are convenience over that primitive, not a second
-implementation of it.**
+**Recommendation: B now, C never unless asked.** It gets a core-only user from a
+dataset to keypoints without OpenCV, costs one vendored header outside the library, and
+keeps `bincv_core` exactly as it is.
+
+**~~`bincv::imread` wrapping `cv::imread`~~ — WITHDRAWN.** It was proposed as a fusion
+of load and quantise, and **it fuses nothing**: `cv::imread` has already materialised
+the 8-bit `cv::Mat` before binCV sees it, so the "saved" intermediate was never saved.
+What remains is two lines of sugar that only exists when OpenCV is already present.
+**The fusion that IS real is T5.11's** — edge detection straight into bit-planes, where
+the boolean per pixel never becomes a byte at all.
 
 
 ---
