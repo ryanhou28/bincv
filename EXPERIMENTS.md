@@ -11248,3 +11248,40 @@ close on, because it is a different question: the cost is real, it is worst on t
 upper pyramid levels T4.1 targets, and it is not genericity in N. It runs in the
 phase whose code it gates, alongside E-7, rather than being carried as a note in a
 log.)
+
+---
+
+### X-78 · Lockstep waste, priced BEFORE the batch is written · `RULE PRE-REGISTERED`
+
+**T5.16 NAMES ITS OWN KILL CONDITION AND IT COSTS ALMOST NOTHING TO CHECK.** Eight
+keypoints in AVX2 lanes iterate **in lockstep**, so a batch runs until its *last* lane
+converges. [X-68](#x-68--track-decomposed--915-is-iterated-residualsums--done) put the
+**mean** at 4.29 iterations per point per level — but the batch pays the **maximum over
+eight**, and nothing measured so far says what that is.
+
+> **THE WHOLE 2.1× KERNEL WIN IS MULTIPLIED BY `mean / mean-of-max-8`.** If that ratio
+> is 0.5, arm D lands at 1.05× and T5.16 is not worth writing. **This is knowable from
+> a histogram, before any AVX2 exists.**
+
+**Predicted end-to-end factor on `track`:**
+
+```
+    naive lockstep  =  2.1  x  mean(iters) / mean(batch max over 8)
+    with lane refill =  2.1  x  mean(iters) / (mean(iters) + refill overhead)
+```
+
+**DECISION RULE, WRITTEN FIRST:**
+
+| measured `mean / mean-of-max-8` | band | what gets built |
+|---|---|---|
+| **≥ 0.70** | **A** | naive lockstep — ≥ 1.47× on `track`, and refill is not worth its complexity |
+| **0.45 – 0.70** | **B** | **lane refill**: a converged lane takes the next untracked point instead of idling |
+| **< 0.45** | **C** | refill is **mandatory**; naive lockstep would be a regression and must not ship |
+| refill also under 1.3× projected | **D** | **T5.16 CLOSES NEGATIVE.** Record it and stop — `track` is already 5.5× faster than where Phase 5 started |
+
+**Measured on the same EuRoC sequences as [X-64](#x-64), at the shipped 1/2/2/2 ladder
+and `seal_params.yaml`'s iteration cap**, counting iterations actually executed per
+point per level — the loop's own `it`, including the points that exit at 1.
+
+**Instrumentation:** `BINCV_LK_ITERATION_HISTOGRAM`, off by default, writing one
+`unsigned` per (level, point). It changes no shipped code path.
