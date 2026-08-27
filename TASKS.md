@@ -3823,7 +3823,8 @@ must match — rather than the thing binCV depends on.
 rule, or a LUT, has to convert and then re-threshold — two passes over the image and an
 8-bit intermediate that the whole library exists to avoid.
 
-**Ship a policy parameter with named defaults:**
+**Ship ALL of these, not only the ones the reference happens to use.** The default
+preserves today's behaviour; every other policy is built and tested alongside it.
 
 | policy | rule | why it exists |
 |---|---|---|
@@ -3856,8 +3857,9 @@ asymmetric L, `p1` above / `p2` centre / `p3` right, computed as
 **Two axes are missing:**
 
 1. **The neighbourhood.** Make the pattern a compile-time parameter — a set of
-   `(dy, dx)` offsets — with the reference's L and its 5-pixel form as named defaults.
-   The user's own pattern is then a template argument, not a fork.
+   `(dy, dx)` offsets — with **both** of the reference's patterns shipped as named
+   constants, not just the L. An arbitrary pattern is then a template argument rather
+   than a fork, and the two named ones are the defaults, not the limit.
 2. **8-bit input.** The reference filters the **grayscale** image, before binarisation.
    binCV's median is binary-only, so it cannot sit where the reference puts it. A
    min/max sorting network handles 8-bit; for binary it must still collapse to `maj3`,
@@ -3883,14 +3885,25 @@ mask     = (diff_x >= t) OR (diff_y >= t)
 not an adjacent `[-1, 1]`. **The defaults must be these**, so the shipped call
 reproduces the reference exactly.
 
-**Four axes the caller should control:**
+**SHIP THE WHOLE CROSS-PRODUCT. The reference's combination is the DEFAULT, not the
+only one built** — the point of the op is that these choices are cheap and a caller
+picking a different one should not have to fork the kernel.
 
-| axis | options | default |
+| axis | **all options shipped** | default (= the reference) |
 |---|---|---|
-| combine | `Or`, `And` | **`Or`** |
-| relation | `Ge`, `Gt` | **`Ge`** |
-| spatial | `Wide` (`[-1,0,1]`), `Forward` (`v[x+1] − v[x]`), `Backward` (`v[x] − v[x−1]`) | **`Wide`** |
-| threshold | integer | — |
+| combine | `Or`, `And` | `Or` |
+| relation | `Ge`, `Gt` | `Ge` |
+| spatial | `Wide` (`[-1,0,1]`), `Forward` (`v[x+1] − v[x]`), `Backward` (`v[x] − v[x−1]`) | `Wide` |
+| threshold | any integer | — |
+
+That is **2 × 2 × 3 = twelve** combinations, and all twelve are the deliverable. They are
+compile-time parameters, so a caller pays only for the one instantiated and the
+comparison folds to a single predicate in the inner loop — the same requirement T5.9
+puts on its policies, and for the same measured reason ([X-72](EXPERIMENTS.md): a
+runtime flag cost 17%).
+
+**Tested as a cross-product, not at the default.** A twelve-way option set where only
+one combination has a test is a one-combination op with eleven untested branches.
 
 **This is 8-bit in, 1-bit out — the same shape as T5.9, and it should fuse with it.**
 Computing an 8-bit edge image and then packing it is two passes and an intermediate;
@@ -3905,6 +3918,27 @@ borrowing a name here.
 **The denominator is the reference's own OpenCV spelling** — `filter2D` ×2, `abs` ×2,
 compare, `|`, two `setTo` calls, all in `CV_32F` over a full 8-bit image. binCV should
 win this one by a wide margin, and if it does not, that is the finding.
+
+### T5.12 · Getting an image in the first place · `TODO`
+
+**binCV HAS NO FILE OR STREAM INPUT AT ALL.** Not a reader, not a wrapper, nothing.
+`benchmark/frontend_sequence.cpp` and `examples/vio_frontend.cpp` both open with
+`cv::imread(...)`, so **a user's first line of binCV code is an OpenCV call**, and the
+path from "I have a PNG" to "I have bits" is undocumented and unfused.
+
+**What to ship, and what NOT to:**
+
+| | |
+|---|---|
+| **`bincv::imread(path, QuantMat&, policy)`** — behind `BINCV_WITH_OPENCV` | wraps `cv::imread` and **fuses T5.9's quantisation into the same pass**. No new dependency, and it removes the 8-bit intermediate the two-step version forces. Mirrors `cv::imread`'s shape ([CLAUDE.md](CLAUDE.md) style). |
+| **A capture adapter** for `cv::VideoCapture` | same argument, for streams. The frame arrives as a `cv::Mat`; quantise it on the way in rather than after. |
+| **A raw / PGM reader in core** | the only file input that adds **no dependency** — useful for core-only tests and for an embedded target with a filesystem. Small, and it makes core-only demonstrable rather than merely buildable. |
+| **~~Codecs~~** | **binCV must not ship JPEG or PNG decoding.** That is libjpeg/libpng/ffmpeg-scale dependency for a library whose entire argument is footprint. If a caller has an encoded file, they have a decoder. |
+
+**And the deployment path is none of these.** An embedded VIO gets bytes from a driver,
+not from `imread` — that is T5.6's `packFrom8Bit`, and it stays the primitive everything
+else is built on. **These are convenience over that primitive, not a second
+implementation of it.**
 
 
 ---
