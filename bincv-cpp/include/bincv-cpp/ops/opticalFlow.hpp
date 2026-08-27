@@ -1667,6 +1667,206 @@ inline GradientCovariance levelCovariance(const LKLevelN<N, WordType>& lv, Rect 
     return gradientCovariance<N, WordType>(lv.dxMag, lv.dyMag, lv.dxSign, lv.dySign, window);
 }
 
+/// @brief One point, one level — the whole tracking body for a single keypoint.
+///        **INTERNAL.**
+///
+/// **THIS WAS THE `parallelFor` LAMBDA AND IT IS UNCHANGED.** It was lifted out so
+/// that [X-79](../../../EXPERIMENTS.md)'s batched path has something to fall back
+/// TO: a window the batch cannot stage — wider than a word, or taller than
+/// `kLkBatchMaxRows` — must still be tracked, and tracked identically. Naming the
+/// body once is what keeps "identically" a property of the code rather than of two
+/// copies staying in step.
+template <typename LevelT, typename WordType = typename LevelT::Word>
+inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_t p,
+                          bool finest, float scale, long long levelWidth,
+                          long long levelHeight, double kLevelMinEigScale) {
+    if (li > entryLevelFor(c, p)) return;
+    const float prevX = c.prevPts[p].x * scale - c.halfWinX;
+    const float prevY = c.prevPts[p].y * scale - c.halfWinY;
+    const long long anchorX = floorToLL(prevX);
+    const long long anchorY = floorToLL(prevY);
+
+    // LOSS RULE 1 -- the window's origin is out of range. The reference's
+    // own bounds, which allow a window almost entirely outside; what is
+    // outside is then clipped away rather than padded (deviation (ii)).
+    if (anchorX < -static_cast<long long>(c.winW) || anchorX >= levelWidth ||
+        anchorY < -static_cast<long long>(c.winH) || anchorY >= levelHeight) {
+        if (finest) c.status[p] = 0;
+        return;
+    }
+
+    const Rect window(static_cast<int>(anchorX), static_cast<int>(anchorY), c.winW, c.winH);
+    const RegionWords<WordType> region =
+        clipRegion<WordType>(lv.width(), lv.height(), window);
+    if (region.isEmpty) {
+        if (finest) c.status[p] = 0;
+        return;
+    }
+
+    // X-66: extract the window's ITERATION-INVARIANT words ONCE. X-68 measured
+    // a mean of 4.29 iterations per point per level, every one of which was
+    // re-reading the same eight previous-frame words per row. `region` is fixed
+    // for the whole iteration, so one staging serves all of them.
+    //
+    // The buffer is a STACK local -- 2 048 B at the shipped N = 2 -- because
+    // CLAUDE.md forbids a kernel allocating and this operation has no caller
+    // scratch. `stageWindow` declines rather than overrunning it.
+    StagedWindow<LevelT::Bits, WordType> stagedWindow;
+    TapCache<LevelT::Bits, WordType> tapCache;   // X-70; invalid until first use
+    const bool staged = stageWindow(lv, region, stagedWindow);
+
+    // BIT-PARALLEL: the 2x2 matrix, one fused traversal, zero scratch.
+    const GradientCovariance a = levelCovariance(lv, window);
+    const double a11 = static_cast<double>(a.sumXX);
+    const double a22 = static_cast<double>(a.sumYY);
+    const double a12 = static_cast<double>(a.sumXY);
+    const double det = a11 * a22 - a12 * a12;
+
+    // LOSS RULE 2 -- a degenerate window. `det` is a difference of
+    // products of exact popcounts, so it is 0 or at least 1 and the test
+    // needs no epsilon (deviation (iv)).
+    const double minEig = static_cast<double>(minEigenValue(a.sumXX, a.sumYY,
+                                                                  a.sumXY));
+    const double referenceMinEig = kLevelMinEigScale * minEig /
+                                   static_cast<double>(c.winW * c.winH);
+    if (det <= 0.0 || referenceMinEig < static_cast<double>(c.minEigThreshold)) {
+        if (finest) c.status[p] = 0;
+        return;
+    }
+
+    float nextX = c.nextPts[p].x - c.halfWinX;
+    float nextY = c.nextPts[p].y - c.halfWinY;
+    double prevDeltaX = 0.0;
+    double prevDeltaY = 0.0;
+    bool inRange = true;
+
+    // The tap offset and the four weights live INSIDE the loop, and
+    // deliberately do not survive it. They used to be declared here so
+    // that the error term below could reuse them, which made `err` the
+    // residual at the previous ITERATE rather than at the position
+    // actually returned -- measured 134% high at c.maxIterations = 1, and
+    // wrong by a whole half-step whenever the oscillation rule fired.
+    // The reference recomputes them in a separate pass after the loop
+    // (LKTrackerInvoker.cpp:222-259); so does this, below.
+    for (int it = 0; it < c.maxIterations; ++it) {
+#ifdef BINCV_LK_ITERATION_HISTOGRAM
+        {
+            const IterationTrace& tr = iterationTrace();
+            if (tr.counts != nullptr) ++tr.counts[li * tr.pointCount + p];
+        }
+#endif
+        const long long originX = floorToLL(nextX);
+        const long long originY = floorToLL(nextY);
+
+        // LOSS RULE 3 -- the estimate walked out of range mid-iteration.
+        if (originX < -static_cast<long long>(c.winW) || originX >= levelWidth ||
+            originY < -static_cast<long long>(c.winH) || originY >= levelHeight) {
+            if (finest) c.status[p] = 0;
+            inRange = false;
+            break;
+        }
+
+        // FLOAT, once per iteration: split the displacement of the whole
+        // window into an integer tap offset and a fraction. Every pixel of
+        // the window shares both, which is exactly why the four weights
+        // can leave the per-pixel loop.
+        // THE DISPLACEMENT IS MEASURED FROM `prevX`, NOT FROM THE
+        // INTEGER ANCHOR. `nextX - anchorX` looks equivalent and is not:
+        // it differs by `frac(prevX)`, which is zero at level 0 for
+        // integer keypoints and is NOT zero at any coarser level, where
+        // `prevPt / 2^level` is fractional. Anchoring the window on the
+        // grid moves which pixels the aperture covers (deviation (i));
+        // it must not move what the residual is a residual OF, which is
+        // `I(z)` against `J(z + d)` for `d` the full-precision flow.
+        // Measured on the repo's real frame with prev == next: the wrong
+        // spelling put a stationary point up to 1.4 px off through four
+        // levels, because each level converged to `d - frac` and handed
+        // twice that error to the next one down.
+        const double offX = static_cast<double>(nextX) - static_cast<double>(prevX);
+        const double offY = static_cast<double>(nextY) - static_cast<double>(prevY);
+        const long long tapX = static_cast<long long>(std::floor(offX));
+        const long long tapY = static_cast<long long>(std::floor(offY));
+        const double fx = offX - static_cast<double>(tapX);
+        const double fy = offY - static_cast<double>(tapY);
+        const double w00 = (1.0 - fx) * (1.0 - fy);
+        const double w01 = fx * (1.0 - fy);
+        const double w10 = (1.0 - fx) * fy;
+        const double w11 = fx * fy;
+
+            // BIT-PARALLEL: ten exact integers, twenty popcounts per word --
+        // reading the previous frame's eight words from `staged` when this
+        // window could be staged (X-66). Bit-exact either way; the staged
+        // path differs only in where the words come from.
+        TapSums sumsX;
+        TapSums sumsY;
+        residualSums(lv, region, tapX, tapY, sumsX, sumsY,
+                     staged ? &stagedWindow : nullptr, staged ? &tapCache : nullptr);
+
+        const double b1 = sumsX.combine(w00, w01, w10, w11);
+        const double b2 = sumsY.combine(w00, w01, w10, w11);
+
+        // FLOAT, once per iteration: the 2x2 solve. The factor of 2 turns
+        // the raw [-1, 0, 1] tap into a central difference; see UNITS.
+        const double deltaX = kCentralDifferenceScale * (a12 * b2 - a22 * b1) / det;
+        const double deltaY = kCentralDifferenceScale * (a12 * b1 - a11 * b2) / det;
+
+        nextX += static_cast<float>(deltaX);
+        nextY += static_cast<float>(deltaY);
+        c.nextPts[p].x = nextX + c.halfWinX;
+        c.nextPts[p].y = nextY + c.halfWinY;
+
+        // TERMINATION 1 -- converged.
+        if (deltaX * deltaX + deltaY * deltaY <= c.eps2) break;
+
+        // TERMINATION 2 -- oscillation: this step almost exactly undoes
+        // the last one. Back off by half a step and stop. The reference's
+        // rule, thresholds included.
+        if (it > 0 && std::fabs(deltaX + prevDeltaX) < 0.01 &&
+            std::fabs(deltaY + prevDeltaY) < 0.01) {
+            c.nextPts[p].x -= static_cast<float>(deltaX * 0.5);
+            c.nextPts[p].y -= static_cast<float>(deltaY * 0.5);
+            nextX = c.nextPts[p].x - c.halfWinX;
+            nextY = c.nextPts[p].y - c.halfWinY;
+            break;
+        }
+        prevDeltaX = deltaX;
+        prevDeltaY = deltaY;
+    }
+
+    // THE FINAL PASS, AND IT IS THE REFERENCE'S OWN SEPARATE PASS. Two
+    // things happen here and both are ABOUT THE POSITION THAT IS
+    // RETURNED, not about the last iterate: the range test is re-applied
+    // to it, and -- only if it survives -- the error term is measured
+    // there, from taps and weights recomputed from `c.nextPts[p]`.
+    if (finest && c.status[p] != 0 && inRange) {
+        const float finalX = c.nextPts[p].x - c.halfWinX;
+        const float finalY = c.nextPts[p].y - c.halfWinY;
+        const long long finalOriginX = floorToLL(finalX);
+        const long long finalOriginY = floorToLL(finalY);
+        if (finalOriginX < -static_cast<long long>(c.winW) || finalOriginX >= levelWidth ||
+            finalOriginY < -static_cast<long long>(c.winH) || finalOriginY >= levelHeight) {
+            // LOSS RULE 3, applied to the RETURNED estimate. The last
+            // iteration's step can carry the point out of range after the
+            // in-loop test has already passed, and `status` describes the
+            // position the caller gets. The reference makes this same test
+            // in this same place -- but only when `err` was requested,
+            // which makes its `status` depend on whether the caller wanted
+            // an error value. That quirk is not reproduced (deviation
+            // (vii)); the test is unconditional here.
+            c.status[p] = 0;
+        } else if (c.err != nullptr) {
+            const double offX = static_cast<double>(finalX) - static_cast<double>(prevX);
+            const double offY = static_cast<double>(finalY) - static_cast<double>(prevY);
+            const long long tapX = static_cast<long long>(std::floor(offX));
+            const long long tapY = static_cast<long long>(std::floor(offY));
+            const double fx = offX - static_cast<double>(tapX);
+            const double fy = offY - static_cast<double>(tapY);
+            c.err[p] = windowMeanAbsDiff(lv, region, tapX, tapY, (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy),
+                (1.0 - fx) * fy, fx * fy);
+        }
+    }
+}
+
 /// @brief Track every point through ONE pyramid level. **INTERNAL, and the whole
 ///        of the tracker's per-level logic.**
 /// @tparam LevelT `LKLevel<W>` or `LKLevelN<N, W>` -- the body is written against
@@ -1723,191 +1923,8 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
     // Serial unless a caller installs a backend (core/parallel.hpp). On a core-only
     // build this is exactly the loop it replaces.
     parallelFor(c.pointCount, [&](size_t p) {
-        if (li > entryLevelFor(c, p)) return;
-        const float prevX = c.prevPts[p].x * scale - c.halfWinX;
-        const float prevY = c.prevPts[p].y * scale - c.halfWinY;
-        const long long anchorX = floorToLL(prevX);
-        const long long anchorY = floorToLL(prevY);
-
-        // LOSS RULE 1 -- the window's origin is out of range. The reference's
-        // own bounds, which allow a window almost entirely outside; what is
-        // outside is then clipped away rather than padded (deviation (ii)).
-        if (anchorX < -static_cast<long long>(c.winW) || anchorX >= levelWidth ||
-            anchorY < -static_cast<long long>(c.winH) || anchorY >= levelHeight) {
-            if (finest) c.status[p] = 0;
-            return;
-        }
-
-        const Rect window(static_cast<int>(anchorX), static_cast<int>(anchorY), c.winW, c.winH);
-        const RegionWords<WordType> region =
-            clipRegion<WordType>(lv.width(), lv.height(), window);
-        if (region.isEmpty) {
-            if (finest) c.status[p] = 0;
-            return;
-        }
-
-        // X-66: extract the window's ITERATION-INVARIANT words ONCE. X-68 measured
-        // a mean of 4.29 iterations per point per level, every one of which was
-        // re-reading the same eight previous-frame words per row. `region` is fixed
-        // for the whole iteration, so one staging serves all of them.
-        //
-        // The buffer is a STACK local -- 2 048 B at the shipped N = 2 -- because
-        // CLAUDE.md forbids a kernel allocating and this operation has no caller
-        // scratch. `stageWindow` declines rather than overrunning it.
-        StagedWindow<LevelT::Bits, WordType> stagedWindow;
-        TapCache<LevelT::Bits, WordType> tapCache;   // X-70; invalid until first use
-        const bool staged = stageWindow(lv, region, stagedWindow);
-
-        // BIT-PARALLEL: the 2x2 matrix, one fused traversal, zero scratch.
-        const GradientCovariance a = levelCovariance(lv, window);
-        const double a11 = static_cast<double>(a.sumXX);
-        const double a22 = static_cast<double>(a.sumYY);
-        const double a12 = static_cast<double>(a.sumXY);
-        const double det = a11 * a22 - a12 * a12;
-
-        // LOSS RULE 2 -- a degenerate window. `det` is a difference of
-        // products of exact popcounts, so it is 0 or at least 1 and the test
-        // needs no epsilon (deviation (iv)).
-        const double minEig = static_cast<double>(minEigenValue(a.sumXX, a.sumYY,
-                                                                      a.sumXY));
-        const double referenceMinEig = kLevelMinEigScale * minEig /
-                                       static_cast<double>(c.winW * c.winH);
-        if (det <= 0.0 || referenceMinEig < static_cast<double>(c.minEigThreshold)) {
-            if (finest) c.status[p] = 0;
-            return;
-        }
-
-        float nextX = c.nextPts[p].x - c.halfWinX;
-        float nextY = c.nextPts[p].y - c.halfWinY;
-        double prevDeltaX = 0.0;
-        double prevDeltaY = 0.0;
-        bool inRange = true;
-
-        // The tap offset and the four weights live INSIDE the loop, and
-        // deliberately do not survive it. They used to be declared here so
-        // that the error term below could reuse them, which made `err` the
-        // residual at the previous ITERATE rather than at the position
-        // actually returned -- measured 134% high at c.maxIterations = 1, and
-        // wrong by a whole half-step whenever the oscillation rule fired.
-        // The reference recomputes them in a separate pass after the loop
-        // (LKTrackerInvoker.cpp:222-259); so does this, below.
-        for (int it = 0; it < c.maxIterations; ++it) {
-#ifdef BINCV_LK_ITERATION_HISTOGRAM
-            {
-                const IterationTrace& tr = iterationTrace();
-                if (tr.counts != nullptr) ++tr.counts[li * tr.pointCount + p];
-            }
-#endif
-            const long long originX = floorToLL(nextX);
-            const long long originY = floorToLL(nextY);
-
-            // LOSS RULE 3 -- the estimate walked out of range mid-iteration.
-            if (originX < -static_cast<long long>(c.winW) || originX >= levelWidth ||
-                originY < -static_cast<long long>(c.winH) || originY >= levelHeight) {
-                if (finest) c.status[p] = 0;
-                inRange = false;
-                break;
-            }
-
-            // FLOAT, once per iteration: split the displacement of the whole
-            // window into an integer tap offset and a fraction. Every pixel of
-            // the window shares both, which is exactly why the four weights
-            // can leave the per-pixel loop.
-            // THE DISPLACEMENT IS MEASURED FROM `prevX`, NOT FROM THE
-            // INTEGER ANCHOR. `nextX - anchorX` looks equivalent and is not:
-            // it differs by `frac(prevX)`, which is zero at level 0 for
-            // integer keypoints and is NOT zero at any coarser level, where
-            // `prevPt / 2^level` is fractional. Anchoring the window on the
-            // grid moves which pixels the aperture covers (deviation (i));
-            // it must not move what the residual is a residual OF, which is
-            // `I(z)` against `J(z + d)` for `d` the full-precision flow.
-            // Measured on the repo's real frame with prev == next: the wrong
-            // spelling put a stationary point up to 1.4 px off through four
-            // levels, because each level converged to `d - frac` and handed
-            // twice that error to the next one down.
-            const double offX = static_cast<double>(nextX) - static_cast<double>(prevX);
-            const double offY = static_cast<double>(nextY) - static_cast<double>(prevY);
-            const long long tapX = static_cast<long long>(std::floor(offX));
-            const long long tapY = static_cast<long long>(std::floor(offY));
-            const double fx = offX - static_cast<double>(tapX);
-            const double fy = offY - static_cast<double>(tapY);
-            const double w00 = (1.0 - fx) * (1.0 - fy);
-            const double w01 = fx * (1.0 - fy);
-            const double w10 = (1.0 - fx) * fy;
-            const double w11 = fx * fy;
-
-                // BIT-PARALLEL: ten exact integers, twenty popcounts per word --
-            // reading the previous frame's eight words from `staged` when this
-            // window could be staged (X-66). Bit-exact either way; the staged
-            // path differs only in where the words come from.
-            TapSums sumsX;
-            TapSums sumsY;
-            residualSums(lv, region, tapX, tapY, sumsX, sumsY,
-                         staged ? &stagedWindow : nullptr, staged ? &tapCache : nullptr);
-
-            const double b1 = sumsX.combine(w00, w01, w10, w11);
-            const double b2 = sumsY.combine(w00, w01, w10, w11);
-
-            // FLOAT, once per iteration: the 2x2 solve. The factor of 2 turns
-            // the raw [-1, 0, 1] tap into a central difference; see UNITS.
-            const double deltaX = kCentralDifferenceScale * (a12 * b2 - a22 * b1) / det;
-            const double deltaY = kCentralDifferenceScale * (a12 * b1 - a11 * b2) / det;
-
-            nextX += static_cast<float>(deltaX);
-            nextY += static_cast<float>(deltaY);
-            c.nextPts[p].x = nextX + c.halfWinX;
-            c.nextPts[p].y = nextY + c.halfWinY;
-
-            // TERMINATION 1 -- converged.
-            if (deltaX * deltaX + deltaY * deltaY <= c.eps2) break;
-
-            // TERMINATION 2 -- oscillation: this step almost exactly undoes
-            // the last one. Back off by half a step and stop. The reference's
-            // rule, thresholds included.
-            if (it > 0 && std::fabs(deltaX + prevDeltaX) < 0.01 &&
-                std::fabs(deltaY + prevDeltaY) < 0.01) {
-                c.nextPts[p].x -= static_cast<float>(deltaX * 0.5);
-                c.nextPts[p].y -= static_cast<float>(deltaY * 0.5);
-                nextX = c.nextPts[p].x - c.halfWinX;
-                nextY = c.nextPts[p].y - c.halfWinY;
-                break;
-            }
-            prevDeltaX = deltaX;
-            prevDeltaY = deltaY;
-        }
-
-        // THE FINAL PASS, AND IT IS THE REFERENCE'S OWN SEPARATE PASS. Two
-        // things happen here and both are ABOUT THE POSITION THAT IS
-        // RETURNED, not about the last iterate: the range test is re-applied
-        // to it, and -- only if it survives -- the error term is measured
-        // there, from taps and weights recomputed from `c.nextPts[p]`.
-        if (finest && c.status[p] != 0 && inRange) {
-            const float finalX = c.nextPts[p].x - c.halfWinX;
-            const float finalY = c.nextPts[p].y - c.halfWinY;
-            const long long finalOriginX = floorToLL(finalX);
-            const long long finalOriginY = floorToLL(finalY);
-            if (finalOriginX < -static_cast<long long>(c.winW) || finalOriginX >= levelWidth ||
-                finalOriginY < -static_cast<long long>(c.winH) || finalOriginY >= levelHeight) {
-                // LOSS RULE 3, applied to the RETURNED estimate. The last
-                // iteration's step can carry the point out of range after the
-                // in-loop test has already passed, and `status` describes the
-                // position the caller gets. The reference makes this same test
-                // in this same place -- but only when `err` was requested,
-                // which makes its `status` depend on whether the caller wanted
-                // an error value. That quirk is not reproduced (deviation
-                // (vii)); the test is unconditional here.
-                c.status[p] = 0;
-            } else if (c.err != nullptr) {
-                const double offX = static_cast<double>(finalX) - static_cast<double>(prevX);
-                const double offY = static_cast<double>(finalY) - static_cast<double>(prevY);
-                const long long tapX = static_cast<long long>(std::floor(offX));
-                const long long tapY = static_cast<long long>(std::floor(offY));
-                const double fx = offX - static_cast<double>(tapX);
-                const double fy = offY - static_cast<double>(tapY);
-                c.err[p] = windowMeanAbsDiff(lv, region, tapX, tapY, (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy),
-                    (1.0 - fx) * fy, fx * fy);
-            }
-        }
+        trackOnePoint<LevelT, WordType>(lv, li, c, p, finest, scale, levelWidth,
+                                        levelHeight, kLevelMinEigScale);
     });
 }
 
