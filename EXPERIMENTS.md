@@ -10864,6 +10864,61 @@ thread.
 
 ---
 
+### X-73 · T5.1's threading, on both architectures and at equal thread counts · `DONE`
+
+**[X-65](#x-65--e-35--what-does-threading-the-frontend-buy-and-what-does-it-cost--done)
+MEASURED THE IDEA; THIS MEASURES THE SHIPPED API**, and adds the two things X-65 was
+missing: the reference device, and OpenCV at a matched thread count.
+
+**REFERENCE DEVICE**, 4 cores, **unpinned** — the protocol deviation X-65 declared,
+since a threading arm is unmeasurable under `taskset -c 3`. Governor `performance`,
+`throttled=0x80000` unchanged before and after. V1_02, 900 frames:
+
+| threads | `track` ms | speedup | binCV ms | vs **1-thread** OpenCV |
+|---|---|---|---|---|
+| 1 | 8.168 | 1.00× | 9.772 | 1.95× |
+| 2 | 3.120 | 2.62× | 4.679 | 3.94× |
+| **4** | **2.213** | **3.69×** | **3.632** | 4.66× |
+
+**`track` scales 3.69× on four cores — better than x86's 2.50×**, which is what a
+smaller cache and a simpler core do to a workload that was already memory-light.
+
+#### THE HONEST HEADLINE IS THE EQUAL-THREADS ROW, AND IT IS THE SAME AT BOTH COUNTS
+
+[D-58](ARCHITECTURE.md#8-design-decisions) exists because an unstated thread count
+produced a wrong headline once already. So:
+
+| | binCV | OpenCV | ratio |
+|---|---|---|---|
+| **reference device, 1 thread each** | 9.772 | 19.023 | **1.95×** |
+| **reference device, 4 threads each** | 3.633 | 7.065 | **1.94×** |
+| *reference device, binCV 4 vs OpenCV 1* | 3.599 | 16.984 | *4.72×* |
+| **x86_64, 4 threads each** | 1.082 | 1.462 | **1.35×** |
+| *x86_64, binCV 4 vs OpenCV 1* | 1.094 | 3.259 | *2.98×* |
+
+> **1.95× at one thread and 1.94× at four, on the deployment target.** The advantage
+> is the implementation, not the parallelism — **both sides scale about equally**, so
+> threading moves the absolute numbers and leaves the ratio where it was. **That is a
+> better claim than 4.72×**, which mixes a parallelism difference into what reads as
+> an implementation one.
+
+**x86 is the weaker of the two at equal threads (1.35×)** and that is the expected
+shape: OpenCV's LK is AVX2-vectorised there and NEON coverage on aarch64 is thinner.
+
+**Decision:** the shipped figures are the **equal-thread** ones. The
+binCV-4-vs-OpenCV-1 rows stay in the record because they are what a caller sees if
+they leave OpenCV at its default — but they are labelled, never quoted bare.
+[D-64](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `benchmark/frontend_sequence.cpp` with `BINCV_LK_THREADS` and
+`BINCV_OPENCV_THREADS`; V1_02, 900 frames. Reference device via direct `ssh` rather
+than `run_on_pi.sh`, because that script pins with `taskset -c 3` and a nested
+`taskset` cannot widen the mask it sets — governor and throttle state checked by hand
+in its place. x86 load average 0.38 at start, and the arms were run back to back so a
+drift moves both.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

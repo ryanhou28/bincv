@@ -3918,6 +3918,36 @@ and 15.5×: the gap is the allocation and the `cv::Mat` row-pointer work *around
 packing, and **it is the same ratio on both machines**, which makes it an explanation
 rather than an excuse.
 
+### D-64: threading ships, and the headline is the equal-thread number
+
+[X-73](EXPERIMENTS.md) measured the shipped API on both architectures.
+
+| | binCV | OpenCV | ratio |
+|---|---|---|---|
+| **reference device, 1 thread each** | 9.772 | 19.023 | **1.95×** |
+| **reference device, 4 threads each** | 3.633 | 7.065 | **1.94×** |
+| **x86_64, 4 threads each** | 1.082 | 1.462 | **1.35×** |
+
+**The ratio is the same at one thread and at four**, because both sides scale. Threading
+moves the absolute numbers and leaves the advantage where it was — which means the
+advantage is the *implementation*.
+
+**So the shipped figures are the equal-thread ones.** binCV at four threads against
+OpenCV at one reads 4.72× on the device, and that number is true and is what a caller
+sees who leaves OpenCV at its default — but quoting it bare would mix a parallelism
+difference into what reads as an implementation one, which is exactly the error
+[D-58](#d-58-state-the-sequence-or-the-headline-is-not-about-the-library) was written
+about.
+
+**`track` scales 3.69× on the device's four cores against 2.50× on x86** — a smaller
+cache and a simpler core, on a workload that was already memory-light.
+
+**The API shape's gate passes.** [D-56](#d-56-bincv-is-single-threaded-by-default-not-by-decision)
+recorded it as provisional pending X-65's bands; neither Band B (footprint) nor Band D
+(<1.5×) fired, so **hosted builds default parallel and the pool stays outside
+`bincv_core`** — which was never a preference: core is allocation-free and builds
+`-fno-exceptions`, and `std::thread` is usable under neither.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

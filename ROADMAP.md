@@ -23,33 +23,34 @@ OpenCV. This is the primary defense against scope drift.
 
 ## Current Status
 
-### Exists and works
-- `BinMat<WordType>` templated on the storage word type, 8/16/32/64-bit
-- Core builds and tests without OpenCV; interop behind `BINCV_WITH_OPENCV`
-- CMake auto-configuration (OpenCV detection, SIMD detection, build type)
-- Operations: fill, resize, pad, transpose, countNonZero, sparsity
-- Test suite: 261 core checks across all word widths + 21 interop checks, in `ctest`
-- Benchmark harness comparing against OpenCV
-- Measured 7.83× memory reduction versus `CV_8U`
+**The single source of truth for what is done is [TASKS.md](TASKS.md)'s status
+column.** This section is a summary and can go stale; that one cannot, because the
+gate runs against it.
 
-### Foundation work still required
-**This list is historical — it described the prototype `BinMat` before Phases 1
-and 2 reshaped it, per [D-7](ARCHITECTURE.md#d-7-existing-code-is-not-a-constraint),
-and every line of it has since been done.** Storage is now `{ptr, stride, owns}`
-with two view types (D-5, D-9); bit-planes exist for arbitrary N (D-2); row
-alignment defaults to word granularity and that default is now measured on both
-sides rather than assumed (D-4, [X-1](EXPERIMENTS.md) and
-[X-9](EXPERIMENTS.md)); `at()` is debug-checked; the `BINCV_NO_EXCEPTIONS` path is
-built and verified in its own configuration; and `ops/` carries the logic kernels,
-the bulk and windowed reductions and the bit-sliced arithmetic. **The single
-source of truth for what is done is [TASKS.md](TASKS.md)'s status column**, not
-this section.
+### Shipped and measured
+
+- **The MVP operation set is complete.**
+  [ARCHITECTURE §7](ARCHITECTURE.md#7-the-mvp-operation-set) — denoise, pyramid,
+  threshold, derivative, LK gradient covariance, corner response, morphology — plus
+  `opticalFlow`, `blockMatch`, `reduce`, `resample`, `shift`, `logic` and `bitslice`.
+- **A binary-frame VIO frontend, validated end to end** on the reference device
+  against all four success criteria ([X-38](EXPERIMENTS.md)).
+- **The sensor stage**: `pack` (8- and 16-bit sources, three rules, streaming),
+  `edge` (twelve combinations, bit-exact with the reference filter), `medianWide`
+  (caller-chosen neighbourhood, bit-exact with the reference median).
+- **Two architectures, both measured**: `x86_64` (POPCNT by default, AVX2 by runtime
+  dispatch) and `aarch64` (NEON, the reference device).
+- **Threading** as a caller-installable backend, serial by default, bit-exact.
+- `BinMat<WordType>` at 8/16/32/64 bits; `QuantMat<N>` for N ≤ 8; core builds and
+  tests with no OpenCV, in four gated configurations.
 
 ### Not started
-The Phase 3 frontend kernels (denoise, derivative, pyramid, covariance, corner
-response), NEON intrinsics, and VIO integration.
 
----
+- **Binary descriptors and Hamming matching** — the line between a VIO frontend and
+  SLAM ([TASKS.md](TASKS.md) T5.4).
+- **32-bit targets and RISC-V** ([TASKS.md](TASKS.md) Phase 7). 32-bit ARM is a code
+  path nobody has compiled, and CLAUDE.md names Cortex-M.
+- **GPU backends, Python bindings** — deferred, below.
 
 ## Phase 1 — Container Foundation
 
@@ -265,9 +266,10 @@ Tier 2 correctness is verified in CI.
 
 ---
 
-## Phase 6 — Deferred
+## Deferred — not scoped
 
-Not scoped. Listed so the ordering is deliberate rather than accidental.
+Not scoped, and not a phase -- listed so the ordering is deliberate rather than
+accidental. (The numbered phases now run to 7; see [TASKS.md](TASKS.md).)
 
 - **GPU backends.** Jetson runs the CPU path today. The view/storage model keeps
   zero-copy viable later without an API break.
