@@ -11043,58 +11043,70 @@ control five runs at load 0.44 on the same tree.
 
 ### X-76 · How fast are the descriptor family and FAST? · `DONE`
 
-**TWO OF THE THREE COMPARISONS ARE FAIR AND ONLY ONE IS WON.** 752×480, 256-bit
-descriptors, OpenCV at one thread, load 0.22:
+**FIRST ANSWER: ONE WIN AND TWO LOSSES. FINAL ANSWER: THREE WINS**, once the losses
+were treated as bugs rather than as facts. 752×480, 256-bit descriptors, OpenCV at one
+thread, three runs, load 0.33:
 
-| | binCV | OpenCV | |
-|---|---|---|---|
-| **matching**, kNN=2 over 1000×1000 | **1.95 ms** | 9.34 (`cv::BFMatcher`) | **4.79× FASTER** |
-| **FAST**, 4144 corners | 1.43 ms | **0.368** (`cv::FAST`) | **3.9× SLOWER** |
-| describe, 1000 keypoints | 0.983 ms | **0.684** (`cv::ORB`) | 1.4× slower |
+| | binCV | OpenCV | | *(first measured)* |
+|---|---|---|---|---|
+| **matching**, kNN=2 over 1000×1000 | 1.96–2.04 ms | 9.46–10.18 (`cv::BFMatcher`) | **4.65 – 5.21×** | 4.79× |
+| **describe**, 1000 keypoints | **0.134–0.136 ms** | 0.685–0.706 (`cv::ORB`) | **5.02 – 5.26×** | *1.4× SLOWER* |
+| **FAST**, 4144 corners | **0.355–0.369 ms** | 0.369–0.373 (`cv::FAST`) | **1.01 – 1.05×** | *3.9× SLOWER* |
 
-**MATCHING IS THE FAIR FIGHT AND binCV WINS IT.** Both sides are brute-force Hamming
-over bit strings; OpenCV stores these as bits too, so **for once neither is paying a
-representation penalty** — and binCV is still 4.8× faster. That is `popcount(a ^ b)`
-over contiguous words against a general-purpose matcher.
+> **THESE ARE COMPARISON OPERATIONS, NOT ARITHMETIC ONES, AND BEING SLOWER AT THEM WAS
+> NEVER PLAUSIBLE.** FAST is sixteen byte comparisons against two thresholds; BRIEF is
+> 256 comparisons; matching is `popcount(a ^ b)`. A library built on bit-parallel
+> comparison losing at all three should have been read as a defect on sight, and the
+> first version of this entry recorded two of them as findings.
 
-**FAST IS 3.9× SLOWER AND THAT IS A REAL GAP.** `cv::FAST` is SIMD-vectorised; this is
-scalar. Two fixes during this experiment took it from **16× slower to 3.9×** —
-precomputing the ring offsets once per image instead of sixteen address computations
-per pixel, and replacing the arc scan with a bitmask trick (`acc &= acc >> 1`, repeated
-`arcLength - 1` times, leaves a bit where a run starts) — but the remaining factor is
-vectorisation. Registered as [E-41](ARCHITECTURE.md#register).
+#### WHAT WAS ACTUALLY WRONG, AND NEITHER WAS EXOTIC
 
-**`describe` IS SLOWER THAN AN OPERATION DOING MORE WORK**, which makes it the clearer
-defect of the two: `cv::ORB::compute` additionally derives an intensity-centroid
-orientation and rotates its pattern per keypoint. Hoisting the bounds test out of the
-256-iteration inner loop — it was asking the same question about the same patch 256
-times — bought 1.10 → 0.98 ms and no more. Also [E-41](ARCHITECTURE.md#register).
+**`computeBrief`: 0.983 → 0.134 ms, 7.3×.** The inner loop computed
+`q.ay * stride + q.ax` **per pair** — two multiplies inside a 256-iteration loop, half
+a million of them for a thousand keypoints, all recomputing the same 512 numbers. The
+pattern is now flattened to offsets **once per call**, the bounds test moved from
+per-pair to per-keypoint, and the descriptor word accumulated in a register instead of
+read-modify-written. **No intrinsics involved.**
+
+**`detectFast`: 1.43 → 0.356 ms, 4.0×, on top of an earlier 16× → 3.9×.** The vector
+path exists because **the ring loads are contiguous**: for a horizontal run of 32
+pixels, ring position `k` is 32 consecutive bytes at a fixed offset. Sixteen vector
+loads per 32 pixels, where the scalar loop paid sixteen scalar loads *per pixel* — a
+**32× reduction in loads before any comparison happens**. The contiguity test then runs
+*vertically* across the sixteen masks: `run = (run + 1) & mask` resets wherever a ring
+pixel fails, and a lane reaching `arcLength` is a corner. No transpose, no per-lane
+branch.
+
+Comparisons are unsigned via **saturating arithmetic** (`v > hi` is
+`subs_epu8(v, hi) != 0`) rather than the sign-bias ops/pack.hpp uses, which would cost
+two extra ops per ring position — and saturation gives the clamp for free: `c + t`
+stopping at 255 means "nothing is brighter", which is exactly right.
+
+**Correctness held throughout: `test_fast` still reports 1818 / 1818 with zero on
+either side** against `cv::FAST`, through three successive rewrites.
 
 #### AND A MEASUREMENT THAT WAS MEASURING NOTHING
 
-The first run of this benchmark reported `describe` at **21.8 µs, "1.05× OpenCV"**. It
-was **white noise at threshold 40, which makes 14% of pixels FAST corners** — against
-about **1.1%** in a real frame. Two things followed, and the second is the bad one:
+The first run reported `describe` at **21.8 µs, "1.05× OpenCV"**. The source was white
+noise at threshold 40, which makes **14% of pixels FAST corners** against about **1.1%**
+in a real frame — and the first 1000 corners in scan order were all in the top rows, so
+their patches fell **outside the image** and `computeBrief` rejected them after **one of
+256 pairs**. The benchmark was timing early exit and calling it a descriptor.
 
-1. the corner-dense image measures the arc scan and almost nothing else;
-2. **the first 1000 corners in scan order were all in the top rows, so their patches
-   fell outside the image and `computeBrief` rejected them after ONE of 256 pairs.**
-   The benchmark was timing early exit and calling it a descriptor.
+Smoothing to a realistic density moved it from 21.8 µs to 983 µs — **a factor of 45** —
+and only then did it measure the operation, which is also when the real defect became
+visible. **A benchmark whose input is unrepresentative does not report a pessimistic
+number; it reports a number about something else.**
 
-Smoothing the source to a realistic 1.1% corner density moved `describe` from 21.8 µs
-to **983 µs — a factor of 45** — and only then was it measuring the operation.
-**A benchmark whose input is unrepresentative does not report a pessimistic number; it
-reports a number about something else.**
+**Decision: all three ship as strengths.** [E-41](ARCHITECTURE.md#register) is narrowed
+to what remains: **the FAST vector path is x86-only**, so aarch64 keeps the scalar one —
+which did get the offset and bitmask fixes, but not the 32×-fewer-loads structure. NEON
+has everything this needs.
 
-**Decision:** matching ships as a strength. FAST and `computeBrief` ship as **correct
-and slow**, which is stated rather than omitted, and their vectorisation is
-[E-41](ARCHITECTURE.md#register). `test_fast.cpp` still shows exact set agreement with
-`cv::FAST` (1818 / 1818) through both optimisations, so the speed work cost no
-correctness.
+**Method:** `benchmark/feature_benchmark.cpp`, seven interleaved repeats, three runs,
+OpenCV pinned to one thread per [D-58](ARCHITECTURE.md#8-design-decisions); source
+smoothed with a 5×5 Gaussian to a corner density matching a real frame.
 
-**Method:** `benchmark/feature_benchmark.cpp`, seven interleaved repeats, OpenCV pinned
-to one thread per [D-58](ARCHITECTURE.md#8-design-decisions); source smoothed with a
-5×5 Gaussian to a corner density matching a real frame.
 
 ---
 

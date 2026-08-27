@@ -34,6 +34,11 @@
 
 #include "../core/error.hpp"
 
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+#define BINCV_FAST_RUNTIME_AVX2 1
+#include <immintrin.h>
+#endif
+
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
@@ -51,6 +56,70 @@ namespace impl {
 ///       winding would accept different corners. This is `cv::FAST`'s order.
 inline constexpr int kFastRingX[16] = {0, 1, 2, 3, 3, 3, 2, 1, 0, -1, -2, -3, -3, -3, -2, -1};
 inline constexpr int kFastRingY[16] = {-3, -3, -2, -1, 0, 1, 2, 3, 3, 3, 2, 1, 0, -1, -2, -3};
+
+} // namespace impl
+
+namespace impl {
+
+#if defined(BINCV_FAST_RUNTIME_AVX2)
+/// @brief Which of 32 consecutive pixels are FAST corners, as 32 bits. **INTERNAL.**
+///
+/// **THE RING LOADS ARE CONTIGUOUS AND THAT IS THE WHOLE TRICK.** For a horizontal run
+/// of 32 pixels, ring position `k` is 32 consecutive bytes at a fixed offset -- so the
+/// sixteen neighbourhoods cost **sixteen vector loads per 32 pixels** where the scalar
+/// loop paid sixteen scalar loads per pixel. That is a 32x reduction in loads before
+/// any comparison happens.
+///
+/// The contiguity test then runs VERTICALLY across the sixteen masks:
+/// `run = (run + 1) & mask` resets to zero wherever the ring pixel fails, and a lane
+/// whose run reaches `arcLength` is a corner. No transpose, no per-lane branch.
+///
+/// @note The comparisons are UNSIGNED via saturating arithmetic: `v > hi` is
+///       `subs_epu8(v, hi) != 0`. SSE/AVX byte compares are signed, and the bias trick
+///       ops/pack.hpp uses would cost two extra ops per ring position here.
+///       Saturation also gives the clamp for free -- `c + t` saturating at 255 means
+///       "nothing is brighter", which is exactly right.
+__attribute__((target("avx2"))) inline uint32_t fastMask32(const uint8_t* p, long long stride,
+                                                           const long long* ringOff,
+                                                           int threshold, int arcLength) {
+    const __m256i c = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+    const __m256i t = _mm256_set1_epi8(static_cast<char>(threshold));
+    const __m256i hi = _mm256_adds_epu8(c, t);
+    const __m256i lo = _mm256_subs_epu8(c, t);
+    const __m256i zero = _mm256_setzero_si256();
+    const __m256i ones = _mm256_set1_epi8(1);
+    const __m256i limit = _mm256_set1_epi8(static_cast<char>(arcLength - 1));
+    (void)stride;
+
+    __m256i mHi[16], mLo[16];
+    for (int k = 0; k < 16; ++k) {
+        const __m256i v =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + ringOff[k]));
+        // v > hi  <=>  subs_epu8(v, hi) != 0
+        mHi[k] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(v, hi), zero),
+                                  _mm256_set1_epi8(-1));
+        // v < lo  <=>  subs_epu8(lo, v) != 0
+        mLo[k] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(lo, v), zero),
+                                  _mm256_set1_epi8(-1));
+    }
+
+    __m256i runH = zero, runL = zero, found = zero;
+    const int steps = 16 + arcLength - 1;
+    for (int k = 0; k < steps; ++k) {
+        const int idx = k & 15;
+        runH = _mm256_and_si256(_mm256_add_epi8(runH, ones), mHi[idx]);
+        runL = _mm256_and_si256(_mm256_add_epi8(runL, ones), mLo[idx]);
+        found = _mm256_or_si256(found, _mm256_cmpgt_epi8(runH, limit));
+        found = _mm256_or_si256(found, _mm256_cmpgt_epi8(runL, limit));
+    }
+    return static_cast<uint32_t>(_mm256_movemask_epi8(found));
+}
+
+inline bool hasFastAvx2() {
+    static const bool kYes = __builtin_cpu_supports("avx2");
+    return kYes;
+}
+#endif
 
 } // namespace impl
 
@@ -104,7 +173,45 @@ inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t st
     size_t n = 0;
     for (size_t y = 3; y + 3 < height; ++y) {
         const SrcT* row = img + y * stride;
-        for (size_t x = 3; x + 3 < width; ++x) {
+        size_t x = 3;
+#if defined(BINCV_FAST_RUNTIME_AVX2)
+        // The vector path answers "is this a corner" for 32 pixels at a time; the
+        // SCORE is still scalar, and that is the right split -- about 1% of pixels are
+        // corners on a real frame, so scoring is rare and rejection is everything.
+        if constexpr (sizeof(SrcT) == 1) {
+            if (impl::hasFastAvx2() && threshold > 0 && threshold < 256) {
+                for (; x + 32 + 3 <= width; x += 32) {
+                    uint32_t m = impl::fastMask32(
+                        reinterpret_cast<const uint8_t*>(row + x), static_cast<long long>(stride),
+                        ringOff, static_cast<int>(threshold), arcLength);
+                    while (m != 0) {
+                        const unsigned b = static_cast<unsigned>(__builtin_ctz(m));
+                        m &= m - 1;
+                        const size_t px = x + b;
+                        const SrcT* p = row + px;
+                        const long long c = static_cast<long long>(*p);
+                        const long long hi = c + threshold, lo = c - threshold;
+                        long long sc = 0, scLo = 0;
+                        for (int j = 0; j < 16; ++j) {
+                            const long long v = static_cast<long long>(p[ringOff[j]]);
+                            if (v - hi > 0) sc += v - hi;
+                            if (lo - v > 0) scLo += lo - v;
+                        }
+                        const long long best = sc > scLo ? sc : scLo;
+                        if (n >= capacity) {
+                            if (truncated != nullptr) *truncated = true;
+                            return n;
+                        }
+                        out[n].x = static_cast<int>(px);
+                        out[n].y = static_cast<int>(y);
+                        out[n].score = best;
+                        ++n;
+                    }
+                }
+            }
+        }
+#endif
+        for (; x + 3 < width; ++x) {
             const SrcT* p = row + x;
             const long long c = static_cast<long long>(*p);
             const long long hi = c + threshold;

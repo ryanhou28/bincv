@@ -138,12 +138,18 @@ inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t st
     BINCV_ASSERT(img != nullptr && keypointsXY != nullptr && out != nullptr,
                  "computeBrief: null argument");
 
-    // THE PATCH EXTENT, ONCE. The bounds test belongs per KEYPOINT, not per pair:
-    // checking eight inequalities inside a 256-iteration loop was most of this
-    // function, and it asks the same question 256 times.
+    // THE PATTERN AS FLAT OFFSETS, ONCE PER CALL. `q.ay * stride + q.ax` was two
+    // MULTIPLIES per pair inside a 256-iteration loop -- half a million of them for a
+    // thousand keypoints, all recomputing the same 512 numbers. The same mistake, and
+    // the same fix, as ops/fast.hpp's ring offsets.
+    //
+    // `reach` comes with them: the bounds test belongs per KEYPOINT, not per pair.
+    long long offA[Bits], offB[Bits];
     int reach = 0;
     for (size_t i = 0; i < Bits; ++i) {
         const BriefPair& q = pattern.pair[i];
+        offA[i] = static_cast<long long>(q.ay) * static_cast<long long>(stride) + q.ax;
+        offB[i] = static_cast<long long>(q.by) * static_cast<long long>(stride) + q.bx;
         const int e[4] = {q.ax < 0 ? -q.ax : q.ax, q.ay < 0 ? -q.ay : q.ay,
                           q.bx < 0 ? -q.bx : q.bx, q.by < 0 ? -q.by : q.by};
         for (int j = 0; j < 4; ++j)
@@ -159,17 +165,21 @@ inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t st
                             cx + reach < static_cast<long long>(width) &&
                             cy + reach < static_cast<long long>(height);
         if (inside) {
-            // Every sample is in range by construction now, so the inner loop is two
-            // loads and a compare -- no bounds test, no early exit, no branch that
-            // depends on the data.
+            // Every sample is in range by construction, so the inner loop is two loads
+            // and a compare: no bounds test, no multiply, and no read-modify-write on
+            // the descriptor -- the word is ACCUMULATED in a register and stored once
+            // per `kBits` pairs.
             const SrcT* centre = img + static_cast<size_t>(cy) * stride +
                                  static_cast<size_t>(cx);
-            for (size_t i = 0; i < Bits; ++i) {
-                const BriefPair& q = pattern.pair[i];
-                const SrcT va = centre[static_cast<long long>(q.ay) * static_cast<long long>(stride) + q.ax];
-                const SrcT vb = centre[static_cast<long long>(q.by) * static_cast<long long>(stride) + q.bx];
-                if (va < vb)
-                    d[i / kBits] = static_cast<WordType>(d[i / kBits] | (WordType{1} << (i % kBits)));
+            for (size_t w = 0; w < kWords; ++w) {
+                WordType acc = 0;
+                const size_t base = w * kBits;
+                for (size_t b = 0; b < kBits; ++b) {
+                    const size_t i = base + b;
+                    acc = static_cast<WordType>(
+                        acc | (static_cast<WordType>(centre[offA[i]] < centre[offB[i]]) << b));
+                }
+                d[w] = acc;
             }
         }
         if (keep != nullptr) keep[k] = inside ? uint8_t{1} : uint8_t{0};
