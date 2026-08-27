@@ -1314,7 +1314,7 @@ void stagedMatchesUnstaged(const char* label) {
                 const long long tapX = t[0], tapY = t[1];
                 bincv::impl::TapSums a1, b1, a2, b2;
                 bincv::impl::residualSums<N, W, true>(lv, reg, tapX, tapY, a1, b1);
-                bincv::impl::stagedResidualSums<N, W, true>(lv, sw, tc, reg, tapX, tapY, a2, b2);
+                bincv::impl::residualSums<N, W, true>(lv, reg, tapX, tapY, a2, b2, &sw, &tc);
                 const bool eq = a1.t00 == a2.t00 && a1.t01 == a2.t01 && a1.t10 == a2.t10 &&
                                 a1.t11 == a2.t11 && a1.self == a2.self && b1.t00 == b2.t00 &&
                                 b1.t01 == b2.t01 && b1.t10 == b2.t10 && b1.t11 == b2.t11 &&

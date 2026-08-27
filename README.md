@@ -36,7 +36,7 @@ the same semantic operations on the same binary content stored as `CV_8U`.
 | | binCV | OpenCV | |
 |---|---|---|---|
 | **peak working set** | **436 704 B** | 2 719 832 B | **6.23× smaller** |
-| frontend, reference device, **1 thread each** | 9.77 ms/frame | 19.02 | **1.95× faster** |
+| frontend, reference device, **1 thread each** | 6.77 ms/frame | 16.72 | **2.47× faster** |
 | frontend, reference device, **4 threads each** | 3.63 ms/frame | 7.07 | **1.94× faster** |
 | frontend, x86_64, **1 thread each** | 1.96 ms/frame | 3.06 | **1.57× faster** |
 | frontend, x86_64, **4 threads each** | 1.08 ms/frame | 1.46 | **1.35× faster** |

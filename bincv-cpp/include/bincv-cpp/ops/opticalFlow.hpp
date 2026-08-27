@@ -622,13 +622,17 @@ inline long long signedMaskedSum(WordType mag, WordType sign, WordType m) {
 ///       folded immediately, so the register footprint does NOT grow with N and
 ///       E-13's O(N^2)-per-row accumulator concern -- which is about
 ///       `BitSlicedPairCounts<N>` in ops/covariance.hpp -- does not arise here.
+/// @note The plane operands are POINTERS, not array references, so a caller holding
+///       them in a staged buffer or a tap cache passes them IN PLACE (E-39's
+///       `RowOperands`). Array arguments decay, so every existing call site is
+///       unchanged; `N` was already explicit at all of them.
 /// @tparam UseNeon False forces the portable scalar path even where NEON exists.
 ///         That is not a tuning knob: it is how the vector path is held to
 ///         BIT-EXACTNESS, by giving the benchmark and the tests both spellings to
 ///         compare on the same machine (X-33).
 template <size_t N, typename WordType, bool UseNeon = true>
-inline long long slicedSignedSum(const WordType (&maskedMag)[N], WordType sign,
-                                 const WordType (&val)[N]) {
+inline long long slicedSignedSum(const WordType* maskedMag, WordType sign,
+                                 const WordType* val) {
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     if constexpr (UseNeon) {
     // ===================================================================
@@ -688,6 +692,13 @@ inline long long slicedSignedSum(const WordType (&maskedMag)[N], WordType sign,
     return acc;
 }
 
+/// Forward declarations: `residualSums`' 1-bit overload names these in its signature
+/// and they are defined below, beside the reader that consumes them (E-39).
+template <size_t N, typename WordType>
+struct StagedWindow;
+template <size_t N, typename WordType>
+struct TapCache;
+
 /// @brief The five integer sums one gradient component's residual needs.
 /// @note `sum(T * Ix)` for each of the four tap planes, and `sum(I * Ix)` for the
 ///       previous frame. The four bilinear weights combine them ONCE per window --
@@ -717,7 +728,9 @@ struct TapSums {
 ///       twenty popcounts per word. Nothing float is touched inside the loop.
 template <typename WordType>
 inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType>& r,
-                         long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY) {
+                         long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY,
+                         const StagedWindow<1, WordType>* = nullptr,
+                         TapCache<1, WordType>* = nullptr) {
     for (size_t y = r.y0; y < r.y1; ++y) {
         const WordType* mx = lv.dxMag.row(y);
         const WordType* sx = lv.dxSign.row(y);
@@ -783,79 +796,255 @@ inline WordType alignedWord(const WordType* row, size_t words, size_t x0) {
     return static_cast<WordType>((lo >> s) | (hi << (bits - s)));
 }
 
-#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
-/// @brief The aligned residual at **N == 1**, batching across the FOUR TAPS and
-///        carrying the counts in vector lanes across the WHOLE WINDOW. **INTERNAL.**
+/// @brief Rows the staging path handles. The shipped window is 31 (D-31).
+/// @note A bound, not a tuning knob: it fixes the size of a STACK buffer, and
+///       CLAUDE.md forbids a kernel allocating. At the shipped `N = 2` the two
+///       structures together are 4 KB; at the `N = 8` ceiling about 15 KB, which is a
+///       lot for a Cortex-M and is stated rather than hidden (E-38). A taller window
+///       declines and takes the unstaged path.
+constexpr size_t kStagedMaxRows = 64;
+
+/// @brief One window's ITERATION-INVARIANT words, extracted once. **INTERNAL** (X-69).
 ///
-/// ===========================================================================
-/// WHY THIS EXISTS SEPARATELY FROM `slicedSignedSum`'s NEON PATH
+/// Of the twelve words a row needs, **eight belong to the PREVIOUS frame** -- `self`,
+/// `magX`, `magY`, `signX`, `signY` -- and LK linearises about the previous frame, so
+/// they are identical on every one of X-68's **4.29 mean iterations** and were being
+/// re-extracted on all of them. `region` is fixed per point per level, so one staging
+/// serves the whole iteration.
+template <size_t N, typename WordType>
+struct StagedWindow {
+    WordType self[kStagedMaxRows][N];
+    WordType magX[kStagedMaxRows][N];   ///< already masked to the region
+    WordType magY[kStagedMaxRows][N];
+    WordType signX[kStagedMaxRows];
+    WordType signY[kStagedMaxRows];
+};
+
+/// @brief The four TAP words per row, cached against the integer displacement they
+///        were read at. **INTERNAL** (X-70).
 ///
-/// That path batches the `N^2` PLANE PAIRS. At `N == 1` there is exactly one pair,
-/// so it does nothing -- and `N == 1` is level 0, the largest level of every
-/// ladder, which was therefore running fully scalar even on aarch64 (X-36).
-///
-/// The structure that exists at EVERY depth is the five taps: `t00`, `t01`, `t10`,
-/// `t11` and `self`, all counted against the same magnitude and sign. Four of them
-/// fit one 128-bit register.
-///
-/// AND BECAUSE D-31 ALIGNED THE WINDOW, EACH ROW IS ONE WORD -- so the lane
-/// accumulators can carry across all 31 rows and cross the register domain **once
-/// per window** instead of once per row. That is what makes this worth more than
-/// the plane-pair batching: X-33 got 1.24x while still extracting per call, and
-/// the ceiling for batching itself is 2.41x.
-///
-/// `self` stays scalar: there are five taps and four lanes, and a fifth lane would
-/// cost a second register pair for one twentieth of the work.
-/// ===========================================================================
-template <typename WordType>
-inline void alignedResidualSumsNeon1(const LKLevelN<1, WordType>& lv,
-                                     const RegionWords<WordType>& r, long long tapX,
-                                     long long tapY, TapSums& sumsX, TapSums& sumsY) {
+/// The taps move, which is why X-69 could not stage them -- but they move as
+/// `floor(offX)`, and the iteration is *shrinking* `off`. Once the estimate settles
+/// inside a pixel the integer part stops changing and the same four words are
+/// re-extracted every remaining iteration. **Sound by construction:** the tap words
+/// are a pure function of `lv.next`, `region` and `(tapX, tapY)`; the first two are
+/// fixed for the point and the third is the key.
+template <size_t N, typename WordType>
+struct TapCache {
+    WordType t00[kStagedMaxRows][N];
+    WordType t01[kStagedMaxRows][N];
+    WordType t10[kStagedMaxRows][N];
+    WordType t11[kStagedMaxRows][N];
+    long long tapX = 0;
+    long long tapY = 0;
+    bool valid = false;
+};
+
+/// @brief Fill a `StagedWindow`, or decline. **INTERNAL** (X-69).
+/// @return False when this window cannot be staged, leaving the caller on the
+///         unstaged path. Declines are not failures: a window wider than a word uses
+///         `ReplicatedShiftedRow` spans rather than single words, and a taller one
+///         would overrun a fixed stack buffer.
+template <size_t N, typename WordType>
+inline bool stageWindow(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
+                        StagedWindow<N, WordType>& s) {
     const size_t width = r.x1 - r.x0;
+    if (width == 0 || width > bitsPerWord<WordType>()) return false;
+    const size_t rows = r.y1 - r.y0;
+    if (rows > kStagedMaxRows) return false;
     const size_t words = minRowWords<WordType>(lv.prev[0].width);
     const WordType mask = lowBitsMask<WordType>(width);
-    const long long x0 = static_cast<long long>(r.x0);
-    const bool tapIsShift = width < bitsPerWord<WordType>();
-    const long long srcX = x0 + tapX;
-    const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
-    const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
+    for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
+        for (size_t k = 0; k < N; ++k) {
+            s.self[i][k] = alignedWord<WordType>(lv.prev[k].row(y), words, r.x0);
+            s.magX[i][k] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dxMag[k].row(y), words, r.x0) & mask);
+            s.magY[i][k] = static_cast<WordType>(
+                alignedWord<WordType>(lv.dyMag[k].row(y), words, r.x0) & mask);
+        }
+        s.signX[i] = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
+        s.signY[i] = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
+    }
+    return true;
+}
+
+/// @brief The 1-bit `LKLevel` declines unconditionally. **INTERNAL.**
+/// @note `stageWindow` is written against `LKLevelN`'s plane arrays. Declining keeps
+///       one tracking body serving both level types (D-21) without a compile error.
+template <typename WordType>
+inline bool stageWindow(const LKLevel<WordType>&, const RegionWords<WordType>&,
+                        StagedWindow<1, WordType>&) {
+    return false;
+}
+
+/// @brief One row's twelve operands, as POINTERS. **INTERNAL** (E-39).
+/// @note **Pointers, and that was measured.** They let a staged or cached operand be
+///       used IN PLACE, which is the whole point of X-69/X-70. Copying them into a
+///       value struct instead gave back what staging bought -- X-72 measured both,
+///       and only pointers PLUS a compile-time `Staged` reached parity.
+template <size_t N, typename WordType>
+struct RowOperands {
+    const WordType* t00;
+    const WordType* t01;
+    const WordType* t10;
+    const WordType* t11;
+    const WordType* self;
+    const WordType* magX;   ///< already masked to the region
+    const WordType* magY;
+    WordType signX;
+    WordType signY;
+    WordType scratch[7][N];   ///< where the unstaged path materialises them
+};
+
+/// @brief The ONE place a window row's operands are read. **INTERNAL** (E-39).
+///
+/// **WHY THIS EXISTS.** X-41 recorded **three copies** of this extraction block and
+/// recommended collapsing them *for maintenance*. X-69 and X-70 made it worth doing
+/// *for speed*: staging and tap-caching have to reach the NEON paths too, and writing
+/// them into each copy separately would have made **five**. One reader serves scalar
+/// and NEON, staged and unstaged -- and X-34's `+1`-tap-is-a-shift and X-35's interior
+/// fast path live here once instead of four times.
+///
+/// @tparam Staged Compile-time, NOT a runtime pointer test. X-72 measured a single
+///         body branching on `staged != nullptr` per row costing **17% of `track` on
+///         x86**: the compiler stops specialising the row loop. Two instantiations of
+///         one source is the price of that 17%.
+template <size_t N, typename WordType, bool Staged>
+class RowReader {
+public:
+    RowReader(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r, long long tapX,
+              long long tapY, const StagedWindow<N, WordType>* staged,
+              TapCache<N, WordType>* taps)
+        : lv_(lv), staged_(staged), taps_(taps), x0_(r.x0), width_(r.x1 - r.x0),
+          words_(minRowWords<WordType>(lv.prev[0].width)),
+          mask_(lowBitsMask<WordType>(r.x1 - r.x0)),
+          tapIsShift_(r.x1 - r.x0 < bitsPerWord<WordType>()),
+          srcX_(static_cast<long long>(r.x0) + tapX), tapY_(tapY) {
+        const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
+        colsInside_ = srcX_ >= 0 && srcX_ + static_cast<long long>(width_) <= lastCol;
+        if constexpr (Staged) {
+            tapsFresh_ = taps_->valid && taps_->tapX == tapX && taps_->tapY == tapY;
+            if (!tapsFresh_) {
+                taps_->tapX = tapX;
+                taps_->tapY = tapY;
+                taps_->valid = true;
+            }
+        }
+    }
+
+    /// @param y Absolute row in the level. @param i Row index within the window.
+    void load(size_t y, size_t i, RowOperands<N, WordType>& o) {
+        if constexpr (Staged) {
+            if (!tapsFresh_) {
+                extractTaps(y, taps_->t00[i], taps_->t01[i], taps_->t10[i], taps_->t11[i]);
+            }
+            // ALIAS, do not copy. `Staged` is compile-time, so this branch is the
+            // whole body here and the operands are used where they already live.
+            o.t00 = taps_->t00[i];
+            o.t01 = taps_->t01[i];
+            o.t10 = taps_->t10[i];
+            o.t11 = taps_->t11[i];
+            o.self = staged_->self[i];
+            o.magX = staged_->magX[i];
+            o.magY = staged_->magY[i];
+            o.signX = staged_->signX[i];
+            o.signY = staged_->signY[i];
+        } else {
+            extractTaps(y, o.scratch[0], o.scratch[1], o.scratch[2], o.scratch[3]);
+            extractInvariants(y, o.scratch[4], o.scratch[5], o.scratch[6], o.signX, o.signY);
+            o.t00 = o.scratch[0];
+            o.t01 = o.scratch[1];
+            o.t10 = o.scratch[2];
+            o.t11 = o.scratch[3];
+            o.self = o.scratch[4];
+            o.magX = o.scratch[5];
+            o.magY = o.scratch[6];
+        }
+    }
+
+private:
+    /// The four displaced taps. X-34's `+1`-is-a-shift and X-35's interior fast path.
+    void extractTaps(size_t y, WordType* t00, WordType* t01, WordType* t10,
+                     WordType* t11) const {
+        const long long srcY = static_cast<long long>(y) + tapY_;
+        const bool rowsInside =
+            srcY >= 0 && srcY + 1 < static_cast<long long>(lv_.next[0].height);
+        const bool interior = colsInside_ && rowsInside;
+        for (size_t k = 0; k < N; ++k) {
+            if (interior) {
+                t00[k] = alignedWord<WordType>(lv_.next[k].row(static_cast<size_t>(srcY)),
+                                               words_, static_cast<size_t>(srcX_));
+                t10[k] = alignedWord<WordType>(lv_.next[k].row(static_cast<size_t>(srcY) + 1),
+                                               words_, static_cast<size_t>(srcX_));
+            } else {
+                t00[k] = displacedRow<WordType>(lv_.next[k], srcY, srcX_).word(0);
+                t10[k] = displacedRow<WordType>(lv_.next[k], srcY + 1, srcX_).word(0);
+            }
+            if (tapIsShift_) {
+                t01[k] = static_cast<WordType>(t00[k] >> 1);
+                t11[k] = static_cast<WordType>(t10[k] >> 1);
+            } else {
+                t01[k] = displacedRow<WordType>(lv_.next[k], srcY, srcX_ + 1).word(0);
+                t11[k] = displacedRow<WordType>(lv_.next[k], srcY + 1, srcX_ + 1).word(0);
+            }
+        }
+    }
+
+    /// The eight previous-frame words -- what X-69 stages when it can.
+    void extractInvariants(size_t y, WordType* self, WordType* magX, WordType* magY,
+                           WordType& signX, WordType& signY) const {
+        for (size_t k = 0; k < N; ++k) {
+            self[k] = alignedWord<WordType>(lv_.prev[k].row(y), words_, x0_);
+            magX[k] = static_cast<WordType>(
+                alignedWord<WordType>(lv_.dxMag[k].row(y), words_, x0_) & mask_);
+            magY[k] = static_cast<WordType>(
+                alignedWord<WordType>(lv_.dyMag[k].row(y), words_, x0_) & mask_);
+        }
+        signX = alignedWord<WordType>(lv_.dxSign.row(y), words_, x0_);
+        signY = alignedWord<WordType>(lv_.dySign.row(y), words_, x0_);
+    }
+
+    const LKLevelN<N, WordType>& lv_;
+    const StagedWindow<N, WordType>* staged_;
+    TapCache<N, WordType>* taps_;
+    size_t x0_, width_, words_;
+    WordType mask_;
+    bool tapIsShift_, colsInside_ = false, tapsFresh_ = false;
+    long long srcX_, tapY_;
+};
+
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+/// @brief The aligned residual at **N == 1**, batching across the FOUR TAPS with
+///        accumulators carried across the WHOLE WINDOW. **INTERNAL** (D-33 / X-36).
+/// @note `Staged` is compile-time; see `RowReader`. This is E-39: the NEON paths get
+///       X-69's staging and X-70's tap cache without a fifth copy of the extraction
+///       block X-41 counted three of.
+template <typename WordType, bool Staged>
+inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
+                                         const RegionWords<WordType>& r, long long tapX,
+                                         long long tapY, TapSums& sumsX, TapSums& sumsY,
+                                         const StagedWindow<1, WordType>* staged,
+                                         TapCache<1, WordType>* taps) {
+    RowReader<1, WordType, Staged> rd(lv, r, tapX, tapY, staged, taps);
+    RowOperands<1, WordType> o;
 
     uint32x4_t totX = vdupq_n_u32(0), oppX = vdupq_n_u32(0);
     uint32x4_t totY = vdupq_n_u32(0), oppY = vdupq_n_u32(0);
     long long selfTotX = 0, selfOppX = 0, selfTotY = 0, selfOppY = 0;
 
-    for (size_t y = r.y0; y < r.y1; ++y) {
-        const long long srcY = static_cast<long long>(y) + tapY;
-        const bool rowsInside = srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
-        const bool interior = colsInside && rowsInside;
-        WordType t00, t10;
-        if (interior) {
-            t00 = alignedWord<WordType>(lv.next[0].row(static_cast<size_t>(srcY)), words,
-                                        static_cast<size_t>(srcX));
-            t10 = alignedWord<WordType>(lv.next[0].row(static_cast<size_t>(srcY) + 1), words,
-                                        static_cast<size_t>(srcX));
-        } else {
-            t00 = displacedRow<WordType>(lv.next[0], srcY, srcX).word(0);
-            t10 = displacedRow<WordType>(lv.next[0], srcY + 1, srcX).word(0);
-        }
-        const WordType t01 = tapIsShift
-            ? static_cast<WordType>(t00 >> 1)
-            : displacedRow<WordType>(lv.next[0], srcY, srcX + 1).word(0);
-        const WordType t11 = tapIsShift
-            ? static_cast<WordType>(t10 >> 1)
-            : displacedRow<WordType>(lv.next[0], srcY + 1, srcX + 1).word(0);
-
-        const WordType selfW = alignedWord<WordType>(lv.prev[0].row(y), words, r.x0);
-        const WordType magX = static_cast<WordType>(
-            alignedWord<WordType>(lv.dxMag[0].row(y), words, r.x0) & mask);
-        const WordType magY = static_cast<WordType>(
-            alignedWord<WordType>(lv.dyMag[0].row(y), words, r.x0) & mask);
-        const WordType sgnX = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
-        const WordType sgnY = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
-
-        const uint32_t taps[4] = {static_cast<uint32_t>(t00), static_cast<uint32_t>(t01),
-                                  static_cast<uint32_t>(t10), static_cast<uint32_t>(t11)};
-        const uint32x4_t vt = vld1q_u32(taps);
+    for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
+        rd.load(y, i, o);
+        const WordType selfW = o.self[0];
+        const WordType magX = o.magX[0];
+        const WordType magY = o.magY[0];
+        const WordType sgnX = o.signX;
+        const WordType sgnY = o.signY;
+        // `tapLanes`, not `taps` -- this function has a `taps` PARAMETER now and
+        // -Wshadow is fatal in every gate configuration.
+        const uint32_t tapLanes[4] = {
+            static_cast<uint32_t>(o.t00[0]), static_cast<uint32_t>(o.t01[0]),
+            static_cast<uint32_t>(o.t10[0]), static_cast<uint32_t>(o.t11[0])};
+        const uint32x4_t vt = vld1q_u32(tapLanes);
 
         // Four taps against one magnitude, counts straight into lanes. No
         // extraction here -- the accumulators run to the end of the window.
@@ -880,9 +1069,9 @@ inline void alignedResidualSumsNeon1(const LKLevelN<1, WordType>& lv,
     }
 
     // ONE domain crossing per window per component, not one per row.
-    auto lane = [](uint32x4_t t, uint32x4_t o, int i) {
+    auto lane = [](uint32x4_t t, uint32x4_t opp, int i) {
         return static_cast<long long>(vgetq_lane_u32(t, i)) -
-               2 * static_cast<long long>(vgetq_lane_u32(o, i));
+               2 * static_cast<long long>(vgetq_lane_u32(opp, i));
     };
     sumsX.t00 += lane(totX, oppX, 0); sumsX.t01 += lane(totX, oppX, 1);
     sumsX.t10 += lane(totX, oppX, 2); sumsX.t11 += lane(totX, oppX, 3);
@@ -892,97 +1081,52 @@ inline void alignedResidualSumsNeon1(const LKLevelN<1, WordType>& lv,
     sumsY.self += selfTotY - 2 * selfOppY;
 }
 
-/// @brief The aligned residual at **N == 2**, batching across the FOUR TAPS with a
-///        SINGLE accumulator per component carried across the WHOLE WINDOW.
-///        **INTERNAL.**
-///
-/// ===========================================================================
-/// WHY THIS EXISTS SEPARATELY FROM BOTH OF THE OTHER TWO PATHS
-///
-/// `slicedSignedSum` batches the `N^2` PLANE PAIRS and reduces ONCE PER CALL:
-/// ten calls per row over 31 rows is **~310 register-domain crossings per window**.
-/// `alignedResidualSumsNeon1` fixed that at `N == 1` by putting the four TAPS in
-/// lanes and carrying the counts to the end of the window -- but at `N == 1` there
-/// is one plane pair, so it had nothing to fold.
-///
-/// **THREE OF THE FOUR LEVELS OF THE SHIPPED `1/2/2/2` LADDER RUN AT `N == 2`**
-/// (D-23), so the depth doing most of the tracking was still reducing per call.
-/// This puts the four taps in lanes AND folds the four plane pairs inside the row:
-///
-///     acc += diff(i, j) * 2^(i+j)          -- vmlaq_n_s32, one per pair
-///
-/// **That is exact, not approximate.** The weight is constant across rows, so
-/// `sum_rows sum_pairs w*d == sum_pairs w*sum_rows d`. `slicedSignedSum`'s scalar
-/// spelling remains the equality oracle and tests/test_opticalflow.cpp compares them.
-///
-/// ONE `int32x4_t` per component, so there is no spill: the obvious alternative --
-/// sixteen accumulators, one per `(tap, pair)` -- was rejected before measuring for
-/// that reason (X-40).
-///
-/// RANGE. Per lane and pair `diff` is in `[-32, 32]` at `uint32_t`; weighted by at
-/// most 4, over 4 pairs and 31 rows, `|acc| <= 15872`. `int32` holds it with three
-/// orders of magnitude to spare, and a wider window would have to grow 135-fold
-/// before that stopped being true.
-///
-/// `self` keeps the per-call shape, exactly as the `N == 1` path leaves it scalar:
-/// five taps do not fit four lanes, and a fifth lane would cost a second register
-/// pair for one fifth of the work.
-///
-/// Measured ceiling for this reshaping: **1.461x**, bit-exact (X-40).
-/// ===========================================================================
 template <typename WordType>
-inline void alignedResidualSumsNeon2(const LKLevelN<2, WordType>& lv,
+inline void alignedResidualSumsNeon1(const LKLevelN<1, WordType>& lv,
                                      const RegionWords<WordType>& r, long long tapX,
-                                     long long tapY, TapSums& sumsX, TapSums& sumsY) {
+                                     long long tapY, TapSums& sumsX, TapSums& sumsY,
+                                     const StagedWindow<1, WordType>* staged,
+                                     TapCache<1, WordType>* taps) {
+    if (staged != nullptr) {
+        alignedResidualSumsNeon1Impl<WordType, true>(lv, r, tapX, tapY, sumsX, sumsY, staged,
+                                                     taps);
+    } else {
+        alignedResidualSumsNeon1Impl<WordType, false>(lv, r, tapX, tapY, sumsX, sumsY,
+                                                      nullptr, nullptr);
+    }
+}
+
+/// @brief The aligned residual at **N == 2**, the plane pairs folded inside the row
+///        into one accumulator per component. **INTERNAL** (X-40).
+/// @note See `alignedResidualSumsNeon1Impl` for why `Staged` is compile-time.
+template <typename WordType, bool Staged>
+inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
+                                         const RegionWords<WordType>& r, long long tapX,
+                                         long long tapY, TapSums& sumsX, TapSums& sumsY,
+                                         const StagedWindow<2, WordType>* staged,
+                                         TapCache<2, WordType>* taps) {
     constexpr size_t N = 2;
-    const size_t width = r.x1 - r.x0;
-    const size_t words = minRowWords<WordType>(lv.prev[0].width);
-    const WordType mask = lowBitsMask<WordType>(width);
-    const long long x0 = static_cast<long long>(r.x0);
-    const bool tapIsShift = width < bitsPerWord<WordType>();
-    const long long srcX = x0 + tapX;
-    const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
-    const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
+    RowReader<N, WordType, Staged> rd(lv, r, tapX, tapY, staged, taps);
+    RowOperands<N, WordType> o;
 
     int32x4_t accX = vdupq_n_s32(0), accY = vdupq_n_s32(0);
     long long selfX = 0, selfY = 0;
 
-    for (size_t y = r.y0; y < r.y1; ++y) {
-        WordType t00[N], t01[N], t10[N], t11[N], self[N], magX[N], magY[N];
-        const long long srcY = static_cast<long long>(y) + tapY;
-        const bool rowsInside = srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
-        const bool interior = colsInside && rowsInside;
-        for (size_t k = 0; k < N; ++k) {
-            if (interior) {
-                t00[k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY)), words,
-                                               static_cast<size_t>(srcX));
-                t10[k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY) + 1),
-                                               words, static_cast<size_t>(srcX));
-            } else {
-                t00[k] = displacedRow<WordType>(lv.next[k], srcY, srcX).word(0);
-                t10[k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX).word(0);
-            }
-            if (tapIsShift) {
-                t01[k] = static_cast<WordType>(t00[k] >> 1);
-                t11[k] = static_cast<WordType>(t10[k] >> 1);
-            } else {
-                t01[k] = displacedRow<WordType>(lv.next[k], srcY, srcX + 1).word(0);
-                t11[k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX + 1).word(0);
-            }
-            self[k] = alignedWord<WordType>(lv.prev[k].row(y), words, r.x0);
-            magX[k] = static_cast<WordType>(
-                alignedWord<WordType>(lv.dxMag[k].row(y), words, r.x0) & mask);
-            magY[k] = static_cast<WordType>(
-                alignedWord<WordType>(lv.dyMag[k].row(y), words, r.x0) & mask);
-        }
-        const WordType signX = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
-        const WordType signY = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
+    for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
+        rd.load(y, i, o);
+        const WordType* self = o.self;
+        const WordType* magX = o.magX;
+        const WordType* magY = o.magY;
+        const WordType signX = o.signX;
+        const WordType signY = o.signY;
 
         // The four taps' plane k, in lanes. Built once and used by both components.
-        const uint32_t p0[4] = {static_cast<uint32_t>(t00[0]), static_cast<uint32_t>(t01[0]),
-                                static_cast<uint32_t>(t10[0]), static_cast<uint32_t>(t11[0])};
-        const uint32_t p1[4] = {static_cast<uint32_t>(t00[1]), static_cast<uint32_t>(t01[1]),
-                                static_cast<uint32_t>(t10[1]), static_cast<uint32_t>(t11[1])};
+        const uint32_t p0[4] = {
+            static_cast<uint32_t>(o.t00[0]), static_cast<uint32_t>(o.t01[0]),
+            static_cast<uint32_t>(o.t10[0]), static_cast<uint32_t>(o.t11[0])};
+        const uint32_t p1[4] = {
+            static_cast<uint32_t>(o.t00[1]), static_cast<uint32_t>(o.t01[1]),
+            static_cast<uint32_t>(o.t10[1]), static_cast<uint32_t>(o.t11[1])};
         const uint32x4_t vp0 = vld1q_u32(p0), vp1 = vld1q_u32(p1);
 
         // One plane pair: count the four taps against magnitude plane j, subtract
@@ -1022,303 +1166,62 @@ inline void alignedResidualSumsNeon2(const LKLevelN<2, WordType>& lv,
     sumsY.t10 += vgetq_lane_s32(accY, 2); sumsY.t11 += vgetq_lane_s32(accY, 3);
     sumsY.self += selfY;
 }
+
+template <typename WordType>
+inline void alignedResidualSumsNeon2(const LKLevelN<2, WordType>& lv,
+                                     const RegionWords<WordType>& r, long long tapX,
+                                     long long tapY, TapSums& sumsX, TapSums& sumsY,
+                                     const StagedWindow<2, WordType>* staged,
+                                     TapCache<2, WordType>* taps) {
+    if (staged != nullptr) {
+        alignedResidualSumsNeon2Impl<WordType, true>(lv, r, tapX, tapY, sumsX, sumsY, staged,
+                                                     taps);
+    } else {
+        alignedResidualSumsNeon2Impl<WordType, false>(lv, r, tapX, tapY, sumsX, sumsY,
+                                                      nullptr, nullptr);
+    }
+}
 #endif
 
-/// @brief `residualSums` for a region that fits in ONE word. **INTERNAL** -- see
-///        the fast-path comment in `residualSums`.
+/// @brief `residualSums` for a region that fits in ONE word. **INTERNAL.**
+/// @note See `alignedResidualSumsNeon1Impl` for why `Staged` is compile-time.
+template <size_t N, typename WordType, bool UseNeon, bool Staged>
+inline void alignedResidualSumsImpl(const LKLevelN<N, WordType>& lv,
+                                    const RegionWords<WordType>& r, long long tapX,
+                                    long long tapY, TapSums& sumsX, TapSums& sumsY,
+                                    const StagedWindow<N, WordType>* staged,
+                                    TapCache<N, WordType>* taps) {
+    RowReader<N, WordType, Staged> rd(lv, r, tapX, tapY, staged, taps);
+    RowOperands<N, WordType> o;
+    for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
+        rd.load(y, i, o);
+        sumsX.t00 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, o.t00);
+        sumsX.t01 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, o.t01);
+        sumsX.t10 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, o.t10);
+        sumsX.t11 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, o.t11);
+        sumsX.self += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, o.self);
+        sumsY.t00 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, o.t00);
+        sumsY.t01 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, o.t01);
+        sumsY.t10 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, o.t10);
+        sumsY.t11 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, o.t11);
+        sumsY.self += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, o.self);
+    }
+}
+
 template <size_t N, typename WordType, bool UseNeon>
-inline void alignedResidualSums(const LKLevelN<N, WordType>& lv,
-                                const RegionWords<WordType>& r, long long tapX, long long tapY,
-                                TapSums& sumsX, TapSums& sumsY) {
+inline void alignedResidualSums(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
+                                long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY,
+                                const StagedWindow<N, WordType>* staged = nullptr,
+                                TapCache<N, WordType>* taps = nullptr) {
     const size_t width = r.x1 - r.x0;
     if (width == 0) return;
-    const size_t words = minRowWords<WordType>(lv.prev[0].width);
-    const WordType mask = lowBitsMask<WordType>(width);
-    const long long x0 = static_cast<long long>(r.x0);
-
-    // ===================================================================
-    // TWO THINGS THE ALIGNMENT MADE POSSIBLE (X-35).
-    //
-    // (T) THE `+1` TAP IS A SHIFT, AND X-34 IS WHAT MADE THAT TRUE.
-    // X-32 tried exactly this identity in the per-word path and it LOST: `t01` at
-    // word `i` needed a bit from word `i + 1`, and the extra read cost more than
-    // it saved. Aligned, the window is `width` pixels and one read covers
-    // `bitsPerWord`, so `t01`'s bits for positions `0..width-1` are source columns
-    // `[c+1, c+width]` -- entirely inside the word `t00` already holds whenever
-    // `width < bitsPerWord`. So `t01 = t00 >> 1`, one operation, and TWO OF THE
-    // FOUR displaced-row constructions disappear.
-    //
-    // (I) THE INTERIOR FAST PATH. `displacedRow` builds the replicate border
-    // unconditionally -- two `edgeFill` calls, each a load and a test. A window
-    // whose displaced extent is entirely inside the frame needs none of it and can
-    // use the same `alignedWord` the previous-frame planes use. Most windows are
-    // interior, so the border machinery was being paid for the minority.
-    //
-    // Both are guarded, and the general path below is what runs when they do not
-    // hold.
-    // ===================================================================
-    const bool tapIsShift = width < bitsPerWord<WordType>();
-    const long long srcX = x0 + tapX;
-    const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
-    const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
-
-    for (size_t y = r.y0; y < r.y1; ++y) {
-        WordType t00[N], t01[N], t10[N], t11[N], self[N], magX[N], magY[N];
-        const long long srcY = static_cast<long long>(y) + tapY;
-        const bool rowsInside = srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
-        const bool interior = colsInside && rowsInside;
-        for (size_t k = 0; k < N; ++k) {
-            if (interior) {
-                t00[k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY)), words,
-                                               static_cast<size_t>(srcX));
-                t10[k] = alignedWord<WordType>(lv.next[k].row(static_cast<size_t>(srcY) + 1),
-                                               words, static_cast<size_t>(srcX));
-            } else {
-                t00[k] = displacedRow<WordType>(lv.next[k], srcY, srcX).word(0);
-                t10[k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX).word(0);
-            }
-            if (tapIsShift) {
-                t01[k] = static_cast<WordType>(t00[k] >> 1);
-                t11[k] = static_cast<WordType>(t10[k] >> 1);
-            } else {
-                t01[k] = displacedRow<WordType>(lv.next[k], srcY, srcX + 1).word(0);
-                t11[k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX + 1).word(0);
-            }
-            self[k] = alignedWord<WordType>(lv.prev[k].row(y), words, r.x0);
-            magX[k] = static_cast<WordType>(
-                alignedWord<WordType>(lv.dxMag[k].row(y), words, r.x0) & mask);
-            magY[k] = static_cast<WordType>(
-                alignedWord<WordType>(lv.dyMag[k].row(y), words, r.x0) & mask);
-        }
-        const WordType signX = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
-        const WordType signY = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
-
-        sumsX.t00 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t00);
-        sumsX.t01 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t01);
-        sumsX.t10 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t10);
-        sumsX.t11 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t11);
-        sumsX.self += slicedSignedSum<N, WordType, UseNeon>(magX, signX, self);
-        sumsY.t00 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t00);
-        sumsY.t01 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t01);
-        sumsY.t10 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t10);
-        sumsY.t11 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t11);
-        sumsY.self += slicedSignedSum<N, WordType, UseNeon>(magY, signY, self);
+    if (staged != nullptr) {
+        alignedResidualSumsImpl<N, WordType, UseNeon, true>(lv, r, tapX, tapY, sumsX, sumsY,
+                                                            staged, taps);
+    } else {
+        alignedResidualSumsImpl<N, WordType, UseNeon, false>(lv, r, tapX, tapY, sumsX, sumsY,
+                                                             nullptr, nullptr);
     }
-}
-
-/// @brief Rows the staging path handles. The shipped window is 31 ([D-31](../../../ARCHITECTURE.md)).
-/// @note A bound, not a tuning knob: it fixes the size of a STACK buffer, and
-///       [CLAUDE.md](../../../CLAUDE.md) forbids a kernel allocating. At the shipped
-///       `N = 2` the whole struct is 2 048 B; at the `N = 8` ceiling it is 6 656 B.
-///       A taller window declines and takes the unstaged path.
-constexpr size_t kStagedMaxRows = 64;
-
-/// @brief One window's ITERATION-INVARIANT words, extracted once. **INTERNAL** (X-66).
-///
-/// **WHY THIS EXISTS.** [X-68](../../../EXPERIMENTS.md) measured **91.5% of `track`**
-/// to be iterated `residualSums`, at a mean of **4.29 iterations** per point per level.
-/// Of the twelve words `alignedResidualSums` reads per row, **eight belong to the
-/// PREVIOUS frame** — `self`, `magX`, `magY`, `signX`, `signY` — and LK linearises
-/// about the previous frame, so **they are identical on every one of those
-/// iterations** and were being re-extracted on all of them.
-///
-/// The four tap words are not here: they depend on `(tapX, tapY)`, which moves.
-///
-/// @note `region` is fixed per point per level — it is derived from `prevPts`, which
-///       the iteration does not touch — so one staging serves every iteration.
-template <size_t N, typename WordType>
-struct StagedWindow {
-    WordType self[kStagedMaxRows][N];
-    WordType magX[kStagedMaxRows][N];   ///< already masked to the region
-    WordType magY[kStagedMaxRows][N];
-    WordType signX[kStagedMaxRows];
-    WordType signY[kStagedMaxRows];
-};
-
-/// @brief The four TAP words per row, cached against the integer displacement they
-///        were read at. **INTERNAL** (X-70).
-///
-/// **WHY A CACHE AND NOT A SECOND STAGING.** The taps move, which is why
-/// [X-69](../../../EXPERIMENTS.md) could not stage them — but they move as
-/// `floor(offX)`, and `offX` is a displacement the iteration is *shrinking*. Once the
-/// estimate settles inside a pixel the integer part stops changing, and the same four
-/// words are re-extracted every remaining iteration. Keying on `(tapX, tapY)` reuses
-/// them whenever it has not moved, and re-reads whenever it has.
-///
-/// **Sound by construction:** the tap words are a pure function of `lv.next`, `region`
-/// and `(tapX, tapY)`. The first two are fixed for the point; the third is the key.
-template <size_t N, typename WordType>
-struct TapCache {
-    WordType t00[kStagedMaxRows][N];
-    WordType t01[kStagedMaxRows][N];
-    WordType t10[kStagedMaxRows][N];
-    WordType t11[kStagedMaxRows][N];
-    long long tapX = 0;
-    long long tapY = 0;
-    bool valid = false;
-};
-
-/// @brief Fill a `StagedWindow`, or decline. **INTERNAL** (X-66).
-/// @return False when this window cannot be staged, leaving the caller on the
-///         unstaged path. Declines are not failures: a window wider than a word uses
-///         `ReplicatedShiftedRow` spans rather than single words, and a taller one
-///         would overrun a fixed stack buffer.
-template <size_t N, typename WordType>
-inline bool stageWindow(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
-                        StagedWindow<N, WordType>& s) {
-#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
-    // ===================================================================
-    // AARCH64 DECLINES WHERE A MEASURED NEON PATH ALREADY EXISTS (X-69/X-70).
-    //
-    // `residualSums` dispatches N == 1 and N == 2 at `uint32_t` to
-    // `alignedResidualSumsNeon1` / `alignedResidualSumsNeon2` -- D-33's tap batching
-    // and X-40's window-carried accumulator, both measured on the reference device.
-    // The staged path does NOT have those: it calls `slicedSignedSum` per value, so
-    // taking it here would trade a measured optimisation for an unmeasured one.
-    //
-    // That is the shipped 1/2/2/2 ladder's entire depth range, so on aarch64 staging
-    // is currently off for every level. **This is a hold, not a verdict**: the
-    // staged NEON variants are E-39, and the reason they are not written here is
-    // that X-41 already records THREE copies of this extraction block and writing
-    // them blind would make five, on a platform this change cannot be measured on
-    // today.
-    // ===================================================================
-    if constexpr ((N == 1 || N == 2) && sizeof(WordType) == 4) {
-        (void)lv;
-        (void)r;
-        (void)s;
-        return false;
-    }
-#endif
-    const size_t width = r.x1 - r.x0;
-    if (width == 0 || width > bitsPerWord<WordType>()) return false;
-    const size_t rows = r.y1 - r.y0;
-    if (rows > kStagedMaxRows) return false;
-    const size_t words = minRowWords<WordType>(lv.prev[0].width);
-    const WordType mask = lowBitsMask<WordType>(width);
-    for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
-        for (size_t k = 0; k < N; ++k) {
-            s.self[i][k] = alignedWord<WordType>(lv.prev[k].row(y), words, r.x0);
-            s.magX[i][k] = static_cast<WordType>(
-                alignedWord<WordType>(lv.dxMag[k].row(y), words, r.x0) & mask);
-            s.magY[i][k] = static_cast<WordType>(
-                alignedWord<WordType>(lv.dyMag[k].row(y), words, r.x0) & mask);
-        }
-        s.signX[i] = alignedWord<WordType>(lv.dxSign.row(y), words, r.x0);
-        s.signY[i] = alignedWord<WordType>(lv.dySign.row(y), words, r.x0);
-    }
-    return true;
-}
-
-/// @brief The 1-bit `LKLevel` declines unconditionally. **INTERNAL.**
-/// @note `stageWindow` is written against `LKLevelN`'s plane arrays. Declining keeps
-///       one tracking body serving both level types ([D-21](../../../ARCHITECTURE.md))
-///       without a compile error, exactly as the two `residualSums` overloads do.
-template <typename WordType>
-inline bool stageWindow(const LKLevel<WordType>&, const RegionWords<WordType>&,
-                        StagedWindow<1, WordType>&) {
-    return false;
-}
-
-/// @brief `alignedResidualSums` reading the previous frame from a `StagedWindow`.
-///        **INTERNAL** (X-66).
-/// @note **Bit-exact with `alignedResidualSums` by construction** — the same words in
-///       the same order, differing only in where they are read from. The taps are
-///       still extracted per iteration, because they move.
-template <size_t N, typename WordType, bool UseNeon>
-inline void stagedResidualSums(const LKLevelN<N, WordType>& lv,
-                               const StagedWindow<N, WordType>& s, TapCache<N, WordType>& tc,
-                               const RegionWords<WordType>& r, long long tapX, long long tapY,
-                               TapSums& sumsX, TapSums& sumsY) {
-    const size_t width = r.x1 - r.x0;
-    if (width == 0) return;
-    const long long x0 = static_cast<long long>(r.x0);
-
-    // Both of `alignedResidualSums`' guards, unchanged and for the same reasons.
-    const bool tapIsShift = width < bitsPerWord<WordType>();
-    const long long srcX = x0 + tapX;
-    const long long lastCol = static_cast<long long>(lv.next[0].width) - 1;
-    const bool colsInside = srcX >= 0 && srcX + static_cast<long long>(width) <= lastCol;
-    const size_t words = minRowWords<WordType>(lv.prev[0].width);
-
-    // X-70: the taps are a pure function of (lv.next, region, tapX, tapY). The first
-    // two are fixed for this point, so an unchanged integer displacement means the
-    // same four words per row -- and the iteration is shrinking `off`, so it stops
-    // changing well before `maxIterations`.
-    const bool tapsFresh = tc.valid && tc.tapX == tapX && tc.tapY == tapY;
-    if (!tapsFresh) {
-        tc.tapX = tapX;
-        tc.tapY = tapY;
-        tc.valid = true;
-    }
-
-    for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
-        if (!tapsFresh) {
-            const long long srcY = static_cast<long long>(y) + tapY;
-            const bool rowsInside =
-                srcY >= 0 && srcY + 1 < static_cast<long long>(lv.next[0].height);
-            const bool interior = colsInside && rowsInside;
-            for (size_t k = 0; k < N; ++k) {
-                if (interior) {
-                    tc.t00[i][k] = alignedWord<WordType>(
-                        lv.next[k].row(static_cast<size_t>(srcY)), words,
-                        static_cast<size_t>(srcX));
-                    tc.t10[i][k] = alignedWord<WordType>(
-                        lv.next[k].row(static_cast<size_t>(srcY) + 1), words,
-                        static_cast<size_t>(srcX));
-                } else {
-                    tc.t00[i][k] = displacedRow<WordType>(lv.next[k], srcY, srcX).word(0);
-                    tc.t10[i][k] = displacedRow<WordType>(lv.next[k], srcY + 1, srcX).word(0);
-                }
-                if (tapIsShift) {
-                    tc.t01[i][k] = static_cast<WordType>(tc.t00[i][k] >> 1);
-                    tc.t11[i][k] = static_cast<WordType>(tc.t10[i][k] >> 1);
-                } else {
-                    tc.t01[i][k] = displacedRow<WordType>(lv.next[k], srcY, srcX + 1).word(0);
-                    tc.t11[i][k] =
-                        displacedRow<WordType>(lv.next[k], srcY + 1, srcX + 1).word(0);
-                }
-            }
-        }
-        const WordType(&t00)[N] = tc.t00[i];
-        const WordType(&t01)[N] = tc.t01[i];
-        const WordType(&t10)[N] = tc.t10[i];
-        const WordType(&t11)[N] = tc.t11[i];
-        // THE EIGHT READS THAT USED TO BE EXTRACTIONS ARE NOW LOADS.
-        const WordType(&magX)[N] = s.magX[i];
-        const WordType(&magY)[N] = s.magY[i];
-        const WordType(&self)[N] = s.self[i];
-        const WordType signX = s.signX[i];
-        const WordType signY = s.signY[i];
-
-        sumsX.t00 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t00);
-        sumsX.t01 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t01);
-        sumsX.t10 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t10);
-        sumsX.t11 += slicedSignedSum<N, WordType, UseNeon>(magX, signX, t11);
-        sumsX.self += slicedSignedSum<N, WordType, UseNeon>(magX, signX, self);
-        sumsY.t00 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t00);
-        sumsY.t01 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t01);
-        sumsY.t10 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t10);
-        sumsY.t11 += slicedSignedSum<N, WordType, UseNeon>(magY, signY, t11);
-        sumsY.self += slicedSignedSum<N, WordType, UseNeon>(magY, signY, self);
-    }
-}
-
-/// @brief Dispatch to the staged path if this level has one. **INTERNAL** (X-66).
-template <size_t N, typename WordType>
-inline void residualSumsStaged(const LKLevelN<N, WordType>& lv,
-                               const StagedWindow<N, WordType>& s, TapCache<N, WordType>& tc,
-                               const RegionWords<WordType>& r, long long tapX, long long tapY,
-                               TapSums& sumsX, TapSums& sumsY) {
-    stagedResidualSums<N, WordType, true>(lv, s, tc, r, tapX, tapY, sumsX, sumsY);
-}
-
-/// @brief Never called — `stageWindow` declines for this level type. **INTERNAL.**
-template <typename WordType>
-inline void residualSumsStaged(const LKLevel<WordType>& lv, const StagedWindow<1, WordType>&,
-                               TapCache<1, WordType>&, const RegionWords<WordType>& r,
-                               long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY) {
-    residualSums(lv, r, tapX, tapY, sumsX, sumsY);
 }
 
 /// @brief `b = sum(diff * grad)` at **N bits per pixel**, as ten exact integers.
@@ -1350,7 +1253,9 @@ inline void residualSumsStaged(const LKLevel<WordType>& lv, const StagedWindow<1
 ///       address arithmetic.
 template <size_t N, typename WordType, bool UseNeon = true>
 inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
-                         long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY) {
+                         long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY,
+                         const StagedWindow<N, WordType>* staged = nullptr,
+                         TapCache<N, WordType>* taps = nullptr) {
     // ===================================================================
     // THE ALIGNED FAST PATH (X-34). A 31-pixel window at an arbitrary offset
     // spans 1.94 `uint32_t` words on average -- it fits in one only when
@@ -1377,7 +1282,8 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
         // batching, because at N == 1 there is one pair. Batching across the four
         // TAPS is what applies here (X-36).
         if constexpr (UseNeon && N == 1 && sizeof(WordType) == 4) {
-            alignedResidualSumsNeon1<WordType>(lv, r, tapX, tapY, sumsX, sumsY);
+            alignedResidualSumsNeon1<WordType>(lv, r, tapX, tapY, sumsX, sumsY, staged,
+                                              taps);
             return;
         }
         // N == 2 is levels 1-3 of the shipped ladder, and had the plane pairs in
@@ -1385,14 +1291,21 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
         // window-carried accumulator instead.
         if constexpr (UseNeon && N == 2 && sizeof(WordType) == 4) {
             if (r.x1 > r.x0) {
-                alignedResidualSumsNeon2<WordType>(lv, r, tapX, tapY, sumsX, sumsY);
+                alignedResidualSumsNeon2<WordType>(lv, r, tapX, tapY, sumsX, sumsY, staged,
+                                                   taps);
                 return;
             }
         }
 #endif
-        alignedResidualSums<N, WordType, UseNeon>(lv, r, tapX, tapY, sumsX, sumsY);
+        alignedResidualSums<N, WordType, UseNeon>(lv, r, tapX, tapY, sumsX, sumsY, staged,
+                                                  taps);
         return;
     }
+    // The general path reads `ReplicatedShiftedRow` SPANS, not single words, so a
+    // staged buffer cannot serve it. `stageWindow` already declines for these
+    // windows; the pointers are ignored here rather than silently half-used.
+    (void)staged;
+    (void)taps;
     for (size_t y = r.y0; y < r.y1; ++y) {
         const WordType* mx[N];
         const WordType* my[N];
@@ -1406,12 +1319,12 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
         const WordType* sy = lv.dySign.row(y);
 
         const long long srcY = static_cast<long long>(y) + tapY;
-        ReplicatedShiftedRow<WordType> taps[4][N];
+        ReplicatedShiftedRow<WordType> tapRows[4][N];
         for (size_t k = 0; k < N; ++k) {
-            taps[0][k] = displacedRow<WordType>(lv.next[k], srcY, tapX);
-            taps[1][k] = displacedRow<WordType>(lv.next[k], srcY, tapX + 1);
-            taps[2][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX);
-            taps[3][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX + 1);
+            tapRows[0][k] = displacedRow<WordType>(lv.next[k], srcY, tapX);
+            tapRows[1][k] = displacedRow<WordType>(lv.next[k], srcY, tapX + 1);
+            tapRows[2][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX);
+            tapRows[3][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX + 1);
         }
 
         TapSums rowX;
@@ -1419,10 +1332,10 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
         visitRowWords<WordType>(r, [&](size_t i, WordType mask) {
             WordType t00[N], t01[N], t10[N], t11[N], self[N];
             for (size_t k = 0; k < N; ++k) {
-                t00[k] = taps[0][k].word(i);
-                t01[k] = taps[1][k].word(i);
-                t10[k] = taps[2][k].word(i);
-                t11[k] = taps[3][k].word(i);
+                t00[k] = tapRows[0][k].word(i);
+                t01[k] = tapRows[1][k].word(i);
+                t10[k] = tapRows[2][k].word(i);
+                t11[k] = tapRows[3][k].word(i);
                 self[k] = ip[k][i];
             }
 
@@ -1566,12 +1479,12 @@ inline float windowMeanAbsDiff(const LKLevelN<N, WordType>& lv, const RegionWord
         for (size_t k = 0; k < N; ++k) ip[k] = lv.prev[k].row(y);
 
         const long long srcY = static_cast<long long>(y) + tapY;
-        ReplicatedShiftedRow<WordType> taps[4][N];
+        ReplicatedShiftedRow<WordType> tapRows[4][N];
         for (size_t k = 0; k < N; ++k) {
-            taps[0][k] = displacedRow<WordType>(lv.next[k], srcY, tapX);
-            taps[1][k] = displacedRow<WordType>(lv.next[k], srcY, tapX + 1);
-            taps[2][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX);
-            taps[3][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX + 1);
+            tapRows[0][k] = displacedRow<WordType>(lv.next[k], srcY, tapX);
+            tapRows[1][k] = displacedRow<WordType>(lv.next[k], srcY, tapX + 1);
+            tapRows[2][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX);
+            tapRows[3][k] = displacedRow<WordType>(lv.next[k], srcY + 1, tapX + 1);
         }
 
         visitRowWords<WordType>(r, [&](size_t i, WordType mask) {
@@ -1579,7 +1492,7 @@ inline float windowMeanAbsDiff(const LKLevelN<N, WordType>& lv, const RegionWord
             WordType tw[4][N];
             for (size_t k = 0; k < N; ++k) {
                 iw[k] = ip[k][i];
-                for (size_t t = 0; t < 4; ++t) tw[t][k] = taps[t][k].word(i);
+                for (size_t t = 0; t < 4; ++t) tw[t][k] = tapRows[t][k].word(i);
             }
             for (size_t b = 0; b < bitsPerWord<WordType>(); ++b) {
                 const WordType bit = bitMask<WordType>(b);
@@ -1899,12 +1812,8 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
             // path differs only in where the words come from.
             TapSums sumsX;
             TapSums sumsY;
-            if (staged) {
-                residualSumsStaged(lv, stagedWindow, tapCache, region, tapX, tapY, sumsX,
-                                   sumsY);
-            } else {
-                residualSums(lv, region, tapX, tapY, sumsX, sumsY);
-            }
+            residualSums(lv, region, tapX, tapY, sumsX, sumsY,
+                         staged ? &stagedWindow : nullptr, staged ? &tapCache : nullptr);
 
             const double b1 = sumsX.combine(w00, w01, w10, w11);
             const double b2 = sumsY.combine(w00, w01, w10, w11);

@@ -10919,6 +10919,57 @@ drift moves both.
 
 ---
 
+### X-74 · E-39 done — the staged NEON variants, and the device reaches 2.48× · `DONE`
+
+**[X-72](#x-72--e-39--the-staged-neon-variants-measured-213-code-deferred--partial)
+MEASURED THIS AND REVERTED IT**, reporting "no way to compile for aarch64". That was
+false — `scripts/check_arm_syntax.sh` compiles the NEON region **in 2.5 seconds** using
+the device as a compiler, and with that loop the work is routine.
+
+**The three things X-72 learned the hard way, all obeyed:**
+
+1. **`Staged` is a template parameter.** A runtime `staged != nullptr` per row cost
+   **17% of `track` on x86** — the compiler stops specialising the loop.
+2. **Operands alias, they do not copy.** Copying them into a per-row struct gives back
+   exactly what staging bought.
+3. **The reader is written ONCE AND WHOLE.** X-72's damage came from splicing it into
+   four existing bodies inside a region x86 never compiles. This time the entire
+   region — `StagedWindow`, `TapCache`, `RowReader`, both NEON kernels and the scalar
+   one — was replaced in a single edit.
+
+**RESULT, reference device, `taskset -c 3`, V1_02, 900 frames, two runs:**
+
+| | `track` ms | binCV ms | OpenCV ms | ratio |
+|---|---|---|---|---|
+| staging held off ([X-71](#x-71--e-40--the-input-conversion-on-both-architectures--done)) | 7.602 / 7.624 | 9.002 / 9.008 | 16.6 | 1.85× |
+| **staged NEON** | **5.356 / 5.388** | **6.754 / 6.788** | 16.7 | **2.48× / 2.46×** |
+
+**`track` 1.42×, the frontend 1.33×, and the ratio 1.85× → 2.47× on the deployment
+target** — and **above X-72's own prototype at 2.13×**, because that one reached the
+NEON kernels through a runtime flag rather than a template parameter.
+
+**x86 pays nothing:** `track` 1.498 / 1.510 ms against 1.544 before, ratio 1.54× /
+1.53× against 1.57× — inside the run-to-run spread at load 0.48, and if anything
+slightly better on `track`.
+
+**298/298 checks pass ON THE DEVICE**, including
+`Flow.StagedMatchesUnstaged_{N1,N2,N3}` — which now exercises the NEON paths, since
+the aarch64 hold is gone and `stageWindow` accepts at every depth.
+
+**THE HOLD IS LIFTED.** [D-60](ARCHITECTURE.md#8-design-decisions) declined staging on
+aarch64 for `N` ∈ {1,2} at `uint32_t` — the shipped ladder's whole depth range —
+because the staged path had neither D-33's tap batching nor X-40's accumulator. It has
+both now: one `RowReader` serves scalar and NEON, staged and unstaged, and X-41's
+**three copies** of the extraction block are **one**.
+
+**Decision: E-39 CLOSED.** [D-65](ARCHITECTURE.md#8-design-decisions).
+
+**Method:** `scripts/check_arm_syntax.sh` as the inner loop; device tests and timing
+via `scripts/run_on_pi.sh pi4` (pinned, matching every recorded entry); x86 control on
+the same tree, load 0.48.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
