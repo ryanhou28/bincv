@@ -10970,6 +10970,77 @@ the same tree, load 0.48.
 
 ---
 
+### X-75 · T5.3 — re-baselining the AVX2 batch, and an x86 non-regression · `DONE`
+
+#### THE DOUBT WAS UNFOUNDED: ARM A WAS ALWAYS THE SHIPPED SHAPE
+
+[D-60](ARCHITECTURE.md#8-design-decisions) warned that
+[X-66](#x-66--e-36--staging-not-gathering-the-x86-keypoint-batch-second-attempt--rule-only)'s
+**2.09×** was "measured against the *unstaged* scalar arm", so the headroom over what
+now ships was "smaller than 2.09× and not yet measured". **Reading the arm settles
+it:** `armScalar` calls `slicedSignedSum` over a **pre-extracted, per-keypoint
+contiguous buffer** — which is exactly what
+[X-69](#x-69--staging-without-vectorising--127-on-track-bit-exact--done)/[X-70](#x-70--the-taps-too--cached-on-the-integer-displacement--done)
+now ship: staged invariants and a hit tap cache, read through the same
+`slicedSignedSum`. **The baseline was already current; the note in D-60 was wrong.**
+
+Re-run on the current tree, three runs:
+
+| arm | vs A | |
+|---|---|---|
+| **A** scalar over pre-staged data — **the shipped inner loop** | 1.000× | |
+| B staged **everything** + per-row emulated popcount | 2.77 – 2.94× | optimistic |
+| C staged **everything** + CSA tree | 3.07 – 3.25× | optimistic |
+| **D** staged invariants, **taps gathered** | **2.06 – 2.14×** | the implementable one |
+
+**T5.3's bar was ≥1.5× and D clears it at 2.1×**, so the arm is worth writing.
+
+**AND THE ACHIEVABLE FACTOR MAY BE ABOVE D.** Arm D gathers taps every row because the
+ceiling has no tap cache. **The shipped path does** — with 4.29 mean iterations
+([X-68](#x-68--track-decomposed--915-is-iterated-residualsums--done)) the cache hits
+about 77% of the time, so a batched kernel that also caches taps in `[row][plane][lane]`
+layout sits **between D and C**. The complication is real and should not be waved away:
+**the eight lanes have different integer taps**, so a refresh for one is a scatter into
+the batched layout rather than a shared reload.
+
+#### AND AN x86 NON-REGRESSION, BECAUSE "WE WERE FASTER BEFORE" DESERVED A NUMBER
+
+[X-74](#x-74--e-39-done--the-staged-neon-variants-and-the-device-reaches-248--done)
+gave the device 1.33× and x86 nothing, which reads like a regression against the 1.63×
+recorded after [X-71](#x-71--e-40--the-input-conversion-on-both-architectures--done).
+**It is not, and the ratio was the wrong thing to look at:**
+
+| | binCV ms | OpenCV ms | ratio |
+|---|---|---|---|
+| after X-71 | 1.869 / **2.004** | 2.918 / **3.271** | 1.56× / **1.63×** |
+| now | 1.877 / 1.907 | 2.885 / 2.912 | 1.53 – 1.55× |
+
+> **binCV's own time is unchanged — 1.877/1.907 against 1.869/2.004.** The 1.63× came
+> from an OpenCV run at **3.271 ms** against its usual 2.9: **the denominator was slow,
+> not the numerator fast.** Five runs on the current tree give `track` 1.482–1.530 and
+> the ratio 1.53–1.55×, a tighter spread than the difference being questioned.
+
+**E-39 gaining nothing on x86 is correct and expected**, not a cost: x86 has had
+staging and the tap cache since X-69/X-70, and E-39's whole content was **bringing them
+to the NEON kernels**, which x86 does not have.
+
+**WHERE x86 GOES NEXT, SIZED.** `track` is 79% of the x86 frontend and
+[X-68](#x-68--track-decomposed--915-is-iterated-residualsums--done) put iterated
+`residualSums` at 91.5% of `track`. At arm D's 2.1×: `track` 1.50 → **0.81 ms**, the
+frontend 1.89 → **1.20**, and the ratio **1.54× → ≈2.4×**. That is the prize, it is on
+x86 specifically, and [E-36](ARCHITECTURE.md#register) is the only thing left that
+reaches it.
+
+**Decision:** T5.3 closed, [E-36](ARCHITECTURE.md#register) confirmed worth writing,
+D-60's baseline note corrected. **The frontend arm remains mandatory**
+([D-53](ARCHITECTURE.md#8-design-decisions)) — the projection above is Amdahl, not a
+measurement.
+
+**Method:** `benchmark/kpbatch_staged_ceiling.cpp`, three runs, load 0.92; frontend
+control five runs at load 0.44 on the same tree.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

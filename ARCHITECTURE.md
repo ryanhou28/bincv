@@ -3798,10 +3798,12 @@ scratch, which is why the bound exists at all.
 **Bit-exactness is pinned by `Flow.StagedMatchesUnstaged_{N1,N2,N3}`, watched to fail**
 on an injected one-bit staging fault (374/487/522 of 624 windows differ).
 
-**This works on aarch64 too**, where [E-36](#register)'s AVX2 batch never would — and it
-**shifts that experiment's baseline**: X-66's 2.09× was measured against the *unstaged*
-scalar arm, so its remaining headroom over this is smaller than 2.09× and is **not yet
-measured**.
+**This works on aarch64 too**, where [E-36](#register)'s AVX2 batch never would.
+
+**~~It also shifts that experiment's baseline~~ — IT DOES NOT, and
+[X-75](EXPERIMENTS.md) checked.** X-66's arm A reads a **pre-extracted, per-keypoint
+contiguous buffer** through the same `slicedSignedSum` this ships, so the baseline was
+already current: **2.06–2.14× re-measured on the shipped tree.**
 
 ### D-61: the taps are cached on the integer displacement, and binCV crosses 1.0
 
