@@ -3688,179 +3688,199 @@ ships, because X-62 was 1.75× in the kernel and 0.31× on the frontend.
 
 ---
 
-## Phase 5.5 — Portability beyond the two architectures actually measured
+## Phase 5.5 — Where the MVP ends and SLAM begins
 
-**WHAT binCV SUPPORTS TODAY, MEASURED:** `x86_64` (POPCNT by default, AVX2 by runtime
-dispatch in the conversion) and `aarch64` (NEON, the reference device). **That is the
-whole list.**
+**THE MVP OPERATION SET IS DONE.**
+[ARCHITECTURE §7](ARCHITECTURE.md#7-the-mvp-operation-set) lists 7.1–7.7 — denoise,
+pyramid, threshold, derivative, LK covariance, corner response, morphology — and every
+one ships, alongside `opticalFlow`, `blockMatch`, `reduce`, `resample`, `shift`, `logic`
+and `bitslice`. A binary-frame **VIO frontend** is covered and validated end to end
+([X-38](EXPERIMENTS.md)).
 
-**WHAT IT CLAIMS BUT HAS NEVER BUILT:** [CMakeLists.txt](bincv-cpp/CMakeLists.txt)
-matches `arm|aarch64|ARM|AARCH64` and probes `-mfpu=neon`, so **32-bit ARM is a code
-path nobody has compiled.** `verify.sh` is x86_64; `verify_arm.sh` is aarch64 under
-emulation; `run_on_pi.sh` is aarch64 hardware. **Nothing anywhere builds a 32-bit
-target**, and CLAUDE.md names Cortex-M as a target in its first paragraph.
+**What is not covered is SLAM**, and the gap is a single family.
 
-### T5.5 · 32-bit targets — and the Cortex-M claim · `TODO`
+### T5.4 · Binary descriptors and Hamming matching · `TODO — ASK BEFORE STARTING`
 
-**THE CLAIM IS IN CLAUDE.md AND IS UNTESTED.** "Targets embedded and mobile CPUs" and
-"Cortex-A / Cortex-M". A 32-bit build has never been produced.
+**THE MOST binCV-NATIVE OPERATION IN COMPUTER VISION, AND binCV DOES NOT HAVE IT.**
+BRIEF and ORB descriptors **are bit strings**; matching them is `popcount(a ^ b)`. A
+library whose thesis is bit-parallel operations at true bit width — which already ships
+a Hamming block-matcher (`impl::hammingAt` in
+[ops/blockMatch.hpp](bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp)) — has no
+descriptor extraction and no matcher.
 
-**Four things that are different there and none of them are hypothetical:**
+**Why it matters beyond elegance:** LK gives frame-to-frame association. **Loop
+closure, relocalisation and map-point association need descriptors** — that is the line
+between a VIO frontend and SLAM, and the ORB-SLAM family and DBoW2 vocabularies are
+built on exactly these bits.
 
-1. **`size_t` is 32 bits.** Every index, stride and `planeWords()` is `size_t`. A
-   752×480 frame is fine; the arithmetic in `-Wconversion`'s crosshairs may not be.
-   **This is exactly what CLAUDE.md means by `-Wconversion` being load-bearing**, and
-   the sweep has only ever run at 64-bit pointer width.
-2. **`uint64_t` words cost two registers.** `uint32_t` is already the default
-   ([D-14](ARCHITECTURE.md#8-design-decisions)) so this is not a crisis, but
-   `slicedSignedSum`'s `long long` accumulators are not free either.
-3. **M-profile has NO popcount and NO NEON.** A-profile has `VCNT`; Cortex-M has
-   neither, so it falls to the software fallback — and
-   [X-57](EXPERIMENTS.md) measured that fallback costing **3.75×** on x86. **On the
-   platform the README names first, the slow path is the only path.** A SWAR popcount
-   (the classic shift-and-mask reduction) is probably the right answer and has never
-   been benchmarked.
-4. **No heap, no exceptions, no `std::thread`.** The core-only and `-fno-exceptions`
-   configurations are exactly this groundwork — but "compiles without exceptions on
-   x86_64-linux" is not "runs freestanding on an MCU".
+**Scope:** descriptor extraction (BRIEF pattern, ORB orientation compensation),
+`bincv::Hamming` distance, brute-force and kNN matching with a ratio test.
+**`cv::BFMatcher` with `NORM_HAMMING` is the denominator, and it is a fair fight** —
+OpenCV stores these as bits too.
 
-**Deliverable:** a 32-bit ARM build in `verify.sh` (qemu-user or a cross-compiler is
-enough — it is a CORRECTNESS axis, and speed decisions still close on the reference
-device), plus a measured answer on the popcount fallback. **If the Cortex-M claim
-cannot be met, say so in CLAUDE.md rather than leaving it standing.**
+**Ask first.** [CLAUDE.md](CLAUDE.md)'s scope discipline defines the MVP as what a VIO
+frontend calls, and this is past that line. It is the most defensible extension
+available, but it is an extension.
 
-### T5.6 · RISC-V · `TODO`
+### T5.5 · FAST corner detection · `TODO`
 
-**Depends:** T5.5 (the 32-bit work is most of it; RV32 and RV64 differ the same way).
+**Depends:** T5.4 — they ship together or not at all. binCV already detects with
+Shi-Tomasi (`cornerMinEigenVal` / `goodFeaturesToTrack`); FAST without descriptors is a
+detector nobody asked for.
 
-**Nothing in the codebase mentions RISC-V.** Two reasons it is worth more than a
-checkbox:
-
-- **`Zbb` has `CPOP`** — a scalar population count, the exact analogue of the `-mpopcnt`
-  flag that [X-57](EXPERIMENTS.md) found was **the single largest x86 factor in this
-  project**. The same 3.75× trap is waiting, with the same fix.
-- **`RVV` is length-agnostic**, which is a genuinely different shape from NEON's fixed
-  128 bits and AVX2's fixed 256. [D-52](ARCHITECTURE.md#8-design-decisions) says a
-  31-pixel window caps packing at 1.94× **regardless of register width** — RVV does not
-  change that conclusion, and the bulk kernels are where it would pay.
-
-**Deliverable:** build and correctness first, `Zbb` second, `RVV` only if a bulk kernel
-justifies it.
+A threshold-and-compare over a 16-pixel Bresenham ring — contiguous comparisons against
+a centre, close to bit-parallel already. It is what the ORB-SLAM family detects with,
+so T5.4's descriptors want it.
 
 ---
 
-## Phase 5.6 — The operation set: where the MVP ends and SLAM begins
+## Phase 6 — Repository shape, for sharing
 
-**THE MVP SET IS DONE.** [ARCHITECTURE §7](ARCHITECTURE.md#7-the-mvp-operation-set)
-lists 7.1–7.7 — denoise, pyramid, threshold, derivative, LK covariance, corner
-response, morphology — and **every one ships**, alongside `opticalFlow`, `blockMatch`,
-`reduce`, `resample`, `shift`, `logic` and `bitslice`. A binary-frame **VIO frontend**
-is covered.
+**GOAL: a repository that reads as a well-built library to someone who lands on it, can
+build it, and can try it.** Not contributor onboarding — that comes later, when there
+are contributors. Nothing here is about process; it is about a stranger's first hour.
 
-**WHAT IS NOT COVERED IS SLAM**, and the gap is a single family.
+**Not in scope, deliberately:** `CONTRIBUTING.md` and `CHANGELOG.md`. Both describe how
+*other people* participate, and there is no one to participate yet. They belong with the
+first external contributor, not before.
 
-### T5.7 · Binary descriptors and Hamming matching · `TODO`
+### T6.1 · LICENSE · `TODO`
 
-**THIS IS THE MOST binCV-NATIVE OPERATION IN COMPUTER VISION AND binCV DOES NOT HAVE
-IT.** BRIEF and ORB descriptors **are bit strings**; matching them is
-`popcount(a ^ b)`. A library whose entire thesis is bit-parallel operations at true bit
-width, that ships a Hamming block-matcher (`impl::hammingAt` in
-[ops/blockMatch.hpp](bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp)) but no descriptor
-extraction or matcher, has an odd-shaped hole in it.
+**Nothing else in this phase matters until this exists.** With no licence the code is
+**all rights reserved by default** — a reader may look at it and may not legally use,
+copy or run it, which defeats the entire purpose of sharing it.
 
-**Why it matters beyond elegance:** LK tracking gives frame-to-frame association.
-**Loop closure, relocalisation and map-point association need descriptors** — that is
-the line between "VIO frontend" and "SLAM", and ORB-SLAM-family systems and DBoW2
-vocabularies are all built on exactly these bits.
+One file, one decision: permissive (Apache-2.0, MIT) or copyleft. **Apache-2.0 is the
+usual choice for a library meant to be adopted** and carries an explicit patent grant,
+which matters for anything that might touch a product. **This is a call for the project
+owner, not a default to be picked quietly.**
 
-**Scope:** descriptor extraction (BRIEF pattern, ORB's orientation compensation),
-`bincv::Hamming` distance, and brute-force / kNN matching with a ratio test.
-**`cv::BFMatcher`'s `NORM_HAMMING` is the denominator**, and it is a fair fight for
-once — OpenCV also stores these as bits.
+### T6.2 · A README that does the job · `TODO`
 
-**Ask before starting.** [CLAUDE.md](CLAUDE.md)'s scope discipline says the MVP is what
-a VIO frontend calls, and this is past that line. It is the most defensible extension
-on the list, but it is an extension.
+87 lines currently front 21 000 lines of internal documentation. A reader needs, in
+order: **what binCV is and why bit-width matters**, the **headline numbers with their
+conditions stated** (sequence, thread count, platform —
+[D-58](ARCHITECTURE.md#8-design-decisions) exists because leaving those unstated
+produced two wrong headlines), a **20-line example** that compiles, **how to build and
+run the tests**, and a **platform support matrix that says plainly what is untested**.
 
-### T5.8 · FAST corner detection · `TODO`
+**The numbers are the reason to look twice** — 6.23× less memory, and faster than
+single-threaded OpenCV on both architectures — so they belong above the fold, with
+their conditions attached rather than buried.
 
-**Depends:** T5.7 (they ship together or not at all — FAST without descriptors is a
-detector nobody asked for; binCV already has Shi-Tomasi via
-`cornerMinEigenVal`/`goodFeaturesToTrack`).
+### T6.3 · Documentation structure and an API reference · `TODO`
 
-FAST is a **threshold-and-compare over a 16-pixel Bresenham ring** — contiguous
-comparisons against a centre, which is close to bit-parallel already. It is what the
-ORB-SLAM family detects with, so T5.7's descriptors want it.
+**The problem is audience, not length.** Every document in the repository is written for
+someone *building* binCV. A person who wants to *use* it has a README and
+GETTING_STARTED, and there is **no API reference at all**.
 
----
+- **`docs/api/`** — generated. The headers are already densely commented and every
+  public entry point states its **API tier**, so Doxygen has most of what it needs.
+- **`docs/adr/`** — one file per D-record. These already *are* architecture decision
+  records; the format has a name the world recognises.
+- **`docs/experiments/`** — [EXPERIMENTS.md](EXPERIMENTS.md) split by phase. At 646 KB
+  it does not render usefully in a browser, which is where a newcomer meets it.
 
-## Phase 5.7 — Open-source readiness
+**Do not discard the D/E/X record system.** Decisions, open questions and measurements,
+cross-linked, every performance claim traceable to a committed benchmark — it is the
+most valuable thing in the repository and the reason several wrong conclusions were
+caught before they shipped. **Keep the substance; fix the packaging.**
 
-**THE REPOSITORY IS NOT IN A STATE TO BE PUBLISHED, AND THE BLOCKER IS ONE FILE.**
+### T6.4 · Delete what should not be shared, correct what is wrong · `TODO`
 
-### T5.9 · The legal and structural minimum · `TODO`
+- **`OVERNIGHT_LOG.md`** — a working log of individual sessions. Its conclusions are
+  already in EXPERIMENTS.md. **Delete it**; a session diary is not part of a library.
+- **[ROADMAP.md](ROADMAP.md)'s "Current Status"** — still lists the Phase 3 frontend
+  kernels and NEON intrinsics as *"Not started"*. They have shipped for months. A stale
+  status section is worse than none: it is the first thing a reader trusts.
+- **[ROADMAP.md](ROADMAP.md)'s "Phase 6 — Deferred"** — renumber. It is a not-scoped
+  list rather than a phase, and it now collides with this one.
+- **`bincv-cuda/`** — nine tracked files against a GPU backend that
+  [ROADMAP](ROADMAP.md) explicitly defers. Either say what it is in its README or move
+  it out; an unexplained half-directory reads as abandoned work.
+- **`.gitignore` stays as it is.** Its comment explains why result logs are committed
+  while build directories are not, and that reasoning is correct.
 
-**There is no `LICENSE`.** Without one the code is "all rights reserved" by default and
-**nobody can legally use it**, which makes every other item here moot. Also absent:
-`CONTRIBUTING.md`, `CHANGELOG.md`, `.github/` (so **no CI** — `verify.sh` runs only when
-someone remembers), and a `README.md` of **87 lines** for a library with 21 000 lines of
-documentation behind it.
+### T6.5 · CI · `TODO — optional, and last`
 
-**The `.gitignore` is in good shape** and deliberately so — its comment explains why
-result logs are committed while build directories are not. That reasoning should
-survive the cleanup.
+`verify.sh` runs when someone remembers. A workflow that runs it on push costs an
+afternoon and makes the repository *demonstrably* green rather than assertedly so.
 
-### T5.10 · The documentation is 21 000 lines and none of it is for a user · `TODO`
+**Genuinely optional.** It is the one item here that serves the maintainer more than the
+reader — but a green badge is also the fastest signal to a stranger that the tests are
+real.
 
-| file | lines | what it is |
-|---|---|---|
-| EXPERIMENTS.md | **10 912** | a lab notebook, appended to 72 times |
-| ARCHITECTURE.md | 3 911 | design + 63 decision records |
-| TASKS.md | 3 687 | this file |
-| OVERNIGHT_LOG.md | 1 222 | **session cruft — should not exist** |
-| GETTING_STARTED.md | 522 | the closest thing to user docs |
-| README.md | **87** | the front door |
+### T6.6 · Where future work gets recorded · `TODO — decide, do not build`
 
-**THE PROBLEM IS NOT LENGTH, IT IS AUDIENCE.** Every one of these is written for
-*someone building binCV*. A person who wants to *use* it has a README and a
-GETTING_STARTED, and neither is an API reference.
+**A 3 687-line file that one person edits is not a backlog anyone else can read from**,
+so this needs an answer before the repository is shared — but it needs a *decision*, not
+an implementation. Nothing here should be built until someone other than the owner wants
+to pick something up.
 
-**What NOT to do: throw the record away.** The D/E/X system — decisions, open
-questions, experiments, each cross-linked, every performance claim traceable to a
-committed benchmark — is unusual and is the most valuable thing in the repository. It
-is why five overstated ceilings and three wrong headlines were caught. **Keep the
-substance; fix the packaging.**
-
-**Proposed shape, to be confirmed before anything moves:**
-
-- **`docs/adr/`** — one file per D-record. That is what these already are: architecture
-  decision records, a format the open-source world knows by name.
-- **`docs/experiments/`** — EXPERIMENTS.md split by phase. A 646 KB file is unreadable
-  on GitHub's web view, which is where a newcomer will meet it.
-- **`docs/api/`** — the reference that does not exist. Doxygen can generate most of it;
-  the headers are already densely commented with API tiers.
-- **README** — what binCV is, the memory and speed numbers with their sequence and
-  thread count stated ([D-58](ARCHITECTURE.md#8-design-decisions)), a 20-line example,
-  and the platform support matrix from T5.5/T5.6 **including what is untested**.
-- **`OVERNIGHT_LOG.md` deleted**, its content already in EXPERIMENTS.md.
-- **ROADMAP "Current Status" rewritten** — it currently says the Phase 3 kernels and
-  NEON intrinsics are "Not started", which has been false for months.
-
-### T5.11 · How future work gets recorded once this is public · `TODO`
-
-**The question is real: TASKS.md does not survive contact with contributors.** A single
-3 687-line file that only one person edits is not a backlog other people can pick from.
-
-**The mapping that preserves what works:**
-
-| today | public |
+| today | when there are contributors |
 |---|---|
-| **TASKS.md** entries | **GitHub Issues**, labelled by phase, with `good-first-issue` where it fits |
-| **E-records** (open questions) | Issues labelled `experiment` — they *are* proposals with a decision rule |
-| **D-records** (decisions) | `docs/adr/`, immutable once merged, superseded rather than edited |
-| **X-records** (measurements) | stay in-tree — they are evidence, not discussion, and they belong next to the benchmark that produced them |
-| **CLAUDE.md hard rules** | `CONTRIBUTING.md` — "kernels take views", "padding bits stay zero", "no heap in kernels" are contributor rules, not agent instructions |
+| **TASKS.md** entries | GitHub Issues, labelled by phase |
+| **E-records** (open questions) | Issues labelled `experiment` — they are already proposals with a decision rule |
+| **D-records** (decisions) | `docs/adr/`, superseded rather than edited |
+| **X-records** (measurements) | **stay in-tree** — evidence, not discussion, and they belong beside the benchmark that produced them |
 
-**The rule worth exporting above all others:** *a performance claim needs a committed
-benchmark, a pre-registered decision rule, and both axes reported.* Put it in
-`CONTRIBUTING.md` and enforce it in review.
+**The one rule worth writing down early:** *a performance claim needs a committed
+benchmark, a pre-registered decision rule, and both speed and memory reported.* That is
+the habit that makes the rest of the record trustworthy.
+
+---
+
+## Phase 7 — Architectures beyond the two that are measured
+
+**Scheduled after the repository is shareable.** binCV supports exactly two
+architectures today, both measured: **`x86_64`** (POPCNT by default, AVX2 by runtime
+dispatch) and **`aarch64`** (NEON, the reference device).
+
+**A claim already outruns that.** [CMakeLists.txt](bincv-cpp/CMakeLists.txt) matches
+`arm|aarch64|ARM|AARCH64` and probes `-mfpu=neon`, so **32-bit ARM is a code path
+nobody has compiled.** `verify.sh` is x86_64; `verify_arm.sh` is aarch64 under
+emulation; `run_on_pi.sh` is aarch64 hardware. **Nothing builds a 32-bit target**, and
+CLAUDE.md names Cortex-M in its first paragraph.
+
+### T7.1 · 32-bit targets, and whether the Cortex-M claim holds · `TODO`
+
+**Four differences, none hypothetical:**
+
+1. **`size_t` is 32 bits.** Every index, stride and `planeWords()` is a `size_t`, and
+   CLAUDE.md calls `-Wconversion` the load-bearing warning — **the four-word-type sweep
+   has only ever run at 64-bit pointer width.**
+2. **`uint64_t` words cost two registers.** `uint32_t` is already the default
+   ([D-14](ARCHITECTURE.md#8-design-decisions)), but `slicedSignedSum`'s `long long`
+   accumulators are not free either.
+3. **M-profile has neither popcount nor NEON.** A-profile has `VCNT`; Cortex-M has
+   nothing, so it falls to the software fallback — and [X-57](EXPERIMENTS.md) measured
+   that fallback at **3.75× slower**. **On the platform CLAUDE.md names first, the slow
+   path is the only path.** A SWAR popcount is probably the answer and has never been
+   benchmarked.
+4. **No heap, no exceptions, no threads.** The core-only and `-fno-exceptions`
+   configurations are the groundwork, but "builds without exceptions on x86_64-linux"
+   is not "runs freestanding on an MCU".
+
+**Deliverable:** a 32-bit ARM configuration in `verify.sh` — qemu-user or a
+cross-compiler suffices, since this is a **correctness** axis and speed still closes on
+the reference device — plus a measured answer on the popcount fallback. **If the
+Cortex-M claim cannot be met, withdraw it from CLAUDE.md rather than leave it
+standing.**
+
+### T7.2 · RISC-V · `TODO`
+
+**Depends:** T7.1 — the 32-bit work is most of it, and RV32 and RV64 differ the same
+way.
+
+Unmentioned anywhere in the codebase. Two reasons it is more than a checkbox:
+
+- **`Zbb` provides `CPOP`**, a scalar population count — the exact analogue of the
+  `-mpopcnt` flag [X-57](EXPERIMENTS.md) called *the single largest x86 factor in this
+  project*. **The same 3.75× trap is waiting, with the same one-flag fix.**
+- **`RVV` is length-agnostic**, a different shape from NEON's fixed 128 bits and AVX2's
+  fixed 256. [D-52](ARCHITECTURE.md#8-design-decisions) says a 31-pixel window caps
+  packing at 1.94× **whatever the register width**, so RVV would pay in the bulk
+  kernels, not in `track`.
+
+**Deliverable:** build and correctness first; `Zbb` second; `RVV` only if a bulk kernel
+justifies it.
