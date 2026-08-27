@@ -889,6 +889,7 @@
 # WILL_FAIL targets no longer deletes the proof, and the in-process version does
 # have a floor: the row below.
 
+opencv	test_parallel	9	0
 opencv	test_binMat	845	0
 opencv	test_quantMat	443	0
 opencv	test_storage	544	0
@@ -907,13 +908,14 @@ opencv	test_derivative	48526	0
 opencv	test_covariance	17704	0
 opencv	test_corner	3655	0
 opencv	test_opticalflow	298	0
-opencv	test_pack	29	0
+opencv	test_pack	31	0
 opencv	test_edge	31	0
 opencv	test_median_wide	6	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	169	0
 opencv	test_equivalence	16403	0
 
+core	test_parallel	9	0
 core	test_binMat	845	0
 core	test_quantMat	443	0
 core	test_storage	544	0
@@ -932,11 +934,12 @@ core	test_derivative	47675	0
 core	test_covariance	17704	0
 core	test_corner	3655	0
 core	test_opticalflow	206	0
-core	test_pack	29	0
+core	test_pack	31	0
 core	test_edge	30	0
 core	test_median_wide	5	0
 core	test_harness	8	0
 
+noexcept	test_parallel	9	0
 noexcept	test_binMat	801	44
 noexcept	test_quantMat	427	16
 noexcept	test_storage	544	0
@@ -955,11 +958,12 @@ noexcept	test_derivative	47675	0
 noexcept	test_covariance	17704	0
 noexcept	test_corner	3655	0
 noexcept	test_opticalflow	206	0
-noexcept	test_pack	29	0
+noexcept	test_pack	31	0
 noexcept	test_edge	30	0
 noexcept	test_median_wide	5	0
 noexcept	test_harness	8	0
 
+debug	test_parallel	9	0
 debug	test_binMat	845	0
 debug	test_quantMat	443	0
 debug	test_storage	544	0
@@ -978,7 +982,7 @@ debug	test_derivative	47675	0
 debug	test_covariance	17704	0
 debug	test_corner	3655	0
 debug	test_opticalflow	206	0
-debug	test_pack	29	0
+debug	test_pack	31	0
 debug	test_edge	30	0
 debug	test_median_wide	5	0
 debug	test_harness	8	0

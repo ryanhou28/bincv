@@ -75,6 +75,39 @@ constexpr PackCmp toPackCmp() {
 
 } // namespace impl
 
+/// @brief Packs `rowCount` rows into `dst` starting at `dstRow`. **API TIER 3.**
+///
+/// **THE STREAMING ENTRY POINT, AND IT IS NOT A CONVENIENCE.** A microcontroller
+/// reading a sensor over DMA gets **rows as they arrive** and may not have RAM for a
+/// whole frame -- the footprint argument that justifies binCV is the same argument
+/// that says it cannot buffer one. This consumes a line buffer of any height, so a
+/// caller can pack as the frame streams in and never materialise it.
+///
+/// `packBits` is a call to this with `dstRow = 0` and every row at once.
+///
+/// @param src The first row of the chunk; `srcStride` ELEMENTS between rows.
+/// @param dstRow Which row of `dst` this chunk begins at.
+/// @note Rows are independent -- nothing here reads a neighbouring row -- so chunk
+///       boundaries cannot change the result. That is what makes streaming exact
+///       rather than approximate, and it is why the ops that DO read neighbours
+///       (ops/edge.hpp, ops/medianWide.hpp) have no such entry point.
+template <PackRule R, typename SrcT, typename WordType>
+inline void packRows(const SrcT* src, size_t width, size_t rowCount, size_t srcStride,
+                     BinMatView<WordType> dst, size_t dstRow, SrcT t = SrcT{0}) {
+    BINCV_ASSERT(width == dst.width, "packRows: src and dst must have the same width");
+    BINCV_ASSERT(dstRow + rowCount <= dst.height, "packRows: chunk runs past dst");
+    if (width == 0 || rowCount == 0) return;
+    BINCV_ASSERT(src != nullptr && dst.ptr != nullptr,
+                 "packRows: a non-empty chunk needs non-null pointers");
+    const size_t words = impl::minRowWords<WordType>(dst.width);
+    for (size_t r = 0; r < rowCount; ++r) {
+        WordType* out = dst.row(dstRow + r);
+        for (size_t i = 0; i < words; ++i) out[i] = 0;
+        impl::packRowCmp<impl::toPackCmp<R>(), SrcT, WordType>(src + r * srcStride, width, t,
+                                                               out);
+    }
+}
+
 /// @brief Packs a pixel array to one bit per pixel. **API TIER 3.**
 /// @tparam R The rule, at compile time.
 /// @param src Row-major, `srcStride` elements between rows (NOT bytes).
@@ -92,15 +125,7 @@ inline void packBits(const SrcT* src, size_t width, size_t height, size_t srcStr
     if (dst.width == 0 || dst.height == 0) return;
     BINCV_ASSERT(src != nullptr && dst.ptr != nullptr,
                  "packBits: a non-empty image needs non-null pointers");
-    const size_t words = impl::minRowWords<WordType>(dst.width);
-    for (size_t y = 0; y < height; ++y) {
-        WordType* out = dst.row(y);
-        // The shared packer ORs, so the row starts clean. A row is tens of words:
-        // noise beside the packing, and it makes the padding invariant unconditional.
-        for (size_t i = 0; i < words; ++i) out[i] = 0;
-        impl::packRowCmp<impl::toPackCmp<R>(), SrcT, WordType>(src + y * srcStride, width, t,
-                                                               out);
-    }
+    packRows<R, SrcT, WordType>(src, width, height, srcStride, dst, 0, t);
 }
 
 /// @brief `packBits` with an arbitrary per-pixel predicate. **API TIER 3.**

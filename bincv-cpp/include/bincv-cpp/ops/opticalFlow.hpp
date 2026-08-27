@@ -249,6 +249,7 @@
 #endif
 
 #include "../core/error.hpp"
+#include "../core/parallel.hpp"
 #include "../core/types.hpp"
 #include "../core/view.hpp"
 #include "../quantMat.hpp"
@@ -1775,8 +1776,17 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
     const long long levelHeight = static_cast<long long>(lv.height());
 
     // PASS 2 -- track.
-    for (size_t p = 0; p < c.pointCount; ++p) {
-        if (li > entryLevelFor(c, p)) continue;
+    // T5.1: KEYPOINTS ARE INDEPENDENT, AND THAT IS WHY THIS SPLITS SAFELY.
+    // Each iteration writes only `nextPts[p]`, `status[p]` and `err[p]` -- distinct
+    // indices -- and reads only the level's views, which are const. Nothing is
+    // accumulated across points, so a split cannot move a flow vector. That is why
+    // X-65 measured 2.60x by splitting the ARRAY with no library change at all; this
+    // only makes it askable.
+    //
+    // Serial unless a caller installs a backend (core/parallel.hpp). On a core-only
+    // build this is exactly the loop it replaces.
+    parallelFor(c.pointCount, [&](size_t p) {
+        if (li > entryLevelFor(c, p)) return;
         const float prevX = c.prevPts[p].x * scale - c.halfWinX;
         const float prevY = c.prevPts[p].y * scale - c.halfWinY;
         const long long anchorX = floorToLL(prevX);
@@ -1788,7 +1798,7 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
         if (anchorX < -static_cast<long long>(c.winW) || anchorX >= levelWidth ||
             anchorY < -static_cast<long long>(c.winH) || anchorY >= levelHeight) {
             if (finest) c.status[p] = 0;
-            continue;
+            return;
         }
 
         const Rect window(static_cast<int>(anchorX), static_cast<int>(anchorY), c.winW, c.winH);
@@ -1796,7 +1806,7 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
             clipRegion<WordType>(lv.width(), lv.height(), window);
         if (region.isEmpty) {
             if (finest) c.status[p] = 0;
-            continue;
+            return;
         }
 
         // X-66: extract the window's ITERATION-INVARIANT words ONCE. X-68 measured
@@ -1827,7 +1837,7 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
                                        static_cast<double>(c.winW * c.winH);
         if (det <= 0.0 || referenceMinEig < static_cast<double>(c.minEigThreshold)) {
             if (finest) c.status[p] = 0;
-            continue;
+            return;
         }
 
         float nextX = c.nextPts[p].x - c.halfWinX;
@@ -1959,7 +1969,7 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
                     (1.0 - fx) * fy, fx * fy);
             }
         }
-    }
+    });
 }
 
 /// @brief Shared prologue: argument checks, and the "every entry is written"

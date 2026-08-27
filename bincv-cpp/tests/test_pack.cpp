@@ -187,4 +187,34 @@ BINCV_TEST(Pack, PgmIsAWholeImageAndSizesItself) {
     BINCV_CHECK(tiny[0] == 0x11);
 }
 
+BINCV_TEST(Pack, StreamingInChunksMatchesWholeFrame) {
+    // The embedded case: a sensor delivers rows, not frames. Rows are independent --
+    // nothing in packing reads a neighbouring row -- so an arbitrary chunking must
+    // produce the identical image. If it ever does not, streaming is approximate and
+    // the whole entry point is unsound.
+    constexpr size_t kW = 149, kH = 23;
+    std::vector<uint8_t> img(kW * kH);
+    uint64_t st = 314159;
+    for (auto& v : img) { st = st * 6364136223846793005ULL + 1; v = static_cast<uint8_t>(st >> 40); }
+    BinMat<uint32_t> whole(kW, kH), streamed(kW, kH);
+    packBits<PackRule::GreaterThan, uint8_t, uint32_t>(img.data(), kW, kH, kW, whole.view(), 120);
+
+    // Deliberately ragged chunks, including one of a single row and one that ends
+    // exactly on the last row.
+    const size_t chunks[] = {1, 7, 4, 1, 10};
+    size_t at = 0;
+    for (size_t c : chunks) {
+        packRows<PackRule::GreaterThan, uint8_t, uint32_t>(img.data() + at * kW, kW, c, kW,
+                                                           streamed.view(), at, 120);
+        at += c;
+    }
+    BINCV_CHECK(at == kH);
+    size_t diff = 0;
+    for (size_t y = 0; y < kH; ++y)
+        for (size_t i = 0; i < (kW + 31) / 32; ++i)
+            if (whole.constView().row(y)[i] != streamed.constView().row(y)[i]) ++diff;
+    std::printf("  streamed in 5 ragged chunks   %zu words differ\n", diff);
+    BINCV_CHECK(diff == 0);
+}
+
 BINCV_TEST_MAIN("test_pack")

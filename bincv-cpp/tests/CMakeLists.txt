@@ -230,6 +230,15 @@ set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_erro
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
 
+# T5.1: the pool is NOT part of bincv_core -- core is allocation-free and builds
+# -fno-exceptions, and std::thread is usable under neither. So this test needs a
+# hosted toolchain and Threads, and the three core-only configurations exercise the
+# SERIAL default instead, which is what an embedded target actually gets.
+bincv_add_test_target(test_parallel test_parallel.cpp)
+find_package(Threads REQUIRED)
+target_link_libraries(test_parallel PRIVATE Threads::Threads)
+add_test(NAME test_parallel COMMAND test_parallel)
+
 foreach(TEST_NAME ${BINCV_CORE_TESTS})
     bincv_add_test_target(${TEST_NAME} ${TEST_NAME}.cpp)
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
