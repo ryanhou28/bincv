@@ -545,6 +545,43 @@ the one place an off-by-one moves a whole value class of pixels rather than a fe
 `thresh + 1`, so the N-bit path costs one bit-sliced comparison per 8–64 pixels
 and adds no arithmetic of its own.
 
+
+**binCV OWNS THIS STAGE** (T5.8). `benchmark/frontend_sequence.cpp` and
+`examples/vio_frontend.cpp` currently run the reference pipeline's `medianBlur` +
+`|d/dx| + |d/dy|` in **OpenCV**, and the benchmark's own comment calls that stage
+"deliberately NOT binCV's claim" — which contradicts this section. The contradiction is
+resolved in favour of this section: **binCV ships it, and the OpenCV spelling becomes
+the control it is measured against.**
+
+**Read out of the reference rather than inferred** —
+`SEAL/src/temporal_processing/edge_filter.cpp`, `rl_fast_edge_filter_wide`:
+
+```
+kernel_x = [-1  0  1]      diff_x = |filter2D(img, kernel_x)|
+kernel_y = [-1  0  1]ᵀ     diff_y = |filter2D(img, kernel_y)|
+mask     = (diff_x >= t) OR (diff_y >= t)
+```
+
+Three details that are easy to get wrong, and all three are the **defaults**: the
+combination is **OR, not AND**; the relation is **`>=`, not `>`**; and *"wide"* is the
+`[-1, 0, 1]` **central** difference — left neighbour against right neighbour, spanning
+two pixels — not an adjacent `[-1, 1]`.
+
+**All twelve combinations ship** — combine `{Or, And}` × relation `{Ge, Gt}` × spatial
+`{Wide, Forward, Backward}` — as compile-time parameters, and are **tested as a
+cross-product**. A twelve-way option set with one tested combination is a
+one-combination op with eleven untested branches.
+
+**Tier 3, and it must not borrow an OpenCV name.** There is no `cv::` equivalent:
+`Sobel` + `threshold` is a different computation with different border handling.
+
+**It takes `SrcT`, not just `uint8_t`** — see
+[§7.8.1](#781-why-the-wide-source-path-is-bincvs-and-not-the-callers), which exists
+almost entirely because of this operation. It is also **8-bit-in, 1-bit-out, and should
+fuse with ingestion**: the comparison already yields a boolean per pixel, which is one
+move-mask from being a bit-plane, so done properly this is the fastest way *into* binCV
+rather than a step before it.
+
 ### 7.4 Spatial derivative — binarized `[-1, 0, 1]`
 
 **On a 1-bit input** (pyramid level 0) the derivative is **ternary**, computed by
@@ -838,12 +875,60 @@ The border fills are opposite for the two operations and that is
 | `morphologyEx` ERODE/DILATE | src + dst | none |
 | `morphologyEx` OPEN/CLOSE/GRADIENT/TOPHAT/BLACKHAT | src + dst + 1 frame | one, the caller's |
 
-### 7.8 Explicitly out of the MVP
+### 7.8 The input contract — where the operation set begins
+
+**binCV accepts a single-channel, integer-typed, strided pixel array and turns it into
+an N-bit `QuantMat`. Getting to that array is the caller's job.**
+
+That one sentence is the boundary, and it settles cases in both directions without
+case-by-case judgement:
+
+| | | why |
+|---|---|---|
+| 8-bit grayscale | **binCV** | it *is* such an array |
+| 10/12/14/16-bit in `uint16_t` | **binCV** | it *is* such an array |
+| the Y plane of YUV420 (NV12/NV21) | **binCV** | it *is* such an array — the `stride` parameter already covers it |
+| Bayer / demosaic | caller | produces another **wide** image |
+| RGB → grey | caller | same |
+| packed 10-bit MIPI (5 bytes / 4 px) | caller | not a plain array; the driver unpacks it |
+| float sources | caller | not integer, and no binariser wants one |
+| encoded files (PNG, JPEG) | caller, or `bincv_io` | a decoder is **8× the size of everything binCV does** — measured |
+
+**The general form of the exclusion: an operation whose OUTPUT IS A WIDE IMAGE is
+somebody else's.** binCV's output is always narrower than its input. That is the whole
+library, and it is a rule rather than a list.
+
+#### 7.8.1 Why the wide-source path is binCV's, and not the caller's
+
+**Because the obvious caller-side workaround is not merely slower — it changes the
+answer, in the direction that hurts most.**
+
+"Downconvert 12→8 yourself, then call binCV" is `v >> 4`, and it **discards the four
+low bits before the threshold decides**. For a plain threshold that is a rounding
+difference at the boundary. **For the gradient-magnitude edge extractor
+([§7.3](#73-edge-filter--threshold)) it is a total loss:** the operation is
+`|I(x+1) − I(x−1)| ≥ t`, so a genuine 12-bit gradient of **15 counts becomes exactly
+zero** once the operands are truncated. The edge is gone before binCV sees the pixel.
+
+**And low contrast is exactly where a VIO frontend needs every edge it can get** —
+indoors, at night, on untextured walls. The workaround fails hardest in the conditions
+that matter most.
+
+Two lesser reasons, both real: the downconversion needs a **full-frame 8-bit
+intermediate**, which is the buffer binCV exists to avoid and which a
+memory-constrained target may not have; and since these kernels already fold their
+comparison to a single predicate, the marginal cost of a source-type template parameter
+is close to nothing.
+
+**So every op that takes 8-bit input takes `SrcT`** — the packers, the quantisation
+policies, the median and the edge extractor alike.
+
+### 7.9 Explicitly out of the MVP
 
 Subpixel refinement, RANSAC, essential-matrix estimation, IMU fusion, bundle
 adjustment. Not image operations. They belong to the VIO application.
 
-### 7.9 The known hard problem: subpixel interpolation
+### 7.10 The known hard problem: subpixel interpolation
 
 Lucas-Kanade warps its window to subpixel positions and bilinearly interpolates.
 That is inherently continuous and does not bit-parallelize. Two routes:

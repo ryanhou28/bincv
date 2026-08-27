@@ -147,6 +147,15 @@ Out of scope, deliberately: quantized-NN/MAC-heavy workloads, geometry and
 estimation (RANSAC, PnP, IMU fusion), GPU backends, connected components,
 distance transform, contours, template matching.
 
+**The input boundary is a rule, not a list**
+([ARCHITECTURE §7.8](ARCHITECTURE.md#78-the-input-contract--where-the-operation-set-begins)):
+binCV accepts a **single-channel, integer-typed, strided pixel array** and turns it into
+an N-bit `QuantMat`. Getting to that array is the caller's. **An operation whose output
+is a WIDE image is somebody else's** — demosaicing, colour conversion, decoding.
+Everything from such an array down to bits is binCV's, **including sources wider than 8
+bits**, because downconverting first destroys small gradients before the threshold can
+see them (§7.8.1).
+
 **Do not mention specific vendor hardware or toolchains in this repo.** Platform
 language stays generic: Cortex-A / Cortex-M, "memory-constrained embedded
 targets".
