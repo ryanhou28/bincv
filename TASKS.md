@@ -4002,10 +4002,54 @@ neither of them technical:
 
 **Neither says "cannot". Both say "not core, and not first."**
 
-**Recommendation:** ship `none` with T5.12/T5.13 — it is nearly free and makes
-core-only demonstrable. Add `system` when an evaluation user asks. **Add `stb` only if
-someone actually has no package manager**, because it is the one option that puts a
-CVE-bearing parser inside binCV's release.
+**PLAN OF RECORD (agreed):** ship `none` with T5.12/T5.13 — it is nearly free and makes
+core-only demonstrable for the first time. Add `system` when an evaluation user asks.
+**Add `stb` only if someone actually has no package manager**, because it is the one
+option that puts a CVE-bearing parser inside binCV's release.
+
+### T5.15 · Source bit depths: 8-bit is not enough coming in, and is always enough going out · `TODO`
+
+**THE ASYMMETRY IS REAL AND IT FALLS OUT OF `N <= 8`.**
+`QuantMat` asserts `N >= 1 && N <= 8`, so `MaxValue` is at most **255**. **Nothing binCV
+holds can exceed one byte per pixel**, which means:
+
+> **Output never needs more than 8 bits. Input frequently does.** `unpackTo8Bit` is
+> complete by construction; `packFrom8Bit` is not.
+
+**WHAT REAL SOURCES ACTUALLY PRODUCE, ACROSS THE THREE TIERS CLAUDE.md NAMES:**
+
+| tier | source | width | covered by 8-bit? |
+|---|---|---|---|
+| embedded | global-shutter mono (the VIO norm) | 8 | **yes** |
+| embedded | MIPI CSI-2 sensors | **10 / 12** | **no** |
+| embedded | scientific / HDR | 14 / 16 | **no** |
+| mobile | Android YUV420 (NV12/NV21) | 8 | **yes** — the Y plane is a strided 8-bit buffer, which `packFrom8Bit`'s `stride` already handles. **Document it; do not reimplement it.** |
+| mobile | 10-bit HDR capture | **10** | **no** |
+| desktop | EuRoC, TUM, KITTI grayscale | 8 | **yes** |
+| desktop | TUM RGB-D **depth**, RealSense | **16** | **no** |
+
+**Ship `packFrom<SrcT>` templated on the source type, `uint8_t` and `uint16_t`.** That
+one addition covers 10-, 12-, 14- and 16-bit sources: a driver hands you `uint16_t`
+whatever the sensor's actual precision, and the quantisation policy is what maps its
+range onto N bits.
+
+**T5.9's policies generalise without change of shape** — `Scale` becomes
+`round(v · MaxValue / SrcMax)`, `Threshold{t}` takes a `SrcT` threshold. **It is the
+source type that needs templating, not the policy set.**
+
+**And X-71's technique survives, at the expected cost.** For a 16-bit source the
+comparison is `_mm256_cmpgt_epi16`, then `_mm256_packs_epi16` narrows two vectors to
+bytes before the move-mask — **32 pixels per move-mask still, one extra pack**. On NEON,
+`vcgtq_u16` then `vqmovn` to narrow, then the same bit-weight fold. **Roughly half the
+throughput per pixel, which is what twice the input bytes costs and not a penalty.**
+
+**Explicitly NOT in scope:**
+
+- **Packed raw** (10-bit MIPI: five bytes per four pixels). Drivers unpack this;
+  binCV should not carry a bit-unpacker for every sensor vendor's layout.
+- **Float sources.** No VIO frontend feeds float into a binariser.
+- **Raising `N` above 8.** binCV is a *low*-bit-width library; the cap is the thesis,
+  not a limitation to be relaxed.
 
 
 ---
