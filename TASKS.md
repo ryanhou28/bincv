@@ -4043,11 +4043,46 @@ bytes before the move-mask — **32 pixels per move-mask still, one extra pack**
 `vcgtq_u16` then `vqmovn` to narrow, then the same bit-weight fold. **Roughly half the
 throughput per pixel, which is what twice the input bytes costs and not a penalty.**
 
+#### EVERY 8-BIT-IN OP TAKES `SrcT`, NOT JUST THE PACKERS
+
+**T5.9's policies, T5.11's edge extractor and T5.10's median must all be templated on
+the source type**, not only `packFrom`. A user with a 12-bit sensor who wants 1-bit
+edges should call binCV once.
+
+**THE ARGUMENT IS CORRECTNESS, NOT CONVENIENCE.** The obvious alternative — "downconvert
+12→8 yourself, then call binCV" — is `v >> 4`, and **it discards the four low bits
+BEFORE the threshold decides.** On a 12-bit sensor a gradient of 15 counts is a real
+edge in a low-contrast scene; shifted right by four it becomes **exactly zero** and the
+edge is gone before binCV ever sees the pixel. **Low-contrast is precisely where a VIO
+frontend needs every edge it can get** — indoors, at night, on untextured walls.
+
+Two lesser reasons, both still real: the downconversion needs **a full-frame 8-bit
+intermediate**, which is the buffer binCV exists to avoid and which an MCU may not have;
+and given T5.15's `packFrom<SrcT>` the marginal cost is **one template parameter**, since
+these ops already fold their comparison to a single predicate.
+
+**THE INPUT CONTRACT, STATED SO THE SCOPE STOPS SOMEWHERE.** The line is not "8 or 16
+bits" and it is not "whatever a sensor emits":
+
+> **binCV accepts a single-channel, integer-typed, strided pixel array, and turns it
+> into an N-bit `QuantMat`. Getting to that array is the caller's job.**
+
+That rule settles every case consistently, in both directions:
+
+| | | why |
+|---|---|---|
+| 12-bit in `uint16_t` | **binCV** | it *is* such an array |
+| YUV420 Y plane | **binCV** | it *is* such an array — `stride` already covers it |
+| Bayer / demosaic | caller | produces another **wide** image; not a step toward bits |
+| RGB → grey | caller | same |
+| packed 10-bit MIPI | caller | five bytes per four pixels is **not a plain array**; the driver unpacks it |
+| float sources | caller | not integer, and no VIO binariser wants one |
+
 **Explicitly NOT in scope:**
 
-- **Packed raw** (10-bit MIPI: five bytes per four pixels). Drivers unpack this;
-  binCV should not carry a bit-unpacker for every sensor vendor's layout.
-- **Float sources.** No VIO frontend feeds float into a binariser.
+- **Anything that outputs a wide image.** Demosaicing, colour conversion, resampling in
+  the source domain. binCV's output is always narrower than its input; an op that is not
+  is somebody else's.
 - **Raising `N` above 8.** binCV is a *low*-bit-width library; the cap is the thesis,
   not a limitation to be relaxed.
 
