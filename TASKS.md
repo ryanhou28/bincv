@@ -4086,6 +4086,45 @@ That rule settles every case consistently, in both directions:
 - **Raising `N` above 8.** binCV is a *low*-bit-width library; the cap is the thesis,
   not a limitation to be relaxed.
 
+### T5.16 · The AVX2 keypoint batch — the x86 optimisation · `TODO`
+
+**Depends:** T5.2 (landed), T5.3 (landed — re-baselined at **2.06–2.14×** against the
+shipped inner loop, clearing the 1.5× bar).
+
+**THIS IS THE ONLY THING LEFT THAT MAKES x86 FASTER.** `track` is **79% of the x86
+frontend** and [X-68](EXPERIMENTS.md) put iterated `residualSums` at **91.5% of
+`track`**. Every other lever is spent: the conversion is 3% of the frontend, `build` is
+small, staging and the tap cache already ship, and threading is orthogonal.
+
+**Sized:** at arm D's 2.1×, `track` 1.50 → **0.81 ms**, the frontend 1.89 → **1.20**,
+and the ratio against one-thread OpenCV **1.54× → ≈2.4×**.
+
+**What it is:** eight keypoints in AVX2 lanes, invariants staged in
+`[row][plane][lane]` order, `slicedSignedSum`'s plane pairs done sixteen-at-a-time.
+[X-66](EXPERIMENTS.md) proved it bit-exact in a standalone ceiling.
+
+**WHY IT IS LAST AND HARDEST.** It is a restructuring of the tracking loop, not a
+kernel swap. Eight keypoints must iterate **in lockstep**, which brings:
+
+- **per-lane convergence** — a lane that meets `eps` must stop contributing while the
+  others continue. Freezing it is correct (its result is then identical to serial) but
+  the wasted iterations are real cost, and the whole batch runs until the *last* lane
+  finishes;
+- **per-lane integer taps** — the eight lanes displace differently, so a tap refresh is
+  a **scatter** into the batched layout rather than a shared reload. This is what
+  separates arm D (2.1×, taps gathered every row) from arm C (3.2×, everything staged);
+- **per-lane clipping and entry level**, and a **scalar fallback** for windows that
+  cannot be batched at all.
+
+**Bit-exactness against the serial path is a precondition, not a band** — the batch
+computes the same integers, so any difference is a bug.
+
+**And the whole-frontend arm is mandatory**
+([D-53](ARCHITECTURE.md#8-design-decisions)): [X-62](EXPERIMENTS.md) measured 1.75× in
+the kernel and **0.31× on the frontend**, because it changed how many iterations ran.
+Lockstep batching changes exactly that — **a converged lane keeps iterating** — so the
+frontend number is not a formality here, it is the specific risk.
+
 
 ---
 
