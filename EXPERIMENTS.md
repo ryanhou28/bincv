@@ -11140,6 +11140,68 @@ smoothed with a 5×5 Gaussian to a corner density matching a real frame.
 
 ---
 
+### X-77 · Where FAST's time actually goes, and why parity is the honest answer · `DONE`
+
+**"WE SHOULD HAVE MORE PARALLELISM THAN OpenCV" — AND FOR THIS OPERATION WE DO NOT.**
+The question deserved a measurement rather than an argument, so: sweep the threshold so
+the corner density runs from nothing to a third of the image, and see which end binCV
+is losing at.
+
+| threshold | corners | binCV | `cv::FAST` | ratio |
+|---|---|---|---|---|
+| 200 | 0 | 104 µs | 44 µs | **0.42×** |
+| 80 | 1 | 96 | 42 | 0.44× |
+| **40** | **4144 (1.1%, realistic)** | **407** | **444** | **1.09×** |
+| 20 | 48 114 | 1 092 | 1 829 | **1.67×** |
+| 10 | 112 741 | 2 477 | 4 602 | **1.86×** |
+
+> **binCV WINS 1.9× WHERE THE CONTIGUITY TEST RUNS AND LOSES 2.4× WHERE ONLY THE
+> REJECT RUNS.** At a realistic density the two cancel. **The reject path was the whole
+> gap**, and the part that looked like the interesting problem — the arc scan — was
+> already the part binCV was better at.
+
+**THE FIX WAS TWO LOADS INSTEAD OF FOUR.** Compass points 0 and 8 are opposite, and
+**any window of nine consecutive ring positions contains at least one of them** —
+1..9 holds 8, and 9..1 wrapping holds 0. So a group where neither passes cannot contain
+a 9-arc, and two loads settle what four were being paid for. Reject path **104 → 53 µs**;
+the zero-corner ratio **0.42 → 0.80×**, realistic **1.09 → 1.04×**, high density
+**1.86 → 2.02×**.
+
+#### WHY PARITY IS THE CEILING HERE, AND IT IS NOT A DISAPPOINTMENT
+
+**FAST'S INPUT IS 8-BIT, SO binCV HAS NO PACKING ADVANTAGE ON THE READS.** Both
+implementations load the same bytes into the same 32-byte registers and compare them
+the same way. binCV's one-bit-per-pixel thesis applies to what it *produces*, not to
+what FAST *consumes* — the operation reads a grayscale image and emits a keypoint list,
+and neither end is a bit-plane.
+
+**Where the thesis DOES apply is the contiguity test**, which is one bit per (pixel,
+ring position) and is exactly where the 1.9× comes from: `run = (run + 1) & mask` over
+sixteen masks, or `acc &= acc >> 1` in the scalar path. **That part is binCV-shaped and
+it wins.** The reject is byte-shaped and it does not.
+
+**A denser packing is available and would not help.** The sixteen masks could be held as
+sixteen 32-bit words (one bit per pixel per ring position) and the arc test done with a
+sliding AND-tree — about **0.3 ops/pixel against the current 6**. But after the
+two-point reject, **99% of groups never reach the arc test at all**, so a 20× saving on
+1% of the work is worth 0.2%. **The bit-packing win is real and already spent.**
+
+**Final, both architectures:** x86 **1.04×** at realistic density and **2.02×** at high
+density; reference device **0.96×**. Correctness unmoved: **1818 / 1818** against
+`cv::FAST` through five successive rewrites.
+
+**Decision:** FAST ships at parity and that is the result. `cv::FAST` is a mature
+vectorised kernel over byte data, and an operation whose input binCV cannot pack more
+tightly is one where matching is the honest ceiling. **The two operations that ARE
+bit-shaped — `describe` and matching — are 5–11× and 2–5×.**
+
+**Method:** `benchmark/feature_benchmark.cpp` and a threshold sweep; five interleaved
+repeats; OpenCV at one thread; x86 load 1.3–1.7 (noted — the realistic-density row moves
+±5% with it, which is why the verdict rests on the shape of the sweep and not on one
+cell).
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

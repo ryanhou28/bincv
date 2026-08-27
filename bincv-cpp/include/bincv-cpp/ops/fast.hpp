@@ -97,12 +97,33 @@ __attribute__((target("avx2"))) inline uint32_t fastMask32(const uint8_t* p, lon
 
     const __m256i allOnes = _mm256_set1_epi8(-1);
     __m256i mHi[16], mLo[16];
+    // STAGE 0: TWO RING POSITIONS, NOT FOUR.
+    // Compass points 0 and 8 are opposite, and ANY window of nine consecutive ring
+    // positions contains at least one of them -- 1..9 holds 8, and 9..1 (wrapping)
+    // holds 0. So a group where neither passes cannot contain a 9-arc, and two loads
+    // settle it where four were being paid.
+    //
+    // This is where the time actually is. A threshold sweep (X-77) showed binCV
+    // WINNING 1.67-1.86x at high corner density -- the contiguity test is good -- and
+    // LOSING 2.4x at zero density, where nothing runs but the reject. At a realistic
+    // 1.1% the two cancelled to 1.09x. The reject path was the whole gap.
+    {
+        const __m256i v0 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + ringOff[0]));
+        const __m256i v8 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + ringOff[8]));
+        mHi[0] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(v0, hi), zero), allOnes);
+        mHi[8] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(v8, hi), zero), allOnes);
+        mLo[0] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(lo, v0), zero), allOnes);
+        mLo[8] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(lo, v8), zero), allOnes);
+        const __m256i any = _mm256_or_si256(_mm256_or_si256(mHi[0], mHi[8]),
+                                            _mm256_or_si256(mLo[0], mLo[8]));
+        if (_mm256_movemask_epi8(any) == 0) return 0;
+    }
     // FOUR COMPASS POSITIONS BEFORE THE OTHER TWELVE. About 1% of pixels on a real
     // frame are corners, so nearly every 32-pixel group can be dismissed from four
     // loads -- and dismissing it here skips twelve loads AND the whole run-length
     // loop, which is most of this function. The scalar path has had this reject since
     // it was written; the vector path was paying full price on every group.
-    for (int c4 = 0; c4 < 4; ++c4) {
+    for (int c4 = 1; c4 < 4; c4 += 2) {   // 4 and 12; 0 and 8 came from stage 0
         const int k = c4 * 4;
         const __m256i v =
             _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + ringOff[k]));
@@ -178,10 +199,30 @@ inline uint32_t fastMask32(const uint8_t* p, long long stride, const long long* 
     const uint8x16_t limit = vdupq_n_u8(static_cast<uint8_t>(arcLength - 1));
 
     uint8x16_t mHi[16], mLo[16];
+    // STAGE 0: TWO RING POSITIONS, NOT FOUR.
+    // Compass points 0 and 8 are opposite, and ANY window of nine consecutive ring
+    // positions contains at least one of them -- 1..9 holds 8, and 9..1 (wrapping)
+    // holds 0. So a group where neither passes cannot contain a 9-arc, and two loads
+    // settle it where four were being paid.
+    //
+    // This is where the time actually is. A threshold sweep (X-77) showed binCV
+    // WINNING 1.67-1.86x at high corner density -- the contiguity test is good -- and
+    // LOSING 2.4x at zero density, where nothing runs but the reject. At a realistic
+    // 1.1% the two cancelled to 1.09x. The reject path was the whole gap.
+    {
+        const uint8x16_t v0 = vld1q_u8(p + ringOff[0]);
+        const uint8x16_t v8 = vld1q_u8(p + ringOff[8]);
+        mHi[0] = vcgtq_u8(v0, hi);
+        mHi[8] = vcgtq_u8(v8, hi);
+        mLo[0] = vcltq_u8(v0, lo);
+        mLo[8] = vcltq_u8(v8, lo);
+        const uint8x16_t any = vorrq_u8(vorrq_u8(mHi[0], mHi[8]), vorrq_u8(mLo[0], mLo[8]));
+        if (vmaxvq_u8(any) == 0) return 0;
+    }
     // FOUR COMPASS POSITIONS BEFORE THE OTHER TWELVE -- see the AVX2 path. On a real
     // frame about 1% of pixels are corners, so nearly every group is dismissed here
     // and skips twelve loads plus the whole run-length loop.
-    for (int c4 = 0; c4 < 4; ++c4) {
+    for (int c4 = 1; c4 < 4; c4 += 2) {   // 4 and 12; 0 and 8 came from stage 0
         const int k = c4 * 4;
         const uint8x16_t v = vld1q_u8(p + ringOff[k]);
         mHi[k] = vcgtq_u8(v, hi);
