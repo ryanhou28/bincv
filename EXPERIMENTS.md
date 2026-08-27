@@ -11285,3 +11285,58 @@ point per level — the loop's own `it`, including the points that exit at 1.
 
 **Instrumentation:** `BINCV_LK_ITERATION_HISTOGRAM`, off by default, writing one
 `unsigned` per (level, point). It changes no shipped code path.
+
+#### RESULT · `BAND B` · naive lockstep would waste 40% of every lane slot
+
+**87 246 point-levels over 120 V1_02 frames, at `seal_params.yaml`'s cap of 20.**
+
+| iterations | share | cumulative |
+|---|---|---|
+| **1** | 14.4% | 14.4% |
+| **2** | **58.2%** | **72.6%** |
+| 3 | 13.8% | 86.4% |
+| 4–19 | 9.8% | 96.4% |
+| **20 (the cap — never converged)** | **3.6%** | 100% |
+
+> **THE DISTRIBUTION IS BIMODAL AND THAT IS THE WHOLE PROBLEM.** Nearly three
+> quarters of point-levels are finished after **two** iterations, and a 3.6% tail runs
+> the cap. Batch eight of those together and **one straggler pins seven converged
+> lanes to its own iteration count.**
+
+|  |  |
+|---|---|
+| mean iterations per point-level | **3.235** |
+| mean **maximum** over a batch of 8 | **5.204** |
+| **ratio `mean / mean-of-max-8`** | **0.622** |
+| lane slots run / useful | 469 424 / 282 213 — **39.9% wasted** |
+
+**Projected `track`: naive lockstep 1.31×, lane refill 2.10×.** **BAND B — build the
+refill.** A batch that idles a converged lane throws away two thirds of what the AVX2
+kernel earns, and the fix is not an optimisation on top of the batch, it is **part of
+the batch's design**: when a lane converges it takes the next untracked point rather
+than waiting.
+
+**REFILL IS VERY NEARLY FREE, WHICH IS WHY THE BAND IS ACTIONABLE.** A refill re-stages
+one lane's window — and **the serial path stages every point exactly once too**. The
+work is the same work at a different time; what refill adds is the interleaved scatter
+and the bookkeeping, not a new pass over the data.
+
+#### TWO THINGS THIS CONTRADICTS, BOTH REPORTED RATHER THAN ABSORBED
+
+1. **X-68's 4.29 mean is high. The direct count is 3.235.** X-68 *derived* its figure
+   from a timing decomposition — iterated time over single-iteration time — which
+   attributes every fixed per-point cost that scales with the loop to the loop. **The
+   counter is the better number and X-68's decomposition should be read as an upper
+   bound.** Nothing built on X-68 changes: 3.235 iterations still put iterated
+   `residualSums` at ~91% of `track`, and the conclusion it gated was *which* stage to
+   optimise.
+2. **3.6% of point-levels burn 22% of all iterations and converge to nothing.** They
+   run the cap and are then almost all dropped. **Lowering the cap is worth its own
+   experiment** — it is an accuracy change, not a free one — and it is filed as
+   **E-42** rather than taken here.
+
+**Method:** `benchmark/lk_iteration_histogram.cpp`, the frontend and re-detection
+schedule of `frontend_sequence` exactly, serial (the hook writes from inside
+`parallelFor`). **One sequence only** — V1_02 is the only one on this machine — and
+D-58 applies: **the ratio is a property of this sequence's convergence behaviour**, so
+the batch's own whole-frontend arm still has to be measured, not projected.

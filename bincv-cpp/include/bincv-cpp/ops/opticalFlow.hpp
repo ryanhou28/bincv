@@ -1531,6 +1531,30 @@ namespace impl {
 /// that `LKContext` can carry every level's extent WITHOUT a scratch allocation.
 constexpr size_t kMaxLevels = 16;
 
+#ifdef BINCV_LK_ITERATION_HISTOGRAM
+/// @brief X-78's iteration counter. **DIAGNOSTIC ONLY — off by default, and it must
+///        stay that way.**
+///
+/// T5.16's AVX2 keypoint batch runs eight lanes in lockstep, so a batch costs the
+/// **maximum** iteration count over its eight points, not the mean X-68 measured. That
+/// ratio decides whether the batch is worth writing at all, and it is knowable from a
+/// histogram before any AVX2 exists — which is the entire reason this hook exists.
+///
+/// `counts` is caller-owned and `levelCount * pointCount` wide; entry `li * n + p` is
+/// the number of iterations point `p` actually executed at level `li`, zero for a point
+/// rejected before the loop. **Written from inside `parallelFor`**, so a caller that has
+/// installed a parallel backend must not read it — indices are distinct, but the
+/// benchmark that consumes this runs serial anyway.
+struct IterationTrace {
+    unsigned* counts = nullptr;
+    size_t pointCount = 0;
+};
+inline IterationTrace& iterationTrace() {
+    static IterationTrace t;
+    return t;
+}
+#endif
+
 /// A level's extent, so `usableLevelCount` needs no <utility>.
 struct LevelDims {
     size_t width = 0;
@@ -1768,6 +1792,12 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
         // The reference recomputes them in a separate pass after the loop
         // (LKTrackerInvoker.cpp:222-259); so does this, below.
         for (int it = 0; it < c.maxIterations; ++it) {
+#ifdef BINCV_LK_ITERATION_HISTOGRAM
+            {
+                const IterationTrace& tr = iterationTrace();
+                if (tr.counts != nullptr) ++tr.counts[li * tr.pointCount + p];
+            }
+#endif
             const long long originX = floorToLL(nextX);
             const long long originY = floorToLL(nextY);
 
