@@ -267,9 +267,16 @@ QuantMat<1, WordType_>& QuantMat<1, WordType_>::operator=(QuantMat&& other) noex
     return *this;
 }
 
-#ifdef BINCV_WITH_OPENCV
-// OpenCV interoperability implementations
 
+// ---------------------------------------------------------------------------
+// THE ROW PACKER LIVES ABOVE THE OpenCV GUARD, AND THAT PLACEMENT IS THE POINT.
+//
+// It was written inside `#ifdef BINCV_WITH_OPENCV` because its first caller was
+// `fromCVMat`. That made the one path a core-only build needs -- turning a plain
+// pixel array into bits -- available only when OpenCV was present, which is the
+// exact gap ops/pack.hpp exists to close. Caught by a core-only compile, since
+// every OpenCV-enabled build hid it.
+// ---------------------------------------------------------------------------
 namespace impl {
 
 /// @brief Scatters a 32-pixel mask into `WordType` words. **INTERNAL** (X-71).
@@ -314,24 +321,93 @@ inline void packRowNonZeroPortable(const uint8_t* rowIn, size_t from, size_t wid
     }
 }
 
+/// @brief How a source pixel becomes a bit. **INTERNAL mirror of `PackRule`** --
+///        ops/pack.hpp holds the public enum, and this header cannot include it
+///        (pack.hpp includes binMat.hpp, which includes this file).
+enum class PackCmp { NonZero, GreaterThan, GreaterEqual };
+
+/// @brief One pixel's bit, scalar.
+template <PackCmp R, typename SrcT>
+inline bool packCmp(SrcT v, SrcT t) {
+    if constexpr (R == PackCmp::NonZero) {
+        (void)t;
+        return v != SrcT{0};
+    } else if constexpr (R == PackCmp::GreaterThan) {
+        return v > t;
+    } else {
+        return v >= t;
+    }
+}
+
 #if defined(BINCV_X86_RUNTIME_AVX2)
-/// @brief The non-zero-ness of 32 bytes, as 32 bits. **INTERNAL** (X-71).
+/// @brief 32 source pixels' rule result, as 32 bits. **INTERNAL** (X-71).
 ///
 /// **ONE COARSE ENTRY POINT, NEVER LEAF HELPERS -- and this is the coarse one.**
 /// `__attribute__((target(...)))` stops a compiler inlining a function into a caller
 /// whose feature set is smaller: that is what the attribute is FOR, since the caller
 /// may run where the callee's instructions do not exist.
 /// [X-60](../../../EXPERIMENTS.md) marked leaf helpers *inside* a hot loop and paid
-/// **310 real calls per window**. Here the call IS the unit of work -- a vector load,
-/// a compare and a movemask for 32 pixels -- not a helper inside one.
+/// **310 real calls per window**. Here the call IS the unit of work -- loads, a
+/// compare and a movemask for 32 pixels -- not a helper inside one.
 ///
 /// This is why binCV uses AVX2 with **no `-mavx2` build**: the baseline ISA is
 /// unchanged and the fast path is chosen at run time.
-__attribute__((target("avx2"))) inline uint32_t movemask32(const uint8_t* p) {
-    const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
-    // AVX2 has no "compare not equal": compare against zero and invert once.
-    return ~static_cast<uint32_t>(
-        _mm256_movemask_epi8(_mm256_cmpeq_epi8(v, _mm256_setzero_si256())));
+///
+/// @note **The comparisons are BIASED because the SSE/AVX integer compares are
+///       SIGNED and binCV's pixels are not.** `cmpgt_epi8` on `0xFF` against `0x01`
+///       answers "is -1 > 1", which is false and wrong. XOR-ing both sides with the
+///       sign bit maps unsigned order onto signed order exactly.
+template <PackCmp R, typename SrcT>
+__attribute__((target("avx2"))) inline uint32_t movemask32(const SrcT* p, SrcT t) {
+    if constexpr (sizeof(SrcT) == 1) {
+        const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+        if constexpr (R == PackCmp::NonZero) {
+            (void)t;
+            // AVX2 has no "compare not equal": compare against zero and invert once.
+            return ~static_cast<uint32_t>(
+                _mm256_movemask_epi8(_mm256_cmpeq_epi8(v, _mm256_setzero_si256())));
+        } else {
+            const __m256i bias = _mm256_set1_epi8(static_cast<char>(0x80));
+            const __m256i vb = _mm256_xor_si256(v, bias);
+            const __m256i tb =
+                _mm256_xor_si256(_mm256_set1_epi8(static_cast<char>(t)), bias);
+            const uint32_t gt = static_cast<uint32_t>(_mm256_movemask_epi8(
+                _mm256_cmpgt_epi8(vb, tb)));
+            if constexpr (R == PackCmp::GreaterThan) return gt;
+            // `>= t` is `> t` OR `== t`.
+            return gt | static_cast<uint32_t>(_mm256_movemask_epi8(
+                       _mm256_cmpeq_epi8(v, _mm256_set1_epi8(static_cast<char>(t)))));
+        }
+    } else {
+        // 16-bit source: two vectors of sixteen, narrowed to bytes before the mask.
+        // `packs_epi16` saturates, which is exactly right here -- the operands are
+        // already 0 or -1, and it preserves the LANE ORDER within each 128-bit half,
+        // which `permute4x64` then puts back in sequence.
+        const __m256i lo = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+        const __m256i hi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + 16));
+        __m256i mlo, mhi;
+        if constexpr (R == PackCmp::NonZero) {
+            (void)t;
+            const __m256i z = _mm256_setzero_si256();
+            mlo = ~_mm256_cmpeq_epi16(lo, z);
+            mhi = ~_mm256_cmpeq_epi16(hi, z);
+            mlo = _mm256_xor_si256(_mm256_cmpeq_epi16(lo, z), _mm256_set1_epi16(-1));
+            mhi = _mm256_xor_si256(_mm256_cmpeq_epi16(hi, z), _mm256_set1_epi16(-1));
+        } else {
+            const __m256i bias = _mm256_set1_epi16(static_cast<short>(0x8000));
+            const __m256i tb =
+                _mm256_xor_si256(_mm256_set1_epi16(static_cast<short>(t)), bias);
+            mlo = _mm256_cmpgt_epi16(_mm256_xor_si256(lo, bias), tb);
+            mhi = _mm256_cmpgt_epi16(_mm256_xor_si256(hi, bias), tb);
+            if constexpr (R == PackCmp::GreaterEqual) {
+                const __m256i te = _mm256_set1_epi16(static_cast<short>(t));
+                mlo = _mm256_or_si256(mlo, _mm256_cmpeq_epi16(lo, te));
+                mhi = _mm256_or_si256(mhi, _mm256_cmpeq_epi16(hi, te));
+            }
+        }
+        const __m256i packed = _mm256_permute4x64_epi64(_mm256_packs_epi16(mlo, mhi), 0xD8);
+        return static_cast<uint32_t>(_mm256_movemask_epi8(packed));
+    }
 }
 
 /// @brief Is AVX2 present on this machine? Asked once, not once per row.
@@ -344,13 +420,42 @@ inline bool hasVectorPack() {
 /// @brief The same 32-bit mask, without a move-mask instruction. **INTERNAL** (X-71).
 /// @note aarch64 has none, so AND per-lane bit weights and let three pairwise adds
 ///       fold sixteen bytes into a sixteen-bit mask. NEON is baseline on aarch64, so
-///       unlike the AVX2 path there is nothing to dispatch on.
-inline uint32_t movemask32(const uint8_t* p) {
+///       unlike the AVX2 path there is nothing to dispatch on. NEON's compares ARE
+///       unsigned (`vcgtq_u8`), so no bias is needed here.
+template <PackCmp R, typename SrcT>
+inline uint32_t movemask32(const SrcT* p, SrcT t) {
     const uint8x16_t weights = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     uint32_t m = 0;
     for (size_t half = 0; half < 2; ++half) {
-        const uint8x16_t v = vld1q_u8(p + half * 16);
-        const uint8x16_t w = vandq_u8(vmvnq_u8(vceqzq_u8(v)), weights);
+        uint8x16_t nz;
+        if constexpr (sizeof(SrcT) == 1) {
+            const uint8x16_t v = vld1q_u8(reinterpret_cast<const uint8_t*>(p) + half * 16);
+            if constexpr (R == PackCmp::NonZero) {
+                (void)t;
+                nz = vmvnq_u8(vceqzq_u8(v));
+            } else if constexpr (R == PackCmp::GreaterThan) {
+                nz = vcgtq_u8(v, vdupq_n_u8(static_cast<uint8_t>(t)));
+            } else {
+                nz = vcgeq_u8(v, vdupq_n_u8(static_cast<uint8_t>(t)));
+            }
+        } else {
+            const uint16_t* q = reinterpret_cast<const uint16_t*>(p) + half * 16;
+            const uint16x8_t a = vld1q_u16(q), b = vld1q_u16(q + 8);
+            uint16x8_t ma, mb;
+            if constexpr (R == PackCmp::NonZero) {
+                (void)t;
+                ma = vmvnq_u16(vceqzq_u16(a));
+                mb = vmvnq_u16(vceqzq_u16(b));
+            } else if constexpr (R == PackCmp::GreaterThan) {
+                ma = vcgtq_u16(a, vdupq_n_u16(static_cast<uint16_t>(t)));
+                mb = vcgtq_u16(b, vdupq_n_u16(static_cast<uint16_t>(t)));
+            } else {
+                ma = vcgeq_u16(a, vdupq_n_u16(static_cast<uint16_t>(t)));
+                mb = vcgeq_u16(b, vdupq_n_u16(static_cast<uint16_t>(t)));
+            }
+            nz = vcombine_u8(vmovn_u16(ma), vmovn_u16(mb));
+        }
+        const uint8x16_t w = vandq_u8(nz, weights);
         uint8x8_t f = vpadd_u8(vget_low_u8(w), vget_high_u8(w));
         f = vpadd_u8(f, f);
         f = vpadd_u8(f, f);
@@ -362,44 +467,55 @@ inline bool hasVectorPack() { return true; }
 #define BINCV_HAVE_VECTOR_PACK 1
 #endif
 
-/// @brief Packs one row of bytes to 1 bit per pixel: bit set iff the byte is non-zero.
-///        **INTERNAL** ([X-71](../../../EXPERIMENTS.md)).
-/// @param rowOut Zero-initialised on entry; only bits `[0, width)` are written, so a
-///        row's PADDING BITS STAY ZERO ([CLAUDE.md](../../../CLAUDE.md)'s hard rule --
-///        word-wise reductions over-count otherwise).
-///
-/// **WHAT THIS REPLACES.** A per-pixel `if (rowIn[x]) rowOut[...] |= bitMask(x)`: a
-/// data-dependent branch per pixel and a read-modify-write per set pixel. On an edge
-/// map that branch is unpredictable **by construction** -- being unpredictable is what
-/// an edge map is -- so it was close to a worst case for a scalar loop.
+/// @brief Packs one row to 1 bit per pixel under `R`. **INTERNAL** (X-71).
+/// @param rowOut Only bits `[0, width)` are written and whole words are STORED, so a
+///        row's PADDING BITS ARE ZERO on return ([CLAUDE.md](../../../CLAUDE.md)'s
+///        hard rule -- word-wise reductions over-count otherwise).
 ///
 /// **WHY THE BIT ORDERS LINE UP AND NO SHUFFLE IS NEEDED.** `bitMask(x)` is
 /// `1 << (x % WordBits)`, so pixel `x` lands in bit `x` of its word, LSB first.
-/// `_mm256_movemask_epi8` returns the top bit of each of 32 bytes as 32 bits, byte `i`
-/// in bit `i`, LSB first. **The two conventions are the same one.**
-template <typename WordType>
-inline void packRowNonZero(const uint8_t* rowIn, size_t width, WordType* rowOut) {
+/// `_mm256_movemask_epi8` returns the top bit of each of 32 bytes as 32 bits, byte
+/// `i` in bit `i`, LSB first. **The two conventions are the same one.**
+template <PackCmp R, typename SrcT, typename WordType>
+inline void packRowCmp(const SrcT* rowIn, size_t width, SrcT t, WordType* rowOut) {
     size_t x = 0;
 #if defined(BINCV_HAVE_VECTOR_PACK)
-    // WHOLE WORDS, NOT WHOLE 32-PIXEL GROUPS. At 64-bit words a 32-pixel group is half
-    // a word, and letting the portable tail start mid-word put its bits at the wrong
-    // offsets -- caught by the `uint64_t` arm of tests/test_opencv_interop.cpp and by
-    // nothing narrower. `kGroup` is a multiple of the word width at every width binCV
-    // supports, so `x` is word-aligned when the loop ends.
-    constexpr size_t kGroup = bitsPerWord<WordType>() > 32 ? bitsPerWord<WordType>()
-                                                           : size_t{32};
+    // WHOLE WORDS, NOT WHOLE 32-PIXEL GROUPS. At 64-bit words a 32-pixel group is
+    // half a word, and letting the scalar tail start mid-word put its bits at the
+    // wrong offsets -- caught by the `uint64_t` arm of tests/test_opencv_interop.cpp
+    // and by nothing narrower.
+    constexpr size_t kGroup =
+        bitsPerWord<WordType>() > 32 ? bitsPerWord<WordType>() : size_t{32};
     if (hasVectorPack()) {
         for (; x + kGroup <= width; x += kGroup) {
             for (size_t g = 0; g < kGroup / 32; ++g)
-                scatter32<WordType>(movemask32(rowIn + x + g * 32), x + g * 32, rowOut);
+                scatter32<WordType>(movemask32<R, SrcT>(rowIn + x + g * 32, t),
+                                    x + g * 32, rowOut);
         }
     }
 #endif
-    packRowNonZeroPortable<WordType>(rowIn, x, width, rowOut);
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    for (; x + kBits <= width; x += kBits) {
+        WordType acc = 0;
+        for (size_t i = 0; i < kBits; ++i)
+            acc |= static_cast<WordType>(static_cast<WordType>(packCmp<R, SrcT>(rowIn[x + i], t))
+                                         << i);
+        rowOut[x / kBits] |= acc;
+    }
+    if (x < width) {
+        WordType acc = 0;
+        for (size_t i = 0; x + i < width; ++i)
+            acc |= static_cast<WordType>(static_cast<WordType>(packCmp<R, SrcT>(rowIn[x + i], t))
+                                         << i);
+        rowOut[x / kBits] |= acc;
+    }
 }
 
-
 } // namespace impl
+
+#ifdef BINCV_WITH_OPENCV
+// OpenCV interoperability implementations
+
 
 template <typename WordType_>
 void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
@@ -424,7 +540,8 @@ void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
     for (size_t y = 0; y < newHeight; ++y) {
         const uint8_t* rowIn = input.ptr<uint8_t>(static_cast<int>(y));
         WordType* rowOut = newData.data() + y * newAlignedWidth;
-        impl::packRowNonZero<WordType>(rowIn, newWidth, rowOut);
+        impl::packRowCmp<impl::PackCmp::NonZero, uint8_t, WordType>(rowIn, newWidth,
+                                                                    uint8_t{0}, rowOut);
     }
 
     width = newWidth;

@@ -146,6 +146,7 @@
 // tests/test_bitslice.cpp, so this file supplies the row geometry and nothing
 // else.
 #include "bitslice.hpp"
+#include "pack.hpp"
 // impl::minRowWords, impl::bitMask, and QuantMat<N> for the container wrapper.
 #include "../quantMat.hpp"
 
@@ -340,7 +341,6 @@ inline void threshold(const cv::Mat& src, BinMatView<WordType> dst, double thres
 
     BINCV_ASSERT(dst.ptr != nullptr, "threshold: a non-empty view needs a non-null pointer");
 
-    constexpr size_t wordBits = sizeof(WordType) * 8;
     const size_t words = impl::minRowWords<WordType>(dst.width);
 
     // The comparison, reduced to ONE INTEGER CUTOFF before the loops. For an
@@ -377,29 +377,37 @@ inline void threshold(const cv::Mat& src, BinMatView<WordType> dst, double thres
         cutoff = static_cast<int>(std::floor(thresh)) + 1;
     }
 
-    for (size_t y = 0; y < dst.height; ++y) {
-        const uint8_t* srcRow = src.ptr<uint8_t>(static_cast<int>(y));
-        WordType* dstRow = dst.row(y);
-
-        // Whole words are ASSEMBLED and stored, never read-modify-written: the
-        // destination's previous contents are irrelevant, and the bits past
-        // `width` in the trailing word are simply never set -- which is the
-        // padding invariant with no mask needed.
-        for (size_t i = 0; i < words; ++i) {
-            const size_t base = i * wordBits;
-            const size_t bits = (dst.width - base < wordBits) ? (dst.width - base) : wordBits;
-            WordType word = 0;
-            for (size_t b = 0; b < bits; ++b) {
-                // `>= cutoff` IS `> thresh`; see the derivation above. Getting
-                // this boundary wrong by one moves the pixels equal to `thresh`
-                // from 0 to 1 -- the failure the top of this file is about.
-                if (static_cast<int>(srcRow[base + b]) >= cutoff) {
-                    word = static_cast<WordType>(word | impl::bitMask<WordType>(b));
-                }
-            }
-            dstRow[i] = word;
+    // ONE IMPLEMENTATION. The packing, the vector paths and the padding invariant
+    // all live in ops/pack.hpp, which is in CORE -- this function's only job is to
+    // reduce `thresh` to a rule and hand over the buffer. Before that split this
+    // loop was a second copy of the same word assembly, and only one of the two was
+    // ever optimised (X-71).
+    //
+    // `cutoff` is an int precisely so the two degenerate ends survive the reduction:
+    // 0 means every pixel passes and 256 means none does, and neither fits a uint8_t.
+    if (cutoff <= 0) {
+        // Everything passes. Whole words of ones, and the trailing word masked so
+        // the padding bits stay zero.
+        const WordType tail = impl::rowTailMask<WordType>(dst.width);
+        for (size_t y = 0; y < dst.height; ++y) {
+            WordType* row = dst.row(y);
+            for (size_t i = 0; i < words; ++i)
+                row[i] = (i + 1 == words) ? tail : static_cast<WordType>(~WordType{0});
         }
+        return;
     }
+    if (cutoff > 255) {
+        for (size_t y = 0; y < dst.height; ++y) {
+            WordType* row = dst.row(y);
+            for (size_t i = 0; i < words; ++i) row[i] = 0;
+        }
+        return;
+    }
+    // `p >= cutoff` IS `p > thresh` -- see the derivation above. Getting this
+    // boundary wrong by one moves the pixels equal to `thresh` from 0 to 1.
+    packBits<PackRule::GreaterEqual, uint8_t, WordType>(
+        src.ptr<uint8_t>(0), dst.width, dst.height, src.step, dst,
+        static_cast<uint8_t>(cutoff));
 }
 
 #endif // BINCV_WITH_OPENCV
