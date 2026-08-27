@@ -3740,10 +3740,6 @@ so T5.4's descriptors want it.
 build it, and can try it.** Not contributor onboarding — that comes later, when there
 are contributors. Nothing here is about process; it is about a stranger's first hour.
 
-**Not in scope, deliberately:** `CONTRIBUTING.md` and `CHANGELOG.md`. Both describe how
-*other people* participate, and there is no one to participate yet. They belong with the
-first external contributor, not before.
-
 ### T6.1 · LICENSE · `TODO`
 
 **Nothing else in this phase matters until this exists.** With no licence the code is
