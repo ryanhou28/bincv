@@ -50,9 +50,23 @@ If a task needs a performance or footprint choice that no experiment has settled
 ## Verify before committing
 
 ```bash
-./scripts/verify.sh          # ~35 s, four configurations, warnings fatal
-./scripts/verify_arm.sh      # aarch64 correctness under emulation; skips without Docker
+./scripts/verify.sh            # ~35 s, four configurations, warnings fatal
+./scripts/verify_arm.sh        # aarch64 correctness under emulation; skips without Docker
+./scripts/check_arm_syntax.sh  # ~2.5 s, aarch64 SYNTAX only, on the device
 ```
+
+**A third of `ops/opticalFlow.hpp` is invisible to every x86 build.** D-33's tap
+batching and X-40's accumulator live inside `#if BINCV_HAVE_NEON && __aarch64__`, so an
+edit there can be structurally broken and still pass all four `verify.sh`
+configurations. `verify_arm.sh` covers it but **emulates** aarch64 and needs Docker;
+when the daemon is down it skips and that region goes unchecked.
+
+`check_arm_syntax.sh` is the inner loop for that case: it uses the **reference device
+as a compiler** — which it is — and compiles one TU with the gate's full warning set in
+about two seconds. It checks that the NEON region COMPILES, not that it computes the
+right answer, so it does not replace `verify_arm.sh` or a device test run. X-72
+abandoned a working refactor after reporting there was "no way to compile for
+aarch64"; there was, and it takes two seconds.
 
 `verify.sh` builds and tests four configurations — Release+OpenCV, Release
 core-only, `-fno-exceptions` core-only, and **Debug** core-only — with
