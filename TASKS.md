@@ -4093,6 +4093,21 @@ That rule settles every case consistently, in both directions:
 - **Raising `N` above 8.** binCV is a *low*-bit-width library; the cap is the thesis,
   not a limitation to be relaxed.
 
+### T5.17 · FAST on a bit-plane — the detector on binCV's own type · `DONE` (X-80 → D-67)
+
+**RAISED BY THE USER, AGAINST A CONCLUSION THIS PROJECT HAD ALREADY WRITTEN DOWN.**
+[X-77](EXPERIMENTS.md) closed FAST at parity on the reasoning that "FAST's input is
+8-bit, so binCV has no packing advantage" — which is true of
+`detectFast(const SrcT*, ...)` and **not true of FAST**. On a one-bit frame there is
+exactly one meaningful threshold and the detector is boolean algebra.
+
+**Shipped:** `detectFast(BinMatConstView<W>, ...)`, bit-exact against `cv::FAST` corner
+for corner and in scan order, **1.21–1.39× on x86, 2.36× on the reference device**, on a seventh of the
+input memory, AVX2 and NEON. Both entry points remain — a caller holding bytes should not have to pack them.
+
+**Left open as [E-44](ARCHITECTURE.md#9-open-questions-and-planned-experiments):** the
+score is ~40% of the operation (1.75× without it).
+
 ### T5.16 · The AVX2 keypoint batch — the x86 optimisation · `DONE` (X-78, X-79 → D-66)
 
 **Depends:** T5.2 (landed), T5.3 (landed — re-baselined at **2.06–2.14×** against the

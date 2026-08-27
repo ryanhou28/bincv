@@ -4019,6 +4019,53 @@ or taller than 32 rows is **tracked by `trackOnePoint`, not refused** — the 32
 is a footprint choice (~20 KB of `[row][plane][lane]` arrays at `N = 2` against ~41 KB
 at 64 rows, and the working set has to stay in L1).
 
+### D-67: FAST is a bit-plane operation, and X-77's ceiling was about a signature
+
+[X-80](EXPERIMENTS.md) answers a question [X-77](EXPERIMENTS.md) had closed without
+measuring. X-77 wrote that "FAST's input is 8-bit, so binCV has no packing advantage"
+**as though that were a property of FAST.** It is a property of
+`detectFast(const SrcT*, ...)`, whose own header line says "on a **wide image**".
+
+**ON A ONE-BIT FRAME THE DETECTOR IS BOOLEAN ALGEBRA**, and there is exactly one
+meaningful threshold — which is why `detectFast(BinMatConstView)` takes none. The whole
+test is
+
+```
+    corner = arc9( ring XOR centre )
+```
+
+because a brighter arc needs a **clear** centre and a darker arc a **set** one, so for
+any given pixel they are the same test. **One tree, not two**, and no polarity anywhere
+in the kernel.
+
+**Result: 1.21–1.39× on x86 and 2.36× on the reference device**, against `cv::FAST` on
+a seventh of the input memory, **bit-exact corner for corner and in scan order**
+(2 860 / 4 085 / 6 724, zero mismatches) — against 0.93–1.02× for the wide entry point
+on the same content. Both entry points ship: a caller holding bytes should not be told
+to pack them first.
+
+**THE DEPLOYMENT TARGET IS WHERE IT LOOKS BEST, AND THAT WAS PREDICTED BEFORE IT WAS
+MEASURED.** The arc tree needs sixteen live vectors; **aarch64 has thirty-two registers
+and x86 has sixteen**, so the AVX2 form spends part of its win on spill traffic and the
+NEON form does not.
+
+> **AND THE FIRST VERSION LOST BY 5×, WHICH IS THE PART WORTH REMEMBERING. A `uint32_t`
+> HOLDS THIRTY-TWO PIXELS — EXACTLY WHAT AN AVX2 REGISTER OF BYTES HOLDS.** Bit-packing
+> buys nothing against a vectorised byte kernel until the boolean algebra itself moves
+> into a vector register, where one `vpand` decides 256 pixels. **The packing is not the
+> advantage; the packing plus the vector register is.** Any future "surely bit-packing
+> wins here" should be checked against that sentence before it is believed.
+
+The other 3× came from register pressure: a four-array arc tree is sixty-four live
+`__m256i` against a file of sixteen and ran at **0.7 operations per cycle**. One
+in-place array of sixteen fits. `-Wconversion`-clean, runtime-dispatched on AVX2, NEON
+baseline on aarch64.
+
+**What is not claimed:** the score is binCV's own (longest qualifying arc, 9–16, because
+OpenCV's is constant on binary content) and it costs about 40% — **1.75× without it**.
+That is registered as [E-44](#9-open-questions-and-planned-experiments), not optimised
+away and not quietly dropped.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
@@ -4080,6 +4127,8 @@ becomes a committed benchmark and an [EXPERIMENTS.md](EXPERIMENTS.md) entry.
 | **E-38** | `StagedWindow` and `TapCache` cap at **64 rows**, so their stack cost scales with `N`: 4 KB at `N = 2`, **≈15 KB at `N = 8`**. Should the cap be on BYTES instead? | [X-70](EXPERIMENTS.md) shipped both and stated the figure rather than hiding it. A row cap is the wrong axis — it fixes the shape, not the footprint, and footprint is the constraint [CLAUDE.md](CLAUDE.md) says wins ties. | **A byte cap would decline the shipped 31-row window at `N = 8`** (≈28 rows fit in 4 KB), sending it to the unstaged path — a correctness-preserving but silent slowdown at high `N`. The shipped ladder is `1/2/2/2` so nothing today is affected, which is exactly why this is registered rather than guessed: **there is no measurement of what high-`N` callers exist.** | Whether the staging path is usable on a Cortex-M at `N > 2`. | D-61 | **Phase 5** |
 | ~~**E-39**~~ **RESOLVED — SHIPPED** | Write the staged NEON variants so aarch64 gets [X-69](EXPERIMENTS.md)/[X-70](EXPERIMENTS.md)'s staging. | `residualSums` dispatches N ∈ {1,2} at `uint32_t` to [D-33](#8-design-decisions)'s and [X-40](EXPERIMENTS.md)'s NEON accumulators, and the staged path has neither, so [D-60](#d-60-the-previous-frames-words-are-staged-once-per-point-per-level) holds staging OFF there. | **[X-72](EXPERIMENTS.md) measured it: 2.13× on the reference device, up from 1.85×** — `track` 1.18×, frontend 1.14×, 298/298 checks including the staged oracle. **The code is NOT committed**: it is a structural edit to functions that compile only on aarch64, and this environment has no cross-compiler, no working Docker for `verify_arm.sh`, and a 5–10 minute device round-trip. Three repair attempts did not clear brace-level damage x86 cannot see. **The next attempt needs, in order:** a working `verify_arm.sh`; the reader written once and whole rather than spliced; and — measured, not guessed — **`Staged` as a template parameter AND operands as aliasing pointers**, since a runtime flag costs 17% of x86 `track` and copying the operands gives back what staging bought. Neither alone sufficed. | Whether the deployment target gets the 1.15× that is now known to be there. | D-60, D-61 | **Phase 5** |
 | **E-40** | `fromCVMat` is **33% of the x86 frontend at one thread and 53% at twelve**, and does not scale. Optimise it on **both** architectures. | [X-67](EXPERIMENTS.md) found it at 20.4%; [X-69](EXPERIMENTS.md)/[X-70](EXPERIMENTS.md) shrank `track` around it until it became the largest single item. The 1-bit path is a **per-pixel branch and read-modify-write**. | **Bit-plane extraction from bytes is what a move-mask instruction does.** `_mm256_movemask_epi8` returns one plane of 32 pixels in one instruction; aarch64 has no movemask but AND-with-bit-weights plus pairwise-add gives 16 in about six. A portable **branchless** arm is measured too, because if it gets most of the win the intrinsics are not worth their maintenance. | Whether binCV's interop boundary is a real cost or an artefact of an unoptimised loop — and, via the allocation arm, whether the packing was ever the problem. | D-59, D-62 | **Phase 5** |
+| ~~**E-43**~~ **RESOLVED — SHIPPED** | `detectFast` takes `const SrcT*` and a byte stride — a **wide image**. Does FAST have a bit-plane form, and is it competitive? | [X-77](EXPERIMENTS.md) concluded FAST could only match `cv::FAST` because "FAST's input is 8-bit", and treated that as a property of the OPERATION. It is a property of the signature this project chose. **The user caught it.** | **On a one-bit frame the detector is boolean algebra**: `{0, 1}` pixels admit exactly one threshold, and — the identity that halved the kernel — a brighter arc needs a clear centre and a darker arc a set one, so both collapse to `arc9(ring XOR centre)`. | Whether binCV's own type makes its own detector faster, or whether X-77's ceiling was real. | D-67 | **Phase 5** (X-80) ✔ |
+| **E-44** | The bit-plane FAST's **score costs ~40% of the operation** — 1.39× with it, **1.75×** without. Can it be computed bit-sliced instead of per corner? | [X-80](EXPERIMENTS.md) measured the split. OpenCV's own score is **the same number for every corner** on binary content, so binCV reports the longest qualifying arc (9–16) instead — which needs a 16-word bit transpose per corner, and corners are 2% of pixels on a real binarised frame. | **The arc length is already half-computed.** The detection tree yields "a run of 9 starts here" as a mask; seven more doubling passes would yield runs of 10 to 16, and the score is then a bit-sliced sum of eight masks — per CHUNK rather than per corner. **It is not obviously cheaper**: 224 extra vector operations per chunk unconditionally, against ~78 scalar per corner, so it wins only above roughly 3% corner density. **Measure both; do not assume the bit-sliced form wins because it is bit-sliced.** | Whether the 1.75× detection number is reachable with the score still present. | D-67 | **Phase 5** |
 | **E-42** | `seal_params.yaml` caps LK at **20 iterations**, and [X-78](EXPERIMENTS.md) measured that **3.6% of point-levels run the whole cap and converge to nothing — burning 22% of every iteration the tracker executes.** Should the cap come down? | X-78 counted iterations directly for the first time: **72.6% of point-levels finish in two or fewer**, and the distribution is bimodal with a tail pegged at the cap. The tracker spends a fifth of its time on points it is about to drop. | **It is an ACCURACY change, not a free one**, which is why it is registered rather than taken. A point at iteration 15 has not converged but its estimate is not therefore worthless, and `status` does not currently distinguish "converged" from "ran out". The arms are the cap itself (20 / 10 / 5) measured against **track lifetime and endpoint error**, not against time alone — [D-53](#8-design-decisions) applies, and a cap that speeds up `track` by shortening tracks has not helped anyone. | Whether a fifth of `track` is being spent on points that were already lost. | D-58 | **Phase 5** |
 | **E-37** | `loadLevel0` converts **both** frames every frame and `build()` builds **both** pyramids — but this frame's `next` is next frame's `prev`. Should the frontend ping-pong? | [X-67](EXPERIMENTS.md) measured `fromCVMat` at **20.4% of the frontend at T=1 and 34.4% at T=4**, and roughly half of it is recomputation. | **Not fixed where it was found, on purpose.** Changing the harness changes every recorded frontend number in [EXPERIMENTS.md](EXPERIMENTS.md) — that is a decision about the denominator, not a cleanup, and it needs its own rule and a restated baseline. Note OpenCV's `calcOpticalFlowPyrLK` also rebuilds both pyramids per call, so the redundancy may be **symmetric** and removing it only on binCV's side would flatter binCV. **Measure both before changing either.** | Whether ~10% of the x86 frontend is recomputation, and whether the denominator moves with it. | D-59 | **Phase 5** |
 | ~~**E-36**~~ **RESOLVED — SHIPPED** | Re-attempt x86 vectorisation of `residualSums` at the **keypoint** granularity, **staging instead of gathering**, and replacing the per-row popcount with a **carry-save adder tree**. | [X-61](EXPERIMENTS.md)'s vector arithmetic WON (≈48 ops against ≈100) and its **gathers** gave it back — a data-movement result that [D-52](#d-52-the-31-pixel-window-caps-the-packing-advantage-at-194) wrongly filed as a packing wall. | **Two changes, neither of which is a port.** (1) **Stage once, reuse across iterations**: eight of the twelve words read per row belong to the PREVIOUS frame and never move, and LK runs up to 20 iterations — so the gather is paid once, not 20 times. ~8 KB, **+1.8%**, an order of magnitude below [E-26](#register)'s declined +21%. (2) **CSA instead of popcount**: AVX2 has no vector popcount, but the kernel needs the SUM of 31 rows' counts, and a carry-save tree compresses 31 words into 5 planes with AND/XOR alone — `maj3` and `addShifted` already exist. | **Answered: it does not.** [X-79](EXPERIMENTS.md) shipped it — `track` **1.37×**, frontend **1.29×**, headline **2.20× → 2.81×** at one thread and **1.35× → 1.67×** at four, bit-exact over 2 208 points and watched to fail twice. The CSA half was NOT what did it (measured a wash earlier); the **layout** was. And [X-78](EXPERIMENTS.md) priced the lockstep waste at **39.9% of lane slots** before a line was written, which is why the shipped form refills a converged lane instead of idling it. | Whether [D-50](#8-design-decisions)'s "closed for x86" holds at the granularity that was never properly tried. **It does not.** | D-55, D-52, D-66 | **Phase 5** (X-79) ✔ |

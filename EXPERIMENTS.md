@@ -11167,33 +11167,35 @@ a 9-arc, and two loads settle what four were being paid for. Reject path **104 �
 the zero-corner ratio **0.42 → 0.80×**, realistic **1.09 → 1.04×**, high density
 **1.86 → 2.02×**.
 
-#### WHY PARITY IS THE CEILING HERE, AND IT IS NOT A DISAPPOINTMENT
+#### WHY PARITY IS THE CEILING **FOR THIS SIGNATURE** — AND THE FIRST VERSION OF THIS SECTION SAID SOMETHING WRONG
 
-**FAST'S INPUT IS 8-BIT, SO binCV HAS NO PACKING ADVANTAGE ON THE READS.** Both
-implementations load the same bytes into the same 32-byte registers and compare them
-the same way. binCV's one-bit-per-pixel thesis applies to what it *produces*, not to
-what FAST *consumes* — the operation reads a grayscale image and emits a keypoint list,
-and neither end is a bit-plane.
+**`detectFast` TAKES `const SrcT* img` WITH A BYTE STRIDE.** Its own header line reads
+"FAST corner detection on a **wide image**". So both implementations load the same bytes
+into the same 32-byte registers and compare them the same way, and there is no packing
+advantage to have.
 
-**Where the thesis DOES apply is the contiguity test**, which is one bit per (pixel,
-ring position) and is exactly where the 1.9× comes from: `run = (run + 1) & mask` over
-sixteen masks, or `acc &= acc >> 1` in the scalar path. **That part is binCV-shaped and
-it wins.** The reject is byte-shaped and it does not.
+> **THIS PARAGRAPH ORIGINALLY READ "FAST's input is 8-bit, so binCV has no packing
+> advantage" AS THOUGH THAT WERE A PROPERTY OF THE OPERATION. IT IS A PROPERTY OF THE
+> SIGNATURE THIS PROJECT CHOSE.** FAST runs perfectly well on a binary image — on
+> `{0, 1}` pixels there is exactly one meaningful threshold, and the whole test collapses
+> to booleans. Writing binCV's FAST against a byte pointer was a decision, and defending
+> its consequence as a ceiling was the error. **See
+> [X-80](#x-80--fast-on-a-bit-plane-where-the-thesis-actually-applies) — the corrected
+> question is measured there, not argued here.**
 
-**A denser packing is available and would not help.** The sixteen masks could be held as
-sixteen 32-bit words (one bit per pixel per ring position) and the arc test done with a
-sliding AND-tree — about **0.3 ops/pixel against the current 6**. But after the
-two-point reject, **99% of groups never reach the arc test at all**, so a 20× saving on
-1% of the work is worth 0.2%. **The bit-packing win is real and already spent.**
+**Within the byte signature the finding stands**, and it is the useful half: the
+contiguity test is one bit per (pixel, ring position) and is exactly where the 1.9×
+comes from, while the reject is byte-shaped and is where the loss was. That is what the
+sweep measured and it is why the two-point reject was the fix.
 
-**Final, both architectures:** x86 **1.04×** at realistic density and **2.02×** at high
-density; reference device **0.96×**. Correctness unmoved: **1818 / 1818** against
-`cv::FAST` through five successive rewrites.
+**Final for the wide-image entry point, both architectures:** x86 **1.04×** at realistic
+density and **2.02×** at high density; reference device **0.96×**. Correctness unmoved:
+**1818 / 1818** against `cv::FAST` through five successive rewrites.
 
-**Decision:** FAST ships at parity and that is the result. `cv::FAST` is a mature
-vectorised kernel over byte data, and an operation whose input binCV cannot pack more
-tightly is one where matching is the honest ceiling. **The two operations that ARE
-bit-shaped — `describe` and matching — are 5–11× and 2–5×.**
+**Decision:** `detectFast` **on a wide image** ships at parity, which for a mature
+vectorised byte kernel is the honest result — and it stays, because a caller holding
+bytes should not be told to pack them first. **What does not follow is that FAST is
+unsuited to binCV**, which is X-80's question.
 
 **Method:** `benchmark/feature_benchmark.cpp` and a threshold sweep; five interleaved
 repeats; OpenCV at one thread; x86 load 1.3–1.7 (noted — the realistic-density row moves
@@ -11328,6 +11330,113 @@ status, 0 err**, compared as BITS and not to a tolerance.
 is asked of a consumer. aarch64 is untouched and still compiles
 (`check_arm_syntax.sh`). **Machine shared with other work** — hence interleaved repeats
 and minima, and hence the kernel table's spread.
+
+---
+
+### X-80 · FAST on a bit-plane — where the thesis actually applies · `DONE — SHIPPED` · E-43
+
+**THIS EXPERIMENT EXISTS BECAUSE [X-77](#x-77--where-fasts-time-actually-goes-and-why-parity-is-the-honest-answer)
+CONCLUDED SOMETHING IT HAD NOT MEASURED.** X-77 wrote that "FAST's input is 8-bit, so
+binCV has no packing advantage" and treated that as a property of the operation. It is a
+property of `detectFast(const SrcT*, ...)`, whose own header line says **"on a wide
+image"**. Writing binCV's FAST against a byte pointer was a decision; defending its
+consequence as a ceiling was the error, and it was **the user who caught it**.
+
+> **ON A ONE-BIT FRAME THE DETECTOR IS BOOLEAN ALGEBRA.** Pixels are `{0, 1}`, so
+> `p_ring > p_centre + t` can hold only for `t = 0` with `ring = 1, centre = 0`, and
+> `p_ring < p_centre - t` only for `ring = 0, centre = 1`. **There is exactly one
+> meaningful threshold** — which is why the bit-plane entry point takes none.
+
+#### THE IDENTITY THAT HALVED THE KERNEL, FOUND ONLY BY WRITING IT OUT
+
+The obvious form is `arc9(ring & ~centre) | arc9(~ring & centre)` — two trees. But a
+brighter arc needs a **clear** centre and a darker arc a **set** one, so for any given
+pixel they are the same test:
+
+```
+    corner  =  arc9( ring XOR centre )
+```
+
+**One tree, not two**, and no polarity anywhere in the kernel. Measured: **182 → 145 µs.**
+
+#### AND THE EQUIVALENCE THAT MAKES THIS TIER-1-TIGHT AGAINST OpenCV
+
+For binary content stored as `CV_8U` in `{0, 255}`, `cv::FAST` at **any** threshold in
+`[1, 254]` accepts precisely these corners — `255 > 0 + t` holds for every such `t`, and
+`0 < 255 - t` likewise. **Checked rather than argued** (`Fast.BitPlaneThresholdIsUnique
+OnOneBitContent`): six thresholds from 1 to 254, all 508 corners, zero disagreements.
+
+So the comparison is **corner for corner and in scan order**, not set against set:
+**2 860 / 2 860, 4 085 / 4 085, 6 724 / 6 724, 0 mismatched**, over four sizes chosen to
+exercise the fully-scalar path, the chunk-plus-leftovers path and the exact-chunk path.
+
+#### THE RESULT
+
+One thread, twelve interleaved rounds, minimum reported, quiet machine:
+
+| content | corners | `cv::FAST` | binCV **wide** | binCV **bit-plane** | input |
+|---|---|---|---|---|---|
+| EuRoC frame, thresholded | 2 860 (0.8%) | 135.2 µs | 145.8 (0.93×) | **111.8 (1.21×)** | **7.8× smaller** |
+| `realframe.bin`, the frontend's own binarised frame | 6 724 (1.9%) | 266.8 | 262.8 (1.02×) | **192.3 (1.39×)** | **7.8× smaller** |
+
+**And on the REFERENCE DEVICE** — Cortex-A72, `taskset -c 3`, performance governor, not
+throttled, same frame:
+
+| | `cv::FAST` | binCV wide | binCV **bit-plane** |
+|---|---|---|---|
+| aarch64, `realframe.bin` | 2 055.8 µs | 2 053.6 (1.00×) | **870.1 (2.36×)** |
+
+> **X-77'S "PARITY IS THE HONEST CEILING" WAS WRONG. ON binCV'S OWN TYPE THE SAME
+> DETECTOR IS 1.4× ON x86 AND 2.36× ON THE DEPLOYMENT TARGET, ON A SEVENTH OF THE
+> MEMORY, BIT-EXACT.**
+
+**THE DEVICE BEATS x86 AND THE REASON WAS PREDICTED BEFORE IT WAS MEASURED:** the arc
+tree needs sixteen live vectors, **aarch64 has thirty-two registers and x86 has
+sixteen**. The AVX2 form spends its win on spill traffic; the NEON form does not.
+For once the embedded target is where the operation looks best, which is the right way
+round for this project.
+
+#### WHAT IT COST TO GET THERE, BECAUSE THE FIRST VERSION LOST BY 5×
+
+**690 → 383 → 235 → 182 → 145 → 112 µs.** Every step was a measurement, and the first
+number is the one worth keeping:
+
+| | µs | why |
+|---|---|---|
+| scalar `uint32_t` words | 690 | **0.20× — SLOWER THAN THE BYTE KERNEL** |
+| + AVX2, four-array arc tree | 383 | |
+| + in-place tree, ring words kept | 235 | scoring was rebuilding 16 displaced reads per corner-bearing word |
+| + compile-time doubling step | 182 | a runtime step makes every index variable, so `v[16]` cannot stay in registers |
+| + `ring XOR centre`, one tree | 145 | the identity above |
+| + last step folded into the OR | 112 | 16 stores per chunk for a value only ever ORed |
+
+**THE FIRST ROW IS THE WHOLE LESSON. A `uint32_t` HOLDS THIRTY-TWO PIXELS — WHICH IS
+EXACTLY WHAT AN AVX2 REGISTER OF BYTES HOLDS.** So bit-packing buys *nothing* against a
+vectorised byte kernel until the boolean algebra itself moves into a vector register,
+where one `vpand` decides **256** pixels. The packing is not the advantage; **the
+packing plus the vector register** is.
+
+**The four-array tree ran at 0.7 operations per cycle** — sixty-four live `__m256i`
+against a register file of sixteen. Restructuring to one in-place array of sixteen is
+most of the difference between 383 and 145, and it is why the NEON form should fare
+better still: **aarch64 has thirty-two vector registers.**
+
+#### WHAT IS NOT CLAIMED
+
+**The score is binCV's own and it costs about 40% of the operation.** With scoring
+stubbed out the same frame runs at **1.75×** rather than 1.39×. OpenCV's score — the
+largest surviving threshold — is **the same number for every corner** on binary content
+and orders nothing, so this reports the **longest qualifying arc**, 9 to 16. That is a
+real Tier 2 difference and a real cost, filed as **E-44** rather than optimised here or
+quietly dropped: a corner list with no strength ordering is not obviously better.
+
+**Method:** `benchmark/fast_bitplane_benchmark.cpp` (defaults to the committed
+`realframe.bin`, so it runs on the reference device with no dataset),
+`Fast.BitPlaneMatchesCvFastExactly`, `Fast.BitPlaneThresholdIsUniqueOnOneBitContent`.
+The AVX2 path is runtime-dispatched; the NEON path is baseline on aarch64 and was
+**watched to fail** under `check_arm_syntax.sh` before being trusted. The vector path
+declines the first and last row of the sweep: a bit-plane row has no stride padding
+(752 px is exactly 96 bytes) and the ring read touches one byte either side.
 
 ---
 

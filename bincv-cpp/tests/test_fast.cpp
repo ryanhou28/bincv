@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <vector>
 
+#include "bincv-cpp/binMat.hpp"
 #include "bincv-cpp/ops/fast.hpp"
 #include "test_util.hpp"
 
@@ -108,7 +109,7 @@ BINCV_TEST(Fast, DetectionsMatchCvFast) {
     uint64_t st = 31337;
     for (int y = 0; y < kH; ++y)
         for (int x = 0; x < kW; ++x) {
-            st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+            st = st * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
             img.at<uint8_t>(y, x) = static_cast<uint8_t>(st >> 40);
         }
     const int t = 30;
@@ -140,6 +141,103 @@ BINCV_TEST(Fast, DetectionsMatchCvFast) {
     BINCV_CHECK(both > 0);
     BINCV_CHECK(onlyMine == 0);
     BINCV_CHECK(onlyCv == 0);
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// X-80 / E-43: THE BIT-PLANE OVERLOAD, WHICH IS FAST ON binCV'S OWN TYPE.
+//
+// THE EQUIVALENCE THIS RESTS ON. For binary content stored as CV_8U in {0, 255},
+// `cv::FAST` at ANY threshold in [1, 254] accepts exactly the corners the bit-plane
+// form accepts: `255 > 0 + t` holds for every such `t`, and `0 < 255 - t` likewise, so
+// a brighter arc needs a zero centre and a darker arc a set one. That is why the
+// bit-plane form takes no threshold at all -- there is only one -- and why the
+// comparison below is CORNER FOR CORNER AND IN ORDER rather than set-against-set.
+//
+// THE SIZES ARE CHOSEN TO EXERCISE BOTH PATHS. The AVX2 kernel handles 256 pixels at a
+// time and declines the first and last row of the sweep (a bit-plane row has no stride
+// padding, so its one-byte-either-side reads would leave the allocation). A width
+// under 256 leaves leftover words for the scalar path; 100 px is ENTIRELY scalar.
+// ---------------------------------------------------------------------------
+#ifdef BINCV_WITH_OPENCV
+BINCV_TEST(Fast, BitPlaneMatchesCvFastExactly) {
+    struct Case { int w, h; const char* what; };
+    const Case cases[] = {
+        {100, 60, "all scalar -- narrower than one vector chunk"},
+        {320, 90, "one vector chunk plus scalar leftovers"},
+        {752, 120, "the reference frame's width"},
+        {256, 40, "exactly one chunk, no leftovers"},
+    };
+    for (const Case& c : cases) {
+        cv::Mat img(c.h, c.w, CV_8U);
+        uint64_t st = UINT64_C(0xC0FFEE) + static_cast<uint64_t>(c.w);
+        for (int y = 0; y < c.h; ++y) {
+            for (int x = 0; x < c.w; ++x) {
+                st = st * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+                // Binary content, and DENSE enough to make real arcs: a coin flip
+                // gives almost no 9-runs, so this biases toward runs of set pixels.
+                img.at<uint8_t>(y, x) = ((st >> 41) % 100u) < 62u ? 255 : 0;
+            }
+        }
+        bincv::BinMat<uint32_t> plane(c.w, c.h);
+        plane.fromCVMat(img);
+
+        std::vector<cv::KeyPoint> cvKp;
+        cv::FAST(img, cvKp, 100, /*nonmaxSuppression=*/false,
+                 cv::FastFeatureDetector::TYPE_9_16);
+        std::vector<FastCorner> mine(200000);
+        bool truncated = false;
+        const size_t n = detectFast(plane.constView(), mine.data(), mine.size(), &truncated);
+
+        size_t mismatched = 0;
+        for (size_t i = 0; i < (n > cvKp.size() ? n : cvKp.size()); ++i) {
+            if (i >= n || i >= cvKp.size()) { ++mismatched; continue; }
+            if (mine[i].x != static_cast<int>(cvKp[i].pt.x) ||
+                mine[i].y != static_cast<int>(cvKp[i].pt.y)) {
+                ++mismatched;
+            }
+        }
+        // The score is binCV's own -- the longest qualifying arc, 9..16 -- because
+        // OpenCV's is the same number for every corner on binary content and orders
+        // nothing. It must still be in range and consistent with detection.
+        size_t badScore = 0;
+        for (size_t i = 0; i < n; ++i) {
+            if (mine[i].score < 9 || mine[i].score > 16) ++badScore;
+        }
+        std::printf("  %4dx%-4d %-46s binCV %6zu  cv %6zu  mismatched %zu\n", c.w, c.h,
+                    c.what, n, cvKp.size(), mismatched);
+        BINCV_CHECK(n > 0);
+        BINCV_CHECK_EQ(n, cvKp.size());
+        BINCV_CHECK_EQ(mismatched, size_t{0});
+        BINCV_CHECK_EQ(badScore, size_t{0});
+        BINCV_CHECK(!truncated);
+    }
+}
+
+BINCV_TEST(Fast, BitPlaneThresholdIsUniqueOnOneBitContent) {
+    // The claim the missing threshold parameter rests on, checked rather than argued:
+    // on {0, 255} content every legal `cv::FAST` threshold gives the SAME corners, so
+    // there is exactly one detector to expose and no knob to offer.
+    constexpr int kW = 200, kH = 80;
+    cv::Mat img(kH, kW, CV_8U);
+    uint64_t st = UINT64_C(991);
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            st = st * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+            img.at<uint8_t>(y, x) = ((st >> 41) % 100u) < 62u ? 255 : 0;
+        }
+    }
+    size_t base = 0, differing = 0;
+    for (int t : {1, 2, 37, 128, 200, 254}) {
+        std::vector<cv::KeyPoint> kp;
+        cv::FAST(img, kp, t, false, cv::FastFeatureDetector::TYPE_9_16);
+        if (t == 1) base = kp.size();
+        else if (kp.size() != base) ++differing;
+    }
+    std::printf("  cv::FAST on {0,255} content: %zu corners at every threshold tried, "
+                "%zu thresholds disagreed\n", base, differing);
+    BINCV_CHECK(base > 0);
+    BINCV_CHECK_EQ(differing, size_t{0});
 }
 #endif
 

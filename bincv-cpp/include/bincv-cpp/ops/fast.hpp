@@ -33,6 +33,8 @@
 #include <cstdint>
 
 #include "../core/error.hpp"
+#include "../core/view.hpp"
+#include "../impl/kernel_util.hpp"
 
 #if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
 #define BINCV_FAST_RUNTIME_AVX2 1
@@ -425,6 +427,477 @@ inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t st
             ++n;
         }
     }
+    return n;
+}
+
+// ===========================================================================
+// X-80 / E-43: THE SAME DETECTOR, ON binCV'S OWN TYPE.
+//
+// Everything above this line takes `const SrcT*` and a byte stride -- a WIDE image.
+// That is why it can only match `cv::FAST`: both sides load the same bytes into the
+// same registers. **It is a property of the signature, not of FAST.**
+//
+// ON A BIT-PLANE FRAME THE DETECTOR COLLAPSES TO BOOLEAN ALGEBRA. Pixels are {0, 1},
+// so `p_ring > p_centre + t` can only hold for `t = 0` with `ring = 1, centre = 0`,
+// and `p_ring < p_centre - t` only for `ring = 0, centre = 1`. There is exactly ONE
+// meaningful threshold, and the whole test becomes
+//
+//     corner = arc9( ring & ~centre )  |  arc9( ~ring & centre )
+//
+// -- sixteen AND-NOTs and an AND-tree, over WHOLE WORDS. **The same instruction that
+// decided one pixel now decides thirty-two**, or two hundred and fifty-six in a vector
+// register, and that is binCV's entire thesis applied to a detector.
+// ===========================================================================
+
+namespace impl {
+
+/// @brief Bits `[w*B + dx, w*B + dx + B)` of a row. **INTERNAL** (X-80).
+/// @note `dx` is a PIXEL offset in `[-(B-1), B-1]`; FAST needs `|dx| <= 3`. Words
+///       outside the row read as zero, which is correct here because every pixel whose
+///       ring reaches outside the image is a border pixel and is masked off anyway.
+template <typename WordType>
+inline WordType fastShiftedWord(const WordType* row, size_t words, size_t w, int dx) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    if (dx == 0) return row[w];
+    if (dx > 0) {
+        const size_t s = static_cast<size_t>(dx);
+        const WordType lo = static_cast<WordType>(row[w] >> s);
+        const WordType hi = (w + 1 < words)
+                                ? static_cast<WordType>(row[w + 1] << (kBits - s))
+                                : static_cast<WordType>(0);
+        return static_cast<WordType>(lo | hi);
+    }
+    const size_t s = static_cast<size_t>(-dx);
+    const WordType lo = static_cast<WordType>(row[w] << s);
+    const WordType hi = (w > 0) ? static_cast<WordType>(row[w - 1] >> (kBits - s))
+                                : static_cast<WordType>(0);
+    return static_cast<WordType>(lo | hi);
+}
+
+/// @brief `OR over all 16 starts of (AND of `arcLength` consecutive)`. **INTERNAL.**
+///
+/// **THE WHOLE TEST IS FOUR PASSES OVER SIXTEEN WORDS AND IT NEEDS NO SECOND ARRAY.**
+/// `v[k] &= v[k + s]` turns "a run of `L` starts at `k`" into "a run of `L + s` starts
+/// at `k`" for any `s <= L`, so doubling 1 -> 2 -> 4 -> 8 and finishing with `s = 1`
+/// reaches nine. Written in place, saving only the `s` entries the wrap-around
+/// consumes — which is what keeps the AVX2 form of this inside sixteen registers.
+/// [X-80](../../../EXPERIMENTS.md) measured a four-array version and it ran at **0.7
+/// operations per cycle**, three times worse than its own operation count.
+///
+/// The schedule is derived from `arcLength` rather than tabulated, so an unusual
+/// `arcLength` is composed exactly rather than getting a rule that belongs to another.
+template <typename WordType>
+inline WordType fastArcAny(const WordType src[16], int arcLength) {
+    WordType v[16];
+    for (int k = 0; k < 16; ++k) v[k] = src[k];
+    int have = 1;
+    while (have < arcLength) {
+        const int step = have < arcLength - have ? have : arcLength - have;
+        WordType save[8];
+        for (int i = 0; i < step; ++i) save[i] = v[i];
+        for (int k = 0; k + step < 16; ++k) v[k] = static_cast<WordType>(v[k] & v[k + step]);
+        for (int k = 16 - step; k < 16; ++k) {
+            v[k] = static_cast<WordType>(v[k] & save[k + step - 16]);
+        }
+        have += step;
+    }
+    WordType any = v[0];
+    for (int k = 1; k < 16; ++k) any = static_cast<WordType>(any | v[k]);
+    return any;
+}
+
+/// @brief The longest run of set bits at ONE pixel, around the cyclic ring.
+///        **INTERNAL** (X-80) -- the Tier 2 score, computed only for detected corners.
+inline int fastLongestRun(unsigned ring, int arcLength) {
+    // The ring doubled end to end, so a run that wraps is a run in the middle. Each
+    // `x &= x >> 1` shortens every run by one, so the number of passes before nothing
+    // survives IS the longest run.
+    //
+    // **BRANCHLESS, AND THAT IS THE POINT.** The obvious `while (x) { x &= x >> 1; }`
+    // is a data-dependent loop with an unpredictable exit, run once per corner --
+    // and on a real binarized frame corners are 2% of pixels, which made SCORING a
+    // third of this operation's time (X-80). The caller only asks about pixels that
+    // already passed the arc test, so the first `arcLength - 1` passes are known to
+    // survive and need no test at all; the remaining ones are counted, not branched on.
+    unsigned x = (ring & 0xFFFFu) | ((ring & 0xFFFFu) << 16);
+    for (int i = 1; i < arcLength; ++i) x &= x >> 1;
+    int len = arcLength;
+    for (int i = arcLength; i < 16; ++i) {
+        x &= x >> 1;
+        len += (x != 0) ? 1 : 0;
+    }
+    return len;
+}
+
+#if defined(BINCV_FAST_RUNTIME_AVX2)
+
+#define BINCV_FASTBIT_FN __attribute__((target("avx2"), always_inline)) inline
+
+/// @brief 256 consecutive pixels of a bit-plane row, starting `dx` pixels along.
+///        **INTERNAL** (X-80).
+///
+/// **A BIT-PLANE ROW IS AN LSB-FIRST BIT STREAM AND THAT IS WHY THIS IS FIVE
+/// INSTRUCTIONS.** `bitMask(x)` is `1 << (x % WordBits)` and the words are
+/// little-endian, so pixel `i` is bit `i % 8` of byte `i / 8` — a flat stream with no
+/// reordering anywhere in it. Displacing by `dx` pixels is therefore a byte offset and
+/// a shift of at most seven.
+///
+/// AVX2 has no 256-bit-wide shift, only per-64-bit-lane ones, so the bits that would
+/// cross a lane boundary are supplied by a **second load one byte along**: within a
+/// lane, `a >> s` and `b << (8 - s)` name the same stream bit wherever both are
+/// defined, and between them they cover the lane.
+BINCV_FASTBIT_FN __m256i fastRing256(const uint8_t* p, int dx) {
+    const int byteOff = dx >= 0 ? 0 : -1;
+    const int s = dx - 8 * byteOff;
+    const __m256i a = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + byteOff));
+    if (s == 0) return a;
+    const __m256i b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + byteOff + 1));
+    return _mm256_or_si256(_mm256_srli_epi64(a, s), _mm256_slli_epi64(b, 8 - s));
+}
+
+/// @brief `OR over all 16 starts of (AND of `arcLength` consecutive)`, for 256 pixels.
+///        **INTERNAL** (X-80). `fastArcAny`'s schedule, in place, for the same reason.
+/// @note **In place is not a tidiness choice, it is the whole difference.** The first
+///       version of this held `r2`, `r4`, `r8` and an accumulator — sixty-four live
+///       `__m256i` against a register file of sixteen — and ran at 0.7 operations per
+///       cycle. Reusing one array of sixteen plus the wrap saves fits.
+/// @brief One doubling step, with the step a COMPILE-TIME constant. **INTERNAL.**
+/// @note **This is a template and not a parameter for a measured reason.** With a
+///       runtime step every index into `v` is variable, so the compiler cannot unroll
+///       and `v` has to live in memory — turning each `vpand` into load-load-and-store.
+///       [X-80](../../../EXPERIMENTS.md) measured that costing **1.6×** on its own.
+template <int Step>
+BINCV_FASTBIT_FN void fastArcStep256(__m256i* v) {
+    __m256i save[static_cast<size_t>(Step)];
+    for (int i = 0; i < Step; ++i) save[i] = v[i];
+    for (int k = 0; k + Step < 16; ++k) v[k] = _mm256_and_si256(v[k], v[k + Step]);
+    for (int k = 16 - Step; k < 16; ++k) {
+        v[k] = _mm256_and_si256(v[k], save[k + Step - 16]);
+    }
+}
+
+BINCV_FASTBIT_FN __m256i fastArcAny256(__m256i* v, int arcLength) {
+    // NINE IS `cv::FAST`'s DEFAULT AND ORB'S, so it gets the constant schedule
+    // 1 -> 2 -> 4 -> 8, and then the LAST step is folded into the reduction: once
+    // `v[k]` is a run of eight, `v[k] & v[k+1]` is a run of nine, and it is wanted only
+    // to be ORed. Writing it back to `v` first is sixteen stores per chunk for nothing.
+    if (arcLength == 9) {
+        fastArcStep256<1>(v);
+        fastArcStep256<2>(v);
+        fastArcStep256<4>(v);
+        // Two accumulators, so the sixteen ORs are two chains of eight and not one of
+        // sixteen at the end of every chunk.
+        __m256i a0 = _mm256_and_si256(v[0], v[1]);
+        __m256i a1 = _mm256_and_si256(v[1], v[2]);
+        for (int k = 2; k < 16; k += 2) {
+            a0 = _mm256_or_si256(a0, _mm256_and_si256(v[k], v[(k + 1) & 15]));
+            a1 = _mm256_or_si256(a1, _mm256_and_si256(v[k + 1], v[(k + 2) & 15]));
+        }
+        return _mm256_or_si256(a0, a1);
+    }
+    if (arcLength == 12) {
+        fastArcStep256<1>(v);
+        fastArcStep256<2>(v);
+        fastArcStep256<4>(v);
+        fastArcStep256<4>(v);
+    } else {
+        int have = 1;
+        while (have < arcLength) {
+            const int step = have < arcLength - have ? have : arcLength - have;
+            __m256i save[8];
+            for (int i = 0; i < step; ++i) save[i] = v[i];
+            for (int k = 0; k + step < 16; ++k) v[k] = _mm256_and_si256(v[k], v[k + step]);
+            for (int k = 16 - step; k < 16; ++k) {
+                v[k] = _mm256_and_si256(v[k], save[k + step - 16]);
+            }
+            have += step;
+        }
+    }
+    __m256i any = v[0];
+    for (int k = 1; k < 16; ++k) any = _mm256_or_si256(any, v[k]);
+    return any;
+}
+
+/// @brief Corner mask for 256 consecutive pixels, as eight `uint32_t`.
+///        **INTERNAL, and the one function carrying `target`** (X-80).
+///
+/// **THIS IS WHERE THE THESIS PAYS.** The scalar word form of this loop does the same
+/// sixteen AND-NOTs and the same AND-tree — and a `uint32_t` holds thirty-two pixels,
+/// which is exactly what an AVX2 register of BYTES holds. **So the bit packing buys
+/// nothing until the boolean algebra itself moves into a vector register**, where one
+/// `vpand` decides two hundred and fifty-six pixels instead of thirty-two.
+/// [X-80](../../../EXPERIMENTS.md) measured both, and the scalar word form loses to the
+/// byte kernel it was meant to beat.
+///
+/// @param ringOut The sixteen ring words, kept rather than recomputed. Scoring needs
+///        them for the ~1% of pixels that are corners, and rebuilding them scalar for
+///        every word that held one cost **as much as the detection itself** (measured).
+__attribute__((target("avx2"))) inline void fastBitMask256(const uint8_t* const* ringRow,
+                                                           const uint8_t* centreRow,
+                                                           size_t chunkByte, int arcLength,
+                                                           uint32_t* out,
+                                                           uint32_t* diffOut) {
+    const __m256i centre =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(centreRow + chunkByte));
+    __m256i v[16];
+    for (int k = 0; k < 16; ++k) {
+        v[k] = _mm256_xor_si256(
+            centre, fastRing256(ringRow[kFastRingY[k] + 3] + chunkByte, kFastRingX[k]));
+        // Kept for scoring, which needs the ring for the ~1% of pixels that are
+        // corners. Rebuilding them scalar for every word that held one cost as much as
+        // the whole detection (X-80), and about a fifth of words hold one.
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(diffOut + k * 8), v[k]);
+    }
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(out), fastArcAny256(v, arcLength));
+}
+
+/// @brief Is AVX2 present? Asked once. (`hasFastAvx2` above serves the byte path.)
+inline bool hasFastBitAvx2() {
+    static const bool kYes = __builtin_cpu_supports("avx2");
+    return kYes;
+}
+
+#endif  // BINCV_FAST_RUNTIME_AVX2
+
+#if defined(BINCV_FAST_NEON)
+
+#define BINCV_FASTBIT_NEON __attribute__((always_inline)) inline
+
+/// @brief 128 consecutive pixels of a bit-plane row, `Dx` pixels along. **INTERNAL.**
+/// @note The AVX2 identity unchanged: a bit-plane row is an LSB-first bit stream, so a
+///       pixel displacement is a byte offset and a shift of at most seven, and the bits
+///       that would cross a 64-bit lane are supplied by a second load one byte along.
+/// @note `Dx` is a TEMPLATE parameter because `vshrq_n_u64` takes an immediate. The
+///       ring is a compile-time constant, so nothing is lost by saying so.
+template <int Dx>
+BINCV_FASTBIT_NEON uint8x16_t fastRingNeon(const uint8_t* p) {
+    constexpr int kByteOff = Dx >= 0 ? 0 : -1;
+    constexpr int kShift = Dx - 8 * kByteOff;
+    const uint8x16_t a = vld1q_u8(p + kByteOff);
+    if constexpr (kShift == 0) {
+        return a;
+    } else {
+        const uint8x16_t b = vld1q_u8(p + kByteOff + 1);
+        return vorrq_u8(
+            vreinterpretq_u8_u64(vshrq_n_u64(vreinterpretq_u64_u8(a), kShift)),
+            vreinterpretq_u8_u64(vshlq_n_u64(vreinterpretq_u64_u8(b), 8 - kShift)));
+    }
+}
+
+/// @brief One doubling step of the arc test, the step a compile-time constant.
+template <int Step>
+BINCV_FASTBIT_NEON void fastArcStepNeon(uint8x16_t* v) {
+    uint8x16_t save[static_cast<size_t>(Step)];
+    for (int i = 0; i < Step; ++i) save[i] = v[i];
+    for (int k = 0; k + Step < 16; ++k) v[k] = vandq_u8(v[k], v[k + Step]);
+    for (int k = 16 - Step; k < 16; ++k) v[k] = vandq_u8(v[k], save[k + Step - 16]);
+}
+
+BINCV_FASTBIT_NEON uint8x16_t fastArcAnyNeon(uint8x16_t* v, int arcLength) {
+    // aarch64 has THIRTY-TWO vector registers, so the sixteen the tree needs fit with
+    // room to spare -- the spilling that dominated the first AVX2 version (X-80) does
+    // not arise here at all.
+    if (arcLength == 9) {
+        fastArcStepNeon<1>(v);
+        fastArcStepNeon<2>(v);
+        fastArcStepNeon<4>(v);
+        uint8x16_t a0 = vandq_u8(v[0], v[1]);
+        uint8x16_t a1 = vandq_u8(v[1], v[2]);
+        for (int k = 2; k < 16; k += 2) {
+            a0 = vorrq_u8(a0, vandq_u8(v[k], v[(k + 1) & 15]));
+            a1 = vorrq_u8(a1, vandq_u8(v[k + 1], v[(k + 2) & 15]));
+        }
+        return vorrq_u8(a0, a1);
+    }
+    int have = 1;
+    while (have < arcLength) {
+        const int step = have < arcLength - have ? have : arcLength - have;
+        uint8x16_t save[8];
+        for (int i = 0; i < step; ++i) save[i] = v[i];
+        for (int k = 0; k + step < 16; ++k) v[k] = vandq_u8(v[k], v[k + step]);
+        for (int k = 16 - step; k < 16; ++k) v[k] = vandq_u8(v[k], save[k + step - 16]);
+        have += step;
+    }
+    uint8x16_t any = v[0];
+    for (int k = 1; k < 16; ++k) any = vorrq_u8(any, v[k]);
+    return any;
+}
+
+/// @brief The sixteen ring reads, unrolled so every displacement is an immediate.
+template <int K>
+BINCV_FASTBIT_NEON void fastRingLoadNeon(const uint8_t* const* ringRow, size_t chunkByte,
+                                         uint8x16_t centre, uint8x16_t* v, uint8_t* diffOut) {
+    if constexpr (K < 16) {
+        v[K] = veorq_u8(centre, fastRingNeon<kFastRingX[K]>(
+                                    ringRow[kFastRingY[K] + 3] + chunkByte));
+        vst1q_u8(diffOut + K * 16, v[K]);
+        fastRingLoadNeon<K + 1>(ringRow, chunkByte, centre, v, diffOut);
+    } else {
+        (void)ringRow; (void)chunkByte; (void)centre; (void)v; (void)diffOut;
+    }
+}
+
+/// @brief Corner mask for 128 consecutive pixels. **INTERNAL** (X-80).
+/// @note NEON is baseline on aarch64, so unlike the AVX2 form there is nothing to
+///       dispatch on.
+inline void fastBitMask128(const uint8_t* const* ringRow, const uint8_t* centreRow,
+                           size_t chunkByte, int arcLength, uint8_t* out, uint8_t* diffOut) {
+    const uint8x16_t centre = vld1q_u8(centreRow + chunkByte);
+    uint8x16_t v[16];
+    fastRingLoadNeon<0>(ringRow, chunkByte, centre, v, diffOut);
+    vst1q_u8(out, fastArcAnyNeon(v, arcLength));
+}
+
+#endif  // BINCV_FAST_NEON
+
+}  // namespace impl
+
+/// @brief Detects FAST corners on a **bit-plane frame**. **API TIER 2** — see below.
+///
+/// **THE DETECTION IS `cv::FAST`'s, EXACTLY, ON THE SAME CONTENT.** For a binary image
+/// stored as `CV_8U` in `{0, 255}`, `cv::FAST` at any threshold in `[1, 254]` accepts
+/// precisely the corners this accepts: `255 > 0 + t` for every such `t`, and
+/// `0 < 255 - t` likewise, so the brighter arc requires a zero centre and the darker
+/// arc a set one. That equivalence is what `tests/test_fast.cpp` checks, corner for
+/// corner and in order.
+///
+/// **THE SCORE IS NOT `cv::FAST`'s, WHICH IS WHY THIS IS TIER 2** — the same reason the
+/// wide-image overload is. On binary content OpenCV's "largest surviving threshold"
+/// score is the SAME NUMBER for every corner and orders nothing, so this reports the
+/// **longest qualifying arc**, 9 to 16, which at least distinguishes a sharp corner
+/// from a marginal one. A caller doing non-maximum suppression over these will keep
+/// different points than one doing it over OpenCV's.
+///
+/// @param img The frame, one bit per pixel.
+/// @param out,capacity Caller-provided; **no allocation happens here**.
+/// @param truncated Set when more corners were found than `capacity` held.
+/// @param arcLength Contiguous ring pixels required; 9 is `cv::FAST`'s default.
+///
+/// @note There is **no threshold parameter and that is not an omission**. A one-bit
+///       alphabet admits exactly one, and offering a knob with one legal value would
+///       be worse than not offering it.
+/// @note Pixels within 3 of a border are never candidates, matching the wide-image
+///       overload and `cv::FAST`.
+template <typename WordType>
+inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
+                         size_t capacity, bool* truncated = nullptr, int arcLength = 9) {
+    BINCV_ASSERT(arcLength >= 1 && arcLength <= 16,
+                 "detectFast: arcLength must be within the ring");
+    if (truncated != nullptr) *truncated = false;
+    if (capacity == 0) return 0;
+    BINCV_ASSERT(out != nullptr, "detectFast: null argument");
+    const size_t width = img.width, height = img.height;
+    if (width < 7 || height < 7) return 0;
+
+    constexpr size_t kBits = impl::bitsPerWord<WordType>();
+    const size_t words = impl::minRowWords<WordType>(width);
+    size_t n = 0;
+
+    // The sixteen `ring XOR centre` words for ONE output word. Named once because the
+    // scalar path, the vector path's scoring and the border fallback all need it.
+    const auto wordDiff = [&](const WordType* const* ringRow, WordType centre, size_t w,
+                              WordType* diff) {
+        for (int k = 0; k < 16; ++k) {
+            const WordType r = impl::fastShiftedWord<WordType>(
+                ringRow[impl::kFastRingY[k] + 3], words, w, impl::kFastRingX[k]);
+            diff[k] = static_cast<WordType>(r ^ centre);
+        }
+    };
+
+    bool overflow = false;
+    const auto emit = [&](const WordType* diff, size_t x0, size_t y, WordType mask) {
+        // The border columns, removed from the WORD rather than tested per pixel.
+        for (size_t b = 0; b < kBits; ++b) {
+            const size_t x = x0 + b;
+            if (x >= 3 && x + 3 < width) continue;
+            mask = static_cast<WordType>(mask & ~(static_cast<WordType>(1) << b));
+        }
+        while (mask != 0) {
+            const size_t b =
+                static_cast<size_t>(__builtin_ctzll(static_cast<unsigned long long>(mask)));
+            mask = static_cast<WordType>(mask & (mask - 1));
+            if (n >= capacity) {
+                overflow = true;
+                return;
+            }
+            unsigned ring = 0;
+            for (int k = 0; k < 16; ++k) {
+                ring |= static_cast<unsigned>((diff[k] >> b) & 1u) << k;
+            }
+            out[n].x = static_cast<int>(x0 + b);
+            out[n].y = static_cast<int>(y);
+            out[n].score = impl::fastLongestRun(ring, arcLength);
+            ++n;
+        }
+    };
+
+    for (size_t y = 3; y + 3 < height && !overflow; ++y) {
+        const WordType* centreRow = img.row(y);
+        const WordType* ringRow[7];
+        for (int d = -3; d <= 3; ++d) {
+            ringRow[d + 3] = img.row(static_cast<size_t>(static_cast<long long>(y) + d));
+        }
+        size_t w = 0;
+#if defined(BINCV_FAST_RUNTIME_AVX2) || defined(BINCV_FAST_NEON)
+        // WHY THE FIRST AND LAST ROWS OF THE SWEEP DECLINE THE VECTOR PATH: a bit-plane
+        // row's stride carries NO padding (752 px is exactly 96 bytes), and the ring
+        // read touches one byte either side of its window. On `y == 3` the top ring row
+        // is row 0 and the read before it is outside the allocation; on the last row the
+        // read after it is. Two rows of ~474 take the scalar path, which is correct and
+        // costs nothing measurable -- declining is cheaper than proving the padding.
+        //
+        // THE CHUNK IS THE VECTOR WIDTH IN PIXELS: 256 on AVX2, 128 on NEON. That
+        // number IS the result -- a `uint32_t` holds 32 pixels, which is exactly what a
+        // vector register of BYTES holds, so the bit packing buys nothing until the
+        // boolean algebra moves into a vector register (X-80).
+#if defined(BINCV_FAST_RUNTIME_AVX2)
+        constexpr size_t kChunkBytes = 32;
+        const bool vectorReady = impl::hasFastBitAvx2();
+#else
+        constexpr size_t kChunkBytes = 16;
+        const bool vectorReady = true;
+#endif
+        constexpr size_t kChunkWords = kChunkBytes / sizeof(WordType);
+        if (vectorReady && kChunkWords >= 1 && y >= 4 && y + 4 < height) {
+            const uint8_t* ringBytes[7];
+            for (int d = 0; d < 7; ++d) {
+                ringBytes[d] = reinterpret_cast<const uint8_t*>(ringRow[d]);
+            }
+            const uint8_t* centreBytes = reinterpret_cast<const uint8_t*>(centreRow);
+            alignas(32) uint8_t maskBuf[kChunkBytes];
+            alignas(32) uint8_t diffBuf[16 * kChunkBytes];
+            for (; w + kChunkWords <= words; w += kChunkWords) {
+#if defined(BINCV_FAST_RUNTIME_AVX2)
+                impl::fastBitMask256(ringBytes, centreBytes, w * sizeof(WordType), arcLength,
+                                     reinterpret_cast<uint32_t*>(maskBuf),
+                                     reinterpret_cast<uint32_t*>(diffBuf));
+#else
+                impl::fastBitMask128(ringBytes, centreBytes, w * sizeof(WordType), arcLength,
+                                     maskBuf, diffBuf);
+#endif
+                const WordType* chunk = reinterpret_cast<const WordType*>(maskBuf);
+                for (size_t j = 0; j < kChunkWords && !overflow; ++j) {
+                    if (chunk[j] == 0) continue;
+                    WordType diff[16];
+                    for (int k = 0; k < 16; ++k) {
+                        diff[k] = reinterpret_cast<const WordType*>(
+                            diffBuf + static_cast<size_t>(k) * kChunkBytes)[j];
+                    }
+                    emit(diff, (w + j) * kBits, y, chunk[j]);
+                }
+                if (overflow) break;
+            }
+        }
+#endif
+        for (; w < words && !overflow; ++w) {
+            WordType diff[16];
+            wordDiff(ringRow, centreRow[w], w, diff);
+            const WordType mask = impl::fastArcAny<WordType>(diff, arcLength);
+            if (mask == 0) continue;
+            emit(diff, w * kBits, y, mask);
+        }
+    }
+    if (overflow && truncated != nullptr) *truncated = true;
     return n;
 }
 
