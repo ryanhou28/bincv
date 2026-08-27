@@ -631,18 +631,34 @@ BINCV_FASTBIT_FN __m256i fastArcAny256(__m256i* v, int arcLength) {
 /// detector wanted anyway.
 ///
 /// @param first,last Inclusive range of `L` to produce, written to `out[L - 9]`.
-BINCV_FASTBIT_FN void fastArcMasks256(const __m256i* v, int first, int last, uint32_t* out) {
-    for (int L = first; L <= last; ++L) {
-        const int off = L - 8;
-        __m256i a0 = _mm256_and_si256(v[0], v[off & 15]);
-        __m256i a1 = _mm256_and_si256(v[1], v[(1 + off) & 15]);
-        for (int k = 2; k < 16; k += 2) {
-            a0 = _mm256_or_si256(a0, _mm256_and_si256(v[k], v[(k + off) & 15]));
-            a1 = _mm256_or_si256(a1, _mm256_and_si256(v[k + 1], v[(k + 1 + off) & 15]));
-        }
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(out + (L - 9) * 8),
-                            _mm256_or_si256(a0, a1));
+template <int L>
+BINCV_FASTBIT_FN void fastArcMask256(const __m256i* v, uint32_t* out) {
+    constexpr int kOff = L - 8;
+    __m256i a0 = _mm256_and_si256(v[0], v[kOff & 15]);
+    __m256i a1 = _mm256_and_si256(v[1], v[(1 + kOff) & 15]);
+    for (int k = 2; k < 16; k += 2) {
+        a0 = _mm256_or_si256(a0, _mm256_and_si256(v[k], v[(k + kOff) & 15]));
+        a1 = _mm256_or_si256(a1, _mm256_and_si256(v[k + 1], v[(k + 1 + kOff) & 15]));
     }
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(out + (L - 9) * 8),
+                        _mm256_or_si256(a0, a1));
+}
+
+/// @brief The seven masks `L = 10..16`. **INTERNAL** (X-81).
+/// @note **Unrolled with `L` a template parameter, and X-81 measured why.** Written as a
+///       loop over a runtime `L`, the index `v[(k + L - 8) & 15]` is variable — so `v`
+///       cannot stay in registers and the whole array goes to memory. On x86 that is
+///       nearly free because sixteen `__m256i` were spilling anyway; **on aarch64,
+///       where they FIT in the thirty-two registers, it cost 2.36× → 1.98× on the
+///       reference device.** The same mistake `fastArcStep256` was already fixed for.
+BINCV_FASTBIT_FN void fastArcMasksRest256(const __m256i* v, uint32_t* out) {
+    fastArcMask256<10>(v, out);
+    fastArcMask256<11>(v, out);
+    fastArcMask256<12>(v, out);
+    fastArcMask256<13>(v, out);
+    fastArcMask256<14>(v, out);
+    fastArcMask256<15>(v, out);
+    fastArcMask256<16>(v, out);
 }
 
 /// @brief One 256-pixel chunk: the corner mask, and the score inputs. **INTERNAL,
@@ -685,11 +701,11 @@ __attribute__((target("avx2"))) inline bool fastBitChunk256(const uint8_t* const
     fastArcStep256<1>(v);
     fastArcStep256<2>(v);
     fastArcStep256<4>(v);
-    fastArcMasks256(v, 9, 9, masks);
+    fastArcMask256<9>(v, masks);
     int corners = 0;
     for (int i = 0; i < 8; ++i) corners += __builtin_popcount(masks[i]);
     if (corners < maskThreshold) return false;
-    fastArcMasks256(v, 10, 16, masks);
+    fastArcMasksRest256(v, masks);
     return true;
 }
 
@@ -779,48 +795,30 @@ BINCV_FASTBIT_NEON void fastRingLoadNeon(const uint8_t* const* ringRow, size_t c
     }
 }
 
-/// @brief The arc-length masks `L = first..last`, for 128 pixels. **INTERNAL** (X-81).
-BINCV_FASTBIT_NEON void fastArcMasksNeon(const uint8x16_t* v, int first, int last,
-                                         uint8_t* out) {
-    for (int L = first; L <= last; ++L) {
-        const int off = L - 8;
-        uint8x16_t a0 = vandq_u8(v[0], v[off & 15]);
-        uint8x16_t a1 = vandq_u8(v[1], v[(1 + off) & 15]);
-        for (int k = 2; k < 16; k += 2) {
-            a0 = vorrq_u8(a0, vandq_u8(v[k], v[(k + off) & 15]));
-            a1 = vorrq_u8(a1, vandq_u8(v[k + 1], v[(k + 1 + off) & 15]));
-        }
-        vst1q_u8(out + (L - 9) * 16, vorrq_u8(a0, a1));
-    }
-}
-
-/// @brief One 128-pixel chunk: the corner mask, and the score inputs. **INTERNAL.**
-/// @return True when `masks[1..7]` were filled -- see `fastScoreMaskThreshold`. The
-///         crossover is the same arithmetic here, at half the chunk width.
+/// @brief Corner mask for 128 consecutive pixels. **INTERNAL** (X-80).
+///
+/// **NO ADAPTIVE SCORING HERE, AND [X-81](../../../EXPERIMENTS.md) MEASURED WHY.** The
+/// AVX2 path chooses per chunk between transposing each corner's ring and reading the
+/// score off eight nested arc-length masks, and that choice is worth **1.39× → 1.71×**
+/// there. Ported to NEON it made the reference device **SLOWER — 2.36× → 2.10×** — and
+/// the sweep showed the loss even at a threshold that never takes the mask path, so it
+/// is the RESTRUCTURING and not the masks.
+///
+/// The reason is that the mask form must keep all sixteen `v` vectors live across up to
+/// eight passes, where this fold **consumes them in place** and they are dead after.
+/// x86 was spilling those sixteen anyway; aarch64's thirty-two registers were holding
+/// them, and that is exactly what X-80's 2.36× was made of.
+///
+/// **A cross-architecture win is not a win. Both were measured, and the two backends
+/// keep different code because the measurement said to.**
 /// @note NEON is baseline on aarch64, so unlike the AVX2 form there is nothing to
-///       dispatch on -- and with THIRTY-TWO vector registers the sixteen the tree needs
-///       fit without spilling, which is why X-80 measured 2.36× here against 1.39× on
-///       x86.
-inline bool fastBitChunk128(const uint8_t* const* ringRow, const uint8_t* centreRow,
-                            size_t chunkByte, int arcLength, int maskThreshold,
-                            uint8_t* masks, uint8_t* diffOut) {
+///       dispatch on.
+inline void fastBitMask128(const uint8_t* const* ringRow, const uint8_t* centreRow,
+                           size_t chunkByte, int arcLength, uint8_t* out, uint8_t* diffOut) {
     const uint8x16_t centre = vld1q_u8(centreRow + chunkByte);
     uint8x16_t v[16];
     fastRingLoadNeon<0>(ringRow, chunkByte, centre, v, diffOut);
-    if (arcLength != 9) {
-        vst1q_u8(masks, fastArcAnyNeon(v, arcLength));
-        return false;
-    }
-    fastArcStepNeon<1>(v);
-    fastArcStepNeon<2>(v);
-    fastArcStepNeon<4>(v);
-    fastArcMasksNeon(v, 9, 9, masks);
-    // Population of the corner mask, from the bytes just written.
-    int corners = 0;
-    for (int i = 0; i < 16; ++i) corners += __builtin_popcount(masks[i]);
-    if (corners < maskThreshold) return false;
-    fastArcMasksNeon(v, 10, 16, masks);
-    return true;
+    vst1q_u8(out, fastArcAnyNeon(v, arcLength));
 }
 
 #endif  // BINCV_FAST_NEON
@@ -997,9 +995,9 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
                     reinterpret_cast<uint32_t*>(maskBuf),
                     reinterpret_cast<uint32_t*>(diffBuf));
 #else
-                const bool scored = impl::fastBitChunk128(
-                    ringBytes, centreBytes, w * sizeof(WordType), arcLength,
-                    impl::fastScoreMaskThreshold(), maskBuf, diffBuf);
+                impl::fastBitMask128(ringBytes, centreBytes, w * sizeof(WordType), arcLength,
+                                     maskBuf, diffBuf);
+                constexpr bool scored = false;   // X-81: measured a LOSS on NEON
 #endif
                 const WordType* chunk = reinterpret_cast<const WordType*>(maskBuf);
                 for (size_t j = 0; j < kChunkWords && !overflow; ++j) {

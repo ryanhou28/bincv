@@ -4106,8 +4106,9 @@ for corner and in scan order, **1.21–1.39× on x86, 2.36× on the reference de
 input memory, AVX2 and NEON. Both entry points remain — a caller holding bytes should not have to pack them.
 
 **[E-44](ARCHITECTURE.md#9-open-questions-and-planned-experiments) closed by X-81:**
-the score's two spellings **cross at ~1% corner density**, so the shipped path chooses
-**per chunk**. Frontend frame **1.39× → 1.58×**; identical output across all three arms.
+the score's two spellings **cross at ~1% corner density**, so the AVX2 path chooses
+**per chunk** — never worse, up to **1.42×** better. **Not on NEON**, where the same
+change cost the device 2.36× → 2.10×. Identical output across all three arms.
 
 **Still open as [E-45](ARCHITECTURE.md#9-open-questions-and-planned-experiments):**
 the LK keypoint batch (T5.16) is **x86 only** — aarch64 got nothing from it.

@@ -31,6 +31,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "bincv-cpp/binMat.hpp"
@@ -99,6 +100,35 @@ void runOne(const cv::Mat& gray, const char* label) {
     std::printf("    %-26s %9.1f us   %5.2fx   %9zu B   (%.1fx smaller input)\n",
                 "(c) binCV BIT-PLANE", bitMin, cvMin / bitMin, planeBytes,
                 static_cast<double>(byteBytes) / static_cast<double>(planeBytes));
+
+    // X-81: WHERE THE TWO SCORING ARMS CROSS, MEASURED PER ARCHITECTURE RATHER THAN
+    // DERIVED ONCE. The arithmetic says ~2.8 corners per chunk on both -- but a chunk
+    // is 256 pixels on AVX2 and 128 on NEON, and a Cortex-A72 has two vector pipes
+    // against a modern x86 core's four-plus, so the same operation count is not the
+    // same time. The first NEON threshold was taken from the x86 arithmetic and cost
+    // the reference device 2.36x -> 2.12x. This sweep is why it is no longer guessed.
+    const int savedThreshold = bincv::impl::fastScoreMaskThreshold();
+    std::printf("    scoring-arm crossover sweep (corners per chunk before the arc masks"
+                " are used):\n");
+    for (int th : {0, 2, 3, 4, 6, 8, 12, 1 << 30}) {
+        bincv::impl::fastScoreMaskThreshold() = th;
+        std::vector<double> ts;
+        for (int r = 0; r < kRounds; ++r) {
+            auto t = Clock::now();
+            for (int i = 0; i < kReps; ++i) {
+                nBit = bincv::detectFast(plane.constView(), corners.data(), corners.size(),
+                                         &truncated);
+            }
+            ts.push_back(std::chrono::duration<double, std::micro>(Clock::now() - t).count() /
+                         kReps);
+        }
+        const double m = minOf(ts);
+        const std::string tag = th == 0 ? "0 (always)"
+                                        : (th > 1000 ? "never" : std::to_string(th));
+        std::printf("      threshold %-10s %9.1f us   %5.2fx vs cv::FAST\n", tag.c_str(), m,
+                    cvMin / m);
+    }
+    bincv::impl::fastScoreMaskThreshold() = savedThreshold;
 }
 
 /// The committed binarized frame, so this runs on the reference device with no dataset

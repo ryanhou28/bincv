@@ -11469,45 +11469,71 @@ transpose**, and `L = 9` is the corner mask the detector wanted anyway.
 #### THE MEASUREMENT, AND IT DOES NOT PICK A WINNER
 
 Density swept by moving the binarisation level; one thread, ten interleaved rounds,
-minimum:
+minimum, quiet machine:
 
-| corners | density | **A** per-corner transpose | **B** arc masks | **ADAPTIVE** | scores differ |
-|---|---|---|---|---|---|
-| 246 | 0.07% | **59.1 µs** | 86.0 | 59.5 | 0 |
-| 745 | 0.21% | **70.6** | 94.9 | 70.8 | 0 |
-| 2 860 | 0.79% | 112.0 | 124.8 | **107.3** | 0 |
-| 9 163 | 2.54% | 196.7 | 168.0 | **152.7** | 0 |
-| 13 809 | 3.83% | 257.5 | 198.7 | **186.8** | 0 |
+| corners | density | **A** per-corner transpose | **B** arc masks | **ADAPTIVE** | vs A | scores differ |
+|---|---|---|---|---|---|---|
+| 246 | 0.07% | **56.9 µs** | 75.7 | 56.8 | 1.00× | 0 |
+| 745 | 0.21% | **68.0** | 83.8 | 67.1 | 1.01× | 0 |
+| 2 860 | 0.79% | 109.8 | 112.8 | **101.2** | **1.08×** | 0 |
+| 9 163 | 2.54% | 195.3 | 157.2 | **147.9** | **1.32×** | 0 |
+| 13 809 | 3.83% | 257.1 | 188.7 | **180.4** | **1.42×** | 0 |
 
-> **THE TWO ARMS CROSS AT ABOUT 1% CORNER DENSITY AND EACH LOSES BY UP TO 1.5× ON THE
+> **THE TWO ARMS CROSS AT ABOUT 1% CORNER DENSITY AND EACH LOSES BY UP TO 1.4× ON THE
 > WRONG SIDE OF IT.** B's seven extra mask passes are ~217 vector operations per chunk
 > **whatever the density**; A's transpose is ~78 scalar operations **per corner**. A
 > library that picked one would be 1.4× slow on half its inputs.
 
 **E-44'S REGISTERED PREDICTION WAS "wins only above roughly 3% corner density"; measured,
-the crossover is nearer 1%.** The shape was right and the number was pessimistic — the
-prediction is recorded here as it was written, not adjusted.
+the crossover is nearer 1%.** The shape was right and the number pessimistic — the
+prediction is recorded as written, not adjusted.
 
-#### SO THE CHOICE IS PER CHUNK, AND THAT BEATS BOTH FIXED ARMS EVERYWHERE
+So the choice is **per chunk**: `L = 9` is computed first, its population counted, and
+the other seven masks produced only if the chunk holds at least three corners. **Never
+worse than the better fixed arm, and up to 1.42× better than the shipped X-80 path.**
 
-`L = 9` is computed first, its population counted, and the remaining seven masks
-produced only if the chunk holds at least **three** corners — where the arithmetic says
-the crossover is, and where the sweep agrees. **Corner density varies WITHIN an image**,
-so this is not merely picking the better arm per image: at 2.54% the adaptive path is
-**1.10× faster than the better fixed arm**, because it spends the masks only on the
-chunks that pay for them.
+#### AND IT IS CLUSTERING, NOT DENSITY, THAT DECIDES HOW MUCH IT IS WORTH
 
-**Headline, same benchmark as X-80:** the frontend's own binarised frame **1.39× →
-1.58×** against `cv::FAST`; the sparser thresholded frame unchanged at **1.21×**, which
-is correct — it takes the transpose path.
+On the frontend's own `realframe.bin` — an **edge map**, 1.86% corners — the adaptive
+path is worth only **~3%**, against 1.32× on thresholded grayscale at a similar overall
+density. **Corners on an edge map are concentrated on the edges**, so most chunks sit
+below the threshold and take the transpose path anyway. Density alone does not predict
+the gain; how corners are spread across chunks does.
 
-**Identical output, checked three ways.** `Fast.BitPlaneScoringArmsAgree` forces
-transpose-always and masks-always and compares both against the shipped adaptive path
-over 2 100 corners: **0 differ in position, 0 in score.** The threshold is settable for
-exactly that reason; a shipped build never touches it.
+#### THE NEON PORT WAS A REGRESSION AND IT IS NOT SHIPPED
 
-**Method:** `fastBitChunk256` / `fastBitChunk128` (AVX2 and NEON both adaptive),
-`Fast.BitPlaneScoringArmsAgree`, the density sweep above. Quiet machine, load < 0.5.
+Ported to NEON the same change made the reference device **SLOWER: 2.36× → 2.10×**. The
+threshold sweep is what settled it — the loss showed up **even at a threshold that never
+takes the mask path**, so it was the restructuring and not the masks:
+
+| device, `realframe.bin` | X-80 | X-81 ported | X-81 with NEON reverted |
+|---|---|---|---|
+| bit-plane | **870.1 µs (2.36×)** | 978.8 (2.10×) | **863.8 (2.37×)** |
+
+**THE CAUSE IS THE REGISTER FILE, WHICH IS ALSO WHAT MADE X-80 GOOD ON THIS DEVICE.**
+The mask form must keep all sixteen `v` vectors **live across up to eight passes**; the
+X-80 fold **consumes them in place** and they are dead after. x86 was spilling those
+sixteen anyway, so it lost nothing; aarch64's thirty-two registers were holding them,
+and that is exactly what X-80's 2.36× was made of.
+
+**A wrong turn on the way, recorded because it cost a device round trip:** the first
+diagnosis was the corner-population count, sixteen `__builtin_popcount` calls per chunk
+on a machine [D-6](ARCHITECTURE.md#8-design-decisions) says **has no scalar popcount**.
+Replacing them with `cnt`/`addv` was correct and changed nothing measurable (978.8 →
+971.3, inside noise). **The plausible cause was not the cause**, and the sweep — not the
+reasoning — is what found the real one.
+
+> **SO THE TWO BACKENDS KEEP DIFFERENT CODE, BECAUSE THE MEASUREMENT SAID TO.** A change
+> that helps one architecture is not thereby an improvement, and this one would have
+> shipped as a 10% device regression on the strength of an x86 number.
+
+**Final: x86 up to 1.42× over X-80's path and never worse; the reference device
+unchanged at 2.37×.**
+
+**Method:** `fastBitChunk256` (AVX2, adaptive) and `fastBitMask128` (NEON, X-80's fold,
+unchanged); `Fast.BitPlaneScoringArmsAgree`; the density sweep above and the threshold
+sweep now built into `fast_bitplane_benchmark`, which is how the NEON regression was
+located. Quiet machine, load < 0.2; device pinned, performance governor, not throttled.
 
 ---
 
