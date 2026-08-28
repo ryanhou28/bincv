@@ -3819,7 +3819,13 @@ branchless scalar arm at **10.3× on x86 and 5.18× on aarch64** with no intrins
 all — that arm is what a target with no vector unit gets, and it did most of the work
 on both.
 
-### T5.8 · binCV ships the sensor stage · `TODO — THE LAST SUBSTANTIVE PHASE 5 ITEM`
+### T5.8 · binCV ships the sensor stage · `DONE` (X-89)
+
+**Shipped:** `frontend_sequence` builds its binary frame with binCV's own `medianWide`
+and `edgeThreshold`, inside its own timing; OpenCV's spelling is now the CONTROL and is
+checked every frame (**bit-exact, 0 pixels differ**). Both kernels vectorised on AVX2 and
+NEON — the sensor stage went **3.743 → 0.081 ms** on x86. End-to-end headline **4.16× on
+x86 and 6.07× on the reference device**, now INCLUDING the preprocessing on both sides.
 
 **The kernels it needs now exist** (T5.10 `medianWide`, T5.11 `edgeThreshold`, both
 bit-exact against the reference). What remains is the WIRING: `frontend_sequence` and

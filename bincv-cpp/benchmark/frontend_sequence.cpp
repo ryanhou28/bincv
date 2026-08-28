@@ -41,6 +41,8 @@
 #include <vector>
 
 #include "bincv-cpp/ops/corner.hpp"
+#include "bincv-cpp/ops/edge.hpp"
+#include "bincv-cpp/ops/medianWide.hpp"
 #include "bincv-cpp/threads/pool.hpp"
 #include "bincv-cpp/ops/derivative.hpp"
 #include "bincv-cpp/ops/opticalFlow.hpp"
@@ -89,6 +91,54 @@ cv::Mat preprocess(const cv::Mat& g, int thr) {
     return referenceEdgeFilter(referenceDenoise(g), thr);
 }
 
+// ---- T5.8: THE SAME TWO STAGES, IN binCV --------------------------------
+//
+// [ARCHITECTURE 7.3](../../ARCHITECTURE.md) puts the edge filter inside the MVP set,
+// and this benchmark used to run BOTH frontends on an OpenCV-preprocessed frame with a
+// comment calling that stage "deliberately NOT binCV's claim". Those disagreed. binCV
+// has had `medianWide` and `edgeThreshold` since T5.10/T5.11 -- bit-exact against the
+// reference, 0 of 1219 and 0 of 3367 pixels differing -- and they were tested but never
+// USED.
+//
+// THE PREPROCESSING IS NOW INSIDE BOTH TIMED PIPELINES, AND THAT IS A CHANGE OF
+// DENOMINATOR RATHER THAN A SPEEDUP. Before this, neither side's total included it:
+// binCV was handed a `CV_8U` binary frame and paid `fromCVMat` to unpack it, and OpenCV
+// was handed the same frame free of charge. Now each side builds its own binary frame
+// from the SAME grayscale input, which is what an end-to-end comparison means -- and it
+// removes `fromCVMat` from binCV's pipeline entirely, because binCV's edge filter writes
+// bit-planes directly.
+//
+// `preprocess` above stays, as the CONTROL: `binaryFramesAgree` checks binCV's output
+// against it pixel for pixel, every frame.
+double gMsMedian = 0.0, gMsEdge = 0.0;   ///< which half of the sensor stage costs what
+
+void bincvPreprocess(const cv::Mat& gray, std::vector<uint8_t>& scratch,
+                     bincv::BinMatView<W> dst, int thr) {
+    const size_t w = static_cast<size_t>(gray.cols), h = static_cast<size_t>(gray.rows);
+    auto t = Clock::now();
+    bincv::medianWide<3, uint8_t>(gray.ptr<uint8_t>(0), w, h, gray.step, scratch.data(), w,
+                                  bincv::kMedianReferenceL);
+    gMsMedian += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
+    t = Clock::now();
+    bincv::edgeThreshold<bincv::EdgeCombine::Or, bincv::EdgeRelation::Ge,
+                         bincv::EdgeSpatial::Wide, uint8_t, W>(
+        scratch.data(), w, h, w, dst, static_cast<uint8_t>(thr));
+    gMsEdge += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
+}
+
+/// binCV's binary frame against OpenCV's, pixel for pixel. Returns the mismatch count.
+size_t binaryFramesAgree(const bincv::BinMat<W>& mine, const cv::Mat& theirs) {
+    size_t bad = 0;
+    for (int y = 0; y < theirs.rows; ++y) {
+        for (int x = 0; x < theirs.cols; ++x) {
+            const unsigned a = mine.at(y, x) ? 1u : 0u;
+            const unsigned b = theirs.at<uint8_t>(y, x) ? 1u : 0u;
+            if (a != b) ++bad;
+        }
+    }
+    return bad;
+}
+
 // ---- binCV's frontend state, ladder 1/2/2/2 (D-23) -----------------------
 struct BincvFrontend {
     static constexpr size_t kLevels = 4;
@@ -98,6 +148,7 @@ struct BincvFrontend {
     bincv::LKLevels<W, 1, 2, 2, 2> levels;
     std::vector<float> ring;  // kResponseRingRows rows, the streaming response
     int w, h;
+    bincv::BinMat<W> hold;   ///< last frame's binary, so it is preprocessed ONCE
 
     BincvFrontend(int width, int height)
         : prev(width, height), next(width, height), dx0(width, height), dy0(width, height),
@@ -105,16 +156,34 @@ struct BincvFrontend {
           dy1(width / 2 + (width & 1), height / 2 + (height & 1)),
           dx2((width + 3) / 4, (height + 3) / 4), dy2((width + 3) / 4, (height + 3) / 4),
           dx3((width + 7) / 8, (height + 7) / 8), dy3((width + 7) / 8, (height + 7) / 8),
-          ring(bincv::kResponseRingRows * static_cast<size_t>(width)), w(width), h(height) {}
+          ring(bincv::kResponseRingRows * static_cast<size_t>(width)), w(width), h(height),
+          hold(width, height) {}
 
-    double msLoad = 0.0;   ///< the CV_8U -> bit-plane conversion. Timed separately
-                           ///< because it is a property of THIS HARNESS's input, not
-                           ///< of binCV's pipeline: a binary-frame frontend receives
-                           ///< bits from its sensor stage and never does this.
-    void loadLevel0(const cv::Mat& binPrev, const cv::Mat& binNext) {
+    double msLoad = 0.0;   ///< T5.8: binCV's OWN sensor stage -- `medianWide` then
+                           ///< `edgeThreshold`, straight from grayscale into bit-planes.
+                           ///< This used to be `fromCVMat` unpacking a CV_8U binary frame
+                           ///< somebody else had produced; binCV produces it now, so the
+                           ///< conversion is gone rather than optimised.
+    std::vector<uint8_t> medianScratch;
+
+    /// Frame 0's binary, so frame 1 has a real `prev`. Untimed: it is setup, and the
+    /// loop below would otherwise lose every track on its first frame and re-detect.
+    void seed(const cv::Mat& gray, int thr) {
+        medianScratch.resize(static_cast<size_t>(gray.cols) * static_cast<size_t>(gray.rows));
+        bincvPreprocess(gray, medianScratch, next.level<0>().plane(0), thr);
+        hold = next.level<0>();
+    }
+
+    /// The new frame becomes `next`; last frame's result becomes `prev`.
+    void loadLevel0(const cv::Mat& gray, int thr, bool haveHold) {
         const auto t = Clock::now();
-        prev.level<0>().fromCVMat(binPrev);
-        next.level<0>().fromCVMat(binNext);
+        if (medianScratch.empty()) {
+            medianScratch.resize(static_cast<size_t>(gray.cols) *
+                                 static_cast<size_t>(gray.rows));
+        }
+        bincvPreprocess(gray, medianScratch, next.level<0>().plane(0), thr);
+        if (haveHold) prev.level<0>() = hold;
+        hold = next.level<0>();
         msLoad += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
     }
     double msPyrDown = 0.0, msDeriv = 0.0;   ///< X-65 put `build` at 52% of the
@@ -177,6 +246,7 @@ struct Stats {
     // over-weighted detection ~33x and sent D-27's target list to the wrong kernel.
     // These timers are taken at the ACTUAL duty cycle.
     double msBuild = 0.0, msDetect = 0.0, msTrack = 0.0;
+    size_t preprocMismatch = 0;   ///< T5.8: binCV's sensor stage vs OpenCV's
     std::vector<int> bincvLifetimes, opencvLifetimes;
 };
 
@@ -278,16 +348,18 @@ int main(int argc, char** argv) {
     std::vector<cv::Point2f> oPts;                    // OpenCV's live tracks
     std::vector<int> oAge;
 
+    // The first frame's binary, for OpenCV's `prev` on frame 1.
     cv::Mat binPrev = preprocess(first, 17);
+    fe.seed(first, 17);   // the same, for binCV
     for (size_t f = 1; f < files.size(); ++f) {
         const cv::Mat gray = cv::imread(files[f].string(), cv::IMREAD_GRAYSCALE);
         if (gray.empty()) continue;
-        const cv::Mat binNext = preprocess(gray, 17);
-
         // ---------------- binCV ----------------
+        // T5.8: binCV builds its own binary frame from the grayscale input, INSIDE its
+        // own timing. OpenCV builds the same frame, inside its own, below.
         auto t0 = Clock::now();
         auto tStage = t0;
-        fe.loadLevel0(binPrev, binNext);
+        fe.loadLevel0(gray, 17, true);
         fe.build();
         st.msBuild += std::chrono::duration<double, std::milli>(Clock::now() - tStage).count();
         tStage = Clock::now();
@@ -317,8 +389,11 @@ int main(int argc, char** argv) {
         st.msTrack += std::chrono::duration<double, std::milli>(Clock::now() - tStage).count();
         st.bincvMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 
-        // ---------------- OpenCV, same binary content as CV_8U ----------------
+        // ---------------- OpenCV, from the SAME grayscale input ----------------
+        // T5.8: OpenCV builds its own binary frame too, inside its own timing. Before
+        // this, both sides were handed one for free and neither total included it.
         t0 = Clock::now();
+        const cv::Mat binNext = preprocess(gray, 17);
         if (oPts.size() < static_cast<size_t>(kMinTracks)) {
             std::vector<cv::Point2f> found;
             cv::goodFeaturesToTrack(binPrev, found, gftt.maxCorners, gftt.qualityLevel,
@@ -392,13 +467,18 @@ int main(int argc, char** argv) {
             age.resize(k);
         };
         st.bTried += bPts.size();
+        // THE CONTROL, outside both timings: OpenCV's spelling of the sensor stage is
+        // what binCV's must reproduce. T5.8 turns `preprocess` from the thing binCV
+        // depends on into the thing binCV is checked against.
+        st.preprocMismatch += binaryFramesAgree(fe.hold, binNext);
+
+        binPrev = binNext;   // OpenCV's `prev` for the next frame
         st.oTried += oPts.size();
         if (!bPts.empty()) compact(bPts, bAge, bOut, bStatus, st.bincvLifetimes, w, h);
         if (!oPts.empty()) compact(oPts, oAge, oOut, oStatus, st.opencvLifetimes, w, h);
         st.bSurvived += bPts.size();
         st.oSurvived += oPts.size();
 
-        binPrev = binNext;
         ++st.frames;
         if (st.frames % 200 == 0) std::printf("  ... %zu frames\n", st.frames);
     }
@@ -465,13 +545,20 @@ int main(int argc, char** argv) {
         std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "build (pyrDown + derivatives)",
                     st.msBuild / f, 100.0 * st.msBuild / tot);
         // E-33 needs to know which half of `build` it is aiming at.
-        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "    ... fromCVMat (harness)",
+        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "    ... sensor stage (T5.8)",
                     fe.msLoad / f, 100.0 * fe.msLoad / tot);
+        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "        ... median",
+                    gMsMedian / f, 100.0 * gMsMedian / tot);
+        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "        ... edge",
+                    gMsEdge / f, 100.0 * gMsEdge / tot);
         std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "    ... pyrDown", fe.msPyrDown / f,
                     100.0 * fe.msPyrDown / tot);
         std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "    ... derivatives",
                     fe.msDeriv / f, 100.0 * fe.msDeriv / tot);
     }
+    std::printf("\n  sensor stage vs OpenCV's: %s (%zu pixels differ over %zu frames)\n",
+                st.preprocMismatch == 0 ? "BIT-EXACT" : "MISMATCH", st.preprocMismatch,
+                st.frames);
     if (lkThreads > 1) {
         std::printf("\n--- T5.1: binCV track stage on %d threads ---\n",
                     bincv::getNumThreads());

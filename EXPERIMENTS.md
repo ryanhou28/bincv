@@ -11942,6 +11942,85 @@ question, not a kernel question.
 
 ---
 
+### X-89 · T5.8: binCV ships the sensor stage, and the denominator changes with it · `DONE — SHIPPED`
+
+**THE BENCHMARK AND [ARCHITECTURE §7.3](ARCHITECTURE.md#73-edge-filter--threshold)
+DISAGREED, AND §7.3 WAS RIGHT.** §7.3 puts the edge filter inside the MVP set;
+`frontend_sequence` ran the reference pipeline's median + gradient-threshold stage **in
+OpenCV for both sides**, with a comment calling it "deliberately NOT binCV's claim".
+binCV has had `medianWide` and `edgeThreshold` since T5.10/T5.11 — **bit-exact against the
+reference, 0 of 1219 and 0 of 3367 pixels differing** — and they were tested but never
+*used*.
+
+**THIS IS A CHANGE OF DENOMINATOR, NOT A SPEEDUP.** Before, *neither* total included the
+sensor stage: binCV was handed a `CV_8U` binary frame and paid `fromCVMat` to unpack it,
+OpenCV was handed the same frame free. Now **each side builds its own binary frame from
+the same grayscale input**, which is what end-to-end means — and `fromCVMat` leaves
+binCV's pipeline entirely, because the edge filter writes bit-planes directly.
+
+**OpenCV's spelling becomes the CONTROL**: `binaryFramesAgree` checks binCV's frame
+against it every frame. **BIT-EXACT, 0 pixels differing over 79 frames**, on both
+architectures.
+
+#### THE FIRST MEASUREMENT WAS THE POINT OF THE TASK
+
+| x86, first run with the stage wired in | |
+|---|---|
+| sensor stage | **3.743 ms/frame — 78.4% of the frontend** |
+| headline | **3.46× → 0.99×** |
+
+The two kernels were written for correctness and never optimised: a per-pixel sorting
+network with three bounds-checked gathers, and an edge predicate re-deriving
+`BORDER_REFLECT_101` for every sample.
+
+#### WHAT THEY BECAME
+
+**`medianWide` at K = 3 is min and max and nothing else** —
+`med3(a,b,c) = max(min(a,b), min(max(a,b), c))`, five register operations for 32 pixels
+on AVX2 or 16 on NEON.
+
+**`edgeThreshold` never forms a byte, even internally.** `|a - b| >= t` on unsigned bytes
+is `subs_epu8(a,b) | subs_epu8(b,a)` for the magnitude and `subs_epu8(t, d) == 0` for the
+comparison — no widening, no sign, no branch — and `movemask_epi8` turns 32 byte masks
+into the 32 bits of an output word **LSB first, which is already binCV's bit order**
+(X-71). aarch64 folds 16 masks with bit weights and pairwise adds, the same substitute.
+
+The tail word is taken by an **overlapping window** anchored at `width - 32` and shifted
+into place — the padding bits shift in as zero, which is the invariant that would
+otherwise need a mask — so only the two border columns per row stay scalar.
+
+| | before | after | |
+|---|---|---|---|
+| `edgeThreshold`, 752×480, standalone | 861.3 µs | **22.8 µs** | **38×** |
+| sensor stage, x86 | 3.743 ms | **0.081** | **46×** |
+| sensor stage, device | — | **0.531 ms** (10.9%) | |
+
+#### THE RESULT, AND IT IS A STRONGER CLAIM THAN THE ONE IT REPLACES
+
+| end-to-end, one thread each, 80 V1_02 frames | binCV | OpenCV | ratio |
+|---|---|---|---|
+| **x86** | **1.072 ms/frame** | 4.46 | **4.16×** |
+| **reference device** | **4.879** | 29.633 | **6.07×** |
+
+**binCV absorbed the entire sensor stage for +0.02 ms** on x86 — its frontend went 1.051
+(excluding preprocessing) to 1.072 (including it) — while OpenCV's total grew by the
+cost of its own. Tracking behaviour unmoved: **1039 / 1037 flow vectors, 193 tracks, 1
+re-detection.**
+
+#### A MEASUREMENT ERROR WORTH RECORDING, BECAUSE IT SURVIVED THREE RUNS
+
+`BINCV_EDGE_AVX2` was **never defined** — the `#define` was attached to an include line
+`edge.hpp` does not have — so the whole vector block was compiled out. Three successive
+"improvements" were measured and reported against it, and **every one of the gains came
+from elsewhere** (the median's SIMD, and a cleanup loop that had been visiting 360 000
+pixels a frame to skip them).
+
+It was caught by **timing the kernel in isolation**: 861 µs standalone, and `-mavx2` on
+the whole translation unit changing the number by 0.8% — which cannot happen if vector
+code is running. **A kernel that does not respond to its own ISA flag is not using it.**
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
