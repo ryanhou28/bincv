@@ -4135,6 +4135,28 @@ to 8.4%.** Half was the NEON kernel it never had; the other half was not calling
 memory that was already in a stack buffer. **The iteration loop is now 80.4% of device
 `track`.**
 
+### D-70: the tracker's counts stay in bytes to the end of the window
+
+[X-86](EXPERIMENTS.md). `vcntq_u8` counts **per byte**, and turning that into a per-tap
+total takes two `vpaddlq` widenings — which the NEON residual kernels were paying **on
+every row**, eleven operations per plane pair. **A byte count is at most 8 and a window
+is 31 rows, so 248 fits in a byte**: the widening waits for the window's end and the row
+body is AND, `cnt`, byte-add. **Six operations where there were eleven.**
+
+**Reference device: `track` 4.048 → 3.683 ms, frontend headline 4.28× → 4.58×**, 303/303
+checks, 193 tracks unchanged.
+
+**IT FITS ON aarch64 AND WOULD NOT ON x86**, which is why the AVX2 keypoint batch stays a
+separate kernel: sixteen byte accumulators plus four for the previous-frame term against
+aarch64's thirty-two vector registers. The same trick makes
+[X-80](EXPERIMENTS.md)'s bit-plane FAST worth having.
+
+**It was reached by counting, not guessing.** A per-point-level counter put
+`residualSums` at **2.003 calls** and tap extraction at **41.6 rows** — 12% of the loop —
+so the arithmetic was 88% and running at ~1.4 operations per cycle against the A72's 2.
+**Scheduling was not the problem; the operation count was.** Two earlier attempts at this
+loop, aimed at scheduling, measured 0.0% and −5%.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

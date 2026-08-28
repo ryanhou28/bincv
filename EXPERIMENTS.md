@@ -11745,9 +11745,15 @@ moves a row is cheaper than the eight stores a row the old layout charged the pa
 
 | device | before | after |
 |---|---|---|
-| iteration loop, ns/point-level | 4489.3 | **4132** |
+| iteration loop, ns/point-level | 4710.1 | **4489.3** |
 | `track` | 4.187 ms | **4.048** |
 | **vs one-thread OpenCV** | **4.17×** | **4.28×** |
+
+> **CORRECTION.** This table first read `4489.3 → 4132`. The **4132 was never measured**
+> — the logged pair is 4710.1 before and 4489.3 after, and the "before" cell had been
+> shifted as well. The `track` and ratio rows were always right. Corrected against the
+> device logs; recorded rather than silently amended, because a number nobody measured
+> is worse in this log than no number at all.
 
 #### WHAT DID NOT: HOISTING THE ITERATION-INVARIANT `self` TERM
 
@@ -11788,6 +11794,70 @@ X-83 also recorded a four-accumulator split of the NEON `vmla` chain at **0.0%**
 reverted. **Three attempts at the iteration loop, one shipped, and the two that failed
 failed for reasons that were not visible without measuring.** The loop is now **79.3% of
 device `track`** and remains the largest item.
+
+---
+
+### X-86 · Keep the counts in BYTES to the end of the window · `DONE — SHIPPED`
+
+**THE ITERATION LOOP WAS 80% OF DEVICE `track` AND THE ARITHMETIC WAS NEAR THE MACHINE'S
+ISSUE LIMIT, SO THE ONLY WAY DOWN WAS FEWER OPERATIONS.** A counter first, because two
+guesses had already missed:
+
+| per point-level, measured | |
+|---|---|
+| `residualSums` calls | **2.003** |
+| tap ROWS extracted | **41.6** (a window is 31, so 1.34 refreshes) |
+| tap refreshes per call | 0.671 — X-70's cache absorbs a third |
+
+So tap extraction is ~12% of the loop and **the arithmetic is ~88%**. At ~124 NEON
+operations a row it was running at roughly 1.4 per cycle against a Cortex-A72's 2 —
+scheduling was not the problem, the operation count was.
+
+#### THE OPERATION COUNT, HALVED
+
+`vcntq_u8` counts **per byte**. Turning that into a per-tap total takes two `vpaddlq`
+widenings, and the old kernel paid them **on every row**, then subtracted, shifted and
+multiply-accumulated — **eleven operations per plane pair per row**:
+
+```
+    b = vand(taps, mag);  sv = vand(b, sign)
+    ct = paddl(paddl(cnt(b)));  co = paddl(paddl(cnt(sv)))
+    acc = mla(acc, sub(ct, shl(co, 1)), weight)
+```
+
+**A byte count is at most 8 and a window is 31 rows, so 248 fits in a byte.** The
+widening can wait for the end of the window and the row body collapses to **AND, `cnt`,
+byte-add — six operations**:
+
+```
+    tX[k] = vaddq_u8(tX[k], cnt(vand(taps, mag)))
+    oX[k] = vaddq_u8(oX[k], cnt(vand(vand(taps, mag), sign)))
+```
+
+with the widening, the `- 2 x` and the `2^(i+j)` weight applied **once per window**.
+Sixteen byte accumulators at `N = 2`, plus four for the previous-frame term —
+**aarch64's thirty-two vector registers fit them, and x86's sixteen would not**, which
+is why the AVX2 batch stays a different kernel. Rows are flushed every 31 so a taller
+window cannot overflow a byte.
+
+This is [X-80](#x-80)'s trick, from the bit-plane FAST, applied to the tracker.
+
+#### RESULT
+
+| reference device | before | after | |
+|---|---|---|---|
+| `track` | 4.048 ms | **3.683** | **1.10×** |
+| frontend | 5.176 | **4.813** | |
+| **vs one-thread OpenCV** | **4.28×** | **4.58×** | |
+
+**Bit-exact:** `test_opticalflow` **303 / 303**, **193 tracks** unchanged. x86 is
+untouched — this is inside the NEON kernels.
+
+**A note on the profiler:** `lk_stage_profile` reports the iteration loop *higher* after
+this change while `frontend_sequence` reports `track` lower. The profiler adds four clock
+reads per point-level and this kernel's register footprint is larger, so its absolute
+numbers are not comparable across builds. **The uninstrumented `frontend_sequence`
+number is the result**; the profiler is for shares within one run.
 
 ---
 

@@ -190,5 +190,15 @@ int main(int argc, char** argv) {
                     s.points ? static_cast<double>(r.ns) / static_cast<double>(s.points) : 0.0);
     }
     std::printf("  %-38s %10.3f ms\n", "TOTAL (instrumented)", total / 1e6);
+    // How much of the iteration loop is TAP EXTRACTION rather than arithmetic. A window
+    // is 31 rows, so `tapRows / iterations / 31` is the fraction of iterations that had
+    // to refresh their taps -- X-70's cache absorbing the rest.
+    std::printf("\n  residualSums calls per point-level  %8.3f\n",
+                s.points ? static_cast<double>(s.iterations) / static_cast<double>(s.points) : 0.0);
+    std::printf("  tap ROWS extracted per point-level %8.1f\n",
+                s.points ? static_cast<double>(s.tapRows) / static_cast<double>(s.points) : 0.0);
+    std::printf("  tap refreshes per residualSums     %8.3f   (1.0 = the cache never hits)\n",
+                s.iterations ? static_cast<double>(s.tapRows) / static_cast<double>(s.iterations) / 31.0
+                             : 0.0);
     return 0;
 }
