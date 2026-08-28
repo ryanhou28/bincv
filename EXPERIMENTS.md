@@ -11880,6 +11880,68 @@ number is the result**; the profiler is for shares within one run.
 
 ---
 
+### X-87 · The keypoint batch does not transfer to NEON · `DONE — E-45 CLOSES NEGATIVE`
+
+**THE PREDICTION [X-82](#x-82) WROTE AGAINST THIS PORT WAS RIGHT, AND THE MARGIN IS
+BIGGER THAN "NO WIN".**
+
+| one 31-row window, `N = 2`, four keypoints, device, 12 interleaved rounds, minimum | |
+|---|---|
+| **(A)** the shipped kernel, four keypoints in sequence | **4 102.2 ns** |
+| **(B)** four keypoints in NEON lanes | **4 825.3 ns** |
+| **ceiling on the residual arithmetic** | **0.85×** |
+
+**BAND D. The batched form is 1.18× SLOWER than the one that ships.**
+
+**[D-6](ARCHITECTURE.md#8-design-decisions) IN REVERSE, EXACTLY AS REGISTERED.** x86
+needed keypoint batching because **AVX2 has no popcount at all** — the nibble-table
+emulation costs six operations per thirty-two bytes and only pays off spread across eight
+keypoints. **aarch64 has `cnt`, and the shipped kernel already fills all four lanes with
+the four taps.** So one `vand` + `cnt` + byte-add covers **four taps × one plane pair**;
+batching keypoints instead makes it **one keypoint set × one (tap, plane pair)** — the
+same lane-work, rearranged into **four times as many vector operations**.
+
+It is worse rather than equal because the per-lane form also loses the broadcasts: the
+shipped kernel `ld1r`s one magnitude word and reuses it across four taps, while the
+batched one must load a different magnitude, sign and tap word **per lane**.
+
+**The denominator honoured all three traps X-82 named in advance:** arm A is the shipped
+kernel's shape including [X-86](#x-86)'s byte accumulation, it reads the **contiguous**
+per-keypoint layout `StagedWindow` really has, and **all ten of its sums are consumed** —
+the omission that flattered a vector arm by 4× in [X-79](#x-79).
+
+**E-45 closes NEGATIVE and the port is not written.** `benchmark/kpbatch_neon_ceiling.cpp`
+is committed so the number can be reproduced rather than re-argued.
+
+---
+
+### X-88 · Where the tracker's iteration loop actually stops · `ASSESSMENT`
+
+The user asked to stop when the remaining time is dominated by something an optimisation
+cannot move. **It is, and here is the arithmetic rather than the impression.**
+
+At `N = 2` the residual needs `20 N^2 = 80` popcounts of a 31-bit word per window row —
+**2 480 bits counted per row**, and that is the algorithm, not the implementation. After
+[X-86](#x-86) the kernel issues **20 `vcntq_u8` per row, each counting 128 bits = 2 560
+bits.**
+
+> **97% OF EVERY BIT THE KERNEL COUNTS IS A BIT THE ALGORITHM ASKED FOR.** There is no
+> packing left to find. On a Cortex-A72 `CNT` is one per cycle, so twenty of them is a
+> **twenty-cycle floor per row** before a single AND or accumulate.
+
+The three attempts that remain unexplained by op count were all aimed at scheduling and
+all failed: four accumulators to break a dependent `vmla` chain (**0.0%**), hoisting the
+iteration-invariant `self` term (**−4%**), and now keypoint batching (**0.85×**). What
+*did* work was always **fewer operations or fewer memory round trips** — the byte domain,
+the tap layout, the shuffle-built operands, the covariance kernel.
+
+**So the loop is called done at this shape.** Going further needs a different algorithm —
+a lower `N`, or a residual that does not need every plane pair — and that is
+[E-7](ARCHITECTURE.md#9-open-questions-and-planned-experiments)'s accuracy-versus-depth
+question, not a kernel question.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
