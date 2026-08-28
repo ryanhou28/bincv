@@ -35,9 +35,12 @@ gate runs against it.
   `opticalFlow`, `blockMatch`, `reduce`, `resample`, `shift`, `logic` and `bitslice`.
 - **A binary-frame VIO frontend, validated end to end** on the reference device
   against all four success criteria ([X-38](EXPERIMENTS.md)).
-- **The sensor stage**: `pack` (8- and 16-bit sources, three rules, streaming),
-  `edge` (twelve combinations, bit-exact with the reference filter), `medianWide`
-  (caller-chosen neighbourhood, bit-exact with the reference median).
+- **The sensor stage, and the frontend now runs it** rather than borrowing OpenCV's:
+  `pack` (8- and 16-bit sources, 1-bit rules and N-bit policies, streaming, no
+  OpenCV), `edge` (twelve combinations) and `medianWide` (caller-chosen
+  neighbourhood), both bit-exact against the reference filter and median.
+- **Feature descriptors**: FAST — including a **bit-plane** form on binCV's own type,
+  bit-exact with `cv::FAST` corner for corner — BRIEF, and Hamming matching.
 - **Two architectures, both measured**: `x86_64` (POPCNT by default, AVX2 by runtime
   dispatch) and `aarch64` (NEON, the reference device).
 - **Threading** as a caller-installable backend, serial by default, bit-exact.
@@ -46,10 +49,10 @@ gate runs against it.
 
 ### Not started
 
-- **Binary descriptors and Hamming matching** — the line between a VIO frontend and
-  SLAM ([TASKS.md](TASKS.md) T5.4).
 - **32-bit targets and RISC-V** ([TASKS.md](TASKS.md) Phase 7). 32-bit ARM is a code
   path nobody has compiled, and CLAUDE.md names Cortex-M.
+- **Repository shape for sharing** ([TASKS.md](TASKS.md) Phase 6) — a licence, an API
+  reference, and documentation aimed at someone *using* binCV rather than building it.
 - **GPU backends, Python bindings** — deferred, below.
 
 ## Phase 1 — Container Foundation
@@ -300,7 +303,12 @@ Phase 4  Validation  <-- the project's result
 Phase 5  Platform hardening
               |
               v
-Phase 6  Deferred (GPU, bindings, research routes)
+Phase 6  Repository shape, for sharing
+              |
+              v
+Phase 7  Architectures beyond the two that are measured
+
+  (GPU, bindings and research routes are DEFERRED, not a phase -- see above.)
 ```
 
 Phase 1 gates everything: kernels written against the wrong container get

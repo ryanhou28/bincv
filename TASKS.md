@@ -4222,7 +4222,13 @@ usual choice for a library meant to be adopted** and carries an explicit patent 
 which matters for anything that might touch a product. **This is a call for the project
 owner, not a default to be picked quietly.**
 
-### T6.2 · A README that does the job · `TODO`
+### T6.2 · A README that does the job · `DONE`
+
+**Numbers refreshed and their conditions restated.** The table had gone stale by a large
+factor (2.47× device / 1.57× x86, both from before the sensor stage moved inside the
+timing); it now reads **6.07× device / 4.16× x86, one thread each side, end to end**, and
+says so. The example was **compiled** rather than eyeballed. Added a "what is in it"
+section, because a reader could not previously tell what operations exist.
 
 87 lines currently front 21 000 lines of internal documentation. A reader needs, in
 order: **what binCV is and why bit-width matters**, the **headline numbers with their
@@ -4235,7 +4241,17 @@ run the tests**, and a **platform support matrix that says plainly what is untes
 single-threaded OpenCV on both architectures — so they belong above the fold, with
 their conditions attached rather than buried.
 
-### T6.3 · Documentation structure and an API reference · `TODO`
+### T6.3 · Documentation structure and an API reference · `PARTLY DONE`
+
+**Done — the gap that mattered:** there is now an API reference. `docs/API.md`, 278
+entries across 27 headers, **generated** from the headers by `scripts/gen_api_index.py`
+so it cannot drift, and committed so a reader in a browser has one without running
+anything. `docs/README.md` says which document is for whom.
+
+**Still open:** splitting `docs/adr/` (one file per D-record) and `docs/experiments/`
+(by phase). Both are packaging of MAINTAINER documents, and both risk breaking the
+hundreds of in-repo cross-links that make the record system work — so they want a
+link-rewriting step, not a copy.
 
 **The problem is audience, not length.** Every document in the repository is written for
 someone *building* binCV. A person who wants to *use* it has a README and
@@ -4253,7 +4269,7 @@ cross-linked, every performance claim traceable to a committed benchmark — it 
 most valuable thing in the repository and the reason several wrong conclusions were
 caught before they shipped. **Keep the substance; fix the packaging.**
 
-### T6.4 · Delete what should not be shared, correct what is wrong · `TODO`
+### T6.4 · Delete what should not be shared, correct what is wrong · `DONE`
 
 - **`OVERNIGHT_LOG.md`** — a working log of individual sessions. Its conclusions are
   already in EXPERIMENTS.md. **Delete it**; a session diary is not part of a library.

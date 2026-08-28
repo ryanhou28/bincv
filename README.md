@@ -30,26 +30,48 @@ integer registers.
 
 ## Where it stands
 
-Measured on **EuRoC V1_02**, the full 1710-frame sequence, against OpenCV performing
-the same semantic operations on the same binary content stored as `CV_8U`.
+Measured on **EuRoC V1_02**, against OpenCV performing the same semantic operations on
+the same content. **Both frontends start from the same grayscale frame and each builds
+its own binary one** — the sensor stage (median, then gradient-threshold edge filter) is
+inside both timings, so this is end to end rather than from a binary frame someone else
+prepared.
 
-| | binCV | OpenCV | |
+| **one thread each side** | binCV | OpenCV | |
 |---|---|---|---|
 | **peak working set** | **436 704 B** | 2 719 832 B | **6.23× smaller** |
-| frontend, reference device, **1 thread each** | 6.77 ms/frame | 16.72 | **2.47× faster** |
-| frontend, reference device, **4 threads each** | 3.63 ms/frame | 7.07 | **1.94× faster** |
-| frontend, x86_64, **1 thread each** | 1.96 ms/frame | 3.06 | **1.57× faster** |
-| frontend, x86_64, **4 threads each** | 1.08 ms/frame | 1.46 | **1.35× faster** |
+| frontend, reference device (Cortex-A72) | **4.88 ms/frame** | 29.63 | **6.07× faster** |
+| frontend, x86_64 | **1.07 ms/frame** | 4.46 | **4.16× faster** |
 
-**Every figure names its conditions, and that is not decoration.** The sequence and the
-thread count each move these numbers by more than most of the optimisations in this
-repository are worth — twice during development a headline was wrong because one of
-them went unstated ([D-58](ARCHITECTURE.md#8-design-decisions)).
+**Every figure names its conditions, and that is not decoration.** The sequence, the
+thread count and whether the sensor stage is inside the timing each move these numbers
+by more than most of the optimisations in this repository are worth. Three times during
+development a headline was wrong because one of them went unstated — including one that
+stood in this README ([D-58](ARCHITECTURE.md#8-design-decisions)).
 
-Both sides are given the same number of threads, which is why the ratio barely moves
-between the rows: **the advantage is the implementation, not the parallelism.** Against
-OpenCV left at *its* default of one thread, binCV at four reads 4.72× on the device —
-true, and not quoted as the headline.
+**Both sides get the same thread count**, which is the only comparison that isolates the
+implementation from the parallelism. binCV threads through a caller-installed backend
+and is serial by default; at four threads each on x86 the ratio narrows to roughly 3×,
+because OpenCV has more byte-work to spread across cores. The reference device is
+measured pinned to a single core — deliberately, so OpenCV's threads cannot escape it
+either — so no thread-scaling figure is quoted for it.
+
+The x86 rows were taken on an otherwise idle machine; under load the ratio *rises*,
+because OpenCV degrades faster than binCV does. The quiet reading is the conservative
+one and it is the one quoted.
+
+## What is in it
+
+- **Sensor stage** — `pack` (8- and 16-bit sources, three 1-bit rules and an N-bit
+  quantisation policy, streaming, no OpenCV), `medianWide`, `edgeThreshold`. The last
+  two are bit-exact against the reference pipeline's filters.
+- **Frontend** — pyramid, derivatives, gradient covariance, corner response,
+  `goodFeaturesToTrack`, and pyramidal Lucas–Kanade tracking on bit-planes.
+- **Features** — FAST (including a **bit-plane** form on binCV's own type, bit-exact
+  with `cv::FAST` corner for corner), BRIEF descriptors, Hamming matching.
+- **Primitives** — logic, shifts, bulk reductions, morphology, resampling, bit-slicing,
+  block matching, thresholding and binarisation.
+- **Interop** — `cv::Mat` in and out when OpenCV is present; PGM and raw buffers when it
+  is not.
 
 ## Supported platforms
 
@@ -80,7 +102,9 @@ configuration the memory argument is about.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | design, the input contract, and every design decision with its evidence |
 | [ROADMAP.md](ROADMAP.md) | phases and success criteria |
 | [TASKS.md](TASKS.md) | the backlog |
+| [docs/API.md](docs/API.md) | **the API reference** — every public entry point, its brief and its API tier |
 | [EXPERIMENTS.md](EXPERIMENTS.md) | the measurement log — every number above traces to an entry here and a committed benchmark |
+| [docs/README.md](docs/README.md) | which document is for whom, and how the D/E/X record system works |
 
 ## How performance claims are made here
 
@@ -89,9 +113,11 @@ rule before measuring**. Every performance claim in this repository has a commit
 benchmark behind it and an entry in [EXPERIMENTS.md](EXPERIMENTS.md) giving the
 platform, the workload and the decision rule that was fixed in advance.
 
-That discipline is not ceremony. It has caught five ceilings that overstated, an
-optimisation that was 1.75× in the kernel and 3.3× *slower* on the workload, and three
-headline figures that were measuring something other than what they claimed.
+That discipline is not ceremony. It has caught several ceilings that overstated, an
+optimisation that was 1.75× in the kernel and 3.3× *slower* on the workload, a vector
+kernel that a mis-attached `#define` had compiled out of three consecutive "improvements",
+and headline figures that were measuring something other than what they claimed —
+including one that stood in this file.
 
 ## Scope
 

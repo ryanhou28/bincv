@@ -208,7 +208,7 @@ __attribute__((target("avx2"))) inline void quantMask32(const uint8_t* src,
     }
 }
 #else
-/// @brief Force the portable path; see the AVX2 form above.
+/// @brief Force the portable path; see the AVX2 form above. **INTERNAL.**
 inline bool& packQuantSimdEnabled() {
     static bool on = true;
     return on;

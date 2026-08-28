@@ -2,7 +2,7 @@
 
 > **Status: deferred / exploratory.**
 >
-> GPU backends are [Phase 6](../ROADMAP.md#phase-6--deferred) — not currently
+> GPU backends are [deferred](../ROADMAP.md#deferred--not-scoped) — not currently
 > scoped. binCV's product is the CPU path targeting embedded and mobile
 > ([ARCHITECTURE §1](../ARCHITECTURE.md#1-scope)); Jetson-class devices run that
 > path on their ARM CPU today.

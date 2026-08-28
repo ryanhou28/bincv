@@ -1,13 +1,13 @@
 # The binCV document set
 
-Five documents, and they are for different people. If you are reading in order, this
+Six documents, and they are for different people. If you are reading in order, this
 is the order.
 
 | | for | what it is |
 |---|---|---|
 | [../README.md](../README.md) | **anyone** | what binCV is, the numbers, how to build |
 | [../GETTING_STARTED.md](../GETTING_STARTED.md) | **a user** | build, test, benchmark, and a tour of the operation set |
-| [api/](api/) | **a user** | the API reference, generated from the headers |
+| [API.md](API.md) | **a user** | **the API reference** — every public entry point, its brief and its tier, generated from the headers |
 | [../ARCHITECTURE.md](../ARCHITECTURE.md) | **a contributor** | the design, the input contract, and every design decision with its evidence |
 | [../TASKS.md](../TASKS.md) | **a contributor** | the backlog, by phase |
 | [../EXPERIMENTS.md](../EXPERIMENTS.md) | **a sceptic** | the measurement log |
@@ -29,15 +29,32 @@ Performance work in this repository leaves three kinds of trace, cross-linked:
 **The rule that makes the rest trustworthy:** a performance claim needs a committed
 benchmark, a pre-registered decision rule, and both speed and memory reported.
 
-It is not ceremony. That loop has caught five ceilings that overstated, an optimisation
-measuring 1.75× in the kernel and 3.3× *slower* on the real workload, and three headline
-figures that were measuring something other than what they claimed — one of them for an
-entire working session.
+It is not ceremony. That loop has caught several ceilings that overstated, an
+optimisation measuring 1.75× in the kernel and 3.3× *slower* on the real workload, a
+vector kernel that a mis-attached `#define` had compiled out of three consecutive
+"improvements", two kernels that were correct and never timed until something called
+them and they turned out to be 78% of the frontend, and headline figures that were
+measuring something other than what they claimed — one of them for an entire working
+session, and one that stood in the README.
 
-## Generating the API reference
+## The API reference
+
+[API.md](API.md) is **generated from the headers** by
 
 ```bash
-doxygen docs/Doxyfile     # writes docs/api/html
+python3 scripts/gen_api_index.py     # writes docs/API.md
+```
+
+and is committed, so a reader in a browser has one without running anything. It is a
+view rather than a document: every line is the `@brief` from the declaration itself, so
+it cannot drift from the code without the code changing. Regenerate it in the same
+commit as any signature change.
+
+For full signatures, parameters and the rationale paragraphs — which are often the
+useful part — read the header, or generate the HTML:
+
+```bash
+doxygen docs/Doxyfile     # writes docs/api/html; needs doxygen installed
 ```
 
 Every public entry point states its **API tier**:
