@@ -11719,6 +11719,78 @@ staging 9.8%, covariance 8.4%, setup 1.4%.
 
 ---
 
+### X-85 · The tap layout, and two hoists that did not pay · `DONE — SHIPPED`
+
+[X-84](#x-84--stop-reading-the-same-window-twice--done--shipped) left the iteration loop
+at **80.4% of device `track`**. Three things were tried in it. **One shipped.**
+
+#### WHAT SHIPPED: `[plane][tap]`, WHICH IS THE ORDER THE LANES WANT
+
+The NEON kernels put a plane's **four taps in the four lanes** of a vector. `TapCache`
+stored them as four separate `[row][plane]` arrays, so every row marshalled them through
+a stack array — **eight stores and two loads a row at `N = 2`, each load waiting on its
+stores.** Storing `[row][plane][tap]` makes it `vld1q_u32(o.taps[k])`: **two loads, no
+stores.**
+
+This is the same store-to-load round trip [X-83](#x-83) found costing 1.5× in the
+covariance. **It is the third time this pattern has cost something in this project**, and
+it is now worth stating as a rule: *on aarch64, marshalling operands through a stack
+array can cost more than the arithmetic they feed.*
+
+The generic scalar fallback transposes the `4 x N` block once a row, because
+`slicedSignedSum` wants a value's `N` planes contiguous. That path is not the shipped
+ladder's — `1/2/2/2` at `uint32_t` takes the NEON kernels or the AVX2 batch — and `4N`
+moves a row is cheaper than the eight stores a row the old layout charged the paths that
+*do* ship.
+
+| device | before | after |
+|---|---|---|
+| iteration loop, ns/point-level | 4489.3 | **4132** |
+| `track` | 4.187 ms | **4.048** |
+| **vs one-thread OpenCV** | **4.17×** | **4.28×** |
+
+#### WHAT DID NOT: HOISTING THE ITERATION-INVARIANT `self` TERM
+
+`b1 = w00*t00 + w01*t01 + w10*t10 + w11*t11 - self`. The four taps move with the
+estimate; **`self` is the previous frame against its own gradient and does not depend on
+the displacement at all.** It is two of the ten window sums — 20% of the residual
+arithmetic — recomputed on every iteration of a loop that averages two. It looks like
+free money.
+
+**It is not, and the measurement is the interesting part:**
+
+| device, ns/point-level | |
+|---|---|
+| iteration loop, self removed | 4489 → **3797** (−692) |
+| the hoisted computation | **+897** |
+| **net** | **+205, i.e. `track` 4.048 → 4.210 ms** |
+
+**Removing 1.98 evaluations saved 692 ns; adding one back cost 897.** So the in-kernel
+evaluation is **2.6× cheaper than the standalone one** — because inside the row loop
+`magX`, `signX` and `self` are already in registers, and the hoisted version re-reads
+them from the staged buffer for no other purpose.
+
+**The first suspect was wrong, too.** The standalone helper used `slicedSignedSum`, whose
+NEON path ends in a `vaddvq_s32` — a horizontal reduce, and 62 of them per point.
+Rewriting it with lane accumulators and one reduce changed the number by **5 ns**. The
+reduces were not the cost; the loads were.
+
+**On x86 the same hoist measured no change at all**, for a different reason: the batch
+computes `self` **eight lanes at a time**, so hoisting it turns vector work into a scalar
+per-lane loop. **A hoist is only free when what it removes costs more than what it
+adds**, and here it never did on either architecture.
+
+**Reverted.** Both the kernels and the test that had been updated to the new contract.
+
+#### AND THE ONE BEFORE THAT
+
+X-83 also recorded a four-accumulator split of the NEON `vmla` chain at **0.0%**, also
+reverted. **Three attempts at the iteration loop, one shipped, and the two that failed
+failed for reasons that were not visible without measuring.** The loop is now **79.3% of
+device `track`** and remains the largest item.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

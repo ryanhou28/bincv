@@ -183,6 +183,12 @@ __attribute__((target("avx2"))) inline void lkBatchResidual(
     const uint32_t* t11, const uint32_t* magX, const uint32_t* signX, const uint32_t* magY,
     const uint32_t* signY, size_t rows, uint32_t* splitP, uint32_t* splitN, int32_t* outX,
     int32_t* outY) {
+    // FIVE VALUES, INCLUDING THE ITERATION-INVARIANT ONE, AND X-85 MEASURED WHY. The
+    // previous-frame term could be hoisted to the refill -- the NEON kernels do exactly
+    // that and gain from it -- but here it is already being computed EIGHT LANES AT A
+    // TIME, and hoisting it turns vector work into a scalar per-lane loop over the
+    // window. Measured on x86: no change. The hoist is a win where the term costs
+    // scalar popcounts and a wash where it does not.
     const uint32_t* const values[5] = {t00, t01, t10, t11, self};
 
     for (int comp = 0; comp < 2; ++comp) {

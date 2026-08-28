@@ -837,10 +837,13 @@ struct StagedWindow {
 /// fixed for the point and the third is the key.
 template <size_t N, typename WordType>
 struct TapCache {
-    WordType t00[kStagedMaxRows][N];
-    WordType t01[kStagedMaxRows][N];
-    WordType t10[kStagedMaxRows][N];
-    WordType t11[kStagedMaxRows][N];
+    /// `[row][plane][tap]`, tap order `t00, t01, t10, t11`. **THE INNERMOST AXIS IS THE
+    /// TAP AND THAT IS THE WHOLE POINT** (X-85): the NEON kernels put the four taps of
+    /// one plane in the four lanes of a vector, so this layout makes that a single
+    /// `vld1q_u32`. Stored as four separate arrays it was **eight stores and two loads
+    /// a row** to marshal them, each load waiting on its stores — the same store-to-load
+    /// round trip X-83 found costing 1.5× in the covariance.
+    WordType taps[kStagedMaxRows][N][4];
     long long tapX = 0;
     long long tapY = 0;
     bool valid = false;
@@ -989,16 +992,14 @@ inline GradientCovariance stagedCovariance(const StagedWindow<N, WordType>& s, s
 ///       and only pointers PLUS a compile-time `Staged` reached parity.
 template <size_t N, typename WordType>
 struct RowOperands {
-    const WordType* t00;
-    const WordType* t01;
-    const WordType* t10;
-    const WordType* t11;
+    const WordType (*taps)[4];   ///< `[plane][tap]`; see `TapCache`
     const WordType* self;
     const WordType* magX;   ///< already masked to the region
     const WordType* magY;
     WordType signX;
     WordType signY;
-    WordType scratch[7][N];   ///< where the unstaged path materialises them
+    WordType tapScratch[N][4];   ///< where the unstaged path materialises them
+    WordType scratch[3][N];
 };
 
 /// @brief The ONE place a window row's operands are read. **INTERNAL** (E-39).
@@ -1040,30 +1041,22 @@ public:
     /// @param y Absolute row in the level. @param i Row index within the window.
     void load(size_t y, size_t i, RowOperands<N, WordType>& o) {
         if constexpr (Staged) {
-            if (!tapsFresh_) {
-                extractTaps(y, taps_->t00[i], taps_->t01[i], taps_->t10[i], taps_->t11[i]);
-            }
+            if (!tapsFresh_) extractTaps(y, taps_->taps[i]);
             // ALIAS, do not copy. `Staged` is compile-time, so this branch is the
             // whole body here and the operands are used where they already live.
-            o.t00 = taps_->t00[i];
-            o.t01 = taps_->t01[i];
-            o.t10 = taps_->t10[i];
-            o.t11 = taps_->t11[i];
+            o.taps = taps_->taps[i];
             o.self = staged_->self[i];
             o.magX = staged_->magX[i];
             o.magY = staged_->magY[i];
             o.signX = staged_->signX[i];
             o.signY = staged_->signY[i];
         } else {
-            extractTaps(y, o.scratch[0], o.scratch[1], o.scratch[2], o.scratch[3]);
-            extractInvariants(y, o.scratch[4], o.scratch[5], o.scratch[6], o.signX, o.signY);
-            o.t00 = o.scratch[0];
-            o.t01 = o.scratch[1];
-            o.t10 = o.scratch[2];
-            o.t11 = o.scratch[3];
-            o.self = o.scratch[4];
-            o.magX = o.scratch[5];
-            o.magY = o.scratch[6];
+            extractTaps(y, o.tapScratch);
+            extractInvariants(y, o.scratch[0], o.scratch[1], o.scratch[2], o.signX, o.signY);
+            o.taps = o.tapScratch;
+            o.self = o.scratch[0];
+            o.magX = o.scratch[1];
+            o.magY = o.scratch[2];
         }
     }
 
@@ -1086,26 +1079,25 @@ private:
         return displacedRow<WordType>(lv_.next[k], sy, sx).word(0);
     }
 
-    void extractTaps(size_t y, WordType* t00, WordType* t01, WordType* t10,
-                     WordType* t11) {
+    void extractTaps(size_t y, WordType (*out)[4]) {
         const long long srcY = static_cast<long long>(y) + tapY_;
         const bool carryOk = haveCarry_ && y == carryRow_ + 1;
         for (size_t k = 0; k < N; ++k) {
             const WordType upper = carryOk ? carry_[k] : readNext(srcY, k, srcX_);
             const WordType lower = readNext(srcY + 1, k, srcX_);
             carry_[k] = lower;
-            t00[k] = upper;
-            t10[k] = lower;
+            out[k][0] = upper;
+            out[k][2] = lower;
             if (tapIsShift_) {
-                t01[k] = static_cast<WordType>(upper >> 1);
-                t11[k] = static_cast<WordType>(lower >> 1);
+                out[k][1] = static_cast<WordType>(upper >> 1);
+                out[k][3] = static_cast<WordType>(lower >> 1);
             } else {
                 const WordType upperR =
                     carryOk ? carryShift_[k] : readNext(srcY, k, srcX_ + 1);
                 const WordType lowerR = readNext(srcY + 1, k, srcX_ + 1);
                 carryShift_[k] = lowerR;
-                t01[k] = upperR;
-                t11[k] = lowerR;
+                out[k][1] = upperR;
+                out[k][3] = lowerR;
             }
         }
         carryRow_ = y;
@@ -1174,10 +1166,9 @@ inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
         const WordType sgnY = o.signY;
         // `tapLanes`, not `taps` -- this function has a `taps` PARAMETER now and
         // -Wshadow is fatal in every gate configuration.
-        const uint32_t tapLanes[4] = {
-            static_cast<uint32_t>(o.t00[0]), static_cast<uint32_t>(o.t01[0]),
-            static_cast<uint32_t>(o.t10[0]), static_cast<uint32_t>(o.t11[0])};
-        const uint32x4_t vt = vld1q_u32(tapLanes);
+        // X-85: ONE LOAD. `TapCache` stores `[plane][tap]`, which is the lane order
+        // this kernel wants, so there is nothing to marshal.
+        const uint32x4_t vt = vld1q_u32(o.taps[0]);
 
         // Four taps against one magnitude, counts straight into lanes. No
         // extraction here -- the accumulators run to the end of the window.
@@ -1268,13 +1259,9 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
         const WordType signY = o.signY;
 
         // The four taps' plane k, in lanes. Built once and used by both components.
-        const uint32_t p0[4] = {
-            static_cast<uint32_t>(o.t00[0]), static_cast<uint32_t>(o.t01[0]),
-            static_cast<uint32_t>(o.t10[0]), static_cast<uint32_t>(o.t11[0])};
-        const uint32_t p1[4] = {
-            static_cast<uint32_t>(o.t00[1]), static_cast<uint32_t>(o.t01[1]),
-            static_cast<uint32_t>(o.t10[1]), static_cast<uint32_t>(o.t11[1])};
-        const uint32x4_t vp0 = vld1q_u32(p0), vp1 = vld1q_u32(p1);
+        // X-85: TWO LOADS, NO STORES. This used to marshal both planes through stack
+        // arrays -- eight stores and two loads a row, each load waiting on its stores.
+        const uint32x4_t vp0 = vld1q_u32(o.taps[0]), vp1 = vld1q_u32(o.taps[1]);
 
         // One plane pair: count the four taps against magnitude plane j, subtract
         // twice the opposing count, weight, and fold. No extraction.
@@ -1361,15 +1348,28 @@ inline void alignedResidualSumsImpl(const LKLevelN<N, WordType>& lv,
     RowOperands<N, WordType> o;
     for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
         rd.load(y, i, o);
-        sumsX.t00 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, o.t00);
-        sumsX.t01 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, o.t01);
-        sumsX.t10 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, o.t10);
-        sumsX.t11 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, o.t11);
+        // X-85: the taps are stored `[plane][tap]` for the NEON kernels' sake, and
+        // `slicedSignedSum` wants a value's N planes contiguous -- so this path
+        // transposes the 4xN block once a row. It is the generic fallback (the shipped
+        // 1/2/2/2 ladder at `uint32_t` takes the NEON kernels or the AVX2 batch), and
+        // 4N moves a row is cheaper than the eight stores a row the old layout cost the
+        // paths that DO ship.
+        WordType val[4][N];
+        for (size_t k = 0; k < N; ++k) {
+            val[0][k] = o.taps[k][0];
+            val[1][k] = o.taps[k][1];
+            val[2][k] = o.taps[k][2];
+            val[3][k] = o.taps[k][3];
+        }
+        sumsX.t00 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, val[0]);
+        sumsX.t01 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, val[1]);
+        sumsX.t10 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, val[2]);
+        sumsX.t11 += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, val[3]);
+        sumsY.t00 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, val[0]);
+        sumsY.t01 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, val[1]);
+        sumsY.t10 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, val[2]);
+        sumsY.t11 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, val[3]);
         sumsX.self += slicedSignedSum<N, WordType, UseNeon>(o.magX, o.signX, o.self);
-        sumsY.t00 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, o.t00);
-        sumsY.t01 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, o.t01);
-        sumsY.t10 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, o.t10);
-        sumsY.t11 += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, o.t11);
         sumsY.self += slicedSignedSum<N, WordType, UseNeon>(o.magY, o.signY, o.self);
     }
 }
