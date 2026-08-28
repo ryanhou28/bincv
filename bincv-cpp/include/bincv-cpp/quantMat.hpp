@@ -12,6 +12,7 @@
 // core/error.hpp, core/storage.hpp, core/types.hpp and core/view.hpp with it, as
 // well as the impl:: word helpers the per-pixel accessors below use.
 #include "binMat.hpp"
+#include "impl/kernel_util.hpp"   // transpose8x8, quantScale (T5.9)
 
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
@@ -34,26 +35,6 @@ constexpr unsigned signedMagnitude(int value) {
     return value < 0 ? 0u - static_cast<unsigned>(value) : static_cast<unsigned>(value);
 }
 
-#ifdef BINCV_WITH_OPENCV
-/// @brief 8x8 bit-matrix transpose: bit (8r + c) moves to bit (8c + r).
-/// @note The pivot of QuantMat's cv::Mat conversions (X-47). One call moves 8
-///       pixels x 8 planes between the two layouts -- byte r holding plane r's
-///       bits in, byte c holding pixel c's value out -- so the conversion runs at
-///       ~3 ops per pixel for ALL planes instead of one bit test per (pixel,
-///       plane). Three delta-swaps (Hacker's Delight 7-3); an involution, so both
-///       conversion directions call the same function.
-/// @note Planes p >= N hold zero bytes on the way in, so value bits >= N are zero
-///       on the way out -- the N < 8 case needs no masking.
-inline uint64_t transpose8x8(uint64_t x) {
-    uint64_t t = (x ^ (x >> 7)) & 0x00AA00AA00AA00AAULL;
-    x ^= t ^ (t << 7);
-    t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCCULL;
-    x ^= t ^ (t << 14);
-    t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0ULL;
-    x ^= t ^ (t << 28);
-    return x;
-}
-#endif // BINCV_WITH_OPENCV
 
 } // namespace impl
 
@@ -406,9 +387,17 @@ public:
         }
         // Quantize once into a table, not once per pixel: 256 bytes, and the
         // per-pixel work drops to one load.
+        //
+        // T5.9: THE RULE ITSELF LIVES IN ONE PLACE NOW. It used to be written out here
+        // and nowhere else, so the core-only `packQuant` would have been a second
+        // spelling of a load-bearing expression -- `toCVMatNormalized`'s exact inverse,
+        // with D-42's deliberate divergence from OpenCV at bytes 1..127 inside it.
+        // `impl::quantScale` is that expression; `Pack.QuantScaleReproducesFromCVMatsRule`
+        // pins the two paths equal at N in {1, 2, 3, 4, 8}.
         uint8_t lut[256];
         for (unsigned v = 0; v < 256u; ++v) {
-            lut[v] = static_cast<uint8_t>((v * MaxValue + 127u) / 255u);
+            lut[v] = static_cast<uint8_t>(impl::quantScale<uint8_t>(static_cast<uint8_t>(v),
+                                                                    MaxValue));
         }
         // Alignment is carried through UNCONDITIONALLY, as the N == 1
         // specialization and resize() do. An `empty() ? DefaultRowAlignment : ...`

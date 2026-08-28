@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "bincv-cpp/io/pnm.hpp"
+#include "bincv-cpp/quantMat.hpp"
 #include "bincv-cpp/ops/pack.hpp"
 #include "test_util.hpp"
 
@@ -266,6 +267,124 @@ BINCV_TEST(Pnm, RejectsRatherThanMisreads) {
     std::printf("  comment-bearing header valid=%d %zux%zu\n", ok.valid ? 1 : 0, ok.width,
                 ok.height);
     BINCV_CHECK(ok.valid && ok.width == 2 && ok.height == 2);
+}
+
+// ---------------------------------------------------------------------------
+// T5.9: N BITS PER PIXEL, AND THE RULE MUST NOT MOVE.
+//
+// `QuantMat<N>::fromCVMat` is the only N-bit ingestion binCV had, it needs OpenCV, and
+// its rule -- `round(v * MaxValue / 255)` -- is load-bearing: it is
+// `toCVMatNormalized`'s EXACT inverse, and D-42 records a deliberate divergence from
+// OpenCV at bytes 1..127. `packQuant` replaces it in core, so "reproduces it bit for
+// bit" is the whole contract and this is where it is pinned.
+// ---------------------------------------------------------------------------
+namespace {
+
+template <size_t N>
+size_t quantMatchesReference(int w, int h) {
+    std::vector<uint8_t> src(static_cast<size_t>(w) * static_cast<size_t>(h));
+    uint64_t st = UINT64_C(0x51CE) + N;
+    for (auto& v : src) {
+        st = st * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+        v = static_cast<uint8_t>(st >> 41);
+    }
+    bincv::QuantMat<N, uint32_t> mine(w, h);
+    bincv::BinMatView<uint32_t> planes[N];
+    for (size_t p = 0; p < N; ++p) planes[p] = mine.plane(p);
+    bincv::packQuant<bincv::QuantRule::Scale, N, uint8_t, uint32_t>(
+        src.data(), static_cast<size_t>(w), static_cast<size_t>(h),
+        static_cast<size_t>(w), planes);
+
+    size_t bad = 0;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const unsigned v = src[static_cast<size_t>(y) * static_cast<size_t>(w) +
+                                   static_cast<size_t>(x)];
+            // `QuantMat<N>::fromCVMat`'s expression, written out.
+            const unsigned expect =
+                (v * ((1u << N) - 1u) + 127u) / 255u;
+            if (static_cast<unsigned>(mine.at(y, x)) != expect) ++bad;
+        }
+    }
+    return bad;
+}
+
+}  // namespace
+
+BINCV_TEST(Pack, QuantScaleReproducesFromCVMatsRule) {
+    // Widths chosen to straddle a word: 32 is exact, 33 and 47 leave padding bits.
+    size_t bad = 0;
+    bad += quantMatchesReference<1>(64, 5);
+    bad += quantMatchesReference<2>(33, 7);
+    bad += quantMatchesReference<3>(47, 4);
+    bad += quantMatchesReference<4>(32, 6);
+    bad += quantMatchesReference<8>(40, 3);
+    std::printf("  packQuant<Scale> vs fromCVMat's rule, N in {1,2,3,4,8}: %zu differ\n",
+                bad);
+    BINCV_CHECK_EQ(bad, size_t{0});
+}
+
+BINCV_TEST(Pack, QuantWithMatchesQuantWhenGivenTheSameRule) {
+    // The escape hatch has to agree with the fast policy where they overlap, or one of
+    // them is wrong and nothing says which.
+    constexpr size_t N = 3, w = 51, h = 9;
+    std::vector<uint8_t> src(w * h);
+    uint64_t st = UINT64_C(777);
+    for (auto& v : src) {
+        st = st * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+        v = static_cast<uint8_t>(st >> 41);
+    }
+    bincv::QuantMat<N, uint32_t> a(w, h), b(w, h);
+    bincv::BinMatView<uint32_t> pa[N], pb[N];
+    for (size_t p = 0; p < N; ++p) { pa[p] = a.plane(p); pb[p] = b.plane(p); }
+    bincv::packQuant<bincv::QuantRule::Scale, N, uint8_t, uint32_t>(src.data(), w, h, w, pa);
+    uint8_t lut[256];
+    for (unsigned v = 0; v < 256u; ++v) {
+        lut[v] = static_cast<uint8_t>((v * ((1u << N) - 1u) + 127u) / 255u);
+    }
+    bincv::packQuantWith<N, uint8_t, uint32_t>(src.data(), w, h, w, pb,
+                                               [&](uint8_t v) { return lut[v]; });
+    size_t bad = 0;
+    for (size_t y = 0; y < h; ++y) {
+        for (size_t p = 0; p < N; ++p) {
+            // WHOLE WORDS, so the padding bits are compared too: a stale bit past
+            // `width` would over-count every word-wise reduction in the library.
+            const size_t words = bincv::impl::minRowWords<uint32_t>(w);
+            for (size_t i = 0; i < words; ++i) {
+                if (a.plane(p).row(y)[i] != b.plane(p).row(y)[i]) ++bad;
+            }
+        }
+    }
+    std::printf("  packQuantWith(LUT) vs packQuant<Scale>, N=3: %zu words differ\n", bad);
+    BINCV_CHECK_EQ(bad, size_t{0});
+}
+
+BINCV_TEST(Pack, QuantAcceptsSixteenBitSources) {
+    // T5.15's point: a 10-, 12- or 16-bit sensor hands you `uint16_t`, and the scale is
+    // against THAT type's range, not 255.
+    constexpr size_t N = 4, w = 40, h = 3;
+    std::vector<uint16_t> src(w * h);
+    for (size_t i = 0; i < src.size(); ++i) {
+        src[i] = static_cast<uint16_t>((i * 65535u) / (src.size() - 1));
+    }
+    bincv::QuantMat<N, uint32_t> m(w, h);
+    bincv::BinMatView<uint32_t> planes[N];
+    for (size_t p = 0; p < N; ++p) planes[p] = m.plane(p);
+    bincv::packQuant<bincv::QuantRule::Scale, N, uint16_t, uint32_t>(src.data(), w, h, w,
+                                                                     planes);
+    size_t bad = 0, sawTop = 0;
+    for (size_t i = 0; i < src.size(); ++i) {
+        const unsigned expect = static_cast<unsigned>(
+            (static_cast<unsigned long long>(src[i]) * 15u + 32767u) / 65535u);
+        const unsigned got = static_cast<unsigned>(
+            m.at(static_cast<int>(i / w), static_cast<int>(i % w)));
+        if (got != expect) ++bad;
+        if (expect == 15u) ++sawTop;
+    }
+    std::printf("  packQuant<Scale> uint16 -> N=4: %zu differ, %zu pixels reached 15\n",
+                bad, sawTop);
+    BINCV_CHECK_EQ(bad, size_t{0});
+    BINCV_CHECK(sawTop > 0);   // the ramp must actually reach the top of the range
 }
 
 BINCV_TEST_MAIN("test_pack")

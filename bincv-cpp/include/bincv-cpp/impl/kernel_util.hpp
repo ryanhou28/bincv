@@ -40,6 +40,83 @@ inline namespace BINCV_ABI_NAMESPACE {
 
 namespace impl {
 
+/// @brief The largest value an `SrcT` can hold, as the scale's denominator.
+template <typename SrcT>
+constexpr unsigned long long srcMax() {
+    return (sizeof(SrcT) >= 8) ? ~0ULL
+                               : ((1ULL << (sizeof(SrcT) * 8)) - 1ULL);
+}
+
+/// @brief `round(v * maxValue / srcMax)` in integers. **INTERNAL.**
+/// @note The `+ srcMax/2` rounding is `QuantMat<N>::fromCVMat`'s `(v * MaxValue + 127)
+///       / 255` generalised; at `SrcT = uint8_t` it is that expression exactly, which
+///       is what keeps [D-42](../../../ARCHITECTURE.md)'s recorded divergence from
+///       OpenCV at bytes 1..127 intact rather than quietly repaired.
+template <typename SrcT>
+constexpr unsigned quantScale(SrcT v, unsigned maxValue) {
+    const unsigned long long m = srcMax<SrcT>();
+    return static_cast<unsigned>(
+        (static_cast<unsigned long long>(v) * maxValue + m / 2ULL) / m);
+}
+
+/// @brief The source values at which `quantScale` first reaches each output level.
+///
+/// **THE SCALE BECOMES A HANDFUL OF COMPARISONS, WHICH IS WHAT LETS IT VECTORISE.**
+/// `quantScale` is monotonic, so `q(v) = the number of levels k in 1..MaxValue with
+/// v >= threshold[k]`. At `N = 2` that is three byte compares and three subtracts for
+/// thirty-two pixels; a 256-entry lookup table cannot be done in a vector register at
+/// all. Built once per call, never per pixel.
+template <typename SrcT>
+inline void quantThresholds(unsigned maxValue, SrcT* out) {
+    unsigned k = 1;
+    const unsigned long long m = srcMax<SrcT>();
+    for (unsigned long long v = 0; v <= m && k <= maxValue; ++v) {
+        if (quantScale<SrcT>(static_cast<SrcT>(v), maxValue) >= k) {
+            out[k - 1] = static_cast<SrcT>(v);
+            ++k;
+        }
+    }
+    // A level the source cannot reach never fires; parking it above the maximum is
+    // the same statement as "no `v` satisfies it".
+    for (; k <= maxValue; ++k) out[k - 1] = static_cast<SrcT>(m);
+}
+
+
+
+
+/// @brief 8x8 bit-matrix transpose: bit (8r + c) moves to bit (8c + r).
+/// @note **Moved here out of an `#ifdef BINCV_WITH_OPENCV` (T5.9).** It is three
+///       delta-swaps of a `uint64_t` and has nothing to do with OpenCV, but it was
+///       declared beside the conversions that happened to use it -- so a core-only
+///       build could not reach the one primitive that makes N-bit packing cheap. The
+///       same shape of gap T5.6 found with `packRowCmp`.
+/// @note The pivot of every value/plane layout change (X-47). One call moves 8 pixels
+///       x 8 planes between the two layouts -- byte r holding plane r's bits in, byte c
+///       holding pixel c's value out -- so packing runs at ~3 ops per pixel for ALL
+///       planes instead of one bit test per (pixel, plane). Hacker's Delight 7-3; an
+///       involution, so both directions call the same function.
+/// @note Planes p >= N hold zero bytes on the way in, so value bits >= N are zero on
+///       the way out -- the N < 8 case needs no masking.
+/// @brief 8x8 bit-matrix transpose: bit (8r + c) moves to bit (8c + r).
+/// @note The pivot of QuantMat's cv::Mat conversions (X-47). One call moves 8
+///       pixels x 8 planes between the two layouts -- byte r holding plane r's
+///       bits in, byte c holding pixel c's value out -- so the conversion runs at
+///       ~3 ops per pixel for ALL planes instead of one bit test per (pixel,
+///       plane). Three delta-swaps (Hacker's Delight 7-3); an involution, so both
+///       conversion directions call the same function.
+/// @note Planes p >= N hold zero bytes on the way in, so value bits >= N are zero
+///       on the way out -- the N < 8 case needs no masking.
+inline uint64_t transpose8x8(uint64_t x) {
+    uint64_t t = (x ^ (x >> 7)) & 0x00AA00AA00AA00AAULL;
+    x ^= t ^ (t << 7);
+    t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCCULL;
+    x ^= t ^ (t << 14);
+    t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0ULL;
+    x ^= t ^ (t << 28);
+    return x;
+}
+
+
 /// @brief Mask of the bits in a row's LAST word that actually hold pixels.
 /// @note All ones when the row ends on a word boundary. This is the mask that
 ///       keeps the padding-bit invariant: `word & rowTailMask(width)` is the only

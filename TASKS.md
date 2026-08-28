@@ -3844,13 +3844,15 @@ are what that costs.
 The benchmark's `referencePreprocess` becomes a **control** — the OpenCV spelling binCV
 must match — rather than the thing binCV depends on.
 
-### T5.9 · Ingestion with a caller-defined quantisation policy · `PARTLY DONE`
+### T5.9 · Ingestion with a caller-defined quantisation policy · `DONE` (X-90)
 
-**Done:** the 1-bit policies — `PackRule{NonZero, GreaterThan, GreaterEqual}` and
-`packBitsIf` for an arbitrary predicate.
-**Still open:** the **N-bit** policies. `pack.hpp` writes `BinMatView` only, so
-`Scale` (`round(v · MaxValue / 255)`) and `Lut` still exist solely inside
-`QuantMat<N>::fromCVMat`, which needs OpenCV.
+**Shipped:** `packQuant<QuantRule::Scale, N>` and `packQuantWith<N>` in `ops/pack.hpp` —
+N bits per pixel, no OpenCV, AVX2 and NEON. **10.6× / 8.8× / 4.1×** over the portable
+path at N = 1/2/4 on x86 and **9.5× / 4.4× / 2.6×** on the device.
+
+**The rule has one definition now** (`impl::quantScale`), which `fromCVMat` also uses;
+the two paths are pinned equal at N in {1,2,3,4,8}. `transpose8x8` moved out of
+`#ifdef BINCV_WITH_OPENCV`, where a core-only build could not reach it.
 
 **Depends:** T5.6 (`packFrom8Bit` in core is the mechanism this parameterises).
 

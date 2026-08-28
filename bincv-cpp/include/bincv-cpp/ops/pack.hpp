@@ -46,6 +46,17 @@
 #include "../binMat.hpp"
 #include "../impl/kernel_util.hpp"
 
+// T5.9: the N-bit packer's vector path, selected at RUN TIME on x86 so the library's
+// baseline ISA is unchanged, and baseline on aarch64 where NEON always exists.
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+#define BINCV_PACKQUANT_AVX2 1
+#define BINCV_PACKQUANT_SIMD 1
+#include <immintrin.h>
+#elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+#define BINCV_PACKQUANT_SIMD 1
+#include <arm_neon.h>
+#endif
+
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
@@ -126,6 +137,236 @@ inline void packBits(const SrcT* src, size_t width, size_t height, size_t srcStr
     BINCV_ASSERT(src != nullptr && dst.ptr != nullptr,
                  "packBits: a non-empty image needs non-null pointers");
     packRows<R, SrcT, WordType>(src, width, height, srcStride, dst, 0, t);
+}
+
+// ===========================================================================
+// T5.9 -- N BITS PER PIXEL, WITHOUT OpenCV.
+//
+// Everything above writes ONE bit per pixel. At `N > 1` the only way into binCV was
+// `QuantMat<N>::fromCVMat`, which takes a `cv::Mat` -- so **N-bit ingestion required
+// linking OpenCV**, which is the one thing the core-only build exists to avoid.
+//
+// AND THE POLICY WAS HARD-CODED, TWICE, INCONSISTENTLY: `BinMat::fromCVMat` reads any
+// nonzero byte as 1, `QuantMat<N>::fromCVMat` scales with `round(v * MaxValue / 255)`.
+// A caller wanting a mid-grey split or a non-monotonic map had to convert and then
+// re-quantise -- two passes and an 8-bit intermediate that this library exists to
+// avoid.
+// ===========================================================================
+
+/// @brief How a source pixel becomes an N-bit value. **Compile-time.**
+enum class QuantRule {
+    Scale,   ///< `round(v * MaxValue / SrcMax)`. `QuantMat<N>::fromCVMat`'s rule, and
+             ///< the exact inverse of `toCVMatNormalized` (D-42).
+};
+
+namespace impl {
+
+} // namespace impl
+
+namespace impl {
+
+#if defined(BINCV_PACKQUANT_SIMD)
+
+#if defined(BINCV_PACKQUANT_AVX2)
+/// @brief Is AVX2 present? Asked once, not once per row.
+/// @brief Force the portable path, for the benchmark and the tests. **INTERNAL.**
+/// @note Not a tuning knob. It is how the vector path is held to BIT-EXACTNESS and how
+///       a benchmark can show it is actually RUNNING -- X-89 shipped a vector block
+///       that was compiled out and measured three "improvements" against it before the
+///       kernel was timed in isolation and found not to respond to `-mavx2`.
+inline bool& packQuantSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
+inline bool hasPackQuantSimd() {
+    static const bool kYes = __builtin_cpu_supports("avx2");
+    return kYes && packQuantSimdEnabled();
+}
+
+/// @brief Thirty-two pixels quantised and transposed into N plane words. **INTERNAL.**
+/// @param bits `out[p]` receives plane `p`'s thirty-two bits, LSB = lowest x, which is
+///        `bitMask(x) = 1 << (x % WordBits)` -- the same convention X-71 relies on, so
+///        `movemask_epi8`'s result IS the word with no shuffle.
+template <size_t N>
+__attribute__((target("avx2"))) inline void quantMask32(const uint8_t* src,
+                                                        const uint8_t* thresholds,
+                                                        unsigned maxValue, uint32_t* bits) {
+    const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src));
+    // q = the number of thresholds this pixel clears. `cmpeq(max(v,t), v)` is `v >= t`
+    // on UNSIGNED bytes -- `cmpgt_epi8` is signed and would invert above 127.
+    __m256i q = _mm256_setzero_si256();
+    for (unsigned k = 0; k < maxValue; ++k) {
+        const __m256i tv = _mm256_set1_epi8(static_cast<char>(thresholds[k]));
+        const __m256i ge = _mm256_cmpeq_epi8(_mm256_max_epu8(v, tv), v);
+        q = _mm256_sub_epi8(q, ge);   // a set lane is -1, so subtracting adds one
+    }
+    for (size_t p = 0; p < N; ++p) {
+        const __m256i sel = _mm256_set1_epi8(static_cast<char>(1u << p));
+        const __m256i m = _mm256_cmpeq_epi8(_mm256_and_si256(q, sel), sel);
+        bits[p] = static_cast<uint32_t>(_mm256_movemask_epi8(m));
+    }
+}
+#else
+/// @brief Force the portable path; see the AVX2 form above.
+inline bool& packQuantSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
+inline bool hasPackQuantSimd() { return packQuantSimdEnabled(); }
+
+/// @brief The same, without a move-mask. **INTERNAL.**
+/// @note aarch64 has none, so AND with per-lane bit weights and let pairwise adds fold
+///       sixteen byte masks into sixteen bits -- X-71's substitute, unchanged.
+template <size_t N>
+inline void quantMask32(const uint8_t* src, const uint8_t* thresholds, unsigned maxValue,
+                        uint32_t* bits) {
+    static const uint8_t kW[16] = {1, 2, 4, 8, 16, 32, 64, 128,
+                                   1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8x16_t weights = vld1q_u8(kW);
+    for (size_t p = 0; p < N; ++p) bits[p] = 0;
+    for (int half = 0; half < 2; ++half) {
+        const uint8x16_t v = vld1q_u8(src + static_cast<size_t>(half) * 16);
+        uint8x16_t q = vdupq_n_u8(0);
+        for (unsigned k = 0; k < maxValue; ++k) {
+            // NEON's compares ARE unsigned, so no bias is needed here.
+            q = vsubq_u8(q, vcgeq_u8(v, vdupq_n_u8(thresholds[k])));
+        }
+        for (size_t p = 0; p < N; ++p) {
+            const uint8x16_t sel = vdupq_n_u8(static_cast<uint8_t>(1u << p));
+            const uint8x16_t m = vandq_u8(vceqq_u8(vandq_u8(q, sel), sel), weights);
+            const uint32_t lo = vaddv_u8(vget_low_u8(m));
+            const uint32_t hi = vaddv_u8(vget_high_u8(m));
+            bits[p] |= (lo | (hi << 8)) << (half * 16);
+        }
+    }
+}
+#endif
+
+#endif  // BINCV_PACKQUANT_SIMD
+
+}  // namespace impl
+
+/// @brief Packs a pixel array to **N bits per pixel**, no OpenCV. **API TIER 3.**
+///
+/// @tparam R The quantisation rule, at compile time -- [X-72](../../../EXPERIMENTS.md)
+///         measured a runtime flag in a hot loop costing 17%, and this one is hotter.
+/// @param dst The N destination planes, LSB first, exactly `QuantMat<N>::plane(i)`.
+///        **Views, not the container** (CLAUDE.md): a kernel must not care how its
+///        arguments were allocated.
+///
+/// @note `Scale`'s defaults reproduce `QuantMat<N>::fromCVMat` **bit for bit**, which
+///       `test_pack.cpp` pins against it. That rule is load-bearing: it is
+///       `toCVMatNormalized`'s exact inverse.
+/// @note Each destination plane's padding bits are zero on return.
+/// @note Never allocates and never throws.
+template <QuantRule R, size_t N, typename SrcT, typename WordType>
+inline void packQuant(const SrcT* src, size_t width, size_t height, size_t srcStride,
+                      BinMatView<WordType> (&dst)[N]) {
+    static_assert(N >= 1 && N <= 8, "packQuant: N outside QuantMat's supported range");
+    for (size_t p = 0; p < N; ++p) {
+        BINCV_ASSERT(width == dst[p].width && height == dst[p].height,
+                     "packQuant: src and every plane must have the same dimensions");
+        BINCV_ASSERT(impl::strideCoversARow<WordType>(dst[p].width, dst[p].height,
+                                                      dst[p].stride),
+                     "packQuant: a plane's stride must cover a whole row");
+    }
+    if (width == 0 || height == 0) return;
+    BINCV_ASSERT(src != nullptr, "packQuant: a non-empty image needs a non-null pointer");
+
+    constexpr unsigned kMaxValue = (1u << N) - 1u;
+    SrcT thresholds[kMaxValue];
+    impl::quantThresholds<SrcT>(kMaxValue, thresholds);
+
+    constexpr size_t kBits = impl::bitsPerWord<WordType>();
+    const size_t words = impl::minRowWords<WordType>(width);
+    static_assert(R == QuantRule::Scale, "packQuant: unknown rule");
+
+    for (size_t y = 0; y < height; ++y) {
+        const SrcT* rowIn = src + y * srcStride;
+        WordType* out[N];
+        for (size_t p = 0; p < N; ++p) {
+            out[p] = dst[p].row(y);
+            for (size_t i = 0; i < words; ++i) out[p][i] = 0;
+        }
+        size_t x = 0;
+#if defined(BINCV_PACKQUANT_SIMD)
+        // THE SCALE IS A HANDFUL OF COMPARISONS AND THE TRANSPOSE IS A MOVE-MASK.
+        // `quantScale` is monotonic, so the value is the number of thresholds a pixel
+        // clears -- `MaxValue` byte compares, three at N = 2. Extracting plane p is then
+        // one AND, one compare and one move-mask per plane, which is X-71's trick with
+        // the comparison replaced. A 256-entry lookup table, which is what
+        // `fromCVMat` uses, cannot be done in a vector register at all.
+        if constexpr (sizeof(SrcT) == 1 && sizeof(WordType) == 4 && kMaxValue <= 15) {
+            if (impl::hasPackQuantSimd()) {
+                for (; x + 32 <= width; x += 32) {
+                    uint32_t bits[N];
+                    impl::quantMask32<N>(reinterpret_cast<const uint8_t*>(rowIn + x),
+                                         reinterpret_cast<const uint8_t*>(thresholds),
+                                         kMaxValue, bits);
+                    for (size_t p = 0; p < N; ++p) out[p][x / kBits] = bits[p];
+                }
+            }
+        }
+#endif
+        // EIGHT PIXELS AND ALL N PLANES PER TRANSPOSE. `transpose8x8` turns a byte per
+        // pixel into a bit per plane in three delta-swaps, so the portable path is ~3
+        // operations per pixel for every plane rather than one bit test per (pixel,
+        // plane). It is also the tail of the vector path above.
+        for (; x < width; x += 8) {
+            const size_t n = (width - x < 8) ? (width - x) : size_t{8};
+            uint64_t m = 0;
+            for (size_t i = 0; i < n; ++i) {
+                m |= static_cast<uint64_t>(impl::quantScale<SrcT>(rowIn[x + i], kMaxValue))
+                     << (8 * i);
+            }
+            const uint64_t tr = impl::transpose8x8(m);
+            // A group of 8 never straddles a word: every WordType's width is a
+            // multiple of 8.
+            const size_t wi = x / kBits;
+            const size_t shift = x % kBits;
+            for (size_t p = 0; p < N; ++p) {
+                const uint64_t b = (tr >> (8 * p)) & 0xFFu;
+                out[p][wi] = static_cast<WordType>(out[p][wi] |
+                                                   static_cast<WordType>(b << shift));
+            }
+        }
+    }
+}
+
+/// @brief `packQuant` with an arbitrary per-pixel map. **API TIER 3.**
+/// @param map Anything callable as `unsigned(SrcT)`, returning `0..(1 << N) - 1`. A
+///        256-entry lookup table is `[&](SrcT v) { return lut[v]; }`.
+/// @note **Slower on purpose**, for the reason `packBitsIf` is: a map the compiler
+///       cannot see is a map the vector path cannot use. Reach for `packQuant` first.
+/// @note Values above `(1 << N) - 1` are a programming error; the extra bits are
+///       dropped rather than silently corrupting a neighbouring plane.
+template <size_t N, typename SrcT, typename WordType, typename Map>
+inline void packQuantWith(const SrcT* src, size_t width, size_t height, size_t srcStride,
+                          BinMatView<WordType> (&dst)[N], Map map) {
+    static_assert(N >= 1 && N <= 8, "packQuantWith: N outside QuantMat's supported range");
+    if (width == 0 || height == 0) return;
+    constexpr size_t kBits = impl::bitsPerWord<WordType>();
+    constexpr unsigned kMaxValue = (1u << N) - 1u;
+    const size_t words = impl::minRowWords<WordType>(width);
+    for (size_t y = 0; y < height; ++y) {
+        const SrcT* rowIn = src + y * srcStride;
+        WordType* out[N];
+        for (size_t p = 0; p < N; ++p) {
+            out[p] = dst[p].row(y);
+            for (size_t i = 0; i < words; ++i) out[p][i] = 0;
+        }
+        for (size_t x = 0; x < width; ++x) {
+            const unsigned q = static_cast<unsigned>(map(rowIn[x])) & kMaxValue;
+            if (q == 0) continue;
+            const size_t w = x / kBits;
+            const WordType bit = static_cast<WordType>(WordType{1} << (x % kBits));
+            for (size_t p = 0; p < N; ++p) {
+                if ((q >> p) & 1u) out[p][w] = static_cast<WordType>(out[p][w] | bit);
+            }
+        }
+    }
 }
 
 /// @brief `packBits` with an arbitrary per-pixel predicate. **API TIER 3.**

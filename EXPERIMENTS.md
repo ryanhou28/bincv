@@ -12021,6 +12021,69 @@ code is running. **A kernel that does not respond to its own ISA flag is not usi
 
 ---
 
+### X-90 · T5.9: N-bit ingestion without OpenCV · `DONE — SHIPPED`
+
+**AT `N > 1` THE ONLY WAY INTO binCV WAS `QuantMat<N>::fromCVMat`, WHICH TAKES A
+`cv::Mat`.** So the core-only build — the whole embedded claim — could receive a **1-bit**
+frame (T5.6's `packBits`, `edgeThreshold`, `readPgm`) and **could not receive a 2-bit
+one**. `packQuant` closes that.
+
+#### THE RULE HAD TO NOT MOVE, WHICH IS THE HARD PART
+
+`round(v · MaxValue / 255)` is not an arbitrary choice: it is `toCVMatNormalized`'s
+**exact inverse**, and [D-42](ARCHITECTURE.md#8-design-decisions) records a deliberate
+divergence from OpenCV at bytes 1..127 inside it. Writing it out a second time in core
+would have been a load-bearing expression with two spellings and no test between them.
+
+**So it now has ONE definition** — `impl::quantScale` in `impl/kernel_util.hpp` — and
+`fromCVMat` builds its lookup table from it. `Pack.QuantScaleReproducesFromCVMatsRule`
+pins the two paths equal at **N in {1, 2, 3, 4, 8}: 0 pixels differ.**
+
+**And `transpose8x8` was locked inside `#ifdef BINCV_WITH_OPENCV`** — three delta-swaps
+of a `uint64_t`, nothing to do with OpenCV, declared beside the conversions that happened
+to use it. **A core-only build could not reach the one primitive that makes N-bit packing
+cheap.** The same shape of gap [T5.6](TASKS.md) found with `packRowCmp`. Moved to
+`kernel_util.hpp`.
+
+#### THE SCALE BECOMES COMPARISONS, WHICH IS WHY IT VECTORISES
+
+`quantScale` is monotonic, so **the value is the number of thresholds a pixel clears** —
+`MaxValue` byte compares, three at `N = 2`. Extracting plane `p` is then one AND, one
+compare and one **move-mask**, which is [X-71](#x-71)'s trick with the comparison
+swapped. `cmpeq(max(v,t), v)` is `v >= t` on unsigned bytes; `cmpgt_epi8` is signed and
+would invert above 127. aarch64 has no move-mask and folds sixteen byte masks with bit
+weights, X-71's substitute unchanged.
+
+**A 256-entry lookup table — which is what `fromCVMat` uses — cannot be done in a vector
+register at all**, which is why the fast policy is a compile-time `QuantRule` and the
+arbitrary map is a separate function.
+
+| 752×480, 10 interleaved rounds, minimum | | x86 | device |
+|---|---|---|---|
+| **N = 1** | vector vs portable | **10.60×** | **9.50×** |
+| **N = 2** | | **8.81×** | **4.35×** |
+| **N = 4** | | **4.08×** | **2.60×** |
+| **N = 8** | | **1.01×** | **1.00×** |
+
+**N = 8 IS THE LIVENESS CHECK AND IT READS 1.00× EXACTLY AS PREDICTED.** `MaxValue` is
+255 there, above the gate, so both arms take the portable transpose. A vector arm that
+reports a speedup where its own gate excludes it is not running the code you think it is
+— which is precisely how [X-89](#x-89) shipped a block that had been compiled out.
+
+`packQuantWith` — the arbitrary map — is **0.06–0.34×**, i.e. 3–17× slower, and says so
+in its docstring. That is the documented cost of a predicate the compiler cannot see.
+
+**Portable path:** `transpose8x8`, eight pixels and **all N planes** per call — ~3
+operations per pixel for every plane rather than one bit test per (pixel, plane). It is
+also the tail of the vector path, so a width that is not a multiple of 32 costs nothing
+extra.
+
+**Method:** `benchmark/pack_quant_benchmark.cpp`, which **links no OpenCV** — that being
+the claim it measures. `impl::packQuantSimdEnabled()` switches the arms.
+`check_arm_syntax.sh` watched to fail on the new NEON region before it was trusted.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
