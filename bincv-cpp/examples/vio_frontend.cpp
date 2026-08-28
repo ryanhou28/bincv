@@ -189,11 +189,13 @@ int main(int argc, char** argv) {
     std::vector<Track> tracks;
     std::vector<Point2f> src, dst;
     std::vector<uint8_t> status;
-    // Sized from the NMS pool, NOT from maxCorners. Getting this wrong truncates
-    // the pool BEFORE the spacing filter runs, so the corners that survive are the
-    // first ones found rather than the strongest -- a silent quality loss that
-    // looks like a binCV defect. `candidatesTruncated` is the only way a caller
-    // learns of it (ops/corner.hpp), and this program checks it every frame.
+    // Sized from the NMS pool, NOT from maxCorners. Getting this wrong truncates the
+    // pool BEFORE the spacing filter runs: the `capacity` STRONGEST survivors are kept
+    // and the rest are dropped, so the returned count is a lower bound on what the
+    // reference would have produced -- a dropped survivor might have been accepted by
+    // the spacing filter after the ranked ones ran out. `candidatesTruncated` is the
+    // only way a caller learns of it (the capacity contract on `selectGoodFeatures`),
+    // and this program checks it every frame.
     std::vector<bincv::Corner> cand(static_cast<size_t>(w) * static_cast<size_t>(h) / 2);
     int nextId = 0;
 
@@ -263,7 +265,7 @@ int main(int argc, char** argv) {
         if (static_cast<int>(tracks.size()) < lowWater) {
             t0 = std::chrono::steady_clock::now();
             bincv::ResponseMap ringView{fe.ring.data(), static_cast<size_t>(w),
-                                        bincv::kResponseRingRows};
+                                        bincv::kResponseRingRows, static_cast<size_t>(w)};
             const bincv::CornerResult r = bincv::goodFeaturesToTrackStreaming<W>(
                 fe.dx0, fe.dy0, gf, ringView, cand.data(), cand.size());
             msDetect += msSince(t0);
@@ -316,10 +318,11 @@ int main(int argc, char** argv) {
     std::printf("  NMS pool peak         : %zu survivors ranked (capacity %zu)%s\n", maxRanked,
                 cand.size(), truncated ? "  <-- TRUNCATED, see below" : "");
     if (truncated) {
-        std::printf("  *** %zu detections truncated the NMS pool. The corners kept are then the\n"
-                    "      FIRST found rather than the strongest, because truncation happens\n"
-                    "      BEFORE the spacing filter. Size the pool from candidatesRanked, not\n"
-                    "      from maxCorners. ***\n", truncated);
+        std::printf("  *** %zu detections truncated the NMS pool. The pool keeps the STRONGEST\n"
+                    "      survivors it can hold, so the loss is the ones dropped before the\n"
+                    "      spacing filter ever saw them: the count returned is a LOWER BOUND on\n"
+                    "      the reference\'s. Size the pool from candidatesRanked, not from\n"
+                    "      maxCorners. ***\n", truncated);
     }
 
     std::printf("\n--- COST PER FRAME ---\n");

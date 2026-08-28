@@ -397,6 +397,21 @@ struct ResponseMap {
     size_t height = 0;      ///< number of rows
     size_t stride = 0;      ///< distance between rows, in floats
 
+    ResponseMap() = default;
+    /// @note **FOUR ARGUMENTS, AND THE CONSTRUCTOR EXISTS SO THREE WILL NOT COMPILE.**
+    ///       As a bare aggregate this type accepted `{data, width, height}` and left
+    ///       `stride` zero, which makes `row(y)` return row 0 for every `y` -- every
+    ///       row of a multi-row map aliased, silently. The `BINCV_ASSERT` in `row()`
+    ///       catches it in a checked build and is a NO-OP in release, so a release
+    ///       binary ran on garbage and looked like it worked.
+    ///
+    ///       **A binCV user hit this**, in `examples/vio_frontend.cpp`, which had
+    ///       exactly that three-argument call; only their checked build caught it.
+    ///       `ConstResponseMap` already had this constructor and so was never
+    ///       vulnerable -- the two views disagreeing is what left the hole.
+    ResponseMap(float* data_, size_t width_, size_t height_, size_t stride_)
+        : data(data_), width(width_), height(height_), stride(stride_) {}
+
     bool empty() const { return data == nullptr || width == 0 || height == 0; }
 
     float* row(size_t y) {

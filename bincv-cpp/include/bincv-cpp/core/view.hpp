@@ -24,7 +24,7 @@ template <typename WordType_> struct BinMatConstView;
 /// @note Views manage no lifetime whatsoever. The referenced memory belongs to
 ///       something else -- a Storage, a caller's buffer, a sensor DMA region --
 ///       and must outlive the view.
-/// @note Aggregate: construct with BinMatView<W>{ptr, width, height, stride}.
+/// @note Construct with BinMatView<W>{ptr, width, height, stride} -- all four.
 template <typename WordType_>
 struct BinMatView {
     static_assert(std::is_same<WordType_, typename std::remove_cv<WordType_>::type>::value,
@@ -47,6 +47,24 @@ struct BinMatView {
     size_t width = 0;         ///< row length in PIXELS
     size_t height = 0;        ///< number of rows in PIXELS
     size_t stride = 0;        ///< distance between rows in WORDS
+
+    BinMatView() = default;
+    /// @note **FOUR ARGUMENTS, AND THE CONSTRUCTOR EXISTS SO THREE WILL NOT COMPILE.**
+    ///       As a bare aggregate this type accepted `{ptr, width, height}` and left
+    ///       `stride` zero, which makes every row of a multi-row view alias row 0. The
+    ///       `row()` precondition below catches it in a checked build and is a **no-op
+    ///       in release**, so a release binary runs on garbage and looks like it works.
+    ///
+    ///       **That is not hypothetical.** A binCV user hit exactly this on
+    ///       `ResponseMap`, whose three-argument construction in
+    ///       `examples/vio_frontend.cpp` inflated the detector's NMS survivor count
+    ///       threefold; only their checked build caught it. `ResponseMap` is fixed the
+    ///       same way, and this type had the identical hole.
+    ///
+    ///       A debug-only assertion is the right guard for an index; it is the wrong
+    ///       guard for a field a caller can silently fail to supply.
+    BinMatView(WordType* ptr_, size_t width_, size_t height_, size_t stride_)
+        : ptr(ptr_), width(width_), height(height_), stride(stride_) {}
 
     /// @brief True if the view addresses no pixels.
     bool empty() const { return ptr == nullptr || width == 0 || height == 0; }
@@ -93,7 +111,7 @@ struct BinMatView {
 ///       These are two distinct types rather than BinMatView<const WordType>
 ///       (D-9): templating on constness fights the unsigned-integral constraint
 ///       on WordType and produces unreadable diagnostics.
-/// @note Aggregate: construct with BinMatConstView<W>{ptr, width, height, stride}.
+/// @note Construct with BinMatConstView<W>{ptr, width, height, stride} -- all four.
 template <typename WordType_>
 struct BinMatConstView {
     static_assert(std::is_same<WordType_, typename std::remove_cv<WordType_>::type>::value,
@@ -116,6 +134,24 @@ struct BinMatConstView {
     size_t width = 0;               ///< row length in PIXELS
     size_t height = 0;              ///< number of rows in PIXELS
     size_t stride = 0;              ///< distance between rows in WORDS
+
+    BinMatConstView() = default;
+    /// @note **FOUR ARGUMENTS, AND THE CONSTRUCTOR EXISTS SO THREE WILL NOT COMPILE.**
+    ///       As a bare aggregate this type accepted `{ptr, width, height}` and left
+    ///       `stride` zero, which makes every row of a multi-row view alias row 0. The
+    ///       `row()` precondition below catches it in a checked build and is a **no-op
+    ///       in release**, so a release binary runs on garbage and looks like it works.
+    ///
+    ///       **That is not hypothetical.** A binCV user hit exactly this on
+    ///       `ResponseMap`, whose three-argument construction in
+    ///       `examples/vio_frontend.cpp` inflated the detector's NMS survivor count
+    ///       threefold; only their checked build caught it. `ResponseMap` is fixed the
+    ///       same way, and this type had the identical hole.
+    ///
+    ///       A debug-only assertion is the right guard for an index; it is the wrong
+    ///       guard for a field a caller can silently fail to supply.
+    BinMatConstView(const WordType* ptr_, size_t width_, size_t height_, size_t stride_)
+        : ptr(ptr_), width(width_), height(height_), stride(stride_) {}
 
     /// @brief True if the view addresses no pixels.
     bool empty() const { return ptr == nullptr || width == 0 || height == 0; }

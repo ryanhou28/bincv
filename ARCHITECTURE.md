@@ -4188,6 +4188,39 @@ term (−4%), keypoint batching (0.85×). Going further needs a different algori
 is [E-7](#9-open-questions-and-planned-experiments)'s depth-versus-accuracy question and
 not a kernel question.
 
+### D-72: a view's stride is a constructor argument, not a defaulted field
+
+**A binCV user hit this and reported it.** `ResponseMap` was a bare aggregate, so
+`{data, width, height}` compiled and left `stride` zero — and `row(y)` then returns row 0
+for **every** `y`. `examples/vio_frontend.cpp` had exactly that call.
+
+**The guard that existed was the wrong kind.** `row()` asserts a non-zero stride on a
+multi-row view, and `BINCV_ASSERT` is a **no-op in release** — so a release binary ran on
+a response map whose three ring rows all aliased, and looked like it worked. Only the
+user's checked build caught it. Reproduced here: the example reported **70 413** NMS
+survivors with the bug against **23 816** without, a threefold inflation (the user
+measured 73 306 → 25 131 on their own frames).
+
+**A debug-only assertion is the right guard for an index. It is the wrong guard for a
+field a caller can silently fail to supply.** `ResponseMap`, `BinMatView` and
+`BinMatConstView` now declare a four-argument constructor, so three arguments is a
+**compile error** in every configuration. All twenty-three construction sites in the
+repository already passed four; nothing else changed.
+
+> **`ConstResponseMap` ALREADY HAD THIS CONSTRUCTOR AND WAS NEVER VULNERABLE.** The hole
+> was the mutable twin not matching it — which is the argument for
+> [D-9](#d-9-two-view-types-not-a-const-templated-one)'s two types being kept in step,
+> not against them.
+
+**The second half of the report was a documentation defect, and the more expensive one.**
+The example claimed a truncated pool keeps "the first ones found rather than the
+strongest". `selectGoodFeatures` keeps a bounded max-heap under `CornerStronger` whose
+root is the **weakest retained**, so it keeps the `capacity` **strongest** — as its
+capacity contract says, and as `Corner.CapacityContract` already pinned with a test that
+notes checking `corners[0]` alone is insufficient. **The code, the contract and the test
+all agreed; only the example's comment was wrong**, and it cost the user an 8× oversized
+buffer. Both instances corrected.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
