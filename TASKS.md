@@ -3602,7 +3602,12 @@ situations and lumping them together was a reporting failure:
 
 ---
 
-### T5.1 · Threading, as an API rather than a benchmark trick · `TODO`
+### T5.1 · Threading, as an API rather than a benchmark trick · `DONE` (X-65)
+
+**Shipped:** `core/parallel.hpp` (customisation point, serial default) and
+`threads/pool.hpp` (`ThreadPool::install()`, kept OUT of core because core is
+allocation-free and `-fno-exceptions`). `trackOneLevel` splits over the point array.
+Device `track` 1.051 → 0.568 ms at four threads.
 
 **Depends:** [X-65](EXPERIMENTS.md) (done — Band A: 2.60× on `track` at T=4, peak RSS
 flat to 0.07%, bit-exact on every one of 300 frames).
@@ -3638,7 +3643,7 @@ measured.
 
 ---
 
-### T5.2 · The staged NEON variants — finish what X-72 reverted · `TODO`
+### T5.2 · The staged NEON variants — finish what X-72 reverted · `DONE` (X-74 → D-65)
 
 **Depends:** T5.1 is independent; do them in either order. [X-72](EXPERIMENTS.md)
 measured **2.13× on the reference device**, up from 1.85×.
@@ -3668,7 +3673,7 @@ run, then `verify.sh`.
 
 ---
 
-### T5.3 · RE-BASELINE the AVX2 keypoint batch before writing it · `TODO`
+### T5.3 · RE-BASELINE the AVX2 keypoint batch before writing it · `DONE` — fed T5.16/X-79
 
 **Depends:** T5.2 (which changes the baseline again).
 
@@ -3705,7 +3710,11 @@ and `bitslice`. A binary-frame **VIO frontend** is covered and validated end to 
 
 **What is not covered is SLAM**, and the gap is a single family.
 
-### T5.4 · Binary descriptors and Hamming matching · `TODO — ASK BEFORE STARTING`
+### T5.4 · Binary descriptors and Hamming matching · `DONE` (X-76)
+
+**Shipped:** `ops/descriptor.hpp` — BRIEF pattern generation, `computeBrief`,
+`hammingDistance`, `matchDescriptors` with an integer-percentage ratio test.
+describe **5.2× x86 / 10.7× device**, matching **4.7× / 1.95×**.
 
 **THE MOST binCV-NATIVE OPERATION IN COMPUTER VISION, AND binCV DOES NOT HAVE IT.**
 BRIEF and ORB descriptors **are bit strings**; matching them is `popcount(a ^ b)`. A
@@ -3735,7 +3744,7 @@ table is off limits. With T6.1 done, shipping it (plus centroid orientation) mak
 binCV's descriptors interchangeable with `cv::ORB`'s, which is worth considerably
 more than a pattern of our own.
 
-### T5.5 · FAST corner detection · `TODO`
+### T5.5 · FAST corner detection · `DONE` (X-76, X-77) — and extended by T5.17
 
 **Depends:** T5.4 — they ship together or not at all. binCV already detects with
 Shi-Tomasi (`cornerMinEigenVal` / `goodFeaturesToTrack`); FAST without descriptors is a
@@ -3763,7 +3772,10 @@ sentence are weaker than the middle**, and a user meets the ends first.
 | `QuantMat<N>::fromCVMat`, N > 1 | 8-bit → N bits | 8×8 transpose, ~4.3 ops/px, **not vectorised** |
 | `toCVMat` / `toCVMatNormalized` | bits → 8-bit | **per-pixel loop**, and carries a `@todo` asking how to do it efficiently |
 
-### T5.6 · A core-only way to get pixels in · `TODO — this is a gap, not an optimisation`
+### T5.6 · A core-only way to get pixels in · `DONE`
+
+**Shipped:** `ops/pack.hpp` — `packRows` / `packBits` / `packBitsIf`, AVX2 and NEON,
+no OpenCV. The gap it names (a core-only build had no way to receive an image) is closed.
 
 **EVERY INGESTION PATH IS BEHIND `BINCV_WITH_OPENCV`.** `fromCVMat` and
 `bincv::threshold` both take a `cv::Mat`, and there is **no entry point that accepts
@@ -3783,7 +3795,7 @@ one place to optimise.
 **This subsumes part of T5.7** — do it first, because optimising four separate
 conversion paths before collapsing them would be optimising the wrong thing.
 
-### T5.7 · Optimise the rest of the conversion surface · `TODO`
+### T5.7 · Optimise the rest of the conversion surface · `DONE` (X-71 → E-40, D-62)
 
 **Depends:** T5.6 (which decides how many paths there are to optimise).
 
@@ -3807,7 +3819,13 @@ branchless scalar arm at **10.3× on x86 and 5.18× on aarch64** with no intrins
 all — that arm is what a target with no vector unit gets, and it did most of the work
 on both.
 
-### T5.8 · binCV ships the sensor stage · `TODO`
+### T5.8 · binCV ships the sensor stage · `TODO — THE LAST SUBSTANTIVE PHASE 5 ITEM`
+
+**The kernels it needs now exist** (T5.10 `medianWide`, T5.11 `edgeThreshold`, both
+bit-exact against the reference). What remains is the WIRING: `frontend_sequence` and
+the `vio_frontend` example still run the preprocessing in OpenCV for **both** sides, so
+binCV's own edge filter is tested but not *used*, and the frontend numbers do not include
+it. Making OpenCV's spelling the control is the point of the task.
 
 **THE DECISION IS MADE: binCV PROVIDES IT.**
 [ARCHITECTURE §7.3](ARCHITECTURE.md#73-edge-filter--threshold) already places the edge
@@ -3820,7 +3838,13 @@ are what that costs.
 The benchmark's `referencePreprocess` becomes a **control** — the OpenCV spelling binCV
 must match — rather than the thing binCV depends on.
 
-### T5.9 · Ingestion with a caller-defined quantisation policy · `TODO`
+### T5.9 · Ingestion with a caller-defined quantisation policy · `PARTLY DONE`
+
+**Done:** the 1-bit policies — `PackRule{NonZero, GreaterThan, GreaterEqual}` and
+`packBitsIf` for an arbitrary predicate.
+**Still open:** the **N-bit** policies. `pack.hpp` writes `BinMatView` only, so
+`Scale` (`round(v · MaxValue / 255)`) and `Lut` still exist solely inside
+`QuantMat<N>::fromCVMat`, which needs OpenCV.
 
 **Depends:** T5.6 (`packFrom8Bit` in core is the mechanism this parameterises).
 
@@ -3852,7 +3876,10 @@ via `cmpeq`/`cmpgt`. `Lut` cannot vectorise that way and takes the portable path
 **Make the fast policies compile-time so the branch never enters the loop**, exactly as
 [X-72](EXPERIMENTS.md) found a runtime flag cost 17% elsewhere.
 
-### T5.10 · Median filter with a configurable neighbourhood · `TODO`
+### T5.10 · Median filter with a configurable neighbourhood · `DONE`
+
+**Shipped:** `ops/medianWide.hpp`, bit-exact against the reference
+`three_pix_median_filter` — 0 of 1219 pixels differ.
 
 **The reference has TWO patterns and binCV implements one of them, for one input type.**
 `SEAL/src/temporal_processing/denoise.cpp` carries `three_pix_median_filter` — the
@@ -3875,7 +3902,11 @@ asymmetric L, `p1` above / `p2` centre / `p3` right, computed as
 **Tier 3, and it must not borrow `medianBlur`'s name** — the neighbourhood is not
 OpenCV's square and the semantics differ.
 
-### T5.11 · The gradient-threshold edge extractor · `TODO`
+### T5.11 · The gradient-threshold edge extractor · `DONE`
+
+**Shipped:** `ops/edge.hpp` — all twelve combinations of `EdgeCombine{Or,And}` ×
+`EdgeRelation{Ge,Gt}` × `EdgeSpatial{Wide,Forward,Backward}`, bit-exact against
+`rl_fast_edge_filter_wide` (0 of 3367 differ).
 
 **Read out of the reference, not inferred.** `rl_fast_edge_filter_wide`
 (`SEAL/src/temporal_processing/edge_filter.cpp`):
@@ -3926,7 +3957,9 @@ borrowing a name here.
 compare, `|`, two `setTo` calls, all in `CV_32F` over a full 8-bit image. binCV should
 win this one by a wide margin, and if it does not, that is the finding.
 
-### T5.12 · Input paths for systems with no OpenCV · `TODO`
+### T5.12 · Input paths for systems with no OpenCV · `DONE`
+
+**Shipped:** `io/pnm.hpp` (`readPgmHeader`, `readPgm`) over T5.6's packer.
 
 **T5.6's `packFrom8Bit` assumes a WHOLE 8-BIT FRAME ALREADY IN MEMORY.** That is one
 embedded case and not the general one.
@@ -3946,7 +3979,9 @@ embedded case and not the general one.
    [EXPERIMENTS.md](EXPERIMENTS.md) comes from a harness that calls `cv::imread`. A
    core-only user cannot reproduce a single one of them.
 
-### T5.13 · Output paths, including without OpenCV · `TODO`
+### T5.13 · Output paths, including without OpenCV · `DONE`
+
+**Shipped:** `unpackTo8Bit` and `writePgm` in `ops/pack.hpp`.
 
 **`toCVMat` / `toCVMatNormalized` are the ONLY way out, they need OpenCV, and they are
 the slowest thing in the library** (per-pixel loop, T5.7).
@@ -4014,7 +4049,10 @@ core-only demonstrable for the first time. Add `system` when an evaluation user 
 **Add `stb` only if someone actually has no package manager**, because it is the one
 option that puts a CVE-bearing parser inside binCV's release.
 
-### T5.15 · Source bit depths: 8-bit is not enough coming in, and is always enough going out · `TODO`
+### T5.15 · Source bit depths: 8-bit is not enough coming in, and is always enough going out · `DONE`
+
+**Shipped:** everything in `ops/pack.hpp` is templated on `SrcT` — `uint8_t` and
+`uint16_t`, which covers 10-, 12-, 14- and 16-bit sensors.
 
 **THE ASYMMETRY IS REAL AND IT FALLS OUT OF `N <= 8`.**
 `QuantMat` asserts `N >= 1 && N <= 8`, so `MaxValue` is at most **255**. **Nothing binCV
