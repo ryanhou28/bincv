@@ -4110,8 +4110,12 @@ the score's two spellings **cross at ~1% corner density**, so the AVX2 path choo
 **per chunk** — never worse, up to **1.42×** better. **Not on NEON**, where the same
 change cost the device 2.36× → 2.10×. Identical output across all three arms.
 
-**Still open as [E-45](ARCHITECTURE.md#9-open-questions-and-planned-experiments):**
-the LK keypoint batch (T5.16) is **x86 only** — aarch64 got nothing from it.
+**aarch64 followed up in [X-82](EXPERIMENTS.md)/[X-83](EXPERIMENTS.md):** the device
+was **never overtaken** (3.17× against x86's 2.81×; D-65's 2.48× is stale), and a
+per-stage profile found `gradientCovariance` with **no NEON path at all** at 27.5% of
+device `track`. Giving it one moved the device headline **3.17× → 3.43×**
+([D-68](ARCHITECTURE.md#8-design-decisions)). **[E-45](ARCHITECTURE.md#9-open-questions-and-planned-experiments)
+— porting the keypoint batch to NEON — remains open and unmeasured.**
 
 ### T5.16 · The AVX2 keypoint batch — the x86 optimisation · `DONE` (X-78, X-79 → D-66)
 

@@ -245,6 +245,9 @@
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
+#ifdef BINCV_LK_STAGE_TIMING
+#include <chrono>
+#endif
 
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
 #include <arm_neon.h>
@@ -1033,7 +1036,14 @@ inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
 
     uint32x4_t totX = vdupq_n_u32(0), oppX = vdupq_n_u32(0);
     uint32x4_t totY = vdupq_n_u32(0), oppY = vdupq_n_u32(0);
-    long long selfTotX = 0, selfOppX = 0, selfTotY = 0, selfOppY = 0;
+    // X-83: THE PREVIOUS-FRAME TERM IN LANES TOO. It needs exactly four counts per row
+    // -- `self & magX`, that AND the sign, and the same pair for Y -- which is one
+    // vector. This used to be FOUR `popcountWord` calls per row, and
+    // [D-6](../../../ARCHITECTURE.md) is the rule that says why that is expensive:
+    // aarch64 has no scalar popcount, so each one is `fmov` in, `cnt`, `addv`, `fmov`
+    // out. Four per row on the FULL-RESOLUTION level was binCV breaking its own rule in
+    // its own hottest kernel.
+    uint32x4_t accSelf = vdupq_n_u32(0);
 
     for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
         rd.load(y, i, o);
@@ -1061,14 +1071,16 @@ inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
         const uint32x4_t sy = vandq_u32(by, vdupq_n_u32(static_cast<uint32_t>(sgnY)));
         oppY = vaddq_u32(oppY, vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(sy)))));
 
+        // {total_X, opposing_X, total_Y, opposing_Y} -- one `cnt` for all four.
         const WordType bsX = static_cast<WordType>(selfW & magX);
-        selfTotX += static_cast<long long>(popcountWord<WordType>(bsX));
-        selfOppX += static_cast<long long>(popcountWord<WordType>(
-            static_cast<WordType>(bsX & sgnX)));
         const WordType bsY = static_cast<WordType>(selfW & magY);
-        selfTotY += static_cast<long long>(popcountWord<WordType>(bsY));
-        selfOppY += static_cast<long long>(popcountWord<WordType>(
-            static_cast<WordType>(bsY & sgnY)));
+        const uint32_t selfLanes[4] = {static_cast<uint32_t>(bsX),
+                                       static_cast<uint32_t>(bsX & sgnX),
+                                       static_cast<uint32_t>(bsY),
+                                       static_cast<uint32_t>(bsY & sgnY)};
+        const uint32x4_t vsl = vld1q_u32(selfLanes);
+        accSelf = vaddq_u32(accSelf,
+                            vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(vsl)))));
     }
 
     // ONE domain crossing per window per component, not one per row.
@@ -1078,10 +1090,12 @@ inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
     };
     sumsX.t00 += lane(totX, oppX, 0); sumsX.t01 += lane(totX, oppX, 1);
     sumsX.t10 += lane(totX, oppX, 2); sumsX.t11 += lane(totX, oppX, 3);
-    sumsX.self += selfTotX - 2 * selfOppX;
+    sumsX.self += static_cast<long long>(vgetq_lane_u32(accSelf, 0)) -
+                  2 * static_cast<long long>(vgetq_lane_u32(accSelf, 1));
     sumsY.t00 += lane(totY, oppY, 0); sumsY.t01 += lane(totY, oppY, 1);
     sumsY.t10 += lane(totY, oppY, 2); sumsY.t11 += lane(totY, oppY, 3);
-    sumsY.self += selfTotY - 2 * selfOppY;
+    sumsY.self += static_cast<long long>(vgetq_lane_u32(accSelf, 2)) -
+                  2 * static_cast<long long>(vgetq_lane_u32(accSelf, 3));
 }
 
 template <typename WordType>
@@ -1112,8 +1126,18 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
     RowReader<N, WordType, Staged> rd(lv, r, tapX, tapY, staged, taps);
     RowOperands<N, WordType> o;
 
+    // X-83 measured a four-accumulator split of these -- one per plane pair, to cut
+    // the 248-long dependent chain of `vmla` through the window -- and it was worth
+    // **0.0%** on the reference device. The chain was not the bottleneck; the compiler
+    // was already scheduling around it. Recorded and reverted: one accumulator.
     int32x4_t accX = vdupq_n_s32(0), accY = vdupq_n_s32(0);
-    long long selfX = 0, selfY = 0;
+    // X-83: the previous-frame term accumulated in lanes instead of reduced per row.
+    // `slicedSignedSum` ends in a `vaddvq_s32` -- a HORIZONTAL reduce, ~8 cycles on a
+    // Cortex-A72 -- and calling it twice per row put two of them in a serial `selfX +=`
+    // chain through the whole window. The four plane pairs' weights are constant per
+    // LANE, so the weighting can wait until the end and the reduce happens ONCE.
+    // This is X-40's accumulator, which the tap terms already had and this one did not.
+    int32x4_t accSelfX = vdupq_n_s32(0), accSelfY = vdupq_n_s32(0);
 
     for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
         rd.load(y, i, o);
@@ -1157,9 +1181,28 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
         accY = fold(accY, vp0, my1, sgY, 2);
         accY = fold(accY, vp1, my1, sgY, 4);
 
-        selfX += slicedSignedSum<N, WordType, true>(magX, signX, self);
-        selfY += slicedSignedSum<N, WordType, true>(magY, signY, self);
+        // The same four ordered plane pairs `slicedSignedSum` forms, unweighted --
+        // bit-exact, because the weights are per lane and constant across rows.
+        const auto selfFold = [&](int32x4_t acc, uint32_t m0, uint32_t m1, uint32_t sg) {
+            const uint32_t both[4] = {
+                static_cast<uint32_t>(self[0]) & m0, static_cast<uint32_t>(self[1]) & m0,
+                static_cast<uint32_t>(self[0]) & m1, static_cast<uint32_t>(self[1]) & m1};
+            const uint32x4_t vb = vld1q_u32(both);
+            const uint32x4_t vs = vandq_u32(vb, vdupq_n_u32(sg));
+            const uint32x4_t ct =
+                vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(vb))));
+            const uint32x4_t co =
+                vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(vs))));
+            return vaddq_s32(acc, vsubq_s32(vreinterpretq_s32_u32(ct),
+                                            vshlq_n_s32(vreinterpretq_s32_u32(co), 1)));
+        };
+        accSelfX = selfFold(accSelfX, mx0, mx1, sgX);
+        accSelfY = selfFold(accSelfY, my0, my1, sgY);
     }
+    const int32_t kPairWeights[4] = {1, 2, 2, 4};
+    const int32x4_t vw = vld1q_s32(kPairWeights);
+    const long long selfX = static_cast<long long>(vaddvq_s32(vmulq_s32(accSelfX, vw)));
+    const long long selfY = static_cast<long long>(vaddvq_s32(vmulq_s32(accSelfY, vw)));
 
     // ONE domain crossing per component, not one per call.
     sumsX.t00 += vgetq_lane_s32(accX, 0); sumsX.t01 += vgetq_lane_s32(accX, 1);
@@ -1534,6 +1577,50 @@ namespace impl {
 /// that `LKContext` can carry every level's extent WITHOUT a scratch allocation.
 constexpr size_t kMaxLevels = 16;
 
+#ifdef BINCV_LK_STAGE_TIMING
+/// @brief Where `track`'s time actually goes, by stage. **DIAGNOSTIC ONLY — off by
+///        default and compiled out otherwise.** (X-83.)
+///
+/// **THIS EXISTS BECAUSE THREE GUESSES IN A ROW MISSED.** An iteration-cap sweep on the
+/// reference device put roughly **45% of `track` OUTSIDE the iteration loop** —
+/// staging, the covariance, the clip — and nothing in this project had ever measured
+/// which of those it is. Guessing produced a 1.9% win and a 0.0% win before this was
+/// written; [X-67](../../../EXPERIMENTS.md)/[D-59](../../../ARCHITECTURE.md) is the
+/// same lesson from the frontend's side.
+///
+/// Nanoseconds, accumulated over every point and level. Four clock reads against a
+/// ~2 300 ns point-level is a few percent, and it is compared only against itself.
+struct StageTiming {
+    unsigned long long setup = 0;        ///< propagation, bounds, `clipRegion`
+    unsigned long long staging = 0;      ///< `stageWindow`
+    unsigned long long covariance = 0;   ///< `levelCovariance` and the eigen test
+    unsigned long long residual = 0;     ///< the iteration loop: taps and `residualSums`
+    unsigned long long points = 0;
+};
+inline StageTiming& stageTiming() {
+    static StageTiming t;
+    return t;
+}
+inline unsigned long long stageNow() {
+    return static_cast<unsigned long long>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+#define BINCV_STAGE_MARK() unsigned long long bincvStageMark = impl::stageNow()
+#define BINCV_STAGE_LAP(field)                                  \
+    do {                                                        \
+        const unsigned long long bincvNow = impl::stageNow();   \
+        impl::stageTiming().field += bincvNow - bincvStageMark; \
+        bincvStageMark = bincvNow;                              \
+    } while (0)
+#define BINCV_STAGE_POINT() ++impl::stageTiming().points
+#else
+#define BINCV_STAGE_MARK() ((void)0)
+#define BINCV_STAGE_LAP(field) ((void)0)
+#define BINCV_STAGE_POINT() ((void)0)
+#endif
+
 #ifdef BINCV_LK_ITERATION_HISTOGRAM
 /// @brief X-78's iteration counter. **DIAGNOSTIC ONLY — off by default, and it must
 ///        stay that way.**
@@ -1684,6 +1771,8 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
                           bool finest, float scale, long long levelWidth,
                           long long levelHeight, double kLevelMinEigScale) {
     if (li > entryLevelFor(c, p)) return;
+    BINCV_STAGE_MARK();
+    BINCV_STAGE_POINT();
     const float prevX = c.prevPts[p].x * scale - c.halfWinX;
     const float prevY = c.prevPts[p].y * scale - c.halfWinY;
     const long long anchorX = floorToLL(prevX);
@@ -1714,9 +1803,11 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
     // The buffer is a STACK local -- 2 048 B at the shipped N = 2 -- because
     // CLAUDE.md forbids a kernel allocating and this operation has no caller
     // scratch. `stageWindow` declines rather than overrunning it.
+    BINCV_STAGE_LAP(setup);
     StagedWindow<LevelT::Bits, WordType> stagedWindow;
     TapCache<LevelT::Bits, WordType> tapCache;   // X-70; invalid until first use
     const bool staged = stageWindow(lv, region, stagedWindow);
+    BINCV_STAGE_LAP(staging);
 
     // BIT-PARALLEL: the 2x2 matrix, one fused traversal, zero scratch.
     const GradientCovariance a = levelCovariance(lv, window);
@@ -1737,6 +1828,7 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
         return;
     }
 
+    BINCV_STAGE_LAP(covariance);
     float nextX = c.nextPts[p].x - c.halfWinX;
     float nextY = c.nextPts[p].y - c.halfWinY;
     double prevDeltaX = 0.0;
@@ -1836,6 +1928,7 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
         prevDeltaY = deltaY;
     }
 
+    BINCV_STAGE_LAP(residual);
     // THE FINAL PASS, AND IT IS THE REFERENCE'S OWN SEPARATE PASS. Two
     // things happen here and both are ABOUT THE POSITION THAT IS
     // RETURNED, not about the last iterate: the range test is re-applied

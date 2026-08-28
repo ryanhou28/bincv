@@ -302,6 +302,10 @@
 #include <cstddef>
 #include <cstdint>
 
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 #include "../core/error.hpp"
 #include "../core/types.hpp"
 #include "../core/view.hpp"
@@ -557,6 +561,113 @@ inline void bitSlicedPairRowRegion(const WordType* (&mx)[N], const WordType* (&m
     });
 }
 
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+/// @brief The whole clipped region's plane-pair counts, in NEON lanes. **INTERNAL**
+///        (X-83). `N` in {1, 2} at `uint32_t` — the shipped 1/2/2/2 ladder (D-23).
+///
+/// **[D-6](../../../ARCHITECTURE.md) WAS WRITTEN FOR THIS AND THIS FUNCTION WAS NOT
+/// OBEYING IT.** `bitSlicedPairRowRegion` issues `3N^2 + N` **scalar** `popcountWord`
+/// calls per word — fourteen at `N = 2` — and on aarch64 there is no scalar popcount:
+/// every one is `fmov` in, `cnt`, `addv`, `fmov` out. [X-83](../../../EXPERIMENTS.md)
+/// measured the consequence on the reference device: the covariance is **27.5% of
+/// `track`** there against 18.2% on x86, and **5.9× slower than x86** where the
+/// iteration loop — which does have a NEON path — is only 3.6× slower. That gap IS the
+/// missing kernel.
+///
+/// The counts go into LANES and stay there to the end of the window, so the register
+/// domain is crossed **once per point per level** instead of `14 * rows` times. This is
+/// the shape [X-40](../../../EXPERIMENTS.md) gave the residual accumulator, applied to
+/// the operation that sits next to it and never got it.
+///
+/// **Bit-exact:** the same integers, counted the same way. The scalar body above is the
+/// portable one AND the oracle, and `tests/test_covariance.cpp` compares them.
+template <size_t N, typename WordType>
+inline void bitSlicedPairRegionNeon(const BinMatConstView<WordType> (&magX)[N],
+                                    const BinMatConstView<WordType> (&magY)[N],
+                                    BinMatConstView<WordType> signX,
+                                    BinMatConstView<WordType> signY,
+                                    const RegionWords<WordType>& r,
+                                    BitSlicedPairCounts<N>& out) {
+    static_assert(N == 1 || N == 2, "bitSlicedPairRegionNeon: shipped depths only");
+    const auto counts = [](uint32x4_t v) {
+        return vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(v))));
+    };
+    uint32x4_t accA = vdupq_n_u32(0), accB = vdupq_n_u32(0);
+    uint32x4_t accC = vdupq_n_u32(0), accD = vdupq_n_u32(0);
+
+    for (size_t y = r.y0; y < r.y1; ++y) {
+        const WordType* rowX[N];
+        const WordType* rowY[N];
+        for (size_t p = 0; p < N; ++p) {
+            rowX[p] = magX[p].row(y);
+            rowY[p] = magY[p].row(y);
+        }
+        const WordType* sxr = signX.row(y);
+        const WordType* syr = signY.row(y);
+        visitRowWords<WordType>(r, [&](size_t w, WordType mask) {
+            const uint32_t sel = static_cast<uint32_t>(sxr[w] ^ syr[w]);
+            if constexpr (N == 1) {
+                const uint32_t ax = static_cast<uint32_t>(rowX[0][w] & mask);
+                const uint32_t ay = static_cast<uint32_t>(rowY[0][w] & mask);
+                // FOUR COUNTS, WHICH IS EXACTLY ONE VECTOR:
+                // {xx, yy, xy total, xy set}.
+                const uint32_t lanes[4] = {ax, ay, ax & ay,
+                                           static_cast<uint32_t>(ax & ay & sel)};
+                accA = vaddq_u32(accA, counts(vld1q_u32(lanes)));
+            } else {
+                // ONE array round trip a word, not four. The first version built each
+                // of the four operand vectors through its own stack array -- sixteen
+                // stores and four loads a word, each load waiting on its stores -- and
+                // X-83 measured that eating most of the win. Everything below is a
+                // SHUFFLE of the one vector `{ax0, ax1, ay0, ay1}`.
+                const uint32_t base[4] = {static_cast<uint32_t>(rowX[0][w] & mask),
+                                          static_cast<uint32_t>(rowX[1][w] & mask),
+                                          static_cast<uint32_t>(rowY[0][w] & mask),
+                                          static_cast<uint32_t>(rowY[1][w] & mask)};
+                const uint32x4_t v = vld1q_u32(base);
+                // A = {ax0, ax1, ay0, ay1} IS already xx[0][0], xx[1][1], yy[0][0],
+                // yy[1][1] -- `a & a` is `a`, so the diagonal needs no AND at all.
+                accA = vaddq_u32(accA, counts(v));
+                // B: rotating by one lane puts ax1 under ax0 and ay1 under ay0, so
+                // lanes 0 and 2 are the two off-diagonal terms. Lanes 1 and 3 are
+                // meaningless and simply not read.
+                accB = vaddq_u32(accB, counts(vandq_u32(v, vextq_u32(v, v, 1))));
+                // C: every ordered (x plane, y plane) pair -- {ax0,ax0,ax1,ax1} against
+                // {ay0,ay1,ay0,ay1}, both shuffles of `v`.
+                const uint32x4_t xs = vzip1q_u32(v, v);
+                const uint32x4_t ys = vcombine_u32(vget_high_u32(v), vget_high_u32(v));
+                const uint32x4_t cross = vandq_u32(xs, ys);
+                accC = vaddq_u32(accC, counts(cross));
+                accD = vaddq_u32(accD, counts(vandq_u32(cross, vdupq_n_u32(sel))));
+            }
+        });
+    }
+
+    // ONE domain crossing per point per level, not fourteen per word.
+    if constexpr (N == 1) {
+        out.xx[0][0] += vgetq_lane_u32(accA, 0);
+        out.yy[0][0] += vgetq_lane_u32(accA, 1);
+        out.xyTotal[0][0] += vgetq_lane_u32(accA, 2);
+        out.xySet[0][0] += vgetq_lane_u32(accA, 3);
+    } else {
+        out.xx[0][0] += vgetq_lane_u32(accA, 0);
+        out.xx[1][1] += vgetq_lane_u32(accA, 1);
+        out.yy[0][0] += vgetq_lane_u32(accA, 2);
+        out.yy[1][1] += vgetq_lane_u32(accA, 3);
+        out.xx[0][1] += vgetq_lane_u32(accB, 0);
+        out.yy[0][1] += vgetq_lane_u32(accB, 2);
+        out.xyTotal[0][0] += vgetq_lane_u32(accC, 0);
+        out.xyTotal[0][1] += vgetq_lane_u32(accC, 1);
+        out.xyTotal[1][0] += vgetq_lane_u32(accC, 2);
+        out.xyTotal[1][1] += vgetq_lane_u32(accC, 3);
+        out.xySet[0][0] += vgetq_lane_u32(accD, 0);
+        out.xySet[0][1] += vgetq_lane_u32(accD, 1);
+        out.xySet[1][0] += vgetq_lane_u32(accD, 2);
+        out.xySet[1][1] += vgetq_lane_u32(accD, 3);
+    }
+}
+#endif  // BINCV_HAVE_NEON && __aarch64__
+
 /// @brief Weights the plane-pair counts into the 2x2 matrix. **INTERNAL.**
 /// @note This is where `2^(i+j)` enters, once per pair per window rather than once
 ///       per word: the counts are exact integers, so weighting them at the end is
@@ -677,6 +788,14 @@ inline GradientCovariance gradientCovariance(const BinMatConstView<WordType> (&m
                  "covariance: a non-empty view needs a non-null pointer");
 
     impl::BitSlicedPairCounts<N> total;
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    // X-83: the shipped ladder's depths get D-6's reservation cashed in. Anything else
+    // takes the portable body below, which is also the exactness oracle.
+    if constexpr ((N == 1 || N == 2) && sizeof(WordType) == 4) {
+        impl::bitSlicedPairRegionNeon<N, WordType>(magX, magY, signX, signY, r, total);
+        return impl::combineBitSlicedPairs<N>(total);
+    }
+#endif
     for (size_t y = r.y0; y < r.y1; ++y) {
         // Row pointers hoisted once per row, per ops/reduce.hpp's row bodies: the
         // per-plane indexing is loop-invariant and "each word is read once" should

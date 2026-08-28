@@ -11678,6 +11678,267 @@ the batch's own whole-frontend arm still has to be measured, not projected.
 
 ---
 
+### X-82 · The keypoint batch on aarch64 — and PART A ended the question · `DONE`
+
+**PART A KILLED PART B, WHICH IS WHY IT WENT FIRST.** The rule said decompose the device
+frontend before pricing the port, because
+[X-67](#x-67)/[D-59](ARCHITECTURE.md#8-design-decisions) had already caught this project
+calling a 3.6% stage the biggest target. It caught it again.
+
+#### FIRST, A CORRECTION: x86 HAD NOT OVERTAKEN THE DEVICE
+
+X-82's own premise was wrong. [D-65](ARCHITECTURE.md#8-design-decisions) records the
+device at **2.48×**, and that figure was compared against a *freshly measured* x86
+2.81×. Measured **today, same harness, same 80 frames, one thread each side**:
+
+| | binCV | OpenCV | ratio | `track` share |
+|---|---|---|---|---|
+| x86 | 1.345 ms | ~3.87 | 2.81× | 78% |
+| **reference device** | **6.945** | **22.014** | **3.17×** | **83.8%** |
+
+**The device was ahead the whole time.** D-65's 2.48× is not wrong, it is *old* — and
+comparing a fresh number against a recorded one is exactly what
+[D-58](ARCHITECTURE.md#8-design-decisions) exists to forbid. **The error was made and
+repeated to the user before it was caught.**
+
+#### PART A — WHERE DEVICE `track` GOES
+
+An iteration-cap sweep first, pinned:
+
+| cap | device `track` | marginal |
+|---|---|---|
+| 1 | 4.207 ms | — |
+| 2 | 5.522 | +1.315 |
+| 4 | 5.759 | +0.237 |
+| 20 | 5.766 | +0.007 |
+
+Mean iterations is 1.98, so **roughly 45% of `track` is outside the iteration loop** —
+and nothing had ever measured which part. So `BINCV_LK_STAGE_TIMING` and
+`benchmark/lk_stage_profile`, on the scalar path both architectures share:
+
+| stage | x86 ns/point-level | device | **device / x86** |
+|---|---|---|---|
+| setup (bounds, clip) | 39.5 | 81.4 | 2.1× |
+| staging | 236.0 | 600.4 | 2.5× |
+| **covariance + eigen** | **366.3** | **2151.3** | **5.9×** |
+| iteration loop | 1369.8 | 4981.9 | 3.6× |
+
+> **THE COVARIANCE IS 27.5% OF DEVICE `track` AND IS 5.9× SLOWER THAN x86 WHERE THE
+> ITERATION LOOP — WHICH HAS A NEON PATH — IS 3.6×.** That gap is the whole finding.
+> `gradientCovariance` had **no NEON path at all**: `3N^2 + N` **scalar**
+> `popcountWord` calls per word, fourteen at `N = 2`, on the one architecture
+> [D-6](ARCHITECTURE.md#8-design-decisions) says has no scalar popcount. **binCV was
+> breaking its own rule, in the operation sitting next to the one that rule was written
+> to enable.**
+
+#### PART B — NOT MEASURED, AND THE RULE SAYS SO
+
+Part A's decomposition makes the keypoint-batch ceiling the wrong next measurement: the
+iteration loop is 66% of `track`, the batch's own x86 result converted a **3.1× kernel
+into 1.37× on `track`**, and the covariance was sitting untouched at 27.5% with a known
+cause and a known fix. **E-45 stays open, unmeasured, and honestly labelled** — the
+prediction against it is still only an argument.
+
+---
+
+### X-83 · The covariance gets the NEON kernel D-6 was written for · `DONE — SHIPPED`
+
+**Three guesses preceded this and the scoreboard is worth keeping**, because it is why
+`lk_stage_profile` exists:
+
+| change | device `track` |
+|---|---|
+| `self` term folded into the NEON lanes (a real D-6 violation: four scalar `popcountWord` a row on the full-resolution level) | **1.9%** |
+| four accumulators instead of one, to break a 248-long dependent `vmla` chain | **0.0% — reverted** |
+| **the covariance NEON kernel, after measuring** | **7.8%** |
+
+The chain was not the bottleneck; the compiler was already scheduling around it. **The
+change was reverted rather than kept for tidiness** — it measured zero and cost eight
+registers and a combine step.
+
+#### THE KERNEL
+
+Fourteen plane-pair counts a word become **four vectors**, accumulated in lanes to the
+end of the window, so the register domain is crossed **once per point per level instead
+of `14 x rows` times** — X-40's accumulator shape, applied to the operation next door
+that never got it. At `N = 1` the four counts `{xx, yy, xy total, xy set}` are *exactly*
+one vector.
+
+**And the second version was 1.5× the first, for a reason worth recording.** The first
+built each of the four operand vectors through its own stack array — **sixteen stores
+and four loads a word, each load waiting on its stores** — and got only 1.17×.
+Everything is now a **shuffle of one vector** `{ax0, ax1, ay0, ay1}`:
+
+- that vector **is already** `xx[0][0]`, `xx[1][1]`, `yy[0][0]`, `yy[1][1]`, because
+  `a & a` is `a` and the diagonal needs no AND at all;
+- rotating it one lane (`vextq`) puts `ax1` under `ax0` and `ay1` under `ay0`, so lanes
+  0 and 2 are the two off-diagonal terms;
+- `vzip1q` and a high-half duplicate give `{ax0,ax0,ax1,ax1}` against
+  `{ay0,ay1,ay0,ay1}` — every ordered cross pair in one AND.
+
+| | before | after | |
+|---|---|---|---|
+| covariance, ns/point-level | 2151.3 | **1613.9** | **1.33×** |
+| device `track` | 5.766 ms | **5.347** | **1.08×** |
+| device frontend | 6.892 | **6.478** | |
+| **device vs one-thread OpenCV** | **3.17×** | **3.43×** | |
+
+**Bit-exact and unmoved:** `test_covariance` **17 704 / 17 704**, `test_opticalflow`
+**303 / 303**, **193 tracks** before and after. The portable body is still the oracle
+and still compiled everywhere.
+
+**x86 is untouched** — the dispatch is `if constexpr` inside the NEON guard — which is
+the point: [X-81](#x-81) had just finished demonstrating that a change helping one
+architecture is not thereby an improvement.
+
+**Method:** `benchmark/lk_stage_profile.cpp` (`BINCV_LK_STAGE_TIMING`, off by default),
+the cap sweep above, `frontend_sequence` over 80 V1_02 frames. Device pinned to core 3,
+performance governor, not throttled. `check_arm_syntax.sh` **watched to fail** on the
+new region before it was trusted.
+
+---
+
+# Pending
+
+Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),
+scheduled as tasks in [TASKS.md](TASKS.md). Each runs **in the phase whose code it
+gates**, not at the end.
+
+**E-8 has closed too**, in Phase 3 and in the task whose code it gates
+([X-14](#x-14--horizontal-decimation-for-the-pyramid--done),
+[D-17](ARCHITECTURE.md#d-17-horizontal-decimation-is-word-local)) — with the
+answer that its own framing was wrong.
+
+**E-1, E-2 and E-3 have closed** on the reference device —
+[X-9](#x-9--does-row-alignment-earn-its-memory--done),
+[X-10](#x-10--default-word-width--done),
+[X-11](#x-11--incremental-versus-recomputed-window-reductions--done). Phase 2 has
+no open experiment left, and the project has no provisional decision left.
+
+**E-10 has now closed as well**, in Phase 3 and in the task whose code it gates
+([T3.11](TASKS.md#t311--rolling-response-map-e-10--done),
+[X-23](#x-23--the-rolling-response-ring-against-the-frame-sized-response-map--done),
+[D-22](ARCHITECTURE.md#d-22-the-corner-response-streams-over-a-three-row-ring-and-that-is-the-recommended-path)),
+and it leaves this table. **Phase 3 has no SCHEDULED experiment left** — every row
+below runs in Phase 4, and the only Phase 3 question still open, E-11, is
+unscheduled and was left untouched by X-23 deliberately. Like E-8, E-10 closed with
+part of its own framing wrong: it was registered as a footprint win to be **bought**
+with compute, and the streaming form is **smaller AND faster**, so there was no
+purchase to make.
+
+| ID | Question | Task | Runs during |
+|---|---|---|---|
+| E-13 | Does the per-row partial accumulator still pay above N = 1, where it is O(N²) per row against work that is O(N²) per word — and can the answer be measured free of the code-layout drift [X-22](#x-22--what-an-n-bit-pyramid-level-costs-the-lk-covariance--done) hit? | T4.1 | Phase 4 |
+| E-12 | How much of the `ops/` kernel's per-row cost is genericity that is not in N — runtime `BorderType`, the word type, the argument contract — and which of them? | T4.1 | Phase 4 |
+| E-7 | Bits needed per pyramid level | T4.1 | Phase 4 |
+| E-6 | Hybrid LK versus binary block matching | T4.2 | Phase 4 |
+| E-5 | End-to-end accuracy, footprint, speed | T4.3 | Phase 4 |
+| E-9 | Per-level word width down the pyramid | — | unscheduled; spun out of [X-10](#x-10--default-word-width--done), which priced both sides |
+
+(E-8 was registered in ARCHITECTURE §9 and never listed here until it was
+about to run; it is now closed and has left the table. **E-4 has now left it
+too** — [X-21](#x-21--does-generic-n-cost-the-specialized-n1-and-ternary-paths-anything--done)
+closed it and [D-21](ARCHITECTURE.md#d-21-generic-n-is-not-capped-and-the-n--1-specialization-is-kept-as-a-test-oracle)
+records the decision. **E-12 is what X-21 found while answering E-4** and could not
+close on, because it is a different question: the cost is real, it is worst on the
+upper pyramid levels T4.1 targets, and it is not genericity in N. It runs in the
+phase whose code it gates, alongside E-7, rather than being carried as a note in a
+log.)
+
+---
+
+### X-78 · Lockstep waste, priced BEFORE the batch is written · `RULE PRE-REGISTERED`
+
+**T5.16 NAMES ITS OWN KILL CONDITION AND IT COSTS ALMOST NOTHING TO CHECK.** Eight
+keypoints in AVX2 lanes iterate **in lockstep**, so a batch runs until its *last* lane
+converges. [X-68](#x-68--track-decomposed--915-is-iterated-residualsums--done) put the
+**mean** at 4.29 iterations per point per level — but the batch pays the **maximum over
+eight**, and nothing measured so far says what that is.
+
+> **THE WHOLE 2.1× KERNEL WIN IS MULTIPLIED BY `mean / mean-of-max-8`.** If that ratio
+> is 0.5, arm D lands at 1.05× and T5.16 is not worth writing. **This is knowable from
+> a histogram, before any AVX2 exists.**
+
+**Predicted end-to-end factor on `track`:**
+
+```
+    naive lockstep  =  2.1  x  mean(iters) / mean(batch max over 8)
+    with lane refill =  2.1  x  mean(iters) / (mean(iters) + refill overhead)
+```
+
+**DECISION RULE, WRITTEN FIRST:**
+
+| measured `mean / mean-of-max-8` | band | what gets built |
+|---|---|---|
+| **≥ 0.70** | **A** | naive lockstep — ≥ 1.47× on `track`, and refill is not worth its complexity |
+| **0.45 – 0.70** | **B** | **lane refill**: a converged lane takes the next untracked point instead of idling |
+| **< 0.45** | **C** | refill is **mandatory**; naive lockstep would be a regression and must not ship |
+| refill also under 1.3× projected | **D** | **T5.16 CLOSES NEGATIVE.** Record it and stop — `track` is already 5.5× faster than where Phase 5 started |
+
+**Measured on the same EuRoC sequences as [X-64](#x-64), at the shipped 1/2/2/2 ladder
+and `seal_params.yaml`'s iteration cap**, counting iterations actually executed per
+point per level — the loop's own `it`, including the points that exit at 1.
+
+**Instrumentation:** `BINCV_LK_ITERATION_HISTOGRAM`, off by default, writing one
+`unsigned` per (level, point). It changes no shipped code path.
+
+#### RESULT · `BAND B` · naive lockstep would waste 40% of every lane slot
+
+**87 246 point-levels over 120 V1_02 frames, at `seal_params.yaml`'s cap of 20.**
+
+| iterations | share | cumulative |
+|---|---|---|
+| **1** | 14.4% | 14.4% |
+| **2** | **58.2%** | **72.6%** |
+| 3 | 13.8% | 86.4% |
+| 4–19 | 9.8% | 96.4% |
+| **20 (the cap — never converged)** | **3.6%** | 100% |
+
+> **THE DISTRIBUTION IS BIMODAL AND THAT IS THE WHOLE PROBLEM.** Nearly three
+> quarters of point-levels are finished after **two** iterations, and a 3.6% tail runs
+> the cap. Batch eight of those together and **one straggler pins seven converged
+> lanes to its own iteration count.**
+
+|  |  |
+|---|---|
+| mean iterations per point-level | **3.235** |
+| mean **maximum** over a batch of 8 | **5.204** |
+| **ratio `mean / mean-of-max-8`** | **0.622** |
+| lane slots run / useful | 469 424 / 282 213 — **39.9% wasted** |
+
+**Projected `track`: naive lockstep 1.31×, lane refill 2.10×.** **BAND B — build the
+refill.** A batch that idles a converged lane throws away two thirds of what the AVX2
+kernel earns, and the fix is not an optimisation on top of the batch, it is **part of
+the batch's design**: when a lane converges it takes the next untracked point rather
+than waiting.
+
+**REFILL IS VERY NEARLY FREE, WHICH IS WHY THE BAND IS ACTIONABLE.** A refill re-stages
+one lane's window — and **the serial path stages every point exactly once too**. The
+work is the same work at a different time; what refill adds is the interleaved scatter
+and the bookkeeping, not a new pass over the data.
+
+#### TWO THINGS THIS CONTRADICTS, BOTH REPORTED RATHER THAN ABSORBED
+
+1. **X-68's 4.29 mean is high. The direct count is 3.235.** X-68 *derived* its figure
+   from a timing decomposition — iterated time over single-iteration time — which
+   attributes every fixed per-point cost that scales with the loop to the loop. **The
+   counter is the better number and X-68's decomposition should be read as an upper
+   bound.** Nothing built on X-68 changes: 3.235 iterations still put iterated
+   `residualSums` at ~91% of `track`, and the conclusion it gated was *which* stage to
+   optimise.
+2. **3.6% of point-levels burn 22% of all iterations and converge to nothing.** They
+   run the cap and are then almost all dropped. **Lowering the cap is worth its own
+   experiment** — it is an accuracy change, not a free one — and it is filed as
+   **E-42** rather than taken here.
+
+**Method:** `benchmark/lk_iteration_histogram.cpp`, the frontend and re-detection
+schedule of `frontend_sequence` exactly, serial (the hook writes from inside
+`parallelFor`). **One sequence only** — V1_02 is the only one on this machine — and
+D-58 applies: **the ratio is a property of this sequence's convergence behaviour**, so
+the batch's own whole-frontend arm still has to be measured, not projected.
+
+---
+
 ### X-82 · The keypoint batch on aarch64, and what is left on the device at all · `RULE PRE-REGISTERED`
 
 **x86 HAS OVERTAKEN THE DEPLOYMENT TARGET AND THAT IS THE WRONG WAY ROUND FOR THIS
