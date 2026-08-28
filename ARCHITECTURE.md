@@ -4157,6 +4157,17 @@ so the arithmetic was 88% and running at ~1.4 operations per cycle against the A
 **Scheduling was not the problem; the operation count was.** Two earlier attempts at this
 loop, aimed at scheduling, measured 0.0% and −5%.
 
+**And the operands stopped going through memory.** The previous-frame term built its four
+lanes in a stack array; `self`, `magX` and `magY` are each two contiguous staged words, so
+a 64-bit load and two lane moves do it with no store. **`track` 3.683 → 3.525 ms, headline
+4.58× → 4.73×.**
+
+> **THAT IS THE FOURTH TIME THIS ONE PATTERN HAS COST SOMETHING MEASURABLE** — the
+> covariance kernel ([D-68](#d-68-the-covariance-was-breaking-d-6-next-door-to-the-kernel-d-6-was-written-for), 1.5×),
+> the tap layout ([X-85](EXPERIMENTS.md)), and twice in this kernel. **On aarch64, if a
+> vector operand can be built by shuffling something already loaded, building it through
+> memory will cost more than the arithmetic it feeds.**
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

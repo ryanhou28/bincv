@@ -11853,6 +11853,25 @@ This is [X-80](#x-80)'s trick, from the bit-plane FAST, applied to the tracker.
 **Bit-exact:** `test_opticalflow` **303 / 303**, **193 tracks** unchanged. x86 is
 untouched — this is inside the NEON kernels.
 
+#### AND THE FOURTH INSTANCE OF THE SAME ROUND TRIP
+
+The previous-frame term still built its four operands through a stack array — four ANDs,
+four stores and a load that waited on all of them. But `self`, `magX` and `magY` are each
+**two contiguous words** in the staged row (and in the unstaged scratch), so a 64-bit load
+and two lane moves give `{s0,s1,s0,s1}` against `{m0,m0,m1,m1}` with no store at all.
+
+| reference device | | |
+|---|---|---|
+| `track` | 3.683 → **3.525 ms** | **1.045×** |
+| frontend | 4.813 → **4.648** | |
+| **vs one-thread OpenCV** | **4.58× → 4.73×** | |
+
+**That is the fourth time marshalling operands through a stack array has cost this
+project something measurable** — the covariance kernel (X-83, 1.5×), the tap layout
+(X-85), and twice here. It is now a rule worth stating plainly: **on aarch64, if a vector
+operand can be built by a shuffle of something already loaded, building it through memory
+will cost more than the arithmetic it feeds.**
+
 **A note on the profiler:** `lk_stage_profile` reports the iteration loop *higher* after
 this change while `frontend_sequence` reports `track` lower. The profiler adds four clock
 reads per point-level and this kernel's register footprint is larger, so its absolute

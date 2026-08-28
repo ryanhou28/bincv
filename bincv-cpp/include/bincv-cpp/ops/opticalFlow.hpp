@@ -1372,19 +1372,21 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
                              vcntq_u8(vreinterpretq_u8_u32(vandq_u32(by, sgY))));
         }
 
-        // The previous-frame term: the same four plane pairs against `self`, in lanes.
-        const uint32_t s0 = static_cast<uint32_t>(o.self[0]);
-        const uint32_t s1 = static_cast<uint32_t>(o.self[1]);
-        const uint32_t bothX[4] = {s0 & static_cast<uint32_t>(o.magX[0]),
-                                   s1 & static_cast<uint32_t>(o.magX[0]),
-                                   s0 & static_cast<uint32_t>(o.magX[1]),
-                                   s1 & static_cast<uint32_t>(o.magX[1])};
-        const uint32_t bothY[4] = {s0 & static_cast<uint32_t>(o.magY[0]),
-                                   s1 & static_cast<uint32_t>(o.magY[0]),
-                                   s0 & static_cast<uint32_t>(o.magY[1]),
-                                   s1 & static_cast<uint32_t>(o.magY[1])};
-        const uint32x4_t vbx = vld1q_u32(bothX);
-        const uint32x4_t vby = vld1q_u32(bothY);
+        // The previous-frame term: the same four plane pairs against `self`, in lanes —
+        // and built by SHUFFLE, not through a stack array. X-86: `self`, `magX` and
+        // `magY` are each two CONTIGUOUS words in the staged row (and in the unstaged
+        // scratch), so a 64-bit load and two lane moves give `{s0,s1,s0,s1}` against
+        // `{m0,m0,m1,m1}`. The array spelling was four ANDs, four stores and a load
+        // that waited on all of them — the same store-to-load round trip that has now
+        // cost this project four separate times (X-83, X-85, and twice here).
+        const uint32x4_t ss = vcombine_u32(vld1_u32(o.self), vld1_u32(o.self));
+        const auto spread = [](const WordType* m) {
+            const uint32x2_t p = vld1_u32(m);
+            const uint32x4_t d = vcombine_u32(p, p);
+            return vzip1q_u32(d, d);   // {m0, m0, m1, m1}
+        };
+        const uint32x4_t vbx = vandq_u32(ss, spread(o.magX));
+        const uint32x4_t vby = vandq_u32(ss, spread(o.magY));
         tS[0] = vaddq_u8(tS[0], vcntq_u8(vreinterpretq_u8_u32(vbx)));
         oS[0] = vaddq_u8(oS[0], vcntq_u8(vreinterpretq_u8_u32(vandq_u32(vbx, sgX))));
         tS[1] = vaddq_u8(tS[1], vcntq_u8(vreinterpretq_u8_u32(vby)));
