@@ -883,6 +883,105 @@ inline bool stageWindow(const LKLevel<WordType>&, const RegionWords<WordType>&,
     return false;
 }
 
+/// @brief The 2x2 covariance from the ALREADY-STAGED window. **INTERNAL** (X-84).
+///
+/// **`levelCovariance` WALKS THE SAME WINDOW `stageWindow` HAS JUST FINISHED WALKING.**
+/// The staged buffer holds `magX`, `magY`, `signX`, `signY` per row — which is exactly
+/// and only what the covariance reads — so the second traversal of the level's planes
+/// is pure repetition. [X-83](../../../EXPERIMENTS.md) measured the covariance at
+/// **27.5% of `track` on the reference device**; this removes its memory traffic
+/// entirely and leaves the arithmetic reading a ~2 KB stack buffer.
+///
+/// **BIT-EXACT, AND THE REASON IS THAT POPCOUNTS DO NOT CARE WHERE A BIT SITS.** The
+/// staged word is the region extracted to bit 0 and masked; `bitSlicedPairRowRegion`
+/// reads it in place under `visitRowWords`' mask. Every operand is shifted by the same
+/// amount, so every `popcount(a & b)` is the same integer. The sign words are unmasked
+/// in both spellings and only ever ANDed with a masked product (D-13).
+///
+/// @param rows `region.y1 - region.y0`. A staged window is one word wide by
+///        construction, so this is one word per row and no `visitRowWords` at all.
+template <size_t N, typename WordType>
+inline GradientCovariance stagedCovariance(const StagedWindow<N, WordType>& s, size_t rows) {
+    BitSlicedPairCounts<N> total;
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    if constexpr ((N == 1 || N == 2) && sizeof(WordType) == 4) {
+        // X-83's lane kernel, on the staged buffer: the counts stay in lanes to the end
+        // of the window and the register domain is crossed once per point per level.
+        const auto counts = [](uint32x4_t v) {
+            return vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(v))));
+        };
+        uint32x4_t accA = vdupq_n_u32(0), accB = vdupq_n_u32(0);
+        uint32x4_t accC = vdupq_n_u32(0), accD = vdupq_n_u32(0);
+        for (size_t i = 0; i < rows; ++i) {
+            const uint32_t sel = static_cast<uint32_t>(s.signX[i] ^ s.signY[i]);
+            if constexpr (N == 1) {
+                const uint32_t ax = static_cast<uint32_t>(s.magX[i][0]);
+                const uint32_t ay = static_cast<uint32_t>(s.magY[i][0]);
+                const uint32_t lanes[4] = {ax, ay, ax & ay,
+                                           static_cast<uint32_t>(ax & ay & sel)};
+                accA = vaddq_u32(accA, counts(vld1q_u32(lanes)));
+            } else {
+                const uint32_t base[4] = {static_cast<uint32_t>(s.magX[i][0]),
+                                          static_cast<uint32_t>(s.magX[i][1]),
+                                          static_cast<uint32_t>(s.magY[i][0]),
+                                          static_cast<uint32_t>(s.magY[i][1])};
+                const uint32x4_t v = vld1q_u32(base);
+                accA = vaddq_u32(accA, counts(v));
+                accB = vaddq_u32(accB, counts(vandq_u32(v, vextq_u32(v, v, 1))));
+                const uint32x4_t cross =
+                    vandq_u32(vzip1q_u32(v, v),
+                              vcombine_u32(vget_high_u32(v), vget_high_u32(v)));
+                accC = vaddq_u32(accC, counts(cross));
+                accD = vaddq_u32(accD, counts(vandq_u32(cross, vdupq_n_u32(sel))));
+            }
+        }
+        if constexpr (N == 1) {
+            total.xx[0][0] = vgetq_lane_u32(accA, 0);
+            total.yy[0][0] = vgetq_lane_u32(accA, 1);
+            total.xyTotal[0][0] = vgetq_lane_u32(accA, 2);
+            total.xySet[0][0] = vgetq_lane_u32(accA, 3);
+        } else {
+            total.xx[0][0] = vgetq_lane_u32(accA, 0);
+            total.xx[1][1] = vgetq_lane_u32(accA, 1);
+            total.yy[0][0] = vgetq_lane_u32(accA, 2);
+            total.yy[1][1] = vgetq_lane_u32(accA, 3);
+            total.xx[0][1] = vgetq_lane_u32(accB, 0);
+            total.yy[0][1] = vgetq_lane_u32(accB, 2);
+            total.xyTotal[0][0] = vgetq_lane_u32(accC, 0);
+            total.xyTotal[0][1] = vgetq_lane_u32(accC, 1);
+            total.xyTotal[1][0] = vgetq_lane_u32(accC, 2);
+            total.xyTotal[1][1] = vgetq_lane_u32(accC, 3);
+            total.xySet[0][0] = vgetq_lane_u32(accD, 0);
+            total.xySet[0][1] = vgetq_lane_u32(accD, 1);
+            total.xySet[1][0] = vgetq_lane_u32(accD, 2);
+            total.xySet[1][1] = vgetq_lane_u32(accD, 3);
+        }
+        return combineBitSlicedPairs<N>(total);
+    }
+#endif
+    for (size_t i = 0; i < rows; ++i) {
+        const WordType selector = static_cast<WordType>(s.signX[i] ^ s.signY[i]);
+        for (size_t a = 0; a < N; ++a) {
+            for (size_t b = a; b < N; ++b) {
+                total.xx[a][b] += popcountWord<WordType>(
+                    static_cast<WordType>(s.magX[i][a] & s.magX[i][b]));
+                total.yy[a][b] += popcountWord<WordType>(
+                    static_cast<WordType>(s.magY[i][a] & s.magY[i][b]));
+            }
+        }
+        for (size_t a = 0; a < N; ++a) {
+            for (size_t b = 0; b < N; ++b) {
+                const WordType both =
+                    static_cast<WordType>(s.magX[i][a] & s.magY[i][b]);
+                total.xyTotal[a][b] += popcountWord<WordType>(both);
+                total.xySet[a][b] +=
+                    popcountWord<WordType>(static_cast<WordType>(both & selector));
+            }
+        }
+    }
+    return combineBitSlicedPairs<N>(total);
+}
+
 /// @brief One row's twelve operands, as POINTERS. **INTERNAL** (E-39).
 /// @note **Pointers, and that was measured.** They let a staged or cached operand be
 ///       used IN PLACE, which is the whole point of X-69/X-70. Copying them into a
@@ -970,30 +1069,47 @@ public:
 
 private:
     /// The four displaced taps. X-34's `+1`-is-a-shift and X-35's interior fast path.
+    ///
+    /// **ROW i's LOWER TAP IS ROW i+1's UPPER TAP** — they name the same level row at
+    /// the same displacement, and the window is walked in increasing `y`, so carrying
+    /// it forward halves the reads of `lv.next`. X-84.
+    ///
+    /// Sound because the two spellings agree wherever both apply: `alignedWord` is
+    /// X-35's interior fast path for exactly the case `displacedRow(...).word(0)` would
+    /// compute the same bits more slowly, and outside it both take `displacedRow`.
+    WordType readNext(long long sy, size_t k, long long sx) const {
+        if (colsInside_ && sx == srcX_ && sy >= 0 &&
+            sy < static_cast<long long>(lv_.next[0].height)) {
+            return alignedWord<WordType>(lv_.next[k].row(static_cast<size_t>(sy)), words_,
+                                         static_cast<size_t>(sx));
+        }
+        return displacedRow<WordType>(lv_.next[k], sy, sx).word(0);
+    }
+
     void extractTaps(size_t y, WordType* t00, WordType* t01, WordType* t10,
-                     WordType* t11) const {
+                     WordType* t11) {
         const long long srcY = static_cast<long long>(y) + tapY_;
-        const bool rowsInside =
-            srcY >= 0 && srcY + 1 < static_cast<long long>(lv_.next[0].height);
-        const bool interior = colsInside_ && rowsInside;
+        const bool carryOk = haveCarry_ && y == carryRow_ + 1;
         for (size_t k = 0; k < N; ++k) {
-            if (interior) {
-                t00[k] = alignedWord<WordType>(lv_.next[k].row(static_cast<size_t>(srcY)),
-                                               words_, static_cast<size_t>(srcX_));
-                t10[k] = alignedWord<WordType>(lv_.next[k].row(static_cast<size_t>(srcY) + 1),
-                                               words_, static_cast<size_t>(srcX_));
-            } else {
-                t00[k] = displacedRow<WordType>(lv_.next[k], srcY, srcX_).word(0);
-                t10[k] = displacedRow<WordType>(lv_.next[k], srcY + 1, srcX_).word(0);
-            }
+            const WordType upper = carryOk ? carry_[k] : readNext(srcY, k, srcX_);
+            const WordType lower = readNext(srcY + 1, k, srcX_);
+            carry_[k] = lower;
+            t00[k] = upper;
+            t10[k] = lower;
             if (tapIsShift_) {
-                t01[k] = static_cast<WordType>(t00[k] >> 1);
-                t11[k] = static_cast<WordType>(t10[k] >> 1);
+                t01[k] = static_cast<WordType>(upper >> 1);
+                t11[k] = static_cast<WordType>(lower >> 1);
             } else {
-                t01[k] = displacedRow<WordType>(lv_.next[k], srcY, srcX_ + 1).word(0);
-                t11[k] = displacedRow<WordType>(lv_.next[k], srcY + 1, srcX_ + 1).word(0);
+                const WordType upperR =
+                    carryOk ? carryShift_[k] : readNext(srcY, k, srcX_ + 1);
+                const WordType lowerR = readNext(srcY + 1, k, srcX_ + 1);
+                carryShift_[k] = lowerR;
+                t01[k] = upperR;
+                t11[k] = lowerR;
             }
         }
+        carryRow_ = y;
+        haveCarry_ = true;
     }
 
     /// The eight previous-frame words -- what X-69 stages when it can.
@@ -1016,6 +1132,10 @@ private:
     size_t x0_, width_, words_;
     WordType mask_;
     bool tapIsShift_, colsInside_ = false, tapsFresh_ = false;
+    WordType carry_[N] = {};
+    WordType carryShift_[N] = {};
+    bool haveCarry_ = false;
+    size_t carryRow_ = 0;
     long long srcX_, tapY_;
 };
 
@@ -1809,8 +1929,12 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
     const bool staged = stageWindow(lv, region, stagedWindow);
     BINCV_STAGE_LAP(staging);
 
-    // BIT-PARALLEL: the 2x2 matrix, one fused traversal, zero scratch.
-    const GradientCovariance a = levelCovariance(lv, window);
+    // BIT-PARALLEL: the 2x2 matrix. X-84: from the STAGED window when there is one,
+    // because `levelCovariance` reads exactly the planes `stageWindow` has just
+    // finished reading and nothing else.
+    const GradientCovariance a =
+        staged ? stagedCovariance<LevelT::Bits, WordType>(stagedWindow, region.y1 - region.y0)
+               : levelCovariance(lv, window);
     const double a11 = static_cast<double>(a.sumXX);
     const double a22 = static_cast<double>(a.sumYY);
     const double a12 = static_cast<double>(a.sumXY);
@@ -2144,6 +2268,38 @@ inline void extractLaneTaps(const LKLevelN<N, WordType>& lv, const RegionWords<W
     }
 }
 
+/// @brief The 2x2 covariance from ONE LANE of an already-staged batch. **INTERNAL**
+///        (X-84). `stagedCovariance`'s reason, in the batch's `[row][plane][lane]`
+///        layout: the words are already here, so reading the level's planes a second
+///        time is pure repetition.
+template <size_t N, typename WordType>
+inline GradientCovariance stagedCovarianceLane(const LkBatchArrays<N, WordType>& b,
+                                               size_t lane, size_t rows) {
+    BitSlicedPairCounts<N> total;
+    for (size_t i = 0; i < rows; ++i) {
+        const WordType selector =
+            static_cast<WordType>(b.signX[i][lane] ^ b.signY[i][lane]);
+        for (size_t x = 0; x < N; ++x) {
+            for (size_t y = x; y < N; ++y) {
+                total.xx[x][y] += popcountWord<WordType>(
+                    static_cast<WordType>(b.magX[i][x][lane] & b.magX[i][y][lane]));
+                total.yy[x][y] += popcountWord<WordType>(
+                    static_cast<WordType>(b.magY[i][x][lane] & b.magY[i][y][lane]));
+            }
+        }
+        for (size_t x = 0; x < N; ++x) {
+            for (size_t y = 0; y < N; ++y) {
+                const WordType both =
+                    static_cast<WordType>(b.magX[i][x][lane] & b.magY[i][y][lane]);
+                total.xyTotal[x][y] += popcountWord<WordType>(both);
+                total.xySet[x][y] +=
+                    popcountWord<WordType>(static_cast<WordType>(both & selector));
+            }
+        }
+    }
+    return combineBitSlicedPairs<N>(total);
+}
+
 /// @brief Track a RANGE of points through one level, eight at a time, with **lane
 ///        refill**. **INTERNAL** (X-79, E-36).
 ///
@@ -2241,7 +2397,14 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
                     lv, li, c, p, finest, scale, levelWidth, levelHeight, kLevelMinEigScale);
                 continue;
             }
-            const GradientCovariance a = levelCovariance(lv, window);
+            // X-84: stage FIRST, then take the covariance off the staged lane. The
+            // order used to be the other way round because the covariance did not need
+            // the staging; now it does, and a rejected point pays one staging it did
+            // not use -- against a whole second traversal of the level's planes for
+            // every point that IS accepted.
+            stageLane<N, WordType>(lv, region, b, L, winRows);
+            const GradientCovariance a =
+                stagedCovarianceLane<N, WordType>(b, L, rows);
             const double a11 = static_cast<double>(a.sumXX);
             const double a22 = static_cast<double>(a.sumYY);
             const double a12 = static_cast<double>(a.sumXY);
@@ -2272,7 +2435,6 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
             s.active = true;
             s.inRange = true;
             s.tapValid = false;
-            stageLane<N, WordType>(lv, region, b, L, winRows);
             return;
         }
     };

@@ -4105,6 +4105,36 @@ against x86's 2.81× — it had not been overtaken, and the claim that it had ca
 comparing a fresh number to a recorded one, which is precisely what
 [D-58](#8-design-decisions) forbids.
 
+### D-69: the covariance and the taps were each reading the same memory twice
+
+[X-84](EXPERIMENTS.md) removed two redundant traversals. Neither is a clever kernel.
+
+**`gradientCovariance` was re-reading the window `stageWindow` had just staged.** The
+staged buffer holds `magX`, `magY`, `signX`, `signY` per row — exactly and only what the
+covariance reads — and `trackOnePoint` was doing both, in that order, over the same rows.
+It now takes the covariance off the staged words. Bit-exact because **popcounts do not
+care where a bit sits**: every operand is shifted by the same amount, so every
+`popcount(a & b)` is the same integer. The keypoint batch needed the same treatment in
+its `[row][plane][lane]` layout, so `refill` stages before it measures.
+
+**And `RowReader` was reading every `next` row twice** — row `i`'s lower tap is row
+`i + 1`'s upper tap. It carries the word forward now, on both architectures.
+
+| | device | x86 |
+|---|---|---|
+| covariance, ns/point-level | **1614 → 492 (3.3×)** | — |
+| `track` | **5.310 → 4.187 ms** | **1.054 → 0.779 ms** |
+| **frontend vs one-thread OpenCV** | **3.42× → 4.17×** | **2.81× → 3.46×** |
+
+Bit-exact: 17 704 / 17 704 covariance checks, 303 / 303 tracker checks, the
+batched-versus-serial oracle at zero, 193 tracks unchanged.
+
+**Across [D-68](#d-68-the-covariance-was-breaking-d-6-next-door-to-the-kernel-d-6-was-written-for)
+and this, the covariance went 2151 → 492 ns — 4.4× — and from 27.5% of device `track`
+to 8.4%.** Half was the NEON kernel it never had; the other half was not calling it on
+memory that was already in a stack buffer. **The iteration loop is now 80.4% of device
+`track`.**
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made
