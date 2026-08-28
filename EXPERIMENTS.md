@@ -12084,6 +12084,68 @@ the claim it measures. `impl::packQuantSimdEnabled()` switches the arms.
 
 ---
 
+### X-91 · The audit: which operations were correct, tested, and never timed · `DONE`
+
+[X-89](#x-89) found `medianWide` and `edgeThreshold` at **78% of the frontend the day
+something first called them** — written bit-exact against the reference, benchmarked by
+nobody, and therefore unoptimised. **That is not bad luck, it is a hole in the rules:**
+CLAUDE.md's benchmarking rules trigger on a performance *claim*, and a kernel with no
+caller makes none. So it ships correct and untimed, and nothing notices.
+
+**The rule is now written down** — *a new operation gets a benchmark arm when it is
+written, even with no caller* — and this is the sweep that came with it.
+
+#### THE SWEEP
+
+Every header in `ops/` and `io/` against every benchmark. Sixteen of eighteen already had
+an arm. The exceptions:
+
+| | state | verdict |
+|---|---|---|
+| `threshold(cv::Mat, …)` | delegates to `ops/pack.hpp` (X-71 unified it) | **covered** — its vector path is the packer's |
+| `binarize<N>` | word-wise already, gathers N plane words per output word | **untimed** |
+| `packBits` | vectorised since X-71, but measured only *inside* `fromCVMat` | **untimed as an entry point** |
+| `unpackTo8Bit` | one word load per 32 pixels, then a scalar per-bit loop | **untimed** |
+| `readPgm` | parses a header and memcpies, once per file | **not on a per-frame path — stated rather than left implicit** |
+
+#### WHAT THE NUMBERS SAID
+
+| 752×480 | x86 | device |
+|---|---|---|
+| `binarize<2>` | 1.9 µs (0.01 ns/px) | 9.7 µs |
+| `binarize<4>` | 4.3 | 18.9 |
+| `packBits<GreaterEqual>` | 31.0 | 94.6 |
+| **`unpackTo8Bit`, before** | **126.9** | — |
+| **`unpackTo8Bit`, after** | **36.3 (3.5×)** | **95.1** |
+
+**Three of the four were already fine and stay untouched** — which is the right outcome
+for an audit and worth saying, because a sweep that "finds" something everywhere is
+usually finding its own expectations.
+
+**`unpackTo8Bit` was the one.** It was **4× slower than `packBits` doing the same job in
+the other direction**, and the reason was thirty-two **branches** per word, not the
+shifts. Unpacking is the *inverse of a move-mask* and vectorises the same way: broadcast
+the word so byte `i` holds the byte containing bit `i`, AND with per-lane bit weights,
+compare, select. Six operations for thirty-two branches.
+
+**It is now symmetric with `packBits` on both architectures** — 36.3 against 31.0 on x86,
+95.1 against 94.6 on the device — which is the shape an operation and its inverse should
+have, and a better check than any absolute number.
+
+#### AND A GUARD THAT WAS WRONG, CAUGHT BY THE TOOL BUILT FOR IT
+
+The first version gated the AVX2 branch on `BINCV_HAVE_VECTOR_PACK`. **That macro means
+"a vector row packer exists" and BOTH backends define it**, so aarch64 compiled the AVX2
+branch. x86's whole four-configuration gate passed — `-Werror` and all — because that
+region is invisible to it. `check_arm_syntax.sh` caught it in two seconds.
+
+**Third time this session a guard has been wrong in code x86 never compiles**, after
+X-89's mis-attached `#define` and X-85's NEON regression. The tool exists precisely
+because a third of `ops/opticalFlow.hpp` is in that state; it is worth running on every
+edit that touches a `#if`, not only ones that touch NEON intrinsics.
+
+---
+
 # Pending
 
 Registered in [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments),

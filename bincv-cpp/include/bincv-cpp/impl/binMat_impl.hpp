@@ -516,6 +516,52 @@ inline void packRowCmp(const SrcT* rowIn, size_t width, SrcT t, WordType* rowOut
 ///       include that file -- pack.hpp includes binMat.hpp, which includes this one.
 ///       ops/pack.hpp's `unpackTo8Bit` is the public spelling and calls straight
 ///       through.
+// GUARDED ON THE ISA, NOT ON `BINCV_HAVE_VECTOR_PACK`. That macro means "a vector row
+// packer exists" and BOTH backends define it, so using it here compiled the AVX2 branch
+// on aarch64 -- caught by `check_arm_syntax.sh`, which is the third time this session
+// that a guard has been wrong in code x86 never compiles.
+#if defined(BINCV_X86_RUNTIME_AVX2)
+inline bool unpackVectorReady() { return hasVectorPack(); }
+
+/// @brief Thirty-two bits into thirty-two bytes. **INTERNAL.**
+/// @note The shuffle mask replicates byte `k` of the word eight times, and
+///       `vpshufb` indexes WITHIN each 128-bit lane -- so lane 0 asks for the word's
+///       bytes 0 and 1 and lane 1 asks for bytes 2 and 3, which is why the two halves
+///       of the mask differ.
+__attribute__((target("avx2"))) inline void unpackWord32(uint32_t w, uint8_t* out,
+                                                         uint8_t onValue,
+                                                         uint8_t zeroValue) {
+    const __m256i spread = _mm256_shuffle_epi8(
+        _mm256_set1_epi32(static_cast<int>(w)),
+        _mm256_setr_epi8(0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2,
+                         2, 2, 3, 3, 3, 3, 3, 3, 3, 3));
+    const __m256i sel = _mm256_setr_epi8(1, 2, 4, 8, 16, 32, 64, -128, 1, 2, 4, 8, 16, 32,
+                                         64, -128, 1, 2, 4, 8, 16, 32, 64, -128, 1, 2, 4, 8,
+                                         16, 32, 64, -128);
+    const __m256i m = _mm256_cmpeq_epi8(_mm256_and_si256(spread, sel), sel);
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(out),
+                        _mm256_blendv_epi8(_mm256_set1_epi8(static_cast<char>(zeroValue)),
+                                           _mm256_set1_epi8(static_cast<char>(onValue)), m));
+}
+#elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+inline bool unpackVectorReady() { return true; }
+
+inline void unpackWord32(uint32_t w, uint8_t* out, uint8_t onValue, uint8_t zeroValue) {
+    static const uint8_t kSel[16] = {1, 2, 4, 8, 16, 32, 64, 128,
+                                     1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8x16_t sel = vld1q_u8(kSel);
+    const uint8x16_t on = vdupq_n_u8(onValue);
+    const uint8x16_t off = vdupq_n_u8(zeroValue);
+    for (int half = 0; half < 2; ++half) {
+        const uint8_t b0 = static_cast<uint8_t>(w >> (half * 16));
+        const uint8_t b1 = static_cast<uint8_t>(w >> (half * 16 + 8));
+        const uint8x16_t spread = vcombine_u8(vdup_n_u8(b0), vdup_n_u8(b1));
+        const uint8x16_t m = vceqq_u8(vandq_u8(spread, sel), sel);
+        vst1q_u8(out + static_cast<size_t>(half) * 16, vbslq_u8(m, on, off));
+    }
+}
+#endif
+
 template <typename WordType>
 inline void unpackTo8BitRaw(const WordType* src, size_t srcStride, size_t width,
                             size_t height, uint8_t* dst, size_t dstStride, uint8_t onValue,
@@ -529,6 +575,20 @@ inline void unpackTo8BitRaw(const WordType* src, size_t srcStride, size_t width,
             // ONE word load per 32 pixels instead of one per pixel: the shift and
             // mask stay in a register where they used to be recomputed from `x`.
             WordType w = rowIn[x / kBits];
+#if defined(BINCV_X86_RUNTIME_AVX2) || (defined(BINCV_HAVE_NEON) && defined(__aarch64__))
+            // THE INVERSE OF A MOVE-MASK, AND IT VECTORISES THE SAME WAY. Broadcast the
+            // word so byte i holds the byte containing bit i, AND with the per-lane bit
+            // weights, compare, and select. Six operations for what was thirty-two
+            // BRANCHES -- and the branch is the cost, not the shift.
+            //
+            // This is the audit CLAUDE.md's benchmark rule produced: `unpackTo8Bit` was
+            // correct, word-wise, and 4x slower than `packBits` doing the same job in the
+            // other direction, because nothing had ever timed it.
+            if (n == 32 && sizeof(WordType) == 4 && unpackVectorReady()) {
+                unpackWord32(static_cast<uint32_t>(w), rowOut + x, onValue, zeroValue);
+                continue;
+            }
+#endif
             for (size_t i = 0; i < n; ++i) {
                 rowOut[x + i] = (w & WordType{1}) ? onValue : zeroValue;
                 w = static_cast<WordType>(w >> 1);

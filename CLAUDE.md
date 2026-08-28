@@ -179,6 +179,19 @@ configuration the paper actually used.
 - **Report peak working set**, not per-buffer ratios. A target either fits or it
   does not.
 - **Commit the benchmark.** Every performance claim must be reproducible.
+- **A new operation gets a benchmark arm when it is written, even with no caller.** The
+  rules above trigger on a performance *claim*, and a kernel nobody calls makes none —
+  so it ships correct, untimed, and unoptimised, and nothing notices until something
+  calls it. **X-89 measured exactly that**: `medianWide` and `edgeThreshold` were written
+  bit-exact against the reference under T5.10/T5.11, benchmarked by nobody, and were
+  **78% of the whole frontend** the day T5.8 gave them a caller. A kernel with no
+  benchmark is unoptimised by default.
+- **A vector arm must be switchable off, and the benchmark must show it is on.** X-89
+  also shipped a vector block that a mis-attached `#define` had compiled out, and
+  measured three "improvements" against it. Two things catch this and both are cheap: a
+  runtime switch so the benchmark can time both arms, and a case where the fast path's
+  own gate excludes it — if that case does not report ~1.00×, the fast path is not
+  running where you think it is.
 
 ## Stop and ask
 
