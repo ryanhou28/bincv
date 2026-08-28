@@ -11779,9 +11779,13 @@ Everything is now a **shuffle of one vector** `{ax0, ax1, ay0, ay1}`:
 | | before | after | |
 |---|---|---|---|
 | covariance, ns/point-level | 2151.3 | **1613.9** | **1.33×** |
-| device `track` | 5.766 ms | **5.347** | **1.08×** |
-| device frontend | 6.892 | **6.478** | |
-| **device vs one-thread OpenCV** | **3.17×** | **3.43×** | |
+| device `track` | 5.766 ms | **5.310** | **1.09×** |
+| device frontend | 6.892 | **6.431** | |
+| **device vs one-thread OpenCV** | **3.17×** | **3.42×** | |
+
+*(Confirmed on the shipped code after the 0.0% change was reverted: 5.347 → 5.310 and
+3.43× → 3.42× across the revert, which is the noise floor — the revert cost nothing, as
+the 0.0% measurement predicted it would.)*
 
 **Bit-exact and unmoved:** `test_covariance` **17 704 / 17 704**, `test_opticalflow`
 **303 / 303**, **193 tracks** before and after. The portable body is still the oracle

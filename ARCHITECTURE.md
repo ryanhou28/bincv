@@ -4077,8 +4077,8 @@ not thereby an improvement**, which is why both were measured before either ship
 architecture [D-6](#8-design-decisions) says **has no scalar popcount**, so every one is
 `fmov` in, `cnt`, `addv`, `fmov` out.
 
-**Reference device: covariance 2151 → 1614 ns per point-level (1.33×), `track` 1.08×,
-and the frontend headline 3.17× → 3.43×.** Bit-exact — 17 704 / 17 704 covariance
+**Reference device: covariance 2151 → 1614 ns per point-level (1.33×), `track` 5.766 →
+5.310 ms, and the frontend headline 3.17× → 3.42×.** Bit-exact — 17 704 / 17 704 covariance
 checks, 303 / 303 tracker checks, 193 tracks unchanged. x86 untouched.
 
 **IT WAS FOUND BY MEASURING, AFTER TWO GUESSES MISSED.** An iteration-cap sweep put ~45%
