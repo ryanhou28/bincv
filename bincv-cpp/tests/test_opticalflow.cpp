@@ -3862,4 +3862,136 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
 
 #endif // BINCV_WITH_OPENCV
 
+
+// ---------------------------------------------------------------------------
+// T5.21 / E-47 -- THE INITIAL-FLOW MODE
+//
+// `LKParams::useInitialFlow` starts each point's search from the estimate already in
+// `nextPts` rather than from `prevPts`. It exists because a VIO frontend has an IMU: a
+// pose prediction says roughly where every feature went before the tracker runs.
+//
+// THE SHARP TEST IS THE IDENTITY, NOT THE IMPROVEMENT. Seeding the guess with
+// `prevPts` is, by definition, exactly what the default does -- so the two must agree
+// BIT FOR BIT, on every point, every status and every err. That single check covers the
+// scaling, the entry-level interaction and the propagation between levels at once, and
+// it fails loudly if the flag is wired into the wrong pass. An "it converged better"
+// test cannot do that: a plumbing error that merely shifts the seed a little still
+// converges.
+// ---------------------------------------------------------------------------
+
+BINCV_TEST(Flow, InitialFlowWithPrevPtsIsExactlyTheDefault_uint32_t) {
+    using W = uint32_t;
+    Frontend<W> fe(320, 240, 4);
+    const Warp warp = translation(3.0, -2.0);
+    renderWarped(fe.prev[0], Warp{});
+    renderWarped(fe.next[0], warp);
+    fe.build();
+
+    LKParams params;
+    const std::vector<Point2f> pts = eligiblePoints(fe.dx[0], fe.dy[0], fe.prev[0].cols(),
+                                                    fe.prev[0].rows(), warp, params.winWidth,
+                                                    params.winHeight);
+    BINCV_CHECK(pts.size() >= 16);
+
+    std::vector<Point2f> outA(pts.size()), outB(pts.size());
+    std::vector<uint8_t> stA(pts.size()), stB(pts.size());
+    std::vector<float> errA(pts.size()), errB(pts.size());
+
+    bincv::calcOpticalFlowPyrLK<W>(fe.levels.data(), fe.levels.size(), pts.data(), outA.data(),
+                                   stA.data(), errA.data(), pts.size(), params);
+
+    // The guess IS prevPts, so the flag must change nothing whatsoever.
+    LKParams seeded = params;
+    seeded.useInitialFlow = true;
+    outB = pts;
+    bincv::calcOpticalFlowPyrLK<W>(fe.levels.data(), fe.levels.size(), pts.data(), outB.data(),
+                                   stB.data(), errB.data(), pts.size(), seeded);
+
+    size_t differ = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        if (outA[i].x != outB[i].x || outA[i].y != outB[i].y) ++differ;
+        if (stA[i] != stB[i]) ++differ;
+        if (errA[i] != errB[i]) ++differ;
+    }
+    std::printf("  initial-flow seeded with prevPts: %zu of %zu points differ from the default\n",
+                differ, pts.size());
+    BINCV_CHECK_EQ(differ, size_t{0});
+}
+
+BINCV_TEST(Flow, InitialFlowSeedIsReadAndUsed_uint32_t) {
+    using W = uint32_t;
+    Frontend<W> fe(320, 240, 4);
+    // A translation far enough that the coarsest level's estimate matters, so a WRONG
+    // guess cannot be silently corrected back to the right answer by the fine levels.
+    const Warp warp = translation(5.0, 4.0);
+    renderWarped(fe.prev[0], Warp{});
+    renderWarped(fe.next[0], warp);
+    fe.build();
+
+    LKParams params;
+    const std::vector<Point2f> pts = eligiblePoints(fe.dx[0], fe.dy[0], fe.prev[0].cols(),
+                                                    fe.prev[0].rows(), warp, params.winWidth,
+                                                    params.winHeight);
+    BINCV_CHECK(pts.size() >= 16);
+
+    LKParams seeded = params;
+    seeded.useInitialFlow = true;
+
+    // A guess AT the truth and a guess far from it. If the seed were being ignored the
+    // two would come back identical; if it were being read they cannot, because the
+    // second starts its coarsest-level search 12 px away in the wrong direction.
+    std::vector<Point2f> good(pts.size()), bad(pts.size());
+    for (size_t i = 0; i < pts.size(); ++i) {
+        double gx = 0.0, gy = 0.0;
+        warp.forward(static_cast<double>(pts[i].x), static_cast<double>(pts[i].y), gx, gy);
+        good[i] = Point2f{static_cast<float>(gx), static_cast<float>(gy)};
+        bad[i] = Point2f{pts[i].x - 12.0f, pts[i].y + 12.0f};
+    }
+    std::vector<uint8_t> stG(pts.size()), stB(pts.size());
+    std::vector<float> errG(pts.size()), errB(pts.size());
+    bincv::calcOpticalFlowPyrLK<W>(fe.levels.data(), fe.levels.size(), pts.data(), good.data(),
+                                   stG.data(), errG.data(), pts.size(), seeded);
+    bincv::calcOpticalFlowPyrLK<W>(fe.levels.data(), fe.levels.size(), pts.data(), bad.data(),
+                                   stB.data(), errB.data(), pts.size(), seeded);
+
+    size_t differ = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        if (good[i].x != bad[i].x || good[i].y != bad[i].y) ++differ;
+    }
+    const FlowStats sg = measure(pts, good, stG, warp);
+    const FlowStats sb = measure(pts, bad, stB, warp);
+    std::printf("  seed at truth: rms %.4f (%zu tracked) | seed 17 px off: rms %.4f (%zu tracked)"
+                " | %zu of %zu points differ\n",
+                sg.rms, sg.tracked, sb.rms, sb.tracked, differ, pts.size());
+    // THE SEED IS READ. Not "the good one is better" -- that is X-94's question and is
+    // measured there, on both architectures, against a range of guess errors.
+    BINCV_CHECK(differ > 0);
+    BINCV_CHECK(sg.rms <= kRmsTolerance);
+}
+
+BINCV_TEST(Flow, InitialFlowSurvivesTheZeroLevelExit_uint32_t) {
+    using W = uint32_t;
+    // With no levels every point is lost. WITHOUT a guess the last estimate is the
+    // point itself; WITH one the caller's estimate is the last estimate there is, and
+    // overwriting it with prevPts would throw away the better of the two.
+    const std::vector<Point2f> pts = {{10.0f, 10.0f}, {20.0f, 30.0f}};
+    std::vector<Point2f> out = {{11.5f, 12.5f}, {23.0f, 34.0f}};
+    std::vector<uint8_t> st(2);
+
+    LKParams seeded;
+    seeded.useInitialFlow = true;
+    bincv::calcOpticalFlowPyrLK<W>(static_cast<const bincv::LKLevel<W>*>(nullptr), 0, pts.data(),
+                                   out.data(), st.data(), nullptr, 2, seeded);
+    BINCV_CHECK(out[0].x == 11.5f && out[0].y == 12.5f);
+    BINCV_CHECK(out[1].x == 23.0f && out[1].y == 34.0f);
+    BINCV_CHECK_EQ(st[0], uint8_t{0});
+    BINCV_CHECK_EQ(st[1], uint8_t{0});
+
+    std::vector<Point2f> plain = {{11.5f, 12.5f}, {23.0f, 34.0f}};
+    bincv::calcOpticalFlowPyrLK<W>(static_cast<const bincv::LKLevel<W>*>(nullptr), 0, pts.data(),
+                                   plain.data(), st.data(), nullptr, 2, LKParams{});
+    BINCV_CHECK(plain[0].x == 10.0f && plain[0].y == 10.0f);
+    BINCV_CHECK(plain[1].x == 20.0f && plain[1].y == 30.0f);
+}
+
 BINCV_TEST_MAIN("test_opticalflow")

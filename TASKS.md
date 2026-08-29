@@ -4224,7 +4224,7 @@ stride. Tracking through it is **bit-identical** to a native 32-bit build and ru
 AVX2 batch. This is the answer to "why doesn't binCV support 64-bit words in the
 tracker": it does, and it never needed 64-bit kernels.
 
-### T5.20 · Space new detections against live tracks (E-46) · `TODO`
+### T5.20 · Space new detections against live tracks (E-46) · `DONE` (X-93 → D-75)
 
 **The gap, and it was reported from outside.** A VIO frontend detects to *top up*, so
 every new corner must be rejected if it lands on a track already being followed. The
@@ -4232,27 +4232,31 @@ reference does this on every detect (`applyMinDistance`); binCV's spacing filter
 new corners only **against each other**, so `examples/vio_frontend.cpp:86` hand-rolls
 the missing loop. Every binCV user writes that loop.
 
-**Two arms, and [X-93](EXPERIMENTS.md) fixes the decision rule before either exists** —
-an exhaustive `O(new × live)` filter costing no memory, and a 1-bit occupancy mask
-costing 38 400 B. The exhaustive arm ships either way; the mask must be **faster at the
-frontend's own operating point on both architectures** to become the recommended path,
-because a tie loses to the memory rule.
+**Shipped as `ops/occupancy.hpp`'s `spaceCandidates`, TIER 3**, vectorised eight-wide on
+AVX2 and four-wide on NEON. **The bit-plane arm was measured and lost by an order of
+magnitude** — 26.6× slower on x86, 7.67× on the device, for 38 400 B against nothing —
+and does not overtake until thousands of candidates. Both ship (clause 2), the loop is
+the default, and the crossover is in the header. The pre-registered estimate was wrong by
+~50× and [X-93](EXPERIMENTS.md) says why.
 
 Bit-exactness between the arms is required independently of the timing: an integer
 candidate is rejected by the mask iff the float distance test rejects it, with the
 disc's row bounds computed by exact squared-integer comparison rather than trusting
 `sqrt` rounding at the boundary.
 
-### T5.21 · An initial-flow mode for the tracker (E-47) · `TODO`
+### T5.21 · An initial-flow mode for the tracker (E-47) · `DONE` (X-94 → D-76)
 
 `LKParams` says there is no initial-flow mode "since an unused mode is an untested
 one". **The premise is false** — `seal_params.yaml` has the flag off, but the pipeline
 around it sets `useInitialCorners` from `predictOpticalFlow` and seeds LK from an
 odometry predictor, which is IMU-aided tracking and the normal VIO case.
 
-Ships on the accuracy argument; the **speed** claim is [X-94](EXPERIMENTS.md)'s to
-allow or refuse, measured against guesses corrupted by 0.25–4 px so the header can name
-the error beyond which a guess is worse than starting from `prevPts`.
+Shipped, and it needed no second buffer — a point is written once, at its entry level,
+so `nextPts` still holds the caller's guess when the tracker reaches it. **The speed claim
+came back conditional**: nothing at 5 px of motion (0.86–1.13×), 3.70×/5.22× at 24 px, and
+a ~10% LOSS once the guess error exceeds the true motion. [X-94](EXPERIMENTS.md) also
+found that without a guess at 24 px the tracker returns 54.7 px of error while reporting
+every point tracked — registered as **E-48**, not fixed here.
 
 ## Phase 6 — Repository shape, for sharing
 

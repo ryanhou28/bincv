@@ -21,7 +21,7 @@
 //   * CULLING on LK status and on leaving the frame -- HybVIO's
 //     FAILED_FLOW / FLOW_OUT_OF_RANGE (src/tracker/optical_flow.cpp);
 //   * TOPPING UP by detection only when the count falls below a target, with
-//     applyMinDistance against the SURVIVORS so new corners do not land on
+//     spaceCandidates against the SURVIVORS so new corners do not land on
 //     features already being tracked (src/tracker/feature_detector_legacy.cpp).
 //     binCV has no mask parameter by design -- ops/corner.hpp documents the
 //     spacing filter as the route -- and this is that route taken.
@@ -42,6 +42,7 @@
 
 #include "bincv-cpp/ops/corner.hpp"
 #include "bincv-cpp/ops/denoise.hpp"
+#include "bincv-cpp/ops/occupancy.hpp"
 #include "bincv-cpp/ops/derivative.hpp"
 #include "bincv-cpp/ops/opticalFlow.hpp"
 #include "bincv-cpp/ops/pyramid.hpp"
@@ -80,27 +81,27 @@ struct Track {
     int id = 0;
 };
 
-/// HybVIO's applyMinDistance, against the SURVIVING tracks rather than against
-/// the previous detection -- which is what makes this a top-up and not a
-/// re-detect. O(new x live); both are a few hundred at most.
-void applyMinDistance(std::vector<Point2f>& fresh, const std::vector<Track>& live, float r) {
-    if (r < 1.0f) return;
-    const float r2 = r * r;
-    size_t out = 0;
-    for (size_t i = 0; i < fresh.size(); ++i) {
-        bool ok = true;
-        for (const Track& t : live) {
-            const float ddx = fresh[i].x - t.p.x, ddy = fresh[i].y - t.p.y;
-            if (ddx * ddx + ddy * ddy < r2) { ok = false; break; }
-        }
-        if (!ok) continue;
-        for (size_t j = 0; j < out; ++j) {   // and against each other
-            const float ddx = fresh[i].x - fresh[j].x, ddy = fresh[i].y - fresh[j].y;
-            if (ddx * ddx + ddy * ddy < r2) { ok = false; break; }
-        }
-        if (ok) fresh[out++] = fresh[i];
-    }
-    fresh.resize(out);
+/// The spacing filter, over the SURVIVING tracks rather than the previous detection
+/// -- which is what makes this a top-up and not a re-detect.
+///
+/// **THIS FUNCTION USED TO BE THIRTY LINES OF DISTANCE TESTS, AND ITS EXISTENCE WAS THE
+/// EVIDENCE FOR T5.20.** binCV had no operation for it: `goodFeaturesToTrack` spaces a
+/// detection's corners against EACH OTHER, which is `cv::goodFeaturesToTrack`'s job and
+/// all of it, and the previous frame's tracks are not among its inputs. Every user of
+/// this library wrote this loop. `bincv::spaceCandidates` is now that operation, and
+/// X-93 measured it against a bit-plane alternative before choosing this shape.
+size_t spaceAgainstLive(std::vector<Point2f>& fresh, const std::vector<Track>& live, float r) {
+    // The tracks' positions, contiguous -- the kernel takes a Point2f array, and a
+    // vector of Track is not one. Kept across frames so the top-up allocates nothing.
+    static std::vector<Point2f> livePts;
+    livePts.clear();
+    livePts.reserve(live.size());
+    for (const Track& t : live) livePts.push_back(t.p);
+
+    const size_t kept = bincv::spaceCandidates(fresh.data(), fresh.size(), livePts.data(),
+                                               livePts.size(), r, fresh.size());
+    fresh.resize(kept);
+    return kept;
 }
 
 /// binCV's half of the frontend: the shipped 1/2/2/2 ladder (D-23), the box
@@ -282,7 +283,7 @@ int main(int argc, char** argv) {
             for (size_t i = 0; i < r.count; ++i) {
                 fresh.push_back(Point2f{static_cast<float>(cand[i].x), static_cast<float>(cand[i].y)});
             }
-            applyMinDistance(fresh, tracks, static_cast<float>(gf.minDistance));
+            spaceAgainstLive(fresh, tracks, static_cast<float>(gf.minDistance));
             for (const Point2f& p : fresh) {
                 if (static_cast<int>(tracks.size()) >= kTarget) break;
                 tracks.push_back(Track{p, 0, nextId++});

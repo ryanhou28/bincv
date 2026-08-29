@@ -284,8 +284,10 @@ inline namespace BINCV_ABI_NAMESPACE {
 ///       `lk_term_criteria_eps: 0.03`, `lk_min_eig_threshold: 0.001`.
 ///       `lk_max_level: 3` is not a field: the number of levels is `levelCount`,
 ///       because the caller owns the pyramid (D-5).
-///       `lk_use_initial_flow: 0` is not a field either -- there is no initial-flow
-///       mode, since an unused mode is an untested one.
+///       `lk_use_initial_flow: 0` IS a field -- `useInitialFlow` below. It used to be
+///       absent, on the grounds that an unused mode is an untested one; that was
+///       checked against `seal_params.yaml`, where the flag is off, and not against
+///       the pipeline around it, where `predictOpticalFlow` turns it on (E-47).
 /// @brief Which pyramid level a keypoint ENTERS at. **X-25 / E-14.**
 /// @note Not a border and not a padding scheme: it is a policy about which levels
 ///       a given point is allowed to be tracked on at all. binCV clips where the
@@ -315,6 +317,46 @@ struct LKParams {
     /// Which level each keypoint enters the pyramid at (X-25 / E-14). Defaults to
     /// the shipped behaviour; nothing changes unless a caller asks for it.
     LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
+
+    /// @brief Start each point's search from the estimate already in `nextPts`
+    ///        instead of from `prevPts`. `cv::OPTFLOW_USE_INITIAL_FLOW` (T5.21 / E-47).
+    ///
+    /// **This is how a VIO frontend uses its IMU.** With a pose prediction the caller
+    /// knows roughly where every feature went before the tracker runs; handing that
+    /// over turns a search into a refinement. HybVIO does exactly this -- its
+    /// `computeOpticalFlow` fills the output array from an odometry predictor and sets
+    /// `cv::OPTFLOW_USE_INITIAL_FLOW` -- which is why the mode exists here at all.
+    ///
+    /// @note **`nextPts` becomes an INPUT as well as an output** when this is set, and
+    ///       is read in FULL-RESOLUTION frame coordinates, exactly as `prevPts` is.
+    ///       The tracker scales it into each level itself. An uninitialised `nextPts`
+    ///       under this flag is not a small error: it seeds every search from garbage.
+    /// @note The window in the PREVIOUS frame is still anchored at `prevPts`. Only the
+    ///       starting estimate for the NEXT frame moves -- which is what the flag means
+    ///       in OpenCV and the only reading under which the residual is still the
+    ///       residual.
+    /// @note **WHEN IT PAYS, AND IT DOES NOT ALWAYS.** X-94 measured this against guess
+    ///       error on both architectures, and the answer is conditional on how far the
+    ///       frame moved:
+    ///
+    ///       - **Small motion (5 px over a 1/2/2/2 ladder): a guess buys nothing.**
+    ///         0.86x-1.13x on x86 and 0.89x-1.11x on the reference device, with the
+    ///         endpoint error identical in every arm. The coarsest level already starts
+    ///         0.62 px from the answer, so there is nothing left to save.
+    ///       - **Large motion (24 px): a guess is decisive.** 3.7x on x86 and 5.2x on
+    ///         the device, and a guess wrong by 8 px still gives 3.5x and 4.1x.
+    ///       - **A guess wrong by MORE than the true motion is worse than no guess** --
+    ///         at 5 px of motion an 8 px error costs 10-11% and raises the iteration
+    ///         count from 2.148 to 2.372.
+    ///
+    ///       So: seed this from a prediction you trust to within the frame's own
+    ///       motion. A prediction with more error than that is not a prediction.
+    /// @note **The large-motion figures are NOT this flag's achievement and should not
+    ///       be read as one.** Without a guess at 24 px the tracker does not merely run
+    ///       slower -- it returns a mean endpoint error of 54.7 px while reporting
+    ///       `status = 1` for every point (E-48). A guess routes around that failure; it
+    ///       does not fix it, and a caller without an IMU still has it.
+    bool useInitialFlow = false;
 };
 
 /// @brief One pyramid level's six planes: both frames, and the previous frame's
@@ -1840,6 +1882,7 @@ struct LKContext {
     double eps2 = 0.0;
     double minEigThreshold = 0.0;
     LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
+    bool useInitialFlow = false;
 
     /// Every usable level's extent, so that a point's entry level can be RECOMPUTED
     /// rather than cached. A per-point array would be scratch, and this operation
@@ -2662,8 +2705,15 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
         const size_t entry = entryLevelFor(c, p);
         if (li > entry) continue;
         if (li == entry) {
-            c.nextPts[p].x = c.prevPts[p].x * scale;
-            c.nextPts[p].y = c.prevPts[p].y * scale;
+            // THE ONLY LINE `useInitialFlow` CHANGES, AND IT NEEDS NO SECOND BUFFER.
+            // A point is written here exactly once -- at its own entry level -- and is
+            // untouched at every coarser one, so `nextPts[p]` still holds whatever the
+            // caller put there. Reading it here is reading the guess; the scale is the
+            // same either way, because a guess arrives in frame coordinates just as
+            // `prevPts` does.
+            const Point2f seed = c.useInitialFlow ? c.nextPts[p] : c.prevPts[p];
+            c.nextPts[p].x = seed.x * scale;
+            c.nextPts[p].y = seed.y * scale;
         } else {
             c.nextPts[p].x *= 2.0f;
             c.nextPts[p].y *= 2.0f;
@@ -2752,6 +2802,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
     c.eps2 = static_cast<double>(eps) * static_cast<double>(eps);
     c.minEigThreshold = static_cast<double>(params.minEigThreshold);
     c.entryLevel = params.entryLevel;
+    c.useInitialFlow = params.useInitialFlow;
 
     // Written BEFORE the degenerate exit below, not after it: "every entry is
     // written" is the documented contract, and a caller that reads `status` after
@@ -2766,7 +2817,10 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
     // last estimate is the point itself.
     if (levelCount == 0) {
         for (size_t i = 0; i < pointCount; ++i) {
-            nextPts[i] = prevPts[i];
+            // Under `useInitialFlow` the caller's guess IS the last estimate, and
+            // overwriting it with `prevPts` would throw away the better of the two.
+            // Without it, the point itself is the only estimate there has ever been.
+            if (!params.useInitialFlow) nextPts[i] = prevPts[i];
             status[i] = 0;
         }
         return false;

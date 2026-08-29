@@ -30,6 +30,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/logic.hpp`](#opslogichpp) — 6 entries
 - [`ops/medianWide.hpp`](#opsmedianWidehpp) — 5 entries
 - [`ops/morphology.hpp`](#opsmorphologyhpp) — 27 entries
+- [`ops/occupancy.hpp`](#opsoccupancyhpp) — 6 entries
 - [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 20 entries
 - [`ops/pack.hpp`](#opspackhpp) — 9 entries
 - [`ops/pyramid.hpp`](#opspyramidhpp) — 41 entries
@@ -282,6 +283,19 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `dilate` | 1 | Morphological dilation: `dst(x,y) = OR over the element of src(x+dx, y+dy)` |
 | `morphologyExNeedsScratch` | — | True when `morphologyEx(op, ...)` reads and writes its scratch view |
 | `morphologyEx` | 1 | The seven `MorphOp` compositions |
+
+## `ops/occupancy.hpp`
+
+[`bincv-cpp/include/bincv-cpp/ops/occupancy.hpp`](../bincv-cpp/include/bincv-cpp/ops/occupancy.hpp)
+
+| | tier | |
+|---|---|---|
+| `spaceCandidates` | 3 | Keeps the candidates that are at least `radius` from every live point and from every candidate already kept |
+| `clearOccupancy` | 3 | Zeroes an occupancy mask |
+| `markDisc` | 3 | Sets every pixel strictly within `radius` of `(cx, cy)` |
+| `markOccupied` | 3 | Stamps `markDisc` for every point |
+| `occupied` | 3 | Is the pixel `(x, y)` claimed? |
+| `spaceCandidatesMasked` | 3 | `spaceCandidates` through an occupancy mask: test one bit, and stamp the disc of every candidate kept |
 
 ## `ops/opticalFlow.hpp`
 

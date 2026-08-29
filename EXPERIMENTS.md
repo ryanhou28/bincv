@@ -12323,7 +12323,7 @@ the batch's own whole-frontend arm still has to be measured, not projected.
 
 ---
 
-### X-93 · E-46: spacing new detections against live tracks · `RULE PRE-REGISTERED`
+### X-93 · E-46: spacing new detections against live tracks · `DONE — CLAUSE 2, THE MASK LOST`
 
 **Written and committed BEFORE either arm exists.** The gap is real and reported from
 outside: the reference calls `applyMinDistance(corners, prevCorners, maskRadius)` on every
@@ -12376,7 +12376,7 @@ rounding at the boundary.
 
 ---
 
-### X-94 · E-47: an initial-flow mode for the tracker · `RULE PRE-REGISTERED`
+### X-94 · E-47: an initial-flow mode for the tracker · `DONE — SHIPPED, CLAIM IS CONDITIONAL`
 
 `ops/opticalFlow.hpp` currently says, of `LKParams`:
 
@@ -12406,3 +12406,147 @@ performance claim, so it is measured before it is written, on both architectures
   one was measured**, and must state the error beyond which the guess is worse than starting
   from `prevPts`. If no such crossover exists in range, that is the finding and the header
   claims nothing about speed — the feature still ships, on the accuracy argument alone.
+
+---
+
+## X-93 · RESULT — the mask lost on both architectures, by an order of magnitude
+
+**Platforms:** x86-64 Release one thread, machine otherwise quiet; and the reference
+device — Raspberry Pi 4 Model B Rev 1.5, aarch64, kernel 6.18.34+rpt-rpi-v8, g++ 14.2.0,
+performance governor, `taskset -c 3`, `throttled` 0x80000 → 0x80000 (sticky history from
+an earlier run, **no growth during this one**). **Code:** `benchmark/spacing_benchmark.cpp`.
+Seven interleaved rounds, minimum reported.
+
+**THE OPERATING POINT — 640×480, radius 32, 120 live tracks, 300 candidates, 80 free slots:**
+
+| | (a) exhaustive | (b) occupancy mask | |
+|---|---|---|---|
+| x86-64, AVX2 | **3 333 ns**, 0 B | 88 767 ns, 38 400 B | exhaustive **26.63×** faster |
+| Cortex-A72, NEON | **49 617 ns**, 0 B | 380 629 ns, 38 400 B | exhaustive **7.67×** faster |
+
+The rule required the mask to be *faster* — a tie loses to the memory rule. It is not
+close to a tie.
+
+**THE CROSSOVER, MEASURED RATHER THAN EXTRAPOLATED**, which is clause 2 of the rule.
+`exhaustive / mask`, so above 1.00 the mask wins:
+
+| live | new = 50 | 200 | 1 000 | 5 000 |
+|---|---|---|---|---|
+| 50 (x86 / device) | 0.01 / 0.02 | 0.04 / 0.10 | 0.18 / 0.41 | 0.91 / **1.49** |
+| 100 | 0.01 / 0.03 | 0.03 / 0.10 | 0.16 / 0.39 | 0.85 / **1.49** |
+| 200 | 0.00 / 0.02 | 0.02 / 0.07 | 0.11 / 0.31 | 0.60 / **1.28** |
+
+**Crossover ≈ 2 000 candidates on aarch64 and ≈ 5 000 on x86** — seven to seventeen
+times more than a detection top-up ever produces. It is *lower* on the device precisely
+because NEON's four-wide distance test is a smaller advantage than AVX2's eight-wide, so
+the arm the mask has to beat is weaker there.
+
+**THE PRE-REGISTERED ESTIMATE WAS WRONG BY ABOUT FIFTY, AND IT IS WORTH SAYING WHY.**
+X-93 predicted a crossover near `π·r²/WordBits ≈ 100`. That counted the disc's ~100 word
+writes and nothing else. Two terms it omitted, each larger than the one it kept:
+
+1. **The per-row bound arithmetic.** A radius-32 disc is 65 rows, and each row costs a
+   `dy²`, two boundary probes and a masked range write — ~25 operations against ~3
+   stores. Measured: **500 ns per disc on x86, 2 427 ns on the device**, where the writes
+   alone would be a fifth of that.
+2. **The vector width on the OTHER side.** The exhaustive arm is 8-wide on AVX2 and
+   4-wide on NEON; the stamp is scalar per row. The estimate compared a vectorised
+   algorithm against a scalar one and counted only scalar operations.
+
+**The two controls both held.** The gate control — `live = 4`, `limit = 1`, so neither
+scan reaches the vector width — read **0.99× on the device** and 0.91–1.07× across three
+x86 runs, so the `vec/sca` column (1.29–1.33× NEON, 1.88–4.99× AVX2) is measuring the
+vector arm and not a compiler artefact. And the arms returned **identical kept sets** in
+every cell, checked in the benchmark itself, so the two columns are timing one operation.
+
+**THE FIRST DEVICE RUN WAS DISCARDED.** It swept out to 20 000 candidates, and
+`run_on_pi.sh` reported `throttled` 0x0 → 0x80000: the soft temperature limit tripped
+*during* the run, which invalidates it. Those numbers are not in this record and were not
+used. The sweep now stops at 5 000 — which still brackets the crossover on both
+architectures — and the re-run started from 50.1 °C with the throttle state unchanged
+throughout. A benchmark that cannot be measured on the device it must be measured on is
+not a benchmark.
+
+**Decision:** [D-75](ARCHITECTURE.md#8-design-decisions). Clause 2 — both ship,
+`spaceCandidates` is the default and the documented answer, the crossover is in the
+header.
+
+---
+
+## X-94 · RESULT — initial flow ships, and the speed claim is conditional
+
+**Platforms:** as X-93. **Code:** `benchmark/lk_initial_flow.cpp`. 640×480, ladder
+1/2/2/2, 816 keypoints, 31×31 window, 15 interleaved rounds, minimum.
+
+**The iteration counts are identical on both architectures** — 2.148, 1.841, 1.827 … and
+12.080, 1.169, 1.340 … to three decimals — which is the cross-check that the two columns
+are running the same algorithm on the same data and only the clock differs.
+
+**TRUE MOTION (5, 3) px — level 3 sees (0.62, 0.38). A guess buys nothing.**
+
+| guess error | x86 | device | iters/pt-level | rms px |
+|---|---|---|---|---|
+| none (`prevPts`) | 1.00× | 1.00× | 2.148 | 0.0004 |
+| exact | 1.01× | 1.10× | 1.841 | 0.0004 |
+| 0.25 px | **1.13×** | **1.11×** | 1.827 | 0.0004 |
+| 1 px | 1.11× | 1.08× | 1.898 | 0.0004 |
+| 4 px | 0.86× | 0.98× | 2.134 | 0.0004 |
+| 8 px | 0.90× | 0.89× | 2.372 | 0.0004 |
+
+The best case is 11–13% and the worst is a 10–11% **loss**. The endpoint error does not
+move at all — 0.0004 px in every arm, including the 8-px-wrong guess — so nothing is
+being traded, there is simply nothing to win: at 5 px of motion the coarsest level starts
+0.62 px from the answer.
+
+**TRUE MOTION (24, 16) px — level 3 sees (3.00, 2.00). A guess is decisive.**
+
+| guess error | x86 | device | iters/pt-level | rms px |
+|---|---|---|---|---|
+| none (`prevPts`) | 1.00× | 1.00× | 12.080 | **54.6779** |
+| exact | **3.70×** | **5.22×** | 1.169 | 0.0000 |
+| 1 px | 3.86× | 4.70× | 1.374 | 0.0000 |
+| 8 px | 3.47× | 4.07× | 1.778 | 0.0000 |
+
+**THE HEADLINE HERE IS THE `rms` COLUMN, NOT THE SPEEDUP.** Without a guess the tracker
+does not run slowly — **it fails**, returning a mean endpoint error of 54.7 px on a true
+motion of 28.8 px while reporting `status = 1` for all 816 points, and burning 12.08
+iterations per point-level against a cap of 20 to do it. The 3.7–5.2× is mostly the cost
+of that failure, not the saving from a good guess.
+
+**So the claim the header is permitted to make** is the conditional one: a guess pays
+when the motion exceeds what the pyramid can bridge, is neutral below that, and **costs
+about 10% once the guess error exceeds the true motion** — seed it from a prediction
+trusted to within the frame's own motion, or not at all.
+
+**What this experiment did NOT establish, and must not be read as establishing:** that
+initial flow fixes the large-motion failure. It routes around it. A caller with no IMU
+still has it, and it is registered as **E-48** rather than folded in here.
+
+**Decision:** [D-76](ARCHITECTURE.md#8-design-decisions).
+
+---
+
+### E-48 · The tracker fails silently at large motion · `REGISTERED, NOT SCHEDULED`
+
+**Found by X-94 while measuring something else, which is why it is its own record.**
+
+On a 24 px translation over a 1/2/2/2 ladder the shipped tracker returns a mean endpoint
+error of **54.7 px — nearly twice the true displacement — and sets `status = 1` for every
+one of 816 points.** It spends 12.08 iterations per point-level getting there. Every loss
+rule passes: `minEigThreshold` does not reject these windows, and nothing else looks at
+whether the answer is plausible.
+
+**This is the same family as [X-20](#x-20)'s findings**, not a new class of bug: X-20
+recorded that accuracy degrades monotonically as 1-bit pyramid levels are added (0.0017
+px at one level, 3.25 px at four, for a **1 px** translation) and that the tracker has a
+level-0 stationary point the `minEigThreshold` does not reject. At 24 px the coarse levels
+are being asked for an estimate they cannot give, and the error is multiplied by 2^level
+on the way down. What is new is the **magnitude** and that `status` is silent about it.
+
+**Not scheduled, and deliberately not fixed here.** Two candidate arms — a bidirectional
+consistency check (which needs the NEXT frame's derivative, two more planes per level,
+and is the footprint trade `LKLevel` currently declines) and a residual-magnitude reject
+at convergence (nearly free, but it is a new loss rule and D-53 says a rule that shortens
+tracks has to be measured on track lifetime, not on time). Both are accuracy changes with
+a footprint or a lifetime cost, and neither belongs in a task about initial flow.
+

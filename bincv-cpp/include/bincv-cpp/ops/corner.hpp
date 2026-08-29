@@ -851,6 +851,15 @@ inline CornerResult selectGoodFeatures(ConstResponseMap response,
 ///       than an absent one. A caller wanting a mask can call cornerMinEigenVal,
 ///       zero the masked pixels of the map, and call selectGoodFeatures -- which
 ///       is the same two-stage split this file already exposes.
+/// @note **IF WHAT YOU WANTED THE MASK FOR WAS TO AVOID DETECTING ON TOP OF TRACKS
+///       YOU ARE ALREADY FOLLOWING, THAT IS `ops/occupancy.hpp`, NOT A MASK HERE.**
+///       This operation's spacing filter spaces a detection's corners against EACH
+///       OTHER -- `cv::goodFeaturesToTrack`'s job and all of it -- and the previous
+///       frame's tracks are not among its inputs and cannot be, because they are not
+///       a property of the response map. `bincv::spaceCandidates(corners, count,
+///       live, liveCount, radius, freeSlots)` is the second half, and every VIO
+///       frontend needs both. T5.20 exists because this library's own example had
+///       written that loop by hand.
 /// @note Never throws; allocates nothing.
 template <typename WordType>
 inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
