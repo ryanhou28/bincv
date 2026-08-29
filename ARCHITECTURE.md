@@ -4263,6 +4263,38 @@ outside.** Any such choice needs all three of: a default that is right, a way to
 what you got, and a diagnostic when the answer is "not what you wanted". The library had
 none of the three.
 
+### D-74: sub-pixel refinement, and why ternary derivatives are enough for it
+
+**Requested by a binCV user**, who had already established the part that makes it
+possible. `cv::cornerSubPix` solves `G q = b` with `G = sum w (grad I)(grad I)^T`;
+scaling the image by `s` scales `grad I` by `s` and therefore **both** `G` and `b` by
+`s^2`, so `q = G^-1 b` does not move. A ternary `+/-1` derivative refines to the same
+place as a byte pipeline's `+/-255`. They measured 0.00018 px mean over 5 924 corners
+before asking; `SubPix.ScaleInvariance` now pins it at **exactly zero**, because binCV's
+own kernel and its oracle differ only by that scale factor.
+
+**`ops/subpix.hpp`, API TIER 2.** The refinement rule, the Gaussian window, the zero-zone
+and the termination are OpenCV's; the **gradient** is not — OpenCV derives its own from
+an 8-bit image, and this takes the `SignedQuantMat` derivatives the frontend already
+holds (D-5, and the only shape that avoids materialising the byte image the library
+exists to avoid). Measured against `cv::cornerSubPix` on the same content: **0.0325 px
+mean, 0.0326 worst.**
+
+**IT IS THE ONE REDUCTION IN THIS LIBRARY THAT IS NOT A POPCOUNT, AND BIT-PLANES STILL
+PAY.** The weights and positions are per-pixel scalars, so the sums cannot collapse into
+bit counts. What they collapse instead is the *traversal*: a pixel with no gradient
+contributes nothing to any of the five sums, and `|dx| | |dy|` finds every such pixel a
+**word at a time**. On a binarised edge map most of a 31×31 window is flat, so the kernel
+visits the edges and skips the rest. `SubPix.MatchesDenseOracle` exists because a skip
+that drops a contributing pixel changes the answer silently — it agrees with a dense
+reference to **exactly zero** over 45 corners straddling word boundaries.
+
+**Not shipped: a claim that this is worth accuracy.** The requesting user measured it at
+1.38 cm for a byte frontend and **0.14 cm for theirs** — the asymmetry meaning their
+detector places corners differently, which is a bigger effect than refinement. binCV
+ships the operation because a VIO frontend calls it; **whether it helps is the caller's
+measurement, not this library's claim.**
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

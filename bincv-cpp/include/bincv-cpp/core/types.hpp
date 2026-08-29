@@ -127,6 +127,15 @@ template <typename WordType = uint32_t> using BinMat = QuantMat<1, WordType>;
 /// @brief Type aliases for convenience
 /// @note These provide easy access to BinMat with different word sizes
 
+/// @brief A point with sub-pixel coordinates -- the tracker's and the refiner's.
+/// @note **Declared here rather than in ops/opticalFlow.hpp, where it used to live.**
+///       `ops/subpix.hpp` needs it and nothing else from the tracker, and a two-float
+///       POD is not worth including three thousand lines of Lucas-Kanade to reach.
+struct Point2f {
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
 /// @brief The word type to use unless you have measured a reason not to.
 ///
 /// **PICK THIS ONE.** `BinMat` and `QuantMat` are templated on the word type (D-1) and

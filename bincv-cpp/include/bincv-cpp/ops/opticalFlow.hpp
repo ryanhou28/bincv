@@ -279,11 +279,6 @@ inline namespace BINCV_ABI_NAMESPACE {
 ///        because this operation's whole job is to produce fractional positions.
 /// @note Deliberately NOT reused for ops/corner.hpp's `Corner`, which is integer
 ///       by construction and carries a response.
-struct Point2f {
-    float x = 0.0f;
-    float y = 0.0f;
-};
-
 /// @brief The tracker's parameters, defaulted to `SEAL/seal_params.yaml` verbatim.
 /// @note `lk_win_size_width/height: 31`, `lk_term_criteria_max_count: 20`,
 ///       `lk_term_criteria_eps: 0.03`, `lk_min_eig_threshold: 0.001`.
@@ -2887,6 +2882,35 @@ inline void calcOpticalFlowPyrLK(const LKLevel<WordType>* levels, size_t levelCo
 /// @note `N == 1` here is the same computation as `LKLevel` above, through the
 ///       generic code path rather than the hand-written one, and
 ///       tests/test_opticalflow.cpp requires the two to agree exactly.
+/// @brief Reads a 64-bit pyramid level as a 32-bit one, so the vector kernels apply.
+///        **API TIER 3.** No copy, no allocation.
+///
+/// ```cpp
+/// // 64-bit storage everywhere, and a tracker that still runs its fast kernels:
+/// bincv::LKLevelN<2, uint32_t> narrow[4];
+/// for (size_t i = 0; i < 4; ++i) narrow[i] = bincv::narrowLevel(levels64[i]);
+/// bincv::calcOpticalFlowPyrLK(narrow, 4, prev, next, status, err, count, params);
+/// ```
+///
+/// **THIS IS THE ANSWER TO "WHY DOESN'T binCV SUPPORT 64-BIT WORDS IN THE TRACKER".**
+/// It does, now, at full speed — because it never needed 64-bit kernels, only a view.
+/// See `narrowPlane` for why the reinterpretation is exact, and
+/// [D-73](../../../ARCHITECTURE.md) for the 8.6× an integrator paid before it existed.
+template <size_t N, typename WordType>
+inline LKLevelN<N, uint32_t> narrowLevel(const LKLevelN<N, WordType>& lv) {
+    static_assert(sizeof(WordType) == 8, "narrowLevel: the source level must be 64-bit");
+    LKLevelN<N, uint32_t> out;
+    for (size_t i = 0; i < N; ++i) {
+        out.prev[i] = narrowPlane<WordType>(lv.prev[i]);
+        out.next[i] = narrowPlane<WordType>(lv.next[i]);
+        out.dxMag[i] = narrowPlane<WordType>(lv.dxMag[i]);
+        out.dyMag[i] = narrowPlane<WordType>(lv.dyMag[i]);
+    }
+    out.dxSign = narrowPlane<WordType>(lv.dxSign);
+    out.dySign = narrowPlane<WordType>(lv.dySign);
+    return out;
+}
+
 /// @brief Which residual kernel this level type will actually run, as a string.
 ///        **API TIER 3.**
 ///
@@ -2944,10 +2968,13 @@ inline void calcOpticalFlowPyrLK(const LKLevelN<N, WordType>* levels, size_t lev
 #ifndef BINCV_ALLOW_SCALAR_LK_WORD
     static_assert(!impl::kLkWordMissesVectorPath<LKLevelN<N, WordType>>,
                   "binCV: this pyramid depth has vectorised tracking kernels, but they "
-                  "are gated on 32-bit words -- use uint32_t (bincv::DefaultWord). A "
-                  "wider word is correct and lands in the scalar fallback on BOTH x86 "
-                  "and aarch64; measured 8.6x slower keypoint tracking in a real "
-                  "frontend. Define BINCV_ALLOW_SCALAR_LK_WORD to measure it on purpose.");
+                  "are gated on 32-bit words. IF YOUR STORAGE IS 64-BIT, CALL "
+                  "bincv::narrowLevel(level) -- it is a view, not a copy, and the "
+                  "kernels then apply at full speed. Otherwise use uint32_t "
+                  "(bincv::DefaultWord). A wider word is correct and lands in the "
+                  "scalar fallback on BOTH x86 and aarch64; measured 8.6x slower "
+                  "keypoint tracking in a real frontend. Define "
+                  "BINCV_ALLOW_SCALAR_LK_WORD to measure the scalar path on purpose.");
 #endif
     impl::LKContext c;
     if (!impl::lkPrologue(levelCount, prevPts, nextPts, status, err, pointCount, params, c)) return;

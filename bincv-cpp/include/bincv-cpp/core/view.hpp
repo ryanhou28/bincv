@@ -171,5 +171,37 @@ inline BinMatView<WordType_>::operator BinMatConstView<WordType_>() const {
     return BinMatConstView<WordType>{ptr, width, height, stride};
 }
 
+/// @brief Reads a 64-bit bit-plane as a 32-bit one. **API TIER 3.** No copy.
+///
+/// **A 64-BIT PLANE ALREADY IS A 32-BIT PLANE WITH TWICE THE STRIDE.** binCV puts pixel
+/// `x` at bit `x % WordBits` of word `x / WordBits`, so on a little-endian machine the
+/// two layouts are the same bytes: for `b = x % 64 < 32` the 32-bit index is `2w` and
+/// the bit is `b`; for `b >= 32` it is `2w + 1` and `b - 32`. Both halves match, and
+/// `tests/test_view_narrow.cpp` checks it pixel by pixel rather than asserting it.
+///
+/// **WHY IT EXISTS.** Every vectorised tracking kernel is gated on 32-bit words
+/// ([D-73](../../../ARCHITECTURE.md)) — the AVX2 keypoint batch and all four NEON
+/// residual kernels — because an LK window is 31 pixels and a wider word is more than
+/// half idle. A caller who wants 64-bit words for the rest of their pipeline, where
+/// they genuinely halve the work, used to face a choice between that and a tracker
+/// running 8.6× slow. **This removes the choice**: keep the 64-bit storage, narrow the
+/// view at the call, and the vector kernels apply.
+///
+/// @note Padding stays zero, which is the invariant word-wise reductions depend on: a
+///       64-bit word's zero padding bits are the derived 32-bit word's zero padding
+///       bits, and a fully-padding high half is simply an all-zero word.
+/// @note Alignment carries: an 8-byte-aligned buffer is 4-byte aligned.
+template <typename WordType>
+inline BinMatConstView<uint32_t> narrowPlane(BinMatConstView<WordType> v) {
+    static_assert(sizeof(WordType) == 8,
+                  "narrowPlane: only a 64-bit plane can be read as a 32-bit one");
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__)
+    static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
+                  "narrowPlane: the two layouts coincide only on a little-endian machine");
+#endif
+    return BinMatConstView<uint32_t>{reinterpret_cast<const uint32_t*>(v.ptr), v.width,
+                                     v.height, v.stride * 2};
+}
+
 } // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv

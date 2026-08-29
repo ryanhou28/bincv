@@ -4205,6 +4205,25 @@ frontend number is not a formality here, it is the specific risk.
 
 ---
 
+### T5.18 · Sub-pixel corner refinement · `DONE` (X-92 → D-74)
+
+**Asked for by a binCV user integrating with HybVIO**, who had verified the enabling
+property first: `cv::cornerSubPix`'s solution is invariant to a scale on the image, so a
+ternary `+/-1` derivative refines to the same place as a byte pipeline's `+/-255`.
+
+**Shipped:** `ops/subpix.hpp` — `cornerSubPix` over binCV's existing `SignedQuantMat`
+derivatives, **API TIER 2** (OpenCV's rule, window, zero-zone and termination; a
+different gradient operator). **0.0325 px mean against `cv::cornerSubPix`**, and the
+scale-invariance property is pinned by a test rather than argued.
+
+### T5.19 · 64-bit callers get the vector tracker · `DONE` (D-73)
+
+`bincv::narrowLevel` reads a 64-bit level as a 32-bit one — **a view, not a copy** —
+because on little-endian a 64-bit bit-plane already IS a 32-bit bit-plane with twice the
+stride. Tracking through it is **bit-identical** to a native 32-bit build and runs the
+AVX2 batch. This is the answer to "why doesn't binCV support 64-bit words in the
+tracker": it does, and it never needed 64-bit kernels.
+
 ## Phase 6 — Repository shape, for sharing
 
 **GOAL: a repository that reads as a well-built library to someone who lands on it, can

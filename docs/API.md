@@ -30,18 +30,19 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/logic.hpp`](#opslogichpp) — 6 entries
 - [`ops/medianWide.hpp`](#opsmedianWidehpp) — 5 entries
 - [`ops/morphology.hpp`](#opsmorphologyhpp) — 27 entries
-- [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 19 entries
+- [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 20 entries
 - [`ops/pack.hpp`](#opspackhpp) — 9 entries
 - [`ops/pyramid.hpp`](#opspyramidhpp) — 41 entries
 - [`ops/reduce.hpp`](#opsreducehpp) — 19 entries
 - [`ops/resample.hpp`](#opsresamplehpp) — 6 entries
 - [`ops/shift.hpp`](#opsshifthpp) — 12 entries
+- [`ops/subpix.hpp`](#opssubpixhpp) — 3 entries
 - [`ops/threshold.hpp`](#opsthresholdhpp) — 2 entries
 - [`io/pnm.hpp`](#iopnmhpp) — 3 entries
 - [`core/parallel.hpp`](#coreparallelhpp) — 4 entries
 - [`core/storage.hpp`](#corestoragehpp) — 11 entries
-- [`core/types.hpp`](#coretypeshpp) — 5 entries
-- [`core/view.hpp`](#coreviewhpp) — 4 entries
+- [`core/types.hpp`](#coretypeshpp) — 6 entries
+- [`core/view.hpp`](#coreviewhpp) — 5 entries
 - [`threads/pool.hpp`](#threadspoolhpp) — 2 entries
 
 ## `binMat.hpp`
@@ -288,8 +289,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
-| `Point2f` *(struct)* | 2 | A subpixel point |
-| `LKEntryLevel` *(enum)* | — | The tracker's parameters, defaulted to `SEAL/seal_params.yaml` verbatim |
+| `LKEntryLevel` *(enum)* | 2 | A subpixel point |
 | `LKLevel` *(struct)* | — | One pyramid level's six planes: both frames, and the previous frame's ternary derivative |
 | `lkLevel` | 2 | Names a level's containers into an LKLevel |
 | `LKLevelN` *(struct)* | — | One pyramid level at N bits per pixel: both frames' bit-planes, and the previous frame's N-bit signed derivative |
@@ -306,6 +306,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `windowFitsAtLevel` | — | Is point `p`'s window entirely inside level `li`? |
 | `entryLevelFor` | — | The coarsest usable level whose window contains point `p`, or 0 |
 | `calcOpticalFlowPyrLK` | 2 | Pyramidal Lucas-Kanade tracking of sparse keypoints between two binary frames |
+| `narrowLevel` | 2 | Pyramidal Lucas-Kanade over a ladder of levels that are all the SAME depth `N` |
+| `lkPathName` | 3 | Which residual kernel this level type will actually run, as a string |
 | `LKLevels` *(struct)* | 2 | A tracking ladder whose levels have DIFFERENT bit depths, level 0 first |
 
 ## `ops/pack.hpp`
@@ -430,6 +432,16 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `shiftUp` | 3 | dst[y][x] = src[y + k][x] -- moves the image UP by k rows |
 | `shiftDown` | 3 | dst[y][x] = src[y - k][x] -- moves the image DOWN by k rows |
 
+## `ops/subpix.hpp`
+
+[`bincv-cpp/include/bincv-cpp/ops/subpix.hpp`](../bincv-cpp/include/bincv-cpp/ops/subpix.hpp)
+
+| | tier | |
+|---|---|---|
+| `SubPixParams` *(struct)* | — | `cv::cornerSubPix`'s `winSize`, `zeroZone` and `criteria`, in one struct |
+| `SubPixResult` *(struct)* | 3 | What `cornerSubPix` did, per corner |
+| `cornerSubPix` | 2 | Refines corner positions to sub-pixel accuracy |
+
 ## `ops/threshold.hpp`
 
 [`bincv-cpp/include/bincv-cpp/ops/threshold.hpp`](../bincv-cpp/include/bincv-cpp/ops/threshold.hpp)
@@ -489,6 +501,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `empty` | — | Check if the size is empty (zero width or height) |
 | `Rect` *(struct)* | — | An axis-aligned rectangle in PIXELS: origin (x, y), extent (width, height) |
 | `QuantMat` *(class)* | — | Forward declaration of the QuantMat template -- the N-bit container |
+| `Point2f` *(struct)* | — | A point with sub-pixel coordinates -- the tracker's and the refiner's |
 
 ## `core/view.hpp`
 
@@ -500,6 +513,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `empty` | — | True if the view addresses no pixels |
 | `row` | — | First word of row y |
 | `BinMatConstView` *(struct)* | — | Non-owning, read-only view of a bit-packed matrix |
+| `narrowPlane` | 3 | Reads a 64-bit bit-plane as a 32-bit one |
 
 ## `threads/pool.hpp`
 
