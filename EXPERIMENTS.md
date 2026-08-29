@@ -12144,6 +12144,41 @@ X-89's mis-attached `#define` and X-85's NEON regression. The tool exists precis
 because a third of `ops/opticalFlow.hpp` is in that state; it is worth running on every
 edit that touches a `#if`, not only ones that touch NEON intrinsics.
 
+### X-92 · T5.18: sub-pixel refinement on ternary derivatives · `DONE — SHIPPED`
+
+**Platform:** x86-64, Release, one thread. **Code:** `tests/test_subpix.cpp`, four cases.
+
+The operation rests on one property, and the property is the measurement: `cv::cornerSubPix`
+solves `G q = b` with `G = Σ w (∇I)(∇I)ᵀ` and `b = Σ w (∇I)(∇Iᵀ p)`, so scaling the image by
+`s` scales `∇I` by `s` and **both** `G` and `b` by `s²` — and `q = G⁻¹b` does not move. If that
+holds, a `±1` ternary derivative refines to the same place a byte pipeline's `±255` does, and
+binCV can refine without ever materialising the byte image.
+
+| what | result |
+|---|---|
+| `±1` against `±255`, 25 starts | mean **0.000e+00** px, worst **0.000e+00** px |
+| word-wise sparse traversal against a dense oracle, 45 corners | worst **0.000e+00** px |
+| 24 starts around a known corner | mean distance **1.952 → 0.592** px, **24/24** improved |
+| against `cv::cornerSubPix`, 25 starts | mean **0.0325** px, worst **0.0326** px |
+
+The first row is exact rather than approximate because binCV's kernel and its `±255` oracle
+differ by nothing but that scale factor — it is the algebra, checked, not a tolerance that
+happened to hold. The requesting user measured the same property end to end at 1.8e-4 px mean
+over 5 924 corners against OpenCV's own gradient, which is the weaker but more independent form
+of the same claim.
+
+**The third row is the one that is easy to over-read.** 45 corners went in; **11 refined and 34
+came back singular**. That is not a defect — §7.6 records that the response is exactly zero iff
+the window's matrix is singular, which is every straight edge, and a binarised edge map is
+mostly straight edges. The operation reports `singular` per point and moves nothing, which is
+the only safe answer; a caller that ignores the flag and treats all 45 as refined is reading 34
+unrefined positions as refined ones.
+
+**No speed claim is made or measured here**, and that is deliberate rather than an omission:
+`cornerSubPix` runs on a few hundred corners once per detection, not per pixel per frame, and
+[X-91](#x-91--the-audit-which-operations-were-correct-tested-and-never-timed--done)'s lesson is
+about kernels on the frontend's hot path. It gets a benchmark arm when something puts it there.
+
 ---
 
 # Pending
@@ -12285,3 +12320,89 @@ schedule of `frontend_sequence` exactly, serial (the hook writes from inside
 D-58 applies: **the ratio is a property of this sequence's convergence behaviour**, so
 the batch's own whole-frontend arm still has to be measured, not projected.
 
+
+---
+
+### X-93 · E-46: spacing new detections against live tracks · `RULE PRE-REGISTERED`
+
+**Written and committed BEFORE either arm exists.** The gap is real and reported from
+outside: the reference calls `applyMinDistance(corners, prevCorners, maskRadius)` on every
+detect (`src/tracker/feature_detector.hpp:73`), binCV's spacing filter spaces new corners only
+against **each other** (`ops/corner.hpp`), and `examples/vio_frontend.cpp:86` hand-rolls the
+missing loop. What is NOT settled is which shape to ship it in, and the temptation to answer
+"the bit-plane one, obviously" is exactly what this record exists to stop.
+
+**The arms.**
+
+- **(a) EXHAUSTIVE** — `O(new × live)` float distance tests, rejecting a candidate within
+  `radius` of any live track and then of any earlier accepted candidate. This is the
+  reference's shape and the example's. Costs **no memory at all**.
+- **(b) OCCUPANCY MASK** — a 1-bit frame; stamp the disc of `radius` around every live track,
+  then each candidate is **one bit test**, and each acceptance stamps its own disc. Costs
+  **one 1-bit frame: 38 400 B at 640×480 with `uint32_t` words.**
+
+**The workload**, taken from the reference's own parameters rather than chosen: 640×480,
+`radius = 32` (`relativeMaskRadius` 0.0667 × `min(w,h)` 480 = 32), `live ∈ {50, 100, 200}`
+(`maxTracks` is 200), `new ∈ {50, 100, 200, 500, 1000}`. Both architectures.
+
+**THE DECISION RULE.**
+
+The two arms do not cost the same memory, so this is a conflict, and
+[CLAUDE.md](CLAUDE.md) settles conflicts that no explicit choice covers **in favour of
+memory**. Therefore:
+
+1. **The mask becomes the recommended path only if it is FASTER at the frontend's own
+   operating point — `live = 200`, `new ≤ 200` — on BOTH x86 and the reference device.**
+   Equal is a loss: 38 400 B has to buy something, and parity buys nothing.
+2. If the mask wins only above some `new`, **both ship, exhaustive is the default, and the
+   measured crossover goes in the header** — not a hand-waved "for large inputs".
+3. If the mask loses everywhere in range, it still ships if and only if it has a second
+   caller that the exhaustive form cannot serve; otherwise it does not ship at all, and this
+   record says so.
+4. **Arm (a) ships regardless of the outcome.** It is the reported gap; the experiment is
+   about the second arm only.
+
+**A cost estimate is recorded now so that agreeing with it later is not evidence.** At
+`radius` 32 a disc is ~65 rows × ~3 words ≈ 200 word-writes, so stamping 200 live tracks is
+~40 000 word ops plus a 9 600-word clear, against 200 × 200 = 40 000 distance tests for
+exhaustive. **These are the same order, and the mask is predicted to LOSE at small `new` and
+win as `new` grows past roughly `π·radius²/WordBits` ≈ 100.** If the measurement lands far
+from that, the estimate was wrong and the record will say which way.
+
+**Bit-exactness is required of arm (b) independently of speed**: an integer candidate is
+rejected by the mask iff it is rejected by the float distance test, pinned by a test, with the
+disc's row bounds computed by exact squared-integer comparison rather than trusting `sqrt`
+rounding at the boundary.
+
+---
+
+### X-94 · E-47: an initial-flow mode for the tracker · `RULE PRE-REGISTERED`
+
+`ops/opticalFlow.hpp` currently says, of `LKParams`:
+
+> `lk_use_initial_flow: 0` is not a field either — there is no initial-flow mode, since an
+> unused mode is an untested one.
+
+**The premise is false and the note has to go.** It was written against `seal_params.yaml`,
+where the flag is off. The pipeline around it uses the flag: HybVIO's `computeOpticalFlow`
+sets `useInitialCorners` from `parameters.predictOpticalFlow` and fills `corners` from an
+odometry predictor before the call (`src/tracker/tracker.cpp:63-83`), reaching
+`cv::OPTFLOW_USE_INITIAL_FLOW`. That is IMU-aided tracking — the thing that makes a VIO
+frontend a VIO frontend rather than a visual one.
+
+**No decision rule is needed for WHETHER to ship it**: the semantics are OpenCV's, fixed and
+documented, and it is a missing feature rather than a choice between alternatives. It ships.
+
+**A rule IS needed for the claim attached to it.** The tempting sentence is "a good initial
+guess cuts the iteration count, and the iteration loop is ~55% of `track`". That is a
+performance claim, so it is measured before it is written, on both architectures:
+
+- **Workload:** a known synthetic translation, so the "perfect guess" arm is exactly
+  achievable, plus guesses corrupted by 0.25 / 0.5 / 1 / 2 / 4 px of error so the curve
+  between perfect and useless is visible rather than assumed.
+- **Reported:** mean iterations per point-level and wall-clock `track` time, both arms, both
+  architectures — via the existing `BINCV_LK_ITERATION_HISTOGRAM` hook.
+- **The rule:** the header may claim a speed benefit **only for the guess-error range where
+  one was measured**, and must state the error beyond which the guess is worse than starting
+  from `prevPts`. If no such crossover exists in range, that is the finding and the header
+  claims nothing about speed — the feature still ships, on the accuracy argument alone.
