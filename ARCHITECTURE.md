@@ -4221,6 +4221,48 @@ notes checking `corners[0]` alone is insufficient. **The code, the contract and 
 all agreed; only the example's comment was wrong**, and it cost the user an 8× oversized
 buffer. Both instances corrected.
 
+### D-73: the fast word type is the one you get by default
+
+**AN INTEGRATOR BUILDING A VIO FRONTEND ON binCV MEASURED KEYPOINT TRACKING 8.6× SLOWER
+THAN IT SHOULD HAVE BEEN**, because they chose `uint64_t` for the storage word —
+reasoning, correctly, that a wider word means fewer operations per row. Every vectorised
+tracking kernel binCV has is gated on `sizeof(WordType) == 4`: the AVX2 eight-keypoint
+batch ([D-66](#d-66-eight-keypoints-per-avx2-register-and-the-refill-is-the-design)) and
+all four NEON residual kernels. A wider word is *correct* and lands in the scalar
+fallback, **on both architectures**.
+
+Their trajectory error was identical either way — which is exactly why it went unnoticed.
+A performance bug with no behavioural signature.
+
+> **THE INFORMATION EXISTED AND WAS UNDISCOVERABLE.**
+> [D-45](#d-45-one-word-type-because-the-two-halves-of-the-frontend-want-different-ones)
+> records the gate in this file and [X-54](EXPERIMENTS.md) measured `uint64_t` at 1.32×
+> slower on `track`. Neither was visible at the point where a caller picks the type.
+> **A decision recorded only in the architecture document is not a decision the API
+> communicates.**
+
+Three changes, in increasing order of how much they help:
+
+1. **`bincv::DefaultWord`** — a name to reach for, with the reason next to it.
+2. **`bincv::lkPathName<LevelT>()`** — the kernel that will actually run, as a string.
+   Both shipped examples print it on startup. This turns "is binCV using its fast path
+   here?" from an investigation into a glance.
+3. **`calcOpticalFlowPyrLK` REFUSES TO COMPILE** at a depth that *has* vector kernels
+   with a word that cannot reach them, and the diagnostic names the fix.
+
+**The static assertion fires only where the configuration is purely a mistake.** A level
+at `N >= 3` is scalar by nature — an accuracy choice ([E-7](#9-open-questions-and-planned-experiments)),
+not an error — and compiles without complaint. `BINCV_ALLOW_SCALAR_LK_WORD` exists for
+`wordwidth_benchmark`, which measures the scalar path on purpose. Nothing in the
+repository needed it: all seventeen call sites were already `uint32_t`.
+
+**The general lesson, which is not about word types.** binCV is a header-only library
+templated on a storage type, and its performance depends on template arguments the
+caller picks and on CPU features resolved at run time. **Neither is visible from
+outside.** Any such choice needs all three of: a default that is right, a way to ask
+what you got, and a diagnostic when the answer is "not what you wanted". The library had
+none of the three.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

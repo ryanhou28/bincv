@@ -2167,6 +2167,26 @@ struct IsLevelN : std::false_type {};
 template <size_t N, typename WordType>
 struct IsLevelN<LKLevelN<N, WordType>> : std::true_type {};
 
+/// @brief Does this level reach a VECTORISED residual kernel? **Public, and
+///        queryable** — `bincv::lkVectorPath<LevelT>()`.
+///
+/// True when the level is an `LKLevelN` at depth 1 or 2 with `uint32_t` words: those
+/// are the depths the AVX2 batch and the NEON kernels are written for. A deeper level
+/// is scalar by nature and that is a legitimate accuracy choice (E-7); a WIDER WORD at
+/// depth 1 or 2 is not — it is the same kernel, opted out of.
+template <typename LevelT>
+inline constexpr bool kLkVectorPath =
+    IsLevelN<LevelT>::value && (LevelT::Bits == 1 || LevelT::Bits == 2) &&
+    sizeof(typename LevelT::Word) == 4;
+
+/// @brief True when this level type's depth HAS vector kernels but its word type
+///        cannot reach them. **INTERNAL** — the one configuration that is purely a
+///        mistake, as opposed to a slow-but-deliberate one.
+template <typename LevelT>
+inline constexpr bool kLkWordMissesVectorPath =
+    IsLevelN<LevelT>::value && (LevelT::Bits == 1 || LevelT::Bits == 2) &&
+    sizeof(typename LevelT::Word) != 4;
+
 /// @brief Can this level type be batched AT ALL — asked at COMPILE time. **INTERNAL.**
 /// @note The shipped 1/2/2/2 ladder (D-23) at `uint32_t`. This has to be a compile-time
 ///       question and not only a runtime one: `lkBatchResidual` is instantiated for the
@@ -2867,11 +2887,68 @@ inline void calcOpticalFlowPyrLK(const LKLevel<WordType>* levels, size_t levelCo
 /// @note `N == 1` here is the same computation as `LKLevel` above, through the
 ///       generic code path rather than the hand-written one, and
 ///       tests/test_opticalflow.cpp requires the two to agree exactly.
+/// @brief Which residual kernel this level type will actually run, as a string.
+///        **API TIER 3.**
+///
+/// **PRINT THIS.** binCV's tracking speed depends on a template argument the caller
+/// chooses — the word type — and on what the CPU turns out to support, and neither is
+/// visible from the outside. An integrator who chose a 64-bit word measured keypoint
+/// tracking 8.6× slower than it should have been and had nothing to look at that would
+/// have said so ([D-73](../../../ARCHITECTURE.md)).
+///
+/// Both shipped example programs print it on startup. Yours should too: it is one line,
+/// and it turns "is binCV actually using its fast path here?" from an investigation
+/// into a glance.
+template <typename LevelT>
+inline const char* lkPathName() {
+    if constexpr (!impl::kLkVectorPath<LevelT>) {
+        return "scalar (this level type has no vector kernel -- N > 2, LKLevel, or a "
+               "word that is not uint32_t)";
+    } else {
+#if defined(BINCV_X86_LK_BATCH)
+        return impl::hasLkBatch() ? "AVX2, eight keypoints per batch"
+                                  : "scalar (this CPU reports no AVX2)";
+#elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+        return "NEON";
+#else
+        return "scalar (no SIMD backend for this target)";
+#endif
+    }
+}
+
+/// @note **THIS REFUSES TO COMPILE AT DEPTH 1 OR 2 WITH A WORD WIDER THAN 32 BITS**,
+///       and the diagnostic names the fix. Those depths have vectorised kernels — the
+///       AVX2 eight-keypoint batch and four NEON residual kernels — all gated on
+///       `sizeof(WordType) == 4`. A wider word is *correct* and lands in the scalar
+///       fallback, silently, on both architectures.
+///
+///       **That is not a hypothetical.** [D-45](../../../ARCHITECTURE.md) recorded the
+///       gate and measured `uint64_t` at 1.32× slower on `track`; the record was true
+///       and invisible at the point of use. An integrator building a VIO frontend
+///       chose `uint64_t` — reasoning, correctly, that a wider word means fewer
+///       operations per row — and measured keypoint tracking **8.6× slower** before
+///       finding the gate. Their trajectory error was identical either way, which is
+///       what made it a performance bug rather than a visible one.
+///
+///       A deeper level (N >= 3) is scalar by nature and compiles without complaint:
+///       that is an accuracy choice (E-7), not a mistake. **This fires only where the
+///       same kernel exists and the word opts out of it.**
+///
+///       Deliberately measuring the scalar path — as `wordwidth_benchmark` does — is
+///       what `BINCV_ALLOW_SCALAR_LK_WORD` is for.
 template <size_t N, typename WordType>
 inline void calcOpticalFlowPyrLK(const LKLevelN<N, WordType>* levels, size_t levelCount,
                                  const Point2f* prevPts, Point2f* nextPts, uint8_t* status,
                                  float* err, size_t pointCount,
                                  const LKParams& params = LKParams()) {
+#ifndef BINCV_ALLOW_SCALAR_LK_WORD
+    static_assert(!impl::kLkWordMissesVectorPath<LKLevelN<N, WordType>>,
+                  "binCV: this pyramid depth has vectorised tracking kernels, but they "
+                  "are gated on 32-bit words -- use uint32_t (bincv::DefaultWord). A "
+                  "wider word is correct and lands in the scalar fallback on BOTH x86 "
+                  "and aarch64; measured 8.6x slower keypoint tracking in a real "
+                  "frontend. Define BINCV_ALLOW_SCALAR_LK_WORD to measure it on purpose.");
+#endif
     impl::LKContext c;
     if (!impl::lkPrologue(levelCount, prevPts, nextPts, status, err, pointCount, params, c)) return;
     BINCV_ASSERT(levels != nullptr, "opticalFlow: levels must be non-null");

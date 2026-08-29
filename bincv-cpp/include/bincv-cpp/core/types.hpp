@@ -127,6 +127,26 @@ template <typename WordType = uint32_t> using BinMat = QuantMat<1, WordType>;
 /// @brief Type aliases for convenience
 /// @note These provide easy access to BinMat with different word sizes
 
+/// @brief The word type to use unless you have measured a reason not to.
+///
+/// **PICK THIS ONE.** `BinMat` and `QuantMat` are templated on the word type (D-1) and
+/// every width is correct — but **only `uint32_t` reaches the vectorised tracking
+/// kernels**: the AVX2 eight-keypoint batch and all four NEON residual kernels are
+/// gated on `sizeof(WordType) == 4`.
+///
+/// A wider word looks like it should mean fewer operations per row, and
+/// [X-10](../../../EXPERIMENTS.md) measured exactly that for *reductions*. For
+/// *tracking* it opts out of every vector path instead:
+/// [X-54](../../../EXPERIMENTS.md) measured `uint64_t` at **1.32× slower on `track`**,
+/// and an integrator who chose it for a real VIO frontend measured **8.6× slower**
+/// keypoint tracking before finding the gate
+/// ([D-73](../../../ARCHITECTURE.md#d-73-the-fast-word-type-is-the-one-you-get-by-default)).
+///
+/// The tracker now refuses to compile at a depth that HAS vector kernels with a word
+/// that cannot reach them, so this is a recommendation rather than a trap — but
+/// spelling it `DefaultWord` is cheaper than reading that diagnostic.
+using DefaultWord = uint32_t;
+
 using BinMat8  = BinMat<uint8_t>;   ///< BinMat with 8-bit words (8 pixels per word)
 using BinMat16 = BinMat<uint16_t>;  ///< BinMat with 16-bit words (16 pixels per word)
 using BinMat32 = BinMat<uint32_t>;  ///< BinMat with 32-bit words (32 pixels per word) - Default

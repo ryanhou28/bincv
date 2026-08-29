@@ -306,6 +306,7 @@ int main(int argc, char** argv) {
     if (const char* e = std::getenv("BINCV_LK_BATCH")) {
         if (std::atoi(e) == 0) bincv::impl::lkBatchEnabled() = false;
     }
+    std::printf("LK residual kernel: %s\n", bincv::lkPathName<bincv::LKLevelN<2, W>>());
     std::printf("LK keypoint batch: %s\n\n",
                 bincv::impl::hasLkBatch() && bincv::impl::lkBatchEnabled()
                     ? "ON (AVX2, 8 lanes, lane refill)"
