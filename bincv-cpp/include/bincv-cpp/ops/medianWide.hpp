@@ -37,6 +37,12 @@
 /// ZEROS. A pixel at the top row therefore takes its median against a 0, not
 /// against a replicated or reflected neighbour. ops/denoise.hpp records the same
 /// rule for the same reason.
+// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// compiler's own macros on aarch64, so an include-only integration still gets the
+// NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
+// its gate before its first core include.
+#include "../core/simd.hpp"
+
 
 #include <cstddef>
 #include <cstdint>

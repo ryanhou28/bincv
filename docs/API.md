@@ -41,6 +41,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/threshold.hpp`](#opsthresholdhpp) — 2 entries
 - [`io/pnm.hpp`](#iopnmhpp) — 3 entries
 - [`core/parallel.hpp`](#coreparallelhpp) — 4 entries
+- [`core/simd.hpp`](#coresimdhpp) — 3 entries
 - [`core/storage.hpp`](#corestoragehpp) — 11 entries
 - [`core/types.hpp`](#coretypeshpp) — 6 entries
 - [`core/view.hpp`](#coreviewhpp) — 5 entries
@@ -485,6 +486,16 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `setNumThreads` | — | How many threads binCV may use |
 | `getNumThreads` | — | The current thread count |
 | `parallelFor` | — | Runs `body(i, ctx)` for `i` in `[0, n)` |
+
+## `core/simd.hpp`
+
+[`bincv-cpp/include/bincv-cpp/core/simd.hpp`](../bincv-cpp/include/bincv-cpp/core/simd.hpp)
+
+| | tier | |
+|---|---|---|
+| `SimdStatus` *(struct)* | — | What this translation unit compiled, and what the CPU under it supports |
+| `simdStatus` | 3 | What vector paths are actually active |
+| `simdStatusString` | 3 | One line naming every fast path and whether it is on |
 
 ## `core/storage.hpp`
 

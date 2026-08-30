@@ -48,6 +48,12 @@
 
 // T5.9: the N-bit packer's vector path, selected at RUN TIME on x86 so the library's
 // baseline ISA is unchanged, and baseline on aarch64 where NEON always exists.
+// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// compiler's own macros on aarch64, so an include-only integration still gets the
+// NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
+// its gate before its first core include.
+#include "../core/simd.hpp"
+
 #if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
 #define BINCV_PACKQUANT_AVX2 1
 #define BINCV_PACKQUANT_SIMD 1

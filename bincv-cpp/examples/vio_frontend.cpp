@@ -40,6 +40,7 @@
 
 #include <opencv2/opencv.hpp>
 
+#include "bincv-cpp/core/simd.hpp"
 #include "bincv-cpp/ops/corner.hpp"
 #include "bincv-cpp/ops/denoise.hpp"
 #include "bincv-cpp/ops/occupancy.hpp"
@@ -188,6 +189,7 @@ int main(int argc, char** argv) {
     // ONE LINE THAT WOULD HAVE SAVED AN INTEGRATOR DAYS. binCV's tracking speed
     // depends on the word type this program chose and on what the CPU supports, and
     // neither is visible from the outside -- see D-73.
+    std::printf("%s\n", bincv::simdStatusString());
     std::printf("LK residual kernel: %s\n", bincv::lkPathName<bincv::LKLevelN<2, W>>());
 
     Frontend fe(w, h);

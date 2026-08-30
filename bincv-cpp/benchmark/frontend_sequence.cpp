@@ -40,6 +40,7 @@
 #include <string>
 #include <vector>
 
+#include "bincv-cpp/core/simd.hpp"
 #include "bincv-cpp/ops/corner.hpp"
 #include "bincv-cpp/ops/edge.hpp"
 #include "bincv-cpp/ops/medianWide.hpp"
@@ -306,6 +307,10 @@ int main(int argc, char** argv) {
     if (const char* e = std::getenv("BINCV_LK_BATCH")) {
         if (std::atoi(e) == 0) bincv::impl::lkBatchEnabled() = false;
     }
+    // F-5. The two ways to lose a fast path silently are an unlinked target and a
+    // missing -mpopcnt, and neither changes an answer. One line, printed by every
+    // benchmark, is what makes a number comparable to a recorded one.
+    std::printf("%s\n", bincv::simdStatusString());
     std::printf("LK residual kernel: %s\n", bincv::lkPathName<bincv::LKLevelN<2, W>>());
     std::printf("LK keypoint batch: %s\n\n",
                 bincv::impl::hasLkBatch() && bincv::impl::lkBatchEnabled()

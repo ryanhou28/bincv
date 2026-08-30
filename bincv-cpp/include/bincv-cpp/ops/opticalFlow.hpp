@@ -239,6 +239,12 @@
 ///  * `nextPts` is written for every point at every level and holds LEVEL
 ///    coordinates while the level loop runs; on return it holds level-0
 ///    coordinates. This is the reference's own use of the same array.
+// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// compiler's own macros on aarch64, so an include-only integration still gets the
+// NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
+// its gate before its first core include.
+#include "../core/simd.hpp"
+
 
 #include <cmath>
 #include <cstddef>

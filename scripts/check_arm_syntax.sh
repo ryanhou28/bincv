@@ -54,3 +54,32 @@ if [[ $RC -ne 0 ]]; then
     exit 1
 fi
 echo "  aarch64 syntax OK -- NEON region compiled with the gate's warning set."
+
+# ---------------------------------------------------------------------------
+# F-5 REGRESSION GUARD: THE NEON PATH MUST NOT DEPEND ON THE CMAKE TARGET.
+#
+# The compile above passes -DBINCV_HAVE_NEON, exactly as the bincv_core target does,
+# so it proves the NEON region compiles and NOTHING about how a consumer reaches it.
+# An integrator who adds the include path and forgets `target_link_libraries` used to
+# get a correct library with every NEON kernel compiled out -- no warning, no different
+# answer, and 1.78x slower `track` measured on this device.
+#
+# So this second compile passes NO define at all. core/simd.hpp is supposed to derive
+# BINCV_HAVE_NEON from __ARM_NEON and __aarch64__, which the compiler defines by itself
+# on ARMv8. If that stops working, this fails.
+# ---------------------------------------------------------------------------
+OUT=$(ssh -4 -o BatchMode=yes "$TARGET" "cd ${REMOTE_DIR}/bincv-cpp && \
+    printf '%s\\n' '#include \"bincv-cpp/ops/opticalFlow.hpp\"' \
+        '#if !defined(BINCV_HAVE_NEON)' \
+        '#error \"F-5: BINCV_HAVE_NEON is not defined without the CMake target -- an include-only integration would silently lose every NEON kernel\"' \
+        '#endif' \
+        'int main() { return 0; }' > /tmp/bincv_f5_guard.cpp && \
+    g++ -std=c++17 -fsyntax-only -Iinclude -O2 /tmp/bincv_f5_guard.cpp" 2>&1)
+RC=$?
+if [[ $RC -ne 0 ]]; then
+    echo "$OUT" | head -20
+    echo
+    echo "  F-5 GUARD FAILED: an include-only build no longer gets NEON."
+    exit 1
+fi
+echo "  F-5 guard OK -- include-only build auto-detects NEON (no CMake target needed)."

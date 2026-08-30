@@ -298,6 +298,12 @@
 ///     precondition on the caller. Dirtying the sign planes wherever the magnitude
 ///     is clear cannot move any of the three numbers, and the test sweeps a frame
 ///     built exactly that way.
+// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// compiler's own macros on aarch64, so an include-only integration still gets the
+// NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
+// its gate before its first core include.
+#include "../core/simd.hpp"
+
 
 #include <cstddef>
 #include <cstdint>

@@ -4413,6 +4413,40 @@ measurement prices something that was already shipping and had never been quanti
 **asking for `err` at all costs that same 2.16× / 1.86×**, which the header had described
 only as "an OPTIONAL output".
 
+### D-78: a fast path may not depend on the build system when the compiler already knows
+
+**Reported from outside.** `BINCV_HAVE_NEON` and `-mpopcnt` were INTERFACE properties of
+the `bincv_core` CMake target, so a consumer who added the include path and did not link
+— the natural thing to do with a header-only library — got a correct binCV with **every
+NEON kernel compiled out**. Measured by the reporter at **2.25×** on a Pi 4, and
+reproduced here at **1.78×** on `track` ([X-96](EXPERIMENTS.md)). Invisible for exactly
+[D-73](#d-73-64-bit-callers-get-the-vector-tracker)'s reason: the vector kernels are
+bit-exact with the scalar ones, so only the clock moves.
+
+**The rule this sets: derive a feature gate from the compiler's own macros wherever the
+compiler can know, and reserve build-system defines for what it cannot.** NEON is
+mandatory in ARMv8, so `__ARM_NEON` and `__aarch64__` are defined with no flags —
+`BINCV_HAVE_NEON` never needed CMake on that target, and routing it through CMake is what
+tied a kernel to a link line. `core/simd.hpp` derives it. The CMake define stays for
+armv7, where the flag genuinely is a choice.
+
+**`-mpopcnt` is the honest exception and is handled differently.** It changes code
+generation rather than gating a `#if`, and no header can add a flag to the translation
+unit that includes it. So it gets **visibility** instead: `simdStatus()` reads
+`__POPCNT__`, and `simdStatusString()` returns one line naming every path and stating the
+verdict in words, which the benchmarks and the example print.
+
+**A diagnostic was what the reporter suggested; it is the second half, not the first.**
+A status line only helps someone who thinks to log it, and the person most likely to hit
+this is integrating for the first time and has no baseline to compare against. Detection
+fixes it for everyone; the line is for the case detection cannot reach.
+
+**The guard is not in the test suite, deliberately.** `tests/test_simd.cpp` links
+`bincv_core` and would pass straight through the bug. `scripts/check_arm_syntax.sh`
+compiles a translation unit on the reference device with **no defines at all** and fails
+if the macro is absent — and it has been watched to fail, which is the same standard
+`verify.sh`'s gate self-check holds itself to.
+
 ## 9. Open Questions and Planned Experiments
 
 ### How performance and footprint decisions get made

@@ -12739,3 +12739,89 @@ distributions as anchors, so a caller can see how far apart two contents can be.
 
 [D-77](ARCHITECTURE.md#8-design-decisions).
 
+---
+
+### X-96 · F-5: the fast path rode on the CMake target, and missing it was silent · `DONE — FIXED, NOT DOCUMENTED AROUND`
+
+**Reported from outside**, by the binCV user integrating with HybVIO. They added
+`-I .../include` and never called `target_link_libraries(... bincv_core)` — the natural
+thing to do with a header-only library — and got a **correct** binCV with every NEON
+kernel `#ifdef`-ed out. `BINCV_HAVE_NEON` and `-mpopcnt` are INTERFACE properties of the
+CMake target, so they arrive only through the link line.
+
+| their keypoint tracking, Pi 4 | |
+|---|---|
+| include path only | **42.83 ms** |
+| linking `bincv_core` | **19.03 ms** |
+
+**2.25× from one CMake line**, and without catching it they would have reported that
+binCV's tracker is slower than OpenCV's on ARM. **Reproduced on this repo's own code**,
+`lk_loss_diagnostic` on the reference device, 816 keypoints:
+
+| include-only build | `track` |
+|---|---|
+| auto-detect (the fix) | **20.31 ms** |
+| `-DBINCV_NO_NEON` (what F-5 silently produced) | **36.16 ms** |
+| | **1.78×** |
+
+**It is invisible for the same reason D-73's `uint64_t` trap was**: the vector kernels
+are bit-exact with the scalar ones, so nothing warns, nothing crashes, and no answer
+changes. Only the clock moves, and a clock has no baseline for someone integrating for
+the first time.
+
+#### THE FIX IS DETECTION, NOT THE DIAGNOSTIC THAT WAS ASKED FOR
+
+They suggested three fixes, "the most useful being a runtime `simdStatus()` a consumer
+can log". A diagnostic is worth having and ships too — but it is second, because **on
+aarch64 the compiler already knows.** NEON is mandatory in ARMv8, so `__ARM_NEON` and
+`__aarch64__` are defined with no flags at all:
+
+```
+$ ssh pi4 'echo | g++ -dM -E -x c++ - | grep __ARM_NEON'
+#define __ARM_NEON 1
+```
+
+So `BINCV_HAVE_NEON` **never needed to come from CMake on that target**, and making it do
+so is the entire bug. `core/simd.hpp` now derives it from the compiler's own macros, and
+an include-only build on aarch64 gets the NEON kernels. Verified by compiling a
+translation unit on the device with nothing but `-I include`:
+
+```
+binCV SIMD: NEON=yes AVX2=n/a popcount=hardware  (fast paths active)
+BINCV_HAVE_NEON is DEFINED in this TU
+```
+
+The CMake definition stays, for armv7 where `__ARM_NEON` appears only with `-mfpu=neon`
+and the flag really is a build-system choice.
+
+**`-mpopcnt` cannot be fixed this way and is not pretended away.** It changes code
+generation rather than gating a `#if` — without it `__builtin_popcount` becomes a table
+lookup, worth 3.75× ([X-57](#x-57)) — and no header can add a compiler flag to the
+translation unit including it. That one gets the diagnostic: `simdStatus()` reads
+`__POPCNT__` and reports it, and `simdStatusString()` spells out the verdict rather than
+leaving a reader to work out which combination is bad:
+
+```
+binCV SIMD: NEON=NO AVX2=n/a popcount=SOFTWARE  (SLOW -- link the bincv_core target, do not just add its include path)
+```
+
+`frontend_sequence` and `examples/vio_frontend` print it, which is
+[CLAUDE.md](CLAUDE.md)'s rule that a benchmark must show its vector arm is on.
+
+#### THE REGRESSION GUARD, AND IT HAS BEEN WATCHED TO FAIL
+
+`tests/test_simd.cpp` cannot catch this and says so in its own header: the suite links
+`bincv_core`, so it gets the define either way and would pass straight through the bug.
+The guard is in **`scripts/check_arm_syntax.sh`**, which now compiles a second
+translation unit on the device **with no defines at all** and `#error`s if
+`BINCV_HAVE_NEON` is absent. Watched to fail — commenting out the auto-define produces:
+
+```
+  F-5 GUARD FAILED: an include-only build no longer gets NEON.
+```
+
+**`BINCV_NO_NEON` was added at the same time and is not a convenience.** CLAUDE.md
+requires a vector arm be switchable off so a benchmark can time both; `BINCV_HAVE_NEON`
+used to be that switch by accident, and auto-defining it would have removed the ability.
+The 1.78× above is measured with it.
+

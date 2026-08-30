@@ -14,6 +14,12 @@
 // X-71: the AVX2 row packer is selected at RUN TIME, so the library's baseline ISA is
 // unchanged and no -mavx2 build is required. Guarded on the compiler supporting both
 // the target attribute and the cpu probe.
+// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// compiler's own macros on aarch64, so an include-only integration still gets the
+// NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
+// its gate before its first core include.
+#include "../core/simd.hpp"
+
 #if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
 #define BINCV_X86_RUNTIME_AVX2 1
 #include <immintrin.h>

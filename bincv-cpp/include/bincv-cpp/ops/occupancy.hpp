@@ -85,6 +85,12 @@
 // binMat.hpp carries core/view.hpp and core/error.hpp and pulls in the word helpers
 // (impl::wordIndex, impl::bitMask) at its end; impl/binMat_impl.hpp is not a header a
 // consumer includes on its own.
+// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// compiler's own macros on aarch64, so an include-only integration still gets the
+// NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
+// its gate before its first core include.
+#include "../core/simd.hpp"
+
 #include "../binMat.hpp"
 #include "../core/error.hpp"
 #include "../core/types.hpp"
