@@ -3994,4 +3994,91 @@ BINCV_TEST(Flow, InitialFlowSurvivesTheZeroLevelExit_uint32_t) {
     BINCV_CHECK(plain[1].x == 20.0f && plain[1].y == 30.0f);
 }
 
+
+// ---------------------------------------------------------------------------
+// T5.22 / E-48 -- THE RESIDUAL REJECT
+//
+// Past the pyramid's reach the tracker does not fail, it answers confidently: X-94
+// measured 54.7 px of endpoint error with `status = 1` on every point. `maxResidual`
+// clears `status` when the level-0 residual -- the number `err` already carries --
+// exceeds a threshold.
+//
+// THE DEFAULT IS OFF AND THIS FILE PINS THAT FIRST, because the parameter changes which
+// points a caller keeps and every recorded frontend number was taken without it.
+// ---------------------------------------------------------------------------
+
+BINCV_TEST(Flow, ResidualRejectDefaultsOffAndChangesNothing_uint32_t) {
+    using W = uint32_t;
+    Frontend<W> fe(320, 240, 4);
+    const Warp warp = translation(3.0, -2.0);
+    renderWarped(fe.prev[0], Warp{});
+    renderWarped(fe.next[0], warp);
+    fe.build();
+
+    LKParams params;
+    BINCV_CHECK(params.maxResidual == 0.0f);
+    const std::vector<Point2f> pts = eligiblePoints(fe.dx[0], fe.dy[0], fe.prev[0].cols(),
+                                                    fe.prev[0].rows(), warp, params.winWidth,
+                                                    params.winHeight);
+    std::vector<Point2f> a(pts.size()), b(pts.size());
+    std::vector<uint8_t> sa(pts.size()), sb(pts.size());
+    bincv::calcOpticalFlowPyrLK<W>(fe.levels.data(), fe.levels.size(), pts.data(), a.data(),
+                                   sa.data(), nullptr, pts.size(), params);
+    LKParams off = params;
+    off.maxResidual = 0.0f;
+    bincv::calcOpticalFlowPyrLK<W>(fe.levels.data(), fe.levels.size(), pts.data(), b.data(),
+                                   sb.data(), nullptr, pts.size(), off);
+    size_t differ = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        if (a[i].x != b[i].x || a[i].y != b[i].y || sa[i] != sb[i]) ++differ;
+    }
+    BINCV_CHECK_EQ(differ, size_t{0});
+}
+
+BINCV_TEST(Flow, ResidualRejectRemovesTheSilentLargeMotionFailure_uint32_t) {
+    using W = uint32_t;
+    // 28 px, which X-95 measured as past the cliff: at 19 px every point is good and at
+    // 28 px every point is wrong, so this is the case E-48 is about.
+    Frontend<W> fe(640, 480, 4);
+    const Warp warp = translation(24.0, 16.0);
+    renderWarped(fe.prev[0], Warp{});
+    renderWarped(fe.next[0], warp);
+    fe.build();
+
+    LKParams params;
+    const std::vector<Point2f> pts = eligiblePoints(fe.dx[0], fe.dy[0], fe.prev[0].cols(),
+                                                    fe.prev[0].rows(), warp, params.winWidth,
+                                                    params.winHeight);
+    BINCV_CHECK(pts.size() >= 50);
+
+    auto run = [&](float thr, size_t& tracked, size_t& wrong) {
+        LKParams p = params;
+        p.maxResidual = thr;
+        std::vector<Point2f> out(pts.size());
+        std::vector<uint8_t> st(pts.size());
+        bincv::calcOpticalFlowPyrLK<W>(fe.levels.data(), fe.levels.size(), pts.data(), out.data(),
+                                       st.data(), nullptr, pts.size(), p);
+        tracked = 0; wrong = 0;
+        for (size_t i = 0; i < pts.size(); ++i) {
+            if (!st[i]) continue;
+            ++tracked;
+            double gx = 0.0, gy = 0.0;
+            warp.forward(static_cast<double>(pts[i].x), static_cast<double>(pts[i].y), gx, gy);
+            if (std::hypot(static_cast<double>(out[i].x) - gx,
+                           static_cast<double>(out[i].y) - gy) > 1.0) ++wrong;
+        }
+    };
+
+    size_t trackedOff = 0, wrongOff = 0, trackedOn = 0, wrongOn = 0;
+    run(0.0f, trackedOff, wrongOff);
+    run(0.05f, trackedOn, wrongOn);
+    std::printf("  24px motion: reject OFF -> %zu tracked, %zu wrong;  reject 0.05 -> %zu "
+                "tracked, %zu wrong\n", trackedOff, wrongOff, trackedOn, wrongOn);
+
+    // OFF: the failure this rule exists for -- points reported tracked and not close.
+    BINCV_CHECK(wrongOff > 0);
+    // ON: none of them survive. This is the whole claim.
+    BINCV_CHECK_EQ(wrongOn, size_t{0});
+}
+
 BINCV_TEST_MAIN("test_opticalflow")

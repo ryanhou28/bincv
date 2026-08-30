@@ -4258,6 +4258,18 @@ a ~10% LOSS once the guess error exceeds the true motion. [X-94](EXPERIMENTS.md)
 found that without a guess at 24 px the tracker returns 54.7 px of error while reporting
 every point tracked — registered as **E-48**, not fixed here.
 
+### T5.22 · A reject for the silent large-motion failure (E-48) · `DONE` (X-95 → D-77)
+
+`LKParams::maxResidual`, **default 0 = off.** The tracker answers confidently past the
+pyramid's reach — 54.7 px of error with `status = 1` on every point — and this clears
+`status` on the residual `err` already carries. The bidirectional check E-48 also
+registered was never built: the free arm works.
+
+**It ships off because the threshold is a property of the CONTENT**, which is the finding.
+0.05 is free on synthetic texture and takes V1_02's median track lifetime from 79 frames
+to 1. And it costs 2.16× (x86) / 1.86× (device), because it computes a residual an
+`err == nullptr` caller was not paying — the pre-registration predicted "unmeasurable".
+
 ## Phase 6 — Repository shape, for sharing
 
 **GOAL: a repository that reads as a well-built library to someone who lands on it, can

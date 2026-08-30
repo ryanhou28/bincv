@@ -327,6 +327,14 @@ int main(int argc, char** argv) {
     // measured how many iterations the tracker actually NEEDS, and at 94.7% of
     // frontend time an unnecessary iteration is the most expensive thing there is.
     if (const char* it = std::getenv("BINCV_LK_ITERS")) lk.maxIterations = std::atoi(it);
+    // X-95 / E-48. The residual reject, so the rule can be measured against TRACK
+    // LIFETIME on a real sequence rather than against the synthetic gap that made it
+    // look free. D-53: a rule that removes the failures by also removing the tracks is
+    // not a fix.
+    if (const char* r = std::getenv("BINCV_LK_MAX_RESIDUAL")) {
+        lk.maxResidual = static_cast<float>(std::atof(r));
+        std::printf("LK residual reject: maxResidual = %.4f\n", static_cast<double>(lk.maxResidual));
+    }
     bincv::GoodFeaturesParams gftt;           // ditto
     const int kMinTracks = 60;
 

@@ -26,6 +26,7 @@
 // ===========================================================================
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -125,11 +126,101 @@ int main() {
                                        : 100.0 * static_cast<double>(badRemoved) /
                                              static_cast<double>(bad.size());
 
+        // Does the reject ACTUALLY do it, end to end, through the shipped parameter?
+        // A separable distribution is not the same as a working rule -- the batch path
+        // and the scalar path both have to apply it.
+        bincv::LKParams rejectParams;
+        rejectParams.maxResidual = 0.05f;
+        std::vector<Point2f> out2(n);
+        std::vector<uint8_t> status2(n);
+        bincv::calcOpticalFlowPyrLK(levels, pts.data(), out2.data(), status2.data(), nullptr, n,
+                                    rejectParams);
+        size_t keptGood = 0, keptBad = 0;
+        for (size_t i = 0; i < n; ++i) {
+            if (!status2[i]) continue;
+            const double ex = static_cast<double>(out2[i].x) - (static_cast<double>(pts[i].x) + tx);
+            const double ey = static_cast<double>(out2[i].y) - (static_cast<double>(pts[i].y) + ty);
+            (std::sqrt(ex * ex + ey * ey) <= 1.0 ? keptGood : keptBad)++;
+        }
         std::printf("%5.0fpx %7zu %7zu %7zu | %7.4f %7.4f %7.4f     | %7.4f %7.4f %7.4f     |"
-                    " %.4f -> removes %.1f%% of bad\n",
+                    " %.4f -> removes %.1f%% of bad  [reject@0.05 keeps %zu good, %zu bad]\n",
                     std::sqrt(tx * tx + ty * ty), n, good.size(), bad.size(),
                     quantile(good, 0.50), quantile(good, 0.90), quantile(good, 0.99),
-                    quantile(bad, 0.01), quantile(bad, 0.10), quantile(bad, 0.50), thr, pct);
+                    quantile(bad, 0.01), quantile(bad, 0.10), quantile(bad, 0.50), thr, pct,
+                    keptGood, keptBad);
+    }
+
+    // -----------------------------------------------------------------------
+    // THE COST, AND IT IS NOT ONLY A COMPARISON.
+    //
+    // For a caller who already asks for `err` the reject is one float compare. For a
+    // caller who passes `err == nullptr` -- which the frontend does -- turning it on
+    // FORCES the residual to be computed, and that is a full windowMeanAbsDiff over a
+    // 31x31 window per point. "Expected to be free" is how X-89's two kernels came to be
+    // 78% of a frontend, so both cases are timed rather than reasoned about.
+    // -----------------------------------------------------------------------
+    {
+        const double tx = 5.0, ty = 3.0;
+        bincv::Pyramid<W, 1, 2, 2, 2> prev(kWidth, kHeight), next(kWidth, kHeight);
+        bincv::SignedQuantMat<1, W> dx0(kWidth, kHeight), dy0(kWidth, kHeight);
+        bincv::SignedQuantMat<2, W> dx1(320, 240), dy1(320, 240), dx2(160, 120), dy2(160, 120),
+            dx3(80, 60), dy3(80, 60);
+        for (int y = 0; y < kHeight; ++y) {
+            for (int x = 0; x < kWidth; ++x) {
+                prev.level<0>().set(y, x, field(x, y) > 0.0 ? 1u : 0u);
+                next.level<0>().set(y, x, field(static_cast<double>(x) - tx,
+                                                static_cast<double>(y) - ty) > 0.0 ? 1u : 0u);
+            }
+        }
+        prev.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
+        next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
+        bincv::derivativeX(prev.level<0>(), dx0); bincv::derivativeY(prev.level<0>(), dy0);
+        bincv::derivativeX(prev.level<1>(), dx1); bincv::derivativeY(prev.level<1>(), dy1);
+        bincv::derivativeX(prev.level<2>(), dx2); bincv::derivativeY(prev.level<2>(), dy2);
+        bincv::derivativeX(prev.level<3>(), dx3); bincv::derivativeY(prev.level<3>(), dy3);
+        bincv::LKLevels<W, 1, 2, 2, 2> levels;
+        levels.get<0>() = bincv::lkLevel<1>(prev.level<0>(), next.level<0>(), dx0, dy0);
+        levels.get<1>() = bincv::lkLevel<2>(prev.level<1>(), next.level<1>(), dx1, dy1);
+        levels.get<2>() = bincv::lkLevel<2>(prev.level<2>(), next.level<2>(), dx2, dy2);
+        levels.get<3>() = bincv::lkLevel<2>(prev.level<3>(), next.level<3>(), dx3, dy3);
+
+        std::vector<Point2f> pts;
+        for (int y = 48; y < kHeight - 48; y += 16) {
+            for (int x = 48; x < kWidth - 48; x += 16) {
+                pts.push_back(Point2f{static_cast<float>(x), static_cast<float>(y)});
+            }
+        }
+        const size_t n = pts.size();
+        std::vector<Point2f> out(n);
+        std::vector<uint8_t> st(n);
+        std::vector<float> errbuf(n);
+
+        struct Arm { const char* label; float thr; bool wantErr; };
+        const Arm arms[] = {
+            {"reject off, err not requested", 0.0f,  false},
+            {"reject ON,  err not requested", 0.05f, false},
+            {"reject off, err requested",     0.0f,  true},
+            {"reject ON,  err requested",     0.05f, true},
+        };
+        constexpr int kRounds = 11;
+        double base = 0.0;
+        std::printf("\n--- the cost of the reject, %zu keypoints, %d rounds, minimum ---\n", n,
+                    kRounds);
+        for (const Arm& a : arms) {
+            bincv::LKParams p;
+            p.maxResidual = a.thr;
+            std::vector<double> ts;
+            for (int r = 0; r < kRounds; ++r) {
+                const auto t0 = std::chrono::steady_clock::now();
+                bincv::calcOpticalFlowPyrLK(levels, pts.data(), out.data(), st.data(),
+                                            a.wantErr ? errbuf.data() : nullptr, n, p);
+                ts.push_back(std::chrono::duration<double, std::nano>(
+                                 std::chrono::steady_clock::now() - t0).count());
+            }
+            const double ns = *std::min_element(ts.begin(), ts.end());
+            if (base == 0.0) base = ns;
+            std::printf("  %-32s %10.0f ns   %6.3fx\n", a.label, ns, ns / base);
+        }
     }
 
     std::printf("\nGOOD = tracked and within 1 px of ground truth; BAD = tracked and not.\n"

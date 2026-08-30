@@ -12591,7 +12591,7 @@ a footprint or a lifetime cost, and neither belongs in a task about initial flow
 
 ---
 
-### X-95 · E-48: a residual reject for the silent large-motion failure · `RULE PRE-REGISTERED`
+### X-95 · E-48: a residual reject for the silent large-motion failure · `DONE — CLAUSE 3, SHIPS DEFAULT-OFF`
 
 **Written before the rule's threshold is chosen, and after one measurement that decides
 which arm is even on the table.**
@@ -12648,4 +12648,94 @@ that cannot be the last word.
 4. The cost arm is a comparison per point and is expected to be unmeasurable. It is still
    run on both architectures, because "expected to be free" is how [X-89](#x-89--the-audit-which-operations-were-correct-tested-and-never-timed--done)'s
    two kernels came to be 78% of a frontend.
+
+---
+
+## X-95 · RESULT — the mechanism works, the threshold does not travel, and it is not free
+
+**Platforms:** x86-64 Release one thread; and the reference device (Pi 4 Model B Rev 1.5,
+aarch64, g++ 14.2.0, performance governor, `taskset -c 3`, `throttled` 0x80000 → 0x80000,
+**no change during the run**). **Code:** `benchmark/lk_loss_diagnostic.cpp`, and the
+`BINCV_LK_MAX_RESIDUAL` sweep in `benchmark/frontend_sequence.cpp`.
+
+### 1. The mechanism works, end to end, on synthetic content
+
+`LKParams::maxResidual` clears `status` when the level-0 residual exceeds it. At 0.05:
+
+| true motion | tracked, reject off | of those, wrong | tracked, reject on | of those, wrong |
+|---|---|---|---|---|
+| 2 / 5 / 9 / 19 px | 816 | 0 | **816** | 0 |
+| 28 / 37 px | 816 | **816** | **0** | 0 |
+
+Nothing good is lost and nothing bad survives — through **both** code paths, which is
+why the check runs at 640×480 where the AVX2 keypoint batch is live. A reject applied
+only in `trackOnePoint` would have been silently absent from every x86 build.
+
+**And the failure is a CLIFF.** Every point survives at 19 px and every point fails at
+28 px. X-94's 24 px sits on the edge of a 1/2/2/2 ladder's reach, and "large motion" is
+not a gradient of degradation — it is a wall.
+
+### 2. THE THRESHOLD DOES NOT TRAVEL, AND THE SYNTHETIC CASE IS WHAT MADE IT LOOK FREE
+
+The pre-registration required the threshold to be chosen on **V1_02**, not on synthetic
+texture. That clause earned its place:
+
+| `maxResidual` | flow vectors | track lifetime median | per-frame survival | re-detections |
+|---|---|---|---|---|
+| **0 (off)** | **1039** | **79** | **100.0%** | **1** |
+| 0.20 | 938 | 79 | 99.2% | 1 |
+| 0.10 | 447 | **1** | 87.0% | 6 |
+| **0.05** — the synthetic value | 108 | **1** | **19.7%** | **79** |
+| 0.04 | 94 | 1 | 14.8% | 79 |
+
+**At the threshold that cost nothing on synthetic content, median track lifetime
+collapses from 79 frames to 1 and the detector runs on every frame.** Real binarised edge
+maps carry residuals four to five times higher than synthetic texture: reading the
+surviving fraction as a CDF, V1_02's tracked points have a median `err` near **0.105**
+against synthetic's **0.019–0.029**, and its p90 is around 0.20 against synthetic's 0.038.
+
+**The units are content-dependent, and that is the transferable finding.** `err` is a mean
+absolute difference over the window, so it measures how well *this* content matches under
+*this* binarisation. A threshold calibrated on one kind of imagery is not conservative on
+another — it is destructive.
+
+**And on V1_02 there is nothing for the rule to fix.** Agreement with OpenCV's flow is
+**100% within 1 px at every threshold including zero**, so clause 1 — "removes points
+whose disagreement with OpenCV exceeds 1 px" — cannot be satisfied on that sequence at
+all. The rule is pure cost there.
+
+### 3. IT IS NOT FREE, AND THE PRE-REGISTRATION SAID IT WOULD BE
+
+X-95 predicted "a comparison per point, expected to be unmeasurable". **Wrong**, and
+wrong in a way that mattered — the comparison is free, but *computing the residual* is
+not, and switching the reject on makes it computed for a caller who was passing
+`err == nullptr`.
+
+| arm | x86 | device |
+|---|---|---|
+| reject off, `err` not requested | **2.83 ms** | **17.51 ms** |
+| reject ON, `err` not requested | 6.15 ms — **2.17×** | 32.62 ms — **1.86×** |
+| reject off, **`err` requested** | 6.12 ms — **2.16×** | 32.61 ms — **1.86×** |
+| reject ON, `err` requested | 6.12 ms — 2.16× | 32.61 ms — 1.86× |
+
+**The third row is the finding that outlives E-48.** Asking `calcOpticalFlowPyrLK` for
+`err` at all costs **2.16× on x86 and 1.86× on the device** — one window pass per point
+against an iteration loop that averages under two iterations. The header called `err`
+"an OPTIONAL output" and offered that as a reason its per-pixel arithmetic was "not a
+hole in the tracker's claim", **without ever stating the magnitude.** It states it now. A
+caller passing an `err` array to log it is more than doubling their tracking time.
+
+Every recorded frontend number is unaffected: `frontend_sequence` and
+`examples/vio_frontend` both pass `nullptr`.
+
+### The decision — clause 3
+
+**Ships DEFAULT-OFF** (`maxResidual = 0`), which is clause 3 of the pre-registered rule
+and not a hedge: no threshold satisfies all three conditions on V1_02, because the
+condition it exists to serve is not violated there and the cost is 2.16×. What ships with
+it is the **calibration procedure** rather than a tuned number — measure `err` over your
+own known-good tracks and set the threshold above their p99 — plus both measured
+distributions as anchors, so a caller can see how far apart two contents can be.
+
+[D-77](ARCHITECTURE.md#8-design-decisions).
 

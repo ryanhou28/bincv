@@ -357,6 +357,33 @@ struct LKParams {
     ///       `status = 1` for every point (E-48). A guess routes around that failure; it
     ///       does not fix it, and a caller without an IMU still has it.
     bool useInitialFlow = false;
+
+    /// @brief Reject a point whose level-0 residual exceeds this, by clearing `status`.
+    ///        **0 disables, which is the default.** (T5.22 / E-48.)
+    ///
+    /// **WHAT IT IS FOR.** X-94 found the tracker returning a mean endpoint error of
+    /// 54.7 px on a 24 px translation while reporting `status = 1` for every point: past
+    /// the pyramid's reach it does not fail, it answers confidently. `minEigThreshold`
+    /// does not catch this -- the windows are well conditioned, they are simply matched
+    /// to the wrong place.
+    ///
+    /// **THE UNITS ARE THE `err` ARRAY'S**, because it is the same number:
+    /// `windowMeanAbsDiff` over the warped window, 0 for an identical match and 0.5 for
+    /// an uncorrelated one. Measured on synthetic translation, good points sit at
+    /// **0.0378 and below** and lost ones at **0.0792 and above** -- disjoint, with a
+    /// factor of two of gap (X-95).
+    ///
+    /// @note **IT IS NOT FREE, AND THE PRE-REGISTRATION EXPECTED IT TO BE.** The
+    ///       comparison is free; computing the residual is not, and setting this makes it
+    ///       computed whether or not `err` was requested. Measured: `track` goes from
+    ///       2.83 ms to 6.15 ms on x86 for a caller who was passing `err == nullptr` --
+    ///       **2.17x**. A caller who ALREADY requests `err` pays nothing extra, because
+    ///       that request costs the same 2.16x on its own (X-95).
+    /// @note **It is a LOSS RULE, so it shortens tracks by construction, and D-53 says
+    ///       that is not automatically a win.** The default is off and the shipped value
+    ///       is whatever X-95 measured on a real sequence against track lifetime -- not
+    ///       the synthetic gap above, which is the easy case.
+    float maxResidual = 0.0f;
 };
 
 /// @brief One pyramid level's six planes: both frames, and the previous frame's
@@ -1756,8 +1783,17 @@ inline float windowMeanAbsDiff(const LKLevel<WordType>& lv, const RegionWords<Wo
 /// OPTIONAL output (`err == nullptr` is the frontend's own call and skips this
 /// entirely), it is computed at level 0 ONLY, it runs once per point per frame and
 /// never inside the iteration loop, and nothing in the solve reads it -- `status`
-/// does not depend on it, deliberately (deviation (vii)). **The per-pixel cost of
+/// does not depend on it unless `LKParams::maxResidual` is set (deviation (vii),
+/// and E-48's reject is the one thing that departs from it). **The per-pixel cost of
 /// TRACKING at N bits remains integers and popcounts only.**
+///
+/// **AND HERE IS WHAT "OPTIONAL" COSTS, WHICH THIS PARAGRAPH USED TO ASSERT WITHOUT A
+/// NUMBER.** Measured by X-95 on 816 keypoints over a 1/2/2/2 ladder, asking for `err`
+/// takes `track` from 2.83 ms to 6.12 ms on x86 -- **2.16x**. It is one window pass per
+/// point against an iteration loop that averages under two iterations, so it is not a
+/// surprise once stated; it was simply never stated. A caller who passes an `err` array
+/// "to log it" is more than doubling their tracking time, and one who does not needs to
+/// know that `maxResidual` turns the same cost on.
 ///
 /// @note **UNITS: LSBs, so the scale depends on N.** The 1-bit form returns a mean
 ///       in `{0, 1}` intensity units; this returns one in `[0, 2^N - 1]` units,
@@ -1883,6 +1919,7 @@ struct LKContext {
     double minEigThreshold = 0.0;
     LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
     bool useInitialFlow = false;
+    double maxResidual = 0.0;   ///< 0 disables; E-48's reject
 
     /// Every usable level's extent, so that a point's entry level can be RECOMPUTED
     /// rather than cached. A per-point array would be scratch, and this operation
@@ -2169,15 +2206,20 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
             // an error value. That quirk is not reproduced (deviation
             // (vii)); the test is unconditional here.
             c.status[p] = 0;
-        } else if (c.err != nullptr) {
+        } else if (c.err != nullptr || c.maxResidual > 0.0) {
             const double offX = static_cast<double>(finalX) - static_cast<double>(prevX);
             const double offY = static_cast<double>(finalY) - static_cast<double>(prevY);
             const long long tapX = static_cast<long long>(std::floor(offX));
             const long long tapY = static_cast<long long>(std::floor(offY));
             const double fx = offX - static_cast<double>(tapX);
             const double fy = offY - static_cast<double>(tapY);
-            c.err[p] = windowMeanAbsDiff(lv, region, tapX, tapY, (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy),
-                (1.0 - fx) * fy, fx * fy);
+            const double residual = windowMeanAbsDiff(lv, region, tapX, tapY,
+                (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
+            if (c.err != nullptr) c.err[p] = static_cast<float>(residual);
+            // E-48. The residual is already here; the reject is one comparison and
+            // needs no storage, which is why it is applied at the point of computation
+            // rather than in a pass over `err` the caller may not have asked for.
+            if (c.maxResidual > 0.0 && residual > c.maxResidual) c.status[p] = 0;
         }
     }
 }
@@ -2468,15 +2510,21 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
             if (fx0 < -static_cast<long long>(c.winW) || fx0 >= levelWidth ||
                 fy0 < -static_cast<long long>(c.winH) || fy0 >= levelHeight) {
                 c.status[s.p] = 0;
-            } else if (c.err != nullptr) {
+            } else if (c.err != nullptr || c.maxResidual > 0.0) {
                 const double offX = static_cast<double>(finalX) - static_cast<double>(s.prevX);
                 const double offY = static_cast<double>(finalY) - static_cast<double>(s.prevY);
                 const long long tx = static_cast<long long>(std::floor(offX));
                 const long long ty = static_cast<long long>(std::floor(offY));
                 const double fx = offX - static_cast<double>(tx);
                 const double fy = offY - static_cast<double>(ty);
-                c.err[s.p] = windowMeanAbsDiff(lv, s.region, tx, ty, (1.0 - fx) * (1.0 - fy),
-                                               fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
+                const double residual = windowMeanAbsDiff(lv, s.region, tx, ty,
+                    (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
+                if (c.err != nullptr) c.err[s.p] = static_cast<float>(residual);
+                // E-48, and it MUST be here too: the batch is the shipped x86 path, so a
+                // reject applied only in `trackOnePoint` would be silently absent from
+                // every AVX2 build -- the failure mode CLAUDE.md warns about, in the
+                // direction x86 does compile.
+                if (c.maxResidual > 0.0 && residual > c.maxResidual) c.status[s.p] = 0;
             }
         }
         s.active = false;
@@ -2803,6 +2851,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
     c.minEigThreshold = static_cast<double>(params.minEigThreshold);
     c.entryLevel = params.entryLevel;
     c.useInitialFlow = params.useInitialFlow;
+    c.maxResidual = static_cast<double>(params.maxResidual);
 
     // Written BEFORE the degenerate exit below, not after it: "every entry is
     // written" is the documented contract, and a caller that reads `status` after
