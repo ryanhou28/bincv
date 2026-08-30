@@ -582,10 +582,16 @@ int main(int argc, char** argv) {
     std::printf("        binCV has its NEON path here (D-30, D-33), so this is SIMD against\n"
                 "        SIMD on the deployment target -- the comparison criterion 4 is about.\n");
 #else
-    std::printf("        binCV has NO VECTOR PATH ON x86 (ROADMAP 5.3 is unwritten), so this is\n"
-                "        binCV SCALAR against OpenCV SSE -- and X-64 measured what that is worth:\n"
-                "        at equal threads binCV LEADS, 1.14-1.19x. The x86 deficit reported\n"
-                "        before X-64 was threads, not vector width.\n");
+    // STALE UNTIL T5.16/T5.8. This used to read "binCV has NO VECTOR PATH ON x86
+    // (ROADMAP 5.3 is unwritten), so this is binCV SCALAR against OpenCV SSE" -- and
+    // this same program prints "LK residual kernel: AVX2, eight keypoints per batch"
+    // five hundred lines earlier. One output contradicting itself is worse than either
+    // claim alone, because a reader believes whichever half they read first.
+    std::printf("        binCV has its AVX2 paths here -- the eight-keypoint LK batch (D-66),\n"
+                "        the sensor stage's median and edge kernels (X-89), and packing --\n"
+                "        so this is SIMD against SIMD, as the aarch64 arm is. What X-64\n"
+                "        measured remains the point: at equal threads binCV LEADS, and the\n"
+                "        x86 deficit reported before it was THREADS, not vector width.\n");
 #endif
     return 0;
 }
