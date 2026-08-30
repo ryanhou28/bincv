@@ -73,18 +73,41 @@ struct SubPixResult {
     size_t refined = 0;    ///< corners whose position moved and converged
     size_t singular = 0;   ///< corners left untouched because `G` was not invertible
     size_t clamped = 0;    ///< corners whose step left the window and were left in place
+
+    /// @brief Corners whose refined position ended up further than `winHalf` from where
+    ///        it started, and were therefore REVERTED to the input.
+    ///
+    /// **This is `cv::cornerSubPix`'s own rule, not an addition** -- "if new point is too
+    /// far from initial, it means poor convergence; leave initial point as the result",
+    /// tested on `|dx| > win.width || |dy| > win.height` after the loop. binCV did not
+    /// implement it until F-4, and the difference is not subtle: a seed that walks out of
+    /// its own window is exactly the case where the two answers diverge by more than the
+    /// window is wide.
+    size_t diverged = 0;
 };
 
 namespace impl {
 
 /// @brief OpenCV's Gaussian window mask, built once per call. **INTERNAL.**
-/// @note `cornerSubPix` weights by `exp(-(x^2 + y^2) / (2 * (win/2)^2))` over the
-///       window, which is `cv::getGaussianKernel`'s shape at the same radius. Built into
-///       a caller-free stack buffer; the window is small and bounded by `kMaxWinHalf`.
+///
+/// @note **`exp(-(dx^2 + dy^2) / winHalf^2)`, and the width is not a free parameter.**
+///       `cv::cornerSubPix` normalises each offset by the half-window and exponentiates
+///       the sum of squares -- `vy = exp(-y*y)` with `y = (i - win.height)/win.height`,
+///       times the same in x -- so the weight is exactly 1/e at the edge of the window
+///       along either axis.
+/// @note **THIS WAS WRONG UNTIL F-4, BY A FACTOR OF TWO IN THE EXPONENT** -- the
+///       denominator read `2*(winHalf/2)^2 = winHalf^2/2`, giving `exp(-2r^2/winHalf^2)`,
+///       a Gaussian sqrt(2) too narrow. Reported from outside at 4.53 px mean against
+///       OpenCV on real frames.
+/// @note **THE TEST SAW IT AND PASSED ANYWAY, AND THAT IS THE PART WORTH REMEMBERING.**
+///       `SubPix.AgreesWithOpenCVOnTheSameCorner` measured **0.0325 px with the wrong
+///       mask and 0.0035 px with the right one** -- it was sensitive, by a factor of
+///       nine. It passed because its bound was 0.1, chosen from the number the code
+///       happened to produce rather than from what a correct implementation reaches. A
+///       tolerance fitted to the observed value cannot fail; it can only record.
 inline void subPixMask(int winHalf, int zeroHalf, double* mask) {
     const int side = 2 * winHalf + 1;
-    const double denom = 2.0 * (static_cast<double>(winHalf) * 0.5) *
-                         (static_cast<double>(winHalf) * 0.5);
+    const double denom = static_cast<double>(winHalf) * static_cast<double>(winHalf);
     for (int dy = -winHalf; dy <= winHalf; ++dy) {
         for (int dx = -winHalf; dx <= winHalf; ++dx) {
             const double r = static_cast<double>(dx * dx + dy * dy);
@@ -143,13 +166,18 @@ inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
     const double eps2 = params.epsilon * params.epsilon;
 
     for (size_t c = 0; c < count; ++c) {
-        double cx = static_cast<double>(corners[c].x);
-        double cy = static_cast<double>(corners[c].y);
+        const double startX = static_cast<double>(corners[c].x);
+        const double startY = static_cast<double>(corners[c].y);
+        double cx = startX;
+        double cy = startY;
 
         for (int it = 0; it < params.maxIterations; ++it) {
-            // The window is anchored on the ROUNDED position, as OpenCV's is: the
-            // gradient samples are integer pixels and the refinement is the offset
-            // within them.
+            // THE WINDOW IS ANCHORED ON THE ROUNDED POSITION, AND THAT IS A DEVIATION.
+            // A bit-plane derivative cannot be interpolated -- the popcount identity is
+            // exact only for {-1, 0, +1} -- so the samples are integer pixels and the
+            // refinement is the offset within them. This comment used to claim the
+            // rounding was "as OpenCV's is"; it is not, and saying so hid a real
+            // difference behind a false reassurance.
             const long long ix0 = static_cast<long long>(std::floor(cx + 0.5));
             const long long iy0 = static_cast<long long>(std::floor(cy + 0.5));
             if (ix0 - winHalf < 0 || iy0 - winHalf < 0 ||
@@ -266,6 +294,19 @@ inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
                 break;
             }
             if (it + 1 == params.maxIterations) ++out.refined;
+        }
+
+        // POOR CONVERGENCE -- cv::cornerSubPix's rule, applied after the loop exactly as
+        // it applies it. A point that has walked further than its own half-window from
+        // the seed has not been refined, it has been captured by different structure, and
+        // the seed is the better answer. Measured on asymmetric content: without this the
+        // mean disagreement with cv::cornerSubPix is 2.02 px and the worst is 5.54 px,
+        // and BOTH numbers come from the handful of seeds this rule rejects.
+        if (std::fabs(cx - startX) > static_cast<double>(winHalf) ||
+            std::fabs(cy - startY) > static_cast<double>(winHalf)) {
+            corners[c].x = static_cast<float>(startX);
+            corners[c].y = static_cast<float>(startY);
+            ++out.diverged;
         }
     }
     return out;

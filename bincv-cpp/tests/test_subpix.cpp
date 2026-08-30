@@ -85,6 +85,13 @@ Point2f denseRefine(const std::vector<int>& gx, const std::vector<int>& gy, size
         cx = nx; cy = ny;
         if (sx * sx + sy * sy <= epsilon * epsilon) break;
     }
+    // cv::cornerSubPix's poor-convergence rule, which the kernel applies and so must
+    // the oracle -- otherwise this test reports a disagreement wherever the rule fires
+    // and calls a correct kernel wrong.
+    if (std::fabs(cx - static_cast<double>(start.x)) > winHalf ||
+        std::fabs(cy - static_cast<double>(start.y)) > winHalf) {
+        return start;
+    }
     return Point2f{static_cast<float>(cx), static_cast<float>(cy)};
 }
 
@@ -112,6 +119,38 @@ void toDense(const bincv::SignedQuantMat<N, uint32_t>& d, std::vector<int>& out,
 }
 
 }  // namespace
+
+/// An ASYMMETRIC corner: the quadrant with a short notch cut from one edge.
+///
+/// **WHY THIS EXISTS, AND IT IS NOT THE REASON IT FIRST LOOKED LIKE.** The obvious story
+/// for F-4 is that a symmetric corner cannot see a radially symmetric mask. Measured,
+/// that is FALSE: the symmetric case reports 0.0325 px with the wrong mask and 0.0035 px
+/// with the right one -- sensitive by a factor of nine. It passed because its BOUND was
+/// 0.1, fitted to the value the code produced instead of to the value a correct
+/// implementation reaches.
+///
+/// What this case adds is different and still worth having: on a symmetric corner the
+/// two gradient operators agree almost exactly, so the comparison is easy and the
+/// residual is tiny. Asymmetric content is where binCV's ternary derivative and OpenCV's
+/// byte-domain one actually diverge, so this is the case that states the Tier 2 gap
+/// honestly rather than flattering it.
+void asymmetricCorner(bincv::BinMat<uint32_t>& m, int cornerX, int cornerY) {
+    for (int y = 0; y < m.rows(); ++y) {
+        for (int x = 0; x < m.cols(); ++x) {
+            bool v = (x >= cornerX && y >= cornerY);
+            // A short notch cut out of the HORIZONTAL edge on one side only, two pixels
+            // from the corner. It has to be MILD: a strong asymmetry drags the solution
+            // several pixels, which puts it on the poor-convergence threshold, and there
+            // a 0.2 px difference in the converged position becomes a 5 px difference in
+            // the OUTPUT -- so the test would be measuring that discontinuity and not the
+            // Gaussian width it exists to check.
+            if (x >= cornerX + 2 && x <= cornerX + 3 && y >= cornerY && y <= cornerY + 1) {
+                v = false;
+            }
+            m.set(y, x, v ? 1u : 0u);
+        }
+    }
+}
 
 BINCV_TEST(SubPix, ScaleInvariance_TernaryRefinesWhereBytesDo) {
     // THE PROPERTY THE WHOLE OPERATION RESTS ON. Same gradients, scaled by 1 and by
@@ -286,8 +325,78 @@ BINCV_TEST(SubPix, AgreesWithOpenCVOnTheSameCorner) {
     // A TOLERANCE, NOT AN EQUALITY, and the docstring says why: different gradient
     // operators on the same content. **0.1 px, against a measured 0.0325** -- a bound
     // thirty times looser than the number it guards is not a test, it is a comment.
-    BINCV_CHECK(mean < 0.1);
-    BINCV_CHECK(worst < 0.15);
+    // BOUNDS SET FROM WHAT A CORRECT IMPLEMENTATION REACHES (0.0035), NOT FROM WHAT THIS
+    // CODE HAPPENS TO PRODUCE. The old bounds were 0.1 and 0.15 against a measured
+    // 0.0325 -- and 0.0325 was the WRONG MASK's number. A tolerance fitted to the
+    // observation cannot fail, which is how F-4 shipped past this file.
+    BINCV_CHECK(mean < 0.01);
+    BINCV_CHECK(worst < 0.01);
+}
+#endif  // BINCV_WITH_OPENCV
+
+
+// ---------------------------------------------------------------------------
+// F-4 -- THE TIER 2 GAP, STATED HONESTLY
+//
+// Reported from outside: binCV's cornerSubPix disagreed with OpenCV's by 4.53 px mean on
+// real frames, while the test above reported 0.0325 px. Two causes, both now fixed -- a
+// Gaussian sqrt(2) too narrow, and a MISSING poor-convergence rule (OpenCV reverts to the
+// seed when the result lands further than the half-window away; binCV kept walking).
+//
+// This case is the same comparison on asymmetric content, which is where the two gradient
+// operators genuinely differ. It reports ~0.47 px, against ~0.0035 px on an ideal
+// symmetric corner -- and that spread is the point: the symmetric number is not
+// representative of what a caller gets on a real frame, and quoting it alone is how
+// D-74 came to advertise 0.0325 px for an operation a user measured at 4.53.
+// ---------------------------------------------------------------------------
+#ifdef BINCV_WITH_OPENCV
+BINCV_TEST(SubPix, MaskWidthMatchesOpenCV_OnAsymmetricContent) {
+    constexpr int W = 70, H = 60;
+    const int cxTrue = 32, cyTrue = 27;
+    bincv::BinMat<uint32_t> img(W, H);
+    asymmetricCorner(img, cxTrue, cyTrue);
+    bincv::SignedQuantMat<1, uint32_t> dx(W, H), dy(W, H);
+    bincv::derivativeX(img, dx);
+    bincv::derivativeY(img, dy);
+
+    cv::Mat bytes(H, W, CV_8U, cv::Scalar(0));
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) bytes.at<uint8_t>(y, x) = img.at(y, x) ? 255 : 0;
+    }
+
+    std::vector<Point2f> mine;
+    std::vector<cv::Point2f> theirs;
+    for (int sy = -2; sy <= 2; ++sy) {
+        for (int sx = -2; sx <= 2; ++sx) {
+            mine.push_back(Point2f{static_cast<float>(cxTrue + sx),
+                                   static_cast<float>(cyTrue + sy)});
+            theirs.push_back(cv::Point2f(static_cast<float>(cxTrue + sx),
+                                         static_cast<float>(cyTrue + sy)));
+        }
+    }
+    bincv::SubPixParams p;
+    p.winHalf = 5;
+    bincv::cornerSubPix<1, uint32_t>(dx, dy, mine.data(), mine.size(), p);
+    cv::cornerSubPix(bytes, theirs, cv::Size(p.winHalf, p.winHalf), cv::Size(-1, -1),
+                     cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER,
+                                      p.maxIterations, p.epsilon));
+
+    double worst = 0.0, total = 0.0;
+    for (size_t i = 0; i < mine.size(); ++i) {
+        const double d = std::hypot(static_cast<double>(mine[i].x) - theirs[i].x,
+                                    static_cast<double>(mine[i].y) - theirs[i].y);
+        worst = d > worst ? d : worst;
+        total += d;
+    }
+    const double mean = total / static_cast<double>(mine.size());
+    std::printf("  ASYMMETRIC, binCV vs cv::cornerSubPix over %zu starts: mean %.4f px, "
+                "worst %.4f px\n", mine.size(), mean, worst);
+    BINCV_CHECK(mine.size() == 25);
+    // The Tier 2 gap on content that shows it. Bound just above the measured 0.4713 --
+    // and it is a CEILING on the deviation, so a regression that widened the gap fails
+    // here even though nothing crashes.
+    BINCV_CHECK(mean < 0.55);
+    BINCV_CHECK(worst < 0.60);
 }
 #endif  // BINCV_WITH_OPENCV
 

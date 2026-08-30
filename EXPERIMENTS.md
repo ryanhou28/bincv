@@ -12159,7 +12159,7 @@ binCV can refine without ever materialising the byte image.
 | `±1` against `±255`, 25 starts | mean **0.000e+00** px, worst **0.000e+00** px |
 | word-wise sparse traversal against a dense oracle, 45 corners | worst **0.000e+00** px |
 | 24 starts around a known corner | mean distance **1.952 → 0.592** px, **24/24** improved |
-| against `cv::cornerSubPix`, 25 starts | mean **0.0325** px, worst **0.0326** px |
+| against `cv::cornerSubPix`, 25 starts | ~~mean **0.0325** px, worst **0.0326** px~~ **WRONG — see the correction below** |
 
 The first row is exact rather than approximate because binCV's kernel and its `±255` oracle
 differ by nothing but that scale factor — it is the algebra, checked, not a tolerance that
@@ -12173,6 +12173,45 @@ the window's matrix is singular, which is every straight edge, and a binarised e
 mostly straight edges. The operation reports `singular` per point and moves nothing, which is
 the only safe answer; a caller that ignores the flag and treats all 45 as refined is reading 34
 unrefined positions as refined ones.
+
+#### CORRECTION (F-4) — THE LAST ROW WAS WRONG, AND THE TEST THAT PRODUCED IT PASSED
+
+**Reported from outside**, by a binCV user integrating with HybVIO: `cornerSubPix`
+disagreed with `cv::cornerSubPix` by **4.53 px mean** on real frames, against the
+0.0325 px this record advertised. They were right and this record was wrong. **Two
+defects, both shipped in D-74:**
+
+1. **The Gaussian mask was `sqrt(2)` too narrow.** The denominator read
+   `2*(winHalf/2)^2 = winHalf^2/2`, giving `exp(-2r^2/winHalf^2)`; `cv::cornerSubPix`
+   normalises each offset by the half-window and exponentiates the sum of squares, which
+   is `exp(-r^2/winHalf^2)`. A factor of two in the exponent.
+2. **`cv::cornerSubPix`'s poor-convergence rule was missing entirely.** OpenCV reverts to
+   the seed when the refined point lands further than the half-window from it — *"if new
+   point is too far from initial, it means poor convergence; leave initial point as the
+   result"* — and binCV kept whatever it had walked to. On content where the refinement
+   travels, this is the difference between agreeing to 0.2 px and disagreeing by 5.
+
+| against `cv::cornerSubPix` | before | after |
+|---|---|---|
+| symmetric corner, 25 starts | 0.0325 px | **0.0035 px** |
+| asymmetric content, 25 starts | 0.5519 px | **0.4713 px** |
+
+**WHY THE TEST DID NOT CATCH IT, AND THE FIRST ANSWER I REACHED FOR WAS WRONG.** The
+tempting explanation is that a symmetric corner cannot see a radially symmetric mask, so
+the width cancels. **Measured, that is false** — the symmetric case reports 0.0325 px
+with the wrong mask and 0.0035 px with the right one, so it was sensitive by a factor of
+nine. It passed because its **bound was 0.1**, set from the number the code produced
+rather than from the number a correct implementation reaches. A tolerance fitted to the
+observation cannot fail; it can only record. The bounds are now 0.01, and the file's own
+comment had already said this in the abstract — *"a bound thirty times looser than the
+number it guards is not a test, it is a comment"* — directly above the bound that was.
+
+**What the honest number is.** 0.0035 px on an ideal symmetric corner and **0.4713 px on
+asymmetric content**, where binCV's ternary derivative and OpenCV's byte-domain one
+genuinely diverge. The spread is the finding: **the symmetric number is not
+representative**, and quoting it alone is how this record came to advertise 0.0325 px for
+an operation a user measured at 4.53. `SubPix.MaskWidthMatchesOpenCV_OnAsymmetricContent`
+now pins the asymmetric figure as a ceiling.
 
 **No speed claim is made or measured here**, and that is deliberate rather than an omission:
 `cornerSubPix` runs on a few hundred corners once per detection, not per pixel per frame, and

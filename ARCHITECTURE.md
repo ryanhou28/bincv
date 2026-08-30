@@ -4277,8 +4277,23 @@ own kernel and its oracle differ only by that scale factor.
 and the termination are OpenCV's; the **gradient** is not — OpenCV derives its own from
 an 8-bit image, and this takes the `SignedQuantMat` derivatives the frontend already
 holds (D-5, and the only shape that avoids materialising the byte image the library
-exists to avoid). Measured against `cv::cornerSubPix` on the same content: **0.0325 px
-mean, 0.0326 worst.**
+exists to avoid). ~~Measured against `cv::cornerSubPix` on the same content: **0.0325 px
+mean, 0.0326 worst.**~~
+
+**CORRECTED (F-4), AND THE CORRECTION CAME FROM OUTSIDE.** A binCV user measured **4.53 px
+mean** against `cv::cornerSubPix` on real frames. Two defects shipped with this decision:
+the Gaussian mask was `sqrt(2)` too narrow — `exp(-2r^2/winHalf^2)` where OpenCV uses
+`exp(-r^2/winHalf^2)` — and **`cv::cornerSubPix`'s poor-convergence rule was missing
+entirely**, so where OpenCV reverts to the seed once the result lands further than the
+half-window away, binCV kept whatever it had walked to. Note that this paragraph claimed
+"the termination are OpenCV's"; that rule IS part of the termination, and it was not
+there. Both fixed. **The honest numbers are 0.0035 px on an ideal symmetric corner and
+0.4713 px on asymmetric content** — and the spread matters more than either figure,
+because the symmetric one is not representative of a real frame and quoting it alone is
+what produced a claim a user could contradict. The test that passed throughout WAS
+sensitive to the mask, by a factor of nine; its **bound** had been fitted to the value
+the code produced instead of the value a correct implementation reaches
+([X-92](EXPERIMENTS.md)).
 
 **IT IS THE ONE REDUCTION IN THIS LIBRARY THAT IS NOT A POPCOUNT, AND BIT-PLANES STILL
 PAY.** The weights and positions are per-pixel scalars, so the sums cannot collapse into
