@@ -12589,3 +12589,63 @@ at convergence (nearly free, but it is a new loss rule and D-53 says a rule that
 tracks has to be measured on track lifetime, not on time). Both are accuracy changes with
 a footprint or a lifetime cost, and neither belongs in a task about initial flow.
 
+---
+
+### X-95 · E-48: a residual reject for the silent large-motion failure · `RULE PRE-REGISTERED`
+
+**Written before the rule's threshold is chosen, and after one measurement that decides
+which arm is even on the table.**
+
+E-48 registered two candidate fixes for [X-94](#x-94--result--initial-flow-ships-and-the-speed-claim-is-conditional)'s
+finding — the tracker returning 54.7 px of endpoint error while reporting `status = 1`
+for every point — and they do not cost the same:
+
+- **(a) a bidirectional consistency check**, which needs the NEXT frame's derivative:
+  two more planes per pyramid level, the footprint trade `LKLevel` declines by
+  construction;
+- **(b) a reject on the residual at convergence**, and **`err` already IS that
+  residual** — `windowMeanAbsDiff` over the warped window, computed at level 0 for every
+  tracked point whenever the caller passes an `err` array. **Free.**
+
+**THE SEPARABILITY MEASUREMENT, TAKEN FIRST BECAUSE IT DECIDES WHETHER (b) EXISTS**
+(`benchmark/lk_loss_diagnostic.cpp`, synthetic translation, 816 keypoints, 1/2/2/2):
+
+| true motion | tracked | within 1 px | not | `err` p99 of good | `err` p1 of bad |
+|---|---|---|---|---|---|
+| 2 / 5 / 9 / 19 px | 816 | **816** | 0 | 0.0304–0.0378 | — |
+| 28 px | 816 | **0** | 816 | — | **0.0814** |
+| 37 px | 816 | **0** | 816 | — | **0.0792** |
+
+**The two populations are disjoint with a factor of two between them**: the worst good
+point sits at 0.0378 and the best bad one at 0.0792. A threshold anywhere in that gap
+removes **100% of the failures and 0% of the good tracks** on this content.
+
+Two things this also fixes in the record. **The failure is a cliff, not a gradient** —
+every point survives at 19 px and every point fails at 28 px, so the ladder's reach is
+between them and X-94's "24 px" sits right on the edge. And it is **wholesale**: at 28 px
+there is not one good track to protect, which is why a threshold looks free here and why
+that cannot be the last word.
+
+**THE DECISION RULE.**
+
+1. **Arm (a) is not built unless (b) fails on real content.** (b) costs 0 B and (a) costs
+   two planes per level; [CLAUDE.md](CLAUDE.md) settles unclaimed conflicts in memory's
+   favour, and (b) has just been shown to work on the synthetic case. Building the
+   expensive arm to compare against a working free one is how a footprint gets spent.
+2. **The synthetic result does NOT license a default.** Uniform synthetic texture is the
+   easy case for a residual: every window has the same statistics. The threshold is
+   chosen on **V1_02**, the real sequence every frontend number in this log uses, and it
+   ships only if on that sequence it:
+   - **removes points whose disagreement with OpenCV's flow exceeds 1 px**, and
+   - costs **no more than 2% of median track lifetime**, and
+   - does not reduce the frame-to-frame flow-vector count materially.
+   [D-53](ARCHITECTURE.md#8-design-decisions) is the reason for the second and third
+   clauses: **a rule that removes the failures by also removing the tracks is not a fix,
+   it is a shorter sequence**, and a benchmark that reported only "bad points gone" would
+   call that a success.
+3. **If no threshold satisfies all three, it ships DEFAULT-OFF** with the measured
+   trade in the header — not tuned until one of the numbers moves.
+4. The cost arm is a comparison per point and is expected to be unmeasurable. It is still
+   run on both architectures, because "expected to be free" is how [X-89](#x-89--the-audit-which-operations-were-correct-tested-and-never-timed--done)'s
+   two kernels came to be 78% of a frontend.
+
