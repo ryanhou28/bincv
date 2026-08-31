@@ -4270,13 +4270,35 @@ registered was never built: the free arm works.
 to 1. And it costs 2.16× (x86) / 1.86× (device), because it computes a residual an
 `err == nullptr` caller was not paying — the pre-registration predicted "unmeasurable".
 
+### T5.23 · The tracker's stack cost, declared and checked (E-38) · `DONE` → D-79
+
+`BINCV_STAGING_BUDGET_BYTES` plus a `static_assert` where the staging buffers are
+declared, and a public `stagingStackBytes<N, W>()` so an integrator can size a stack.
+
+**The row cap bounds the SHAPE and lets the SIZE float** — 4 120 B at the shipped N = 2,
+**14 872 B at N = 8**, and double both at 64-bit words. Irrelevant on a desktop; on a
+Cortex-M with a 16 KB stack the N = 8 figure is the whole stack, and overflow there is
+silent corruption rather than a crash. A run-time cap was declined because it trades a
+silent overflow for a silent slowdown; a build error is the only outcome a person must
+look at.
+
+### T5.24 · 64-bit words: narrowing, not a second kernel set (E-29) · `DONE` → D-80
+
+`narrowPlaneMutable`, so the sensor-stage kernels — which WRITE, and which the const
+`narrowPlane` therefore could not reach — are available to a 64-bit caller too.
+
+**No native 64-bit kernel was written, and X-97 says why in one line: narrowing runs at
+1.00× of native on the device.** It is the same kernel on the same bytes, so a second
+implementation could at best match it. Against the scalar fallback it would have looked
+like a 32× win — which is the wrong baseline, named in advance.
+
 ## Phase 6 — Repository shape, for sharing
 
 **GOAL: a repository that reads as a well-built library to someone who lands on it, can
 build it, and can try it.** Not contributor onboarding — that comes later, when there
 are contributors. Nothing here is about process; it is about a stranger's first hour.
 
-### T6.1 · LICENSE · `TODO`
+### T6.1 · LICENSE · `DESCHEDULED — owner's call, deliberately not chosen`
 
 **Nothing else in this phase matters until this exists.** With no licence the code is
 **all rights reserved by default** — a reader may look at it and may not legally use,

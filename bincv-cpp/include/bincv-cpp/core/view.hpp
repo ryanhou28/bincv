@@ -203,5 +203,32 @@ inline BinMatConstView<uint32_t> narrowPlane(BinMatConstView<WordType> v) {
                                      v.height, v.stride * 2};
 }
 
+/// @brief The same reinterpretation for a WRITABLE plane. **API TIER 3.** No copy.
+///
+/// **The const form covers reading, which is all the tracker needs. This covers the
+/// stage before it.** `edgeThreshold` and `packQuant` write bit-planes and are gated on
+/// 32-bit words for the same reason the tracker is — their vector arms use 32-lane
+/// move-masks — so a caller with 64-bit storage loses the sensor stage's vector path
+/// too, and `narrowPlane`'s const overload cannot help because those kernels write.
+///
+/// @note **The aliasing rule is the caller's and it is not decorative.** The narrowed
+///       view and the original address the same bytes, so writing through one while
+///       reading the other in the same kernel call is exactly the overlap D-11's
+///       predicates reject. Narrow the DESTINATION, pass the source as it is, and do not
+///       hold both spellings of the same plane across a call that writes.
+/// @note Everything the const form promises holds here: padding stays zero, alignment
+///       carries, and the layouts coincide only on a little-endian machine.
+template <typename WordType>
+inline BinMatView<uint32_t> narrowPlaneMutable(BinMatView<WordType> v) {
+    static_assert(sizeof(WordType) == 8,
+                  "narrowPlaneMutable: only a 64-bit plane can be written as a 32-bit one");
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__)
+    static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
+                  "narrowPlaneMutable: the two layouts coincide only on little-endian");
+#endif
+    return BinMatView<uint32_t>{reinterpret_cast<uint32_t*>(v.ptr), v.width, v.height,
+                                v.stride * 2};
+}
+
 } // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv

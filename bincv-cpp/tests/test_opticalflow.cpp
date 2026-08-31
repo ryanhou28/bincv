@@ -4081,4 +4081,53 @@ BINCV_TEST(Flow, ResidualRejectRemovesTheSilentLargeMotionFailure_uint32_t) {
     BINCV_CHECK_EQ(wrongOn, size_t{0});
 }
 
+
+// ---------------------------------------------------------------------------
+// E-38 / D-79 -- THE STAGING STACK BUDGET
+//
+// The tracker stages each window into two STACK buffers. The row cap bounds their
+// SHAPE; their SIZE then floats with the bit depth and the word type. On a desktop that
+// is noise. On a Cortex-M with a 16 KB stack, the N = 8 figure is the whole stack -- and
+// overflowing one there is silent corruption, not a crash.
+//
+// `BINCV_STAGING_BUDGET_BYTES` turns that into a build error. This case pins the sizes
+// the budget is checked against, so a layout change that quietly doubles them fails here
+// rather than on a board.
+// ---------------------------------------------------------------------------
+BINCV_TEST(Flow, StagingStackBytesAreWhatTheBudgetAssumes) {
+    // 64 rows x (3N + 2) staged words + 64 rows x 4N tap words -- so 64 * (7N + 2)
+    // words -- PLUS 24 bytes of `TapCache` scalars (`tapX`, `tapY`, `valid` with its
+    // padding). The constant is small and easy to forget, and forgetting it is how a
+    // budget check ends up off by one cache line.
+    auto expect = [](size_t n, size_t wordBytes) {
+        return size_t{64} * (7 * n + 2) * wordBytes + 24;
+    };
+    BINCV_CHECK_EQ((bincv::stagingStackBytes<1, uint32_t>()), expect(1, 4));
+    BINCV_CHECK_EQ((bincv::stagingStackBytes<2, uint32_t>()), expect(2, 4));
+    BINCV_CHECK_EQ((bincv::stagingStackBytes<8, uint32_t>()), expect(8, 4));
+    BINCV_CHECK_EQ((bincv::stagingStackBytes<2, uint64_t>()), expect(2, 8));
+
+    std::printf("  staging stack: uint32 N=1 %zu B  N=2 %zu B  N=8 %zu B | uint64 N=2 %zu B\n",
+                bincv::stagingStackBytes<1, uint32_t>(), bincv::stagingStackBytes<2, uint32_t>(),
+                bincv::stagingStackBytes<8, uint32_t>(), bincv::stagingStackBytes<2, uint64_t>());
+
+    // THE SHIPPED LADDER MUST FIT A SMALL TARGET, and that is the claim worth pinning:
+    // 1/2/2/2 at 32-bit words is what an embedded caller actually runs.
+    // Locals, because `stagingStackBytes<2, uint32_t>()` inside a one-argument macro
+    // reads its comma as an argument separator.
+    const size_t n1 = bincv::stagingStackBytes<1, uint32_t>();
+    const size_t n2 = bincv::stagingStackBytes<2, uint32_t>();
+    BINCV_CHECK(n1 <= 4096);
+    BINCV_CHECK(n2 <= 8192);
+    // And the default budget must admit everything binCV ships, or the library would
+    // not compile out of the box.
+    BINCV_CHECK(n2 <= static_cast<size_t>(BINCV_STAGING_BUDGET_BYTES));
+
+    // A 64-bit word DOUBLES it. Relevant to E-29: whichever way that question goes, a
+    // native 64-bit staging path costs twice the stack of narrowing to 32.
+    // The ARRAYS double; the 24 bytes of scalars do not, so it is 2x less that constant.
+    const size_t n2w64 = bincv::stagingStackBytes<2, uint64_t>();
+    BINCV_CHECK_EQ(n2w64, 2 * (n2 - 24) + 24);
+}
+
 BINCV_TEST_MAIN("test_opticalflow")

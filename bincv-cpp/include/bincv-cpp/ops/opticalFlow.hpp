@@ -392,6 +392,7 @@ struct LKParams {
     float maxResidual = 0.0f;
 };
 
+
 /// @brief One pyramid level's six planes: both frames, and the previous frame's
 ///        ternary derivative.
 /// @note Views, not containers (D-5). All six must share the level's dimensions.
@@ -921,11 +922,35 @@ inline WordType alignedWord(const WordType* row, size_t words, size_t x0) {
 
 /// @brief Rows the staging path handles. The shipped window is 31 (D-31).
 /// @note A bound, not a tuning knob: it fixes the size of a STACK buffer, and
-///       CLAUDE.md forbids a kernel allocating. At the shipped `N = 2` the two
-///       structures together are 4 KB; at the `N = 8` ceiling about 15 KB, which is a
-///       lot for a Cortex-M and is stated rather than hidden (E-38). A taller window
-///       declines and takes the unstaged path.
+///       CLAUDE.md forbids a kernel allocating. A taller window declines and takes the
+///       unstaged path.
+/// @note **THE ROW CAP FIXES THE SHAPE AND LETS THE MEMORY FLOAT**, which is the wrong
+///       way round for an embedded target — hence `BINCV_STAGING_BUDGET_BYTES` below.
 constexpr size_t kStagedMaxRows = 64;
+
+/// @brief The stack these two structures may occupy, in BYTES. **E-38 / D-79.**
+///
+/// **WHY A BYTE BUDGET EXISTS ALONGSIDE THE ROW CAP.** The row cap bounds the window's
+/// SHAPE; the memory it costs then floats with the bit depth, because every row carries
+/// `3N + 2` staged words and `4N` tap words. At the shipped `N = 2` that is 4 KB, and at
+/// the `N = 8` ceiling about 14.5 KB.
+///
+/// On a desktop 8 MB stack, 14.5 KB is noise. **On a Cortex-M with a 16 KB stack it is
+/// the whole stack, and overflowing one there is not a crash — it is silent memory
+/// corruption.** That is the failure this budget exists to convert into a build error.
+///
+/// **A byte CAP was the other candidate and was declined.** Capping rows by a byte
+/// budget at run time would silently send a normal 31-row window to the slower unstaged
+/// path at high `N` (only ~28 rows fit in 4 KB) — trading a silent overflow for a silent
+/// slowdown, which is not an improvement. A compile-time budget instead **fails to build
+/// and names the number**, so the choice is made by a person.
+///
+/// The default admits everything binCV ships today, so nothing changes unless a caller
+/// asks. **An embedded integrator sets this to their real stack budget** — the point is
+/// that they then find out at compile time rather than in the field.
+#ifndef BINCV_STAGING_BUDGET_BYTES
+#define BINCV_STAGING_BUDGET_BYTES 16384
+#endif
 
 /// @brief One window's ITERATION-INVARIANT words, extracted once. **INTERNAL** (X-69).
 ///
@@ -965,6 +990,13 @@ struct TapCache {
     long long tapY = 0;
     bool valid = false;
 };
+
+/// @brief The two staging buffers' combined size. **INTERNAL** -- the public spelling
+///        is `bincv::stagingStackBytes`, below, which forwards to this.
+template <size_t N, typename WordType>
+constexpr size_t stagingStackBytesImpl() {
+    return sizeof(StagedWindow<N, WordType>) + sizeof(TapCache<N, WordType>);
+}
 
 /// @brief Fill a `StagedWindow`, or decline. **INTERNAL** (X-69).
 /// @return False when this window cannot be staged, leaving the caller on the
@@ -2059,6 +2091,18 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
     // CLAUDE.md forbids a kernel allocating and this operation has no caller
     // scratch. `stageWindow` declines rather than overrunning it.
     BINCV_STAGE_LAP(setup);
+    // E-38 / D-79. THE BUDGET IS CHECKED WHERE THE BUFFERS ARE DECLARED, so it fires
+    // only for the `(N, WordType)` a caller actually instantiates -- a Cortex-M build
+    // tracking the shipped 1-bit ladder never trips it, and one at N = 8 gets a build
+    // error naming the number instead of a stack overflow in the field.
+    static_assert(stagingStackBytesImpl<LevelT::Bits, WordType>() <=
+                      BINCV_STAGING_BUDGET_BYTES,
+                  "binCV: the tracker's staging buffers exceed BINCV_STAGING_BUDGET_BYTES "
+                  "for this (bit depth, word type). They are STACK buffers, so on a small "
+                  "target this is a stack overflow -- which is silent corruption, not a "
+                  "crash. Either raise BINCV_STAGING_BUDGET_BYTES if your stack really is "
+                  "that big, or use a shallower bit depth. bincv::stagingStackBytes<N, W>() "
+                  "is the exact figure.");
     StagedWindow<LevelT::Bits, WordType> stagedWindow;
     TapCache<LevelT::Bits, WordType> tapCache;   // X-70; invalid until first use
     const bool staged = stageWindow(lv, region, stagedWindow);
@@ -3200,6 +3244,24 @@ inline void calcOpticalFlowPyrLK(const LKLevels<WordType, LevelBits...>& levels,
     for (size_t i = 0; i < c.usableLevels; ++i) c.dims[i] = levels.dimsAt(i);
     auto visit = [&](const auto& lv, size_t li) { impl::trackOneLevel(lv, li, c); };
     levels.visitCoarseToFine(c.usableLevels, visit, 0);
+}
+
+/// @brief Stack bytes the tracker's staging buffers occupy at `(N, WordType)`.
+///        **API TIER 3.**
+///
+/// **This is the whole of the tracker's per-call memory.** Everything else it keeps is
+/// O(1): there is no scratch buffer and no allocation anywhere (D-5, and CLAUDE.md's
+/// hard rule that a kernel does not allocate).
+///
+/// @note **For sizing a thread stack, and for asserting against a budget binCV cannot
+///       know.** It grows with the bit depth — `64 * (7N + 2)` words — so it is 4 KB at
+///       the shipped `N = 2` with 32-bit words and about 14.5 KB at `N = 8`. On a
+///       desktop that is noise; on a Cortex-M with a 16 KB stack the second figure is
+///       the whole stack. `BINCV_STAGING_BUDGET_BYTES` turns that into a build error
+///       rather than a silent overflow, and this is the number it checks (E-38, D-79).
+template <size_t N, typename WordType>
+constexpr size_t stagingStackBytes() {
+    return impl::stagingStackBytesImpl<N, WordType>();
 }
 
 } // inline namespace BINCV_ABI_NAMESPACE

@@ -12825,3 +12825,111 @@ requires a vector arm be switchable off so a benchmark can time both; `BINCV_HAV
 used to be that switch by accident, and auto-defining it would have removed the ability.
 The 1.78× above is measured with it.
 
+---
+
+### X-97 · E-29: native 64-bit kernels, or narrowing? · `DONE — NARROWING WINS, NO KERNEL WRITTEN`
+
+**The question the owner asked**, and it is broader than E-29 as registered: E-29 asks
+only whether `residualSums` should get a `uint64_t` NEON path. The real question is
+whether binCV should support 64-bit words **natively across the kernels that are gated
+on 32**, or keep the view-narrowing approach [D-73](ARCHITECTURE.md) introduced.
+
+**Which kernels are gated on `sizeof(WordType) == 4`** — enumerated rather than assumed:
+the LK residual (four NEON arms and the AVX2 keypoint batch), the covariance lane
+kernel, `unpackWord32`, **`edgeThreshold`**, and **`packQuant`**. The last two are the
+sensor stage, so this is not only a tracking question, and `narrowPlane`'s const overload
+could not reach them because they WRITE — hence `narrowPlaneMutable`, added as this
+experiment's arm rather than as a fix.
+
+**THE ARMS.**
+
+- **(A) `uint32_t` throughout** — today's default (D-14).
+- **(B) `uint64_t` throughout**, taking the scalar fallback wherever a kernel is gated.
+  This is what a 64-bit caller gets by default, and [X-54](#x-54) priced it: **1.32×
+  slower on `track`, 1.66× FASTER on `build`.**
+- **(C) `uint64_t` storage, narrowed at the call** — `narrowLevel` for tracking,
+  `narrowPlaneMutable` for the sensor stage. No copy, no allocation, bit-identical.
+- **(D) native 64-bit kernels** — does not exist, and the point of the rule is to decide
+  whether to write it.
+
+**THE DECISION RULE.**
+
+1. **(D) is written only if (C) fails to recover (A)'s kernel speed.** If a narrowed
+   64-bit buffer runs the same kernel at the same speed as a native 32-bit one — and it
+   should, because it is the *same kernel on the same bytes* — then (D) can at best
+   match it, and would cost a second implementation of every gated kernel.
+2. **The bar for (D) is therefore not "faster than (B)". It is "faster than (C)".**
+   Measuring (D) against the scalar fallback would be measuring the wrong baseline, and
+   that is the trap this clause exists to name.
+3. **Two facts already argue against (D) and are recorded now so that agreeing with them
+   later is not evidence.** An LK window is 31 pixels, so a 64-bit word is more than half
+   idle and [D-52](ARCHITECTURE.md#d-52-the-31-pixel-window-caps-the-packing-advantage-at-194)
+   caps the packing advantage at 1.94× regardless; and **staging at 64 bits costs exactly
+   twice the stack** — 8 216 B against 4 120 B at the shipped `N = 2`, measured — which
+   [D-79](ARCHITECTURE.md) has just made a build-time constraint for embedded targets.
+4. **Memory is reported alongside speed and can veto.** `uint64_t` rounds row strides
+   more coarsely, which is why D-14 chose 32 in the first place: it costs **+33% at
+   94×60**, the upper pyramid levels. A build win that is paid for in footprint at the
+   levels an embedded target is tightest on is not a win under CLAUDE.md's rule.
+5. If (C) recovers (A), the outcome is **guidance, not code**: keep 32-bit as the
+   default, document narrowing as the way to hold 64-bit storage without losing a kernel,
+   and close E-29 without writing a second kernel set.
+
+**Measured on both architectures**, per-kernel rather than end-to-end, because the
+question is about kernels and D-53's whole-frontend requirement applies to a *ceiling
+claim*, which this is not.
+
+---
+
+## X-97 · RESULT — narrowing IS native speed, so there is nothing for a 64-bit kernel to win
+
+**Platforms:** x86-64 Release one thread; and the reference device (Pi 4 Model B Rev 1.5,
+aarch64, g++ 14.2.0, performance governor, `taskset -c 3`, `throttled` unchanged
+0x80000 → 0x80000, **valid throughout**). **Code:** `benchmark/wordtype_narrow.cpp`,
+15 interleaved rounds, minimum. `edgeThreshold` — 8-bit in, 1-bit out, and one of the
+kernels gated on 32-bit words.
+
+| arm | x86 | device |
+|---|---|---|
+| **(A)** native `uint32_t` buffer | **19 310 ns** — 1.00× | **259 164 ns** — 1.00× |
+| **(B)** `uint64_t` buffer, scalar fallback | 619 981 ns — **0.03× (32× slower)** | 2 162 164 ns — **0.12× (8.3× slower)** |
+| **(C)** `uint64_t` buffer, narrowed view | 20 030 ns — **0.96×** | 259 145 ns — **1.00×** |
+
+**On aarch64 the two are the same number to four significant figures, and they should
+be: (C) is the SAME KERNEL on the SAME BYTES.** Narrowing changes no memory and copies
+nothing — it reinterprets a 64-bit plane as the 32-bit plane it already is. The x86 4%
+is the noise on a 19 µs measurement.
+
+**0 of 307 200 pixels differ** between (A) and (C), checked rather than argued.
+
+**THE RULE'S CLAUSE 1 THEREFORE DECIDES IT, AND NO KERNEL IS WRITTEN.** A native 64-bit
+kernel could at best match (C), because (C) already runs the vector arm at full speed on
+64-bit storage. The bar was never "beat the scalar fallback" — measuring against (B)'s
+32× would have made a native kernel look like an enormous win, which is exactly the
+wrong baseline the pre-registration was written to rule out.
+
+**And the fallback penalty is far worse than E-29 was registered with.** E-29 quoted
+[X-54](#x-54)'s 1.32× on `track`; `edgeThreshold` falls back per PIXEL, so it loses
+**32× on x86 and 8.3× on the device.** The question was framed as one ARM kernel and is
+really about five — the LK residual, the covariance lane kernel, `unpackWord32`,
+`edgeThreshold` and `packQuant` — and the last two are the sensor stage, which is why
+`narrowPlaneMutable` had to exist before this could be measured at all: the const
+`narrowPlane` cannot reach a kernel that WRITES.
+
+**The memory side, measured rather than recalled**, and it confirms D-14 exactly:
+
+| level | `uint32_t` | `uint64_t` | |
+|---|---|---|---|
+| 640×480 | 38 400 B | 38 400 B | +0.0% |
+| 320×240 | 9 600 B | 9 600 B | +0.0% |
+| 160×120 | 2 400 B | 2 880 B | **+20.0%** |
+| 80×60 | 720 B | 960 B | **+33.3%** |
+
+The penalty is row-stride rounding, so it is zero where the width divides evenly and
+worst at the **upper pyramid levels** — which is where an embedded target is tightest.
+*(The first version of this benchmark printed only the 640×480 figure under the words
+"the gap widens", i.e. "38400 B against 38400 B". A memory claim measured at the one
+size where the effect is zero is not a measurement.)*
+
+**Decision:** [D-80](ARCHITECTURE.md#8-design-decisions). Guidance, not code.
+

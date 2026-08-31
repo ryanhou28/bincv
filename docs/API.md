@@ -31,7 +31,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/medianWide.hpp`](#opsmedianWidehpp) — 5 entries
 - [`ops/morphology.hpp`](#opsmorphologyhpp) — 27 entries
 - [`ops/occupancy.hpp`](#opsoccupancyhpp) — 6 entries
-- [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 20 entries
+- [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 21 entries
 - [`ops/pack.hpp`](#opspackhpp) — 9 entries
 - [`ops/pyramid.hpp`](#opspyramidhpp) — 41 entries
 - [`ops/reduce.hpp`](#opsreducehpp) — 19 entries
@@ -44,7 +44,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`core/simd.hpp`](#coresimdhpp) — 3 entries
 - [`core/storage.hpp`](#corestoragehpp) — 11 entries
 - [`core/types.hpp`](#coretypeshpp) — 6 entries
-- [`core/view.hpp`](#coreviewhpp) — 5 entries
+- [`core/view.hpp`](#coreviewhpp) — 6 entries
 - [`threads/pool.hpp`](#threadspoolhpp) — 2 entries
 
 ## `binMat.hpp`
@@ -324,6 +324,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `narrowLevel` | 2 | Pyramidal Lucas-Kanade over a ladder of levels that are all the SAME depth `N` |
 | `lkPathName` | 3 | Which residual kernel this level type will actually run, as a string |
 | `LKLevels` *(struct)* | 2 | A tracking ladder whose levels have DIFFERENT bit depths, level 0 first |
+| `stagingStackBytes` | 3 | Stack bytes the tracker's staging buffers occupy at `(N, WordType)` |
 
 ## `ops/pack.hpp`
 
@@ -539,6 +540,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `row` | — | First word of row y |
 | `BinMatConstView` *(struct)* | — | Non-owning, read-only view of a bit-packed matrix |
 | `narrowPlane` | 3 | Reads a 64-bit bit-plane as a 32-bit one |
+| `narrowPlaneMutable` | 3 | The same reinterpretation for a WRITABLE plane |
 
 ## `threads/pool.hpp`
 
