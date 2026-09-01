@@ -714,8 +714,14 @@ bool runNBitLadder(int width, int height) {
 }  // namespace
 
 int main() {
+    // binCV is single-threaded here, so OpenCV is held to one thread too. Left at its
+    // default a multi-core box turns the ratio into a measurement of parallelism.
+    cv::setNumThreads(1);
+
     std::printf(" binarized spatial derivative -- vs cv::filter2D with the same kernel\n");
     std::printf("================================================================================\n\n");
+    std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n\n",
+                CV_VERSION, cv::getNumThreads());
     std::printf("DENOMINATOR (ARCHITECTURE 10.3): SEAL's calcBinarizedDeriv on the SAME binary\n");
     std::printf("content stored as CV_8U -- two cv::filter2D calls with [-1, 0, 1] as a 1x3 and\n");
     std::printf("a 3x1, ported. That is what the pipeline runs today without binCV.\n\n");

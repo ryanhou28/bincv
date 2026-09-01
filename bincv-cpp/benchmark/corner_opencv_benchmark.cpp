@@ -234,7 +234,13 @@ void openCvBinarized(const cv::Mat& src, CvBuffers& b, std::vector<cv::Point>& o
 } // namespace
 
 int main() {
+    // binCV is single-threaded here, so OpenCV is held to one thread too. Left at its
+    // default a multi-core box turns the ratio into a measurement of parallelism.
+    cv::setNumThreads(1);
+
     std::printf("binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)\n");
+    std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n",
+                CV_VERSION, cv::getNumThreads());
     std::printf("frame %dx%d, blockSize %d, maxCorners %d, qualityLevel %.2f, minDistance %.5f\n",
                 kWidth, kHeight, kBlockSize, kMaxCorners, kQualityLevel, kMinDistance);
     std::printf("(SEAL/seal_params.yaml verbatim; word uint32_t)\n\n");

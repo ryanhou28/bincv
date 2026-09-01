@@ -552,8 +552,14 @@ bool runSize(int width, int height) {
 }  // namespace
 
 int main() {
+    // binCV is single-threaded here, so OpenCV is held to one thread too. Left at its
+    // default a multi-core box turns the ratio into a measurement of parallelism.
+    cv::setNumThreads(1);
+
     std::printf(" denoise -- three-pixel median vs the reference implementation\n");
     std::printf("================================================================================\n\n");
+    std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n\n",
+                CV_VERSION, cv::getNumThreads());
     std::printf("DENOMINATOR (ARCHITECTURE 10.3): SEAL's three_pix_median_filter on the SAME\n");
     std::printf("binary content stored as CV_8U -- cv::min/cv::max over two zero-filled\n");
     std::printf("neighbour matrices, ported call for call. That is what the pipeline runs\n");

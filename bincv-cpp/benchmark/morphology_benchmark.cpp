@@ -609,8 +609,14 @@ bool runSize(int width, int height) {
 }  // namespace
 
 int main() {
+    // binCV is single-threaded here, so OpenCV is held to one thread too. Left at its
+    // default a multi-core box turns the ratio into a measurement of parallelism.
+    cv::setNumThreads(1);
+
     std::printf(" morphology -- erode / dilate / morphologyEx vs OpenCV\n");
     std::printf("================================================================================\n\n");
+    std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n\n",
+                CV_VERSION, cv::getNumThreads());
     std::printf("DENOMINATOR (ARCHITECTURE 10.3): cv::erode / cv::dilate / cv::morphologyEx on\n");
     std::printf("the SAME binary content stored as CV_8U, with the same structuring element,\n");
     std::printf("anchor and border. That is what a user does today without binCV.\n\n");
