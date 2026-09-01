@@ -2,7 +2,7 @@
 
 CPU implementation of binCV. This is the primary implementation — see the
 [top-level README](../README.md) for what the project is and
-[ARCHITECTURE.md](../ARCHITECTURE.md) for the design.
+[ARCHITECTURE.md](../docs/ARCHITECTURE.md) for the design.
 
 The core is **header-only with no dependencies**. OpenCV is optional and enables
 interop plus the comparison benchmarks.

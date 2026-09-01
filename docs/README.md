@@ -8,21 +8,21 @@ is the order.
 | [../README.md](../README.md) | **anyone** | what binCV is, the numbers, how to build |
 | [../GETTING_STARTED.md](../GETTING_STARTED.md) | **a user** | build, test, benchmark, and a tour of the operation set |
 | [API.md](API.md) | **a user** | **the API reference** — every public entry point, its brief and its tier, generated from the headers |
-| [../ARCHITECTURE.md](../ARCHITECTURE.md) | **a contributor** | the design, the input contract, and every design decision with its evidence |
-| [../TASKS.md](../TASKS.md) | **a contributor** | the backlog, by phase |
-| [../EXPERIMENTS.md](../EXPERIMENTS.md) | **a sceptic** | the measurement log |
+| [../ARCHITECTURE.md](ARCHITECTURE.md) | **a contributor** | the design, the input contract, and every design decision with its evidence |
+| [../TASKS.md](TASKS.md) | **a contributor** | the COMPLETED record. Open work is in [GitHub Issues](https://github.com/ryanhou28/bincv/issues) |
+| [../EXPERIMENTS.md](EXPERIMENTS.md) | **a sceptic** | the measurement log |
 
 ## The three record types, and why they are worth the trouble
 
 Performance work in this repository leaves three kinds of trace, cross-linked:
 
-- **D-records** — *decisions*, in [ARCHITECTURE §8](../ARCHITECTURE.md#8-design-decisions).
+- **D-records** — *decisions*, in [ARCHITECTURE §8](ARCHITECTURE.md#8-design-decisions).
   What was chosen, why, and what evidence settled it. These are architecture decision
   records in everything but filename.
 - **E-records** — *open questions*, in
-  [ARCHITECTURE §9](../ARCHITECTURE.md#9-open-questions-and-planned-experiments). Each
+  [ARCHITECTURE §9](ARCHITECTURE.md#9-open-questions-and-planned-experiments). Each
   is a proposal with a decision rule attached, not a wish.
-- **X-records** — *measurements*, in [EXPERIMENTS.md](../EXPERIMENTS.md). Each names its
+- **X-records** — *measurements*, in [EXPERIMENTS.md](EXPERIMENTS.md). Each names its
   platform, its workload, and **the decision rule that was fixed before the numbers
   were taken**.
 

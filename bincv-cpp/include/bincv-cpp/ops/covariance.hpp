@@ -571,10 +571,10 @@ inline void bitSlicedPairRowRegion(const WordType* (&mx)[N], const WordType* (&m
 /// @brief The whole clipped region's plane-pair counts, in NEON lanes. **INTERNAL**
 ///        (X-83). `N` in {1, 2} at `uint32_t` — the shipped 1/2/2/2 ladder (D-23).
 ///
-/// **[D-6](../../../ARCHITECTURE.md) WAS WRITTEN FOR THIS AND THIS FUNCTION WAS NOT
+/// **[D-6](../../../../docs/ARCHITECTURE.md) WAS WRITTEN FOR THIS AND THIS FUNCTION WAS NOT
 /// OBEYING IT.** `bitSlicedPairRowRegion` issues `3N^2 + N` **scalar** `popcountWord`
 /// calls per word — fourteen at `N = 2` — and on aarch64 there is no scalar popcount:
-/// every one is `fmov` in, `cnt`, `addv`, `fmov` out. [X-83](../../../EXPERIMENTS.md)
+/// every one is `fmov` in, `cnt`, `addv`, `fmov` out. [X-83](../../../../docs/EXPERIMENTS.md)
 /// measured the consequence on the reference device: the covariance is **27.5% of
 /// `track`** there against 18.2% on x86, and **5.9× slower than x86** where the
 /// iteration loop — which does have a NEON path — is only 3.6× slower. That gap IS the
@@ -582,7 +582,7 @@ inline void bitSlicedPairRowRegion(const WordType* (&mx)[N], const WordType* (&m
 ///
 /// The counts go into LANES and stay there to the end of the window, so the register
 /// domain is crossed **once per point per level** instead of `14 * rows` times. This is
-/// the shape [X-40](../../../EXPERIMENTS.md) gave the residual accumulator, applied to
+/// the shape [X-40](../../../../docs/EXPERIMENTS.md) gave the residual accumulator, applied to
 /// the operation that sits next to it and never got it.
 ///
 /// **Bit-exact:** the same integers, counted the same way. The scalar body above is the

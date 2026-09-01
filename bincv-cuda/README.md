@@ -2,9 +2,9 @@
 
 > **Status: deferred / exploratory.**
 >
-> GPU backends are [deferred](../ROADMAP.md#deferred--not-scoped) — not currently
+> GPU backends are [deferred](../docs/ROADMAP.md#deferred--not-scoped) — not currently
 > scoped. binCV's product is the CPU path targeting embedded and mobile
-> ([ARCHITECTURE §1](../ARCHITECTURE.md#1-scope)); Jetson-class devices run that
+> ([ARCHITECTURE §1](../docs/ARCHITECTURE.md#1-scope)); Jetson-class devices run that
 > path on their ARM CPU today.
 >
 > This directory holds early CUDA edge-filter experiments that predate the
@@ -12,7 +12,7 @@
 > wired into the main build. Treat it as a reference sketch, not a component.
 
 When GPU work resumes, the storage model
-([ARCHITECTURE §4.3](../ARCHITECTURE.md#43-storage-model-and-views)) is designed
+([ARCHITECTURE §4.3](../docs/ARCHITECTURE.md#43-storage-model-and-views)) is designed
 to make it possible without an API break: non-owning views over externally
 allocated memory are the same mechanism used for DMA and unified memory.
 

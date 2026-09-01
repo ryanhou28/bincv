@@ -29,7 +29,7 @@
 /// are compile-time parameters, so a caller pays only for the one instantiated and
 /// the comparison folds to a single predicate -- the same requirement ops/pack.hpp
 /// puts on its rules, for the same measured reason
-/// ([X-72](../../../EXPERIMENTS.md): a runtime flag cost 17% elsewhere).
+/// ([X-72](../../../../docs/EXPERIMENTS.md): a runtime flag cost 17% elsewhere).
 ///
 /// The point of the operation is that these choices are cheap. A caller wanting AND
 /// instead of OR, or an adjacent difference instead of a central one, should not have

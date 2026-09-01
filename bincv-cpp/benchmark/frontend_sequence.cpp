@@ -94,7 +94,7 @@ cv::Mat preprocess(const cv::Mat& g, int thr) {
 
 // ---- T5.8: THE SAME TWO STAGES, IN binCV --------------------------------
 //
-// [ARCHITECTURE 7.3](../../ARCHITECTURE.md) puts the edge filter inside the MVP set,
+// [ARCHITECTURE 7.3](../../docs/ARCHITECTURE.md) puts the edge filter inside the MVP set,
 // and this benchmark used to run BOTH frontends on an OpenCV-preprocessed frame with a
 // comment calling that stage "deliberately NOT binCV's claim". Those disagreed. binCV
 // has had `medianWide` and `edgeThreshold` since T5.10/T5.11 -- bit-exact against the

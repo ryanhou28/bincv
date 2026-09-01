@@ -6,7 +6,7 @@
 /// ---------------------------------------------------------------------------
 /// THE SPEEDUP WAS NEVER MISSING; THE WAY TO ASK FOR IT WAS
 ///
-/// [X-65](../../../EXPERIMENTS.md) measured **2.60x on `track` at four threads**,
+/// [X-65](../../../../docs/EXPERIMENTS.md) measured **2.60x on `track` at four threads**,
 /// bit-exact, with peak RSS flat to 0.07% -- and it needed **no library change at
 /// all**. `calcOpticalFlowPyrLK` already takes an ARRAY of points and the pyramids
 /// are read-only, so any caller could split the array themselves; the benchmark did

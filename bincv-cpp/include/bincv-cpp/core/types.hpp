@@ -144,12 +144,12 @@ struct Point2f {
 /// gated on `sizeof(WordType) == 4`.
 ///
 /// A wider word looks like it should mean fewer operations per row, and
-/// [X-10](../../../EXPERIMENTS.md) measured exactly that for *reductions*. For
+/// [X-10](../../../../docs/EXPERIMENTS.md) measured exactly that for *reductions*. For
 /// *tracking* it opts out of every vector path instead:
-/// [X-54](../../../EXPERIMENTS.md) measured `uint64_t` at **1.32× slower on `track`**,
+/// [X-54](../../../../docs/EXPERIMENTS.md) measured `uint64_t` at **1.32× slower on `track`**,
 /// and an integrator who chose it for a real VIO frontend measured **8.6× slower**
 /// keypoint tracking before finding the gate
-/// ([D-73](../../../ARCHITECTURE.md#d-73-the-fast-word-type-is-the-one-you-get-by-default)).
+/// ([D-73](../../../../docs/ARCHITECTURE.md#d-73-the-fast-word-type-is-the-one-you-get-by-default)).
 ///
 /// The tracker now refuses to compile at a depth that HAS vector kernels with a word
 /// that cannot reach them, so this is a recommendation rather than a trap — but

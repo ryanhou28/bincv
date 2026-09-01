@@ -115,7 +115,7 @@
 /// THIS caller the advantage does not merely shrink -- below `blockSize` 15 it
 /// reverses. Measured on the reference device at 640x480,
 /// `benchmark/corner_benchmark.cpp`, spreads 0.04-3.4%
-/// ([X-18](../../../EXPERIMENTS.md), `results/corner_benchmark_pi4.log`):
+/// ([X-18](../../../../docs/EXPERIMENTS.md), `results/corner_benchmark_pi4.log`):
 ///
 ///     blockSize   sliding      recompute    net       incremental   traversal
 ///                 ns/pixel     ns/pixel     ratio     alone         alone
@@ -161,7 +161,7 @@
 /// The table above is binCV against binCV. CLAUDE.md's denominator rule asks for
 /// something else -- OpenCV doing the SAME semantic operation on the SAME binary
 /// content stored as `CV_8U`, with PEAK WORKING SET beside speed -- and
-/// [X-19](../../../EXPERIMENTS.md) measures it
+/// [X-19](../../../../docs/EXPERIMENTS.md) measures it
 /// (`benchmark/corner_opencv_benchmark.cpp`,
 /// `results/corner_opencv_benchmark_pi4.log`). The denominator is the reference
 /// pipeline written out in stock OpenCV: two `filter2D` taps, three product planes,
@@ -1056,7 +1056,7 @@ namespace impl {
 // and a box sum of bits is word-parallel. Horizontally `a(x-1) + a(x) + a(x+1)` is
 // ONE FULL ADDER into two planes (0..3); vertically three of those sum into four
 // planes (0..9, and 3+3+3 = 9 fits exactly). So a whole word of pixels is summed
-// at once. This is [D-2](../../../ARCHITECTURE.md)'s technique and the same shape
+// at once. This is [D-2](../../../../docs/ARCHITECTURE.md)'s technique and the same shape
 // `pyrDown`'s `boxSum4` already uses; it was simply never applied here, to the
 // largest kernel in the frontend.
 //

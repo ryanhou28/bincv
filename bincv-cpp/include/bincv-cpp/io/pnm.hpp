@@ -7,7 +7,7 @@
 /// THE `none` BACKEND OF `bincv_io`, AND WHY IT IS THE DEFAULT ONE
 ///
 /// A PNG decoder is **eight times the size of everything binCV does** — measured, in
-/// [ARCHITECTURE §7.8](../../../ARCHITECTURE.md): `libpng` + `libz` is 336 KB against
+/// [ARCHITECTURE §7.8](../../../../docs/ARCHITECTURE.md): `libpng` + `libz` is 336 KB against
 /// binCV's ~41 KB of code, and `libjpeg` is 510 KB. binCV must not carry one.
 ///
 /// PNM is the format whose whole encoder is a header and a copy, and whose decoder is

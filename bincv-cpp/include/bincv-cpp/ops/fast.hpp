@@ -286,7 +286,7 @@ constexpr size_t kFastLanes = 16;
 /// @param arcLength Contiguous ring pixels required. 9 is `cv::FAST`'s default and
 ///        the one ORB uses.
 /// @param out,capacity Caller-provided; **no allocation happens here**
-///        ([CLAUDE.md](../../../CLAUDE.md)).
+///        ([CLAUDE.md](../../../../CLAUDE.md)).
 /// @param truncated Set when more corners were found than `capacity` held. **A
 ///        silently truncated detection looks like a sparse image**, which is the kind
 ///        of failure that gets diagnosed as a tuning problem for weeks.
@@ -487,7 +487,7 @@ inline WordType fastShiftedWord(const WordType* row, size_t words, size_t w, int
 /// at `k`" for any `s <= L`, so doubling 1 -> 2 -> 4 -> 8 and finishing with `s = 1`
 /// reaches nine. Written in place, saving only the `s` entries the wrap-around
 /// consumes — which is what keeps the AVX2 form of this inside sixteen registers.
-/// [X-80](../../../EXPERIMENTS.md) measured a four-array version and it ran at **0.7
+/// [X-80](../../../../docs/EXPERIMENTS.md) measured a four-array version and it ran at **0.7
 /// operations per cycle**, three times worse than its own operation count.
 ///
 /// The schedule is derived from `arcLength` rather than tabulated, so an unusual
@@ -571,7 +571,7 @@ BINCV_FASTBIT_FN __m256i fastRing256(const uint8_t* p, int dx) {
 /// @note **This is a template and not a parameter for a measured reason.** With a
 ///       runtime step every index into `v` is variable, so the compiler cannot unroll
 ///       and `v` has to live in memory — turning each `vpand` into load-load-and-store.
-///       [X-80](../../../EXPERIMENTS.md) measured that costing **1.6×** on its own.
+///       [X-80](../../../../docs/EXPERIMENTS.md) measured that costing **1.6×** on its own.
 template <int Step>
 BINCV_FASTBIT_FN void fastArcStep256(__m256i* v) {
     __m256i save[static_cast<size_t>(Step)];
@@ -680,7 +680,7 @@ BINCV_FASTBIT_FN void fastArcMasksRest256(const __m256i* v, uint32_t* out) {
 ///         when it should transpose each corner's ring instead.
 ///
 /// **THE CHOICE IS PER CHUNK AND IT IS A MEASURED CROSSOVER, NOT A PREFERENCE.**
-/// [X-81](../../../EXPERIMENTS.md) measured both scoring arms across corner densities:
+/// [X-81](../../../../docs/EXPERIMENTS.md) measured both scoring arms across corner densities:
 /// the seven extra mask passes cost ~217 vector operations per chunk **whatever the
 /// density**, and a per-corner transpose costs ~78 scalar operations **per corner** —
 /// so the masks win above about three corners in a chunk and lose by up to **1.5×**
@@ -803,7 +803,7 @@ BINCV_FASTBIT_NEON void fastRingLoadNeon(const uint8_t* const* ringRow, size_t c
 
 /// @brief Corner mask for 128 consecutive pixels. **INTERNAL** (X-80).
 ///
-/// **NO ADAPTIVE SCORING HERE, AND [X-81](../../../EXPERIMENTS.md) MEASURED WHY.** The
+/// **NO ADAPTIVE SCORING HERE, AND [X-81](../../../../docs/EXPERIMENTS.md) MEASURED WHY.** The
 /// AVX2 path chooses per chunk between transposing each corner's ring and reading the
 /// score off eight nested arc-length masks, and that choice is worth **1.39× → 1.71×**
 /// there. Ported to NEON it made the reference device **SLOWER — 2.36× → 2.10×** — and
@@ -835,7 +835,7 @@ inline void fastBitMask128(const uint8_t* const* ringRow, const uint8_t* centreR
 /// **A MEASURED CROSSOVER, AND THE REASON THERE IS A KNOB AT ALL.** The two ways to
 /// score cost differently in the density: the seven extra mask passes are ~217 vector
 /// operations per chunk **whatever the density**, and transposing a corner's ring is
-/// ~78 scalar operations **per corner**. [X-81](../../../EXPERIMENTS.md) measured both
+/// ~78 scalar operations **per corner**. [X-81](../../../../docs/EXPERIMENTS.md) measured both
 /// across a density sweep and they cross at about three corners per chunk — below it
 /// the masks lose by up to 1.5×, above it they win by up to 1.42×.
 ///

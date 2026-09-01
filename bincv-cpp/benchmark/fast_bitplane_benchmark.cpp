@@ -1,7 +1,7 @@
 // ===========================================================================
 // X-80 / E-43 -- FAST ON A BIT-PLANE, WHICH IS THE OPERATION binCV IS FOR.
 //
-// [X-77](../../EXPERIMENTS.md) concluded that FAST could only match `cv::FAST`
+// [X-77](../../docs/EXPERIMENTS.md) concluded that FAST could only match `cv::FAST`
 // because "FAST's input is 8-bit". That is true of `detectFast(const SrcT*, ...)`,
 // whose own header says "on a WIDE image" -- and it is a property of the SIGNATURE,
 // not of FAST. On a one-bit frame the detector collapses to boolean algebra: there is

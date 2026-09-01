@@ -27,7 +27,7 @@
 /// **THE LAYOUT IS `[row][plane][lane]` AND THAT IS THE WHOLE TRICK.** A window row is
 /// one `uint32_t` per plane per keypoint, so eight keypoints' words at the same row and
 /// plane are eight adjacent `uint32_t` — one `__m256i` load, no gather.
-/// [X-61](../../../EXPERIMENTS.md) lost precisely because it gathered; the fix was
+/// [X-61](../../../../docs/EXPERIMENTS.md) lost precisely because it gathered; the fix was
 /// never a better gather, it was arranging not to need one.
 ///
 /// **AND THE MEASURED REASON THE ENTRY POINT IS COARSE.** `target("avx2")` on a leaf
@@ -50,7 +50,7 @@ constexpr size_t kLkBatchLanes = 8;
 /// The batch holds eleven `[row][plane][lane]` arrays; at `N = 2` that is **~20 KB at
 /// 32 rows and ~41 KB at 64**, and the working set has to stay inside L1 or the
 /// transpose the layout exists to avoid comes back as cache traffic.
-/// [CLAUDE.md](../../../CLAUDE.md) says footprint wins a tie, and this one is not even
+/// [CLAUDE.md](../../../../CLAUDE.md) says footprint wins a tie, and this one is not even
 /// a tie: the shipped window is 31 rows.
 ///
 /// A **taller window is not refused, it is not accelerated** — `trackOnePoint` tracks
@@ -235,7 +235,7 @@ inline bool hasLkBatch() { return false; }
 /// @brief The scalar oracle the AVX2 kernel is held to. **INTERNAL, TEST-FACING.**
 ///
 /// Not a fallback — nothing calls it in a shipped build. It exists because
-/// [CLAUDE.md](../../../CLAUDE.md) makes bit-exactness a proven property, and a vector
+/// [CLAUDE.md](../../../../CLAUDE.md) makes bit-exactness a proven property, and a vector
 /// kernel with no independent spelling of the same arithmetic can only be checked
 /// against itself. Same layout, same arguments, plain C++.
 template <size_t N>

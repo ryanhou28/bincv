@@ -46,7 +46,7 @@ prepared.
 thread count and whether the sensor stage is inside the timing each move these numbers
 by more than most of the optimisations in this repository are worth. Three times during
 development a headline was wrong because one of them went unstated — including one that
-stood in this README ([D-58](ARCHITECTURE.md#8-design-decisions)).
+stood in this README ([D-58](docs/ARCHITECTURE.md#8-design-decisions)).
 
 **Both sides get the same thread count**, which is the only comparison that isolates the
 implementation from the parallelism. binCV threads through a caller-installed backend
@@ -99,18 +99,18 @@ configuration the memory argument is about.
 | | |
 |---|---|
 | [GETTING_STARTED.md](GETTING_STARTED.md) | build, test, benchmark, and a tour of the operation set |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | design, the input contract, and every design decision with its evidence |
-| [ROADMAP.md](ROADMAP.md) | phases and success criteria |
-| [TASKS.md](TASKS.md) | the backlog |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | design, the input contract, and every design decision with its evidence |
+| [ROADMAP.md](docs/ROADMAP.md) | phases and success criteria |
+| [TASKS.md](docs/TASKS.md) | the backlog |
 | [docs/API.md](docs/API.md) | **the API reference** — every public entry point, its brief and its API tier |
-| [EXPERIMENTS.md](EXPERIMENTS.md) | the measurement log — every number above traces to an entry here and a committed benchmark |
+| [EXPERIMENTS.md](docs/EXPERIMENTS.md) | the measurement log — every number above traces to an entry here and a committed benchmark |
 | [docs/README.md](docs/README.md) | which document is for whom, and how the D/E/X record system works |
 
 ## How performance claims are made here
 
 Measure the alternatives, weigh the result, record all three — and **write the decision
 rule before measuring**. Every performance claim in this repository has a committed
-benchmark behind it and an entry in [EXPERIMENTS.md](EXPERIMENTS.md) giving the
+benchmark behind it and an entry in [EXPERIMENTS.md](docs/EXPERIMENTS.md) giving the
 platform, the workload and the decision rule that was fixed in advance.
 
 That discipline is not ceremony. It has caught several ceilings that overstated, an
@@ -126,7 +126,7 @@ bundle adjustment — belong to the VIO application and are deliberately out of 
 are GPU backends.
 
 The input boundary is a rule rather than a list
-([ARCHITECTURE §7.8](ARCHITECTURE.md#78-the-input-contract--where-the-operation-set-begins)):
+([ARCHITECTURE §7.8](docs/ARCHITECTURE.md#78-the-input-contract--where-the-operation-set-begins)):
 **binCV accepts a single-channel, integer-typed, strided pixel array and turns it into
 an N-bit matrix.** Getting to that array — decoding, demosaicing, colour conversion —
 is the caller's.
@@ -138,5 +138,5 @@ validated frontend; expect names and signatures to move.
 
 ## Licence
 
-Not yet chosen — see [TASKS.md](TASKS.md) T6.1. **Until a licence file exists this code
+Not yet chosen — see [TASKS.md](docs/TASKS.md) T6.1. **Until a licence file exists this code
 is "all rights reserved" by default and cannot be used or redistributed.**

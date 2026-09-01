@@ -50,7 +50,7 @@ constexpr unsigned long long srcMax() {
 /// @brief `round(v * maxValue / srcMax)` in integers. **INTERNAL.**
 /// @note The `+ srcMax/2` rounding is `QuantMat<N>::fromCVMat`'s `(v * MaxValue + 127)
 ///       / 255` generalised; at `SrcT = uint8_t` it is that expression exactly, which
-///       is what keeps [D-42](../../../ARCHITECTURE.md)'s recorded divergence from
+///       is what keeps [D-42](../../../../docs/ARCHITECTURE.md)'s recorded divergence from
 ///       OpenCV at bytes 1..127 intact rather than quietly repaired.
 template <typename SrcT>
 constexpr unsigned quantScale(SrcT v, unsigned maxValue) {

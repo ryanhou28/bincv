@@ -652,7 +652,7 @@ inline void gatherPhases(WordType w0, WordType w1, WordType& evenPhase,
 // The reference defines SIX `LKPyrDownFilterType` variants and binCV implemented
 // exactly one, `BOX_2x2`, because that is what `seal_params.yaml` selects. Every
 // accuracy result in this project was therefore measured at one point of a
-// two-dimensional design space -- and [X-39](../../../EXPERIMENTS.md) showed the
+// two-dimensional design space -- and [X-39](../../../../docs/EXPERIMENTS.md) showed the
 // two axes are NOT independent: a 2x2 box sum of four values has five possible
 // outcomes, so it saturates at 3 bits and gains +0.82 yield points from N=2 to
 // N=7, where a 5x5 Gaussian gains +3.93. **The filter decides how much depth is

@@ -15,7 +15,7 @@
 /// A sensor hands a driver a buffer. That buffer is what this file takes.
 ///
 /// ---------------------------------------------------------------------------
-/// THE INPUT CONTRACT ([ARCHITECTURE §7.8](../../../ARCHITECTURE.md))
+/// THE INPUT CONTRACT ([ARCHITECTURE §7.8](../../../../docs/ARCHITECTURE.md))
 ///
 /// binCV accepts a SINGLE-CHANNEL, INTEGER-TYPED, STRIDED pixel array and turns
 /// it into bits. Getting to that array is the caller's job. The Y plane of a
@@ -29,11 +29,11 @@
 /// ---------------------------------------------------------------------------
 /// WHY THE RULE IS A TEMPLATE PARAMETER AND NOT A FUNCTION POINTER
 ///
-/// [X-71](../../../EXPERIMENTS.md) measured this loop at **46x** on x86 and
+/// [X-71](../../../../docs/EXPERIMENTS.md) measured this loop at **46x** on x86 and
 /// **14x** on aarch64 by turning it into a compare and a move-mask. That only
 /// works if the comparison is ONE PREDICATE the compiler can see. A runtime
 /// callback would put a call in the inner loop and give the whole factor back --
-/// [X-72](../../../EXPERIMENTS.md) measured a mere runtime BRANCH costing 17%
+/// [X-72](../../../../docs/EXPERIMENTS.md) measured a mere runtime BRANCH costing 17%
 /// elsewhere in this library.
 ///
 /// So the shipped rules are an enum, resolved at compile time. `packBitsIf`
@@ -256,7 +256,7 @@ inline void quantMask32(const uint8_t* src, const uint8_t* thresholds, unsigned 
 
 /// @brief Packs a pixel array to **N bits per pixel**, no OpenCV. **API TIER 3.**
 ///
-/// @tparam R The quantisation rule, at compile time -- [X-72](../../../EXPERIMENTS.md)
+/// @tparam R The quantisation rule, at compile time -- [X-72](../../../../docs/EXPERIMENTS.md)
 ///         measured a runtime flag in a hot loop costing 17%, and this one is hotter.
 /// @param dst The N destination planes, LSB first, exactly `QuantMat<N>::plane(i)`.
 ///        **Views, not the container** (CLAUDE.md): a kernel must not care how its
@@ -423,7 +423,7 @@ inline void unpackTo8Bit(BinMatConstView<WordType> src, uint8_t* dst, size_t dst
 ///       OpenCV**, and debugging a frontend you cannot see is not debugging. PGM is
 ///       chosen because it is the only image format whose encoder is a `printf` and a
 ///       `memcpy` -- binCV must not carry a real codec
-///       ([ARCHITECTURE §7.8](../../../ARCHITECTURE.md): a PNG decoder is **eight
+///       ([ARCHITECTURE §7.8](../../../../docs/ARCHITECTURE.md): a PNG decoder is **eight
 ///       times the size of everything binCV does**, measured).
 /// @note Takes a buffer rather than a path: `bincv_core` does no file I/O, has no
 ///       allocator and builds without exceptions. Where the bytes go is the caller's.

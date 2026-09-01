@@ -5,10 +5,10 @@
 ///        matching over bit-packed frames (T4.2 / E-6). **API TIER 3** -- no
 ///        OpenCV equivalent, so it borrows no OpenCV name.
 ///
-/// [ARCHITECTURE 7.9](../../../ARCHITECTURE.md) names TWO routes for tracking on
+/// [ARCHITECTURE 7.9](../../../../docs/ARCHITECTURE.md) names TWO routes for tracking on
 /// binary frames and only route (b) had ever been built. This is route (a).
 ///
-/// **SCOPE, BECAUSE [CLAUDE.md](../../../CLAUDE.md) PUTS TEMPLATE MATCHING OUT OF
+/// **SCOPE, BECAUSE [CLAUDE.md](../../../../CLAUDE.md) PUTS TEMPLATE MATCHING OUT OF
 /// SCOPE.** It does, as an *operation*: `cv::matchTemplate` is deliberately absent
 /// and stays absent. This is not that. It is an internal tracker search named in
 /// 7.9 and scheduled as T4.2 since the roadmap was written, and it exposes no
@@ -37,7 +37,7 @@
 ///    not integer arithmetic.
 ///  * **It is a ONE-BIT algorithm.** Hamming distance is defined on bits. Route
 ///    (b) does better on a `1/2/2/2` ladder than on `1/1/1/1`
-///    ([D-23](../../../ARCHITECTURE.md)), and route (a) cannot enter that
+///    ([D-23](../../../../docs/ARCHITECTURE.md)), and route (a) cannot enter that
 ///    comparison without an N-bit cost function. X-26 reports both the same-ladder
 ///    comparison (the algorithm question) and the best-ladder one (the practical
 ///    question) rather than picking whichever flatters route (a).

@@ -2,8 +2,8 @@
 
 Practical guide for building, testing, and contributing to binCV.
 
-**Read first:** [ARCHITECTURE.md](ARCHITECTURE.md) for the design and its
-rationale, [ROADMAP.md](ROADMAP.md) for what to work on next.
+**Read first:** [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and its
+rationale, [ROADMAP.md](docs/ROADMAP.md) for what to work on next.
 
 ---
 
@@ -97,7 +97,7 @@ cmake -S bincv-cpp -B bincv-cpp/build-noexcept \
 ```
 
 binCV commits to compiling and running correctly in this configuration. See
-[ARCHITECTURE §2](ARCHITECTURE.md#tier-2--cortex-m-class-correctness-only).
+[ARCHITECTURE §2](docs/ARCHITECTURE.md#tier-2--cortex-m-class-correctness-only).
 
 ### Debug (the checked configuration)
 
@@ -223,7 +223,7 @@ binCV needs nothing but a C++17 compiler.
 ### Tests for checks that kill the process
 
 A failed binCV check terminates the process — it throws where exceptions exist
-and calls `std::abort()` where they do not ([§5.3](ARCHITECTURE.md#53-error-policy))
+and calls `std::abort()` where they do not ([§5.3](docs/ARCHITECTURE.md#53-error-policy))
 — so no assertion inside that process can observe it. Those cases are **death
 tests**:
 
@@ -246,7 +246,7 @@ never be compiled at all.
 ### Correctness standards
 
 What "correct" means depends on the API tier
-([ARCHITECTURE §5.1](ARCHITECTURE.md#51-three-tiers)):
+([ARCHITECTURE §5.1](docs/ARCHITECTURE.md#51-three-tiers)):
 
 | Tier | Standard |
 |---|---|
@@ -292,7 +292,7 @@ sanitizer run needs a compiler and nothing else.
 **binCV is fast when its INPUT is narrow.** A bit-sliced kernel's cost scales with the
 precision it *reads*, not the precision it writes — so the advantage is a property of
 the data, not of the operation. `pyrDown` against `cv::pyrDown`, 640×480, reference
-device ([X-46](EXPERIMENTS.md)):
+device ([X-46](docs/EXPERIMENTS.md)):
 
 | bits in → out | filter | vs `cv::pyrDown` |
 |---|---|---|
@@ -307,24 +307,24 @@ Gaussian above ~1. There is no single number; the table is the shape, not the ru
 `BINCV_X86_POPCNT` is **ON by default**. Baseline x86-64 predates SSE4.2, so without it
 `__builtin_popcountll` compiles to a **software fallback** — measured: zero `popcnt`
 instructions in the binary — and binCV counts bits for a living. The flag is worth
-**3.75× on the whole frontend** ([X-57](EXPERIMENTS.md)): 12.9 → 3.4 ms, and from 3.8×
+**3.75× on the whole frontend** ([X-57](docs/EXPERIMENTS.md)): 12.9 → 3.4 ms, and from 3.8×
 slower than OpenCV to **0.91×**, near parity at 6.23× less memory. Turn it off for
 pre-SSE4.2 targets and accept the 3.75×.
 
 **Two things follow, and they are easy to conflate:**
 
 - **The footprint advantage is universal** — 6.23× over an OpenCV frontend
-  ([X-49](EXPERIMENTS.md)), identical on every platform, because it is a property of
+  ([X-49](docs/EXPERIMENTS.md)), identical on every platform, because it is a property of
   the representation.
 - **The speed advantage is measured on aarch64**, where binCV is **1.53× faster**. On
-  x86 it is **0.91× of OpenCV** with POPCNT on ([X-57](EXPERIMENTS.md)) — competitive,
+  x86 it is **0.91× of OpenCV** with POPCNT on ([X-57](docs/EXPERIMENTS.md)) — competitive,
   not ahead, because **binCV has NEON paths and no x86 vector code**, while OpenCV's
   x86 LK and gftt are hand-tuned AVX2. That asymmetry is a gap, not a design choice
-  ([E-32](ARCHITECTURE.md#register)). **Benchmark on your target.**
+  ([E-32](docs/ARCHITECTURE.md#register)). **Benchmark on your target.**
 
 **Above the crossover, hand the data to OpenCV.** `QuantMat<N>::toCVMatNormalized` and
 `fromCVMat` are the bridge, and the round trip is **3.7× faster than binCV's own 8-bit
-path** ([D-42](ARCHITECTURE.md)). Send an operation to OpenCV when
+path** ([D-42](docs/ARCHITECTURE.md)). Send an operation to OpenCV when
 `native_binCV − native_OpenCV` exceeds the conversion tax — which a chain of wide
 operations pays only once at each end. Matching OpenCV's *output precision* is what
 costs; matching its *filter* is nearly free.
@@ -355,7 +355,7 @@ information content), and not a strawman implementation.
 
 **Report peak working set, not per-buffer ratios.** A target either fits the
 pipeline in its memory budget or it does not
-([ARCHITECTURE §10.4](ARCHITECTURE.md#104-the-metric-that-matters)).
+([ARCHITECTURE §10.4](docs/ARCHITECTURE.md#104-the-metric-that-matters)).
 
 **Commit the measurement.** Every performance claim in this repository must be
 reproducible from a committed benchmark — and, for anything closed on the
@@ -384,19 +384,19 @@ reproducing X-9, X-10 or X-11 on the reference device takes no extra flags.
 ### Kernels
 - [bincv-cpp/include/bincv-cpp/ops/logic.hpp](bincv-cpp/include/bincv-cpp/ops/logic.hpp) — `bitwiseAnd` / `Or` / `Xor` / `Not` (T2.2), over views and per `QuantMat` plane
 - [bincv-cpp/include/bincv-cpp/ops/shift.hpp](bincv-cpp/include/bincv-cpp/ops/shift.hpp) — `shiftLeft` / `Right` / `Up` / `Down` and the 2-D `shift` (T2.3, T2.4), with OpenCV `BorderType` semantics
-- [bincv-cpp/include/bincv-cpp/ops/reduce.hpp](bincv-cpp/include/bincv-cpp/ops/reduce.hpp) — `countNonZero`, `countAnd`, `countAndSplit`, `countCovariance`, `SlidingWindowCount` (T2.5, T2.6, T2.11). Bulk only, per [D-6](ARCHITECTURE.md#d-6-bulk-only-reductions): there is no per-word popcount in the public surface, and [D-13](ARCHITECTURE.md#d-13-a-reduction-counts-pixels-never-padding) says a reduction never counts a bit past `width`. Several of these compute what another one also computes, faster, by traversing less — the file's "which shape to reach for" section is the access-pattern argument, and it is measured ([X-11](EXPERIMENTS.md), [D-15](ARCHITECTURE.md#d-15-window-reductions-get-incremental-state-and-a-fused-covariance))
+- [bincv-cpp/include/bincv-cpp/ops/reduce.hpp](bincv-cpp/include/bincv-cpp/ops/reduce.hpp) — `countNonZero`, `countAnd`, `countAndSplit`, `countCovariance`, `SlidingWindowCount` (T2.5, T2.6, T2.11). Bulk only, per [D-6](docs/ARCHITECTURE.md#d-6-bulk-only-reductions): there is no per-word popcount in the public surface, and [D-13](docs/ARCHITECTURE.md#d-13-a-reduction-counts-pixels-never-padding) says a reduction never counts a bit past `width`. Several of these compute what another one also computes, faster, by traversing less — the file's "which shape to reach for" section is the access-pattern argument, and it is measured ([X-11](docs/EXPERIMENTS.md), [D-15](docs/ARCHITECTURE.md#d-15-window-reductions-get-incremental-state-and-a-fused-covariance))
 - [bincv-cpp/include/bincv-cpp/ops/bitslice.hpp](bincv-cpp/include/bincv-cpp/ops/bitslice.hpp) — `maj3`, `bitSlicedSum`, `thresholdGE` and the view-level `majority3` (T2.7). Small-count arithmetic over bit planes, **API tier 3**; its whole per-lane input space is enumerated by `tests/test_bitslice.cpp` rather than sampled
-- [bincv-cpp/include/bincv-cpp/ops/denoise.hpp](bincv-cpp/include/bincv-cpp/ops/denoise.hpp) — `denoiseMedian3` (T3.1), the reference pipeline's three-pixel median. **API tier 3**: the neighbourhood is an asymmetric above/self/right L with a ZERO-FILL border, which is the reference's behaviour and not `cv::medianBlur`'s. One pass, no scratch buffer ([X-12](EXPERIMENTS.md))
+- [bincv-cpp/include/bincv-cpp/ops/denoise.hpp](bincv-cpp/include/bincv-cpp/ops/denoise.hpp) — `denoiseMedian3` (T3.1), the reference pipeline's three-pixel median. **API tier 3**: the neighbourhood is an asymmetric above/self/right L with a ZERO-FILL border, which is the reference's behaviour and not `cv::medianBlur`'s. One pass, no scratch buffer ([X-12](docs/EXPERIMENTS.md))
 - [bincv-cpp/include/bincv-cpp/ops/threshold.hpp](bincv-cpp/include/bincv-cpp/ops/threshold.hpp) — `threshold` from a `CV_8U` source (**API tier 1**, bit-exact against `cv::threshold` with `THRESH_BINARY`) and `binarize` from a `QuantMat<N>` (**API tier 3**, no OpenCV equivalent) (T3.2). Both compare **strictly greater than**, and the suite enumerates that boundary rather than sampling it
-- [bincv-cpp/include/bincv-cpp/ops/pyramid.hpp](bincv-cpp/include/bincv-cpp/ops/pyramid.hpp) — **three entry points, and picking the wrong one is the easiest mistake in the library.** `pyrDown` is **exactly `cv::pyrDown`** — 5×5 `[1,4,6,4,1]` Gaussian, `BORDER_REFLECT_101`, **API tier 1 at `NIn == NOut == 8`** and proven bit-exact against OpenCV. `pyrDownBox` is the 2×2 box with `BORDER_REPLICATE` — **binCV's own operating point**, and what every performance number here is measured on. `pyrDownFiltered<F, …, Bo>` is the full space: five filters × three borders, dispatching to a per-filter specialisation where one exists. `Pyramid<W, N0, N1, …>::build<F, Bo>()` defaults to the OpenCV pair, so **a pipeline must ask for the box explicitly** (T3.4, [D-39](ARCHITECTURE.md), [X-48](EXPERIMENTS.md))
-- [bincv-cpp/include/bincv-cpp/ops/derivative.hpp](bincv-cpp/include/bincv-cpp/ops/derivative.hpp) — the binarized `[-1, 0, 1]` spatial derivative into a `SignedQuantMat<N>` (T3.5). Sign-magnitude, not two's complement ([D-3](ARCHITECTURE.md)), which is what makes the LK covariance fall out as popcounts
+- [bincv-cpp/include/bincv-cpp/ops/pyramid.hpp](bincv-cpp/include/bincv-cpp/ops/pyramid.hpp) — **three entry points, and picking the wrong one is the easiest mistake in the library.** `pyrDown` is **exactly `cv::pyrDown`** — 5×5 `[1,4,6,4,1]` Gaussian, `BORDER_REFLECT_101`, **API tier 1 at `NIn == NOut == 8`** and proven bit-exact against OpenCV. `pyrDownBox` is the 2×2 box with `BORDER_REPLICATE` — **binCV's own operating point**, and what every performance number here is measured on. `pyrDownFiltered<F, …, Bo>` is the full space: five filters × three borders, dispatching to a per-filter specialisation where one exists. `Pyramid<W, N0, N1, …>::build<F, Bo>()` defaults to the OpenCV pair, so **a pipeline must ask for the box explicitly** (T3.4, [D-39](docs/ARCHITECTURE.md), [X-48](docs/EXPERIMENTS.md))
+- [bincv-cpp/include/bincv-cpp/ops/derivative.hpp](bincv-cpp/include/bincv-cpp/ops/derivative.hpp) — the binarized `[-1, 0, 1]` spatial derivative into a `SignedQuantMat<N>` (T3.5). Sign-magnitude, not two's complement ([D-3](docs/ARCHITECTURE.md)), which is what makes the LK covariance fall out as popcounts
 - [bincv-cpp/include/bincv-cpp/ops/covariance.hpp](bincv-cpp/include/bincv-cpp/ops/covariance.hpp) — the LK gradient covariance over a window (T3.6, T3.10), N-bit
 - [bincv-cpp/include/bincv-cpp/ops/corner.hpp](bincv-cpp/include/bincv-cpp/ops/corner.hpp) — `cornerMinEigenVal` and the `goodFeaturesToTrack` port (T3.7, T3.11), including the streaming three-row response ring that keeps detection off the heap
-- [bincv-cpp/include/bincv-cpp/ops/opticalFlow.hpp](bincv-cpp/include/bincv-cpp/ops/opticalFlow.hpp) — `calcOpticalFlowPyrLK` over an `LKLevels` ladder (T3.8). **The hot kernel**: 68% of the frontend, and where D-30…D-33, X-35 and X-40's NEON work lives. Read [D-37](ARCHITECTURE.md) and [D-40](ARCHITECTURE.md) before optimising it — counting, addressing, cache and layout have each been priced and each declined or exhausted
+- [bincv-cpp/include/bincv-cpp/ops/opticalFlow.hpp](bincv-cpp/include/bincv-cpp/ops/opticalFlow.hpp) — `calcOpticalFlowPyrLK` over an `LKLevels` ladder (T3.8). **The hot kernel**: 68% of the frontend, and where D-30…D-33, X-35 and X-40's NEON work lives. Read [D-37](docs/ARCHITECTURE.md) and [D-40](docs/ARCHITECTURE.md) before optimising it — counting, addressing, cache and layout have each been priced and each declined or exhausted
 - [bincv-cpp/include/bincv-cpp/ops/morphology.hpp](bincv-cpp/include/bincv-cpp/ops/morphology.hpp) — `erode` / `dilate` (T3.3), **API tier 1** against OpenCV for the rectangular structuring elements
 - [bincv-cpp/include/bincv-cpp/ops/resample.hpp](bincv-cpp/include/bincv-cpp/ops/resample.hpp) — nearest-neighbour resize over packed bits
-- [bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp](bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp) — Hamming block matching, E-6's route (a). Kept as the measured alternative to LK, not as the shipped tracker ([D-24](ARCHITECTURE.md))
-- [bincv-cpp/include/bincv-cpp/impl/kernel_util.hpp](bincv-cpp/include/bincv-cpp/impl/kernel_util.hpp) — the row-tail mask, the stride check and the [D-11](ARCHITECTURE.md#d-11-kernels-alias-exactly-or-not-at-all) overlap predicates, shared by every kernel under `ops/`
+- [bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp](bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp) — Hamming block matching, E-6's route (a). Kept as the measured alternative to LK, not as the shipped tracker ([D-24](docs/ARCHITECTURE.md))
+- [bincv-cpp/include/bincv-cpp/impl/kernel_util.hpp](bincv-cpp/include/bincv-cpp/impl/kernel_util.hpp) — the row-tail mask, the stride check and the [D-11](docs/ARCHITECTURE.md#d-11-kernels-alias-exactly-or-not-at-all) overlap predicates, shared by every kernel under `ops/`
 
 ### Support
 - [bincv-cpp/include/bincv-cpp/util.hpp](bincv-cpp/include/bincv-cpp/util.hpp) — image I/O for tests (OpenCV-only)
@@ -423,7 +423,7 @@ Storage {ptr, words, owns}           <- T1.1
 `BinMat<WordType>` is an **alias** for `QuantMat<1, WordType>`, not a separate
 type: the 1-bit case keeps its hand-written single-plane paths while still being
 what a `QuantMat<N>` parameter binds to (ARCHITECTURE
-[4.4](ARCHITECTURE.md#44-container-hierarchy)). One consequence under C++17:
+[4.4](docs/ARCHITECTURE.md#44-container-hierarchy)). One consequence under C++17:
 class template argument deduction does not see through an alias template, so a
 default-word-type container is spelled `BinMat<> m(w, h)`, not `BinMat m(w, h)`.
 
@@ -451,7 +451,7 @@ never throw.
 
 **Never expose a per-word popcount.** Reductions are bulk-only — region, masked,
 or windowed. On aarch64 a per-word popcount pays two register-domain crossings
-per 64 pixels ([ARCHITECTURE §6.2](ARCHITECTURE.md#62-reductions-are-bulk-only)).
+per 64 pixels ([ARCHITECTURE §6.2](docs/ARCHITECTURE.md#62-reductions-are-bulk-only)).
 
 ### Documentation
 
@@ -492,7 +492,7 @@ valgrind --tool=massif ./your_benchmark
 ## Adding an Operation
 
 1. **Check it is in scope.** Is it called by a binary-frame VIO frontend? If not,
-   it likely belongs in [ROADMAP Phase 6](ROADMAP.md#phase-6--deferred).
+   it likely belongs in [ROADMAP Phase 6](docs/ROADMAP.md#phase-6--deferred).
 2. **Determine its API tier** and name it accordingly.
 3. **Write the equivalence or reference test first.**
 4. **Express it in the primitive vocabulary** — logic, shift, majority,

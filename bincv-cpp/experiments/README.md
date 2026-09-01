@@ -1,6 +1,6 @@
 # Experiment probes
 
-Measurement code backing entries in [EXPERIMENTS.md](../../EXPERIMENTS.md).
+Measurement code backing entries in [EXPERIMENTS.md](../../docs/EXPERIMENTS.md).
 Every logged result must be reproducible from a committed probe.
 
 | Probe | Entry | Build |

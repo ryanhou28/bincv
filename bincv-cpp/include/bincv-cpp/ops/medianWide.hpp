@@ -27,7 +27,7 @@
 ///
 /// This is emphatically NOT `cv::medianBlur`, whose neighbourhood is a square and
 /// whose border is replicated. Tier 3, and the name is not borrowed
-/// ([CLAUDE.md](../../../CLAUDE.md)).
+/// ([CLAUDE.md](../../../../CLAUDE.md)).
 ///
 /// ---------------------------------------------------------------------------
 /// THE BORDER IS ZERO FILL, AND THAT IS THE REFERENCE'S, NOT A CHOICE

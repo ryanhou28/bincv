@@ -352,7 +352,7 @@ inline bool packCmp(SrcT v, SrcT t) {
 /// `__attribute__((target(...)))` stops a compiler inlining a function into a caller
 /// whose feature set is smaller: that is what the attribute is FOR, since the caller
 /// may run where the callee's instructions do not exist.
-/// [X-60](../../../EXPERIMENTS.md) marked leaf helpers *inside* a hot loop and paid
+/// [X-60](../../../../docs/EXPERIMENTS.md) marked leaf helpers *inside* a hot loop and paid
 /// **310 real calls per window**. Here the call IS the unit of work -- loads, a
 /// compare and a movemask for 32 pixels -- not a helper inside one.
 ///
@@ -475,7 +475,7 @@ inline bool hasVectorPack() { return true; }
 
 /// @brief Packs one row to 1 bit per pixel under `R`. **INTERNAL** (X-71).
 /// @param rowOut Only bits `[0, width)` are written and whole words are STORED, so a
-///        row's PADDING BITS ARE ZERO on return ([CLAUDE.md](../../../CLAUDE.md)'s
+///        row's PADDING BITS ARE ZERO on return ([CLAUDE.md](../../../../CLAUDE.md)'s
 ///        hard rule -- word-wise reductions over-count otherwise).
 ///
 /// **WHY THE BIT ORDERS LINE UP AND NO SHUFFLE IS NEEDED.** `bitMask(x)` is
@@ -647,7 +647,7 @@ void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
 /// @note ONE IMPLEMENTATION. The unpacking lives in ops/pack.hpp, in CORE, so the
 ///       `cv::Mat` wrapper is a shape adapter and nothing more. Before this split it
 ///       was a per-pixel loop recomputing `wordIndex` and `bitMask` for every pixel --
-///       the exact shape `fromCVMat` had before [X-71](../../../EXPERIMENTS.md), and
+///       the exact shape `fromCVMat` had before [X-71](../../../../docs/EXPERIMENTS.md), and
 ///       the slowest thing in the library.
 template <typename WordType, typename PixelTransform>
 inline void toCVMatHelper(const BinMat<WordType>& binmat, cv::Mat& output,

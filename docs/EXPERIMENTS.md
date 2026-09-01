@@ -52,7 +52,7 @@ A microbenchmark that no pipeline resembles can favor the wrong design.
 **Report memory and speed together.** They trade against each other; a result
 that reports one alone cannot be weighed against the project's goals.
 
-**Always Release builds.** See [CLAUDE.md](CLAUDE.md).
+**Always Release builds.** See [CLAUDE.md](../CLAUDE.md).
 
 **Commit the measurement code.** Every entry here must be reproducible from a
 committed benchmark or probe.
@@ -116,7 +116,7 @@ entry `PARTIAL` if it was not the authoritative one.
 
 ### Measuring on the Pi 4
 
-Setup instructions: [docs/MEASUREMENT_HARDWARE.md](docs/MEASUREMENT_HARDWARE.md).
+Setup instructions: [docs/MEASUREMENT_HARDWARE.md](MEASUREMENT_HARDWARE.md).
 
 A Pi 4 will happily produce stable-looking numbers that are wrong. Four hazards,
 all of which the runner script ([T1.10](TASKS.md)) must handle rather than leaving
@@ -1651,8 +1651,8 @@ throttled before: throttled=0x0
 throttled after:  throttled=0x0
 ```
 
-Full logs: [`bincv-cpp/results/morphology_benchmark_pi4.log`](bincv-cpp/results/morphology_benchmark_pi4.log)
-and [`bincv-cpp/results/morphology_path_benchmark_pi4.log`](bincv-cpp/results/morphology_path_benchmark_pi4.log).
+Full logs: [`bincv-cpp/results/morphology_benchmark_pi4.log`](../bincv-cpp/results/morphology_benchmark_pi4.log)
+and [`bincv-cpp/results/morphology_path_benchmark_pi4.log`](../bincv-cpp/results/morphology_path_benchmark_pi4.log).
 Both carry the platform block above including both throttle readings, and the
 sha256 of every source that produced them — T3.3's files are untracked at the
 time of the run, so the commit hash alone does not pin what was measured (the
@@ -2194,7 +2194,7 @@ made the source-level count tight — grouping the nine arrays into one struct, 
 hoisting the helpers' locals into the caller — were both tried and both measured
 **larger** (784 B and 816 B against 704 B at NIn = 4 / NOut = 5 / `uint64_t`,
 x86_64), because the compiler can no longer overlap the lifetimes that do not
-meet. Memory wins ([CLAUDE.md](CLAUDE.md)), so the kernel kept its shape and the
+meet. Memory wins ([CLAUDE.md](../CLAUDE.md)), so the kernel kept its shape and the
 documentation was corrected instead — which is also what
 "[a measurement contradicts a documented claim] → report it rather than adjusting
 the code to fit the doc" asks for. The heap half of the promise was
@@ -2662,9 +2662,9 @@ being wrapped in an operation.
 The **plane** form is faster again (1.20–1.44× over the four-argument form) and is
 still not what T3.6 ships, because it costs a fifth plane at every pyramid level.
 That is X-11 axis 3's tradeoff re-confirmed here, and it lands the same way:
-memory wins ([CLAUDE.md](CLAUDE.md)).
+memory wins ([CLAUDE.md](../CLAUDE.md)).
 
-Raw log: [bincv-cpp/results/covariance_benchmark_pi4.log](bincv-cpp/results/covariance_benchmark_pi4.log).
+Raw log: [bincv-cpp/results/covariance_benchmark_pi4.log](../bincv-cpp/results/covariance_benchmark_pi4.log).
 
 ---
 
@@ -2741,7 +2741,7 @@ inside one process. That is not the number a difference has to clear, and this
 entry originally quoted it as though it were. X-17 (immediately above) recorded
 that re-runs move ratios; X-14 took three device runs for the same reason. So
 three more were taken, same binary, same protocol, `throttled=0x0` before and
-after each ([`corner_benchmark_pi4_scatter.log`](bincv-cpp/results/corner_benchmark_pi4_scatter.log)):
+after each ([`corner_benchmark_pi4_scatter.log`](../bincv-cpp/results/corner_benchmark_pi4_scatter.log)):
 
 | blockSize | sliding ns/px (min…max) | recompute ns/px (min…max) | net ratio (min…max) | net scatter |
 |---|---|---|---|---|
@@ -2815,9 +2815,9 @@ part and at a second frame size, plus a decision about whether a window-size bra
 inside a kernel is a shape this project wants at all. Until then T3.7 ships the
 form its spec named, with the cost written down beside it.
 
-Raw logs: [bincv-cpp/results/corner_benchmark_pi4.log](bincv-cpp/results/corner_benchmark_pi4.log)
+Raw logs: [bincv-cpp/results/corner_benchmark_pi4.log](../bincv-cpp/results/corner_benchmark_pi4.log)
 (run 1) and
-[bincv-cpp/results/corner_benchmark_pi4_scatter.log](bincv-cpp/results/corner_benchmark_pi4_scatter.log)
+[bincv-cpp/results/corner_benchmark_pi4_scatter.log](../bincv-cpp/results/corner_benchmark_pi4_scatter.log)
 (runs 2–4, with the cross-run summary).
 
 ---
@@ -2890,9 +2890,9 @@ allocates nothing (`operator new` count 0, X-18); OpenCV's buffers are the
 allocation.
 
 Raw logs:
-[bincv-cpp/results/corner_opencv_benchmark_pi4.log](bincv-cpp/results/corner_opencv_benchmark_pi4.log),
+[bincv-cpp/results/corner_opencv_benchmark_pi4.log](../bincv-cpp/results/corner_opencv_benchmark_pi4.log),
 and
-[bincv-cpp/results/corner_opencv_benchmark_x86_indicative.log](bincv-cpp/results/corner_opencv_benchmark_x86_indicative.log)
+[bincv-cpp/results/corner_opencv_benchmark_x86_indicative.log](../bincv-cpp/results/corner_opencv_benchmark_x86_indicative.log)
 (indicative only — spreads past 50%, per "Measurement platforms").
 
 **AGREEMENT FIRST, BECAUSE IT IS THE SURPRISE.** Over four frames binCV and the
@@ -3298,8 +3298,8 @@ that only anticipates the answer you expect is not doing this job.
 > independent control, and the decision rule was not softened — band 2 fired, was
 > reported, and nothing was acted on. One reviewer hypothesis was **rejected on
 > evidence**; see conclusion 3. Every number in this entry is reproducible from
-> [`bincv-cpp/results/genericn_benchmark_pi4.log`](bincv-cpp/results/genericn_benchmark_pi4.log),
-> produced by [`scripts/genericn_evidence.sh`](scripts/genericn_evidence.sh).
+> [`bincv-cpp/results/genericn_benchmark_pi4.log`](../bincv-cpp/results/genericn_benchmark_pi4.log),
+> produced by [`scripts/genericn_evidence.sh`](../scripts/genericn_evidence.sh).
 
 **Gates:** [E-4](ARCHITECTURE.md#9-open-questions-and-planned-experiments) · task
 [T3.9](TASKS.md) — whether N
@@ -3409,7 +3409,7 @@ interface), `genericn_arm_generic.cpp`, `genericn_arm_specialized.cpp`,
 
 The separation is not tidiness. `size` on one object per arm is a number **per
 arm** rather than for the sum, which the code-size half of the metric needs; and
-[morphology_path_benchmark.cpp](bincv-cpp/benchmark/morphology_path_benchmark.cpp)
+[morphology_path_benchmark.cpp](../bincv-cpp/benchmark/morphology_path_benchmark.cpp)
 records, measured, that two instantiations of one kernel in a single object move
 each other's timings by ~10% through code layout alone. The cost — no arm inlines
 into the timing loop — is paid identically by all three, one call per frame
@@ -3501,12 +3501,12 @@ repaired the same way:
 ./scripts/run_on_pi.sh pi4 '../../scripts/genericn_evidence.sh'
 ```
 
-[`scripts/genericn_evidence.sh`](scripts/genericn_evidence.sh) emits, in one
+[`scripts/genericn_evidence.sh`](../scripts/genericn_evidence.sh) emits, in one
 stream, the benchmark, `size`, `size -A`, `nm -C -S`, the address-stripped
 instruction-identity diff for **all three** generic/specialized function pairs, the
 hand-written instruction counts, the arithmetic-spelling check, and the
 `-fno-exceptions` sizes — and writes them to
-[`bincv-cpp/results/genericn_benchmark_pi4.log`](bincv-cpp/results/genericn_benchmark_pi4.log),
+[`bincv-cpp/results/genericn_benchmark_pi4.log`](../bincv-cpp/results/genericn_benchmark_pi4.log),
 which is committed. Its normalisation is documented in the script and removes only
 the instruction address, the redundant hex branch target, and the arm's name inside
 a symbol; a differing register, mnemonic or within-function offset survives and
@@ -3524,7 +3524,7 @@ because popcount cost is content-dependent and the derivative rows leave each
 buffer holding whichever frame ran last.
 
 **Environment** (the committed triage run, whose full output is
-[`bincv-cpp/results/genericn_benchmark_pi4.log`](bincv-cpp/results/genericn_benchmark_pi4.log);
+[`bincv-cpp/results/genericn_benchmark_pi4.log`](../bincv-cpp/results/genericn_benchmark_pi4.log);
 the two earlier runs at `066a339` and `abf3504` were taken on the same device with
 the same block and agree to within 0.5%):
 
@@ -3899,7 +3899,7 @@ about the curve rather than a selection between arms:
   Report the measured curve as the price and mark `3N² + N` an upper bound.
 - **Band C — ratios ABOVE:** something is quadratic that should not be. That
   contradicts the shipped kernel's documented cost and
-  [CLAUDE.md](CLAUDE.md)'s rule applies — report it, do not adjust the doc.
+  [CLAUDE.md](../CLAUDE.md)'s rule applies — report it, do not adjust the doc.
 
 **Variants:** the T3.6 ternary entry point; the T3.10 bit-sliced entry point at
 N = 1, 2, 3, 4; and — added after the first run, see the caveat — the same
@@ -3919,7 +3919,7 @@ derivative against ternary's 2, which is the other half of the trade.
 **Method:** `benchmark/covariance_nbit_benchmark.cpp` through
 `measure_util.hpp`'s protocol. Every arm's ANSWER is checked against a per-pixel
 reference at every timed window before anything is timed. Log:
-[`bincv-cpp/results/covariance_nbit_benchmark_pi4.log`](bincv-cpp/results/covariance_nbit_benchmark_pi4.log).
+[`bincv-cpp/results/covariance_nbit_benchmark_pi4.log`](../bincv-cpp/results/covariance_nbit_benchmark_pi4.log).
 
 **Result — reference device, `./scripts/run_on_pi.sh pi4 ./benchmark/covariance_nbit_benchmark`,
 ns per window, W = 31, `throttled=0x0` before and after:**
@@ -3984,10 +3984,10 @@ and for T4.1, which will be choosing bit depth and word width on the same levels
 **THE OBVIOUS EXPLANATION IS WRONG, AND IT WAS MEASURED RATHER THAN ASSUMED.**
 Register pressure — 2N = 8 live magnitude words at N = 4, a 64-bit word being a
 whole GPR where two 32-bit words are not — predicts spills at exactly that corner.
-[`scripts/covariance_nbit_codegen.sh`](scripts/covariance_nbit_codegen.sh) compiles
+[`scripts/covariance_nbit_codegen.sh`](../scripts/covariance_nbit_codegen.sh) compiles
 the kernel out of line per (N, word type) on the device and counts stack traffic in
 its own instruction stream
-([log](bincv-cpp/results/covariance_nbit_codegen_pi4.log)):
+([log](../bincv-cpp/results/covariance_nbit_codegen_pi4.log)):
 
 | word | N=1 | N=2 | N=3 | N=4 |
 |---|---|---|---|---|
@@ -4172,7 +4172,7 @@ response map is **1 228 800 B — 71.4%, more than everything else combined** �
 tracker itself is 0.2%. On a project whose thesis is footprint, the largest buffer
 in the frontend is a float scratch.
 
-**And the trade is NOT settled by that fact.** [CLAUDE.md](CLAUDE.md)'s "memory
+**And the trade is NOT settled by that fact.** [CLAUDE.md](../CLAUDE.md)'s "memory
 wins" is the tiebreak for a conflict **where no explicit choice has been made**;
 this entry is where the choice gets made, so the tiebreak applies only if the
 measurement leaves it genuinely close — and the bands below say what "close" is
@@ -4941,7 +4941,7 @@ Among ladders that pass:
 
 * **Band A — a shallow ladder suffices.** Some ladder with no level deeper than
   **3 bits** passes. Adopt the smallest such ladder by frontend peak footprint;
-  where footprints tie within 2%, the faster wins ([CLAUDE.md](CLAUDE.md): memory
+  where footprints tie within 2%, the faster wins ([CLAUDE.md](../CLAUDE.md): memory
   wins, then speed). E-7 closes and the fix is cheap.
 * **Band B — depth is needed but bounded.** No ≤3-bit ladder passes, but some ladder
   within the natural growth `1/3/5/7` does. Adopt the smallest-footprint passing
@@ -4962,7 +4962,7 @@ Among ladders that pass:
   point SETS must be reported beside the errors — **a curve measured over different
   point sets is not a curve** — and the comparison re-run over the intersection.
 
-**Reporting is mandatory in every band**, per [CLAUDE.md](CLAUDE.md)'s "report
+**Reporting is mandatory in every band**, per [CLAUDE.md](../CLAUDE.md)'s "report
 memory and speed together": pyramid + derivative bytes, frontend peak bytes,
 tracker ns/frame and pyramid-build ns/frame.
 
@@ -5221,7 +5221,7 @@ asks the question the old criterion was trying to ask.
 
 **ORDER, AND IT IS PART OF THE RULE.** C and D cost **zero bytes**, so they are
 measured FIRST, and **B is built only if neither reaches the gate below**. That is
-[CLAUDE.md](CLAUDE.md)'s memory-wins tiebreak applied to the experiment's own scope
+[CLAUDE.md](../CLAUDE.md)'s memory-wins tiebreak applied to the experiment's own scope
 rather than only to its conclusion: a padded pyramid is a large, invasive change and
 building it before knowing whether a free arm suffices would bias the comparison
 toward using it. **If C reaches the gate, B is not built and this entry says so
@@ -5353,7 +5353,7 @@ route (b) has ever been built.
 **Question:** Does fully bit-parallel tracking — census/Hamming block matching at
 integer pixels — match hybrid LK's accuracy, and what does it cost?
 
-**Scope note, because [CLAUDE.md](CLAUDE.md) forbids template matching.** It does,
+**Scope note, because [CLAUDE.md](../CLAUDE.md) forbids template matching.** It does,
 as an *operation*: `cv::matchTemplate` is deliberately out of scope. This is not
 that. Route (a) is an internal tracker search named in §7.9 and scheduled as T4.2
 since the roadmap was written, and nothing here exposes a template-matching API.
@@ -5498,7 +5498,7 @@ Route (b) stays the default because yield is what a frontend produces and it is
 materially higher. `ops/blockMatch.hpp` ships as the memory-constrained
 alternative, documented with its 3.00× footprint advantage, its equal
 yield-per-millisecond, and its 15–25 point yield deficit — because
-[CLAUDE.md](CLAUDE.md)'s tiebreak covers speed against footprint and **this is
+[CLAUDE.md](../CLAUDE.md)'s tiebreak covers speed against footprint and **this is
 accuracy against footprint, which is the integrating pipeline's call and not this
 repo's**: a VIO frontend that RANSACs its correspondences may rationally prefer
 more, cheaper, noisier points, and ARCHITECTURE §1 puts that decision on the other
@@ -5757,7 +5757,7 @@ so there is no opportunity to shape a criterion around a result.
 **Workload:** EuRoC **V1_02_medium, all 1709 frame pairs**, 752×480, through the
 reference pipeline's **two-stage** preprocessing (`median_filter` then
 `rl_fast_edge_filter_wide(17)`). `seal_params.yaml` parameters verbatim.
-**Denominator:** [CLAUDE.md](CLAUDE.md)'s — OpenCV doing the same semantic
+**Denominator:** [CLAUDE.md](../CLAUDE.md)'s — OpenCV doing the same semantic
 operation **on the same binary content stored as `CV_8U`**. Both frontends see
 bit-identical input, detect their own corners, maintain their own track sets and
 re-detect on their own schedule, so **track lifetime is comparable** rather than
@@ -6333,7 +6333,7 @@ and nothing had measured it. Over 599 real frames, LK time against track quality
 
 **It is not free**: 3 iterations is **1.47× faster for 15% shorter tracks**. Track
 lifetime is what a VIO estimator consumes, so this is accuracy against speed —
-[CLAUDE.md](CLAUDE.md)'s tiebreak covers speed against footprint and
+[CLAUDE.md](../CLAUDE.md)'s tiebreak covers speed against footprint and
 [§1](ARCHITECTURE.md#what-bincv-is-not) puts this one on the integrating pipeline's
 side, exactly as [D-24](ARCHITECTURE.md) put route (a) there. **binCV keeps
 `seal_params.yaml`'s 20 and documents the curve.** It is recorded here because a
@@ -12387,7 +12387,7 @@ missing loop. What is NOT settled is which shape to ship it in, and the temptati
 **THE DECISION RULE.**
 
 The two arms do not cost the same memory, so this is a conflict, and
-[CLAUDE.md](CLAUDE.md) settles conflicts that no explicit choice covers **in favour of
+[CLAUDE.md](../CLAUDE.md) settles conflicts that no explicit choice covers **in favour of
 memory**. Therefore:
 
 1. **The mask becomes the recommended path only if it is FASTER at the frontend's own
@@ -12629,7 +12629,7 @@ that cannot be the last word.
 **THE DECISION RULE.**
 
 1. **Arm (a) is not built unless (b) fails on real content.** (b) costs 0 B and (a) costs
-   two planes per level; [CLAUDE.md](CLAUDE.md) settles unclaimed conflicts in memory's
+   two planes per level; [CLAUDE.md](../CLAUDE.md) settles unclaimed conflicts in memory's
    favour, and (b) has just been shown to work on the synthetic case. Building the
    expensive arm to compare against a working free one is how a footprint gets spent.
 2. **The synthetic result does NOT license a default.** Uniform synthetic texture is the
@@ -12806,7 +12806,7 @@ binCV SIMD: NEON=NO AVX2=n/a popcount=SOFTWARE  (SLOW -- link the bincv_core tar
 ```
 
 `frontend_sequence` and `examples/vio_frontend` print it, which is
-[CLAUDE.md](CLAUDE.md)'s rule that a benchmark must show its vector arm is on.
+[CLAUDE.md](../CLAUDE.md)'s rule that a benchmark must show its vector arm is on.
 
 #### THE REGRESSION GUARD, AND IT HAS BEEN WATCHED TO FAIL
 

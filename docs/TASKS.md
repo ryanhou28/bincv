@@ -1,5 +1,19 @@
 # binCV Task Backlog
 
+> ## OPEN WORK LIVES IN GITHUB ISSUES NOW, NOT HERE
+>
+> This file is the **completed record** — 61 finished tasks with what was decided and
+> why. It is kept because the reasoning is evidence, not because it is a backlog.
+>
+> **To pick something up, read the issues**, labelled `experiment`, `optimisation`,
+> `accuracy`, `platform`, `infrastructure`, `research`, `needs-decision`, `measured`.
+> Anything still open when this file was migrated is now an issue and says so.
+>
+> That split is [T6.6](#t66--where-future-work-gets-recorded--done)'s answer: issues for
+> discussion and open work, **X-records stay in-tree** beside the benchmark that produced
+> them, because they are evidence rather than conversation.
+
+
 Executable breakdown of [ROADMAP.md](ROADMAP.md). Each task is scoped to roughly
 one working session and is specified tightly enough that **no architectural
 decision should be needed to complete it**.
@@ -20,10 +34,10 @@ document — see [Stop and ask](#stop-and-ask).
 **Status:** `TODO` · `IN PROGRESS` · `DONE` · `BLOCKED`
 
 Tasks marked **⚙️ needs Pi** require the reference measurement device
-([setup](docs/MEASUREMENT_HARDWARE.md)). **Skip them and continue** — they are not
+([setup](MEASUREMENT_HARDWARE.md)). **Skip them and continue** — they are not
 on the critical path for implementation work. Everything through T3.5 proceeds
 without hardware; see
-[What works without it](docs/MEASUREMENT_HARDWARE.md#what-works-without-it).
+[What works without it](MEASUREMENT_HARDWARE.md#what-works-without-it).
 
 **Do not substitute a laptop measurement to unblock one.** Closing an experiment on
 non-authoritative hardware is worse than leaving it open, because a recorded wrong
@@ -109,7 +123,7 @@ The fourth was added by T1.8. Before it, every configuration was Release, so
 precondition — was compiled out of everything that could fail.
 
 The individual commands are still in
-[GETTING_STARTED](GETTING_STARTED.md#build-configurations) for when one configuration needs to
+[GETTING_STARTED](../GETTING_STARTED.md#build-configurations) for when one configuration needs to
 be driven by hand.
 
 ---
@@ -603,7 +617,7 @@ verifying less than it said:
 
 **Depends:** T1.9
 **Files:** `scripts/run_on_pi.sh` (new)
-**Setup:** [docs/MEASUREMENT_HARDWARE.md](docs/MEASUREMENT_HARDWARE.md)
+**Setup:** [docs/MEASUREMENT_HARDWARE.md](MEASUREMENT_HARDWARE.md)
 
 **Goal:** Make the reference device usable from an ordinary session, with the
 measurement hazards enforced mechanically rather than remembered.
@@ -1471,7 +1485,7 @@ saying that holds for a 1-bit source only, and `@param k` said "the MVP uses 3, 
 and 9" when k = 3 has no caller (the three-pixel median is `maj3`).
 
 **Sanitizers.** Both spellings from
-[GETTING_STARTED](GETTING_STARTED.md#sanitizers-for-the-kernels-where-undefined-behaviour-is-the-likely-bug)
+[GETTING_STARTED](../GETTING_STARTED.md#sanitizers-for-the-kernels-where-undefined-behaviour-is-the-likely-bug)
 were run over `test_bitslice` and are clean: UBSan at `-O2 -DNDEBUG` (the shipping
 configuration) and UBSan+ASan at `-O1 -g` (assertions live). Worth doing here
 because the file is full of shift counts — `1 << lane` in the enumeration,
@@ -1713,7 +1727,7 @@ the discrepancy.
    plane is 16–18% faster per frame even after paying to form it — and buys a
    **fifth plane at every pyramid level** on top of the four the covariance
    already reads: +25% of the derivative working set, which is 38400 B at 640×480
-   and scales down with the level (~51 kB over four levels). [CLAUDE.md](CLAUDE.md)'s tiebreak decides it: memory wins when
+   and scales down with the level (~51 kB over four levels). [CLAUDE.md](../CLAUDE.md)'s tiebreak decides it: memory wins when
    the goals conflict. Keep the three-argument overload; a caller that has already
    formed the plane for other reasons should not be made to unform it.
 4. **Split `impl::countViewRegion`'s accumulator per row.** Not an interface
@@ -3057,7 +3071,7 @@ control on the whole-frame count by 5.9–11.9%, with *more* instructions, and b
 proposed explanations for it are now measured and eliminated.
 
 Full evidence, including the raw device log the first report did not commit:
-[`bincv-cpp/results/genericn_benchmark_pi4.log`](bincv-cpp/results/genericn_benchmark_pi4.log),
+[`bincv-cpp/results/genericn_benchmark_pi4.log`](../bincv-cpp/results/genericn_benchmark_pi4.log),
 reproducible with `./scripts/run_on_pi.sh pi4 '../../scripts/genericn_evidence.sh'`.
 
 ---
@@ -3219,7 +3233,7 @@ all three carry the correction by name.
 This was a speed/footprint conflict with no prior decision, so it followed the
 experiment protocol: the rule was committed at `79db8f8` with no streaming form in
 the tree, both sides were measured, and the choice was taken afterwards.
-[CLAUDE.md](CLAUDE.md)'s tiebreak was never reached — band A fired on a form that is
+[CLAUDE.md](../CLAUDE.md)'s tiebreak was never reached — band A fired on a form that is
 smaller *and* faster.
 
 **Done when** — all met
@@ -3434,12 +3448,12 @@ any of it is measured**, which is the only time a rule may be touched.
    picks a depth per level, it is picking how often that prologue runs.
 
 **Decision rule** — *amended here, before any measurement, on the strength of point
-2 above and [CLAUDE.md](CLAUDE.md)'s standing requirement to report memory and
+2 above and [CLAUDE.md](../CLAUDE.md)'s standing requirement to report memory and
 speed together:* adopt the smallest per-level depth whose tracking accuracy is
 within the Phase-4 tolerance of the full-precision pipeline **and whose per-pixel
 cost is affordable at that level**. Report the accuracy/footprint **/speed** curve,
 not just the chosen point. Where accuracy ties, footprint decides
-([CLAUDE.md](CLAUDE.md)'s tiebreak); where footprint ties, speed decides.
+([CLAUDE.md](../CLAUDE.md)'s tiebreak); where footprint ties, speed decides.
 
 **Why the rule needed amending:** as written it measured "trajectory accuracy
 versus pyramid footprint" and had **no speed axis at all**, which
@@ -3720,7 +3734,7 @@ describe **5.2× x86 / 10.7× device**, matching **4.7× / 1.95×**.
 BRIEF and ORB descriptors **are bit strings**; matching them is `popcount(a ^ b)`. A
 library whose thesis is bit-parallel operations at true bit width — which already ships
 a Hamming block-matcher (`impl::hammingAt` in
-[ops/blockMatch.hpp](bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp)) — has no
+[ops/blockMatch.hpp](../bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp)) — has no
 descriptor extraction and no matcher.
 
 **Why it matters beyond elegance:** LK gives frame-to-frame association. **Loop
@@ -3733,7 +3747,7 @@ built on exactly these bits.
 **`cv::BFMatcher` with `NORM_HAMMING` is the denominator, and it is a fair fight** —
 OpenCV stores these as bits too.
 
-**Ask first.** [CLAUDE.md](CLAUDE.md)'s scope discipline defines the MVP as what a VIO
+**Ask first.** [CLAUDE.md](../CLAUDE.md)'s scope discipline defines the MVP as what a VIO
 frontend calls, and this is past that line. It is the most defensible extension
 available, but it is an extension.
 
@@ -3872,7 +3886,7 @@ preserves today's behaviour; every other policy is built and tested alongside it
 | `Scale` | `round(v · MaxValue / 255)` | today's `QuantMat<N>` behaviour, preserved |
 | `Lut{table}` | arbitrary 256-entry map | anything else, including non-monotonic |
 
-**Shape follows OpenCV** ([CLAUDE.md](CLAUDE.md) style): destination as out-parameter, a
+**Shape follows OpenCV** ([CLAUDE.md](../CLAUDE.md) style): destination as out-parameter, a
 params struct with defaults, `camelCase`. **The defaults must reproduce today's
 behaviour exactly** — both existing rules are load-bearing and one of them
 ([D-42](ARCHITECTURE.md#8-design-decisions)) has a recorded divergence from OpenCV at
@@ -3893,7 +3907,7 @@ via `cmpeq`/`cmpgt`. `Lut` cannot vectorise that way and takes the portable path
 `SEAL/src/temporal_processing/denoise.cpp` carries `three_pix_median_filter` — the
 asymmetric L, `p1` above / `p2` centre / `p3` right, computed as
 `max(min(p1,p2), min(max(p1,p2), p3))` — **and** `five_pix_median_filter`.
-[ops/denoise.hpp](bincv-cpp/include/bincv-cpp/ops/denoise.hpp) implements the L, for
+[ops/denoise.hpp](../bincv-cpp/include/bincv-cpp/ops/denoise.hpp) implements the L, for
 **binary** input, where median collapses to `maj3`.
 
 **Two axes are missing:**
@@ -3958,7 +3972,7 @@ being a bit-plane. **Done properly this is the fastest way into binCV, not an ex
 step before it.**
 
 **Tier 3, and no OpenCV name.** There is no `cv::` equivalent — `Sobel` + `threshold` is
-a different computation with different border handling. [CLAUDE.md](CLAUDE.md) forbids
+a different computation with different border handling. [CLAUDE.md](../CLAUDE.md) forbids
 borrowing a name here.
 
 **The denominator is the reference's own OpenCV spelling** — `filter2D` ×2, `abs` ×2,
@@ -4003,6 +4017,8 @@ the slowest thing in the library** (per-pixel loop, T5.7).
   implementation and one place to optimise.
 
 ### T5.14 · Encoded image files: `bincv_io`, with the codec as a backend choice · `TODO — DISCUSS FIRST`
+
+> **Tracked as [#15](https://github.com/ryanhou28/bincv/issues/15).** This entry is the historical spec; the issue is where the work happens.
 
 **THE SIZES, MEASURED, BECAUSE THE ARGUMENT TURNS ENTIRELY ON THEM.** A stripped
 core-only binary carrying LK, the pyramid, derivatives, corner response, threshold and
@@ -4328,17 +4344,27 @@ run the tests**, and a **platform support matrix that says plainly what is untes
 single-threaded OpenCV on both architectures — so they belong above the fold, with
 their conditions attached rather than buried.
 
-### T6.3 · Documentation structure and an API reference · `PARTLY DONE`
+### T6.3 · Documentation structure and an API reference · `DONE — 2026-08-31`
 
 **Done — the gap that mattered:** there is now an API reference. `docs/API.md`, 278
 entries across 27 headers, **generated** from the headers by `scripts/gen_api_index.py`
 so it cannot drift, and committed so a reader in a browser has one without running
 anything. `docs/README.md` says which document is for whom.
 
-**Still open:** splitting `docs/adr/` (one file per D-record) and `docs/experiments/`
-(by phase). Both are packaging of MAINTAINER documents, and both risk breaking the
-hundreds of in-repo cross-links that make the record system work — so they want a
-link-rewriting step, not a copy.
+**Done:** ARCHITECTURE, EXPERIMENTS, TASKS and ROADMAP moved into `docs/`, leaving
+README, GETTING_STARTED and CLAUDE at the root — the three a *reader* meets first.
+
+**The link-rewriting step this entry demanded was real and it found a pre-existing bug.**
+Every relative link in the repository was resolved and repaired mechanically, and the
+checker now reports **0 broken links across every tracked `.md`, `.hpp`, `.cpp`, `.sh`
+and `.py`**. Along the way it turned out that the doc links inside `include/bincv-cpp/ops/`
+had been wrong all along: `../../../ARCHITECTURE.md` from a file four levels deep resolves
+to `bincv-cpp/ARCHITECTURE.md`, which never existed. Those were broken before the move,
+and nobody had checked.
+
+**Not done, and now unnecessary:** splitting `docs/adr/` one-file-per-D-record. The
+records are cross-linked by anchor and the split would trade a working reference for a
+tidier directory listing.
 
 **The problem is audience, not length.** Every document in the repository is written for
 someone *building* binCV. A person who wants to *use* it has a README and
@@ -4373,6 +4399,8 @@ caught before they shipped. **Keep the substance; fix the packaging.**
 
 ### T6.5 · CI · `TODO — optional, and last`
 
+> **Tracked as [#16](https://github.com/ryanhou28/bincv/issues/16).** This entry is the historical spec; the issue is where the work happens.
+
 `verify.sh` runs when someone remembers. A workflow that runs it on push costs an
 afternoon and makes the repository *demonstrably* green rather than assertedly so.
 
@@ -4380,12 +4408,19 @@ afternoon and makes the repository *demonstrably* green rather than assertedly s
 reader — but a green badge is also the fastest signal to a stranger that the tests are
 real.
 
-### T6.6 · Where future work gets recorded · `TODO — decide, do not build`
+### T6.6 · Where future work gets recorded · `DONE — decided 2026-08-31`
 
 **A 3 687-line file that one person edits is not a backlog anyone else can read from**,
-so this needs an answer before the repository is shared — but it needs a *decision*, not
-an implementation. Nothing here should be built until someone other than the owner wants
-to pick something up.
+so this needed an answer before the repository was shared.
+
+**DECIDED AND DONE.** Open tasks and open E-records are now GitHub issues with labels;
+this file and ARCHITECTURE keep the completed record; **X-records stay in-tree**. The
+table below was the proposal and is now the shape.
+
+The one thing deliberately NOT migrated is the measurement log. 97 of its 105 records are
+closed evidence for published numbers, and an issue tracker is the wrong home for that:
+issues can be edited or deleted without trace, have no stable ordering, and the D-E-X
+cross-links would break. Evidence belongs beside the benchmark that produced it.
 
 | today | when there are contributors |
 |---|---|
@@ -4406,13 +4441,15 @@ the habit that makes the rest of the record trustworthy.
 architectures today, both measured: **`x86_64`** (POPCNT by default, AVX2 by runtime
 dispatch) and **`aarch64`** (NEON, the reference device).
 
-**A claim already outruns that.** [CMakeLists.txt](bincv-cpp/CMakeLists.txt) matches
+**A claim already outruns that.** [CMakeLists.txt](../bincv-cpp/CMakeLists.txt) matches
 `arm|aarch64|ARM|AARCH64` and probes `-mfpu=neon`, so **32-bit ARM is a code path
 nobody has compiled.** `verify.sh` is x86_64; `verify_arm.sh` is aarch64 under
 emulation; `run_on_pi.sh` is aarch64 hardware. **Nothing builds a 32-bit target**, and
 CLAUDE.md names Cortex-M in its first paragraph.
 
 ### T7.1 · 32-bit targets, and whether the Cortex-M claim holds · `TODO`
+
+> **Tracked as [#13](https://github.com/ryanhou28/bincv/issues/13).** This entry is the historical spec; the issue is where the work happens.
 
 **Four differences, none hypothetical:**
 
@@ -4438,6 +4475,8 @@ Cortex-M claim cannot be met, withdraw it from CLAUDE.md rather than leave it
 standing.**
 
 ### T7.2 · RISC-V · `TODO`
+
+> **Tracked as [#14](https://github.com/ryanhou28/bincv/issues/14).** This entry is the historical spec; the issue is where the work happens.
 
 **Depends:** T7.1 — the 32-bit work is most of it, and RV32 and RV64 differ the same
 way.

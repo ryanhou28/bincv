@@ -6,7 +6,7 @@
 ///        deliberately different numerics. NOT bit-exact against OpenCV, and no
 ///        such promise is available even in principle (see THE BOUNDARY below).
 ///
-/// This is [ARCHITECTURE 7.9](../../../ARCHITECTURE.md)'s **known hard problem**,
+/// This is [ARCHITECTURE 7.9](../../../../docs/ARCHITECTURE.md)'s **known hard problem**,
 /// and route **(b)** of the two it names. Lucas-Kanade warps its window to
 /// subpixel positions and bilinearly interpolates; that is continuous and does not
 /// bit-parallelize. Route (a) -- census/Hamming block matching at integer pixels,
@@ -503,7 +503,7 @@ namespace impl {
 /// reference device put roughly **45% of `track` OUTSIDE the iteration loop** —
 /// staging, the covariance, the clip — and nothing in this project had ever measured
 /// which of those it is. Guessing produced a 1.9% win and a 0.0% win before this was
-/// written; [X-67](../../../EXPERIMENTS.md)/[D-59](../../../ARCHITECTURE.md) is the
+/// written; [X-67](../../../../docs/EXPERIMENTS.md)/[D-59](../../../../docs/ARCHITECTURE.md) is the
 /// same lesson from the frontend's side.
 ///
 /// Nanoseconds, accumulated over every point and level. Four clock reads against a
@@ -762,7 +762,7 @@ inline long long slicedSignedSum(const WordType* maskedMag, WordType sign,
     // ===================================================================
     // NEON: THE PLANE-PAIR POPCOUNTS BATCHED INTO LANES (X-33, Phase 5.1).
     //
-    // This is [D-6](../../../ARCHITECTURE.md)'s reservation being cashed in.
+    // This is [D-6](../../../../docs/ARCHITECTURE.md)'s reservation being cashed in.
     // aarch64 has NO SCALAR POPCOUNT: `CNT` lives in the vector registers, so
     // every scalar `popcountWord` pays `fmov` in and `fmov` out. This call issues
     // `2N^2` of them -- EIGHT at N = 2, the depth three of four levels of the
@@ -1040,7 +1040,7 @@ inline bool stageWindow(const LKLevel<WordType>&, const RegionWords<WordType>&,
 /// **`levelCovariance` WALKS THE SAME WINDOW `stageWindow` HAS JUST FINISHED WALKING.**
 /// The staged buffer holds `magX`, `magY`, `signX`, `signY` per row — which is exactly
 /// and only what the covariance reads — so the second traversal of the level's planes
-/// is pure repetition. [X-83](../../../EXPERIMENTS.md) measured the covariance at
+/// is pure repetition. [X-83](../../../../docs/EXPERIMENTS.md) measured the covariance at
 /// **27.5% of `track` on the reference device**; this removes its memory traffic
 /// entirely and leaves the arithmetic reading a ~2 KB stack buffer.
 ///
@@ -1409,7 +1409,7 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
     // AND, `cnt`, byte-add.
     //
     // Six operations where there were eleven, and it is the same trick
-    // [X-80](../../../EXPERIMENTS.md) used to make the bit-plane FAST worth having.
+    // [X-80](../../../../docs/EXPERIMENTS.md) used to make the bit-plane FAST worth having.
     //
     // Sixteen byte accumulators — total and opposing for each of the four plane pairs,
     // twice for the two components — plus four for the previous-frame term. aarch64
@@ -2048,7 +2048,7 @@ inline GradientCovariance levelCovariance(const LKLevelN<N, WordType>& lv, Rect 
 ///        **INTERNAL.**
 ///
 /// **THIS WAS THE `parallelFor` LAMBDA AND IT IS UNCHANGED.** It was lifted out so
-/// that [X-79](../../../EXPERIMENTS.md)'s batched path has something to fall back
+/// that [X-79](../../../../docs/EXPERIMENTS.md)'s batched path has something to fall back
 /// TO: a window the batch cannot stage — wider than a word, or taller than
 /// `kLkBatchMaxRows` — must still be tracked, and tracked identically. Naming the
 /// body once is what keeps "identically" a property of the code rather than of two
@@ -2356,7 +2356,7 @@ struct LkLane {
 ///
 /// `[row][plane][lane]`: eight keypoints' words at the same row and plane are eight
 /// adjacent `uint32_t`, so a `__m256i` load fetches one word from each of eight
-/// keypoints. [X-61](../../../EXPERIMENTS.md) tried the other arrangement and lost --
+/// keypoints. [X-61](../../../../docs/EXPERIMENTS.md) tried the other arrangement and lost --
 /// its vector arithmetic won on operation count and its **gathers** gave the win back.
 /// The fix was never a better gather; it was arranging not to need one.
 template <size_t N, typename WordType>
@@ -2511,7 +2511,7 @@ inline GradientCovariance stagedCovarianceLane(const LkBatchArrays<N, WordType>&
 ///        refill**. **INTERNAL** (X-79, E-36).
 ///
 /// **THE REFILL IS THE DESIGN, NOT A REFINEMENT ON TOP OF IT.**
-/// [X-78](../../../EXPERIMENTS.md) counted the iteration distribution before any of
+/// [X-78](../../../../docs/EXPERIMENTS.md) counted the iteration distribution before any of
 /// this was written: **72.6% of point-levels finish in two iterations or fewer, and a
 /// 3.6% tail runs the cap of twenty.** Eight lanes in lockstep cost the MAXIMUM of
 /// eight draws from that distribution, which measured **5.20 against a mean of 3.24 --
@@ -3048,7 +3048,7 @@ inline void calcOpticalFlowPyrLK(const LKLevel<WordType>* levels, size_t levelCo
 /// **THIS IS THE ANSWER TO "WHY DOESN'T binCV SUPPORT 64-BIT WORDS IN THE TRACKER".**
 /// It does, now, at full speed — because it never needed 64-bit kernels, only a view.
 /// See `narrowPlane` for why the reinterpretation is exact, and
-/// [D-73](../../../ARCHITECTURE.md) for the 8.6× an integrator paid before it existed.
+/// [D-73](../../../../docs/ARCHITECTURE.md) for the 8.6× an integrator paid before it existed.
 template <size_t N, typename WordType>
 inline LKLevelN<N, uint32_t> narrowLevel(const LKLevelN<N, WordType>& lv) {
     static_assert(sizeof(WordType) == 8, "narrowLevel: the source level must be 64-bit");
@@ -3071,7 +3071,7 @@ inline LKLevelN<N, uint32_t> narrowLevel(const LKLevelN<N, WordType>& lv) {
 /// chooses — the word type — and on what the CPU turns out to support, and neither is
 /// visible from the outside. An integrator who chose a 64-bit word measured keypoint
 /// tracking 8.6× slower than it should have been and had nothing to look at that would
-/// have said so ([D-73](../../../ARCHITECTURE.md)).
+/// have said so ([D-73](../../../../docs/ARCHITECTURE.md)).
 ///
 /// Both shipped example programs print it on startup. Yours should too: it is one line,
 /// and it turns "is binCV actually using its fast path here?" from an investigation
@@ -3099,7 +3099,7 @@ inline const char* lkPathName() {
 ///       `sizeof(WordType) == 4`. A wider word is *correct* and lands in the scalar
 ///       fallback, silently, on both architectures.
 ///
-///       **That is not a hypothetical.** [D-45](../../../ARCHITECTURE.md) recorded the
+///       **That is not a hypothetical.** [D-45](../../../../docs/ARCHITECTURE.md) recorded the
 ///       gate and measured `uint64_t` at 1.32× slower on `track`; the record was true
 ///       and invisible at the point of use. An integrator building a VIO frontend
 ///       chose `uint64_t` — reasoning, correctly, that a wider word means fewer

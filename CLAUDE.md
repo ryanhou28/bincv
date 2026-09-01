@@ -17,11 +17,12 @@ hardware with a fraction of the memory of a byte-per-pixel pipeline.
 
 | | |
 |---|---|
-| [TASKS.md](TASKS.md) | **Start here.** Executable backlog; pick the lowest-numbered task whose deps are `DONE` |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Design and recorded decisions (D-1…D-9), open experiments (E-1…E-7) |
-| [EXPERIMENTS.md](EXPERIMENTS.md) | Measurement log — every result that informed a decision |
+| [GitHub Issues](https://github.com/ryanhou28/bincv/issues) | **START HERE.** All open work, labelled. `experiment` items carry a decision rule |
+| [docs/TASKS.md](docs/TASKS.md) | The COMPLETED record — 61 finished tasks and why. Not a backlog any more |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design and every recorded decision (D-records); open questions (E-records) link to their issue |
+| [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) | Measurement log — every result that informed a decision. **Stays in-tree: it is evidence, not discussion** |
 | [docs/MEASUREMENT_HARDWARE.md](docs/MEASUREMENT_HARDWARE.md) | Reference-device setup, and what works without it |
-| [ROADMAP.md](ROADMAP.md) | Phase structure and success criteria |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Phase structure and success criteria |
 | [GETTING_STARTED.md](GETTING_STARTED.md) | Build, test, benchmark, conventions |
 
 ## How performance and footprint decisions get made
@@ -36,7 +37,7 @@ footprint question; neither does a benchmark without a stated decision rule.
 - **Compare alternatives**, not one option, on representative workloads.
 - **Report memory and speed together** — they trade off, so one alone cannot be
   weighed against goals that conflict.
-- **Log it in [EXPERIMENTS.md](EXPERIMENTS.md)** and commit the measurement code.
+- **Log it in [EXPERIMENTS.md](docs/EXPERIMENTS.md)** and commit the measurement code.
 - **Promote the conclusion** to a D-record in ARCHITECTURE §8.
 
 Experiments run **in the phase whose code they gate**, never at the end. A
@@ -139,7 +140,7 @@ say so rather than working around it.
 ## Scope discipline
 
 The MVP is defined by what a binary-frame VIO frontend calls
-([ARCHITECTURE §7](ARCHITECTURE.md#7-the-mvp-operation-set)) — not by OpenCV's
+([ARCHITECTURE §7](docs/ARCHITECTURE.md#7-the-mvp-operation-set)) — not by OpenCV's
 table of contents. An operation no such pipeline calls is deferred, however
 prominent it is in OpenCV.
 
@@ -149,12 +150,12 @@ distance transform, contours, template matching.
 
 **DESCHEDULED is not the same thing, and GPU backends are DESCHEDULED.** A CUDA
 prototype is in `bincv-cuda/` and the view/storage model was chosen to keep a device
-backend possible ([ROADMAP](ROADMAP.md)). It is not being worked on and no task depends
+backend possible ([ROADMAP](docs/ROADMAP.md)). It is not being worked on and no task depends
 on it — that is all "descheduled" means. Do not write it up as out of scope, and do not
 delete it as though the project had rejected it.
 
 **The input boundary is a rule, not a list**
-([ARCHITECTURE §7.8](ARCHITECTURE.md#78-the-input-contract--where-the-operation-set-begins)):
+([ARCHITECTURE §7.8](docs/ARCHITECTURE.md#78-the-input-contract--where-the-operation-set-begins)):
 binCV accepts a **single-channel, integer-typed, strided pixel array** and turns it into
 an N-bit `QuantMat`. Getting to that array is the caller's. **An operation NOT ON THE PATH
 FROM PIXELS TO BITS is somebody else's** — decoding, demosaicing, colour conversion,
@@ -205,7 +206,7 @@ Surface the question rather than deciding, if:
 
 - A task spec is ambiguous or contradicts ARCHITECTURE.md
 - A decision is needed that isn't recorded in
-  [ARCHITECTURE §8](ARCHITECTURE.md#8-design-decisions)
+  [ARCHITECTURE §8](docs/ARCHITECTURE.md#8-design-decisions)
 - Something in scope turns out to be impossible as specified
 - **A measurement contradicts a documented claim** — this is valuable; report it
   rather than adjusting the code to fit the doc

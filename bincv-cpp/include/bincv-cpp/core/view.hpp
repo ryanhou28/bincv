@@ -180,7 +180,7 @@ inline BinMatView<WordType_>::operator BinMatConstView<WordType_>() const {
 /// `tests/test_view_narrow.cpp` checks it pixel by pixel rather than asserting it.
 ///
 /// **WHY IT EXISTS.** Every vectorised tracking kernel is gated on 32-bit words
-/// ([D-73](../../../ARCHITECTURE.md)) — the AVX2 keypoint batch and all four NEON
+/// ([D-73](../../../../docs/ARCHITECTURE.md)) — the AVX2 keypoint batch and all four NEON
 /// residual kernels — because an LK window is 31 pixels and a wider word is more than
 /// half idle. A caller who wants 64-bit words for the rest of their pipeline, where
 /// they genuinely halve the work, used to face a choice between that and a tracker

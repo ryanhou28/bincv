@@ -7,7 +7,7 @@ experiments. Nothing in the normal development loop depends on this — see
 **Why a separate device:** E-1, E-2 and E-3 are cache-hierarchy questions, and a
 laptop hides the effect they measure. A Pi 4's Cortex-A72 has 32 KiB L1D and 1 MiB
 shared L2, against roughly 128 KiB and 12 MiB on an M-series core. Full rationale
-in [EXPERIMENTS.md § Measurement platforms](../EXPERIMENTS.md#measurement-platforms).
+in [EXPERIMENTS.md § Measurement platforms](EXPERIMENTS.md#measurement-platforms).
 
 ---
 
@@ -51,7 +51,7 @@ straight to headless.
 
    **64-bit is a requirement, not a preference.** On 32-bit ARM every `uint64_t`
    operation is synthesised from 32-bit pairs, so
-   [E-2](../ARCHITECTURE.md#9-open-questions-and-planned-experiments) would measure
+   [E-2](ARCHITECTURE.md#9-open-questions-and-planned-experiments) would measure
    the compiler's 64-bit emulation instead of the hardware. `scripts/run_on_pi.sh`
    refuses to run on `armv7l` for this reason.
 
@@ -152,7 +152,7 @@ ssh bincv-pi 'sudo apt-get update && sudo apt-get install -y build-essential cma
 non-zero value means undervoltage or thermal throttling has occurred, and
 measurements taken in that state are invalid rather than merely slow.
 
-Then use the runner (see [T1.10](../TASKS.md)):
+Then use the runner (see [T1.10](TASKS.md)):
 
 ```bash
 ./scripts/run_on_pi.sh bincv-pi ./tests/test_binMat     # expect 261/261
@@ -173,7 +173,7 @@ tasks (T2.1–T2.7). These are correctness and structural work.
 
 **Measurable without it:** *every footprint result.* Allocated bytes are
 architecture-independent, so half of binCV's two co-equal goals can be developed
-and measured on any machine. [X-1](../EXPERIMENTS.md)'s footprint half already
+and measured on any machine. [X-1](EXPERIMENTS.md)'s footprint half already
 closed on x86.
 
 **Visible without it:** algorithmic wins. Bit-parallel versus per-pixel is a
@@ -183,13 +183,13 @@ validating the core approach.
 
 **Blocked:** Phase 4 validation and meaningful Phase 5 NEON work. (T2.8, T2.9 and
 T2.10 were blocked on this device too, and all three have now run on it —
-[X-9, X-10, X-11](../EXPERIMENTS.md). Their x86 pre-runs disagreed with the device
+[X-9, X-10, X-11](EXPERIMENTS.md). Their x86 pre-runs disagreed with the device
 on the sign of several rows, which is the case for the device in one line.)
 
 **Why the blocked set is small:** two architecture decisions insulate the
 structural work from the tuning results.
-[D-5](../ARCHITECTURE.md#d-5-views-are-core-not-an-add-on) gives kernels views with
+[D-5](ARCHITECTURE.md#d-5-views-are-core-not-an-add-on) gives kernels views with
 *runtime* stride, so changing the alignment default never touches a kernel.
-[D-1](../ARCHITECTURE.md#d-1-template-on-the-word-type-not-a-bit-count) templates
+[D-1](ARCHITECTURE.md#d-1-template-on-the-word-type-not-a-bit-count) templates
 on the word type, so changing the default word width never touches a kernel either.
 Both experiments can therefore land late without invalidating work already done.

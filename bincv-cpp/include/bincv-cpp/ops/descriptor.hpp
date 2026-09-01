@@ -19,7 +19,7 @@
 /// The test is `img[a] < img[b]` on the **grayscale** image, exactly as the reference
 /// implementations do it, because a comparison between two ONE-BIT pixels carries
 /// almost nothing. So this takes `SrcT` like the rest of the sensor stage
-/// ([ARCHITECTURE §7.8](../../../ARCHITECTURE.md)) and emits bits. The intermediate
+/// ([ARCHITECTURE §7.8](../../../../docs/ARCHITECTURE.md)) and emits bits. The intermediate
 /// byte never exists.
 ///
 /// ---------------------------------------------------------------------------
