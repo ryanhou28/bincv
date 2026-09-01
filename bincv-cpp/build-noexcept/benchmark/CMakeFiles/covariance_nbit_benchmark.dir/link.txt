@@ -1,1 +1,0 @@
-/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/covariance_nbit_benchmark.dir/covariance_nbit_benchmark.cpp.o -o covariance_nbit_benchmark

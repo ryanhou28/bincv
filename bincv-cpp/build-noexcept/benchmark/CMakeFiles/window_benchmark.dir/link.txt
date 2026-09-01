@@ -1,1 +1,0 @@
-/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/window_benchmark.dir/window_benchmark.cpp.o -o window_benchmark

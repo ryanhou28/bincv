@@ -1,6 +1,11 @@
-bincv-cuda/build/*
-bincv-cpp/build/*
+# Build trees, including the ones scripts/verify.sh creates for its four
+# configurations. 2 067 of these files were committed once; the glob is broad on
+# purpose so a new configuration cannot slip in the same way.
 build/
+build-*/
+*/build/
+*/build-*/
+cmake-build-*/
 
 # Benchmark output.
 bincv-cpp/results/
@@ -12,3 +17,6 @@ results/
 # reader of this library needs none of them.
 .local/
 bincv-cpp/experiments/
+
+# Written by test_opencv_interop, not read by it.
+bincv-cpp/tests/output/

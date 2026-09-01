@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/test_corner.dir/test_corner.cpp.o -o test_corner  /usr/lib/x86_64-linux-gnu/libgtest.a

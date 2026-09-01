@@ -1,1 +1,0 @@
-/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_subpix.dir/test_subpix.cpp.o -o test_subpix

@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/covariance_benchmark.dir/covariance_benchmark.cpp.o -o covariance_benchmark

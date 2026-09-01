@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/window_benchmark.dir/window_benchmark.cpp.o -o window_benchmark

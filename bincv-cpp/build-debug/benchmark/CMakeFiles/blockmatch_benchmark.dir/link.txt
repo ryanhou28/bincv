@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/blockmatch_benchmark.dir/blockmatch_benchmark.cpp.o -o blockmatch_benchmark

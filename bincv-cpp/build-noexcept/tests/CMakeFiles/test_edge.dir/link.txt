@@ -1,1 +1,0 @@
-/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_edge.dir/test_edge.cpp.o -o test_edge

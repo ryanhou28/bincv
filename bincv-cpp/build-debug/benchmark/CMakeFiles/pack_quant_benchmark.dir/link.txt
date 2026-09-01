@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/pack_quant_benchmark.dir/pack_quant_benchmark.cpp.o -o pack_quant_benchmark

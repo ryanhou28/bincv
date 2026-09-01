@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/wordwidth_benchmark.dir/wordwidth_benchmark.cpp.o -o wordwidth_benchmark

@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/test_subpix.dir/test_subpix.cpp.o -o test_subpix  /usr/lib/x86_64-linux-gnu/libgtest.a

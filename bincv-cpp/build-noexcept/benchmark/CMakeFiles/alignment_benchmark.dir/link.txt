@@ -1,1 +1,0 @@
-/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/alignment_benchmark.dir/alignment_benchmark.cpp.o -o alignment_benchmark

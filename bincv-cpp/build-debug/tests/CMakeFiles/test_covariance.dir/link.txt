@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/test_covariance.dir/test_covariance.cpp.o -o test_covariance  /usr/lib/x86_64-linux-gnu/libgtest.a

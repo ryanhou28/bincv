@@ -1,1 +1,0 @@
-/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/lk_initial_flow.dir/lk_initial_flow.cpp.o -o lk_initial_flow

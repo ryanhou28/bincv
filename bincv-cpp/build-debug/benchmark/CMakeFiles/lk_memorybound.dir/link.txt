@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/lk_memorybound.dir/lk_memorybound.cpp.o -o lk_memorybound

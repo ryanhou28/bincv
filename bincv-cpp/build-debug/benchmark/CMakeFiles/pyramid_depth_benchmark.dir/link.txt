@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/pyramid_depth_benchmark.dir/pyramid_depth_benchmark.cpp.o -o pyramid_depth_benchmark

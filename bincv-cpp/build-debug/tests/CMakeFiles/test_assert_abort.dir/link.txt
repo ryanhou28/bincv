@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/test_assert_abort.dir/test_assert_abort.cpp.o -o test_assert_abort

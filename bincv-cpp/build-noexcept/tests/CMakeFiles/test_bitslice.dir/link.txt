@@ -1,1 +1,0 @@
-/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_bitslice.dir/test_bitslice.cpp.o -o test_bitslice

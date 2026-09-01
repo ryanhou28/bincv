@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/lk_initial_flow.dir/lk_initial_flow.cpp.o -o lk_initial_flow

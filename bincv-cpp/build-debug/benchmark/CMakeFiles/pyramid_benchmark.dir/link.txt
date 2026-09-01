@@ -1,1 +1,0 @@
-/usr/bin/c++ -g CMakeFiles/pyramid_benchmark.dir/pyramid_benchmark.cpp.o -o pyramid_benchmark

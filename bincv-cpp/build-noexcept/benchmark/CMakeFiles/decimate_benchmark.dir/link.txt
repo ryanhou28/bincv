@@ -1,1 +1,0 @@
-/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/decimate_benchmark.dir/decimate_benchmark.cpp.o -o decimate_benchmark

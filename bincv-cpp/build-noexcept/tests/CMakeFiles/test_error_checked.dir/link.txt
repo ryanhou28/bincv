@@ -1,1 +1,0 @@
-/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_error_checked.dir/test_error_checked.cpp.o -o test_error_checked
