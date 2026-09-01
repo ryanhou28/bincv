@@ -143,9 +143,15 @@ The MVP is defined by what a binary-frame VIO frontend calls
 table of contents. An operation no such pipeline calls is deferred, however
 prominent it is in OpenCV.
 
-Out of scope, deliberately: quantized-NN/MAC-heavy workloads, geometry and
-estimation (RANSAC, PnP, IMU fusion), GPU backends, connected components,
+**Out of scope** — a different problem, not a later one: quantized-NN/MAC-heavy
+workloads, geometry and estimation (RANSAC, PnP, IMU fusion), connected components,
 distance transform, contours, template matching.
+
+**DESCHEDULED is not the same thing, and GPU backends are DESCHEDULED.** A CUDA
+prototype is in `bincv-cuda/` and the view/storage model was chosen to keep a device
+backend possible ([ROADMAP](ROADMAP.md)). It is not being worked on and no task depends
+on it — that is all "descheduled" means. Do not write it up as out of scope, and do not
+delete it as though the project had rejected it.
 
 **The input boundary is a rule, not a list**
 ([ARCHITECTURE §7.8](ARCHITECTURE.md#78-the-input-contract--where-the-operation-set-begins)):
