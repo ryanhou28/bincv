@@ -18,7 +18,7 @@ holding a fifth of the memory.
 | Hamming matching, kNN=2 | `cv::BFMatcher` | **4.72×** | 1.97× | — |
 | FAST, wide image | `cv::FAST` | 1.05× | 0.96× | — |
 | FAST, bit-plane | `cv::FAST` | **1.50×** | **2.37×** | 7.8× smaller input |
-| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` | **0.53×** | **0.53×** | 5.71× smaller |
+| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` | 0.92× | *pending* ‡‡ | 5.71× smaller |
 
 † `cv::ORB::compute` also computes orientation and rotates its pattern per keypoint. It is
 not a like-for-like comparison and is printed for scale rather than claimed.
@@ -26,6 +26,11 @@ not a like-for-like comparison and is printed for scale rather than claimed.
 ‡ The tracking benchmark measures time, not footprint. The 6.23× memory result is a
 whole-frontend figure and belongs to [frontend.md](frontend.md); it is not a per-call
 property of `calcOpticalFlowPyrLK`.
+
+‡‡ The corner detector's response kernel changed after the aarch64 numbers were taken —
+see [Corner detection](#corner-detection). The device figure would move with it, so the
+stale one is withdrawn rather than reprinted, and the row will be filled when the
+reference device is next free.
 
 ## Optical flow
 
@@ -115,31 +120,40 @@ a Tier 2 operation.
 
 ## Corner detection
 
-**binCV is about twice as slow here, and roughly five times smaller.**
+**binCV is slightly behind here — around 0.92× — and roughly five times smaller.**
 
-| variant | x86 ns/pixel | spread | aarch64 ns/pixel | spread | vs OpenCV | bytes/pixel |
-|---|---|---|---|---|---|---|
-| binCV | 26.060 | 35.7% | 140.457 | 0.08% | **0.53×** both | 16.54 |
-| OpenCV, binarized (the denominator) | 13.873 | 16.6% | 74.383 | 0.29% | 1.00× | 36.94 |
-| `cv::goodFeaturesToTrack` (stock, different numerics) | 12.977 | 47.6% | 57.799 | 0.48% | 1.07× / 1.29× | 29.00 |
+Both spellings, x86-64, at 640×480. The two return the same corners and are timed in the
+same interleaved run:
 
-Agreement is exact on both: 723 corners against 723, every position matching, worst
-displacement 0.00 px.
+| variant | ns/pixel | vs OpenCV | bytes/pixel |
+|---|---|---|---|
+| binCV, frame map | 14.72–15.96 | 0.85–0.97× | 16.54 |
+| binCV, streaming ring | 14.46–15.01 | 0.92–0.98× | **12.56** |
+| OpenCV, binarized (the denominator) | 13.63–14.24 | 1.00× | 36.94 |
+| `cv::goodFeaturesToTrack` (stock, different numerics) | 8.53 | 1.60× | 29.00 |
 
-The two architectures land on the same 0.53×, which is a stronger statement than either
-reading alone — this is a property of the operation rather than of one machine's dispatch.
+Agreement is exact against OpenCV: 723 corners against 723, every position matching, worst
+displacement 0.00 px. And the two binCV spellings agree with each other corner for corner,
+which the benchmark now asserts before it times anything.
 
-The trade is deliberate and it is the clearest example of the library's tie-break. OpenCV's
-detector materialises seven `float` planes — 28 bytes per pixel — to buy locality that binCV
-declines to buy, sweeping a three-row response ring instead. binCV holds 5.14 bytes per
-pixel at the measured survivor count against 29.35. The speed loss was accepted for that.
+**An earlier version of this report published 0.53× here, and that was wrong.** The number
+was real but it measured a path the library does not ship. `goodFeaturesToTrack` and
+`goodFeaturesToTrackStreaming` returned identical corners by contract but did not share a
+response kernel: the streaming form used bit-sliced 3×3 box sums, and the frame-map form had
+been left on the older per-position sweep when that kernel was written. Every frontend here
+calls the streaming form; the benchmark called the other one. They now share one kernel, and
+the frame-map form went from 26.06 to about 14.9 ns/pixel — the whole of the difference
+between "twice as slow" and "a little behind".
 
-Two qualifications. **The x86 spreads are wide** — 36% on binCV's own row, 48% on OpenCV's —
-so on that platform treat this as "roughly half speed" rather than as 0.53. The device rows
-have spreads of 0.08% to 0.48%, which is the difference between a quiet pinned single-purpose
-machine and a desktop under a hypervisor, and is a good reason to read the aarch64 column as
-the precise one throughout these reports. And detection is 11.5–14.5% of the frontend at this
-benchmark's duty cycle, so the end-to-end cost of the loss is small.
+The remaining gap is a deliberate trade and the clearest example of the library's tie-break.
+OpenCV's detector materialises seven `float` planes — 28 bytes per pixel — to buy locality
+binCV declines to buy, sweeping a three-row ring instead. binCV holds 5.14 bytes per pixel at
+the measured survivor count against 29.35.
+
+Two qualifications. **The spreads on this host are wide** — 5% to 63% on binCV's arms across
+runs, against 6–48% on OpenCV's — so read this as "roughly parity, slightly behind" rather
+than as three significant figures. And detection is 11.5–14.6% of the frontend at this
+benchmark's duty cycle, so the end-to-end cost is small either way.
 
 ## Reproduce
 

@@ -50,7 +50,7 @@ words, against the same binary content stored as `CV_8U`:
 | `goodFeaturesToTrack` | 1,580,064 B | 9,014,976 B | **5.71×** |
 | FAST input plane | 46,080 B | 360,960 B | **7.83×** |
 
-Three of those deserve the qualification they carry.
+Four of those deserve the qualification they carry.
 
 **`morphologyEx` is 5.33×, not 8×**, because binCV's fused kernel needs a caller-provided
 scratch frame — three frames live against OpenCV's two — where `erode` and `dilate` need
@@ -58,8 +58,15 @@ none. `cv::morphologyEx` allocates nothing of its own for `OPEN`, which was prob
 than assumed: the process high-water mark does not move around the call. Reporting 8× here
 would have been wrong by a factor of 1.5 on the number most likely to be quoted.
 
-**`goodFeaturesToTrack` is 5.71× at the measured survivor count and 2.23× when both sides
-are provisioned for their worst case.** Both are in [the log](logs/goodfeatures-x86_64.log);
+**`goodFeaturesToTrack` has two footprints, because it has two spellings.** Over the whole
+call at worst-case provisioning, the frame-map form holds 16.54 bytes per pixel and the
+streaming form 12.56 — the difference being a 1,228,800-byte response map against a
+7,680-byte three-row ring. Both return the same corners. The streaming form is what every
+frontend here calls, and it is the one the 6.23× whole-frontend figure above is built on.
+
+**Against the OpenCV denominator it is 5.71× smaller at the measured survivor count and 2.23×
+when both sides are provisioned for their worst case.** Both are in
+[the log](logs/goodfeatures-x86_64.log);
 the pessimistic one is the safer number to design against. The gap is the candidate array,
 which is a per-frame reading rather than a bound: a binarized min-eigenvalue map takes few
 distinct values, so large numbers of pixels tie and survive non-maximum suppression, and how

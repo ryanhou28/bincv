@@ -1,10 +1,10 @@
 # frontend -- x86-64
 # host:     AMD Ryzen 5 5600X 6-Core Processor
 # kernel:   5.15.167.4-microsoft-standard-WSL2
-# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
-# commit:   25065d7
+# compiler: c++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   83087b0
 # pinning:  taskset -c 2
-# date:     2026-09-01T12:02:51-07:00
+# date:     2026-09-01T16:28:32-07:00
 
 binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
 LK residual kernel: AVX2, eight keypoints per batch
@@ -39,21 +39,21 @@ both frontends see bit-identical input: median_filter then rl_fast_edge_filter_w
  RATIO : 6.23x smaller
 
 --- binCV per-stage, AT THE REAL DUTY CYCLE ---
- detect                          0.186 ms/frame  14.5% (82 detections in 1709 frames = 4.8%)
- track (LK)                      0.799 ms/frame  62.3%
- build (pyrDown + derivatives)    0.297 ms/frame  23.2%
-  ... sensor stage               0.118 ms/frame   9.2%
-  ... median                     0.067 ms/frame   5.2%
-  ... edge                       0.044 ms/frame   3.4%
-  ... pyrDown                    0.137 ms/frame  10.6%
-  ... derivatives                0.043 ms/frame   3.3%
+ detect                          0.179 ms/frame  14.6% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      0.778 ms/frame  63.5%
+ build (pyrDown + derivatives)    0.268 ms/frame  21.9%
+  ... sensor stage               0.102 ms/frame   8.3%
+  ... median                     0.060 ms/frame   4.9%
+  ... edge                       0.035 ms/frame   2.9%
+  ... pyrDown                    0.125 ms/frame  10.2%
+  ... derivatives                0.042 ms/frame   3.4%
 
  sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
 
 --- CRITERION 4: speed against the byte-per-pixel denominator ---
- binCV :    1.283 ms/frame
- OpenCV :    4.485 ms/frame
- RATIO : 3.50x
+ binCV :    1.226 ms/frame
+ OpenCV :    4.049 ms/frame
+ RATIO : 3.30x
  NOTE: OpenCV threads = 1 (binCV is single-threaded, always), and its
  LK and gftt are SIMD-vectorized.
  binCV has its AVX2 paths here -- the eight-keypoint LK batch,

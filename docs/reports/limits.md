@@ -81,13 +81,19 @@ done that work, binCV ties or loses.
 | `erode`, `BORDER_REPLICATE` | 0.64× | 0.72× | a rim pass `BORDER_CONSTANT` does not need |
 | `erode`, `BORDER_REFLECT_101` | 0.62× | 0.71× | the same |
 | `erode`, 3×3 rect | 1.04× | 1.00× | dead heat with a vectorised byte kernel |
-| `goodFeaturesToTrack` | **0.53×** | **0.53×** | seven float planes of locality binCV declines to buy |
+| `goodFeaturesToTrack` | 0.92× | *pending* | seven float planes of locality binCV declines to buy |
 | `countNonZero` | 1.62× | 2.69× | both sides are bandwidth-bound; binCV moves less data, that is all |
 
 Parity on FAST ships as parity. A caller who is holding bytes should not be told to pack
 them first, and for that caller the honest answer is that binCV costs nothing to adopt and
 gains nothing either. The [bit-plane overload](features.md#fast) is where the thesis actually
 applies, and it is 1.50× on x86 and 2.37× on the device.
+
+`goodFeaturesToTrack` is on this list at 0.92× rather than the 0.53× an earlier version of
+these reports published. That figure measured the frame-map spelling while it was still on an
+older response kernel than the streaming spelling every frontend here calls; the two now
+share one kernel. The aarch64 column is marked pending rather than reprinted, because the
+device figure was taken before that change and would move with it.
 
 ## 4. A footprint win is not a speed win
 

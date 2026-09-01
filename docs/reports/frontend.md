@@ -1,7 +1,7 @@
 # The frontend, end to end
 
 **Over 1709 consecutive frame pairs of EuRoC `V1_02_medium`, a binCV tracking frontend runs
-3.36× faster than the OpenCV equivalent on x86-64 and 4.73× faster on the reference device,
+3.30× faster than the OpenCV equivalent on x86-64 and 4.73× faster on the reference device,
 holding 6.23× less memory on both, with flow that agrees with OpenCV's to 0.0437 px at the
 median.**
 
@@ -43,7 +43,7 @@ AVX2 on x86, NEON against NEON on the device. The run prints both.
 
 | | binCV | OpenCV | ratio |
 |---|---|---|---|
-| **x86-64**, ms/frame | 1.134–1.283 | 3.841–4.485 | **3.36×** (conservative of four runs) |
+| **x86-64**, ms/frame | 1.134–1.283 | 3.841–4.485 | **3.30×** (conservative of five runs) |
 | **aarch64**, ms/frame | 4.906–4.949 | 23.249–23.451 | **4.73×** (conservative of three runs) |
 | **peak working set**, bytes | 436,704 | 2,719,832 | **6.23× smaller** |
 
@@ -52,7 +52,7 @@ architectures. The speed figures are not comparable across the two rows: they ar
 OpenCV builds on different machines, and the reference device is the one that carries a
 deployment claim.
 
-Four x86 runs span 3.36× to 3.50×, and almost all of that spread is OpenCV's: binCV's own
+Five x86 runs span 3.30× to 3.50×, and almost all of that spread is OpenCV's: binCV's own
 time moves 1.134 to 1.283 ms while OpenCV's moves 3.841 to 4.485. Three device runs span
 4.73× to 4.74× — a 0.2% spread, against the x86 box's 4% — which is what a pinned,
 governor-locked, single-purpose machine buys over a desktop under a hypervisor. The

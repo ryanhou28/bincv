@@ -8,7 +8,7 @@ was cut from is in [logs/](logs/).
 
 | report | what it covers | headline |
 |---|---|---|
-| [frontend.md](frontend.md) | a whole tracking frontend, end to end, over a real sequence | **3.36× / 4.73× faster, 6.23× smaller** |
+| [frontend.md](frontend.md) | a whole tracking frontend, end to end, over a real sequence | **3.30× / 4.73× faster, 6.23× smaller** |
 | [primitives.md](primitives.md) | logic, reductions, denoise, morphology, derivative, pyramid downsample | 1.0× to 58×, by operation |
 | [features.md](features.md) | corner detection, FAST, descriptors, matching, optical flow | **7.13× / 8.26×** on optical flow |
 | [footprint.md](footprint.md) | the memory result on its own, and the speed declined to protect it | **6.23×** over the frontend |
@@ -23,7 +23,7 @@ The whole result in one table — same commit, same sequence, one thread on each
 
 | | x86-64 | aarch64 |
 |---|---|---|
-| whole frontend, speed | **3.36×** | **4.73×** |
+| whole frontend, speed | **3.30×** | **4.73×** |
 | whole frontend, peak memory | **6.23× smaller** | **6.23× smaller** |
 | optical flow, LK against LK | 7.13× | 8.26× |
 | spatial derivative | 11.44× | 24.28× |
@@ -32,7 +32,7 @@ The whole result in one table — same commit, same sequence, one thread on each
 | `pyrDown`, 1 bit in | 1.56× | 5.56× |
 | `erode` 3×3 | 1.04× | 1.00× |
 | FAST, wide image | 1.05× | 0.96× |
-| `goodFeaturesToTrack` | 0.53× | 0.53× |
+| `goodFeaturesToTrack` | 0.92× | *pending* |
 | `erode`, 5×5 ellipse | 0.32× | 0.51× |
 
 ## What these are not
