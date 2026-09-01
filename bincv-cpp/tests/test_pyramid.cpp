@@ -1302,13 +1302,13 @@ BINCV_TEST(Pyramid, FilteredRoutesMatchAPerPixelReference_uint32_t) {
 // THE Box2x2 SPECIALIZATION IS THE SAME FUNCTION AS THE GENERIC ROUTE.
 //
 // pyrDownFiltered<Box2x2,..., Replicate> dispatches to impl::pyrDownRoute, the
-// hand-optimised box path, at 1.24x the generic route's speed. Two implementations
+// hand-optimized box path, at 1.24x the generic route's speed. Two implementations
 // of one function is a standing correctness liability, and this is what pays for it.
 //
 // ODD EXTENTS ARE THE WHOLE POINT. At even extents no Box2x2 tap ever leaves the
 // frame, so all three borders and both routes agree trivially and a test that used
 // only even sizes -- as this file's did -- proves nothing about the border at all.
-// Measured: at 63x47 the specialised route differs from Zero in 39 of 768 pixels and
+// Measured: at 63x47 the specialized route differs from Zero in 39 of 768 pixels and
 // from Reflect101 in 35, because it implements a THIRD rule, BORDER_REPLICATE.
 // ---------------------------------------------------------------------------
 namespace {
@@ -1324,7 +1324,7 @@ size_t checkBoxSpecializationAt(int sw, int sh) {
         }
     const int dw = (sw + 1) / 2, dh = (sh + 1) / 2;
     bincv::QuantMat<NOut, FilterWord> viaSpecial(dw, dh), viaGeneric(dw, dh);
-    // The unified API, which dispatches into the specialisation...
+    // The unified API, which dispatches into the specialization...
     bincv::pyrDownFiltered<bincv::PyrDownFilter::Box2x2, NOut, NIn, FilterWord,
                            bincv::PyrDownBorder::Replicate>(src, viaSpecial);
     //...against the per-pixel definition under the same border.

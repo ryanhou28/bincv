@@ -169,7 +169,7 @@ struct Ladder {
 /// **0.61x** of `1/1/1/1` -- FASTER with more bits -- while `1/2/2/1`, which only
 /// adds bits to a level with a sixteenth of the pixels, came out **twice as slow**
 /// as `1/2/1/1`. Neither ordering survives real content. A benchmark whose arms
-/// differ in convergence behaviour needs content whose convergence behaviour is
+/// differ in convergence behavior needs content whose convergence behavior is
 /// real; the build column never had this problem, because it is per-pixel.
 template <typename WordType, size_t... LevelBits>
 void seed(Ladder<WordType, LevelBits...>& lad, int w, int h) {

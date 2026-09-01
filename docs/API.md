@@ -84,7 +84,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `empty` | — | True if the matrix has no pixels |
 | `ownsMemory` | — | True if this matrix will free its storage |
 | `data` | — | First word of plane 0 |
-| `sizeInWords` | — | Total words backing ALL N planes: N * planeWords() |
+| `sizeInWords` | — | Total words backing ALL N planes: N * planeWords |
 | `planeWords` | — | Words in one plane: height * stride |
 | `plane` | — | Plane `i` as a mutable view, plane 0 being the LEAST significant bit |
 | `constPlane` | — | Plane `i` as a read-only view, from a NON-const matrix |
@@ -136,7 +136,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | | tier | |
 |---|---|---|
 | `ResponseMap` *(struct)* | 3 | A caller-owned, non-owning view of a `float` response map |
-| `ConstResponseMap` *(struct)* | — | The read-only spelling of ResponseMap (D-9's two-view-types rule) |
+| `ConstResponseMap` *(struct)* | — | The read-only spelling of ResponseMap (the design rule’s two-view-types rule) |
 | `Corner` *(struct)* | — | One detected corner: integer pixel coordinates and its response |
 | `GoodFeaturesParams` *(struct)* | — | The four parameters `goodFeaturesToTrack` takes, defaulted to the values the reference pipeline actually runs |
 | `CornerResult` *(struct)* | — | What `goodFeaturesToTrack` / `selectGoodFeatures` report back |
@@ -262,13 +262,13 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `cross` | — | `cv::getStructuringElement(MORPH_CROSS, {c, r}, anchor)` |
 | `ellipse` | — | `cv::getStructuringElement(MORPH_ELLIPSE, {c, r}, anchor)` |
 | `custom` | — | An arbitrary caller-owned mask; `m` must outlive the element |
-| `anchorCol` | — | The anchor column with OpenCV's `-1 == centre` resolved |
-| `anchorRow` | — | The anchor row with OpenCV's `-1 == centre` resolved |
+| `anchorCol` | — | The anchor column with OpenCV's `-1 == center` resolved |
+| `anchorRow` | — | The anchor row with OpenCV's `-1 == center` resolved |
 | `activeAt` | — | True when cell (col, row) is part of the element |
 | `spanOfRow` | — | The half-open column range `[first, last)` of row `row` that MAY be set: exact for the parametric shapes, `[0, cols)` for a mask |
-| `spanIsDense` | — | True when every cell inside `spanOfRow()` is set, so a kernel that iterates the span needs no per-cell test at all |
+| `spanIsDense` | — | True when every cell inside `spanOfRow` is set, so a kernel that iterates the span needs no per-cell test at all |
 | `valid` | — | Extents positive, anchor inside the element, at least one set cell |
-| `rect3x3` | — | The 3x3 rectangle -- `cv::Mat()` passed to `cv::erode`, i.e |
+| `rect3x3` | — | The 3x3 rectangle -- `cv::Mat` passed to `cv::erode`, i.e |
 | `cross3x3` | — | The 3x3 plus -- what BOTH `MORPH_CROSS` and `MORPH_ELLIPSE` give at 3x3 |
 | `MorphPath` *(enum)* | — | Which implementation `morphApply` may take |
 | `MorphFold` *(struct)* | — | The combining operation and its identity, as a compile-time choice |
@@ -277,12 +277,12 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `morphFixupPixel` | — | One destination pixel, recomputed from the whole element with every source coordinate mapped through `borderIndex` |
 | `morphFixupRowBorder` | — | Rewrites the destination columns whose source column can leave the row, one pixel at a time, for the four NON-CONSTANT border types |
 | `morphRowGeneric` | — | One destination row, general element |
-| `morphRow3x3` | — | One destination row, 3x3 element anchored at its centre |
+| `morphRow3x3` | — | One destination row, 3x3 element anchored at its center |
 | `morphApply` | — | erode (IsErode) or dilate, whole image |
 | `morphArgumentsAreSane` | — | The preconditions `erode` and `dilate` share, in one place |
 | `erode` | 1 | Morphological erosion: `dst(x,y) = AND over the element of src(x+dx, y+dy)` |
 | `dilate` | 1 | Morphological dilation: `dst(x,y) = OR over the element of src(x+dx, y+dy)` |
-| `morphologyExNeedsScratch` | — | True when `morphologyEx(op, ...)` reads and writes its scratch view |
+| `morphologyExNeedsScratch` | — | True when `morphologyEx(op,...)` reads and writes its scratch view |
 | `morphologyEx` | 1 | The seven `MorphOp` compositions |
 
 ## `ops/occupancy.hpp`
@@ -317,7 +317,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `TapSums` *(struct)* | — | The five integer sums one gradient component's residual needs |
 | `combine` | — | `w00*t00 + w01*t01 + w10*t10 + w11*t11 - self` |
 | `floorToLL` | — | `floor(v)` as a `long long`, for a value already known to be finite and within the frame's range |
-| `IterationTrace` *(struct)* | — | X-78's iteration counter |
+| `IterationTrace` *(struct)* | — | that measurement’s iteration counter |
 | `windowFitsAtLevel` | — | Is point `p`'s window entirely inside level `li`? |
 | `entryLevelFor` | — | The coarsest usable level whose window contains point `p`, or 0 |
 | `calcOpticalFlowPyrLK` | 2 | Pyramidal Lucas-Kanade tracking of sparse keypoints between two binary frames |
@@ -397,7 +397,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | | tier | |
 |---|---|---|
 | `SplitCount` *(struct)* | — | The two halves of a split count: pixels where the selector `c` was clear, and pixels where it was set |
-| `crossTerm` | — | The LK cross term: `whenClear - whenSet`, signed (ARCHITECTURE 7.5) |
+| `crossTerm` | — | The LK cross term: `whenClear - whenSet`, signed (the design notes) |
 | `CovarianceCount` *(struct)* | 3 | The four numbers of a 2x2 gradient covariance over one region: popcount(a), popcount(b), and the split of `a & b` by the selector |
 | `RegionWords` *(struct)* | — | A region clipped to a view, expressed in the words a row loop walks |
 | `regionFromExtent` | — | Region geometry from an already-clipped, non-empty pixel extent |
@@ -425,8 +425,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `decimatedWidth` | 3 | Destination width for a horizontal decimation by two |
 | `rowsDecimatedBy2` | 3 | The FREE half of a 2x2 subsample: every other row, as a view |
 | `checkDecimateArgs` | — | The shape and aliasing contract every decimation kernel here shares |
-| `decimateColumnsBy2Gather` | — | E-8 variant A: horizontal decimation one destination pixel at a time |
-| `decimateColumnsBy2FrameMasked` | — | E-8 variant C: horizontal decimation as a big-integer unshuffle |
+| `decimateColumnsBy2Gather` | — | variant A: horizontal decimation one destination pixel at a time |
+| `decimateColumnsBy2FrameMasked` | — | variant C: horizontal decimation as a big-integer unshuffle |
 | `decimateColumnsBy2` | 3 | Horizontal decimation by two: `dst(y, j) = src(y, 2j)` |
 
 ## `ops/shift.hpp`

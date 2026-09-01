@@ -98,7 +98,7 @@ constexpr PackCmp toPackCmp() {
 /// reading a sensor over DMA gets **rows as they arrive** and may not have RAM for a
 /// whole frame -- the footprint argument that justifies binCV is the same argument
 /// that says it cannot buffer one. This consumes a line buffer of any height, so a
-/// caller can pack as the frame streams in and never materialise it.
+/// caller can pack as the frame streams in and never materialize it.
 ///
 /// `packBits` is a call to this with `dstRow = 0` and every row at once.
 ///
@@ -154,8 +154,8 @@ inline void packBits(const SrcT* src, size_t width, size_t height, size_t srcStr
 //
 // AND THE POLICY WAS HARD-CODED, TWICE, INCONSISTENTLY: `BinMat::fromCVMat` reads any
 // nonzero byte as 1, `QuantMat<N>::fromCVMat` scales with `round(v * MaxValue / 255)`.
-// A caller wanting a mid-grey split or a non-monotonic map had to convert and then
-// re-quantise -- two passes and an 8-bit intermediate that this library exists to
+// A caller wanting a mid-gray split or a non-monotonic map had to convert and then
+// re-quantize -- two passes and an 8-bit intermediate that this library exists to
 // avoid.
 // ===========================================================================
 
@@ -190,7 +190,7 @@ inline bool hasPackQuantSimd() {
     return kYes && packQuantSimdEnabled();
 }
 
-/// @brief Thirty-two pixels quantised and transposed into N plane words. **INTERNAL.**
+/// @brief Thirty-two pixels quantized and transposed into N plane words. **INTERNAL.**
 /// @param bits `out[p]` receives plane `p`'s thirty-two bits, LSB = lowest x, which is
 /// `bitMask(x) = 1 << (x % WordBits)` -- the same convention relies on, so
 /// `movemask_epi8`'s result IS the word with no shuffle.
@@ -256,7 +256,7 @@ inline void quantMask32(const uint8_t* src, const uint8_t* thresholds, unsigned 
 
 /// @brief Packs a pixel array to **N bits per pixel**, no OpenCV. **API TIER 3.**
 ///
-/// @tparam R The quantisation rule, at compile time --
+/// @tparam R The quantization rule, at compile time --
 /// measured a runtime flag in a hot loop costing 17%, and this one is hotter.
 /// @param dst The N destination planes, LSB first, exactly `QuantMat<N>::plane(i)`.
 /// **Views, not the container** (CLAUDE.md): a kernel must not care how its

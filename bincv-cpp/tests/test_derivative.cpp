@@ -213,7 +213,7 @@ int referenceTap(const Frame& f, int y, int x, bool horizontal, int offset, Bord
 
 /// @brief The reference derivative: RIGHT/BELOW tap minus LEFT/ABOVE tap.
 /// @note This one line is the correlation direction. cv::filter2D with the anchor
-/// at the centre computes exactly it (Derivative.OpenCvFilter2D_Direction
+/// at the center computes exactly it (Derivative.OpenCvFilter2D_Direction
 /// pins that), and a convolution would compute its negation.
 int referenceDeriv(const Frame& f, int y, int x, bool horizontal, BorderType type,
                    bool borderValue) {

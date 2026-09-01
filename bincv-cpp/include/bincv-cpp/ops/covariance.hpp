@@ -127,7 +127,7 @@
 /// accuracy tolerance on the reference pipeline's own edge-map content, and
 /// separated the causes: on the windows that never clip, four 1-BIT pyramid levels
 /// are still ~600x worse than one, because a level whose pixels are BITS cannot
-/// localise sub-pixel motion better than its own quantisation and that error is
+/// localise sub-pixel motion better than its own quantization and that error is
 /// multiplied by 2^level on the way down. a measurement had already measured the levels
 /// needing 1/3/4/5 bits -- a frame statistic superseded with the alphabet the
 /// arithmetic can REACH, 1/3/5/7. So the fix is N-bit levels -- and before earlier work binCV
@@ -276,7 +276,7 @@
 /// so N is in the type there and the same mistake does not compile. Hand
 /// assembly of the five-argument form is for a ternary level only.
 /// 2. **Windows are CLIPPED, not rejected** (, and ops/reduce.hpp's region
-/// contract). A 31x31 window centred on a keypoint within 15 pixels of an edge
+/// contract). A 31x31 window centerd on a keypoint within 15 pixels of an edge
 /// is out of range, and every LK frontend has such keypoints. The window is
 /// intersected with the image; the pixels that exist contribute and the rest
 /// do not. A window wholly outside gives `{0, 0, 0}`, which is a value and not
@@ -336,7 +336,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// `((sumXX + sumYY) - sqrt((sumXX - sumYY)^2 + 4*sumXY^2)) / 2`, in which
 /// `sumXX - sumYY` is negative for half the windows in any real frame. Typed
 /// as counts, that subtraction is `size_t` arithmetic and wraps to ~1.8e19
-/// silently -- unsigned wraparound is defined behaviour, so `-Wconversion
+/// silently -- unsigned wraparound is defined behavior, so `-Wconversion
 /// -Wsign-conversion -Werror` does not diagnose it. `SplitCount::crossTerm`
 /// exists for exactly this hazard one level down (ops/reduce.hpp); this
 /// struct is the same defence applied to the whole matrix, by making the

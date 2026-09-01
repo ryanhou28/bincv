@@ -304,7 +304,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// **0.0010 px over the 58 that never clip**.
 enum class LKEntryLevel {
     /// Every point enters at the coarsest usable level. **What ships**, and the
-    /// reference's behaviour given a padded pyramid it always has enough of.
+    /// reference's behavior given a padded pyramid it always has enough of.
     Coarsest,
     /// A point enters at the coarsest level whose window lies **fully inside that
     /// level**, and is not tracked above it. Costs **no memory and no keypoints**:
@@ -321,7 +321,7 @@ struct LKParams {
     float minEigThreshold = 0.001f;  ///< IN THE REFERENCE'S UNITS; see UNITS above
 
     /// Which level each keypoint enters the pyramid at (earlier work). Defaults to
-    /// the shipped behaviour; nothing changes unless a caller asks for it.
+    /// the shipped behavior; nothing changes unless a caller asks for it.
     LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
 
     /// @brief Start each point's search from the estimate already in `nextPts`
@@ -335,7 +335,7 @@ struct LKParams {
     ///
     /// @note **`nextPts` becomes an INPUT as well as an output** when this is set, and
     /// is read in FULL-RESOLUTION frame coordinates, exactly as `prevPts` is.
-    /// The tracker scales it into each level itself. An uninitialised `nextPts`
+    /// The tracker scales it into each level itself. An uninitialized `nextPts`
     /// under this flag is not a small error: it seeds every search from garbage.
     /// @note The window in the PREVIOUS frame is still anchored at `prevPts`. Only the
     /// starting estimate for the NEXT frame moves -- which is what the flag means
@@ -550,7 +550,7 @@ constexpr double kCentralDifferenceScale = 2.0;
 /// @brief binCV's integer minimum eigenvalue, in the units the reference's
 /// `minEigThreshold` is quoted in: `(16*255)^2 / 2^20`.
 /// @note Written as the quotient of the two integers it comes from, so that a
-/// reader can check the derivation rather than recognise 15.875244140625.
+/// reader can check the derivation rather than recognize 15.875244140625.
 constexpr double kReferenceMinEigScale = (16.0 * 255.0) * (16.0 * 255.0) / 1048576.0;
 
 /// @brief `kReferenceMinEigScale` at an arbitrary bit depth.
@@ -1147,7 +1147,7 @@ struct RowOperands {
     const WordType* magY;
     WordType signX;
     WordType signY;
-    WordType tapScratch[N][4];   ///< where the unstaged path materialises them
+    WordType tapScratch[N][4];   ///< where the unstaged path materializes them
     WordType scratch[3][N];
 };
 
@@ -1162,7 +1162,7 @@ struct RowOperands {
 ///
 /// @tparam Staged Compile-time, NOT a runtime pointer test. a measurement measured a single
 /// body branching on `staged != nullptr` per row costing **17% of `track` on
-/// x86**: the compiler stops specialising the row loop. Two instantiations of
+/// x86**: the compiler stops specializing the row loop. Two instantiations of
 /// one source is the price of that 17%.
 template <size_t N, typename WordType, bool Staged>
 class RowReader {
@@ -2297,7 +2297,7 @@ struct IsLevelN : std::false_type {};
 template <size_t N, typename WordType>
 struct IsLevelN<LKLevelN<N, WordType>> : std::true_type {};
 
-/// @brief Does this level reach a VECTORISED residual kernel? **Public, and
+/// @brief Does this level reach a VECTORIZED residual kernel? **Public, and
 /// queryable** — `bincv::lkVectorPath<LevelT>`.
 ///
 /// True when the level is an `LKLevelN` at depth 1 or 2 with `uint32_t` words: those
@@ -2330,7 +2330,7 @@ inline constexpr bool kBatchableLevel = IsLevelN<T>::value && (T::Bits == 1 || T
 
 /// @brief One lane's tracking state. **INTERNAL**.
 /// @note Everything here is per-KEYPOINT and scalar, and it stays scalar on purpose.
-/// Only the ten window sums are vectorised; the 2x2 solve, the tap split, the
+/// Only the ten window sums are vectorized; the 2x2 solve, the tap split, the
 /// convergence test and the oscillation rule are computed in `double` exactly as
 /// `trackOnePoint` computes them. **That is what makes the batch bit-exact rather
 /// than merely close** -- there is no second spelling of the floating-point
@@ -2664,7 +2664,7 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
         if (!any) break;
 
         // PER-LANE, SCALAR: the range test and the tap split, both of which are
-        // per-keypoint float arithmetic and neither of which is worth vectorising.
+        // per-keypoint float arithmetic and neither of which is worth vectorizing.
         size_t rowsMax = 0;
         bool lost = false;
         for (size_t L = 0; L < kLkBatchLanes; ++L) {
@@ -2905,7 +2905,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
 
     // Written BEFORE the degenerate exit below, not after it: "every entry is
     // written" is the documented contract, and a caller that reads `status` after
-    // a zero-level call must not be reading its own uninitialised buffer.
+    // a zero-level call must not be reading its own uninitialized buffer.
     for (size_t i = 0; i < pointCount; ++i) {
         status[i] = 1;
         if (err != nullptr) err[i] = 0.0f;
@@ -3094,7 +3094,7 @@ inline const char* lkPathName() {
 }
 
 /// @note **THIS REFUSES TO COMPILE AT DEPTH 1 OR 2 WITH A WORD WIDER THAN 32 BITS**,
-/// and the diagnostic names the fix. Those depths have vectorised kernels — the
+/// and the diagnostic names the fix. Those depths have vectorized kernels — the
 /// AVX2 eight-keypoint batch and four NEON residual kernels — all gated on
 /// `sizeof(WordType) == 4`. A wider word is *correct* and lands in the scalar
 /// fallback, silently, on both architectures.
@@ -3120,7 +3120,7 @@ inline void calcOpticalFlowPyrLK(const LKLevelN<N, WordType>* levels, size_t lev
                                  const LKParams& params = LKParams()) {
 #ifndef BINCV_ALLOW_SCALAR_LK_WORD
     static_assert(!impl::kLkWordMissesVectorPath<LKLevelN<N, WordType>>,
-                  "binCV: this pyramid depth has vectorised tracking kernels, but they "
+                  "binCV: this pyramid depth has vectorized tracking kernels, but they "
                   "are gated on 32-bit words. IF YOUR STORAGE IS 64-BIT, CALL "
                   "bincv::narrowLevel(level) -- it is a view, not a copy, and the "
                   "kernels then apply at full speed. Otherwise use uint32_t "

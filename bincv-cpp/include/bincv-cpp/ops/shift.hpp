@@ -33,7 +33,7 @@
 /// | (src[i + wordShift + 1] << (WordBits - bitShift))
 ///
 /// **`bitShift == 0` IS A SEPARATE BRANCH BECAUSE `x << WordBits` IS UNDEFINED
-/// BEHAVIOUR.** Not merely wrong -- undefined, and on x86 the natural encoding
+/// BEHAVIOR.** Not merely wrong -- undefined, and on x86 the natural encoding
 /// masks the shift count and yields `x` where the algebra wants 0, so the bug
 /// survives every test written at k = 1 and appears the first time a caller shifts
 /// by exactly one word. tests/test_shift.cpp sweeps k from 0 through 2*WordBits+1
@@ -193,7 +193,7 @@ inline bool isKnownBorderType(BorderType type) {
 /// @param type One of the five BorderType values.
 ///
 /// @note **This function is the Tier 1 promise.** Every downstream neighbourhood
-/// operation's border behaviour is this mapping and nothing else, so it is
+/// operation's border behavior is this mapping and nothing else, so it is
 /// compared directly against cv::borderInterpolate in tests/test_shift.cpp
 /// rather than only through the images built on it.
 /// @note Closed form rather than OpenCV's `do {... } while (p out of range)`. The
@@ -274,7 +274,7 @@ inline void fillRowWords(WordType* dstRow, size_t rowWords, WordType value, Word
 /// word operation, and the source's own bit alignment never has to match the
 /// destination's.
 /// @note Deliberately NOT split into a bounds-check-free interior loop and two
-/// edge loops. That is the obvious optimisation and it is Phase 5's business
+/// edge loops. That is the obvious optimization and it is Phase 5's business
 /// (: "correct scalar first"); the branch inside
 /// extendedRowWord is perfectly predictable and the alternative doubles the
 /// number of index expressions that can be off by one.

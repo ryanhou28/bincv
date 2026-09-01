@@ -345,7 +345,7 @@
 #               `thresh + 1` wraps                 33072 -- WideCutoff ONLY
 #             The last row is the one worth reading, and it is a case that had to
 #             be ADDED for the guard to have any. That shortcut is not an
-#             optimisation: without it `thresh + 1` wraps to 0 at UINT_MAX and
+#             optimization: without it `thresh + 1` wraps to 0 at UINT_MAX and
 #             thresholdGE answers EVERY LANE, so the threshold that should select
 #             least of all returns an all-ones image. No ordinary sweep reaches a
 #             threshold that can wrap, so Threshold.BinarizeSaturated_* now
@@ -442,7 +442,7 @@
 #
 #             THE SIGN ROWS ARE THE POINT OF THE ASYMMETRIC ELEMENTS, and that is
 #             a measurement rather than an argument. All three parametric shapes
-#             are point-symmetric about their centre, so at the default anchor the
+#             are point-symmetric about their center, so at the default anchor the
 #             offset set satisfies E == -E and negating every offset changes
 #             nothing. The 53016 checks the all-at-once flip fails decompose
 #             EXACTLY, by the check family that reported them:
@@ -453,10 +453,10 @@
 #                   128  a wide element -- the fallback recurrence
 #                 -----
 #                 53016
-#             and NOT ONE of them names a centred rect, cross or ellipse: the only
+#             and NOT ONE of them names a centerd rect, cross or ellipse: the only
 #             parametric elements that appear in a failure label are rect3x3@(0,0),
-#             ellipse5x5@(0,4) and cross5x5@(4,1), every one off-centre. A suite of
-#             rect and cross at centred anchors would have passed the flip
+#             ellipse5x5@(0,4) and cross5x5@(4,1), every one off-center. A suite of
+#             rect and cross at centerd anchors would have passed the flip
 #             5040/5040 -- measured directly, before this suite existed.
 #
 #             THE FALLBACK ROW HAD TO BE EARNED TWICE. The fallback recurrence --
@@ -472,7 +472,7 @@
 #               * Its offset SIGN then survived too, 298541/298541, and that was
 #                 found in T3.3's review rather than by its author. Both families
 #                 reaching the fallback were point-symmetric about their anchor:
-#                 the rects were centred, and the sparse mask's cells sat at
+#                 the rects were centerd, and the sparse mask's cells sat at
 #                 {0, half, cols-1} around an anchor at half. Anchoring the wide
 #                 rects at column 0 and at column `size - 1` as well makes the
 #                 offset set {0..size-1} and {-(size-1)..0}, and the mutation now
@@ -545,7 +545,7 @@
 #             ddepth and its *= 16) compared at every pixel after the scale is
 #             divided out, the same comparison for N-bit sources where
 #             cv::filter2D on CV_8U VALUES needs no scale at all, and the two
-#             probes that pin cv::filter2D's own behaviour: that it CORRELATES
+#             probes that pin cv::filter2D's own behavior: that it CORRELATES
 #             (dst(x) = src(x+1) - src(x-1)) and that its default border is
 #             BORDER_REFLECT_101 rather than zero. Those two probes are the ones
 #             to protect. Both properties would differ SILENTLY -- a reversed
@@ -700,7 +700,7 @@
 #             **THAT LAST ONE IS DELIBERATELY REVERSED BY T3.10.** The container
 #             spelling now ACCEPTS SignedQuantMat<N> for N > 1 and dispatches to the
 #             bit-sliced kernel, because X-20 made an N-bit level a precondition
-#             rather than a future generalisation. What replaced the rejection check
+#             rather than a future generalization. What replaced the rejection check
 #             is a dispatch check: both container overloads exist, and the N-bit
 #             VIEW form takes plane ARRAYS so that a loose view and a
 #             wrong-length array both fail to compile -- the promise the

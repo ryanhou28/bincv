@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
         const int half = win / 2;
         double sumStates = 0, sumSet = 0, sumSqErr = 0, maxErr = 0, sumInterval = 0;
         size_t windows = 0, samples = 0;
-        // A grid of window centres, stepped so the windows are near-independent.
+        // A grid of window centers, stepped so the windows are near-independent.
         for (int cy = half + 20; cy + half < gray.rows - 20; cy += 37) {
             for (int cx = half + 20; cx + half < gray.cols - 20; cx += 41) {
                 const cv::Rect r(cx - half, cy - half, win, win);

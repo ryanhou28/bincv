@@ -223,7 +223,7 @@ void testReference(const char* wordTypeName) {
 // ===========================================================================
 //
 // Section 1 would catch a wrong border -- it checks every pixel -- but it would
-// report it as "1920 pixels differ" in a case labelled by size, and the two edges
+// report it as "1920 pixels differ" in a case labeled by size, and the two edges
 // fail for different reasons. These cases isolate them, on content constructed so
 // that a REPLICATE or REFLECT border gives a different answer from a zero one.
 //
@@ -513,7 +513,7 @@ void testDisjointViewsAccepted(const char* wordTypeName) {
         // whole STRIDE, and this view's stride spans the interleaved source rows
         // -- another view's live pixels, not padding. Counting them would report a
         // violation that is the test's construction rather than the kernel's
-        // behaviour. The padding invariant is asserted over ordinary views by
+        // behavior. The padding invariant is asserted over ordinary views by
         // every other family in this file; what this case exists to check is that
         // the predicate ACCEPTS the view at all (a bounding-box test would
         // abort the Debug build here).

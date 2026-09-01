@@ -2,7 +2,7 @@
 //
 // ops/denoise.hpp already implements this neighbourhood for BINARY input, where the
 // median collapses to maj3. But the reference filters the GRAYSCALE image before
-// binarisation -- SEALProcessor.cpp runs three_pix_median_filter(img) and only then
+// binarization -- SEALProcessor.cpp runs three_pix_median_filter(img) and only then
 // rl_fast_edge_filter_wide -- so a binary-only median cannot sit where the reference
 // puts it. This is the wide-input form and the caller-chosen neighbourhood.
 //

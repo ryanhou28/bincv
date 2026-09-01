@@ -259,7 +259,7 @@ double field(double x, double y) {
          + 0.4 * std::sin(x / 3.1) * std::sin(y / 3.7);
 }
 
-/// @brief An affine warp about a centre: `A (z - c) + c + t`.
+/// @brief An affine warp about a center: `A (z - c) + c + t`.
 struct Warp {
     double m00 = 1.0, m01 = 0.0, m10 = 0.0, m11 = 1.0;
     double tx = 0.0, ty = 0.0;
@@ -700,7 +700,7 @@ FlowStats measure(const std::vector<Point2f>& prevPts, const std::vector<Point2f
 
         // T3's second half. Both quantities are of the POINT, not of the frame:
         // under a rotation or a scale the ground-truth displacement is near zero
-        // at the centre of the image and large at its corners, so "did truth
+        // at the center of the image and large at its corners, so "did truth
         // move" has to be asked per point.
         const double tx = gx - static_cast<double>(prevPts[i].x);
         const double ty = gy - static_cast<double>(prevPts[i].y);
@@ -957,7 +957,7 @@ constexpr int kH = 240;
 /// @brief `three_pix_median_filter`, ported line for line from
 /// `SEAL/src/temporal_processing/denoise.cpp`. **STAGE ONE of the reference
 /// preprocessing, and it was missing from this file until 2026-08-21.**
-/// @note p1 is the pixel ABOVE, p2 the centre, p3 the pixel to the RIGHT:
+/// @note p1 is the pixel ABOVE, p2 the center, p3 the pixel to the RIGHT:
 /// `median = max(min(p1,p2), min(max(p1,p2), p3))`. Borders are ZERO-filled,
 /// which is what the reference's `cv::Mat::zeros` + `copyTo` does -- not a
 /// replicate or a reflect, and the difference shows on the first row and the
@@ -1674,7 +1674,7 @@ BINCV_TEST(Flow, LossRules_uint32_t) {
 
     // Degenerate arguments are values, not errors -- AND EVERY OUT ENTRY IS
     // WRITTEN, which is the documented contract. A zero-level call used to return
-    // before the initialisation loop, leaving `status` and `err` holding whatever
+    // before the initialization loop, leaving `status` and `err` holding whatever
     // the caller's buffer held; the poison below is what makes that visible
     // rather than accidentally-correct on a zeroed vector.
     {
@@ -2040,7 +2040,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     // The 16 B of carry the streaming form keeps for the two GLOBAL properties -- a
     // running maximum, a running retained count and the strongest discarded
     // response -- is NOT on the heap and therefore cannot appear in the reading. It
-    // is added to the attributed total explicitly and labelled as the one term here
+    // is added to the attributed total explicitly and labeled as the one term here
     // that is counted rather than read, because a measurement said every byte of carry comes
     // off the saving and rounding it away would be the easy lie.
     const std::size_t streamCarryBytes = 2 * sizeof(float) + sizeof(std::size_t);
@@ -2226,7 +2226,7 @@ namespace {
 /// @note Deliberately naive and deliberately NOT bit-sliced: it reads pixel
 /// VALUES through QuantMat::at and multiplies them. It reproduces
 /// displacedRow's BORDER_REPLICATE by clamping, which is the one piece of
-/// the kernel's behaviour a per-pixel control still has to model.
+/// the kernel's behavior a per-pixel control still has to model.
 template <size_t N, typename WordType>
 unsigned replicatedAt(const bincv::QuantMat<N, WordType>& m, long long x, long long y) {
     if (x < 0) x = 0;
@@ -2457,7 +2457,7 @@ BINCV_TEST(Flow, X79_KeypointBatchIsBitExact_uint32_t) {
     bincv::impl::lkBatchEnabled() = true;
 
     // BIT comparison, not a tolerance. Two spellings of the same integer arithmetic
-    // feeding the same `double` solve have no licence to differ in the last place.
+    // feeding the same `double` solve have no license to differ in the last place.
     size_t posDiff = 0, statusDiff = 0, errDiff = 0, tracked = 0;
     for (size_t i = 0; i < n; ++i) {
         if (stA[i] != stB[i]) ++statusDiff;
@@ -3112,7 +3112,7 @@ Yield runArmB(const cv::Mat& gray, const Warp& warp, const std::vector<Point2f>&
         if (status[i] == 0) continue;
         // Ground truth in UNPADDED coordinates, then offset -- the warp is a
         // property of the original frame and must not be evaluated in the padded
-        // frame's coordinates, where its centre of rotation would move.
+        // frame's coordinates, where its center of rotation would move.
         double gx = 0.0, gy = 0.0;
         warp.forward(static_cast<double>(pts[i].x), static_cast<double>(pts[i].y), gx, gy);
         const double ex = static_cast<double>(out[i].x) - (gx + pad);
@@ -3234,7 +3234,7 @@ BINCV_TEST(Flow, X25_CoarseLevelBorder_uint32_t) {
 //
 // Same frame, same keypoints, same window, same ladder, same yield metric. The
 // two differ in the SEARCH and in nothing else, which is what makes this a
-// comparison of algorithms rather than of border behaviours.
+// comparison of algorithms rather than of border behaviors.
 // ---------------------------------------------------------------------------
 namespace {
 

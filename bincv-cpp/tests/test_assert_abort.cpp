@@ -52,7 +52,7 @@ using Mat = bincv::BinMat<uint32_t>;
 
 // 20 pixels in a 32-bit word, so the out-of-range columns below are still inside
 // the row's own allocation: the case proves the CHECK fires, and does not depend
-// on undefined behaviour to do it.
+// on undefined behavior to do it.
 Mat makeMat() { return Mat(20, 4); }
 
 uint32_t g_buffer[8] = {0};
@@ -155,7 +155,7 @@ int caseSignedSetValue() {
 }
 
 // The extreme of the same range check. Worth its own case because the value that
-// gets past it is the one that used to be undefined behaviour rather than merely
+// gets past it is the one that used to be undefined behavior rather than merely
 // wrong: the magnitude was computed as `-value`, and negating INT_MIN is signed
 // overflow. impl::signedMagnitude now does that in unsigned; this case is the
 // other half, proving the guard that keeps INT_MIN out is still here.

@@ -31,7 +31,7 @@
 /// tests/test_derivative.cpp.
 ///
 /// **1. `filter2D` CORRELATES. It does not convolve.** With the anchor at the
-/// centre of a 1x3 kernel,
+/// center of a 1x3 kernel,
 ///
 /// dst(x) = -1*src(x-1) + 0*src(x) + 1*src(x+1) = src(x+1) - src(x-1)
 ///
@@ -751,7 +751,7 @@ inline void derivativeYGeneric(const BinMatConstView<WordType> (&src)[N],
 /// representable N-bit value.
 ///
 /// @note **CORRELATION, NOT CONVOLUTION**: the `+1` tap is the RIGHT neighbour.
-/// That is `cv::filter2D`'s behaviour with `[-1, 0, 1]`, verified by
+/// That is `cv::filter2D`'s behavior with `[-1, 0, 1]`, verified by
 /// experiment rather than inferred; getting it backwards negates every
 /// gradient and silently negates that work’s cross term while leaving `sumXX`
 /// and `sumYY` correct. See the file header.

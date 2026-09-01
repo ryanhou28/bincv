@@ -10,7 +10,7 @@
 // (a) the PORTABLE path -- `transpose8x8`, eight pixels and all N planes at a time;
 // (b) the VECTOR path -- the scale as `MaxValue` byte compares, then one move-mask
 // per plane;
-// (c) `packQuantWith`, the arbitrary-map escape hatch, which cannot vectorise.
+// (c) `packQuantWith`, the arbitrary-map escape hatch, which cannot vectorize.
 //
 // (a) vs (b) IS ALSO A LIVENESS CHECK, and it is here deliberately. shipped a
 // vector block that was compiled out by a mis-attached `#define`, measured three

@@ -582,7 +582,7 @@ inline void unpackTo8BitRaw(const WordType* src, size_t srcStride, size_t width,
             // mask stay in a register where they used to be recomputed from `x`.
             WordType w = rowIn[x / kBits];
 #if defined(BINCV_X86_RUNTIME_AVX2) || (defined(BINCV_HAVE_NEON) && defined(__aarch64__))
-            // THE INVERSE OF A MOVE-MASK, AND IT VECTORISES THE SAME WAY. Broadcast the
+            // THE INVERSE OF A MOVE-MASK, AND IT VECTORIZES THE SAME WAY. Broadcast the
             // word so byte i holds the byte containing bit i, AND with the per-lane bit
             // weights, compare, and select. Six operations for what was thirty-two
             // BRANCHES -- and the branch is the cost, not the shift.
@@ -698,11 +698,11 @@ void QuantMat<1, WordType_>::clearTrailingBits() {
 
 // at and set
 //
-// Debug-checked, unchecked in release (the design notes, and the behaviour
+// Debug-checked, unchecked in release (the design notes, and the behavior
 // change sanctions). These are the two functions on the per-pixel path, and
 // a throw here would sit inside every loop that reads an image. In a release
 // build the checks are gone entirely -- what remains is the row offset, a shift
-// and a mask -- and an out-of-range index is undefined behaviour, exactly as it
+// and a mask -- and an out-of-range index is undefined behavior, exactly as it
 // is for cv::Mat::at. Callers that cannot guarantee their indices should clamp
 // before calling, not rely on the container to report it.
 template <typename WordType_>

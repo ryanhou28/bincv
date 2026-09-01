@@ -786,7 +786,7 @@ void testAliasAcceptsDisjointViews(const char* wordTypeName) {
 //
 // testGuardWords cannot see this -- it checks whole WORDS, and the bits in
 // question live in a word the kernel is entitled to write. This case exists so
-// that the behaviour is a recorded contract rather than a blind spot: if the tail
+// that the behavior is a recorded contract rather than a blind spot: if the tail
 // handling ever changes to read-modify-write, this is the test that says so.
 
 template <typename WordType>

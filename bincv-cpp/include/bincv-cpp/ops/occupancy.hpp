@@ -28,7 +28,7 @@
 /// TWO ARMS, AND WHICH ONE TO CALL IS A MEASUREMENT
 ///
 /// - `spaceCandidates` -- exhaustive. Every candidate against every live point.
-/// `O(new x live)` distance tests, vectorised eight-wide on AVX2 and four-wide on
+/// `O(new x live)` distance tests, vectorized eight-wide on AVX2 and four-wide on
 /// NEON. **Costs no memory at all.**
 ///
 /// - `spaceCandidatesMasked` -- a 1-bit occupancy frame. Stamp the disc of `radius`
@@ -50,9 +50,9 @@
 /// TIE. The mask does not overtake until roughly **2 000 candidates on aarch64 and
 /// 5 000 on x86** -- seven to seventeen times more than a frontend ever detects.
 ///
-/// **The reason is structural, not an unoptimised inner loop.** Stamping a disc touches
+/// **The reason is structural, not an unoptimized inner loop.** Stamping a disc touches
 /// pi*r^2 = 3 217 pixels to encode what the exhaustive arm consumes in ONE distance
-/// test per candidate -- and that test is vectorised eight-wide on AVX2 and four-wide
+/// test per candidate -- and that test is vectorized eight-wide on AVX2 and four-wide
 /// on NEON, while a disc stamp is scalar per row. The pre-registration predicted a
 /// crossover near 100 candidates and was **wrong by a factor of about fifty**, because
 /// it counted the disc's word-writes and neither the per-row bound arithmetic nor the
@@ -70,7 +70,7 @@
 /// here: the disc's row bounds are found by **exact squared comparison** -- integer x
 /// against `(x - cx)^2 < radius^2 - (y - cy)^2` in `double` -- rather than by rounding
 /// a `sqrt`, so no boundary pixel can fall on different sides of the two tests.
-/// `tests/test_occupancy.cpp` sweeps sub-pixel centres and radii against the float
+/// `tests/test_occupancy.cpp` sweeps sub-pixel centers and radii against the float
 /// oracle for exactly this.
 ///
 /// Live points may sit anywhere; only the CANDIDATE has to be integral, which is what
@@ -258,7 +258,7 @@ inline void setBitRange(WordType* row, size_t x0, size_t x1) {
 /// 0.5 than `goodFeaturesToTrack` would.
 /// @note Never throws, allocates nothing, and the compaction is in place -- the write
 /// index never passes the read index.
-/// @note The distance loop is vectorised where the ISA allows and gives the same
+/// @note The distance loop is vectorized where the ISA allows and gives the same
 /// answer as the scalar arm bit for bit; `impl::spacingSimdEnabled` forces the
 /// scalar one, which is how the tests check that.
 inline size_t spaceCandidates(Point2f* candidates, size_t count, const Point2f* live,
@@ -300,9 +300,9 @@ inline void clearOccupancy(BinMatView<WordType> mask) {
 
 /// @brief Sets every pixel strictly within `radius` of `(cx, cy)`. **API TIER 3.**
 ///
-/// @note **NO `sqrt` IS TAKEN, and that is not micro-optimisation** -- it is what makes
+/// @note **NO `sqrt` IS TAKEN, and that is not micro-optimization** -- it is what makes
 /// the mask agree with the float distance test exactly. Rows are walked outward
-/// from the centre, where the half-width only ever shrinks, so each row's bound
+/// from the center, where the half-width only ever shrinks, so each row's bound
 /// is reached by decrementing the previous one under the exact test
 /// `(x - cx)^2 < radius^2 - (y - cy)^2`. The total decrementing over a whole disc
 /// is `O(radius)`, not `O(radius)` per row, so the bounds are free next to the
@@ -351,9 +351,9 @@ inline void markDisc(BinMatView<WordType> mask, float cx, float cy, float radius
             const float dy2 = dy * dy;
             if (!(dy2 < r2)) return;              // past the disc; every later row too
             if (!seeded) {
-                // The widest row of this sweep, walked out from the centre column.
+                // The widest row of this sweep, walked out from the center column.
                 // O(radius) once; every later row only narrows what this found.
-                // FLOOR, not a truncating cast: for a centre left of the frame
+                // FLOOR, not a truncating cast: for a center left of the frame
                 // `(long long)(-5.3)` is -5 and the column containing cx is -6. The
                 // seed has to be the containing column, because the two probes below
                 // are `c` and `c+1` -- the only two integers that can be nearest to cx,

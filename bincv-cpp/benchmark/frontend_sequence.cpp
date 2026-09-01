@@ -164,7 +164,7 @@ struct BincvFrontend {
                            ///< `edgeThreshold`, straight from grayscale into bit-planes.
                            ///< This used to be `fromCVMat` unpacking a CV_8U binary frame
                            ///< somebody else had produced; binCV produces it now, so the
-                           ///< conversion is gone rather than optimised.
+                           ///< conversion is gone rather than optimized.
     std::vector<uint8_t> medianScratch;
 
     /// Frame 0's binary, so frame 1 has a real `prev`. Untimed: it is setup, and the
@@ -190,7 +190,7 @@ struct BincvFrontend {
     double msPyrDown = 0.0, msDeriv = 0.0;   ///< put `build` at 52% of the
                                             ///< frontend at T=12; this splits it,
                                             ///< because a measurement found `derivative`
-                                            ///< auto-vectorises and `pyrDown` does
+                                            ///< auto-vectorizes and `pyrDown` does
                                             ///< not, so the two halves have very
                                             ///< different priors.
     void build() {

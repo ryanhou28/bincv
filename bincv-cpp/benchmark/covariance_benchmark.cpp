@@ -248,7 +248,7 @@ struct DerivativeSet {
     }
 };
 
-/// @brief 200 scattered keypoint windows, centred, so edge windows clip.
+/// @brief 200 scattered keypoint windows, centerd, so edge windows clip.
 std::vector<Rect> keypointWindows(int W) {
     std::vector<Rect> out;
     out.reserve(static_cast<size_t>(kKeypoints));

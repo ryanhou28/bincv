@@ -10,8 +10,8 @@
 // rather than at the one point where it is guaranteed to look good.
 //
 // THE WORKLOAD IS SYNTHETIC ON PURPOSE. A guess-error curve needs the truth to be
-// known exactly, and only a rendered warp gives that: `frame1` is the binarisation of
-// the TRANSLATED field, not a translation of the binarisation, so ground truth is the
+// known exactly, and only a rendered warp gives that: `frame1` is the binarization of
+// the TRANSLATED field, not a translation of the binarization, so ground truth is the
 // warp's own arithmetic. On a real sequence the "perfect guess" arm cannot be built at
 // all, and the number that matters here is the SHAPE of the curve between perfect and
 // useless.
@@ -54,7 +54,7 @@ constexpr int kWidth = 640, kHeight = 480;
 constexpr int kRounds = 15;
 
 /// test_opticalflow.cpp's texture, verbatim -- four incommensurate terms at four
-/// orientations, so the binarised level set has edges at many angles.
+/// orientations, so the binarized level set has edges at many angles.
 double field(double x, double y) {
     return std::sin(x / 7.3 + 0.4) * std::cos(y / 5.1) + 0.6 * std::sin((x + y) / 11.7) +
            0.5 * std::cos((x - 2.0 * y) / 9.3) + 0.4 * std::sin(x / 3.1) * std::sin(y / 3.7);

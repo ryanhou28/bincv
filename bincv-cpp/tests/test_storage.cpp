@@ -56,7 +56,7 @@ inline void escape(const void* p) { g_sink = p; }
 // reproduce either (g++ 11.4, -O0/-O2, guard removed). Keeping a rule no compiler
 // in the gate enforces teaches the next contributor something untrue, so the
 // style reason above is the one that stands. The guard itself stays: it is
-// behaviour, not warning-appeasement.
+// behavior, not warning-appeasement.
 //
 // The neighbouring -Wuse-after-free finding in core/storage.hpp 
 // is a different matter -- that one does reproduce on GCC 12 -- so the two should
@@ -94,7 +94,7 @@ namespace {
 // -- Storage
 // ---------------------------------------------------------------------------
 
-// The behavioural contract, run against every supported word width so the
+// The behavioral contract, run against every supported word width so the
 // word-sized arithmetic in size/copy is exercised at 8/16/32/64 bits.
 template <typename W>
 void testStorage(const char* label) {

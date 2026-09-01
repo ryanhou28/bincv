@@ -10,7 +10,7 @@
 // a candidate at distance exactly `radius` from a live point, or one where the disc's
 // row bound comes from a `sqrt` that rounded the wrong way. `markDisc` takes no square
 // root for precisely this reason, and `MaskMatchesFloatDistance` checks every pixel of
-// a sweep of sub-pixel centres against the float predicate rather than sampling.
+// a sweep of sub-pixel centers against the float predicate rather than sampling.
 //
 // Four claims:
 // 1. THE MASK IS THE DISTANCE TEST -- pixel for pixel, no tolerance.
@@ -83,13 +83,13 @@ BINCV_TEST(Occupancy, MaskMatchesFloatDistance) {
 
     size_t checked = 0, disagreements = 0;
     Rng rng;
-    // Sub-pixel centres deliberately including.0 and.5, where a boundary pixel is
+    // Sub-pixel centers deliberately including.0 and.5, where a boundary pixel is
     // exactly at distance `radius` and the strict `<` decides it.
-    const float kCentres[] = {0.0f, 0.25f, 0.5f, 0.75f};
+    const float kCenters[] = {0.0f, 0.25f, 0.5f, 0.75f};
     const float kRadii[] = {1.0f, 2.5f, 4.0f, 7.5f, 13.0f, 32.0f};
     for (float rad : kRadii) {
-        for (float fx : kCentres) {
-            for (float fy : kCentres) {
+        for (float fx : kCenters) {
+            for (float fy : kCenters) {
                 const float cx = static_cast<float>(11 + static_cast<int>(rng.next() % 40)) + fx;
                 const float cy = static_cast<float>(7 + static_cast<int>(rng.next() % 30)) + fy;
                 bincv::clearOccupancy<W>(mask.view());
@@ -130,10 +130,10 @@ BINCV_TEST(Occupancy, DiscIsClippedNotWrapped) {
     using W = uint32_t;
     constexpr size_t kW = 40, kH = 24;
     bincv::BinMat<W> mask(kW, kH);
-    // A centre outside the frame on every side in turn. A disc that wrapped would set
+    // A center outside the frame on every side in turn. A disc that wrapped would set
     // pixels on the opposite edge; one that ran off the end would corrupt the next row.
-    const Point2f kCentres[] = {{-5.0f, 12.0f}, {44.0f, 12.0f}, {20.0f, -6.0f}, {20.0f, 30.0f}};
-    for (const Point2f& c : kCentres) {
+    const Point2f kCenters[] = {{-5.0f, 12.0f}, {44.0f, 12.0f}, {20.0f, -6.0f}, {20.0f, 30.0f}};
+    for (const Point2f& c : kCenters) {
         bincv::clearOccupancy<W>(mask.view());
         bincv::markDisc<W>(mask.view(), c.x, c.y, 9.0f);
         const float r2 = 81.0f;
@@ -147,7 +147,7 @@ BINCV_TEST(Occupancy, DiscIsClippedNotWrapped) {
             }
         }
     }
-    // A centre far enough out that nothing is set at all -- the sweep must terminate
+    // A center far enough out that nothing is set at all -- the sweep must terminate
     // rather than walk the whole frame or, worse, not terminate.
     bincv::clearOccupancy<W>(mask.view());
     bincv::markDisc<W>(mask.view(), -100.0f, -100.0f, 9.0f);

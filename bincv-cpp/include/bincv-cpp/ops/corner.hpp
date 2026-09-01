@@ -33,7 +33,7 @@
 /// An exact integer comparison against `cv::cornerMinEigenVal` is therefore
 /// not available even in principle, and the validation here is against a
 /// per-pixel reference of this file's own (tests/test_corner.cpp) plus the
-/// reference pipeline's documented behaviour.
+/// reference pipeline's documented behavior.
 ///
 /// Nothing in this file is Tier 1 and nothing in it promises OpenCV bit-exactness.
 ///
@@ -152,7 +152,7 @@
 /// this operation should select on `blockSize` is an OPEN DECISION** that
 /// registers and does not take. One device and one frame size is not enough to
 /// hard-code a threshold -- the x86 run has the opposite sign at `blockSize` 3
-/// (1.19x in the sliding form's favour) and spreads past 50%, which is why it is
+/// (1.19x in the sliding form's favor) and spreads past 50%, which is why it is
 /// filed as indicative only.
 ///
 /// ---------------------------------------------------------------------------
@@ -302,7 +302,7 @@
 /// `impl::CornerStronger` is that rule spelled on coordinates: response
 /// descending, then `y` DESCENDING, then `x` descending. It is not a refinement or
 /// a deviation, it is the same order, which is what a tier 2 operation validated
-/// against the reference's behaviour owes it. The direction matters: with
+/// against the reference's behavior owes it. The direction matters: with
 /// `minDistance` 3 and equal responses at `(1, 1)` and `(3, 1)` the greedy spacing
 /// filter keeps whichever comes first, so an ascending tiebreak returns `(1, 1)`
 /// and the reference returns `(3, 1)`. On a checkerboard, where the whole interior
@@ -474,10 +474,10 @@ struct Corner {
 /// derivative path ignores (it is a fixed `[-1, 0, 1]` tap), so it has no
 /// field.
 struct GoodFeaturesParams {
-    int maxCorners = 200;                    ///< <= 0 means "no limit" (reference behaviour)
+    int maxCorners = 200;                    ///< <= 0 means "no limit" (reference behavior)
     double qualityLevel = 0.01;              ///< survivors need response > this * max response
     double minDistance = 33.33333333333;     ///< < 1 disables the spacing filter, as in gftt.cpp
-    int blockSize = 3;                       ///< covariance window, square, centred as OpenCV centres it
+    int blockSize = 3;                       ///< covariance window, square, centerd as OpenCV centers it
 };
 
 /// @brief What `goodFeaturesToTrack` / `selectGoodFeatures` report back.
@@ -514,8 +514,8 @@ inline float minEigenValue(long long xx, long long yy, long long xy) {
 /// @brief The window OpenCV's box filter of side `blockSize` reduces at pixel
 /// `(x, y)`, anchored where `cv::Point(-1, -1)` puts it.
 /// @note `cv::boxFilter`'s default anchor is `ksize/2` by integer division, so an
-/// ODD `blockSize` is centred and an EVEN one leans up and left. Written out
-/// rather than assumed, because "centre" is ambiguous for even sides and the
+/// ODD `blockSize` is centerd and an EVEN one leans up and left. Written out
+/// rather than assumed, because "center" is ambiguous for even sides and the
 /// reference passes 3.
 inline Rect blockWindow(int x, int y, int blockSize) {
     const int off = blockSize / 2;
@@ -880,7 +880,7 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 // 1 721 568 B, of which the `float` response map above is 1 228 800 B -- 71.4%,
 // more than every other stage combined, at 4 BYTES per pixel where every image
 // plane in the frontend is one or two BITS. The streaming form keeps only the
-// three rows the 3x3 NMS reads and never materialises the frame-sized map.
+// three rows the 3x3 NMS reads and never materializes the frame-sized map.
 //
 // It is NOT a replacement. `cornerMinEigenVal` + `selectGoodFeatures` stay,
 // because a caller who wants to select twice over one map, to mask it (the
@@ -905,7 +905,7 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 // 1. **The threshold is a pure POST-FILTER over the raw 3x3 maxima.** The
 // selection above already rests on this -- it fuses the threshold into the
 // NMS scan precisely because a thresholded neighbour can never beat an
-// above-threshold centre. So the candidate set is
+// above-threshold center. So the candidate set is
 // `{raw 3x3 maxima} filtered by response > threshold`, and the filter can be
 // applied last instead of first.
 // 2. **The set the caller's buffer must hold is a TOP-K, and the threshold only

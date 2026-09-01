@@ -30,7 +30,7 @@
 /// > **A PIXEL WITH NO GRADIENT CONTRIBUTES NOTHING TO ANY OF THE SIX SUMS, AND
 /// > `|dx| | |dy|` FINDS ALL OF THEM A WORD AT A TIME.**
 ///
-/// On a binarised edge map most of a 31x31 window is flat, so the loop below computes
+/// On a binarized edge map most of a 31x31 window is flat, so the loop below computes
 /// the skip mask word-wise and then visits only set bits. The dense spelling would touch
 /// 961 pixels; this touches the edges.
 ///
@@ -41,7 +41,7 @@
 /// `cv::cornerSubPix`'s. **The gradient is not**: OpenCV computes its own from the
 /// 8-bit image with a Sobel-like scheme, and this takes binCV's already-computed
 /// `SignedQuantMat` derivatives -- which is (a kernel binds to views, and the
-/// frontend has these already) and also the only shape that avoids materialising an
+/// frontend has these already) and also the only shape that avoids materializing an
 /// 8-bit image the library exists to avoid.
 
 #include <cmath>
@@ -91,7 +91,7 @@ namespace impl {
 /// @brief OpenCV's Gaussian window mask, built once per call. **INTERNAL.**
 ///
 /// @note **`exp(-(dx^2 + dy^2) / winHalf^2)`, and the width is not a free parameter.**
-/// `cv::cornerSubPix` normalises each offset by the half-window and exponentiates
+/// `cv::cornerSubPix` normalizes each offset by the half-window and exponentiates
 /// the sum of squares -- `vy = exp(-y*y)` with `y = (i - win.height)/win.height`,
 /// times the same in x -- so the weight is exactly 1/e at the edge of the window
 /// along either axis.
@@ -208,7 +208,7 @@ inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
                 for (size_t wi = xLo / kBits; wi <= xHi / kBits; ++wi) {
                     // WHICH PIXELS IN THIS WORD CAN CONTRIBUTE AT ALL, A WORD AT A
                     // TIME. A pixel with zero gradient in both axes adds nothing to any
-                    // of the five sums, and on a binarised edge map most of a 31x31
+                    // of the five sums, and on a binarized edge map most of a 31x31
                     // window is exactly that. This is what bit-planes buy in an
                     // operation that cannot be reduced to popcounts.
                     WordType nz = 0;
@@ -251,7 +251,7 @@ inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
                         const double xx = w * gx * gx;
                         const double xy = w * gx * gy;
                         const double yy = w * gy * gy;
-                        // `p` is the sample's offset from the window centre, so the
+                        // `p` is the sample's offset from the window center, so the
                         // solve returns an offset and nothing large is accumulated.
                         const double px = static_cast<double>(wx);
                         const double py = static_cast<double>(wy);
@@ -269,7 +269,7 @@ inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
                 ++out.singular;
                 break;
             }
-            // q = G^-1 b, as an offset from the window centre.
+            // q = G^-1 b, as an offset from the window center.
             const double qx = (gyy * bx - gxy * by) / det;
             const double qy = (gxx * by - gxy * bx) / det;
             // OUTSIDE THE WINDOW IS A DIVERGENCE, NOT AN ANSWER. OpenCV stops when the

@@ -11,7 +11,7 @@
 /// input, where median collapses to `maj3` -- one expression, 32 pixels per word.
 /// That is the right kernel and it is not going anywhere.
 ///
-/// But the reference filters the **grayscale** image, BEFORE binarisation:
+/// But the reference filters the **grayscale** image, BEFORE binarization:
 /// `SEALProcessor.cpp` runs `three_pix_median_filter(img)` and only then
 /// `rl_fast_edge_filter_wide(img, t)`. A binary-only median cannot sit where the
 /// reference puts it, so a frontend that wanted the reference's pipeline had to
@@ -21,7 +21,7 @@
 /// THE NEIGHBOURHOOD IS THE CALLER'S, AND THE REFERENCE HAS TWO OF THEM
 ///
 /// `SEAL/src/temporal_processing/denoise.cpp` carries `three_pix_median_filter` --
-/// the asymmetric L, `p1` above / `p2` centre / `p3` right -- **and**
+/// the asymmetric L, `p1` above / `p2` center / `p3` right -- **and**
 /// `five_pix_median_filter`, the plus. Both ship here as named constants, and an
 /// arbitrary offset set is a template argument rather than a fork.
 ///
@@ -73,7 +73,7 @@ struct MedianPattern {
     MedianOffset offset[K];
 };
 
-/// @brief The reference's `three_pix_median_filter`: above, centre, right.
+/// @brief The reference's `three_pix_median_filter`: above, center, right.
 /// @note An asymmetric **L**, not a line and not a square. It is chosen for what it
 /// costs in race logic, not for isotropy, which is why no OpenCV kernel
 /// matches it.

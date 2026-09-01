@@ -10,7 +10,7 @@
 //
 // const int64_t weight = static_cast<int64_t>(1) << (i + j);
 //
-// is undefined behaviour as soon as 2N - 2 >= 64, and the weights overflow int64_t
+// is undefined behavior as soon as 2N - 2 >= 64, and the weights overflow int64_t
 // well before that. Measured before the fix, with a 40-element view array under
 // -fsanitize=undefined: "covariance.hpp:536:60: runtime error: shift exponent 64 is
 // too large for 64-bit type 'long int'".

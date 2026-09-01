@@ -49,7 +49,7 @@ constexpr unsigned long long srcMax() {
 
 /// @brief `round(v * maxValue / srcMax)` in integers. **INTERNAL.**
 /// @note The `+ srcMax/2` rounding is `QuantMat<N>::fromCVMat`'s `(v * MaxValue + 127)
-/// / 255` generalised; at `SrcT = uint8_t` it is that expression exactly, which
+/// / 255` generalized; at `SrcT = uint8_t` it is that expression exactly, which
 /// is what keeps the design rule’s recorded divergence from
 /// OpenCV at bytes 1..127 intact rather than quietly repaired.
 template <typename SrcT>
@@ -61,7 +61,7 @@ constexpr unsigned quantScale(SrcT v, unsigned maxValue) {
 
 /// @brief The source values at which `quantScale` first reaches each output level.
 ///
-/// **THE SCALE BECOMES A HANDFUL OF COMPARISONS, WHICH IS WHAT LETS IT VECTORISE.**
+/// **THE SCALE BECOMES A HANDFUL OF COMPARISONS, WHICH IS WHAT LETS IT VECTORIZE.**
 /// `quantScale` is monotonic, so `q(v) = the number of levels k in 1..MaxValue with
 /// v >= threshold[k]`. At `N = 2` that is three byte compares and three subtracts for
 /// thirty-two pixels; a 256-entry lookup table cannot be done in a vector register at

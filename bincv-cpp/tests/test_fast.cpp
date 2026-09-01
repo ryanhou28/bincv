@@ -150,7 +150,7 @@ BINCV_TEST(Fast, DetectionsMatchCvFast) {
 // THE EQUIVALENCE THIS RESTS ON. For binary content stored as CV_8U in {0, 255},
 // `cv::FAST` at ANY threshold in [1, 254] accepts exactly the corners the bit-plane
 // form accepts: `255 > 0 + t` holds for every such `t`, and `0 < 255 - t` likewise, so
-// a brighter arc needs a zero centre and a darker arc a set one. That is why the
+// a brighter arc needs a zero center and a darker arc a set one. That is why the
 // bit-plane form takes no threshold at all -- there is only one -- and why the
 // comparison below is CORNER FOR CORNER AND IN ORDER rather than set-against-set.
 //

@@ -67,7 +67,7 @@
 // Point2f, impl::displacedRow, impl::ReplicatedShiftedRow, impl::floorToLL --
 // route (a) reuses route (b)'s tap machinery deliberately. Two implementations of
 // "read the next frame displaced by (dx, dy) with a replicate border" is how two
-// border behaviours happen, and the comparison would then not be one.
+// border behaviors happen, and the comparison would then not be one.
 #include "opticalFlow.hpp"
 #include "reduce.hpp"
 
@@ -251,7 +251,7 @@ inline void calcOpticalFlowBlockMatch(const BlockMatchLevel<WordType>* levels, s
             }
 
             // THE SEARCH. A running minimum, not a cost surface -- see CONTRACTS.
-            // Ties keep the FIRST candidate in scan order, and the scan is centred,
+            // Ties keep the FIRST candidate in scan order, and the scan is centerd,
             // so a flat plateau resolves to its top-left rather than drifting with
             // the previous estimate.
             long long bestCost = -1;

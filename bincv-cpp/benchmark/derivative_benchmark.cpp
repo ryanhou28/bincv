@@ -68,7 +68,7 @@
 // non-zero rather than printing a table under a warning.
 // 5. THE BASELINE'S FIXED PER-CALL COST IS MEASURED, NOT ASSUMED. cv::filter2D
 // pays a size-independent dispatch cost -- argument checking, kernel
-// analysis (it separates and specialises [-1,0,1] on every call), the
+// analysis (it separates and specializes [-1,0,1] on every call), the
 // parallel_for decision. At 640x480 that is small; at 94x60 it is most of
 // the frame time, so the ns/pixel ladder is NOT a pure statement about the
 // operation. The floor is measured directly on a 2x2 frame and printed

@@ -101,7 +101,7 @@ void fillRandom(BinMat<Word>& m, uint64_t seed) {
 
 // ---------------------------------------------------------------------------
 // One (case, word type) fixture: four sources, one destination per variant, and
-// variant C's plan built once -- which is the most favourable accounting it can
+// variant C's plan built once -- which is the most favorable accounting it can
 // have, since a pyramid reuses a plan across every frame at that width.
 // ---------------------------------------------------------------------------
 template <typename Word>
@@ -286,7 +286,7 @@ int main() {
                 "%.0f ms budget\n",
                 kInputs, kRepeats, kTargetMs);
     std::printf("aux B is the mask table plus the scratch row -- built ONCE per width, which "
-                "is\nthe most favourable accounting variant C can have\n");
+                "is\nthe most favorable accounting variant C can have\n");
 
     bool ok = true;
     for (const Case& c : kCases) ok = runCase(c) && ok;

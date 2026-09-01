@@ -5,14 +5,14 @@
 // on a track already being followed. Two shapes, and the DECISION RULE WAS FIXED BEFORE
 // EITHER EXISTED :
 //
-// (a) EXHAUSTIVE -- O(new x live) float distance tests. Vectorised eight-wide on
+// (a) EXHAUSTIVE -- O(new x live) float distance tests. Vectorized eight-wide on
 // AVX2, four-wide on NEON. COSTS NO MEMORY.
 // (b) OCCUPANCY MASK -- stamp a disc of `radius` per live track into a 1-bit frame,
 // then one bit test per candidate. COSTS ONE 1-BIT FRAME: 38 400 B at 640x480.
 //
 // The rule: the mask becomes the recommended path only if it is FASTER at the
 // frontend's own operating point on BOTH architectures. Parity is a loss -- CLAUDE.md
-// settles unclaimed speed/footprint conflicts in favour of memory, and 38 400 B has to
+// settles unclaimed speed/footprint conflicts in favor of memory, and 38 400 B has to
 // buy something.
 //
 // The pre-registered prediction, recorded so that agreeing with it is not evidence:
@@ -208,9 +208,9 @@ int main() {
     // `live = 4` is below the vector width in both ISAs, so those rows LOOK like the
     // control -- and they read 1.5x to 3.4x, not 1.00x. The reason is that
     // `spaceCandidates` makes TWO scans, and the second one is over the candidates
-    // already KEPT, which grows into the hundreds and vectorises perfectly. A control
+    // already KEPT, which grows into the hundreds and vectorizes perfectly. A control
     // has to starve BOTH scans, so this one caps `limit` at 1 as well: at most one
-    // kept point, four live points, nothing for either scan to vectorise.
+    // kept point, four live points, nothing for either scan to vectorize.
     //
     // If this reads far from 1.00x, the vec/sca column above is not measuring the
     // vector arm and every ratio in this table is against the wrong denominator.

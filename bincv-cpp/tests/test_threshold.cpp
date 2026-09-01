@@ -758,7 +758,7 @@ void testThresholdRoi(const char* wordTypeName) {
 /// ramp: cv::threshold sets EVERY pixel at +1e300 and CLEARS every pixel at
 /// -1e300, i.e. the exact opposite of the comparison, in both directions.
 /// Comparing against that would be pinning a compiler's conversion
-/// behaviour.
+/// behavior.
 /// @note So the reference here is `double(pixel) > thresh` per pixel, which is
 /// what binCV computes, and the family exists so that binCV's CHOICE at the
 /// ends -- everything below, nothing above, nothing for NaN -- cannot drift

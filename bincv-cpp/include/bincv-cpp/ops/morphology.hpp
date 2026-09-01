@@ -164,9 +164,9 @@ inline namespace BINCV_ABI_NAMESPACE {
 ///
 /// - `MORPH_ELLIPSE` at 3x3 is a PLUS, not a filled square. OpenCV's
 /// half-axis is `rows/2` and `cols/2`, so at 3x3 the row offsets +/-1
-/// admit only the centre column.
-/// - `MORPH_CROSS` is centred on the ANCHOR, not on the element. That is
-/// `getStructuringElement`'s behaviour and it is why the anchor is a
+/// admit only the center column.
+/// - `MORPH_CROSS` is centerd on the ANCHOR, not on the element. That is
+/// `getStructuringElement`'s behavior and it is why the anchor is a
 /// field here rather than a separate argument.
 /// - A 1x1 element is a filled 1x1 whatever the shape says.
 ///
@@ -181,17 +181,17 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// When non-null it names a caller-owned, row-major, `cols * rows` array of
 /// bytes -- non-zero means set -- and `shape` is ignored. The memory must
 /// outlive the element. This exists because the three parametric shapes are
-/// all symmetric about their centre, and a suite built only from them
+/// all symmetric about their center, and a suite built only from them
 /// cannot catch an inverted offset sign: negating a symmetric offset set
 /// gives the same set back. See `Morphology.Asymmetric_*`.
 ///
-/// @note An off-centre ANCHOR breaks that symmetry too, and is the cheaper way to
+/// @note An off-center ANCHOR breaks that symmetry too, and is the cheaper way to
 /// get an asymmetric case: the offsets are `cell - anchor`, so a 3x3 rect
 /// anchored at (0,0) reaches {0,1,2} in each axis and its negation reaches
 /// {0,-1,-2}. Both routes are swept.
 ///
 /// @note Aggregate-initializable, but prefer the named factories -- they document
-/// which of five ints is which, and `-1` for an anchor means "centre",
+/// which of five ints is which, and `-1` for an anchor means "center",
 /// spelled `cv::Point(-1, -1)` in OpenCV.
 struct StructuringElement {
     MorphShape shape = MORPH_RECT;  ///< Ignored when `mask` is non-null.
@@ -208,7 +208,7 @@ struct StructuringElement {
         return StructuringElement{MORPH_RECT, c, r, ax, ay, nullptr};
     }
     /// @brief `cv::getStructuringElement(MORPH_CROSS, {c, r}, anchor)`.
-    /// @note The arms pass through the ANCHOR, not the centre. OpenCV's choice.
+    /// @note The arms pass through the ANCHOR, not the center. OpenCV's choice.
     static StructuringElement cross(int c, int r, int ax = -1, int ay = -1) {
         return StructuringElement{MORPH_CROSS, c, r, ax, ay, nullptr};
     }
@@ -221,9 +221,9 @@ struct StructuringElement {
         return StructuringElement{MORPH_RECT, c, r, ax, ay, m};
     }
 
-    /// @brief The anchor column with OpenCV's `-1 == centre` resolved.
+    /// @brief The anchor column with OpenCV's `-1 == center` resolved.
     int anchorCol() const { return anchorX < 0 ? cols / 2 : anchorX; }
-    /// @brief The anchor row with OpenCV's `-1 == centre` resolved.
+    /// @brief The anchor row with OpenCV's `-1 == center` resolved.
     int anchorRow() const { return anchorY < 0 ? rows / 2 : anchorY; }
 
     /// @brief True when cell (col, row) is part of the element.
@@ -249,7 +249,7 @@ struct StructuringElement {
     /// @brief The half-open column range `[first, last)` of row `row` that MAY be
     /// set: exact for the parametric shapes, `[0, cols)` for a mask.
     /// @note Every parametric shape's row is one CONTIGUOUS run -- rect is the
-    /// whole row, ellipse is a centred run, and cross is either the whole
+    /// whole row, ellipse is a centerd run, and cross is either the whole
     /// row (the anchor row) or the single anchor column. That is what lets
     /// the kernels hoist the ellipse's `sqrt` out of the pixel loop and
     /// skip the empty part of a cross's rows entirely, without storing a
@@ -379,7 +379,7 @@ struct MorphFold {
 /// offset without a temporary. The two are required to agree by
 /// `Morphology.SingleOffsetEqualsShift_*`.
 /// @note `bitShift == 0` is a separate branch because `x << WordBits` is
-/// undefined behaviour, not merely wrong -- see ops/shift.hpp.
+/// undefined behavior, not merely wrong -- see ops/shift.hpp.
 template <typename WordType>
 inline WordType morphShiftedWord(const WordType* srcRow, size_t i, size_t rowWords, size_t width,
                                  WordType tailMask, ptrdiff_t dx, WordType fill) {
@@ -628,7 +628,7 @@ inline void morphRowGeneric(BinMatConstView<WordType> src, WordType* dstRow, siz
     }
 }
 
-/// @brief One destination row, 3x3 element anchored at its centre.
+/// @brief One destination row, 3x3 element anchored at its center.
 ///
 /// @note THE SPECIAL CASE ASKS FOR, and it is a special case of the loop
 /// above rather than a different algorithm: the offsets are known to be
@@ -653,7 +653,7 @@ inline void morphRowGeneric(BinMatConstView<WordType> src, WordType* dstRow, siz
 /// 3.17x (rect3x3 dilate), 2.47x / 3.69x at `uint64_t`, and 2.78x-3.67x for
 /// cross3x3; across the whole pyramid ladder the range is 2.1x-3.7x, at
 /// batch spreads under 4%. That is the number a Phase 5 reader deciding
-/// whether to vectorise one path or both should start from, and it is why
+/// whether to vectorize one path or both should start from, and it is why
 /// the duplicated code stays.
 /// @note Driven by the element's own cells, so it serves rect, cross, ellipse and
 /// any 3x3 mask alike; a cleared cell simply contributes nothing.
@@ -675,9 +675,9 @@ inline void morphRow3x3(BinMatConstView<WordType> src, WordType* dstRow, size_t 
     for (int ey = 0; ey < 3; ++ey) {
         const bool* cell0 = cells + ey * 3;
         const bool cellLeft = cell0[0];
-        const bool cellCentre = cell0[1];
+        const bool cellCenter = cell0[1];
         const bool cellRight = cell0[2];
-        if (!cellLeft && !cellCentre && !cellRight) continue;
+        if (!cellLeft && !cellCenter && !cellRight) continue;
 
         const ptrdiff_t sy =
             borderIndex(static_cast<ptrdiff_t>(y) + (ey - 1), src.height, borderType);
@@ -708,7 +708,7 @@ inline void morphRow3x3(BinMatConstView<WordType> src, WordType* dstRow, size_t 
                                            static_cast<WordType>(cur << 1) |
                                            static_cast<WordType>(prev >> (wordBits - 1))));
             }
-            if (cellCentre) acc = Fold::apply(acc, cur);
+            if (cellCenter) acc = Fold::apply(acc, cur);
             // dx = +1: destination column c reads source column c + 1.
             if (cellRight) {
                 acc = Fold::apply(acc, static_cast<WordType>(

@@ -2,9 +2,9 @@
 //
 // says "Special-case 3x3 -- it is the common case in practice", and
 // ops/morphology.hpp does: morphRow3x3 is a second row kernel that runs when the
-// element is 3x3 and centred. A second implementation of one function is a
+// element is 3x3 and centerd. A second implementation of one function is a
 // maintenance cost forever, and this file is what says what it buys, so that a
-// Phase 5 reader deciding whether to vectorise one path or both has a number
+// Phase 5 reader deciding whether to vectorize one path or both has a number
 // rather than an assertion.
 //
 // IT IS ALSO A CORRECTION. The special case's docstring used to justify itself by

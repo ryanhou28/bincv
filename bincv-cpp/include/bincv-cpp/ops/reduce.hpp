@@ -218,7 +218,7 @@
 /// contribute nothing. A region with `width <= 0` or `height <= 0` counts zero.
 ///
 /// This is not leniency, it is the calling convention needs. The LK window is
-/// 31x31 centred on a keypoint, so every keypoint within 15 pixels of an edge
+/// 31x31 centerd on a keypoint, so every keypoint within 15 pixels of an edge
 /// produces an out-of-range rectangle. The alternative -- assert and make the
 /// caller clamp -- puts the same four `min`/`max` expressions in every call site,
 /// and a wrong one there is a silently wrong covariance rather than a diagnostic.
@@ -362,7 +362,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// correlated window (ΣIxIy < 0, half of them in practice) wraps to ~1.8e19,
 /// and the project's warning set -- `-Wconversion -Wsign-conversion -Werror`
 /// included -- does not diagnose it, because unsigned wraparound is defined
-/// behaviour rather than a conversion. Nothing in a type named for counts
+/// behavior rather than a conversion. Nothing in a type named for counts
 /// announces that its difference is not a count. So the short spelling is
 /// made the correct one instead of being warned about in prose.
 struct SplitCount {

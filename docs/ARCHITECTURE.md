@@ -112,7 +112,7 @@ costs two register-domain crossings — roughly the cost of the count itself. A 
 exposes `popcount(word)` invites callers to write loops that pay that per word.
 
 So reductions are offered over **regions, masks and sliding windows**, and the crossings
-are amortised across the whole traversal. Internal helpers stay internal.
+are amortized across the whole traversal. Internal helpers stay internal.
 
 ---
 
@@ -147,7 +147,7 @@ N-bit matrix.** Getting to that array is the caller's.
 That one sentence settles cases in both directions. An 8-bit grayscale frame, a 12-bit
 sensor buffer in `uint16_t`, the Y plane of an NV12 frame — all of them *are* such an
 array, and the stride parameter already covers them. Decoding a PNG, demosaicing a Bayer
-frame or converting colour are not: each turns one wide image into another and leaves the
+frame or converting color are not: each turns one wide image into another and leaves the
 caller exactly as far from bits as before.
 
 **Everything from such an array down to bits is binCV's, including sources wider than
@@ -203,7 +203,7 @@ Vector arms exist for both measured architectures, and three rules govern them.
 
 **Every vector arm is switchable off**, so a benchmark can time both and a test can hold
 them to producing identical results. A vector kernel that is faster and different is not
-an optimisation.
+an optimization.
 
 **A feature gate is derived from the compiler's own macros wherever the compiler can know
 it.** NEON is mandatory in ARMv8, so `__ARM_NEON` is defined with no flags — routing that

@@ -227,10 +227,10 @@
 /// (y, x) is source rows 2y-1..2y and columns 2x-1..2x, half a source pixel up
 /// and to the left of the aligned block, with the reference's border rule
 /// supplying row and column -1. binCV uses the ALIGNED, non-overlapping block
-/// (rows 2y..2y+1, columns 2x..2x+1), whose centre is source coordinate
+/// (rows 2y..2y+1, columns 2x..2x+1), whose center is source coordinate
 /// 2*(y + 0.5): the destination grid maps onto the source with a pure factor
 /// of two and no offset. The reference's half-pixel shift is an artifact of an
-/// even-sized kernel's anchor, not a modelling choice, and reproducing it
+/// even-sized kernel's anchor, not a modeling choice, and reproducing it
 /// would cost a border rule in the hot loop for a geometry that is worse.
 /// tests/test_pyramid.cpp pins this claim rather than asserting it in prose:
 /// under OpenCV it checks that cv::blur's default-anchor output at (2y, 2x)
@@ -697,7 +697,7 @@ enum class PyrDownFilter {
 /// @brief What a filter reads outside the frame.
 /// @note `Reflect101` is `cv::BORDER_REFLECT_101` -- what `cv::pyrDown` applies --
 /// and it is the DEFAULT, because binCV's same-named functions match OpenCV's
-/// behaviour and the cheaper alternatives are opt-in. `Zero` is the deviation
+/// behavior and the cheaper alternatives are opt-in. `Zero` is the deviation
 /// binCV shipped before, kept because it is genuinely cheaper and because
 /// every measurement up to this was taken on it.
 /// @note THE TWO AXES COST DIFFERENTLY, which is what makes reflect-101 affordable
@@ -709,7 +709,7 @@ enum class PyrDownFilter {
 /// up per pixel on that rim while the interior keeps the word-parallel path.
 enum class PyrDownBorder {
     Reflect101,  ///< cv::BORDER_REFLECT_101, what cv::pyrDown applies. THE DEFAULT.
-    Replicate,   ///< cv::BORDER_REPLICATE -- and what the hand-optimised Box2x2
+    Replicate,   ///< cv::BORDER_REPLICATE -- and what the hand-optimized Box2x2
                  ///< route has always done, so it is the border under which that
                  ///< route is reachable and every pre- measurement was taken.
     Zero,        ///< read outside as 0. The cheapest, and a deviation from both.
@@ -874,7 +874,7 @@ inline void divideStage(WordType* value, WordType* quotient) {
 /// compile time.
 /// @note. Same restoring division, same order, same result -- but
 /// `Divisor << q` is a literal at every step, so each `thresholdGE` and each
-/// `subtractConstantWhere` specialises against its own constant instead of
+/// `subtractConstantWhere` specializes against its own constant instead of
 /// shifting a runtime value. The runtime spelling stays for callers that have
 /// a genuinely runtime divisor.
 template <unsigned Divisor, size_t N, size_t NQ, typename WordType>
@@ -1532,15 +1532,15 @@ template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType,
 inline void pyrDownFiltered(const BinMatConstView<WordType> (&src)[NIn],
                             BinMatView<WordType> (&dst)[NOut]) {
     // PER-FILTER SPECIALIZATION, dispatched at compile time. `F` is a closed enum,
-    // not a caller-supplied functor, so specialising the cases that earn it is the
+    // not a caller-supplied functor, so specializing the cases that earn it is the
     // design rather than an exception -- the same shape ops/opticalFlow.hpp uses to
     // reach alignedResidualSumsNeon1/2.
     //
-    // Box2x2 + Replicate is the one specialisation that exists today: the
-    // hand-optimised route through boxSum4 and requantizeBoxSum, 1.24x the generic
+    // Box2x2 + Replicate is the one specialization that exists today: the
+    // hand-optimized route through boxSum4 and requantizeBoxSum, 1.24x the generic
     // route computing the same function, and the border it has always
     // implemented. The other four filters and the other two borders take the generic
-    // route until someone measures a case worth specialising.
+    // route until someone measures a case worth specializing.
     //
     // The two are held to agreement by tests/test_pyramid.cpp at ODD extents
     // specifically, which is the only place they can differ.
@@ -1567,7 +1567,7 @@ inline void pyrDownFiltered(const QuantMat<NIn, WordType>& src, QuantMat<NOut, W
 /// against the OpenCV-matching Gaussian's rough parity. It is not `cv::pyrDown`
 /// and does not claim to be -- different filter, different border -- which is
 /// why it no longer holds that name.
-/// @note Dispatches to the hand-optimised box route (`impl::pyrDownRoute`), 1.24x the
+/// @note Dispatches to the hand-optimized box route (`impl::pyrDownRoute`), 1.24x the
 /// generic framework computing the same function.
 /// tests/test_pyramid.cpp holds the two to agreement at ODD extents, which is
 /// the only place they can differ.

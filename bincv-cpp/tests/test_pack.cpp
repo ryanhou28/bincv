@@ -254,7 +254,7 @@ BINCV_TEST(Pnm, RejectsRatherThanMisreads) {
     // A parser in core has no exceptions and no error channel, so the only honest
     // failure is `valid == false`. Each of these is a real way a buffer goes wrong.
     const uint8_t notPgm[] = {'P', '6', ' ', '1', ' ', '1', ' ', '2', '5', '5', '\n', 0};
-    BINCV_CHECK(!readPgmHeader(notPgm, sizeof(notPgm)).valid);          // P6 is colour
+    BINCV_CHECK(!readPgmHeader(notPgm, sizeof(notPgm)).valid);          // P6 is color
     const uint8_t truncated[] = {'P', '5', '\n', '4', ' ', '4', '\n', '2', '5', '5', '\n', 1, 2};
     BINCV_CHECK(!readPgmHeader(truncated, sizeof(truncated)).valid);    // 13 bytes for 16 pixels
     const uint8_t noNumber[] = {'P', '5', '\n', 'x', '\n'};

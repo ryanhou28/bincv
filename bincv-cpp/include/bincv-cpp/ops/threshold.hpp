@@ -46,7 +46,7 @@
 /// answer: a bit-packed BinMat rather than a CV_8U matrix, which is the entire
 /// point -- 640x480 in 38400 bytes rather than 307200 (the design notes). The
 /// harness compares by unpacking to CV_8U {0, 255}, so "bit-exact" is asserted
-/// against OpenCV's actual bytes and not against a normalisation of them.
+/// against OpenCV's actual bytes and not against a normalization of them.
 ///
 /// `maxval` is therefore NOT a parameter. In a one-bit destination the set value
 /// is 1 by construction; a `maxval` argument could only be ignored or asserted
@@ -81,7 +81,7 @@
 /// +2^31 every pixel set none set binCV
 ///
 /// OpenCV's answers there are the *opposite* of the arithmetic, and they flip
-/// direction with the compiler's conversion behaviour rather than with the
+/// direction with the compiler's conversion behavior rather than with the
 /// threshold. binCV does NOT chase that: the reduction below is exact over the
 /// whole real line, so a huge positive threshold selects nothing and a huge
 /// negative one selects everything. `NaN` -- which is not a threshold at all --
@@ -182,7 +182,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// pixels are compared per call and the comparison itself is branch-free.
 /// @note `thresh + 1` is what reaches thresholdGE, because it answers `>=` and
 /// this operation is `>`. The `thresh >= MaxValue` shortcut above it is
-/// not an optimisation -- it is what stops that increment from wrapping
+/// not an optimization -- it is what stops that increment from wrapping
 /// when a caller passes the largest `unsigned`.
 /// @note The destination's padding bits are zero on return. That is not
 /// automatic here: thresholdGE answers every lane in the word, including
@@ -359,7 +359,7 @@ inline void threshold(const cv::Mat& src, BinMatView<WordType> dst, double thres
     //
     // THE THREE BRANCHES ARE ORDERED SO THAT THE CAST NEVER SEES A VALUE IT
     // CANNOT REPRESENT. `std::floor` is reached only for thresh in [0, 255), so
-    // the `int` conversion is exact and this kernel has no undefined behaviour of
+    // the `int` conversion is exact and this kernel has no undefined behavior of
     // its own for ANY double -- including the infinities and NaN, which reach it
     // through the second branch. The second test is written `!(thresh < 255.0)`
     // rather than `thresh >= 255.0` for exactly one input: NaN, which is less
@@ -381,7 +381,7 @@ inline void threshold(const cv::Mat& src, BinMatView<WordType> dst, double thres
     // all live in ops/pack.hpp, which is in CORE -- this function's only job is to
     // reduce `thresh` to a rule and hand over the buffer. Before that split this
     // loop was a second copy of the same word assembly, and only one of the two was
-    // ever optimised.
+    // ever optimized.
     //
     // `cutoff` is an int precisely so the two degenerate ends survive the reduction:
     // 0 means every pixel passes and 256 means none does, and neither fits a uint8_t.

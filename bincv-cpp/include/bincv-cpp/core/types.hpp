@@ -45,7 +45,7 @@ struct Size {
 /// @note The rectangle covers columns [x, x + width) and rows [y, y + height) --
 /// half-open, like cv::Rect. `width` and `height` are extents, not
 /// coordinates of the far corner.
-/// @note **Signed on purpose.** A window centred on a keypoint near an edge has a
+/// @note **Signed on purpose.** A window centerd on a keypoint near an edge has a
 /// negative origin (the design notes: 31x31 windows over the whole frame),
 /// and the alternative -- making the caller clamp before it can express the
 /// window -- moves the same clipping arithmetic into every call site, where
@@ -139,7 +139,7 @@ struct Point2f {
 /// @brief The word type to use unless you have measured a reason not to.
 ///
 /// **PICK THIS ONE.** `BinMat` and `QuantMat` are templated on the word type and
-/// every width is correct — but **only `uint32_t` reaches the vectorised tracking
+/// every width is correct — but **only `uint32_t` reaches the vectorized tracking
 /// kernels**: the AVX2 eight-keypoint batch and all four NEON residual kernels are
 /// gated on `sizeof(WordType) == 4`.
 ///

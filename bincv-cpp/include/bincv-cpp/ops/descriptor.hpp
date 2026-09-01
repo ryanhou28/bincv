@@ -28,14 +28,14 @@
 /// `cv::ORB` uses a **specific 256-pair table**, `bit_pattern_31_`, plus an
 /// orientation from the intensity centroid. binCV reproduces neither, and the reason
 /// is **practical, not legal** -- an earlier version of this comment said the table
-/// "would import a licence question", which overstated it:
+/// "would import a license question", which overstated it:
 ///
 /// * the ORB paper (Rublee et al., ICCV 2011) describes how the pattern is
 /// *learned*, and that method is free to reimplement;
 /// * the table as it exists is OpenCV source under **Apache-2.0, which permits
 /// copying with attribution.** Vendoring it is allowed, not forbidden.
 ///
-/// **What actually stops it today is that binCV has no licence file**, so it
+/// **What actually stops it today is that binCV has no license file**, so it
 /// cannot discharge an attribution obligation it would be taking on. Once it has one,
 /// shipping an OpenCV-compatible pattern with proper attribution is a normal thing to
 /// do and would make binCV's descriptors interchangeable with `cv::ORB`'s.
@@ -169,7 +169,7 @@ inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t st
             // and a compare: no bounds test, no multiply, and no read-modify-write on
             // the descriptor -- the word is ACCUMULATED in a register and stored once
             // per `kBits` pairs.
-            const SrcT* centre = img + static_cast<size_t>(cy) * stride +
+            const SrcT* center = img + static_cast<size_t>(cy) * stride +
                                  static_cast<size_t>(cx);
             for (size_t w = 0; w < kWords; ++w) {
                 WordType acc = 0;
@@ -177,7 +177,7 @@ inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t st
                 for (size_t b = 0; b < kBits; ++b) {
                     const size_t i = base + b;
                     acc = static_cast<WordType>(
-                        acc | (static_cast<WordType>(centre[offA[i]] < centre[offB[i]]) << b));
+                        acc | (static_cast<WordType>(center[offA[i]] < center[offB[i]]) << b));
                 }
                 d[w] = acc;
             }

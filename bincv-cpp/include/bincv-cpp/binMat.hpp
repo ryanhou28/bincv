@@ -185,7 +185,7 @@ public:
     /// @brief Takes over `other`'s storage, leaving it empty. See the move
     /// constructor.
     /// @note Moving from a matrix that WRAPS this object's own storage leaves this
-    /// object unchanged (`other` is still emptied). Storage cannot honour
+    /// object unchanged (`other` is still emptied). Storage cannot honor
     /// such a transfer -- it would have to free the block and then adopt a
     /// pointer into it -- and this is the only answer that keeps the move
     /// allocation-free and noexcept, which the Tier 2 path depends on.
@@ -253,7 +253,7 @@ public:
     /// @throws std::out_of_range if `i != 0`, in EVERY build -- NOT debug-only.
     /// This is a view factory, not element access (the design notes), and
     /// it is checked here for the same reason it is checked on QuantMat<N>:
-    /// so that one wrong plane index has one defined behaviour across the
+    /// so that one wrong plane index has one defined behavior across the
     /// family. Discarding the index in release, as this did, meant generic
     /// code could not be tested for index handling at N = 1 and have the
     /// result carry to N > 1 -- which is precisely the portability the
@@ -309,7 +309,7 @@ public:
     /// @brief Gets the value of a single element at (row, col). Not a reference.
     /// @note DEBUG-CHECKED, UNCHECKED IN RELEASE, as cv::Mat::at is. An index
     /// outside [0, height) x [0, width) trips a BINCV_ASSERT in a debug
-    /// build and is undefined behaviour in a release one -- it does not
+    /// build and is undefined behavior in a release one -- it does not
     /// throw, and did until ( sanctions the change). This is what
     /// keeps the bounds test out of every per-pixel loop and lets a release
     /// build inline the access down to a row offset, a shift and a mask.

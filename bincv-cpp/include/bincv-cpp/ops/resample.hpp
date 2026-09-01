@@ -81,7 +81,7 @@
 /// The same arithmetic makes variant C's zero-fill of its padded scratch words
 /// DEFENSIVE rather than load-bearing: whatever those words held would gather to
 /// positions >= dst.width and be masked away. It is still done, because a
-/// recurrence whose result depends on uninitialised memory only where nobody
+/// recurrence whose result depends on uninitialized memory only where nobody
 /// looks is one refactor away from depending on it where somebody does.
 ///
 /// A DIRTY SOURCE cannot reach a live destination pixel, and that is arithmetic
@@ -281,7 +281,7 @@ inline WordType gatherEvenBits(WordType x) {
 // there are log2(rowBits) of them -- ten at 640 columns, against six register
 // steps for a uint64_t word,
 // * the masks are no longer word literals. Once the period exceeds a word they
-// are runs of all-ones and all-zero WORDS, so they have to be materialised at
+// are runs of all-ones and all-zero WORDS, so they have to be materialized at
 // frame width, and the row has to be padded to a power-of-two bit count for
 // the block recurrence to tile it. Hence a mask table and a scratch row, both
 // the caller's (no heap in a kernel, CLAUDE.md).

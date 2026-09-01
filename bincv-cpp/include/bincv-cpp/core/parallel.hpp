@@ -27,7 +27,7 @@
 /// ---------------------------------------------------------------------------
 /// THE SURFACE IS OPENCV'S ON PURPOSE
 ///
-/// `setNumThreads` / `getNumThreads`, with `1` serialising. An integrator who already
+/// `setNumThreads` / `getNumThreads`, with `1` serializing. An integrator who already
 /// knows `cv::setNumThreads` needs no new vocabulary, and the reference implementation's
 /// model -- single-worker pools per pipeline stage, parallelism taken at the stage
 /// level -- is one `setNumThreads(1)` call away.
@@ -66,7 +66,7 @@ inline int& threadCount() {
 /// would put an atomic load in a path that runs per keypoint.
 inline void setParallelForBackend(ParallelForFn fn) { impl::parallelBackend() = fn; }
 
-/// @brief How many threads binCV may use. `1` serialises. Mirrors `cv::setNumThreads`.
+/// @brief How many threads binCV may use. `1` serializes. Mirrors `cv::setNumThreads`.
 inline void setNumThreads(int n) { impl::threadCount() = n < 1 ? 1 : n; }
 
 /// @brief The current thread count. `1` unless a backend is installed and asked for more.

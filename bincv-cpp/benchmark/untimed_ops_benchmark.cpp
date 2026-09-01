@@ -3,7 +3,7 @@
 //
 // a measurement found `medianWide` and `edgeThreshold` at 78% of the frontend the day something
 // first called them: written bit-exact against the reference, benchmarked by nobody, and
-// therefore unoptimised. That prompted a sweep of every operation for the same state --
+// therefore unoptimized. That prompted a sweep of every operation for the same state --
 // correct, tested, and never timed.
 //
 // The sweep found exactly two on real paths:

@@ -6,7 +6,7 @@
 // reference pipeline's own edge-map content and separated the causes: on windows
 // that never clip, four 1-BIT pyramid levels are still ~600x worse than one,
 // because a level whose pixels are bits cannot localise sub-pixel motion better
-// than its own quantisation. a measurement measured the levels needing 1/3/4/5 bits. So the
+// than its own quantization. a measurement measured the levels needing 1/3/4/5 bits. So the
 // fix is N-bit levels, is the task that has to CHOOSE a bit depth per
 // level -- and a choice needs a price. This file is the price.
 //
@@ -243,7 +243,7 @@ struct LevelSet {
     }
 };
 
-/// @brief 200 scattered keypoint windows, centred, so edge windows clip.
+/// @brief 200 scattered keypoint windows, centerd, so edge windows clip.
 /// @note The same generator covariance_benchmark.cpp uses, seeded identically, so
 /// the two files time the same windows.
 std::vector<Rect> keypointWindows(int W) {

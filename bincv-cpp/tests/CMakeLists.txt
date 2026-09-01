@@ -250,7 +250,7 @@ endforeach()
 #
 # The plane-ARRAY overload of gradientCovariance() is templated on the plane count
 # and shipped without a bound on it, so a hand-assembled 33-plane view array reached
-# `int64_t(1) << (i + j)` with a shift exponent of 64 -- undefined behaviour,
+# `int64_t(1) << (i + j)` with a shift exponent of 64 -- undefined behavior,
 # reproduced under -fsanitize=undefined before the fix. The fix is a static_assert
 # bounding N at QuantMat's 1..8, matching pyrDownRoute and derivativeX.
 #

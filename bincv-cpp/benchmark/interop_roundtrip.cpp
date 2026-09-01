@@ -1,7 +1,7 @@
-// -- INTEROP OR SPECIALISATION above the bit-width crossover?
+// -- INTEROP OR SPECIALIZATION above the bit-width crossover?
 //
 // a measurement measured binCV 2.5-14x slower than OpenCV above the (filter-dependent)
-// crossover. The candidate answers: specialise wide-N cases internally to a byte
+// crossover. The candidate answers: specialize wide-N cases internally to a byte
 // representation -- a second storage layout and a second implementation of every
 // kernel -- or make QuantMat<N> <-> cv::Mat conversion first-class and hand wide
 // intermediates to OpenCV, which is already optimal at 8 bits.

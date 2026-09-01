@@ -13,7 +13,7 @@ choice has been made, memory wins.**
 
 | | |
 |---|---|
-| [GitHub Issues](https://github.com/ryanhou28/bincv/issues) | **Start here.** All open work, labelled |
+| [GitHub Issues](https://github.com/ryanhou28/bincv/issues) | **Start here.** All open work, labeled |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the library is put together, and why |
 | [docs/API.md](docs/API.md) | Generated API reference — regenerate with `scripts/gen_api_index.py` |
 | [GETTING_STARTED.md](GETTING_STARTED.md) | Build, use, conventions |
@@ -27,7 +27,7 @@ one-off probes — live in `.local/` and are **not** part of the repository.
 Argument alone does not settle a performance question; neither does a benchmark without a
 stated decision rule.
 
-- **Write the decision rule before measuring.** What result favours which choice, written
+- **Write the decision rule before measuring.** What result favors which choice, written
   down first. Deciding afterwards invites fitting the conclusion to the numbers.
 - **Compare alternatives**, not one option, on representative workloads.
 - **Report memory and speed together** — they trade off, so one alone cannot be weighed
@@ -38,7 +38,7 @@ stated decision rule.
   look like a win.
 
 **A new operation gets a benchmark arm when it is written, even with no caller.** A kernel
-nobody calls makes no performance claim, so it ships correct, untimed and unoptimised, and
+nobody calls makes no performance claim, so it ships correct, untimed and unoptimized, and
 nothing notices until something calls it. That has happened here: two kernels written
 bit-exact and benchmarked by nobody turned out to be **78% of the whole frontend** the day
 they got a caller.
@@ -120,7 +120,7 @@ adjustment — belong to the application above it.
 
 **The input boundary is a rule, not a list:** binCV accepts a **single-channel,
 integer-typed, strided pixel array** and turns it into an N-bit matrix. Getting to that
-array is the caller's — decoding, demosaicing and colour conversion each turn one wide
+array is the caller's — decoding, demosaicing and color conversion each turn one wide
 image into another and leave the caller exactly as far from bits as before. Everything
 from such an array down to bits is binCV's, **including sources wider than 8 bits**,
 because downconverting first destroys small gradients before the threshold can see them.

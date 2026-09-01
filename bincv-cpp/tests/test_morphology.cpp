@@ -21,13 +21,13 @@
 // ---------------------------------------------------------------------------
 // WHY THERE ARE ASYMMETRIC ELEMENTS HERE, MEASURED
 //
-// All three parametric shapes are point-symmetric about their centre, so at a
-// centred anchor the offset set E satisfies E == -E and NEGATING EVERY OFFSET
+// All three parametric shapes are point-symmetric about their center, so at a
+// centerd anchor the offset set E satisfies E == -E and NEGATING EVERY OFFSET
 // CHANGES NOTHING. A suite built only from rect / cross / ellipse at the default
 // anchor therefore cannot see an inverted shift sign. That is not a worry, it is
 // a measurement: with `dx = ex - anchorX` inverted to `anchorX - ex` in both the
-// general and the 3x3 path, a 5040-case sweep of the three shapes at centred
-// anchors passed 5040/5040, while the same sweep with off-centre anchors and the
+// general and the 3x3 path, a 5040-case sweep of the three shapes at centerd
+// anchors passed 5040/5040, while the same sweep with off-center anchors and the
 // three custom masks below failed 3803 of 5040. Both routes to asymmetry are
 // swept here for that reason.
 //
@@ -172,7 +172,7 @@ const uint8_t kMaskL[9] = {1, 0, 0,
 
 // A wedge, NOT a plain diagonal. The first version of this mask was the 5x5 main
 // diagonal, and Morphology.ElementStructure rejected it: a diagonal is invariant
-// under a 180-degree rotation, so its offset set satisfies E == -E at a centred
+// under a 180-degree rotation, so its offset set satisfies E == -E at a centerd
 // anchor and it belongs in the SYMMETRIC catalogue. That check exists precisely
 // so a mask that looks asymmetric cannot be filed as one.
 const uint8_t kMaskWedge[25] = {0, 0, 0, 0, 1,
@@ -204,7 +204,7 @@ const std::vector<NamedElement>& symmetricElements() {
     return v;
 }
 
-/// @brief The asymmetric catalogue: off-centre anchors and hand-written masks.
+/// @brief The asymmetric catalogue: off-center anchors and hand-written masks.
 const std::vector<NamedElement>& asymmetricElements() {
     static const std::vector<NamedElement> v{
         {"rect3x3@(0,0)", StructuringElement::rect(3, 3, 0, 0)},
@@ -389,7 +389,7 @@ void dirtyThePadding(BinMat<WordType>& m) {
 // formulation of it, because "OpenCV's rounding" is the specification. What is
 // checkable without OpenCV is the structure every shape must have, and it is what
 // the kernels' correctness rests on: that spanOfRow and activeAt agree, that
-// the parametric shapes are point-symmetric at a centred anchor (the property
+// the parametric shapes are point-symmetric at a centerd anchor (the property
 // that makes the asymmetric catalogue necessary), and that rect and cross match
 // their closed forms.
 
@@ -425,7 +425,7 @@ void testElementStructure() {
                 // The CONVERSE, which is what the kernels rely on: a parametric
                 // shape's span is SOLID, so the word loop can iterate it without
                 // a per-cell test (StructuringElement::spanIsDense). Without
-                // this check that optimisation would be an assumption.
+                // this check that optimization would be an assumption.
                 int holesInSpan = 0;
                 for (int row = 0; row < r; ++row) {
                     int first = 0;
@@ -441,7 +441,7 @@ void testElementStructure() {
                 MORPH_EXPECT(cells > 0 && se.valid(), "the element has at least one set cell",
                              what);
 
-                // Point symmetry at a centred anchor, for odd extents. This is the
+                // Point symmetry at a centerd anchor, for odd extents. This is the
                 // property that makes a rect/cross/ellipse-only suite unable to
                 // see an inverted offset sign.
                 if (c % 2 == 1 && r % 2 == 1) {
@@ -472,9 +472,9 @@ void testElementStructure() {
                     MORPH_EXPECT(wrong == 0, "MORPH_CROSS is the anchor's row and column", what);
                 }
                 if (shape == bincv::MORPH_ELLIPSE) {
-                    // Bounded by the rect and containing the centre cross's stem.
+                    // Bounded by the rect and containing the center cross's stem.
                     MORPH_EXPECT(cells <= c * r && se.activeAt(c / 2, r / 2),
-                                 "MORPH_ELLIPSE is inside its box and contains the centre", what);
+                                 "MORPH_ELLIPSE is inside its box and contains the center", what);
                 }
             }
         }
@@ -487,20 +487,20 @@ void testElementStructure() {
                      std::string("shape=") + std::to_string(shape));
     }
 
-    // -1 resolves to the centre; an explicit anchor is taken as given.
-    const StructuringElement centred = StructuringElement::rect(7, 5);
-    MORPH_EXPECT(centred.anchorCol() == 3 && centred.anchorRow() == 2,
+    // -1 resolves to the center; an explicit anchor is taken as given.
+    const StructuringElement centerd = StructuringElement::rect(7, 5);
+    MORPH_EXPECT(centerd.anchorCol() == 3 && centerd.anchorRow() == 2,
                  "an anchor of -1 resolves to size / 2", "rect(7,5)");
     const StructuringElement explicitAnchor = StructuringElement::rect(7, 5, 0, 4);
     MORPH_EXPECT(explicitAnchor.anchorCol() == 0 && explicitAnchor.anchorRow() == 4,
                  "an explicit anchor is taken as given", "rect(7,5,0,4)");
 
-    // A cross follows its anchor, which is cv::getStructuringElement's behaviour
+    // A cross follows its anchor, which is cv::getStructuringElement's behavior
     // and the reason the anchor is a field of the element rather than a separate
     // argument to the kernel.
     const StructuringElement offCross = StructuringElement::cross(5, 5, 0, 4);
     MORPH_EXPECT(offCross.activeAt(0, 0) && offCross.activeAt(4, 4) && !offCross.activeAt(4, 0),
-                 "MORPH_CROSS is centred on the ANCHOR, not on the element", "cross(5,5,0,4)");
+                 "MORPH_CROSS is centerd on the ANCHOR, not on the element", "cross(5,5,0,4)");
 
     // The mask overrides the shape and is read row-major.
     const StructuringElement masked = StructuringElement::custom(kMaskL, 3, 3);
@@ -684,7 +684,7 @@ void testSingleOffsetEqualsShift(const char* wordTypeName) {
 template <typename WordType>
 void testFastPathEqualsGeneric(const char* wordTypeName) {
     // Every 3x3 element the special case can be handed, including masks whose
-    // cells make it skip work -- and a centred anchor, which is its precondition.
+    // cells make it skip work -- and a centerd anchor, which is its precondition.
     uint8_t mask[9];
     std::vector<StructuringElement> elements3x3{
         StructuringElement::rect(3, 3), StructuringElement::cross(3, 3),
@@ -959,7 +959,7 @@ void testPaddingAndDegenerate(const char* wordTypeName) {
             fillRandom(src, 0.5f, caseSeed(dims[0], dims[1], 31000 + static_cast<size_t>(size)));
             BinMat<WordType> dst(dims[0], dims[1]);
             BinMat<WordType> expected(dims[0], dims[1]);
-            // -1 is OpenCV's "centre"; 0 and size - 1 are the asymmetric ones.
+            // -1 is OpenCV's "center"; 0 and size - 1 are the asymmetric ones.
             const int wideAnchors[] = {-1, 0, size - 1};
             for (int anchorX : wideAnchors) {
                 const StructuringElement se = StructuringElement::rect(size, 3, anchorX, 1);
@@ -1107,7 +1107,7 @@ void testElementMatchesOpenCv() {
     for (int c : sizes) {
         for (int r : sizes) {
             for (MorphShape shape : shapes) {
-                // The default anchor and two off-centre ones; MORPH_CROSS's cell
+                // The default anchor and two off-center ones; MORPH_CROSS's cell
                 // set depends on the anchor, so this is not a redundant sweep.
                 const cv::Point anchors[] = {cv::Point(-1, -1), cv::Point(0, 0),
                                              cv::Point(c - 1, r - 1), cv::Point(c / 2, 0)};

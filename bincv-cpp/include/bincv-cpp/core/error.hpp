@@ -41,13 +41,13 @@
 /// otherwise fail with an error per throw site, which is exactly the state
 /// this file was written to fix. Defining BINCV_NO_EXCEPTIONS by hand still
 /// works, and still wins: it forces the abort path even where `throw` would
-/// have compiled, which is how the Tier 2 behaviour is exercised on a
+/// have compiled, which is how the Tier 2 behavior is exercised on a
 /// desktop toolchain.
 /// @note Set it for the WHOLE program if you set it at all. Like NDEBUG it is a
 /// per-translation-unit macro, and it changes the body of every function
 /// containing a check, so a program with both kinds of object in it has two
 /// definitions of each. BINCV_ABI_NAMESPACE below keeps that from resolving
-/// silently -- each object gets the behaviour it was compiled for, and a
+/// silently -- each object gets the behavior it was compiled for, and a
 /// genuinely shared interface fails to link rather than misbehaving -- but
 /// a half-converted program is still not a configuration anyone wants.
 /// @note __cpp_exceptions is the standard feature-test macro; __EXCEPTIONS
@@ -90,7 +90,7 @@
 /// emitted into whichever objects use them. Two objects compiled with
 /// different NDEBUG or different BINCV_NO_EXCEPTIONS define the same symbol
 /// differently, which is an ODR violation; the linker keeps one arbitrarily
-/// and the loser silently gets the other configuration's behaviour, chosen
+/// and the loser silently gets the other configuration's behavior, chosen
 /// by link order. Measured before this namespace existed: linking a release
 /// object ahead of a debug one made an out-of-range set in the DEBUG
 /// object return quietly and set a padding bit; reversing the link order
@@ -100,7 +100,7 @@
 /// Each object then instantiates and calls the definition it was compiled
 /// for -- no coin flip -- and any interface a mismatched pair really does
 /// share becomes an undefined symbol naming both configurations, which is a
-/// link error a reader can act on rather than a behaviour change nobody
+/// link error a reader can act on rather than a behavior change nobody
 /// sees. It is transparent otherwise: `bincv::BinMat` still names the type.
 /// @note Written out as four cases rather than pasted together from the two
 /// macros, so the name that appears in a linker diagnostic is greppable.

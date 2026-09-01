@@ -1008,7 +1008,7 @@ void testCovarianceIdentity(const char* wordTypeName) {
             const int windowSizes[] = {7, 15, 31};
             for (int k : windowSizes) {
                 const int half = k / 2;
-                // Centres at the corners, edges and middle, so every window here
+                // Centers at the corners, edges and middle, so every window here
                 // is clipped on at least one side except the middle ones.
                 const int cxs[] = {0, half, width / 2, width - 1, width + 2};
                 const int cys[] = {0, half, height / 2, height - 1};
@@ -1511,7 +1511,7 @@ void testFusedCovariance(const char* wordTypeName) {
     }
 
     // Window for window over a whole frame, at the three LK window sizes, with the
-    // centres placed so that every window on the border is clipped. This is the
+    // centers placed so that every window on the border is clipped. This is the
     // half of the requirement the curated region list does not cover: the region
     // list is chosen, and a sweep is not.
     {

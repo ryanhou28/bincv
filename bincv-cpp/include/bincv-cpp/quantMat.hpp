@@ -21,7 +21,7 @@ namespace impl {
 
 /// @brief |value| as an unsigned, computed WITHOUT negating a signed int.
 /// @note Not a stylistic choice. `-value` at value == INT_MIN is signed overflow,
-/// which is undefined behaviour -- and undefined in a way that matters more
+/// which is undefined behavior -- and undefined in a way that matters more
 /// than the wrong answer: it licenses the optimizer to assume the argument
 /// is never INT_MIN and to drop the `value < 0` test that guards it. The
 /// range assert in SignedQuantMat::set is compiled out under NDEBUG, which
@@ -256,7 +256,7 @@ public:
     /// memory at 640x480, with no diagnostic.
     /// @note The same check, with the same spelling, is on QuantMat<1>::plane
     /// and on SignedQuantMat::magnitude. One wrong plane index has one
-    /// defined behaviour across the whole type family, so index handling
+    /// defined behavior across the whole type family, so index handling
     /// tested at one N carries to the others.
     BinMatView<WordType> plane(size_t i) {
         if (i >= N) BINCV_THROW(std::out_of_range, "QuantMat::plane: index out of range");
@@ -286,7 +286,7 @@ public:
     /// @return The value in [0, MaxValue].
     /// @note DEBUG-CHECKED, UNCHECKED IN RELEASE, as BinMat::at is. An index
     /// outside the matrix trips a BINCV_ASSERT in a debug build and is
-    /// undefined behaviour in a release one.
+    /// undefined behavior in a release one.
     /// @note This is the per-pixel path, provided for setup, tests and printing.
     /// It is not how images are processed: bulk work goes plane-wise
     /// through plane, which is the whole point of the representation.
@@ -697,7 +697,7 @@ public:
     /// magnitude planes, so a zero written here is the canonical zero.
     /// @note Debug-checked, unchecked in release; see QuantMat::at.
     /// @note The magnitude is taken in UNSIGNED arithmetic (impl::signedMagnitude).
-    /// Writing it as `-value` would be undefined behaviour at INT_MIN, and
+    /// Writing it as `-value` would be undefined behavior at INT_MIN, and
     /// the assert above is compiled out in every configuration the project
     /// verifies, so nothing would stop INT_MIN from reaching it.
     void set(int row, int col, int value) {

@@ -300,7 +300,7 @@ constexpr size_t PADDED_ALIGNMENT = 32;
 // The range names, and it is chosen to straddle every boundary the
 // recurrence has: k == 0 and k == WordBits and k == 2 * WordBits are the
 // bitShift == 0 cases, where `x << (WordBits - bitShift)` would be a shift by
-// WordBits -- undefined behaviour, and on x86 the natural encoding masks the count
+// WordBits -- undefined behavior, and on x86 the natural encoding masks the count
 // and returns `x` instead of 0, so the bug is invisible at every other k.
 
 template <typename WordType>
@@ -920,7 +920,7 @@ int cvBorderType(BorderType type) {
 ///
 /// @note OpenCV has no shift, so the denominator has to be built. It is exact:
 /// dst(y, x) = extended-src(y + dy, x + dx), and copyMakeBorder is the
-/// function that materialises "extended src". Pad by just enough that the
+/// function that materializes "extended src". Pad by just enough that the
 /// window lands inside, then take the window --
 /// top = max(0, -dy), bottom = max(0, dy), and the ROI origin is
 /// (max(dx, 0), max(dy, 0)).

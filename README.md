@@ -44,24 +44,26 @@ per-pixel work.
 
 ## Performance
 
-A keypoint-tracking frontend — median, edge threshold, pyramid, derivatives, corner
-detection and Lucas–Kanade — against OpenCV performing the same operations on the same
-content. Both sides start from the same grayscale frame and each builds its own binary
-one, so this is end to end.
+The point of storing a bit per pixel is that an operation over a row becomes a handful of
+word operations, and a buffer that used to be a megabyte becomes an eighth of one. Both
+show up in practice, and the memory one is usually the one that decides whether something
+fits on a small device.
 
-| one thread each side | binCV | OpenCV | |
-|---|---|---|---|
-| peak working set | **436 704 B** | 2 719 832 B | **6.23× smaller** |
-| Cortex-A72 | **4.88 ms/frame** | 29.63 | **6.07× faster** |
-| x86-64 | **1.07 ms/frame** | 4.46 | **4.16× faster** |
+How much you gain depends on the operation, the image size, the word type, the compiler
+and the machine — so rather than quote a number here, the benchmarks are in the
+repository and report on your hardware:
 
-Tracking agrees with OpenCV within 1 px on **100%** of flow vectors, median difference
-0.032 px.
+```bash
+cmake -S bincv-cpp -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+./build/benchmark/logic_benchmark          # a primitive, against OpenCV
+./build/benchmark/frontend_sequence <dir>  # a whole tracking frontend, against OpenCV
+```
 
-**Both sides get the same thread count**, which is the only comparison that isolates the
-implementation from the parallelism. binCV threads through a caller-installed backend and
-is serial by default; at four threads each on x86 the ratio narrows to roughly 3×,
-because OpenCV has more byte-work to spread across cores.
+Each one reports binCV and OpenCV side by side on the same content, with peak memory
+alongside the timings, and prints which vector paths were active. **Compare at equal
+thread counts** — binCV is serial unless you install a threading backend, and comparing
+one thread against many measures the parallelism rather than the implementation.
 
 ## What is in it
 
@@ -108,6 +110,6 @@ See [GETTING_STARTED.md](GETTING_STARTED.md).
 
 **Pre-release, and the API is not stable.** Expect names and signatures to move.
 
-## Licence
+## License
 
 TBD.

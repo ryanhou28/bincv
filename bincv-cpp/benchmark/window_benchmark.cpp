@@ -40,7 +40,7 @@
 //
 // The rule names a window size but not an access pattern, and the two things it
 // asks for -- "~200 keypoints, per the reference gftt_max_corners" and "include
-// the heavy-overlap case, since that is what favours incremental" -- are not the
+// the heavy-overlap case, since that is what favors incremental" -- are not the
 // same workload. So all three patterns the MVP actually contains are measured and
 // reported separately, and the rule is applied to each rather than to an average
 // that would hide the disagreement:
@@ -702,7 +702,7 @@ bool runAxis3(const char* wordName, DerivativeSet<Word>& d) {
     // The plane is one bit per pixel OF THE LEVEL IT BELONGS TO, so it shrinks by 4x
     // per level exactly as the derivative planes do. Printing only the 640x480
     // figure and calling it "per pyramid level" overstates the pyramid-wide cost by
-    // about 3x -- in favour of the memory side of this axis, which is the direction
+    // about 3x -- in favor of the memory side of this axis, which is the direction
     // an error must never go unremarked. The level-invariant statement is the
     // relative one: a fifth plane against the four the covariance already reads.
     const size_t levels[] = {1, 4, 16, 64};  // area divisors for L0..L3

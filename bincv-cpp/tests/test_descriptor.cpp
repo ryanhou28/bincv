@@ -137,7 +137,7 @@ BINCV_TEST(Descriptor, BorderKeypointsAreRejectedNotInvented) {
     std::vector<uint8_t> keep(3);
     computeBrief<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, kp, 3, pat, d.data(),
                                            keep.data());
-    std::printf(" keep flags: corner=%u centre=%u corner=%u\n", keep[0], keep[1], keep[2]);
+    std::printf(" keep flags: corner=%u center=%u corner=%u\n", keep[0], keep[1], keep[2]);
     BINCV_CHECK(keep[0] == 0);
     BINCV_CHECK(keep[1] == 1);
     BINCV_CHECK(keep[2] == 0);

@@ -57,7 +57,7 @@ public:
     /// @note Zero-filled because padding bits must start clear -- word-wise
     /// reductions over-count otherwise.
     /// @note Allocation failure is left to plain new, which already produces
-    /// exactly the two behaviours BINCV_THROW encodes: it throws
+    /// exactly the two behaviors BINCV_THROW encodes: it throws
     /// std::bad_alloc where exceptions are enabled, and aborts where they
     /// are not. Routing it through the macro would mean allocating with
     /// new(std::nothrow) and testing the result on every allocation, and
@@ -204,7 +204,7 @@ private:
     /// @note Wrapping owned memory is a first-class pattern here -- a non-owning
     /// Storage over another Storage's buffer is how sharing is expressed --
     /// so an assignment source can legitimately name memory the target is
-    /// about to free. There is no way to honour such an assignment: dropping
+    /// about to free. There is no way to honor such an assignment: dropping
     /// ownership either leaks the block or leaves both objects dangling, and
     /// adopting an interior pointer while staying owning would make delete
     /// undefined. The assignment is therefore defined as a no-op, which

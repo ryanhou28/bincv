@@ -1217,7 +1217,7 @@ BINCV_TEST(Corner, Structure_DiagonalEdgeHasNoCorner) {
     }
     // And the same frame really does have an enormous EDGE response, so the zero
     // above is the eigenvalue discriminating, not an absent gradient. A 15x15
-    // window centred ON the diagonal: both diagonal entries large, and the
+    // window centerd ON the diagonal: both diagonal entries large, and the
     // determinant exactly zero because every gradient in it is parallel.
     const Derived<uint32_t> d(f, BORDER_REFLECT_101);
     const GradientCovariance cov =

@@ -200,7 +200,7 @@ void checkCase(Variant variant, const char* wordName, size_t width, size_t heigh
 
     // A destination one row taller and one word wider than needed, pre-filled with
     // ones: anything the kernel fails to write shows up as a wrong value rather
-    // than as whatever zero-initialised memory happened to hold, and the guard row
+    // than as whatever zero-initialized memory happened to hold, and the guard row
     // catches a kernel that walks past its height.
     BinMat<WordType> dstStore(static_cast<int>(outWidth == 0 ? 1 : outWidth) + static_cast<int>(B),
                               static_cast<int>(height == 0 ? 1 : height) + 1);

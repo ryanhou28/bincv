@@ -89,7 +89,7 @@ BINCV_LKB_FN __m256i lkbFoldToLanes(__m256i bytes, __m256i ones8, __m256i ones16
 /// @brief `sum over the window of V(z) * G(z)` for EIGHT keypoints. **INTERNAL.**
 ///
 /// The vector form of `slicedSignedSum` accumulated over a whole window, which is
-/// what makes it worth vectorising: `slicedSignedSum` on its own is `2N^2` popcounts
+/// what makes it worth vectorizing: `slicedSignedSum` on its own is `2N^2` popcounts
 /// and nothing to hide the reduction behind.
 ///
 /// @param val `[row][plane][lane]`, the value's planes — a tap or the previous frame.

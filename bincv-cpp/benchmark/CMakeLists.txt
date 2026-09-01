@@ -49,7 +49,7 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
     target_link_libraries(${benchmark_name} PRIVATE bincv_core bincv_warnings)
     target_include_directories(${benchmark_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     # The real binarized frame, for benchmarks whose arms differ in CONVERGENCE
-    # behaviour and therefore cannot use synthetic content (X-50).
+    # behavior and therefore cannot use synthetic content (X-50).
     target_compile_definitions(${benchmark_name} PRIVATE
         BINCV_REALFRAME_PATH="${CMAKE_CURRENT_SOURCE_DIR}/realframe.bin")
 

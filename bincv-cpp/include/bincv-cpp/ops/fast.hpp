@@ -20,8 +20,8 @@
 /// TIER 2, NOT TIER 1, AND THE DIFFERENCE IS THE SCORE
 ///
 /// The DETECTION rule is `cv::FAST`'s exactly: `arcLength` contiguous pixels of the
-/// 16-pixel Bresenham ring all brighter than `centre + t`, or all darker than
-/// `centre - t`. Same ring, same order, same contiguity-wraps-around rule.
+/// 16-pixel Bresenham ring all brighter than `center + t`, or all darker than
+/// `center - t`. Same ring, same order, same contiguity-wraps-around rule.
 ///
 /// The SCORE is not. OpenCV scores a corner by binary-searching the largest threshold
 /// at which it survives; this sums how far the qualifying arc exceeds the threshold.
@@ -191,7 +191,7 @@ constexpr size_t kFastLanes = 32;
 /// instructions, **NEON compares unsigned natively**: `vcgtq_u8` and `vcltq_u8`, one
 /// instruction each and no bias. Saturation is still used for the thresholds
 /// (`vqaddq_u8` / `vqsubq_u8`), because `c + t` stopping at 255 is exactly the rule
-/// "nothing is brighter than a saturated centre".
+/// "nothing is brighter than a saturated center".
 ///
 /// The only thing NEON lacks is a move-mask, and ops/pack.hpp already carries the
 /// answer: AND per-lane bit weights, then three pairwise adds fold sixteen bytes into
@@ -444,11 +444,11 @@ inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t st
 // same registers. **It is a property of the signature, not of FAST.**
 //
 // ON A BIT-PLANE FRAME THE DETECTOR COLLAPSES TO BOOLEAN ALGEBRA. Pixels are {0, 1},
-// so `p_ring > p_centre + t` can only hold for `t = 0` with `ring = 1, centre = 0`,
-// and `p_ring < p_centre - t` only for `ring = 0, centre = 1`. There is exactly ONE
+// so `p_ring > p_centre + t` can only hold for `t = 0` with `ring = 1, center = 0`,
+// and `p_ring < p_centre - t` only for `ring = 0, center = 1`. There is exactly ONE
 // meaningful threshold, and the whole test becomes
 //
-// corner = arc9( ring & ~centre ) | arc9( ~ring & centre )
+// corner = arc9( ring & ~center ) | arc9( ~ring & center )
 //
 // -- sixteen AND-NOTs and an AND-tree, over WHOLE WORDS. **The same instruction that
 // decided one pixel now decides thirty-two**, or two hundred and fifty-six in a vector
@@ -686,17 +686,17 @@ BINCV_FASTBIT_FN void fastArcMasksRest256(const __m256i* v, uint32_t* out) {
 /// so the masks win above about three corners in a chunk and lose by up to **1.5×**
 /// below it. A library that picked one would be 1.4× slow on half its inputs.
 __attribute__((target("avx2"))) inline bool fastBitChunk256(const uint8_t* const* ringRow,
-                                                            const uint8_t* centreRow,
+                                                            const uint8_t* centerRow,
                                                             size_t chunkByte, int arcLength,
                                                             int maskThreshold,
                                                             uint32_t* masks,
                                                             uint32_t* diffOut) {
-    const __m256i centre =
-        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(centreRow + chunkByte));
+    const __m256i center =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(centerRow + chunkByte));
     __m256i v[16];
     for (int k = 0; k < 16; ++k) {
         v[k] = _mm256_xor_si256(
-            centre, fastRing256(ringRow[kFastRingY[k] + 3] + chunkByte, kFastRingX[k]));
+            center, fastRing256(ringRow[kFastRingY[k] + 3] + chunkByte, kFastRingX[k]));
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(diffOut + k * 8), v[k]);
     }
     if (arcLength != 9) {
@@ -790,14 +790,14 @@ BINCV_FASTBIT_NEON uint8x16_t fastArcAnyNeon(uint8x16_t* v, int arcLength) {
 /// @brief The sixteen ring reads, unrolled so every displacement is an immediate.
 template <int K>
 BINCV_FASTBIT_NEON void fastRingLoadNeon(const uint8_t* const* ringRow, size_t chunkByte,
-                                         uint8x16_t centre, uint8x16_t* v, uint8_t* diffOut) {
+                                         uint8x16_t center, uint8x16_t* v, uint8_t* diffOut) {
     if constexpr (K < 16) {
-        v[K] = veorq_u8(centre, fastRingNeon<kFastRingX[K]>(
+        v[K] = veorq_u8(center, fastRingNeon<kFastRingX[K]>(
                                     ringRow[kFastRingY[K] + 3] + chunkByte));
         vst1q_u8(diffOut + K * 16, v[K]);
-        fastRingLoadNeon<K + 1>(ringRow, chunkByte, centre, v, diffOut);
+        fastRingLoadNeon<K + 1>(ringRow, chunkByte, center, v, diffOut);
     } else {
-        (void)ringRow; (void)chunkByte; (void)centre; (void)v; (void)diffOut;
+        (void)ringRow; (void)chunkByte; (void)center; (void)v; (void)diffOut;
     }
 }
 
@@ -819,11 +819,11 @@ BINCV_FASTBIT_NEON void fastRingLoadNeon(const uint8_t* const* ringRow, size_t c
 /// keep different code because the measurement said to.**
 /// @note NEON is baseline on aarch64, so unlike the AVX2 form there is nothing to
 /// dispatch on.
-inline void fastBitMask128(const uint8_t* const* ringRow, const uint8_t* centreRow,
+inline void fastBitMask128(const uint8_t* const* ringRow, const uint8_t* centerRow,
                            size_t chunkByte, int arcLength, uint8_t* out, uint8_t* diffOut) {
-    const uint8x16_t centre = vld1q_u8(centreRow + chunkByte);
+    const uint8x16_t center = vld1q_u8(centerRow + chunkByte);
     uint8x16_t v[16];
-    fastRingLoadNeon<0>(ringRow, chunkByte, centre, v, diffOut);
+    fastRingLoadNeon<0>(ringRow, chunkByte, center, v, diffOut);
     vst1q_u8(out, fastArcAnyNeon(v, arcLength));
 }
 
@@ -854,7 +854,7 @@ inline int& fastScoreMaskThreshold() {
 /// **THE DETECTION IS `cv::FAST`'s, EXACTLY, ON THE SAME CONTENT.** For a binary image
 /// stored as `CV_8U` in `{0, 255}`, `cv::FAST` at any threshold in `[1, 254]` accepts
 /// precisely the corners this accepts: `255 > 0 + t` for every such `t`, and
-/// `0 < 255 - t` likewise, so the brighter arc requires a zero centre and the darker
+/// `0 < 255 - t` likewise, so the brighter arc requires a zero center and the darker
 /// arc a set one. That equivalence is what `tests/test_fast.cpp` checks, corner for
 /// corner and in order.
 ///
@@ -890,14 +890,14 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
     const size_t words = impl::minRowWords<WordType>(width);
     size_t n = 0;
 
-    // The sixteen `ring XOR centre` words for ONE output word. Named once because the
+    // The sixteen `ring XOR center` words for ONE output word. Named once because the
     // scalar path, the vector path's scoring and the border fallback all need it.
-    const auto wordDiff = [&](const WordType* const* ringRow, WordType centre, size_t w,
+    const auto wordDiff = [&](const WordType* const* ringRow, WordType center, size_t w,
                               WordType* diff) {
         for (int k = 0; k < 16; ++k) {
             const WordType r = impl::fastShiftedWord<WordType>(
                 ringRow[impl::kFastRingY[k] + 3], words, w, impl::kFastRingX[k]);
-            diff[k] = static_cast<WordType>(r ^ centre);
+            diff[k] = static_cast<WordType>(r ^ center);
         }
     };
 
@@ -956,7 +956,7 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
     };
 
     for (size_t y = 3; y + 3 < height && !overflow; ++y) {
-        const WordType* centreRow = img.row(y);
+        const WordType* centerRow = img.row(y);
         const WordType* ringRow[7];
         for (int d = -3; d <= 3; ++d) {
             ringRow[d + 3] = img.row(static_cast<size_t>(static_cast<long long>(y) + d));
@@ -987,7 +987,7 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
             for (int d = 0; d < 7; ++d) {
                 ringBytes[d] = reinterpret_cast<const uint8_t*>(ringRow[d]);
             }
-            const uint8_t* centreBytes = reinterpret_cast<const uint8_t*>(centreRow);
+            const uint8_t* centerBytes = reinterpret_cast<const uint8_t*>(centerRow);
             // EIGHT masks, not one: `masks[0]` is the corner mask (a run of nine) and
             // `masks[1..7]` are runs of ten to sixteen, from which a score is a
             // population count rather than a bit transpose.
@@ -996,12 +996,12 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
             for (; w + kChunkWords <= words; w += kChunkWords) {
 #if defined(BINCV_FAST_RUNTIME_AVX2)
                 const bool scored = impl::fastBitChunk256(
-                    ringBytes, centreBytes, w * sizeof(WordType), arcLength,
+                    ringBytes, centerBytes, w * sizeof(WordType), arcLength,
                     impl::fastScoreMaskThreshold(),
                     reinterpret_cast<uint32_t*>(maskBuf),
                     reinterpret_cast<uint32_t*>(diffBuf));
 #else
-                impl::fastBitMask128(ringBytes, centreBytes, w * sizeof(WordType), arcLength,
+                impl::fastBitMask128(ringBytes, centerBytes, w * sizeof(WordType), arcLength,
                                      maskBuf, diffBuf);
                 constexpr bool scored = false;   // measured a LOSS on NEON
 #endif
@@ -1030,7 +1030,7 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
 #endif
         for (; w < words && !overflow; ++w) {
             WordType diff[16];
-            wordDiff(ringRow, centreRow[w], w, diff);
+            wordDiff(ringRow, centerRow[w], w, diff);
             const WordType mask = impl::fastArcAny<WordType>(diff, arcLength);
             if (mask == 0) continue;
             emit(diff, w * kBits, y, mask);

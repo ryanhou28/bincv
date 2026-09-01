@@ -189,12 +189,12 @@ void testValidationStillRejects() {
 // ---------------------------------------------------------------------------
 
 #if !BINCV_DEBUG_CHECKS
-// The behaviour change sanctions, pinned down so it cannot drift back.
+// The behavior change sanctions, pinned down so it cannot drift back.
 //
 // Every index used here is outside [0, width) but inside the row's own word, so
 // the reads and writes stay within the allocation and the test is well-defined.
 // That is the only kind of out-of-range index a portable test can use: a truly
-// out-of-bounds one is undefined behaviour now, which is the point.
+// out-of-bounds one is undefined behavior now, which is the point.
 void testAtIsUncheckedInRelease() {
     std::cout << "\n--- at() / set() are unchecked in release ---\n";
 
@@ -269,7 +269,7 @@ BINCV_TEST(ErrorPolicy, AtIsUncheckedInRelease) { testAtIsUncheckedInRelease(); 
 BINCV_TEST(ErrorPolicy, AtIsCheckedInDebug) {
     std::cout << "\n debug build: at()/set() are bounds-checked, so the"
                  " unchecked-access test is skipped here -- the checked"
-                 " behaviour is covered by test_error_checked and"
+                 " behavior is covered by test_error_checked and"
                  " test_assert_abort\n";
 }
 #endif

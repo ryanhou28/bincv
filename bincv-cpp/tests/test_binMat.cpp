@@ -97,7 +97,7 @@ int countBitsAcrossStride(const bincv::BinMat<WordType>& m) {
     return bits;
 }
 
-// Runs the shared behavioural contract against one word type, so the packing
+// Runs the shared behavioral contract against one word type, so the packing
 // logic is exercised at 8/16/32/64 bits rather than only the default.
 template <typename WordType>
 void testWordType(const char* label) {
@@ -245,7 +245,7 @@ void testWordType(const char* label) {
         BINCV_CHECK(visited[1] == std::make_pair(2, 9));
     }
 
-    // Empty matrix behaviour
+    // Empty matrix behavior
     bincv::BinMat<WordType> empty;
     BINCV_CHECK(empty.empty());
     BINCV_CHECK_EQ(empty.countNonZero(), 0);
@@ -360,7 +360,7 @@ void testValueSemantics(const char* label) {
     BINCV_CHECK(movedTo.data() == nullptr);
 
     // Move-assigning from a matrix that WRAPS this object's own storage is the one
-    // transfer that cannot be honoured -- the block would have to be freed and then
+    // transfer that cannot be honored -- the block would have to be freed and then
     // re-adopted through an interior pointer -- so the target is left UNCHANGED.
     // The failure mode being pinned here is a half-applied move: taking the
     // source's dimensions over a buffer that never moved makes every row pointer
@@ -383,7 +383,7 @@ void testValueSemantics(const char* label) {
     BINCV_CHECK(subRows.empty());             // the source is emptied either way
     BINCV_CHECK(subRows.data() == nullptr);
 
-    // The copy-assignment form of the same aliasing case IS honoured, because the
+    // The copy-assignment form of the same aliasing case IS honored, because the
     // deep copy is taken while this object still holds its buffer: owner2 ends up
     // owning a real copy of the two rows the wrapper described. (subRows2 wraps
     // freed memory afterwards and must not be touched again.)
@@ -702,7 +702,7 @@ void testWrapAllocatesNothing() {
     BINCV_CHECK(buffer[3 * stride + 2] == (1u << (69 % 32)));
 }
 
-// Row strides must honour the requested byte alignment.
+// Row strides must honor the requested byte alignment.
 void testRowAlignment() {
     std::cout << "\n--- Row alignment ---\n";
 
@@ -793,7 +793,7 @@ void testTypeAliases() {
 
 } // namespace
 
-// One registered case per (behaviour, word type). The bodies above are unchanged
+// One registered case per (behavior, word type). The bodies above are unchanged
 // by the migration -- only the driver is -- so the check count this suite
 // reports is the same 845 it reported before, by construction rather than by
 // re-counting.

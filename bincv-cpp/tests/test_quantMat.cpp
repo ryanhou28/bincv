@@ -518,7 +518,7 @@ void testWrapAllocatesNothing() {
 // BinMat::plane(7) -> quietly plane 0
 // SignedQuantMat<2>::magnitude(2) -> the SIGN plane, in bounds and therefore
 // invisible to every sanitizer
-// It is one behaviour now, and it is a throw. That is what makes index handling
+// It is one behavior now, and it is a throw. That is what makes index handling
 // testable at one N and carried to the others.
 // ---------------------------------------------------------------------------
 

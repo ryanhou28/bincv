@@ -7,7 +7,7 @@
 // not of FAST. On a one-bit frame the detector collapses to boolean algebra: there is
 // exactly one meaningful threshold, and the test becomes
 //
-// corner = arc9(ring & ~centre) | arc9(~ring & centre)
+// corner = arc9(ring & ~center) | arc9(~ring & center)
 //
 // This measures the three arms on identical content:
 //
@@ -46,7 +46,7 @@ double minOf(const std::vector<double>& v) {
 }
 
 void runOne(const cv::Mat& gray, const char* label) {
-    // `realframe.bin` holds {0, 1}; a photograph holds {0..255}. Binarise at a level
+    // `realframe.bin` holds {0, 1}; a photograph holds {0..255}. Binarize at a level
     // that means the same thing for both, and land on {0, 255} either way -- the
     // equivalence with `cv::FAST` is stated for {0, 255} content.
     double lo = 0.0, hi = 0.0;

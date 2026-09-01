@@ -357,8 +357,8 @@ inline cv::Mat randomCvMask(int width, int height, float fillRatio, uint64_t see
 /// @note 255 rather than 1 because that is the value OpenCV's own binary
 /// operations produce and compare against -- cv::threshold, cv::bitwise_*
 /// on a mask, cv::erode. Comparing against a {0,1} matrix would make the
-/// harness agree with OpenCV only after a normalisation step, and a
-/// normalisation step is somewhere for a discrepancy to hide.
+/// harness agree with OpenCV only after a normalization step, and a
+/// normalization step is somewhere for a discrepancy to hide.
 /// @note Reads the view's words directly rather than going through BinMat::at,
 /// so what it validates is the LAYOUT the view describes -- which is what
 /// kernels will bind to -- and not the container's accessor.

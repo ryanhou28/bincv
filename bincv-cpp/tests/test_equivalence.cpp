@@ -277,7 +277,7 @@ void testGeneratorWordTypeIndependent() {
 }
 
 void testGeneratorFillRatios() {
-    std::cout << "\n--- randomBinary honours its fill ratio ---\n";
+    std::cout << "\n--- randomBinary honors its fill ratio ---\n";
 
     // The endpoints are exact, not approximate: an all-zero and an all-ones frame
     // are where a short-circuiting kernel stops being exercised.
@@ -848,7 +848,7 @@ void testTransposeEquivalence(const char* wordTypeName) {
 // ---------------------------------------------------------------------------
 // Registration
 //
-// One case per (behaviour, word type), matching the naming the rest of the
+// One case per (behavior, word type), matching the naming the rest of the
 // suites use so a --gtest_filter written for one narrows the others.
 // ---------------------------------------------------------------------------
 
