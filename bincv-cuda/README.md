@@ -1,8 +1,20 @@
-# BinCV-cuda
+# binCV-cuda
+
+> **Status: TODO.**
+>
+> A GPU backend is in scope and not yet built. This directory holds early CUDA
+> edge-filter experiments that predate the current architecture: they do not use the
+> bit-plane data model and are not wired into the main build. Treat this as a sketch to
+> build on, not a component.
+
+When GPU work resumes, the storage model
+([ARCHITECTURE §4.3](../docs/ARCHITECTURE.md#43-storage-model-and-views)) is designed
+to make it possible without an API break: non-owning views over externally
+allocated memory are the same mechanism used for DMA and unified memory.
 
 ## Requirements
 
-- NVIDIA GPU w/ CUDA support, CUDA toolkit installed
+- NVIDIA GPU with CUDA support, CUDA toolkit installed
 - CMake
 - OpenCV
 
@@ -13,4 +25,3 @@ mkdir build && cd build
 cmake ..
 make -j$(nproc)
 ```
-

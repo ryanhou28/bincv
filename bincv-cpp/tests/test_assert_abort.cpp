@@ -1,0 +1,803 @@
+// Deliberately violates one debug-checked precondition, and does not survive it.
+//
+// THIS FILE FORCES THE CHECKED CONFIGURATION. The #undef below runs before any
+// binCV header is seen, so BINCV_DEBUG_CHECKS is 1 here no matter which build
+// type compiled it. Without that, this suite would be dead source in every
+// configuration the project actually verifies: all three V-ALL builds are
+// Release, so NDEBUG is set in all of them, and the debug half of the error
+// policy -- the live BINCV_ASSERT, and the bounds checks that at and set are
+// specified to have -- would never be compiled or run.
+//
+// WHAT IT REPLACES: before earlier work, out-of-range at/set threw std::out_of_range
+// and tests/test_binMat.cpp asserted that with three BINCV_CHECK_THROWS lines
+// (plus one in tests/test_opencv_interop.cpp). removed the throw, and those
+// four assertions were deleted with it and not replaced -- deleting both bounds
+// checks from binMat_impl.hpp left Release, Debug and -fno-exceptions all
+// reporting 100% passed. These cases are that coverage, restored at the checked
+// configuration's terms: the failure is now an abort, so it is observed from
+// outside the process by tests/expect_fatal.cmake.
+//
+// Each case is registered in tests/CMakeLists.txt with the diagnostic it must
+// print, so the message is covered too -- an assert that fires with the wrong
+// message points at the wrong mistake.
+
+#undef NDEBUG
+
+#include <climits>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+
+#include "bincv-cpp/binMat.hpp"
+#include "bincv-cpp/core/view.hpp"
+#include "bincv-cpp/core/types.hpp"
+#include "bincv-cpp/ops/bitslice.hpp"
+#include "bincv-cpp/ops/denoise.hpp"
+#include "bincv-cpp/ops/derivative.hpp"
+#include "bincv-cpp/ops/logic.hpp"
+#include "bincv-cpp/ops/morphology.hpp"
+#include "bincv-cpp/ops/opticalFlow.hpp"
+#include "bincv-cpp/ops/reduce.hpp"
+#include "bincv-cpp/ops/shift.hpp"
+#include "bincv-cpp/ops/threshold.hpp"
+#include "bincv-cpp/quantMat.hpp"
+
+#if !BINCV_DEBUG_CHECKS
+#error "test_assert_abort must compile with BINCV_DEBUG_CHECKS == 1; the #undef NDEBUG above is what guarantees it"
+#endif
+
+namespace {
+
+using Mat = bincv::BinMat<uint32_t>;
+
+// 20 pixels in a 32-bit word, so the out-of-range columns below are still inside
+// the row's own allocation: the case proves the CHECK fires, and does not depend
+// on undefined behavior to do it.
+Mat makeMat() { return Mat(20, 4); }
+
+uint32_t g_buffer[8] = {0};
+
+int caseAtRow() {
+    const Mat m = makeMat();
+    return m.at(999, 0) ? 1 : 0;
+}
+
+int caseAtCol() {
+    const Mat m = makeMat();
+    return m.at(0, 999) ? 1 : 0;
+}
+
+int caseAtNegative() {
+    const Mat m = makeMat();
+    return m.at(-1, 0) ? 1 : 0;
+}
+
+int caseSetRow() {
+    Mat m = makeMat();
+    m.set(-1, 5, true);
+    return m.countNonZero();
+}
+
+int caseSetCol() {
+    Mat m = makeMat();
+    // Column 25 is past `width` but inside the first word. In release this
+    // silently sets a padding bit that countNonZero cannot see, which is the
+    // invariant break the check exists to catch (CLAUDE.md: padding bits stay
+    // zero).
+    m.set(0, 25, true);
+    return m.countNonZero();
+}
+
+// The views are the type kernels bind to, so their preconditions are the other
+// half of the hot-path policy. A missing stride is the one field whose omission
+// is not self-announcing: every row silently aliases row 0.
+int caseViewStride() {
+    bincv::BinMatView<uint32_t> v{g_buffer, 64, 4, 0};
+    return static_cast<int>(*v.row(2));
+}
+
+int caseConstViewStride() {
+    bincv::BinMatConstView<uint32_t> v{g_buffer, 64, 4, 0};
+    return static_cast<int>(*v.row(2));
+}
+
+// The N-plane container's own per-pixel preconditions. Same policy as
+// at and set above: debug-checked, gone in release, so the only place they can
+// be observed is a process that does not survive them.
+//
+// NOT here, deliberately: the plane-index checks. plane, constPlane and
+// magnitude are view factories rather than per-pixel access, and are validated
+// through BINCV_THROW in every build -- so their cases live in
+// tests/test_error_abort.cpp with the other validation sites.
+using Quant = bincv::QuantMat<3, uint32_t>;
+using Ternary = bincv::SignedQuantMat<2, uint32_t>;
+
+Quant makeQuant() { return Quant(20, 4); }
+
+int caseQuantAtRow() {
+    const Quant m = makeQuant();
+    return static_cast<int>(m.at(999, 0));
+}
+
+int caseQuantAtCol() {
+    const Quant m = makeQuant();
+    return static_cast<int>(m.at(0, 999));
+}
+
+int caseQuantSetRow() {
+    Quant m = makeQuant();
+    m.set(-1, 0, 1u);
+    return static_cast<int>(m.at(0, 0));
+}
+
+// A value with bits above N would be written to planes this container does not
+// have; the low N bits alone would land, silently storing something else.
+int caseQuantSetValue() {
+    Quant m = makeQuant();
+    m.set(0, 0, 8u);                            // 3 planes hold 0..7
+    return static_cast<int>(m.at(0, 0));
+}
+
+// The same value-range precondition at N == 1, which is where it used to go
+// missing: BinMat::set takes bool, so an out-of-range value from code written
+// generically over QuantMat<N> narrowed to 1 instead of being reported. The
+// integral overload added for that is what fires here.
+int caseBinMatSetValue() {
+    Mat m = makeMat();
+    m.set(0, 0, 3u);                            // one plane holds 0..1
+    return m.countNonZero();
+}
+
+int caseSignedSetValue() {
+    Ternary m(20, 4);
+    m.set(0, 0, -4);                            // 2 magnitude planes hold -3..3
+    return m.at(0, 0);
+}
+
+// The extreme of the same range check. Worth its own case because the value that
+// gets past it is the one that used to be undefined behavior rather than merely
+// wrong: the magnitude was computed as `-value`, and negating INT_MIN is signed
+// overflow. impl::signedMagnitude now does that in unsigned; this case is the
+// other half, proving the guard that keeps INT_MIN out is still here.
+int caseSignedSetIntMin() {
+    Ternary m(20, 4);
+    volatile int mostNegative = INT_MIN;        // volatile: not folded at compile time
+    m.set(0, 0, mostNegative);
+    return m.at(0, 0);
+}
+
+// The the kernel preconditions. Kernels never throw (the design notes), so
+// mismatched dimensions and an unsafe destination alias are BINCV_ASSERT sites --
+// which means they are observable only from outside the process, exactly like the
+// per-pixel checks above.
+//
+// The alias case is the one worth having. A destination that overlaps a source at
+// a DIFFERENT offset reads words the row loop has already overwritten: every
+// address involved is valid memory, so no sanitizer sees anything, and the result
+// is simply wrong for part of the image. Exact aliasing (dst IS a, same stride) is
+// supported and is covered in-process by tests/test_logic.cpp.
+uint32_t g_logicA[8] = {0};
+uint32_t g_logicB[8] = {0};
+uint32_t g_logicDst[8] = {0};
+
+int caseLogicDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_logicA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> b{g_logicB, 32, 3, 1};    // narrower
+    const bincv::BinMatView<uint32_t> dst{g_logicDst, 64, 3, 2};
+    bincv::bitwiseAnd(a, b, dst);
+    return static_cast<int>(g_logicDst[0]);
+}
+
+int caseLogicDimsNot() {
+    const bincv::BinMatConstView<uint32_t> src{g_logicA, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_logicDst, 32, 3, 1};     // narrower
+    bincv::bitwiseNot(src, dst);
+    return static_cast<int>(g_logicDst[0]);
+}
+
+int caseLogicAlias() {
+    // Same shape, same buffer, one word apart: word i of dst is word i+1 of src.
+    //
+    // Half a row apart, deliberately. The predicate accepts two views over one
+    // buffer whose ROWS never meet -- interleaved row bands and column tiles are
+    // legal and are covered in-process by Logic.AliasAccepts_* -- so a case
+    // that merely shared a buffer would no longer prove anything. This one shares
+    // words: dst row 0 is src words 1..2, and word 1 is read after it was written.
+    const bincv::BinMatConstView<uint32_t> src{g_logicA, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_logicA + 1, 64, 3, 2};
+    bincv::bitwiseNot(src, dst);
+    return static_cast<int>(g_logicA[0]);
+}
+
+// A stride shorter than the row it has to hold: consecutive rows overlap, so the
+// kernel reads each row through the previous one's tail. BinMat's wrap constructor
+// rejects the same numbers by name; a hand-built view is what a kernel takes
+//, so the kernel carries the check. Measured before it existed: this call
+// produced three rows of ffff0000 from a source of 0000ffff, in every build, with
+// nothing reported.
+int caseLogicShortStride() {
+    const bincv::BinMatConstView<uint32_t> src{g_logicA, 64, 3, 1};   // needs 2 words
+    const bincv::BinMatView<uint32_t> dst{g_logicDst, 64, 3, 1};
+    bincv::bitwiseNot(src, dst);
+    return static_cast<int>(g_logicDst[0]);
+}
+
+// The shift preconditions. Two of them say something the logic cases
+// above do not.
+//
+// `shift-in-place` is the important one. ops/logic.hpp ACCEPTS a destination that
+// is exactly a source -- the design rule’s in-place idiom -- because those kernels are
+// pointwise in the word index. A shift is not: word i of the destination is built
+// from words i +/- wordShift of the source, so the same call that is legal for
+// bitwiseAnd is undefined here. That difference is invisible in a release build
+// (the answer is merely wrong for part of the image, with every address valid and
+// no sanitizer able to see it), which is exactly what makes it worth a case.
+//
+// `shift-border-type` covers the argument no other kernel has: BorderType is an
+// enum, so an int can arrive as one, and an unchecked unknown value would silently
+// behave as BORDER_CONSTANT -- a plausible answer to a question nobody asked.
+uint32_t g_shiftSrc[8] = {0};
+uint32_t g_shiftDst[8] = {0};
+
+int caseShiftDims() {
+    const bincv::BinMatConstView<uint32_t> src{g_shiftSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_shiftDst, 32, 3, 1};      // narrower
+    bincv::shiftLeft(src, dst, 1);
+    return static_cast<int>(g_shiftDst[0]);
+}
+
+int caseShiftInPlace() {
+    const bincv::BinMatConstView<uint32_t> src{g_shiftSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_shiftSrc, 64, 3, 2};      // exactly src
+    bincv::shiftLeft(src, dst, 1);
+    return static_cast<int>(g_shiftSrc[0]);
+}
+
+int caseShiftOverlap() {
+    // Same shape, same buffer, one word apart: word i of dst is word i+1 of src.
+    // Half a row apart, deliberately -- the predicate accepts two views over one
+    // buffer whose ROWS never meet (Shift.DisjointViews_* covers those), so a case
+    // that merely shared a buffer would no longer prove anything.
+    const bincv::BinMatConstView<uint32_t> src{g_shiftSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_shiftSrc + 1, 64, 3, 2};
+    bincv::shiftUp(src, dst, 1);
+    return static_cast<int>(g_shiftSrc[0]);
+}
+
+int caseShiftShortStride() {
+    const bincv::BinMatConstView<uint32_t> src{g_shiftSrc, 64, 3, 1};   // needs 2 words
+    const bincv::BinMatView<uint32_t> dst{g_shiftDst, 64, 3, 1};
+    bincv::shiftRight(src, dst, 1);
+    return static_cast<int>(g_shiftDst[0]);
+}
+
+int caseShiftBorderType() {
+    const bincv::BinMatConstView<uint32_t> src{g_shiftSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_shiftDst, 64, 3, 2};
+    // 7, not 99. BorderType's enumerators span 0..4, so the smallest bit-field
+    // that holds them all is 3 bits and the type's value range is 0..7: casting
+    // 99 into it is UNSPECIFIED, and -Wconversion says so ("the result of the
+    // conversion is unspecified because '99' is outside the range of type"). 7 is
+    // a representable value that is not one of the five, which is exactly the
+    // input isKnownBorderType exists to reject.
+    bincv::shift(src, dst, 1, 1, static_cast<bincv::BorderType>(7), false);
+    return static_cast<int>(g_shiftDst[0]);
+}
+
+// The reduction preconditions. A reduction READS ONLY, so it has no
+// aliasing case at all -- binds kernels that write, and countAndSplit(m, m,
+// m, r) is a supported call that an alias predicate copied in from ops/logic.hpp
+// would abort on. What is left is the two checks a reduction can still fail:
+// dimensions that disagree between the masked arguments, and a stride too short
+// to hold a row.
+//
+// The dimension check gets a case per entry point because each carries its own:
+// countAnd compares two views and countAndSplit three, and a third view that
+// nobody compared would be read at the first two's geometry -- inside the buffer,
+// wrong answer, nothing to see.
+uint32_t g_reduceA[8] = {0};
+uint32_t g_reduceB[8] = {0};
+
+int caseReduceDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> b{g_reduceB, 32, 3, 1};  // narrower
+    return static_cast<int>(bincv::countAnd(a, b, bincv::Rect(0, 0, 64, 3)));
+}
+
+int caseReduceSplitDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c{g_reduceB, 64, 2, 2};  // one row short
+    return static_cast<int>(bincv::countAndSplit(a, a, c, bincv::Rect(0, 0, 64, 3)).whenSet);
+}
+
+// added a FOURTH view argument and two more entry points, each with its own
+// dimension assert, and each therefore its own way to be deleted unnoticed. That
+// is not hypothetical: deleting `&& a.width == c1.width && a.height == c1.height`
+// from both four-argument overloads and the stride assert from
+// SlidingWindowCount's constructor left all four gate configurations green with
+// byte-identical CHECKS counts (Debug test_reduce: 594184/594184 either way). An
+// assert has no in-process test, so these three cases are the only place those
+// checks can be observed firing.
+int caseReduceXorSplitDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c1{g_reduceB, 64, 2, 2};  // one row short
+    // c1 is the argument nobody compared before this case existed: it would be
+    // read at a's geometry -- row 2 of a two-row view -- which is off the end of
+    // its buffer, in Release, returning a plausible-looking count.
+    return static_cast<int>(
+        bincv::countAndSplit(a, a, a, c1, bincv::Rect(0, 0, 64, 3)).whenSet);
+}
+
+int caseReduceCovarianceDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c{g_reduceB, 64, 2, 2};  // one row short
+    return static_cast<int>(bincv::countCovariance(a, a, c, bincv::Rect(0, 0, 64, 3)).xx);
+}
+
+// The four-argument countCovariance carries its OWN copy of the same clause --
+// four entry points, four copies, four separate deletions. Covered separately for
+// exactly the reason the three-argument cases are.
+int caseReduceCovarianceXorDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c1{g_reduceB, 64, 2, 2};  // one row short
+    return static_cast<int>(bincv::countCovariance(a, a, a, c1, bincv::Rect(0, 0, 64, 3)).xx);
+}
+
+// SlidingWindowCount is the one entry point that is a CLASS, so its precondition
+// is checked in a constructor rather than at a call. Same short stride as
+// reduce-short-stride, different site.
+int caseReduceSlidingShortStride() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 1};  // needs 2 words
+    bincv::SlidingWindowCount<uint32_t> w(a, bincv::Rect(0, 0, 31, 3));
+    return static_cast<int>(w.count());
+}
+
+int caseReduceShortStride() {
+    const bincv::BinMatConstView<uint32_t> a{g_reduceA, 64, 3, 1};  // needs 2 words
+    return static_cast<int>(bincv::countNonZero(a));
+}
+
+// impl::regionFromExtent's non-empty precondition, called DIRECTLY rather than
+// through an entry point -- because no entry point can reach it. Both callers in
+// ops/reduce.hpp guard the empty extent themselves (wholeViewWords returns early
+// on width == 0, clipRegion on x0 >= x1), so this is a trap laid for the next
+// caller, not a live bug: x1 == 0 underflows `x1 - 1` and yields lastWord =
+// SIZE_MAX / WordBits with isEmpty == false, which visitRowWords would walk
+// straight off the end of the buffer. The assertion is what stops that being
+// discovered by a segfault in Phase 3; this case is what stops the assertion from
+// being deleted as unreachable.
+int caseReduceEmptyExtent() {
+    const bincv::impl::RegionWords<uint32_t> r = bincv::impl::regionFromExtent<uint32_t>(0, 0, 0, 1);
+    return static_cast<int>(r.lastWord);
+}
+
+// that work’s preconditions. `denoise-in-place` is the one no case above states:
+// denoiseMedian3 reads SOURCE ROW y - 1 while writing destination row y, so it is
+// not pointwise in the word index and the in-place spelling ops/logic.hpp
+// supports is undefined here. Nothing diagnoses it -- the memory is valid and the
+// filter simply feeds on its own output from the second row onwards.
+uint32_t g_denSrc[16] = {0};
+uint32_t g_denDst[16] = {0};
+
+int caseDenoiseDims() {
+    const bincv::BinMatConstView<uint32_t> src{g_denSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_denDst, 32, 3, 1};        // narrower
+    bincv::denoiseMedian3(src, dst);
+    return static_cast<int>(g_denDst[0]);
+}
+
+int caseDenoiseInPlace() {
+    const bincv::BinMatConstView<uint32_t> src{g_denSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_denSrc, 64, 3, 2};        // the same words
+    bincv::denoiseMedian3(src, dst);
+    return static_cast<int>(g_denSrc[0]);
+}
+
+int caseDenoiseShortStride() {
+    const bincv::BinMatConstView<uint32_t> src{g_denSrc, 64, 3, 1};   // needs 2 words
+    const bincv::BinMatView<uint32_t> dst{g_denDst, 64, 3, 1};
+    bincv::denoiseMedian3(src, dst);
+    return static_cast<int>(g_denDst[0]);
+}
+
+// that work’s preconditions. `binarize-dims` is a PER-PLANE check: an N-bit source
+// arrives as N separate views, and a check that only inspected plane 0
+// would read the rest at plane 0's geometry. The narrowed plane here is plane 1,
+// not plane 0, so a loop that stops after the first plane does not fire.
+uint32_t g_binPlanes[3][16] = {{0}, {0}, {0}};
+uint32_t g_binDst[16] = {0};
+
+int caseBinarizeDims() {
+    const bincv::BinMatConstView<uint32_t> planes[3] = {
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[0], 64, 3, 2},
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[1], 32, 3, 1},   // narrower
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[2], 64, 3, 2},
+    };
+    const bincv::BinMatView<uint32_t> dst{g_binDst, 64, 3, 2};
+    bincv::binarize(planes, dst, 1u);
+    return static_cast<int>(g_binDst[0]);
+}
+
+int caseBinarizeAlias() {
+    // dst IS plane 2. ops/logic.hpp would accept that (pointwise in the word
+    // index); this kernel must not -- plane 2 is read after dst's word has been
+    // written from planes 0 and 1.
+    const bincv::BinMatConstView<uint32_t> planes[3] = {
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[0], 64, 3, 2},
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[1], 64, 3, 2},
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[2], 64, 3, 2},
+    };
+    const bincv::BinMatView<uint32_t> dst{g_binPlanes[2], 64, 3, 2};
+    bincv::binarize(planes, dst, 1u);
+    return static_cast<int>(g_binPlanes[2][0]);
+}
+
+int caseBinarizeShortStride() {
+    const bincv::BinMatConstView<uint32_t> planes[3] = {
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[0], 64, 3, 1},   // needs 2 words
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[1], 64, 3, 1},
+        bincv::BinMatConstView<uint32_t>{g_binPlanes[2], 64, 3, 1},
+    };
+    const bincv::BinMatView<uint32_t> dst{g_binDst, 64, 3, 2};
+    bincv::binarize(planes, dst, 1u);
+    return static_cast<int>(g_binDst[0]);
+}
+
+// that work’s preconditions. Two of these say something NO OTHER CASE IN THIS FILE
+// says, because no other kernel in the project takes a caller-provided scratch
+// view and none takes a shape object:
+//
+// `morphex-scratch-size` and `morphex-scratch-overlap` are the scratch
+// contract. morphologyEx's five compound ops write an intermediate frame the
+// CALLER owns (a kernel may not allocate one), so a scratch that is too small
+// or that aliases src or dst is a silent wrong answer or a buffer overrun --
+// `erode(src, scratch)` followed by `dilate(scratch, dst)` reads every word of
+// scratch back, so an undersized one runs off the end of the caller's array.
+//
+// `morph-element-invalid` is the only precondition anywhere that checks an
+// ARGUMENT'S OWN INTERNAL CONSISTENCY rather than a relationship between views.
+// StructuringElement::valid has no other caller: without this case, deleting
+// it changes nothing observable, and an element with zero set cells makes every
+// destination pixel the fold's identity -- a plausible all-black or all-white
+// frame rather than a crash.
+//
+// The frames are 64 x 3 at uint32_t, i.e. two words per row, which is what makes
+// the short-stride case (stride 1) a violation rather than a tight fit.
+uint32_t g_morphSrc[16] = {0};
+uint32_t g_morphDst[16] = {0};
+uint32_t g_morphScratch[16] = {0};
+
+int caseMorphDims() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 32, 3, 1};      // narrower
+    bincv::erode(src, dst, bincv::rect3x3());
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphShortStride() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 1};  // needs 2 words
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 1};
+    bincv::erode(src, dst, bincv::rect3x3());
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphInPlace() {
+    // A destination word is built from SEVERAL source words, so in place is not
+    // merely unsupported here -- it feeds already-eroded words back in.
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphSrc, 64, 3, 2};       // the same words
+    bincv::erode(src, dst, bincv::rect3x3());
+    return static_cast<int>(g_morphSrc[0]);
+}
+
+int caseMorphBorderType() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
+    // 7, not 99, for the reason caseShiftBorderType gives above: BorderType's
+    // enumerators span 0..4, so the type's value range is 0..7 and casting 99 into
+    // it is UNSPECIFIED (-Wconversion says so). 7 is representable and not one of
+    // the five, which is exactly what isKnownBorderType rejects.
+    bincv::dilate(src, dst, bincv::rect3x3(), static_cast<bincv::BorderType>(7));
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphElementInvalid() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
+    // A cross whose every cell is cleared: cols and rows are positive and the
+    // anchor is in range, so only the set-cell half of valid rejects it.
+    static const uint8_t emptyMask[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    bincv::erode(src, dst, bincv::StructuringElement::custom(emptyMask, 3, 3));
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphExOp() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> scratch{g_morphScratch, 64, 3, 2};
+    // 7, not 42: MorphOp's enumerators span 0..6, so its value range is 0..7 and 7
+    // is the one representable value that names no operation.
+    bincv::morphologyEx(src, dst, static_cast<bincv::MorphOp>(7), bincv::rect3x3(), scratch);
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphExScratchSize() {
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> scratch{g_morphScratch, 32, 3, 1};  // half a frame
+    bincv::morphologyEx(src, dst, bincv::MORPH_OPEN, bincv::rect3x3(), scratch);
+    return static_cast<int>(g_morphDst[0]);
+}
+
+int caseMorphExScratchOverlap() {
+    // scratch IS dst. OPEN erodes into scratch and then dilates scratch into dst,
+    // so the second step would read words the first wrote at a different offset.
+    const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> scratch{g_morphDst, 64, 3, 2};
+    bincv::morphologyEx(src, dst, bincv::MORPH_OPEN, bincv::rect3x3(), scratch);
+    return static_cast<int>(g_morphDst[0]);
+}
+
+struct Case {
+    const char* name;
+    int (*run)();
+};
+
+// The bit-sliced preconditions. Two of them say something no case above does.
+//
+// `bitslice-dims` is the three-source dimension check. ops/logic.hpp's kernels
+// compare two views, majority3 compares three, and a check that forgot the third
+// would read `c` at the other two's geometry -- inside its own buffer, with only
+// the answer wrong. Measured by deleting `c.width == dst.width && c.height ==
+// dst.height` from the assert: every one of tests/test_bitslice.cpp's 348061
+// checks still passed, in all four configurations. That is the whole reason this
+// case exists rather than being assumed covered by logic-dims.
+//
+// `bitslice-sum-overlap` is a precondition on RAW POINTERS rather than on views,
+// which nothing else in this file has. bitSlicedSum accumulates in its output
+// planes, so an outPlanes array overlapping inputs rewrites inputs the ripple has
+// not read yet -- again valid memory, again only the answer wrong.
+uint32_t g_majA[8] = {0};
+uint32_t g_majB[8] = {0};
+uint32_t g_majC[8] = {0};
+uint32_t g_majDst[8] = {0};
+
+int caseBitSliceDims() {
+    const bincv::BinMatConstView<uint32_t> a{g_majA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> b{g_majB, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c{g_majC, 32, 3, 1};       // narrower
+    const bincv::BinMatView<uint32_t> dst{g_majDst, 64, 3, 2};
+    bincv::majority3(a, b, c, dst);
+    return static_cast<int>(g_majDst[0]);
+}
+
+int caseBitSliceAlias() {
+    // Same shape, same buffer, one word apart -- half a row, so the two views
+    // really do share words rather than merely sharing a buffer (the disjoint
+    // cases are legal under earlier work and are covered in-process).
+    const bincv::BinMatConstView<uint32_t> a{g_majA, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> b{g_majB, 64, 3, 2};
+    const bincv::BinMatConstView<uint32_t> c{g_majC, 64, 3, 2};
+    const bincv::BinMatView<uint32_t> dst{g_majA + 1, 64, 3, 2};
+    bincv::majority3(a, b, c, dst);
+    return static_cast<int>(g_majA[0]);
+}
+
+int caseBitSliceShortStride() {
+    const bincv::BinMatConstView<uint32_t> a{g_majA, 64, 3, 1};       // needs 2 words
+    const bincv::BinMatConstView<uint32_t> b{g_majB, 64, 3, 1};
+    const bincv::BinMatConstView<uint32_t> c{g_majC, 64, 3, 1};
+    const bincv::BinMatView<uint32_t> dst{g_majDst, 64, 3, 1};
+    bincv::majority3(a, b, c, dst);
+    return static_cast<int>(g_majDst[0]);
+}
+
+uint32_t g_sumBuffer[8] = {0};
+
+int caseBitSliceSumOverlap() {
+    // Four inputs at [0, 4), three output planes at [2, 5) -- the accumulator
+    // would overwrite inputs 2 and 3 before it read them.
+    bincv::bitSlicedSum<uint32_t>(g_sumBuffer, 4, g_sumBuffer + 2);
+    return static_cast<int>(g_sumBuffer[0]);
+}
+
+// that work’s preconditions. TWO OF THESE ARE A CLASS NO OTHER KERNEL IN THE PROJECT
+// HAS, which is why they lead the block rather than trail it.
+//
+// `derivative-sign-alias` / `derivative-mag-alias` are DESTINATION-VERSUS-
+// DESTINATION. Every other kernel here writes one plane, so "no aliasing" has
+// only ever meant src-versus-dst; the derivative writes N magnitude planes AND
+// a sign plane, so the destinations must be distinct from EACH OTHER too. The
+// failure is silent and specific: a sign plane that shares words with a
+// magnitude plane leaves pixels at magnitude 0 with the sign bit SET, which is
+// precisely the canonical-zero violation ops/derivative.hpp's header says
+// "would compile, run, and quietly produce an image where the canonical-zero
+// rule no longer holds" -- and which corrupts only that work’s sumXY, leaving sumXX
+// and sumYY correct. No magnitude-checking test can see it.
+//
+// `derivative-border-type` goes through derivativeY rather than derivativeX, so
+// the shared impl::checkDerivativeArgs is covered from both entry points; the
+// same device tests/CMakeLists.txt uses for erode/dilate above.
+//
+// Measured before these existed: replacing every condition inside
+// impl::checkDerivativeArgs with a literal `true` -- all fourteen -- left
+// tests/test_derivative.cpp reporting a BYTE-IDENTICAL 47593/47593 checks passed
+// in the Debug core-only build (the only configuration where BINCV_ASSERT is
+// live), and./scripts/verify.sh ALL CONFIGURATIONS GREEN. The whole precondition
+// block was deletable. Preconditions with no death test are not covered by a
+// correctness suite that never violates them.
+uint32_t g_derSrc[32] = {0};
+uint32_t g_derSrc1[32] = {0};
+uint32_t g_derMag[32] = {0};
+uint32_t g_derSign[32] = {0};
+
+int caseDerivativeDims() {
+    const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 2}};
+    bincv::BinMatView<uint32_t> mag[1] = {{g_derMag, 32, 3, 1}};      // narrower
+    const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
+    bincv::derivativeX<1, uint32_t>(src, mag, sign);
+    return static_cast<int>(g_derMag[0]);
+}
+
+int caseDerivativeShortStride() {
+    const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 1}};   // needs 2 words
+    bincv::BinMatView<uint32_t> mag[1] = {{g_derMag, 64, 3, 2}};
+    const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
+    bincv::derivativeX<1, uint32_t>(src, mag, sign);
+    return static_cast<int>(g_derMag[0]);
+}
+
+int caseDerivativeInPlace() {
+    // dst word 1 onto src word 1 -- the views really share words, not merely a
+    // buffer. Neither axis is pointwise in the word index, so no in-place form
+    // exists: derivativeX reads source words i-1, i and i+1 for destination word i.
+    const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 2}};
+    bincv::BinMatView<uint32_t> mag[1] = {{g_derSrc, 64, 3, 2}};
+    const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
+    bincv::derivativeX<1, uint32_t>(src, mag, sign);
+    return static_cast<int>(g_derSrc[0]);
+}
+
+int caseDerivativeSignAlias() {
+    // The sign plane one word into the magnitude plane's own storage -- half a
+    // row, so they overlap rather than abut.
+    const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 2}};
+    bincv::BinMatView<uint32_t> mag[1] = {{g_derMag, 64, 3, 2}};
+    const bincv::BinMatView<uint32_t> sign{g_derMag + 1, 64, 3, 2};
+    bincv::derivativeX<1, uint32_t>(src, mag, sign);
+    return static_cast<int>(g_derMag[0]);
+}
+
+int caseDerivativeMagAlias() {
+    // N = 2, and the two magnitude planes share storage. The subtraction writes
+    // plane 0 and then reads it back through the conditional negate, so this is
+    // not merely an untidy destination.
+    const bincv::BinMatConstView<uint32_t> src[2] = {{g_derSrc, 64, 3, 2},
+                                                     {g_derSrc1, 64, 3, 2}};
+    bincv::BinMatView<uint32_t> mag[2] = {{g_derMag, 64, 3, 2}, {g_derMag + 1, 64, 3, 2}};
+    const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
+    bincv::derivativeX<2, uint32_t>(src, mag, sign);
+    return static_cast<int>(g_derMag[0]);
+}
+
+int caseDerivativeBorderType() {
+    const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 2}};
+    bincv::BinMatView<uint32_t> mag[1] = {{g_derMag, 64, 3, 2}};
+    const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
+    // 7, not 99, for the reason caseShiftBorderType gives above: BorderType's
+    // enumerators span 0..4, so the type's value range is 0..7 and casting 99 into
+    // it is UNSPECIFIED (-Wconversion says so). 7 is representable and not one of
+    // the five, which is exactly what isKnownBorderType rejects.
+    bincv::derivativeY<1, uint32_t>(src, mag, sign, static_cast<bincv::BorderType>(7), false);
+    return static_cast<int>(g_derMag[0]);
+}
+
+// ---------------------------------------------------------------------------
+// The tracker's one predicate. ops/opticalFlow.hpp writes EVERY
+// `nextPts` entry for a level before it reads ANY `prevPts` entry for that level,
+// so an in-place call tracks every point from an anchor that has already been
+// overwritten. It is the only kernel in the library whose destination is an array
+// of points rather than a view, and it was the only one with no overlap check at
+// all: measured before this case existed, `calcOpticalFlowPyrLK(levels, n, a, a,
+//...)` returned status 1 for every point and answers up to 23 px away from the
+// correct ones, in the Debug build, silently.
+// ---------------------------------------------------------------------------
+uint32_t g_flowPlane[16] = {0};
+
+int caseFlowAlias() {
+    const bincv::BinMatConstView<uint32_t> plane{g_flowPlane, 64, 8, 2};
+    bincv::LKLevel<uint32_t> level;
+    level.prev = plane;
+    level.next = plane;
+    level.dxMag = plane;
+    level.dxSign = plane;
+    level.dyMag = plane;
+    level.dySign = plane;
+    bincv::Point2f pts[2] = {{32.0f, 4.0f}, {40.0f, 4.0f}};
+    uint8_t status[2] = {0, 0};
+    bincv::calcOpticalFlowPyrLK<uint32_t>(&level, 1, pts, pts, status, nullptr, 2);
+    return static_cast<int>(status[0]);
+}
+
+const Case kCases[] = {
+    {"at-row", caseAtRow},
+    {"at-col", caseAtCol},
+    {"at-negative", caseAtNegative},
+    {"set-row", caseSetRow},
+    {"set-col", caseSetCol},
+    {"quant-at-row", caseQuantAtRow},
+    {"quant-at-col", caseQuantAtCol},
+    {"quant-set-row", caseQuantSetRow},
+    {"quant-set-value", caseQuantSetValue},
+    {"binmat-set-value", caseBinMatSetValue},
+    {"signed-set-value", caseSignedSetValue},
+    {"signed-set-int-min", caseSignedSetIntMin},
+    {"view-stride", caseViewStride},
+    {"const-view-stride", caseConstViewStride},
+    {"logic-dims", caseLogicDims},
+    {"logic-dims-not", caseLogicDimsNot},
+    {"logic-alias", caseLogicAlias},
+    {"logic-short-stride", caseLogicShortStride},
+    {"shift-dims", caseShiftDims},
+    {"shift-in-place", caseShiftInPlace},
+    {"shift-overlap", caseShiftOverlap},
+    {"shift-short-stride", caseShiftShortStride},
+    {"shift-border-type", caseShiftBorderType},
+    {"reduce-dims", caseReduceDims},
+    {"reduce-split-dims", caseReduceSplitDims},
+    {"reduce-xor-split-dims", caseReduceXorSplitDims},
+    {"reduce-covariance-dims", caseReduceCovarianceDims},
+    {"reduce-covariance-xor-dims", caseReduceCovarianceXorDims},
+    {"reduce-sliding-short-stride", caseReduceSlidingShortStride},
+    {"reduce-short-stride", caseReduceShortStride},
+    {"reduce-empty-extent", caseReduceEmptyExtent},
+    {"bitslice-dims", caseBitSliceDims},
+    {"bitslice-alias", caseBitSliceAlias},
+    {"bitslice-short-stride", caseBitSliceShortStride},
+    {"bitslice-sum-overlap", caseBitSliceSumOverlap},
+    {"denoise-dims", caseDenoiseDims},
+    {"denoise-in-place", caseDenoiseInPlace},
+    {"denoise-short-stride", caseDenoiseShortStride},
+    {"binarize-dims", caseBinarizeDims},
+    {"binarize-alias", caseBinarizeAlias},
+    {"binarize-short-stride", caseBinarizeShortStride},
+    {"morph-dims", caseMorphDims},
+    {"morph-short-stride", caseMorphShortStride},
+    {"morph-in-place", caseMorphInPlace},
+    {"morph-border-type", caseMorphBorderType},
+    {"morph-element-invalid", caseMorphElementInvalid},
+    {"morphex-op", caseMorphExOp},
+    {"morphex-scratch-size", caseMorphExScratchSize},
+    {"morphex-scratch-overlap", caseMorphExScratchOverlap},
+    {"derivative-dims", caseDerivativeDims},
+    {"derivative-short-stride", caseDerivativeShortStride},
+    {"derivative-in-place", caseDerivativeInPlace},
+    {"derivative-sign-alias", caseDerivativeSignAlias},
+    {"derivative-mag-alias", caseDerivativeMagAlias},
+    {"derivative-border-type", caseDerivativeBorderType},
+    {"flow-alias", caseFlowAlias},
+};
+
+} // namespace
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::fprintf(stderr, "usage: %s <case>\ncases:\n", argv[0]);
+        for (const Case& c : kCases) std::fprintf(stderr, " %s\n", c.name);
+        return 2;
+    }
+
+    for (const Case& c : kCases) {
+        if (std::strcmp(argv[1], c.name) == 0) {
+            const int evidence = c.run();
+            std::fprintf(stderr, "REACHED: the check did not fire for case '%s' (evidence %d)\n",
+                         c.name, evidence);
+            std::fflush(stderr);
+            return 0;
+        }
+    }
+
+    std::fprintf(stderr, "unknown case '%s'\n", argv[1]);
+    return 2;
+}

@@ -10,7 +10,7 @@ int main(int argc, char* argv[]) {
     int newHeight = cfg.height * 2;
 
     // Construct input BinMat and cv::Mat based on dtype
-    bincv::BinMat binmat(cfg.width, cfg.height);
+    bincv::BinMat<> binmat(cfg.width, cfg.height);
     cv::Mat cvmat;
 
     if (cfg.dtype == "binary" || cfg.dtype == "uint8")
@@ -39,7 +39,7 @@ int main(int argc, char* argv[]) {
     });
 
     bench::benchmark("BinMat resize", cfg.iterations, [&] {
-        bincv::BinMat tmp = binmat;
+        bincv::BinMat<> tmp = binmat;
         tmp.resize(newWidth, newHeight);
     });
 

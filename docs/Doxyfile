@@ -1,0 +1,39 @@
+# Doxygen configuration for binCV's API reference (T6.3).
+#
+# The headers are already densely commented and every public entry point states its
+# API tier, so this mostly gets out of the way. What it does NOT do is document
+# `impl::` -- that namespace is internal by convention and publishing it would invite
+# callers to depend on it.
+
+PROJECT_NAME           = "binCV"
+PROJECT_BRIEF          = "Low-bit-width image processing at true bit width"
+OUTPUT_DIRECTORY       = docs/api
+INPUT                  = bincv-cpp/include
+FILE_PATTERNS          = *.hpp
+RECURSIVE              = YES
+
+# impl/ is internal. Excluding it is a documentation decision, not an oversight.
+EXCLUDE_PATTERNS       = */impl/*
+
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+HIDE_UNDOC_MEMBERS     = YES
+
+# The headers carry long block comments that are the real documentation; keep them.
+JAVADOC_AUTOBRIEF      = NO
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+
+# Templates are the library's whole shape -- a reference that hid them would be
+# describing a different library.
+HIDE_SCOPE_NAMES       = NO
+SHOW_INCLUDE_FILES     = YES
+SORT_MEMBER_DOCS       = NO
+
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO

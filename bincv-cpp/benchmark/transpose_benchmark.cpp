@@ -6,7 +6,7 @@ int main(int argc, char* argv[]) {
     bench::Config cfg = bench::parseArgs(argc, argv);
 
     // Construct input BinMat and cv::Mat based on dtype
-    bincv::BinMat binmat(cfg.width, cfg.height);
+    bincv::BinMat<> binmat(cfg.width, cfg.height);
     cv::Mat cvmat;
 
     if (cfg.dtype == "binary" || cfg.dtype == "uint8")

@@ -1,3 +1,17 @@
-bincv-cuda/build/*
-bincv-cpp/build/*
-bincv-cpp/results/
+# Build trees, anywhere, under any configuration suffix.
+build*/
+**/build*/
+cmake-build*/
+
+# Benchmark output.
+results/
+**/results/
+
+# Test image output, written by the interop test and never read by it.
+bincv-cpp/tests/output/
+
+# Maintainer-only working files: the measurement log, the reference-device setup and
+# the script that drives it, and the one-off measurement probes. One person's working
+# notes and one person's hardware; a reader of this library needs none of them.
+.local/
+bincv-cpp/experiments/
