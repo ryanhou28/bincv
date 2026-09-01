@@ -1,56 +1,56 @@
-// E-8 / X-14 -- horizontal decimation by two: which route, and at what footprint?
+// -- horizontal decimation by two: which route, and at what footprint?
 //
 // The decision rule this benchmark feeds was committed BEFORE it ran; it is in
-// EXPERIMENTS.md as X-14, and the short form is:
+// EXPERIMENTS.md as, and the short form is:
 //
-//   1. The frame-masked route (C) ships only if it beats the better word-local
-//      route by >= 1.5x with non-overlapping spreads at both word types on
-//      640x480 -> 320x240. It is the only one that costs bytes, and below that
-//      bar memory wins (CLAUDE.md's tiebreak).
-//   2. Between the two zero-byte routes (A, B) speed alone decides, and a
-//      difference inside the larger spread is a null result that takes the
-//      simpler one -- the gather loop.
+// 1. The frame-masked route (C) ships only if it beats the better word-local
+// route by >= 1.5x with non-overlapping spreads at both word types on
+// 640x480 -> 320x240. It is the only one that costs bytes, and below that
+// bar memory wins (CLAUDE.md's tiebreak).
+// 2. Between the two zero-byte routes (A, B) speed alone decides, and a
+// difference inside the larger spread is a null result that takes the
+// simpler one -- the gather loop.
 //
-// NO OPENCV. All three variants are binCV, so ARCHITECTURE 10.3's denominator
+// NO OPENCV. All three variants are binCV, so the design notes's denominator
 // does not apply and this builds in the reference device's DEFAULT core-only
 // build. (cv::resize would not be that denominator anyway: it resamples both axes
 // on a byte image and rounds, rather than keeping the even columns.)
 //
-// VARIANTS   impl::decimateColumnsBy2Gather       per-pixel gather loop, 0 B aux
-//            decimateColumnsBy2                   word-local Morton deinterleave,
-//                                                 0 B aux -- and after X-14 chose
-//                                                 it (D-17) this is the SHIPPED
-//                                                 entry point, so re-running this
-//                                                 benchmark measures the library
-//                                                 rather than a copy of one arm
-//            impl::decimateColumnsBy2FrameMasked  big-integer masked unshuffle,
-//                                                 mask table + scratch row
-// WORKLOAD   the pyramid ladder T3.4 will call this with -- 640x480, 320x240,
-//            160x120 and 94x60 sources -- at ~50% fill, four rotated inputs, at
-//            uint32_t (D-14) and uint64_t.
-// METRIC     ns per destination pixel, min/median/max over interleaved batches,
-//            beside the auxiliary bytes each route needs. Speed and memory in one
-//            table, because rule 1 weighs the pair.
+// VARIANTS impl::decimateColumnsBy2Gather per-pixel gather loop, 0 B aux
+// decimateColumnsBy2 word-local Morton deinterleave,
+// 0 B aux -- and after earlier work chose
+// it this is the SHIPPED
+// entry point, so re-running this
+// benchmark measures the library
+// rather than a copy of one arm
+// impl::decimateColumnsBy2FrameMasked big-integer masked unshuffle,
+// mask table + scratch row
+// WORKLOAD the pyramid ladder this will call this with -- 640x480, 320x240,
+// 160x120 and 94x60 sources -- at ~50% fill, four rotated inputs, at
+// uint32_t and uint64_t.
+// METRIC ns per destination pixel, min/median/max over interleaved batches,
+// beside the auxiliary bytes each route needs. Speed and memory in one
+// table, because rule 1 weighs the pair.
 //
 // VALIDITY (EXPERIMENTS.md "Verify the benchmark measures something"):
-//   * measure::g_sink consumes a destination word from every timed call;
-//   * four distinct random sources rotate, so nothing constant-folds;
-//   * all three variants are compared against a per-pixel reference AND against
-//     each other, on every case, before anything is timed -- a benchmark between
-//     a right answer and a wrong one is not a measurement;
-//   * every row prints effective bytes/s next to it. At 640x480/uint32_t a call
-//     touches 28.1 KiB, which is L1-resident on a Cortex-A72, so DRAM bandwidth
-//     is NOT the bound -- L1 load throughput (~12-24 GB/s at 1.5 GHz) is, and a
-//     row above that is a dead-code measurement rather than a fast kernel.
+// * measure::g_sink consumes a destination word from every timed call;
+// * four distinct random sources rotate, so nothing constant-folds;
+// * all three variants are compared against a per-pixel reference AND against
+// each other, on every case, before anything is timed -- a benchmark between
+// a right answer and a wrong one is not a measurement;
+// * every row prints effective bytes/s next to it. At 640x480/uint32_t a call
+// touches 28.1 KiB, which is L1-resident on a Cortex-A72, so DRAM bandwidth
+// is NOT the bound -- L1 load throughput (~12-24 GB/s at 1.5 GHz) is, and a
+// row above that is a dead-code measurement rather than a fast kernel.
 //
 // The vertical half of a 2x2 subsample is free and is NOT what is being compared:
-// all three variants read the same rowsDecimatedBy2() view, so the difference
+// all three variants read the same rowsDecimatedBy2 view, so the difference
 // between them is the horizontal half alone.
 //
 // On x86_64 this is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms").
 // The authoritative run is
 //
-//   ./scripts/run_on_pi.sh pi4 './benchmark/decimate_benchmark'
+//./scripts/run_on_pi.sh pi4 './benchmark/decimate_benchmark'
 
 #include <cstddef>
 #include <cstdint>
@@ -79,7 +79,7 @@ struct Case {
     size_t height;
 };
 
-// The pyramid ladder, plus the small frame X-10 used. 640 columns is 20 words at
+// The pyramid ladder, plus the small frame a measurement used. 640 columns is 20 words at
 // uint32_t and 10 at uint64_t -- neither a power of two, which is the case that
 // makes variant C pad its row.
 const Case kCases[] = {
@@ -153,7 +153,7 @@ bool matchesReference(const BinMat<Word>& src, const BinMat<Word>& dst, const ch
         for (size_t x = 0; x < dst.getWidth(); ++x) {
             const bool want = src.at(static_cast<int>(2 * y), static_cast<int>(2 * x));
             if (dst.at(static_cast<int>(y), static_cast<int>(x)) != want) {
-                std::printf("  DISAGREEMENT: %s at (%zu,%zu)\n", what, y, x);
+                std::printf(" DISAGREEMENT: %s at (%zu,%zu)\n", what, y, x);
                 return false;
             }
         }
@@ -177,7 +177,7 @@ bool agree(Fixture<Word>& f, const char* wordName) {
         // since a variant that left dirt past the width would differ here.
         for (size_t w = 0; w < f.dstA.sizeInWords(); ++w) {
             if (f.dstA.data()[w] != f.dstB.data()[w] || f.dstA.data()[w] != f.dstC.data()[w]) {
-                std::printf("  DISAGREEMENT: %s variants differ at word %zu\n", wordName, w);
+                std::printf(" DISAGREEMENT: %s variants differ at word %zu\n", wordName, w);
                 return false;
             }
         }
@@ -198,7 +198,7 @@ struct Row {
 };
 
 void printRows(const std::vector<Row>& rows) {
-    std::printf("\n  %-22s %26s %9s %9s %10s\n", "variant",
+    std::printf("\n %-22s %26s %9s %9s %10s\n", "variant",
                 "ns/dst-pixel min/med/max", "spread", "aux B", "GB/s");
     double best = 0.0;
     for (const Row& r : rows) {
@@ -207,13 +207,13 @@ void printRows(const std::vector<Row>& rows) {
     for (const Row& r : rows) {
         const double px = static_cast<double>(r.dstPixels);
         const double gbs = static_cast<double>(r.touchedBytes) / r.timing.medianNs;  // B/ns == GB/s
-        std::printf("  %-22s %7.4f/%7.4f/%7.4f %8.1f%% %9zu %10.2f\n", r.label.c_str(),
+        std::printf(" %-22s %7.4f/%7.4f/%7.4f %8.1f%% %9zu %10.2f\n", r.label.c_str(),
                     r.timing.minNs / px, r.timing.medianNs / px, r.timing.maxNs / px,
                     r.timing.spreadPct(), r.auxBytes, gbs);
     }
-    std::printf("\n  %-22s %12s %12s\n", "variant", "x slower", "vs fastest");
+    std::printf("\n %-22s %12s %12s\n", "variant", "x slower", "vs fastest");
     for (const Row& r : rows) {
-        std::printf("  %-22s %11.2fx %12s\n", r.label.c_str(), r.timing.medianNs / best,
+        std::printf(" %-22s %11.2fx %12s\n", r.label.c_str(), r.timing.medianNs / best,
                     (r.timing.medianNs == best) ? "<- fastest" : "");
     }
 }
@@ -262,9 +262,9 @@ bool runCase(const Case& c) {
     std::vector<Row> rows;
     if (!addCase<uint32_t>(c, "uint32_t", benches, rows, f32)) return false;
     if (!addCase<uint64_t>(c, "uint64_t", benches, rows, f64)) return false;
-    std::printf("  all three variants match the per-pixel reference and each other\n");
+    std::printf(" all three variants match the per-pixel reference and each other\n");
 
-    std::printf("  working set of one call: %zu B read + written at uint32_t, %zu B at "
+    std::printf(" working set of one call: %zu B read + written at uint32_t, %zu B at "
                 "uint64_t\n",
                 f32.touchedBytes, f64.touchedBytes);
 
@@ -281,7 +281,7 @@ bool runCase(const Case& c) {
 }  // namespace
 
 int main() {
-    std::printf("binCV -- E-8 / X-14: horizontal decimation by two\n");
+    std::printf("binCV -- horizontal decimation by two\n");
     std::printf("three routes to the same destination; %d inputs, %d interleaved batches, "
                 "%.0f ms budget\n",
                 kInputs, kRepeats, kTargetMs);

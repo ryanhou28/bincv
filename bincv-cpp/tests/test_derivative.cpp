@@ -1,4 +1,4 @@
-// The binarized spatial derivative (T3.5): derivativeX / derivativeY.
+// The binarized spatial derivative: derivativeX / derivativeY.
 //
 // THE CORRECTNESS BAR IS THE REFERENCE IMPLEMENTATION, NOT A FORMULA. The
 // operation is SEAL/src/keypoint_tracking/gradients.cpp's calcBinarizedDeriv, and
@@ -6,48 +6,48 @@
 // Two properties of cv::filter2D decide whether binCV agrees with it, and both
 // are the kind that produce a plausible-looking image when got backwards:
 //
-//   * filter2D CORRELATES. dst(x) = src(x+1) - src(x-1). A convolution would
-//     negate every gradient -- and NOTHING DOWNSTREAM WOULD NOTICE. It is
-//     tempting to say T3.6's cross term would catch it, since sumXX and sumYY are
-//     magnitude popcounts and sumXY is the only entry that reads the sign planes;
-//     but the inversion negates BOTH derivatives and (-Ix)(-Iy) = IxIy, so the
-//     whole 2x2 covariance is invariant under it (pinned in
-//     tests/test_covariance.cpp). Derivative.OpenCvFilter2D_Direction is
-//     therefore the ONLY guard on the direction. It pins it against the real
-//     cv::filter2D on a single step edge, where the two readings differ by sign
-//     at a known column.
-//   * filter2D's default border is BORDER_REFLECT_101, NOT zero.
-//     Derivative.OpenCvFilter2D_BorderDefault pins that too, by running the same
-//     input through the default and through all three of BORDER_CONSTANT,
-//     BORDER_REFLECT_101 and BORDER_REPLICATE explicitly and requiring the
-//     default to equal exactly one of them.
+// * filter2D CORRELATES. dst(x) = src(x+1) - src(x-1). A convolution would
+// negate every gradient -- and NOTHING DOWNSTREAM WOULD NOTICE. It is
+// tempting to say that work’s cross term would catch it, since sumXX and sumYY are
+// magnitude popcounts and sumXY is the only entry that reads the sign planes;
+// but the inversion negates BOTH derivatives and (-Ix)(-Iy) = IxIy, so the
+// whole 2x2 covariance is invariant under it (pinned in
+// tests/test_covariance.cpp). Derivative.OpenCvFilter2D_Direction is
+// therefore the ONLY guard on the direction. It pins it against the real
+// cv::filter2D on a single step edge, where the two readings differ by sign
+// at a known column.
+// * filter2D's default border is BORDER_REFLECT_101, NOT zero.
+// Derivative.OpenCvFilter2D_BorderDefault pins that too, by running the same
+// input through the default and through all three of BORDER_CONSTANT,
+// BORDER_REFLECT_101 and BORDER_REPLICATE explicitly and requiring the
+// default to equal exactly one of them.
 //
 // Neither probe is a comment about OpenCV; each is a check that fails if OpenCV
 // ever disagrees with what ops/derivative.hpp was written against.
 //
 // FOUR HALVES, and only the last needs OpenCV:
 //
-//   CORE, per-pixel reference. Every swept case is compared against a reference
-//     written in COORDINATES rather than in words -- `a = tap(+1)`,
-//     `b = tap(-1)`, `value = a - b` -- over an INDEPENDENTLY WRITTEN border
-//     mapping (a do-while, the shape OpenCV uses, not the closed form
-//     ops/shift.hpp ships). Both axes, all five BorderTypes, both fill values,
-//     N = 1, 2 and 3, all four word widths.
-//   CORE, structural. The canonical-zero rule swept over whole frames; the
-//     padding-bit invariant in every destination plane INCLUDING the sign plane;
-//     sources whose padding is already dirty; differing strides; degenerate
-//     shapes; and the cost constants.
-//   CORE, agreement between formulations. The ternary spelling against the
-//     generic ripple at N = 1 (impl::derivativeXGeneric), and the fused kernel
-//     against the COMPOSED spelling -- shiftLeft/shiftRight plus ops/logic.hpp --
-//     which is what keeps the inline shift honest about word boundaries.
-//   OPENCV. calcBinarizedDeriv PORTED -- its own cv::filter2D calls, its own
-//     scale factor of 16 -- compared at every pixel, borders included, after
-//     dividing by 4080. The division is required to be EXACT, which is what makes
-//     "the scale factor is representational" a checked claim rather than an
-//     assertion: if any other value ever appeared, the division would not be.
-//     Plus the same comparison for N-bit sources, where cv::filter2D on CV_8U
-//     holding the pixel VALUES needs no scale factor at all.
+// CORE, per-pixel reference. Every swept case is compared against a reference
+// written in COORDINATES rather than in words -- `a = tap(+1)`,
+// `b = tap(-1)`, `value = a - b` -- over an INDEPENDENTLY WRITTEN border
+// mapping (a do-while, the shape OpenCV uses, not the closed form
+// ops/shift.hpp ships). Both axes, all five BorderTypes, both fill values,
+// N = 1, 2 and 3, all four word widths.
+// CORE, structural. The canonical-zero rule swept over whole frames; the
+// padding-bit invariant in every destination plane INCLUDING the sign plane;
+// sources whose padding is already dirty; differing strides; degenerate
+// shapes; and the cost constants.
+// CORE, agreement between formulations. The ternary spelling against the
+// generic ripple at N = 1 (impl::derivativeXGeneric), and the fused kernel
+// against the COMPOSED spelling -- shiftLeft/shiftRight plus ops/logic.hpp --
+// which is what keeps the inline shift honest about word boundaries.
+// OPENCV. calcBinarizedDeriv PORTED -- its own cv::filter2D calls, its own
+// scale factor of 16 -- compared at every pixel, borders included, after
+// dividing by 4080. The division is required to be EXACT, which is what makes
+// "the scale factor is representational" a checked claim rather than an
+// assertion: if any other value ever appeared, the division would not be.
+// Plus the same comparison for N-bit sources, where cv::filter2D on CV_8U
+// holding the pixel VALUES needs no scale factor at all.
 //
 // WHY THE CHECK COUNT IS NOT ONE PER PIXEL: a 129x17 case would contribute 2193
 // checks and drown the summary. Each swept case reports its DISAGREEMENT COUNT as
@@ -100,9 +100,9 @@ uint64_t nextRandom(uint64_t& state) {
 
 /// @brief The pixel VALUES of a frame, row-major -- the reference's whole state.
 /// @note Deliberately a plain vector rather than a view onto the container under
-///       test: a reference that read its input back out of the object it is
-///       judging could cancel a packing fault through both sides (T2.1's
-///       argument for the equivalence harness's second generator).
+/// test: a reference that read its input back out of the object it is
+/// judging could cancel a packing fault through both sides (that work’s
+/// argument for the equivalence harness's second generator).
 struct Frame {
     int width = 0;
     int height = 0;
@@ -152,7 +152,7 @@ void loadFrame(const Frame& f, bincv::QuantMat<N, WordType>& m) {
     }
 }
 
-// BinMat's set() takes bool rather than an unsigned, so N == 1 needs its own
+// BinMat's set takes bool rather than an unsigned, so N == 1 needs its own
 // spelling (quantMat.hpp says why the binary case deserves bool).
 template <typename WordType>
 void loadFrame(const Frame& f, bincv::BinMat<WordType>& m) {
@@ -167,9 +167,9 @@ void loadFrame(const Frame& f, bincv::BinMat<WordType>& m) {
 
 /// @brief cv::borderInterpolate, written as OpenCV writes it: a do-while.
 /// @note INDEPENDENT of impl::borderIndex on purpose. That function is a closed
-///       form and is pinned against cv::borderInterpolate by tests/test_shift.cpp;
-///       reusing it here would make this suite blind to a border regression in
-///       the one operation whose edges T3.6 reads.
+/// form and is pinned against cv::borderInterpolate by tests/test_shift.cpp;
+/// reusing it here would make this suite blind to a border regression in
+/// the one operation whose edges reads.
 int referenceBorderIndex(int p, int len, BorderType type) {
     if (len == 1) return (type == BORDER_CONSTANT) ? -1 : 0;
     if (p >= 0 && p < len) return p;
@@ -213,8 +213,8 @@ int referenceTap(const Frame& f, int y, int x, bool horizontal, int offset, Bord
 
 /// @brief The reference derivative: RIGHT/BELOW tap minus LEFT/ABOVE tap.
 /// @note This one line is the correlation direction. cv::filter2D with the anchor
-///       at the centre computes exactly it (Derivative.OpenCvFilter2D_Direction
-///       pins that), and a convolution would compute its negation.
+/// at the centre computes exactly it (Derivative.OpenCvFilter2D_Direction
+/// pins that), and a convolution would compute its negation.
 int referenceDeriv(const Frame& f, int y, int x, bool horizontal, BorderType type,
                    bool borderValue) {
     return referenceTap(f, y, x, horizontal, +1, type, borderValue) -
@@ -226,9 +226,9 @@ int referenceDeriv(const Frame& f, int y, int x, bool horizontal, BorderType typ
 // ---------------------------------------------------------------------------
 
 /// @brief The RAW planes of a signed pixel: magnitude bits, and the sign bit
-///        separately, WITHOUT the canonical-zero reading at() applies.
-/// @note at() hides a set sign over a zero magnitude by design. This suite has to
-///       be able to SEE one, because "the kernel never writes one" is the claim.
+/// separately, WITHOUT the canonical-zero reading at applies.
+/// @note at hides a set sign over a zero magnitude by design. This suite has to
+/// be able to SEE one, because "the kernel never writes one" is the claim.
 template <size_t N, typename WordType>
 void rawSigned(const bincv::SignedQuantMat<N, WordType>& m, int y, int x, unsigned& magnitude,
                bool& signBit) {
@@ -238,9 +238,9 @@ void rawSigned(const bincv::SignedQuantMat<N, WordType>& m, int y, int x, unsign
 }
 
 /// @brief Bits set past `width` in a plane's trailing word, over the whole image.
-/// @note The padding-bit invariant (D-13) as a number. Read plane by plane so the
-///       SIGN plane is covered too -- it is the one a per-value check cannot see,
-///       because at() reports 0 for a zero magnitude whatever the sign holds.
+/// @note The padding-bit invariant as a number. Read plane by plane so the
+/// SIGN plane is covered too -- it is the one a per-value check cannot see,
+/// because at reports 0 for a zero magnitude whatever the sign holds.
 template <size_t N, typename WordType>
 int dirtyPaddingBits(const bincv::SignedQuantMat<N, WordType>& m) {
     const size_t words = bincv::impl::minRowWords<WordType>(m.getWidth());
@@ -309,9 +309,9 @@ uint64_t caseSeed(int width, int height, size_t n, size_t index) {
 
 /// @brief Runs one (size, border, axis) case and returns how many pixels differ.
 /// @note Checks the VALUE, the MAGNITUDE and the SIGN BIT separately rather than
-///       only at(): at() applies the canonical-zero reading, so a kernel that
-///       wrote a set sign over a zero magnitude would agree on every value and be
-///       wrong in the plane T3.6's cross term reads.
+/// only at: at applies the canonical-zero reading, so a kernel that
+/// wrote a set sign over a zero magnitude would agree on every value and be
+/// wrong in the plane that work’s cross term reads.
 template <size_t N, typename WordType>
 int runCase(const Frame& f, bool horizontal, BorderType type, bool borderValue, int& signViolations,
             int& padding) {
@@ -384,10 +384,10 @@ void sweepReference(const char* wordName) {
 // ---------------------------------------------------------------------------
 
 /// @brief The ternary route against the generic ripple, at N == 1.
-/// @note ARCHITECTURE 7.4 says ternary is the N = 1 instance of the general
-///       signed form "and not a separate code path". This is that sentence as a
-///       test: impl::derivativeXGeneric takes the ripple even at N = 1, and the
-///       two must produce identical images -- every plane, every word.
+/// @note the design notes says ternary is the N = 1 instance of the general
+/// signed form "and not a separate code path". This is that sentence as a
+/// test: impl::derivativeXGeneric takes the ripple even at N = 1, and the
+/// two must produce identical images -- every plane, every word.
 template <typename WordType>
 void sweepRoutesAgree(const char* wordName) {
     size_t index = 0;
@@ -435,10 +435,10 @@ void sweepRoutesAgree(const char* wordName) {
 
 /// @brief The fused kernel against the COMPOSED spelling at level 0.
 /// @note shiftLeft(src, 1) is the src(x+1) tap and shiftRight(src, 1) the
-///       src(x-1) tap -- ops/shift.hpp's convention, stated at the top of that
-///       file. This case is what keeps the inline one-bit shift in
-///       ops/derivative.hpp honest about word boundaries and about the border:
-///       the two implementations share no code below the border mapping.
+/// src(x-1) tap -- ops/shift.hpp's convention, stated at the top of that
+/// file. This case is what keeps the inline one-bit shift in
+/// ops/derivative.hpp honest about word boundaries and about the border:
+/// the two implementations share no code below the border mapping.
 template <typename WordType>
 void sweepComposed(const char* wordName) {
     size_t index = 0;
@@ -457,7 +457,7 @@ void sweepComposed(const char* wordName) {
                         bincv::derivativeY(src, fused, border.type, border.value);
                     }
 
-                    // pos = a & ~b;  neg = b & ~a;  mag = pos | neg;  sign = neg
+                    // pos = a & ~b; neg = b & ~a; mag = pos | neg; sign = neg
                     bincv::BinMat<WordType> a(width, height);
                     bincv::BinMat<WordType> b(width, height);
                     bincv::BinMat<WordType> notA(width, height);
@@ -508,23 +508,23 @@ void sweepComposed(const char* wordName) {
 
 /// @brief A source whose PADDING bits are already set, wrapped rather than owned.
 /// @note BinMat's wrap constructor documents that a caller's padding is the
-///       caller's (sensor DMA, a sub-region of a wider frame). The horizontal
-///       kernel is the one that can leak such a bit into a live pixel: `cur >> 1`
-///       moves bit `width % WordBits` into pixel `width - 1`.
+/// caller's (sensor DMA, a sub-region of a wider frame). The horizontal
+/// kernel is the one that can leak such a bit into a live pixel: `cur >> 1`
+/// moves bit `width % WordBits` into pixel `width - 1`.
 /// @note WHAT THESE CASES STAND BEHIND IS THE RIGHT-BORDER FIXUP, NOT A MASK.
-///       ops/derivative.hpp does NOT mask the source's trailing word -- the mask
-///       was measured dead and REMOVED, because the bit it would clear lands on
-///       exactly the bit the fixup overwrites a moment later (48444 of 48444
-///       checks pass with it and without it). Do not "restore" it; measurement
-///       rejected it.
+/// ops/derivative.hpp does NOT mask the source's trailing word -- the mask
+/// was measured dead and REMOVED, because the bit it would clear lands on
+/// exactly the bit the fixup overwrites a moment later (48444 of 48444
+/// checks pass with it and without it). Do not "restore" it; measurement
+/// rejected it.
 ///
-///       What is load-bearing is the fixup, and these cases are how the coupling
-///       between the two is guarded from this end. Deleting the fixup from the
-///       shipped kernel fails 16772 checks, of which 28 are DirtyPadding cases
-///       that pass when the mask is put back -- i.e. the mask is dead BECAUSE the
-///       fixup is there. Anything that narrows the fixup must re-establish the
-///       last live column's right tap AND the padding invariant explicitly, which
-///       is the coupling ops/derivative.hpp's item 3 states from the other end.
+/// What is load-bearing is the fixup, and these cases are how the coupling
+/// between the two is guarded from this end. Deleting the fixup from the
+/// shipped kernel fails 16772 checks, of which 28 are DirtyPadding cases
+/// that pass when the mask is put back -- i.e. the mask is dead BECAUSE the
+/// fixup is there. Anything that narrows the fixup must re-establish the
+/// last live column's right tap AND the padding invariant explicitly, which
+/// is the coupling ops/derivative.hpp's item 3 states from the other end.
 template <size_t N, typename WordType>
 void sweepDirtyPadding(const char* wordName) {
     size_t index = 0;
@@ -571,7 +571,7 @@ void sweepDirtyPadding(const char* wordName) {
     }
 }
 
-/// @brief Over-aligned rows (D-4's opt-in), so the strides differ from the width.
+/// @brief Over-aligned rows (the design rule’s opt-in), so the strides differ from the width.
 template <size_t N, typename WordType>
 void sweepStrides(const char* wordName) {
     const size_t alignments[] = {sizeof(WordType), 8 * sizeof(WordType)};
@@ -614,12 +614,12 @@ void sweepStrides(const char* wordName) {
 
 /// @brief The border columns and rows, named explicitly rather than swept.
 /// @note The sweep above already covers these, but a failure there reports "17
-///       mismatches" on a 94x9 case. These say WHICH property broke.
+/// mismatches" on a 94x9 case. These say WHICH property broke.
 template <typename WordType>
 void checkBorderIdentities(const char* wordName) {
     // Reflect-101 makes both taps read the same source pixel at the first and last
     // column, so the derivative is EXACTLY ZERO there whatever the image holds.
-    // That is the property T3.7's corner response depends on -- a zero fill would
+    // That is the property that work’s corner response depends on -- a zero fill would
     // put a full-strength edge all the way around the frame.
     {
         const int width = 65;
@@ -750,8 +750,8 @@ void checkDegenerate(const char* wordName) {
 
 /// @brief calcBinarizedDeriv, PORTED -- its kernels, its ddepth, its scale.
 /// @note Not a reimplementation. The point of porting rather than paraphrasing is
-///       that the border and the correlation direction come from cv::filter2D
-///       itself, so binCV cannot agree with a misreading of them.
+/// that the border and the correlation direction come from cv::filter2D
+/// itself, so binCV cannot agree with a misreading of them.
 void portedCalcBinarizedDeriv(const cv::Mat& src, cv::Mat& binarizedX, cv::Mat& binarizedY) {
     const int ddepth = CV_16S;
     cv::Mat kernelX = (cv::Mat_<int>(1, 3) << -1, 0, 1);
@@ -775,11 +775,11 @@ cv::Mat toCv8U(const Frame& f, int scale) {
 
 /// @brief binCV against the ported reference at every pixel, borders included.
 /// @note THE SCALE FACTOR IS DIVIDED OUT AND THE DIVISION IS REQUIRED TO BE
-///       EXACT. 255 (the reference's "white") times 16 is 4080, so the reference's
-///       only possible values are {-4080, 0, +4080}; if any other ever appeared,
-///       the exactness check would fail and the "representational, not semantic"
-///       claim in ops/derivative.hpp would be false rather than merely
-///       unsupported.
+/// EXACT. 255 (the reference's "white") times 16 is 4080, so the reference's
+/// only possible values are {-4080, 0, +4080}; if any other ever appeared,
+/// the exactness check would fail and the "representational, not semantic"
+/// claim in ops/derivative.hpp would be false rather than merely
+/// unsupported.
 template <typename WordType>
 void sweepAgainstReference(const char* wordName) {
     size_t index = 0;
@@ -819,11 +819,11 @@ void sweepAgainstReference(const char* wordName) {
 
 /// @brief The same comparison for an N-BIT source, where no scale factor applies.
 /// @note cv::filter2D on a CV_8U image holding the pixel VALUES 0..2^N-1 produces
-///       exactly the N-bit derivative into CV_16S. There is no reference
-///       implementation for the N-bit case -- the reference pipeline never
-///       binarizes above level 0 -- so cv::filter2D itself is the denominator,
-///       which is also what makes the border and the correlation direction the
-///       same ones the level-0 comparison is judged against.
+/// exactly the N-bit derivative into CV_16S. There is no reference
+/// implementation for the N-bit case -- the reference pipeline never
+/// binarizes above level 0 -- so cv::filter2D itself is the denominator,
+/// which is also what makes the border and the correlation direction the
+/// same ones the level-0 comparison is judged against.
 template <size_t N, typename WordType>
 void sweepAgainstFilter2D(const char* wordName) {
     size_t index = 0;
@@ -933,7 +933,7 @@ BINCV_TEST(Derivative, OpenCvFilter2D_Direction) {
     // filter2D CORRELATES. A 1x8 row stepping 0 -> 255 between columns 3 and 4
     // gives dx(3) = src(4) - src(2) = +255; a convolution predicts -255. This
     // check is the ONLY guard on the direction: the inversion negates both
-    // derivatives, and T3.6's covariance -- cross term included -- is invariant
+    // derivatives, and that work’s covariance -- cross term included -- is invariant
     // under that, so no downstream test can see it (test_covariance.cpp pins the
     // invariance).
     cv::Mat src = cv::Mat::zeros(1, 8, CV_8U);
@@ -971,7 +971,7 @@ BINCV_TEST(Derivative, OpenCvFilter2D_BorderDefault) {
     BINCV_CHECK_EQ(static_cast<int>(reflect101.at<short>(0, 0)), 0);
     BINCV_CHECK_EQ(static_cast<int>(constant.at<short>(0, 0)), 255);
     BINCV_CHECK_EQ(static_cast<int>(replicate.at<short>(0, 0)), 255);
-    // ...and binCV's BORDER_REFLECT_101 is the same enumerator value OpenCV's is,
+    //...and binCV's BORDER_REFLECT_101 is the same enumerator value OpenCV's is,
     // which is what lets a caller pass one through to the other unchanged.
     BINCV_CHECK_EQ(static_cast<int>(bincv::BORDER_REFLECT_101),
                    static_cast<int>(cv::BORDER_REFLECT_101));

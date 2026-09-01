@@ -1,22 +1,22 @@
-// Morphology (T3.3): erode / dilate / morphologyEx, and the StructuringElement
+// Morphology: erode / dilate / morphologyEx, and the StructuringElement
 // they take.
 //
 // TWO HALVES, the same split as tests/test_shift.cpp and tests/test_reduce.cpp.
 //
-//   1. The CORE half needs no OpenCV, so it runs in all four verification
-//      configurations -- including Debug, the only place the kernels'
-//      BINCV_ASSERT preconditions are live, and -fno-exceptions, which is the
-//      embedded claim. It checks the kernel against a PER-PIXEL reference written
-//      in terms of coordinates and an INDEPENDENTLY WRITTEN border mapping (the
-//      do-while shape OpenCV documents, not the library's closed form), against
-//      ops/shift.hpp for the single-cell case, and the 3x3 special case against
-//      the general path it replaced.
+// 1. The CORE half needs no OpenCV, so it runs in all four verification
+// configurations -- including Debug, the only place the kernels'
+// BINCV_ASSERT preconditions are live, and -fno-exceptions, which is the
+// embedded claim. It checks the kernel against a PER-PIXEL reference written
+// in terms of coordinates and an INDEPENDENTLY WRITTEN border mapping (the
+// do-while shape OpenCV documents, not the library's closed form), against
+// ops/shift.hpp for the single-cell case, and the 3x3 special case against
+// the general path it replaced.
 //
-//   2. The OPENCV half is the Tier 1 promise: bit-exact against cv::erode,
-//      cv::dilate and cv::morphologyEx -- and, separately, StructuringElement
-//      cell-for-cell against cv::getStructuringElement, because an element that
-//      is not OpenCV's element makes every image comparison a comparison of two
-//      different operations.
+// 2. The OPENCV half is the Tier 1 promise: bit-exact against cv::erode,
+// cv::dilate and cv::morphologyEx -- and, separately, StructuringElement
+// cell-for-cell against cv::getStructuringElement, because an element that
+// is not OpenCV's element makes every image comparison a comparison of two
+// different operations.
 //
 // ---------------------------------------------------------------------------
 // WHY THERE ARE ASYMMETRIC ELEMENTS HERE, MEASURED
@@ -35,9 +35,9 @@
 // WHERE THE BORDER IS CHECKED
 //
 // Everywhere, and deliberately not only through whole images. cv::erode and
-// cv::dilate default to BORDER_CONSTANT with morphologyDefaultBorderValue(),
-// which is NOT the same constant for the two (D-12) -- ones outside for an
-// erosion, zeros for a dilation. The sweeps below run every size in T2.1's
+// cv::dilate default to BORDER_CONSTANT with morphologyDefaultBorderValue,
+// which is NOT the same constant for the two -- ones outside for an
+// erosion, zeros for a dilation. The sweeps below run every size in that work’s
 // matrix including width 1 and height 1, where EVERY pixel is a border pixel, and
 // the non-constant types are swept separately because they are the only path
 // through the per-pixel fixup.
@@ -90,7 +90,7 @@ using bincv::StructuringElement;
 // Content: the same generator as tests/equivalence.hpp, minus OpenCV
 // ---------------------------------------------------------------------------
 //
-// Duplicated rather than shared, for T2.1's reason: a harness that shared a
+// Duplicated rather than shared, for that work’s reason: a harness that shared a
 // generator with the suite judging it could cancel a fault through both sides.
 
 uint64_t nextRandom(uint64_t& state) {
@@ -111,7 +111,7 @@ uint32_t fillThreshold(float fillRatio) {
     return static_cast<uint32_t>(rounded);
 }
 
-/// @brief Fills through set(), so the padding bits stay clear on entry.
+/// @brief Fills through set, so the padding bits stay clear on entry.
 template <typename WordType>
 void fillRandom(BinMat<WordType>& m, float fillRatio, uint64_t seed) {
     uint64_t state = seed;
@@ -134,9 +134,9 @@ uint64_t caseSeed(int width, int height, size_t index) {
 
 /// @brief cv::borderInterpolate as OpenCV writes it: a loop, not a closed form.
 /// @note The library uses a signed modulo into the reflect pattern's period
-///       (impl::borderIndex). Two different algorithms for one function is the
-///       point: the core half of this suite must be able to fail when that closed
-///       form is wrong, and it cannot be if it judges itself.
+/// (impl::borderIndex). Two different algorithms for one function is the
+/// point: the core half of this suite must be able to fail when that closed
+/// form is wrong, and it cannot be if it judges itself.
 int borderIndexReference(int p, int len, BorderType type) {
     if (p >= 0 && p < len) return p;
     if (type == bincv::BORDER_REPLICATE) return p < 0 ? 0 : len - 1;
@@ -251,7 +251,7 @@ const char* borderName(BorderType t) {
 #ifdef BINCV_WITH_OPENCV
 /// @brief Border types with an OpenCV morphology denominator -- WRAP is absent.
 /// @note Guarded because it names OpenCV's restriction and nothing else uses it;
-///       an unused function is a -Werror failure in the core configurations.
+/// an unused function is a -Werror failure in the core configurations.
 const std::vector<BorderType>& openCvBorderTypes() {
     static const std::vector<BorderType> v{bincv::BORDER_CONSTANT, bincv::BORDER_REPLICATE,
                                            bincv::BORDER_REFLECT, bincv::BORDER_REFLECT_101};
@@ -266,7 +266,7 @@ const std::vector<BorderType>& allBorderTypes() {
     return v;
 }
 
-// The reduced sweep. The full T2.1 matrix is used where one element and two ops
+// The reduced sweep. The full the matrix is used where one element and two ops
 // are swept over it; the combinatorial cases (7 ops x 7 elements x 5 borders)
 // use this instead, which keeps every packing-sensitive width and drops only the
 // two dimensions that cost seconds and cannot expose a word-boundary bug.
@@ -294,8 +294,8 @@ std::string label(const char* wordTypeName, int width, int height, const char* e
 
 /// @brief erode / dilate at ONE pixel, written in coordinates.
 /// @note Shares nothing with the kernel but the element itself: the fold is a
-///       bool, the neighbourhood is a double loop over cells, and the border goes
-///       through borderIndexReference() above rather than through impl::.
+/// bool, the neighbourhood is a double loop over cells, and the border goes
+/// through borderIndexReference above rather than through impl::.
 template <typename WordType>
 bool referencePixel(const BinMat<WordType>& src, int x, int y, const StructuringElement& se,
                     BorderType borderType, bool borderValue, bool isErode) {
@@ -338,7 +338,7 @@ int countDisagreements(const BinMat<WordType>& a, const BinMat<WordType>& b) {
 }
 
 /// @brief Set bits across the whole STRIDE, padding included.
-/// @note binCV exposes no per-word popcount (D-6), so the test writes its own.
+/// @note binCV exposes no per-word popcount, so the test writes its own.
 template <typename WordType>
 int paddingBitsSet(const BinMat<WordType>& m) {
     constexpr size_t wordBits = BinMat<WordType>::WordBits;
@@ -388,7 +388,7 @@ void dirtyThePadding(BinMat<WordType>& m) {
 // real cv::getStructuringElement in the OpenCV half -- there is no independent
 // formulation of it, because "OpenCV's rounding" is the specification. What is
 // checkable without OpenCV is the structure every shape must have, and it is what
-// the kernels' correctness rests on: that spanOfRow() and activeAt() agree, that
+// the kernels' correctness rests on: that spanOfRow and activeAt agree, that
 // the parametric shapes are point-symmetric at a centred anchor (the property
 // that makes the asymmetric catalogue necessary), and that rect and cross match
 // their closed forms.
@@ -424,7 +424,7 @@ void testElementStructure() {
 
                 // The CONVERSE, which is what the kernels rely on: a parametric
                 // shape's span is SOLID, so the word loop can iterate it without
-                // a per-cell test (StructuringElement::spanIsDense()). Without
+                // a per-cell test (StructuringElement::spanIsDense). Without
                 // this check that optimisation would be an assumption.
                 int holesInSpan = 0;
                 for (int row = 0; row < r; ++row) {
@@ -550,7 +550,7 @@ void testAgainstReference(const char* wordTypeName) {
 
                 for (const NamedElement& elements : symmetricElements()) {
                     for (BorderType borderType : allBorderTypes()) {
-                        // BOTH fills, but only where a fill is read. D-12 makes
+                        // BOTH fills, but only where a fill is read. the design rule makes
                         // the fill the caller's, so both values are part of the
                         // contract -- and the four non-constant types ignore it
                         // entirely, so sweeping it there doubles the cost of this
@@ -812,7 +812,7 @@ void testCompound(const char* wordTypeName) {
 
                             // The definition, spelled out with the per-pixel
                             // reference rather than with the kernel: `a` and `b`
-                            // are built by referenceImage(), so an erode and a
+                            // are built by referenceImage, so an erode and a
                             // dilate that were wrong the same way could not agree
                             // their way past this.
                             switch (op) {
@@ -888,7 +888,7 @@ void testCompound(const char* wordTypeName) {
 template <typename WordType>
 void testPaddingAndDegenerate(const char* wordTypeName) {
     // A source whose padding bits are all ones is a SUPPORTED construction
-    // (BinMat's wrap constructor, D-13's neighbours). It must not change a pixel.
+    // (BinMat's wrap constructor, the design rule’s neighbours). It must not change a pixel.
     size_t index = 0;
     for (int width : reducedWidths()) {
         for (int height : reducedHeights()) {
@@ -930,17 +930,17 @@ void testPaddingAndDegenerate(const char* wordTypeName) {
 
     // WIDE elements, for two reasons at once.
     //
-    //   * Every offset leaves the frame, which is what a kernel that clamps an
-    //     offset to the image gets wrong.
-    //   * An element whose horizontal reach is a WHOLE WORD or more is the only
-    //     thing that reaches morphRowGeneric's fallback recurrence -- the
-    //     sliding three-word window cannot express a shift of a word or more. The
-    //     sizes below cross that threshold at every supported word width: reach 4
-    //     at uint8_t, 16 at uint16_t, 32 at uint32_t and 64 at uint64_t. Without
-    //     129 here the fallback would never run at uint64_t in any configuration.
+    // * Every offset leaves the frame, which is what a kernel that clamps an
+    // offset to the image gets wrong.
+    // * An element whose horizontal reach is a WHOLE WORD or more is the only
+    // thing that reaches morphRowGeneric's fallback recurrence -- the
+    // sliding three-word window cannot express a shift of a word or more. The
+    // sizes below cross that threshold at every supported word width: reach 4
+    // at uint8_t, 16 at uint16_t, 32 at uint32_t and 64 at uint64_t. Without
+    // 129 here the fallback would never run at uint64_t in any configuration.
     //
     // THE ANCHOR SWEEP IS NOT DECORATION, and it is a measurement. A wide rect at
-    // the DEFAULT anchor is point-symmetric -- its offset set is {-size/2 .. +size/2},
+    // the DEFAULT anchor is point-symmetric -- its offset set is {-size/2.. +size/2},
     // which satisfies E == -E -- and so was the sparse wide mask below, whose cells
     // sat at {0, half, cols-1} around an anchor at half. Those were the only two
     // families reaching the fallback recurrence, so `morphShiftedWord`'s offset
@@ -1097,9 +1097,9 @@ cv::Point toCvAnchor(const StructuringElement& se) {
 
 /// @brief cv::getStructuringElement, cell for cell.
 /// @note Without this, every image comparison below could be two implementations
-///       agreeing about the wrong element. The parametric shapes' exact cell sets
-///       -- MORPH_ELLIPSE's rounding above all -- have no specification other than
-///       what OpenCV computes, so this is where they are pinned.
+/// agreeing about the wrong element. The parametric shapes' exact cell sets
+/// -- MORPH_ELLIPSE's rounding above all -- have no specification other than
+/// what OpenCV computes, so this is where they are pinned.
 void testElementMatchesOpenCv() {
     const int sizes[] = {1, 2, 3, 4, 5, 7, 9, 11, 15, 21, 31};
     const MorphShape shapes[] = {bincv::MORPH_RECT, bincv::MORPH_CROSS, bincv::MORPH_ELLIPSE};
@@ -1150,13 +1150,13 @@ void expectMatchesOpenCv(const BinMat<WordType>& src, const cv::Mat& cvSrc,
     BINCV_EXPECT_BIT_EXACT(dst.constView(), expected, context);
 }
 
-/// @brief The full T2.1 matrix: the three 3x3 shapes, erode and dilate.
+/// @brief The full the matrix: the three 3x3 shapes, erode and dilate.
 /// @note Through cv::erode / cv::dilate DIRECTLY rather than through
-///       cv::morphologyEx, because those are the two functions ARCHITECTURE 5.1
-///       names as Tier 1 and their default borderValue is the premise D-12 rests
-///       on. Content is generated ONCE per (size, fill) and reused across the six
-///       (shape, op) combinations -- the generator and the comparison are both
-///       per-pixel loops, and at 640x480 they, not OpenCV, are the cost.
+/// cv::morphologyEx, because those are the two functions the design notes
+/// names as Tier 1 and their default borderValue is the premise rests
+/// on. Content is generated ONCE per (size, fill) and reused across the six
+/// (shape, op) combinations -- the generator and the comparison are both
+/// per-pixel loops, and at 640x480 they, not OpenCV, are the cost.
 template <typename WordType>
 void testOpenCvErodeDilate(const char* wordTypeName) {
     uint64_t seed = 0x3033ull;
@@ -1222,8 +1222,8 @@ void testOpenCvOps(const char* wordTypeName) {
 
 /// @brief The four border types cv::morphologyEx accepts, over the reduced matrix.
 /// @note This is the path through the per-pixel fixup, and it is swept at width 1
-///       and height 1 as well -- the sizes where EVERY pixel is a border pixel and
-///       an interior-only implementation still passes an interior-only test.
+/// and height 1 as well -- the sizes where EVERY pixel is a border pixel and
+/// an interior-only implementation still passes an interior-only test.
 template <typename WordType>
 void testOpenCvBorders(const char* wordTypeName) {
     uint64_t seed = 0x303300000000ull;
@@ -1258,11 +1258,11 @@ void testOpenCvBorders(const char* wordTypeName) {
     }
 }
 
-/// @brief D-12 from binCV's side: the fill is the caller's, and the default is
-///        the one OpenCV picks for the operation.
+/// @brief from binCV's side: the fill is the caller's, and the default is
+/// the one OpenCV picks for the operation.
 /// @note tests/test_shift.cpp pins the premise about cv::erode. This pins that
-///       binCV's DEFAULTS follow it, and that passing the other value reproduces
-///       OpenCV's other answer -- so the parameter is not decorative.
+/// binCV's DEFAULTS follow it, and that passing the other value reproduces
+/// OpenCV's other answer -- so the parameter is not decorative.
 void testBorderFillIsTheCallers() {
     const int n = 8;
     cv::Mat white(n, n, CV_8U, cv::Scalar(255));

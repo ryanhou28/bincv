@@ -1,4 +1,4 @@
-// X-36 isolated: residualSums at N = 1, tap-batched NEON vs scalar. The shipped
+// isolated: residualSums at N = 1, tap-batched NEON vs scalar. The shipped
 // 1/2/2/2 ladder has only ONE level at N = 1, so a whole-ladder measurement dilutes
 // this by four; the kernel ratio is what the decision rule asks for.
 #include <cstdio>
@@ -30,7 +30,7 @@ int main() {
             tx.push_back((long long)(rnd() % 7u) - 3);
             ty.push_back((long long)(rnd() % 7u) - 3);
         }
-    std::printf("=== X-36: residualSums at N=1, %zu windows of 31x31 ===\n\n", regs.size());
+    std::printf("=== residualSums at N=1, %zu windows of 31x31 ===\n\n", regs.size());
 
     size_t bad = 0;
     for (size_t k = 0; k < regs.size(); ++k) {
@@ -39,11 +39,11 @@ int main() {
         bincv::impl::residualSums<1, W, true>(lv, regs[k], tx[k], ty[k], a2, b2);
         if (a1.t00!=a2.t00||a1.t01!=a2.t01||a1.t10!=a2.t10||a1.t11!=a2.t11||a1.self!=a2.self||
             b1.t00!=b2.t00||b1.t01!=b2.t01||b1.t10!=b2.t10||b1.t11!=b2.t11||b1.self!=b2.self) {
-            if (bad < 3) std::printf("  MISMATCH window %zu: x.t01 %lld vs %lld\n", k, a1.t01, a2.t01);
+            if (bad < 3) std::printf(" MISMATCH window %zu: x.t01 %lld vs %lld\n", k, a1.t01, a2.t01);
             ++bad;
         }
     }
-    std::printf("  EQUALITY: %zu of %zu windows differ\n", bad, regs.size());
+    std::printf(" EQUALITY: %zu of %zu windows differ\n", bad, regs.size());
     if (bad) return 1;
 
     std::vector<measure::Bench> b = {
@@ -57,9 +57,9 @@ int main() {
             measure::g_sink += (size_t)a.t00; }},
     };
     const auto t = measure::measureInterleaved(b, 9, 60.0);
-    std::printf("\n  %-30s %10s %9s\n", "arm", "us", "vs scalar");
+    std::printf("\n %-30s %10s %9s\n", "arm", "us", "vs scalar");
     for (size_t i = 0; i < b.size(); ++i)
-        std::printf("  %-30s %10.1f %8.3fx\n", b[i].name.c_str(), t[i].medianNs/1000.0,
+        std::printf(" %-30s %10.1f %8.3fx\n", b[i].name.c_str(), t[i].medianNs/1000.0,
                     t[0].medianNs/t[i].medianNs);
     return 0;
 }

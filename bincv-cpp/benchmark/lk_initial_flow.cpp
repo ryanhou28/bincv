@@ -1,5 +1,5 @@
 // ===========================================================================
-// X-94 / E-47 -- WHAT DOES AN INITIAL-FLOW GUESS ACTUALLY BUY, AND WHERE DOES IT
+// earlier work -- WHAT DOES AN INITIAL-FLOW GUESS ACTUALLY BUY, AND WHERE DOES IT
 // STOP BUYING IT?
 //
 // `LKParams::useInitialFlow` seeds each point's search from `nextPts` instead of
@@ -18,7 +18,7 @@
 //
 // Reported per arm: mean iterations per point-level (the thing a guess is supposed to
 // change), wall-clock `track`, and RMS endpoint error against ground truth. THE ERROR
-// COLUMN IS NOT DECORATION -- D-53: a change that speeds `track` up by giving up on
+// COLUMN IS NOT DECORATION -- a change that speeds `track` up by giving up on
 // points has not helped anyone, and a bad guess does exactly that.
 //
 // Usage: lk_initial_flow
@@ -81,11 +81,11 @@ double minOf(const std::vector<double>& v) { return *std::min_element(v.begin(),
 }  // namespace
 
 int main() {
-    std::printf("=== X-94 / E-47: what an initial-flow guess buys ===\n");
+    std::printf("=== what an initial-flow guess buys ===\n");
     std::printf("640x480, ladder 1/2/2/2, 31x31 window, %d interleaved rounds, minimum\n\n",
                 kRounds);
 #if defined(BINCV_X86_LK_BATCH)
-    std::printf("shipped path: %s;  the iteration counter only sees the SCALAR path,\n"
+    std::printf("shipped path: %s; the iteration counter only sees the SCALAR path,\n"
                 "because the keypoint batch does not go through `trackOnePoint` -- so the\n"
                 "table times BOTH and counts iterations on the one that can be counted.\n\n",
                 bincv::lkPathName<bincv::LKLevelN<1, W>>());
@@ -240,7 +240,7 @@ int main() {
                                          : 0.0;
         const double rms = tracked ? std::sqrt(sumSq / static_cast<double>(tracked)) : 0.0;
         if (baseNs == 0.0) { baseNs = ns; baseIters = iters; }
-        std::printf("%-24s %11.0f %11.0f %11.3f %9.4f %8zu   %5.2fx time  %5.2fx iters\n",
+        std::printf("%-24s %11.0f %11.0f %11.3f %9.4f %8zu %5.2fx time %5.2fx iters\n",
                     row.label, ns, sc, iters, rms, tracked, baseNs / ns,
                     iters > 0.0 ? baseIters / iters : 0.0);
     }
@@ -250,6 +250,6 @@ int main() {
 
     std::printf("\nThe first row is the denominator: it is the shipped tracker, unchanged.\n"
                 "A guess is only a win where BOTH the time ratio is above 1.00 AND the rms\n"
-                "column has not moved -- D-53: buying speed by dropping points is not a win.\n");
+                "column has not moved -- buying speed by dropping points is not a win.\n");
     return 0;
 }

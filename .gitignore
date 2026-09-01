@@ -11,8 +11,14 @@ bincv-cpp/build/*
 # while TASKS.md quoted figures from a file no one else could read. Result logs
 # are the evidence for a published number; scratch output is not, so it keeps
 # whatever other extension it likes.
-bincv-cpp/results/*
-!bincv-cpp/results/*.log
+bincv-cpp/results/
+
+# Maintainer-only working files. The measurement log, the backlog, the roadmap, the
+# reference-device setup and the script that drives it are kept OUT of the repository:
+# they are one person's working notes and one person's hardware, and a reader of this
+# library needs none of them.
+.local/
+bincv-cpp/experiments/
 
 # Alternate build trees (core-only, cross-compiled, etc.)
 build*/

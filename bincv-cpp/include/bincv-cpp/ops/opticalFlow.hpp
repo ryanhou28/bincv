@@ -1,16 +1,16 @@
 #pragma once
 
 /// @file opticalFlow.hpp
-/// @brief Pyramidal Lucas-Kanade keypoint tracking over bit-packed frames (T3.8).
-///        **API TIER 2** -- `cv::calcOpticalFlowPyrLK`'s role and call shape with
-///        deliberately different numerics. NOT bit-exact against OpenCV, and no
-///        such promise is available even in principle (see THE BOUNDARY below).
+/// @brief Pyramidal Lucas-Kanade keypoint tracking over bit-packed frames.
+/// **API TIER 2** -- `cv::calcOpticalFlowPyrLK`'s role and call shape with
+/// deliberately different numerics. NOT bit-exact against OpenCV, and no
+/// such promise is available even in principle (see THE BOUNDARY below).
 ///
-/// This is [ARCHITECTURE 7.9](../../../../docs/ARCHITECTURE.md)'s **known hard problem**,
+/// This is the design notes's **known hard problem**,
 /// and route **(b)** of the two it names. Lucas-Kanade warps its window to
 /// subpixel positions and bilinearly interpolates; that is continuous and does not
 /// bit-parallelize. Route (a) -- census/Hamming block matching at integer pixels,
-/// fully bit-parallel -- is a different algorithm and is E-6 / T4.2, not this
+/// fully bit-parallel -- is a different algorithm and is, not this
 /// file. Route (b) keeps LK's numerics where LK's accuracy comes from and puts
 /// everything else on population counts.
 ///
@@ -21,63 +21,63 @@
 ///
 /// **BIT-PARALLEL, EXACT INTEGERS, NO PER-PIXEL FLOAT AT ALL:**
 ///
-///  1. **Window extraction.** The 31x31 window is a `Rect` clipped against the
-///     level through `impl::clipRegion` and walked by `impl::visitRowWords` --
-///     the same two helpers every reduction in ops/reduce.hpp uses. No patch is
-///     ever copied out. The reference copies the warped patch into `IWinBuf` and
-///     `derivIWinBuf` (`winSize.area() * 3` shorts = 5766 B at 31x31, per
-///     invoker); this file copies nothing and needs no scratch buffer.
-///  2. **The 2x2 normal-equations matrix `A`.** One call to T3.6's
-///     `gradientCovariance` -- four masked popcounts in one traversal, no scratch
-///     (ARCHITECTURE 7.5, D-15). Its three entries are EXACT INTEGERS, which is
-///     what lets the singularity test below be exact rather than epsilon-guarded.
-///  3. **THE RESIDUAL `b = sum(diff * grad)`, WHICH IS ALSO POPCOUNTS.** This is
-///     the one place this file goes further than [ARCHITECTURE 7.9] promised, and
-///     the reason is an identity rather than an optimization. Bilinear
-///     interpolation is LINEAR in the four taps, and the taps of a BINARY next
-///     frame are bits:
+/// 1. **Window extraction.** The 31x31 window is a `Rect` clipped against the
+/// level through `impl::clipRegion` and walked by `impl::visitRowWords` --
+/// the same two helpers every reduction in ops/reduce.hpp uses. No patch is
+/// ever copied out. The reference copies the warped patch into `IWinBuf` and
+/// `derivIWinBuf` (`winSize.area * 3` shorts = 5766 B at 31x31, per
+/// invoker); this file copies nothing and needs no scratch buffer.
+/// 2. **The 2x2 normal-equations matrix `A`.** One call to that work’s
+/// `gradientCovariance` -- four masked popcounts in one traversal, no scratch
+/// (the design notes). Its three entries are EXACT INTEGERS, which is
+/// what lets the singularity test below be exact rather than epsilon-guarded.
+/// 3. **THE RESIDUAL `b = sum(diff * grad)`, WHICH IS ALSO POPCOUNTS.** This is
+/// the one place this file goes further than [the design notes] promised, and
+/// the reason is an identity rather than an optimization. Bilinear
+/// interpolation is LINEAR in the four taps, and the taps of a BINARY next
+/// frame are bits:
 ///
-///         diff(z) = w00*T00(z) + w01*T01(z) + w10*T10(z) + w11*T11(z) - I(z)
+/// diff(z) = w00*T00(z) + w01*T01(z) + w10*T10(z) + w11*T11(z) - I(z)
 ///
-///     with `w..` the four bilinear weights -- CONSTANT over the whole window,
-///     because every pixel of the window is displaced by the same vector -- and
-///     `T00..T11` the next frame's four tap planes, each one bit per pixel. The
-///     gradient is ternary, so `sum(M * Ix)` over any bit-plane `M` is a SIGNED
-///     MASKED POPCOUNT, `popcount(magX & M) - 2*popcount(magX & M & signX)`.
-///     Therefore
+/// with `w..` the four bilinear weights -- CONSTANT over the whole window,
+/// because every pixel of the window is displaced by the same vector -- and
+/// `T00..T11` the next frame's four tap planes, each one bit per pixel. The
+/// gradient is ternary, so `sum(M * Ix)` over any bit-plane `M` is a SIGNED
+/// MASKED POPCOUNT, `popcount(magX & M) - 2*popcount(magX & M & signX)`.
+/// Therefore
 ///
-///         b1 = w00*S(T00) + w01*S(T01) + w10*S(T10) + w11*S(T11) - S(I)
+/// b1 = w00*S(T00) + w01*S(T01) + w10*S(T10) + w11*S(T11) - S(I)
 ///
-///     with `S(M) = sum over the window of M * Ix`, five exact integers. The
-///     bilinear interpolation is *performed*, at full precision, by five integer
-///     counts and four floating-point multiplies **per window per iteration** --
-///     not per pixel. Nothing is approximated and nothing is rounded before the
-///     four weights are applied; the reference, by contrast, rounds each
-///     interpolated sample to 14-bit fixed point (`CV_DESCALE`) at every pixel.
-///  4. **The tracking error `err`.** Same identity: `|diff|` collapses because
-///     `I` is a bit, so `|Jinterp - I| = I + (1 - 2I)*Jinterp`, and the window sum
-///     is again five popcounts per tap plane. Bit-parallel, exact.
-///  5. **The four tap planes themselves.** `T01` is `T00` shifted one pixel and
-///     `T1x` is one row down, so all four are word-aligned reads of the SAME two
-///     next-frame rows with a cross-word bit shift -- `impl::ReplicatedShiftedRow`
-///     below. No gather, no per-pixel address arithmetic.
+/// with `S(M) = sum over the window of M * Ix`, five exact integers. The
+/// bilinear interpolation is *performed*, at full precision, by five integer
+/// counts and four floating-point multiplies **per window per iteration** --
+/// not per pixel. Nothing is approximated and nothing is rounded before the
+/// four weights are applied; the reference, by contrast, rounds each
+/// interpolated sample to 14-bit fixed point (`CV_DESCALE`) at every pixel.
+/// 4. **The tracking error `err`.** Same identity: `|diff|` collapses because
+/// `I` is a bit, so `|Jinterp - I| = I + (1 - 2I)*Jinterp`, and the window sum
+/// is again five popcounts per tap plane. Bit-parallel, exact.
+/// 5. **The four tap planes themselves.** `T01` is `T00` shifted one pixel and
+/// `T1x` is one row down, so all four are word-aligned reads of the SAME two
+/// next-frame rows with a cross-word bit shift -- `impl::ReplicatedShiftedRow`
+/// below. No gather, no per-pixel address arithmetic.
 ///
 /// **FLOATING POINT, ONCE PER WINDOW PER ITERATION -- NEVER PER PIXEL:**
 ///
-///  6. The subpixel position itself, and the split of the flow into an integer
-///     tap offset and a fraction `(a, b)` in `[0, 1)`.
-///  7. The four bilinear weights `w00 = (1-a)(1-b)` ... `w11 = ab`.
-///  8. The 2x2 solve `delta = -A^-1 b`, its determinant, and the minimum
-///     eigenvalue used to reject a degenerate window.
-///  9. The iteration: `nextPt += delta`, the epsilon test, the oscillation test.
+/// 6. The subpixel position itself, and the split of the flow into an integer
+/// tap offset and a fraction `(a, b)` in `[0, 1)`.
+/// 7. The four bilinear weights `w00 = (1-a)(1-b)`... `w11 = ab`.
+/// 8. The 2x2 solve `delta = -A^-1 b`, its determinant, and the minimum
+/// eigenvalue used to reject a degenerate window.
+/// 9. The iteration: `nextPt += delta`, the epsilon test, the oscillation test.
 ///
 /// So the per-pixel cost of this tracker is **integers and popcounts only**, and
 /// the floating point is O(iterations), not O(iterations * window area). That is a
-/// STRONGER result than [ARCHITECTURE 7.9] specified route (b) with -- it named
+/// STRONGER result than [the design notes] specified route (b) with -- it named
 /// only the window and the covariance -- and it is stated here rather than buried
 /// because the boundary IS the claim. What could not be moved across the line is
 /// items 6-9: the position, the weights and the solve are irreducibly continuous,
-/// exactly as 7.9 says. D-20 records the placement.
+/// exactly as 7.9 says. the design rule records the placement.
 ///
 /// ===========================================================================
 /// WHAT IS DELIBERATELY DIFFERENT FROM THE REFERENCE, AND WHY
@@ -92,7 +92,7 @@
 /// windows: it bilinearly interpolates the previous frame and its derivative at
 /// the fractional `prevPt`, then interpolates the next frame at `nextPt`. A
 /// bit-plane derivative cannot be interpolated -- the popcount identity of
-/// ARCHITECTURE 7.5 is exact only for values in {-1, 0, +1} -- so the previous
+/// the design notes is exact only for values in {-1, 0, +1} -- so the previous
 /// window is anchored at `floor(prevPt - halfWin)` and the ENTIRE subpixel
 /// displacement is carried on the next-frame side. The estimated flow is
 /// unaffected: the residual still compares `I(z)` with `J(z + d)` for `d` the
@@ -106,7 +106,7 @@
 /// with BORDER_REFLECT_101 -- at 640x480 and a 31x31 window that is a 702x542
 /// buffer for a 640x480 level, **1.24x the level's own footprint, at every
 /// level**. binCV declines it: the window is intersected with the level exactly as
-/// D-13 and ops/reduce.hpp intersect every other region, so `A` and `b` are
+/// and ops/reduce.hpp intersect every other region, so `A` and `b` are
 /// accumulated over the same clipped pixel set and the solve stays consistent.
 /// A window wholly outside gives `A = {0,0,0}`, a zero determinant, and a lost
 /// point -- a value, not an error.
@@ -116,7 +116,7 @@
 /// read as the nearest edge pixel (BORDER_REPLICATE). Reflect-101 -- the
 /// reference's choice -- is a per-pixel index mapping and is not word-parallel;
 /// replicate is two mask-selects per word. Replicate also cannot manufacture a
-/// gradient outside the frame, which is the property D-19 chose reflect-101 for
+/// gradient outside the frame, which is the property the design rule chose reflect-101 for
 /// on the derivative.
 ///
 /// **(iv) THE SINGULARITY TEST IS EXACT.** The reference guards `D < FLT_EPSILON`
@@ -128,9 +128,9 @@
 /// **(v) ONE BIT PER PYRAMID LEVEL.** Every level here is binary, because the
 /// popcount covariance is exact only for a TERNARY derivative and a ternary
 /// derivative is what a ONE-bit level produces (ops/covariance.hpp promise 1). An
-/// N-bit level needs the bit-sliced weighted-sum covariance that ARCHITECTURE 7.5
+/// N-bit level needs the bit-sliced weighted-sum covariance that the design notes
 /// describes and nothing in binCV implements. **How many bits each level actually
-/// needs is E-7 / T4.1, which depends on this task and is where that choice gets
+/// needs is, which depends on this task and is where that choice gets
 /// made and measured** -- it is not settled here, and 1/1/1/1 is what the shipped
 /// kernels can express, not a claim that it is right.
 ///
@@ -138,7 +138,7 @@
 /// reference stops BUILDING levels at the first one that is not strictly larger
 /// than `winSize` (`SparsePyrLKOpticalFlowSealImpl.cpp`'s `if (sz.width <=
 /// winSize.width || sz.height <= winSize.height)`) and truncates `maxLevel`. Here
-/// the caller owns the pyramid (D-5), so the same rule is applied at USE: levels
+/// the caller owns the pyramid, so the same rule is applied at USE: levels
 /// are consumed as a prefix and one at or below the window size ends it. This is
 /// a deviation only in WHERE the rule lives. It is load-bearing for binCV in a way
 /// it is not for the reference: on such a level every window covers nearly the
@@ -147,7 +147,7 @@
 ///
 /// **(vii) THE FINAL-POSITION RANGE TEST IS UNCONDITIONAL.** The reference
 /// re-tests the returned position and can set `status` false there, but only
-/// inside `if (status && err && level == 0 ...)` -- so its `status` depends on
+/// inside `if (status && err && level == 0...)` -- so its `status` depends on
 /// whether the caller asked for an error value. That is not reproduced: the test
 /// runs whether or not `err` is null, because `status` describes the position the
 /// caller is handed.
@@ -155,35 +155,35 @@
 /// ===========================================================================
 /// THE ITERATION AND THE TERMINATION RULE, TAKEN FROM THE REFERENCE
 /// ===========================================================================
-/// `LKTrackerInvoker::operator()` decides these, and all five are reproduced:
+/// `LKTrackerInvoker::operator` decides these, and all five are reproduced:
 ///
-///   * **Coarse to fine, propagating by doubling.** At the coarsest level the
-///     estimate starts at the point itself (`lk_use_initial_flow: 0`); at every
-///     finer level it starts at twice the level above's answer. The propagation
-///     happens for EVERY point before ANY point is tracked, and it happens even
-///     for points that were skipped at the level above -- so a point that leaves
-///     the frame at level 2 still arrives at level 1 with a doubled estimate.
-///   * **A point is LOST in exactly three ways**, and status is written **only at
-///     level 0** -- at coarser levels the point is skipped for that level and
-///     tried again at the next one:
-///       1. the previous window's origin is out of range
-///          (`ip.x < -winWidth || ip.x >= width`, and likewise in y);
-///       2. the window is degenerate -- `minEig < minEigThreshold` or a singular
-///          `det`;
-///       3. the current estimate's origin goes out of range -- tested at the top
-///          of every iteration, and once more on the position finally returned
-///          (deviation (vii)).
-///   * **Up to `maxIterations` iterations**, clamped to [0, 100] as the reference
-///     clamps `criteria.maxCount`.
-///   * **Converged when `|delta|^2 <= epsilon^2`.** The reference squares
-///     `criteria.epsilon` once up front and compares `delta.ddot(delta)`; 0.03 px
-///     is `seal_params.yaml`'s value and the default here.
-///   * **The oscillation rule, which is NOT the epsilon rule.** From iteration 1
-///     on, if `|delta + prevDelta| < 0.01` in both components -- i.e. this step
-///     almost exactly undoes the last one -- the point is declared converged, the
-///     estimate is backed off by HALF the last step, and the loop breaks. Without
-///     it a point that lands between two pixels ping-pongs for all 20 iterations
-///     and finishes on whichever side the last step took it to.
+/// * **Coarse to fine, propagating by doubling.** At the coarsest level the
+/// estimate starts at the point itself (`lk_use_initial_flow: 0`); at every
+/// finer level it starts at twice the level above's answer. The propagation
+/// happens for EVERY point before ANY point is tracked, and it happens even
+/// for points that were skipped at the level above -- so a point that leaves
+/// the frame at level 2 still arrives at level 1 with a doubled estimate.
+/// * **A point is LOST in exactly three ways**, and status is written **only at
+/// level 0** -- at coarser levels the point is skipped for that level and
+/// tried again at the next one:
+/// 1. the previous window's origin is out of range
+/// (`ip.x < -winWidth || ip.x >= width`, and likewise in y);
+/// 2. the window is degenerate -- `minEig < minEigThreshold` or a singular
+/// `det`;
+/// 3. the current estimate's origin goes out of range -- tested at the top
+/// of every iteration, and once more on the position finally returned
+/// (deviation (vii)).
+/// * **Up to `maxIterations` iterations**, clamped to [0, 100] as the reference
+/// clamps `criteria.maxCount`.
+/// * **Converged when `|delta|^2 <= epsilon^2`.** The reference squares
+/// `criteria.epsilon` once up front and compares `delta.ddot(delta)`; 0.03 px
+/// is `seal_params.yaml`'s value and the default here.
+/// * **The oscillation rule, which is NOT the epsilon rule.** From iteration 1
+/// on, if `|delta + prevDelta| < 0.01` in both components -- i.e. this step
+/// almost exactly undoes the last one -- the point is declared converged, the
+/// estimate is backed off by HALF the last step, and the loop breaks. Without
+/// it a point that lands between two pixels ping-pongs for all 20 iterations
+/// and finishes on whichever side the last step took it to.
 ///
 /// ===========================================================================
 /// UNITS: WHY THERE IS A FACTOR OF 2 AND A CONSTANT NAMED FOR THE REFERENCE
@@ -211,9 +211,9 @@
 /// ===========================================================================
 /// WHAT THIS FILE DOES NOT CLAIM
 /// ===========================================================================
-/// **Tracking across real image sequences is T4.3a, not this task.** ADVIO ships
+/// **Tracking across real image sequences is a separate, end-to-end question. ADVIO ships
 /// `.mov`; frame extraction and a comparison harness against the reference
-/// frontend are pipeline validation, on the far side of ARCHITECTURE 1's
+/// frontend are pipeline validation, on the far side of the design notes's
 /// boundary. What is claimed here is measured against SYNTHETIC WARPS with
 /// EXACTLY KNOWN ground-truth displacement -- see tests/test_opticalflow.cpp for
 /// the tolerance, which is stated with its derivation BEFORE any error is
@@ -222,23 +222,23 @@
 /// ===========================================================================
 /// CONTRACTS
 /// ===========================================================================
-///  * **Views, never containers** (D-5). Every per-level argument is a
-///    `BinMatConstView`; `lkLevel()` is the one convenience that names a
-///    container's planes into them.
-///  * **No heap, anywhere.** The keypoint arrays, the status array and the error
-///    array are the caller's. There is no scratch buffer of any kind -- not one
-///    byte -- because item 1 above never copies a patch out.
-///  * **Never throws** (ARCHITECTURE 5.3). Inconsistent arguments are programming
-///    errors reported by BINCV_ASSERT in debug and undefined in release. A track
-///    that fails reports `status[i] == 0`; that is a value, not an error.
-///  * **Read-only inputs**, so aliasing between any two inputs is unrestricted.
-///    The OUT arrays are a different matter: `nextPts` must not overlap `prevPts`.
-///    The level loop writes every `nextPts` entry before it reads any `prevPts`
-///    entry, so an in-place call tracks from the wrong anchor -- a BINCV_ASSERT,
-///    in the shape of D-11, rather than a documented hazard.
-///  * `nextPts` is written for every point at every level and holds LEVEL
-///    coordinates while the level loop runs; on return it holds level-0
-///    coordinates. This is the reference's own use of the same array.
+/// * **Views, never containers**. Every per-level argument is a
+/// `BinMatConstView`; `lkLevel` is the one convenience that names a
+/// container's planes into them.
+/// * **No heap, anywhere.** The keypoint arrays, the status array and the error
+/// array are the caller's. There is no scratch buffer of any kind -- not one
+/// byte -- because item 1 above never copies a patch out.
+/// * **Never throws** (the design notes). Inconsistent arguments are programming
+/// errors reported by BINCV_ASSERT in debug and undefined in release. A track
+/// that fails reports `status[i] == 0`; that is a value, not an error.
+/// * **Read-only inputs**, so aliasing between any two inputs is unrestricted.
+/// The OUT arrays are a different matter: `nextPts` must not overlap `prevPts`.
+/// The level loop writes every `nextPts` entry before it reads any `prevPts`
+/// entry, so an in-place call tracks from the wrong anchor -- a BINCV_ASSERT,
+/// in the shape of earlier work, rather than a documented hazard.
+/// * `nextPts` is written for every point at every level and holds LEVEL
+/// coordinates while the level loop runs; on return it holds level-0
+/// coordinates. This is the reference's own use of the same array.
 // F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
 // compiler's own macros on aarch64, so an include-only integration still gets the
 // NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
@@ -266,7 +266,7 @@
 #include "../quantMat.hpp"
 #include "../impl/kernel_util.hpp"
 #include "../impl/lkBatch_impl.hpp"
-// gradientCovariance: the 2x2 matrix, one fused traversal, zero scratch (T3.6).
+// gradientCovariance: the 2x2 matrix, one fused traversal, zero scratch.
 #include "covariance.hpp"
 // impl::minEigenValue -- the SAME (S - sqrt(D))/2 from exact integer operands
 // that ops/corner.hpp selects on. One definition, two operations: the corner
@@ -274,7 +274,7 @@
 // the same question and must not be able to answer it differently.
 #include "corner.hpp"
 // impl::clipRegion / visitRowWords / popcountWord / RegionWords -- the region
-// walk every reduction in the library shares (D-13's clipping and padding
+// walk every reduction in the library shares (the design rule’s clipping and padding
 // contract lives there, not here).
 #include "reduce.hpp"
 
@@ -282,26 +282,26 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief A subpixel point. **API TIER 2**: `cv::Point2f`'s role and field names,
-///        because this operation's whole job is to produce fractional positions.
+/// because this operation's whole job is to produce fractional positions.
 /// @note Deliberately NOT reused for ops/corner.hpp's `Corner`, which is integer
-///       by construction and carries a response.
+/// by construction and carries a response.
 /// @brief The tracker's parameters, defaulted to `SEAL/seal_params.yaml` verbatim.
 /// @note `lk_win_size_width/height: 31`, `lk_term_criteria_max_count: 20`,
-///       `lk_term_criteria_eps: 0.03`, `lk_min_eig_threshold: 0.001`.
-///       `lk_max_level: 3` is not a field: the number of levels is `levelCount`,
-///       because the caller owns the pyramid (D-5).
-///       `lk_use_initial_flow: 0` IS a field -- `useInitialFlow` below. It used to be
-///       absent, on the grounds that an unused mode is an untested one; that was
-///       checked against `seal_params.yaml`, where the flag is off, and not against
-///       the pipeline around it, where `predictOpticalFlow` turns it on (E-47).
-/// @brief Which pyramid level a keypoint ENTERS at. **X-25 / E-14.**
+/// `lk_term_criteria_eps: 0.03`, `lk_min_eig_threshold: 0.001`.
+/// `lk_max_level: 3` is not a field: the number of levels is `levelCount`,
+/// because the caller owns the pyramid.
+/// `lk_use_initial_flow: 0` IS a field -- `useInitialFlow` below. It used to be
+/// absent, on the grounds that an unused mode is an untested one; that was
+/// checked against `seal_params.yaml`, where the flag is off, and not against
+/// the pipeline around it, where `predictOpticalFlow` turns it on.
+/// @brief Which pyramid level a keypoint ENTERS at. **earlier work.**
 /// @note Not a border and not a padding scheme: it is a policy about which levels
-///       a given point is allowed to be tracked on at all. binCV clips where the
-///       reference pads (deviation (ii)), and a window that is mostly outside a
-///       coarse level yields an ill-conditioned `A` and a one-sided `b` whose
-///       error is then multiplied by `2^level` on the way down. X-24 measured that
-///       cost: `1/2/2/2` is 0.8356 px over all 141 real-frame keypoints and
-///       **0.0010 px over the 58 that never clip**.
+/// a given point is allowed to be tracked on at all. binCV clips where the
+/// reference pads (deviation (ii)), and a window that is mostly outside a
+/// coarse level yields an ill-conditioned `A` and a one-sided `b` whose
+/// error is then multiplied by `2^level` on the way down. a measurement measured that
+/// cost: `1/2/2/2` is 0.8356 px over all 141 real-frame keypoints and
+/// **0.0010 px over the 58 that never clip**.
 enum class LKEntryLevel {
     /// Every point enters at the coarsest usable level. **What ships**, and the
     /// reference's behaviour given a padded pyramid it always has enough of.
@@ -320,12 +320,12 @@ struct LKParams {
     float epsilon = 0.03f;       ///< converged when |delta| <= this, in pixels
     float minEigThreshold = 0.001f;  ///< IN THE REFERENCE'S UNITS; see UNITS above
 
-    /// Which level each keypoint enters the pyramid at (X-25 / E-14). Defaults to
+    /// Which level each keypoint enters the pyramid at (earlier work). Defaults to
     /// the shipped behaviour; nothing changes unless a caller asks for it.
     LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
 
     /// @brief Start each point's search from the estimate already in `nextPts`
-    ///        instead of from `prevPts`. `cv::OPTFLOW_USE_INITIAL_FLOW` (T5.21 / E-47).
+    /// instead of from `prevPts`. `cv::OPTFLOW_USE_INITIAL_FLOW`.
     ///
     /// **This is how a VIO frontend uses its IMU.** With a pose prediction the caller
     /// knows roughly where every feature went before the tracker runs; handing that
@@ -334,40 +334,40 @@ struct LKParams {
     /// `cv::OPTFLOW_USE_INITIAL_FLOW` -- which is why the mode exists here at all.
     ///
     /// @note **`nextPts` becomes an INPUT as well as an output** when this is set, and
-    ///       is read in FULL-RESOLUTION frame coordinates, exactly as `prevPts` is.
-    ///       The tracker scales it into each level itself. An uninitialised `nextPts`
-    ///       under this flag is not a small error: it seeds every search from garbage.
+    /// is read in FULL-RESOLUTION frame coordinates, exactly as `prevPts` is.
+    /// The tracker scales it into each level itself. An uninitialised `nextPts`
+    /// under this flag is not a small error: it seeds every search from garbage.
     /// @note The window in the PREVIOUS frame is still anchored at `prevPts`. Only the
-    ///       starting estimate for the NEXT frame moves -- which is what the flag means
-    ///       in OpenCV and the only reading under which the residual is still the
-    ///       residual.
-    /// @note **WHEN IT PAYS, AND IT DOES NOT ALWAYS.** X-94 measured this against guess
-    ///       error on both architectures, and the answer is conditional on how far the
-    ///       frame moved:
+    /// starting estimate for the NEXT frame moves -- which is what the flag means
+    /// in OpenCV and the only reading under which the residual is still the
+    /// residual.
+    /// @note **WHEN IT PAYS, AND IT DOES NOT ALWAYS.** a measurement measured this against guess
+    /// error on both architectures, and the answer is conditional on how far the
+    /// frame moved:
     ///
-    ///       - **Small motion (5 px over a 1/2/2/2 ladder): a guess buys nothing.**
-    ///         0.86x-1.13x on x86 and 0.89x-1.11x on the reference device, with the
-    ///         endpoint error identical in every arm. The coarsest level already starts
-    ///         0.62 px from the answer, so there is nothing left to save.
-    ///       - **Large motion (24 px): a guess is decisive.** 3.7x on x86 and 5.2x on
-    ///         the device, and a guess wrong by 8 px still gives 3.5x and 4.1x.
-    ///       - **A guess wrong by MORE than the true motion is worse than no guess** --
-    ///         at 5 px of motion an 8 px error costs 10-11% and raises the iteration
-    ///         count from 2.148 to 2.372.
+    /// - **Small motion (5 px over a 1/2/2/2 ladder): a guess buys nothing.**
+    /// 0.86x-1.13x on x86 and 0.89x-1.11x on the reference device, with the
+    /// endpoint error identical in every arm. The coarsest level already starts
+    /// 0.62 px from the answer, so there is nothing left to save.
+    /// - **Large motion (24 px): a guess is decisive.** 3.7x on x86 and 5.2x on
+    /// the device, and a guess wrong by 8 px still gives 3.5x and 4.1x.
+    /// - **A guess wrong by MORE than the true motion is worse than no guess** --
+    /// at 5 px of motion an 8 px error costs 10-11% and raises the iteration
+    /// count from 2.148 to 2.372.
     ///
-    ///       So: seed this from a prediction you trust to within the frame's own
-    ///       motion. A prediction with more error than that is not a prediction.
+    /// So: seed this from a prediction you trust to within the frame's own
+    /// motion. A prediction with more error than that is not a prediction.
     /// @note **The large-motion figures are NOT this flag's achievement and should not
-    ///       be read as one.** Without a guess at 24 px the tracker does not merely run
-    ///       slower -- it returns a mean endpoint error of 54.7 px while reporting
-    ///       `status = 1` for every point (E-48). A guess routes around that failure; it
-    ///       does not fix it, and a caller without an IMU still has it.
+    /// be read as one.** Without a guess at 24 px the tracker does not merely run
+    /// slower -- it returns a mean endpoint error of 54.7 px while reporting
+    /// `status = 1` for every point. A guess routes around that failure; it
+    /// does not fix it, and a caller without an IMU still has it.
     bool useInitialFlow = false;
 
     /// @brief Reject a point whose level-0 residual exceeds this, by clearing `status`.
-    ///        **0 disables, which is the default.** (T5.22 / E-48.)
+    /// **0 disables, which is the default.** (.)
     ///
-    /// **WHAT IT IS FOR.** X-94 found the tracker returning a mean endpoint error of
+    /// **WHAT IT IS FOR.** a measurement found the tracker returning a mean endpoint error of
     /// 54.7 px on a 24 px translation while reporting `status = 1` for every point: past
     /// the pyramid's reach it does not fail, it answers confidently. `minEigThreshold`
     /// does not catch this -- the windows are well conditioned, they are simply matched
@@ -377,41 +377,41 @@ struct LKParams {
     /// `windowMeanAbsDiff` over the warped window, 0 for an identical match and 0.5 for
     /// an uncorrelated one. Measured on synthetic translation, good points sit at
     /// **0.0378 and below** and lost ones at **0.0792 and above** -- disjoint, with a
-    /// factor of two of gap (X-95).
+    /// factor of two of gap.
     ///
     /// @note **IT IS NOT FREE, AND THE PRE-REGISTRATION EXPECTED IT TO BE.** The
-    ///       comparison is free; computing the residual is not, and setting this makes it
-    ///       computed whether or not `err` was requested. Measured: `track` goes from
-    ///       2.83 ms to 6.15 ms on x86 for a caller who was passing `err == nullptr` --
-    ///       **2.17x**. A caller who ALREADY requests `err` pays nothing extra, because
-    ///       that request costs the same 2.16x on its own (X-95).
-    /// @note **It is a LOSS RULE, so it shortens tracks by construction, and D-53 says
-    ///       that is not automatically a win.** The default is off and the shipped value
-    ///       is whatever X-95 measured on a real sequence against track lifetime -- not
-    ///       the synthetic gap above, which is the easy case.
+    /// comparison is free; computing the residual is not, and setting this makes it
+    /// computed whether or not `err` was requested. Measured: `track` goes from
+    /// 2.83 ms to 6.15 ms on x86 for a caller who was passing `err == nullptr` --
+    /// **2.17x**. A caller who ALREADY requests `err` pays nothing extra, because
+    /// that request costs the same 2.16x on its own.
+    /// @note **It is a LOSS RULE, so it shortens tracks by construction, and the design rule says
+    /// that is not automatically a win.** The default is off and the shipped value
+    /// is whatever a measurement measured on a real sequence against track lifetime -- not
+    /// the synthetic gap above, which is the easy case.
     float maxResidual = 0.0f;
 };
 
 
 /// @brief One pyramid level's six planes: both frames, and the previous frame's
-///        ternary derivative.
-/// @note Views, not containers (D-5). All six must share the level's dimensions.
+/// ternary derivative.
+/// @note Views, not containers. All six must share the level's dimensions.
 /// @note The derivative belongs to the PREVIOUS frame only. LK linearizes about
-///       the previous frame, so the next frame's derivative is never formed --
-///       which halves the derivative footprint against a naive reading of the
-///       algorithm.
+/// the previous frame, so the next frame's derivative is never formed --
+/// which halves the derivative footprint against a naive reading of the
+/// algorithm.
 template <typename WordType>
 struct LKLevel {
     BinMatConstView<WordType> prev;    ///< previous frame at this level, 1 bit/pixel
     BinMatConstView<WordType> next;    ///< next frame at this level, 1 bit/pixel
     BinMatConstView<WordType> dxMag;   ///< `dx.constMagnitude(0)`
-    BinMatConstView<WordType> dxSign;  ///< `dx.constSign()`; a set bit is NEGATIVE (D-3)
+    BinMatConstView<WordType> dxSign;  ///< `dx.constSign`; a set bit is NEGATIVE
     BinMatConstView<WordType> dyMag;   ///< `dy.constMagnitude(0)`
-    BinMatConstView<WordType> dySign;  ///< `dy.constSign()`
+    BinMatConstView<WordType> dySign;  ///< `dy.constSign`
 
     /// Bits per pixel at this level -- one, by construction. `LKLevelN<N>` below
     /// is the same level at N, and the tracking body is written against this
-    /// surface so that ONE body serves both (D-21: genericity in N is not paid
+    /// surface so that ONE body serves both ( genericity in N is not paid
     /// for at N == 1).
     static constexpr size_t Bits = 1;
 
@@ -424,8 +424,8 @@ struct LKLevel {
 
 /// @brief Names a level's containers into an LKLevel. **API TIER 2.**
 /// @note The one container-shaped entry point in this file, in the shape
-///       ops/derivative.hpp and ops/covariance.hpp use: the container knows which
-///       plane is magnitude and which is sign; the kernel does not (D-5).
+/// ops/derivative.hpp and ops/covariance.hpp use: the container knows which
+/// plane is magnitude and which is sign; the kernel does not.
 template <typename WordType>
 inline LKLevel<WordType> lkLevel(const BinMat<WordType>& prev, const BinMat<WordType>& next,
                                  const TernaryMat<WordType>& dx, const TernaryMat<WordType>& dy) {
@@ -440,18 +440,18 @@ inline LKLevel<WordType> lkLevel(const BinMat<WordType>& prev, const BinMat<Word
 }
 
 /// @brief One pyramid level at **N bits per pixel**: both frames' bit-planes, and
-///        the previous frame's N-bit signed derivative. The generic-N form of
-///        `LKLevel`, which is this at `N == 1`.
-/// @note Views, not containers (D-5). All `4N + 2` planes must share the level's
-///       dimensions.
+/// the previous frame's N-bit signed derivative. The generic-N form of
+/// `LKLevel`, which is this at `N == 1`.
+/// @note Views, not containers. All `4N + 2` planes must share the level's
+/// dimensions.
 /// @note `prev[i]` / `next[i]` are bit-plane `i`, **plane 0 being the LEAST
-///       significant bit** -- QuantMat's own convention, unchanged. `dxMag[j]` is
-///       magnitude plane `j` and `dxSign` is the shared sign plane, a set bit
-///       meaning NEGATIVE (D-3).
+/// significant bit** -- QuantMat's own convention, unchanged. `dxMag[j]` is
+/// magnitude plane `j` and `dxSign` is the shared sign plane, a set bit
+/// meaning NEGATIVE.
 /// @note The derivative of an N-bit level is N-bit: `I(x+1) - I(x-1)` over an
-///       alphabet of `2^N` values lands in `[-(2^N - 1), 2^N - 1]`, which is
-///       exactly `SignedQuantMat<N, WordType>`'s range. So one `N` describes the
-///       whole level and there is no second depth parameter.
+/// alphabet of `2^N` values lands in `[-(2^N - 1), 2^N - 1]`, which is
+/// exactly `SignedQuantMat<N, WordType>`'s range. So one `N` describes the
+/// whole level and there is no second depth parameter.
 template <size_t N, typename WordType>
 struct LKLevelN {
     static_assert(N >= 1 && N <= 7, "LKLevelN: N outside SignedQuantMat's supported range");
@@ -465,9 +465,9 @@ struct LKLevelN {
     BinMatConstView<WordType> prev[N];    ///< previous frame's planes, LSB first
     BinMatConstView<WordType> next[N];    ///< next frame's planes, LSB first
     BinMatConstView<WordType> dxMag[N];   ///< `dx.constMagnitude(j)`
-    BinMatConstView<WordType> dxSign;     ///< `dx.constSign()`; set bit is NEGATIVE (D-3)
+    BinMatConstView<WordType> dxSign;     ///< `dx.constSign`; set bit is NEGATIVE
     BinMatConstView<WordType> dyMag[N];   ///< `dy.constMagnitude(j)`
-    BinMatConstView<WordType> dySign;     ///< `dy.constSign()`
+    BinMatConstView<WordType> dySign;     ///< `dy.constSign`
 
     size_t width() const { return prev[0].width; }
     size_t height() const { return prev[0].height; }
@@ -475,7 +475,7 @@ struct LKLevelN {
 
 /// @brief Names an N-bit level's containers into an LKLevelN. **API TIER 2.**
 /// @note The generic-N counterpart of the `lkLevel` above, in the same shape: the
-///       container knows which plane is which, the kernel does not (D-5).
+/// container knows which plane is which, the kernel does not.
 template <size_t N, typename WordType>
 inline LKLevelN<N, WordType> lkLevel(const QuantMat<N, WordType>& prev,
                                      const QuantMat<N, WordType>& next,
@@ -497,13 +497,13 @@ namespace impl {
 
 #ifdef BINCV_LK_STAGE_TIMING
 /// @brief Where `track`'s time actually goes, by stage. **DIAGNOSTIC ONLY — off by
-///        default and compiled out otherwise.** (X-83.)
+/// default and compiled out otherwise.** (.)
 ///
 /// **THIS EXISTS BECAUSE THREE GUESSES IN A ROW MISSED.** An iteration-cap sweep on the
 /// reference device put roughly **45% of `track` OUTSIDE the iteration loop** —
 /// staging, the covariance, the clip — and nothing in this project had ever measured
 /// which of those it is. Guessing produced a 1.9% win and a 0.0% win before this was
-/// written; [X-67](../../../../docs/EXPERIMENTS.md)/[D-59](../../../../docs/ARCHITECTURE.md) is the
+/// written; earlier work is the
 /// same lesson from the frontend's side.
 ///
 /// Nanoseconds, accumulated over every point and level. Four clock reads against a
@@ -543,21 +543,21 @@ inline unsigned long long stageNow() {
 
 
 /// @brief The factor the raw `[-1, 0, 1]` tap needs to become a central
-///        difference. See UNITS at the top of the file -- this is a derivation,
-///        not a tuning knob.
+/// difference. See UNITS at the top of the file -- this is a derivation,
+/// not a tuning knob.
 constexpr double kCentralDifferenceScale = 2.0;
 
 /// @brief binCV's integer minimum eigenvalue, in the units the reference's
-///        `minEigThreshold` is quoted in: `(16*255)^2 / 2^20`.
+/// `minEigThreshold` is quoted in: `(16*255)^2 / 2^20`.
 /// @note Written as the quotient of the two integers it comes from, so that a
-///       reader can check the derivation rather than recognise 15.875244140625.
+/// reader can check the derivation rather than recognise 15.875244140625.
 constexpr double kReferenceMinEigScale = (16.0 * 255.0) * (16.0 * 255.0) / 1048576.0;
 
 /// @brief `kReferenceMinEigScale` at an arbitrary bit depth.
 /// @param bits Bits per pixel at the level, `>= 1`.
 ///
 /// **THIS IS WHAT KEEPS `minEigThreshold` MEANING THE SAME THING AT EVERY N, AND
-/// WITHOUT IT E-7's ACCURACY CURVE WOULD COMPARE DIFFERENT POINT SETS.** The
+/// WITHOUT IT that work’s ACCURACY CURVE WOULD COMPARE DIFFERENT POINT SETS.** The
 /// derivation above fixes binCV's full-scale intensity at 1 because a bit is the
 /// whole alphabet; at N bits the alphabet runs `[0, 2^N - 1]` and the SAME
 /// physical intensity is now `2^N - 1` LSBs rather than 1. The reference's
@@ -583,34 +583,34 @@ static_assert(referenceMinEigScale(1) == kReferenceMinEigScale,
               "referenceMinEigScale(1) must be kReferenceMinEigScale");
 
 /// @brief `floor(a / b)` for integers with `b > 0`, rounding toward MINUS
-///        infinity.
+/// infinity.
 /// @note C++ integer division truncates toward zero, which for a negative
-///       numerator is one word off in the tap extraction below -- and off by one
-///       WORD, i.e. up to 64 pixels, not off by one pixel. Spelled out rather than
-///       written inline for that reason.
+/// numerator is one word off in the tap extraction below -- and off by one
+/// WORD, i.e. up to 64 pixels, not off by one pixel. Spelled out rather than
+/// written inline for that reason.
 inline long long floorDiv(long long a, long long b) {
     const long long q = a / b;
     return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q;
 }
 
 /// @brief One row of a binary plane, readable at an arbitrary PIXEL offset, with
-///        columns outside `[0, width)` reading as the nearest edge pixel.
-///        **INTERNAL.**
+/// columns outside `[0, width)` reading as the nearest edge pixel.
+/// **INTERNAL.**
 ///
 /// @note This is the whole of the "bilinear tap" machinery, and it is a bit shift.
-///       `word(i)` returns the `WordBits` bits that sit under word `i` of the
-///       window's own coordinate grid after displacement by `off` pixels, so a
-///       caller ANDs it straight against a derivative mask word (see the residual
-///       below) with no per-pixel address arithmetic anywhere.
+/// `word(i)` returns the `WordBits` bits that sit under word `i` of the
+/// window's own coordinate grid after displacement by `off` pixels, so a
+/// caller ANDs it straight against a derivative mask word (see the residual
+/// below) with no per-pixel address arithmetic anywhere.
 /// @note **The replicate fill is why this is not simply a shift.** `leftFill` and
-///       `rightFill` are all-ones or all-zeros words holding the value of pixel 0
-///       and pixel `width - 1`; the two mask-selects at the end substitute them
-///       for the bits whose source column fell outside. Deviation (iii) at the top
-///       of the file is what that implements.
+/// `rightFill` are all-ones or all-zeros words holding the value of pixel 0
+/// and pixel `width - 1`; the two mask-selects at the end substitute them
+/// for the bits whose source column fell outside. Deviation (iii) at the top
+/// of the file is what that implements.
 /// @note Bits past `width` in the last word are cleared by `tailMask` before any
-///       shift, so a source plane with dirty padding gives the clean plane's
-///       answer -- D-13's rule, applied one level down from the reductions that
-///       state it.
+/// shift, so a source plane with dirty padding gives the clean plane's
+/// answer -- the design rule’s rule, applied one level down from the reductions that
+/// state it.
 template <typename WordType>
 struct ReplicatedShiftedRow {
     const WordType* row = nullptr;  ///< the source row, or null for an empty plane
@@ -622,7 +622,7 @@ struct ReplicatedShiftedRow {
     WordType rightFill = 0;         ///< all ones iff pixel width-1 is set
 
     /// @brief The source word `k`, with the trailing partial word masked and any
-    ///        index outside the row reading as zero (the replicate fill covers it).
+    /// index outside the row reading as zero (the replicate fill covers it).
     WordType sourceWord(long long k) const {
         if (k < 0 || static_cast<unsigned long long>(k) >= words) return 0;
         const size_t ku = static_cast<size_t>(k);
@@ -671,7 +671,7 @@ struct ReplicatedShiftedRow {
 };
 
 /// @brief Reads one pixel of a plane, for the two edge values a replicate fill
-///        needs. **INTERNAL**, and called twice per row, never per pixel.
+/// needs. **INTERNAL**, and called twice per row, never per pixel.
 template <typename WordType>
 inline WordType edgeFill(const WordType* row, size_t column) {
     const bool set = (row[wordIndex<WordType>(column)] & bitMask<WordType>(column)) != 0;
@@ -680,9 +680,9 @@ inline WordType edgeFill(const WordType* row, size_t column) {
 
 /// @brief Builds a displaced reader for row `y` of `plane`, clamped vertically.
 /// @note The vertical half of the replicate border is this clamp; the horizontal
-///       half is inside ReplicatedShiftedRow. Two axes, two mechanisms, because a
-///       row displacement moves no bits (T2.4) and a column displacement moves all
-///       of them.
+/// half is inside ReplicatedShiftedRow. Two axes, two mechanisms, because a
+/// row displacement moves no bits and a column displacement moves all
+/// of them.
 template <typename WordType>
 inline ReplicatedShiftedRow<WordType> displacedRow(const BinMatConstView<WordType>& plane,
                                                    long long y, long long off) {
@@ -704,14 +704,14 @@ inline ReplicatedShiftedRow<WordType> displacedRow(const BinMatConstView<WordTyp
 }
 
 /// @brief `sum over the window of M(z) * Ix(z)` for a ternary derivative, from two
-///        popcounts. **INTERNAL.**
+/// popcounts. **INTERNAL.**
 /// @return `popcount(mag & M) - 2 * popcount(mag & M & sign)`, i.e. the count of
-///         agreeing pixels minus the count of opposing ones.
+/// agreeing pixels minus the count of opposing ones.
 /// @note The `total - 2*set` spelling rather than
-///       `popcount(mag & M & ~sign) - popcount(mag & M & sign)`: one popcount
-///       cheaper on a target where the popcount is the expensive operation (D-6),
-///       and it never forms `~sign`, which would set every padding bit of a
-///       trailing word (D-13). The same argument as `impl::splitRowRegion`'s.
+/// `popcount(mag & M & ~sign) - popcount(mag & M & sign)`: one popcount
+/// cheaper on a target where the popcount is the expensive operation,
+/// and it never forms `~sign`, which would set every padding bit of a
+/// trailing word. The same argument as `impl::splitRowRegion`'s.
 template <typename WordType>
 inline long long signedMaskedSum(WordType mag, WordType sign, WordType m) {
     const WordType both = static_cast<WordType>(mag & m);
@@ -722,55 +722,55 @@ inline long long signedMaskedSum(WordType mag, WordType sign, WordType m) {
 }
 
 /// @brief `sum over the window of V(z) * G(z)` for an N-bit value `V` against an
-///        N-bit SIGN-MAGNITUDE gradient `G`, from `2N^2` popcounts. **INTERNAL.**
+/// N-bit SIGN-MAGNITUDE gradient `G`, from `2N^2` popcounts. **INTERNAL.**
 /// @param maskedMag The gradient's N magnitude plane words, ALREADY masked to the
-///        region -- masked once by the caller rather than `N^2` times here.
+/// region -- masked once by the caller rather than `N^2` times here.
 /// @param sign The gradient's sign plane word, unmasked: it is only ever ANDed
-///        with an already-masked magnitude.
+/// with an already-masked magnitude.
 /// @param val The value's N plane words, LSB first.
 ///
 /// `V = sum_i 2^i V_i` and `G = +/- sum_j 2^j M_j`, so
 ///
-///     sum V*G = sum_{i,j} 2^(i+j) * [ popcount(V_i & M_j) - 2*popcount(V_i & M_j & S) ]
+/// sum V*G = sum_{i,j} 2^(i+j) * [ popcount(V_i & M_j) - 2*popcount(V_i & M_j & S) ]
 ///
 /// -- the same `total - 2*set` spelling `signedMaskedSum` uses, for the same two
 /// reasons (one popcount cheaper than forming both halves, and it never forms
-/// `~sign`, which would set every padding bit of a trailing word, D-13). This is
+/// `~sign`, which would set every padding bit of a trailing word,). This is
 /// the generalization of `signedMaskedSum`, which it reduces to exactly at N = 1.
 ///
 /// @note The weight is a MULTIPLY, not a shift. `(total - 2*opposing)` is signed
-///       and routinely negative, and left-shifting a negative value is undefined
-///       before C++20. ops/covariance.hpp's `combineBitSlicedPairs` multiplies by
-///       `int64_t(1) << (i + j)` for the same reason.
+/// and routinely negative, and left-shifting a negative value is undefined
+/// before C++20. ops/covariance.hpp's `combineBitSlicedPairs` multiplies by
+/// `int64_t(1) << (i + j)` for the same reason.
 /// @note One accumulator, not `N^2` of them. The per-(i,j) counts are weighted and
-///       folded immediately, so the register footprint does NOT grow with N and
-///       E-13's O(N^2)-per-row accumulator concern -- which is about
-///       `BitSlicedPairCounts<N>` in ops/covariance.hpp -- does not arise here.
+/// folded immediately, so the register footprint does NOT grow with N and
+/// that work’s O(N^2)-per-row accumulator concern -- which is about
+/// `BitSlicedPairCounts<N>` in ops/covariance.hpp -- does not arise here.
 /// @note The plane operands are POINTERS, not array references, so a caller holding
-///       them in a staged buffer or a tap cache passes them IN PLACE (E-39's
-///       `RowOperands`). Array arguments decay, so every existing call site is
-///       unchanged; `N` was already explicit at all of them.
+/// them in a staged buffer or a tap cache passes them IN PLACE (that work’s
+/// `RowOperands`). Array arguments decay, so every existing call site is
+/// unchanged; `N` was already explicit at all of them.
 /// @tparam UseNeon False forces the portable scalar path even where NEON exists.
-///         That is not a tuning knob: it is how the vector path is held to
-///         BIT-EXACTNESS, by giving the benchmark and the tests both spellings to
-///         compare on the same machine (X-33).
+/// That is not a tuning knob: it is how the vector path is held to
+/// BIT-EXACTNESS, by giving the benchmark and the tests both spellings to
+/// compare on the same machine.
 template <size_t N, typename WordType, bool UseNeon = true>
 inline long long slicedSignedSum(const WordType* maskedMag, WordType sign,
                                  const WordType* val) {
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     if constexpr (UseNeon) {
     // ===================================================================
-    // NEON: THE PLANE-PAIR POPCOUNTS BATCHED INTO LANES (X-33, Phase 5.1).
+    // NEON: THE PLANE-PAIR POPCOUNTS BATCHED INTO LANES (Phase 5.1).
     //
-    // This is [D-6](../../../../docs/ARCHITECTURE.md)'s reservation being cashed in.
+    // This is the design rule’s reservation being cashed in.
     // aarch64 has NO SCALAR POPCOUNT: `CNT` lives in the vector registers, so
     // every scalar `popcountWord` pays `fmov` in and `fmov` out. This call issues
     // `2N^2` of them -- EIGHT at N = 2, the depth three of four levels of the
-    // adopted 1/2/2/2 ladder run at (D-23). Batching the four plane pairs into
+    // adopted 1/2/2/2 ladder run at. Batching the four plane pairs into
     // lanes crosses the register domain ONCE, at the horizontal add, instead of
     // eight times.
     //
-    // D-6 forbade a per-word popcount in the public API precisely so that the
+    // forbade a per-word popcount in the public API precisely so that the
     // reductions would be shaped to allow this; nothing here would be possible if
     // callers had been handed `popcountWord`.
     //
@@ -817,7 +817,7 @@ inline long long slicedSignedSum(const WordType* maskedMag, WordType sign,
 }
 
 /// Forward declarations: `residualSums`' 1-bit overload names these in its signature
-/// and they are defined below, beside the reader that consumes them (E-39).
+/// and they are defined below, beside the reader that consumes them.
 template <size_t N, typename WordType>
 struct StagedWindow;
 template <size_t N, typename WordType>
@@ -825,8 +825,8 @@ struct TapCache;
 
 /// @brief The five integer sums one gradient component's residual needs.
 /// @note `sum(T * Ix)` for each of the four tap planes, and `sum(I * Ix)` for the
-///       previous frame. The four bilinear weights combine them ONCE per window --
-///       see the residual identity at the top of the file.
+/// previous frame. The four bilinear weights combine them ONCE per window --
+/// see the residual identity at the top of the file.
 struct TapSums {
     long long t00 = 0;
     long long t01 = 0;
@@ -843,13 +843,13 @@ struct TapSums {
 };
 
 /// @brief The right-hand side `b = sum(diff * grad)` of the normal equations, as
-///        ten exact integers. **INTERNAL, and the heart of the file.**
+/// ten exact integers. **INTERNAL, and the heart of the file.**
 /// @param lv The level's six planes.
 /// @param r The window, already clipped to the level (impl::clipRegion).
 /// @param tapX, tapY The INTEGER part of the displacement, in pixels.
 /// @param sumsX, sumsY Out: the five sums for each gradient component.
 /// @note One traversal, four tap words and one previous-frame word per word index,
-///       twenty popcounts per word. Nothing float is touched inside the loop.
+/// twenty popcounts per word. Nothing float is touched inside the loop.
 template <typename WordType>
 inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType>& r,
                          long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY,
@@ -873,7 +873,7 @@ inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType
 
         // Per-row partial sums, for the reason ops/reduce.hpp's row bodies return
         // one: a single accumulator across every row of a window is one serialized
-        // dependency chain through the popcount latency (D-15, X-11b).
+        // dependency chain through the popcount latency.
         TapSums rowX;
         TapSums rowY;
         visitRowWords<WordType>(r, [&](size_t i, WordType mask) {
@@ -908,7 +908,7 @@ inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType
 
 /// @brief Bits `[x0, x0 + bitsPerWord)` of a row, aligned to bit 0. **INTERNAL.**
 /// @note The `s == 0` guard is not decoration: shifting a word by its own width is
-///       undefined, and that case is 1 in 32 rather than exotic.
+/// undefined, and that case is 1 in 32 rather than exotic.
 template <typename WordType>
 inline WordType alignedWord(const WordType* row, size_t words, size_t x0) {
     constexpr size_t bits = bitsPerWord<WordType>();
@@ -920,15 +920,15 @@ inline WordType alignedWord(const WordType* row, size_t words, size_t x0) {
     return static_cast<WordType>((lo >> s) | (hi << (bits - s)));
 }
 
-/// @brief Rows the staging path handles. The shipped window is 31 (D-31).
+/// @brief Rows the staging path handles. The shipped window is 31.
 /// @note A bound, not a tuning knob: it fixes the size of a STACK buffer, and
-///       CLAUDE.md forbids a kernel allocating. A taller window declines and takes the
-///       unstaged path.
+/// CLAUDE.md forbids a kernel allocating. A taller window declines and takes the
+/// unstaged path.
 /// @note **THE ROW CAP FIXES THE SHAPE AND LETS THE MEMORY FLOAT**, which is the wrong
-///       way round for an embedded target — hence `BINCV_STAGING_BUDGET_BYTES` below.
+/// way round for an embedded target — hence `BINCV_STAGING_BUDGET_BYTES` below.
 constexpr size_t kStagedMaxRows = 64;
 
-/// @brief The stack these two structures may occupy, in BYTES. **E-38 / D-79.**
+/// @brief The stack these two structures may occupy, in BYTES. **.**
 ///
 /// **WHY A BYTE BUDGET EXISTS ALONGSIDE THE ROW CAP.** The row cap bounds the window's
 /// SHAPE; the memory it costs then floats with the bit depth, because every row carries
@@ -952,11 +952,11 @@ constexpr size_t kStagedMaxRows = 64;
 #define BINCV_STAGING_BUDGET_BYTES 16384
 #endif
 
-/// @brief One window's ITERATION-INVARIANT words, extracted once. **INTERNAL** (X-69).
+/// @brief One window's ITERATION-INVARIANT words, extracted once. **INTERNAL**.
 ///
 /// Of the twelve words a row needs, **eight belong to the PREVIOUS frame** -- `self`,
 /// `magX`, `magY`, `signX`, `signY` -- and LK linearises about the previous frame, so
-/// they are identical on every one of X-68's **4.29 mean iterations** and were being
+/// they are identical on every one of that measurement’s **4.29 mean iterations** and were being
 /// re-extracted on all of them. `region` is fixed per point per level, so one staging
 /// serves the whole iteration.
 template <size_t N, typename WordType>
@@ -969,9 +969,9 @@ struct StagedWindow {
 };
 
 /// @brief The four TAP words per row, cached against the integer displacement they
-///        were read at. **INTERNAL** (X-70).
+/// were read at. **INTERNAL**.
 ///
-/// The taps move, which is why X-69 could not stage them -- but they move as
+/// The taps move, which is why this could not stage them -- but they move as
 /// `floor(offX)`, and the iteration is *shrinking* `off`. Once the estimate settles
 /// inside a pixel the integer part stops changing and the same four words are
 /// re-extracted every remaining iteration. **Sound by construction:** the tap words
@@ -980,11 +980,11 @@ struct StagedWindow {
 template <size_t N, typename WordType>
 struct TapCache {
     /// `[row][plane][tap]`, tap order `t00, t01, t10, t11`. **THE INNERMOST AXIS IS THE
-    /// TAP AND THAT IS THE WHOLE POINT** (X-85): the NEON kernels put the four taps of
+    /// TAP AND THAT IS THE WHOLE POINT**: the NEON kernels put the four taps of
     /// one plane in the four lanes of a vector, so this layout makes that a single
     /// `vld1q_u32`. Stored as four separate arrays it was **eight stores and two loads
     /// a row** to marshal them, each load waiting on its stores — the same store-to-load
-    /// round trip X-83 found costing 1.5× in the covariance.
+    /// round trip a measurement found costing 1.5× in the covariance.
     WordType taps[kStagedMaxRows][N][4];
     long long tapX = 0;
     long long tapY = 0;
@@ -992,17 +992,17 @@ struct TapCache {
 };
 
 /// @brief The two staging buffers' combined size. **INTERNAL** -- the public spelling
-///        is `bincv::stagingStackBytes`, below, which forwards to this.
+/// is `bincv::stagingStackBytes`, below, which forwards to this.
 template <size_t N, typename WordType>
 constexpr size_t stagingStackBytesImpl() {
     return sizeof(StagedWindow<N, WordType>) + sizeof(TapCache<N, WordType>);
 }
 
-/// @brief Fill a `StagedWindow`, or decline. **INTERNAL** (X-69).
+/// @brief Fill a `StagedWindow`, or decline. **INTERNAL**.
 /// @return False when this window cannot be staged, leaving the caller on the
-///         unstaged path. Declines are not failures: a window wider than a word uses
-///         `ReplicatedShiftedRow` spans rather than single words, and a taller one
-///         would overrun a fixed stack buffer.
+/// unstaged path. Declines are not failures: a window wider than a word uses
+/// `ReplicatedShiftedRow` spans rather than single words, and a taller one
+/// would overrun a fixed stack buffer.
 template <size_t N, typename WordType>
 inline bool stageWindow(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
                         StagedWindow<N, WordType>& s) {
@@ -1028,19 +1028,19 @@ inline bool stageWindow(const LKLevelN<N, WordType>& lv, const RegionWords<WordT
 
 /// @brief The 1-bit `LKLevel` declines unconditionally. **INTERNAL.**
 /// @note `stageWindow` is written against `LKLevelN`'s plane arrays. Declining keeps
-///       one tracking body serving both level types (D-21) without a compile error.
+/// one tracking body serving both level types without a compile error.
 template <typename WordType>
 inline bool stageWindow(const LKLevel<WordType>&, const RegionWords<WordType>&,
                         StagedWindow<1, WordType>&) {
     return false;
 }
 
-/// @brief The 2x2 covariance from the ALREADY-STAGED window. **INTERNAL** (X-84).
+/// @brief The 2x2 covariance from the ALREADY-STAGED window. **INTERNAL**.
 ///
 /// **`levelCovariance` WALKS THE SAME WINDOW `stageWindow` HAS JUST FINISHED WALKING.**
 /// The staged buffer holds `magX`, `magY`, `signX`, `signY` per row — which is exactly
 /// and only what the covariance reads — so the second traversal of the level's planes
-/// is pure repetition. [X-83](../../../../docs/EXPERIMENTS.md) measured the covariance at
+/// is pure repetition. a measurement measured the covariance at
 /// **27.5% of `track` on the reference device**; this removes its memory traffic
 /// entirely and leaves the arithmetic reading a ~2 KB stack buffer.
 ///
@@ -1048,16 +1048,16 @@ inline bool stageWindow(const LKLevel<WordType>&, const RegionWords<WordType>&,
 /// staged word is the region extracted to bit 0 and masked; `bitSlicedPairRowRegion`
 /// reads it in place under `visitRowWords`' mask. Every operand is shifted by the same
 /// amount, so every `popcount(a & b)` is the same integer. The sign words are unmasked
-/// in both spellings and only ever ANDed with a masked product (D-13).
+/// in both spellings and only ever ANDed with a masked product.
 ///
 /// @param rows `region.y1 - region.y0`. A staged window is one word wide by
-///        construction, so this is one word per row and no `visitRowWords` at all.
+/// construction, so this is one word per row and no `visitRowWords` at all.
 template <size_t N, typename WordType>
 inline GradientCovariance stagedCovariance(const StagedWindow<N, WordType>& s, size_t rows) {
     BitSlicedPairCounts<N> total;
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     if constexpr ((N == 1 || N == 2) && sizeof(WordType) == 4) {
-        // X-83's lane kernel, on the staged buffer: the counts stay in lanes to the end
+        // that measurement’s lane kernel, on the staged buffer: the counts stay in lanes to the end
         // of the window and the register domain is crossed once per point per level.
         const auto counts = [](uint32x4_t v) {
             return vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(v))));
@@ -1134,11 +1134,11 @@ inline GradientCovariance stagedCovariance(const StagedWindow<N, WordType>& s, s
     return combineBitSlicedPairs<N>(total);
 }
 
-/// @brief One row's twelve operands, as POINTERS. **INTERNAL** (E-39).
+/// @brief One row's twelve operands, as POINTERS. **INTERNAL**.
 /// @note **Pointers, and that was measured.** They let a staged or cached operand be
-///       used IN PLACE, which is the whole point of X-69/X-70. Copying them into a
-///       value struct instead gave back what staging bought -- X-72 measured both,
-///       and only pointers PLUS a compile-time `Staged` reached parity.
+/// used IN PLACE, which is the whole point of earlier work. Copying them into a
+/// value struct instead gave back what staging bought -- a measurement measured both,
+/// and only pointers PLUS a compile-time `Staged` reached parity.
 template <size_t N, typename WordType>
 struct RowOperands {
     const WordType (*taps)[4];   ///< `[plane][tap]`; see `TapCache`
@@ -1151,19 +1151,19 @@ struct RowOperands {
     WordType scratch[3][N];
 };
 
-/// @brief The ONE place a window row's operands are read. **INTERNAL** (E-39).
+/// @brief The ONE place a window row's operands are read. **INTERNAL**.
 ///
-/// **WHY THIS EXISTS.** X-41 recorded **three copies** of this extraction block and
-/// recommended collapsing them *for maintenance*. X-69 and X-70 made it worth doing
+/// **WHY THIS EXISTS.** recorded **three copies** of this extraction block and
+/// recommended collapsing them *for maintenance*. made it worth doing
 /// *for speed*: staging and tap-caching have to reach the NEON paths too, and writing
 /// them into each copy separately would have made **five**. One reader serves scalar
-/// and NEON, staged and unstaged -- and X-34's `+1`-tap-is-a-shift and X-35's interior
+/// and NEON, staged and unstaged -- and that measurement’s `+1`-tap-is-a-shift and that measurement’s interior
 /// fast path live here once instead of four times.
 ///
-/// @tparam Staged Compile-time, NOT a runtime pointer test. X-72 measured a single
-///         body branching on `staged != nullptr` per row costing **17% of `track` on
-///         x86**: the compiler stops specialising the row loop. Two instantiations of
-///         one source is the price of that 17%.
+/// @tparam Staged Compile-time, NOT a runtime pointer test. a measurement measured a single
+/// body branching on `staged != nullptr` per row costing **17% of `track` on
+/// x86**: the compiler stops specialising the row loop. Two instantiations of
+/// one source is the price of that 17%.
 template <size_t N, typename WordType, bool Staged>
 class RowReader {
 public:
@@ -1215,14 +1215,14 @@ public:
     }
 
 private:
-    /// The four displaced taps. X-34's `+1`-is-a-shift and X-35's interior fast path.
+    /// The four displaced taps. that measurement’s `+1`-is-a-shift and that measurement’s interior fast path.
     ///
     /// **ROW i's LOWER TAP IS ROW i+1's UPPER TAP** — they name the same level row at
     /// the same displacement, and the window is walked in increasing `y`, so carrying
-    /// it forward halves the reads of `lv.next`. X-84.
+    /// it forward halves the reads of `lv.next`..
     ///
     /// Sound because the two spellings agree wherever both apply: `alignedWord` is
-    /// X-35's interior fast path for exactly the case `displacedRow(...).word(0)` would
+    /// that measurement’s interior fast path for exactly the case `displacedRow(...).word(0)` would
     /// compute the same bits more slowly, and outside it both take `displacedRow`.
     WordType readNext(long long sy, size_t k, long long sx) const {
         if (colsInside_ && sx == srcX_ && sy >= 0 &&
@@ -1258,7 +1258,7 @@ private:
         haveCarry_ = true;
     }
 
-    /// The eight previous-frame words -- what X-69 stages when it can.
+    /// The eight previous-frame words -- what stages when it can.
     void extractInvariants(size_t y, WordType* self, WordType* magX, WordType* magY,
                            WordType& signX, WordType& signY) const {
         for (size_t k = 0; k < N; ++k) {
@@ -1287,10 +1287,10 @@ private:
 
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
 /// @brief The aligned residual at **N == 1**, batching across the FOUR TAPS with
-///        accumulators carried across the WHOLE WINDOW. **INTERNAL** (D-33 / X-36).
-/// @note `Staged` is compile-time; see `RowReader`. This is E-39: the NEON paths get
-///       X-69's staging and X-70's tap cache without a fifth copy of the extraction
-///       block X-41 counted three of.
+/// accumulators carried across the WHOLE WINDOW. **INTERNAL**.
+/// @note `Staged` is compile-time; see `RowReader`. This is the NEON paths get
+/// that measurement’s staging and that measurement’s tap cache without a fifth copy of the extraction
+/// block a measurement counted three of.
 template <typename WordType, bool Staged>
 inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
                                          const RegionWords<WordType>& r, long long tapX,
@@ -1300,7 +1300,7 @@ inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
     RowReader<1, WordType, Staged> rd(lv, r, tapX, tapY, staged, taps);
     RowOperands<1, WordType> o;
 
-    // X-86: byte-domain accumulation, as in the N == 2 kernel. `vcntq_u8` gives per-byte
+    // byte-domain accumulation, as in the N == 2 kernel. `vcntq_u8` gives per-byte
     // counts and a byte count is at most 8, so 31 rows fit in a byte and the two
     // `vpaddlq` widenings move out of the row loop entirely.
     uint8x16_t bTotX = vdupq_n_u8(0), bOppX = vdupq_n_u8(0);
@@ -1327,7 +1327,7 @@ inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
         const WordType magY = o.magY[0];
         const WordType sgnX = o.signX;
         const WordType sgnY = o.signY;
-        // X-85: `[plane][tap]` -- one load, nothing to marshal.
+        // `[plane][tap]` -- one load, nothing to marshal.
         const uint32x4_t vt = vld1q_u32(o.taps[0]);
 
         const uint32x4_t bx = vandq_u32(vt, vdupq_n_u32(static_cast<uint32_t>(magX)));
@@ -1387,7 +1387,7 @@ inline void alignedResidualSumsNeon1(const LKLevelN<1, WordType>& lv,
 }
 
 /// @brief The aligned residual at **N == 2**, the plane pairs folded inside the row
-///        into one accumulator per component. **INTERNAL** (X-40).
+/// into one accumulator per component. **INTERNAL**.
 /// @note See `alignedResidualSumsNeon1Impl` for why `Staged` is compile-time.
 template <typename WordType, bool Staged>
 inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
@@ -1399,7 +1399,7 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
     RowReader<N, WordType, Staged> rd(lv, r, tapX, tapY, staged, taps);
     RowOperands<N, WordType> o;
 
-    // X-86: THE COUNTS STAY IN BYTES UNTIL THE END OF THE WINDOW.
+    // THE COUNTS STAY IN BYTES UNTIL THE END OF THE WINDOW.
     //
     // `vcntq_u8` counts per byte. Turning that into a per-TAP total takes two
     // `vpaddlq` widenings — and the old kernel paid them **on every row**, then
@@ -1409,7 +1409,7 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
     // AND, `cnt`, byte-add.
     //
     // Six operations where there were eleven, and it is the same trick
-    // [X-80](../../../../docs/EXPERIMENTS.md) used to make the bit-plane FAST worth having.
+    // a measurement used to make the bit-plane FAST worth having.
     //
     // Sixteen byte accumulators — total and opposing for each of the four plane pairs,
     // twice for the two components — plus four for the previous-frame term. aarch64
@@ -1452,7 +1452,7 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
     size_t sinceFlush = 0;
     for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
         rd.load(y, i, o);
-        // X-85: `[plane][tap]`, so this is two loads and no marshalling.
+        // `[plane][tap]`, so this is two loads and no marshalling.
         const uint32x4_t vp0 = vld1q_u32(o.taps[0]), vp1 = vld1q_u32(o.taps[1]);
         const uint32x4_t sgX = vdupq_n_u32(static_cast<uint32_t>(o.signX));
         const uint32x4_t sgY = vdupq_n_u32(static_cast<uint32_t>(o.signY));
@@ -1475,12 +1475,12 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
         }
 
         // The previous-frame term: the same four plane pairs against `self`, in lanes —
-        // and built by SHUFFLE, not through a stack array. X-86: `self`, `magX` and
+        // and built by SHUFFLE, not through a stack array. `self`, `magX` and
         // `magY` are each two CONTIGUOUS words in the staged row (and in the unstaged
         // scratch), so a 64-bit load and two lane moves give `{s0,s1,s0,s1}` against
         // `{m0,m0,m1,m1}`. The array spelling was four ANDs, four stores and a load
         // that waited on all of them — the same store-to-load round trip that has now
-        // cost this project four separate times (X-83, X-85, and twice here).
+        // cost this project four separate times (and twice here).
         const uint32x4_t ss = vcombine_u32(vld1_u32(o.self), vld1_u32(o.self));
         const auto spread = [](const WordType* m) {
             const uint32x2_t p = vld1_u32(m);
@@ -1547,7 +1547,7 @@ inline void alignedResidualSumsImpl(const LKLevelN<N, WordType>& lv,
     RowOperands<N, WordType> o;
     for (size_t y = r.y0, i = 0; y < r.y1; ++y, ++i) {
         rd.load(y, i, o);
-        // X-85: the taps are stored `[plane][tap]` for the NEON kernels' sake, and
+        // the taps are stored `[plane][tap]` for the NEON kernels' sake, and
         // `slicedSignedSum` wants a value's N planes contiguous -- so this path
         // transposes the 4xN block once a row. It is the generic fallback (the shipped
         // 1/2/2/2 ladder at `uint32_t` takes the NEON kernels or the AVX2 batch), and
@@ -1590,7 +1590,7 @@ inline void alignedResidualSums(const LKLevelN<N, WordType>& lv, const RegionWor
 }
 
 /// @brief `b = sum(diff * grad)` at **N bits per pixel**, as ten exact integers.
-///        **INTERNAL, and the generic-N form of the function above.**
+/// **INTERNAL, and the generic-N form of the function above.**
 ///
 /// **THE RESIDUAL IDENTITY SURVIVES AN N-BIT ALPHABET UNCHANGED, AND THAT IS THE
 /// WHOLE REASON AN N-BIT TRACKER IS AFFORDABLE AT ALL.** Item 3 of THE BOUNDARY
@@ -1602,27 +1602,27 @@ inline void alignedResidualSums(const LKLevelN<N, WordType>& lv, const RegionWor
 /// iteration, and still round nothing before they are applied.
 ///
 /// @note **`20 N^2` popcounts per word**, against 20 at N = 1, which this reduces
-///       to exactly: five plane sums (four taps and the previous frame) for each
-///       of two gradient components, `2N^2` popcounts each. That quadratic is the
-///       cost side of E-7 and it is the same `3N^2 + N`-shaped growth
-///       ops/covariance.hpp pays -- both come from the SAME source, a product of
-///       two bit-sliced values needing every plane pair.
+/// to exactly: five plane sums (four taps and the previous frame) for each
+/// of two gradient components, `2N^2` popcounts each. That quadratic is the
+/// cost side of earlier work and it is the same `3N^2 + N`-shaped growth
+/// ops/covariance.hpp pays -- both come from the SAME source, a product of
+/// two bit-sliced values needing every plane pair.
 /// @note The per-row partial sums are the same ten `long long`s at every N, for
-///       the reason the 1-bit form has them (D-15, X-11b): a single accumulator
-///       across every row is one serialized dependency chain through the popcount
-///       latency. The count does not grow with N because `slicedSignedSum` folds
-///       its `N^2` terms internally.
+/// the reason the 1-bit form has them: a single accumulator
+/// across every row is one serialized dependency chain through the popcount
+/// latency. The count does not grow with N because `slicedSignedSum` folds
+/// its `N^2` terms internally.
 /// @note `4N` displaced row readers per row, not `4`. They are built once per row
-///       and are word-aligned reads of the same two next-frame rows per plane, so
-///       item 5 of THE BOUNDARY also survives: still no gather, still no per-pixel
-///       address arithmetic.
+/// and are word-aligned reads of the same two next-frame rows per plane, so
+/// item 5 of THE BOUNDARY also survives: still no gather, still no per-pixel
+/// address arithmetic.
 template <size_t N, typename WordType, bool UseNeon = true>
 inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
                          long long tapX, long long tapY, TapSums& sumsX, TapSums& sumsY,
                          const StagedWindow<N, WordType>* staged = nullptr,
                          TapCache<N, WordType>* taps = nullptr) {
     // ===================================================================
-    // THE ALIGNED FAST PATH (X-34). A 31-pixel window at an arbitrary offset
+    // THE ALIGNED FAST PATH. A 31-pixel window at an arbitrary offset
     // spans 1.94 `uint32_t` words on average -- it fits in one only when
     // `x0 % 32 <= 1`, two cases in thirty-two -- so the general path below issues
     // TWICE THE POPCOUNTS IT NEEDS, each covering 15.5 useful pixels instead of
@@ -1645,14 +1645,14 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
         // N == 1 is level 0 of every ladder and got NOTHING from the plane-pair
         // batching, because at N == 1 there is one pair. Batching across the four
-        // TAPS is what applies here (X-36).
+        // TAPS is what applies here.
         if constexpr (UseNeon && N == 1 && sizeof(WordType) == 4) {
             alignedResidualSumsNeon1<WordType>(lv, r, tapX, tapY, sumsX, sumsY, staged,
                                               taps);
             return;
         }
         // N == 2 is levels 1-3 of the shipped ladder, and had the plane pairs in
-        // lanes but still reduced once per call. X-40 folds the pairs into a
+        // lanes but still reduced once per call. folds the pairs into a
         // window-carried accumulator instead.
         if constexpr (UseNeon && N == 2 && sizeof(WordType) == 4) {
             if (r.x1 > r.x0) {
@@ -1734,23 +1734,23 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
 }
 
 /// @brief Mean absolute residual over the window, in binCV's {0, 1} intensity
-///        units. **INTERNAL.**
+/// units. **INTERNAL.**
 /// @note `|Jinterp - I| = I + (1 - 2I)*Jinterp` because `I` is a BIT and
-///       `Jinterp` lies in [0, 1]. So the absolute value -- the one nonlinearity
-///       in the whole operation -- still collapses to popcounts: the window sum is
-///       `count(I) + sum(Jinterp) - 2*sum over I of Jinterp`, and each `sum` is
-///       the four tap planes' counts weighted by the four bilinear weights.
+/// `Jinterp` lies in [0, 1]. So the absolute value -- the one nonlinearity
+/// in the whole operation -- still collapses to popcounts: the window sum is
+/// `count(I) + sum(Jinterp) - 2*sum over I of Jinterp`, and each `sum` is
+/// the four tap planes' counts weighted by the four bilinear weights.
 /// @note **THE DENOMINATOR IS THE CLIPPED PIXEL COUNT**, i.e. the number of pixels
-///       actually compared, not the window's area. The reference divides by the
-///       FULL window area (`errval / (32*winSize.width*cn*winSize.height)`),
-///       because it pads every level and so always has `w*h` pixels to compare.
-///       The two agree exactly for a window that does not clip; for one that does,
-///       the reference would report the same total spread over more pixels. Since
-///       binCV declines the padded level (deviation (ii)), the pixels outside are
-///       not merely unknown, they do not exist -- so the mean is taken over the
-///       set the residual was actually computed on, which is also the set `A` and
-///       `b` were accumulated over. For an unclipped window, multiply by 255 to
-///       reach the reference's {0,255} scale.
+/// actually compared, not the window's area. The reference divides by the
+/// FULL window area (`errval / (32*winSize.width*cn*winSize.height)`),
+/// because it pads every level and so always has `w*h` pixels to compare.
+/// The two agree exactly for a window that does not clip; for one that does,
+/// the reference would report the same total spread over more pixels. Since
+/// binCV declines the padded level (deviation (ii)), the pixels outside are
+/// not merely unknown, they do not exist -- so the mean is taken over the
+/// set the residual was actually computed on, which is also the set `A` and
+/// `b` were accumulated over. For an unclipped window, multiply by 255 to
+/// reach the reference's {0,255} scale.
 template <typename WordType>
 inline float windowMeanAbsDiff(const LKLevel<WordType>& lv, const RegionWords<WordType>& r,
                                long long tapX, long long tapY, double w00, double w01, double w10,
@@ -1795,7 +1795,7 @@ inline float windowMeanAbsDiff(const LKLevel<WordType>& lv, const RegionWords<Wo
 }
 
 /// @brief Mean absolute residual over the window at **N bits per pixel**.
-///        **INTERNAL.**
+/// **INTERNAL.**
 ///
 /// ===========================================================================
 /// THIS IS THE ONE PIECE OF THE BIT-PARALLEL BOUNDARY THAT DOES NOT SURVIVE
@@ -1822,11 +1822,11 @@ inline float windowMeanAbsDiff(const LKLevel<WordType>& lv, const RegionWords<Wo
 /// entirely), it is computed at level 0 ONLY, it runs once per point per frame and
 /// never inside the iteration loop, and nothing in the solve reads it -- `status`
 /// does not depend on it unless `LKParams::maxResidual` is set (deviation (vii),
-/// and E-48's reject is the one thing that departs from it). **The per-pixel cost of
+/// and that work’s reject is the one thing that departs from it). **The per-pixel cost of
 /// TRACKING at N bits remains integers and popcounts only.**
 ///
 /// **AND HERE IS WHAT "OPTIONAL" COSTS, WHICH THIS PARAGRAPH USED TO ASSERT WITHOUT A
-/// NUMBER.** Measured by X-95 on 816 keypoints over a 1/2/2/2 ladder, asking for `err`
+/// NUMBER.** Measured by earlier work on 816 keypoints over a 1/2/2/2 ladder, asking for `err`
 /// takes `track` from 2.83 ms to 6.12 ms on x86 -- **2.16x**. It is one window pass per
 /// point against an iteration loop that averages under two iterations, so it is not a
 /// surprise once stated; it was simply never stated. A caller who passes an `err` array
@@ -1834,12 +1834,12 @@ inline float windowMeanAbsDiff(const LKLevel<WordType>& lv, const RegionWords<Wo
 /// know that `maxResidual` turns the same cost on.
 ///
 /// @note **UNITS: LSBs, so the scale depends on N.** The 1-bit form returns a mean
-///       in `{0, 1}` intensity units; this returns one in `[0, 2^N - 1]` units,
-///       because that is the level's alphabet. Divide by `2^N - 1` to compare
-///       across depths, or multiply by `255 / (2^N - 1)` to reach the reference's
-///       `{0, 255}` scale. At N = 1 both statements are the old one.
+/// in `{0, 1}` intensity units; this returns one in `[0, 2^N - 1]` units,
+/// because that is the level's alphabet. Divide by `2^N - 1` to compare
+/// across depths, or multiply by `255 / (2^N - 1)` to reach the reference's
+/// `{0, 255}` scale. At N = 1 both statements are the old one.
 /// @note The denominator is the CLIPPED pixel count, exactly as above and for the
-///       same reason.
+/// same reason.
 template <size_t N, typename WordType>
 inline float windowMeanAbsDiff(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
                                long long tapX, long long tapY, double w00, double w01, double w10,
@@ -1893,7 +1893,7 @@ inline float windowMeanAbsDiff(const LKLevelN<N, WordType>& lv, const RegionWord
 }
 
 /// @brief `floor(v)` as a `long long`, for a value already known to be finite and
-///        within the frame's range.
+/// within the frame's range.
 inline long long floorToLL(float v) { return static_cast<long long>(std::floor(v)); }
 
 } // namespace impl
@@ -1907,11 +1907,11 @@ constexpr size_t kMaxLevels = 16;
 
 
 #ifdef BINCV_LK_ITERATION_HISTOGRAM
-/// @brief X-78's iteration counter. **DIAGNOSTIC ONLY — off by default, and it must
-///        stay that way.**
+/// @brief that measurement’s iteration counter. **DIAGNOSTIC ONLY — off by default, and it must
+/// stay that way.**
 ///
-/// T5.16's AVX2 keypoint batch runs eight lanes in lockstep, so a batch costs the
-/// **maximum** iteration count over its eight points, not the mean X-68 measured. That
+/// that work’s AVX2 keypoint batch runs eight lanes in lockstep, so a batch costs the
+/// **maximum** iteration count over its eight points, not the mean a measurement measured. That
 /// ratio decides whether the batch is worth writing at all, and it is knowable from a
 /// histogram before any AVX2 exists — which is the entire reason this hook exists.
 ///
@@ -1937,10 +1937,10 @@ struct LevelDims {
 };
 
 /// @brief Everything the per-level tracking body needs that does not vary with the
-///        level. **INTERNAL.**
+/// level. **INTERNAL.**
 /// @note Not templated on WordType: nothing in it is a view or a word. The level
-///       is the only WordType-dependent argument `trackOneLevel` takes, which is
-///       what lets one body serve a ladder whose levels have DIFFERENT types.
+/// is the only WordType-dependent argument `trackOneLevel` takes, which is
+/// what lets one body serve a ladder whose levels have DIFFERENT types.
 struct LKContext {
     const Point2f* prevPts = nullptr;
     Point2f* nextPts = nullptr;
@@ -1957,7 +1957,7 @@ struct LKContext {
     double minEigThreshold = 0.0;
     LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
     bool useInitialFlow = false;
-    double maxResidual = 0.0;   ///< 0 disables; E-48's reject
+    double maxResidual = 0.0;   ///< 0 disables; that work’s reject
 
     /// Every usable level's extent, so that a point's entry level can be RECOMPUTED
     /// rather than cached. A per-point array would be scratch, and this operation
@@ -1969,10 +1969,10 @@ struct LKContext {
 
 /// @brief Is point `p`'s window entirely inside level `li`?
 /// @note **This is `unclippedAtEveryLevel`'s predicate in tests/test_opticalflow.cpp,
-///       deliberately spelled the same way.** X-25 measures a policy against a
-///       point set defined by clipping; if the kernel's notion of "fits" and the
-///       harness's disagreed, the experiment would be comparing two definitions
-///       rather than two policies.
+/// deliberately spelled the same way.** measures a policy against a
+/// point set defined by clipping; if the kernel's notion of "fits" and the
+/// harness's disagreed, the experiment would be comparing two definitions
+/// rather than two policies.
 inline bool windowFitsAtLevel(const LKContext& c, const Point2f& point, size_t li) {
     const double scale = 1.0 / static_cast<double>(size_t{1} << li);
     const double x = static_cast<double>(point.x) * scale;
@@ -1985,11 +1985,11 @@ inline bool windowFitsAtLevel(const LKContext& c, const Point2f& point, size_t l
 
 /// @brief The coarsest usable level whose window contains point `p`, or 0.
 /// @note Fitting is MONOTONE in the level index -- the window's half-extent is
-///       fixed in pixels while the level halves, so `x >= halfWin * 2^l` tightens
-///       as `l` grows -- which is what makes "the coarsest level that fits" also
-///       "every level below it fits", and therefore makes a single scan correct.
+/// fixed in pixels while the level halves, so `x >= halfWin * 2^l` tightens
+/// as `l` grows -- which is what makes "the coarsest level that fits" also
+/// "every level below it fits", and therefore makes a single scan correct.
 /// @note Returns 0 when nothing fits: level 0 is always tracked, whatever it clips,
-///       because it is the frame. So this policy loses NO keypoints.
+/// because it is the frame. So this policy loses NO keypoints.
 inline size_t entryLevelFor(const LKContext& c, size_t p) {
     if (c.entryLevel == LKEntryLevel::Coarsest) return c.usableLevels - 1;
     for (size_t li = c.usableLevels; li-- > 0;) {
@@ -2031,10 +2031,10 @@ inline void checkLevelPlanes(const LKLevelN<N, WordType>& lv) {
 
 /// @brief The 2x2 normal-equations matrix for a level of any depth. **INTERNAL.**
 /// @note Two overloads over one name so that `trackOneLevel` names the operation
-///       rather than the representation. The N-bit one is ops/covariance.hpp's
-///       bit-sliced weighted-sum form (T3.10), which is bit-identical to the
-///       ternary one at N == 1 -- so this dispatch changes which code runs but
-///       cannot change the answer at the depth both can express.
+/// rather than the representation. The N-bit one is ops/covariance.hpp's
+/// bit-sliced weighted-sum form, which is bit-identical to the
+/// ternary one at N == 1 -- so this dispatch changes which code runs but
+/// cannot change the answer at the depth both can express.
 template <typename WordType>
 inline GradientCovariance levelCovariance(const LKLevel<WordType>& lv, Rect window) {
     return gradientCovariance<WordType>(lv.dxMag, lv.dyMag, lv.dxSign, lv.dySign, window);
@@ -2045,10 +2045,10 @@ inline GradientCovariance levelCovariance(const LKLevelN<N, WordType>& lv, Rect 
 }
 
 /// @brief One point, one level — the whole tracking body for a single keypoint.
-///        **INTERNAL.**
+/// **INTERNAL.**
 ///
 /// **THIS WAS THE `parallelFor` LAMBDA AND IT IS UNCHANGED.** It was lifted out so
-/// that [X-79](../../../../docs/EXPERIMENTS.md)'s batched path has something to fall back
+/// that that measurement’s batched path has something to fall back
 /// TO: a window the batch cannot stage — wider than a word, or taller than
 /// `kLkBatchMaxRows` — must still be tracked, and tracked identically. Naming the
 /// body once is what keeps "identically" a property of the code rather than of two
@@ -2082,7 +2082,7 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
         return;
     }
 
-    // X-66: extract the window's ITERATION-INVARIANT words ONCE. X-68 measured
+    // extract the window's ITERATION-INVARIANT words ONCE. a measurement measured
     // a mean of 4.29 iterations per point per level, every one of which was
     // re-reading the same eight previous-frame words per row. `region` is fixed
     // for the whole iteration, so one staging serves all of them.
@@ -2091,7 +2091,7 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
     // CLAUDE.md forbids a kernel allocating and this operation has no caller
     // scratch. `stageWindow` declines rather than overrunning it.
     BINCV_STAGE_LAP(setup);
-    // E-38 / D-79. THE BUDGET IS CHECKED WHERE THE BUFFERS ARE DECLARED, so it fires
+    //. THE BUDGET IS CHECKED WHERE THE BUFFERS ARE DECLARED, so it fires
     // only for the `(N, WordType)` a caller actually instantiates -- a Cortex-M build
     // tracking the shipped 1-bit ladder never trips it, and one at N = 8 gets a build
     // error naming the number instead of a stack overflow in the field.
@@ -2104,11 +2104,11 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
                   "that big, or use a shallower bit depth. bincv::stagingStackBytes<N, W>() "
                   "is the exact figure.");
     StagedWindow<LevelT::Bits, WordType> stagedWindow;
-    TapCache<LevelT::Bits, WordType> tapCache;   // X-70; invalid until first use
+    TapCache<LevelT::Bits, WordType> tapCache;   //; invalid until first use
     const bool staged = stageWindow(lv, region, stagedWindow);
     BINCV_STAGE_LAP(staging);
 
-    // BIT-PARALLEL: the 2x2 matrix. X-84: from the STAGED window when there is one,
+    // BIT-PARALLEL: the 2x2 matrix. from the STAGED window when there is one,
     // because `levelCovariance` reads exactly the planes `stageWindow` has just
     // finished reading and nothing else.
     const GradientCovariance a =
@@ -2193,7 +2193,7 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
 
             // BIT-PARALLEL: ten exact integers, twenty popcounts per word --
         // reading the previous frame's eight words from `staged` when this
-        // window could be staged (X-66). Bit-exact either way; the staged
+        // window could be staged. Bit-exact either way; the staged
         // path differs only in where the words come from.
         TapSums sumsX;
         TapSums sumsY;
@@ -2266,7 +2266,7 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
             const double residual = windowMeanAbsDiff(lv, region, tapX, tapY,
                 (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
             if (c.err != nullptr) c.err[p] = static_cast<float>(residual);
-            // E-48. The residual is already here; the reject is one comparison and
+            //. The residual is already here; the reject is one comparison and
             // needs no storage, which is why it is applied at the point of computation
             // rather than in a pass over `err` the caller may not have asked for.
             if (c.maxResidual > 0.0 && residual > c.maxResidual) c.status[p] = 0;
@@ -2279,7 +2279,7 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
 /// It is how the batched path is held to BIT-EXACTNESS: the batch and `trackOnePoint`
 /// are two spellings of the same arithmetic, and the only way to hold them equal is to
 /// run both on the same input and compare. `slicedSignedSum`'s `UseNeon` exists for
-/// exactly this reason and says exactly this (X-33).
+/// exactly this reason and says exactly this.
 ///
 /// A shipped build never touches it. It is a plain `bool` and therefore **not
 /// thread-safe to flip while tracking** — tests flip it between calls.
@@ -2290,19 +2290,19 @@ inline bool& lkBatchEnabled() {
 
 /// @brief Is this level type the N-bit one, with plane ARRAYS? **INTERNAL.**
 /// @note `LKLevel<W>` and `LKLevelN<1, W>` both report `Bits == 1` and are not
-///       interchangeable: only the second has `prev[]`, which is what the batch stages
-///       from. `Bits` cannot tell them apart, so this does.
+/// interchangeable: only the second has `prev`, which is what the batch stages
+/// from. `Bits` cannot tell them apart, so this does.
 template <typename T>
 struct IsLevelN : std::false_type {};
 template <size_t N, typename WordType>
 struct IsLevelN<LKLevelN<N, WordType>> : std::true_type {};
 
 /// @brief Does this level reach a VECTORISED residual kernel? **Public, and
-///        queryable** — `bincv::lkVectorPath<LevelT>()`.
+/// queryable** — `bincv::lkVectorPath<LevelT>`.
 ///
 /// True when the level is an `LKLevelN` at depth 1 or 2 with `uint32_t` words: those
 /// are the depths the AVX2 batch and the NEON kernels are written for. A deeper level
-/// is scalar by nature and that is a legitimate accuracy choice (E-7); a WIDER WORD at
+/// is scalar by nature and that is a legitimate accuracy choice; a WIDER WORD at
 /// depth 1 or 2 is not — it is the same kernel, opted out of.
 template <typename LevelT>
 inline constexpr bool kLkVectorPath =
@@ -2310,31 +2310,31 @@ inline constexpr bool kLkVectorPath =
     sizeof(typename LevelT::Word) == 4;
 
 /// @brief True when this level type's depth HAS vector kernels but its word type
-///        cannot reach them. **INTERNAL** — the one configuration that is purely a
-///        mistake, as opposed to a slow-but-deliberate one.
+/// cannot reach them. **INTERNAL** — the one configuration that is purely a
+/// mistake, as opposed to a slow-but-deliberate one.
 template <typename LevelT>
 inline constexpr bool kLkWordMissesVectorPath =
     IsLevelN<LevelT>::value && (LevelT::Bits == 1 || LevelT::Bits == 2) &&
     sizeof(typename LevelT::Word) != 4;
 
 /// @brief Can this level type be batched AT ALL — asked at COMPILE time. **INTERNAL.**
-/// @note The shipped 1/2/2/2 ladder (D-23) at `uint32_t`. This has to be a compile-time
-///       question and not only a runtime one: `lkBatchResidual` is instantiated for the
-///       level's depth, and a level at `N = 4` would fail to COMPILE a kernel it would
-///       never have called. Whether the machine has AVX2 is the separate, runtime half.
+/// @note The shipped 1/2/2/2 ladder at `uint32_t`. This has to be a compile-time
+/// question and not only a runtime one: `lkBatchResidual` is instantiated for the
+/// level's depth, and a level at `N = 4` would fail to COMPILE a kernel it would
+/// never have called. Whether the machine has AVX2 is the separate, runtime half.
 template <typename T>
 inline constexpr bool kBatchableLevel = IsLevelN<T>::value && (T::Bits == 1 || T::Bits == 2) &&
                                         sizeof(typename T::Word) == 4;
 
 #if defined(BINCV_X86_LK_BATCH)
 
-/// @brief One lane's tracking state. **INTERNAL** (X-79).
+/// @brief One lane's tracking state. **INTERNAL**.
 /// @note Everything here is per-KEYPOINT and scalar, and it stays scalar on purpose.
-///       Only the ten window sums are vectorised; the 2x2 solve, the tap split, the
-///       convergence test and the oscillation rule are computed in `double` exactly as
-///       `trackOnePoint` computes them. **That is what makes the batch bit-exact rather
-///       than merely close** -- there is no second spelling of the floating-point
-///       arithmetic to drift from the first.
+/// Only the ten window sums are vectorised; the 2x2 solve, the tap split, the
+/// convergence test and the oscillation rule are computed in `double` exactly as
+/// `trackOnePoint` computes them. **That is what makes the batch bit-exact rather
+/// than merely close** -- there is no second spelling of the floating-point
+/// arithmetic to drift from the first.
 template <typename WordType>
 struct LkLane {
     RegionWords<WordType> region{};
@@ -2352,11 +2352,11 @@ struct LkLane {
 };
 
 /// @brief Eight windows' worth of staged operands, in the ONE layout that makes the
-///        batch worth having. **INTERNAL** (X-79).
+/// batch worth having. **INTERNAL**.
 ///
 /// `[row][plane][lane]`: eight keypoints' words at the same row and plane are eight
 /// adjacent `uint32_t`, so a `__m256i` load fetches one word from each of eight
-/// keypoints. [X-61](../../../../docs/EXPERIMENTS.md) tried the other arrangement and lost --
+/// keypoints. tried the other arrangement and lost --
 /// its vector arithmetic won on operation count and its **gathers** gave the win back.
 /// The fix was never a better gather; it was arranging not to need one.
 template <size_t N, typename WordType>
@@ -2375,7 +2375,7 @@ struct LkBatchArrays {
 };
 
 /// @brief Stage ONE lane's iteration-invariant words, and zero-pad it to `winRows`.
-///        **INTERNAL** (X-79).
+/// **INTERNAL**.
 ///
 /// The scalar `stageWindow` written into a lane of the batch layout — same eight words
 /// per row, same masking, scattered instead of packed.
@@ -2415,10 +2415,10 @@ inline void stageLane(const LKLevelN<N, WordType>& lv, const RegionWords<WordTyp
 }
 
 /// @brief Refresh ONE lane's four tap words per row at a new integer displacement.
-///        **INTERNAL** (X-79). `RowReader::extractTaps`, scattered into the lane.
-/// @note X-34's `+1`-tap-is-a-shift and X-35's interior fast path, both preserved:
-///       the taps for row `i+1`'s upper pair are row `i`'s lower pair, and a window
-///       narrower than a word gets its `+1` column by shifting rather than re-reading.
+/// **INTERNAL**. `RowReader::extractTaps`, scattered into the lane.
+/// @note that measurement’s `+1`-tap-is-a-shift and that measurement’s interior fast path, both preserved:
+/// the taps for row `i+1`'s upper pair are row `i`'s lower pair, and a window
+/// narrower than a word gets its `+1` column by shifting rather than re-reading.
 template <size_t N, typename WordType>
 inline void extractLaneTaps(const LKLevelN<N, WordType>& lv, const RegionWords<WordType>& r,
                             long long tapX, long long tapY, LkBatchArrays<N, WordType>& b,
@@ -2437,7 +2437,7 @@ inline void extractLaneTaps(const LKLevelN<N, WordType>& lv, const RegionWords<W
     // `lv.next` halves the scalar half of the batch's inner loop.
     //
     // Sound because the two spellings agree wherever both apply: `alignedWord` is
-    // X-35's interior fast path for exactly the case `displacedRow(...).word(0)` would
+    // that measurement’s interior fast path for exactly the case `displacedRow(...).word(0)` would
     // compute the same bits more slowly, and outside it both sides take `displacedRow`.
     const auto readRow = [&](long long sy, size_t k, long long sx) -> WordType {
         if (colsInside && sy >= 0 && sy < static_cast<long long>(height) && sx == srcX) {
@@ -2476,9 +2476,9 @@ inline void extractLaneTaps(const LKLevelN<N, WordType>& lv, const RegionWords<W
 }
 
 /// @brief The 2x2 covariance from ONE LANE of an already-staged batch. **INTERNAL**
-///        (X-84). `stagedCovariance`'s reason, in the batch's `[row][plane][lane]`
-///        layout: the words are already here, so reading the level's planes a second
-///        time is pure repetition.
+///. `stagedCovariance`'s reason, in the batch's `[row][plane][lane]`
+/// layout: the words are already here, so reading the level's planes a second
+/// time is pure repetition.
 template <size_t N, typename WordType>
 inline GradientCovariance stagedCovarianceLane(const LkBatchArrays<N, WordType>& b,
                                                size_t lane, size_t rows) {
@@ -2508,10 +2508,10 @@ inline GradientCovariance stagedCovarianceLane(const LkBatchArrays<N, WordType>&
 }
 
 /// @brief Track a RANGE of points through one level, eight at a time, with **lane
-///        refill**. **INTERNAL** (X-79, E-36).
+/// refill**. **INTERNAL**.
 ///
 /// **THE REFILL IS THE DESIGN, NOT A REFINEMENT ON TOP OF IT.**
-/// [X-78](../../../../docs/EXPERIMENTS.md) counted the iteration distribution before any of
+/// a measurement counted the iteration distribution before any of
 /// this was written: **72.6% of point-levels finish in two iterations or fewer, and a
 /// 3.6% tail runs the cap of twenty.** Eight lanes in lockstep cost the MAXIMUM of
 /// eight draws from that distribution, which measured **5.20 against a mean of 3.24 --
@@ -2523,13 +2523,13 @@ inline GradientCovariance stagedCovarianceLane(const LkBatchArrays<N, WordType>&
 /// point anyway: the work is not new, it happens at a different time.
 ///
 /// @param pFirst,pEnd The half-open range of points this call owns. Splitting the
-///        ARRAY is how the operation threads (T5.1) — each range refills from its own
-///        cursor and writes only its own points' outputs.
+/// ARRAY is how the operation threads — each range refills from its own
+/// cursor and writes only its own points' outputs.
 ///
 /// @note **Points the batch cannot hold are not skipped, they are tracked here**, by
-///       `trackOnePoint`, at the moment the refill reaches them. A window wider than a
-///       word or taller than `kLkBatchMaxRows` is rare (the shipped window is 31x31)
-///       and correct either way.
+/// `trackOnePoint`, at the moment the refill reaches them. A window wider than a
+/// word or taller than `kLkBatchMaxRows` is rare (the shipped window is 31x31)
+/// and correct either way.
 template <size_t N, typename WordType>
 inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const LKContext& c,
                               bool finest, float scale, long long levelWidth,
@@ -2570,7 +2570,7 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
                 const double residual = windowMeanAbsDiff(lv, s.region, tx, ty,
                     (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
                 if (c.err != nullptr) c.err[s.p] = static_cast<float>(residual);
-                // E-48, and it MUST be here too: the batch is the shipped x86 path, so a
+                //, and it MUST be here too: the batch is the shipped x86 path, so a
                 // reject applied only in `trackOnePoint` would be silently absent from
                 // every AVX2 build -- the failure mode CLAUDE.md warns about, in the
                 // direction x86 does compile.
@@ -2610,7 +2610,7 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
                     lv, li, c, p, finest, scale, levelWidth, levelHeight, kLevelMinEigScale);
                 continue;
             }
-            // X-84: stage FIRST, then take the covariance off the staged lane. The
+            // stage FIRST, then take the covariance off the staged lane. The
             // order used to be the other way round because the covariance did not need
             // the staging; now it does, and a rejected point pays one staging it did
             // not use -- against a whole second traversal of the level's planes for
@@ -2694,7 +2694,7 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
             s.w01 = fx * (1.0 - fy);
             s.w10 = (1.0 - fx) * fy;
             s.w11 = fx * fy;
-            // X-70's tap cache, per lane: the iteration SHRINKS the displacement, so
+            // that measurement’s tap cache, per lane: the iteration SHRINKS the displacement, so
             // once the estimate settles inside a pixel the integer part stops moving
             // and the same four words would be re-extracted every remaining iteration.
             if (!s.tapValid || s.tapX != tapX || s.tapY != tapY) {
@@ -2706,7 +2706,7 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
             if (s.rows > rowsMax) rowsMax = s.rows;
         }
         // A lane lost here would idle through the kernel call. Refill first -- the
-        // whole point of X-78 is that an idle lane is the expensive thing.
+        // whole point of this is that an idle lane is the expensive thing.
         if (lost) continue;
 
         lkBatchResidual<N>(&b.self[0][0][0], &b.t00[0][0][0], &b.t01[0][0][0],
@@ -2770,18 +2770,18 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
 #endif  // BINCV_X86_LK_BATCH
 
 /// @brief Track every point through ONE pyramid level. **INTERNAL, and the whole
-///        of the tracker's per-level logic.**
+/// of the tracker's per-level logic.**
 /// @tparam LevelT `LKLevel<W>` or `LKLevelN<N, W>` -- the body is written against
-///         `width()`, `height()`, `Bits` and the two dispatched helpers above, so
-///         it is identical for both and cannot drift between them.
+/// `width`, `height`, `Bits` and the two dispatched helpers above, so
+/// it is identical for both and cannot drift between them.
 /// @note `Bits` enters in exactly one place: the `minEigThreshold` conversion.
-///       Everything else about the level's depth is inside `levelCovariance` and
-///       `residualSums`.
+/// Everything else about the level's depth is inside `levelCovariance` and
+/// `residualSums`.
 template <typename LevelT, typename WordType = typename LevelT::Word>
 inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
     // The one place the level's depth reaches the tracking logic. See
     // referenceMinEigScale for why holding the 1-bit constant here would silently
-    // reject more points at higher N and confound E-7's accuracy curve.
+    // reject more points at higher N and confound that work’s accuracy curve.
     constexpr double kLevelMinEigScale = referenceMinEigScale(LevelT::Bits);
 
     const bool finest = (li == 0);
@@ -2822,22 +2822,22 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
     const long long levelHeight = static_cast<long long>(lv.height());
 
     // PASS 2 -- track.
-    // T5.1: KEYPOINTS ARE INDEPENDENT, AND THAT IS WHY THIS SPLITS SAFELY.
+    // KEYPOINTS ARE INDEPENDENT, AND THAT IS WHY THIS SPLITS SAFELY.
     // Each iteration writes only `nextPts[p]`, `status[p]` and `err[p]` -- distinct
     // indices -- and reads only the level's views, which are const. Nothing is
     // accumulated across points, so a split cannot move a flow vector. That is why
-    // X-65 measured 2.60x by splitting the ARRAY with no library change at all; this
+    // a measurement measured 2.60x by splitting the ARRAY with no library change at all; this
     // only makes it askable.
     //
     // Serial unless a caller installs a backend (core/parallel.hpp). On a core-only
     // build this is exactly the loop it replaces.
 #if defined(BINCV_X86_LK_BATCH)
-    // X-79 / E-36: EIGHT KEYPOINTS PER AVX2 REGISTER, WITH LANE REFILL.
+    // earlier work: EIGHT KEYPOINTS PER AVX2 REGISTER, WITH LANE REFILL.
     // Selected at run time, so nothing about the library's baseline ISA changes and a
     // machine without AVX2 takes the loop below. The split is by RANGE rather than by
     // point, because each range carries its own refill cursor -- and by at most one
     // range per thread, since a short final batch is the one thing a range boundary
-    // costs and X-78 measured idle lanes to be expensive.
+    // costs and a measurement measured idle lanes to be expensive.
     if constexpr (kBatchableLevel<LevelT>) {
         if (hasLkBatch() && lkBatchEnabled()) {
             size_t groups = c.pointCount / kLkBatchLanes;
@@ -2860,7 +2860,7 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
 }
 
 /// @brief Shared prologue: argument checks, and the "every entry is written"
-///        contract. **INTERNAL.**
+/// contract. **INTERNAL.**
 /// @return false when the call is already complete -- no points, or no levels.
 inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextPts,
                        uint8_t* status, float* err, size_t pointCount, const LKParams& params,
@@ -2871,7 +2871,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
     // PASS 1 writes `nextPts[p]` before PASS 2 reads `prevPts[p]`, so an in-place
     // call is not merely inexact, it tracks from the wrong anchor -- measured at up
     // to 23 px of divergence on a three-level frontend. Every other kernel in the
-    // library carries an explicit D-11 predicate; this is that predicate, on the
+    // library carries an explicit predicate; this is that predicate, on the
     // destination array rather than on a view.
     BINCV_ASSERT(byteRangesDisjoint(prevPts, pointCount * sizeof(Point2f), nextPts,
                                     pointCount * sizeof(Point2f)),
@@ -2911,7 +2911,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
         if (err != nullptr) err[i] = 0.0f;
     }
 
-    // Degenerate but legal, and a VALUE rather than an error (ARCHITECTURE 5.3):
+    // Degenerate but legal, and a VALUE rather than an error (the design notes):
     // with no levels there is nothing to track on, so every point is lost and its
     // last estimate is the point itself.
     if (levelCount == 0) {
@@ -2928,13 +2928,13 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
 }
 
 /// @brief THE REFERENCE'S PYRAMID CAP, REPRODUCED (deviation (vi)).
-///        **INTERNAL.**
+/// **INTERNAL.**
 ///
 /// `buildOpticalFlowPyramid` refuses to build a level that is not strictly larger
 /// than the window -- `if (sz.width <= winSize.width || sz.height <=
 /// winSize.height) { maxLevel = level; break; }` -- and truncates `maxLevel` to
 /// what it built. binCV cannot decline to BUILD a level, because the caller owns
-/// the pyramid (D-5), so it declines to USE one: levels are consumed as a prefix,
+/// the pyramid, so it declines to USE one: levels are consumed as a prefix,
 /// coarsest usable first, and anything at or below the window size is ignored. It
 /// matters MORE here than in the reference, because binCV clips where the
 /// reference pads: on a level no larger than the window every point's window
@@ -2943,7 +2943,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
 /// Level 0 is always used, whatever its size; it is the frame.
 ///
 /// @note Written against `widthAt`/`heightAt` callables so that the array form and
-///       the heterogeneous ladder share ONE copy of the rule.
+/// the heterogeneous ladder share ONE copy of the rule.
 template <typename DimFn>
 inline size_t usableLevelCount(size_t levelCount, int winW, int winH, DimFn dims) {
     size_t usable = 1;
@@ -2956,52 +2956,52 @@ inline size_t usableLevelCount(size_t levelCount, int winW, int winH, DimFn dims
 } // namespace impl
 
 /// @brief Pyramidal Lucas-Kanade tracking of sparse keypoints between two binary
-///        frames. **API TIER 2** -- `cv::calcOpticalFlowPyrLK`'s role and call
-///        shape, deliberately different numerics, NOT bit-exact against OpenCV.
+/// frames. **API TIER 2** -- `cv::calcOpticalFlowPyrLK`'s role and call
+/// shape, deliberately different numerics, NOT bit-exact against OpenCV.
 ///
-/// @tparam WordType The planes' word type (D-1).
+/// @tparam WordType The planes' word type.
 /// @param levels `levelCount` per-level view bundles, **level 0 (the finest)
-///        first**. Every level's six planes must share that level's dimensions.
+/// first**. Every level's six planes must share that level's dimensions.
 /// @param levelCount Number of pyramid levels. `seal_params.yaml`'s
-///        `lk_max_level: 3` means four levels. **Levels at or below the window
-///        size are ignored** (deviation (vi)), so passing more of them than the
-///        frame can carry is harmless rather than silently wrong; 0 is legal and
-///        loses every point.
+/// `lk_max_level: 3` means four levels. **Levels at or below the window
+/// size are ignored** (deviation (vi)), so passing more of them than the
+/// frame can carry is harmless rather than silently wrong; 0 is legal and
+/// loses every point.
 /// @param prevPts `pointCount` keypoints in LEVEL-0 coordinates. Read only.
 /// @param nextPts Out: `pointCount` tracked positions in LEVEL-0 coordinates.
-///        Written for every point, whether or not it was tracked -- a lost point's
-///        entry is its last estimate, exactly as in the reference, and `status` is
-///        the only thing that says which is which.
+/// Written for every point, whether or not it was tracked -- a lost point's
+/// entry is its last estimate, exactly as in the reference, and `status` is
+/// the only thing that says which is which.
 /// @param status Out: 1 if the point was tracked, 0 if it was lost. Every entry is
-///        written -- including on the degenerate `levelCount == 0` call, where
-///        every point is lost and `nextPts` is a copy of `prevPts`.
+/// written -- including on the degenerate `levelCount == 0` call, where
+/// every point is lost and `nextPts` is a copy of `prevPts`.
 /// @param err Out, OPTIONAL (may be null): the mean absolute residual **at the
-///        position that was returned** -- taps and weights recomputed from the
-///        final `nextPts`, not left over from the last iterate -- over the clipped
-///        window at level 0, in {0, 1} intensity units. Zero for a lost point. See
-///        `impl::windowMeanAbsDiff` for the denominator, which is the clipped
-///        pixel count and not the window area.
+/// position that was returned** -- taps and weights recomputed from the
+/// final `nextPts`, not left over from the last iterate -- over the clipped
+/// window at level 0, in {0, 1} intensity units. Zero for a lost point. See
+/// `impl::windowMeanAbsDiff` for the denominator, which is the clipped
+/// pixel count and not the window area.
 /// @param pointCount Number of keypoints.
 /// @param params Window, iteration limit, epsilon and minimum-eigenvalue
-///        threshold; defaulted to `seal_params.yaml`.
+/// threshold; defaulted to `seal_params.yaml`.
 ///
 /// @note **No allocation, no scratch, no throw.** The four arrays are the
-///       caller's and nothing else is needed; tests/test_opticalflow.cpp counts
-///       `operator new` across this call -- the plain and the over-aligned forms --
-///       and requires zero.
+/// caller's and nothing else is needed; tests/test_opticalflow.cpp counts
+/// `operator new` across this call -- the plain and the over-aligned forms --
+/// and requires zero.
 /// @note **Every level of THIS overload is one bit deep.** For deeper levels see
-///       the `LKLevelN<N, WordType>` overload below (a ladder all at one depth)
-///       and `LKLevels<WordType, LevelBits...>` (a ladder of MIXED depths, which
-///       is the form E-7 / T4.1 needs). All three run the same body; the depth
-///       reaches it in exactly two places, `impl::referenceMinEigScale` and
-///       `impl::levelCovariance`.
+/// the `LKLevelN<N, WordType>` overload below (a ladder all at one depth)
+/// and `LKLevels<WordType, LevelBits...>` (a ladder of MIXED depths, which
+/// is the form needs). All three run the same body; the depth
+/// reaches it in exactly two places, `impl::referenceMinEigScale` and
+/// `impl::levelCovariance`.
 /// @note **Windows clip at the frame edge** (deviation (ii)) and next-frame taps
-///       outside the frame replicate (deviation (iii)). Neither is the reference's
-///       border, and both are consequences of declining its `winSize`-wide padded
-///       copy of every level.
+/// outside the frame replicate (deviation (iii)). Neither is the reference's
+/// border, and both are consequences of declining its `winSize`-wide padded
+/// copy of every level.
 /// @note Points are propagated coarse-to-fine even when they are skipped at a
-///       level, and `status` is written only from level 0 -- the reference's rule,
-///       reproduced deliberately, not incidentally.
+/// level, and `status` is written only from level 0 -- the reference's rule,
+/// reproduced deliberately, not incidentally.
 template <typename WordType>
 inline void calcOpticalFlowPyrLK(const LKLevel<WordType>* levels, size_t levelCount,
                                  const Point2f* prevPts, Point2f* nextPts, uint8_t* status,
@@ -3022,21 +3022,21 @@ inline void calcOpticalFlowPyrLK(const LKLevel<WordType>* levels, size_t levelCo
 
 
 /// @brief Pyramidal Lucas-Kanade over a ladder of levels that are all the SAME
-///        depth `N`. **API TIER 2.**
+/// depth `N`. **API TIER 2.**
 /// @param levels `levelCount` levels, **LEVEL 0 FIRST**, each `N` bits per pixel.
 /// @note Identical in every respect to the 1-bit entry point above -- same
-///       contracts, same deviations, same loss rules, same `err` denominator --
-///       because it runs the same body. The two differences are consequences of
-///       the depth and are documented where they live:
-///       `impl::referenceMinEigScale` (the `minEigThreshold` conversion, which
-///       is what keeps the threshold meaning one thing across depths) and
-///       `impl::windowMeanAbsDiff` (the `err` term, the one piece of THE BOUNDARY
-///       that does not survive `N > 1`).
+/// contracts, same deviations, same loss rules, same `err` denominator --
+/// because it runs the same body. The two differences are consequences of
+/// the depth and are documented where they live:
+/// `impl::referenceMinEigScale` (the `minEigThreshold` conversion, which
+/// is what keeps the threshold meaning one thing across depths) and
+/// `impl::windowMeanAbsDiff` (the `err` term, the one piece of THE BOUNDARY
+/// that does not survive `N > 1`).
 /// @note `N == 1` here is the same computation as `LKLevel` above, through the
-///       generic code path rather than the hand-written one, and
-///       tests/test_opticalflow.cpp requires the two to agree exactly.
+/// generic code path rather than the hand-written one, and
+/// tests/test_opticalflow.cpp requires the two to agree exactly.
 /// @brief Reads a 64-bit pyramid level as a 32-bit one, so the vector kernels apply.
-///        **API TIER 3.** No copy, no allocation.
+/// **API TIER 3.** No copy, no allocation.
 ///
 /// ```cpp
 /// // 64-bit storage everywhere, and a tracker that still runs its fast kernels:
@@ -3048,7 +3048,7 @@ inline void calcOpticalFlowPyrLK(const LKLevel<WordType>* levels, size_t levelCo
 /// **THIS IS THE ANSWER TO "WHY DOESN'T binCV SUPPORT 64-BIT WORDS IN THE TRACKER".**
 /// It does, now, at full speed — because it never needed 64-bit kernels, only a view.
 /// See `narrowPlane` for why the reinterpretation is exact, and
-/// [D-73](../../../../docs/ARCHITECTURE.md) for the 8.6× an integrator paid before it existed.
+/// for the 8.6× an integrator paid before it existed.
 template <size_t N, typename WordType>
 inline LKLevelN<N, uint32_t> narrowLevel(const LKLevelN<N, WordType>& lv) {
     static_assert(sizeof(WordType) == 8, "narrowLevel: the source level must be 64-bit");
@@ -3065,13 +3065,13 @@ inline LKLevelN<N, uint32_t> narrowLevel(const LKLevelN<N, WordType>& lv) {
 }
 
 /// @brief Which residual kernel this level type will actually run, as a string.
-///        **API TIER 3.**
+/// **API TIER 3.**
 ///
 /// **PRINT THIS.** binCV's tracking speed depends on a template argument the caller
 /// chooses — the word type — and on what the CPU turns out to support, and neither is
 /// visible from the outside. An integrator who chose a 64-bit word measured keypoint
 /// tracking 8.6× slower than it should have been and had nothing to look at that would
-/// have said so ([D-73](../../../../docs/ARCHITECTURE.md)).
+/// have said so.
 ///
 /// Both shipped example programs print it on startup. Yours should too: it is one line,
 /// and it turns "is binCV actually using its fast path here?" from an investigation
@@ -3094,25 +3094,25 @@ inline const char* lkPathName() {
 }
 
 /// @note **THIS REFUSES TO COMPILE AT DEPTH 1 OR 2 WITH A WORD WIDER THAN 32 BITS**,
-///       and the diagnostic names the fix. Those depths have vectorised kernels — the
-///       AVX2 eight-keypoint batch and four NEON residual kernels — all gated on
-///       `sizeof(WordType) == 4`. A wider word is *correct* and lands in the scalar
-///       fallback, silently, on both architectures.
+/// and the diagnostic names the fix. Those depths have vectorised kernels — the
+/// AVX2 eight-keypoint batch and four NEON residual kernels — all gated on
+/// `sizeof(WordType) == 4`. A wider word is *correct* and lands in the scalar
+/// fallback, silently, on both architectures.
 ///
-///       **That is not a hypothetical.** [D-45](../../../../docs/ARCHITECTURE.md) recorded the
-///       gate and measured `uint64_t` at 1.32× slower on `track`; the record was true
-///       and invisible at the point of use. An integrator building a VIO frontend
-///       chose `uint64_t` — reasoning, correctly, that a wider word means fewer
-///       operations per row — and measured keypoint tracking **8.6× slower** before
-///       finding the gate. Their trajectory error was identical either way, which is
-///       what made it a performance bug rather than a visible one.
+/// **That is not a hypothetical.** recorded the
+/// gate and measured `uint64_t` at 1.32× slower on `track`; the record was true
+/// and invisible at the point of use. An integrator building a VIO frontend
+/// chose `uint64_t` — reasoning, correctly, that a wider word means fewer
+/// operations per row — and measured keypoint tracking **8.6× slower** before
+/// finding the gate. Their trajectory error was identical either way, which is
+/// what made it a performance bug rather than a visible one.
 ///
-///       A deeper level (N >= 3) is scalar by nature and compiles without complaint:
-///       that is an accuracy choice (E-7), not a mistake. **This fires only where the
-///       same kernel exists and the word opts out of it.**
+/// A deeper level (N >= 3) is scalar by nature and compiles without complaint:
+/// that is an accuracy choice, not a mistake. **This fires only where the
+/// same kernel exists and the word opts out of it.**
 ///
-///       Deliberately measuring the scalar path — as `wordwidth_benchmark` does — is
-///       what `BINCV_ALLOW_SCALAR_LK_WORD` is for.
+/// Deliberately measuring the scalar path — as `wordwidth_benchmark` does — is
+/// what `BINCV_ALLOW_SCALAR_LK_WORD` is for.
 template <size_t N, typename WordType>
 inline void calcOpticalFlowPyrLK(const LKLevelN<N, WordType>* levels, size_t levelCount,
                                  const Point2f* prevPts, Point2f* nextPts, uint8_t* status,
@@ -3143,20 +3143,20 @@ inline void calcOpticalFlowPyrLK(const LKLevelN<N, WordType>* levels, size_t lev
 }
 
 /// @brief A tracking ladder whose levels have **DIFFERENT bit depths**, level 0
-///        first. **API TIER 2.**
+/// first. **API TIER 2.**
 /// @tparam LevelBits One depth per level -- `LKLevels<uint32_t, 1, 3, 4, 5>` is
-///         the ladder ARCHITECTURE 7.2 measured on the reference pipeline.
+/// the ladder the design notes measured on the reference pipeline.
 ///
 /// @note **The depths are a template parameter list, not a runtime vector, and
-///       that is `Pyramid`'s decision rather than a new one.** `QuantMat` is
-///       templated on N, so levels of different depths have different TYPES; a
-///       runtime container of them would need type erasure, and the `N^2` inner
-///       loops of `impl::slicedSignedSum` would become runtime-bounded, which
-///       would confound exactly the ns/pixel axis E-7 has to report. This mirrors
-///       `Pyramid<WordType, LevelBits...>` one-for-one so that a pyramid and the
-///       tracker that reads it are declared the same way.
-/// @note Holds VIEWS, not containers (D-5), so it owns nothing and allocates
-///       nothing. The caller owns the two pyramids and the derivative planes.
+/// that is `Pyramid`'s decision rather than a new one.** `QuantMat` is
+/// templated on N, so levels of different depths have different TYPES; a
+/// runtime container of them would need type erasure, and the `N^2` inner
+/// loops of `impl::slicedSignedSum` would become runtime-bounded, which
+/// would confound exactly the ns/pixel axis has to report. This mirrors
+/// `Pyramid<WordType, LevelBits...>` one-for-one so that a pyramid and the
+/// tracker that reads it are declared the same way.
+/// @note Holds VIEWS, not containers, so it owns nothing and allocates
+/// nothing. The caller owns the two pyramids and the derivative planes.
 template <typename WordType, size_t... LevelBits>
 struct LKLevels;
 
@@ -3213,8 +3213,8 @@ struct LKLevels<WordType, N0, N1, Rest...> {
     }
 
     /// @note Recurses to the coarsest USABLE level and calls `f` on the way back
-    ///       out, so the visit order is coarse-to-fine -- the tracker's order --
-    ///       with no array of pointers and no type erasure.
+    /// out, so the visit order is coarse-to-fine -- the tracker's order --
+    /// with no array of pointers and no type erasure.
     template <typename Fn>
     void visitCoarseToFine(size_t usable, Fn& f, size_t index) const {
         if (index + 1 < usable) rest.visitCoarseToFine(usable, f, index + 1);
@@ -3223,11 +3223,11 @@ struct LKLevels<WordType, N0, N1, Rest...> {
 };
 
 /// @brief Pyramidal Lucas-Kanade over a ladder of **mixed-depth** levels.
-///        **API TIER 2.**
+/// **API TIER 2.**
 /// @note Same contracts, deviations and loss rules as the two entry points above;
-///       each level runs the same body at its own depth. This is the form E-7
-///       needs, because the question it asks -- how many bits does EACH level need
-///       -- only has an answer a mixed ladder can express.
+/// each level runs the same body at its own depth. This is the form
+/// needs, because the question it asks -- how many bits does EACH level need
+/// -- only has an answer a mixed ladder can express.
 template <typename WordType, size_t... LevelBits>
 inline void calcOpticalFlowPyrLK(const LKLevels<WordType, LevelBits...>& levels,
                                  const Point2f* prevPts, Point2f* nextPts, uint8_t* status,
@@ -3247,18 +3247,18 @@ inline void calcOpticalFlowPyrLK(const LKLevels<WordType, LevelBits...>& levels,
 }
 
 /// @brief Stack bytes the tracker's staging buffers occupy at `(N, WordType)`.
-///        **API TIER 3.**
+/// **API TIER 3.**
 ///
 /// **This is the whole of the tracker's per-call memory.** Everything else it keeps is
-/// O(1): there is no scratch buffer and no allocation anywhere (D-5, and CLAUDE.md's
+/// O(1): there is no scratch buffer and no allocation anywhere (, and CLAUDE.md's
 /// hard rule that a kernel does not allocate).
 ///
 /// @note **For sizing a thread stack, and for asserting against a budget binCV cannot
-///       know.** It grows with the bit depth — `64 * (7N + 2)` words — so it is 4 KB at
-///       the shipped `N = 2` with 32-bit words and about 14.5 KB at `N = 8`. On a
-///       desktop that is noise; on a Cortex-M with a 16 KB stack the second figure is
-///       the whole stack. `BINCV_STAGING_BUDGET_BYTES` turns that into a build error
-///       rather than a silent overflow, and this is the number it checks (E-38, D-79).
+/// know.** It grows with the bit depth — `64 * (7N + 2)` words — so it is 4 KB at
+/// the shipped `N = 2` with 32-bit words and about 14.5 KB at `N = 8`. On a
+/// desktop that is noise; on a Cortex-M with a 16 KB stack the second figure is
+/// the whole stack. `BINCV_STAGING_BUDGET_BYTES` turns that into a build error
+/// rather than a silent overflow, and this is the number it checks.
 template <size_t N, typename WordType>
 constexpr size_t stagingStackBytes() {
     return impl::stagingStackBytesImpl<N, WordType>();

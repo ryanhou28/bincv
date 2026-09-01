@@ -1,23 +1,23 @@
-// Shift kernels (T2.3 horizontal, T2.4 vertical and borders).
+// Shift kernels ( horizontal, vertical and borders).
 //
 // TWO HALVES, exactly as tests/test_logic.cpp has:
 //
-//   1. The CORE half (everything above the OpenCV guard) needs no OpenCV, so it
-//      runs in all four verification configurations -- including Debug, the only
-//      one where the kernels' BINCV_ASSERT preconditions are live, and
-//      -fno-exceptions, which is the embedded claim. It checks the kernels against
-//      a NAIVE PER-PIXEL REFERENCE, over differing strides, at the degenerate
-//      sizes, against sources whose padding bits are dirty, and against the
-//      padding-bit invariant that no pixel comparison can see.
+// 1. The CORE half (everything above the OpenCV guard) needs no OpenCV, so it
+// runs in all four verification configurations -- including Debug, the only
+// one where the kernels' BINCV_ASSERT preconditions are live, and
+// -fno-exceptions, which is the embedded claim. It checks the kernels against
+// a NAIVE PER-PIXEL REFERENCE, over differing strides, at the degenerate
+// sizes, against sources whose padding bits are dirty, and against the
+// padding-bit invariant that no pixel comparison can see.
 //
-//   2. The OPENCV half asserts what the border semantics actually promise:
-//      the same mapping cv::borderInterpolate computes, and the same images
-//      cv::copyMakeBorder produces, over T2.1's size matrix at all four word
-//      widths. That is what makes morphology (T3.3) bit-exact later.
+// 2. The OPENCV half asserts what the border semantics actually promise:
+// the same mapping cv::borderInterpolate computes, and the same images
+// cv::copyMakeBorder produces, over that work’s size matrix at all four word
+// widths. That is what makes morphology bit-exact later.
 //
 // THE ORACLE IS THE PER-PIXEL REFERENCE, AND IT SHARES NO CODE WITH THE KERNEL.
 //
-// refPixel() below indexes the source one pixel at a time and knows nothing about
+// refPixel below indexes the source one pixel at a time and knows nothing about
 // words, carries or masks -- so a mistake in the word recurrence cannot cancel
 // through it. Its border mapping is written as OpenCV's documented do-while loop,
 // where impl::borderIndex is a closed-form modulo: two different algorithms for
@@ -128,8 +128,8 @@ long refBorderIndex(long p, long len, BorderType type) {
 }
 
 /// @brief What dst(y, x) must hold after shift(src, dst, dx, dy, type, value).
-/// @note One pixel at a time, through at(). No word, no mask, no carry -- which is
-///       what makes it an independent verdict on the packed implementation.
+/// @note One pixel at a time, through at. No word, no mask, no carry -- which is
+/// what makes it an independent verdict on the packed implementation.
 template <typename WordType>
 bool refPixel(const bincv::BinMat<WordType>& src, long y, long x, long dx, long dy,
               BorderType type, bool value) {
@@ -160,7 +160,7 @@ int disagreements(const bincv::BinMat<WordType>& src, const bincv::BinMat<WordTy
 // ---------------------------------------------------------------------------
 //
 // Duplicated rather than shared for the reason tests/test_logic.cpp gives:
-// randomBinary() lives behind BINCV_WITH_OPENCV, and three of the four
+// randomBinary lives behind BINCV_WITH_OPENCV, and three of the four
 // configurations this suite runs in have no OpenCV. Same SplitMix64, same
 // threshold mapping, so a case that fails here reproduces there.
 
@@ -183,7 +183,7 @@ uint32_t fillThreshold(float fillRatio) {
     return static_cast<uint32_t>(rounded);
 }
 
-/// @brief Fills a matrix through set(), so its padding bits stay clear.
+/// @brief Fills a matrix through set, so its padding bits stay clear.
 template <typename WordType>
 void fillRandom(bincv::BinMat<WordType>& m, float fillRatio, uint64_t seed) {
     uint64_t state = seed;
@@ -205,12 +205,12 @@ uint64_t caseSeed(int width, int height, size_t index) {
 // ---------------------------------------------------------------------------
 
 /// @brief Set bits across the whole STRIDE, padding included.
-/// @note Not a library operation -- binCV exposes no per-word popcount (D-6).
-///       Comparing it against countNonZero()'s per-pixel loop is how a padding-bit
-///       violation becomes visible: they agree only when every bit past `width` is
-///       zero. A shift with a border value of `true` sets every padding bit of the
-///       trailing word before the mask removes them, so this is the check that
-///       fails first if the mask is dropped.
+/// @note Not a library operation -- binCV exposes no per-word popcount.
+/// Comparing it against countNonZero's per-pixel loop is how a padding-bit
+/// violation becomes visible: they agree only when every bit past `width` is
+/// zero. A shift with a border value of `true` sets every padding bit of the
+/// trailing word before the mask removes them, so this is the check that
+/// fails first if the mask is dropped.
 template <typename WordType>
 int bitsAcrossStride(const bincv::BinMat<WordType>& m) {
     int bits = 0;
@@ -235,11 +235,11 @@ std::string label(const char* wordTypeName, int width, int height, long dx, long
 }
 
 /// @brief Runs a pure horizontal or vertical shift through its DIRECTIONAL entry
-///        point, and anything else through shift().
+/// point, and anything else through shift.
 /// @note The directional wrappers are where a sign error hides: they are four
-///       one-line calls into shift() and each one can have its direction backwards
-///       without any word arithmetic being wrong. Routing the axis-aligned sweeps
-///       through them is what makes that a test failure.
+/// one-line calls into shift and each one can have its direction backwards
+/// without any word arithmetic being wrong. Routing the axis-aligned sweeps
+/// through them is what makes that a test failure.
 template <typename WordType>
 void runShift(const bincv::BinMat<WordType>& src, bincv::BinMat<WordType>& dst, long dx,
               long dy, BorderType type, bool value) {
@@ -282,22 +282,22 @@ void checkOneCase(const char* wordTypeName, const bincv::BinMat<WordType>& src,
 // The sweep matrix
 // ---------------------------------------------------------------------------
 //
-// The T2.1 widths. All but 640 are non-multiples of at least one supported word
+// The widths. All but 640 are non-multiples of at least one supported word
 // width, which is where the cross-word carry and the trailing-word mask meet.
 
 const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (D-4 makes alignment a per-object choice): 32 bytes
+// An over-aligned row stride (the design rule makes alignment a per-object choice): 32 bytes
 // is a whole number of 1-, 2-, 4- and 8-byte words, so every word type gets a
 // stride strictly larger than the ceil(width / WordBits) words its rows need.
 constexpr size_t PADDED_ALIGNMENT = 32;
 
 // ===========================================================================
-// 1. The k sweep: 0 through 2 * WordBits + 1, both directions (T2.3)
+// 1. The k sweep: 0 through 2 * WordBits + 1, both directions
 // ===========================================================================
 //
-// The range TASKS.md T2.3 names, and it is chosen to straddle every boundary the
+// The range names, and it is chosen to straddle every boundary the
 // recurrence has: k == 0 and k == WordBits and k == 2 * WordBits are the
 // bitShift == 0 cases, where `x << (WordBits - bitShift)` would be a shift by
 // WordBits -- undefined behaviour, and on x86 the natural encoding masks the count
@@ -368,7 +368,7 @@ void testWideRows(const char* wordTypeName) {
 }
 
 // ===========================================================================
-// 3. Vertical shifts, including offsets that exceed the height (T2.4)
+// 3. Vertical shifts, including offsets that exceed the height
 // ===========================================================================
 
 template <typename WordType>
@@ -380,7 +380,7 @@ void testVertical(const char* wordTypeName) {
             bincv::BinMat<WordType> src(width, height);
             fillRandom(src, 0.5f, caseSeed(width, height, 3));
 
-            // 0 .. 2*height+1 covers every in-range offset and the first few past
+            // 0.. 2*height+1 covers every in-range offset and the first few past
             // it; 3*height+2 is well past, which is where a clamp that should have
             // been a modulo (BORDER_WRAP) stops agreeing with a reflection.
             std::vector<long> ks;
@@ -398,7 +398,7 @@ void testVertical(const char* wordTypeName) {
 }
 
 // ===========================================================================
-// 4. Every BorderType, both fill values, in both axes at once (T2.4)
+// 4. Every BorderType, both fill values, in both axes at once
 // ===========================================================================
 //
 // Against the per-pixel reference here; against cv::copyMakeBorder in the OpenCV
@@ -454,7 +454,7 @@ void testDegenerate(const char* wordTypeName) {
 
     // Empty is a no-op, not an error. All three shapes of empty, since a kernel
     // could plausibly guard one and not the others -- and an empty image has no
-    // border to interpolate, so a shift that reached borderIndex() would divide by
+    // border to interpolate, so a shift that reached borderIndex would divide by
     // zero or spin.
     const int emptyShapes[][2] = {{0, 0}, {0, 5}, {5, 0}};
     for (const auto& shape : emptyShapes) {
@@ -501,7 +501,7 @@ void testDegenerate(const char* wordTypeName) {
         }
     }
 
-    std::cout << "  " << wordTypeName << ": empty and 1x1 shapes handled\n";
+    std::cout << " " << wordTypeName << ": empty and 1x1 shapes handled\n";
 }
 
 // ===========================================================================
@@ -510,7 +510,7 @@ void testDegenerate(const char* wordTypeName) {
 //
 // The failure this exists to catch: a kernel that walks its arguments as one dense
 // run is correct whenever both were built the same way, and wrong the moment one
-// is over-aligned (D-4) or wraps a caller's buffer with its own stride.
+// is over-aligned or wraps a caller's buffer with its own stride.
 
 enum class Stride { Tight, Padded, Odd };
 
@@ -593,13 +593,13 @@ void testDifferingStrides(const char* wordTypeName) {
 // 7. SOURCES WHOSE PADDING BITS ARE ALREADY DIRTY
 // ===========================================================================
 //
-// The case the T2.3 spec's word recurrence does not cover on its own, and the one
+// The case the spec's word recurrence does not cover on its own, and the one
 // place a shift differs from a pointwise kernel.
 //
 // "Out-of-range source WORDS read as zero" is not the whole rule. A row's trailing
 // partial word holds pixels in its low bits and PADDING in its high ones, and
 // those padding bits sit at column indices past `width` -- outside the image. A
-// shiftLeft by k moves them to columns width-k .. width-1, which are live
+// shiftLeft by k moves them to columns width-k.. width-1, which are live
 // destination pixels. BinMat's wrap constructor documents that a caller's padding
 // belongs to the caller, so a source with dirty padding is a supported
 // construction (tests/test_logic.cpp sweeps the same one).
@@ -620,7 +620,7 @@ void makeDirtyPadded(StridedMat<WordType>& out, int width, int height, float fil
     out.buffer.assign(minWords * static_cast<size_t>(height), allOnes);
     out.mat = bincv::BinMat<WordType>(out.buffer.data(), width, height, minWords);
 
-    // Through set(), so the pixel bits are the drawn content and every bit past
+    // Through set, so the pixel bits are the drawn content and every bit past
     // `width` keeps the 1 it was born with.
     uint64_t state = seed;
     const uint32_t threshold = fillThreshold(fillRatio);
@@ -743,8 +743,8 @@ void testGuardWords(const char* wordTypeName) {
 // shift.hpp refuses an overlapping destination, and "overlapping" has to mean per
 // row rather than per bounding box. Two views over one buffer can interleave
 // without sharing a byte -- alternate row bands are what a pyramid downsample
-// takes (ARCHITECTURE 7.2), left/right column tiles are how a frame is split
-// across a loop -- and D-5 says a kernel takes any {ptr, width, height, stride}.
+// takes (the design notes), left/right column tiles are how a frame is split
+// across a loop -- and the design rule says a kernel takes any {ptr, width, height, stride}.
 // The equivalent predicate in ops/logic.hpp got this wrong once and aborted every
 // Debug build on a call that was correct in release; this case is what would say
 // so if the shared predicate regressed.
@@ -762,7 +762,7 @@ void testDisjointViewsOverOneBuffer(const char* wordTypeName) {
     const int width = static_cast<int>(2 * wordBits);   // exactly two words, no tail
 
     // (a) Interleaved ROW BANDS: dst is physical rows 0, 2, 4 and src is rows
-    //     1, 3, 5 of one 6-row image. Same stride, half a stride apart.
+    // 1, 3, 5 of one 6-row image. Same stride, half a stride apart.
     {
         const int height = 3;
         std::vector<WordType> buffer(rowWords * 6, static_cast<WordType>(0));
@@ -872,9 +872,9 @@ void testBorderIndexAgainstReference() {
 
 /// @brief impl::borderIndex against cv::borderInterpolate, coordinate by coordinate.
 /// @note This is the check that makes "border semantics match OpenCV exactly" a
-///       measurement. Everything downstream -- morphology's bit-exactness against
-///       cv::erode -- rests on this one mapping, and an image comparison can only
-///       see it where the border actually reaches.
+/// measurement. Everything downstream -- morphology's bit-exactness against
+/// cv::erode -- rests on this one mapping, and an image comparison can only
+/// see it where the border actually reaches.
 void testBorderInterpolateAgainstOpenCv() {
     std::cout << "\n--- borderIndex vs cv::borderInterpolate ---\n";
 
@@ -919,13 +919,13 @@ int cvBorderType(BorderType type) {
 /// @brief The shifted image OpenCV produces, via cv::copyMakeBorder and a crop.
 ///
 /// @note OpenCV has no shift, so the denominator has to be built. It is exact:
-///       dst(y, x) = extended-src(y + dy, x + dx), and copyMakeBorder is the
-///       function that materialises "extended src". Pad by just enough that the
-///       window lands inside, then take the window --
-///       top = max(0, -dy), bottom = max(0, dy), and the ROI origin is
-///       (max(dx, 0), max(dy, 0)).
-/// @note This is the T2.4 requirement stated literally: "every border type matches
-///       cv::copyMakeBorder on equivalent content".
+/// dst(y, x) = extended-src(y + dy, x + dx), and copyMakeBorder is the
+/// function that materialises "extended src". Pad by just enough that the
+/// window lands inside, then take the window --
+/// top = max(0, -dy), bottom = max(0, dy), and the ROI origin is
+/// (max(dx, 0), max(dy, 0)).
+/// @note This is the requirement stated literally: "every border type matches
+/// cv::copyMakeBorder on equivalent content".
 cv::Mat openCvShift(const cv::Mat& src, long dx, long dy, BorderType type, bool value) {
     const int left = static_cast<int>(dx < 0 ? -dx : 0);
     const int right = static_cast<int>(dx > 0 ? dx : 0);
@@ -942,43 +942,43 @@ cv::Mat openCvShift(const cv::Mat& src, long dx, long dy, BorderType type, bool 
 }
 
 /// @brief "0.50" -- the fill ratio as a failing case's label spells it.
-/// @note Two decimals, matching tests/equivalence.hpp's caseLabel(), so a failure
-///       here and a failure there name the same case the same way. std::to_string
-///       would print 0.010000.
+/// @note Two decimals, matching tests/equivalence.hpp's caseLabel, so a failure
+/// here and a failure there name the same case the same way. std::to_string
+/// would print 0.010000.
 std::string fillText(float fill) {
     char text[16];
     std::snprintf(text, sizeof(text), "%.2f", static_cast<double>(fill));
     return std::string(text);
 }
 
-/// @brief Tier 1 border semantics over the T2.1 size matrix.
-/// @note OpenCV's input comes from randomCvMask(), the harness's SECOND generator,
-///       which writes CV_8U bytes directly and never touches the packing or the
-///       unpacking path. tests/test_logic.cpp measured what the obvious spelling
-///       costs: with both sides built through toCvMask(), a one-column fault in the
-///       conversion cancelled exactly and the suite passed 56044 of 56044.
-/// @note **The WHOLE T2.1 matrix -- widths, heights AND fill ratios.** It used to
-///       be equivalenceWidths() x {1, 3, 17} at a hard-coded fill of 0.5, which is
-///       a subset while the surrounding prose claimed the matrix. Both omissions
-///       cost coverage: height 2 is the smallest case where a wrong stride is not
-///       invisible (tests/equivalence.hpp says so in as many words), and 0.0 and
-///       1.0 are the exact all-clear and all-set frames, which are where a masked
-///       or short-circuited kernel stops being exercised and where the border
-///       stands at maximum contrast against the image.
+/// @brief Tier 1 border semantics over the size matrix.
+/// @note OpenCV's input comes from randomCvMask, the harness's SECOND generator,
+/// which writes CV_8U bytes directly and never touches the packing or the
+/// unpacking path. tests/test_logic.cpp measured what the obvious spelling
+/// costs: with both sides built through toCvMask, a one-column fault in the
+/// conversion cancelled exactly and the suite passed 56044 of 56044.
+/// @note **The WHOLE the matrix -- widths, heights AND fill ratios.** It used to
+/// be equivalenceWidths x {1, 3, 17} at a hard-coded fill of 0.5, which is
+/// a subset while the surrounding prose claimed the matrix. Both omissions
+/// cost coverage: height 2 is the smallest case where a wrong stride is not
+/// invisible (tests/equivalence.hpp says so in as many words), and 0.0 and
+/// 1.0 are the exact all-clear and all-set frames, which are where a masked
+/// or short-circuited kernel stops being exercised and where the border
+/// stands at maximum contrast against the image.
 /// @note **The last six offsets are relative to the EXTENTS, and that is the point
-///       of declaring the table inside the size loops.** T2.4's second done-when
-///       clause is "vertical shifts correct for offsets exceeding the image
-///       height", and the fixed table this replaces reached |dy| = 3 against
-///       heights of 1, 3 and 17 -- so `dy > height` at a height greater than 1 was
-///       never asked of cv::copyMakeBorder at all. Measured, with a clamp injected
-///       into ops/shift.hpp's row loop that is wrong ONLY past the height
-///       (`dy > src.height ? src.height : dy` feeding borderIndex): the core
-///       reference half went red, 112589 of 112733, and all four Shift.OpenCv_*
-///       cases stayed GREEN. With the offsets below the same clamp fails 2768
-///       checks and takes every Shift.OpenCv_* with it. The horizontal analogue
-///       (clamping dx to the width) always did fail here -- {wordBits + 1, -1}
-///       exceeds a width of 1 -- so the hole was one axis wide, which is exactly
-///       the shape of gap an "it is symmetric" reading of the file would miss.
+/// of declaring the table inside the size loops.** that work’s second done-when
+/// clause is "vertical shifts correct for offsets exceeding the image
+/// height", and the fixed table this replaces reached |dy| = 3 against
+/// heights of 1, 3 and 17 -- so `dy > height` at a height greater than 1 was
+/// never asked of cv::copyMakeBorder at all. Measured, with a clamp injected
+/// into ops/shift.hpp's row loop that is wrong ONLY past the height
+/// (`dy > src.height ? src.height : dy` feeding borderIndex): the core
+/// reference half went red, 112589 of 112733, and all four Shift.OpenCv_*
+/// cases stayed GREEN. With the offsets below the same clamp fails 2768
+/// checks and takes every Shift.OpenCv_* with it. The horizontal analogue
+/// (clamping dx to the width) always did fail here -- {wordBits + 1, -1}
+/// exceeds a width of 1 -- so the hole was one axis wide, which is exactly
+/// the shape of gap an "it is symmetric" reading of the file would miss.
 template <typename WordType>
 void testOpenCvBorders(const char* wordTypeName) {
     std::cout << "\n--- shift vs cv::copyMakeBorder: " << wordTypeName << " ---\n";
@@ -1002,7 +1002,7 @@ void testOpenCvBorders(const char* wordTypeName) {
                                        {wordBits + 1, -1},
                                        {-wordBits - 1, 2},
                                        // Past the extent on each axis, and both at
-                                       // once -- the regime T2.4 names, where a
+                                       // once -- the regime names, where a
                                        // reflection's period and a clamp part ways.
                                        {0, h + 2},
                                        {0, -(h + 2)},
@@ -1042,14 +1042,14 @@ void testOpenCvBorders(const char* wordTypeName) {
 /// @brief The premise the fill decision rests on, measured rather than asserted.
 ///
 /// @note ops/shift.hpp says erode needs ones outside the image and dilate needs
-///       zeros, and claims OpenCV encodes the same asymmetry through
-///       morphologyDefaultBorderValue(). That is a statement about OpenCV, so it
-///       is checked against OpenCV: eroding an all-white frame with the default
-///       border must NOT produce a black frame around the edge, and dilating an
-///       all-black one must NOT produce a white one.
+/// zeros, and claims OpenCV encodes the same asymmetry through
+/// morphologyDefaultBorderValue. That is a statement about OpenCV, so it
+/// is checked against OpenCV: eroding an all-white frame with the default
+/// border must NOT produce a black frame around the edge, and dilating an
+/// all-black one must NOT produce a white one.
 /// @note If this case ever fails, the paragraph in ops/shift.hpp is wrong and
-///       T3.3's border defaults follow it -- which is exactly why it is here rather
-///       than in the morphology task that will consume it.
+/// that work’s border defaults follow it -- which is exactly why it is here rather
+/// than in the morphology task that will consume it.
 #if BINCV_TEST_HAVE_IMGPROC
 void testMorphologyFillPremise() {
     std::cout << "\n--- the erode/dilate fill asymmetry, as OpenCV implements it ---\n";

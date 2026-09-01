@@ -1,4 +1,4 @@
-// The debug half of the error policy (T1.4, ARCHITECTURE 5.3), compiled in every
+// The debug half of the error policy (the design notes), compiled in every
 // configuration.
 //
 // THIS FILE FORCES THE CHECKED CONFIGURATION, exactly as tests/test_assert_abort.cpp
@@ -98,7 +98,7 @@ void testInRangeAccessIsUnaffected() {
     BINCV_CHECK_EQ(m.countNonZero(), 2);
 
     // Nothing leaked past `width`: the padding bits of row 3 are still zero, so
-    // a word-wise reduction would agree with countNonZero().
+    // a word-wise reduction would agree with countNonZero.
     BINCV_CHECK(m.data()[3] == (uint32_t(1) << 19));
 }
 
@@ -138,8 +138,8 @@ void testViewRowPreconditionAcceptsLegalShapes() {
 } // namespace
 
 BINCV_TEST(ErrorPolicyChecked, Configuration) {
-    std::cout << "  BINCV_DEBUG_CHECKS       = " << BINCV_DEBUG_CHECKS << "\n";
-    std::cout << "  BINCV_EXCEPTIONS_ENABLED = " << BINCV_EXCEPTIONS_ENABLED << "\n";
+    std::cout << " BINCV_DEBUG_CHECKS = " << BINCV_DEBUG_CHECKS << "\n";
+    std::cout << " BINCV_EXCEPTIONS_ENABLED = " << BINCV_EXCEPTIONS_ENABLED << "\n";
 }
 BINCV_TEST(ErrorPolicyChecked, AssertIsLiveInDebug)   { testAssertIsLiveInDebug(); }
 BINCV_TEST(ErrorPolicyChecked, InRangeAccessUnaffected) { testInRangeAccessIsUnaffected(); }

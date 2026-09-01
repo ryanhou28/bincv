@@ -4,16 +4,16 @@
 // CMakeLists.txt compile it, and scripts/verify.sh turns each on in a throwaway
 // build tree and requires the build to FAIL:
 //
-//   -DBINCV_SELFTEST_WARNING=ON   builds it as a properly wired target, so
-//                                 -Werror must reject it.  Proves the flags are
-//                                 reaching first-party sources and are fatal.
+// -DBINCV_SELFTEST_WARNING=ON builds it as a properly wired target, so
+// -Werror must reject it. Proves the flags are
+// reaching first-party sources and are fatal.
 //
-//   -DBINCV_SELFTEST_UNWIRED=ON   builds it as a target that omits
-//                                 bincv_warnings, so bincv_assert_warning_policy()
-//                                 must reject it at CONFIGURE time.  Proves the
-//                                 wiring assertion fires -- this is the case a
-//                                 build-log scan structurally cannot catch, since
-//                                 an unwired target emits nothing to scan.
+// -DBINCV_SELFTEST_UNWIRED=ON builds it as a target that omits
+// bincv_warnings, so bincv_assert_warning_policy
+// must reject it at CONFIGURE time. Proves the
+// wiring assertion fires -- this is the case a
+// build-log scan structurally cannot catch, since
+// an unwired target emits nothing to scan.
 //
 // A gate that has never been observed to fail is not known to work; both of
 // these have to stay compilable-but-unclean for that observation to be possible.

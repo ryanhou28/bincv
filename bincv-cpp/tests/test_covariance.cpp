@@ -1,7 +1,7 @@
-// The LK gradient covariance (T3.6) -- ops/covariance.hpp.
+// The LK gradient covariance -- ops/covariance.hpp.
 //
 // THIS SUITE IS WHAT STANDS BEHIND THE PROJECT'S CENTRAL TECHNICAL CLAIM.
-// ARCHITECTURE 7.5 asserts that the whole 2x2 Lucas-Kanade gradient covariance
+// the design notes asserts that the whole 2x2 Lucas-Kanade gradient covariance
 // reduces to masked population counts over sign-magnitude ternary planes. If that
 // identity is wrong, bit-parallel software cannot do this job and the project's
 // premise is wrong -- so the identity is not assumed here, it is PROVEN against a
@@ -59,23 +59,23 @@
 //
 // WHAT ELSE IS PINNED HERE
 //
-//   * NO SCRATCH AND NO HEAP. `operator new` is counted across the calls -- the
-//     plain AND the C++17 over-aligned forms, since only the plain pair was
-//     replaced at first and an over-aligned scratch buffer was therefore invisible
-//     to it -- and must be zero. The counter is itself exercised on one allocation
-//     of each kind, so the zero is a reading and not a blind spot. This is not
-//     decoration: the four-argument selector form was chosen over the 11-14%
-//     FASTER precomputed-plane form precisely because it needs no plane (X-11b
-//     axis 3, D-15, CLAUDE.md's memory tiebreak). A covariance that quietly
-//     allocated would have discarded the speed and bought nothing.
-//   * THE SIGN PLANE IS READ ONLY WHERE BOTH MAGNITUDES ARE SET. Dirtying every
-//     sign bit over a zero magnitude -- which the canonical-zero rule says carries
-//     no information -- must not move any of the three numbers.
-//   * PADDING IS NEVER COUNTED (D-13), including when the source's padding bits
-//     are all ones, and including when the "padding" is a neighbour's live pixels
-//     because the view windows a wider frame.
-//   * The container spelling and the view spelling agree, and both agree with the
-//     fused entry point they are a naming of.
+// * NO SCRATCH AND NO HEAP. `operator new` is counted across the calls -- the
+// plain AND the C++17 over-aligned forms, since only the plain pair was
+// replaced at first and an over-aligned scratch buffer was therefore invisible
+// to it -- and must be zero. The counter is itself exercised on one allocation
+// of each kind, so the zero is a reading and not a blind spot. This is not
+// decoration: the four-argument selector form was chosen over the 11-14%
+// FASTER precomputed-plane form precisely because it needs no plane (
+// axis 3,, CLAUDE.md's memory tiebreak). A covariance that quietly
+// allocated would have discarded the speed and bought nothing.
+// * THE SIGN PLANE IS READ ONLY WHERE BOTH MAGNITUDES ARE SET. Dirtying every
+// sign bit over a zero magnitude -- which the canonical-zero rule says carries
+// no information -- must not move any of the three numbers.
+// * PADDING IS NEVER COUNTED, including when the source's padding bits
+// are all ones, and including when the "padding" is a neighbour's live pixels
+// because the view windows a wider frame.
+// * The container spelling and the view spelling agree, and both agree with the
+// fused entry point they are a naming of.
 
 #include <algorithm>
 #include <cstddef>
@@ -128,8 +128,8 @@ void* countedAllocate(std::size_t bytes) {
 
 /// @brief The over-aligned allocation path, counted on the same counter.
 /// @note std::aligned_alloc requires the size to be a multiple of the alignment,
-///       which `operator new` does not promise, so it is rounded up here. The
-///       alignment is already a power of two -- the language guarantees it.
+/// which `operator new` does not promise, so it is rounded up here. The
+/// alignment is already a power of two -- the language guarantees it.
 void* countedAllocateAligned(std::size_t bytes, std::size_t alignment) {
     ++g_newCount;
     if (bytes > static_cast<std::size_t>(PTRDIFF_MAX)) std::abort();
@@ -177,7 +177,7 @@ using bincv::gradientCovariance;
     ::bincv::test::reportCheck((ok), (what), __FILE__, __LINE__, \
                                (ok) ? std::string() : (detailExpr))
 
-// The three window sizes T3.6 is specified over. 31 is the reference pipeline's
+// The three window sizes this is specified over. 31 is the reference pipeline's
 // LK window; 7 and 15 are the smaller ones a pyramid level uses.
 const int WINDOW_SIZES[] = {7, 15, 31};
 
@@ -204,7 +204,7 @@ const int SWEEP_HEIGHT = 35;
 // The largest window swept. Kept as its own constant so the relationship above can
 // be a compile-time property: a future edit that shrinks the frame, or adds a
 // window size larger than the frame, is a build failure rather than a suite that
-// is still green while proving less. checkWindowSizes() below pins that this is
+// is still green while proving less. checkWindowSizes below pins that this is
 // really the maximum of WINDOW_SIZES, since a static_assert cannot read the array.
 constexpr int MAX_WINDOW_SIZE = 31;
 static_assert(SWEEP_HEIGHT > MAX_WINDOW_SIZE,
@@ -231,7 +231,7 @@ size_t g_invariancePositions = 0;
 
 // splitmix64, so a failure reproduces exactly. Deliberately this file's own copy:
 // the generator that builds an input and the reference that judges the output must
-// not share machinery, or a fault in the shared part cancels (T2.1's rule).
+// not share machinery, or a fault in the shared part cancels (that work’s rule).
 uint64_t nextRandom(uint64_t& state) {
     state += UINT64_C(0x9E3779B97F4A7C15);
     uint64_t z = state;
@@ -240,10 +240,10 @@ uint64_t nextRandom(uint64_t& state) {
     return z ^ (z >> 31);
 }
 
-/// @brief Fills a ternary matrix with values in {-1, 0, +1} through set(), so its
-///        padding bits stay clear and its zeros stay canonical.
+/// @brief Fills a ternary matrix with values in {-1, 0, +1} through set, so its
+/// padding bits stay clear and its zeros stay canonical.
 /// @param zeroBias Out of 4 draws, how many are forced to 0. Higher means sparser
-///        gradients, which is what a real binarized derivative looks like.
+/// gradients, which is what a real binarized derivative looks like.
 template <typename WordType>
 void fillRandomTernary(TernaryMat<WordType>& m, uint64_t seed, int zeroBias) {
     uint64_t state = seed;
@@ -259,7 +259,7 @@ void fillRandomTernary(TernaryMat<WordType>& m, uint64_t seed, int zeroBias) {
 }
 
 /// @brief Fills a binary matrix, for the case whose ternary planes come out of the
-///        real T3.5 derivative rather than out of a generator.
+/// real derivative rather than out of a generator.
 template <typename WordType>
 void fillRandomBinary(bincv::BinMat<WordType>& m, uint64_t seed) {
     uint64_t state = seed;
@@ -270,10 +270,10 @@ void fillRandomBinary(bincv::BinMat<WordType>& m, uint64_t seed) {
     }
 }
 
-/// @brief Sets one bit of a view directly, bypassing set().
-/// @note Used to dirty a sign bit where the magnitude is zero -- which set()
-///       correctly refuses to do (the canonical-zero rule) -- and to dirty padding
-///       bits, which no public writer will touch either.
+/// @brief Sets one bit of a view directly, bypassing set.
+/// @note Used to dirty a sign bit where the magnitude is zero -- which set
+/// correctly refuses to do (the canonical-zero rule) -- and to dirty padding
+/// bits, which no public writer will touch either.
 template <typename WordType>
 void setBit(bincv::BinMatView<WordType> v, size_t y, size_t x) {
     constexpr size_t bits = bincv::BinMatView<WordType>::WordBits;
@@ -297,16 +297,16 @@ bool bitAt(const BinMatConstView<WordType>& v, int y, int x) {
 // ---------------------------------------------------------------------------
 //
 // It knows nothing about words, masks or popcounts. It reads a ternary pixel as a
-// float, multiplies, and accumulates -- the formulation ARCHITECTURE 7.5 claims
+// float, multiplies, and accumulates -- the formulation the design notes claims
 // the masked popcounts are equal to. That is the whole point: two spellings of the
 // same popcount agreeing would prove nothing about the identity.
 
 /// @brief A frame of ternary values as plain floats, indexed [y * width + x].
 /// @note The conversion applies the canonical-zero rule INDEPENDENTLY of the
-///       library: magnitude clear means 0.0f whatever the sign bit holds. So a
-///       frame whose sign plane is dirty over zero magnitudes produces the same
-///       oracle frame as a clean one, which is what makes that invariance a real
-///       comparison rather than a tautology.
+/// library: magnitude clear means 0.0f whatever the sign bit holds. So a
+/// frame whose sign plane is dirty over zero magnitudes produces the same
+/// oracle frame as a clean one, which is what makes that invariance a real
+/// comparison rather than a tautology.
 struct FloatFrame {
     int width = 0;
     int height = 0;
@@ -337,8 +337,8 @@ FloatFrame toFloatFrame(const BinMatConstView<WordType>& magX,
 
 /// @brief The 2x2 covariance over a window, in float, one pixel at a time.
 /// @note The clip is written independently of impl::clipRegion -- min/max against
-///       the extents rather than the library's early-exit ladder -- so the region
-///       contract has two implementations to disagree.
+/// the extents rather than the library's early-exit ladder -- so the region
+/// contract has two implementations to disagree.
 struct FloatCovariance {
     float xx = 0.0f;
     float yy = 0.0f;
@@ -391,9 +391,9 @@ std::string floatCovText(const FloatCovariance& c) {
 
 /// @brief Exact agreement with the oracle -- integer AND float, no tolerance.
 /// @note Both spellings of the same equality, on purpose. The integer comparison
-///       is the operation's contract; the float one additionally pins that the
-///       oracle's accumulation is integral, which is the premise that makes "no
-///       tolerance" a legitimate demand rather than a strict one.
+/// is the operation's contract; the float one additionally pins that the
+/// oracle's accumulation is integral, which is the premise that makes "no
+/// tolerance" a legitimate demand rather than a strict one.
 bool agrees(const GradientCovariance& k, const FloatCovariance& r) {
     return k.sumXX == static_cast<int64_t>(r.xx) && k.sumYY == static_cast<int64_t>(r.yy) &&
            k.sumXY == static_cast<int64_t>(r.xy) && static_cast<float>(k.sumXX) == r.xx &&
@@ -409,16 +409,16 @@ bool same(const GradientCovariance& a, const GradientCovariance& b) {
 // ---------------------------------------------------------------------------
 
 /// @brief Sweeps every window position from a full window outside the frame to a
-///        full window past it, against the float oracle.
+/// full window past it, against the float oracle.
 /// @param magX, magY, signX, signY The four planes, as views -- so the same sweep
-///        serves a container, a dirtied container and a window onto a wider frame.
+/// serves a container, a dirtied container and a window onto a wider frame.
 /// @return Positions compared.
 /// @note ONE CHECK PER (window size, row of positions), not per position: a
-///       per-position check would put ~50000 entries in the CHECKS column for one
-///       property, and a per-case check would make the column blind to a sweep
-///       that lost its margin. The row is the granularity at which a failure still
-///       names where it happened -- the message carries the first bad window and
-///       the mismatch count for the row.
+/// per-position check would put ~50000 entries in the CHECKS column for one
+/// property, and a per-case check would make the column blind to a sweep
+/// that lost its margin. The row is the granularity at which a failure still
+/// names where it happened -- the message carries the first bad window and
+/// the mismatch count for the row.
 template <typename WordType>
 size_t sweepAgainstOracle(const BinMatConstView<WordType>& magX,
                           const BinMatConstView<WordType>& magY,
@@ -463,9 +463,9 @@ size_t sweepAgainstOracle(const BinMatConstView<WordType>& magX,
                            " mismatches=" + std::to_string(bad) + " first: " + firstBad);
         }
         // THE REGRESSION CHECK for the frame that was too short. Clipped positions
-        // are the interesting ones for D-13, but a suite made only of them never
+        // are the interesting ones for earlier work, but a suite made only of them never
         // reduces a full-height window at all, and the 31x31 window of
-        // ARCHITECTURE 7.5 is the one the operation exists for.
+        // the design notes is the one the operation exists for.
         const size_t expectedInterior = static_cast<size_t>(width - windowSize + 1) *
                                         static_cast<size_t>(height - windowSize + 1);
         COV_EXPECT(interior == expectedInterior && interior > 0,
@@ -481,9 +481,9 @@ size_t sweepAgainstOracle(const BinMatConstView<WordType>& magX,
 
 /// @brief MAX_WINDOW_SIZE really is the largest entry of WINDOW_SIZES.
 /// @note The two static_asserts at the top of this file guard the frame against
-///       the windows, but a static_assert cannot read a runtime array. Without
-///       this, adding a fourth window size larger than the frame would restore
-///       exactly the gap those asserts exist to close, silently.
+/// the windows, but a static_assert cannot read a runtime array. Without
+/// this, adding a fourth window size larger than the frame would restore
+/// exactly the gap those asserts exist to close, silently.
 void checkWindowSizes() {
     int largest = 0;
     for (int windowSize : WINDOW_SIZES) {
@@ -496,11 +496,11 @@ void checkWindowSizes() {
                    std::to_string(MAX_WINDOW_SIZE));
 }
 
-/// @brief Positions sweepAgainstOracle() must have compared, from the geometry.
+/// @brief Positions sweepAgainstOracle must have compared, from the geometry.
 /// @note The sweep's own arithmetic, written out separately, so that a margin that
-///       shrank from `windowSize` to something smaller fails a check instead of
-///       quietly testing less. This is the one property in the file whose failure
-///       mode is "still green, but no longer proving anything".
+/// shrank from `windowSize` to something smaller fails a check instead of
+/// quietly testing less. This is the one property in the file whose failure
+/// mode is "still green, but no longer proving anything".
 size_t expectedSweepPositions(int width, int height) {
     size_t total = 0;
     for (int windowSize : WINDOW_SIZES) {
@@ -533,7 +533,7 @@ void testGeneratedFrame(const char* wordTypeName) {
                label + " compared " + std::to_string(positions) + ", expected " +
                    std::to_string(expectedSweepPositions(SWEEP_WIDTH, SWEEP_HEIGHT)));
 
-    // The container spelling is the one T3.6 specifies, and it must be the same
+    // The container spelling is the one specifies, and it must be the same
     // three numbers as the view spelling it forwards to -- at every position of
     // one window size, not at a sample.
     {
@@ -572,15 +572,15 @@ void testGeneratedFrame(const char* wordTypeName) {
     }
 }
 
-/// @brief Case 2: the planes the REAL pipeline produces -- T3.5's derivative.
+/// @brief Case 2: the planes the REAL pipeline produces -- that work’s derivative.
 /// @note The generated case above draws dx and dy independently, so its cross term
-///       hovers around zero. A real binarized derivative pair is correlated, sparse
-///       and structured, and its sign planes are the borrow bits ops/derivative.hpp
-///       computes rather than random draws. This is the input T3.6 is FOR, and it
-///       is swept against the same oracle.
+/// hovers around zero. A real binarized derivative pair is correlated, sparse
+/// and structured, and its sign planes are the borrow bits ops/derivative.hpp
+/// computes rather than random draws. This is the input this is FOR, and it
+/// is swept against the same oracle.
 template <typename WordType>
 void testDerivativeFrame(const char* wordTypeName) {
-    const std::string label = std::string(wordTypeName) + " [from T3.5 derivative]";
+    const std::string label = std::string(wordTypeName) + " [from derivative]";
     bincv::BinMat<WordType> src(SWEEP_WIDTH, SWEEP_HEIGHT);
     fillRandomBinary(src, UINT64_C(0x5EED0C0FFEE00011));
 
@@ -620,12 +620,12 @@ void testDerivativeFrame(const char* wordTypeName) {
 
 /// @brief Case 3: sign bits dirtied wherever the magnitude is zero.
 /// @note The canonical-zero rule (quantMat.hpp) says such a bit carries no
-///       information. ops/covariance.hpp promise 5 turns that into a property of
-///       this operation: the sign planes are read only where BOTH magnitudes are
-///       set, so dirtying them cannot move a number. Checked by comparing a clean
-///       frame against a dirtied copy at every position, and by running the
-///       dirtied frame against the oracle -- which applies the same rule
-///       independently.
+/// information. ops/covariance.hpp promise 5 turns that into a property of
+/// this operation: the sign planes are read only where BOTH magnitudes are
+/// set, so dirtying them cannot move a number. Checked by comparing a clean
+/// frame against a dirtied copy at every position, and by running the
+/// dirtied frame against the oracle -- which applies the same rule
+/// independently.
 template <typename WordType>
 void testDirtySigns(const char* wordTypeName) {
     const std::string label = std::string(wordTypeName) + " [dirty signs]";
@@ -634,7 +634,7 @@ void testDirtySigns(const char* wordTypeName) {
     fillRandomTernary(dx, UINT64_C(0x5EED0C0FFEE00021), 2);
     fillRandomTernary(dy, UINT64_C(0x5EED0C0FFEE00022), 2);
 
-    TernaryMat<WordType> dirtyX(dx);  // deep copy (D-8)
+    TernaryMat<WordType> dirtyX(dx);  // deep copy
     TernaryMat<WordType> dirtyY(dy);
     size_t dirtied = 0;
     for (int y = 0; y < SWEEP_HEIGHT; ++y) {
@@ -684,13 +684,13 @@ void testDirtySigns(const char* wordTypeName) {
                                                       dirtyY.constSign(), label);
 }
 
-/// @brief Case 4: every padding bit set, in all four planes (D-13).
+/// @brief Case 4: every padding bit set, in all four planes.
 /// @note A wrapped buffer's padding belongs to its caller -- sensor DMA, a
-///       sub-region of a larger frame -- so dirty padding is a SUPPORTED
-///       construction and a covariance that over-counts on one returns a wrong
-///       answer from a legal input. Width 70 leaves 2 padding bits at uint8_t, 10
-///       at uint16_t, 26 at uint32_t and 58 at uint64_t, so every word type has
-///       some.
+/// sub-region of a larger frame -- so dirty padding is a SUPPORTED
+/// construction and a covariance that over-counts on one returns a wrong
+/// answer from a legal input. Width 70 leaves 2 padding bits at uint8_t, 10
+/// at uint16_t, 26 at uint32_t and 58 at uint64_t, so every word type has
+/// some.
 template <typename WordType>
 void testDirtyPadding(const char* wordTypeName) {
     const std::string label = std::string(wordTypeName) + " [dirty padding]";
@@ -701,8 +701,8 @@ void testDirtyPadding(const char* wordTypeName) {
 
     TernaryMat<WordType> paddedX(dx);
     TernaryMat<WordType> paddedY(dy);
-    // getAlignedWidth() is the row stride in WORDS, so the padding runs from the
-    // last real column to the end of the last word -- not to getAlignedWidth().
+    // getAlignedWidth is the row stride in WORDS, so the padding runs from the
+    // last real column to the end of the last word -- not to getAlignedWidth.
     // The first version of this loop conflated the two and dirtied nothing at all,
     // which is exactly why the "actually dirtied something" check below exists.
     const size_t paddingEnd = paddedX.getAlignedWidth() * TernaryMat<WordType>::WordBits;
@@ -745,12 +745,12 @@ void testDirtyPadding(const char* wordTypeName) {
                label + " mismatches=" + std::to_string(bad) + " first: " + firstBad);
 }
 
-/// @brief Case 5: a view that WINDOWS A WIDER FRAME (D-13's second half).
+/// @brief Case 5: a view that WINDOWS A WIDER FRAME (the design rule’s second half).
 /// @note The pixels past the view's width are not padding, they are a neighbour's
-///       live pixels -- and they are set, since the wider frame is dense. One
-///       sentence of D-13 covers both, and this is the half no container can
-///       express: the views are built by hand over the wide frame's planes with a
-///       narrower width and the wide frame's stride.
+/// live pixels -- and they are set, since the wider frame is dense. One
+/// sentence of earlier work covers both, and this is the half no container can
+/// express: the views are built by hand over the wide frame's planes with a
+/// narrower width and the wide frame's stride.
 template <typename WordType>
 void testWindowOntoWiderFrame(const char* wordTypeName) {
     const std::string label = std::string(wordTypeName) + " [view onto a wider frame]";
@@ -774,8 +774,8 @@ void testWindowOntoWiderFrame(const char* wordTypeName) {
 
 /// @brief Case 6: windows that are outside, empty, or degenerate.
 /// @note The sweeps above already cover wholly-outside windows at a window's
-///       distance; these are the far ones and the ill-formed ones, where the
-///       arithmetic that clips could overflow rather than merely clip.
+/// distance; these are the far ones and the ill-formed ones, where the
+/// arithmetic that clips could overflow rather than merely clip.
 template <typename WordType>
 void testDegenerate(const char* wordTypeName) {
     const std::string label = std::string(wordTypeName) + " [degenerate]";
@@ -841,21 +841,21 @@ void testDegenerate(const char* wordTypeName) {
 }
 
 /// @brief Case 7: WHAT A TAP-ORDER INVERSION DOES TO THIS MATRIX, and what it
-///        does not.
-/// @note ARCHITECTURE 7.4, ops/derivative.hpp and tests/test_derivative.cpp all
-///       used to say that a cv::filter2D correlate-vs-convolve mix-up would leave
-///       sumXX and sumYY correct "while silently negating the cross term", so that
-///       this covariance was a tripwire for it. **It is not, and the arithmetic
-///       says so: a tap-order inversion negates BOTH derivatives, and
-///       (-Ix)(-Iy) = IxIy.** The entire 2x2 matrix, cross term included, is
-///       INVARIANT under a global negation -- so the direction of the taps is
-///       guarded by Derivative.OpenCvFilter2D_Direction alone, and nothing here
-///       can see it. That correction is pinned here rather than only written down,
-///       because it is the kind of sentence that gets restored by someone
-///       reasoning from "the cross term reads the sign planes".
+/// does not.
+/// @note the design notes, ops/derivative.hpp and tests/test_derivative.cpp all
+/// used to say that a cv::filter2D correlate-vs-convolve mix-up would leave
+/// sumXX and sumYY correct "while silently negating the cross term", so that
+/// this covariance was a tripwire for it. **It is not, and the arithmetic
+/// says so: a tap-order inversion negates BOTH derivatives, and
+/// (-Ix)(-Iy) = IxIy.** The entire 2x2 matrix, cross term included, is
+/// INVARIANT under a global negation -- so the direction of the taps is
+/// guarded by Derivative.OpenCvFilter2D_Direction alone, and nothing here
+/// can see it. That correction is pinned here rather than only written down,
+/// because it is the kind of sentence that gets restored by someone
+/// reasoning from "the cross term reads the sign planes".
 /// @note The half that IS true is also pinned: negating ONE derivative negates the
-///       cross term and leaves the diagonal alone. That is a real property of the
-///       identity, and it is what the old sentence was probably reaching for.
+/// cross term and leaves the diagonal alone. That is a real property of the
+/// identity, and it is what the old sentence was probably reaching for.
 template <typename WordType>
 void testNegationInvariance(const char* wordTypeName) {
     const std::string label = std::string(wordTypeName) + " [negation]";
@@ -871,7 +871,7 @@ void testNegationInvariance(const char* wordTypeName) {
     // src(x+1) - src(x-1): same magnitude everywhere, sign flipped wherever the
     // magnitude is set. Both kernels are reversed together, because the mix-up
     // being described is filter2D's convention and it applies to both calls.
-    TernaryMat<WordType> negX(dx);  // deep copy (D-8)
+    TernaryMat<WordType> negX(dx);  // deep copy
     TernaryMat<WordType> negY(dy);
     size_t flipped = 0;
     for (int y = 0; y < SWEEP_HEIGHT; ++y) {
@@ -922,14 +922,14 @@ void testNegationInvariance(const char* wordTypeName) {
 }
 
 /// @brief Case 8: what SlidingWindowCount can and cannot do for a column sweep.
-/// @note ops/covariance.hpp points a column-sweeping caller (T3.7) at
-///       SlidingWindowCount, and used to point it there for the whole operation.
-///       SlidingWindowCount slides ONE plane's popcount, so it delivers sumXX and
-///       sumYY and cannot deliver sumXY -- there is no sliding form of the
-///       `magX & magY` split anywhere in ops/reduce.hpp. Both halves are pinned:
-///       the two that slide must agree with this operation position for position
-///       down a column, and the reason the third does not is that no such class
-///       exists to compare against.
+/// @note ops/covariance.hpp points a column-sweeping caller at
+/// SlidingWindowCount, and used to point it there for the whole operation.
+/// SlidingWindowCount slides ONE plane's popcount, so it delivers sumXX and
+/// sumYY and cannot deliver sumXY -- there is no sliding form of the
+/// `magX & magY` split anywhere in ops/reduce.hpp. Both halves are pinned:
+/// the two that slide must agree with this operation position for position
+/// down a column, and the reason the third does not is that no such class
+/// exists to compare against.
 template <typename WordType>
 void testColumnSweepAgreement(const char* wordTypeName) {
     const std::string label = std::string(wordTypeName) + " [column sweep]";
@@ -973,19 +973,19 @@ void testColumnSweepAgreement(const char* wordTypeName) {
 }
 
 /// @brief Case 9: WHICH SPELLING ACCEPTS WHAT, checked rather than asserted.
-/// @note T3.6 shipped with `SignedQuantMat<N, W>` for N > 1 matching NO overload,
-///       and this case pinned that. **T3.10 reverses it deliberately**: X-20 found
-///       the tracker's accuracy failure IS the 1-bit pyramid, so the frontend needs
-///       N-bit levels and the covariance has to form at N > 1. The container
-///       spelling now dispatches on the plane count -- ternary to the
-///       single-popcount kernel, N-bit to the bit-sliced one -- and what this case
-///       pins is that BOTH still exist and that the five-argument view form has not
-///       silently grown an N it cannot check.
+/// @note shipped with `SignedQuantMat<N, W>` for N > 1 matching NO overload,
+/// and this case pinned that. ** reverses it deliberately**: a measurement found
+/// the tracker's accuracy failure IS the 1-bit pyramid, so the frontend needs
+/// N-bit levels and the covariance has to form at N > 1. The container
+/// spelling now dispatches on the plane count -- ternary to the
+/// single-popcount kernel, N-bit to the bit-sliced one -- and what this case
+/// pins is that BOTH still exist and that the five-argument view form has not
+/// silently grown an N it cannot check.
 /// @note The one claim that has NOT changed: a `BinMatConstView` carries no plane
-///       count, so the five-argument view form still cannot tell a ternary level
-///       from an N-bit level's LSB plane. The N-bit VIEW form takes plane ARRAYS
-///       precisely so that N is in the type there -- and the last two traits below
-///       check that a loose view, and an array of the wrong length, do not compile.
+/// count, so the five-argument view form still cannot tell a ternary level
+/// from an N-bit level's LSB plane. The N-bit VIEW form takes plane ARRAYS
+/// precisely so that N is in the type there -- and the last two traits below
+/// check that a loose view, and an array of the wrong length, do not compile.
 template <typename WordType, typename = void>
 struct ContainerCallable : std::false_type {};
 
@@ -1007,8 +1007,8 @@ struct TernaryCallable<
 
 /// @brief Is the N-bit VIEW form callable with loose views instead of plane arrays?
 /// @note It must not be. This is the difference between the two view spellings:
-///       the five-argument one cannot know N and says so, the array one knows N by
-///       construction.
+/// the five-argument one cannot know N and says so, the array one knows N by
+/// construction.
 template <typename WordType, typename = void>
 struct LooseViewCallableAsNBit : std::false_type {};
 
@@ -1038,8 +1038,8 @@ template <typename WordType>
 void testNBitDispatch(const char* wordTypeName) {
     const std::string label = std::string(wordTypeName) + " [dispatch]";
     COV_EXPECT(ContainerCallable<WordType>::value,
-               "the CONTAINER spelling ACCEPTS SignedQuantMat<N> for N > 1 -- T3.10 added "
-               "the bit-sliced kernel X-20 made a precondition, and T3.6's compile-time "
+               "the CONTAINER spelling ACCEPTS SignedQuantMat<N> for N > 1 -- added "
+               "the bit-sliced kernel this made a precondition, and the compile-time "
                "refusal is deliberately gone",
                label);
     COV_EXPECT(TernaryCallable<WordType>::value,
@@ -1057,12 +1057,12 @@ void testNBitDispatch(const char* wordTypeName) {
 }
 
 /// @brief Case 10: no heap, no scratch (ops/covariance.hpp promise 3).
-/// @note This is the check that keeps the D-15 axis-3 trade honest. The
-///       four-argument selector form was taken over the 11-14% faster plane form
-///       for one reason: it needs no plane. An implementation that allocated a
-///       window buffer, or built a selector plane internally, would have given up
-///       the speed and kept the memory -- and every value test in this file would
-///       still pass.
+/// @note This is the check that keeps the the axis-3 trade honest. The
+/// four-argument selector form was taken over the 11-14% faster plane form
+/// for one reason: it needs no plane. An implementation that allocated a
+/// window buffer, or built a selector plane internally, would have given up
+/// the speed and kept the memory -- and every value test in this file would
+/// still pass.
 template <typename WordType>
 void testNoScratch(const char* wordTypeName) {
     const std::string label = std::string(wordTypeName) + " [no scratch]";
@@ -1123,8 +1123,8 @@ void testNoScratch(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// T3.10: THE N-BIT ORACLE, AND WHY IT IS A SECOND ORACLE RATHER THAN THE FIRST
-//        ONE WIDENED
+// THE N-BIT ORACLE, AND WHY IT IS A SECOND ORACLE RATHER THAN THE FIRST
+// ONE WIDENED
 // ---------------------------------------------------------------------------
 //
 // The float oracle above reads a TERNARY pixel. An N-bit level's pixel is
@@ -1134,8 +1134,8 @@ void testNoScratch(const char* wordTypeName) {
 // would cancel against itself in both. This is written from the plane bits
 // upward, in INTEGERS, with multiplies:
 //
-//     Ix = magnitude 0 ? 0 : (sign ? -SUM 2^i m[i] : +SUM 2^i m[i])
-//     xx += Ix*Ix;  yy += Iy*Iy;  xy += Ix*Iy
+// Ix = magnitude 0 ? 0 : (sign ? -SUM 2^i m[i] : +SUM 2^i m[i])
+// xx += Ix*Ix; yy += Iy*Iy; xy += Ix*Iy
 //
 // It shares no code, no clipping ladder and no word arithmetic with
 // ops/covariance.hpp -- it does not know that a plane pair or a popcount exists.
@@ -1151,16 +1151,16 @@ void testNoScratch(const char* wordTypeName) {
 // arithmetic rather than leaving it in this comment.
 
 /// @brief The largest bit depth swept. Every N-bit sweep runs at 1..MAX_BIT_DEPTH,
-///        DRIVEN BY THIS CONSTANT rather than hand-unrolled, so the depths swept
-///        and the exactness guard below cannot drift apart.
-/// @note **7, and the justification is X-15's, not X-2's.** An earlier version of
-///       this comment stopped at 4 and cited X-2's "1/3/4/5 bits". X-15 superseded
-///       that premise (ARCHITECTURE 7.2: "'1/3/4/5' was the sample, not the
-///       requirement"): the reachable alphabet an uncapped 2x2 mean produces is
-///       1/3/5/7 bits, because a four-input sum of N-bit values needs N + 2. So
-///       N = 5 and N = 7 are the depths T4.1 will actually run, and stopping at 4
-///       left them uninstantiated. 7 is also SignedQuantMat's own limit, so this
-///       sweeps the whole range a derivative can be built at.
+/// DRIVEN BY THIS CONSTANT rather than hand-unrolled, so the depths swept
+/// and the exactness guard below cannot drift apart.
+/// @note **7, and the justification is that measurement’s, not that measurement’s.** An earlier version of
+/// this comment stopped at 4 and cited that measurement’s "1/3/4/5 bits". superseded
+/// that premise (the design notes: "'1/3/4/5' was the sample, not the
+/// requirement"): the reachable alphabet an uncapped 2x2 mean produces is
+/// 1/3/5/7 bits, because a four-input sum of N-bit values needs N + 2. So
+/// N = 5 and N = 7 are the depths this will actually run, and stopping at 4
+/// left them uninstantiated. 7 is also SignedQuantMat's own limit, so this
+/// sweeps the whole range a derivative can be built at.
 constexpr size_t MAX_BIT_DEPTH = 7;
 
 /// The value bound of an N-bit signed level, and the covariance bound it implies.
@@ -1178,12 +1178,12 @@ static_assert(MAX_BIT_DEPTH <= 7,
 
 /// @brief A frame of N-bit signed values as plain ints, indexed [y * width + x].
 /// @note Reconstructed from the PLANE VIEWS with this file's own bit reader, not
-///       through SignedQuantMat::at(), so the same oracle serves a container, a
-///       dirtied container and a hand-built view onto a wider frame -- and so that
-///       the container's own plane reassembly is not the thing judging the kernel.
+/// through SignedQuantMat::at, so the same oracle serves a container, a
+/// dirtied container and a hand-built view onto a wider frame -- and so that
+/// the container's own plane reassembly is not the thing judging the kernel.
 /// @note The canonical-zero rule is applied here INDEPENDENTLY: magnitude zero
-///       reads as 0 whatever the sign bit says. That is what makes the dirty-sign
-///       invariance below a real comparison rather than a tautology.
+/// reads as 0 whatever the sign bit says. That is what makes the dirty-sign
+/// invariance below a real comparison rather than a tautology.
 struct IntFrame {
     int width = 0;
     int height = 0;
@@ -1221,12 +1221,12 @@ IntFrame toIntFrame(const BinMatConstView<WordType> (&magX)[N],
 
 /// @brief The 2x2 covariance over a window, one pixel at a time, with multiplies.
 /// @note Accumulated in `long long` AND in `float`, in the same loop. The integer
-///       column is the contract; the float column additionally pins that the
-///       accumulation is integral, which is what makes "no tolerance" a legitimate
-///       demand at N-bit widths rather than merely a strict one.
+/// column is the contract; the float column additionally pins that the
+/// accumulation is integral, which is what makes "no tolerance" a legitimate
+/// demand at N-bit widths rather than merely a strict one.
 /// @note The clip is min/max against the extents, written independently of
-///       impl::clipRegion's early-exit ladder, so the region contract has two
-///       implementations to disagree at every one of the swept positions.
+/// impl::clipRegion's early-exit ladder, so the region contract has two
+/// implementations to disagree at every one of the swept positions.
 struct IntCovariance {
     long long xx = 0;
     long long yy = 0;
@@ -1290,10 +1290,10 @@ void magnitudePlanesOf(const bincv::SignedQuantMat<N, WordType>& m,
     for (size_t p = 0; p < N; ++p) out[p] = m.constMagnitude(p);
 }
 
-/// @brief Fills an N-bit signed matrix through set(), so padding stays clear and
-///        zeros stay canonical.
+/// @brief Fills an N-bit signed matrix through set, so padding stays clear and
+/// zeros stay canonical.
 /// @param zeroBias Out of 4 draws, how many are forced to 0 -- a real binarized
-///        derivative is sparse, and a dense one never exercises the zero lanes.
+/// derivative is sparse, and a dense one never exercises the zero lanes.
 template <size_t N, typename WordType>
 void fillRandomSigned(bincv::SignedQuantMat<N, WordType>& m, uint64_t seed, int zeroBias) {
     const int maxMagnitude = static_cast<int>(bincv::SignedQuantMat<N, WordType>::MaxMagnitude);
@@ -1313,18 +1313,18 @@ void fillRandomSigned(bincv::SignedQuantMat<N, WordType>& m, uint64_t seed, int 
 }
 
 /// @brief Sweeps every window position from a full window outside the frame to a
-///        full window past it, against the N-bit integer oracle.
+/// full window past it, against the N-bit integer oracle.
 /// @return Positions compared.
 /// @note One check per (window size, row of positions), for sweepAgainstOracle's
-///       reason: a per-position check would put ~24000 entries in the CHECKS column
-///       for one property, and a per-case check would make the column blind to a
-///       sweep that lost its margin.
+/// reason: a per-position check would put ~24000 entries in the CHECKS column
+/// for one property, and a per-case check would make the column blind to a
+/// sweep that lost its margin.
 template <size_t N, typename WordType>
 size_t sweepAgainstIntOracle(const BinMatConstView<WordType> (&magX)[N],
                              const BinMatConstView<WordType> (&magY)[N],
                              const BinMatConstView<WordType>& signX,
                              const BinMatConstView<WordType>& signY, const std::string& label) {
-    // Keyed to THIS sweep's N, not to MAX_BIT_DEPTH: the float half of agreesN() is
+    // Keyed to THIS sweep's N, not to MAX_BIT_DEPTH: the float half of agreesN is
     // exact only while every entry fits float's 24-bit integer range, and a sweep
     // instantiated at a depth the constant above does not describe would otherwise
     // turn that half into a silent tolerance.
@@ -1377,7 +1377,7 @@ size_t sweepAgainstIntOracle(const BinMatConstView<WordType> (&magX)[N],
 }
 
 // ---------------------------------------------------------------------------
-// T3.10 case A: a generated N-bit pair, swept whole, at N = 1..MAX_BIT_DEPTH
+// the case A: a generated N-bit pair, swept whole, at N = 1..MAX_BIT_DEPTH
 // ---------------------------------------------------------------------------
 
 template <size_t N, typename WordType>
@@ -1441,14 +1441,14 @@ void testBitSlicedGeneratedFrame(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// T3.10 case B: the planes the REAL N-bit pipeline produces -- T3.5's derivative
-//               over a QuantMat<N> level
+// the case B: the planes the REAL N-bit pipeline produces -- that work’s derivative
+// over a QuantMat<N> level
 // ---------------------------------------------------------------------------
 
 template <size_t N, typename WordType>
 void testBitSlicedDerivativeFrame(const char* wordTypeName) {
     const std::string label =
-        std::string(wordTypeName) + " [N=" + std::to_string(N) + " from T3.5 derivative]";
+        std::string(wordTypeName) + " [N=" + std::to_string(N) + " from derivative]";
     bincv::QuantMat<N, WordType> src(SWEEP_WIDTH, SWEEP_HEIGHT);
     uint64_t state = UINT64_C(0x5EED0C0FFEE00111) + N;
     for (int y = 0; y < SWEEP_HEIGHT; ++y) {
@@ -1490,7 +1490,7 @@ void testBitSlicedDerivativeFrame(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// T3.10 case C: THE N = 1 IDENTITY. The single most important check in the file.
+// the case C: THE N = 1 IDENTITY. The single most important check in the file.
 // ---------------------------------------------------------------------------
 //
 // Ternary is the N = 1 instance of the bit-sliced form, and this requires it as an
@@ -1499,18 +1499,18 @@ void testBitSlicedDerivativeFrame(const char* wordTypeName) {
 //
 // THE TWO CALLS ARE SPELLED SO THAT NEITHER CAN BE THE OTHER. The left-hand side
 // is `gradientCovariance<WordType>(magX, magY, signX, signY, w)` -- five loose
-// views, explicit single template argument, which only the T3.6 ternary overload
+// views, explicit single template argument, which only the ternary overload
 // can match. The right-hand side is `gradientCovariance<1, WordType>(...)` on
-// ARRAYS of one view, which only the T3.10 overload can match. A future edit that
+// ARRAYS of one view, which only the overload can match. A future edit that
 // deleted the ternary overload would make the left-hand call fail to compile
 // rather than quietly turn this into the bit-sliced kernel compared against
-// itself -- the "compares a route against itself" hazard X-21 named.
+// itself -- the "compares a route against itself" hazard named.
 
 template <typename WordType>
 void testTernaryIsTheNEqualsOneInstance(const char* wordTypeName) {
     const std::string label = std::string(wordTypeName) + " [N=1 identity]";
 
-    // Two frames: a generated ternary pair, and the pair T3.5's derivative writes.
+    // Two frames: a generated ternary pair, and the pair that work’s derivative writes.
     TernaryMat<WordType> genX(SWEEP_WIDTH, SWEEP_HEIGHT);
     TernaryMat<WordType> genY(SWEEP_WIDTH, SWEEP_HEIGHT);
     fillRandomTernary(genX, UINT64_C(0x5EED0C0FFEE00121), 1);
@@ -1524,7 +1524,7 @@ void testTernaryIsTheNEqualsOneInstance(const char* wordTypeName) {
     bincv::derivativeY(src, derY);
 
     const TernaryMat<WordType>* frames[2][2] = {{&genX, &genY}, {&derX, &derY}};
-    const char* frameNames[2] = {"generated", "from T3.5 derivative"};
+    const char* frameNames[2] = {"generated", "from derivative"};
 
     for (int frame = 0; frame < 2; ++frame) {
         const TernaryMat<WordType>& dx = *frames[frame][0];
@@ -1562,7 +1562,7 @@ void testTernaryIsTheNEqualsOneInstance(const char* wordTypeName) {
             }
         }
         COV_EXPECT(bad == 0,
-                   "T3.10's bit-sliced kernel at N = 1 is BIT-IDENTICAL to T3.6's ternary "
+                   "the bit-sliced kernel at N = 1 is BIT-IDENTICAL to the ternary "
                    "kernel at every window position -- ternary IS the N = 1 instance",
                    label + " [" + frameNames[frame] + "] positions=" + std::to_string(positions) +
                        " mismatches=" + std::to_string(bad) + " first: " + firstBad);
@@ -1598,8 +1598,8 @@ void testTernaryIsTheNEqualsOneInstance(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// T3.10 case D: the contracts, at N bits -- dirty signs, dirty padding, a view
-//               onto a wider frame, and the degenerate windows
+// the case D: the contracts, at N bits -- dirty signs, dirty padding, a view
+// onto a wider frame, and the degenerate windows
 // ---------------------------------------------------------------------------
 
 template <size_t N, typename WordType>
@@ -1613,7 +1613,7 @@ void testBitSlicedContracts(const char* wordTypeName) {
     fillRandomSigned(dy, UINT64_C(0x5EED0C0FFEE00132), 2);
 
     // (i) A sign bit over a zero magnitude carries no information (promise 5), and
-    //     at N bits "zero magnitude" means ALL N planes clear.
+    // at N bits "zero magnitude" means ALL N planes clear.
     bincv::SignedQuantMat<N, WordType> dirtyX(dx);
     bincv::SignedQuantMat<N, WordType> dirtyY(dy);
     size_t dirtied = 0;
@@ -1632,7 +1632,7 @@ void testBitSlicedContracts(const char* wordTypeName) {
     COV_EXPECT(dirtied > 0, "the N-bit dirty-sign case actually dirtied something",
                label + " dirtied=" + std::to_string(dirtied));
 
-    // (ii) Every padding bit set, in all N + 1 planes of both derivatives (D-13).
+    // (ii) Every padding bit set, in all N + 1 planes of both derivatives.
     bincv::SignedQuantMat<N, WordType> paddedX(dx);
     bincv::SignedQuantMat<N, WordType> paddedY(dy);
     const size_t paddingEnd =
@@ -1685,7 +1685,7 @@ void testBitSlicedContracts(const char* wordTypeName) {
                label + " mismatches=" + std::to_string(padBad) + " first: " + firstBad);
 
     // (iii) The dirtied frames against the ORACLE, which applies the canonical-zero
-    //       rule and the width bound its own way rather than by comparison.
+    // rule and the width bound its own way rather than by comparison.
     {
         BinMatConstView<WordType> magX[N];
         BinMatConstView<WordType> magY[N];
@@ -1696,7 +1696,7 @@ void testBitSlicedContracts(const char* wordTypeName) {
     }
 
     // (iv) A view that WINDOWS A WIDER FRAME: the bits past the view's width are a
-    //      neighbour's live pixels, not padding, and every one of them is set.
+    // neighbour's live pixels, not padding, and every one of them is set.
     {
         const int wideWidth = SWEEP_WIDTH + 29;  // not a multiple of any word width
         bincv::SignedQuantMat<N, WordType> wideX(wideWidth, SWEEP_HEIGHT);
@@ -1759,7 +1759,7 @@ void testBitSlicedContracts(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// T3.10 case E: the weights, worked by hand
+// the case E: the weights, worked by hand
 // ---------------------------------------------------------------------------
 //
 // Everything above compares two loops. This compares the kernel against arithmetic
@@ -1820,11 +1820,11 @@ void testBitSlicedWeightsByHand(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// T3.10 case F: no heap at N bits
+// the case F: no heap at N bits
 // ---------------------------------------------------------------------------
 //
 // The ternary case took the SLOWER of two selector forms to avoid a frame-sized
-// plane (D-15 axis 3). The N-bit kernel has N^2 plane pairs and an obvious
+// plane (the axis 3). The N-bit kernel has N^2 plane pairs and an obvious
 // temptation to materialize something per pair; it does not, and this is the
 // reading that says so rather than the docstring.
 
@@ -1864,8 +1864,8 @@ void testBitSlicedNoScratch(const char* wordTypeName) {
     (void)sink;
 }
 
-/// @brief Every case, for one word type. The word type is the axis D-1 makes
-///        load-bearing: every mask and shift is compiled at 8, 16, 32 and 64 bits.
+/// @brief Every case, for one word type. The word type is the axis the design rule makes
+/// load-bearing: every mask and shift is compiled at 8, 16, 32 and 64 bits.
 template <typename WordType>
 void testWordType(const char* wordTypeName) {
     std::cout << "\n--- LK gradient covariance: " << wordTypeName << " ---\n";
@@ -1882,7 +1882,7 @@ void testWordType(const char* wordTypeName) {
     testColumnSweepAgreement<WordType>(wordTypeName);
     testNBitDispatch<WordType>(wordTypeName);
     testNoScratch<WordType>(wordTypeName);
-    std::cout << "    " << wordTypeName << ": " << (g_oraclePositions - before)
+    std::cout << " " << wordTypeName << ": " << (g_oraclePositions - before)
               << " window positions compared against the per-pixel float oracle, "
               << (g_invariancePositions - beforeInvariance)
               << " more against an invariant (running totals " << g_oraclePositions << " / "
@@ -1891,9 +1891,9 @@ void testWordType(const char* wordTypeName) {
 
 /// @brief Both whole-frame sweeps at EVERY bit depth 1..MAX_BIT_DEPTH.
 /// @note A fold over an index sequence rather than a hand-written list of
-///       instantiations. The depths swept are then a consequence of MAX_BIT_DEPTH,
-///       which is also what the float-exactness guard is keyed to -- so raising one
-///       cannot leave the other checking a depth nobody runs any more.
+/// instantiations. The depths swept are then a consequence of MAX_BIT_DEPTH,
+/// which is also what the float-exactness guard is keyed to -- so raising one
+/// cannot leave the other checking a depth nobody runs any more.
 template <typename WordType, size_t... Is>
 void sweepEveryBitDepth(const char* wordTypeName, std::index_sequence<Is...>) {
     (testBitSlicedGeneratedFrame<Is + 1, WordType>(wordTypeName), ...);
@@ -1906,15 +1906,15 @@ void noScratchAtEveryBitDepth(const char* wordTypeName, std::index_sequence<Is..
     (testBitSlicedNoScratch<Is + 1, WordType>(wordTypeName), ...);
 }
 
-/// @brief Every T3.10 case, for one word type, at N = 1..MAX_BIT_DEPTH.
+/// @brief Every the case, for one word type, at N = 1..MAX_BIT_DEPTH.
 /// @note **N and the word type are independent axes and both are swept whole.** N
-///       decides how many plane pairs there are (the kernel's arithmetic); the word
-///       type decides every mask and shift (D-1). A bug in the pair weighting shows
-///       at one N and every word type; a bug in the head/tail masks shows at one
-///       word type and every N. Neither axis alone would find both.
+/// decides how many plane pairs there are (the kernel's arithmetic); the word
+/// type decides every mask and shift. A bug in the pair weighting shows
+/// at one N and every word type; a bug in the head/tail masks shows at one
+/// word type and every N. Neither axis alone would find both.
 template <typename WordType>
 void testBitSlicedWordType(const char* wordTypeName) {
-    std::cout << "\n--- N-bit gradient covariance (T3.10): " << wordTypeName << " ---\n";
+    std::cout << "\n--- N-bit gradient covariance: " << wordTypeName << " ---\n";
     const size_t before = g_bitSlicedPositions;
     const size_t beforeIdentity = g_identityPositions;
 
@@ -1924,7 +1924,7 @@ void testBitSlicedWordType(const char* wordTypeName) {
 
     sweepEveryBitDepth<WordType>(wordTypeName, std::make_index_sequence<MAX_BIT_DEPTH>{});
 
-    // The contracts are checked at N = 3, the depth X-15 puts pyramid level 1 at:
+    // The contracts are checked at N = 3, the depth puts pyramid level 1 at:
     // it has more than one magnitude plane, so a plane the kernel forgets is
     // visible, and it is not the largest N so the arrays are not degenerate.
     testBitSlicedContracts<3, WordType>(wordTypeName);
@@ -1935,7 +1935,7 @@ void testBitSlicedWordType(const char* wordTypeName) {
     // per-plane-pair temporary would be cheapest to introduce unnoticed.
     noScratchAtEveryBitDepth<WordType>(wordTypeName, std::make_index_sequence<MAX_BIT_DEPTH>{});
 
-    std::cout << "    " << wordTypeName << ": " << (g_bitSlicedPositions - before)
+    std::cout << " " << wordTypeName << ": " << (g_bitSlicedPositions - before)
               << " window positions compared against the per-pixel INTEGER oracle at "
               << "N = 1.." << MAX_BIT_DEPTH << ", " << (g_identityPositions - beforeIdentity)
               << " more against the ternary kernel at N = 1 (running totals "

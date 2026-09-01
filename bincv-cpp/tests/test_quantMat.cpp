@@ -1,10 +1,10 @@
-// Core tests for the N-bit container (T1.5) and its sign-magnitude reading
-// (T1.6). Deliberately free of OpenCV, so this suite also runs in the core-only
+// Core tests for the N-bit container and its sign-magnitude reading
+//. Deliberately free of OpenCV, so this suite also runs in the core-only
 // and no-exceptions configurations -- QuantMat is what makes the embedded claim
 // concrete, so it has to be verified in the configurations that claim serves.
 //
 // What is being defended here, in one line: a binary frame does not stay binary
-// through the pyramid (ARCHITECTURE 7.2 measured 1 -> 3 -> 4 -> 5 bits), so the
+// through the pyramid (the design notes measured 1 -> 3 -> 4 -> 5 bits), so the
 // N-plane container is required, and the thing that makes it affordable is that
 // N planes cost ONE allocation of exactly N times the binary footprint -- not N
 // allocations, and not a byte more than the arithmetic says.
@@ -28,7 +28,7 @@
 // claims about the allocator, so the allocator is what answers them. Same idiom
 // as test_storage.cpp, with the byte count added: the footprint figures below
 // (3 x 38400 for a 640x480 QuantMat<3>) are the point of the container, and
-// sizeInWords() alone would only report what the container believes.
+// sizeInWords alone would only report what the container believes.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -46,8 +46,8 @@ inline void escape(const void* p) { g_sink = p; }
 
 // Never inlined. At -O2 GCC otherwise inlines these replacement operators into
 // the container's constructors, loses track of which new/delete pair it is
-// looking at, and reports a correctly paired new[]/delete[] as mismatched
-// (-Wmismatched-new-delete, pointing at Storage's `new WordType[words]()` and at
+// looking at, and reports a correctly paired new/delete as mismatched
+// (-Wmismatched-new-delete, pointing at Storage's `new WordType[words]` and at
 // the std::free below -- which are each other's counterpart). Not inlining them
 // also keeps the counters exact, since there is nothing left for the optimizer
 // to fold away. A `#pragma GCC diagnostic ignored` does NOT work here: the
@@ -90,11 +90,11 @@ using bincv::SignedQuantMat;
 using bincv::TernaryMat;
 
 /// @brief Bits per word, spelled out rather than taken from the container, so a
-///        wrong WordBits cannot agree with itself.
+/// wrong WordBits cannot agree with itself.
 template <typename W>
 constexpr size_t wordBits() { return sizeof(W) * 8; }
 
-/// @brief ceil(width / WordBits) -- the stride at the default alignment (D-4).
+/// @brief ceil(width / WordBits) -- the stride at the default alignment.
 template <typename W>
 size_t expectedStride(size_t width) {
     return (width + wordBits<W>() - 1) / wordBits<W>();
@@ -102,8 +102,8 @@ size_t expectedStride(size_t width) {
 
 /// @brief Reads bit `x` of a row directly out of the packed words.
 /// @note Independent of the container's own indexing on purpose: a round trip
-///       through set()/at() alone would agree with itself even if the packing
-///       were wrong. Column x lives at bit x % WordBits of word x / WordBits.
+/// through set/at alone would agree with itself even if the packing
+/// were wrong. Column x lives at bit x % WordBits of word x / WordBits.
 template <typename W>
 bool rawBit(const W* row, size_t x) {
     const W mask = static_cast<W>(static_cast<W>(1) << (x % wordBits<W>()));
@@ -130,7 +130,7 @@ bool paddingBitsClear(const W* row, size_t width, size_t strideWords) {
 }
 
 // ---------------------------------------------------------------------------
-// T1.5 -- layout: one allocation, plane p at offset p * planeWords
+// -- layout: one allocation, plane p at offset p * planeWords
 // ---------------------------------------------------------------------------
 
 template <size_t N, typename W>
@@ -156,7 +156,7 @@ void testPlaneLayout(const char* label) {
     BINCV_CHECK(!m.empty());
 
     // Every plane is a view of the same shape, and plane p begins exactly
-    // p * planeWords() into the single block -- contiguity, stated as addresses.
+    // p * planeWords into the single block -- contiguity, stated as addresses.
     for (size_t p = 0; p < N; ++p) {
         bincv::BinMatView<W> v = m.plane(p);
         BINCV_CHECK(v.ptr == m.data() + p * m.planeWords());
@@ -178,11 +178,11 @@ void testPlaneLayout(const char* label) {
     BINCV_CHECK(m.plane(N - 1).ptr + m.planeWords() == m.data() + m.sizeInWords());
 }
 
-// The footprint claim from T1.5, in bytes, measured at the allocator.
+// The footprint claim from earlier work, in bytes, measured at the allocator.
 void testFootprint() {
     std::cout << "\n--- Footprint: QuantMat<3, uint32_t> at 640x480 ---\n";
 
-    const size_t binaryBytes = 38400;  // 640x480 at 1 bit/px, word granularity (T1.3)
+    const size_t binaryBytes = 38400;  // 640x480 at 1 bit/px, word granularity
 
     size_t newsBefore = g_newCount;
     size_t bytesBefore = g_newBytes;
@@ -200,7 +200,7 @@ void testFootprint() {
         BINCV_CHECK_EQ(frame.sizeInWords() * sizeof(uint32_t), size_t(115200));
     }
     // ONE allocation, of exactly 3 x 38400 bytes -- not three allocations, and
-    // not a byte of slack. This is the whole memory argument (ARCHITECTURE 4.6).
+    // not a byte of slack. This is the whole memory argument (the design notes).
     BINCV_CHECK_EQ(news, size_t(1));
     BINCV_CHECK_EQ(bytes, 3 * binaryBytes);
 
@@ -232,7 +232,7 @@ void testFootprint() {
 }
 
 // ---------------------------------------------------------------------------
-// T1.5 -- N = 1 is BinMat itself, not a generic instantiation
+// -- N = 1 is BinMat itself, not a generic instantiation
 // ---------------------------------------------------------------------------
 
 void testSinglePlaneIsBinMat() {
@@ -252,8 +252,8 @@ void testSinglePlaneIsBinMat() {
     BINCV_CHECK(true);  // the four static_asserts above, counted once
 
     // Consequently the whole BinMat API is available on a QuantMat<1>, and it is
-    // the specialized single-plane implementation that runs: fill() writes words,
-    // countNonZero() reads them, neither iterates planes.
+    // the specialized single-plane implementation that runs: fill writes words,
+    // countNonZero reads them, neither iterates planes.
     QuantMat<1, uint32_t> single(70, 3);
     single.fill(true);
     BINCV_CHECK_EQ(single.countNonZero(), 210);
@@ -261,7 +261,7 @@ void testSinglePlaneIsBinMat() {
     BINCV_CHECK(!single.at(1, 5));
     BINCV_CHECK_EQ(single.countNonZero(), 209);
 
-    // plane(0) is view() -- same pointer, same stride, no offset arithmetic.
+    // plane(0) is view -- same pointer, same stride, no offset arithmetic.
     BINCV_CHECK(single.plane(0).ptr == single.view().ptr);
     BINCV_CHECK_EQ(single.plane(0).stride, single.view().stride);
     BINCV_CHECK_EQ(single.planeWords(), single.sizeInWords());
@@ -278,7 +278,7 @@ void testSinglePlaneIsBinMat() {
 }
 
 // ---------------------------------------------------------------------------
-// T1.5 -- planes are independent, and plane(0) is the LSB
+// -- planes are independent, and plane(0) is the LSB
 // ---------------------------------------------------------------------------
 
 template <size_t N, typename W>
@@ -336,7 +336,7 @@ void testPlanesIndependent(const char* label) {
 }
 
 // ---------------------------------------------------------------------------
-// T1.5 -- round trip, every N in 1..8
+// -- round trip, every N in 1..8
 // ---------------------------------------------------------------------------
 
 template <size_t N, typename W>
@@ -374,7 +374,7 @@ void testRoundTrip(const char* label) {
                 // Path 1: the container's own accessor.
                 if (static_cast<unsigned>(m.at(y, x)) != expected) roundTripped = false;
                 // Path 2: reassembled from the raw plane words, which is the
-                // independent check -- at() agreeing with set() proves nothing
+                // independent check -- at agreeing with set proves nothing
                 // about where the bits actually went.
                 unsigned fromPlanes = 0;
                 for (size_t p = 0; p < N; ++p) {
@@ -389,7 +389,7 @@ void testRoundTrip(const char* label) {
         BINCV_CHECK(roundTripped);
         BINCV_CHECK(planesAgree);
 
-        // Overwriting must replace, not accumulate: set() writes every plane,
+        // Overwriting must replace, not accumulate: set writes every plane,
         // including the ones whose bit is zero.
         m.set(0, 0, maxValue);
         m.set(0, 0, 0u);
@@ -412,7 +412,7 @@ void testRoundTrip(const char* label) {
 }
 
 // ---------------------------------------------------------------------------
-// T1.5 -- non-owning wrap: the Tier 2 path, allocating nothing
+// -- non-owning wrap: the Tier 2 path, allocating nothing
 // ---------------------------------------------------------------------------
 
 void testWrapAllocatesNothing() {
@@ -505,19 +505,19 @@ void testWrapAllocatesNothing() {
 }
 
 // ---------------------------------------------------------------------------
-// T1.5/T1.6 -- the plane index is validated, in every build
+// -- the plane index is validated, in every build
 //
-// REGRESSION. plane() used to be debug-checked, and all three verified
+// REGRESSION. plane used to be debug-checked, and all three verified
 // configurations are Release, so the check was compiled out of every one of
 // them. Measured in that state, one identical caller mistake had three unrelated
 // outcomes across one type family:
-//   QuantMat<3>::plane(3)             -> a writable view of the NEXT allocation
-//                                        (a.plane(3).ptr == b.data() exactly; a
-//                                        plane-wide write is a 37.5 KiB heap
-//                                        overflow at 640x480)
-//   BinMat::plane(7)                  -> quietly plane 0
-//   SignedQuantMat<2>::magnitude(2)   -> the SIGN plane, in bounds and therefore
-//                                        invisible to every sanitizer
+// QuantMat<3>::plane(3) -> a writable view of the NEXT allocation
+// (a.plane(3).ptr == b.data exactly; a
+// plane-wide write is a 37.5 KiB heap
+// overflow at 640x480)
+// BinMat::plane(7) -> quietly plane 0
+// SignedQuantMat<2>::magnitude(2) -> the SIGN plane, in bounds and therefore
+// invisible to every sanitizer
 // It is one behaviour now, and it is a throw. That is what makes index handling
 // testable at one N and carried to the others.
 // ---------------------------------------------------------------------------
@@ -551,7 +551,7 @@ void testPlaneIndexIsChecked() {
     BINCV_CHECK_THROWS(s.magnitude(3), std::out_of_range);
 
     // The valid indices are untouched by the check, and still address the planes
-    // the layout says they do -- including the sign plane through sign(), which is
+    // the layout says they do -- including the sign plane through sign, which is
     // the accessor that is allowed to reach plane N. Driven through the const
     // references too: each const overload carries its own copy of the check, so
     // each has to be exercised on both sides of the boundary. (It also keeps them
@@ -578,14 +578,14 @@ void testPlaneIndexIsChecked() {
 }
 
 // ---------------------------------------------------------------------------
-// T1.5/T1.6 -- const views of a plane, from a NON-const matrix
+// -- const views of a plane, from a NON-const matrix
 //
 // REGRESSION. A plane could not be handed to a kernel declared
 // `f(BinMatConstView<W>)`: on a non-const matrix the mutable overload wins, and
 // template argument deduction does not consider the BinMatView ->
-// BinMatConstView conversion (view.hpp:77-85). That is the exact call shape T3.6
-// specifies -- `countNonZero(dx.magnitude(0), window)` -- and the reason T1.3
-// gave BinMat a constView() callable on a non-const object. The named const
+// BinMatConstView conversion (view.hpp:77-85). That is the exact call shape
+// specifies -- `countNonZero(dx.magnitude(0), window)` -- and the reason
+// gave BinMat a constView callable on a non-const object. The named const
 // accessors are that, per plane.
 // ---------------------------------------------------------------------------
 
@@ -633,12 +633,12 @@ void testConstPlaneAccessors() {
 }
 
 // ---------------------------------------------------------------------------
-// T1.5/T1.6 -- wrap() checks the buffer length the constructor cannot
+// -- wrap checks the buffer length the constructor cannot
 //
 // REGRESSION. The wrapping constructor is spelled exactly like BinMat's -- same
 // four arguments -- but needs N times as many words, and is handed no length, so
 // an undersized buffer was accepted with no diagnostic even though the container
-// knows exactly how many words it needs. wrap() is the spelling that is told.
+// knows exactly how many words it needs. wrap is the spelling that is told.
 // ---------------------------------------------------------------------------
 
 void testWrapChecksBufferLength() {
@@ -696,14 +696,14 @@ void testWrapChecksBufferLength() {
     }
     BINCV_CHECK(signedWrapOk);
 
-    // The other checks still report first and in their own words: wrap() adds a
+    // The other checks still report first and in their own words: wrap adds a
     // length check, it does not take over the constructor's diagnostics.
     BINCV_CHECK_THROWS(Q3::wrap(buffer, exact, 64, 8, 1),
                        std::invalid_argument);   // stride shorter than a row
     BINCV_CHECK_THROWS(Q3::wrap(buffer, exact, -1, 8, 2),
                        std::invalid_argument);   // negative width
 
-    // An empty matrix requires nothing, and wrap() must not invent a requirement.
+    // An empty matrix requires nothing, and wrap must not invent a requirement.
     bool emptyWrapOk = false;
     {
         Q3 emptyWrap = Q3::wrap(nullptr, 0, 0, 0, 0);
@@ -713,9 +713,9 @@ void testWrapChecksBufferLength() {
 }
 
 // ---------------------------------------------------------------------------
-// T1.6 -- the magnitude is taken in unsigned arithmetic
+// -- the magnitude is taken in unsigned arithmetic
 //
-// REGRESSION. set() computed it as `-value`, which at INT_MIN is signed-overflow
+// REGRESSION. set computed it as `-value`, which at INT_MIN is signed-overflow
 // UB -- reported by UBSan at both -O0 and -O2, and licensing the optimizer to
 // assume the `value < 0` branch it guards is never taken. The range assert above
 // it is compiled out under NDEBUG, i.e. in every configuration this project
@@ -750,7 +750,7 @@ void testSignedMagnitudeIsUnsigned() {
 }
 
 // ---------------------------------------------------------------------------
-// T1.5 -- value semantics (D-8), inherited from the storage layer
+// -- value semantics, inherited from the storage layer
 // ---------------------------------------------------------------------------
 
 void testValueSemantics() {
@@ -781,7 +781,7 @@ void testValueSemantics() {
     BINCV_CHECK(original.empty());          // NOLINT: use-after-move is the point
     BINCV_CHECK_EQ(original.getHeight(), size_t(0));
 
-    // Copying a WRAPPED container still deep-copies into owned storage (D-8):
+    // Copying a WRAPPED container still deep-copies into owned storage:
     // the rule is a property of the container, not of how the source was built.
     static uint32_t buffer[3 * 2 * 2] = {};
     QuantMat<3, uint32_t> wrapped(buffer, 40, 2, 2);
@@ -792,7 +792,7 @@ void testValueSemantics() {
 }
 
 // ---------------------------------------------------------------------------
-// T1.6 -- sign-magnitude, and the canonical-zero rule
+// -- sign-magnitude, and the canonical-zero rule
 // ---------------------------------------------------------------------------
 
 void testTernaryRoundTrip() {
@@ -876,7 +876,7 @@ void testCanonicalZero() {
     // encodings DIFFER in storage -- the uninterpreted container can see that
     // one has its top plane set -- and AGREE in value, because the sign-magnitude
     // reading is what erases the distinction. Without both halves, "the sign bit
-    // is ignored" would be untestable: an int has no -0 for at() to return.
+    // is ignored" would be untestable: an int has no -0 for at to return.
     setRawBit(t.sign().row(0), size_t(6), false);
     BINCV_CHECK(t.planes().at(0, 5) != t.planes().at(0, 6));  // storage differs
     BINCV_CHECK_EQ(t.planes().at(0, 5), 2u);                  // sign plane set, magnitude clear
@@ -884,7 +884,7 @@ void testCanonicalZero() {
     BINCV_CHECK_EQ(t.at(0, 6), t.at(0, 5));                   // value does not
 
     // The other half: writing 0 CANONICALIZES, clearing the sign bit as well as
-    // the magnitude, so a value written through set() never leaves a stray sign
+    // the magnitude, so a value written through set never leaves a stray sign
     // bit for a later reader to puzzle over.
     t.set(1, 9, -1);
     BINCV_CHECK(rawBit(t.sign().row(1), size_t(9)));
@@ -924,7 +924,7 @@ void testSignedRoundTrip(const char* label) {
     const int height = 4;
     SignedQuantMat<N, uint32_t> m(width, height);
     const int maxMagnitude = static_cast<int>(SignedQuantMat<N, uint32_t>::MaxMagnitude);
-    const int span = 2 * maxMagnitude + 1;  // -max .. +max inclusive
+    const int span = 2 * maxMagnitude + 1;  // -max.. +max inclusive
 
     auto expectedAt = [&](int y, int x) -> int {
         return ((y * 5 + x) % span) - maxMagnitude;

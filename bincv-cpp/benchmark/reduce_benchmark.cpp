@@ -1,6 +1,6 @@
-// T2.5/T2.6 bulk reductions versus OpenCV, and versus the per-pixel loop.
+// bulk reductions versus OpenCV, and versus the per-pixel loop.
 //
-// THE DENOMINATOR (ARCHITECTURE 10.3, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
 // semantic operation on the SAME binary content stored as CV_8U -- what a user
 // does today without binCV. For countNonZero that denominator is exact: OpenCV
 // has the identical function, and this is a Tier 1 operation. For countAnd it is
@@ -8,7 +8,7 @@
 // temporary, then cv::countNonZero -- and the temporary is part of the cost,
 // which is the point of having a masked reduction at all.
 //
-// A THIRD ROW, because T2.5 asks for it: BinMat::countNonZero(), the per-pixel
+// A THIRD ROW, because asks for it: BinMat::countNonZero, the per-pixel
 // loop the container has carried since before this task. It is the "before" this
 // work is supposed to improve on, and it is measured rather than assumed.
 //
@@ -16,18 +16,18 @@
 // MEASUREMENT VALIDITY -- the same four hazards benchmark/logic_benchmark.cpp
 // enumerates, answered here in the same way:
 //
-//   1. DEAD CODE. A reduction whose result is unused is deleted outright, and it
-//      is a more inviting target than a kernel that writes to memory. Every count
-//      is folded into a `volatile` sink AND printed, so a loop that computed
-//      nothing would be visible twice.
-//   2. CONSTANT FOLDING. The inputs rotate through four distinct random images,
-//      so no iteration can reuse the previous one's answer.
-//   3. CALIBRATED BATCHES. A fixed iteration count measures clock resolution at
-//      94x60; every case runs enough iterations to fill a target millisecond
-//      budget, and the reported figure is the minimum over several batches.
-//   4. THE SIDES MUST AGREE. Every implementation's count is compared before
-//      anything is timed, and a disagreement skips the size and exits non-zero
-//      rather than printing a table under a warning.
+// 1. DEAD CODE. A reduction whose result is unused is deleted outright, and it
+// is a more inviting target than a kernel that writes to memory. Every count
+// is folded into a `volatile` sink AND printed, so a loop that computed
+// nothing would be visible twice.
+// 2. CONSTANT FOLDING. The inputs rotate through four distinct random images,
+// so no iteration can reuse the previous one's answer.
+// 3. CALIBRATED BATCHES. A fixed iteration count measures clock resolution at
+// 94x60; every case runs enough iterations to fill a target millisecond
+// budget, and the reported figure is the minimum over several batches.
+// 4. THE SIDES MUST AGREE. Every implementation's count is compared before
+// anything is timed, and a disagreement skips the size and exits non-zero
+// rather than printing a table under a warning.
 //
 // NOT reproduced here: logic_benchmark's physical-bound probe. That probe bounds
 // a kernel that reads and writes; a reduction only reads, and this file does not
@@ -37,15 +37,15 @@
 //
 // The timing helpers below are duplicated from logic_benchmark.cpp rather than
 // shared through bench_util.hpp. That file's copy is measurement code behind a
-// published result (EXPERIMENTS.md X-5 / results/logic_benchmark.log); putting a
+// published result ( / results/logic_benchmark.log); putting a
 // refactor underneath it would mean re-validating numbers that are already
 // recorded, to save forty lines.
 //
 // ---------------------------------------------------------------------------
 // WHAT THIS FILE IS NOT
 //
-// It is NOT E-1, E-2 or E-3. It reports word types side by side and windows at
-// three sizes because those are the workloads T2.8-T2.10 need, but a number
+// It is NOT or. It reports word types side by side and windows at
+// three sizes because those are the workloads- need, but a number
 // measured here is x86_64 and therefore NON-AUTHORITATIVE for every one of those
 // questions (EXPERIMENTS.md, "Measurement platforms"). They close on the
 // reference device through scripts/run_on_pi.sh, and this file is the code they
@@ -87,8 +87,8 @@ uint64_t nextRandom(uint64_t& state) {
 
 /// @brief One image in every representation under test, from ONE draw per pixel.
 /// @note The four packed matrices and the CV_8U mask are not merely statistically
-///       similar -- they are the same picture, which is what makes the comparison
-///       like for like.
+/// similar -- they are the same picture, which is what makes the comparison
+/// like for like.
 struct Image {
     bincv::BinMat<uint8_t> packed8;
     bincv::BinMat<uint16_t> packed16;
@@ -156,7 +156,7 @@ double measureNs(Body body, int repeats, double targetMs) {
 
 void report(const char* op, const char* impl, double nsPerCall, double pixels, double readBytes,
             double bufferBytes) {
-    std::printf("[BENCH] %-24s %-18s %10.5f ns/px  %8.2f GB/s read  %10.0f B/buffer\n", op, impl,
+    std::printf("[BENCH] %-24s %-18s %10.5f ns/px %8.2f GB/s read %10.0f B/buffer\n", op, impl,
                 nsPerCall / pixels, (nsPerCall > 0.0) ? readBytes / nsPerCall : 0.0, bufferBytes);
 }
 
@@ -186,13 +186,13 @@ bool runSize(int width, int height) {
                                                      bincv::Rect(0, 0, width, height))};
         for (size_t c : counts) {
             if (c != expected) {
-                std::printf("  DISAGREEMENT: %zu vs cv::countNonZero %zu -- size skipped\n", c,
+                std::printf(" DISAGREEMENT: %zu vs cv::countNonZero %zu -- size skipped\n", c,
                             expected);
                 return false;
             }
         }
     }
-    std::printf("  all implementations agree (%d set pixels in image 0)\n",
+    std::printf(" all implementations agree (%d set pixels in image 0)\n",
                 cv::countNonZero(images[0].mask));
 
     const double packedBytes32 =
@@ -235,7 +235,7 @@ bool runSize(int width, int height) {
         kRepeats, kTargetMs);
     report("countNonZero", "OpenCV CV_8U", nsCv, pixels, maskBytes, maskBytes);
 
-    std::printf("  ratio vs OpenCV: uint32 %.2fx, uint64 %.2fx | vs the per-pixel loop: %.1fx\n",
+    std::printf(" ratio vs OpenCV: uint32 %.2fx, uint64 %.2fx | vs the per-pixel loop: %.1fx\n",
                 nsCv / ns32, nsCv / ns64, nsPerPixelLoop / ns32);
 
     // --- countAnd, against the composite a user would have to write ----------
@@ -259,12 +259,12 @@ bool runSize(int width, int height) {
         },
         kRepeats, kTargetMs);
     report("countAnd", "OpenCV composite", nsCvAnd, pixels, 3.0 * maskBytes, 2.0 * maskBytes);
-    std::printf("  ratio vs the OpenCV composite: %.2fx (and binCV allocates no temporary)\n",
+    std::printf(" ratio vs the OpenCV composite: %.2fx (and binCV allocates no temporary)\n",
                 nsCvAnd / nsAnd);
 
     // --- countAndSplit over LK-sized windows ---------------------------------
     //
-    // Context for E-3 (T2.10), not an answer to it: the MVP recomputes per
+    // Context for earlier work, not an answer to it: the MVP recomputes per
     // window, windows overlap heavily, and this is what recomputation costs. The
     // incremental alternative is deliberately not implemented here -- measuring
     // one option is not an experiment.
@@ -305,22 +305,22 @@ bool runSize(int width, int height) {
 
 /// @brief How impl::popcountWord actually lowers in THIS build.
 /// @note Printed because it changes the answer by roughly an order of magnitude
-///       and is invisible in the table otherwise. binCV applies no -march flags
-///       (the top-level CMakeLists detects AVX2/AVX-512 and deliberately does not
-///       enable them until runtime dispatch lands), so on the portable x86-64
-///       baseline __builtin_popcountll is a CALL to libgcc's __popcountdi2 -- one
-///       function call per word. Verified by reading `g++ -O2 -S` output for a
-///       countNonZero caller: four `call __popcountdi2@PLT` in the row loop, and
-///       `popcntq` in its place under -mpopcnt.
+/// and is invisible in the table otherwise. binCV applies no -march flags
+/// (the top-level CMakeLists detects AVX2/AVX-512 and deliberately does not
+/// enable them until runtime dispatch lands), so on the portable x86-64
+/// baseline __builtin_popcountll is a CALL to libgcc's __popcountdi2 -- one
+/// function call per word. Verified by reading `g++ -O2 -S` output for a
+/// countNonZero caller: four `call __popcountdi2@PLT` in the row loop, and
+/// `popcntq` in its place under -mpopcnt.
 const char* popcountLowering() {
 #if defined(__aarch64__)
     // Per ENTRY POINT, not one sequence for all of them: the interior loops emit 1
     // GPR<->NEON crossing per word for countNonZero (the inbound fmov is elided --
     // `ldr d31, [x2], 8` -- and the horizontal add is `addv b31`, not `uaddlv h0`),
     // 2 for countAnd, and 4 for countAndSplit. Read off `g++ -O2 -DNDEBUG -S` on
-    // the reference device; measured cost in EXPERIMENTS.md X-7b.
+    // the reference device; measured cost in.
     return "aarch64: cnt + addv per word, accumulator in a GPR -- 1/2/4 domain "
-           "crossings per word for countNonZero/countAnd/countAndSplit (D-6, X-7b)";
+           "crossings per word for countNonZero/countAnd/countAndSplit";
 #elif defined(__POPCNT__)
     return "x86-64 with POPCNT: popcntq per word";
 #elif defined(__x86_64__) || defined(__i386__)
@@ -331,17 +331,17 @@ const char* popcountLowering() {
 }
 
 int main() {
-    std::printf("=== binCV reduction benchmark (T2.5, T2.6) ===\n");
+    std::printf("=== binCV reduction benchmark ===\n");
     std::printf("OpenCV %s\n", CV_VERSION);
     std::printf("Denominator: cv::countNonZero on the same content as CV_8U (ARCHITECTURE 10.3)\n");
     std::printf("popcount lowering: %s\n", popcountLowering());
-    std::printf("x86_64 numbers are INDICATIVE. E-1/E-2/E-3 close on the reference device.\n");
+    std::printf("x86_64 numbers are INDICATIVE. close on the reference device.\n");
 
     struct Extent {
         int width;
         int height;
     };
-    // 640x480 and 94x60 are the two extremes T2.8/T2.9 name (a frame and pyramid
+    // 640x480 and 94x60 are the two extremes name (a frame and pyramid
     // level 3); 1024x1024 is the cache-resident middle; 8192x4096 is the only one
     // where the CV_8U side does not fit in last-level cache and binCV does.
     const Extent sizes[] = {{94, 60}, {640, 480}, {1024, 1024}, {8192, 4096}};

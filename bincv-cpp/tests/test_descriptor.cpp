@@ -1,4 +1,4 @@
-// Binary descriptors and Hamming matching (T5.4).
+// Binary descriptors and Hamming matching.
 //
 // Core-only: descriptors need no OpenCV, and the point of the family is that matching
 // is popcount(a ^ b) -- the operation binCV is built out of.
@@ -52,7 +52,7 @@ BINCV_TEST(Descriptor, PatternIsDeterministic) {
     makeBriefPattern<kBits>(c, 31, 0xABCDEF01ull);
     size_t moved = 0;
     for (size_t i = 0; i < kBits; ++i) if (a.pair[i].ax != c.pair[i].ax) ++moved;
-    std::printf("  same seed: %zu pairs differ; other seed: %zu of %zu moved\n", diff,
+    std::printf(" same seed: %zu pairs differ; other seed: %zu of %zu moved\n", diff,
                 moved, kBits);
     BINCV_CHECK(moved > kBits / 4);
     // Every offset must sit inside the patch, or computeBrief rejects keypoints that
@@ -62,7 +62,7 @@ BINCV_TEST(Descriptor, PatternIsDeterministic) {
         maxAbs = std::max(maxAbs, std::abs(static_cast<int>(a.pair[i].ax)));
         maxAbs = std::max(maxAbs, std::abs(static_cast<int>(a.pair[i].by)));
     }
-    std::printf("  widest offset %d (patch half is 15)\n", maxAbs);
+    std::printf(" widest offset %d (patch half is 15)\n", maxAbs);
     BINCV_CHECK(maxAbs <= 15);
 }
 
@@ -78,7 +78,7 @@ BINCV_TEST(Descriptor, IdenticalPatchesGiveDistanceZero) {
                                            keep.data());
     BINCV_CHECK(keep[0] == 1 && keep[1] == 1);
     const unsigned dist = hammingDistance<uint32_t>(d.data(), d.data() + kWords, kWords);
-    std::printf("  same patch twice: distance %u of %zu bits\n", dist, kBits);
+    std::printf(" same patch twice: distance %u of %zu bits\n", dist, kBits);
     BINCV_CHECK(dist == 0);
 }
 
@@ -115,7 +115,7 @@ BINCV_TEST(Descriptor, ATranslatedImageMatchesBackToItsOwnKeypoints) {
         if (m[i].valid) ++accepted;
         if (m[i].valid && m[i].trainIndex == i) ++correct;
     }
-    std::printf("  %zu keypoints, %zu accepted by the ratio test, %zu correct\n", n,
+    std::printf(" %zu keypoints, %zu accepted by the ratio test, %zu correct\n", n,
                 accepted, correct);
     // Not 100%: a random-texture image has genuinely ambiguous patches, and the ratio
     // test is SUPPOSED to reject those. What must hold is that nearly everything it
@@ -137,7 +137,7 @@ BINCV_TEST(Descriptor, BorderKeypointsAreRejectedNotInvented) {
     std::vector<uint8_t> keep(3);
     computeBrief<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, kp, 3, pat, d.data(),
                                            keep.data());
-    std::printf("  keep flags: corner=%u centre=%u corner=%u\n", keep[0], keep[1], keep[2]);
+    std::printf(" keep flags: corner=%u centre=%u corner=%u\n", keep[0], keep[1], keep[2]);
     BINCV_CHECK(keep[0] == 0);
     BINCV_CHECK(keep[1] == 1);
     BINCV_CHECK(keep[2] == 0);
@@ -163,7 +163,7 @@ BINCV_TEST(Descriptor, RatioTestNeedsTwoCandidates) {
     computeBrief<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, other, 1, pat, q.data());
     DescriptorMatch m;
     matchDescriptors<uint32_t>(q.data(), 1, t.data(), 1, kWords, &m, 80);
-    std::printf("  single-candidate train set: valid=%d\n", m.valid ? 1 : 0);
+    std::printf(" single-candidate train set: valid=%d\n", m.valid ? 1 : 0);
     BINCV_CHECK(!m.valid);
 }
 

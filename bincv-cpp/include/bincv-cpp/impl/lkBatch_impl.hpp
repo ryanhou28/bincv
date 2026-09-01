@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// X-79 / E-36: the keypoint batch is selected at RUN TIME, so the library's baseline
+// earlier work: the keypoint batch is selected at RUN TIME, so the library's baseline
 // ISA is unchanged and no `-mavx2` build is required of a consumer. Guarded on the
 // compiler supporting both the target attribute and the cpu probe, exactly as
 // impl/binMat_impl.hpp's row packer is.
@@ -16,7 +16,7 @@
 #include "../ops/reduce.hpp"       // popcountWord, for the scalar oracle only
 
 /// @file
-/// @brief EIGHT KEYPOINTS' RESIDUAL SUMS IN AVX2 LANES. **INTERNAL** (E-36, X-79).
+/// @brief EIGHT KEYPOINTS' RESIDUAL SUMS IN AVX2 LANES. **INTERNAL**.
 ///
 /// **WHY THIS IS A SEPARATE FILE AND NOT PART OF ops/opticalFlow.hpp.** Everything
 /// here is arithmetic over `uint32_t` arrays with no notion of a level, a window or a
@@ -27,12 +27,12 @@
 /// **THE LAYOUT IS `[row][plane][lane]` AND THAT IS THE WHOLE TRICK.** A window row is
 /// one `uint32_t` per plane per keypoint, so eight keypoints' words at the same row and
 /// plane are eight adjacent `uint32_t` — one `__m256i` load, no gather.
-/// [X-61](../../../../docs/EXPERIMENTS.md) lost precisely because it gathered; the fix was
+/// lost precisely because it gathered; the fix was
 /// never a better gather, it was arranging not to need one.
 ///
 /// **AND THE MEASURED REASON THE ENTRY POINT IS COARSE.** `target("avx2")` on a leaf
 /// helper blocks inlining — GCC and Clang refuse to inline a callee whose target
-/// features are not a subset of the caller's — and X-60 measured that costing **1.9×**
+/// features are not a subset of the caller's — and a measurement measured that costing **1.9×**
 /// by turning `slicedSignedSum` into 310 real calls per window. One function carries
 /// the attribute and covers the whole window; the helpers it calls carry the same
 /// attribute plus `always_inline`, so they fold into it.
@@ -64,14 +64,14 @@ constexpr size_t kLkBatchMaxRows = 32;
 
 /// @brief Per-BYTE popcount of a 256-bit vector. **INTERNAL.**
 /// @note AVX2 has no popcount instruction at all — `VPOPCNTDQ` is AVX-512. The nibble
-///       table through `vpshufb` is the standard substitute and costs six operations
-///       for thirty-two bytes, against `POPCNT`'s one instruction for eight. That
-///       looks like a loss and is not: this covers **eight keypoints at once**, so it
-///       is six operations where the scalar path issues eight.
+/// table through `vpshufb` is the standard substitute and costs six operations
+/// for thirty-two bytes, against `POPCNT`'s one instruction for eight. That
+/// looks like a loss and is not: this covers **eight keypoints at once**, so it
+/// is six operations where the scalar path issues eight.
 /// @note The counts stay in BYTES on purpose. Folding them to per-lane integers costs
-///       two more operations, and the caller can weight and fold FOUR plane pairs
-///       first — which is why the reduction happens once per (row, value, component)
-///       rather than once per popcount.
+/// two more operations, and the caller can weight and fold FOUR plane pairs
+/// first — which is why the reduction happens once per (row, value, component)
+/// rather than once per popcount.
 BINCV_LKB_FN __m256i lkbByteCounts(__m256i v, __m256i lut, __m256i lowMask) {
     const __m256i lo = _mm256_and_si256(v, lowMask);
     const __m256i hi = _mm256_and_si256(_mm256_srli_epi16(v, 4), lowMask);
@@ -80,8 +80,8 @@ BINCV_LKB_FN __m256i lkbByteCounts(__m256i v, __m256i lut, __m256i lowMask) {
 
 /// @brief Byte counts within each 32-bit lane, summed to that lane. **INTERNAL.**
 /// @note `maddubs` folds adjacent byte pairs into 16-bit, `madd` folds those pairs
-///       into 32-bit — and a 32-bit lane's four bytes are exactly two `maddubs` pairs,
-///       so two instructions place each lane's total in its own lane and nowhere else.
+/// into 32-bit — and a 32-bit lane's four bytes are exactly two `maddubs` pairs,
+/// so two instructions place each lane's total in its own lane and nowhere else.
 BINCV_LKB_FN __m256i lkbFoldToLanes(__m256i bytes, __m256i ones8, __m256i ones16) {
     return _mm256_madd_epi16(_mm256_maddubs_epi16(bytes, ones8), ones16);
 }
@@ -92,23 +92,23 @@ BINCV_LKB_FN __m256i lkbFoldToLanes(__m256i bytes, __m256i ones8, __m256i ones16
 /// what makes it worth vectorising: `slicedSignedSum` on its own is `2N^2` popcounts
 /// and nothing to hide the reduction behind.
 ///
-/// @param val  `[row][plane][lane]`, the value's planes — a tap or the previous frame.
+/// @param val `[row][plane][lane]`, the value's planes — a tap or the previous frame.
 /// @param magP `[row][plane][lane]`, gradient magnitude where the gradient is
-///        POSITIVE, already masked to each lane's region.
+/// POSITIVE, already masked to each lane's region.
 /// @param magN the same where it is negative. **Splitting the sign out of the inner
-///        loop is why nothing here has to go negative in the byte domain**: both
-///        halves are counted as unsigned bytes and subtracted only once they are
-///        32-bit lane sums.
+/// loop is why nothing here has to go negative in the byte domain**: both
+/// halves are counted as unsigned bytes and subtracted only once they are
+/// 32-bit lane sums.
 /// @param rows Rows in the batch — the tallest lane's. Shorter lanes are padded with
-///        ZERO magnitude, which contributes exactly zero and needs no masking.
+/// ZERO magnitude, which contributes exactly zero and needs no masking.
 /// @return One `int32` per lane: `sum_{i,j} 2^(i+j) (popcount(V_i & P_j) -
-///         popcount(V_i & N_j))`.
+/// popcount(V_i & N_j))`.
 ///
 /// @note **The byte accumulator would overflow and does not.** A weighted byte is at
-///       most `8 + 2*16 + 4*8 = 72` at `N = 2`, so the four plane pairs are folded in
-///       the byte domain and only THEN widened — one widening per row rather than
-///       four. Accumulating the bytes ACROSS rows would overflow at 255 and is not
-///       attempted.
+/// most `8 + 2*16 + 4*8 = 72` at `N = 2`, so the four plane pairs are folded in
+/// the byte domain and only THEN widened — one widening per row rather than
+/// four. Accumulating the bytes ACROSS rows would overflow at 255 and is not
+/// attempted.
 template <size_t N>
 BINCV_LKB_FN __m256i lkbWindowSum(const uint32_t* val, const uint32_t* magP,
                                   const uint32_t* magN, size_t rows) {
@@ -163,27 +163,27 @@ BINCV_LKB_FN __m256i lkbWindowSum(const uint32_t* val, const uint32_t* magP,
 }
 
 /// @brief The whole batched residual: **ten window sums for eight keypoints**.
-///        **INTERNAL** (E-36, X-79). This is the one function carrying `target`.
+/// **INTERNAL**. This is the one function carrying `target`.
 ///
 /// @param magX,magY `[row][plane][lane]`, masked to each lane's region.
-/// @param signX,signY `[row][lane]`, a set bit meaning NEGATIVE (D-3).
+/// @param signX,signY `[row][lane]`, a set bit meaning NEGATIVE.
 /// @param outX,outY `[5][kLkBatchLanes]`, in the order `t00, t01, t10, t11, self` —
-///        `TapSums`' own field order, so the caller copies straight across.
+/// `TapSums`' own field order, so the caller copies straight across.
 ///
 /// @note **Ten separate passes over the staged rows, and that is deliberate.** Doing
-///       all ten sums inside one row loop needs ten accumulators plus both components'
-///       split magnitudes plus the four constants — past sixteen `ymm` registers, and
-///       the spill costs more than the extra loads do. Each pass here keeps ONE
-///       accumulator live and reads `[row][plane][lane]` rows that are already in L1.
+/// all ten sums inside one row loop needs ten accumulators plus both components'
+/// split magnitudes plus the four constants — past sixteen `ymm` registers, and
+/// the spill costs more than the extra loads do. Each pass here keeps ONE
+/// accumulator live and reads `[row][plane][lane]` rows that are already in L1.
 /// @note The sign split is recomputed per pass rather than staged. Two operations per
-///       row against a 32 KB staged array it would otherwise double.
+/// row against a 32 KB staged array it would otherwise double.
 template <size_t N>
 __attribute__((target("avx2"))) inline void lkBatchResidual(
     const uint32_t* self, const uint32_t* t00, const uint32_t* t01, const uint32_t* t10,
     const uint32_t* t11, const uint32_t* magX, const uint32_t* signX, const uint32_t* magY,
     const uint32_t* signY, size_t rows, uint32_t* splitP, uint32_t* splitN, int32_t* outX,
     int32_t* outY) {
-    // FIVE VALUES, INCLUDING THE ITERATION-INVARIANT ONE, AND X-85 MEASURED WHY. The
+    // FIVE VALUES, INCLUDING THE ITERATION-INVARIANT ONE, AND MEASURED WHY. The
     // previous-frame term could be hoisted to the refill -- the NEON kernels do exactly
     // that and gain from it -- but here it is already being computed EIGHT LANES AT A
     // TIME, and hoisting it turns vector work into a scalar per-lane loop over the

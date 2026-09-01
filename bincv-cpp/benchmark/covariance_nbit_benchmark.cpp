@@ -1,29 +1,29 @@
-// T3.10 / X-22 -- what an N-BIT pyramid level costs per LK window.
+// -- what an N-BIT pyramid level costs per LK window.
 //
 // WHY THIS MEASUREMENT IS A DELIVERABLE AND NOT AN AFTERTHOUGHT
 //
-// X-20 measured the hybrid LK tracker missing its accuracy tolerance on the
+// a measurement measured the hybrid LK tracker missing its accuracy tolerance on the
 // reference pipeline's own edge-map content and separated the causes: on windows
 // that never clip, four 1-BIT pyramid levels are still ~600x worse than one,
 // because a level whose pixels are bits cannot localise sub-pixel motion better
-// than its own quantisation. X-2 measured the levels needing 1/3/4/5 bits. So the
-// fix is N-bit levels, T4.1 (E-7) is the task that has to CHOOSE a bit depth per
+// than its own quantisation. a measurement measured the levels needing 1/3/4/5 bits. So the
+// fix is N-bit levels, is the task that has to CHOOSE a bit depth per
 // level -- and a choice needs a price. This file is the price.
 //
 // THE COST MODEL, WRITTEN OUT BEFORE MEASURING
 //
 // The covariance of two N-bit values is a sum over plane PAIRS, so it is quadratic
-// in N where T3.5's derivative is linear (D-21's scope limit says exactly this, and
-// X-21 flagged it). Counting the popcounts ops/covariance.hpp issues per word:
+// in N where that work’s derivative is linear (the design rule’s scope limit says exactly this, and
+// flagged it). Counting the popcounts ops/covariance.hpp issues per word:
 //
-//     N(N+1)/2 for sumXX   (the diagonal is symmetric: upper triangle, doubled)
-//     N(N+1)/2 for sumYY
-//     2*N^2    for sumXY   (a total and a selected count per ORDERED pair)
-//     ----------------------------------------------------------------
-//     3N^2 + N  popcounts per word, with 2N+2 word loads and one selector XOR
+// N(N+1)/2 for sumXX (the diagonal is symmetric: upper triangle, doubled)
+// N(N+1)/2 for sumYY
+// 2*N^2 for sumXY (a total and a selected count per ORDERED pair)
+// ----------------------------------------------------------------
+// 3N^2 + N popcounts per word, with 2N+2 word loads and one selector XOR
 //
-//     N = 1:  4     N = 2: 14     N = 3: 30     N = 4: 52
-//     ratio:  1.00        3.50          7.50          13.00
+// N = 1: 4 N = 2: 14 N = 3: 30 N = 4: 52
+// ratio: 1.00 3.50 7.50 13.00
 //
 // At N = 1 that is exactly countCovariance's four popcounts, which is the
 // arithmetic statement of "ternary is the N = 1 instance".
@@ -34,52 +34,52 @@
 // a different quantity. So the rule is a falsifiable prediction about the cost
 // curve rather than a selection between arms:
 //
-//   BAND A -- measured ns/window ratios within +/-25% of 1.00 / 3.50 / 7.50 / 13.00:
-//     the popcount count IS the cost model. T4.1 may price a per-level bit depth
-//     with 3N^2 + N and this file's table, and no code moves.
-//   BAND B -- ratios systematically BELOW the prediction: the kernel is not purely
-//     popcount-bound at these N (the N^2 pairs come off 2N+2 loads, so there is
-//     instruction-level parallelism the count does not model). Report the MEASURED
-//     curve as the price and mark 3N^2 + N an upper bound. Still no code moves.
-//   BAND C -- ratios ABOVE the prediction: something is quadratic that should not
-//     be -- register spills out of the N^2 counters, or the per-row combine growing
-//     with N. That CONTRADICTS the documented cost of the shipped kernel and
-//     CLAUDE.md's rule applies: report it, do not adjust the doc to fit.
+// BAND A -- measured ns/window ratios within +/-25% of 1.00 / 3.50 / 7.50 / 13.00:
+// the popcount count IS the cost model. this may price a per-level bit depth
+// with 3N^2 + N and this file's table, and no code moves.
+// BAND B -- ratios systematically BELOW the prediction: the kernel is not purely
+// popcount-bound at these N (the N^2 pairs come off 2N+2 loads, so there is
+// instruction-level parallelism the count does not model). Report the MEASURED
+// curve as the price and mark 3N^2 + N an upper bound. Still no code moves.
+// BAND C -- ratios ABOVE the prediction: something is quadratic that should not
+// be -- register spills out of the N^2 counters, or the per-row combine growing
+// with N. That CONTRADICTS the documented cost of the shipped kernel and
+// CLAUDE.md's rule applies: report it, do not adjust the doc to fit.
 //
 // WHAT IS MEASURED
 //
-//   ternary N=1   the T3.6 five-view entry point -- the shipped level-0 path, and
-//                 the denominator a bit-depth decision is taken against.
-//   bit-sliced    the T3.10 plane-array entry point at N = 1, 2, 3, 4. The N = 1
-//                 arm is the SAME KERNEL as the N = 2..4 arms with N = 1, not the
-//                 ternary one, so the ratios in the table are one kernel's curve
-//                 and not a change of kernel at the first column.
-//   window-acc    THE SHIPPED KERNEL WITH EXACTLY ONE THING CHANGED: the per-row
-//                 partial accumulator replaced by a single window-wide one. Same
-//                 popcounts, same words, same masks, same combine -- so any
-//                 difference is the accumulator and nothing else.
+// ternary N=1 the five-view entry point -- the shipped level-0 path, and
+// the denominator a bit-depth decision is taken against.
+// bit-sliced the plane-array entry point at N = 1, 2, 3, 4. The N = 1
+// arm is the SAME KERNEL as the N = 2..4 arms with N = 1, not the
+// ternary one, so the ratios in the table are one kernel's curve
+// and not a change of kernel at the first column.
+// window-acc THE SHIPPED KERNEL WITH EXACTLY ONE THING CHANGED: the per-row
+// partial accumulator replaced by a single window-wide one. Same
+// popcounts, same words, same masks, same combine -- so any
+// difference is the accumulator and nothing else.
 //
-//                 It is here because the per-row split is a MEASURED decision taken
-//                 at N = 1 (T2.11 item 4; X-11b measured 1.08x at W=31 and a 5-6%
-//                 loss at W=7) and its cost is O(N^2) PER ROW -- 4N^2 counters
-//                 zeroed and 4N^2 added, 128 operations per row at N = 4 -- while
-//                 the work it is amortized over is O(N^2) per WORD. A 31-pixel
-//                 window is 1-2 `uint64_t` words per row, so at large N and wide
-//                 words the fixed per-row cost stops being small. Whether it
-//                 actually does is a question this file can answer with one arm
-//                 rather than a paragraph, and it is exactly the corner T4.1 will
-//                 be choosing in. **This arm decides nothing** -- the shipped
-//                 kernel is not changed here -- it exists so the report says
-//                 "measured" where it would otherwise say "presumably".
+// It is here because the per-row split is a MEASURED decision taken
+// at N = 1 ( item 4; a measurement measured 1.08x at W=31 and a 5-6%
+// loss at W=7) and its cost is O(N^2) PER ROW -- 4N^2 counters
+// zeroed and 4N^2 added, 128 operations per row at N = 4 -- while
+// the work it is amortized over is O(N^2) per WORD. A 31-pixel
+// window is 1-2 `uint64_t` words per row, so at large N and wide
+// words the fixed per-row cost stops being small. Whether it
+// actually does is a question this file can answer with one arm
+// rather than a paragraph, and it is exactly the corner this will
+// be choosing in. **This arm decides nothing** -- the shipped
+// kernel is not changed here -- it exists so the report says
+// "measured" where it would otherwise say "presumably".
 //
 // Both spellings are VIEW spellings, so no arm pays container plumbing the others
 // do not. Memory is reported beside the time, as CLAUDE.md requires: an N-bit level
 // costs (N+1) bits per pixel per derivative against ternary's 2, and that is the
-// other half of the trade T4.1 is taking.
+// other half of the trade this is taking.
 //
 // THE WORKLOAD IS THE LK ONE: 200 keypoints (the reference pipeline's
 // gftt_max_corners), one window each, at 640x480, scattered so border windows clip
-// -- the same shape covariance_benchmark.cpp and X-11 use, so the numbers are
+// -- the same shape covariance_benchmark.cpp and use, so the numbers are
 // comparable across the three.
 //
 // Validity: measure_util.hpp's protocol -- volatile sink, four rotating inputs,
@@ -167,7 +167,7 @@ constexpr double kTargetMs = 50.0;
 const int kWindows[] = {7, 15, 31};
 
 /// @brief Popcounts per word at bit depth N -- the model the rule is written
-///        against. Derived in this file's header; NOT read out of the kernel.
+/// against. Derived in this file's header; NOT read out of the kernel.
 constexpr double popcountsPerWord(size_t n) {
     return 3.0 * static_cast<double>(n) * static_cast<double>(n) + static_cast<double>(n);
 }
@@ -176,17 +176,17 @@ constexpr double popcountsPerWord(size_t n) {
 // Inputs: N-bit levels through the REAL derivative, not a generator
 // ---------------------------------------------------------------------------
 
-/// @brief `kInputs` N-bit derivative pairs, and the plane-array views the T3.10
-///        entry point takes.
-/// @note The content comes from T3.5's `derivativeX` / `derivativeY` over a random
-///       `QuantMat<N>` level, which is what an N-bit pyramid level actually feeds
-///       the covariance. The kernels are content-independent -- every word in the
-///       window is loaded and counted whatever it holds -- so the fill ratio moves
-///       no ratio here, but a generator that produced impossible sign/magnitude
-///       combinations would make the ANSWER check below meaningless.
+/// @brief `kInputs` N-bit derivative pairs, and the plane-array views the
+/// entry point takes.
+/// @note The content comes from that work’s `derivativeX` / `derivativeY` over a random
+/// `QuantMat<N>` level, which is what an N-bit pyramid level actually feeds
+/// the covariance. The kernels are content-independent -- every word in the
+/// window is loaded and counted whatever it holds -- so the fill ratio moves
+/// no ratio here, but a generator that produced impossible sign/magnitude
+/// combinations would make the ANSWER check below meaningless.
 /// @note The views are built AFTER every container exists. Building them inside
-///       the fill loop would leave them pointing into storage a `push_back`
-///       reallocation had moved.
+/// the fill loop would leave them pointing into storage a `push_back`
+/// reallocation had moved.
 template <size_t N, typename Word>
 struct LevelSet {
     /// The plane arrays one input's kernel call needs, in the exact array form
@@ -236,8 +236,8 @@ struct LevelSet {
 
     /// @brief Bytes of derivative plane the covariance must hold for ONE level.
     /// @note (N + 1) planes per derivative, two derivatives. This is the footprint
-    ///       half of the trade: ternary is 2 bits per pixel per derivative, N = 4
-    ///       is 5.
+    /// half of the trade: ternary is 2 bits per pixel per derivative, N = 4
+    /// is 5.
     size_t bytesPerLevel() const {
         return 2 * bincv::SignedQuantMat<N, Word>::Planes * dx[0].planeWords() * sizeof(Word);
     }
@@ -245,7 +245,7 @@ struct LevelSet {
 
 /// @brief 200 scattered keypoint windows, centred, so edge windows clip.
 /// @note The same generator covariance_benchmark.cpp uses, seeded identically, so
-///       the two files time the same windows.
+/// the two files time the same windows.
 std::vector<Rect> keypointWindows(int W) {
     std::vector<Rect> out;
     out.reserve(static_cast<size_t>(kKeypoints));
@@ -264,15 +264,15 @@ std::vector<Rect> keypointWindows(int W) {
 // ---------------------------------------------------------------------------
 
 /// @brief ops/covariance.hpp's N-bit kernel with the per-row partial accumulator
-///        removed, and nothing else changed.
+/// removed, and nothing else changed.
 /// @note It calls the SAME `impl::bitSlicedPairRowRegion` and the SAME
-///       `impl::combineBitSlicedPairs`, so the popcounts, the masks, the clip and
-///       the weighting are literally the shipped code. The only difference is that
-///       every row adds into one `BitSlicedPairCounts<N>` rather than into a fresh
-///       one that is then folded in -- which removes 8N^2 operations per row and
-///       lengthens the dependency chain through each counter.
+/// `impl::combineBitSlicedPairs`, so the popcounts, the masks, the clip and
+/// the weighting are literally the shipped code. The only difference is that
+/// every row adds into one `BitSlicedPairCounts<N>` rather than into a fresh
+/// one that is then folded in -- which removes 8N^2 operations per row and
+/// lengthens the dependency chain through each counter.
 /// @note Its ANSWER is identical by construction (integer addition is
-///       associative), and the check below requires it rather than assuming it.
+/// associative), and the check below requires it rather than assuming it.
 template <size_t N, typename Word>
 GradientCovariance covarianceWindowAccumulator(const BinMatConstView<Word> (&magX)[N],
                                                const BinMatConstView<Word> (&magY)[N],
@@ -301,9 +301,9 @@ GradientCovariance covarianceWindowAccumulator(const BinMatConstView<Word> (&mag
 // The independent answer check (validity hazard 4)
 // ---------------------------------------------------------------------------
 
-/// @brief The per-pixel covariance, with multiplies, through SignedQuantMat::at().
+/// @brief The per-pixel covariance, with multiplies, through SignedQuantMat::at.
 /// @note Not a second spelling of the kernel: it knows nothing about planes, pairs,
-///       masks or popcounts. Slow and only run once per arm before timing starts.
+/// masks or popcounts. Slow and only run once per arm before timing starts.
 template <size_t N, typename Word>
 GradientCovariance referenceCovariance(const bincv::SignedQuantMat<N, Word>& dx,
                                        const bincv::SignedQuantMat<N, Word>& dy, const Rect& w) {
@@ -329,7 +329,7 @@ bool same(const GradientCovariance& a, const GradientCovariance& b) {
 }
 
 /// @brief Checks one bit depth's arm against the per-pixel reference at every
-///        timed window, and returns false loudly if any disagrees.
+/// timed window, and returns false loudly if any disagrees.
 template <size_t N, typename Word>
 bool checkAnswers(const LevelSet<N, Word>& set, const std::vector<Rect>& windows,
                   const char* wordName, int W) {
@@ -342,13 +342,13 @@ bool checkAnswers(const LevelSet<N, Word>& set, const std::vector<Rect>& windows
             const GradientCovariance alt = covarianceWindowAccumulator<N, Word>(
                 set.views[k].magX, set.views[k].magY, set.views[k].signX, set.views[k].signY, w);
             if (!same(got, alt)) {
-                std::printf("  DISAGREEMENT %s N=%zu W=%d at [%d %d]: the window-accumulator "
+                std::printf(" DISAGREEMENT %s N=%zu W=%d at [%d %d]: the window-accumulator "
                             "arm is not the shipped kernel's answer\n",
                             wordName, N, W, w.x, w.y);
                 return false;
             }
             if (!same(got, want)) {
-                std::printf("  DISAGREEMENT %s N=%zu W=%d at [%d %d]: kernel "
+                std::printf(" DISAGREEMENT %s N=%zu W=%d at [%d %d]: kernel "
                             "{%lld %lld %lld} reference {%lld %lld %lld}\n",
                             wordName, N, W, w.x, w.y, static_cast<long long>(got.sumXX),
                             static_cast<long long>(got.sumYY),
@@ -364,7 +364,7 @@ bool checkAnswers(const LevelSet<N, Word>& set, const std::vector<Rect>& windows
 }
 
 /// @brief One timed arm: every keypoint window at one bit depth, folded into the
-///        volatile sink so nothing can be deleted.
+/// volatile sink so nothing can be deleted.
 template <size_t N, typename Word>
 measure::Bench bitSlicedArm(const LevelSet<N, Word>& set, const std::vector<Rect>& windows,
                             const std::string& name) {
@@ -413,8 +413,8 @@ bool runWordType(const char* wordName) {
     LevelSet<3, Word> l3;
     LevelSet<4, Word> l4;
 
-    std::printf("\n  === %s ===\n", wordName);
-    std::printf("  %-4s %-14s %12s %10s %10s %9s %12s\n", "W", "arm", "ns/window", "vs N=1",
+    std::printf("\n === %s ===\n", wordName);
+    std::printf(" %-4s %-14s %12s %10s %10s %9s %12s\n", "W", "arm", "ns/window", "vs N=1",
                 "predicted", "spread", "bits/px/deriv");
 
     bool ok = true;
@@ -427,10 +427,10 @@ bool runWordType(const char* wordName) {
         ok = checkAnswers<3, Word>(l3, windows, wordName, W) && ok;
         ok = checkAnswers<4, Word>(l4, windows, wordName, W) && ok;
 
-        // The T3.6 arm is the shipped level-0 path, spelled as five loose views so
+        // The the arm is the shipped level-0 path, spelled as five loose views so
         // that it pays exactly the call structure the bit-sliced arms do.
         measure::Bench ternary;
-        ternary.name = "ternary (T3.6)";
+        ternary.name = "ternary";
         ternary.body = [&l1, &windows](int i) {
             const size_t k = static_cast<size_t>(i % kInputs);
             int64_t acc = 0;
@@ -480,23 +480,23 @@ bool runWordType(const char* wordName) {
             const size_t n = armDepth[b];
             const double predicted =
                 (b == 0) ? 1.0 : popcountsPerWord(n) / popcountsPerWord(1);
-            std::printf("  %-4d %-14s %12.1f %10.2fx %9.2fx %8.1f%% %12zu\n", W,
+            std::printf(" %-4d %-14s %12.1f %10.2fx %9.2fx %8.1f%% %12zu\n", W,
                         benches[b].name.c_str(), ns, ns / base, predicted, t[b].spreadPct(),
                         bitsPerPixel[n]);
         }
         if (newsDuring != 0) {
-            std::printf("  W=%d: operator new was called %zu time(s) across %d kernel calls "
+            std::printf(" W=%d: operator new was called %zu time(s) across %d kernel calls "
                         "-- the no-scratch claim is FALSE here\n",
                         W, newsDuring, kKeypoints * static_cast<int>(benches.size()));
             ok = false;
         } else {
-            std::printf("  W=%d: operator new across %d kernel calls: 0 (no scratch at any "
+            std::printf(" W=%d: operator new across %d kernel calls: 0 (no scratch at any "
                         "N)\n", W, kKeypoints * static_cast<int>(benches.size()));
         }
     }
 
-    std::printf("\n  footprint at %dx%d, both derivatives, one level:\n", kWidth, kHeight);
-    std::printf("    N=1 (ternary) %8zu B     N=2 %8zu B     N=3 %8zu B     N=4 %8zu B\n",
+    std::printf("\n footprint at %dx%d, both derivatives, one level:\n", kWidth, kHeight);
+    std::printf(" N=1 (ternary) %8zu B N=2 %8zu B N=3 %8zu B N=4 %8zu B\n",
                 l1.bytesPerLevel(), l2.bytesPerLevel(), l3.bytesPerLevel(), l4.bytesPerLevel());
     return ok;
 }
@@ -504,12 +504,12 @@ bool runWordType(const char* wordName) {
 } // namespace
 
 int main() {
-    std::printf("=== T3.10 / X-22: what an N-bit level costs per LK window ===\n");
+    std::printf("=== what an N-bit level costs per LK window ===\n");
 #if defined(__aarch64__)
     std::printf("target: aarch64 -- AUTHORITATIVE (the reference device is where this closes)\n");
 #else
     std::printf("target: not aarch64 -- INDICATIVE ONLY. Every arm here is popcount-bound and\n"
-                "        the x86 popcount lowering (X-7) can change the shape of the curve.\n");
+                " the x86 popcount lowering can change the shape of the curve.\n");
 #endif
     std::printf("%dx%d, %d keypoints, one window each -- the LK access pattern of\n", kWidth,
                 kHeight, kKeypoints);

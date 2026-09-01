@@ -1,17 +1,17 @@
 // ===========================================================================
-// X-78 -- HOW MANY ITERATIONS DOES A POINT ACTUALLY RUN, AND WHAT DOES THE
+// -- HOW MANY ITERATIONS DOES A POINT ACTUALLY RUN, AND WHAT DOES THE
 // MAXIMUM OVER EIGHT COST?
 //
-// T5.16's AVX2 keypoint batch puts eight keypoints in lanes and iterates them IN
-// LOCKSTEP, so a batch runs until its LAST lane converges. X-68 measured the MEAN
+// that work’s AVX2 keypoint batch puts eight keypoints in lanes and iterates them IN
+// LOCKSTEP, so a batch runs until its LAST lane converges. a measurement measured the MEAN
 // at 4.29 iterations per point per level; the batch pays the MAXIMUM OVER EIGHT,
 // and that number decides whether the batch is worth writing.
 //
-//     naive lockstep   =  kernel x  mean(iters) / mean(batch max over 8)
-//     with lane refill =  kernel x  mean(iters) / (mean(iters) + refill)
+// naive lockstep = kernel x mean(iters) / mean(batch max over 8)
+// with lane refill = kernel x mean(iters) / (mean(iters) + refill)
 //
-// THE POINT OF MEASURING THIS FIRST is that it is decisive and nearly free. D-53
-// exists because X-62 measured 1.75x in a kernel and 0.31x on the frontend, and
+// THE POINT OF MEASURING THIS FIRST is that it is decisive and nearly free.
+// exists because a measurement measured 1.75x in a kernel and 0.31x on the frontend, and
 // lockstep batching changes exactly the quantity that did that -- how many
 // iterations run.
 //
@@ -219,34 +219,34 @@ int main(int argc, char** argv) {
     const double meanMax = mean(gBatchMax);
     const double ratio = meanMax > 0.0 ? meanIters / meanMax : 0.0;
 
-    std::printf("=== X-78: LK iteration distribution, %zu frames, cap %d ===\n",
+    std::printf("=== LK iteration distribution, %zu frames, cap %d ===\n",
                 files.size(), lk.maxIterations);
-    std::printf("point-levels tracked: %zu   batches of 8: %zu\n\n",
+    std::printf("point-levels tracked: %zu batches of 8: %zu\n\n",
                 gAll.size(), gBatchMax.size());
-    std::printf("  iters   points    share   cumulative\n");
+    std::printf(" iters points share cumulative\n");
     double cum = 0.0;
     for (unsigned k = 1; k <= hi; ++k) {
         if (hist[k] == 0) continue;
         const double share = static_cast<double>(hist[k]) / static_cast<double>(gAll.size());
         cum += share;
-        std::printf("  %5u  %7zu   %6.2f%%   %6.2f%%\n", k, hist[k], share * 100.0,
+        std::printf(" %5u %7zu %6.2f%% %6.2f%%\n", k, hist[k], share * 100.0,
                     cum * 100.0);
     }
-    std::printf("\n  mean iterations per point-level      %8.3f\n", meanIters);
-    std::printf("  mean MAXIMUM over a batch of 8       %8.3f\n", meanMax);
-    std::printf("  ratio  mean / mean-of-max-8          %8.3f\n", ratio);
-    std::printf("  lane slots run %.0f, of which useful %.0f  -> %.1f%% wasted\n",
+    std::printf("\n mean iterations per point-level %8.3f\n", meanIters);
+    std::printf(" mean MAXIMUM over a batch of 8 %8.3f\n", meanMax);
+    std::printf(" ratio mean / mean-of-max-8 %8.3f\n", ratio);
+    std::printf(" lane slots run %.0f, of which useful %.0f -> %.1f%% wasted\n",
                 gSlots, gUsed, (1.0 - gUsed / gSlots) * 100.0);
 
     // The projection the decision rule is written against. The kernel factor is
-    // X-66's arm D, measured; everything else here is this run's distribution.
+    // that measurement’s arm D, measured; everything else here is this run's distribution.
     constexpr double kKernel = 2.1;
-    std::printf("\n  projected `track` speedup, naive lockstep   %5.2fx\n", kKernel * ratio);
-    std::printf("  projected `track` speedup, with lane refill %5.2fx  (refill excluded)\n",
+    std::printf("\n projected `track` speedup, naive lockstep %5.2fx\n", kKernel * ratio);
+    std::printf(" projected `track` speedup, with lane refill %5.2fx (refill excluded)\n",
                 kKernel);
     const char* band = ratio >= 0.70 ? "A -- naive lockstep is enough"
                      : ratio >= 0.45 ? "B -- lane refill"
                                      : "C -- refill MANDATORY, naive lockstep regresses";
-    std::printf("  BAND: %s\n", band);
+    std::printf(" BAND: %s\n", band);
     return 0;
 }

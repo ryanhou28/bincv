@@ -1,23 +1,23 @@
-// Error-policy tests (T1.4, ARCHITECTURE 5.3). Core-only on purpose: the whole
+// Error-policy tests (the design notes). Core-only on purpose: the whole
 // point of the policy is the configuration that has no OpenCV and no exceptions,
 // so this suite has to build and run there.
 //
 // Covers the four claims the policy makes:
-//   1. BINCV_THROW throws the named type, with the message, where exceptions exist
-//   2. BINCV_ASSERT compiles away ENTIRELY under NDEBUG
-//   3. Validation still rejects bad arguments
-//   4. at() / set() are unchecked in a release build
+// 1. BINCV_THROW throws the named type, with the message, where exceptions exist
+// 2. BINCV_ASSERT compiles away ENTIRELY under NDEBUG
+// 3. Validation still rejects bad arguments
+// 4. at / set are unchecked in a release build
 //
 // This suite covers the configuration it is COMPILED in, which is never the
 // checked one in practice: all three verified builds are Release. Two companion
 // suites cover what this one structurally cannot --
-//   tests/test_error_checked.cpp  the live BINCV_ASSERT and the checked
-//                                 accessors, forced on with #undef NDEBUG so
-//                                 they run in every configuration
-//   tests/test_error_abort.cpp    every BINCV_THROW site, and
-//   tests/test_assert_abort.cpp   every BINCV_ASSERT site, as death tests: a
-//                                 failed check terminates the process, so it
-//                                 cannot be observed from inside one.
+// tests/test_error_checked.cpp the live BINCV_ASSERT and the checked
+// accessors, forced on with #undef NDEBUG so
+// they run in every configuration
+// tests/test_error_abort.cpp every BINCV_THROW site, and
+// tests/test_assert_abort.cpp every BINCV_ASSERT site, as death tests: a
+// failed check terminates the process, so it
+// cannot be observed from inside one.
 
 #include <cstddef>
 #include <cstdint>
@@ -108,13 +108,13 @@ void testAssertCompilesAwayInRelease() {
 #if BINCV_DEBUG_CHECKS
     // Debug build: the check is live, so the condition ran exactly once. This
     // branch WAS unverified when it was written -- all three configurations were
-    // Release, so nothing compiled it. T1.8 added the Debug configuration to
+    // Release, so nothing compiled it. added the Debug configuration to
     // scripts/verify.sh, and this is now one of the lines that configuration
     // exists to run. The same claim is also made unconditionally in
     // tests/test_error_checked.cpp, which forces the checks on regardless.
     BINCV_CHECK_EQ(g_conditionEvaluations, 1);
 #else
-    // Release build: nothing ran. This is the claim that lets at() reduce to a
+    // Release build: nothing ran. This is the claim that lets at reduce to a
     // shift and a mask.
     BINCV_CHECK_EQ(g_conditionEvaluations, 0);
     assertDiscardsItsConditionEntirely();
@@ -175,7 +175,7 @@ void testValidationStillRejects() {
     BINCV_CHECK_THROWS(empty.sparsity(), std::runtime_error);
     BINCV_CHECK_THROWS(empty.forEachNonZero([](int, int) {}), std::runtime_error);
 
-    // ...and the valid forms of the same calls still work, so the checks are
+    //...and the valid forms of the same calls still work, so the checks are
     // rejecting the argument rather than the call.
     m.resize(16, 2);
     BINCV_CHECK_EQ(m.getWidth(), size_t(16));
@@ -185,11 +185,11 @@ void testValidationStillRejects() {
 #endif // BINCV_EXCEPTIONS_ENABLED
 
 // ---------------------------------------------------------------------------
-// 4. at() and set() are unchecked in release
+// 4. at and set are unchecked in release
 // ---------------------------------------------------------------------------
 
 #if !BINCV_DEBUG_CHECKS
-// The behaviour change D-7 sanctions, pinned down so it cannot drift back.
+// The behaviour change sanctions, pinned down so it cannot drift back.
 //
 // Every index used here is outside [0, width) but inside the row's own word, so
 // the reads and writes stay within the allocation and the test is well-defined.
@@ -209,7 +209,7 @@ void testAtIsUncheckedInRelease() {
     BINCV_CHECK(!m.at(1, 31));
 
     // Writing past `width` is not stopped either, and it breaks the padding-bit
-    // invariant: the pixel is readable through at(), yet countNonZero() -- which
+    // invariant: the pixel is readable through at, yet countNonZero -- which
     // only walks columns [0, width) -- never sees it.
     m.set(0, 25, true);
     BINCV_CHECK(m.at(0, 25));
@@ -226,8 +226,8 @@ void testAtIsUncheckedInRelease() {
 // The configuration under test, printed so a passing log says which paths ran.
 void reportConfiguration() {
     std::cout << "\n--- Error policy configuration ---\n";
-    std::cout << "  BINCV_EXCEPTIONS_ENABLED = " << BINCV_EXCEPTIONS_ENABLED << "\n";
-    std::cout << "  BINCV_DEBUG_CHECKS       = " << BINCV_DEBUG_CHECKS << "\n";
+    std::cout << " BINCV_EXCEPTIONS_ENABLED = " << BINCV_EXCEPTIONS_ENABLED << "\n";
+    std::cout << " BINCV_DEBUG_CHECKS = " << BINCV_DEBUG_CHECKS << "\n";
 
     // Both are 0/1 macros, never merely defined/undefined: `#if` on a
     // misspelled name silently yields 0, so the values are checked, not assumed.
@@ -256,7 +256,7 @@ BINCV_TEST(ErrorPolicy, ThrowCarriesTypeAndMessage) { testThrowCarriesTypeAndMes
 BINCV_TEST(ErrorPolicy, ValidationStillRejects)     { testValidationStillRejects(); }
 #else
 BINCV_TEST(ErrorPolicy, ThrowAbortsWithoutExceptions) {
-    std::cout << "\n  exceptions disabled: BINCV_THROW's abort path is covered by"
+    std::cout << "\n exceptions disabled: BINCV_THROW's abort path is covered by"
                  " test_error_abort\n";
 }
 #endif
@@ -267,7 +267,7 @@ BINCV_TEST(ErrorPolicy, AssertCompilesAwayInRelease) { testAssertCompilesAwayInR
 BINCV_TEST(ErrorPolicy, AtIsUncheckedInRelease) { testAtIsUncheckedInRelease(); }
 #else
 BINCV_TEST(ErrorPolicy, AtIsCheckedInDebug) {
-    std::cout << "\n  debug build: at()/set() are bounds-checked, so the"
+    std::cout << "\n debug build: at()/set() are bounds-checked, so the"
                  " unchecked-access test is skipped here -- the checked"
                  " behaviour is covered by test_error_checked and"
                  " test_assert_abort\n";

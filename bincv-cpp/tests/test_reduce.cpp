@@ -1,7 +1,7 @@
-// Bulk reductions (T2.5, T2.6, T2.11): countNonZero / countAnd / countAndSplit /
+// Bulk reductions: countNonZero / countAnd / countAndSplit /
 // countCovariance / SlidingWindowCount.
 //
-// T2.11 added three entry points and one accumulator to what T2.5/T2.6 shipped,
+// added three entry points and one accumulator to what shipped,
 // and every one of them computes something an older entry point already computes
 // -- faster, by traversing less. So the suite's central question for them is not
 // "is this number right" but "is this number THE SAME": Reduce.Sliding_* sweeps
@@ -14,17 +14,17 @@
 // TWO HALVES, and they answer different questions -- the same split as
 // tests/test_logic.cpp and tests/test_shift.cpp.
 //
-//   1. The CORE half (everything up to the OpenCV guard) needs no OpenCV, so it
-//      runs in all four verification configurations -- including the Debug one,
-//      which is the only place the kernels' BINCV_ASSERT preconditions are live,
-//      and the -fno-exceptions one, which is the embedded claim. It checks every
-//      reduction against a per-pixel reference written before the kernels, over a
-//      region sweep that is deliberately hostile to word arithmetic.
+// 1. The CORE half (everything up to the OpenCV guard) needs no OpenCV, so it
+// runs in all four verification configurations -- including the Debug one,
+// which is the only place the kernels' BINCV_ASSERT preconditions are live,
+// and the -fno-exceptions one, which is the embedded claim. It checks every
+// reduction against a per-pixel reference written before the kernels, over a
+// region sweep that is deliberately hostile to word arithmetic.
 //
-//   2. The OPENCV half asserts what Tier 1 promises for countNonZero: equality
-//      with cv::countNonZero on the same binary content stored as CV_8U
-//      (ARCHITECTURE 5.1, 10.3), across T2.1's full size and fill matrix, at all
-//      four word widths, whole-image and by region.
+// 2. The OPENCV half asserts what Tier 1 promises for countNonZero: equality
+// with cv::countNonZero on the same binary content stored as CV_8U
+// (the design notes, 10.3), across that work’s full size and fill matrix, at all
+// four word widths, whole-image and by region.
 //
 // WHERE THE EXHAUSTIVE SWEEP IS, AND WHY IT IS NOT IN THE VALUE TESTS
 //
@@ -47,9 +47,9 @@
 // WHY THERE ARE NO BINCV_EQUIVALENCE_INJECT_FAULT TARGETS FOR THIS SUITE
 //
 // tests/CMakeLists.txt rebuilds test_logic under three conversion faults as
-// WILL_FAIL targets, because its Tier 1 half reads binCV back through unpackTo8U()
+// WILL_FAIL targets, because its Tier 1 half reads binCV back through unpackTo8U
 // and a fault there could cancel through a pointwise operation. This suite never
-// calls unpackTo8U(): its OpenCV half compares a binCV count against
+// calls unpackTo8U: its OpenCV half compares a binCV count against
 // cv::countNonZero of content built by the harness's INDEPENDENT generator
 // (randomCvMask), so there is no shared conversion to cancel through. Fault 4
 // (dirty padding) is the interesting one, and it is covered in-process instead by
@@ -99,7 +99,7 @@ const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70, 128, 640};
 const int HEIGHTS[] = {1, 2, 3, 17};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (D-4 makes alignment a per-object choice): 32 bytes
+// An over-aligned row stride (the design rule makes alignment a per-object choice): 32 bytes
 // is a whole number of 1-, 2-, 4- and 8-byte words, so every word type gets a
 // stride strictly greater than ceil(width / WordBits) at most widths -- which is
 // the one thing a reduction must not assume.
@@ -109,7 +109,7 @@ constexpr size_t PADDED_ALIGNMENT = 32;
 // Content: the same generator as tests/equivalence.hpp, minus OpenCV
 // ---------------------------------------------------------------------------
 //
-// Duplicated rather than shared, for the reason T2.1 gives: the harness that
+// Duplicated rather than shared, for the reason gives: the harness that
 // judges a kernel and the kernel's own test must not share machinery, or a fault
 // in the shared part cancels. tests/test_logic.cpp carries the same three
 // functions for the same reason.
@@ -133,7 +133,7 @@ uint32_t fillThreshold(float fillRatio) {
     return static_cast<uint32_t>(rounded);
 }
 
-/// @brief Fills a matrix through set(), so its padding bits stay clear on entry.
+/// @brief Fills a matrix through set, so its padding bits stay clear on entry.
 template <typename WordType>
 void fillRandom(bincv::BinMat<WordType>& m, float fillRatio, uint64_t seed) {
     uint64_t state = seed;
@@ -173,9 +173,9 @@ bool pixelAt(const bincv::BinMatConstView<WordType>& v, int y, int x) {
     return (v.row(static_cast<size_t>(y))[ux / bits] & mask) != 0;
 }
 
-/// @brief Sets one pixel of a view directly, bypassing set().
-/// @note Used only to dirty a sign plane where the magnitude is zero, which set()
-///       correctly refuses to do (the canonical-zero rule, T1.6).
+/// @brief Sets one pixel of a view directly, bypassing set.
+/// @note Used only to dirty a sign plane where the magnitude is zero, which set
+/// correctly refuses to do (the canonical-zero rule).
 template <typename WordType>
 void setPixel(bincv::BinMatView<WordType> v, int y, int x) {
     constexpr size_t bits = bincv::BinMatView<WordType>::WordBits;
@@ -196,9 +196,9 @@ struct Clipped {
 
 /// @brief The region contract, written independently of impl::clipRegion.
 /// @note Deliberately a different shape from the library's -- min/max on long long
-///       against the extents, rather than the library's early-exit ladder. Two
-///       implementations of one rule, so the core-only configurations still have
-///       something for the library's version to disagree with.
+/// against the extents, rather than the library's early-exit ladder. Two
+/// implementations of one rule, so the core-only configurations still have
+/// something for the library's version to disagree with.
 Clipped clipReference(int width, int height, const Rect& r) {
     Clipped c;
     if (r.width <= 0 || r.height <= 0) return c;
@@ -282,9 +282,9 @@ std::string sizeLabel(const char* wordTypeName, int width, int height) {
 
 /// @brief One check for one (case, region) comparison.
 /// @note The message is built ONLY when the check fails -- the ternary below is
-///       what keeps a sweep of a hundred thousand regions from spending its time
-///       in std::string. On success it constructs an empty one, which allocates
-///       nothing.
+/// what keeps a sweep of a hundred thousand regions from spending its time
+/// in std::string. On success it constructs an empty one, which allocates
+/// nothing.
 void expectCount(size_t actual, size_t expected, const char* what, const Rect& region,
                  const std::string& label, const char* file, int line) {
     const bool ok = (actual == expected);
@@ -313,7 +313,7 @@ void expectTrue(bool ok, const char* what, const std::string& detail, const std:
 // ---------------------------------------------------------------------------
 
 /// @brief The regions every value sweep runs. Curated, and each entry is a case
-///        someone could get wrong rather than a number that looked plausible.
+/// someone could get wrong rather than a number that looked plausible.
 std::vector<Rect> valueRegions(int w, int h) {
     std::vector<Rect> out;
 
@@ -376,7 +376,7 @@ std::vector<Rect> valueRegions(int w, int h) {
 
 /// @brief The exhaustive region cross product the GEOMETRY sweep runs.
 /// @note A few word operations per entry, so this one can afford to be a cross
-///       product where the value sweeps cannot -- see the header comment.
+/// product where the value sweeps cannot -- see the header comment.
 std::vector<Rect> geometryRegions(int w, int h) {
     std::vector<Rect> out;
     const int xs[] = {-9, -1, 0, 1, 5, 7, 8, 15, 16, 31, 32, 33, 63, 64, w - 1, w, w + 3};
@@ -415,7 +415,7 @@ void testCountNonZeroReference(const char* wordTypeName) {
                 const Rect whole(0, 0, width, height);
 
                 // The no-region overload, against the whole-image reference and
-                // against the container's own per-pixel countNonZero().
+                // against the container's own per-pixel countNonZero.
                 REDUCE_EXPECT_COUNT(countNonZero(v), refCountNonZero(v, whole), "whole image",
                                     whole, label);
                 REDUCE_EXPECT_COUNT(countNonZero(v), static_cast<size_t>(m.countNonZero()),
@@ -498,13 +498,13 @@ void testMaskedReference(const char* wordTypeName) {
 // This is the test that reaches into impl::, and it is worth doing because the
 // two properties it pins are invisible in a value comparison:
 //
-//   - impl::visitRowWords visits each word index of a region-row EXACTLY ONCE, in
-//     ascending order. That is what T2.6's "single pass" means, and a skeleton
-//     that visited the head word twice would still produce the right count for
-//     every region whose head word happens to be empty.
-//   - the masks select EXACTLY the region's columns and nothing else -- in
-//     particular no column at or past `width`, which is the padding contract
-//     stated as a property of the geometry rather than of an image.
+// - impl::visitRowWords visits each word index of a region-row EXACTLY ONCE, in
+// ascending order. That is what that work’s "single pass" means, and a skeleton
+// that visited the head word twice would still produce the right count for
+// every region whose head word happens to be empty.
+// - the masks select EXACTLY the region's columns and nothing else -- in
+// particular no column at or past `width`, which is the padding contract
+// stated as a property of the geometry rather than of an image.
 //
 // tests/test_shift.cpp does the same to impl::borderIndex, and for the same
 // reason: an image comparison reaches the border only at the border.
@@ -594,13 +594,13 @@ void testGeometry(const char* wordTypeName) {
 // it holds." Three constructions where such a bit is set, none of which may change
 // an answer:
 //
-//   a. a wrapped buffer of all ones -- every pixel AND every padding bit set;
-//   b. clean content copied into a buffer whose padding is then dirtied;
-//   c. a sub-width WINDOW onto a wider image, where the bits past the window's
-//      `width` are not padding at all but a neighbour's live pixels.
+// a. a wrapped buffer of all ones -- every pixel AND every padding bit set;
+// b. clean content copied into a buffer whose padding is then dirtied;
+// c. a sub-width WINDOW onto a wider image, where the bits past the window's
+// `width` are not padding at all but a neighbour's live pixels.
 //
 // (c) is the one that reasoning about padding alone would miss, and it is the
-// construction ARCHITECTURE 7.5 needs: an LK window is a view onto a frame.
+// construction the design notes needs: an LK window is a view onto a frame.
 
 template <typename WordType>
 void testDirtyPadding(const char* wordTypeName) {
@@ -721,7 +721,7 @@ void testStrides(const char* wordTypeName) {
             const uint64_t seed = caseSeed(width, height, 900);
             const std::string label = sizeLabel(wordTypeName, width, height);
 
-            // Three sources, three different strides: word granularity (D-4's
+            // Three sources, three different strides: word granularity (the design rule’s
             // default), 32-byte aligned, and a hand-built view with two spare
             // words per row. A reduction must read each one's own stride.
             bincv::BinMat<WordType> dense(width, height);
@@ -841,7 +841,7 @@ void testDegenerate(const char* wordTypeName) {
     }
 
     // Rect's own three predicates. They are public API on a type this task added,
-    // and impl::clipRegion calls empty() -- but a member whose body is wrong and
+    // and impl::clipRegion calls empty -- but a member whose body is wrong and
     // whose only caller is a fast path can still leave every count right, so they
     // are checked directly rather than inferred from the counts above. (This is
     // the same argument that put Reduce.PortablePopcount_* in this file: source
@@ -856,7 +856,7 @@ void testDegenerate(const char* wordTypeName) {
     REDUCE_EXPECT_TRUE(!Rect(0, 0, 1, 1).empty(), "1x1 is not empty", "Rect(0,0,1,1)", label);
     // A rectangle wholly outside an image is NOT empty by this test: emptiness
     // after clipping is the operation's business, which is what the docstring on
-    // Rect::empty() says and what impl::clipRegion relies on.
+    // Rect::empty says and what impl::clipRegion relies on.
     REDUCE_EXPECT_TRUE(!Rect(-500, -500, 31, 31).empty(), "outside but not empty",
                        "Rect(-500,-500,31,31)", label);
 
@@ -924,35 +924,35 @@ void testPortablePopcount(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. The LK gradient covariance identity (ARCHITECTURE 7.5)
+// 8. The LK gradient covariance identity (the design notes)
 // ---------------------------------------------------------------------------
 //
-// This is the reason T2.6 exists, so it is tested as the thing it is for: build a
+// This is the reason exists, so it is tested as the thing it is for: build a
 // pair of ternary derivative images, compute the 2x2 covariance THROUGH these
 // primitives, and compare against a per-pixel floating-point reference over the
 // same window.
 //
-//     sumXX = countNonZero(mag_x, window)
-//     sumYY = countNonZero(mag_y, window)
-//     sumXY = split.crossTerm(), from ONE countAndSplit pass over
-//             (mag_x, mag_y, sign_x ^ sign_y)
+// sumXX = countNonZero(mag_x, window)
+// sumYY = countNonZero(mag_y, window)
+// sumXY = split.crossTerm, from ONE countAndSplit pass over
+// (mag_x, mag_y, sign_x ^ sign_y)
 //
-// sumXY is taken through SplitCount::crossTerm() and not through the fields,
-// because that is the spelling T3.6 is meant to copy. `whenClear - whenSet`
+// sumXY is taken through SplitCount::crossTerm and not through the fields,
+// because that is the spelling this is meant to copy. `whenClear - whenSet`
 // written on the two size_t fields is unsigned arithmetic and wraps for every
 // negatively correlated window -- half of them -- with no warning from a build
 // that has -Wconversion -Wsign-conversion -Werror on. The anti-correlated block
 // at the end of this function pins that: it is the case where the two spellings
-// differ by 2^64, so a crossTerm() that lost its casts cannot pass.
+// differ by 2^64, so a crossTerm that lost its casts cannot pass.
 //
 // Every quantity is an integer, so the float reference must agree EXACTLY. An
 // approximate comparison would accept an off-by-one in the split, which is
 // precisely the bug this operation can have.
 //
-// The sign planes are deliberately DIRTIED where the magnitude is zero. T1.6's
-// canonical-zero rule says the sign bit carries no information there and set()
+// The sign planes are deliberately DIRTIED where the magnitude is zero. that work’s
+// canonical-zero rule says the sign bit carries no information there and set
 // will not write one, but a caller that writes the sign plane directly -- which
-// T3.5's derivative does, `sign = neg` being a whole-plane assignment -- can leave
+// that work’s derivative does, `sign = neg` being a whole-plane assignment -- can leave
 // sign bits standing over zero magnitudes. The identity survives only because the
 // `a & b` factor removes them, and that is what the dirty-sign variant checks.
 
@@ -1000,7 +1000,7 @@ void testCovarianceIdentity(const char* wordTypeName) {
                 }
             }
 
-            // The scratch plane T3.6 will take as a caller-provided buffer. No
+            // The scratch plane this will take as a caller-provided buffer. No
             // allocation happens inside any kernel here.
             bincv::BinMat<WordType> signXor(width, height);
             bincv::bitwiseXor(dx.constSign(), dy.constSign(), signXor.view());
@@ -1038,7 +1038,7 @@ void testCovarianceIdentity(const char* wordTypeName) {
                             }
                         }
 
-                        // THE SHAPE T3.6 CALLS (T2.11 items 2 and 3): all four
+                        // THE SHAPE CALLS ( items 2 and 3): all four
                         // numbers from one pass, and the selector formed in the
                         // word loop rather than in a plane. Checked against the
                         // SAME float reference as the composition above, in the
@@ -1104,7 +1104,7 @@ void testCovarianceIdentity(const char* wordTypeName) {
     // the correlation is -1 everywhere by construction: dx = +1, dy = -1, so the
     // signs disagree at every pixel, whenClear is 0, and the cross term is
     // -(width * height) exactly. Written on the fields as `whenClear - whenSet`
-    // that is 2^64 - width*height instead, which is the bug crossTerm() exists to
+    // that is 2^64 - width*height instead, which is the bug crossTerm exists to
     // make unwritable -- and it compiles clean under the project's -Werror set,
     // so no build configuration would have caught it.
     // -----------------------------------------------------------------------
@@ -1136,8 +1136,8 @@ void testCovarianceIdentity(const char* wordTypeName) {
                            "crossTerm=" + std::to_string(split.crossTerm()) + " expected=" +
                                std::to_string(-static_cast<long long>(width) * height),
                            label);
-        // ... and the unsigned spelling on the same two fields is the enormous
-        // positive number this accessor exists to keep out of T3.6. Asserted, not
+        //... and the unsigned spelling on the same two fields is the enormous
+        // positive number this accessor exists to keep out of earlier work. Asserted, not
         // narrated, so the hazard is a checked fact rather than a comment that
         // could quietly stop being true.
         REDUCE_EXPECT_TRUE((split.whenClear - split.whenSet) > (~size_t{0} / 2),
@@ -1159,11 +1159,11 @@ void testCovarianceIdentity(const char* wordTypeName) {
                            "an agreeing pair gives the positive cross term",
                            std::to_string(agree.crossTerm()), label);
 
-        // THE SPELLING ARCHITECTURE 7.5 AND TASKS T2.6 PRINT, compiled from a
-        // NON-const container -- which is what T3.6 will hold. This is a
+        // THE SPELLING the design notes AND TASKS PRINT, compiled from a
+        // NON-const container -- which is what this will hold. This is a
         // compile-time regression as much as a value one: reduce.hpp's entry
         // points take BinMatConstView and template argument deduction does not
-        // consider BinMatView's conversion to it (D-9), so `dx.magnitude(0)` is a
+        // consider BinMatView's conversion to it, so `dx.magnitude(0)` is a
         // deduction failure while `dx.constMagnitude(0)` is not. The header
         // documents that; this pins the documented form to something that must
         // keep compiling.
@@ -1183,7 +1183,7 @@ void testCovarianceIdentity(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// 9. SlidingWindowCount agrees with recompute WINDOW FOR WINDOW (T2.11 item 1)
+// 9. SlidingWindowCount agrees with recompute WINDOW FOR WINDOW ( item 1)
 // ---------------------------------------------------------------------------
 //
 // The whole risk of an incremental accumulator is that it is right for a while.
@@ -1194,7 +1194,7 @@ void testCovarianceIdentity(const char* wordTypeName) {
 // of the image to one past its right edge, and within each, every y position from
 // one window-height above the image to one past its bottom. Every position is
 // compared against countNonZero(src, window) -- the recompute path, unchanged by
-// T2.11 -- and against the rectangle the accumulator says it is on.
+// -- and against the rectangle the accumulator says it is on.
 //
 // The y range is deliberately wider than the image on BOTH sides. Above it, the
 // window is clipped from the top and the "outgoing" row does not exist; below it,
@@ -1207,15 +1207,15 @@ void testCovarianceIdentity(const char* wordTypeName) {
 // blind to a shortened sweep. The message names the first disagreeing position.
 
 /// @brief One column of window positions, checked at every y. Returns the number
-///        of positions that disagreed, and the first one's description.
+/// of positions that disagreed, and the first one's description.
 /// @note TWO accumulators per position, not one, and the second is not redundant.
-///       `slid` is constructed once above the frame and walked down, so it tests
-///       the incremental path; `fresh` is constructed AT each position, so it
-///       tests the constructor's initial sum over an arbitrary clipped row range.
-///       Measured: with only the slid one, a constructor that dropped the last row
-///       of its initial sum passed the whole suite -- because a column that starts
-///       above the image starts with an empty row range and an initial sum of
-///       zero, so the initialization loop never ran with anything to do.
+/// `slid` is constructed once above the frame and walked down, so it tests
+/// the incremental path; `fresh` is constructed AT each position, so it
+/// tests the constructor's initial sum over an arbitrary clipped row range.
+/// Measured: with only the slid one, a constructor that dropped the last row
+/// of its initial sum passed the whole suite -- because a column that starts
+/// above the image starts with an empty row range and an initial sum of
+/// zero, so the initialization loop never ran with anything to do.
 template <typename WordType>
 size_t slideColumnMismatches(const bincv::BinMatConstView<WordType>& v, int x, int windowW,
                              int windowH, std::string& firstBad) {
@@ -1312,7 +1312,7 @@ void testSlidingWindow(const char* wordTypeName) {
 
     // The same sweep over the view constructions a reduction must not assume away:
     // an over-aligned stride, a hand-built wide stride, and -- the one that can
-    // silently over-count -- a buffer whose padding bits are all ones (D-13).
+    // silently over-count -- a buffer whose padding bits are all ones.
     {
         const int width = 33;
         const int height = 9;
@@ -1398,7 +1398,7 @@ void testSlidingWindow(const char* wordTypeName) {
         nullAcc.slideDown();
         REDUCE_EXPECT_COUNT(nullAcc.count(), 0u, "empty view, after a slide", none, label);
 
-        // window() tracks y and nothing else, including through positions whose
+        // window tracks y and nothing else, including through positions whose
         // count is zero.
         SlidingWindowCount<WordType> tracked(v, Rect(-3, -5, 9, 4));
         bool rectsOk = true;
@@ -1412,18 +1412,18 @@ void testSlidingWindow(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// 10. countCovariance and the four-argument split (T2.11 items 2 and 3)
+// 10. countCovariance and the four-argument split ( items 2 and 3)
 // ---------------------------------------------------------------------------
 //
 // Two properties, and they are different claims:
 //
-//   * the FUSED pass returns what the three-call COMPOSITION returns -- for every
-//     region in the curated list, and window for window over a whole frame at the
-//     three LK window sizes, edge-clipped positions included;
-//   * the FOUR-ARGUMENT selector returns what the precomputed XOR plane returns.
-//     `c0 ^ c1` is formed a word at a time inside the loop there, so the padding
-//     hazard is not the same one: a trailing word's padding bits of c0 and c1 are
-//     both the caller's, and their XOR is whatever it is. It may not reach a count.
+// * the FUSED pass returns what the three-call COMPOSITION returns -- for every
+// region in the curated list, and window for window over a whole frame at the
+// three LK window sizes, edge-clipped positions included;
+// * the FOUR-ARGUMENT selector returns what the precomputed XOR plane returns.
+// `c0 ^ c1` is formed a word at a time inside the loop there, so the padding
+// hazard is not the same one: a trailing word's padding bits of c0 and c1 are
+// both the caller's, and their XOR is whatever it is. It may not reach a count.
 //
 // Both are also checked against the per-pixel references written before the
 // kernels, so a fused pass and a composition that were wrong the same way could
@@ -1593,12 +1593,12 @@ void testFusedCovariance(const char* wordTypeName) {
 
 #ifdef BINCV_WITH_OPENCV
 
-/// @brief countNonZero against cv::countNonZero over the full T2.1 matrix.
-/// @note OpenCV's side is built by randomCvMask() -- the harness's INDEPENDENT
-///       generator, which never constructs a BinMat and never runs the unpacking
-///       path. That is T2.1 property 2 applied here: if both sides went through
-///       toCvMask(), a fault in the conversion would land on both and cancel, and
-///       the comparison would pass while proving nothing.
+/// @brief countNonZero against cv::countNonZero over the full the matrix.
+/// @note OpenCV's side is built by randomCvMask -- the harness's INDEPENDENT
+/// generator, which never constructs a BinMat and never runs the unpacking
+/// path. That is property 2 applied here: if both sides went through
+/// toCvMask, a fault in the conversion would land on both and cancel, and
+/// the comparison would pass while proving nothing.
 template <typename WordType>
 void testOpenCvEquivalence(const char* wordTypeName) {
     std::cout << "\n--- countNonZero vs cv::countNonZero: " << wordTypeName << " ---\n";
@@ -1636,10 +1636,10 @@ void testOpenCvEquivalence(const char* wordTypeName) {
 
 /// @brief The masked reductions against the OpenCV composite they replace.
 /// @note countAnd and countAndSplit are Tier 3 -- OpenCV has no equivalent -- but
-///       the composite it would take to get the same number does exist:
-///       cv::bitwise_and into a temporary, then cv::countNonZero. This is not a
-///       Tier 1 promise; it is a second independent reference built out of code
-///       that shares nothing with the word arithmetic under test.
+/// the composite it would take to get the same number does exist:
+/// cv::bitwise_and into a temporary, then cv::countNonZero. This is not a
+/// Tier 1 promise; it is a second independent reference built out of code
+/// that shares nothing with the word arithmetic under test.
 template <typename WordType>
 void testOpenCvMaskedComposite(const char* wordTypeName) {
     std::cout << "\n--- countAnd / countAndSplit vs an OpenCV composite: " << wordTypeName

@@ -1,4 +1,4 @@
-// FAST corner detection (T5.5).
+// FAST corner detection.
 //
 // TWO HALVES. The CORE half checks the detection rule against a naive oracle and
 // against synthetic geometry with a known answer. The OPENCV half checks binCV's
@@ -32,7 +32,7 @@ BINCV_TEST(Fast, FlatImageHasNoCorners) {
     bool trunc = false;
     const size_t n = detectFast<uint8_t>(flat.data(), kW, kH, kW, 20, out.data(), out.size(),
                                          &trunc);
-    std::printf("  flat image: %zu corners\n", n);
+    std::printf(" flat image: %zu corners\n", n);
     BINCV_CHECK(n == 0);
     BINCV_CHECK(!trunc);
 }
@@ -57,7 +57,7 @@ BINCV_TEST(Fast, ASquareCornerIsDetectedAndItsInteriorIsNot) {
         for (size_t i = 0; i < n; ++i) if (out[i].x == px && out[i].y == py) return true;
         return false;
     };
-    std::printf("  square: %zu corners; TL=%d TR=%d BL=%d BR=%d edge=%d interior=%d\n", n,
+    std::printf(" square: %zu corners; TL=%d TR=%d BL=%d BR=%d edge=%d interior=%d\n", n,
                 near(25, 25), near(54, 25), near(25, 54), near(54, 54), any(40, 25),
                 any(40, 40));
     BINCV_CHECK(near(25, 25) && near(54, 25) && near(25, 54) && near(54, 54));
@@ -78,7 +78,7 @@ BINCV_TEST(Fast, TruncationIsReportedNotSilent) {
     bool trunc = false;
     const size_t n = detectFast<uint8_t>(img.data(), kW, kH, kW, 40, small.data(),
                                          small.size(), &trunc);
-    std::printf("  capacity 4: wrote %zu, truncated=%d\n", n, trunc ? 1 : 0);
+    std::printf(" capacity 4: wrote %zu, truncated=%d\n", n, trunc ? 1 : 0);
     BINCV_CHECK(n == 4);
     BINCV_CHECK(trunc);
 }
@@ -95,7 +95,7 @@ BINCV_TEST(Fast, ArcLengthChangesWhatQualifies) {
                                           nullptr, 9);
     const size_t n12 = detectFast<uint8_t>(img.data(), kW, kH, kW, 30, out.data(), out.size(),
                                            nullptr, 12);
-    std::printf("  random texture: arc 9 -> %zu, arc 12 -> %zu\n", n9, n12);
+    std::printf(" random texture: arc 9 -> %zu, arc 12 -> %zu\n", n9, n12);
     BINCV_CHECK(n12 <= n9);
 }
 
@@ -136,7 +136,7 @@ BINCV_TEST(Fast, DetectionsMatchCvFast) {
         else if (mineMask[i]) ++onlyMine;
         else if (cvMask[i]) ++onlyCv;
     }
-    std::printf("  binCV %zu, cv::FAST %zu -- both %zu, only binCV %zu, only cv %zu\n", n,
+    std::printf(" binCV %zu, cv::FAST %zu -- both %zu, only binCV %zu, only cv %zu\n", n,
                 cvKp.size(), both, onlyMine, onlyCv);
     BINCV_CHECK(both > 0);
     BINCV_CHECK(onlyMine == 0);
@@ -145,7 +145,7 @@ BINCV_TEST(Fast, DetectionsMatchCvFast) {
 #endif
 
 // ---------------------------------------------------------------------------
-// X-80 / E-43: THE BIT-PLANE OVERLOAD, WHICH IS FAST ON binCV'S OWN TYPE.
+// earlier work: THE BIT-PLANE OVERLOAD, WHICH IS FAST ON binCV'S OWN TYPE.
 //
 // THE EQUIVALENCE THIS RESTS ON. For binary content stored as CV_8U in {0, 255},
 // `cv::FAST` at ANY threshold in [1, 254] accepts exactly the corners the bit-plane
@@ -204,7 +204,7 @@ BINCV_TEST(Fast, BitPlaneMatchesCvFastExactly) {
         for (size_t i = 0; i < n; ++i) {
             if (mine[i].score < 9 || mine[i].score > 16) ++badScore;
         }
-        std::printf("  %4dx%-4d %-46s binCV %6zu  cv %6zu  mismatched %zu\n", c.w, c.h,
+        std::printf(" %4dx%-4d %-46s binCV %6zu cv %6zu mismatched %zu\n", c.w, c.h,
                     c.what, n, cvKp.size(), mismatched);
         BINCV_CHECK(n > 0);
         BINCV_CHECK_EQ(n, cvKp.size());
@@ -215,7 +215,7 @@ BINCV_TEST(Fast, BitPlaneMatchesCvFastExactly) {
 }
 
 BINCV_TEST(Fast, BitPlaneScoringArmsAgree) {
-    // X-81: the score can be computed two ways -- by transposing each corner's ring, or
+    // the score can be computed two ways -- by transposing each corner's ring, or
     // by counting how many of the nested arc-length masks hold that pixel's bit. They
     // are the same number by construction, and the shipped path CHOOSES BETWEEN THEM
     // PER CHUNK on a measured density crossover. That choice must not be observable in
@@ -253,7 +253,7 @@ BINCV_TEST(Fast, BitPlaneScoringArmsAgree) {
         }
         if (transposed[i].score < 9 || transposed[i].score > 16) ++scoreRange;
     }
-    std::printf("  X-81 scoring arms: %zu corners; transpose vs masks %zu differ, "
+    std::printf(" scoring arms: %zu corners; transpose vs masks %zu differ, "
                 "vs adaptive %zu differ\n", nT, diffM, diffA);
     BINCV_CHECK(nT > 500);
     BINCV_CHECK_EQ(nM, nT);
@@ -283,7 +283,7 @@ BINCV_TEST(Fast, BitPlaneThresholdIsUniqueOnOneBitContent) {
         if (t == 1) base = kp.size();
         else if (kp.size() != base) ++differing;
     }
-    std::printf("  cv::FAST on {0,255} content: %zu corners at every threshold tried, "
+    std::printf(" cv::FAST on {0,255} content: %zu corners at every threshold tried, "
                 "%zu thresholds disagreed\n", base, differing);
     BINCV_CHECK(base > 0);
     BINCV_CHECK_EQ(differing, size_t{0});

@@ -1,6 +1,6 @@
-// T3.5 binarized spatial derivative -- against cv::filter2D with the same kernel.
+// binarized spatial derivative -- against cv::filter2D with the same kernel.
 //
-// THE DENOMINATOR (ARCHITECTURE 10.3, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that is not a judgement call either -- it is
 // SEAL/src/keypoint_tracking/gradients.cpp's calcBinarizedDeriv, which is two
@@ -9,33 +9,33 @@
 //
 // TWO OpenCV ROWS, and the DENOMINATOR IS THE LEANER ONE:
 //
-//   OpenCV filter2D x2   the two cv::filter2D calls into pre-allocated CV_16S
-//                        destinations. This is the derivative proper and nothing
-//                        else, and every ratio below is taken against it.
-//   OpenCV as-written    the same two calls plus the reference's `*= 16` on each
-//                        result and its cv::merge into one CV_16SC2 image. Those
-//                        three extra passes are what the reference actually costs
-//                        today; binCV reproduces none of them, so charging them
-//                        to the baseline would flatter binCV. They are timed and
-//                        printed, and not used as the denominator.
+// OpenCV filter2D x2 the two cv::filter2D calls into pre-allocated CV_16S
+// destinations. This is the derivative proper and nothing
+// else, and every ratio below is taken against it.
+// OpenCV as-written the same two calls plus the reference's `*= 16` on each
+// result and its cv::merge into one CV_16SC2 image. Those
+// three extra passes are what the reference actually costs
+// today; binCV reproduces none of them, so charging them
+// to the baseline would flatter binCV. They are timed and
+// printed, and not used as the denominator.
 //
 // binCV drops the scale factor deliberately (ops/derivative.hpp: it is
 // representational, not semantic) and keeps the two axes as two images rather
-// than merging them, because binCV's reductions read plane views (D-5).
+// than merging them, because binCV's reductions read plane views.
 //
 // binCV ROWS:
 //
-//   binCV u32 / u64      derivativeX + derivativeY into two TernaryMats. One pass
-//                        per axis, NO scratch.
-//   binCV composed u32   the same image through ops/shift.hpp and ops/logic.hpp:
-//                        shiftLeft + shiftRight + xor + not + and per axis, which
-//                        is four passes and TWO FRAME-SIZED SCRATCH BUFFERS the
-//                        caller must own. It is the spelling ops/derivative.hpp's
-//                        "no scratch" claim is a claim ABOUT, so it is measured
-//                        rather than asserted -- binCV has no rule that says
-//                        "always fuse", it has a rule that says memory wins when
-//                        memory and speed conflict, and this pair of rows is how
-//                        one finds out whether they conflict here.
+// binCV u32 / u64 derivativeX + derivativeY into two TernaryMats. One pass
+// per axis, NO scratch.
+// binCV composed u32 the same image through ops/shift.hpp and ops/logic.hpp:
+// shiftLeft + shiftRight + xor + not + and per axis, which
+// is four passes and TWO FRAME-SIZED SCRATCH BUFFERS the
+// caller must own. It is the spelling ops/derivative.hpp's
+// "no scratch" claim is a claim ABOUT, so it is measured
+// rather than asserted -- binCV has no rule that says
+// "always fuse", it has a rule that says memory wins when
+// memory and speed conflict, and this pair of rows is how
+// one finds out whether they conflict here.
 //
 // AND AN N-BIT LADDER. ops/derivative.hpp claims the N-bit path is LINEAR in N
 // (derivativeAdderStages(N) == 2N) rather than exponential
@@ -53,28 +53,28 @@
 // MEASUREMENT VALIDITY -- the five hazards, answered as the other benchmarks in
 // this directory answer them:
 //
-//   1. DEAD CODE. Every timed body writes memory and feeds one word to a volatile
-//      sink. THAT WORD IS NOT THE VALIDITY ARGUMENT. What is: after the timing,
-//      every implementation is run once more on image 0 and its destination is
-//      folded PIXEL BY PIXEL into a checksum printed in the table. The fold reads
-//      the derivative VALUE, so it is representation-independent and all rows of
-//      a size must print the same number.
-//   2. CONSTANT FOLDING. Four distinct random images are rotated through.
-//   3. CALIBRATED BATCHES. Every case runs enough iterations to fill a target
-//      millisecond budget; the reported figure is the minimum over several
-//      batches.
-//   4. THE SIDES MUST AGREE. Every implementation is compared pixel for pixel
-//      BEFORE anything is timed, and a disagreement skips the size and exits
-//      non-zero rather than printing a table under a warning.
-//   5. THE BASELINE'S FIXED PER-CALL COST IS MEASURED, NOT ASSUMED. cv::filter2D
-//      pays a size-independent dispatch cost -- argument checking, kernel
-//      analysis (it separates and specialises [-1,0,1] on every call), the
-//      parallel_for decision. At 640x480 that is small; at 94x60 it is most of
-//      the frame time, so the ns/pixel ladder is NOT a pure statement about the
-//      operation. The floor is measured directly on a 2x2 frame and printed
-//      beside every size.
+// 1. DEAD CODE. Every timed body writes memory and feeds one word to a volatile
+// sink. THAT WORD IS NOT THE VALIDITY ARGUMENT. What is: after the timing,
+// every implementation is run once more on image 0 and its destination is
+// folded PIXEL BY PIXEL into a checksum printed in the table. The fold reads
+// the derivative VALUE, so it is representation-independent and all rows of
+// a size must print the same number.
+// 2. CONSTANT FOLDING. Four distinct random images are rotated through.
+// 3. CALIBRATED BATCHES. Every case runs enough iterations to fill a target
+// millisecond budget; the reported figure is the minimum over several
+// batches.
+// 4. THE SIDES MUST AGREE. Every implementation is compared pixel for pixel
+// BEFORE anything is timed, and a disagreement skips the size and exits
+// non-zero rather than printing a table under a warning.
+// 5. THE BASELINE'S FIXED PER-CALL COST IS MEASURED, NOT ASSUMED. cv::filter2D
+// pays a size-independent dispatch cost -- argument checking, kernel
+// analysis (it separates and specialises [-1,0,1] on every call), the
+// parallel_for decision. At 640x480 that is small; at 94x60 it is most of
+// the frame time, so the ns/pixel ladder is NOT a pure statement about the
+// operation. The floor is measured directly on a 2x2 frame and printed
+// beside every size.
 //
-// AND THE ONE THIS OPERATION SHARES WITH X-6, X-12 AND X-13: A LARGE RATIO AT
+// AND THE ONE THIS OPERATION SHARES WITH earlier measurements: A LARGE RATIO AT
 // 640x480 IS PARTLY A CACHE-RESIDENCY RESULT, NOT PURELY AN ARITHMETIC ONE. The
 // working-set column is what makes that readable -- binCV's whole working set for
 // both axes is 5 bit-planes where OpenCV's is 5 BYTE-planes, i.e. 8x smaller, and
@@ -89,8 +89,8 @@
 // On x86_64 it is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms"). The
 // numbers that belong in a claim come from the reference device:
 //
-//   BINCV_PI_OPENCV=1 ./scripts/run_on_pi.sh <target>
-//       './benchmark/derivative_benchmark > derivative_benchmark.log'
+// BINCV_PI_OPENCV=1./scripts/run_on_pi.sh <target>
+// './benchmark/derivative_benchmark > derivative_benchmark.log'
 //
 // BINCV_PI_OPENCV=1 is required: the denominator is an OpenCV call, and the
 // device's default build is core-only.
@@ -162,10 +162,10 @@ void makeImage(Image& out, int width, int height, uint64_t seed) {
 
 /// @brief The kernels the reference builds, hoisted out of the timed region.
 /// @note WHAT IS HOISTED, PRECISELY: the two 1x3/3x1 cv::Mat kernels and the two
-///       CV_16S destinations, as a caller in a frame loop would. Timing their
-///       allocation would flatter binCV, which allocates nothing at all here.
-///       Nothing else is hoisted -- in particular cv::filter2D's per-call kernel
-///       analysis is NOT, because it is not something a caller can hoist.
+/// CV_16S destinations, as a caller in a frame loop would. Timing their
+/// allocation would flatter binCV, which allocates nothing at all here.
+/// Nothing else is hoisted -- in particular cv::filter2D's per-call kernel
+/// analysis is NOT, because it is not something a caller can hoist.
 struct OpenCvScratch {
     cv::Mat kernelX = (cv::Mat_<int>(1, 3) << -1, 0, 1);
     cv::Mat kernelY = (cv::Mat_<int>(3, 1) << -1, 0, 1);
@@ -270,7 +270,7 @@ uint64_t valueChecksum(const bincv::SignedQuantMat<N, WordType>& dx,
 }
 
 /// @param divisor 4080 for the reference's {0,255} content scaled by 16, 255 for
-///        the unscaled filter2D rows, 1 for an N-bit source holding values.
+/// the unscaled filter2D rows, 1 for an N-bit source holding values.
 uint64_t valueChecksum(const cv::Mat& dx, const cv::Mat& dy, int divisor) {
     uint64_t h = UINT64_C(0xCBF29CE484222325);
     for (int y = 0; y < dx.rows; ++y) {
@@ -288,7 +288,7 @@ uint64_t valueChecksum(const cv::Mat& dx, const cv::Mat& dy, int divisor) {
 //
 // Per axis: two shifts into scratch, then `mag = a ^ b` and `sign = b & ~a`.
 // The `~a` is written back over `a` (ops/logic.hpp supports the exact-alias
-// in-place case, D-11) and `a` is dead by then, so the two scratch frames are
+// in-place case,) and `a` is dead by then, so the two scratch frames are
 // enough for both axes -- this is the LEANEST composed spelling, not a strawman.
 // Four passes per axis against the fused kernel's one.
 
@@ -332,7 +332,7 @@ void measureCallFloors() {
     // way, so the two floors stay symmetric; and neither call can be elided
     // regardless, cv::filter2D being an out-of-line library call and derivativeX
     // writing through a pointer the compiler cannot prove dead. The sizes that
-    // carry the actual comparison read an INTERIOR pixel -- see runSize().
+    // carry the actual comparison read an INTERIOR pixel -- see runSize.
     g_openCvCallFloorUs = measureNs(
                               [&](int) {
                                   openCvDeriv(tiny.mask, s);
@@ -351,11 +351,11 @@ void measureCallFloors() {
 
     std::printf("\nFIXED PER-CALL COST (hazard 5), measured on a 2x2 frame -- the part of every\n"
                 "row below that is not the operation:\n");
-    std::printf("  OpenCV, 2 x cv::filter2D:         %8.3f us per call\n", g_openCvCallFloorUs);
-    std::printf("  binCV, derivativeX + derivativeY: %8.3f us per call\n", g_binCvCallFloorUs);
-    std::printf("  Divided by a frame's pixel count this is what a small frame's ns/pixel is\n"
-                "  mostly made of. It is NOT subtracted from the tables; it is printed beside\n"
-                "  them so the ladder is read with it.\n");
+    std::printf(" OpenCV, 2 x cv::filter2D: %8.3f us per call\n", g_openCvCallFloorUs);
+    std::printf(" binCV, derivativeX + derivativeY: %8.3f us per call\n", g_binCvCallFloorUs);
+    std::printf(" Divided by a frame's pixel count this is what a small frame's ns/pixel is\n"
+                " mostly made of. It is NOT subtracted from the tables; it is printed beside\n"
+                " them so the ladder is read with it.\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -400,17 +400,17 @@ bool runSize(int width, int height) {
     const double openCvSet = 5.0 * pixels;                // CV_8U src + 2 x CV_16S
     const double openCvSetAsWritten = 9.0 * pixels;       // + the CV_16SC2 merge
 
-    std::printf("  one plane:   binCV uint32 %.0f B, binCV uint64 %.0f B, OpenCV CV_8U %.0f B\n",
+    std::printf(" one plane: binCV uint32 %.0f B, binCV uint64 %.0f B, OpenCV CV_8U %.0f B\n",
                 planeBytes32, planeBytes64, pixels);
-    std::printf("  WORKING SET of one call, BOTH AXES (the number CLAUDE.md asks for):\n");
-    std::printf("    binCV u32          %10.0f B   src + 2 ternary results, no scratch\n",
+    std::printf(" WORKING SET of one call, BOTH AXES (the number CLAUDE.md asks for):\n");
+    std::printf(" binCV u32 %10.0f B src + 2 ternary results, no scratch\n",
                 binCvSet32);
-    std::printf("    binCV u64          %10.0f B   the same at 64-bit words\n", binCvSet64);
-    std::printf("    binCV composed u32 %10.0f B   + 2 frame-sized scratch buffers (%.2fx)\n",
+    std::printf(" binCV u64 %10.0f B the same at 64-bit words\n", binCvSet64);
+    std::printf(" binCV composed u32 %10.0f B + 2 frame-sized scratch buffers (%.2fx)\n",
                 composedSet32, composedSet32 / binCvSet32);
-    std::printf("    OpenCV filter2D    %10.0f B   CV_8U src + 2 x CV_16S  (%.1fx binCV u32)\n",
+    std::printf(" OpenCV filter2D %10.0f B CV_8U src + 2 x CV_16S (%.1fx binCV u32)\n",
                 openCvSet, openCvSet / binCvSet32);
-    std::printf("    OpenCV as-written  %10.0f B   + the CV_16SC2 merge     (%.1fx binCV u32)\n",
+    std::printf(" OpenCV as-written %10.0f B + the CV_16SC2 merge (%.1fx binCV u32)\n",
                 openCvSetAsWritten, openCvSetAsWritten / binCvSet32);
 
     // --- hazard 4: the sides must agree before anything is timed -------------
@@ -421,7 +421,7 @@ bool runSize(int width, int height) {
         openCvDerivAsWritten(img.mask, cvScratch);
         const uint64_t asWritten = valueChecksum(cvScratch.dx, cvScratch.dy, 4080);
         if (reference != asWritten) {
-            std::printf("  THE TWO OpenCV SPELLINGS DISAGREE -- SKIPPING THIS SIZE.\n");
+            std::printf(" THE TWO OpenCV SPELLINGS DISAGREE -- SKIPPING THIS SIZE.\n");
             return false;
         }
 
@@ -435,10 +435,10 @@ bool runSize(int width, int height) {
         const uint64_t b = valueChecksum(dx64, dy64);
         const uint64_t c = valueChecksum(cdx32, cdy32);
         if (a != reference || b != reference || c != reference) {
-            std::printf("  RESULTS DISAGREE -- SKIPPING THIS SIZE.\n"
-                        "  reference %llu, binCV u32 %llu, u64 %llu, composed %llu.\n"
-                        "  The implementations do not compute the same image, so no timing of\n"
-                        "  them is a comparison.\n",
+            std::printf(" RESULTS DISAGREE -- SKIPPING THIS SIZE.\n"
+                        " reference %llu, binCV u32 %llu, u64 %llu, composed %llu.\n"
+                        " The implementations do not compute the same image, so no timing of\n"
+                        " them is a comparison.\n",
                         static_cast<unsigned long long>(reference),
                         static_cast<unsigned long long>(a), static_cast<unsigned long long>(b),
                         static_cast<unsigned long long>(c));
@@ -455,7 +455,7 @@ bool runSize(int width, int height) {
                 // (1, 1), NOT (0, 0). Reflect-101 pins dx(0, y) to exactly 0 for
                 // every input -- both taps read column 1 -- so a sink reading the
                 // corner would add a CONSTANT on the OpenCV side while binCV's
-                // sink (dx32.data()[0], which spans columns 0..31) is genuinely
+                // sink (dx32.data[0], which spans columns 0..31) is genuinely
                 // content-dependent. Measured on six random 640x480 draws:
                 // dx(0,0) = 0 every time, dx(1,1) alternates 0 and 4080.
                 g_sink += static_cast<uint64_t>(cvScratch.dx.at<short>(1, 1) + 4096);
@@ -527,27 +527,27 @@ bool runSize(int width, int height) {
         if (g_rows[i].isDenominator) reference = g_rows[i].nsPerPixel;
     }
 
-    std::printf("\n  %-20s %12s %10s %14s %8s %20s\n", "IMPLEMENTATION", "ns/pixel", "vs OpenCV",
+    std::printf("\n %-20s %12s %10s %14s %8s %20s\n", "IMPLEMENTATION", "ns/pixel", "vs OpenCV",
                 "working set", "passes", "checksum");
-    std::printf("  ------------------------------------------------------------------------"
+    std::printf(" ------------------------------------------------------------------------"
                 "----------------\n");
     for (size_t i = firstRow; i < g_rows.size(); ++i) {
         const Row& row = g_rows[i];
-        std::printf("  %-20s %12.5f %9.2fx %12.0f B %8d %20llu\n", row.impl.c_str(),
+        std::printf(" %-20s %12.5f %9.2fx %12.0f B %8d %20llu\n", row.impl.c_str(),
                     row.nsPerPixel, (row.nsPerPixel > 0.0) ? reference / row.nsPerPixel : 0.0,
                     row.workingSetBytes, row.traversals,
                     static_cast<unsigned long long>(row.checksum));
     }
-    std::printf("  ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).\n");
+    std::printf(" ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).\n");
 
     const double baselineUs = reference * pixels / 1000.0;
     const double binCvUs = g_rows[firstRow + 2].nsPerPixel * pixels / 1000.0;
-    std::printf("  PER-FRAME: OpenCV %.2f us, of which %.2f us is the measured fixed per-call\n"
-                "             cost (%.0f%%). binCV u32 %.2f us, fixed cost %.2f us (%.0f%%).\n"
-                "             SUBTRACT BEFORE COMPARING SIZES.\n",
+    std::printf(" PER-FRAME: OpenCV %.2f us, of which %.2f us is the measured fixed per-call\n"
+                " cost (%.0f%%). binCV u32 %.2f us, fixed cost %.2f us (%.0f%%).\n"
+                " SUBTRACT BEFORE COMPARING SIZES.\n",
                 baselineUs, g_openCvCallFloorUs, 100.0 * g_openCvCallFloorUs / baselineUs, binCvUs,
                 g_binCvCallFloorUs, 100.0 * g_binCvCallFloorUs / binCvUs);
-    std::printf("  sink=%llu\n", static_cast<unsigned long long>(g_sink));
+    std::printf(" sink=%llu\n", static_cast<unsigned long long>(g_sink));
     return true;
 }
 
@@ -564,14 +564,14 @@ bool runSize(int width, int height) {
 // it is TIMED here rather than merely consulted for agreement.
 
 /// @brief One row of the N-bit ladder: binCV, its OpenCV denominator, and the
-///        working set each of them costs.
+/// working set each of them costs.
 /// @note THE OpenCV FIGURE HERE IS TIMED, NOT AN ORACLE. It used to be neither:
-///       the two cv::filter2D calls ran once, outside the timed region, purely to
-///       check agreement, while this file's header and X-16 both described them as
-///       "the denominator" -- a denominator that was never measured, so the N >= 2
-///       path (which is what every pyramid level above 0 runs) had no OpenCV
-///       comparison anywhere. They are now inside their own measureNs, and the
-///       ladder prints the ratio.
+/// the two cv::filter2D calls ran once, outside the timed region, purely to
+/// check agreement, while this file's header and both described them as
+/// "the denominator" -- a denominator that was never measured, so the N >= 2
+/// path (which is what every pyramid level above 0 runs) had no OpenCV
+/// comparison anywhere. They are now inside their own measureNs, and the
+/// ladder prints the ratio.
 struct NBitRow {
     double binCvNs = -1.0;
     double openCvNs = -1.0;
@@ -641,7 +641,7 @@ NBitRow timeNBit(int width, int height, uint64_t& checksumOut) {
     cv::filter2D(src8[0], refX, CV_16S, kernelX);
     cv::filter2D(src8[0], refY, CV_16S, kernelY);
     if (valueChecksum(refX, refY, 1) != valueChecksum(dx, dy)) {
-        std::printf("  N = %zu DISAGREES WITH cv::filter2D -- the timing below is not a "
+        std::printf(" N = %zu DISAGREES WITH cv::filter2D -- the timing below is not a "
                     "comparison.\n",
                     N);
         checksumOut = 0;
@@ -667,16 +667,16 @@ NBitRow timeNBit(int width, int height, uint64_t& checksumOut) {
 
 bool runNBitLadder(int width, int height) {
     std::printf("\n================ N-BIT LADDER, %d x %d ================\n", width, height);
-    std::printf("  Is the N-bit path LINEAR in N (2N stages) or exponential (2*(2^N - 1))?\n");
-    std::printf("  Every row is checked against cv::filter2D on the same values first, and\n");
-    std::printf("  cv::filter2D is then TIMED on those same values -- so N >= 2, which is what\n");
-    std::printf("  every pyramid level above 0 runs, has a real denominator and not only an\n");
-    std::printf("  oracle. The denominator needs no scale factor here: the CV_8U image holds\n");
-    std::printf("  the pixel VALUES, not {0, 255}.\n\n");
-    std::printf("  %-4s %11s %11s %10s %8s %12s %13s %9s %11s\n", "N", "binCV ns/px",
+    std::printf(" Is the N-bit path LINEAR in N (2N stages) or exponential (2*(2^N - 1))?\n");
+    std::printf(" Every row is checked against cv::filter2D on the same values first, and\n");
+    std::printf(" cv::filter2D is then TIMED on those same values -- so N >= 2, which is what\n");
+    std::printf(" every pyramid level above 0 runs, has a real denominator and not only an\n");
+    std::printf(" oracle. The denominator needs no scale factor here: the CV_8U image holds\n");
+    std::printf(" the pixel VALUES, not {0, 255}.\n\n");
+    std::printf(" %-4s %11s %11s %10s %8s %12s %13s %9s %11s\n", "N", "binCV ns/px",
                 "OpenCV ns/px", "vs OpenCV", "vs N=1", "binCV bytes", "OpenCV bytes", "2N stg",
                 "replicated");
-    std::printf("  --------------------------------------------------------------------------"
+    std::printf(" --------------------------------------------------------------------------"
                 "-------------------------\n");
 
     uint64_t sum = 0;
@@ -692,29 +692,29 @@ bool runNBitLadder(int width, int height) {
             ok = false;
             continue;
         }
-        std::printf("  %-4zu %11.5f %11.5f %9.2fx %7.2fx %10.0f B %11.0f B %9zu %11zu\n", n,
+        std::printf(" %-4zu %11.5f %11.5f %9.2fx %7.2fx %10.0f B %11.0f B %9zu %11zu\n", n,
                     r.binCvNs, r.openCvNs, r.openCvNs / r.binCvNs, r.binCvNs / n1, r.binCvBytes,
                     r.openCvBytes, bincv::derivativeAdderStages(n),
                     bincv::derivativeReplicatedInputs(n));
     }
-    std::printf("\n  'vs N=1' against the STAGES column is the whole reading: a cost that tracks\n"
-                "  2N is the linear formulation, one that tracks the replicated column is the\n"
-                "  exponential one T3.4 was written to avoid. The two axes together write\n"
-                "  2*(N+1) destination planes at row N, so part of any growth is stores.\n");
-    std::printf("  READ THE TWO BYTE COLUMNS WITH THE RATIO, per CLAUDE.md. binCV's footprint\n"
-                "  is the column that MOVES: 3(N+1) - 1 bit-planes against OpenCV's flat one\n"
-                "  byte-plane plus two 16-bit planes. binCV stays smaller at every N in this\n"
-                "  ladder, but the margin narrows as N rises, and the crossing point is what\n"
-                "  E-7 (bits per pyramid level) is for -- it is not assumed here.\n");
-    std::printf("  Note the fixed per-call cost printed above applies to the OpenCV column at\n"
-                "  every row of this ladder too.\n");
+    std::printf("\n 'vs N=1' against the STAGES column is the whole reading: a cost that tracks\n"
+                " 2N is the linear formulation, one that tracks the replicated column is the\n"
+                " exponential one this was written to avoid. The two axes together write\n"
+                " 2*(N+1) destination planes at row N, so part of any growth is stores.\n");
+    std::printf(" READ THE TWO BYTE COLUMNS WITH THE RATIO, per CLAUDE.md. binCV's footprint\n"
+                " is the column that MOVES: 3(N+1) - 1 bit-planes against OpenCV's flat one\n"
+                " byte-plane plus two 16-bit planes. binCV stays smaller at every N in this\n"
+                " ladder, but the margin narrows as N rises, and the crossing point is what\n"
+                " (bits per pyramid level) is for -- it is not assumed here.\n");
+    std::printf(" Note the fixed per-call cost printed above applies to the OpenCV column at\n"
+                " every row of this ladder too.\n");
     return ok;
 }
 
 }  // namespace
 
 int main() {
-    std::printf("T3.5 binarized spatial derivative -- vs cv::filter2D with the same kernel\n");
+    std::printf(" binarized spatial derivative -- vs cv::filter2D with the same kernel\n");
     std::printf("================================================================================\n\n");
     std::printf("DENOMINATOR (ARCHITECTURE 10.3): SEAL's calcBinarizedDeriv on the SAME binary\n");
     std::printf("content stored as CV_8U -- two cv::filter2D calls with [-1, 0, 1] as a 1x3 and\n");
@@ -725,13 +725,13 @@ int main() {
     std::printf("interleaved channels are unreachable to a word-parallel popcount). Charging\n");
     std::printf("those to the baseline would flatter binCV, so they are printed and not used.\n\n");
     std::printf("Every row computes BOTH AXES, because that is what a VIO frontend needs before\n");
-    std::printf("it can form the T3.6 covariance.\n\n");
+    std::printf("it can form the covariance.\n\n");
     std::printf("The checksum column folds every destination pixel's VALUE and is\n");
     std::printf("representation-independent, so all rows of a size must print the same number.\n\n");
     std::printf("READ THE WORKING-SET COLUMN WITH THE RATIO. binCV's whole working set is five\n");
     std::printf("BIT-planes where OpenCV's is one byte-plane and two 16-bit planes -- 8x smaller\n");
     std::printf("-- so on a 1 MiB-L2 Cortex-A part of any large ratio at 640x480 is residency\n");
-    std::printf("rather than arithmetic, exactly as in X-6, X-12 and X-13. The size ladder is\n");
+    std::printf("rather than arithmetic, exactly as in. The size ladder is\n");
     std::printf("there to separate the two: if the ratio collapses once BOTH sides fit in cache,\n");
     std::printf("the headline figure was residency; if it holds, it is the operation.\n");
 

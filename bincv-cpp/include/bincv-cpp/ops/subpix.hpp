@@ -8,7 +8,7 @@
 ///
 /// `cv::cornerSubPix` refines a corner by solving, over a window around it,
 ///
-///     G q = b,    G = sum w (grad I)(grad I)^T,    b = sum w (grad I)(grad I)^T p
+/// G q = b, G = sum w (grad I)(grad I)^T, b = sum w (grad I)(grad I)^T p
 ///
 /// for the position `q` that every edge in the window points at. **The solution is
 /// invariant to a scale on the image**: scaling `I` by `s` scales `grad I` by `s`, so it
@@ -40,7 +40,7 @@
 /// The refinement rule, the Gaussian window, the zero-zone and the termination are
 /// `cv::cornerSubPix`'s. **The gradient is not**: OpenCV computes its own from the
 /// 8-bit image with a Sobel-like scheme, and this takes binCV's already-computed
-/// `SignedQuantMat` derivatives -- which is D-5 (a kernel binds to views, and the
+/// `SignedQuantMat` derivatives -- which is (a kernel binds to views, and the
 /// frontend has these already) and also the only shape that avoids materialising an
 /// 8-bit image the library exists to avoid.
 
@@ -75,7 +75,7 @@ struct SubPixResult {
     size_t clamped = 0;    ///< corners whose step left the window and were left in place
 
     /// @brief Corners whose refined position ended up further than `winHalf` from where
-    ///        it started, and were therefore REVERTED to the input.
+    /// it started, and were therefore REVERTED to the input.
     ///
     /// **This is `cv::cornerSubPix`'s own rule, not an addition** -- "if new point is too
     /// far from initial, it means poor convergence; leave initial point as the result",
@@ -91,20 +91,20 @@ namespace impl {
 /// @brief OpenCV's Gaussian window mask, built once per call. **INTERNAL.**
 ///
 /// @note **`exp(-(dx^2 + dy^2) / winHalf^2)`, and the width is not a free parameter.**
-///       `cv::cornerSubPix` normalises each offset by the half-window and exponentiates
-///       the sum of squares -- `vy = exp(-y*y)` with `y = (i - win.height)/win.height`,
-///       times the same in x -- so the weight is exactly 1/e at the edge of the window
-///       along either axis.
+/// `cv::cornerSubPix` normalises each offset by the half-window and exponentiates
+/// the sum of squares -- `vy = exp(-y*y)` with `y = (i - win.height)/win.height`,
+/// times the same in x -- so the weight is exactly 1/e at the edge of the window
+/// along either axis.
 /// @note **THIS WAS WRONG UNTIL F-4, BY A FACTOR OF TWO IN THE EXPONENT** -- the
-///       denominator read `2*(winHalf/2)^2 = winHalf^2/2`, giving `exp(-2r^2/winHalf^2)`,
-///       a Gaussian sqrt(2) too narrow. Reported from outside at 4.53 px mean against
-///       OpenCV on real frames.
+/// denominator read `2*(winHalf/2)^2 = winHalf^2/2`, giving `exp(-2r^2/winHalf^2)`,
+/// a Gaussian sqrt(2) too narrow. Reported from outside at 4.53 px mean against
+/// OpenCV on real frames.
 /// @note **THE TEST SAW IT AND PASSED ANYWAY, AND THAT IS THE PART WORTH REMEMBERING.**
-///       `SubPix.AgreesWithOpenCVOnTheSameCorner` measured **0.0325 px with the wrong
-///       mask and 0.0035 px with the right one** -- it was sensitive, by a factor of
-///       nine. It passed because its bound was 0.1, chosen from the number the code
-///       happened to produce rather than from what a correct implementation reaches. A
-///       tolerance fitted to the observed value cannot fail; it can only record.
+/// `SubPix.AgreesWithOpenCVOnTheSameCorner` measured **0.0325 px with the wrong
+/// mask and 0.0035 px with the right one** -- it was sensitive, by a factor of
+/// nine. It passed because its bound was 0.1, chosen from the number the code
+/// happened to produce rather than from what a correct implementation reaches. A
+/// tolerance fitted to the observed value cannot fail; it can only record.
 inline void subPixMask(int winHalf, int zeroHalf, double* mask) {
     const int side = 2 * winHalf + 1;
     const double denom = static_cast<double>(winHalf) * static_cast<double>(winHalf);
@@ -132,19 +132,19 @@ inline constexpr int kMaxWinHalf = 15;
 /// @brief Refines corner positions to sub-pixel accuracy. **API TIER 2.**
 ///
 /// @param dx,dy The previous frame's signed derivatives -- exactly what
-///        `ops/covariance.hpp` and the tracker already consume.
+/// `ops/covariance.hpp` and the tracker already consume.
 /// @param corners In/out. Positions are refined in place; a corner whose window leaves
-///        the image, or whose `G` is singular, is **left exactly where it was**.
+/// the image, or whose `G` is singular, is **left exactly where it was**.
 /// @param count Number of corners.
 ///
 /// @note **Never allocates and never throws.** The Gaussian mask is a stack buffer
-///       bounded by `impl::kMaxWinHalf`.
+/// bounded by `impl::kMaxWinHalf`.
 /// @note A corner is refined **independently of every other**, so this splits over
-///       `parallelFor` exactly as tracking does. It is not split here because the
-///       operation is a few microseconds per frame at realistic corner counts; measure
-///       before adding it.
+/// `parallelFor` exactly as tracking does. It is not split here because the
+/// operation is a few microseconds per frame at realistic corner counts; measure
+/// before adding it.
 /// @note The step is computed in `double` and the position stored as `float`, matching
-///       the tracker's convention and OpenCV's.
+/// the tracker's convention and OpenCV's.
 template <size_t N, typename WordType>
 inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
                                  const SignedQuantMat<N, WordType>& dy, Point2f* corners,
@@ -236,7 +236,7 @@ inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
                         if (w == 0.0) continue;   // the zero zone
 
                         // The signed value, assembled from the planes already loaded --
-                        // `at()` would re-derive the row pointers for every pixel.
+                        // `at` would re-derive the row pointers for every pixel.
                         const WordType bit = static_cast<WordType>(WordType{1} << b);
                         long long vx = 0, vy = 0;
                         for (size_t j = 0; j < N; ++j) {

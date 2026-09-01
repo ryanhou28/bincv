@@ -40,20 +40,20 @@ struct Size {
 /// @brief An axis-aligned rectangle in PIXELS: origin (x, y), extent (width, height).
 ///
 /// @note Field names and order are cv::Rect's, deliberately. A caller porting
-///       `cv::countNonZero(img(roi))` writes the same four numbers here, and the
-///       T2.5 region reduction is Tier 1 against exactly that expression.
+/// `cv::countNonZero(img(roi))` writes the same four numbers here, and the
+/// region reduction is Tier 1 against exactly that expression.
 /// @note The rectangle covers columns [x, x + width) and rows [y, y + height) --
-///       half-open, like cv::Rect. `width` and `height` are extents, not
-///       coordinates of the far corner.
+/// half-open, like cv::Rect. `width` and `height` are extents, not
+/// coordinates of the far corner.
 /// @note **Signed on purpose.** A window centred on a keypoint near an edge has a
-///       negative origin (ARCHITECTURE 7.5: 31x31 windows over the whole frame),
-///       and the alternative -- making the caller clamp before it can express the
-///       window -- moves the same clipping arithmetic into every call site, where
-///       it would be written once per caller instead of once per library. Every
-///       consumer in ops/ clips against the image and is documented as doing so.
+/// negative origin (the design notes: 31x31 windows over the whole frame),
+/// and the alternative -- making the caller clamp before it can express the
+/// window -- moves the same clipping arithmetic into every call site, where
+/// it would be written once per caller instead of once per library. Every
+/// consumer in ops/ clips against the image and is documented as doing so.
 /// @note No intersection or union arithmetic here. This is the argument type a
-///       kernel takes, not a geometry library; ops/reduce.hpp does the one
-///       clipping operation the MVP needs, internally.
+/// kernel takes, not a geometry library; ops/reduce.hpp does the one
+/// clipping operation the MVP needs, internally.
 struct Rect {
     int x;       ///< Column of the left edge; may be negative (clipped by the op)
     int y;       ///< Row of the top edge; may be negative (clipped by the op)
@@ -65,8 +65,8 @@ struct Rect {
 
     /// @brief True when the rectangle covers no pixel at all, before any clipping.
     /// @note A rectangle that lies wholly outside an image is NOT empty by this
-    ///       test -- it is empty after clipping, which is the operation's business
-    ///       and not the rectangle's.
+    /// test -- it is empty after clipping, which is the operation's business
+    /// and not the rectangle's.
     bool empty() const { return width <= 0 || height <= 0; }
 
     /// @brief Equality, field for field.
@@ -106,22 +106,22 @@ enum BorderType {
 
 /// @brief Forward declaration of the QuantMat template -- the N-bit container.
 /// @note The default template argument is declared here (not on the definition)
-///       because this header is included first; a default may only be given once.
+/// because this header is included first; a default may only be given once.
 /// @note The primary template (N planes, quantMat.hpp) and the hand-written N=1
-///       partial specialization (binMat.hpp) are defined in different headers, so
-///       the declaration they both need lives here, ahead of either.
+/// partial specialization (binMat.hpp) are defined in different headers, so
+/// the declaration they both need lives here, ahead of either.
 template <size_t N, typename WordType = uint32_t> class QuantMat;
 
 /// @brief The 1-bit container: an alias for the N=1 specialization of QuantMat.
-/// @note ARCHITECTURE 4.4. BinMat is a name, not a separate type -- QuantMat<1>
-///       IS the hand-written single-plane container, so a kernel or container
-///       written against QuantMat<N> accepts the binary case with no adapter and
-///       no plane loop. binMat.hpp defines that specialization.
+/// @note the design notes. BinMat is a name, not a separate type -- QuantMat<1>
+/// IS the hand-written single-plane container, so a kernel or container
+/// written against QuantMat<N> accepts the binary case with no adapter and
+/// no plane loop. binMat.hpp defines that specialization.
 /// @note One consequence of the alias, and it is the only one: class template
-///       argument deduction through an alias template is C++20 (P1814), so under
-///       this project's C++17 the empty argument list is required --
-///       `BinMat<> m(w, h)`, not `BinMat m(w, h)`. `BinMat<uint32_t>` and the
-///       BinMat8/16/32/64 aliases below are unaffected.
+/// argument deduction through an alias template is C++20 (P1814), so under
+/// this project's C++17 the empty argument list is required --
+/// `BinMat<> m(w, h)`, not `BinMat m(w, h)`. `BinMat<uint32_t>` and the
+/// BinMat8/16/32/64 aliases below are unaffected.
 template <typename WordType = uint32_t> using BinMat = QuantMat<1, WordType>;
 
 /// @brief Type aliases for convenience
@@ -129,8 +129,8 @@ template <typename WordType = uint32_t> using BinMat = QuantMat<1, WordType>;
 
 /// @brief A point with sub-pixel coordinates -- the tracker's and the refiner's.
 /// @note **Declared here rather than in ops/opticalFlow.hpp, where it used to live.**
-///       `ops/subpix.hpp` needs it and nothing else from the tracker, and a two-float
-///       POD is not worth including three thousand lines of Lucas-Kanade to reach.
+/// `ops/subpix.hpp` needs it and nothing else from the tracker, and a two-float
+/// POD is not worth including three thousand lines of Lucas-Kanade to reach.
 struct Point2f {
     float x = 0.0f;
     float y = 0.0f;
@@ -138,18 +138,18 @@ struct Point2f {
 
 /// @brief The word type to use unless you have measured a reason not to.
 ///
-/// **PICK THIS ONE.** `BinMat` and `QuantMat` are templated on the word type (D-1) and
+/// **PICK THIS ONE.** `BinMat` and `QuantMat` are templated on the word type and
 /// every width is correct — but **only `uint32_t` reaches the vectorised tracking
 /// kernels**: the AVX2 eight-keypoint batch and all four NEON residual kernels are
 /// gated on `sizeof(WordType) == 4`.
 ///
 /// A wider word looks like it should mean fewer operations per row, and
-/// [X-10](../../../../docs/EXPERIMENTS.md) measured exactly that for *reductions*. For
+/// a measurement measured exactly that for *reductions*. For
 /// *tracking* it opts out of every vector path instead:
-/// [X-54](../../../../docs/EXPERIMENTS.md) measured `uint64_t` at **1.32× slower on `track`**,
+/// a measurement measured `uint64_t` at **1.32× slower on `track`**,
 /// and an integrator who chose it for a real VIO frontend measured **8.6× slower**
 /// keypoint tracking before finding the gate
-/// ([D-73](../../../../docs/ARCHITECTURE.md#d-73-the-fast-word-type-is-the-one-you-get-by-default)).
+///.
 ///
 /// The tracker now refuses to compile at a depth that HAS vector kernels with a word
 /// that cannot reach them, so this is a recommendation rather than a trap — but

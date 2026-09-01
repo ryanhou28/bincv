@@ -1,11 +1,11 @@
 // Is LK memory-bound or compute-bound? The 8x smaller footprint only buys speed if
 // it does. Two probes:
 //
-//  (a) PER-POINT COST vs POINT COUNT. More points touch more of the frame. If the
-//      kernel were bandwidth- or cache-bound the per-point cost would RISE as the
-//      working set grows past L1 and then L2; if it is compute-bound it stays flat.
+// (a) PER-POINT COST vs POINT COUNT. More points touch more of the frame. If the
+// kernel were bandwidth- or cache-bound the per-point cost would RISE as the
+// working set grows past L1 and then L2; if it is compute-bound it stays flat.
 //
-//  (b) FRAME SIZE at a fixed point count. Same compute, more spread-out data.
+// (b) FRAME SIZE at a fixed point count. Same compute, more spread-out data.
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -37,9 +37,9 @@ int main() {
         const auto lv = bincv::lkLevel(p, n, dx, dy);
         bincv::LKParams lk; lk.maxIterations = 4; lk.epsilon = 0.0f;
 
-        std::printf("  (a) point count sweep, 640x480 (frame = %.1f KB at 1 bit)\n",
+        std::printf(" (a) point count sweep, 640x480 (frame = %.1f KB at 1 bit)\n",
                     static_cast<double>(w) * h / 8.0 / 1024.0);
-        std::printf("      %8s %12s %14s\n", "points", "ms", "us per point");
+        std::printf(" %8s %12s %14s\n", "points", "ms", "us per point");
         for (int step : {80, 56, 40, 28, 20, 14}) {
             std::vector<bincv::Point2f> pts;
             for (int y = 40; y < h - 40; y += step)
@@ -51,15 +51,15 @@ int main() {
                 bincv::calcOpticalFlowPyrLK<W>(&lv, 1, pts.data(), out.data(), st.data(),
                                                nullptr, pts.size(), lk); }}};
             const auto t = measure::measureInterleaved(b, 5, 50.0);
-            std::printf("      %8zu %12.4f %14.4f\n", pts.size(), t[0].medianNs / 1e6,
+            std::printf(" %8zu %12.4f %14.4f\n", pts.size(), t[0].medianNs / 1e6,
                         t[0].medianNs / 1e3 / static_cast<double>(pts.size()));
         }
     }
 
     // (b) frame size at a FIXED point count -- same compute, data more spread out.
     {
-        std::printf("\n  (b) frame size at 140 points (same compute, wider spread)\n");
-        std::printf("      %12s %10s %12s %14s\n", "frame", "KB @1bit", "ms", "us per point");
+        std::printf("\n (b) frame size at 140 points (same compute, wider spread)\n");
+        std::printf(" %12s %10s %12s %14s\n", "frame", "KB @1bit", "ms", "us per point");
         for (auto wh : {std::pair<int,int>{320,240}, {640,480}, {1280,960}, {1920,1440}}) {
             const int w = wh.first, h = wh.second;
             bincv::BinMat<W> p(w, h), n(w, h);
@@ -82,12 +82,12 @@ int main() {
                                                nullptr, pts.size(), lk); }}};
             const auto t = measure::measureInterleaved(b, 5, 50.0);
             char name[24]; std::snprintf(name, sizeof(name), "%dx%d", w, h);
-            std::printf("      %12s %10.1f %12.4f %14.4f\n", name,
+            std::printf(" %12s %10.1f %12.4f %14.4f\n", name,
                         static_cast<double>(w) * h / 8.0 / 1024.0, t[0].medianNs / 1e6,
                         t[0].medianNs / 1e3 / static_cast<double>(pts.size()));
         }
     }
-    std::printf("\n  FLAT us/point => compute-bound, and the 8x footprint buys nothing here.\n"
-                "  RISING       => memory-bound, and it should.\n");
+    std::printf("\n FLAT us/point => compute-bound, and the 8x footprint buys nothing here.\n"
+                " RISING => memory-bound, and it should.\n");
     return 0;
 }

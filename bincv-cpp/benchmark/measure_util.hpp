@@ -1,8 +1,8 @@
 #pragma once
 
 // Timing harness shared by the three Phase 2 experiment benchmarks
-// (alignment_benchmark.cpp / E-1, wordwidth_benchmark.cpp / E-2,
-// window_benchmark.cpp / E-3).
+// (alignment_benchmark.cpp /, wordwidth_benchmark.cpp /,
+// window_benchmark.cpp /).
 //
 // It is a separate header from bench_util.hpp on purpose: bench_util.hpp is the
 // binCV-versus-OpenCV harness and pulls in <opencv2/opencv.hpp>, whereas every one
@@ -12,19 +12,19 @@
 //
 // WHAT THE PROTOCOL REQUIRES OF A NUMBER PRINTED HERE (EXPERIMENTS.md "Rules"):
 //
-//   1. A volatile sink consumes every result, so no measured loop is dead code.
-//   2. Inputs rotate through several distinct random images, so nothing constant
-//      folds. The index handed to body() RUNS ON ACROSS BATCHES rather than
-//      restarting at 0 each batch -- see measureInterleaved() for why that is not
-//      a detail.
-//   3. Batches are calibrated to a time budget, then repeated -- and the SPREAD
-//      across repeats is reported next to the central value. A difference smaller
-//      than the spread is a null result, and a null result is a result. The
-//      spread bounds WITHIN-run noise only; run-to-run scatter is a separate and
-//      sometimes larger number, and an entry that calls a difference real should
-//      clear the larger of the two.
-//   4. Whatever is being compared must AGREE before it is timed. That check lives
-//      in the individual benchmarks, since only they know what agreement means.
+// 1. A volatile sink consumes every result, so no measured loop is dead code.
+// 2. Inputs rotate through several distinct random images, so nothing constant
+// folds. The index handed to body RUNS ON ACROSS BATCHES rather than
+// restarting at 0 each batch -- see measureInterleaved for why that is not
+// a detail.
+// 3. Batches are calibrated to a time budget, then repeated -- and the SPREAD
+// across repeats is reported next to the central value. A difference smaller
+// than the spread is a null result, and a null result is a result. The
+// spread bounds WITHIN-run noise only; run-to-run scatter is a separate and
+// sometimes larger number, and an entry that calls a difference real should
+// clear the larger of the two.
+// 4. Whatever is being compared must AGREE before it is timed. That check lives
+// in the individual benchmarks, since only they know what agreement means.
 //
 // WHY VARIANTS ARE INTERLEAVED RATHER THAN RUN ONE AFTER THE OTHER
 //
@@ -32,7 +32,7 @@
 // over the run -- clock ramp, a migrating background process, cache state left by
 // the previous variant -- entirely to whichever ran later. These experiments are
 // deciding 5% and 15% questions, which is the same order as that drift. So
-// measureInterleaved() calibrates each variant once and then runs ONE batch of
+// measureInterleaved calibrates each variant once and then runs ONE batch of
 // each per round, round-robin, so a drift moves every variant's samples together
 // instead of moving the comparison. The reported spread is then an honest bound
 // on what a difference has to exceed to be real.
@@ -50,11 +50,11 @@ namespace measure {
 using Clock = std::chrono::steady_clock;
 
 /// @brief The volatile sink. Every benchmark result is folded into it and it is
-///        printed at exit, so no timed loop can be deleted as dead code.
+/// printed at exit, so no timed loop can be deleted as dead code.
 inline volatile size_t g_sink = 0;
 
 /// @brief splitmix64, so each benchmark generates its own inputs deterministically
-///        -- a re-run is the same run, and four seeds give four distinct images.
+/// -- a re-run is the same run, and four seeds give four distinct images.
 inline uint64_t nextRandom(uint64_t& state) {
     state += UINT64_C(0x9E3779B97F4A7C15);
     uint64_t z = state;
@@ -65,15 +65,15 @@ inline uint64_t nextRandom(uint64_t& state) {
 
 /// @brief One measurement: the central value AND what the run-to-run scatter was.
 /// @note `medianNs` is what ratios are taken on -- it is not moved by a single
-///       descheduling event the way a mean is, and unlike the minimum it does not
-///       report the luckiest batch as though it were typical. `minNs` and `maxNs`
-///       are printed with it so a reader can see whether a reported difference is
-///       larger than the noise it was measured against.
+/// descheduling event the way a mean is, and unlike the minimum it does not
+/// report the luckiest batch as though it were typical. `minNs` and `maxNs`
+/// are printed with it so a reader can see whether a reported difference is
+/// larger than the noise it was measured against.
 struct Timing {
-    double minNs = 0.0;     ///< fastest batch, ns per body() call
+    double minNs = 0.0;     ///< fastest batch, ns per body call
     double medianNs = 0.0;  ///< median batch -- the value ratios use
     double maxNs = 0.0;     ///< slowest batch
-    int iterations = 0;     ///< body() calls per batch
+    int iterations = 0;     ///< body calls per batch
     int repeats = 0;        ///< batches
 
     /// @brief Full scatter as a percentage of the median: (max - min) / median.
@@ -83,14 +83,14 @@ struct Timing {
 };
 
 /// @brief A named variant to time. The body takes the iteration index so that it
-///        can rotate over several inputs (validity hazard 2).
+/// can rotate over several inputs (validity hazard 2).
 struct Bench {
     std::string name;
     std::function<void(int)> body;
 };
 
 /// @brief Chooses a batch size that runs for about `targetMs`, so that a clock
-///        tick and the call overhead are both negligible against the batch.
+/// tick and the call overhead are both negligible against the batch.
 inline int calibrate(const std::function<void(int)>& body, double targetMs) {
     int iterations = 1;
     for (int attempt = 0; attempt < 24; ++attempt) {
@@ -106,7 +106,7 @@ inline int calibrate(const std::function<void(int)>& body, double targetMs) {
 }
 
 /// @brief Times every variant against every other, round-robin. See the header
-///        comment for why the interleaving is the point.
+/// comment for why the interleaving is the point.
 /// @param benches The variants being compared. All of them, in one call.
 /// @param repeats Batches per variant. Every variant gets the same number.
 /// @param targetMs Time budget for one batch.
@@ -121,9 +121,9 @@ inline std::vector<Timing> measureInterleaved(const std::vector<Bench>& benches,
         samples[b].reserve(static_cast<size_t>(repeats));
     }
 
-    // The index passed to body() is a RUNNING per-variant call counter, not the
+    // The index passed to body is a RUNNING per-variant call counter, not the
     // position within the batch. Validity hazard 2 says inputs must rotate, and
-    // bodies implement that as `i % kInputs` -- but calibrate() returns 1 whenever
+    // bodies implement that as `i % kInputs` -- but calibrate returns 1 whenever
     // a single call already exceeds the budget, and a batch of one restarted at 0
     // would then time image 0 forever while a cheaper variant in the same
     // comparison rotated through all four. The two sides of a ratio would be on

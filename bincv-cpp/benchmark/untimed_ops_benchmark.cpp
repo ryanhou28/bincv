@@ -1,20 +1,20 @@
 // ===========================================================================
 // THE AUDIT CLAUDE.md's NEW RULE CAME FROM.
 //
-// X-89 found `medianWide` and `edgeThreshold` at 78% of the frontend the day something
+// a measurement found `medianWide` and `edgeThreshold` at 78% of the frontend the day something
 // first called them: written bit-exact against the reference, benchmarked by nobody, and
 // therefore unoptimised. That prompted a sweep of every operation for the same state --
 // correct, tested, and never timed.
 //
 // The sweep found exactly two on real paths:
 //
-//   * `binarize<N>` -- the N-bit-to-1-bit reduction in ops/threshold.hpp. Word-wise
-//     already (it gathers N plane words and produces one output word), so the SHAPE was
-//     never in doubt; the NUMBER was simply unknown.
-//   * `unpackTo8Bit` -- the output path in ops/pack.hpp, and the only way to look at what
-//     binCV produced on a target with no OpenCV.
+// * `binarize<N>` -- the N-bit-to-1-bit reduction in ops/threshold.hpp. Word-wise
+// already (it gathers N plane words and produces one output word), so the SHAPE was
+// never in doubt; the NUMBER was simply unknown.
+// * `unpackTo8Bit` -- the output path in ops/pack.hpp, and the only way to look at what
+// binCV produced on a target with no OpenCV.
 //
-// `packBits` is here too. It has had a vector path since X-71, but X-71 measured it as
+// `packBits` is here too. It has had a vector path since earlier work, but a measurement measured it as
 // part of `fromCVMat`, and the core-only entry point had never been timed on its own.
 //
 // Everything else already had an arm. `readPgm` is deliberately absent: it parses a
@@ -54,7 +54,7 @@ void benchBinarize(const bincv::QuantMat<N, uint32_t>& src, bincv::BinMat<uint32
                      kReps);
     }
     const double m = minOf(ts);
-    std::printf("  binarize<N=%zu>            %8.1f us   %5.2f ns/px\n", N, m,
+    std::printf(" binarize<N=%zu> %8.1f us %5.2f ns/px\n", N, m,
                 m * 1000.0 / static_cast<double>(kW * kH));
 }
 
@@ -99,7 +99,7 @@ int main() {
                 std::chrono::duration<double, std::micro>(Clock::now() - t).count() / kReps);
         }
         const double m = minOf(ts);
-        std::printf("  packBits<GreaterEqual>    %8.1f us   %5.2f ns/px\n", m,
+        std::printf(" packBits<GreaterEqual> %8.1f us %5.2f ns/px\n", m,
                     m * 1000.0 / static_cast<double>(kW * kH));
     }
     {
@@ -114,10 +114,10 @@ int main() {
                 std::chrono::duration<double, std::micro>(Clock::now() - t).count() / kReps);
         }
         const double m = minOf(ts);
-        std::printf("  unpackTo8Bit              %8.1f us   %5.2f ns/px\n", m,
+        std::printf(" unpackTo8Bit %8.1f us %5.2f ns/px\n", m,
                     m * 1000.0 / static_cast<double>(kW * kH));
     }
-    std::printf("\n  (readPgm is deliberately not here: it parses a header and memcpies,\n"
-                "   runs once per file, and is on no per-frame path.)\n");
+    std::printf("\n (readPgm is deliberately not here: it parses a header and memcpies,\n"
+                " runs once per file, and is on no per-frame path.)\n");
     return 0;
 }

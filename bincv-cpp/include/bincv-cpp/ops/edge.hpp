@@ -2,23 +2,23 @@
 
 /// @file edge.hpp
 /// @brief Gradient-magnitude edge extraction, 8- or 16-bit in, 1 bit out.
-///        **API TIER 3** -- there is no `cv::` equivalent; see the tier note.
+/// **API TIER 3** -- there is no `cv::` equivalent; see the tier note.
 ///
 /// ---------------------------------------------------------------------------
 /// READ OUT OF THE REFERENCE, NOT INFERRED
 ///
 /// `SEAL/src/temporal_processing/edge_filter.cpp`, `rl_fast_edge_filter_wide`:
 ///
-///     kernel_x = [-1  0  1]      diff_x = |filter2D(img, kernel_x)|
-///     kernel_y = [-1  0  1]^T    diff_y = |filter2D(img, kernel_y)|
-///     mask     = (diff_x >= t) OR (diff_y >= t)
+/// kernel_x = [-1 0 1] diff_x = |filter2D(img, kernel_x)|
+/// kernel_y = [-1 0 1]^T diff_y = |filter2D(img, kernel_y)|
+/// mask = (diff_x >= t) OR (diff_y >= t)
 ///
 /// THREE DETAILS THAT ARE EASY TO GET WRONG, AND ALL THREE ARE THE DEFAULTS:
 ///
-///   * the combination is **OR**, not AND;
-///   * the relation is **`>=`**, not `>`;
-///   * **"wide" is the CENTRAL difference** `[-1, 0, 1]` -- the left neighbour
-///     against the RIGHT neighbour, spanning two pixels -- not an adjacent `[-1, 1]`.
+/// * the combination is **OR**, not AND;
+/// * the relation is **`>=`**, not `>`;
+/// * **"wide" is the CENTRAL difference** `[-1, 0, 1]` -- the left neighbour
+/// against the RIGHT neighbour, spanning two pixels -- not an adjacent `[-1, 1]`.
 ///
 /// A caller who says nothing gets exactly the reference's operation.
 ///
@@ -29,14 +29,14 @@
 /// are compile-time parameters, so a caller pays only for the one instantiated and
 /// the comparison folds to a single predicate -- the same requirement ops/pack.hpp
 /// puts on its rules, for the same measured reason
-/// ([X-72](../../../../docs/EXPERIMENTS.md): a runtime flag cost 17% elsewhere).
+/// ( a runtime flag cost 17% elsewhere).
 ///
 /// The point of the operation is that these choices are cheap. A caller wanting AND
 /// instead of OR, or an adjacent difference instead of a central one, should not have
 /// to fork the kernel.
 ///
 /// ---------------------------------------------------------------------------
-/// WHY `SrcT` AND NOT JUST `uint8_t` (ARCHITECTURE 7.8.1)
+/// WHY `SrcT` AND NOT JUST `uint8_t` (the design notes)
 ///
 /// **This operation is why that section exists.** "Downconvert 12->8 yourself, then
 /// call binCV" is `v >> 4`, which truncates the OPERANDS before they are differenced:
@@ -97,7 +97,7 @@ namespace impl {
 
 /// @brief `BORDER_REFLECT_101`: index -1 reads 1, index n reads n-2. **INTERNAL.**
 /// @note OpenCV's `filter2D` default, and therefore the reference's. A one-pixel
-///       extent reflects to itself.
+/// extent reflects to itself.
 inline size_t reflect101Edge(long long i, size_t n) {
     if (n <= 1) return 0;
     const long long last = static_cast<long long>(n) - 1;
@@ -160,17 +160,17 @@ inline bool isEdge(const SrcT* src, size_t width, size_t height, size_t stride, 
 
 
 // ==================================================================
-// X-89 / T5.8: THE EDGE PREDICATE, THIRTY-TWO PIXELS AT A TIME.
+// earlier work: THE EDGE PREDICATE, THIRTY-TWO PIXELS AT A TIME.
 //
 // `|a - b| >= t` on unsigned bytes is `subs_epu8(a,b) | subs_epu8(b,a)` for the absolute
 // difference and `subs_epu8(t, d) == 0` for the comparison — **no widening, no sign, no
 // branch.** The result is a byte mask, and `movemask_epi8` turns thirty-two of those into
 // the thirty-two bits of an output word directly, LSB first, which is exactly binCV's bit
-// order (X-71). **The 8-bit intermediate this operation exists to avoid never appears
+// order. **The 8-bit intermediate this operation exists to avoid never appears
 // even inside the kernel.**
 //
 // aarch64 has no move-mask, so bit weights and three pairwise adds fold sixteen byte
-// masks into sixteen bits — the same substitute X-71 measured for the row packer.
+// masks into sixteen bits — the same substitute a measurement measured for the row packer.
 //
 // The scalar body above stays: it is the border rule, the general `SrcT`, the general
 // `EdgeSpatial`, and the oracle `tests/test_edge.cpp` compares against.
@@ -190,7 +190,7 @@ __attribute__((target("avx2"))) inline __m256i edgePass32(__m256i a, __m256i b, 
 
 /// @brief Thirty-two pixels of the edge predicate, as thirty-two bits.
 /// @param tp The threshold ALREADY adjusted for the relation: `t` for `Ge`, `t + 1` for
-///        `Gt`, so the comparison itself has only one spelling.
+/// `Gt`, so the comparison itself has only one spelling.
 template <EdgeCombine C>
 __attribute__((target("avx2"))) inline uint32_t edgeMask32(const uint8_t* rowUp,
                                                            const uint8_t* row,
@@ -253,8 +253,8 @@ inline uint32_t edgeMask32(const uint8_t* rowUp, const uint8_t* row, const uint8
 /// with no template arguments is `rl_fast_edge_filter_wide(img, 17)`.
 ///
 /// @note 8-bit-in, 1-bit-out, and **the byte never exists**: the comparison yields a
-///       boolean per pixel which goes straight into a word. Computing an 8-bit edge
-///       image and packing it afterwards would be two passes and an intermediate.
+/// boolean per pixel which goes straight into a word. Computing an 8-bit edge
+/// image and packing it afterwards would be two passes and an intermediate.
 /// @note `dst`'s padding bits are zero on return.
 /// @note Never allocates and never throws.
 template <EdgeCombine C = EdgeCombine::Or, EdgeRelation R = EdgeRelation::Ge,
@@ -274,7 +274,7 @@ inline void edgeThreshold(const SrcT* src, size_t width, size_t height, size_t s
     const long long tt = static_cast<long long>(t);
 
 #if defined(BINCV_EDGE_AVX2) || defined(BINCV_EDGE_NEON)
-    // X-89 / T5.8: the vector interior. Only the shipped shape — 8-bit source, 32-bit
+    // earlier work: the vector interior. Only the shipped shape — 8-bit source, 32-bit
     // words, the WIDE central difference — because that is what the sensor stage runs
     // and every other combination still has the scalar body, which is also the oracle.
     //

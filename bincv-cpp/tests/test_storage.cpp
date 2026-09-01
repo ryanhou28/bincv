@@ -1,4 +1,4 @@
-// Core tests for the storage model (T1.1) and the view types (T1.2).
+// Core tests for the storage model and the view types.
 // Deliberately free of OpenCV so this suite also runs in the core-only and
 // no-exceptions configurations -- those are the configurations these two types
 // exist to serve.
@@ -36,7 +36,7 @@ inline void escape(const void* p) { g_sink = p; }
 // Every replacement operator below routes through this pair rather than the
 // scalar forms forwarding to each other, so that each operator has its own body
 // and every malloc is visibly paired with a free in the same two functions. The
-// alternative -- `operator new[]` calling `::operator new`, the sized deletes
+// alternative -- `operator new` calling `::operator new`, the sized deletes
 // calling `::operator delete` -- spreads one allocation's lifetime across four
 // bodies that a reader has to hold in their head at once, for no gain.
 //
@@ -47,10 +47,10 @@ inline void escape(const void* p) { g_sink = p; }
 // (-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion), on the
 // forwarding spelling, zero warnings in every combination:
 //
-//   g++ 11.4 (x86_64)              -O0 -O1 -O2 -O3
-//   g++ 12.5 (x86_64, gcc:12)      -O0 -O1 -O2 -O3
-//   g++ 12.5 (arm64v8/gcc:12)      -O0 -O2      <- the image scripts/verify_arm.sh uses
-//   clang++ 18 (x86_64)            -O0 -O2
+// g++ 11.4 (x86_64) -O0 -O1 -O2 -O3
+// g++ 12.5 (x86_64, gcc:12) -O0 -O1 -O2 -O3
+// g++ 12.5 (arm64v8/gcc:12) -O0 -O2 <- the image scripts/verify_arm.sh uses
+// clang++ 18 (x86_64) -O0 -O2
 //
 // The -Walloc-size-larger-than= claim that used to sit on the guard below did not
 // reproduce either (g++ 11.4, -O0/-O2, guard removed). Keeping a rule no compiler
@@ -58,7 +58,7 @@ inline void escape(const void* p) { g_sink = p; }
 // style reason above is the one that stands. The guard itself stays: it is
 // behaviour, not warning-appeasement.
 //
-// The neighbouring -Wuse-after-free finding in core/storage.hpp (TASKS.md T1.9)
+// The neighbouring -Wuse-after-free finding in core/storage.hpp 
 // is a different matter -- that one does reproduce on GCC 12 -- so the two should
 // not be read as equally shaky.
 void* countedAllocate(std::size_t bytes) {
@@ -91,11 +91,11 @@ void operator delete[](void* p, std::size_t) noexcept  { countedFree(p); }
 namespace {
 
 // ---------------------------------------------------------------------------
-// T1.1 -- Storage
+// -- Storage
 // ---------------------------------------------------------------------------
 
 // The behavioural contract, run against every supported word width so the
-// word-sized arithmetic in size()/copy is exercised at 8/16/32/64 bits.
+// word-sized arithmetic in size/copy is exercised at 8/16/32/64 bits.
 template <typename W>
 void testStorage(const char* label) {
     using S = bincv::Storage<W>;
@@ -140,13 +140,13 @@ void testStorage(const char* label) {
     BINCV_CHECK(buf[1] == W(0x5A));
 
     // REGRESSION: a degenerate wrap normalizes to the empty state, so that
-    // `!empty()` really does mean `data()` is usable. Storage(nullptr, n) used to
+    // `!empty` really does mean `data` is usable. Storage(nullptr, n) used to
     // report n words at a null pointer, and a caller following the documented
-    // `if (!s.empty()) s.data()[0] = ...` idiom -- or building a view from
-    // {s.data(), w, h, stride} -- would walk it.
+    // `if (!s.empty) s.data[0] =...` idiom -- or building a view from
+    // {s.data, w, h, stride} -- would walk it.
     S nullWrap(nullptr, 10);
     BINCV_CHECK(nullWrap.data() == nullptr);
-    BINCV_CHECK(nullWrap.empty());              // was false, with size() == 10
+    BINCV_CHECK(nullWrap.empty());              // was false, with size == 10
     BINCV_CHECK_EQ(nullWrap.size(), size_t(0));
     BINCV_CHECK(!nullWrap.ownsMemory());
 
@@ -155,7 +155,7 @@ void testStorage(const char* label) {
     BINCV_CHECK(literalNullWrap.empty());
     BINCV_CHECK_EQ(literalNullWrap.size(), size_t(0));
 
-    // ...and symmetrically, wrapping zero words leaves nothing to address.
+    //...and symmetrically, wrapping zero words leaves nothing to address.
     S zeroWordWrap(buf, 0);
     BINCV_CHECK(zeroWordWrap.empty());
     BINCV_CHECK(zeroWordWrap.data() == nullptr);
@@ -163,7 +163,7 @@ void testStorage(const char* label) {
 
     // --- copy construction ---
 
-    // Copying an owning Storage deep-copies (D-8): new buffer, same contents,
+    // Copying an owning Storage deep-copies: new buffer, same contents,
     // and the two are independent afterwards in both directions.
     S src(4);
     src.data()[0] = W(1);
@@ -206,7 +206,7 @@ void testStorage(const char* label) {
     BINCV_CHECK(!dst.ownsMemory());
     BINCV_CHECK_EQ(dst.size(), size_t(8));
 
-    // ...and back the other way, proving a non-owning target does not free the
+    //...and back the other way, proving a non-owning target does not free the
     // caller's buffer when it is reassigned.
     dst = src;
     BINCV_CHECK(dst.ownsMemory());
@@ -250,7 +250,7 @@ void testStorage(const char* label) {
     blockOwner.data()[1] = W(0x3D);
     BINCV_CHECK(wrapAtBase.data()[1] == W(0x3D));  // and still the same memory
 
-    // Same defect through an interior pointer -- the shape T1.3's non-owning
+    // Same defect through an interior pointer -- the shape that work’s non-owning
     // BinMat constructor makes reachable as `frame = roiWrapper`.
     S interiorOwner(6);
     interiorOwner.data()[3] = W(0x5E);
@@ -295,7 +295,7 @@ void testStorage(const char* label) {
     BINCV_CHECK(movedFrom.empty());
     BINCV_CHECK(!movedFrom.ownsMemory());
 
-    // ...and safe to assign to again.
+    //...and safe to assign to again.
     movedFrom = S(2);
     BINCV_CHECK(movedFrom.ownsMemory());
     BINCV_CHECK_EQ(movedFrom.size(), size_t(2));
@@ -381,7 +381,7 @@ void testAllocationDiscipline() {
     BINCV_CHECK_EQ(news, size_t(1));
     BINCV_CHECK_EQ(deletes, size_t(1));
 
-    // Copying an owning object allocates a second buffer (deep copy, D-8).
+    // Copying an owning object allocates a second buffer (deep copy).
     newsBefore = g_newCount;
     deletesBefore = g_deleteCount;
     {
@@ -452,13 +452,13 @@ void testAllocationDiscipline() {
 //
 // REGRESSION: the constraint used to be `is_integral && is_unsigned` alone, which
 // admits three things it should not:
-//   - `const`/`volatile` word types, so BinMatView<const uint32_t> instantiated --
-//     exactly the const-templated view D-9 forbids, and a fourth view type that
-//     kernels would silently be instantiated on
-//   - `bool`, for which WordBits = sizeof * 8 is a lie: the object holds one
-//     usable bit, so bit packing would discard seven pixels in eight
-//   - plain `char`, which is unsigned on some targets and signed on others, so
-//     the accepted type set differed between the project's two named tiers
+// - `const`/`volatile` word types, so BinMatView<const uint32_t> instantiated --
+// exactly the const-templated view the design rule forbids, and a fourth view type that
+// kernels would silently be instantiated on
+// - `bool`, for which WordBits = sizeof * 8 is a lie: the object holds one
+// usable bit, so bit packing would discard seven pixels in eight
+// - plain `char`, which is unsigned on some targets and signed on others, so
+// the accepted type set differed between the project's two named tiers
 //
 // A failed static_assert is a hard error, so these cannot be exercised from a
 // running test. Build with -DBINCV_TEST_MUST_NOT_COMPILE to check that each one
@@ -478,7 +478,7 @@ bincv::BinMatView<char>             charView;
 #endif
 
 // ---------------------------------------------------------------------------
-// T1.2 -- views
+// -- views
 // ---------------------------------------------------------------------------
 
 // A kernel-shaped free function: takes a read-only view by value, which is how
@@ -497,7 +497,7 @@ void testViewTypeProperties() {
     using CV = bincv::BinMatConstView<uint32_t>;
     std::cout << "\n--- View type properties ---\n";
 
-    // Two distinct types, not one templated on constness (D-9).
+    // Two distinct types, not one templated on constness.
     static_assert(!std::is_same<V, CV>::value, "views must be two distinct types");
 
     // Non-owning and trivially copyable: passing a view by value is a register
@@ -521,7 +521,7 @@ void testViewTypeProperties() {
     BINCV_CHECK_EQ(offsetof(CV, ptr), size_t(0));
     BINCV_CHECK_EQ(offsetof(CV, stride), sizeof(void*) + 2 * sizeof(size_t));
 
-    // WordBits derives from the word type, not from a separate parameter (D-1).
+    // WordBits derives from the word type, not from a separate parameter.
     static_assert(bincv::BinMatView<uint8_t>::WordBits == 8, "");
     static_assert(bincv::BinMatView<uint16_t>::WordBits == 16, "");
     static_assert(bincv::BinMatView<uint32_t>::WordBits == 32, "");
@@ -630,11 +630,11 @@ void testView(const char* label) {
     BINCV_CHECK(zeroHeight.empty());
 
     // REGRESSION boundary for the debug-only non-zero-stride precondition on
-    // row(). A stride of zero is legitimate at height <= 1 -- there is no second
+    // row. A stride of zero is legitimate at height <= 1 -- there is no second
     // row for it to collide with -- so the assertion must not fire here. It is
-    // the multi-row case that row() rejects in debug builds; that one aborts, so
+    // the multi-row case that row rejects in debug builds; that one aborts, so
     // it cannot be exercised from a running test until the harness grows death
-    // tests (T1.7).
+    // tests.
     V singleRow{buf, width, 1, 0};
     BINCV_CHECK(!singleRow.empty());
     singleRow.row(0)[0] = W(0x15);
@@ -679,7 +679,7 @@ void testViewOverStorage() {
     BINCV_CHECK_EQ(cv.row(2)[1], 0xFFu);
 
     // A deep copy of the storage is a different buffer, so the original view must
-    // not be pointing into it -- this is D-8 seen from the view side.
+    // not be pointing into it -- this is seen from the view side.
     bincv::Storage<uint32_t> deepCopy(storage);
     BINCV_CHECK(deepCopy.data() != storage.data());
     BINCV_CHECK_EQ(deepCopy.data()[5], 0xFFu);

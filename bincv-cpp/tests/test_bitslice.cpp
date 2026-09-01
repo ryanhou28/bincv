@@ -1,20 +1,20 @@
-// Bit-sliced small-count arithmetic (T2.7): maj3 / bitSlicedSum / thresholdGE,
+// Bit-sliced small-count arithmetic: maj3 / bitSlicedSum / thresholdGE,
 // and the view-level majority3 kernel built on the first of them.
 //
 // TWO HALVES, the same split as tests/test_logic.cpp and tests/test_reduce.cpp.
 //
-//   1. The CORE half (everything up to the OpenCV guard) needs no OpenCV, so it
-//      runs in all four verification configurations -- including the Debug one,
-//      which is the only place majority3's BINCV_ASSERT preconditions are live,
-//      and the -fno-exceptions one, which is the embedded claim.
+// 1. The CORE half (everything up to the OpenCV guard) needs no OpenCV, so it
+// runs in all four verification configurations -- including the Debug one,
+// which is the only place majority3's BINCV_ASSERT preconditions are live,
+// and the -fno-exceptions one, which is the embedded claim.
 //
-//   2. The OPENCV half checks majority3 against the reference pipeline's own
-//      three-pixel median, written as OpenCV calls: max(min(a,b), min(max(a,b), c))
-//      over CV_8U (SEAL/src/temporal_processing/denoise.cpp). That is a SECOND
-//      REFERENCE, not a tier promise -- bit-sliced arithmetic is Tier 3
-//      (ARCHITECTURE 5.1) and OpenCV has no pointwise median of three images.
-//      It is here because T3.1 must match that formula, and the cheapest way to
-//      be sure the majority IS that median is to run the formula.
+// 2. The OPENCV half checks majority3 against the reference pipeline's own
+// three-pixel median, written as OpenCV calls: max(min(a,b), min(max(a,b), c))
+// over CV_8U (SEAL/src/temporal_processing/denoise.cpp). That is a SECOND
+// REFERENCE, not a tier promise -- bit-sliced arithmetic is Tier 3
+// (the design notes) and OpenCV has no pointwise median of three images.
+// It is here because must match that formula, and the cheapest way to
+// be sure the majority IS that median is to run the formula.
 //
 // EXHAUSTIVE, NOT SAMPLED -- WHICH IS AFFORDABLE HERE AND NOWHERE ELSE
 //
@@ -23,16 +23,16 @@
 // there are exactly 2^k distinct per-lane input patterns, and the whole input
 // space can be enumerated rather than sampled. It is, for
 //
-//   maj3          k = 3     all 8 patterns
-//   bitSlicedSum  k = 1, 2, 3, 4, 9   all 2, 4, 8, 16 and 512 patterns
-//   bitSlicedSum  k = 16              all 65536 patterns
-//   thresholdGE   nPlanes = 0..5      every value 0..2^n-1 against every
-//                                     threshold 0..2^n+1, which is that
-//                                     function's ENTIRE input space
+// maj3 k = 3 all 8 patterns
+// bitSlicedSum k = 1, 2, 3, 4, 9 all 2, 4, 8, 16 and 512 patterns
+// bitSlicedSum k = 16 all 65536 patterns
+// thresholdGE nPlanes = 0..5 every value 0..2^n-1 against every
+// threshold 0..2^n+1, which is that
+// function's ENTIRE input space
 //
 // at all four word widths. k = 3, 4 and 9 are the MVP's shapes (median of 3, box
 // 2x2, 3x3 median); k = 1 and 2 are the degenerate ones; 16 is the larger case
-// T2.7 asks for, and 2^16 patterns is still under a second.
+// asks for, and 2^16 patterns is still under a second.
 //
 // The patterns are packed into the LANES of the words under test -- pattern
 // base+L in lane L -- so one call covers WordBits patterns and the enumeration
@@ -49,8 +49,8 @@
 //
 // WHAT THE REFERENCES ARE, AND WHY THEY ARE NOT THE IMPLEMENTATION RESTATED
 //
-// refMedian3() is the sorting network -- max(min(a,b), min(max(a,b),c)) -- not
-// (a&b)|(b&c)|(a&c). refCount() counts set inputs with an ordinary loop over the
+// refMedian3 is the sorting network -- max(min(a,b), min(max(a,b),c)) -- not
+// (a&b)|(b&c)|(a&c). refCount counts set inputs with an ordinary loop over the
 // input WORDS (not over the pattern index it was built from), and refThresholdGE
 // is `value >= threshold` on unsigned ints. None of the three shares an
 // expression with the code under test, which is the point: a reference derived
@@ -131,9 +131,9 @@ constexpr size_t wordBits() {
 
 /// @brief Median of three binary pixels, as the reference pipeline computes it.
 /// @note max(min(a, b), min(max(a, b), c)), i.e. SEAL's three_pix_median_filter
-///       with cv::min / cv::max read as && / || on {0, 255}. Deliberately NOT
-///       (a&b)|(b&c)|(a&c): a reference that restates the implementation cannot
-///       disagree with it.
+/// with cv::min / cv::max read as && / || on {0, 255}. Deliberately NOT
+/// (a&b)|(b&c)|(a&c): a reference that restates the implementation cannot
+/// disagree with it.
 bool refMedian3(bool a, bool b, bool c) {
     const bool minAB = a && b;
     const bool maxAB = a || b;
@@ -143,8 +143,8 @@ bool refMedian3(bool a, bool b, bool c) {
 
 /// @brief How many of the k inputs have lane `lane` set -- one loop, no popcount.
 /// @note Reads the input WORDS rather than the pattern index they were built
-///       from, so a bug in the pattern builder cannot cancel against a bug in the
-///       adder.
+/// from, so a bug in the pattern builder cannot cancel against a bug in the
+/// adder.
 template <typename WordType>
 unsigned refCount(const WordType* inputs, size_t k, size_t lane) {
     unsigned n = 0;
@@ -170,17 +170,17 @@ unsigned laneValue(const WordType* planes, size_t nPlanes, size_t lane) {
 
 /// @brief Packs the integers [base, base + lanes) into `n` bit-sliced words.
 /// @param words `n` words, rebuilt from zero: bit `lane` of `words[i]` becomes
-///        bit i of the integer base + lane.
+/// bit i of the integer base + lane.
 /// @param n How many bits of each integer to keep -- the input count k when the
-///        integer is a PATTERN index (input j's bit is bit j), and the plane
-///        count when it is a VALUE (plane p's bit is bit p). The two
-///        enumerations this file runs are the same packing operation, so they are
-///        the same function.
+/// integer is a PATTERN index (input j's bit is bit j), and the plane
+/// count when it is a VALUE (plane p's bit is bit p). The two
+/// enumerations this file runs are the same packing operation, so they are
+/// the same function.
 /// @return How many lanes were filled -- WordBits, or fewer for the last chunk.
 /// @note Lane L holds integer base + L, which is what makes one call cover
-///       WordBits patterns and what makes the sweep prove the lanes stay
-///       independent: a kernel that leaked a carry from lane L into lane L+1
-///       would pass a test that used lane 0 only.
+/// WordBits patterns and what makes the sweep prove the lanes stay
+/// independent: a kernel that leaked a carry from lane L into lane L+1
+/// would pass a test that used lane 0 only.
 template <typename WordType>
 size_t packLanes(WordType* words, size_t n, uint64_t base, uint64_t total) {
     const uint64_t remaining = total - base;
@@ -346,7 +346,7 @@ void testThresholdGEValues(const char* wordTypeName) {
 // ===========================================================================
 //
 // Every threshold from 0 (everything passes) to k+1 (nothing passes), over every
-// pattern, for the counts the MVP uses. T2.7 names both ends explicitly, and they
+// pattern, for the counts the MVP uses. names both ends explicitly, and they
 // are exactly where a comparison built from `>` rather than `>=` survives a
 // mid-range test.
 
@@ -456,7 +456,7 @@ void testDegenerate(const char* wordTypeName) {
             BITSLICE_EXPECT(intact, "bitSlicedSum writes no plane past its plane count",
                             label + " k=" + std::to_string(k));
 
-            // ... and the count it did write is k in every lane, which is the
+            //... and the count it did write is k in every lane, which is the
             // all-ones input's answer and the one the ripple has to carry
             // furthest.
             const bool okValue =
@@ -476,7 +476,7 @@ void testDegenerate(const char* wordTypeName) {
 // exhaustive word-level sweep above has already settled at every input.
 
 // Content generation: the same SplitMix64 draw as tests/equivalence.hpp, minus
-// OpenCV, duplicated for the reason T2.1 gives (a harness and the suite it judges
+// OpenCV, duplicated for the reason gives (a harness and the suite it judges
 // must not share a generator, or a fault in the shared part cancels).
 
 uint64_t nextRandom(uint64_t& state) {
@@ -498,7 +498,7 @@ uint32_t fillThreshold(float fillRatio) {
     return static_cast<uint32_t>(rounded);
 }
 
-/// @brief Fills through set(), so the padding bits stay clear on entry.
+/// @brief Fills through set, so the padding bits stay clear on entry.
 template <typename WordType>
 void fillRandom(bincv::BinMat<WordType>& m, float fillRatio, uint64_t seed) {
     uint64_t state = seed;
@@ -517,9 +517,9 @@ uint64_t caseSeed(int width, int height, size_t index) {
 
 /// @brief Set bits across the whole STRIDE, padding included.
 /// @note Deliberately not a library operation -- binCV exposes no per-word
-///       popcount (D-6). Compared against countNonZero()'s per-pixel loop it is
-///       how a padding-bit violation becomes visible: the two agree only when
-///       every bit past `width` is zero.
+/// popcount. Compared against countNonZero's per-pixel loop it is
+/// how a padding-bit violation becomes visible: the two agree only when
+/// every bit past `width` is zero.
 template <typename WordType>
 int bitsAcrossStride(const bincv::BinMat<WordType>& m) {
     int bits = 0;
@@ -554,13 +554,13 @@ std::string sizeLabel(const char* wordTypeName, int width, int height, const cha
            std::to_string(height) + " " + extra;
 }
 
-// The T2.1 widths, plus 128 -- an exact multiple of every supported word width,
+// The widths, plus 128 -- an exact multiple of every supported word width,
 // which is the only shape that reaches majority3's single-contiguous-run path.
 const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70, 128, 640};
 const int HEIGHTS[] = {1, 2, 3, 17};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (D-4 makes alignment a per-object choice).
+// An over-aligned row stride (the design rule makes alignment a per-object choice).
 constexpr size_t PADDED_ALIGNMENT = 32;
 
 template <typename WordType>
@@ -597,9 +597,9 @@ void testMajority3Reference(const char* wordTypeName) {
 }
 
 // Three stride flavours per argument, as in tests/test_logic.cpp:
-//   tight   stride == ceil(width / WordBits)      the D-4 default
-//   padded  stride from a 32-byte row alignment   the opt-in
-//   odd     stride == tight + 3                   a wrapped buffer
+// tight stride == ceil(width / WordBits) the default
+// padded stride from a 32-byte row alignment the opt-in
+// odd stride == tight + 3 a wrapped buffer
 
 enum class Stride { Tight, Padded, Odd };
 
@@ -767,12 +767,12 @@ void testDegenerateViews(const char* wordTypeName) {
 }
 
 /// @brief Sources whose padding bits are ALREADY SET, which is a legal
-///        construction (BinMat's wrap constructor: a wrapped buffer's padding
-///        belongs to its caller).
+/// construction (BinMat's wrap constructor: a wrapped buffer's padding
+/// belongs to its caller).
 /// @note Without the trailing-word mask in the kernel the majority of three dirty
-///       padding words is itself dirty, and the destination leaves phantom pixels
-///       behind for the next reduction to count. The pixel comparison alone would
-///       not see it.
+/// padding words is itself dirty, and the destination leaves phantom pixels
+/// behind for the next reduction to count. The pixel comparison alone would
+/// not see it.
 template <typename WordType>
 void makeDirtyPadded(StridedMat<WordType>& out, int width, int height, float fillRatio,
                      uint64_t seed) {
@@ -826,26 +826,26 @@ void testDirtySources(const char* wordTypeName) {
 // notion of `width`: every lane is answered, including the lanes past a row's
 // last pixel, and at `threshold == 0` every lane is answered *yes* whatever the
 // planes hold -- which is precisely the value a caller sweeping thresholds from 0
-// reaches by arithmetic rather than by choice (T3.2's requantization does exactly
+// reaches by arithmetic rather than by choice (that work’s requantization does exactly
 // that sweep). A caller that stores such a word into a row's trailing word
 // without masking leaves padding bits set past `width`, and the next word-wise
-// reduction over that image over-counts: the D-13 failure, in a place no
+// reduction over that image over-counts: the failure, in a place no
 // -Werror, no assert and no pixel comparison can see.
 //
 // majority3 masks internally because it owns its destination. thresholdGE returns
 // a word and cannot, so the contract lives in its docstring -- and here, where it
 // is executable. Two halves, and BOTH are the point:
 //
-//   1. the RAW result really does carry set bits past `width` (if a later change
-//      makes thresholdGE mask internally, this fails and the docstring is what
-//      has to change), and
-//   2. the documented remedy -- AND with impl::rowTailMask<W>(width) -- really
-//      does leave the padding zero while leaving every live pixel's answer
-//      intact, checked against the same per-pixel count reference section 2 uses.
+// 1. the RAW result really does carry set bits past `width` (if a later change
+// makes thresholdGE mask internally, this fails and the docstring is what
+// has to change), and
+// 2. the documented remedy -- AND with impl::rowTailMask<W>(width) -- really
+// does leave the padding zero while leaving every live pixel's answer
+// intact, checked against the same per-pixel count reference section 2 uses.
 //
 // The shape under test is the one the finding named: a 2x2 box sum (k = 4) over
 // four sources whose padding is already dirty, then a threshold sweep, then the
-// masked store -- i.e. what T3.2/T3.4 will do word by word.
+// masked store -- i.e. what/this will do word by word.
 
 template <typename WordType>
 void testThresholdPaddingContract(const char* wordTypeName) {
@@ -888,7 +888,7 @@ void testThresholdPaddingContract(const char* wordTypeName) {
                                 "thresholdGE at threshold 0 answers every lane, padding included",
                                 label);
             }
-            // ... and whenever the row does not end on a word boundary, that
+            //... and whenever the row does not end on a word boundary, that
             // answer includes bits the row does not own. This is the assertion a
             // future "fix" that masks inside thresholdGE would break, on purpose.
             if (tailMask != allOnes && t == 0u) {
@@ -898,13 +898,13 @@ void testThresholdPaddingContract(const char* wordTypeName) {
                                 label);
             }
 
-            // (2) The documented remedy leaves the padding zero ...
+            // (2) The documented remedy leaves the padding zero...
             const WordType padding = static_cast<WordType>(stored & static_cast<WordType>(~tailMask));
             BITSLICE_EXPECT(padding == 0,
                             "rowTailMask on the result leaves no bit past width",
                             label + " t=" + std::to_string(t));
 
-            // ... and costs no live pixel its answer. The reference is the count
+            //... and costs no live pixel its answer. The reference is the count
             // of set pixels per lane, done per pixel, exactly as in section 2.
             bool okPixels = true;
             for (size_t lane = 0; lane < livePixelsInTail; ++lane) {
@@ -946,10 +946,10 @@ void testThresholdPaddingContract(const char* wordTypeName) {
 #ifdef BINCV_WITH_OPENCV
 
 /// @brief max(min(a, b), min(max(a, b), c)) over CV_8U -- SEAL's three-pixel
-///        median, unchanged.
+/// median, unchanged.
 /// @note NOT a Tier 1 claim: OpenCV has no pointwise median of three images, and
-///       bit-sliced arithmetic is Tier 3 (ARCHITECTURE 5.1). This is a second,
-///       independent reference for the operation T3.1 has to reproduce.
+/// bit-sliced arithmetic is Tier 3 (the design notes). This is a second,
+/// independent reference for the operation has to reproduce.
 cv::Mat openCvMedian3(const cv::Mat& a, const cv::Mat& b, const cv::Mat& c) {
     cv::Mat minAB, maxAB, minMaxC, out;
     cv::min(a, b, minAB);

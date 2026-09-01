@@ -1,30 +1,30 @@
-// T3.7 -- the corner response map: THE SLIDING FORM AGAINST A COVARIANCE CALL PER
+// -- the corner response map: THE SLIDING FORM AGAINST A COVARIANCE CALL PER
 // POSITION.
 //
-// WHY THIS FILE EXISTS WHEN X-11 ALREADY MEASURED "incremental against recompute"
+// WHY THIS FILE EXISTS WHEN ALREADY MEASURED "incremental against recompute"
 //
-// X-11 axis 1 measured that question on ops/reduce.hpp's own entry points: a
+// the axis 1 measured that question on ops/reduce.hpp's own entry points: a
 // `SlidingWindowCount` sweep against a `countNonZero` per position, one plane, one
 // number. It reported 15.9x on a dense scan at 31x31 and that number is quoted in
-// three docstrings. T3.7 is the first CALLER of that shape in the MVP, and what it
+// three docstrings. this is the first CALLER of that shape in the MVP, and what it
 // sweeps is NOT one plane's popcount -- it is a 2x2 covariance of which only TWO
 // of the three numbers have an incremental form. `sumXX` and `sumYY` slide;
 // `sumXY` needs `magX & magY` split by `signX ^ signY`, nothing in ops/reduce.hpp
 // slides a split, and making it slide would cost two frame-sized planes per
-// pyramid level (D-15 axis 3 already declined one). So the cross term is
+// pyramid level (the axis 3 already declined one). So the cross term is
 // recomputed per position on BOTH sides of this comparison, and the saving is
 // bounded by the share of the work the other two numbers represent.
 //
 // "ON BOTH SIDES" IS TRUE OF THE WORK, NOT OF THE ENTRY POINT, and the difference
 // is what the table's incremental column actually measures:
 //
-//   sliding     two slid row counts (`SlidingWindowCount`, one plane each) PLUS
-//               `countAndSplit(magX, magY, signX, signY, window)` -- TWO popcounts
-//               per word (ops/reduce.hpp's crossing table).
-//   recompute   `gradientCovariance` -> `countCovariance(magX, magY, signX, signY,
-//               window)` -- FOUR popcounts per word, producing xx, yy AND the
-//               split in ONE pass. The cross term is never issued separately there;
-//               it is fused into the pass that also produces xx and yy.
+// sliding two slid row counts (`SlidingWindowCount`, one plane each) PLUS
+// `countAndSplit(magX, magY, signX, signY, window)` -- TWO popcounts
+// per word (ops/reduce.hpp's crossing table).
+// recompute `gradientCovariance` -> `countCovariance(magX, magY, signX, signY,
+// window)` -- FOUR popcounts per word, producing xx, yy AND the
+// split in ONE pass. The cross term is never issued separately there;
+// it is fused into the pass that also produces xx and yy.
 //
 // So the recompute side is not "the sliding side plus two extra row counts", and
 // saying it that way would misread the column. It is a different reduction with a
@@ -33,26 +33,26 @@
 //
 // That bound is the whole point. A reader who takes 15.9x from ops/reduce.hpp and
 // expects it here would be wrong, and the only way to say so honestly is to
-// measure the ratio at THIS level, on the entry point T3.7 actually ships.
+// measure the ratio at THIS level, on the entry point actually ships.
 //
 // THE RULE, WRITTEN BEFORE MEASURING (CLAUDE.md: "write the decision rule before
 // measuring"):
 //
-//   * SLIDING FASTER THAN RECOMPUTE AT EVERY BLOCK SIZE -> X-11 axis 1's advantage
-//     survives being embedded in a caller that can only slide two thirds of its
-//     state. ops/corner.hpp's "this is the sliding form" note stands, and the
-//     magnitude recorded here -- not 15.9x -- is what a caller should plan with.
-//   * SLIDING WITHIN THE MEASURED SPREAD OF RECOMPUTE, OR SLOWER -> that
-//     CONTRADICTS a documented claim (D-15, ops/reduce.hpp's "WHICH SHAPE TO REACH
-//     FOR" table, ops/covariance.hpp's docstring, and T3.7's own spec, all of
-//     which point a dense sweep at the incremental form). CLAUDE.md's rule for
-//     that case is explicit: report it, do not adjust the code to fit the doc. The
-//     conclusion would be that the sliding form is not worth its complexity in
-//     THIS caller, and ops/corner.hpp would need re-deciding rather than
-//     re-measuring.
-//   * A RATIO NEAR 15.9x WOULD ALSO BE A SURPRISE and would mean the cross term is
-//     not the dominant cost the argument above assumes. It is written down here so
-//     that it cannot be quietly welcomed as a good result.
+// * SLIDING FASTER THAN RECOMPUTE AT EVERY BLOCK SIZE -> the axis 1's advantage
+// survives being embedded in a caller that can only slide two thirds of its
+// state. ops/corner.hpp's "this is the sliding form" note stands, and the
+// magnitude recorded here -- not 15.9x -- is what a caller should plan with.
+// * SLIDING WITHIN THE MEASURED SPREAD OF RECOMPUTE, OR SLOWER -> that
+// CONTRADICTS a documented claim (, ops/reduce.hpp's "WHICH SHAPE TO REACH
+// FOR" table, ops/covariance.hpp's docstring, and that work’s own spec, all of
+// which point a dense sweep at the incremental form). CLAUDE.md's rule for
+// that case is explicit: report it, do not adjust the code to fit the doc. The
+// conclusion would be that the sliding form is not worth its complexity in
+// THIS caller, and ops/corner.hpp would need re-deciding rather than
+// re-measuring.
+// * A RATIO NEAR 15.9x WOULD ALSO BE A SURPRISE and would mean the cross term is
+// not the dominant cost the argument above assumes. It is written down here so
+// that it cannot be quietly welcomed as a good result.
 //
 // No threshold is attached, deliberately: this is confirming the direction of an
 // interface already selected, so the question is direction and magnitude against
@@ -60,22 +60,22 @@
 //
 // WHAT IS MEASURED
 //
-//   SLIDING     ops/corner.hpp's cornerMinEigenVal -- WHAT T3.7 SHIPS. Per column,
-//               two SlidingWindowCounts carry sumXX and sumYY; per position, one
-//               four-argument countAndSplit for the cross term.
-//   RECOMPUTE   the same map, with `gradientCovariance(dx, dy, window)` called per
-//               position -- T3.6's own entry point, which is the obvious way to
-//               write this operation and is what ops/covariance.hpp's docstring
-//               tells a dense caller NOT to do. All three numbers are recomputed
-//               over the whole window at every pixel, ROW-MAJOR, which is how
-//               anyone would write it.
-//   RECOMPUTE-COL
-//               the same recomputation swept COLUMN-MAJOR. It exists because
-//               `sliding` differs from `recompute` in TWO ways at once -- the
-//               incremental state AND the traversal order the accumulator forces
-//               -- and those pull in opposite directions. Without this control the
-//               table cannot say which effect it measured, and on a 32 KiB L1 the
-//               traversal effect is not small.
+// SLIDING ops/corner.hpp's cornerMinEigenVal -- WHAT SHIPS. Per column,
+// two SlidingWindowCounts carry sumXX and sumYY; per position, one
+// four-argument countAndSplit for the cross term.
+// RECOMPUTE the same map, with `gradientCovariance(dx, dy, window)` called per
+// position -- that work’s own entry point, which is the obvious way to
+// write this operation and is what ops/covariance.hpp's docstring
+// tells a dense caller NOT to do. All three numbers are recomputed
+// over the whole window at every pixel, ROW-MAJOR, which is how
+// anyone would write it.
+// RECOMPUTE-COL
+// the same recomputation swept COLUMN-MAJOR. It exists because
+// `sliding` differs from `recompute` in TWO ways at once -- the
+// incremental state AND the traversal order the accumulator forces
+// -- and those pull in opposite directions. Without this control the
+// table cannot say which effect it measured, and on a 32 KiB L1 the
+// traversal effect is not small.
 //
 // All three produce the same map, and the maps are compared BIT FOR BIT on EVERY
 // ONE OF THE FOUR ROTATING INPUTS before anything is timed -- the timed bodies
@@ -164,14 +164,14 @@ void operator delete[](void* p, std::size_t, std::align_val_t) noexcept { benchF
 
 namespace {
 
-using Word = uint32_t;  // D-14's default, and what a VIO frontend would run
+using Word = uint32_t;  // the design rule’s default, and what a VIO frontend would run
 
 constexpr int kWidth = 640;
 constexpr int kHeight = 480;
 const int kBlockSizes[] = {3, 7, 15, 31};
 
-/// @brief THE AVOIDABLE COST: the same response map, with T3.6's covariance called
-///        once per pixel instead of two accumulators slid down each column.
+/// @brief THE AVOIDABLE COST: the same response map, with that work’s covariance called
+/// once per pixel instead of two accumulators slid down each column.
 ///
 /// This is not a straw man -- it is the natural way to write the operation once
 /// ops/covariance.hpp exists, and it is exactly what that file's docstring tells a
@@ -201,8 +201,8 @@ void responseMapByRecompute(const bincv::TernaryMat<Word>& dx, const bincv::Tern
 }
 
 /// @brief The same recomputation, swept COLUMN-MAJOR -- the traversal order the
-///        sliding form is forced into, because SlidingWindowCount only slides
-///        downward.
+/// sliding form is forced into, because SlidingWindowCount only slides
+/// downward.
 ///
 /// WITHOUT THIS VARIANT THE TABLE MEASURES TWO THINGS AT ONCE and cannot say
 /// which. `sliding` differs from `recompute` in BOTH the incremental state and
@@ -211,9 +211,9 @@ void responseMapByRecompute(const bincv::TernaryMat<Word>& dx, const bincv::Tern
 /// 32 KiB L1 on the reference device, and a column sweep re-walks all of them per
 /// column). Three variants make the two separable:
 ///
-///     sliding / recompute-col   the INCREMENTAL effect, traversal held equal
-///     recompute-col / recompute the TRAVERSAL effect, arithmetic held equal
-///     sliding / recompute       what a caller actually chooses between
+/// sliding / recompute-col the INCREMENTAL effect, traversal held equal
+/// recompute-col / recompute the TRAVERSAL effect, arithmetic held equal
+/// sliding / recompute what a caller actually chooses between
 void responseMapByRecomputeColumnMajor(const bincv::TernaryMat<Word>& dx,
                                        const bincv::TernaryMat<Word>& dy, int blockSize,
                                        bincv::ResponseMap dst) {
@@ -232,8 +232,8 @@ void responseMapByRecomputeColumnMajor(const bincv::TernaryMat<Word>& dx,
 }
 
 /// @brief A frame with real corner structure rather than salt-and-pepper noise:
-///        overlapping rectangles and a diagonal, so the map has edges (rank one,
-///        response 0), corners (rank two) and flat regions.
+/// overlapping rectangles and a diagonal, so the map has edges (rank one,
+/// response 0), corners (rank two) and flat regions.
 bincv::BinMat<Word> makeFrame(uint64_t seed) {
     bincv::BinMat<Word> src(kWidth, kHeight);
     uint64_t state = seed;
@@ -252,7 +252,7 @@ bincv::BinMat<Word> makeFrame(uint64_t seed) {
 size_t planeBytes(const bincv::TernaryMat<Word>& t) {
     // Two planes per ternary image (one magnitude, one sign), each stride x height
     // words. Read out of the view rather than recomputed from the dimensions, so
-    // row alignment (D-4) is included.
+    // row alignment is included.
     const bincv::BinMatConstView<Word> p = t.constMagnitude(0);
     return 2 * p.stride * p.height * sizeof(Word);
 }
@@ -260,7 +260,7 @@ size_t planeBytes(const bincv::TernaryMat<Word>& t) {
 } // namespace
 
 int main() {
-    std::printf("binCV T3.7 -- corner response: sliding against a covariance call per position\n");
+    std::printf("binCV -- corner response: sliding against a covariance call per position\n");
     std::printf("frame %dx%d, word uint32_t, one column of sliding state, no caller scratch\n\n",
                 kWidth, kHeight);
 
@@ -293,13 +293,13 @@ int main() {
     const size_t planes = planeBytes(dxs[0]) + planeBytes(dys[0]);
     const size_t mapBytes = pixels * sizeof(float);
 
-    std::printf("  working set, identical for both variants:\n");
-    std::printf("    four one-bit derivative planes   %9zu B\n", planes);
-    std::printf("    float response map               %9zu B\n", mapBytes);
-    std::printf("    caller scratch                          0 B  (two stack accumulators)\n");
-    std::printf("    TOTAL                            %9zu B\n\n", planes + mapBytes);
+    std::printf(" working set, identical for both variants:\n");
+    std::printf(" four one-bit derivative planes %9zu B\n", planes);
+    std::printf(" float response map %9zu B\n", mapBytes);
+    std::printf(" caller scratch 0 B (two stack accumulators)\n");
+    std::printf(" TOTAL %9zu B\n\n", planes + mapBytes);
 
-    std::printf("  %-6s %-14s %10s %10s %8s %8s %s\n", "block", "variant", "ns/frame",
+    std::printf(" %-6s %-14s %10s %10s %8s %8s %s\n", "block", "variant", "ns/frame",
                 "ns/pixel", "spread", "vs.slide", "allocs");
 
     for (int blockSize : kBlockSizes) {
@@ -320,7 +320,7 @@ int main() {
             }
         }
         if (differingB != 0 || differingC != 0) {
-            std::printf("  MISMATCH at block %d over %d inputs: recompute %zu, recompute-col %zu "
+            std::printf(" MISMATCH at block %d over %d inputs: recompute %zu, recompute-col %zu "
                         "of %zu positions differ -- not timing\n",
                         blockSize, kInputs, differingB, differingC, mapA.size() * kInputs);
             return 1;
@@ -375,24 +375,24 @@ int main() {
         const double slidingNs = t[0].medianNs;
         const double recomputeNs = t[1].medianNs;
         const double recomputeColNs = t[2].medianNs;
-        std::printf("  %-6d %-14s %10.0f %10.3f %7.2f%% %8s %6zu\n", blockSize, "sliding",
+        std::printf(" %-6d %-14s %10.0f %10.3f %7.2f%% %8s %6zu\n", blockSize, "sliding",
                     slidingNs, slidingNs / static_cast<double>(pixels), t[0].spreadPct(), "-",
                     slidingAllocs);
-        std::printf("  %-6d %-14s %10.0f %10.3f %7.2f%% %7.2fx %6zu\n", blockSize, "recompute",
+        std::printf(" %-6d %-14s %10.0f %10.3f %7.2f%% %7.2fx %6zu\n", blockSize, "recompute",
                     recomputeNs, recomputeNs / static_cast<double>(pixels), t[1].spreadPct(),
                     recomputeNs / slidingNs, recomputeAllocs);
-        std::printf("  %-6d %-14s %10.0f %10.3f %7.2f%% %7.2fx %6zu\n", blockSize,
+        std::printf(" %-6d %-14s %10.0f %10.3f %7.2f%% %7.2fx %6zu\n", blockSize,
                     "recompute-col", recomputeColNs,
                     recomputeColNs / static_cast<double>(pixels), t[2].spreadPct(),
                     recomputeColNs / slidingNs, recomputeColAllocs);
-        std::printf("         -> incremental effect (sliding vs recompute-col) %6.2fx, "
+        std::printf(" -> incremental effect (sliding vs recompute-col) %6.2fx, "
                     "traversal effect (recompute vs recompute-col) %6.2fx\n",
                     recomputeColNs / slidingNs, recomputeColNs / recomputeNs);
     }
 
-    std::printf("\n  the `allocs` column is `operator new` calls -- plain AND C++17 "
+    std::printf("\n the `allocs` column is `operator new` calls -- plain AND C++17 "
                 "over-aligned --\n");
-    std::printf("  counted around ONE call of each variant. Zero is what no scratch means.\n");
-    std::printf("  sink %zu\n", static_cast<size_t>(measure::g_sink));
+    std::printf(" counted around ONE call of each variant. Zero is what no scratch means.\n");
+    std::printf(" sink %zu\n", static_cast<size_t>(measure::g_sink));
     return 0;
 }

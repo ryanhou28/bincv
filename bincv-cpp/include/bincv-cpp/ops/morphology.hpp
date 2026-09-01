@@ -1,9 +1,9 @@
 #pragma once
 
 /// @file morphology.hpp
-/// @brief erode / dilate / morphologyEx on bit-packed binary frames (T3.3).
+/// @brief erode / dilate / morphologyEx on bit-packed binary frames.
 ///
-/// **API TIER 1** (ARCHITECTURE 5.1): every entry point here is bit-exact
+/// **API TIER 1** (the design notes): every entry point here is bit-exact
 /// against `cv::erode`, `cv::dilate` and `cv::morphologyEx` on the same binary
 /// content stored as `CV_8U` -- interior, edge and corner alike, for every
 /// `BorderType` and every structuring element this file can express.
@@ -13,19 +13,19 @@
 ///
 /// On a binary image the two primitives are shifted ORs and shifted ANDs:
 ///
-///     dilate(src, E) = OR  over (dx,dy) in E of shift(src, dx, dy, fill = 0)
-///     erode (src, E) = AND over (dx,dy) in E of shift(src, dx, dy, fill = 1)
+/// dilate(src, E) = OR over (dx,dy) in E of shift(src, dx, dy, fill = 0)
+/// erode (src, E) = AND over (dx,dy) in E of shift(src, dx, dy, fill = 1)
 ///
 /// with `(dx, dy) = (ex - anchorX, ey - anchorY)` over the element's set cells --
 /// the same offset sign for BOTH operations, because OpenCV does not flip the
 /// kernel (its `dst(x,y) = max/min over element of src(x + x', y + y')`).
 ///
-/// **The two fills are opposite and that is [D-12]**, measured rather than
+/// **The two fills are opposite and that is **, measured rather than
 /// argued: a pixel outside the image must contribute nothing, and "nothing" is 0
 /// to an OR and 1 to an AND. One fixed fill makes one of the two wrong at every
 /// edge -- flipping erode's fill to `false` dropped the composition suite that
 /// preceded this file from 12960/12960 to 11056/12960. OpenCV encodes the same
-/// asymmetry through `morphologyDefaultBorderValue()`, which resolves to the
+/// asymmetry through `morphologyDefaultBorderValue`, which resolves to the
 /// depth's maximum for erosion and its minimum for dilation, and
 /// `tests/test_shift.cpp` (`Shift.MorphologyFillPremise`) pins that claim
 /// against the real `cv::erode` / `cv::dilate` rather than citing it.
@@ -45,7 +45,7 @@
 /// The composition is not thereby unverified -- it is verified harder. A
 /// structuring element with exactly ONE set cell reduces this kernel to a single
 /// shift, so `Morphology.SingleOffsetEqualsShift_*` requires it to agree with
-/// `ops/shift.hpp`'s `shift()` pixel for pixel, at every offset in the element
+/// `ops/shift.hpp`'s `shift` pixel for pixel, at every offset in the element
 /// and at all five `BorderType` values, in the three configurations that have no
 /// OpenCV at all. The word recurrence below and the one in `ops/shift.hpp` are
 /// separately written; that test is what says they mean the same thing.
@@ -53,21 +53,21 @@
 /// ---------------------------------------------------------------------------
 /// THE BORDER IS THE RISK, AND IT IS HANDLED IN TWO PIECES
 ///
-///   * VERTICALLY, always exactly. A destination row's source row is
-///     `impl::borderIndex(y + dy, height, type)` -- the same closed form
-///     `ops/shift.hpp` is Tier 1 against `cv::borderInterpolate` for. Under
-///     `BORDER_CONSTANT` an out-of-image row folds the constant in, and when the
-///     constant IS the identity (the morphological default) it is skipped.
+/// * VERTICALLY, always exactly. A destination row's source row is
+/// `impl::borderIndex(y + dy, height, type)` -- the same closed form
+/// `ops/shift.hpp` is Tier 1 against `cv::borderInterpolate` for. Under
+/// `BORDER_CONSTANT` an out-of-image row folds the constant in, and when the
+/// constant IS the identity (the morphological default) it is skipped.
 ///
-///   * HORIZONTALLY, in the word path for `BORDER_CONSTANT` and in a per-pixel
-///     fixup for the other four. `impl::extendedRowWord` reads the constant for
-///     everything past the row's pixels, which is exact; the four non-constant
-///     types map each out-of-range column to a DIFFERENT source column, so there
-///     is no word-wide answer. Those columns are recomputed one pixel at a time
-///     after the row is accumulated -- at most `maxOffsetX` columns at each edge,
-///     where `maxOffsetX` is the element's horizontal reach (1 for every 3x3).
-///     The interior stays word-parallel, which is the whole point of the packed
-///     representation.
+/// * HORIZONTALLY, in the word path for `BORDER_CONSTANT` and in a per-pixel
+/// fixup for the other four. `impl::extendedRowWord` reads the constant for
+/// everything past the row's pixels, which is exact; the four non-constant
+/// types map each out-of-range column to a DIFFERENT source column, so there
+/// is no word-wide answer. Those columns are recomputed one pixel at a time
+/// after the row is accumulated -- at most `maxOffsetX` columns at each edge,
+/// where `maxOffsetX` is the element's horizontal reach (1 for every 3x3).
+/// The interior stays word-parallel, which is the whole point of the packed
+/// representation.
 ///
 /// A column strictly inside `[maxOffsetX, width - maxOffsetX)` cannot reach the
 /// border under ANY cell of the element, which is what makes the split safe: the
@@ -95,18 +95,18 @@
 ///
 /// `erode` and `dilate` need none. The five compound operations each need one
 /// intermediate image, and it is the CALLER'S -- `morphologyEx` takes it as a
-/// view like every other argument (D-5). One frame is enough for all five, which
+/// view like every other argument. One frame is enough for all five, which
 /// is not obvious for TOPHAT and BLACKHAT and is worth writing down:
 ///
-///     OPEN      erode(src -> scratch);   dilate(scratch -> dst)
-///     CLOSE     dilate(src -> scratch);  erode(scratch -> dst)
-///     GRADIENT  dilate(src -> dst);      erode(src -> scratch);  dst &= ~scratch
-///     TOPHAT    open(src -> dst) using scratch;   dst = src & ~dst
-///     BLACKHAT  close(src -> dst) using scratch;  scratch = ~src;  dst &= scratch
+/// OPEN erode(src -> scratch); dilate(scratch -> dst)
+/// CLOSE dilate(src -> scratch); erode(scratch -> dst)
+/// GRADIENT dilate(src -> dst); erode(src -> scratch); dst &= ~scratch
+/// TOPHAT open(src -> dst) using scratch; dst = src & ~dst
+/// BLACKHAT close(src -> dst) using scratch; scratch = ~src; dst &= scratch
 ///
 /// TOPHAT and BLACKHAT would each need a second frame if the subtraction were
 /// written the obvious way; they do not, because `ops/logic.hpp` supports the
-/// exact-alias in-place case (D-11) and the scratch is dead by the time the
+/// exact-alias in-place case and the scratch is dead by the time the
 /// subtraction runs.
 ///
 /// **The subtractions are bitwise and that is exact, not an approximation.**
@@ -128,7 +128,7 @@
 ///
 /// A custom `borderValue` on `morphologyEx`. Each step uses the morphological
 /// default for ITS operation, which is what `cv::morphologyEx` does when it is
-/// passed `morphologyDefaultBorderValue()` -- its own default. A caller who wants
+/// passed `morphologyDefaultBorderValue` -- its own default. A caller who wants
 /// a literal constant on both steps composes `erode`/`dilate` directly, where the
 /// parameter is exposed.
 
@@ -136,12 +136,12 @@
 #include <cstddef>
 #include <cstdint>
 
-// impl::rowTailMask / strideCoversARow / viewsShareNoWord (D-11), and through it
+// impl::rowTailMask / strideCoversARow / viewsShareNoWord, and through it
 // binMat.hpp's word helpers and the two view types.
 #include "../impl/kernel_util.hpp"
 
 // impl::borderIndex, impl::extendedRowWord, impl::isKnownBorderType -- the Tier 1
-// border mapping this file inherits rather than re-derives -- and shift() itself,
+// border mapping this file inherits rather than re-derives -- and shift itself,
 // which the single-cell equivalence test compares against.
 #include "shift.hpp"
 
@@ -158,41 +158,41 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// @brief A morphological structuring element: a shape, an extent and an anchor.
 ///
 /// @note **Mirrors `cv::getStructuringElement` exactly**, including the parts of
-///       it that are surprising, because Tier 1 means the two must agree cell for
-///       cell (`Morphology.ElementMatchesOpenCv_*` compares every cell of every
-///       shape at every size in the sweep against the real function):
+/// it that are surprising, because Tier 1 means the two must agree cell for
+/// cell (`Morphology.ElementMatchesOpenCv_*` compares every cell of every
+/// shape at every size in the sweep against the real function):
 ///
-///       - `MORPH_ELLIPSE` at 3x3 is a PLUS, not a filled square. OpenCV's
-///         half-axis is `rows/2` and `cols/2`, so at 3x3 the row offsets +/-1
-///         admit only the centre column.
-///       - `MORPH_CROSS` is centred on the ANCHOR, not on the element. That is
-///         `getStructuringElement`'s behaviour and it is why the anchor is a
-///         field here rather than a separate argument.
-///       - A 1x1 element is a filled 1x1 whatever the shape says.
+/// - `MORPH_ELLIPSE` at 3x3 is a PLUS, not a filled square. OpenCV's
+/// half-axis is `rows/2` and `cols/2`, so at 3x3 the row offsets +/-1
+/// admit only the centre column.
+/// - `MORPH_CROSS` is centred on the ANCHOR, not on the element. That is
+/// `getStructuringElement`'s behaviour and it is why the anchor is a
+/// field here rather than a separate argument.
+/// - A 1x1 element is a filled 1x1 whatever the shape says.
 ///
 /// @note **Nothing is stored per cell and nothing is allocated.** The parametric
-///       shapes are evaluated by `activeAt()` on demand -- a few integer
-///       comparisons, or one `sqrt` per element ROW for the ellipse, hoisted by
-///       the kernels into a span so the inner loop never sees it. That keeps this
-///       a 32-byte value type that can be a constant, a member, or a temporary in
-///       a call expression, at any odd size, with no capacity limit and no heap.
+/// shapes are evaluated by `activeAt` on demand -- a few integer
+/// comparisons, or one `sqrt` per element ROW for the ellipse, hoisted by
+/// the kernels into a span so the inner loop never sees it. That keeps this
+/// a 32-byte value type that can be a constant, a member, or a temporary in
+/// a call expression, at any odd size, with no capacity limit and no heap.
 ///
-/// @note **`mask` is the escape hatch, and it is a view, not a container** (D-5).
-///       When non-null it names a caller-owned, row-major, `cols * rows` array of
-///       bytes -- non-zero means set -- and `shape` is ignored. The memory must
-///       outlive the element. This exists because the three parametric shapes are
-///       all symmetric about their centre, and a suite built only from them
-///       cannot catch an inverted offset sign: negating a symmetric offset set
-///       gives the same set back. See `Morphology.Asymmetric_*`.
+/// @note **`mask` is the escape hatch, and it is a view, not a container**.
+/// When non-null it names a caller-owned, row-major, `cols * rows` array of
+/// bytes -- non-zero means set -- and `shape` is ignored. The memory must
+/// outlive the element. This exists because the three parametric shapes are
+/// all symmetric about their centre, and a suite built only from them
+/// cannot catch an inverted offset sign: negating a symmetric offset set
+/// gives the same set back. See `Morphology.Asymmetric_*`.
 ///
 /// @note An off-centre ANCHOR breaks that symmetry too, and is the cheaper way to
-///       get an asymmetric case: the offsets are `cell - anchor`, so a 3x3 rect
-///       anchored at (0,0) reaches {0,1,2} in each axis and its negation reaches
-///       {0,-1,-2}. Both routes are swept.
+/// get an asymmetric case: the offsets are `cell - anchor`, so a 3x3 rect
+/// anchored at (0,0) reaches {0,1,2} in each axis and its negation reaches
+/// {0,-1,-2}. Both routes are swept.
 ///
 /// @note Aggregate-initializable, but prefer the named factories -- they document
-///       which of five ints is which, and `-1` for an anchor means "centre",
-///       spelled `cv::Point(-1, -1)` in OpenCV.
+/// which of five ints is which, and `-1` for an anchor means "centre",
+/// spelled `cv::Point(-1, -1)` in OpenCV.
 struct StructuringElement {
     MorphShape shape = MORPH_RECT;  ///< Ignored when `mask` is non-null.
     int cols = 3;                   ///< Width in cells; >= 1.
@@ -230,10 +230,10 @@ struct StructuringElement {
     /// @param col Column in [0, cols). @param row Row in [0, rows).
     /// @note Argument order is (x, y) -- OpenCV's `Point` order, not `Mat::at`'s.
     /// @note Transcribed from `cv::getStructuringElement`'s row loop, branch for
-    ///       branch, so the two agree by construction and not by coincidence. The
-    ///       ellipse's `saturate_cast<int>` is `cvRound`, i.e. nearest with ties
-    ///       to even, which is what `std::lrint` is under the default rounding
-    ///       mode -- `std::round` would differ on a tie.
+    /// branch, so the two agree by construction and not by coincidence. The
+    /// ellipse's `saturate_cast<int>` is `cvRound`, i.e. nearest with ties
+    /// to even, which is what `std::lrint` is under the default rounding
+    /// mode -- `std::round` would differ on a tie.
     bool activeAt(int col, int row) const {
         if (mask != nullptr) {
             const size_t index =
@@ -247,13 +247,13 @@ struct StructuringElement {
     }
 
     /// @brief The half-open column range `[first, last)` of row `row` that MAY be
-    ///        set: exact for the parametric shapes, `[0, cols)` for a mask.
+    /// set: exact for the parametric shapes, `[0, cols)` for a mask.
     /// @note Every parametric shape's row is one CONTIGUOUS run -- rect is the
-    ///       whole row, ellipse is a centred run, and cross is either the whole
-    ///       row (the anchor row) or the single anchor column. That is what lets
-    ///       the kernels hoist the ellipse's `sqrt` out of the pixel loop and
-    ///       skip the empty part of a cross's rows entirely, without storing a
-    ///       cell table anywhere.
+    /// whole row, ellipse is a centred run, and cross is either the whole
+    /// row (the anchor row) or the single anchor column. That is what lets
+    /// the kernels hoist the ellipse's `sqrt` out of the pixel loop and
+    /// skip the empty part of a cross's rows entirely, without storing a
+    /// cell table anywhere.
     void spanOfRow(int row, int& first, int& last) const {
         if (mask != nullptr) {
             first = 0;
@@ -293,18 +293,18 @@ struct StructuringElement {
         if (last < first) last = first;
     }
 
-    /// @brief True when every cell inside `spanOfRow()` is set, so a kernel that
-    ///        iterates the span needs no per-cell test at all.
+    /// @brief True when every cell inside `spanOfRow` is set, so a kernel that
+    /// iterates the span needs no per-cell test at all.
     /// @note That is the case for ALL THREE parametric shapes -- each one's row is
-    ///       a solid run -- and only a custom mask can have holes. It matters
-    ///       because the per-cell test is `activeAt()`, and for MORPH_ELLIPSE that
-    ///       is a `sqrt`: measured, calling it once per (word, cell) rather than
-    ///       once per element row made a 5x5 ellipse erosion of a 640x480 frame
-    ///       4.23 ns/pixel, i.e. 17x SLOWER than cv::erode. The shape query is not
-    ///       the operation and must not be inside the word loop.
+    /// a solid run -- and only a custom mask can have holes. It matters
+    /// because the per-cell test is `activeAt`, and for MORPH_ELLIPSE that
+    /// is a `sqrt`: measured, calling it once per (word, cell) rather than
+    /// once per element row made a 5x5 ellipse erosion of a 640x480 frame
+    /// 4.23 ns/pixel, i.e. 17x SLOWER than cv::erode. The shape query is not
+    /// the operation and must not be inside the word loop.
     /// @note Morphology.ElementStructure asserts both halves of this -- every set
-    ///       cell inside the span, and every cell inside the span set -- because
-    ///       the kernels now depend on the second.
+    /// cell inside the span, and every cell inside the span set -- because
+    /// the kernels now depend on the second.
     bool spanIsDense() const { return mask == nullptr; }
 
     /// @brief Extents positive, anchor inside the element, at least one set cell.
@@ -325,7 +325,7 @@ struct StructuringElement {
     }
 };
 
-/// @brief The 3x3 rectangle -- `cv::Mat()` passed to `cv::erode`, i.e. its default.
+/// @brief The 3x3 rectangle -- `cv::Mat` passed to `cv::erode`, i.e. its default.
 inline StructuringElement rect3x3() { return StructuringElement::rect(3, 3); }
 /// @brief The 3x3 plus -- what BOTH `MORPH_CROSS` and `MORPH_ELLIPSE` give at 3x3.
 inline StructuringElement cross3x3() { return StructuringElement::cross(3, 3); }
@@ -333,34 +333,34 @@ inline StructuringElement cross3x3() { return StructuringElement::cross(3, 3); }
 namespace impl {
 
 /// @brief Which implementation `morphApply` may take. Internal; tests and the
-///        benchmark only.
+/// benchmark only.
 /// @note `Generic` exists so `Morphology.FastPathEqualsGeneric_*` can require the
-///       3x3 special case to agree with the code it replaced on every swept
-///       image, and so benchmark/morphology_benchmark.cpp can price what the
-///       special case is worth. A special case nobody compares against the
-///       general one is a second implementation with no test of its own.
+/// 3x3 special case to agree with the code it replaced on every swept
+/// image, and so benchmark/morphology_benchmark.cpp can price what the
+/// special case is worth. A special case nobody compares against the
+/// general one is a second implementation with no test of its own.
 /// @note IT IS A TEMPLATE PARAMETER OF `morphApply`, NOT AN ARGUMENT, and that is
-///       a measurement result rather than a style preference. As a runtime
-///       argument it was constant-folded only while every call site in a
-///       translation unit passed the same value; adding the benchmark's one
-///       `Generic` call site made `use3x3` a live branch in the SHIPPED path and
-///       measured erode 3x3 at 640x480 13% slower (0.143-0.159 against
-///       0.126-0.129 ns/pixel, x86, same header). A benchmark that changes the
-///       code it measures is not measuring it. Two instantiations cannot do that
-///       to each other.
+/// a measurement result rather than a style preference. As a runtime
+/// argument it was constant-folded only while every call site in a
+/// translation unit passed the same value; adding the benchmark's one
+/// `Generic` call site made `use3x3` a live branch in the SHIPPED path and
+/// measured erode 3x3 at 640x480 13% slower (0.143-0.159 against
+/// 0.126-0.129 ns/pixel, x86, same header). A benchmark that changes the
+/// code it measures is not measuring it. Two instantiations cannot do that
+/// to each other.
 enum class MorphPath { Auto, Generic };
 
 /// @brief The combining operation and its identity, as a compile-time choice.
 /// @note `IsErode` rather than a functor so that both the fold and the identity
-///       come from one place: an identity that does not match the fold silently
-///       produces an image that is right in the interior and wrong at the edge,
-///       which is the failure this file exists to avoid.
+/// come from one place: an identity that does not match the fold silently
+/// produces an image that is right in the interior and wrong at the edge,
+/// which is the failure this file exists to avoid.
 template <bool IsErode, typename WordType>
 struct MorphFold {
     /// @note The outer static_cast is not decoration: at uint8_t and uint16_t both
-    ///       arms of the conditional are promoted to int, and returning that int
-    ///       is exactly the narrowing -Wconversion is on to catch (D-1 compiles
-    ///       every kernel at all four widths).
+    /// arms of the conditional are promoted to int, and returning that int
+    /// is exactly the narrowing -Wconversion is on to catch ( compiles
+    /// every kernel at all four widths).
     static WordType identity() {
         return static_cast<WordType>(IsErode ? static_cast<WordType>(~static_cast<WordType>(0))
                                              : static_cast<WordType>(0));
@@ -372,14 +372,14 @@ struct MorphFold {
 };
 
 /// @brief Word `i` of `srcRow` shifted so that destination column `c` reads
-///        source column `c + dx`, with everything outside the row reading `fill`.
+/// source column `c + dx`, with everything outside the row reading `fill`.
 /// @note The recurrence of `impl::shiftRowHorizontal`, evaluated for ONE word
-///       instead of a whole row, because this kernel interleaves many different
-///       `dx` values over the same destination word and cannot make a pass per
-///       offset without a temporary. The two are required to agree by
-///       `Morphology.SingleOffsetEqualsShift_*`.
+/// instead of a whole row, because this kernel interleaves many different
+/// `dx` values over the same destination word and cannot make a pass per
+/// offset without a temporary. The two are required to agree by
+/// `Morphology.SingleOffsetEqualsShift_*`.
 /// @note `bitShift == 0` is a separate branch because `x << WordBits` is
-///       undefined behaviour, not merely wrong -- see ops/shift.hpp.
+/// undefined behaviour, not merely wrong -- see ops/shift.hpp.
 template <typename WordType>
 inline WordType morphShiftedWord(const WordType* srcRow, size_t i, size_t rowWords, size_t width,
                                  WordType tailMask, ptrdiff_t dx, WordType fill) {
@@ -412,8 +412,8 @@ inline WordType morphShiftedWord(const WordType* srcRow, size_t i, size_t rowWor
 
 /// @brief The element's horizontal reach: max |cell - anchor| over set cells.
 /// @note This is the width of the band at each edge that the per-pixel border
-///       fixup has to rewrite, and it is computed ONCE per call rather than per
-///       row. For every 3x3 element it is 1.
+/// fixup has to rewrite, and it is computed ONCE per call rather than per
+/// row. For every 3x3 element it is 1.
 inline size_t morphMaxOffsetX(const StructuringElement& se) {
     const int ax = se.anchorCol();
     int reach = 0;
@@ -431,10 +431,10 @@ inline size_t morphMaxOffsetX(const StructuringElement& se) {
 }
 
 /// @brief One destination pixel, recomputed from the whole element with every
-///        source coordinate mapped through `borderIndex`.
+/// source coordinate mapped through `borderIndex`.
 /// @note Recomputes rather than repairs the word path's answer, because more than
-///       one element cell can reach past the same edge and their contributions
-///       cannot be unpicked.
+/// one element cell can reach past the same edge and their contributions
+/// cannot be unpicked.
 /// @note Writes only column `c < width`, so it cannot dirty a padding bit.
 template <bool IsErode, typename WordType>
 inline void morphFixupPixel(BinMatConstView<WordType> src, WordType* dstRow, size_t y, size_t c,
@@ -480,29 +480,29 @@ inline void morphFixupPixel(BinMatConstView<WordType> src, WordType* dstRow, siz
 }
 
 /// @brief Rewrites the destination columns whose source column can leave the row,
-///        one pixel at a time, for the four NON-CONSTANT border types.
+/// one pixel at a time, for the four NON-CONSTANT border types.
 ///
 /// @note TWO EXPLICIT BAND LOOPS, NOT ONE LOOP OVER THE ROW WITH THE INTERIOR
-///       SKIPPED. This function rewrites `2 * reach` pixels of a `width`-pixel row
-///       -- 2 of 640 for a 3x3 element -- and an `if (interior) continue;` inside
-///       a `for (c = 0; c < width; ++c)` still pays `width` iterations to do it.
-///       Measured on x86 at 640x480, `uint64_t`, `rect3x3()`, best of 5 x 200
-///       calls (indicative only -- see EXPERIMENTS.md on measurement platforms):
-///       the skipping form ran 19.5 us under BORDER_CONSTANT, which never calls
-///       this, against 241-260 us under the other four. The fixup cost 12x the
-///       entire word path to rewrite 960 of 307200 pixels, and made binCV 6-10x
-///       SLOWER than `cv::erode` (24-25 us) instead of faster. Banded, the same
-///       four types cost 40-45 us against the same 20-23 us baseline. The border
-///       is a boundary, and its cost must scale with the boundary, not the frame.
+/// SKIPPED. This function rewrites `2 * reach` pixels of a `width`-pixel row
+/// -- 2 of 640 for a 3x3 element -- and an `if (interior) continue;` inside
+/// a `for (c = 0; c < width; ++c)` still pays `width` iterations to do it.
+/// Measured on x86 at 640x480, `uint64_t`, `rect3x3`, best of 5 x 200
+/// calls (indicative only -- see EXPERIMENTS.md on measurement platforms):
+/// the skipping form ran 19.5 us under BORDER_CONSTANT, which never calls
+/// this, against 241-260 us under the other four. The fixup cost 12x the
+/// entire word path to rewrite 960 of 307200 pixels, and made binCV 6-10x
+/// SLOWER than `cv::erode` (24-25 us) instead of faster. Banded, the same
+/// four types cost 40-45 us against the same 20-23 us baseline. The border
+/// is a boundary, and its cost must scale with the boundary, not the frame.
 ///
-/// @param bandLeft      Columns `[0, bandLeft)` can reach past the left edge.
+/// @param bandLeft Columns `[0, bandLeft)` can reach past the left edge.
 /// @param bandRightStart Columns `[bandRightStart, width)` can reach past the right.
 /// @note The two ranges OVERLAP when `2 * reach >= width` (and `bandRightStart`
-///       is 0 with `bandLeft == width` when the element out-reaches the frame
-///       entirely), so the right band starts at `max(bandLeft, bandRightStart)`
-///       and every column is visited exactly once. The wide-element cases in
-///       `tests/test_morphology.cpp` -- a 129-wide element over a 3-wide frame --
-///       are that path.
+/// is 0 with `bandLeft == width` when the element out-reaches the frame
+/// entirely), so the right band starts at `max(bandLeft, bandRightStart)`
+/// and every column is visited exactly once. The wide-element cases in
+/// `tests/test_morphology.cpp` -- a 129-wide element over a 3-wide frame --
+/// are that path.
 template <bool IsErode, typename WordType>
 inline void morphFixupRowBorder(BinMatConstView<WordType> src, WordType* dstRow, size_t y,
                                 const StructuringElement& se, BorderType borderType,
@@ -563,14 +563,14 @@ inline void morphRowGeneric(BinMatConstView<WordType> src, WordType* dstRow, siz
         const WordType* srcRow = src.row(static_cast<size_t>(sy));
         // The span is solid for every parametric shape, so the only element that
         // needs a per-cell test is a custom mask -- and that test is a byte load,
-        // not a shape query. See StructuringElement::spanIsDense().
+        // not a shape query. See StructuringElement::spanIsDense.
         const bool dense = se.spanIsDense();
 
         // THE WINDOW. Every cell of this element row reads the same source row at
         // a DIFFERENT horizontal offset, and when the row's widest offset is
         // smaller than a word every one of those offsets is a shift of the same
         // three source words. Fetching them once per destination word and shifting
-        // per cell replaces two extendedRowWord() calls per CELL with one per
+        // per cell replaces two extendedRowWord calls per CELL with one per
         // WORD: for a 5x5 ellipse that is 34 masked, bounds-checked loads per word
         // reduced to 1. The general recurrence below stays for the case the window
         // cannot express -- an element reaching a whole word or more sideways --
@@ -630,36 +630,36 @@ inline void morphRowGeneric(BinMatConstView<WordType> src, WordType* dstRow, siz
 
 /// @brief One destination row, 3x3 element anchored at its centre.
 ///
-/// @note THE SPECIAL CASE T3.3 ASKS FOR, and it is a special case of the loop
-///       above rather than a different algorithm: the offsets are known to be
-///       {-1, 0, +1} in both axes, so the horizontal recurrence collapses to two
-///       one-bit shifts with a carry from the neighbouring word, and the three
-///       source words a destination word needs slide along the row instead of
-///       being fetched per offset.
+/// @note THE SPECIAL CASE ASKS FOR, and it is a special case of the loop
+/// above rather than a different algorithm: the offsets are known to be
+/// {-1, 0, +1} in both axes, so the horizontal recurrence collapses to two
+/// one-bit shifts with a carry from the neighbouring word, and the three
+/// source words a destination word needs slide along the row instead of
+/// being fetched per offset.
 /// @note WHAT IT ACTUALLY REMOVES, since the reason first written here was wrong.
-///       That reason was "one `extendedRowWord` per word per element row where the
-///       general path pays two per SET CELL"; morphRowGeneric's window branch
-///       hoists `extendedRowWord` per WORD too, for any element whose row reaches
-///       less than a word sideways -- which every 3x3 element does -- so the load
-///       counts are the same and the claim described a path neither one takes.
-///       What this kernel removes is the inner loop over element cells, the
-///       data-dependent shift count each iteration computes, and the per-row span
-///       queries: three cells become three predictable branches on values hoisted
-///       to the whole call, and `<< 1` / `>> 1` become constants.
+/// That reason was "one `extendedRowWord` per word per element row where the
+/// general path pays two per SET CELL"; morphRowGeneric's window branch
+/// hoists `extendedRowWord` per WORD too, for any element whose row reaches
+/// less than a word sideways -- which every 3x3 element does -- so the load
+/// counts are the same and the claim described a path neither one takes.
+/// What this kernel removes is the inner loop over element cells, the
+/// data-dependent shift count each iteration computes, and the per-row span
+/// queries: three cells become three predictable branches on values hoisted
+/// to the whole call, and `<< 1` / `>> 1` become constants.
 /// @note AND IT IS MEASURED, on the reference device, by
-///       benchmark/morphology_path_benchmark.cpp -- which runs this kernel against
-///       `MorphPath::Generic` on the same images and requires them to agree first.
-///       At 640x480 the general path costs 2.12x (rect3x3 erode, `uint32_t`),
-///       3.17x (rect3x3 dilate), 2.47x / 3.69x at `uint64_t`, and 2.78x-3.67x for
-///       cross3x3; across the whole pyramid ladder the range is 2.1x-3.7x, at
-///       batch spreads under 4%. That is the number a Phase 5 reader deciding
-///       whether to vectorise one path or both should start from, and it is why
-///       the duplicated code stays.
+/// benchmark/morphology_path_benchmark.cpp -- which runs this kernel against
+/// `MorphPath::Generic` on the same images and requires them to agree first.
+/// At 640x480 the general path costs 2.12x (rect3x3 erode, `uint32_t`),
+/// 3.17x (rect3x3 dilate), 2.47x / 3.69x at `uint64_t`, and 2.78x-3.67x for
+/// cross3x3; across the whole pyramid ladder the range is 2.1x-3.7x, at
+/// batch spreads under 4%. That is the number a Phase 5 reader deciding
+/// whether to vectorise one path or both should start from, and it is why
+/// the duplicated code stays.
 /// @note Driven by the element's own cells, so it serves rect, cross, ellipse and
-///       any 3x3 mask alike; a cleared cell simply contributes nothing.
+/// any 3x3 mask alike; a cleared cell simply contributes nothing.
 /// @param cells The element's nine cells, row-major, computed ONCE per call by
-///        morphApply() -- not per row. A 3x3 MORPH_ELLIPSE queried per row would
-///        pay nine `sqrt` per image row for an answer that cannot change.
+/// morphApply -- not per row. A 3x3 MORPH_ELLIPSE queried per row would
+/// pay nine `sqrt` per image row for an answer that cannot change.
 template <bool IsErode, typename WordType>
 inline void morphRow3x3(BinMatConstView<WordType> src, WordType* dstRow, size_t y,
                         const bool* cells, BorderType borderType, WordType constantFill,
@@ -724,8 +724,8 @@ inline void morphRow3x3(BinMatConstView<WordType> src, WordType* dstRow, size_t 
 
 /// @brief erode (IsErode) or dilate, whole image. The one kernel both call.
 /// @note Internal. `MorphPath::Generic` forbids the 3x3 special case, for the test
-///       that compares the two and the benchmark row that prices it. It is a
-///       TEMPLATE parameter -- see MorphPath's note on why.
+/// that compares the two and the benchmark row that prices it. It is a
+/// TEMPLATE parameter -- see MorphPath's note on why.
 template <bool IsErode, MorphPath Path, typename WordType>
 inline void morphApply(BinMatConstView<WordType> src, BinMatView<WordType> dst,
                        const StructuringElement& se, BorderType borderType, bool borderValue) {
@@ -752,7 +752,7 @@ inline void morphApply(BinMatConstView<WordType> src, BinMatView<WordType> dst,
     const bool use3x3 = (Path == MorphPath::Auto) && se.cols == 3 && se.rows == 3 &&
                         se.anchorCol() == 1 && se.anchorRow() == 1;
 
-    // Once per call, never per row: for MORPH_ELLIPSE activeAt() evaluates a
+    // Once per call, never per row: for MORPH_ELLIPSE activeAt evaluates a
     // square root.
     bool cells[9] = {false, false, false, false, false, false, false, false, false};
     if (use3x3) {
@@ -790,41 +790,41 @@ inline bool morphArgumentsAreSane(BinMatConstView<WordType> src, BinMatView<Word
 }  // namespace impl
 
 // ---------------------------------------------------------------------------
-// The kernels (D-5: views, never containers)
+// The kernels ( views, never containers)
 // ---------------------------------------------------------------------------
 
 /// @brief Morphological erosion: `dst(x,y) = AND over the element of src(x+dx, y+dy)`.
-///        **API TIER 1** -- bit-exact against `cv::erode` on the same binary
-///        content as `CV_8U`, borders and corners included.
+/// **API TIER 1** -- bit-exact against `cv::erode` on the same binary
+/// content as `CV_8U`, borders and corners included.
 ///
 /// @param src Source view.
 /// @param dst Destination view; must have src's dimensions and must share no word
-///        with src. In place is NOT supported (a destination word is built from
-///        several source words).
-/// @param element The structuring element. `cv::erode(src, dst, cv::Mat())` is
-///        `rect3x3()`.
+/// with src. In place is NOT supported (a destination word is built from
+/// several source words).
+/// @param element The structuring element. `cv::erode(src, dst, cv::Mat)` is
+/// `rect3x3`.
 /// @param borderType How coordinates outside the image extrapolate; OpenCV's five.
 /// @param borderValue The pixel value outside the image under `BORDER_CONSTANT`.
-///        **Defaults to `true`, which is `morphologyDefaultBorderValue()`** -- the
-///        maximum, so the frame's edge is not eaten away (D-12). Passing `false`
-///        is legal and matches `cv::erode(..., BORDER_CONSTANT, cv::Scalar(0))`.
+/// **Defaults to `true`, which is `morphologyDefaultBorderValue`** -- the
+/// maximum, so the frame's edge is not eaten away. Passing `false`
+/// is legal and matches `cv::erode(..., BORDER_CONSTANT, cv::Scalar(0))`.
 ///
 /// @note One pass over the destination, NO SCRATCH BUFFER and no allocation. The
-///       accumulation happens in the destination row (see the fused-form note at
-///       the top of this file).
+/// accumulation happens in the destination row (see the fused-form note at
+/// the top of this file).
 /// @note The destination's padding bits are zero on return, and the source's
-///       padding bits are never read as pixels even when the source wraps a buffer
-///       whose padding is dirty.
+/// padding bits are never read as pixels even when the source wraps a buffer
+/// whose padding is dirty.
 /// @note **`dst` must span its image's full width or end on a word boundary**, as
-///       in ops/logic.hpp and ops/shift.hpp. The bits of its trailing partial word
-///       past `width` are CLEARED: padding in the usual case, and a wider parent's
-///       next 1..WordBits-1 live pixels when `dst` is a sub-width window onto one.
-///       Nothing diagnoses that -- every address written is inside the parent.
-/// @note Never throws and never allocates (ARCHITECTURE 5.3). Mismatched
-///       dimensions, a stride shorter than a row, an unknown `BorderType`, an
-///       invalid element, and any overlap between src and dst are programming
-///       errors: `BINCV_ASSERT` reports them in debug builds and they are
-///       undefined in release.
+/// in ops/logic.hpp and ops/shift.hpp. The bits of its trailing partial word
+/// past `width` are CLEARED: padding in the usual case, and a wider parent's
+/// next 1..WordBits-1 live pixels when `dst` is a sub-width window onto one.
+/// Nothing diagnoses that -- every address written is inside the parent.
+/// @note Never throws and never allocates (the design notes). Mismatched
+/// dimensions, a stride shorter than a row, an unknown `BorderType`, an
+/// invalid element, and any overlap between src and dst are programming
+/// errors: `BINCV_ASSERT` reports them in debug builds and they are
+/// undefined in release.
 template <typename WordType>
 inline void erode(BinMatConstView<WordType> src, BinMatView<WordType> dst,
                   const StructuringElement& element, BorderType borderType = BORDER_CONSTANT,
@@ -847,11 +847,11 @@ inline void erode(BinMatConstView<WordType> src, BinMatView<WordType> dst,
 }
 
 /// @brief Morphological dilation: `dst(x,y) = OR over the element of src(x+dx, y+dy)`.
-///        **API TIER 1** -- bit-exact against `cv::dilate`.
-/// @param borderValue Defaults to `false`, which is `morphologyDefaultBorderValue()`
-///        for a dilation -- the minimum, so the frame does not grow a border
-///        (D-12). Everything else: see erode(), INCLUDING the precondition that
-///        `dst` span its image's full width or end on a word boundary.
+/// **API TIER 1** -- bit-exact against `cv::dilate`.
+/// @param borderValue Defaults to `false`, which is `morphologyDefaultBorderValue`
+/// for a dilation -- the minimum, so the frame does not grow a border
+///. Everything else: see erode, INCLUDING the precondition that
+/// `dst` span its image's full width or end on a word boundary.
 template <typename WordType>
 inline void dilate(BinMatConstView<WordType> src, BinMatView<WordType> dst,
                    const StructuringElement& element, BorderType borderType = BORDER_CONSTANT,
@@ -873,42 +873,42 @@ inline void dilate(BinMatConstView<WordType> src, BinMatView<WordType> dst,
     impl::morphApply<false, impl::MorphPath::Auto>(src, dst, element, borderType, borderValue);
 }
 
-/// @brief True when `morphologyEx(op, ...)` reads and writes its scratch view.
+/// @brief True when `morphologyEx(op,...)` reads and writes its scratch view.
 /// @note `MORPH_ERODE` and `MORPH_DILATE` are single kernels and need none; the
-///       other five need exactly one frame. Callers that size a scratch buffer
-///       from an `op` chosen at runtime ask this rather than hard-coding the list.
+/// other five need exactly one frame. Callers that size a scratch buffer
+/// from an `op` chosen at runtime ask this rather than hard-coding the list.
 inline bool morphologyExNeedsScratch(MorphOp op) {
     return !(op == MORPH_ERODE || op == MORPH_DILATE);
 }
 
 /// @brief The seven `MorphOp` compositions. **API TIER 1** -- bit-exact against
-///        `cv::morphologyEx` for every op and every element.
+/// `cv::morphologyEx` for every op and every element.
 ///
 /// @param src Source view.
 /// @param dst Destination view; src's dimensions, sharing no word with src.
 /// @param op Any `MorphOp`: ERODE, DILATE, OPEN, CLOSE, GRADIENT, TOPHAT, BLACKHAT.
 /// @param element The structuring element.
 /// @param scratch **CALLER-PROVIDED intermediate**, src's dimensions, sharing no
-///        word with src or dst. Its contents on entry are irrelevant and on
-///        return are unspecified. Required for every op except `MORPH_ERODE` and
-///        `MORPH_DILATE`, which ignore it and accept an empty view --
-///        `morphologyExNeedsScratch()` is that predicate.
+/// word with src or dst. Its contents on entry are irrelevant and on
+/// return are unspecified. Required for every op except `MORPH_ERODE` and
+/// `MORPH_DILATE`, which ignore it and accept an empty view --
+/// `morphologyExNeedsScratch` is that predicate.
 /// @param borderType OpenCV's five; passed to every step, as `cv::morphologyEx` does.
 ///
 /// @note **No allocation, and exactly ONE frame of scratch for all five compound
-///       ops** -- see the scratch section at the top of this file for why TOPHAT
-///       and BLACKHAT do not need a second.
+/// ops** -- see the scratch section at the top of this file for why TOPHAT
+/// and BLACKHAT do not need a second.
 /// @note Each step uses the morphological default fill for ITS OWN operation
-///       (ones outside for an erosion, zeros for a dilation), which is what
-///       `cv::morphologyEx` does with its default `borderValue`. A literal
-///       constant on both steps is not offered here; compose erode/dilate.
+/// (ones outside for an erosion, zeros for a dilation), which is what
+/// `cv::morphologyEx` does with its default `borderValue`. A literal
+/// constant on both steps is not offered here; compose erode/dilate.
 /// @note **`dst` AND `scratch` must each span their image's full width or end on a
-///       word boundary**, for the reason erode() states: both are written by these
-///       kernels, so both have their trailing partial word's bits past `width`
-///       cleared -- a wider parent's live pixels when either is a sub-width window
-///       onto one, and undiagnosable.
+/// word boundary**, for the reason erode states: both are written by these
+/// kernels, so both have their trailing partial word's bits past `width`
+/// cleared -- a wider parent's live pixels when either is a sub-width window
+/// onto one, and undiagnosable.
 /// @note Never throws and never allocates. Every precondition above is a
-///       `BINCV_ASSERT` (ARCHITECTURE 5.3).
+/// `BINCV_ASSERT` (the design notes).
 template <typename WordType>
 inline void morphologyEx(BinMatConstView<WordType> src, BinMatView<WordType> dst, MorphOp op,
                          const StructuringElement& element, BinMatView<WordType> scratch,

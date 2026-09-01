@@ -1,65 +1,65 @@
-// T3.6 -- the LK gradient covariance, fused against composed, AT THIS LEVEL.
+// -- the LK gradient covariance, fused against composed, AT THIS LEVEL.
 //
 // WHY THIS FILE EXISTS WHEN window_benchmark.cpp ALREADY MEASURED "fused versus
 // composed"
 //
-// X-11 axis 2 measured that question one level down, on the REDUCTION entry points
-// and with a precomputed `sign_x ^ sign_y` plane on both sides. T3.6 ships neither
+// the axis 2 measured that question one level down, on the REDUCTION entry points
+// and with a precomputed `sign_x ^ sign_y` plane on both sides. ships neither
 // of those things: it ships `gradientCovariance`, which calls the FOUR-ARGUMENT
 // countCovariance -- the form that XORs the two sign planes inside the word loop
-// and needs no plane at all (D-15 axis 3, memory wins CLAUDE.md's tiebreak). The
+// and needs no plane at all (the axis 3, memory wins CLAUDE.md's tiebreak). The
 // four-argument form loads a fourth stream per word, so it is a different mix of
-// loads to popcounts than the plane form X-11 timed, and the redundancy a
+// loads to popcounts than the plane form a measurement timed, and the redundancy a
 // composition pays is a different fraction of a bigger number.
 //
-// So T3.6's Done-when asks for the ratio to be CONFIRMED at this level rather than
+// So that work’s Done-when asks for the ratio to be CONFIRMED at this level rather than
 // inherited from a measurement of something adjacent. That is the whole content of
 // this file.
 //
 // THE RULE, WRITTEN BEFORE MEASURING (CLAUDE.md: "write the decision rule before
 // measuring"):
 //
-//   * Fused beats composed at W=31 -> D-15 axis 2 holds at the T3.6 level;
-//     ops/covariance.hpp's "reach for the fused entry point" note is confirmed and
-//     nothing moves.
-//   * Fused within noise of composed, or SLOWER -> that CONTRADICTS a documented
-//     claim (D-15 axis 2, ARCHITECTURE 7.5, ops/reduce.hpp). CLAUDE.md's rule for
-//     that case is explicit: report it, do not adjust the code to fit the doc.
-//     T3.6's implementation would then be resting on a ratio that does not exist
-//     at its own level, and the spec's "built on the fused entry point" would need
-//     re-deciding rather than re-measuring.
+// * Fused beats composed at W=31 -> the axis 2 holds at the level;
+// ops/covariance.hpp's "reach for the fused entry point" note is confirmed and
+// nothing moves.
+// * Fused within noise of composed, or SLOWER -> that CONTRADICTS a documented
+// claim (the axis 2, the design notes, ops/reduce.hpp). CLAUDE.md's rule for
+// that case is explicit: report it, do not adjust the code to fit the doc.
+// that work’s implementation would then be resting on a ratio that does not exist
+// at its own level, and the spec's "built on the fused entry point" would need
+// re-deciding rather than re-measuring.
 //
-// No threshold is attached to that rule, deliberately. The 15% line in T2.10
+// No threshold is attached to that rule, deliberately. The 15% line in earlier work
 // selected an interface that did not exist yet; this file is checking that an
 // interface already selected behaves as recorded where it is actually called, so
 // the question is direction and magnitude against the measured spread, not a gate.
 //
 // WHAT IS MEASURED
 //
-//   FUSED       gradientCovariance(dx, dy, window) -- WHAT T3.6 SHIPS. One
-//               traversal, four popcounts per word, three loads plus the selector
-//               XOR of two more, no scratch.
-//   COMPOSED    countNonZero(magX, w) + countNonZero(magY, w) +
-//               countAndSplit(magX, magY, signX, signY, w). The same four numbers,
-//               the same popcounts, THREE traversals, and 6 word loads per word
-//               index against the fused pass's 4. Also no scratch -- so this
-//               comparison is speed against speed with memory held equal, which is
-//               what makes it a clean confirmation of axis 2 rather than a mixture
-//               of axes 2 and 3.
-//   FUSED+PLANE / COMPOSED+PLANE
-//               The same two, with a caller-held `sign_x ^ sign_y` plane. They are
-//               here because CLAUDE.md requires memory and speed to be reported
-//               TOGETHER: the plane forms are faster and cost a frame-sized plane
-//               per pyramid level, and a reader weighing T3.6's choice needs both
-//               numbers on one page. The plane's formation cost is reported
-//               separately and is NOT charged to the timed loop, which flatters the
-//               plane forms on purpose -- the conclusion survives being generous to
-//               the alternative.
+// FUSED gradientCovariance(dx, dy, window) -- WHAT SHIPS. One
+// traversal, four popcounts per word, three loads plus the selector
+// XOR of two more, no scratch.
+// COMPOSED countNonZero(magX, w) + countNonZero(magY, w) +
+// countAndSplit(magX, magY, signX, signY, w). The same four numbers,
+// the same popcounts, THREE traversals, and 6 word loads per word
+// index against the fused pass's 4. Also no scratch -- so this
+// comparison is speed against speed with memory held equal, which is
+// what makes it a clean confirmation of axis 2 rather than a mixture
+// of axes 2 and 3.
+// FUSED+PLANE / COMPOSED+PLANE
+// The same two, with a caller-held `sign_x ^ sign_y` plane. They are
+// here because CLAUDE.md requires memory and speed to be reported
+// TOGETHER: the plane forms are faster and cost a frame-sized plane
+// per pyramid level, and a reader weighing that work’s choice needs both
+// numbers on one page. The plane's formation cost is reported
+// separately and is NOT charged to the timed loop, which flatters the
+// plane forms on purpose -- the conclusion survives being generous to
+// the alternative.
 //
 // THE WORKLOAD IS THE LK ONE: 200 keypoints (the reference pipeline's
 // gftt_max_corners), one window each, at 640x480, scattered so that windows near
 // the border clip. Windows are NOT swept in a column here -- a caller that sweeps a
-// column should be calling SlidingWindowCount for sumXX and sumYY instead (X-11b
+// column should be calling SlidingWindowCount for sumXX and sumYY instead (
 // axis 1: 5.96x-15.9x, which are single-plane countNonZero sweeps; the cross term
 // has no incremental form and is recomputed per position), and
 // ops/covariance.hpp says so in its docstring.
@@ -88,8 +88,8 @@
 // THE ALLOCATION COUNTER -- so the memory column is MEASURED on the same binary
 // that produced the speed column.
 //
-// The "0 B" beside `fused` is the whole reason T3.6 ships the slower of the two
-// selector forms (D-15 axis 3: the plane is 11-14% faster and costs a fifth
+// The "0 B" beside `fused` is the whole reason ships the slower of the two
+// selector forms (the axis 3: the plane is 11-14% faster and costs a fifth
 // frame-sized plane per pyramid level; CLAUDE.md's tiebreak takes the memory).
 // Printed as a literal it was an assertion about the code rather than an
 // observation of it: this table would have read "fused 0 B" unchanged if
@@ -150,7 +150,7 @@ using bincv::GradientCovariance;
 using bincv::Rect;
 using bincv::TernaryMat;
 
-// 640x480 and 200 keypoints, the same frame and keypoint count X-11 used, so the
+// 640x480 and 200 keypoints, the same frame and keypoint count a measurement used, so the
 // two measurements are directly comparable.
 constexpr int kWidth = 640;
 constexpr int kHeight = 480;
@@ -165,9 +165,9 @@ const int kWindows[] = {7, 15, 31};
 // agreement check is on the shipped type and not on an intermediate.
 // ---------------------------------------------------------------------------
 
-/// @brief ARCHITECTURE 7.5 through the T2.5/T2.6 primitives, with no plane: three
-///        calls, therefore three traversals of one window. This is what a caller
-///        who has not read D-15 writes, and it is the denominator.
+/// @brief the design notes through the primitives, with no plane: three
+/// calls, therefore three traversals of one window. This is what a caller
+/// who has not read writes, and it is the denominator.
 template <typename Word>
 GradientCovariance covarianceComposed(const BinMatConstView<Word>& magX,
                                       const BinMatConstView<Word>& magY,
@@ -194,7 +194,7 @@ GradientCovariance covarianceComposedPlane(const BinMatConstView<Word>& magX,
 }
 
 /// @brief The fused entry point with a caller-held plane -- one traversal, one
-///        fewer stream, and a frame-sized plane per pyramid level.
+/// fewer stream, and a frame-sized plane per pyramid level.
 template <typename Word>
 GradientCovariance covarianceFusedPlane(const BinMatConstView<Word>& magX,
                                         const BinMatConstView<Word>& magY,
@@ -217,8 +217,8 @@ bool same(const GradientCovariance& a, const GradientCovariance& b) {
 
 /// @brief Ternary derivative pairs plus the precomputed sign_x ^ sign_y plane.
 /// @note Sparse on purpose -- a binarized derivative is mostly zero -- but the
-///       kernels are content-independent (every word is loaded and counted
-///       whatever it holds), so the fill ratio moves no ratio here.
+/// kernels are content-independent (every word is loaded and counted
+/// whatever it holds), so the fill ratio moves no ratio here.
 template <typename Word>
 struct DerivativeSet {
     std::vector<TernaryMat<Word>> dx;
@@ -267,9 +267,9 @@ std::vector<Rect> keypointWindows(int W) {
 
 template <typename Word>
 bool runWordType(const char* wordName, const DerivativeSet<Word>& d) {
-    std::printf("\n  %-9s %-4s %12s %12s %11s %12s %12s %11s %18s\n", "word", "W", "fused",
+    std::printf("\n %-9s %-4s %12s %12s %11s %12s %12s %11s %18s\n", "word", "W", "fused",
                 "composed", "composed/", "fused+plane", "comp+plane", "plane/", "spread f / c");
-    std::printf("  %-9s %-4s %12s %12s %11s %12s %12s %11s\n", "", "", "ns/window", "ns/window",
+    std::printf(" %-9s %-4s %12s %12s %11s %12s %12s %11s\n", "", "", "ns/window", "ns/window",
                 "fused", "ns/window", "ns/window", "4arg");
 
     for (size_t wi = 0; wi < sizeof(kWindows) / sizeof(kWindows[0]); ++wi) {
@@ -290,7 +290,7 @@ bool runWordType(const char* wordName, const DerivativeSet<Word>& d) {
                     d.dx[k].constMagnitude(0), d.dy[k].constMagnitude(0), d.sel[k].constView(), w);
                 if (!same(fused, composed) || !same(fused, fusedPlane) ||
                     !same(fused, composedPlane)) {
-                    std::printf("  DISAGREEMENT at W=%d: fused {%lld %lld %lld} composed "
+                    std::printf(" DISAGREEMENT at W=%d: fused {%lld %lld %lld} composed "
                                 "{%lld %lld %lld}\n",
                                 W, static_cast<long long>(fused.sumXX),
                                 static_cast<long long>(fused.sumYY),
@@ -354,7 +354,7 @@ bool runWordType(const char* wordName, const DerivativeSet<Word>& d) {
         const std::vector<measure::Timing> t =
             measure::measureInterleaved(benches, kRepeats, kTargetMs);
         const double n = static_cast<double>(kKeypoints);
-        std::printf("  %-9s %-4d %12.1f %12.1f %10.2fx %12.1f %12.1f %10.2fx %8.1f%% / %.1f%%\n",
+        std::printf(" %-9s %-4d %12.1f %12.1f %10.2fx %12.1f %12.1f %10.2fx %8.1f%% / %.1f%%\n",
                     wordName, W, t[0].medianNs / n, t[1].medianNs / n,
                     t[1].medianNs / t[0].medianNs, t[2].medianNs / n, t[3].medianNs / n,
                     t[0].medianNs / t[2].medianNs, t[0].spreadPct(), t[1].spreadPct());
@@ -363,10 +363,10 @@ bool runWordType(const char* wordName, const DerivativeSet<Word>& d) {
 }
 
 /// @brief One pass of a variant over every keypoint window, with the allocation
-///        counter armed. Returns allocations OBSERVED, not allocations expected.
+/// counter armed. Returns allocations OBSERVED, not allocations expected.
 /// @note The counter is armed after the windows exist -- building the window list
-///       is the harness's allocation, not the kernel's -- and the result is
-///       accumulated into the volatile sink so the pass cannot be elided.
+/// is the harness's allocation, not the kernel's -- and the result is
+/// accumulated into the volatile sink so the pass cannot be elided.
 template <typename Word, typename Fn>
 size_t observedAllocations(const std::vector<Rect>& windows, Fn&& fn) {
     const size_t before = g_newCount;
@@ -381,15 +381,15 @@ size_t observedAllocations(const std::vector<Rect>& windows, Fn&& fn) {
 
 /// @brief What each form needs beyond the four derivative planes it must read.
 /// @note CLAUDE.md: report memory and speed together. Two of the four forms need a
-///       frame-sized plane and two need nothing, and that is the entire reason the
-///       slower pair is what ships.
+/// frame-sized plane and two need nothing, and that is the entire reason the
+/// slower pair is what ships.
 /// @note **The "allocs/pass" column is measured on this binary, not asserted.**
-///       The plane bytes are arithmetic -- a plane's size is not in doubt -- but
-///       the 0 B is a claim about the KERNEL, and printed as a literal it would
-///       read 0 B for a gradientCovariance that allocated scratch on every call.
-///       That is the one number D-15 axis 3 traded 11-14% of speed for, so it is
-///       counted here rather than stated. The counter covers the over-aligned
-///       path too; see the note beside operator new at the top of this file.
+/// The plane bytes are arithmetic -- a plane's size is not in doubt -- but
+/// the 0 B is a claim about the KERNEL, and printed as a literal it would
+/// read 0 B for a gradientCovariance that allocated scratch on every call.
+/// That is the one number the axis 3 traded 11-14% of speed for, so it is
+/// counted here rather than stated. The counter covers the over-aligned
+/// path too; see the note beside operator new at the top of this file.
 template <typename Word>
 void reportMemory(const char* wordName, const DerivativeSet<Word>& d) {
     const size_t planeWords =
@@ -427,47 +427,47 @@ void reportMemory(const char* wordName, const DerivativeSet<Word>& d) {
     const size_t alignedSeen = g_newCount - alignedBefore;
     delete over;
 
-    std::printf("\n  MEMORY (%s), beyond the four derivative planes every form reads.\n",
+    std::printf("\n MEMORY (%s), beyond the four derivative planes every form reads.\n",
                 wordName);
-    std::printf("  \"allocs/pass\" is operator new calls COUNTED over one pass of %zu windows\n",
+    std::printf(" \"allocs/pass\" is operator new calls COUNTED over one pass of %zu windows\n",
                 windows.size());
-    std::printf("  at W=31 -- the 0 B is a measurement of this binary, not a printed claim.\n");
-    std::printf("  (counter self-check: plain new counted %zu, over-aligned new counted %zu; "
+    std::printf(" at W=31 -- the 0 B is a measurement of this binary, not a printed claim.\n");
+    std::printf(" (counter self-check: plain new counted %zu, over-aligned new counted %zu; "
                 "both must be 1)\n",
                 plainSeen, alignedSeen);
-    std::printf("    %-16s %9s  %11s\n", "", "scratch", "allocs/pass");
-    std::printf("    %-16s %7zu B  %11zu      <- T3.6 SHIPS THIS\n", "fused", size_t(0),
+    std::printf(" %-16s %9s %11s\n", "", "scratch", "allocs/pass");
+    std::printf(" %-16s %7zu B %11zu <- this SHIPS THIS\n", "fused", size_t(0),
                 fusedAllocs);
-    std::printf("    %-16s %7zu B  %11zu\n", "composed", size_t(0), composedAllocs);
-    std::printf("    %-16s %7zu B  %11zu      one sign_x^sign_y plane at %dx%d\n", "fused+plane",
+    std::printf(" %-16s %7zu B %11zu\n", "composed", size_t(0), composedAllocs);
+    std::printf(" %-16s %7zu B %11zu one sign_x^sign_y plane at %dx%d\n", "fused+plane",
                 planeBytes, fusedPlaneAllocs, kWidth, kHeight);
-    std::printf("    %-16s %7zu B  %11zu\n", "composed+plane", planeBytes, composedPlaneAllocs);
-    std::printf("    A plane is needed at EVERY pyramid level, not once: ~%zu B over a\n",
+    std::printf(" %-16s %7zu B %11zu\n", "composed+plane", planeBytes, composedPlaneAllocs);
+    std::printf(" A plane is needed at EVERY pyramid level, not once: ~%zu B over a\n",
                 planeBytes + planeBytes / 4 + planeBytes / 16 + planeBytes / 64);
-    std::printf("    four-level pyramid, a FIFTH plane on top of the four the covariance\n");
-    std::printf("    already reads -- +25%% of the derivative working set, held for the\n");
-    std::printf("    frame's lifetime.\n");
+    std::printf(" four-level pyramid, a FIFTH plane on top of the four the covariance\n");
+    std::printf(" already reads -- +25%% of the derivative working set, held for the\n");
+    std::printf(" frame's lifetime.\n");
 }
 
 } // namespace
 
 int main() {
-    std::printf("=== T3.6: the LK gradient covariance -- fused against composed ===\n");
+    std::printf("=== the LK gradient covariance -- fused against composed ===\n");
 #if defined(__aarch64__)
     std::printf("target: aarch64 -- AUTHORITATIVE (the reference device is where this closes)\n");
 #else
     std::printf("target: not aarch64 -- INDICATIVE ONLY. Every variant here is popcount-bound,\n"
-                "        and the x86 popcount lowering (X-7: a libgcc CALL per word on the\n"
-                "        shipped baseline) can change the ranking outright.\n");
+                " and the x86 popcount lowering ( a libgcc CALL per word on the\n"
+                " shipped baseline) can change the ranking outright.\n");
 #endif
     std::printf("%dx%d, %d keypoints, one window each -- the LK access pattern of\n", kWidth,
                 kHeight, kKeypoints);
     std::printf("ARCHITECTURE 7.5. The rule this is measured against is in this file's\n");
     std::printf("header, written before measuring.\n");
-    std::printf("\n\"composed/fused\" > 1.00x means the FUSED entry point T3.6 ships is faster,\n");
-    std::printf("confirming D-15 axis 2 at this level. \"plane/4arg\" > 1.00x means the\n");
+    std::printf("\n\"composed/fused\" > 1.00x means the FUSED entry point this ships is faster,\n");
+    std::printf("confirming axis 2 at this level. \"plane/4arg\" > 1.00x means the\n");
     std::printf("precomputed selector plane is faster than the four-argument form -- which it\n");
-    std::printf("is expected to be, and is the speed T3.6 spends to save the plane.\n");
+    std::printf("is expected to be, and is the speed spends to save the plane.\n");
 
     DerivativeSet<uint32_t> d32;
     DerivativeSet<uint64_t> d64;

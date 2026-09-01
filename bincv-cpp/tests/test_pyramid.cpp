@@ -1,30 +1,30 @@
-// Pyramid downsample (T3.4): the 2x2 box mean, subsampled, requantized to NOut
+// Pyramid downsample: the 2x2 box mean, subsampled, requantized to NOut
 // bits -- ops/pyramid.hpp.
 //
-// CORE, AND MOSTLY NOT BY OMISSION. pyrDown is API TIER 2 (ARCHITECTURE 5.1):
+// CORE, AND MOSTLY NOT BY OMISSION. pyrDown is API TIER 2 (the design notes):
 // it has cv::pyrDown's name and role and deliberately different numerics, so
 // there is no bit-exactness promise to check and no Tier 1 denominator. What
 // stands behind it is three independent references, and only the third needs
 // OpenCV:
 //
-//   1. A PER-PIXEL REFERENCE over at(), written from the operation's definition
-//      and sharing no expression with the kernel. It runs in all four
-//      configurations, including Debug -- the only one where pyrDown's
-//      BINCV_ASSERT preconditions are live -- and -fno-exceptions, which is the
-//      embedded claim.
-//   2. THE REJECTED FORMULATION. impl::boxSum4Replicated reaches the same 2x2
-//      sum through ops/bitslice.hpp's SINGLE-BIT adder network by replicating
-//      plane p of each pixel 2^p times (k = 4 * (2^NIn - 1) inputs). It is the
-//      exponential route T3.4 exists to replace, and keeping it under test is
-//      what makes "the shipped route is linear in NIn" a comparison rather than
-//      a claim -- the same reason ops/resample.hpp keeps E-8's losing arms.
-//   3. THE REFERENCE PIPELINE'S BOX_2x2 PATH, behind BINCV_WITH_OPENCV:
-//      cv::blur(2x2) then subsample with the Gaussian disabled, which is what
-//      SEAL/src/keypoint_tracking/pyramids.cpp does. Two things are checked
-//      there and neither is a tier promise: that binCV at NOut = 8 reproduces
-//      the reference's value set exactly on the aligned block, and that
-//      cv::blur's DEFAULT anchor really does shift its window half a pixel up
-//      and to the left -- the deviation ops/pyramid.hpp documents.
+// 1. A PER-PIXEL REFERENCE over at, written from the operation's definition
+// and sharing no expression with the kernel. It runs in all four
+// configurations, including Debug -- the only one where pyrDown's
+// BINCV_ASSERT preconditions are live -- and -fno-exceptions, which is the
+// embedded claim.
+// 2. THE REJECTED FORMULATION. impl::boxSum4Replicated reaches the same 2x2
+// sum through ops/bitslice.hpp's SINGLE-BIT adder network by replicating
+// plane p of each pixel 2^p times (k = 4 * (2^NIn - 1) inputs). It is the
+// exponential route exists to replace, and keeping it under test is
+// what makes "the shipped route is linear in NIn" a comparison rather than
+// a claim -- the same reason ops/resample.hpp keeps that work’s losing arms.
+// 3. THE REFERENCE PIPELINE'S BOX_2x2 PATH, behind BINCV_WITH_OPENCV:
+// cv::blur(2x2) then subsample with the Gaussian disabled, which is what
+// SEAL/src/keypoint_tracking/pyramids.cpp does. Two things are checked
+// there and neither is a tier promise: that binCV at NOut = 8 reproduces
+// the reference's value set exactly on the aligned block, and that
+// cv::blur's DEFAULT anchor really does shift its window half a pixel up
+// and to the left -- the deviation ops/pyramid.hpp documents.
 //
 // THE ARITHMETIC IS ENUMERATED, NOT SAMPLED. The requantizer's whole input space
 // is the 4 * (2^NIn - 1) + 1 possible sums, so Pyramid.Requantize_* runs every
@@ -60,7 +60,7 @@
 // sentence used to carry a wrong number for the kernel's automatic storage (it
 // quoted the widest single intermediate, NIn + NOut + 2 words, as the total); the
 // stack half is now measured with -fstack-usage and recorded in the header and in
-// EXPERIMENTS.md X-15, because it is a property of the emitted code rather than
+//, because it is a property of the emitted code rather than
 // of the source. THE HEAP HALF IS CHECKABLE HERE, and is checked -- a kernel that
 // grew a std::vector of scratch would still pass every value test in this file.
 // ---------------------------------------------------------------------------
@@ -126,14 +126,14 @@ void fillRandom(QuantMat<N, WordType>& m, uint64_t seed) {
     }
 }
 
-/// The operation's definition, evaluated per pixel through at().
+/// The operation's definition, evaluated per pixel through at.
 ///
 /// @note Deliberately the FIRST spelling from ops/pyramid.hpp's header --
-///       "round(mean * (2^NOut - 1) / (2^NIn - 1))" written as an exact integer
-///       rounding -- so that the kernel's second spelling (multiply, add, divide
-///       in bit-sliced planes) has something to be equal to that is not itself.
+/// "round(mean * (2^NOut - 1) / (2^NIn - 1))" written as an exact integer
+/// rounding -- so that the kernel's second spelling (multiply, add, divide
+/// in bit-sliced planes) has something to be equal to that is not itself.
 /// @note The edge rule is written out as coordinates: 2y+1 and 2x+1 clamp to the
-///       last row and column, which IS the replication ops/pyramid.hpp documents.
+/// last row and column, which IS the replication ops/pyramid.hpp documents.
 template <size_t NOut, size_t NIn, typename WordType>
 unsigned referencePixel(const QuantMat<NIn, WordType>& src, size_t y, size_t x) {
     const size_t h = src.getHeight();
@@ -155,7 +155,7 @@ unsigned referencePixel(const QuantMat<NIn, WordType>& src, size_t y, size_t x) 
     return (sum * maxOut + 2u * maxIn) / (4u * maxIn);
 }
 
-/// Every bit at or above `width` in every row's words of every plane, which D-13
+/// Every bit at or above `width` in every row's words of every plane, which
 /// requires to be zero. Returns the first offending (plane, row, bit), or "".
 template <size_t N, typename WordType>
 std::string paddingDirt(const QuantMat<N, WordType>& m) {
@@ -259,7 +259,7 @@ void checkCase(const char* wordName, size_t width, size_t height, uint64_t seed,
     if (dstWidth > 0 && dstHeight > 0 && dstWidth == dst.getWidth() &&
         dstHeight == dst.getHeight()) {
         const std::string dirt = paddingDirt(dst);
-        PYR_EXPECT(dirt.empty(), "destination padding bits stay zero (D-13)", label + ": " + dirt);
+        PYR_EXPECT(dirt.empty(), "destination padding bits stay zero", label + ": " + dirt);
     }
 }
 
@@ -289,7 +289,7 @@ void testDirtySource(const char* wordName) {
 }
 
 /// Strides that differ between source and destination -- which is exactly what a
-/// pyramid ladder produces, since every level rounds its own row length up (D-5
+/// pyramid ladder produces, since every level rounds its own row length up (
 /// says a kernel may not care).
 template <size_t NOut, size_t NIn, typename WordType>
 void testDifferingStrides(const char* wordName) {
@@ -563,7 +563,7 @@ void testBoxSumAgainstReplicated(const char* wordName) {
 
 /// THE WHOLE KERNEL, both ways. impl::pyrDownReplicated is pyrDown with the
 /// exponential box sum substituted and nothing else changed, so a disagreement
-/// anywhere in the sweep is a disagreement about the SUM -- the one thing T3.4
+/// anywhere in the sweep is a disagreement about the SUM -- the one thing
 /// reformulated.
 template <size_t NOut, size_t NIn, typename WordType>
 void testRouteAgreement(const char* wordName) {
@@ -600,7 +600,7 @@ void testRouteAgreement(const char* wordName) {
 // 4. The cost claim
 // ---------------------------------------------------------------------------
 
-/// T3.4's second blocking gap, stated as numbers. The shipped box is
+/// that work’s second blocking gap, stated as numbers. The shipped box is
 /// 3*NIn + 1 full-adder stages; the replication route is 4*(2^NIn - 1) single-bit
 /// inputs. A regression that reintroduced the exponential shape would break these.
 void testCostIsNotExponential() {
@@ -649,7 +649,7 @@ void testCostIsNotExponential() {
 ///
 /// THE HEAP HALF -- "no allocation, no scratch parameter" -- is true and is
 /// checked here by counting `operator new` across pyrDown at several (NIn, NOut,
-/// WordType) and across Pyramid::build over the 1-3-4-5 ladder. `build()`
+/// WordType) and across Pyramid::build over the 1-3-4-5 ladder. `build`
 /// allocates nothing because every level already exists; the CONSTRUCTOR does,
 /// which is why the arming happens after it.
 ///
@@ -742,7 +742,7 @@ void testFootprintClaims() {
                    "NIn=4 NOut=5 uint64_t");
     }
     {
-        // The whole ladder. The constructor allocates; build() must not.
+        // The whole ladder. The constructor allocates; build must not.
         bincv::Pyramid<uint32_t, 1, 3, 4, 5> pyramid(640, 480);
         auto& base = pyramid.level<0>();
         for (int y = 0; y < 480; y += 7)
@@ -762,7 +762,7 @@ void testFootprintClaims() {
 // 5. The ladder
 // ---------------------------------------------------------------------------
 
-/// Pyramid<W, 1, 3, 4, 5> -- the ladder ARCHITECTURE 7.2 measured -- must size its
+/// Pyramid<W, 1, 3, 4, 5> -- the ladder the design notes measured -- must size its
 /// levels by ceil/2 and must produce exactly what four separate pyrDown calls do.
 template <typename WordType>
 void testPyramidLadder(const char* wordName) {
@@ -840,10 +840,10 @@ void testPyramidLadder(const char* wordName) {
 /// SEAL's BOX_2x2 pyrDown, transcribed.
 ///
 /// @note This is a PORT of what SEAL/src/keypoint_tracking/pyramids.cpp does, not
-///       a paraphrase: `cv::blur(_src, _src_new, cv::Size(2, 2))` with OpenCV's
-///       DEFAULT anchor and border, then -- because `disableGaussian` is true for
-///       every filter type except GAUSSIAN_5x5 -- PyrDownInvoker's early-out,
-///       which is literally `dst[x * cn + c] = src[sx + c]` over rows `y * 2`.
+/// a paraphrase: `cv::blur(_src, _src_new, cv::Size(2, 2))` with OpenCV's
+/// DEFAULT anchor and border, then -- because `disableGaussian` is true for
+/// every filter type except GAUSSIAN_5x5 -- PyrDownInvoker's early-out,
+/// which is literally `dst[x * cn + c] = src[sx + c]` over rows `y * 2`.
 cv::Mat referenceBox2x2(const cv::Mat& src) {
     cv::Mat blurred;
     cv::blur(src, blurred, cv::Size(2, 2));
@@ -885,7 +885,7 @@ cv::Mat randomBinaryMat(int width, int height, uint64_t seed) {
 /// **A MEASUREMENT, NOT AN ASSUMPTION.** `cv::blur` on CV_8U does not round the
 /// exact mean to nearest: measured over every quadruple this sweep visits, its
 /// 2x2 box is `ceil((a + b + c + d) / 4)` -- it rounds the mean UP. That is where
-/// ARCHITECTURE 7.2's level-1 value set `{0, 64, 128, 192, 255}` comes from; the
+/// the design notes's level-1 value set `{0, 64, 128, 192, 255}` comes from; the
 /// exact means are `{0, 63.75, 127.5, 191.25, 255}`, and rounding those to
 /// NEAREST would give 191, not 192.
 ///
@@ -955,13 +955,13 @@ void testAgainstReferencePipeline(const char* wordName) {
                                "pyrDownBox<8, 1> is the exact 2x2 mean rounded once, half up",
                                where);
                     // 3. The two therefore agree to within one LSB out of 255, and
-                    //    OpenCV is never the lower of the two. NOTE WHAT `openCv`
-                    //    IS: alignedBox2x2, i.e. cv::blur at anchor (0, 0) with
-                    //    BORDER_REPLICATE -- binCV's OWN geometry, so this bounds
-                    //    the ARITHMETIC alone. The distance to the reference
-                    //    pipeline's actual level (referenceBox2x2, default anchor)
-                    //    is far larger and is entirely phase; checks 4 and 5 below
-                    //    are what account for it.
+                    // OpenCV is never the lower of the two. NOTE WHAT `openCv`
+                    // IS: alignedBox2x2, i.e. cv::blur at anchor (0, 0) with
+                    // BORDER_REPLICATE -- binCV's OWN geometry, so this bounds
+                    // the ARITHMETIC alone. The distance to the reference
+                    // pipeline's actual level (referenceBox2x2, default anchor)
+                    // is far larger and is entirely phase; checks 4 and 5 below
+                    // are what account for it.
                     PYR_EXPECT(openCv >= got && openCv - got <= 1,
                                "binCV and OpenCV's 2x2 box ARITHMETIC, on the aligned "
                                "block, agree to within one LSB -- OpenCV never lower "
@@ -977,10 +977,10 @@ void testAgainstReferencePipeline(const char* wordName) {
             }
 
             // 4. THE SAME DEVIATION AT THE LEVEL, not just inside the blur: the
-            //    SEAL path's destination (y, x) is the 2x2 block at source rows
-            //    2y-1..2y and columns 2x-1..2x, where binCV's is 2y..2y+1 by
-            //    2x..2x+1. Checked on destination pixels whose shifted block is
-            //    wholly inside the image, so the border rule is not the subject.
+            // SEAL path's destination (y, x) is the 2x2 block at source rows
+            // 2y-1..2y and columns 2x-1..2x, where binCV's is 2y..2y+1 by
+            // 2x..2x+1. Checked on destination pixels whose shifted block is
+            // wholly inside the image, so the border rule is not the subject.
             const cv::Mat sealLevel = referenceBox2x2(cvSrc);
             for (int y = 1; y < sealLevel.rows; ++y) {
                 for (int x = 1; x < sealLevel.cols; ++x) {
@@ -999,10 +999,10 @@ void testAgainstReferencePipeline(const char* wordName) {
             }
 
             // 5. THE PHASE DEVIATION, OpenCV against OpenCV so that the two sides
-            //    share a rounding rule and only the anchor differs: cv::blur's
-            //    default anchor for an even kernel size is (1, 1), so its output at
-            //    (r, c) is the ALIGNED block at (r-1, c-1). Interior only, where a
-            //    border rule cannot be the explanation.
+            // share a rounding rule and only the anchor differs: cv::blur's
+            // default anchor for an even kernel size is (1, 1), so its output at
+            // (r, c) is the ALIGNED block at (r-1, c-1). Interior only, where a
+            // border rule cannot be the explanation.
             cv::Mat blurDefault;
             cv::Mat blurAligned;
             cv::blur(cvSrc, blurDefault, cv::Size(2, 2));
@@ -1023,14 +1023,14 @@ void testAgainstReferencePipeline(const char* wordName) {
                        label + ": " + std::to_string(agree) + " of " + std::to_string(interior));
 
             // 6. REGRESSION GUARD ON THE DOCUMENTED DEVIATION ITSELF. Check 3
-            //    bounds binCV against the ALIGNED block by one LSB; that bound was
-            //    once described as agreement with "the reference pipeline's
-            //    BOX_2x2", which it is not. Measure the actual whole-level
-            //    distance to referenceBox2x2 (default anchor, the SEAL path) so
-            //    the deviation is a number the header can quote, and assert that
-            //    it is emphatically NOT within one LSB -- if it ever became so,
-            //    the phase deviation would have silently disappeared and the three
-            //    documented deviations would need re-deriving.
+            // bounds binCV against the ALIGNED block by one LSB; that bound was
+            // once described as agreement with "the reference pipeline's
+            // BOX_2x2", which it is not. Measure the actual whole-level
+            // distance to referenceBox2x2 (default anchor, the SEAL path) so
+            // the deviation is a number the header can quote, and assert that
+            // it is emphatically NOT within one LSB -- if it ever became so,
+            // the phase deviation would have silently disappeared and the three
+            // documented deviations would need re-deriving.
             for (int y = 0; y < sealLevel.rows; ++y) {
                 for (int x = 0; x < sealLevel.cols; ++x) {
                     ++sealPixels;
@@ -1065,14 +1065,14 @@ void testAgainstReferencePipeline(const char* wordName) {
     std::cout << "\n--- pyrDownBox<8, 1> against OpenCV's 2x2 box ARITHMETIC on the ALIGNED "
                  "block (binCV's own geometry): "
               << wordName << " ---\n"
-              << "    identical      " << exact << " destination pixels\n"
-              << "    one LSB apart  " << offByOne
+              << " identical " << exact << " destination pixels\n"
+              << " one LSB apart " << offByOne
               << " (OpenCV rounds the mean up; binCV rounds to nearest)\n"
               << "--- and against the reference pipeline's WHOLE BOX_2x2 level "
                  "(default anchor), which also carries the phase deviation ---\n"
-              << "    identical      " << sealSame << " of " << sealPixels
+              << " identical " << sealSame << " of " << sealPixels
               << " destination pixels\n"
-              << "    max |delta|    " << sealMaxDelta << " of 255 (all of it phase)\n";
+              << " max |delta| " << sealMaxDelta << " of 255 (all of it phase)\n";
 }
 
 #endif // BINCV_WITH_OPENCV
@@ -1126,7 +1126,7 @@ void testAgainstReferencePipeline(const char* wordName) {
         testRequantizeEnumerated<NOut, NIn, WordType>(#name);                         \
     }
 
-// The ladder ARCHITECTURE 7.2 measured, at every word width: 1 -> 3 -> 4 -> 5.
+// The ladder the design notes measured, at every word width: 1 -> 3 -> 4 -> 5.
 PYRAMID_SWEEP(1, 3, uint8_t, uint8_t)
 PYRAMID_SWEEP(1, 3, uint16_t, uint16_t)
 PYRAMID_SWEEP(1, 3, uint32_t, uint32_t)
@@ -1139,7 +1139,7 @@ PYRAMID_SWEEP(4, 5, uint32_t, uint32_t)
 
 // The extremes of the (NIn, NOut) space, where the arithmetic's widths are most
 // likely to be off by one: no cap at all, the widest cap, and a cap BELOW the
-// source depth -- which is a real E-7 candidate, not a degenerate case.
+// source depth -- which is a real candidate, not a degenerate case.
 PYRAMID_SWEEP(1, 1, uint32_t, uint32_t)
 PYRAMID_SWEEP(1, 8, uint32_t, uint32_t)
 PYRAMID_SWEEP_NO_ROUTES(8, 8, uint32_t, uint32_t)
@@ -1173,9 +1173,9 @@ BINCV_TEST(Pyramid, ReferencePipeline_uint64_t) {
 
 
 // ---------------------------------------------------------------------------
-// X-39 / E-21: the FILTERED pyrDown routes against a per-pixel integer reference.
+// earlier work: the FILTERED pyrDown routes against a per-pixel integer reference.
 //
-// X-39's rule asks each filter to reproduce ITS OWN definition exactly -- not
+// that measurement’s rule asks each filter to reproduce ITS OWN definition exactly -- not
 // OpenCV's, since these deliberately compute different functions and the border
 // rule is binCV's (zero outside, the same rule the shipped route applies to source
 // words past the row). That is what this checks, at several (NIn, NOut) pairs,
@@ -1248,7 +1248,7 @@ size_t checkFilterAt(bincv::PyrDownFilter f, const char* name, int lo, int hi,
             const unsigned want = (unsigned)(num / (K2 * maxIn));
             const unsigned got = dst.at(y, x);
             if (got != want) {
-                if (bad < 3) std::printf("    MISMATCH %s N=%zu->%zu %dx%d at (%d,%d): got %u want %u\n",
+                if (bad < 3) std::printf(" MISMATCH %s N=%zu->%zu %dx%d at (%d,%d): got %u want %u\n",
                                     name, NIn, NOut, sw, sh, x, y, got, want);
                 ++bad;
             }
@@ -1271,7 +1271,7 @@ size_t checkFilter(bincv::PyrDownFilter f, const char* name, int lo, int hi,
     bad += checkFilterAt<NOut, NIn, B::Reflect101>(f, name, lo, hi, w, ksum, 33, 9);
     bad += checkFilterAt<NOut, NIn, B::Zero>(f, name, lo, hi, w, ksum, 64, 48);
     bad += checkFilterAt<NOut, NIn, B::Zero>(f, name, lo, hi, w, ksum, 63, 47);
-    std::printf("  %-18s NIn=%zu NOut=%zu : %s  (reflect101 + zero, even + odd)\n",
+    std::printf(" %-18s NIn=%zu NOut=%zu : %s (reflect101 + zero, even + odd)\n",
                 name, NIn, NOut, bad ? "FAIL" : "exact");
     return bad;
 }
@@ -1301,7 +1301,7 @@ BINCV_TEST(Pyramid, FilteredRoutesMatchAPerPixelReference_uint32_t) {
 // ---------------------------------------------------------------------------
 // THE Box2x2 SPECIALIZATION IS THE SAME FUNCTION AS THE GENERIC ROUTE.
 //
-// pyrDownFiltered<Box2x2, ..., Replicate> dispatches to impl::pyrDownRoute, the
+// pyrDownFiltered<Box2x2,..., Replicate> dispatches to impl::pyrDownRoute, the
 // hand-optimised box path, at 1.24x the generic route's speed. Two implementations
 // of one function is a standing correctness liability, and this is what pays for it.
 //
@@ -1327,7 +1327,7 @@ size_t checkBoxSpecializationAt(int sw, int sh) {
     // The unified API, which dispatches into the specialisation...
     bincv::pyrDownFiltered<bincv::PyrDownFilter::Box2x2, NOut, NIn, FilterWord,
                            bincv::PyrDownBorder::Replicate>(src, viaSpecial);
-    // ...against the per-pixel definition under the same border.
+    //...against the per-pixel definition under the same border.
     size_t bad = 0;
     bincv::BinMatConstView<FilterWord> sv[NIn];
     for (size_t p = 0; p < NIn; ++p) sv[p] = src.constPlane(p);
@@ -1357,7 +1357,7 @@ BINCV_TEST(Pyramid, Box2x2SpecializationMatchesDefinition) {
     bad += checkBoxSpecializationAt<3, 1>(32, 65);   // odd height
     bad += checkBoxSpecializationAt<5, 3>(63, 47);
     bad += checkBoxSpecializationAt<8, 8>(33, 17);
-    std::printf("  Box2x2 specialization == per-pixel definition and == pyrDown, "
+    std::printf(" Box2x2 specialization == per-pixel definition and == pyrDown, "
                 "even + odd: %s\n", bad ? "FAIL" : "exact");
     BINCV_CHECK_EQ(bad, size_t{0});
 }
@@ -1404,7 +1404,7 @@ size_t cvPyrDownCase(int w, int h) {
                 if (d > worst) worst = d;
             }
         }
-    std::printf("  %3dx%-3d -> %3dx%-3d vs cv::pyrDown : %s (%zu of %d differ, max |d| %zu)\n",
+    std::printf(" %3dx%-3d -> %3dx%-3d vs cv::pyrDown : %s (%zu of %d differ, max |d| %zu)\n",
                 w, h, want.cols, want.rows, bad ? "DIFFERS" : "BIT-EXACT",
                 bad, want.cols * want.rows, worst);
     return bad;

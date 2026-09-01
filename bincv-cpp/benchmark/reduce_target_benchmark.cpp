@@ -4,33 +4,33 @@
 //
 // This file compares binCV against BINCV -- alternative implementations of the
 // same reduction -- so unlike benchmark/reduce_benchmark.cpp it has no OpenCV
-// denominator and needs none. ARCHITECTURE 10.3's denominator answers "is binCV
+// denominator and needs none. the design notes's denominator answers "is binCV
 // worth using"; these two questions are "is this file's interface buying what it
 // claims" and "does composing the covariance out of it cost anything", and OpenCV
 // is not a party to either.
 //
 // ===========================================================================
-// Q1 -- D-6's claim, on the target D-6 was derived from
+// Q1 -- the design rule’s claim, on the target this was derived from
 // ===========================================================================
 //
-// ARCHITECTURE 6.2 says reductions are bulk-only "so the implementation keeps
+// the design notes says reductions are bulk-only "so the implementation keeps
 // data in vector registers and accumulates with cnt + uaddlv without crossing
-// back". T2.5 also says the implementation is scalar __builtin_popcountll for
+// back". also says the implementation is scalar __builtin_popcountll for
 // now. Both cannot describe the same code, and on aarch64 the difference is the
-// entire argument for D-6. So: measure the shipped bulk entry point against the
-// per-word popcount loop D-6 forbids exposing, at the same load width, on the
+// entire argument for earlier work. So: measure the shipped bulk entry point against the
+// per-word popcount loop the design rule forbids exposing, at the same load width, on the
 // same data.
 //
 // DECISION RULE (written first):
-//   * bulk >= 1.15x the per-word loop -> 6.2's present tense is defensible; fix
-//     only the instruction sequence it quotes.
-//   * bulk within +/-15% of the per-word loop -> the INTERFACE decision (D-6)
-//     stands, but 6.2's IMPLEMENTATION claim is false today. Separate the two in
-//     6.2 and in ops/reduce.hpp, record the numbers in EXPERIMENTS.md X-7, and
-//     change no kernel: vectorization is Phase 5, and this is a documentation
-//     defect, not a kernel defect.
-//   * Either way, no -march flag and no intrinsics enter the LIBRARY -- the same
-//     standing decision X-7's x86_64 half already recorded.
+// * bulk >= 1.15x the per-word loop -> 6.2's present tense is defensible; fix
+// only the instruction sequence it quotes.
+// * bulk within +/-15% of the per-word loop -> the INTERFACE decision
+// stands, but 6.2's IMPLEMENTATION claim is false today. Separate the two in
+// 6.2 and in ops/reduce.hpp, record the numbers in, and
+// change no kernel: vectorization is Phase 5, and this is a documentation
+// defect, not a kernel defect.
+// * Either way, no -march flag and no intrinsics enter the LIBRARY -- the same
+// standing decision that measurement’s x86_64 half already recorded.
 //
 // A third row runs on aarch64 only and is a HEADROOM PROBE, not a candidate
 // implementation: the identical 64-bit loads with a VECTOR accumulator (cnt into
@@ -43,25 +43,25 @@
 // Q2 -- what composing the 2x2 covariance out of these primitives costs
 // ===========================================================================
 //
-// ARCHITECTURE 7.5's covariance needs four numbers over one window. Through the
-// T2.6 primitives that is THREE calls -- countNonZero(mag_x), countNonZero(mag_y),
+// the design notes's covariance needs four numbers over one window. Through the
+// primitives that is THREE calls -- countNonZero(mag_x), countNonZero(mag_y),
 // countAndSplit(mag_x, mag_y, sign_x^sign_y) -- and therefore three traversals of
 // the same window, issuing the same popcounts a single fused traversal would.
-// countAndSplit is single-pass, as T2.6 requires; the COMPOSITION is not, and no
-// experiment has looked at that axis. E-3 (T2.10) is scoped to
+// countAndSplit is single-pass, as requires; the COMPOSITION is not, and no
+// experiment has looked at that axis. is scoped to
 // incremental-versus-recompute and would not measure it.
 //
 // DECISION RULE (written first):
-//   * composition within 15% of a fused traversal -> the composition is free
-//     enough; record it and close the question.
-//   * composition costs > 15% more -> widen T2.10's brief to measure a
-//     covariance-shaped entry point against the composition BEFORE T3.6 is
-//     written against either, and register that in TASKS.md and ARCHITECTURE 9.
-//     Do NOT add the entry point here: choosing T2.6's interface on the strength
-//     of one measurement with no decision rule is the thing T2.6 forbids for
-//     incremental state, and the same reasoning binds this.
-//   * 15% is T2.10's own existing threshold, adopted rather than invented, so
-//     that two questions about the same interface are not judged on two scales.
+// * composition within 15% of a fused traversal -> the composition is free
+// enough; record it and close the question.
+// * composition costs > 15% more -> widen that work’s brief to measure a
+// covariance-shaped entry point against the composition BEFORE this is
+// written against either, and register that in TASKS.md and the design notes.
+// Do NOT add the entry point here: choosing that work’s interface on the strength
+// of one measurement with no decision rule is the thing forbids for
+// incremental state, and the same reasoning binds this.
+// * 15% is that work’s own existing threshold, adopted rather than invented, so
+// that two questions about the same interface are not judged on two scales.
 //
 // The fused traversal below is MEASUREMENT CODE. It reaches into impl:: -- which
 // carries no stability promise and is exactly what tests/test_reduce.cpp already
@@ -70,13 +70,13 @@
 // ===========================================================================
 // MEASUREMENT VALIDITY -- the four hazards benchmark/reduce_benchmark.cpp lists
 //
-//   1. DEAD CODE: every result is folded into a volatile sink and printed.
-//   2. CONSTANT FOLDING: inputs rotate through four distinct random images.
-//   3. CALIBRATED BATCHES: iteration counts are calibrated to a time budget and
-//      the reported figure is the minimum over several batches.
-//   4. THE SIDES MUST AGREE: every implementation is compared against the shipped
-//      one before anything is timed; a disagreement exits non-zero rather than
-//      printing a table under a caveat.
+// 1. DEAD CODE: every result is folded into a volatile sink and printed.
+// 2. CONSTANT FOLDING: inputs rotate through four distinct random images.
+// 3. CALIBRATED BATCHES: iteration counts are calibrated to a time budget and
+// the reported figure is the minimum over several batches.
+// 4. THE SIDES MUST AGREE: every implementation is compared against the shipped
+// one before anything is timed; a disagreement exits non-zero rather than
+// printing a table under a caveat.
 //
 // x86_64 numbers from this file are INDICATIVE ONLY. Both questions are about the
 // primary target and close on the reference device (scripts/run_on_pi.sh).
@@ -157,11 +157,11 @@ double measureNs(Body body, int repeats, double targetMs) {
 // Width is a whole number of 64-bit words on purpose, so no implementation pays
 // for a partial trailing word and the comparison is about the LOOP rather than
 // about the masking around it. The shipped kernel still applies its one AND per
-// row (D-13); that is part of what it costs and is not subtracted out.
+// row; that is part of what it costs and is not subtracted out.
 
-/// @brief The per-word popcount loop D-6 forbids the PUBLIC API from making
-///        possible. Written here as the thing being measured against, and
-///        nowhere else in the project.
+/// @brief The per-word popcount loop the design rule forbids the PUBLIC API from making
+/// possible. Written here as the thing being measured against, and
+/// nowhere else in the project.
 size_t countPerWordLoop(const BinMatConstView<uint64_t>& v, size_t wordsPerRow) {
     size_t total = 0;
     for (size_t y = 0; y < v.height; ++y) {
@@ -176,10 +176,10 @@ size_t countPerWordLoop(const BinMatConstView<uint64_t>& v, size_t wordsPerRow) 
 #if defined(__aarch64__)
 /// @brief HEADROOM PROBE, aarch64 only -- NOT a proposed implementation.
 /// @note Identical 64-bit loads; the only difference is that the running total
-///       stays in a NEON register (vpadal_u8) and crosses to a GPR once per ROW
-///       instead of once per word. Per-lane totals cannot overflow: a row here is
-///       64 words, each u16 lane accumulates two u8 lanes of at most 8, so the
-///       largest lane value is 64 * 16 = 1024.
+/// stays in a NEON register (vpadal_u8) and crosses to a GPR once per ROW
+/// instead of once per word. Per-lane totals cannot overflow: a row here is
+/// 64 words, each u16 lane accumulates two u8 lanes of at most 8, so the
+/// largest lane value is 64 * 16 = 1024.
 size_t countVectorAccum(const BinMatConstView<uint64_t>& v, size_t wordsPerRow) {
     size_t total = 0;
     for (size_t y = 0; y < v.height; ++y) {
@@ -216,8 +216,8 @@ bool runQ1() {
         images.push_back(std::move(m));
     }
 
-    std::printf("\n=== Q1: does the bulk entry point beat the per-word loop D-6 forbids? ===\n");
-    std::printf("  %d x %d uint64, %.0f pixels, %zu B per image (L1-resident)\n", width, height,
+    std::printf("\n=== Q1: does the bulk entry point beat the per-word loop forbids? ===\n");
+    std::printf(" %d x %d uint64, %.0f pixels, %zu B per image (L1-resident)\n", width, height,
                 pixels, static_cast<size_t>(width / 8) * static_cast<size_t>(height));
 
     // Hazard 4: agreement before timing.
@@ -226,18 +226,18 @@ bool runQ1() {
         const size_t shipped = bincv::countNonZero(v);
         const size_t perWord = countPerWordLoop(v, wordsPerRow);
         if (shipped != perWord) {
-            std::printf("  DISAGREEMENT: shipped %zu vs per-word loop %zu\n", shipped, perWord);
+            std::printf(" DISAGREEMENT: shipped %zu vs per-word loop %zu\n", shipped, perWord);
             return false;
         }
 #if defined(__aarch64__)
         const size_t vec = countVectorAccum(v, wordsPerRow);
         if (shipped != vec) {
-            std::printf("  DISAGREEMENT: shipped %zu vs vector accumulator %zu\n", shipped, vec);
+            std::printf(" DISAGREEMENT: shipped %zu vs vector accumulator %zu\n", shipped, vec);
             return false;
         }
 #endif
     }
-    std::printf("  all implementations agree (%zu set pixels in image 0)\n",
+    std::printf(" all implementations agree (%zu set pixels in image 0)\n",
                 bincv::countNonZero(images[0].constView()));
 
     const double nsBulk = measureNs(
@@ -251,7 +251,7 @@ bool runQ1() {
 
     std::printf("[BENCH] %-34s %10.5f ns/px\n", "countNonZero (shipped, bulk API)", nsBulk / pixels);
     std::printf("[BENCH] %-34s %10.5f ns/px\n", "caller-written per-word loop", nsPerWord / pixels);
-    std::printf("  bulk / per-word: %.2fx  (>1 means the bulk API is faster)\n", nsPerWord / nsBulk);
+    std::printf(" bulk / per-word: %.2fx (>1 means the bulk API is faster)\n", nsPerWord / nsBulk);
 
 #if defined(__aarch64__)
     const double nsVec = measureNs(
@@ -259,11 +259,11 @@ bool runQ1() {
             g_sink += countVectorAccum(images[static_cast<size_t>(i % kInputs)].constView(), wordsPerRow);
         },
         kRepeats, kTargetMs);
-    std::printf("[BENCH] %-34s %10.5f ns/px   <- HEADROOM PROBE, not shipped\n",
+    std::printf("[BENCH] %-34s %10.5f ns/px <- HEADROOM PROBE, not shipped\n",
                 "vector accumulator (Phase 5)", nsVec / pixels);
-    std::printf("  headroom available to Phase 5 at the same load width: %.2fx\n", nsBulk / nsVec);
+    std::printf(" headroom available to Phase 5 at the same load width: %.2fx\n", nsBulk / nsVec);
 #else
-    std::printf("  (the vector-accumulator headroom probe is aarch64-only)\n");
+    std::printf(" (the vector-accumulator headroom probe is aarch64-only)\n");
 #endif
     return true;
 }
@@ -283,8 +283,8 @@ struct Covariance {
     }
 };
 
-/// @brief ARCHITECTURE 7.5 through the T2.6 primitives -- three calls, and
-///        therefore three traversals of the same window.
+/// @brief the design notes through the primitives -- three calls, and
+/// therefore three traversals of the same window.
 Covariance covarianceComposed(const BinMatConstView<uint64_t>& magX,
                               const BinMatConstView<uint64_t>& magY,
                               const BinMatConstView<uint64_t>& signXor, const Rect& window) {
@@ -296,7 +296,7 @@ Covariance covarianceComposed(const BinMatConstView<uint64_t>& magX,
 }
 
 /// @brief The same four numbers from ONE traversal. MEASUREMENT CODE ONLY -- see
-///        the header comment; this is not proposed for include/.
+/// the header comment; this is not proposed for include/.
 Covariance covarianceFused(const BinMatConstView<uint64_t>& magX,
                            const BinMatConstView<uint64_t>& magY,
                            const BinMatConstView<uint64_t>& signXor, const Rect& window) {
@@ -326,8 +326,8 @@ Covariance covarianceFused(const BinMatConstView<uint64_t>& magX,
 
 bool runQ2() {
     // 640x480 and 200 keypoints: the frame size and the keypoint count TASKS.md
-    // T2.10 names (the reference gftt_max_corners), with the 31x31 window
-    // ARCHITECTURE 7.5 specifies.
+    // names (the reference gftt_max_corners), with the 31x31 window
+    // the design notes specifies.
     const int width = 640;
     const int height = 480;
     const int windowSize = 31;
@@ -357,7 +357,7 @@ bool runQ2() {
     }
 
     // Keypoints, including ones near enough to an edge that the window clips --
-    // which is the realistic case (ARCHITECTURE 7.5) and not a corner case.
+    // which is the realistic case (the design notes) and not a corner case.
     std::vector<Rect> windows;
     windows.reserve(static_cast<size_t>(keypoints));
     {
@@ -369,8 +369,8 @@ bool runQ2() {
         }
     }
 
-    std::printf("\n=== Q2: the 2x2 covariance composed out of T2.6 versus one fused pass ===\n");
-    std::printf("  %d x %d uint64, %d keypoints, %dx%d windows (ARCHITECTURE 7.5)\n", width, height,
+    std::printf("\n=== Q2: the 2x2 covariance composed out of versus one fused pass ===\n");
+    std::printf(" %d x %d uint64, %d keypoints, %dx%d windows (ARCHITECTURE 7.5)\n", width, height,
                 keypoints, windowSize, windowSize);
 
     // Hazard 4: agreement on every window before anything is timed.
@@ -384,7 +384,7 @@ bool runQ2() {
                                                  dys[k].constMagnitude(0),
                                                  xors[k].constView(), w);
             if (!(a == b)) {
-                std::printf("  DISAGREEMENT on a window: composed {%zu,%zu,%zu,%zu} "
+                std::printf(" DISAGREEMENT on a window: composed {%zu,%zu,%zu,%zu} "
                             "fused {%zu,%zu,%zu,%zu}\n",
                             a.xx, a.yy, a.xy.whenClear, a.xy.whenSet, b.xx, b.yy, b.xy.whenClear,
                             b.xy.whenSet);
@@ -392,7 +392,7 @@ bool runQ2() {
             }
         }
     }
-    std::printf("  composed and fused agree on all %d windows x %d images\n", keypoints, kInputs);
+    std::printf(" composed and fused agree on all %d windows x %d images\n", keypoints, kInputs);
 
     const double nsComposed = measureNs(
         [&](int i) {
@@ -423,11 +423,11 @@ bool runQ2() {
         kRepeats, kTargetMs);
 
     const double perKp = static_cast<double>(keypoints);
-    std::printf("[BENCH] %-34s %8.4f ms/frame  %8.1f ns/keypoint\n",
+    std::printf("[BENCH] %-34s %8.4f ms/frame %8.1f ns/keypoint\n",
                 "covariance composed (as shipped)", nsComposed / 1e6, nsComposed / perKp);
-    std::printf("[BENCH] %-34s %8.4f ms/frame  %8.1f ns/keypoint\n",
+    std::printf("[BENCH] %-34s %8.4f ms/frame %8.1f ns/keypoint\n",
                 "covariance fused (one traversal)", nsFused / 1e6, nsFused / perKp);
-    std::printf("  composed / fused: %.2fx  (decision rule: > 1.15x widens T2.10's brief)\n",
+    std::printf(" composed / fused: %.2fx (decision rule: > 1.15x widens the brief)\n",
                 nsComposed / nsFused);
     return true;
 }
@@ -435,7 +435,7 @@ bool runQ2() {
 }  // namespace
 
 int main() {
-    std::printf("=== binCV reduction: target-specific questions (T2.5/T2.6 triage) ===\n");
+    std::printf("=== binCV reduction: target-specific questions ( triage) ===\n");
 #if defined(__aarch64__)
     std::printf("target: aarch64 -- AUTHORITATIVE for both questions\n");
 #else

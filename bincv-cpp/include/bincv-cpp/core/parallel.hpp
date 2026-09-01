@@ -6,7 +6,7 @@
 /// ---------------------------------------------------------------------------
 /// THE SPEEDUP WAS NEVER MISSING; THE WAY TO ASK FOR IT WAS
 ///
-/// [X-65](../../../../docs/EXPERIMENTS.md) measured **2.60x on `track` at four threads**,
+/// a measurement measured **2.60x on `track` at four threads**,
 /// bit-exact, with peak RSS flat to 0.07% -- and it needed **no library change at
 /// all**. `calcOpticalFlowPyrLK` already takes an ARRAY of points and the pyramids
 /// are read-only, so any caller could split the array themselves; the benchmark did
@@ -40,14 +40,14 @@ inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief Runs `body(i)` for `i` in `[0, n)`, possibly concurrently.
 /// @note The callback is a raw function pointer plus a `void*`, not a
-///       `std::function`: core allocates nothing, and a `std::function` may.
+/// `std::function`: core allocates nothing, and a `std::function` may.
 using ParallelForFn = void (*)(size_t n, void (*body)(size_t, void*), void* ctx);
 
 namespace impl {
 
 /// @brief The installed backend, or null for serial. **INTERNAL.**
 /// @note A plain pointer with static storage duration: no constructor runs, so this
-///       is safe before `main` and costs nothing in a freestanding image.
+/// is safe before `main` and costs nothing in a freestanding image.
 inline ParallelForFn& parallelBackend() {
     static ParallelForFn fn = nullptr;
     return fn;
@@ -62,8 +62,8 @@ inline int& threadCount() {
 
 /// @brief Installs a parallel-for backend. `nullptr` restores serial execution.
 /// @note **Not thread-safe, and deliberately not.** A backend is installed once at
-///       start-up, like OpenCV's. Guarding every call to make installation racy-safe
-///       would put an atomic load in a path that runs per keypoint.
+/// start-up, like OpenCV's. Guarding every call to make installation racy-safe
+/// would put an atomic load in a path that runs per keypoint.
 inline void setParallelForBackend(ParallelForFn fn) { impl::parallelBackend() = fn; }
 
 /// @brief How many threads binCV may use. `1` serialises. Mirrors `cv::setNumThreads`.
@@ -76,8 +76,8 @@ inline int getNumThreads() {
 
 /// @brief Runs `body(i, ctx)` for `i` in `[0, n)`. Serial unless a backend is installed.
 /// @note **Serial is not a fallback, it is the default.** Every kernel that uses this
-///       must be correct when it runs straight through, because on a core-only build
-///       that is the only way it ever runs.
+/// must be correct when it runs straight through, because on a core-only build
+/// that is the only way it ever runs.
 template <typename Body>
 inline void parallelFor(size_t n, Body&& body) {
     const ParallelForFn fn = impl::parallelBackend();

@@ -11,7 +11,7 @@
 // written in terms of these two macros, so the dependency is real. It also
 // carries <stdexcept> in exactly the configuration whose expansion needs it, and
 // BINCV_ABI_NAMESPACE.
-// X-71: the AVX2 row packer is selected at RUN TIME, so the library's baseline ISA is
+// the AVX2 row packer is selected at RUN TIME, so the library's baseline ISA is
 // unchanged and no -mavx2 build is required. Guarded on the compiler supporting both
 // the target attribute and the cpu probe.
 // F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
@@ -58,12 +58,12 @@ inline size_t wordIndex(size_t x) {
 /// @brief Mask with a single 1 at the bit corresponding to column x.
 /// @note Indexing runs LSB->MSB, so column 0 is the least significant bit.
 /// @note The outer cast is not redundant at narrow word widths. Integer
-///       promotion runs the shift in `int` for uint8_t and uint16_t, so the
-///       return narrows implicitly -- harmless for a single bit, which always
-///       fits, and exactly the shape that stops being harmless the moment a mask
-///       is built from more than one. Written explicitly so the truncation is a
-///       decision rather than a side effect (clang's -Wimplicit-int-conversion
-///       reports the implicit form; GCC's -Wconversion does not).
+/// promotion runs the shift in `int` for uint8_t and uint16_t, so the
+/// return narrows implicitly -- harmless for a single bit, which always
+/// fits, and exactly the shape that stops being harmless the moment a mask
+/// is built from more than one. Written explicitly so the truncation is a
+/// decision rather than a side effect (clang's -Wimplicit-int-conversion
+/// reports the implicit form; GCC's -Wconversion does not).
 template <typename WordType>
 inline WordType bitMask(size_t x) {
     return static_cast<WordType>(static_cast<WordType>(1) << (x % bitsPerWord<WordType>()));
@@ -78,8 +78,8 @@ inline WordType lowBitsMask(size_t n) {
 }
 
 /// @brief Words a row of `widthPixels` inherently needs: ceil(width / WordBits).
-/// @note This is the stride at the default alignment (D-4), and the floor below
-///       which a caller-supplied stride cannot go without rows overlapping.
+/// @note This is the stride at the default alignment, and the floor below
+/// which a caller-supplied stride cannot go without rows overlapping.
 template <typename WordType>
 inline size_t minRowWords(size_t widthPixels) {
     constexpr size_t bitsPerWordV = bitsPerWord<WordType>();
@@ -87,8 +87,8 @@ inline size_t minRowWords(size_t widthPixels) {
 }
 
 /// @brief Words per row so that the row stride meets the requested byte alignment.
-/// @note With the default alignment of one word this returns minRowWords()
-///       unchanged -- the row already occupies a whole number of words.
+/// @note With the default alignment of one word this returns minRowWords
+/// unchanged -- the row already occupies a whole number of words.
 template <typename WordType>
 inline size_t calcAlignedWidth(size_t widthPixels, size_t alignmentBytes) {
     constexpr size_t bytesPerWord = sizeof(WordType);
@@ -104,7 +104,7 @@ inline size_t calcAlignedWidth(size_t widthPixels, size_t alignmentBytes) {
 
 /// @brief Validates a rowAlignment argument, throwing on the two invalid shapes.
 /// @note Shared by every entry point that accepts one, so the diagnostics cannot
-///       drift apart between constructors.
+/// drift apart between constructors.
 template <typename WordType>
 inline void checkRowAlignment(size_t alignmentBytes) {
     if (alignmentBytes == 0 || (alignmentBytes & (alignmentBytes - 1)) != 0) {
@@ -180,7 +180,7 @@ QuantMat<1, WordType_>::QuantMat(const QuantMat& other)
       rowAlignment(other.rowAlignment),
       alignedWidth(other.alignedWidth),
       storage() {
-    // The copy owns its memory whether or not the source did -- D-8 applies to the
+    // The copy owns its memory whether or not the source did -- the design rule applies to the
     // source's *contents*, not to how the source happened to be constructed.
     if (other.storage.ownsMemory()) {
         // Storage's own copy deep-copies an owning source, allocating and filling
@@ -223,11 +223,11 @@ QuantMat<1, WordType_>::QuantMat(QuantMat&& other) noexcept
       alignedWidth(other.alignedWidth),
       storage(std::move(other.storage)) {
     // Storage's move leaves the source with no buffer, so the source's dimensions
-    // have to go with it. Otherwise a moved-from matrix would report empty()
-    // == false while data() is null, and at()/ptr() would walk a null pointer.
+    // have to go with it. Otherwise a moved-from matrix would report empty
+    // == false while data is null, and at/ptr would walk a null pointer.
     // @note Unlike move-assignment below, this can adopt `other`'s dimensions
-    //       unconditionally: a freshly built object owns no block for `other` to
-    //       alias, so Storage's move constructor has no refusal path.
+    // unconditionally: a freshly built object owns no block for `other` to
+    // alias, so Storage's move constructor has no refusal path.
     other.width = 0;
     other.height = 0;
     other.alignedWidth = 0;
@@ -243,7 +243,7 @@ QuantMat<1, WordType_>& QuantMat<1, WordType_>::operator=(QuantMat&& other) noex
     // this object's buffer untouched. The dimensions must therefore not be
     // committed until the transfer is known to have happened: adopting `other`'s
     // shape over an unchanged buffer would describe memory this matrix does not
-    // have, breaking sizeInWords() == height * alignedWidth and making every row
+    // have, breaking sizeInWords == height * alignedWidth and making every row
     // pointer address the wrong row.
     const WordType* const otherPtr = other.storage.data();
     const size_t otherWords = other.storage.size();
@@ -285,9 +285,9 @@ QuantMat<1, WordType_>& QuantMat<1, WordType_>::operator=(QuantMat&& other) noex
 // ---------------------------------------------------------------------------
 namespace impl {
 
-/// @brief Scatters a 32-pixel mask into `WordType` words. **INTERNAL** (X-71).
+/// @brief Scatters a 32-pixel mask into `WordType` words. **INTERNAL**.
 /// @note `bitsPerWord` is a power of two, so this is one store, a shifted OR, or a
-///       split -- a 32-pixel group can never straddle a word boundary.
+/// split -- a 32-pixel group can never straddle a word boundary.
 template <typename WordType>
 inline void scatter32(uint32_t m, size_t x, WordType* rowOut) {
     constexpr size_t kBits = bitsPerWord<WordType>();
@@ -301,10 +301,10 @@ inline void scatter32(uint32_t m, size_t x, WordType* rowOut) {
     }
 }
 
-/// @brief Packs `[from, width)` of a row, branchless and portable. **INTERNAL** (X-71).
+/// @brief Packs `[from, width)` of a row, branchless and portable. **INTERNAL**.
 /// @note **Not merely a tail handler.** This is the whole path on any target without a
-///       vector one, and on its own it is **10.3×** the per-pixel loop it replaces
-///       (0.108 ns/px against 1.112). `!= 0` is a set-flag, not a jump.
+/// vector one, and on its own it is **10.3×** the per-pixel loop it replaces
+/// (0.108 ns/px against 1.112). `!= 0` is a set-flag, not a jump.
 template <typename WordType>
 inline void packRowNonZeroPortable(const uint8_t* rowIn, size_t from, size_t width,
                                    WordType* rowOut) {
@@ -328,8 +328,8 @@ inline void packRowNonZeroPortable(const uint8_t* rowIn, size_t from, size_t wid
 }
 
 /// @brief How a source pixel becomes a bit. **INTERNAL mirror of `PackRule`** --
-///        ops/pack.hpp holds the public enum, and this header cannot include it
-///        (pack.hpp includes binMat.hpp, which includes this file).
+/// ops/pack.hpp holds the public enum, and this header cannot include it
+/// (pack.hpp includes binMat.hpp, which includes this file).
 enum class PackCmp { NonZero, GreaterThan, GreaterEqual };
 
 /// @brief One pixel's bit, scalar.
@@ -346,13 +346,13 @@ inline bool packCmp(SrcT v, SrcT t) {
 }
 
 #if defined(BINCV_X86_RUNTIME_AVX2)
-/// @brief 32 source pixels' rule result, as 32 bits. **INTERNAL** (X-71).
+/// @brief 32 source pixels' rule result, as 32 bits. **INTERNAL**.
 ///
 /// **ONE COARSE ENTRY POINT, NEVER LEAF HELPERS -- and this is the coarse one.**
 /// `__attribute__((target(...)))` stops a compiler inlining a function into a caller
 /// whose feature set is smaller: that is what the attribute is FOR, since the caller
 /// may run where the callee's instructions do not exist.
-/// [X-60](../../../../docs/EXPERIMENTS.md) marked leaf helpers *inside* a hot loop and paid
+/// marked leaf helpers *inside* a hot loop and paid
 /// **310 real calls per window**. Here the call IS the unit of work -- loads, a
 /// compare and a movemask for 32 pixels -- not a helper inside one.
 ///
@@ -360,9 +360,9 @@ inline bool packCmp(SrcT v, SrcT t) {
 /// unchanged and the fast path is chosen at run time.
 ///
 /// @note **The comparisons are BIASED because the SSE/AVX integer compares are
-///       SIGNED and binCV's pixels are not.** `cmpgt_epi8` on `0xFF` against `0x01`
-///       answers "is -1 > 1", which is false and wrong. XOR-ing both sides with the
-///       sign bit maps unsigned order onto signed order exactly.
+/// SIGNED and binCV's pixels are not.** `cmpgt_epi8` on `0xFF` against `0x01`
+/// answers "is -1 > 1", which is false and wrong. XOR-ing both sides with the
+/// sign bit maps unsigned order onto signed order exactly.
 template <PackCmp R, typename SrcT>
 __attribute__((target("avx2"))) inline uint32_t movemask32(const SrcT* p, SrcT t) {
     if constexpr (sizeof(SrcT) == 1) {
@@ -423,11 +423,11 @@ inline bool hasVectorPack() {
 }
 #define BINCV_HAVE_VECTOR_PACK 1
 #elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
-/// @brief The same 32-bit mask, without a move-mask instruction. **INTERNAL** (X-71).
+/// @brief The same 32-bit mask, without a move-mask instruction. **INTERNAL**.
 /// @note aarch64 has none, so AND per-lane bit weights and let three pairwise adds
-///       fold sixteen bytes into a sixteen-bit mask. NEON is baseline on aarch64, so
-///       unlike the AVX2 path there is nothing to dispatch on. NEON's compares ARE
-///       unsigned (`vcgtq_u8`), so no bias is needed here.
+/// fold sixteen bytes into a sixteen-bit mask. NEON is baseline on aarch64, so
+/// unlike the AVX2 path there is nothing to dispatch on. NEON's compares ARE
+/// unsigned (`vcgtq_u8`), so no bias is needed here.
 template <PackCmp R, typename SrcT>
 inline uint32_t movemask32(const SrcT* p, SrcT t) {
     const uint8x16_t weights = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
@@ -473,10 +473,10 @@ inline bool hasVectorPack() { return true; }
 #define BINCV_HAVE_VECTOR_PACK 1
 #endif
 
-/// @brief Packs one row to 1 bit per pixel under `R`. **INTERNAL** (X-71).
+/// @brief Packs one row to 1 bit per pixel under `R`. **INTERNAL**.
 /// @param rowOut Only bits `[0, width)` are written and whole words are STORED, so a
-///        row's PADDING BITS ARE ZERO on return ([CLAUDE.md](../../../../CLAUDE.md)'s
-///        hard rule -- word-wise reductions over-count otherwise).
+/// row's PADDING BITS ARE ZERO on return ([CLAUDE.md](../../../../CLAUDE.md)'s
+/// hard rule -- word-wise reductions over-count otherwise).
 ///
 /// **WHY THE BIT ORDERS LINE UP AND NO SHUFFLE IS NEEDED.** `bitMask(x)` is
 /// `1 << (x % WordBits)`, so pixel `x` lands in bit `x` of its word, LSB first.
@@ -517,11 +517,11 @@ inline void packRowCmp(const SrcT* rowIn, size_t width, SrcT t, WordType* rowOut
     }
 }
 
-/// @brief Unpacks one bit per pixel to one byte per pixel. **INTERNAL** (T5.7).
+/// @brief Unpacks one bit per pixel to one byte per pixel. **INTERNAL**.
 /// @note Lives here rather than in ops/pack.hpp because impl/binMat_impl.hpp cannot
-///       include that file -- pack.hpp includes binMat.hpp, which includes this one.
-///       ops/pack.hpp's `unpackTo8Bit` is the public spelling and calls straight
-///       through.
+/// include that file -- pack.hpp includes binMat.hpp, which includes this one.
+/// ops/pack.hpp's `unpackTo8Bit` is the public spelling and calls straight
+/// through.
 // GUARDED ON THE ISA, NOT ON `BINCV_HAVE_VECTOR_PACK`. That macro means "a vector row
 // packer exists" and BOTH backends define it, so using it here compiled the AVX2 branch
 // on aarch64 -- caught by `check_arm_syntax.sh`, which is the third time this session
@@ -531,9 +531,9 @@ inline bool unpackVectorReady() { return hasVectorPack(); }
 
 /// @brief Thirty-two bits into thirty-two bytes. **INTERNAL.**
 /// @note The shuffle mask replicates byte `k` of the word eight times, and
-///       `vpshufb` indexes WITHIN each 128-bit lane -- so lane 0 asks for the word's
-///       bytes 0 and 1 and lane 1 asks for bytes 2 and 3, which is why the two halves
-///       of the mask differ.
+/// `vpshufb` indexes WITHIN each 128-bit lane -- so lane 0 asks for the word's
+/// bytes 0 and 1 and lane 1 asks for bytes 2 and 3, which is why the two halves
+/// of the mask differ.
 __attribute__((target("avx2"))) inline void unpackWord32(uint32_t w, uint8_t* out,
                                                          uint8_t onValue,
                                                          uint8_t zeroValue) {
@@ -623,10 +623,10 @@ void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
     const size_t newAlignedWidth = impl::calcAlignedWidth<WordType>(newWidth, rowAlignment);
 
     // Allocate and fill zero-initialized storage BEFORE touching this object's
-    // dimensions, the same commit-last shape resize() uses. Committing first would
+    // dimensions, the same commit-last shape resize uses. Committing first would
     // leave a failed allocation behind a matrix that describes a buffer it does not
-    // have, and every later read would trust those dimensions -- at() cannot catch
-    // it, since T1.4 made the bounds check debug-only.
+    // have, and every later read would trust those dimensions -- at cannot catch
+    // it, since earlier work made the bounds check debug-only.
     Storage<WordType> newData(newHeight * newAlignedWidth);
 
     for (size_t y = 0; y < newHeight; ++y) {
@@ -645,10 +645,10 @@ void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
 // Shared unpacking loop for the two cv::Mat conversions; `transform` maps a bit
 // to the output pixel value.
 /// @note ONE IMPLEMENTATION. The unpacking lives in ops/pack.hpp, in CORE, so the
-///       `cv::Mat` wrapper is a shape adapter and nothing more. Before this split it
-///       was a per-pixel loop recomputing `wordIndex` and `bitMask` for every pixel --
-///       the exact shape `fromCVMat` had before [X-71](../../../../docs/EXPERIMENTS.md), and
-///       the slowest thing in the library.
+/// `cv::Mat` wrapper is a shape adapter and nothing more. Before this split it
+/// was a per-pixel loop recomputing `wordIndex` and `bitMask` for every pixel --
+/// the exact shape `fromCVMat` had before earlier work, and
+/// the slowest thing in the library.
 template <typename WordType, typename PixelTransform>
 inline void toCVMatHelper(const BinMat<WordType>& binmat, cv::Mat& output,
                           PixelTransform transform) {
@@ -664,7 +664,7 @@ inline void toCVMatHelper(const BinMat<WordType>& binmat, cv::Mat& output,
 }
 
 // @todo: could an approach using OpenCV's resize and scaling functions be more efficient?
-//        need to think more about how to do this efficiently
+// need to think more about how to do this efficiently
 template <typename WordType_>
 void QuantMat<1, WordType_>::toCVMat(cv::Mat& output) const {
     toCVMatHelper(*this, output, [](bool value) -> uint8_t { return value ? 1 : 0; });
@@ -698,8 +698,8 @@ void QuantMat<1, WordType_>::clearTrailingBits() {
 
 // at and set
 //
-// Debug-checked, unchecked in release (ARCHITECTURE 5.3, and the behaviour
-// change D-7 sanctions). These are the two functions on the per-pixel path, and
+// Debug-checked, unchecked in release (the design notes, and the behaviour
+// change sanctions). These are the two functions on the per-pixel path, and
 // a throw here would sit inside every loop that reads an image. In a release
 // build the checks are gone entirely -- what remains is the row offset, a shift
 // and a mask -- and an out-of-range index is undefined behaviour, exactly as it
@@ -782,8 +782,8 @@ void QuantMat<1, WordType_>::resize(int newWidth, int newHeight) {
 // pad
 // @todo: This could potentially be optimized further
 // @todo: OpenCV has a copyMakeBorder function, however alignment with our packed
-//        representation becomes complicated when padding towards the left.
-//        For now we implement our own padding.
+// representation becomes complicated when padding towards the left.
+// For now we implement our own padding.
 template <typename WordType_>
 void QuantMat<1, WordType_>::pad(int top, int bottom, int left, int right, bool value) {
     if (top < 0 || bottom < 0 || left < 0 || right < 0) {
@@ -837,7 +837,7 @@ void QuantMat<1, WordType_>::pad(int top, int bottom, int left, int right, bool 
 
 // transposed
 // @todo: naive pixel-by-pixel transpose; replace with a cache-blocked / bit-parallel
-//        version (see ARCHITECTURE.md 6.4). This is currently the slowest operation.
+// version (see ARCHITECTURE.md 6.4). This is currently the slowest operation.
 template <typename WordType_>
 QuantMat<1, WordType_> QuantMat<1, WordType_>::transposed() const {
     // An empty matrix still has a shape to transpose: a 640x0 matrix transposes to
@@ -861,7 +861,7 @@ QuantMat<1, WordType_> QuantMat<1, WordType_>::transposed() const {
 }
 
 // transpose
-// @todo: this could avoid the copy made by transposed() for the square case
+// @todo: this could avoid the copy made by transposed for the square case
 template <typename WordType_>
 void QuantMat<1, WordType_>::transpose() {
     *this = this->transposed();
@@ -958,17 +958,17 @@ void QuantMat<1, WordType_>::fill(bool value) {
 
 // countNonZero
 //
-// STILL A PER-PIXEL LOOP, and deliberately so since T2.5. The bulk reduction is
-// `bincv::countNonZero(m.constView())` in ops/reduce.hpp, which is 6x faster here
+// STILL A PER-PIXEL LOOP, and deliberately so since earlier work. The bulk reduction is
+// `bincv::countNonZero(m.constView)` in ops/reduce.hpp, which is 6x faster here
 // and 35x faster where the popcount lowers to an instruction
 // (bincv-cpp/results/reduce_benchmark.log). This member cannot simply forward to
 // it: ops/reduce.hpp includes binMat.hpp, which includes this file, so the call
 // would close a cycle. It stays for two reasons -- it is the container-shaped
-// spelling callers already use, and it is the "before" the T2.5 benchmark
+// spelling callers already use, and it is the "before" the benchmark
 // measures against, which stops being true the moment it becomes a wrapper.
 //
 // It does NOT rely on padding bits being zero (it never reads one), which is the
-// same guarantee the bulk kernels now make by masking; see D-13.
+// same guarantee the bulk kernels now make by masking; see.
 template <typename WordType_>
 int QuantMat<1, WordType_>::countNonZero() const {
     if (empty())

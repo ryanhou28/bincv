@@ -1,21 +1,21 @@
 #pragma once
 
 /// @file threshold.hpp
-/// @brief Producing the 1-bit frame from a higher-precision source (T3.2).
+/// @brief Producing the 1-bit frame from a higher-precision source.
 ///
-/// ARCHITECTURE 7.3: in a deployed system the binarization may happen in-sensor;
+/// the design notes: in a deployed system the binarization may happen in-sensor;
 /// binCV provides it for pipelines that binarize on the host. Two sources, two
 /// tiers, and the tier difference is the whole reason they have different names.
 ///
-///   threshold(const cv::Mat&, dst, thresh)   CV_8U in, 1 bit out.  **TIER 1.**
-///   binarize(planes, dst, thresh)            N-bit in, 1 bit out.  **TIER 3.**
+/// threshold(const cv::Mat&, dst, thresh) CV_8U in, 1 bit out. **TIER 1.**
+/// binarize(planes, dst, thresh) N-bit in, 1 bit out. **TIER 3.**
 ///
 /// ---------------------------------------------------------------------------
 /// THE COMPARISON IS STRICTLY GREATER THAN, AND IT IS NOT A DETAIL
 ///
 /// `cv::threshold` with `THRESH_BINARY` is documented and implemented as
 ///
-///     dst(x, y) = (src(x, y) >  thresh) ? maxval : 0
+/// dst(x, y) = (src(x, y) > thresh) ? maxval : 0
 ///
 /// **`>`, not `>=`.** Getting that backwards moves exactly one value class --
 /// the pixels equal to `thresh` -- from 0 to 1. On a natural image at a
@@ -29,22 +29,22 @@
 ///
 /// The consequence at the ends, stated so a caller does not have to derive it:
 ///
-///   thresh = 0    every NON-ZERO pixel is set. This is `src != 0`, the usual
-///                 "make a mask" call, and it is the one an implementation using
-///                 `>=` would turn into "all ones".
-///   thresh = 255  NOTHING is set for a CV_8U source: no uint8 exceeds 255. Not
-///                 an error, and not clamped to something more useful -- it is
-///                 what cv::threshold returns, and Tier 1 means matching it.
+/// thresh = 0 every NON-ZERO pixel is set. This is `src != 0`, the usual
+/// "make a mask" call, and it is the one an implementation using
+/// `>=` would turn into "all ones".
+/// thresh = 255 NOTHING is set for a CV_8U source: no uint8 exceeds 255. Not
+/// an error, and not clamped to something more useful -- it is
+/// what cv::threshold returns, and Tier 1 means matching it.
 ///
 /// ---------------------------------------------------------------------------
 /// TIER 1 FOR CV_8U, TIER 3 FOR QuantMat<N>
 ///
 /// The CV_8U entry point IS `cv::threshold(src, dst, thresh, 255, THRESH_BINARY)`
-/// on the same content, so it takes OpenCV's name (ARCHITECTURE 5.1) and
-/// tests/test_threshold.cpp proves bit-exactness through T2.1's harness across
+/// on the same content, so it takes OpenCV's name (the design notes) and
+/// tests/test_threshold.cpp proves bit-exactness through that work’s harness across
 /// its full size and fill matrix. What differs is the OUTPUT CONTAINER, not the
 /// answer: a bit-packed BinMat rather than a CV_8U matrix, which is the entire
-/// point -- 640x480 in 38400 bytes rather than 307200 (ARCHITECTURE 4.6). The
+/// point -- 640x480 in 38400 bytes rather than 307200 (the design notes). The
 /// harness compares by unpacking to CV_8U {0, 255}, so "bit-exact" is asserted
 /// against OpenCV's actual bytes and not against a normalisation of them.
 ///
@@ -52,13 +52,13 @@
 /// is 1 by construction; a `maxval` argument could only be ignored or asserted
 /// on, and an ignored argument that looks like OpenCV's is worse than an absent
 /// one. Nor is there a `type` parameter: THRESH_BINARY is the operation
-/// ARCHITECTURE 7.3 names, THRESH_BINARY_INV is `bitwiseNot` of it (ops/logic.hpp),
+/// the design notes names, THRESH_BINARY_INV is `bitwiseNot` of it (ops/logic.hpp),
 /// and the four truncating types cannot be expressed in a 1-bit destination at
 /// all. A ThresholdType enum whose every other value asserted would be a promise
 /// this file cannot keep.
 ///
 /// The QuantMat<N> entry point has no OpenCV counterpart -- OpenCV has no N-bit
-/// image type -- so it is Tier 3 and must NOT borrow the name (ARCHITECTURE 5.1).
+/// image type -- so it is Tier 3 and must NOT borrow the name (the design notes).
 /// It is `binarize`, and it is checked against a per-pixel reference:
 /// `src.at(y, x) > thresh`, the same comparison as above, so the two entry points
 /// cannot drift into disagreeing about their boundary.
@@ -73,12 +73,12 @@
 /// it reduces the double with `cvFloor`, whose `(int)value` conversion is
 /// undefined once the value leaves `int`'s range. Measured on OpenCV 4.5.4, x86-64:
 ///
-///   thresh      cv::threshold      binCV        who is right
-///   ---------------------------------------------------------------------
-///   +1e300      every pixel set    none set     binCV (nothing exceeds 1e300)
-///   -1e300      none set           every pixel  binCV (everything exceeds it)
-///   +/-inf      same inversion     as above     binCV
-///   +2^31       every pixel set    none set     binCV
+/// thresh cv::threshold binCV who is right
+/// ---------------------------------------------------------------------
+/// +1e300 every pixel set none set binCV (nothing exceeds 1e300)
+/// -1e300 none set every pixel binCV (everything exceeds it)
+/// +/-inf same inversion as above binCV
+/// +2^31 every pixel set none set binCV
 ///
 /// OpenCV's answers there are the *opposite* of the arithmetic, and they flip
 /// direction with the compiler's conversion behaviour rather than with the
@@ -97,26 +97,26 @@
 /// ---------------------------------------------------------------------------
 /// WHAT THE KERNELS PROMISE (the ops/ contract)
 ///
-///  1. **Views, never containers** (D-5). `binarize` takes the N plane views, and
-///     the QuantMat overload is a thin wrapper that names them -- not a second
-///     implementation. The CV_8U overload's source is a `const cv::Mat&` because
-///     that IS the foreign format being read; it is used strictly as
-///     {ptr, rows, cols, step} and is never resized, reallocated or written.
-///  2. **No heap allocation.** `binarize` gathers N plane words into a
-///     stack array whose size is the template parameter N, so there is nothing to
-///     allocate and nothing for a caller to provide.
-///  3. **PADDING BITS STAY ZERO.** Both kernels write WHOLE WORDS -- a threshold
-///     produces a bit per pixel and stores 8..64 of them at a time -- so the
-///     trailing partial word of every destination row is stored masked. It is
-///     load-bearing in `binarize`: `thresholdGE` returns a full word with no
-///     notion of `width` and answers every lane, including lanes past the last
-///     pixel, and at `threshold == 0` it returns all ones whatever the planes
-///     hold (ops/bitslice.hpp says so in as many words). Storing that unmasked
-///     would leave phantom set bits past `width` and every later word-wise
-///     reduction would over-count them (D-13).
-///  4. **Never throws** (ARCHITECTURE 5.3). Dimension mismatches, a short stride,
-///     a source of the wrong cv::Mat type and a null destination are programming
-///     errors, reported by BINCV_ASSERT in debug builds and undefined in release.
+/// 1. **Views, never containers**. `binarize` takes the N plane views, and
+/// the QuantMat overload is a thin wrapper that names them -- not a second
+/// implementation. The CV_8U overload's source is a `const cv::Mat&` because
+/// that IS the foreign format being read; it is used strictly as
+/// {ptr, rows, cols, step} and is never resized, reallocated or written.
+/// 2. **No heap allocation.** `binarize` gathers N plane words into a
+/// stack array whose size is the template parameter N, so there is nothing to
+/// allocate and nothing for a caller to provide.
+/// 3. **PADDING BITS STAY ZERO.** Both kernels write WHOLE WORDS -- a threshold
+/// produces a bit per pixel and stores 8..64 of them at a time -- so the
+/// trailing partial word of every destination row is stored masked. It is
+/// load-bearing in `binarize`: `thresholdGE` returns a full word with no
+/// notion of `width` and answers every lane, including lanes past the last
+/// pixel, and at `threshold == 0` it returns all ones whatever the planes
+/// hold (ops/bitslice.hpp says so in as many words). Storing that unmasked
+/// would leave phantom set bits past `width` and every later word-wise
+/// reduction would over-count them.
+/// 4. **Never throws** (the design notes). Dimension mismatches, a short stride,
+/// a source of the wrong cv::Mat type and a null destination are programming
+/// errors, reported by BINCV_ASSERT in debug builds and undefined in release.
 ///
 /// ---------------------------------------------------------------------------
 /// PRECONDITION ON `dst`, identical to ops/logic.hpp's: it must span its image's
@@ -141,8 +141,8 @@
 #include "../core/view.hpp"
 // impl::rowTailMask, impl::strideCoversARow, impl::viewsShareNoWord.
 #include "../impl/kernel_util.hpp"
-// thresholdGE -- T2.7's bit-sliced comparison, and the entire arithmetic of
-// binarize(). Its whole (value, threshold) input space is enumerated by
+// thresholdGE -- that work’s bit-sliced comparison, and the entire arithmetic of
+// binarize. Its whole (value, threshold) input space is enumerated by
 // tests/test_bitslice.cpp, so this file supplies the row geometry and nothing
 // else.
 #include "bitslice.hpp"
@@ -166,30 +166,30 @@ inline namespace BINCV_ABI_NAMESPACE {
 // ---------------------------------------------------------------------------
 
 /// @brief dst = (src > thresh), pixel for pixel, over an N-plane bit-sliced
-///        source. **API TIER 3.**
+/// source. **API TIER 3.**
 /// @tparam N Number of source planes, deduced from the array argument. Plane 0 is
-///         the LEAST significant bit, matching QuantMat (ARCHITECTURE 4.1).
+/// the LEAST significant bit, matching QuantMat (the design notes).
 /// @param planes The N source plane views, all of the same dimensions as `dst`.
 /// @param dst Destination view; must have the planes' dimensions and share no
-///        word with any of them.
+/// word with any of them.
 /// @param thresh The constant each pixel is compared against, STRICTLY GREATER
-///        THAN -- see the comparison section at the top of this file. Values at
-///        or above the largest an N-bit pixel can hold select nothing, which is
-///        reached by arithmetic (a sweep from 0 to 2^N) rather than by choice and
-///        is therefore defined rather than asserted against.
+/// THAN -- see the comparison section at the top of this file. Values at
+/// or above the largest an N-bit pixel can hold select nothing, which is
+/// reached by arithmetic (a sweep from 0 to 2^N) rather than by choice and
+/// is therefore defined rather than asserted against.
 /// @note One pass, word by word, no scratch and no allocation: each word of the
-///        destination is one `thresholdGE` over N gathered plane words, so 8..64
-///        pixels are compared per call and the comparison itself is branch-free.
+/// destination is one `thresholdGE` over N gathered plane words, so 8..64
+/// pixels are compared per call and the comparison itself is branch-free.
 /// @note `thresh + 1` is what reaches thresholdGE, because it answers `>=` and
-///        this operation is `>`. The `thresh >= MaxValue` shortcut above it is
-///        not an optimisation -- it is what stops that increment from wrapping
-///        when a caller passes the largest `unsigned`.
+/// this operation is `>`. The `thresh >= MaxValue` shortcut above it is
+/// not an optimisation -- it is what stops that increment from wrapping
+/// when a caller passes the largest `unsigned`.
 /// @note The destination's padding bits are zero on return. That is not
-///        automatic here: thresholdGE answers every lane in the word, including
-///        the ones past `width`, so the trailing word is masked before it is
-///        stored. See property 3 at the top of this file.
+/// automatic here: thresholdGE answers every lane in the word, including
+/// the ones past `width`, so the trailing word is masked before it is
+/// stored. See property 3 at the top of this file.
 /// @note Source padding bits are never read as pixels -- they only ever land in
-///        destination bits past `width`, which the tail mask clears.
+/// destination bits past `width`, which the tail mask clears.
 /// @note Never throws and never allocates.
 template <size_t N, typename WordType>
 inline void binarize(const BinMatConstView<WordType> (&planes)[N], BinMatView<WordType> dst,
@@ -268,12 +268,12 @@ inline void binarize(const BinMatConstView<WordType> (&planes)[N], BinMatView<Wo
 
 /// @brief dst = (src > thresh) over an N-bit binCV image. **API TIER 3.**
 /// @note A thin wrapper: it names `src`'s planes and calls the view kernel above,
-///        which is where the work and the contract live (D-5). A caller holding
-///        views never reaches this overload.
+/// which is where the work and the contract live. A caller holding
+/// views never reaches this overload.
 /// @note N == 1 comes here too -- BinMat IS QuantMat<1> (core/types.hpp) -- where
-///        the only meaningful threshold is 0 and the result is a copy of the
-///        source. Defined rather than rejected, because a caller sweeping N does
-///        not want a special case.
+/// the only meaningful threshold is 0 and the result is a copy of the
+/// source. Defined rather than rejected, because a caller sweeping N does
+/// not want a special case.
 template <size_t N, typename WordType>
 inline void binarize(const QuantMat<N, WordType>& src, BinMatView<WordType> dst, unsigned thresh) {
     BinMatConstView<WordType> planes[N];
@@ -288,45 +288,45 @@ inline void binarize(const QuantMat<N, WordType>& src, BinMatView<WordType> dst,
 // ---------------------------------------------------------------------------
 
 /// @brief dst = (src > thresh), packing a CV_8U image into one bit per pixel.
-///        **API TIER 1** -- bit-exact against
-///        `cv::threshold(src, tmp, thresh, 255, cv::THRESH_BINARY)` on the same
-///        content, pixel for pixel, for every `thresh` with `|thresh| < 2^31`.
-///        Beyond that range cv::threshold is itself undefined and binCV answers
-///        the arithmetic instead; see "THE DOMAIN OF THE TIER 1 PROMISE" at the
-///        top of this file.
+/// **API TIER 1** -- bit-exact against
+/// `cv::threshold(src, tmp, thresh, 255, cv::THRESH_BINARY)` on the same
+/// content, pixel for pixel, for every `thresh` with `|thresh| < 2^31`.
+/// Beyond that range cv::threshold is itself undefined and binCV answers
+/// the arithmetic instead; see "THE DOMAIN OF THE TIER 1 PROMISE" at the
+/// top of this file.
 /// @param src The source image. Must be CV_8UC1 and must have `dst`'s dimensions.
-///        Read as a view -- rows, cols and step -- never written or resized.
+/// Read as a view -- rows, cols and step -- never written or resized.
 /// @param dst Destination view; must have src's dimensions.
 /// @param thresh The constant each pixel is compared against. **STRICTLY GREATER
-///        THAN**: a pixel EQUAL to `thresh` is 0. See the comparison section at
-///        the top of this file, including what happens at 0 and at 255.
+/// THAN**: a pixel EQUAL to `thresh` is 0. See the comparison section at
+/// the top of this file, including what happens at 0 and at 255.
 /// @note `thresh` is `double` for one reason: it is cv::threshold's parameter
-///        type, and a caller porting a call passes the same expression. It is
-///        compared against the integer pixel directly, so the comparison is
-///        exact for every value a CV_8U pixel can take -- a `double` holds every
-///        uint8 without rounding, and a fractional threshold such as 127.5 does
-///        what a reader expects rather than being truncated. This is the ONE
-///        place binCV takes a floating-point argument, and it takes it to be
-///        drop-in.
+/// type, and a caller porting a call passes the same expression. It is
+/// compared against the integer pixel directly, so the comparison is
+/// exact for every value a CV_8U pixel can take -- a `double` holds every
+/// uint8 without rounding, and a fractional threshold such as 127.5 does
+/// what a reader expects rather than being truncated. This is the ONE
+/// place binCV takes a floating-point argument, and it takes it to be
+/// drop-in.
 /// @note EVERY `double` IS DEFINED HERE, including the ones no caller means. A
-///        threshold at or above 255 -- however large, up to +infinity -- selects
-///        nothing; one below 0 -- however small, down to -infinity -- selects
-///        everything; `NaN` selects nothing, because `p > NaN` is false for every
-///        `p`. That is the arithmetic, not cv::threshold's answer, for the values
-///        where cv::threshold has no defined answer to match.
+/// threshold at or above 255 -- however large, up to +infinity -- selects
+/// nothing; one below 0 -- however small, down to -infinity -- selects
+/// everything; `NaN` selects nothing, because `p > NaN` is false for every
+/// `p`. That is the arithmetic, not cv::threshold's answer, for the values
+/// where cv::threshold has no defined answer to match.
 /// @note THIS IS THE ONLY ENTRY POINT IN ops/ THAT NAMES A cv:: TYPE, and it is
-///        behind BINCV_WITH_OPENCV: the core-only, no-exceptions and Debug
-///        configurations never see it. Nothing the embedded claim rests on
-///        depends on OpenCV (ARCHITECTURE 2).
+/// behind BINCV_WITH_OPENCV: the core-only, no-exceptions and Debug
+/// configurations never see it. Nothing the embedded claim rests on
+/// depends on OpenCV (the design notes).
 /// @note The destination's padding bits are zero on return: the row's trailing
-///        partial word is assembled from live pixels only, and the bits past
-///        `width` are never set.
+/// partial word is assembled from live pixels only, and the bits past
+/// `width` are never set.
 /// @note PRECONDITION ON `dst`: it must span its image's full width, or end on a
-///        word boundary -- the trailing word is STORED, not merged, so bits past
-///        `width` in a sub-width window onto a wider image are zeroed.
+/// word boundary -- the trailing word is STORED, not merged, so bits past
+/// `width` in a sub-width window onto a wider image are zeroed.
 /// @note Never throws and never allocates. A src of the wrong type, mismatched
-///        dimensions and a short stride are programming errors: BINCV_ASSERT
-///        reports them in debug builds and they are undefined in release.
+/// dimensions and a short stride are programming errors: BINCV_ASSERT
+/// reports them in debug builds and they are undefined in release.
 template <typename WordType>
 inline void threshold(const cv::Mat& src, BinMatView<WordType> dst, double thresh) {
     BINCV_ASSERT(src.empty() || src.type() == CV_8UC1,
@@ -381,7 +381,7 @@ inline void threshold(const cv::Mat& src, BinMatView<WordType> dst, double thres
     // all live in ops/pack.hpp, which is in CORE -- this function's only job is to
     // reduce `thresh` to a rule and hand over the buffer. Before that split this
     // loop was a second copy of the same word assembly, and only one of the two was
-    // ever optimised (X-71).
+    // ever optimised.
     //
     // `cutoff` is an int precisely so the two degenerate ends survive the reduction:
     // 0 means every pixel passes and 256 means none does, and neither fits a uint8_t.

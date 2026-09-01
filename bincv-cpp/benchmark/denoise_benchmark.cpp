@@ -1,7 +1,7 @@
-// T3.1 denoise -- the reference pipeline's three-pixel median -- against OpenCV,
+// denoise -- the reference pipeline's three-pixel median -- against OpenCV,
 // and against binCV's own composed spelling.
 //
-// THE DENOMINATOR (ARCHITECTURE 10.3, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that denominator is not a judgement call -- it is
 // SEAL/src/temporal_processing/denoise.cpp's `three_pix_median_filter`, ported
@@ -13,10 +13,10 @@
 //
 // THREE IMPLEMENTATIONS, and the third is the point of the file:
 //
-//   OpenCV CV_8U      the reference above, one byte per pixel.
-//   binCV fused       ops/denoise.hpp -- one pass, NO scratch.
-//   binCV composed    shiftDown + shiftLeft + majority3 -- three passes and TWO
-//                     FRAME-SIZED SCRATCH BUFFERS the caller must own.
+// OpenCV CV_8U the reference above, one byte per pixel.
+// binCV fused ops/denoise.hpp -- one pass, NO scratch.
+// binCV composed shiftDown + shiftLeft + majority3 -- three passes and TWO
+// FRAME-SIZED SCRATCH BUFFERS the caller must own.
 //
 // The fused and composed rows compute the same image (checked before anything is
 // timed) and differ only in traversals and working set, so they are the evidence
@@ -34,35 +34,35 @@
 // MEASUREMENT VALIDITY -- the four hazards the other benchmarks in this
 // directory enumerate, answered here in the same way:
 //
-//   1. DEAD CODE. Every timed body writes to memory the next iteration reads, and
-//      feeds one word of its destination to a volatile sink so the store cannot be
-//      sunk out of the loop. THAT WORD IS NOT THE VALIDITY ARGUMENT -- a kernel
-//      that computed only the first word would satisfy it. What does: after the
-//      timing, every implementation is run once more on image 0 and its
-//      destination is folded PIXEL BY PIXEL into a checksum printed in the table.
-//      All rows must print the same number, because they compute the same image
-//      in four different containers, and a row that stopped computing most of its
-//      output prints a different one. (An earlier version of this file printed
-//      only the volatile sink and claimed it was a checksum of each destination.
-//      It was one word.)
-//   2. CONSTANT FOLDING. Four distinct random images are rotated through, so no
-//      iteration can reuse the previous one's answer.
-//   3. CALIBRATED BATCHES. A fixed iteration count measures clock resolution at
-//      94x60; every case runs enough iterations to fill a target millisecond
-//      budget, and the reported figure is the minimum over several batches.
-//   4. THE SIDES MUST AGREE. All five implementations are compared pixel for
-//      pixel BEFORE anything is timed, and a disagreement skips the size and
-//      exits non-zero rather than printing a table under a warning.
-//   5. THE BASELINE'S FIXED PER-CALL COST IS MEASURED, NOT ASSUMED. The reference
-//      implementation makes EIGHT cv:: calls per frame (two setTo, two copyTo,
-//      four min/max), each of which pays a size-independent dispatch cost. At
-//      640x480 that is noise; at 94x60 it is most of the frame time, so the
-//      ns/pixel ladder is NOT a pure statement about the operation and the small
-//      sizes' ratios are not comparable with the large ones. The floor is
-//      measured directly (the same eight calls on a 2x2 frame) and printed beside
-//      every size, so a reader can subtract it instead of taking the ladder's
-//      shape as a cache result. binCV's own floor is measured the same way, for
-//      the same reason and to keep the comparison symmetric.
+// 1. DEAD CODE. Every timed body writes to memory the next iteration reads, and
+// feeds one word of its destination to a volatile sink so the store cannot be
+// sunk out of the loop. THAT WORD IS NOT THE VALIDITY ARGUMENT -- a kernel
+// that computed only the first word would satisfy it. What does: after the
+// timing, every implementation is run once more on image 0 and its
+// destination is folded PIXEL BY PIXEL into a checksum printed in the table.
+// All rows must print the same number, because they compute the same image
+// in four different containers, and a row that stopped computing most of its
+// output prints a different one. (An earlier version of this file printed
+// only the volatile sink and claimed it was a checksum of each destination.
+// It was one word.)
+// 2. CONSTANT FOLDING. Four distinct random images are rotated through, so no
+// iteration can reuse the previous one's answer.
+// 3. CALIBRATED BATCHES. A fixed iteration count measures clock resolution at
+// 94x60; every case runs enough iterations to fill a target millisecond
+// budget, and the reported figure is the minimum over several batches.
+// 4. THE SIDES MUST AGREE. All five implementations are compared pixel for
+// pixel BEFORE anything is timed, and a disagreement skips the size and
+// exits non-zero rather than printing a table under a warning.
+// 5. THE BASELINE'S FIXED PER-CALL COST IS MEASURED, NOT ASSUMED. The reference
+// implementation makes EIGHT cv:: calls per frame (two setTo, two copyTo,
+// four min/max), each of which pays a size-independent dispatch cost. At
+// 640x480 that is noise; at 94x60 it is most of the frame time, so the
+// ns/pixel ladder is NOT a pure statement about the operation and the small
+// sizes' ratios are not comparable with the large ones. The floor is
+// measured directly (the same eight calls on a 2x2 frame) and printed beside
+// every size, so a reader can subtract it instead of taking the ladder's
+// shape as a cache result. binCV's own floor is measured the same way, for
+// the same reason and to keep the comparison symmetric.
 //
 // ---------------------------------------------------------------------------
 // WHERE THIS IS AUTHORITATIVE
@@ -70,8 +70,8 @@
 // On x86_64 it is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms"). The
 // numbers that belong in a claim come from the reference device:
 //
-//   BINCV_PI_OPENCV=1 ./scripts/run_on_pi.sh <target>
-//       './benchmark/denoise_benchmark > denoise_benchmark.log'
+// BINCV_PI_OPENCV=1./scripts/run_on_pi.sh <target>
+// './benchmark/denoise_benchmark > denoise_benchmark.log'
 //
 // BINCV_PI_OPENCV=1 is required: the denominator is an OpenCV call, and the
 // device's default build is core-only.
@@ -113,8 +113,8 @@ uint64_t nextRandom(uint64_t& state) {
 
 /// @brief One image in every representation under test, from ONE draw per pixel.
 /// @note The packed matrices and the CV_8U mask are not merely statistically
-///       similar -- they are the same picture, which is what makes the comparison
-///       like for like (ARCHITECTURE 10.3: the same binary content).
+/// similar -- they are the same picture, which is what makes the comparison
+/// like for like (the design notes: the same binary content).
 struct Image {
     bincv::BinMat<uint32_t> packed32;
     bincv::BinMat<uint64_t> packed64;
@@ -144,30 +144,30 @@ void makeImage(Image& out, int width, int height, uint64_t seed) {
 // ---------------------------------------------------------------------------
 
 /// @brief SEAL's three_pix_median_filter, in two spellings: the denominator, and
-///        the reference exactly as written.
+/// the reference exactly as written.
 /// @note WHAT IS HOISTED, PRECISELY. The reference constructs SEVEN cv::Mats per
-///       call with `cv::Mat::zeros`, i.e. seven allocations and six zero-fills
-///       (the seventh is the input). Both variants below hoist all seven
-///       ALLOCATIONS, as a caller in a frame loop would -- timing malloc would
-///       flatter binCV, which allocates nothing at all here. They differ in the
-///       zero-fills:
+/// call with `cv::Mat::zeros`, i.e. seven allocations and six zero-fills
+/// (the seventh is the input). Both variants below hoist all seven
+/// ALLOCATIONS, as a caller in a frame loop would -- timing malloc would
+/// flatter binCV, which allocates nothing at all here. They differ in the
+/// zero-fills:
 ///
-///         openCvMedian3()          re-zeroes the two NEIGHBOUR matrices only.
-///                                  The other four (minAB, maxAB, minMax, out)
-///                                  are fully overwritten by the cv::min/cv::max
-///                                  that follows, so their zero-fill is dead
-///                                  work no caller would keep. THIS IS THE
-///                                  DENOMINATOR.
-///         openCvMedian3AsWritten() re-zeroes all six, which is what the
-///                                  reference actually costs today.
+/// openCvMedian3 re-zeroes the two NEIGHBOUR matrices only.
+/// The other four (minAB, maxAB, minMax, out)
+/// are fully overwritten by the cv::min/cv::max
+/// that follows, so their zero-fill is dead
+/// work no caller would keep. THIS IS THE
+/// DENOMINATOR.
+/// openCvMedian3AsWritten re-zeroes all six, which is what the
+/// reference actually costs today.
 ///
-///       Both are timed and both appear in the table. The ratio quoted anywhere
-///       else is against the FASTER of the two, so it is conservative by exactly
-///       the gap the table prints -- rather than resting on a memset the
-///       reference pays and a competent port would not. The two neighbour
-///       matrices' zero-fill is NOT optional in either: `right`'s last column and
-///       `above`'s first row are never written by the copyTo calls, and those
-///       zeros are the border (ops/denoise.hpp).
+/// Both are timed and both appear in the table. The ratio quoted anywhere
+/// else is against the FASTER of the two, so it is conservative by exactly
+/// the gap the table prints -- rather than resting on a memset the
+/// reference pays and a competent port would not. The two neighbour
+/// matrices' zero-fill is NOT optional in either: `right`'s last column and
+/// `above`'s first row are never written by the copyTo calls, and those
+/// zeros are the border (ops/denoise.hpp).
 struct OpenCvScratch {
     cv::Mat right, above, minAB, maxAB, minMax, out;
 
@@ -187,8 +187,8 @@ void openCvMedian3(const cv::Mat& img, OpenCvScratch& s) {
     if (img.cols > 1) img.colRange(1, img.cols).copyTo(s.right.colRange(0, img.cols - 1));
     if (img.rows > 1) img.rowRange(0, img.rows - 1).copyTo(s.above.rowRange(1, img.rows));
 
-    // |   | p1 |    |
-    // |   | p2 | p3 |
+    // | | p1 | |
+    // | | p2 | p3 |
     // Median = max(min(p1, p2), min(max(p1, p2), p3))
     cv::min(s.above, img, s.minAB);
     cv::max(s.above, img, s.maxAB);
@@ -197,7 +197,7 @@ void openCvMedian3(const cv::Mat& img, OpenCvScratch& s) {
 }
 
 /// @brief The same filter with all six `cv::Mat::zeros` fills the reference pays,
-///        not just the two the border needs. See the note above OpenCvScratch.
+/// not just the two the border needs. See the note above OpenCvScratch.
 void openCvMedian3AsWritten(const cv::Mat& img, OpenCvScratch& s) {
     s.right.setTo(cv::Scalar(0));
     s.above.setTo(cv::Scalar(0));
@@ -356,11 +356,11 @@ void measureCallFloors() {
 
     std::printf("\nFIXED PER-CALL COST (hazard 5), measured on a 2x2 frame -- the part of every\n"
                 "row below that is not the operation:\n");
-    std::printf("  OpenCV reference (8 cv:: calls):  %8.3f us per call\n", g_openCvCallFloorUs);
-    std::printf("  binCV denoiseMedian3:             %8.3f us per call\n", g_binCvCallFloorUs);
-    std::printf("  Divided by a frame's pixel count this is what a small frame's ns/pixel is\n"
-                "  mostly made of. It is NOT subtracted from the tables; it is printed beside\n"
-                "  them so the ladder is read with it.\n");
+    std::printf(" OpenCV reference (8 cv:: calls): %8.3f us per call\n", g_openCvCallFloorUs);
+    std::printf(" binCV denoiseMedian3: %8.3f us per call\n", g_binCvCallFloorUs);
+    std::printf(" Divided by a frame's pixel count this is what a small frame's ns/pixel is\n"
+                " mostly made of. It is NOT subtracted from the tables; it is printed beside\n"
+                " them so the ladder is read with it.\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -396,16 +396,16 @@ bool runSize(int width, int height) {
     // 4-buffer figure beside it is what a caller who reused temporaries could get
     // away with, so the comparison is not resting on the reference being
     // wasteful -- binCV's 2 buffers beat even that.
-    std::printf("  one frame:   binCV uint32 %.0f B, binCV uint64 %.0f B, OpenCV CV_8U %.0f B "
+    std::printf(" one frame: binCV uint32 %.0f B, binCV uint64 %.0f B, OpenCV CV_8U %.0f B "
                 "(%.1fx)\n",
                 packed32Bytes, packed64Bytes, pixels, pixels / packed32Bytes);
-    std::printf("  WORKING SET of one call (the number CLAUDE.md asks for):\n");
-    std::printf("    binCV fused      %10.0f B   (src + dst, no scratch)\n",
+    std::printf(" WORKING SET of one call (the number CLAUDE.md asks for):\n");
+    std::printf(" binCV fused %10.0f B (src + dst, no scratch)\n",
                 2.0 * packed32Bytes);
-    std::printf("    binCV composed   %10.0f B   (src + dst + 2 scratch frames)\n",
+    std::printf(" binCV composed %10.0f B (src + dst + 2 scratch frames)\n",
                 4.0 * packed32Bytes);
-    std::printf("    OpenCV reference %10.0f B   (7 CV_8U frames, as written)\n", 7.0 * pixels);
-    std::printf("    OpenCV minimal   %10.0f B   (4 CV_8U frames, temporaries reused)\n",
+    std::printf(" OpenCV reference %10.0f B (7 CV_8U frames, as written)\n", 7.0 * pixels);
+    std::printf(" OpenCV minimal %10.0f B (4 CV_8U frames, temporaries reused)\n",
                 4.0 * pixels);
 
     // --- hazard 4: the sides must agree before anything is timed -------------
@@ -417,9 +417,9 @@ bool runSize(int width, int height) {
         const uint64_t asWrittenSum = pixelChecksum(cvScratch.out);
         openCvMedian3(img.mask, cvScratch);
         if (pixelChecksum(cvScratch.out) != asWrittenSum) {
-            std::printf("  THE TWO OpenCV SPELLINGS DISAGREE -- SKIPPING THIS SIZE.\n"
-                        "  Dropping the four dead zero-fills changed the image, which means one\n"
-                        "  of the four temporaries was NOT fully overwritten after all.\n");
+            std::printf(" THE TWO OpenCV SPELLINGS DISAGREE -- SKIPPING THIS SIZE.\n"
+                        " Dropping the four dead zero-fills changed the image, which means one\n"
+                        " of the four temporaries was NOT fully overwritten after all.\n");
             return false;
         }
         bincv::denoiseMedian3(img.packed32.constView(), dst32.view());
@@ -433,9 +433,9 @@ bool runSize(int width, int height) {
         const int d64 = comparePixels(dst64, cvScratch.out);
         const int dComposed = comparePixels(composed32, cvScratch.out);
         if (d32 != 0 || d64 != 0 || dComposed != 0) {
-            std::printf("  RESULTS DISAGREE (%d / %d / %d pixels) -- SKIPPING THIS SIZE.\n"
-                        "  The implementations do not compute the same image, so no timing of\n"
-                        "  them is a comparison.\n",
+            std::printf(" RESULTS DISAGREE (%d / %d / %d pixels) -- SKIPPING THIS SIZE.\n"
+                        " The implementations do not compute the same image, so no timing of\n"
+                        " them is a comparison.\n",
                         d32, d64, dComposed);
             return false;
         }
@@ -523,36 +523,36 @@ bool runSize(int width, int height) {
         if (g_rows[i].isDenominator) reference = g_rows[i].nsPerPixel;
     }
 
-    std::printf("\n  %-20s %12s %10s %14s %8s %20s\n", "IMPLEMENTATION", "ns/pixel", "vs OpenCV",
+    std::printf("\n %-20s %12s %10s %14s %8s %20s\n", "IMPLEMENTATION", "ns/pixel", "vs OpenCV",
                 "working set", "passes", "checksum");
-    std::printf("  ------------------------------------------------------------------------"
+    std::printf(" ------------------------------------------------------------------------"
                 "----------------\n");
     for (size_t i = firstRow; i < g_rows.size(); ++i) {
         const Row& row = g_rows[i];
-        std::printf("  %-20s %12.5f %9.2fx %12.0f B %8d %20llu\n", row.impl.c_str(),
+        std::printf(" %-20s %12.5f %9.2fx %12.0f B %8d %20llu\n", row.impl.c_str(),
                     row.nsPerPixel, (row.nsPerPixel > 0.0) ? reference / row.nsPerPixel : 0.0,
                     row.workingSetBytes, row.traversals,
                     static_cast<unsigned long long>(row.checksum));
     }
-    std::printf("  ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).\n");
+    std::printf(" ratio > 1 means binCV is faster. All checksums must be EQUAL (hazard 1).\n");
 
     // --- hazard 5: how much of the denominator is not the operation ----------
     const double baselineUs = reference * pixels / 1000.0;
     const double binCvUs = g_rows[firstRow + 2].nsPerPixel * pixels / 1000.0;
-    std::printf("  PER-FRAME: OpenCV %.2f us, of which %.2f us is the measured fixed per-call\n"
-                "             cost (%.0f%%). binCV fused u32 %.2f us, fixed cost %.2f us (%.0f%%).\n"
-                "             SUBTRACT BEFORE COMPARING SIZES: the ratio column at the small\n"
-                "             sizes is mostly this, not the operation.\n",
+    std::printf(" PER-FRAME: OpenCV %.2f us, of which %.2f us is the measured fixed per-call\n"
+                " cost (%.0f%%). binCV fused u32 %.2f us, fixed cost %.2f us (%.0f%%).\n"
+                " SUBTRACT BEFORE COMPARING SIZES: the ratio column at the small\n"
+                " sizes is mostly this, not the operation.\n",
                 baselineUs, g_openCvCallFloorUs, 100.0 * g_openCvCallFloorUs / baselineUs, binCvUs,
                 g_binCvCallFloorUs, 100.0 * g_binCvCallFloorUs / binCvUs);
-    std::printf("  sink=%llu\n", static_cast<unsigned long long>(g_sink));
+    std::printf(" sink=%llu\n", static_cast<unsigned long long>(g_sink));
     return true;
 }
 
 }  // namespace
 
 int main() {
-    std::printf("T3.1 denoise -- three-pixel median vs the reference implementation\n");
+    std::printf(" denoise -- three-pixel median vs the reference implementation\n");
     std::printf("================================================================================\n\n");
     std::printf("DENOMINATOR (ARCHITECTURE 10.3): SEAL's three_pix_median_filter on the SAME\n");
     std::printf("binary content stored as CV_8U -- cv::min/cv::max over two zero-filled\n");

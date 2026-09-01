@@ -1,7 +1,7 @@
 // ===========================================================================
-// X-26 / E-6 -- THE SPEED AXIS OF ROUTE (a) AGAINST ROUTE (b).
+// earlier work -- THE SPEED AXIS OF ROUTE (a) AGAINST ROUTE (b).
 //
-// X-26's band B requires yield-per-millisecond for both routes, so this supplies
+// that measurement’s band B requires yield-per-millisecond for both routes, so this supplies
 // the millisecond. Interleaved round-robin; the reference device closes it.
 //
 // PRE-WRITTEN COST MODEL. Route (a) scores (2R+1)^2 windows per point per level,
@@ -118,7 +118,7 @@ int main() {
     std::vector<Point2f> out(pts.size());
     std::vector<uint8_t> status(pts.size());
 
-    std::printf("=== X-26 / E-6: route (a) block matching vs route (b) hybrid LK ===\n");
+    std::printf("=== route (a) block matching vs route (b) hybrid LK ===\n");
     std::printf("640x480, %zu keypoints, 31x31 window, 4 levels\n\n", pts.size());
 
     auto lkTrack = [&](int) {
@@ -149,22 +149,22 @@ int main() {
     const auto bt = measure::measureInterleaved(build, 7, 60.0);
     const auto tt = measure::measureInterleaved(track, 7, 60.0);
 
-    std::printf("  BUILD\n");
+    std::printf(" BUILD\n");
     for (size_t i = 0; i < build.size(); ++i) {
-        std::printf("    %-44s %9.1f us   spread %.0f%%\n", build[i].name.c_str(),
+        std::printf(" %-44s %9.1f us spread %.0f%%\n", build[i].name.c_str(),
                     bt[i].medianNs / 1000.0, bt[i].spreadPct());
     }
-    std::printf("    route (b) build / route (a) build = %.2fx\n",
+    std::printf(" route (b) build / route (a) build = %.2fx\n",
                 bt[0].medianNs / bt[1].medianNs);
 
-    std::printf("\n  TRACK\n");
+    std::printf("\n TRACK\n");
     for (size_t i = 0; i < track.size(); ++i) {
-        std::printf("    %-44s %9.1f us   %.2fx LK   spread %.0f%%\n", track[i].name.c_str(),
+        std::printf(" %-44s %9.1f us %.2fx LK spread %.0f%%\n", track[i].name.c_str(),
                     tt[i].medianNs / 1000.0, tt[i].medianNs / tt[0].medianNs, tt[i].spreadPct());
     }
 
-    std::printf("\n  FOOTPRINT (pyramid stage, 640x480, 4 levels)\n");
-    std::printf("    route (b): %zu B   route (a): %zu B   ratio %.2fx\n", fr.lkBytes(),
+    std::printf("\n FOOTPRINT (pyramid stage, 640x480, 4 levels)\n");
+    std::printf(" route (b): %zu B route (a): %zu B ratio %.2fx\n", fr.lkBytes(),
                 fr.blockBytes(),
                 static_cast<double>(fr.lkBytes()) / static_cast<double>(fr.blockBytes()));
     return 0;

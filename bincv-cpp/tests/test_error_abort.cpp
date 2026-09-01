@@ -1,7 +1,7 @@
 // Deliberately fails one validation check, and does not survive it.
 //
 // This is the only way to cover BINCV_THROW's abort path: in a build without
-// exceptions the macro prints and calls std::abort(), which no same-process
+// exceptions the macro prints and calls std::abort, which no same-process
 // assertion can observe. So the check lives in the process exit instead --
 // tests/CMakeLists.txt registers one ctest test per case below, each driven by
 // tests/expect_fatal.cmake, which requires that the child died AND that it named
@@ -9,19 +9,19 @@
 //
 // The same test is meaningful in both configurations, which is why the match is
 // on the message and not on the mechanism:
-//   exceptions on  -- the uncaught std::invalid_argument terminates the process,
-//                     and the runtime prints what() on the way out
-//   exceptions off -- BINCV_THROW prints "bincv: fatal error: <message>" itself
-//                     and aborts
+// exceptions on -- the uncaught std::invalid_argument terminates the process,
+// and the runtime prints what on the way out
+// exceptions off -- BINCV_THROW prints "bincv: fatal error: <message>" itself
+// and aborts
 // Either way: a bad argument is fatal, and it names the reason before dying. In
 // the no-exceptions build that is the entire error-reporting contract.
 //
 // WHY EVERY SITE AND NOT JUST ONE: BINCV_CHECK_THROWS cannot evaluate its
 // expression without exceptions, so the in-process suites skip 44 validation
 // checks in that configuration. Measured before these cases existed: deleting
-// the strideWords check (and the at()/set() bounds asserts) from binMat_impl.hpp
+// the strideWords check (and the at/set bounds asserts) from binMat_impl.hpp
 // left `-fno-exceptions` reporting 4/4 tests and 801/801 checks passed. The
-// configuration T1.4 exists for could not fail. One case per BINCV_THROW site is
+// configuration exists for could not fail. One case per BINCV_THROW site is
 // what closes that, and it closes it in all three configurations at once.
 
 #include <cstdint>
@@ -39,7 +39,7 @@ using Mat = bincv::BinMat<uint32_t>;
 // dangling stack buffer.
 uint32_t g_buffer[8] = {0};
 
-// Every case returns something derived from the object it built, and main()
+// Every case returns something derived from the object it built, and main
 // prints it. A case that stops being fatal therefore cannot be optimized into
 // nothing -- it has to produce a value, and printing that value is what the
 // "REACHED" marker reports.
@@ -59,7 +59,7 @@ int caseQuantHeightOverflow() {
     return m.cols();
 }
 
-// --- Plane indices (T1.5/T1.6) ---------------------------------------------
+// --- Plane indices ---------------------------------------------
 //
 // These are validation, not element access, so they are checked in EVERY build
 // and belong here rather than in test_assert_abort.cpp. What an unchecked one
@@ -108,7 +108,7 @@ int caseSignedMagnitudeIndexConst() {
 // --- Wrapping a buffer that is too short ------------------------------------
 //
 // The wrapping constructor is spelled exactly like BinMat's but needs N times as
-// many words, and is handed no length, so it cannot check. wrap() is the spelling
+// many words, and is handed no length, so it cannot check. wrap is the spelling
 // that is told the length -- and this is what it is for.
 uint32_t g_shortBuffer[8 * 2] = {0};   // 16 words; QuantMat<3> at 64x8 needs 48
 
@@ -204,7 +204,7 @@ int main(int argc, char** argv) {
     // exists must not look like a passing death test.
     if (argc < 2) {
         std::fprintf(stderr, "usage: %s <case>\ncases:\n", argv[0]);
-        for (const Case& c : kCases) std::fprintf(stderr, "  %s\n", c.name);
+        for (const Case& c : kCases) std::fprintf(stderr, " %s\n", c.name);
         return 2;
     }
 

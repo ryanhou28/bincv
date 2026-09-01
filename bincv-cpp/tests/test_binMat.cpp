@@ -68,7 +68,7 @@ namespace {
 
 /// @brief Reads pixel (y, x) through a view's own row pointer and word arithmetic.
 /// @note Deliberately does not go through BinMat, so that comparing this against
-///       BinMat::at() actually tests that the view describes the same layout.
+/// BinMat::at actually tests that the view describes the same layout.
 template <typename WordType>
 bool viewPixel(const bincv::BinMatConstView<WordType>& v, size_t y, size_t x) {
     constexpr size_t bits = bincv::BinMatConstView<WordType>::WordBits;
@@ -77,10 +77,10 @@ bool viewPixel(const bincv::BinMatConstView<WordType>& v, size_t y, size_t x) {
 
 /// @brief Counts every set bit in the backing words, row padding included.
 /// @note Deliberately NOT a library operation -- binCV exposes no per-word
-///       popcount (D-6). It lives here because it is the only way to see the bits
-///       countNonZero()'s per-pixel loop cannot: whenever this disagrees with
-///       countNonZero(), the padding-bit invariant is broken and every word-wise
-///       reduction built on it would over-count.
+/// popcount. It lives here because it is the only way to see the bits
+/// countNonZero's per-pixel loop cannot: whenever this disagrees with
+/// countNonZero, the padding-bit invariant is broken and every word-wise
+/// reduction built on it would over-count.
 template <typename WordType>
 int countBitsAcrossStride(const bincv::BinMat<WordType>& m) {
     int bits = 0;
@@ -146,8 +146,8 @@ void testWordType(const char* label) {
     BINCV_CHECK(odd.sparsity() == 0.0f);
 
     // The trailing partial word is the ONLY padding that exists at the default
-    // (tight) stride, and countNonZero()'s per-pixel loop never reads it -- so the
-    // mask clearTrailingBits() applies has to be asserted directly. 70 pixels
+    // (tight) stride, and countNonZero's per-pixel loop never reads it -- so the
+    // mask clearTrailingBits applies has to be asserted directly. 70 pixels
     // leaves 6 valid bits in the last word at every supported word width.
     constexpr size_t bitsPerWord = bincv::BinMat<WordType>::WordBits;
     constexpr size_t lastWord = (70 - 1) / bitsPerWord;
@@ -201,7 +201,7 @@ void testWordType(const char* label) {
     BINCV_CHECK_EQ(pdOnes.getHeight(), size_t(4));
     // border all ones, interior still zero => total = area - original area
     BINCV_CHECK_EQ(pdOnes.countNonZero(), 6 * 4 - 4 * 2);
-    // ...and the ones stopped at the row's last pixel, not at the word boundary.
+    //...and the ones stopped at the row's last pixel, not at the word boundary.
     BINCV_CHECK_EQ(countBitsAcrossStride(pdOnes), 6 * 4 - 4 * 2);
 
     // transposed / transpose
@@ -276,7 +276,7 @@ void testWordType(const char* label) {
     BINCV_CHECK(thin.empty());
 
     // Argument validation. These are setup-time checks, so they still report
-    // through BINCV_THROW (T1.4). The at()/set() bounds cases that used to sit
+    // through BINCV_THROW. The at/set bounds cases that used to sit
     // here cannot: those accessors are debug-checked and unchecked in release
     // now, so an out-of-range index aborts instead of throwing and no
     // in-process check can observe it. They moved to tests/test_assert_abort.cpp
@@ -293,7 +293,7 @@ void testWordType(const char* label) {
     BINCV_CHECK_THROWS(mat.pad(-1, 0, 0, 0), std::invalid_argument);
 }
 
-// Copy is deep and move empties the source (D-8), for every word width.
+// Copy is deep and move empties the source, for every word width.
 template <typename WordType>
 void testValueSemantics(const char* label) {
     std::cout << "\n--- Value semantics, BinMat<" << label << "> ---\n";
@@ -343,7 +343,7 @@ void testValueSemantics(const char* label) {
     BINCV_CHECK_EQ(assigned.countNonZero(), copied.countNonZero());
 
     // Move hands the buffer over and leaves the source a valid EMPTY matrix --
-    // dimensions included, so empty() cannot report false while data() is null.
+    // dimensions included, so empty cannot report false while data is null.
     bincv::BinMat<WordType> movedTo(std::move(assigned));
     BINCV_CHECK(movedTo.at(1, 69));
     BINCV_CHECK(movedTo.ownsMemory());
@@ -364,7 +364,7 @@ void testValueSemantics(const char* label) {
     // re-adopted through an interior pointer -- so the target is left UNCHANGED.
     // The failure mode being pinned here is a half-applied move: taking the
     // source's dimensions over a buffer that never moved makes every row pointer
-    // address the wrong row and breaks sizeInWords() == height * alignedWidth.
+    // address the wrong row and breaks sizeInWords == height * alignedWidth.
     bincv::BinMat<WordType> owner(64, 4);
     for (int y = 0; y < 4; ++y) owner.set(y, y, true);
     const WordType* const ownerData = owner.data();
@@ -447,13 +447,13 @@ void testExternalBuffer(const char* label) {
     // Writes through the container land in the caller's buffer...
     wrapped.set(1, 0, true);
     BINCV_CHECK(buffer[stride] == static_cast<WordType>(1));
-    // ...and writes the caller makes are visible through the container.
+    //...and writes the caller makes are visible through the container.
     buffer[2 * stride] |= static_cast<WordType>(1);
     BINCV_CHECK(wrapped.at(2, 0));
     BINCV_CHECK_EQ(wrapped.countNonZero(), 2);
 
     // A view of a wrapped matrix addresses the caller's buffer directly, so a
-    // kernel cannot tell wrapped from owning memory (D-5).
+    // kernel cannot tell wrapped from owning memory.
     BINCV_CHECK(wrapped.view().ptr == buffer);
     BINCV_CHECK_EQ(wrapped.view().stride, stride);
 
@@ -490,7 +490,7 @@ void testExternalBuffer(const char* label) {
     BINCV_CHECK(resized.data() != buffer);
     BINCV_CHECK(buffer[0] == before);
 
-    // transpose() reallocates as resize() and pad() do, so it detaches from the
+    // transpose reallocates as resize and pad do, so it detaches from the
     // caller's buffer and leaves it untouched -- including for a square matrix,
     // where an in-place bit transpose would be the natural reading.
     constexpr size_t sqSide = 8;
@@ -540,7 +540,7 @@ void testExternalBuffer(const char* label) {
     BINCV_CHECK_THROWS(bincv::BinMat<WordType>(nullptr, 8, 2, stride), std::invalid_argument);
 }
 
-// view() / constView() describe exactly the pixels the container holds.
+// view / constView describe exactly the pixels the container holds.
 template <typename WordType>
 void testViews(const char* label) {
     std::cout << "\n--- Views over BinMat<" << label << "> ---\n";
@@ -561,7 +561,7 @@ void testViews(const char* label) {
     BINCV_CHECK(!constV.empty());
 
     // Round-trip: every pixel read through the view's own row/word arithmetic
-    // matches BinMat::at(), and the set pixels are where they were put.
+    // matches BinMat::at, and the set pixels are where they were put.
     bool matches = true;
     size_t setPixels = 0;
     for (size_t y = 0; y < m.getHeight(); ++y) {
@@ -582,16 +582,16 @@ void testViews(const char* label) {
     BINCV_CHECK(m.at(1, 0));
     BINCV_CHECK_EQ(m.countNonZero(), 4);
 
-    // ...and a change made through the container is visible through a fresh view.
+    //...and a change made through the container is visible through a fresh view.
     m.set(1, 0, false);
     BINCV_CHECK(!viewPixel<WordType>(m.constView(), 1, 0));
 
-    // Implicit BinMatView -> BinMatConstView conversion (D-9).
+    // Implicit BinMatView -> BinMatConstView conversion.
     bincv::BinMatConstView<WordType> converted = m.view();
     BINCV_CHECK(converted.ptr == m.data());
     BINCV_CHECK_EQ(converted.stride, m.getAlignedWidth());
 
-    // constView() is const-callable, which is how a const BinMat is handed to a
+    // constView is const-callable, which is how a const BinMat is handed to a
     // read-only kernel.
     const bincv::BinMat<WordType>& constRef = m;
     BINCV_CHECK(constRef.constView().ptr == m.data());
@@ -604,11 +604,11 @@ void testViews(const char* label) {
     BINCV_CHECK(none.view().ptr == nullptr);
 }
 
-// D-4: the default row stride is ceil(width / WordBits) words with no padding
+// the default row stride is ceil(width / WordBits) words with no padding
 // beyond it. The 640x480 figure is the number the decision was argued on, so it
 // is pinned here rather than left to be re-derived.
 void testDefaultFootprint() {
-    std::cout << "\n--- Allocation footprint (D-4) ---\n";
+    std::cout << "\n--- Allocation footprint ---\n";
 
     // 640 px / 32 bits = 20 words per row; 20 words * 4 B * 480 rows = 38400 B.
     bincv::BinMat<uint32_t> frame(640, 480);
@@ -628,7 +628,7 @@ void testDefaultFootprint() {
     BINCV_CHECK_EQ(aligned32.getAlignedWidth(), size_t(24));
     BINCV_CHECK_EQ(aligned32.sizeInWords() * sizeof(uint32_t), size_t(46080));
 
-    // Where D-4 actually bites: pyramid level 3, which LK touches every frame.
+    // Where actually bites: pyramid level 3, which LK touches every frame.
     // 94 px -> 3 words (720 B) at word granularity, 8 words (1920 B) at 32 B.
     bincv::BinMat<uint32_t> level3(94, 60);
     BINCV_CHECK_EQ(level3.getAlignedWidth(), size_t(3));
@@ -707,7 +707,7 @@ void testRowAlignment() {
     std::cout << "\n--- Row alignment ---\n";
 
     // The default is word granularity: 70 pixels at 32 bits/word is 3 words, and
-    // that is the whole stride (D-4).
+    // that is the whole stride.
     bincv::BinMat<uint32_t> tight(70, 2);
     BINCV_CHECK_EQ(tight.getRowAlignment(), sizeof(uint32_t));
     BINCV_CHECK_EQ(tight.getAlignedWidth(), size_t(3));
@@ -772,7 +772,7 @@ void testTypeAliases() {
     static_assert(bincv::BinMat32::WordBits == 32, "BinMat32 should be 32-bit");
     static_assert(bincv::BinMat64::WordBits == 64, "BinMat64 should be 64-bit");
 
-    // The default alignment is word granularity for every word type (D-4).
+    // The default alignment is word granularity for every word type.
     static_assert(bincv::BinMat8::DefaultRowAlignment == 1, "");
     static_assert(bincv::BinMat16::DefaultRowAlignment == 2, "");
     static_assert(bincv::BinMat32::DefaultRowAlignment == 4, "");
@@ -794,7 +794,7 @@ void testTypeAliases() {
 } // namespace
 
 // One registered case per (behaviour, word type). The bodies above are unchanged
-// by the T1.7 migration -- only the driver is -- so the check count this suite
+// by the migration -- only the driver is -- so the check count this suite
 // reports is the same 845 it reported before, by construction rather than by
 // re-counting.
 

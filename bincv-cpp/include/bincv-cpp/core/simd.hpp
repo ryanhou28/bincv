@@ -2,14 +2,14 @@
 
 /// @file simd.hpp
 /// @brief Which vector paths this build actually compiled, and the auto-detection that
-///        stops one of them from going missing. **API TIER 3.**
+/// stops one of them from going missing. **API TIER 3.**
 ///
 /// ---------------------------------------------------------------------------
 /// F-5: THE FAST PATH USED TO RIDE ON A CMAKE TARGET, AND MISSING IT WAS SILENT
 ///
 /// `BINCV_HAVE_NEON` and `-mpopcnt` are INTERFACE properties of the `bincv_core` CMake
 /// target. binCV is header-only, so an integrator can do the natural thing --
-/// `-I .../include`, no `target_link_libraries` -- and get a **correct** library with
+/// `-I.../include`, no `target_link_libraries` -- and get a **correct** library with
 /// every NEON kernel `#ifdef`-ed out. Nothing warns, and nothing computes a different
 /// answer, because the vector kernels are bit-exact with the scalar ones.
 ///
@@ -22,7 +22,7 @@
 ///
 /// **2.25x from one CMake line**, and without catching it they would have reported that
 /// binCV's tracker is slower than OpenCV's on ARM. Same shape as the `uint64_t` trap
-/// (D-73) and invisible for the same reason.
+/// and invisible for the same reason.
 ///
 /// ---------------------------------------------------------------------------
 /// THE FIX IS DETECTION, NOT A DIAGNOSTIC
@@ -37,17 +37,17 @@
 ///
 /// **`-mpopcnt` cannot be fixed this way and is not pretended away.** It changes code
 /// generation rather than gating a `#if`: without it `__builtin_popcount` becomes a
-/// table lookup, worth 3.75x (X-57). No header can add a compiler flag to a translation
+/// table lookup, worth 3.75x. No header can add a compiler flag to a translation
 /// unit it is being included into. What this header does instead is make the omission
-/// **visible** -- `simdStatus()` reports it, so a consumer can log one line and see it.
+/// **visible** -- `simdStatus` reports it, so a consumer can log one line and see it.
 ///
 /// ---------------------------------------------------------------------------
 /// USE IT
 ///
 /// ```cpp
-/// std::printf("binCV: %s\n", bincv::simdStatusString());
-/// // binCV SIMD: NEON=yes AVX2=n/a popcount=hardware  (all fast paths active)
-/// // binCV SIMD: NEON=NO   AVX2=n/a popcount=software (SLOW -- link bincv_core)
+/// std::printf("binCV: %s\n", bincv::simdStatusString);
+/// // binCV SIMD: NEON=yes AVX2=n/a popcount=hardware (all fast paths active)
+/// // binCV SIMD: NEON=NO AVX2=n/a popcount=software (SLOW -- link bincv_core)
 /// ```
 
 // -------------------------------------------------------------------------------
@@ -79,7 +79,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 struct SimdStatus {
     bool neon = false;             ///< NEON kernels compiled in (aarch64, or armv7 + flag)
     bool avx2Compiled = false;     ///< AVX2 kernels compiled in (x86 with a GNU-ish compiler)
-    bool avx2Runtime = false;      ///< ...and this CPU supports AVX2
+    bool avx2Runtime = false;      ///<...and this CPU supports AVX2
     bool hardwarePopcount = false; ///< `-mpopcnt` on x86; always true on aarch64 (`cnt`)
     bool isX86 = false;
     bool isAarch64 = false;
@@ -116,10 +116,10 @@ inline SimdStatus simdStatus() {
 
 /// @brief One line naming every fast path and whether it is on. **API TIER 3.**
 /// @note **LOG THIS ONCE AT START-UP.** It is the whole answer to "why is binCV slower
-///       than I expected" for the two failure modes that produce no other symptom --
-///       and both of them are silent because the fast and slow paths agree exactly.
+/// than I expected" for the two failure modes that produce no other symptom --
+/// and both of them are silent because the fast and slow paths agree exactly.
 /// @note Returns a pointer to a function-local static; valid for the program's lifetime
-///       and not to be freed.
+/// and not to be freed.
 inline const char* simdStatusString() {
     static char buf[160];
     const SimdStatus s = simdStatus();
@@ -131,7 +131,7 @@ inline const char* simdStatusString() {
     // is bad is a reader who will not notice the bad one.
     const bool slow = (s.isAarch64 && !s.neon) || (s.isX86 && !s.hardwarePopcount);
     std::snprintf(buf, sizeof(buf),
-                  "binCV SIMD: NEON=%s AVX2=%s popcount=%s  (%s)", s.neon ? "yes" : "NO",
+                  "binCV SIMD: NEON=%s AVX2=%s popcount=%s (%s)", s.neon ? "yes" : "NO",
                   avx2, s.hardwarePopcount ? "hardware" : "SOFTWARE",
                   slow ? "SLOW -- link the bincv_core target, do not just add its include path"
                        : "fast paths active");

@@ -1,18 +1,18 @@
-// Logic kernels (T2.2): bitwiseAnd / bitwiseOr / bitwiseXor / bitwiseNot.
+// Logic kernels: bitwiseAnd / bitwiseOr / bitwiseXor / bitwiseNot.
 //
 // TWO HALVES, and they answer different questions.
 //
-//   1. The CORE half (this whole file up to the OpenCV guard) needs no OpenCV, so
-//      it runs in all four verification configurations -- including the Debug one,
-//      which is the only place BINCV_ASSERT is live, and the -fno-exceptions one,
-//      which is the embedded claim. It checks the kernels against a per-pixel
-//      reference, over differing strides, in place, at the degenerate sizes, and
-//      against the padding-bit invariant that no pixel comparison can see.
+// 1. The CORE half (this whole file up to the OpenCV guard) needs no OpenCV, so
+// it runs in all four verification configurations -- including the Debug one,
+// which is the only place BINCV_ASSERT is live, and the -fno-exceptions one,
+// which is the embedded claim. It checks the kernels against a per-pixel
+// reference, over differing strides, in place, at the degenerate sizes, and
+// against the padding-bit invariant that no pixel comparison can see.
 //
-//   2. The OPENCV half asserts what Tier 1 actually promises: bit-exactness
-//      against cv::bitwise_and/or/xor/not on the same binary content stored as
-//      CV_8U (ARCHITECTURE 5.1, 10.3), through T2.1's harness, across its full
-//      size and fill matrix, at all four word widths.
+// 2. The OPENCV half asserts what Tier 1 actually promises: bit-exactness
+// against cv::bitwise_and/or/xor/not on the same binary content stored as
+// CV_8U (the design notes, 10.3), through that work’s harness, across its full
+// size and fill matrix, at all four word widths.
 //
 // The two are not redundant. A per-pixel reference written next to the kernel can
 // share a misunderstanding with it; OpenCV cannot. And the OpenCV half cannot run
@@ -69,7 +69,7 @@ const char* opName(Op op) {
 }
 
 /// @brief The per-pixel meaning of each operation. The reference the core half
-///        compares against, written independently of the word arithmetic.
+/// compares against, written independently of the word arithmetic.
 bool reference(Op op, bool a, bool b) {
     switch (op) {
         case Op::And: return a && b;
@@ -80,9 +80,9 @@ bool reference(Op op, bool a, bool b) {
     return false;
 }
 
-/// @brief Runs one operation through the VIEW kernels (D-5), never the container.
+/// @brief Runs one operation through the VIEW kernels, never the container.
 /// @note bitwiseNot ignores `b`, which is why it is passed anyway: it keeps the
-///       sweeps below one loop over ALL_OPS rather than two.
+/// sweeps below one loop over ALL_OPS rather than two.
 template <typename WordType>
 void runOp(Op op, const bincv::BinMat<WordType>& a, const bincv::BinMat<WordType>& b,
            bincv::BinMat<WordType>& dst) {
@@ -98,12 +98,12 @@ void runOp(Op op, const bincv::BinMat<WordType>& a, const bincv::BinMat<WordType
 // Content: the same generator as tests/equivalence.hpp, minus OpenCV
 // ---------------------------------------------------------------------------
 //
-// tests/equivalence.hpp's randomBinary() is behind BINCV_WITH_OPENCV, and three of
+// tests/equivalence.hpp's randomBinary is behind BINCV_WITH_OPENCV, and three of
 // the four configurations this suite runs in have no OpenCV. This is the same
 // SplitMix64 draw and the same threshold mapping, so a case that fails here
 // reproduces there; it is duplicated rather than shared because moving it out of
 // equivalence.hpp would mean the harness and the suite it judges shared a
-// generator, and T2.1's whole argument is that shared machinery cancels faults.
+// generator, and that work’s whole argument is that shared machinery cancels faults.
 
 uint64_t nextRandom(uint64_t& state) {
     state += UINT64_C(0x9E3779B97F4A7C15);
@@ -124,7 +124,7 @@ uint32_t fillThreshold(float fillRatio) {
     return static_cast<uint32_t>(rounded);
 }
 
-/// @brief Fills a matrix through set(), so the padding bits stay clear on entry.
+/// @brief Fills a matrix through set, so the padding bits stay clear on entry.
 template <typename WordType>
 void fillRandom(bincv::BinMat<WordType>& m, float fillRatio, uint64_t seed) {
     uint64_t state = seed;
@@ -147,10 +147,10 @@ uint64_t caseSeed(int width, int height, size_t index) {
 
 /// @brief Set bits across the whole STRIDE, padding included.
 /// @note Deliberately not a library operation -- binCV exposes no per-word
-///       popcount (D-6). Comparing it against countNonZero()'s per-pixel loop is
-///       how a padding-bit violation becomes visible: they agree only when every
-///       bit past `width` is zero. This is the check that a word-wise kernel
-///       cannot pass by accident, and the one bitwiseNot fails without its mask.
+/// popcount. Comparing it against countNonZero's per-pixel loop is
+/// how a padding-bit violation becomes visible: they agree only when every
+/// bit past `width` is zero. This is the check that a word-wise kernel
+/// cannot pass by accident, and the one bitwiseNot fails without its mask.
 template <typename WordType>
 int bitsAcrossStride(const bincv::BinMat<WordType>& m) {
     int bits = 0;
@@ -188,7 +188,7 @@ std::string label(const char* wordTypeName, Op op, int width, int height, const 
 // ---------------------------------------------------------------------------
 // The sweep matrix
 //
-// The T2.1 widths, plus 128 -- an exact multiple of every supported word width,
+// The widths, plus 128 -- an exact multiple of every supported word width,
 // which is the only shape that reaches the single-contiguous-run path in
 // logic.hpp. Without it that path would be exercised only at 640, and only when
 // every argument also happened to be tightly strided.
@@ -198,7 +198,7 @@ const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70, 128, 640};
 const int HEIGHTS[] = {1, 2, 3, 17};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (D-4 makes alignment a per-object choice): 32 bytes
+// An over-aligned row stride (the design rule makes alignment a per-object choice): 32 bytes
 // is a whole number of 1-, 2-, 4- and 8-byte words, so every word type gets a
 // stride strictly larger than the ceil(width / WordBits) words its rows need.
 constexpr size_t PADDED_ALIGNMENT = 32;
@@ -248,14 +248,14 @@ void testAgainstReference(const char* wordTypeName) {
 //
 // The failure this exists to catch: a kernel that walks its arguments as one
 // dense run is correct whenever every argument was built the same way, and wrong
-// the moment one is over-aligned or wraps a caller's buffer. Measured during T2.1
+// the moment one is over-aligned or wraps a caller's buffer. Measured during earlier work
 // on the default-alignment sweep -- stride was the minimum in 48 of 48 cases, so
 // nothing there could have noticed.
 //
 // Three stride flavours per argument:
-//   tight   stride == ceil(width / WordBits)      the D-4 default
-//   padded  stride from a 32-byte row alignment   the opt-in
-//   odd     stride == tight + 3, a wrapped buffer  a stride no allocator would pick
+// tight stride == ceil(width / WordBits) the default
+// padded stride from a 32-byte row alignment the opt-in
+// odd stride == tight + 3, a wrapped buffer a stride no allocator would pick
 
 enum class Stride { Tight, Padded, Odd };
 
@@ -270,8 +270,8 @@ const char* strideName(Stride s) {
 
 /// @brief A matrix at the requested stride flavour, plus the buffer behind it.
 /// @note The `odd` flavour wraps a caller-provided buffer, so the buffer has to
-///       outlive the matrix -- which is why it is returned alongside rather than
-///       being a local of a factory function.
+/// outlive the matrix -- which is why it is returned alongside rather than
+/// being a local of a factory function.
 template <typename WordType>
 struct StridedMat {
     std::vector<WordType> buffer;   // used by Stride::Odd only
@@ -379,7 +379,7 @@ void testInPlace(const char* wordTypeName) {
                     runOp(op, a, b, expected);
 
                     // dst IS a
-                    bincv::BinMat<WordType> intoA(a);       // deep copy (D-8)
+                    bincv::BinMat<WordType> intoA(a);       // deep copy
                     switch (op) {
                         case Op::And: bitwiseAnd(intoA.constView(), b.constView(), intoA.view()); break;
                         case Op::Or:  bitwiseOr(intoA.constView(), b.constView(), intoA.view()); break;
@@ -468,7 +468,7 @@ void testDegenerate(const char* wordTypeName) {
         }
     }
 
-    std::cout << "  " << wordTypeName << ": empty and 1x1 shapes handled\n";
+    std::cout << " " << wordTypeName << ": empty and 1x1 shapes handled\n";
 }
 
 // ===========================================================================
@@ -560,7 +560,7 @@ void testGuardWords(const char* wordTypeName) {
 // MEASURED: with `& tailMask` deleted from impl::applyBinary and applyUnary left
 // alone, this file passed 56044 of 56044 checks under OpenCV and 43948 of 43948
 // core -- fully green in both. Every source in every other sweep is built by an
-// owning BinMat or through set(), so every source's padding is already zero and
+// owning BinMat or through set, so every source's padding is already zero and
 // `Op(0, 0)` is 0 for all three binary operations. The mask has nothing to do.
 //
 // A wrapped buffer is where it does. BinMat's wrap constructor documents that a
@@ -572,11 +572,11 @@ void testGuardWords(const char* wordTypeName) {
 // a CLAUDE.md hard-rule violation with no test able to see it.
 
 /// @brief A matrix wrapping a buffer whose PADDING bits are all ones.
-/// @note Written through set() after the wrap, so the pixel bits are the drawn
-///       content and every bit past `width` keeps the 1 it was born with. Stride
-///       is the tight minimum so that bitsAcrossStride() covers exactly the words
-///       the kernel writes -- the words past that are the caller's by contract and
-///       are the subject of testGuardWords instead.
+/// @note Written through set after the wrap, so the pixel bits are the drawn
+/// content and every bit past `width` keeps the 1 it was born with. Stride
+/// is the tight minimum so that bitsAcrossStride covers exactly the words
+/// the kernel writes -- the words past that are the caller's by contract and
+/// are the subject of testGuardWords instead.
 template <typename WordType>
 void makeDirtyPadded(StridedMat<WordType>& out, int width, int height, float fillRatio,
                      uint64_t seed) {
@@ -671,8 +671,8 @@ void testDirtySources(const char* wordTypeName) {
 // with "dst must alias an input exactly or not overlap it", and each was fully
 // correct in a Release build -- 0 wrong words and 0 source words modified. Both
 // shapes are ordinary: alternate row bands are what a pyramid downsample takes
-// (ARCHITECTURE 7.2), column tiles are how one frame is split across a loop, and
-// D-5 says a kernel takes any {ptr, width, height, stride}.
+// (the design notes), column tiles are how one frame is split across a loop, and
+// the design rule says a kernel takes any {ptr, width, height, stride}.
 //
 // This case runs in every configuration but only MEANS anything in the Debug one,
 // where BINCV_ASSERT is live. That is the configuration verify.sh added for
@@ -688,7 +688,7 @@ void testAliasAcceptsDisjointViews(const char* wordTypeName) {
     const int width = static_cast<int>(2 * wordBits); // exactly two words, no tail
 
     // (a) Interleaved ROW BANDS: dst is physical rows 0, 2, 4 and src is rows
-    //     1, 3, 5 of one 6-row image. Same stride, half a stride apart.
+    // 1, 3, 5 of one 6-row image. Same stride, half a stride apart.
     {
         const int height = 3;
         std::vector<WordType> buffer(rowWords * 6, static_cast<WordType>(0));
@@ -749,9 +749,9 @@ void testAliasAcceptsDisjointViews(const char* wordTypeName) {
     }
 
     // (c) One row, in place, described with two different strides. A single-row
-    //     view never reads its stride (row(0) == ptr), and BinMatView::row already
-    //     exempts height <= 1 from its own non-zero-stride precondition; the alias
-    //     predicate used to demand the two agree and aborted on a correct call.
+    // view never reads its stride (row(0) == ptr), and BinMatView::row already
+    // exempts height <= 1 from its own non-zero-stride precondition; the alias
+    // predicate used to demand the two agree and aborted on a correct call.
     {
         std::vector<WordType> buffer(rowWords, static_cast<WordType>(0x0Fu));
         const std::vector<WordType> before = buffer;
@@ -935,21 +935,21 @@ void testQuantMatOverloads(const char* wordTypeName) {
 }
 
 // ===========================================================================
-// 10. Tier 1: bit-exact against OpenCV, across the T2.1 matrix
+// 10. Tier 1: bit-exact against OpenCV, across the the matrix
 // ===========================================================================
 //
-// WHERE OPENCV'S INPUTS COME FROM, AND WHY IT IS NOT toCvMask().
+// WHERE OPENCV'S INPUTS COME FROM, AND WHY IT IS NOT toCvMask.
 //
 // The obvious spelling builds both sides through the same conversion: pack the
-// content into a BinMat, unpack it with toCvMask() to feed cv::bitwise_*, run the
-// binCV kernel, and compare the two with expectBitExact() -- which unpacks again.
+// content into a BinMat, unpack it with toCvMask to feed cv::bitwise_*, run the
+// binCV kernel, and compare the two with expectBitExact -- which unpacks again.
 // equivalence.hpp property 2 says exactly what that costs, and MEASURED here it
 // costs everything: compiled with BINCV_EQUIVALENCE_INJECT_FAULT=1 (a one-column
 // rotation in the unpacking path) this file passed 56044 of 56044 checks and
 // exited 0, and with =3 (a transposing conversion) likewise. The fault cancels
 // through a pointwise operation, on both sides, in every case.
 //
-// So OpenCV's inputs are built by randomCvMask(), the harness's SECOND generator,
+// So OpenCV's inputs are built by randomCvMask, the harness's SECOND generator,
 // which writes CV_8U bytes directly and never touches a BinMat or the unpacking
 // path. The content is identical by construction -- same SplitMix64, same seed,
 // same threshold, same row-major order -- so this is not a different test, it is
@@ -961,9 +961,9 @@ void testQuantMatOverloads(const char* wordTypeName) {
 
 /// @brief The content of a QuantMat<3>, as three independent CV_8U plane masks.
 /// @note Written from the SAME draw that sets the QuantMat pixel, byte by byte,
-///       so the two representations agree without either being derived from the
-///       other. The plane overloads' oracle cannot come from constPlane() ->
-///       unpackTo8U for the same reason the binary sweep's cannot.
+/// so the two representations agree without either being derived from the
+/// other. The plane overloads' oracle cannot come from constPlane ->
+/// unpackTo8U for the same reason the binary sweep's cannot.
 template <typename WordType>
 void fillRandomQuantWithMasks(bincv::QuantMat<3, WordType>& m, cv::Mat (&planes)[3],
                               uint64_t seed) {
@@ -985,8 +985,8 @@ void fillRandomQuantWithMasks(bincv::QuantMat<3, WordType>& m, cv::Mat (&planes)
 }
 
 /// @brief What OpenCV produces for one operation on the same content as CV_8U.
-/// @note ARCHITECTURE 10.3's denominator, as an oracle: the same binary content a
-///       user has today without binCV, through the function they call today.
+/// @note the design notes's denominator, as an oracle: the same binary content a
+/// user has today without binCV, through the function they call today.
 cv::Mat openCvResult(Op op, const cv::Mat& a, const cv::Mat& b) {
     cv::Mat out;
     switch (op) {
@@ -1034,8 +1034,8 @@ void testOpenCvEquivalence(const char* wordTypeName) {
 }
 
 /// @brief The same Tier 1 claim, with the three views deliberately mis-matched in
-///        stride -- the case a real caller hits by mixing an over-aligned frame
-///        with a tightly-packed one.
+/// stride -- the case a real caller hits by mixing an over-aligned frame
+/// with a tightly-packed one.
 template <typename WordType>
 void testOpenCvEquivalenceMixedStrides(const char* wordTypeName) {
     std::cout << "\n--- logic vs cv::bitwise_* across strides: " << wordTypeName << " ---\n";
@@ -1069,7 +1069,7 @@ void testOpenCvEquivalenceMixedStrides(const char* wordTypeName) {
 
 /// @brief The QuantMat overloads, per plane, against OpenCV.
 /// @note Each plane is a binary image in its own right, so Tier 1 applies to it
-///       unchanged -- which is the point of the bit-plane representation.
+/// unchanged -- which is the point of the bit-plane representation.
 template <typename WordType>
 void testOpenCvEquivalencePlanes(const char* wordTypeName) {
     std::cout << "\n--- QuantMat logic vs cv::bitwise_*: " << wordTypeName << " ---\n";
@@ -1080,7 +1080,7 @@ void testOpenCvEquivalencePlanes(const char* wordTypeName) {
             bincv::QuantMat<3, WordType> b(width, height);
 
             // Both representations from the same draw, neither derived from the
-            // other -- constPlane() -> toCvMask() on the OpenCV side would put
+            // other -- constPlane -> toCvMask on the OpenCV side would put
             // the plane view AND the unpacking path on both sides of the
             // comparison, which is the cancellation this section exists to avoid.
             cv::Mat cvA[3];

@@ -1,9 +1,9 @@
-// The parallel-for customisation point and the optional pool (T5.1).
+// The parallel-for customisation point and the optional pool.
 //
 // BIT-EXACTNESS IS THE PRECONDITION, NOT A GOAL. Keypoints are independent -- each
 // iteration writes only nextPts[p], status[p] and err[p], and reads only const views
 // -- so splitting the point array cannot move a flow vector. If it ever does, the
-// split has a data race and any timing measured through it is meaningless. X-65 made
+// split has a data race and any timing measured through it is meaningless. made
 // that a precondition of the experiment; this file is where it is enforced.
 //
 // The pool itself is NOT part of bincv_core: core is allocation-free and builds
@@ -47,7 +47,7 @@ BINCV_TEST(Parallel, PoolRunsEveryIndexExactlyOnce) {
     BINCV_CHECK(getNumThreads() == 1);
     size_t wrong = 0;
     for (int h : hits) if (h != 1) ++wrong;
-    std::printf("  every index once: %zu of %zu wrong\n", wrong, kN);
+    std::printf(" every index once: %zu of %zu wrong\n", wrong, kN);
     BINCV_CHECK(wrong == 0);
 }
 
@@ -107,7 +107,7 @@ BINCV_TEST(Parallel, TrackerIsBitExactWithAPoolInstalled) {
         if (serial[i].x != threaded[i].x || serial[i].y != threaded[i].y ||
             sStat[i] != tStat[i] || sErr[i] != tErr[i]) ++diff;
     }
-    std::printf("  %zu points (%zu tracked), %zu differ between serial and 4 threads\n",
+    std::printf(" %zu points (%zu tracked), %zu differ between serial and 4 threads\n",
                 pts.size(), tracked, diff);
     // A test where nothing tracked would compare zeros and pass for the wrong reason.
     BINCV_CHECK(tracked > 0);

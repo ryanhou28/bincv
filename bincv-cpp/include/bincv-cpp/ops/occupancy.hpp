@@ -1,8 +1,8 @@
 #pragma once
 
 /// @file occupancy.hpp
-/// @brief Spacing NEW detections against the points already being tracked (T5.20).
-///        **API TIER 3** -- no `cv::` equivalent, so no OpenCV name is borrowed.
+/// @brief Spacing NEW detections against the points already being tracked.
+/// **API TIER 3** -- no `cv::` equivalent, so no OpenCV name is borrowed.
 ///
 /// ---------------------------------------------------------------------------
 /// WHY THIS FILE EXISTS
@@ -25,19 +25,19 @@
 /// library's own operations.
 ///
 /// ---------------------------------------------------------------------------
-/// TWO ARMS, AND WHICH ONE TO CALL IS A MEASUREMENT (E-46 / X-93)
+/// TWO ARMS, AND WHICH ONE TO CALL IS A MEASUREMENT
 ///
-///  - `spaceCandidates` -- exhaustive. Every candidate against every live point.
-///    `O(new x live)` distance tests, vectorised eight-wide on AVX2 and four-wide on
-///    NEON. **Costs no memory at all.**
+/// - `spaceCandidates` -- exhaustive. Every candidate against every live point.
+/// `O(new x live)` distance tests, vectorised eight-wide on AVX2 and four-wide on
+/// NEON. **Costs no memory at all.**
 ///
-///  - `spaceCandidatesMasked` -- a 1-bit occupancy frame. Stamp the disc of `radius`
-///    around each live point once, then each candidate is **one bit test**.
-///    `O(live x radius^2 / WordBits + new)`. **Costs one 1-bit frame** -- 38 400 B at
-///    640x480 with `uint32_t` words.
+/// - `spaceCandidatesMasked` -- a 1-bit occupancy frame. Stamp the disc of `radius`
+/// around each live point once, then each candidate is **one bit test**.
+/// `O(live x radius^2 / WordBits + new)`. **Costs one 1-bit frame** -- 38 400 B at
+/// 640x480 with `uint32_t` words.
 ///
 /// **CALL `spaceCandidates`. THE BIT-PLANE ARM LOST, AND IT LOST BY AN ORDER OF
-/// MAGNITUDE.** X-93 fixed the rule before either arm existed and then measured both at
+/// MAGNITUDE.** fixed the rule before either arm existed and then measured both at
 /// the frontend's own operating point -- 640x480, radius 32, 120 live tracks, 300
 /// candidates, 80 free slots:
 ///
@@ -111,9 +111,9 @@ namespace impl {
 
 /// @brief Force the portable distance loop, for the benchmark and the tests. **INTERNAL.**
 /// @note Not a tuning knob. It is how the vector arm is held to giving the SAME answer
-///       as the scalar one, and how a benchmark can show the vector arm is actually
-///       running -- X-89 shipped a vector block that a mis-attached `#define` had
-///       compiled out and measured three "improvements" against it.
+/// as the scalar one, and how a benchmark can show the vector arm is actually
+/// running -- shipped a vector block that a mis-attached `#define` had
+/// compiled out and measured three "improvements" against it.
 inline bool& spacingSimdEnabled() {
     static bool on = true;
     return on;
@@ -131,10 +131,10 @@ inline bool hasSpacingSimd() { return false; }
 #endif
 
 /// @brief Is any of `pts[0, count)` strictly within `sqrt(r2)` of `(cx, cy)`?
-///        **INTERNAL** -- the scalar reference arm.
+/// **INTERNAL** -- the scalar reference arm.
 /// @note Squared distances throughout: the comparison `d2 < r2` answers `d < r`
-///       exactly for non-negative reals, and a `sqrt` per pair would be both slower
-///       and a source of boundary disagreement between the arms.
+/// exactly for non-negative reals, and a `sqrt` per pair would be both slower
+/// and a source of boundary disagreement between the arms.
 inline bool anyWithinScalar(const Point2f* pts, size_t count, float cx, float cy, float r2) {
     for (size_t i = 0; i < count; ++i) {
         const float dx = pts[i].x - cx;
@@ -147,7 +147,7 @@ inline bool anyWithinScalar(const Point2f* pts, size_t count, float cx, float cy
 #if defined(BINCV_OCCUPANCY_AVX2)
 /// @brief Eight live points per register. **INTERNAL.**
 ///
-/// `Point2f` is interleaved, so two loads give `{x0 y0 x1 y1 ...}` and a pair of
+/// `Point2f` is interleaved, so two loads give `{x0 y0 x1 y1...}` and a pair of
 /// `shuffle_ps` splits them. The shuffle is WITHIN each 128-bit lane, so the eight x
 /// values come out permuted -- which costs nothing, because the only thing asked of
 /// them is "is any lane within the radius", and that reduction is order-blind.
@@ -177,7 +177,7 @@ inline bool anyWithinAvx2(const Point2f* pts, size_t count, float cx, float cy, 
 #if defined(BINCV_OCCUPANCY_NEON)
 /// @brief Four live points per register. **INTERNAL.**
 /// @note `vld2q_f32` deinterleaves in the load, so NEON needs no shuffle at all --
-///       the one place in this library where the aarch64 spelling is the shorter one.
+/// the one place in this library where the aarch64 spelling is the shorter one.
 inline bool anyWithinNeon(const Point2f* pts, size_t count, float cx, float cy, float r2) {
     const float32x4_t vcx = vdupq_n_f32(cx);
     const float32x4_t vcy = vdupq_n_f32(cy);
@@ -207,9 +207,9 @@ inline bool anyWithin(const Point2f* pts, size_t count, float cx, float cy, floa
 
 /// @brief Sets bits `[x0, x1]` INCLUSIVE of one packed row. **INTERNAL.**
 /// @note The caller has already clamped both ends inside `[0, width)`, which is what
-///       keeps padding bits zero (CLAUDE.md's hard rule) without a masking pass: a
-///       disc never reaches past the last pixel of a row, so no word past `width` is
-///       ever touched.
+/// keeps padding bits zero (CLAUDE.md's hard rule) without a masking pass: a
+/// disc never reaches past the last pixel of a row, so no word past `width` is
+/// ever touched.
 template <typename WordType>
 inline void setBitRange(WordType* row, size_t x0, size_t x1) {
     constexpr size_t kBits = sizeof(WordType) * 8;
@@ -238,29 +238,29 @@ inline void setBitRange(WordType* row, size_t x0, size_t x1) {
 // ---------------------------------------------------------------------------
 
 /// @brief Keeps the candidates that are at least `radius` from every live point and
-///        from every candidate already kept. **API TIER 3.**
+/// from every candidate already kept. **API TIER 3.**
 /// @param candidates In/out. Survivors are compacted to the front, **in the order they
-///        arrived** -- so a caller that passes the detector's output untouched keeps
-///        its strongest-first ranking, and the greedy filter accepts strong corners
-///        before weak ones.
+/// arrived** -- so a caller that passes the detector's output untouched keeps
+/// its strongest-first ranking, and the greedy filter accepts strong corners
+/// before weak ones.
 /// @param count Entries in `candidates`.
 /// @param live The points already being tracked. May be `nullptr` when `liveCount` is 0.
 /// @param liveCount Entries in `live`.
 /// @param radius Minimum separation, in pixels. **Rejection is `distance < radius`,
-///        strictly** -- the reference's comparison and `ops/corner.hpp`'s.
+/// strictly** -- the reference's comparison and `ops/corner.hpp`'s.
 /// @param limit Stop after keeping this many. Pass the number of free track slots.
 /// @return How many candidates were kept; they are `candidates[0, return)`.
 ///
 /// @note **`radius < 1` disables the filter entirely** and keeps the first `limit`
-///       candidates. That is `gftt.cpp`'s rule, reproduced because
-///       `GoodFeaturesParams::minDistance` documents the same one and a caller
-///       forwarding that field to this function must not get a different answer at
-///       0.5 than `goodFeaturesToTrack` would.
+/// candidates. That is `gftt.cpp`'s rule, reproduced because
+/// `GoodFeaturesParams::minDistance` documents the same one and a caller
+/// forwarding that field to this function must not get a different answer at
+/// 0.5 than `goodFeaturesToTrack` would.
 /// @note Never throws, allocates nothing, and the compaction is in place -- the write
-///       index never passes the read index.
+/// index never passes the read index.
 /// @note The distance loop is vectorised where the ISA allows and gives the same
-///       answer as the scalar arm bit for bit; `impl::spacingSimdEnabled()` forces the
-///       scalar one, which is how the tests check that.
+/// answer as the scalar arm bit for bit; `impl::spacingSimdEnabled` forces the
+/// scalar one, which is how the tests check that.
 inline size_t spaceCandidates(Point2f* candidates, size_t count, const Point2f* live,
                               size_t liveCount, float radius, size_t limit) {
     BINCV_ASSERT(candidates != nullptr || count == 0,
@@ -287,7 +287,7 @@ inline size_t spaceCandidates(Point2f* candidates, size_t count, const Point2f* 
 
 /// @brief Zeroes an occupancy mask. **API TIER 3.**
 /// @note Whole words including padding, so the frame is clean for `countRegion` and
-///       friends as well as for `occupied`.
+/// friends as well as for `occupied`.
 template <typename WordType>
 inline void clearOccupancy(BinMatView<WordType> mask) {
     if (mask.empty()) return;
@@ -301,14 +301,14 @@ inline void clearOccupancy(BinMatView<WordType> mask) {
 /// @brief Sets every pixel strictly within `radius` of `(cx, cy)`. **API TIER 3.**
 ///
 /// @note **NO `sqrt` IS TAKEN, and that is not micro-optimisation** -- it is what makes
-///       the mask agree with the float distance test exactly. Rows are walked outward
-///       from the centre, where the half-width only ever shrinks, so each row's bound
-///       is reached by decrementing the previous one under the exact test
-///       `(x - cx)^2 < radius^2 - (y - cy)^2`. The total decrementing over a whole disc
-///       is `O(radius)`, not `O(radius)` per row, so the bounds are free next to the
-///       writing and no rounded square root can put a boundary pixel on the wrong side.
+/// the mask agree with the float distance test exactly. Rows are walked outward
+/// from the centre, where the half-width only ever shrinks, so each row's bound
+/// is reached by decrementing the previous one under the exact test
+/// `(x - cx)^2 < radius^2 - (y - cy)^2`. The total decrementing over a whole disc
+/// is `O(radius)`, not `O(radius)` per row, so the bounds are free next to the
+/// writing and no rounded square root can put a boundary pixel on the wrong side.
 /// @note The disc is CLIPPED to the mask, not wrapped, and never writes a word past
-///       `width` -- so padding bits stay zero with no masking pass.
+/// `width` -- so padding bits stay zero with no masking pass.
 template <typename WordType>
 inline void markDisc(BinMatView<WordType> mask, float cx, float cy, float radius) {
     if (mask.empty() || radius <= 0.0f) return;
@@ -395,7 +395,7 @@ inline void markOccupied(BinMatView<WordType> mask, const Point2f* pts, size_t c
 
 /// @brief Is the pixel `(x, y)` claimed? **API TIER 3.**
 /// @note Out of bounds is NOT occupied. A candidate outside the frame is the caller's
-///       to reject, and answering `true` would silently do it for them.
+/// to reject, and answering `true` would silently do it for them.
 template <typename WordType>
 inline bool occupied(BinMatConstView<WordType> mask, long long x, long long y) {
     if (x < 0 || y < 0) return false;
@@ -406,24 +406,24 @@ inline bool occupied(BinMatConstView<WordType> mask, long long x, long long y) {
 }
 
 /// @brief `spaceCandidates` through an occupancy mask: test one bit, and stamp the
-///        disc of every candidate kept. **API TIER 3.**
+/// disc of every candidate kept. **API TIER 3.**
 /// @param mask A mask the live points have already been stamped into --
-///        `clearOccupancy` then `markOccupied`. **It is modified**: each accepted
-///        candidate is stamped, which is what spaces the candidates against each other.
+/// `clearOccupancy` then `markOccupied`. **It is modified**: each accepted
+/// candidate is stamped, which is what spaces the candidates against each other.
 /// @param candidates In/out, compacted to the front in arrival order, as arm (a).
 /// @param radius Must be the radius the live points were stamped with.
 /// @param limit Stop after keeping this many.
 /// @return How many were kept.
 ///
 /// @note **Identical output to `spaceCandidates` for integer candidates**, pinned by
-///       `Occupancy.ArmsAgreeExactly`. A candidate is rounded to the pixel it sits in;
-///       for the integer positions a detector produces that is the point itself.
+/// `Occupancy.ArmsAgreeExactly`. A candidate is rounded to the pixel it sits in;
+/// for the integer positions a detector produces that is the point itself.
 /// @note **THIS IS NOT THE ARM TO CALL FOR A VIO TOP-UP.** At the frontend's operating
-///       point `spaceCandidates` is 26.6x faster on x86 and 7.7x on the reference
-///       device, and costs no memory against this arm's 38 400 B. The crossover is
-///       around 2 000 candidates on aarch64 and 5 000 on x86 (X-93), so this arm is
-///       for a caller filtering THOUSANDS -- which a detection top-up is not.
-///       @see EXPERIMENTS.md X-93 for the sweep and the memory cost.
+/// point `spaceCandidates` is 26.6x faster on x86 and 7.7x on the reference
+/// device, and costs no memory against this arm's 38 400 B. The crossover is
+/// around 2 000 candidates on aarch64 and 5 000 on x86, so this arm is
+/// for a caller filtering THOUSANDS -- which a detection top-up is not.
+/// @see for the sweep and the memory cost.
 template <typename WordType>
 inline size_t spaceCandidatesMasked(BinMatView<WordType> mask, Point2f* candidates,
                                     size_t count, float radius, size_t limit) {

@@ -36,9 +36,9 @@ inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief A minimal fixed-size pool that serves `bincv::parallelFor`.
 /// @note Deliberately minimal: work is claimed by index from one counter, which is
-///       the right shape when the items are keypoints -- a few hundred of them, each
-///       a few microseconds. A work-stealing deque would be more code for no
-///       measurable difference at that grain.
+/// the right shape when the items are keypoints -- a few hundred of them, each
+/// a few microseconds. A work-stealing deque would be more code for no
+/// measurable difference at that grain.
 class ThreadPool {
 public:
     /// @param threads Workers to start. `<= 1` leaves binCV serial.
@@ -66,8 +66,8 @@ public:
 
     /// @brief Makes this pool binCV's backend and sets the thread count to match.
     /// @note Install once, at start-up, before any tracking call -- the backend
-    ///       pointer is not guarded, because guarding it would put an atomic load in
-    ///       a path that runs per keypoint.
+    /// pointer is not guarded, because guarding it would put an atomic load in
+    /// a path that runs per keypoint.
     void install() {
         instance() = this;
         setNumThreads(static_cast<int>(workers_.size()) + 1);

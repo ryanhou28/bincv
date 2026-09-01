@@ -1,7 +1,7 @@
-// T3.3 -- what is the 3x3 SPECIAL CASE worth? binCV against binCV.
+// -- what is the 3x3 SPECIAL CASE worth? binCV against binCV.
 //
-// TASKS.md T3.3 says "Special-case 3x3 -- it is the common case in practice", and
-// ops/morphology.hpp does: morphRow3x3() is a second row kernel that runs when the
+// says "Special-case 3x3 -- it is the common case in practice", and
+// ops/morphology.hpp does: morphRow3x3 is a second row kernel that runs when the
 // element is 3x3 and centred. A second implementation of one function is a
 // maintenance cost forever, and this file is what says what it buys, so that a
 // Phase 5 reader deciding whether to vectorise one path or both has a number
@@ -23,24 +23,24 @@
 // that gets published against OpenCV must not depend on what else is in the file
 // that measures it, so the two comparisons live in two binaries.
 //
-// NO OPENCV. Both sides are binCV, so ARCHITECTURE 10.3's denominator does not
+// NO OPENCV. Both sides are binCV, so the design notes's denominator does not
 // apply and this builds in the reference device's DEFAULT core-only build.
 //
-// VARIANTS   impl::morphApply with MorphPath::Auto (what erode/dilate call) and
-//            with MorphPath::Generic (the general row kernel, special case off).
-//            They are required to compute the SAME image before either is timed
-//            -- the same property tests/test_morphology.cpp's
-//            Morphology.FastPathEqualsGeneric_* asserts across the whole sweep.
-// WORKLOAD   erode and dilate, rect3x3 / cross3x3 (== ellipse 3x3, D-12's note),
-//            640x480 and the pyramid ladder below it, ~50% fill, four rotated
-//            inputs, at uint32_t (D-14's default) and uint64_t.
-// METRIC     ns/pixel for both paths and the ratio, with the batch spread beside
-//            it so a difference smaller than the noise reads as one.
+// VARIANTS impl::morphApply with MorphPath::Auto (what erode/dilate call) and
+// with MorphPath::Generic (the general row kernel, special case off).
+// They are required to compute the SAME image before either is timed
+// -- the same property tests/test_morphology.cpp's
+// Morphology.FastPathEqualsGeneric_* asserts across the whole sweep.
+// WORKLOAD erode and dilate, rect3x3 / cross3x3 (== ellipse 3x3, the design rule’s note),
+// 640x480 and the pyramid ladder below it, ~50% fill, four rotated
+// inputs, at uint32_t (the design rule’s default) and uint64_t.
+// METRIC ns/pixel for both paths and the ratio, with the batch spread beside
+// it so a difference smaller than the noise reads as one.
 //
 // On x86_64 this is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms").
 // The authoritative run is
 //
-//   ./scripts/run_on_pi.sh pi4 './benchmark/morphology_path_benchmark'
+//./scripts/run_on_pi.sh pi4 './benchmark/morphology_path_benchmark'
 
 #include <cstdint>
 #include <cstdio>
@@ -105,7 +105,7 @@ bool runOne(const char* wordName, const Shape& shape, int width, int height) {
                                                         shape.se, BORDER_CONSTANT, IsErode);
     const int differing = disagreements(autoDst, genericDst);
     if (differing != 0) {
-        std::printf("  %-8s %-9s %-6s  THE TWO PATHS DISAGREE on %d pixels -- not timed.\n",
+        std::printf(" %-8s %-9s %-6s THE TWO PATHS DISAGREE on %d pixels -- not timed.\n",
                     wordName, shape.name, IsErode ? "erode" : "dilate", differing);
         return false;
     }
@@ -129,7 +129,7 @@ bool runOne(const char* wordName, const Shape& shape, int width, int height) {
     const double pixels = static_cast<double>(width) * static_cast<double>(height);
     const double a = t[0].medianNs / pixels;
     const double g = t[1].medianNs / pixels;
-    std::printf("  %-8s %-9s %-6s  %8.5f  %8.5f  %8.2fx   (spread %.1f%% / %.1f%%)\n", wordName,
+    std::printf(" %-8s %-9s %-6s %8.5f %8.5f %8.2fx (spread %.1f%% / %.1f%%)\n", wordName,
                 shape.name, IsErode ? "erode" : "dilate", a, g, (a > 0.0) ? g / a : 0.0,
                 t[0].spreadPct(), t[1].spreadPct());
     return true;
@@ -138,9 +138,9 @@ bool runOne(const char* wordName, const Shape& shape, int width, int height) {
 bool runSize(int width, int height) {
     const Shape shapes[] = {{"rect3x3", bincv::rect3x3()}, {"cross3x3", bincv::cross3x3()}};
     std::printf("\n================ %d x %d ================\n", width, height);
-    std::printf("  %-8s %-9s %-6s  %8s  %8s  %9s\n", "word", "element", "fold", "auto", "generic",
+    std::printf(" %-8s %-9s %-6s %8s %8s %9s\n", "word", "element", "fold", "auto", "generic",
                 "generic/auto");
-    std::printf("  ------------------------------------------------------------------------\n");
+    std::printf(" ------------------------------------------------------------------------\n");
     bool ok = true;
     for (const Shape& s : shapes) {
         if (!runOne<true, uint32_t>("uint32", s, width, height)) ok = false;
@@ -154,7 +154,7 @@ bool runSize(int width, int height) {
 }  // namespace
 
 int main() {
-    std::printf("T3.3 -- the 3x3 special case priced against the general row kernel\n");
+    std::printf(" -- the 3x3 special case priced against the general row kernel\n");
     std::printf("================================================================================\n\n");
     std::printf("Both columns are ops/morphology.hpp. `auto` is what bincv::erode and\n");
     std::printf("bincv::dilate call; `generic` is impl::MorphPath::Generic, the same kernel\n");
@@ -167,7 +167,7 @@ int main() {
         if (!runSize(size[0], size[1])) ok = false;
     }
 
-    std::printf("\n  sink=%llu\n", static_cast<unsigned long long>(measure::g_sink));
+    std::printf("\n sink=%llu\n", static_cast<unsigned long long>(measure::g_sink));
     if (!ok) {
         std::printf("\nAT LEAST ONE PAIR DISAGREED -- see above.\n");
         return 1;

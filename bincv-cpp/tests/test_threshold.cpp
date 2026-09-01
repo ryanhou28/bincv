@@ -1,20 +1,20 @@
-// Threshold / binarize (T3.2): the 1-bit frame from a higher-precision source.
+// Threshold / binarize: the 1-bit frame from a higher-precision source.
 //
 // TWO HALVES, and they are two different tiers rather than two different
 // configurations.
 //
-//   1. The CORE half (everything up to the OpenCV guard) covers `binarize`, the
-//      QuantMat<N> -> 1 bit kernel. **API TIER 3**: OpenCV has no N-bit image
-//      type, so there is no cv:: expression to be bit-exact against, and the
-//      reference is per pixel -- `src.at(y, x) > thresh`, the comparison
-//      ops/threshold.hpp documents. It runs in all four verification
-//      configurations, including Debug, the only one where binarize's
-//      BINCV_ASSERTs are live.
+// 1. The CORE half (everything up to the OpenCV guard) covers `binarize`, the
+// QuantMat<N> -> 1 bit kernel. **API TIER 3**: OpenCV has no N-bit image
+// type, so there is no cv:: expression to be bit-exact against, and the
+// reference is per pixel -- `src.at(y, x) > thresh`, the comparison
+// ops/threshold.hpp documents. It runs in all four verification
+// configurations, including Debug, the only one where binarize's
+// BINCV_ASSERTs are live.
 //
-//   2. The OPENCV half covers `threshold`, the CV_8U -> 1 bit kernel, and it is
-//      the tier promise: bit-exact against
-//      cv::threshold(src, dst, thresh, 255, THRESH_BINARY) through T2.1's
-//      harness, across its full size matrix.
+// 2. The OPENCV half covers `threshold`, the CV_8U -> 1 bit kernel, and it is
+// the tier promise: bit-exact against
+// cv::threshold(src, dst, thresh, 255, THRESH_BINARY) through that work’s
+// harness, across its full size matrix.
 //
 // THE COMPARISON IS STRICTLY GREATER THAN, AND THAT IS WHAT THIS FILE IS FOR.
 // cv::threshold's THRESH_BINARY sets dst where `src > thresh`; an implementation
@@ -23,24 +23,24 @@
 // samples a few thresholds on a few images can pass with the comparison
 // backwards. So the boundary is not sampled here, it is ENUMERATED:
 //
-//   Threshold.Ramp_*  a 256-pixel ramp holding every uint8 value exactly once,
-//                     thresholded at every value 0..255 and at 255 fractional
-//                     thresholds between them, each compared against
-//                     cv::threshold on the same cv::Mat. That is the ENTIRE
-//                     (pixel value, integer threshold) space of this operation,
-//                     not a sample of it.
-//   Threshold.Ends_*  thresh = 0, 254 and 255 on real content, where an
-//                     off-by-one is a whole-image difference rather than a
-//                     scattering: `>= 0` selects every pixel, `> 255` selects
-//                     none, and `>= 255` versus `> 254` differ on the value 255
-//                     alone.
-//   BinarizeSweep_*   every threshold from 0 to MaxValue + 1 on the N-bit side,
-//                     for the same reason and by the same argument.
+// Threshold.Ramp_* a 256-pixel ramp holding every uint8 value exactly once,
+// thresholded at every value 0..255 and at 255 fractional
+// thresholds between them, each compared against
+// cv::threshold on the same cv::Mat. That is the ENTIRE
+// (pixel value, integer threshold) space of this operation,
+// not a sample of it.
+// Threshold.Ends_* thresh = 0, 254 and 255 on real content, where an
+// off-by-one is a whole-image difference rather than a
+// scattering: `>= 0` selects every pixel, `> 255` selects
+// none, and `>= 255` versus `> 254` differ on the value 255
+// alone.
+// BinarizeSweep_* every threshold from 0 to MaxValue + 1 on the N-bit side,
+// for the same reason and by the same argument.
 //
 // WHY THE INPUT IS NOT PACKED CONTENT ON THE TIER 1 SIDE: both sides of that
 // comparison read ONE cv::Mat. cv::threshold reads it and bincv::threshold reads
 // it, so there is no packing on the input path at all and no shared conversion
-// that could cancel a fault (T2.1's argument). Only the binCV OUTPUT is unpacked,
+// that could cancel a fault (that work’s argument). Only the binCV OUTPUT is unpacked,
 // by the harness, and that path is anchored by tests/test_equivalence.cpp.
 //
 // WHY THE CHECK COUNT IS NOT ONE PER PIXEL: each swept case reports its
@@ -99,13 +99,13 @@ std::string sizeLabel(const char* wordTypeName, int width, int height, const std
 }
 
 /// @brief Set bits across the whole STRIDE, padding included.
-/// @note Against countNonZero()'s per-pixel loop this is how a padding-bit
-///       violation becomes visible. It is the check that matters most for
-///       `binarize`: thresholdGE answers EVERY lane in a word, including the
-///       ones past `width`, and at threshold 0 it answers "yes" to all of them
-///       whatever the planes hold (ops/bitslice.hpp). Without the tail mask the
-///       kernel applies, `binarize(src, dst, 0)` would leave up to WordBits - 1
-///       phantom pixels per row for the next reduction to count (D-13).
+/// @note Against countNonZero's per-pixel loop this is how a padding-bit
+/// violation becomes visible. It is the check that matters most for
+/// `binarize`: thresholdGE answers EVERY lane in a word, including the
+/// ones past `width`, and at threshold 0 it answers "yes" to all of them
+/// whatever the planes hold (ops/bitslice.hpp). Without the tail mask the
+/// kernel applies, `binarize(src, dst, 0)` would leave up to WordBits - 1
+/// phantom pixels per row for the next reduction to count.
 template <typename WordType>
 int bitsAcrossStride(const bincv::BinMat<WordType>& m) {
     int bits = 0;
@@ -122,8 +122,8 @@ int bitsAcrossStride(const bincv::BinMat<WordType>& m) {
     return bits;
 }
 
-/// @brief Random N-bit pixel values, written through set() so the padding stays
-///        clear on entry.
+/// @brief Random N-bit pixel values, written through set so the padding stays
+/// clear on entry.
 template <size_t N, typename WordType>
 void fillRandom(bincv::QuantMat<N, WordType>& m, uint64_t seed) {
     uint64_t state = seed;
@@ -138,16 +138,16 @@ void fillRandom(bincv::QuantMat<N, WordType>& m, uint64_t seed) {
 
 /// @brief Pixels on which binarize's result differs from `src.at(y, x) > thresh`.
 /// @note The reference is the comparison ops/threshold.hpp documents, written as
-///       an ordinary unsigned `>` on the value at() reassembles from the planes --
-///       not as a bit-sliced expression. A reference sharing thresholdGE's
-///       formulation could not fail with it.
+/// an ordinary unsigned `>` on the value at reassembles from the planes --
+/// not as a bit-sliced expression. A reference sharing thresholdGE's
+/// formulation could not fail with it.
 template <size_t N, typename WordType>
 int disagreements(const bincv::QuantMat<N, WordType>& src, const bincv::BinMat<WordType>& dst,
                   unsigned thresh) {
     int differing = 0;
     for (int y = 0; y < dst.rows(); ++y) {
         for (int x = 0; x < dst.cols(); ++x) {
-            // The cast is not decoration: QuantMat<1>::at() returns bool
+            // The cast is not decoration: QuantMat<1>::at returns bool
             // (core/types.hpp), and `bool > unsigned` is an int/unsigned
             // comparison -- which -Wextra reports and which would make the N == 1
             // instantiation the one that does not compile.
@@ -348,11 +348,11 @@ void testBinarizeStrides(const char* wordTypeName) {
 }
 
 /// @brief Source planes whose padding bits are ALREADY SET -- a legal
-///        construction (a wrapped buffer's padding belongs to its caller).
+/// construction (a wrapped buffer's padding belongs to its caller).
 /// @note This is what makes the tail mask in ops/threshold.hpp observable. With
-///       every padding bit set in every plane, an unmasked store would leave the
-///       destination's padding set for every threshold the dirty lanes pass,
-///       which is most of them.
+/// every padding bit set in every plane, an unmasked store would leave the
+/// destination's padding set for every threshold the dirty lanes pass,
+/// which is most of them.
 template <size_t N, typename WordType>
 void testBinarizeDirtyPlanes(const char* wordTypeName) {
     std::cout << "\n--- binarize<" << N << "> with dirty source padding: " << wordTypeName
@@ -411,10 +411,10 @@ void testBinarizeDegenerate(const char* wordTypeName) {
 }
 
 /// @brief The plane-view entry point, called with the array spelling directly.
-/// @note The QuantMat overload is documented as a thin wrapper over it (D-5), and
-///       this is what stops that from being only a claim: the two are called on
-///       the same content and required to produce the same image. A caller
-///       holding views rather than a container takes this path.
+/// @note The QuantMat overload is documented as a thin wrapper over it, and
+/// this is what stops that from being only a claim: the two are called on
+/// the same content and required to produce the same image. A caller
+/// holding views rather than a container takes this path.
 template <size_t N, typename WordType>
 void testBinarizePlaneViews(const char* wordTypeName) {
     std::cout << "\n--- binarize<" << N << "> through plane views: " << wordTypeName << " ---\n";
@@ -460,8 +460,8 @@ void testBinarizePlaneViews(const char* wordTypeName) {
 // `unsigned` RANGE IS WHERE THAT MATTERS, and nothing else in this file goes
 // near it with more than 8 planes:
 //
-//   * `thresh == MaxValue` must select NOTHING and must not wrap `thresh + 1`.
-//   * `thresh == MaxValue - 1` must select exactly the saturated pixels.
+// * `thresh == MaxValue` must select NOTHING and must not wrap `thresh + 1`.
+// * `thresh == MaxValue - 1` must select exactly the saturated pixels.
 //
 // Those two cases one apart are the ones a shortcut written in terms of a
 // SATURATED MaxValue answers identically and wrongly. Measured, on the code as it
@@ -551,7 +551,7 @@ void testBinarizeWideCutoff(const char* wordTypeName) {
 #ifdef BINCV_WITH_OPENCV
 
 /// @brief What OpenCV produces: THRESH_BINARY with maxval 255, so the bytes are
-///        {0, 255} -- exactly what the harness unpacks a BinMat into.
+/// {0, 255} -- exactly what the harness unpacks a BinMat into.
 cv::Mat openCvThreshold(const cv::Mat& src, double thresh) {
     cv::Mat out;
     cv::threshold(src, out, thresh, 255.0, cv::THRESH_BINARY);
@@ -560,10 +560,10 @@ cv::Mat openCvThreshold(const cv::Mat& src, double thresh) {
 
 /// @brief Random CV_8U content over the FULL value range, not a binary mask.
 /// @note tests/equivalence.hpp's generators produce {0, 255} only, which is the
-///       right content for the Tier 1 logic and shift kernels and the wrong
-///       content here: a threshold whose sources are only ever 0 or 255 agrees
-///       with itself for every threshold in 1..254. This generator is local for
-///       that reason, and it feeds BOTH sides of the comparison.
+/// right content for the Tier 1 logic and shift kernels and the wrong
+/// content here: a threshold whose sources are only ever 0 or 255 agrees
+/// with itself for every threshold in 1..254. This generator is local for
+/// that reason, and it feeds BOTH sides of the comparison.
 cv::Mat randomGray(int width, int height, uint64_t seed) {
     cv::Mat out = cv::Mat::zeros(height, width, CV_8U);
     uint64_t state = seed;
@@ -576,17 +576,17 @@ cv::Mat randomGray(int width, int height, uint64_t seed) {
     return out;
 }
 
-/// @brief The T2.1 size matrix, at the thresholds where an off-by-one is a
-///        whole-image difference rather than a scattering.
+/// @brief The size matrix, at the thresholds where an off-by-one is a
+/// whole-image difference rather than a scattering.
 /// @note BOTH DESTINATION ALIGNMENTS, and that is not padding for its own sake.
-///       At DefaultRowAlignment == sizeof(WordType) an image's aligned width IS
-///       its minimum row width, so `dst.row(y)` and `dst.ptr + y * words` are the
-///       same address and the kernel's row addressing is invisible. Measured:
-///       replacing `dst.row(y)` in ops/threshold.hpp with the stride-free
-///       expression left all 27040 checks green before this loop existed. D-4 is
-///       provisional, so an over-aligned destination is a supported shape, and
-///       the Tier 3 half already swept it (testBinarizeStrides) -- the Tier 1
-///       half not doing so was an asymmetry rather than a decision.
+/// At DefaultRowAlignment == sizeof(WordType) an image's aligned width IS
+/// its minimum row width, so `dst.row(y)` and `dst.ptr + y * words` are the
+/// same address and the kernel's row addressing is invisible. Measured:
+/// replacing `dst.row(y)` in ops/threshold.hpp with the stride-free
+/// expression left all 27040 checks green before this loop existed. this is
+/// provisional, so an over-aligned destination is a supported shape, and
+/// the Tier 3 half already swept it (testBinarizeStrides) -- the Tier 1
+/// half not doing so was an asymmetry rather than a decision.
 template <typename WordType>
 void testThresholdSizes(const char* wordTypeName) {
     std::cout << "\n--- threshold vs cv::threshold across the size matrix: " << wordTypeName
@@ -621,15 +621,15 @@ void testThresholdSizes(const char* wordTypeName) {
 }
 
 /// @brief THE BOUNDARY, ENUMERATED. A ramp holding every uint8 value exactly
-///        once, thresholded at every integer 0..255 -- so every (pixel value,
-///        threshold) pair this operation has is compared against cv::threshold.
+/// once, thresholded at every integer 0..255 -- so every (pixel value,
+/// threshold) pair this operation has is compared against cv::threshold.
 /// @note An implementation using `>=` instead of `>` differs from OpenCV on the
-///        single pixel whose value equals the threshold, for 256 of these 256
-///        cases. A sampled test can miss that; this cannot.
+/// single pixel whose value equals the threshold, for 256 of these 256
+/// cases. A sampled test can miss that; this cannot.
 /// @note The fractional thresholds are the second half. cv::threshold FLOORS
-///        `thresh` for a CV_8U source before dispatching, so `t - 0.5` must
-///        behave as `t - 1` and `t + 0.5` as `t`. ops/threshold.hpp reduces the
-///        double to the same integer cutoff, and this is what says so.
+/// `thresh` for a CV_8U source before dispatching, so `t - 0.5` must
+/// behave as `t - 1` and `t + 0.5` as `t`. ops/threshold.hpp reduces the
+/// double to the same integer cutoff, and this is what says so.
 template <typename WordType>
 void testThresholdRamp(const char* wordTypeName) {
     std::cout << "\n--- threshold over a full 0..255 ramp, every threshold: " << wordTypeName
@@ -666,8 +666,8 @@ void testThresholdRamp(const char* wordTypeName) {
 }
 
 /// @brief The ramp again at widths that are NOT a multiple of any word size, so
-///        the trailing partial word carries live boundary values rather than
-///        padding.
+/// the trailing partial word carries live boundary values rather than
+/// padding.
 template <typename WordType>
 void testThresholdRampWidths(const char* wordTypeName) {
     std::cout << "\n--- threshold over ramps at awkward widths: " << wordTypeName << " ---\n";
@@ -703,18 +703,18 @@ void testThresholdRampWidths(const char* wordTypeName) {
 }
 
 /// @brief A cv::Mat ROI -- `step != cols` -- against cv::threshold on the same
-///        ROI.
+/// ROI.
 /// @note EVERY OTHER cv::Mat IN THIS FILE IS FRESHLY ALLOCATED, hence continuous,
-///       so `src.step` is the same as `src.cols` and the kernel's row addressing
-///       is not being tested at all. Measured: replacing
-///       `src.ptr<uint8_t>(y)` in ops/threshold.hpp with
-///       `src.ptr<uint8_t>(0) + y * src.cols` left all 27040 checks green before
-///       this family existed. A cropped frame is the natural way a VIO frontend
-///       hands a region to a kernel, so this is a supported shape and not an
-///       exotic one.
+/// so `src.step` is the same as `src.cols` and the kernel's row addressing
+/// is not being tested at all. Measured: replacing
+/// `src.ptr<uint8_t>(y)` in ops/threshold.hpp with
+/// `src.ptr<uint8_t>(0) + y * src.cols` left all 27040 checks green before
+/// this family existed. A cropped frame is the natural way a VIO frontend
+/// hands a region to a kernel, so this is a supported shape and not an
+/// exotic one.
 /// @note The ROI is taken at a non-zero x offset as well as a non-zero y offset,
-///       so a kernel that got the row pitch right and the row ORIGIN wrong still
-///       fails here.
+/// so a kernel that got the row pitch right and the row ORIGIN wrong still
+/// fails here.
 template <typename WordType>
 void testThresholdRoi(const char* wordTypeName) {
     std::cout << "\n--- threshold on a cv::Mat ROI (step != cols): " << wordTypeName << " ---\n";
@@ -749,21 +749,21 @@ void testThresholdRoi(const char* wordTypeName) {
 }
 
 /// @brief Thresholds OUTSIDE the domain of the Tier 1 promise, pinned against the
-///        ARITHMETIC rather than against cv::threshold.
+/// ARITHMETIC rather than against cv::threshold.
 /// @note THIS IS THE ONE FAMILY IN THE OPENCV HALF THAT DOES NOT USE
-///       cv::threshold AS ITS REFERENCE, and the reason is written into
-///       ops/threshold.hpp: for a CV_8U source cv::threshold reduces its double
-///       with cvFloor, whose `(int)value` conversion is undefined once the value
-///       leaves `int`'s range. Measured on OpenCV 4.5.4 / x86-64 over a 0..255
-///       ramp: cv::threshold sets EVERY pixel at +1e300 and CLEARS every pixel at
-///       -1e300, i.e. the exact opposite of the comparison, in both directions.
-///       Comparing against that would be pinning a compiler's conversion
-///       behaviour.
+/// cv::threshold AS ITS REFERENCE, and the reason is written into
+/// ops/threshold.hpp: for a CV_8U source cv::threshold reduces its double
+/// with cvFloor, whose `(int)value` conversion is undefined once the value
+/// leaves `int`'s range. Measured on OpenCV 4.5.4 / x86-64 over a 0..255
+/// ramp: cv::threshold sets EVERY pixel at +1e300 and CLEARS every pixel at
+/// -1e300, i.e. the exact opposite of the comparison, in both directions.
+/// Comparing against that would be pinning a compiler's conversion
+/// behaviour.
 /// @note So the reference here is `double(pixel) > thresh` per pixel, which is
-///       what binCV computes, and the family exists so that binCV's CHOICE at the
-///       ends -- everything below, nothing above, nothing for NaN -- cannot drift
-///       silently. The suite's previous "out-of-range" values (-1.0 and 300.0) are
-///       both inside int range and never reached this.
+/// what binCV computes, and the family exists so that binCV's CHOICE at the
+/// ends -- everything below, nothing above, nothing for NaN -- cannot drift
+/// silently. The suite's previous "out-of-range" values (-1.0 and 300.0) are
+/// both inside int range and never reached this.
 template <typename WordType>
 void testThresholdOutOfDomain(const char* wordTypeName) {
     std::cout << "\n--- threshold beyond cv::threshold's domain: " << wordTypeName << " ---\n";
@@ -820,7 +820,7 @@ void testThresholdOutOfDomain(const char* wordTypeName) {
 // ---------------------------------------------------------------------------
 //
 // N = 1, 2, 3 and 5 rather than every N up to 8: 1 is BinMat (core/types.hpp),
-// and 3 and 5 are the pyramid levels ARCHITECTURE 7.2 actually reaches. 2 is the
+// and 3 and 5 are the pyramid levels the design notes actually reaches. 2 is the
 // smallest N where a plane loop can be wrong about plane order.
 
 BINCV_TEST(Threshold, BinarizeSweep_uint8_t) {

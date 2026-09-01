@@ -1,15 +1,11 @@
 # binCV-cuda
 
-> **Status: deferred / exploratory.**
+> **Status: TODO.**
 >
-> GPU backends are [deferred](../docs/ROADMAP.md#deferred--not-scoped) — not currently
-> scoped. binCV's product is the CPU path targeting embedded and mobile
-> ([ARCHITECTURE §1](../docs/ARCHITECTURE.md#1-scope)); Jetson-class devices run that
-> path on their ARM CPU today.
->
-> This directory holds early CUDA edge-filter experiments that predate the
-> current architecture. It does not use the bit-plane data model and is not
-> wired into the main build. Treat it as a reference sketch, not a component.
+> A GPU backend is in scope and not yet built. This directory holds early CUDA
+> edge-filter experiments that predate the current architecture: they do not use the
+> bit-plane data model and are not wired into the main build. Treat this as a sketch to
+> build on, not a component.
 
 When GPU work resumes, the storage model
 ([ARCHITECTURE §4.3](../docs/ARCHITECTURE.md#43-storage-model-and-views)) is designed

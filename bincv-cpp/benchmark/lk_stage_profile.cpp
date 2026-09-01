@@ -1,15 +1,15 @@
 // ===========================================================================
-// X-83 -- WHERE `track` TIME ACTUALLY GOES ON THE REFERENCE DEVICE, BY STAGE.
+// -- WHERE `track` TIME ACTUALLY GOES ON THE REFERENCE DEVICE, BY STAGE.
 //
 // An iteration-cap sweep on the device put roughly 45% of `track` OUTSIDE the
 // iteration loop:
 //
-//     cap 1   4.207 ms      cap 4   5.759
-//     cap 2   5.522         cap 20  5.766     (mean iterations 1.98)
+// cap 1 4.207 ms cap 4 5.759
+// cap 2 5.522 cap 20 5.766 (mean iterations 1.98)
 //
 // Nothing in this project has ever measured WHICH of the per-point stages that is --
 // staging, the covariance, the clip. Two guesses had already been made and measured at
-// 1.9% and 0.0%, which is what this benchmark is for. X-67/D-59 is the same lesson from
+// 1.9% and 0.0%, which is what this benchmark is for. earlier work is the same lesson from
 // the frontend's side: `build` looked like one thing and decomposed into three, one of
 // which was 3.6%.
 //
@@ -123,10 +123,10 @@ int main(int argc, char** argv) {
     const int kMinTracks = 60;
     // (the ladder depth; the stage counters are per point-level, not per level)
 
-    // THE SCALAR PATH ON BOTH ARCHITECTURES, DELIBERATELY. x86 takes D-66's keypoint
+    // THE SCALAR PATH ON BOTH ARCHITECTURES, DELIBERATELY. x86 takes the design rule’s keypoint
     // batch, which does not go through `trackOnePoint` and so records nothing -- and
     // the reference device has no batch at all. Profiling the same code both places is
-    // what makes the two columns comparable, and the device column is the one X-83 is
+    // what makes the two columns comparable, and the device column is the one this is
     // about.
 #if defined(BINCV_X86_LK_BATCH)
     bincv::impl::lkBatchEnabled() = false;
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
         std::printf("no stages recorded\n");
         return 1;
     }
-    std::printf("=== X-83: `track` by stage, %zu frames, %llu point-levels ===\n",
+    std::printf("=== `track` by stage, %zu frames, %llu point-levels ===\n",
                 files.size(), s.points);
     const struct { const char* name; unsigned long long ns; } rows[] = {
         {"setup (bounds, clipRegion)", s.setup},
@@ -184,20 +184,20 @@ int main(int argc, char** argv) {
         {"iteration loop (taps + residualSums)", s.residual},
     };
     for (const auto& r : rows) {
-        std::printf("  %-38s %10.3f ms   %5.1f%%   %7.1f ns/point-level\n", r.name,
+        std::printf(" %-38s %10.3f ms %5.1f%% %7.1f ns/point-level\n", r.name,
                     static_cast<double>(r.ns) / 1e6,
                     100.0 * static_cast<double>(r.ns) / total,
                     s.points ? static_cast<double>(r.ns) / static_cast<double>(s.points) : 0.0);
     }
-    std::printf("  %-38s %10.3f ms\n", "TOTAL (instrumented)", total / 1e6);
+    std::printf(" %-38s %10.3f ms\n", "TOTAL (instrumented)", total / 1e6);
     // How much of the iteration loop is TAP EXTRACTION rather than arithmetic. A window
     // is 31 rows, so `tapRows / iterations / 31` is the fraction of iterations that had
-    // to refresh their taps -- X-70's cache absorbing the rest.
-    std::printf("\n  residualSums calls per point-level  %8.3f\n",
+    // to refresh their taps -- that measurement’s cache absorbing the rest.
+    std::printf("\n residualSums calls per point-level %8.3f\n",
                 s.points ? static_cast<double>(s.iterations) / static_cast<double>(s.points) : 0.0);
-    std::printf("  tap ROWS extracted per point-level %8.1f\n",
+    std::printf(" tap ROWS extracted per point-level %8.1f\n",
                 s.points ? static_cast<double>(s.tapRows) / static_cast<double>(s.points) : 0.0);
-    std::printf("  tap refreshes per residualSums     %8.3f   (1.0 = the cache never hits)\n",
+    std::printf(" tap refreshes per residualSums %8.3f (1.0 = the cache never hits)\n",
                 s.iterations ? static_cast<double>(s.tapRows) / static_cast<double>(s.iterations) / 31.0
                              : 0.0);
     return 0;

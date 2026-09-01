@@ -1,4 +1,4 @@
-// Turning a plain pixel array into bits (T5.6 / T5.9 / T5.15).
+// Turning a plain pixel array into bits.
 //
 // CORE-ONLY BY DESIGN, AND THAT IS THE POINT OF THE FILE. Before ops/pack.hpp every
 // path that got pixels into binCV took a `cv::Mat`, so the three core-only
@@ -8,24 +8,24 @@
 //
 // WHAT IS ACTUALLY CHECKED, AND WHY IT IS A CROSS-PRODUCT.
 //
-//   * THREE RULES x TWO SOURCE TYPES x FOUR WORD TYPES. The rules are compile-time
-//     (X-71's 46x needs one visible predicate), so each combination is a separate
-//     instantiation and testing one of them tests one of them. A rule set with a
-//     single tested member is a one-rule op with untested branches.
+// * THREE RULES x TWO SOURCE TYPES x FOUR WORD TYPES. The rules are compile-time
+// (that measurement’s 46x needs one visible predicate), so each combination is a separate
+// instantiation and testing one of them tests one of them. A rule set with a
+// single tested member is a one-rule op with untested branches.
 //
-//   * uint16_t IS NOT DECORATION. 10-, 12- and 16-bit sensors are ordinary
-//     (ARCHITECTURE 7.8), and the x86 path narrows two 16-lane compares with
-//     `packs_epi16` + `permute4x64` before the move-mask -- lane order that a
-//     uint8-only test cannot exercise.
+// * uint16_t IS NOT DECORATION. 10-, 12- and 16-bit sensors are ordinary
+// (the design notes), and the x86 path narrows two 16-lane compares with
+// `packs_epi16` + `permute4x64` before the move-mask -- lane order that a
+// uint8-only test cannot exercise.
 //
-//   * THE SIGNED-COMPARE BIAS. SSE/AVX integer compares are SIGNED and binCV's
-//     pixels are not: `cmpgt_epi8` on 0xFF against 0x01 asks "is -1 > 1" and answers
-//     no. Thresholds above 127 (and above 32767) are chosen deliberately so a
-//     missing bias fails here rather than in a frontend.
+// * THE SIGNED-COMPARE BIAS. SSE/AVX integer compares are SIGNED and binCV's
+// pixels are not: `cmpgt_epi8` on 0xFF against 0x01 asks "is -1 > 1" and answers
+// no. Thresholds above 127 (and above 32767) are chosen deliberately so a
+// missing bias fails here rather than in a frontend.
 //
-//   * PADDING BITS. Every row's trailing partial word is checked to be zero past
-//     `width` -- CLAUDE.md's hard rule, and word-wise reductions over-count without
-//     it. The widths are odd for the same reason.
+// * PADDING BITS. Every row's trailing partial word is checked to be zero past
+// `width` -- CLAUDE.md's hard rule, and word-wise reductions over-count without
+// it. The widths are odd for the same reason.
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -74,7 +74,7 @@ void checkRule(const char* label, SrcT t) {
         const size_t used = kW % kBits;
         if (used != 0 && static_cast<W>(row[words - 1] >> used) != W{0}) ++dirty;
     }
-    std::printf("  %-30s %5zu wrong, %zu rows with dirty padding\n", label, wrong, dirty);
+    std::printf(" %-30s %5zu wrong, %zu rows with dirty padding\n", label, wrong, dirty);
     BINCV_CHECK(wrong == 0);
     BINCV_CHECK(dirty == 0);
 }
@@ -83,16 +83,16 @@ void checkRule(const char* label, SrcT t) {
 
 BINCV_TEST(Pack, RulesBySourceAndWordType) {
     // Thresholds ABOVE 127 and 32767 on purpose -- see the bias note in the header.
-    checkRule<PackRule::NonZero, uint8_t, uint32_t>("NonZero      u8  -> u32", 0);
-    checkRule<PackRule::GreaterThan, uint8_t, uint32_t>("GreaterThan  u8  -> u32", 200);
-    checkRule<PackRule::GreaterEqual, uint8_t, uint32_t>("GreaterEqual u8  -> u32", 200);
-    checkRule<PackRule::GreaterThan, uint8_t, uint8_t>("GreaterThan  u8  -> u8 ", 17);
-    checkRule<PackRule::GreaterThan, uint8_t, uint16_t>("GreaterThan  u8  -> u16", 250);
-    checkRule<PackRule::GreaterThan, uint8_t, uint64_t>("GreaterThan  u8  -> u64", 128);
-    checkRule<PackRule::NonZero, uint16_t, uint32_t>("NonZero      u16 -> u32", 0);
-    checkRule<PackRule::GreaterThan, uint16_t, uint32_t>("GreaterThan  u16 -> u32", 40000);
+    checkRule<PackRule::NonZero, uint8_t, uint32_t>("NonZero u8 -> u32", 0);
+    checkRule<PackRule::GreaterThan, uint8_t, uint32_t>("GreaterThan u8 -> u32", 200);
+    checkRule<PackRule::GreaterEqual, uint8_t, uint32_t>("GreaterEqual u8 -> u32", 200);
+    checkRule<PackRule::GreaterThan, uint8_t, uint8_t>("GreaterThan u8 -> u8 ", 17);
+    checkRule<PackRule::GreaterThan, uint8_t, uint16_t>("GreaterThan u8 -> u16", 250);
+    checkRule<PackRule::GreaterThan, uint8_t, uint64_t>("GreaterThan u8 -> u64", 128);
+    checkRule<PackRule::NonZero, uint16_t, uint32_t>("NonZero u16 -> u32", 0);
+    checkRule<PackRule::GreaterThan, uint16_t, uint32_t>("GreaterThan u16 -> u32", 40000);
     checkRule<PackRule::GreaterEqual, uint16_t, uint32_t>("GreaterEqual u16 -> u32", 4095);
-    checkRule<PackRule::GreaterThan, uint16_t, uint64_t>("GreaterThan  u16 -> u64", 1000);
+    checkRule<PackRule::GreaterThan, uint16_t, uint64_t>("GreaterThan u16 -> u64", 1000);
 }
 
 BINCV_TEST(Pack, PredicateFormMatchesRule) {
@@ -110,7 +110,7 @@ BINCV_TEST(Pack, PredicateFormMatchesRule) {
     for (size_t y = 0; y < kH; ++y)
         for (size_t i = 0; i < (kW + 31) / 32; ++i)
             if (a.constView().row(y)[i] != b.constView().row(y)[i]) ++diff;
-    std::printf("  packBitsIf vs PackRule        %zu words differ\n", diff);
+    std::printf(" packBitsIf vs PackRule %zu words differ\n", diff);
     BINCV_CHECK(diff == 0);
 }
 
@@ -130,12 +130,12 @@ BINCV_TEST(Pack, RoundTripThroughUnpack) {
         const uint8_t want = (img[i] > 128) ? 255 : 0;
         if (out[i] != want) ++wrong;
     }
-    std::printf("  pack -> unpack round trip     %zu pixels differ\n", wrong);
+    std::printf(" pack -> unpack round trip %zu pixels differ\n", wrong);
     BINCV_CHECK(wrong == 0);
 }
 
 BINCV_TEST(Pack, StridedSourceIsTheYPlaneCase) {
-    // A YUV420 Y plane is a strided 8-bit array and nothing more -- ARCHITECTURE 7.8
+    // A YUV420 Y plane is a strided 8-bit array and nothing more -- the design notes
     // says binCV takes it as-is rather than converting. This is that claim: a source
     // whose stride exceeds its width must pack identically to the tight one.
     constexpr size_t kW = 61, kH = 9, kStride = 96;
@@ -153,7 +153,7 @@ BINCV_TEST(Pack, StridedSourceIsTheYPlaneCase) {
     for (size_t y = 0; y < kH; ++y)
         for (size_t i = 0; i < (kW + 31) / 32; ++i)
             if (a.constView().row(y)[i] != b.constView().row(y)[i]) ++diff;
-    std::printf("  strided source (Y plane)      %zu words differ\n", diff);
+    std::printf(" strided source (Y plane) %zu words differ\n", diff);
     BINCV_CHECK(diff == 0);
 }
 
@@ -170,7 +170,7 @@ BINCV_TEST(Pack, PgmIsAWholeImageAndSizesItself) {
     const size_t need = writePgm<uint32_t>(m.constView(), nullptr, 0);
     std::vector<uint8_t> buf(need, 0xEE);
     const size_t wrote = writePgm<uint32_t>(m.constView(), buf.data(), buf.size());
-    std::printf("  PGM sized %zu, wrote %zu\n", need, wrote);
+    std::printf(" PGM sized %zu, wrote %zu\n", need, wrote);
     BINCV_CHECK(wrote == need);
     // "P5\n40 3\n255\n" then w*h payload bytes.
     BINCV_CHECK(buf[0] == 'P' && buf[1] == '5' && buf[2] == '\n');
@@ -180,7 +180,7 @@ BINCV_TEST(Pack, PgmIsAWholeImageAndSizesItself) {
     unpackTo8Bit<uint32_t>(m.constView(), direct.data(), kW);
     size_t diff = 0;
     for (size_t i = 0; i < kW * kH; ++i) if (buf[header + i] != direct[i]) ++diff;
-    std::printf("  PGM payload vs unpackTo8Bit   %zu bytes differ\n", diff);
+    std::printf(" PGM payload vs unpackTo8Bit %zu bytes differ\n", diff);
     BINCV_CHECK(diff == 0);
     // A short buffer must report the requirement and write NOTHING.
     std::vector<uint8_t> tiny(4, 0x11);
@@ -215,7 +215,7 @@ BINCV_TEST(Pack, StreamingInChunksMatchesWholeFrame) {
     for (size_t y = 0; y < kH; ++y)
         for (size_t i = 0; i < (kW + 31) / 32; ++i)
             if (whole.constView().row(y)[i] != streamed.constView().row(y)[i]) ++diff;
-    std::printf("  streamed in 5 ragged chunks   %zu words differ\n", diff);
+    std::printf(" streamed in 5 ragged chunks %zu words differ\n", diff);
     BINCV_CHECK(diff == 0);
 }
 
@@ -223,7 +223,7 @@ BINCV_TEST(Pnm, RoundTripsThroughAFileFormat) {
     // writePgm -> readPgm with no OpenCV anywhere. This is the `none` backend of
     // bincv_io: enough to LOOK at what binCV produced on a target that has no image
     // library, and enough to feed it a test image. A PNG decoder would be eight times
-    // the size of everything binCV does (ARCHITECTURE 7.8, measured).
+    // the size of everything binCV does (the design notes, measured).
     constexpr size_t kW = 67, kH = 11;
     std::vector<uint8_t> img(kW * kH);
     uint64_t st = 20260827;
@@ -235,7 +235,7 @@ BINCV_TEST(Pnm, RoundTripsThroughAFileFormat) {
     writePgm<uint32_t>(a.constView(), file.data(), file.size());
 
     const PgmHeader h = readPgmHeader(file.data(), file.size());
-    std::printf("  header: %zux%zu max=%u valid=%d\n", h.width, h.height, h.maxValue,
+    std::printf(" header: %zux%zu max=%u valid=%d\n", h.width, h.height, h.maxValue,
                 h.valid ? 1 : 0);
     BINCV_CHECK(h.valid);
     BINCV_CHECK(h.width == kW && h.height == kH && h.maxValue == 255);
@@ -246,7 +246,7 @@ BINCV_TEST(Pnm, RoundTripsThroughAFileFormat) {
     for (size_t y = 0; y < kH; ++y)
         for (size_t i = 0; i < (kW + 31) / 32; ++i)
             if (a.constView().row(y)[i] != b.constView().row(y)[i]) ++diff;
-    std::printf("  write -> read round trip      %zu words differ\n", diff);
+    std::printf(" write -> read round trip %zu words differ\n", diff);
     BINCV_CHECK(diff == 0);
 }
 
@@ -264,17 +264,17 @@ BINCV_TEST(Pnm, RejectsRatherThanMisreads) {
     const uint8_t commented[] = {'P','5','\n','#',' ','h','i','\n','2',' ','2','\n','2','5','5','\n',
                                  9, 9, 9, 9};
     const PgmHeader ok = readPgmHeader(commented, sizeof(commented));
-    std::printf("  comment-bearing header valid=%d %zux%zu\n", ok.valid ? 1 : 0, ok.width,
+    std::printf(" comment-bearing header valid=%d %zux%zu\n", ok.valid ? 1 : 0, ok.width,
                 ok.height);
     BINCV_CHECK(ok.valid && ok.width == 2 && ok.height == 2);
 }
 
 // ---------------------------------------------------------------------------
-// T5.9: N BITS PER PIXEL, AND THE RULE MUST NOT MOVE.
+// N BITS PER PIXEL, AND THE RULE MUST NOT MOVE.
 //
 // `QuantMat<N>::fromCVMat` is the only N-bit ingestion binCV had, it needs OpenCV, and
 // its rule -- `round(v * MaxValue / 255)` -- is load-bearing: it is
-// `toCVMatNormalized`'s EXACT inverse, and D-42 records a deliberate divergence from
+// `toCVMatNormalized`'s EXACT inverse, and the design rule records a deliberate divergence from
 // OpenCV at bytes 1..127. `packQuant` replaces it in core, so "reproduces it bit for
 // bit" is the whole contract and this is where it is pinned.
 // ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ BINCV_TEST(Pack, QuantScaleReproducesFromCVMatsRule) {
     bad += quantMatchesReference<3>(47, 4);
     bad += quantMatchesReference<4>(32, 6);
     bad += quantMatchesReference<8>(40, 3);
-    std::printf("  packQuant<Scale> vs fromCVMat's rule, N in {1,2,3,4,8}: %zu differ\n",
+    std::printf(" packQuant<Scale> vs fromCVMat's rule, N in {1,2,3,4,8}: %zu differ\n",
                 bad);
     BINCV_CHECK_EQ(bad, size_t{0});
 }
@@ -355,12 +355,12 @@ BINCV_TEST(Pack, QuantWithMatchesQuantWhenGivenTheSameRule) {
             }
         }
     }
-    std::printf("  packQuantWith(LUT) vs packQuant<Scale>, N=3: %zu words differ\n", bad);
+    std::printf(" packQuantWith(LUT) vs packQuant<Scale>, N=3: %zu words differ\n", bad);
     BINCV_CHECK_EQ(bad, size_t{0});
 }
 
 BINCV_TEST(Pack, QuantAcceptsSixteenBitSources) {
-    // T5.15's point: a 10-, 12- or 16-bit sensor hands you `uint16_t`, and the scale is
+    // that work’s point: a 10-, 12- or 16-bit sensor hands you `uint16_t`, and the scale is
     // against THAT type's range, not 255.
     constexpr size_t N = 4, w = 40, h = 3;
     std::vector<uint16_t> src(w * h);
@@ -381,7 +381,7 @@ BINCV_TEST(Pack, QuantAcceptsSixteenBitSources) {
         if (got != expect) ++bad;
         if (expect == 15u) ++sawTop;
     }
-    std::printf("  packQuant<Scale> uint16 -> N=4: %zu differ, %zu pixels reached 15\n",
+    std::printf(" packQuant<Scale> uint16 -> N=4: %zu differ, %zu pixels reached 15\n",
                 bad, sawTop);
     BINCV_CHECK_EQ(bad, size_t{0});
     BINCV_CHECK(sawTop > 0);   // the ramp must actually reach the top of the range

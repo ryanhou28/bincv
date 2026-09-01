@@ -1,27 +1,27 @@
-// The reference pipeline's three-pixel median filter (T3.1): denoiseMedian3.
+// The reference pipeline's three-pixel median filter: denoiseMedian3.
 //
 // THE CORRECTNESS BAR IS NOT "MATCHES A FORMULA I WROTE DOWN". It is "matches
 // the reference implementation pixel for pixel on binary input", and the
 // reference is SEAL/src/temporal_processing/denoise.cpp. Two consequences shape
 // this file:
 //
-//   * The OpenCV half PORTS THE REFERENCE'S ACTUAL cv:: CALLS -- cv::Mat::zeros
-//     for both neighbour matrices, the two copyTo range assignments, then
-//     cv::min / cv::max in the reference's order. It does not reimplement the
-//     filter from the comment above them. That matters for exactly one reason:
-//     THE BORDER. `right_pixels` is written only on colRange(0, cols - 1) and
-//     `above_pixels` only on rowRange(1, rows), so the last column's right
-//     neighbour and the first row's above neighbour are the zeros the matrices
-//     were constructed with. Porting the construction rather than the reading of
-//     it means that border cannot be got wrong here in a way that agrees with a
-//     kernel that got it wrong the same way.
+// * The OpenCV half PORTS THE REFERENCE'S ACTUAL cv:: CALLS -- cv::Mat::zeros
+// for both neighbour matrices, the two copyTo range assignments, then
+// cv::min / cv::max in the reference's order. It does not reimplement the
+// filter from the comment above them. That matters for exactly one reason:
+// THE BORDER. `right_pixels` is written only on colRange(0, cols - 1) and
+// `above_pixels` only on rowRange(1, rows), so the last column's right
+// neighbour and the first row's above neighbour are the zeros the matrices
+// were constructed with. Porting the construction rather than the reading of
+// it means that border cannot be got wrong here in a way that agrees with a
+// kernel that got it wrong the same way.
 //
-//   * The CORE half has its own per-pixel reference with the neighbourhood
-//     written out as coordinates, so the three configurations without OpenCV --
-//     including Debug, the only one where denoiseMedian3's BINCV_ASSERTs are
-//     live, and -fno-exceptions, which is the embedded claim -- still check every
-//     pixel. The two references are independent: one is a sorting network over
-//     cv::Mat bytes, the other is `median of three bools` by counting.
+// * The CORE half has its own per-pixel reference with the neighbourhood
+// written out as coordinates, so the three configurations without OpenCV --
+// including Debug, the only one where denoiseMedian3's BINCV_ASSERTs are
+// live, and -fno-exceptions, which is the embedded claim -- still check every
+// pixel. The two references are independent: one is a sorting network over
+// cv::Mat bytes, the other is `median of three bools` by counting.
 //
 // A THIRD CHECK NEITHER OF THOSE IS: Denoise.Composed_* runs
 // shiftDown / shiftLeft / majority3 -- the spelling ops/bitslice.hpp and
@@ -70,7 +70,7 @@ using bincv::denoiseMedian3;
 // Content: the same generator as tests/equivalence.hpp, minus OpenCV
 // ---------------------------------------------------------------------------
 //
-// Duplicated rather than shared, for T2.1's reason: a harness that shared a
+// Duplicated rather than shared, for that work’s reason: a harness that shared a
 // generator with the suite judging it could cancel a fault through both sides.
 
 uint64_t nextRandom(uint64_t& state) {
@@ -91,7 +91,7 @@ uint32_t fillThreshold(float fillRatio) {
     return static_cast<uint32_t>(rounded);
 }
 
-/// @brief Fills through set(), so the padding bits stay clear on entry.
+/// @brief Fills through set, so the padding bits stay clear on entry.
 template <typename WordType>
 void fillRandom(bincv::BinMat<WordType>& m, float fillRatio, uint64_t seed) {
     uint64_t state = seed;
@@ -114,9 +114,9 @@ std::string sizeLabel(const char* wordTypeName, int width, int height, const cha
 }
 
 /// @brief Set bits across the whole STRIDE, padding included.
-/// @note Compared against countNonZero()'s per-pixel loop this is how a
-///       padding-bit violation becomes visible; binCV exposes no per-word
-///       popcount (D-6), so the test writes its own.
+/// @note Compared against countNonZero's per-pixel loop this is how a
+/// padding-bit violation becomes visible; binCV exposes no per-word
+/// popcount, so the test writes its own.
 template <typename WordType>
 int bitsAcrossStride(const bincv::BinMat<WordType>& m) {
     int bits = 0;
@@ -139,9 +139,9 @@ int bitsAcrossStride(const bincv::BinMat<WordType>& m) {
 
 /// @brief The median of three bools, by counting rather than by maj3.
 /// @note Deliberately NOT (a&b)|(b&c)|(a&c) and not a sorting network either: a
-///       reference that shares an expression with the code under test cannot
-///       fail with it. "At least two of three" is the definition of the median
-///       of three values drawn from a two-element set, and this counts them.
+/// reference that shares an expression with the code under test cannot
+/// fail with it. "At least two of three" is the definition of the median
+/// of three values drawn from a two-element set, and this counts them.
 bool refMedian3(bool p1, bool p2, bool p3) {
     const int set = (p1 ? 1 : 0) + (p2 ? 1 : 0) + (p3 ? 1 : 0);
     return set >= 2;
@@ -149,15 +149,15 @@ bool refMedian3(bool p1, bool p2, bool p3) {
 
 /// @brief The reference filter's three-pixel L, per pixel, with the zero border.
 /// @note THE NEIGHBOURHOOD AND THE BORDER, both from
-///       SEAL/src/temporal_processing/denoise.cpp:
-///         p1 = src[y - 1][x]  -- `above_pixels`, whose rowRange(1, rows) is the
-///                                only part ever written, so row 0 reads the
-///                                cv::Mat::zeros it was built with.
-///         p2 = src[y][x]      -- the pixel itself.
-///         p3 = src[y][x + 1]  -- `right_pixels`, whose colRange(0, cols - 1) is
-///                                the only part ever written, so column
-///                                width - 1 reads zero.
-///       Zero fill in both cases; not replicate, not reflect.
+/// SEAL/src/temporal_processing/denoise.cpp:
+/// p1 = src[y - 1][x] -- `above_pixels`, whose rowRange(1, rows) is the
+/// only part ever written, so row 0 reads the
+/// cv::Mat::zeros it was built with.
+/// p2 = src[y][x] -- the pixel itself.
+/// p3 = src[y][x + 1] -- `right_pixels`, whose colRange(0, cols - 1) is
+/// the only part ever written, so column
+/// width - 1 reads zero.
+/// Zero fill in both cases; not replicate, not reflect.
 template <typename WordType>
 bool refPixel(const bincv::BinMat<WordType>& src, int y, int x) {
     const bool p1 = (y > 0) && src.at(y - 1, x);
@@ -178,18 +178,18 @@ int disagreements(const bincv::BinMat<WordType>& src, const bincv::BinMat<WordTy
     return differing;
 }
 
-// The T2.1 widths, plus 128 -- an exact multiple of every supported word width.
+// The widths, plus 128 -- an exact multiple of every supported word width.
 // 1 and 7 are the widths where the right-neighbour never crosses a word boundary
 // at any word type, which is the geometry the kernel's trailing-word path owns.
 const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70, 128, 640};
 const int HEIGHTS[] = {1, 2, 3, 17, 37};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (D-4 makes alignment a per-object choice).
+// An over-aligned row stride (the design rule makes alignment a per-object choice).
 constexpr size_t PADDED_ALIGNMENT = 32;
 
 // ===========================================================================
-// 1. The per-pixel reference, over the T2.1 size and fill matrix
+// 1. The per-pixel reference, over the size and fill matrix
 // ===========================================================================
 
 template <typename WordType>
@@ -228,10 +228,10 @@ void testReference(const char* wordTypeName) {
 // that a REPLICATE or REFLECT border gives a different answer from a zero one.
 //
 // The construction: an all-ones image. Then
-//   * every interior pixel is 1 (all three neighbours are 1),
-//   * row 0 becomes p2 & p3 -- 1 everywhere except the last column,
-//   * the last column becomes p1 & p2 -- 1 everywhere except row 0,
-//   * pixel (0, width - 1) has TWO zero neighbours and becomes 0.
+// * every interior pixel is 1 (all three neighbours are 1),
+// * row 0 becomes p2 & p3 -- 1 everywhere except the last column,
+// * the last column becomes p1 & p2 -- 1 everywhere except row 0,
+// * pixel (0, width - 1) has TWO zero neighbours and becomes 0.
 // Under BORDER_REPLICATE every one of those would stay 1, so the expected image
 // below is only correct for the zero fill the reference uses.
 
@@ -281,12 +281,12 @@ void testBorder(const char* wordTypeName) {
 //
 // ops/denoise.hpp claims its one-pass kernel is exactly
 //
-//     shiftDown(src, above, 1);  shiftLeft(src, right, 1);
-//     majority3(above, src, right, dst);
+// shiftDown(src, above, 1); shiftLeft(src, right, 1);
+// majority3(above, src, right, dst);
 //
 // with the two frame-sized scratch buffers removed. This runs that composition
 // -- through the shipped ops/shift.hpp and ops/bitslice.hpp, at their DEFAULT
-// border, which is BORDER_CONSTANT with value false (D-12) -- and requires the
+// border, which is BORDER_CONSTANT with value false -- and requires the
 // two images to agree on every pixel. A disagreement means either the kernel's
 // inline right-shift or ops/shift.hpp's has a word-boundary bug, and the check
 // is cheap because both sides already exist.
@@ -480,11 +480,11 @@ void testDegenerateViews(const char* wordTypeName) {
 }
 
 /// @brief Two views over ONE buffer that share no word must be ACCEPTED.
-/// @note D-11: the aliasing predicate is exact and per row, not a bounding-box
-///       test, so interleaved row bands over a single allocation are legal
-///       arguments. Rejecting them would abort the Debug build on a view a caller
-///       is entitled to build (D-5). Nothing here checks a pixel that the
-///       reference sweep does not; the check is that the call RUNS.
+/// @note the aliasing predicate is exact and per row, not a bounding-box
+/// test, so interleaved row bands over a single allocation are legal
+/// arguments. Rejecting them would abort the Debug build on a view a caller
+/// is entitled to build. Nothing here checks a pixel that the
+/// reference sweep does not; the check is that the call RUNS.
 template <typename WordType>
 void testDisjointViewsAccepted(const char* wordTypeName) {
     std::cout << "\n--- denoiseMedian3 accepts disjoint views over one buffer: " << wordTypeName
@@ -509,13 +509,13 @@ void testDisjointViewsAccepted(const char* wordTypeName) {
         DENOISE_EXPECT(disagreements(srcMat, dstMat) == 0,
                        "denoiseMedian3 accepts interleaved views over one buffer", label);
 
-        // NO bitsAcrossStride() CHECK HERE, deliberately. That helper walks the
+        // NO bitsAcrossStride CHECK HERE, deliberately. That helper walks the
         // whole STRIDE, and this view's stride spans the interleaved source rows
         // -- another view's live pixels, not padding. Counting them would report a
         // violation that is the test's construction rather than the kernel's
         // behaviour. The padding invariant is asserted over ordinary views by
         // every other family in this file; what this case exists to check is that
-        // the D-11 predicate ACCEPTS the view at all (a bounding-box test would
+        // the predicate ACCEPTS the view at all (a bounding-box test would
         // abort the Debug build here).
     }
 }
@@ -529,23 +529,23 @@ void testDisjointViewsAccepted(const char* wordTypeName) {
 /// @brief SEAL's three_pix_median_filter, transcribed.
 ///
 /// @note This is a PORT, not a paraphrase. Every line below appears in
-///       SEAL/src/temporal_processing/denoise.cpp in this order, including the
-///       two `cv::Mat::zeros` constructions and the two range-limited copyTo
-///       calls that are the entire border specification:
+/// SEAL/src/temporal_processing/denoise.cpp in this order, including the
+/// two `cv::Mat::zeros` constructions and the two range-limited copyTo
+/// calls that are the entire border specification:
 ///
-///         img.colRange(1, img.cols).copyTo(right_pixels.colRange(0, img.cols - 1));
-///         img.rowRange(0, img.rows - 1).copyTo(above_pixels.rowRange(1, img.rows));
+/// img.colRange(1, img.cols).copyTo(right_pixels.colRange(0, img.cols - 1));
+/// img.rowRange(0, img.rows - 1).copyTo(above_pixels.rowRange(1, img.rows));
 ///
-///       Column `cols - 1` of `right_pixels` and row 0 of `above_pixels` are
-///       never assigned, so they keep the zeros they were built with. Writing
-///       the border out by hand instead would put this file's reading of those
-///       ranges on both sides of the comparison, which is the one thing the port
-///       exists to avoid.
+/// Column `cols - 1` of `right_pixels` and row 0 of `above_pixels` are
+/// never assigned, so they keep the zeros they were built with. Writing
+/// the border out by hand instead would put this file's reading of those
+/// ranges on both sides of the comparison, which is the one thing the port
+/// exists to avoid.
 /// @note The only edit is guarding the two copies for a single-column or
-///       single-row image, where cv::Range(1, 1) and cv::Range(0, 0) are empty.
-///       The reference is only ever run on real frames; the T2.1 matrix includes
-///       1-pixel extents, and an empty range is a cv::Mat assertion rather than a
-///       no-op.
+/// single-row image, where cv::Range(1, 1) and cv::Range(0, 0) are empty.
+/// The reference is only ever run on real frames; the the matrix includes
+/// 1-pixel extents, and an empty range is a cv::Mat assertion rather than a
+/// no-op.
 cv::Mat referenceMedian3(const cv::Mat& img) {
     cv::Mat right_pixels = cv::Mat::zeros(img.size(), img.type());
     cv::Mat above_pixels = cv::Mat::zeros(img.size(), img.type());
@@ -562,8 +562,8 @@ cv::Mat referenceMedian3(const cv::Mat& img) {
     cv::Mat min_max = cv::Mat::zeros(img.size(), img.type());
     cv::Mat median_img = cv::Mat::zeros(img.size(), img.type());
 
-    // |   | p1 |    |
-    // |   | p2 | p3 |
+    // | | p1 | |
+    // | | p2 | p3 |
     // p1 is above_pixels, p3 is right_pixels
     // Median = max(min(p1, p2), min(max(p1, p2), p3))
     cv::min(above_pixels, img, min_p1_p2);
@@ -590,7 +590,7 @@ void testAgainstReference(const char* wordTypeName) {
 
                 // The harness's SECOND generator, which never touches the packing
                 // or the unpacking path -- so the two sides of the comparison do
-                // not share a conversion that could cancel (T2.1's anchor).
+                // not share a conversion that could cancel (that work’s anchor).
                 const cv::Mat cvSrc = bincv::test::randomCvMask(width, height, fill, seed);
 
                 bincv::BinMat<WordType> dst(width, height);

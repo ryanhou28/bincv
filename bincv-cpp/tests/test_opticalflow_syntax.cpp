@@ -1,7 +1,7 @@
 // The aarch64 SYNTAX surface for scripts/check_arm_syntax.sh.
 //
-// Roughly a third of this library is invisible to every x86 build -- D-33's tap
-// batching, X-40's accumulator, ops/fast.hpp's NEON mask, ops/pack.hpp's bit-weight
+// Roughly a third of this library is invisible to every x86 build -- the design rule’s tap
+// batching, that measurement’s accumulator, ops/fast.hpp's NEON mask, ops/pack.hpp's bit-weight
 // fold -- because it lives behind `#if BINCV_HAVE_NEON && __aarch64__`. An edit there
 // can be structurally broken and still pass all four verify.sh configurations.
 //

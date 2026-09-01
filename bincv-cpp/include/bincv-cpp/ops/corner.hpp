@@ -2,9 +2,9 @@
 
 /// @file corner.hpp
 /// @brief The minimum-eigenvalue corner response and the good-features selection
-///        it feeds (T3.7). **API TIER 2** -- see the tier note below.
+/// it feeds. **API TIER 2** -- see the tier note below.
 ///
-/// This is the operation the whole covariance machinery was built for. T3.6 gives
+/// This is the operation the whole covariance machinery was built for. gives
 /// the 2x2 Lucas-Kanade matrix `[sumXX, sumXY; sumXY, sumYY]` over ONE window;
 /// this file evaluates its smaller eigenvalue at EVERY pixel of a frame and then
 /// performs the selection `cv::goodFeaturesToTrack` performs -- a quality
@@ -14,26 +14,26 @@
 /// ---------------------------------------------------------------------------
 /// THE TIER, STATED FIRST BECAUSE IT IS THE THING A CALLER MUST NOT GET WRONG
 ///
-/// **API TIER 2** (ARCHITECTURE 5.1): the same call shape and the same ROLE as
+/// **API TIER 2** (the design notes): the same call shape and the same ROLE as
 /// `cv::goodFeaturesToTrack` / `cv::cornerMinEigenVal`, with deliberately
 /// different numerics. It is **NOT** bit-exact against OpenCV and no test here
 /// claims it is. Two independent reasons, and either one alone would be enough:
 ///
-///   * **The derivatives are binarized, not Sobel.** binCV's `Ix` and `Iy` are
-///     `[-1, 0, 1]` taps over a ONE-BIT image (T3.5, D-3), so every gradient is in
-///     {-1, 0, +1}. `cv::cornerMinEigenVal` runs a 3x3 Sobel over a byte image.
-///     Those are different numbers before any window is summed. That is the
-///     reference pipeline's own choice -- `gftt_corner_derivative_type: BINARIZED`
-///     in SEAL/seal_params.yaml -- and this file reproduces THAT, not OpenCV's
-///     default path.
-///   * **`cv::cornerMinEigenVal` works in float and cannot be compared exactly.**
-///     Its `eig` map is `CV_32F` produced by a float box filter over float
-///     products of float Sobel outputs. binCV's three sums are EXACT INTEGERS from
-///     population counts, so the only rounding on this side is the square root.
-///     An exact integer comparison against `cv::cornerMinEigenVal` is therefore
-///     not available even in principle, and the validation here is against a
-///     per-pixel reference of this file's own (tests/test_corner.cpp) plus the
-///     reference pipeline's documented behaviour.
+/// * **The derivatives are binarized, not Sobel.** binCV's `Ix` and `Iy` are
+/// `[-1, 0, 1]` taps over a ONE-BIT image, so every gradient is in
+/// {-1, 0, +1}. `cv::cornerMinEigenVal` runs a 3x3 Sobel over a byte image.
+/// Those are different numbers before any window is summed. That is the
+/// reference pipeline's own choice -- `gftt_corner_derivative_type: BINARIZED`
+/// in SEAL/seal_params.yaml -- and this file reproduces THAT, not OpenCV's
+/// default path.
+/// * **`cv::cornerMinEigenVal` works in float and cannot be compared exactly.**
+/// Its `eig` map is `CV_32F` produced by a float box filter over float
+/// products of float Sobel outputs. binCV's three sums are EXACT INTEGERS from
+/// population counts, so the only rounding on this side is the square root.
+/// An exact integer comparison against `cv::cornerMinEigenVal` is therefore
+/// not available even in principle, and the validation here is against a
+/// per-pixel reference of this file's own (tests/test_corner.cpp) plus the
+/// reference pipeline's documented behaviour.
 ///
 /// Nothing in this file is Tier 1 and nothing in it promises OpenCV bit-exactness.
 ///
@@ -46,18 +46,18 @@
 /// `gftt_block_size: 3`, `gftt_use_harris_detector: 0` -- so MINIMUM EIGENVALUE,
 /// not Harris; GoodFeaturesParams' defaults are those four values and say so).
 ///
-/// `cornerEigenValsVecs()` forms, per pixel, `dx*dx`, `dx*dy`, `dy*dy`; box-filters
+/// `cornerEigenValsVecs` forms, per pixel, `dx*dx`, `dx*dy`, `dy*dy`; box-filters
 /// the three planes with `normalize = false` (so a SUM over the block, not a mean);
 /// and calls `calcMinEigenVal`:
 ///
-///     float a = cov[j*3]*0.5f;      // sumXX / 2
-///     float b = cov[j*3+1];         // sumXY
-///     float c = cov[j*3+2]*0.5f;    // sumYY / 2
-///     dst[j] = (a + c) - std::sqrt((a - c)*(a - c) + b*b);
+/// float a = cov[j*3]*0.5f; // sumXX / 2
+/// float b = cov[j*3+1]; // sumXY
+/// float c = cov[j*3+2]*0.5f; // sumYY / 2
+/// dst[j] = (a + c) - std::sqrt((a - c)*(a - c) + b*b);
 ///
 /// which is `(sumXX + sumYY)/2 - sqrt(((sumXX - sumYY)/2)^2 + sumXY^2)`, the
 /// smaller eigenvalue of `[[xx, xy], [xy, yy]]`. Those three sums are exactly
-/// T3.6's `GradientCovariance` over a `blockSize x blockSize` window, so this file
+/// that work’s `GradientCovariance` over a `blockSize x blockSize` window, so this file
 /// computes no products and no box filter: it asks ops/covariance.hpp's popcounts
 /// for the same three integers.
 ///
@@ -73,28 +73,28 @@
 /// absolute threshold taken from the reference.
 ///
 /// ---------------------------------------------------------------------------
-/// THE SLIDING FORM IS WHY X-11 AND T2.11 EXIST, AND IT IS USED HERE
+/// THE SLIDING FORM IS WHY AND EXIST, AND IT IS USED HERE
 ///
-/// A response map sweeps a window over EVERY pixel. That is X-11's "DENSE" access
+/// A response map sweeps a window over EVERY pixel. That is that measurement’s "DENSE" access
 /// pattern verbatim -- the one ops/reduce.hpp's table and ops/covariance.hpp's
 /// docstring both point at this operation for -- so `impl::cornerResponseColumn`
 /// sweeps a COLUMN at a time with two `SlidingWindowCount`s alive:
 ///
-///     SlidingWindowCount<WordType> xx(magX, firstWindow);   // ΣIx² , slid
-///     SlidingWindowCount<WordType> yy(magY, firstWindow);   // ΣIy² , slid
-///     for (y ...) {
-///         const SplitCount xy = countAndSplit(magX, magY, signX, signY, window);
-///         response = minEigenValue(xx.count(), yy.count(), xy.crossTerm());
-///         xx.slideDown(); yy.slideDown();
-///     }
+/// SlidingWindowCount<WordType> xx(magX, firstWindow); // ΣIx², slid
+/// SlidingWindowCount<WordType> yy(magY, firstWindow); // ΣIy², slid
+/// for (y...) {
+/// const SplitCount xy = countAndSplit(magX, magY, signX, signY, window);
+/// response = minEigenValue(xx.count, yy.count, xy.crossTerm);
+/// xx.slideDown; yy.slideDown;
+/// }
 ///
 /// **TWO OF THE THREE NUMBERS SLIDE AND THE THIRD DOES NOT, and that is not an
-/// oversight here -- it is the property T3.6's docstring says T3.7 has to know.**
+/// oversight here -- it is the property that work’s docstring says has to know.**
 /// `SlidingWindowCount` slides ONE plane's popcount, so `sumXX` and `sumYY` each
 /// get one accumulator and cost two row counts per position whatever `blockSize`
 /// is. `sumXY` needs `magX & magY` split by `signX ^ signY`, nothing in
 /// ops/reduce.hpp slides a split, and making it slide would cost TWO frame-sized
-/// planes per pyramid level -- more than the one plane D-15 axis 3 already
+/// planes per pyramid level -- more than the one plane the axis 3 already
 /// declined on memory grounds. So the cross term is recomputed per position
 /// through the four-argument `countAndSplit`, which is the widest form that needs
 /// no scratch.
@@ -102,7 +102,7 @@
 /// **The sweep is column-major because the accumulator only slides DOWNWARD.**
 /// A row-major sweep would need one accumulator per column -- a `width`-long
 /// scratch array the caller would have to own, which is a second shape and a
-/// second decision (X-11 declined exactly that for the box accumulator). Two live
+/// second decision ( declined exactly that for the box accumulator). Two live
 /// accumulators and zero scratch is what this costs instead. That traversal order
 /// is not free, and the measurement below prices it.
 ///
@@ -110,19 +110,19 @@
 /// AND IT IS NOT A WIN AT THE REFERENCE PIPELINE'S OWN BLOCK SIZE. READ THIS
 /// BEFORE QUOTING 15.9x AT THIS OPERATION.
 ///
-/// X-11b's 15.9x is a single-plane `countNonZero` dense sweep. It applies to the
+/// that measurement’s 15.9x is a single-plane `countNonZero` dense sweep. It applies to the
 /// two numbers that slide and to nothing else, and when the shape is embedded in
 /// THIS caller the advantage does not merely shrink -- below `blockSize` 15 it
 /// reverses. Measured on the reference device at 640x480,
 /// `benchmark/corner_benchmark.cpp`, spreads 0.04-3.4%
-/// ([X-18](../../../../docs/EXPERIMENTS.md), `results/corner_benchmark_pi4.log`):
+/// (`results/corner_benchmark_pi4.log`):
 ///
-///     blockSize   sliding      recompute    net       incremental   traversal
-///                 ns/pixel     ns/pixel     ratio     alone         alone
-///        3         101.25        84.83      0.84x      0.94x         1.12x
-///        7         142.84       138.55      0.97x      1.04x         1.07x
-///       15         252.89       278.78      1.10x      1.14x         1.03x
-///       31         581.44       704.39      1.21x      1.22x         1.01x
+/// blockSize sliding recompute net incremental traversal
+/// ns/pixel ns/pixel ratio alone alone
+/// 3 101.25 84.83 0.84x 0.94x 1.12x
+/// 7 142.84 138.55 0.97x 1.04x 1.07x
+/// 15 252.89 278.78 1.10x 1.14x 1.03x
+/// 31 581.44 704.39 1.21x 1.22x 1.01x
 ///
 /// The last two columns separate the two things this shape changes at once, using
 /// a third variant that recomputes COLUMN-MAJOR: the incremental state alone is
@@ -144,12 +144,12 @@
 /// of the two rows it is taken from.
 ///
 /// **That contradicts documented guidance** -- ops/reduce.hpp's "WHICH SHAPE TO
-/// REACH FOR" table, ops/covariance.hpp's docstring and D-15 all send a dense
-/// sweep to the incremental form without a window-size qualification, and T3.7's
+/// REACH FOR" table, ops/covariance.hpp's docstring and all send a dense
+/// sweep to the incremental form without a window-size qualification, and that work’s
 /// spec did too. CLAUDE.md's rule for a measurement that contradicts a documented
 /// claim is to report it rather than adjust the code to fit the doc, so: the
 /// sliding form is what ships, the number above is what it costs, and **whether
-/// this operation should select on `blockSize` is an OPEN DECISION** that X-18
+/// this operation should select on `blockSize` is an OPEN DECISION** that
 /// registers and does not take. One device and one frame size is not enough to
 /// hard-code a threshold -- the x86 run has the opposite sign at `blockSize` 3
 /// (1.19x in the sliding form's favour) and spreads past 50%, which is why it is
@@ -161,17 +161,17 @@
 /// The table above is binCV against binCV. CLAUDE.md's denominator rule asks for
 /// something else -- OpenCV doing the SAME semantic operation on the SAME binary
 /// content stored as `CV_8U`, with PEAK WORKING SET beside speed -- and
-/// [X-19](../../../../docs/EXPERIMENTS.md) measures it
+/// measures it
 /// (`benchmark/corner_opencv_benchmark.cpp`,
 /// `results/corner_opencv_benchmark_pi4.log`). The denominator is the reference
 /// pipeline written out in stock OpenCV: two `filter2D` taps, three product planes,
 /// a `boxFilter` SUM, the min eigenvalue, then gftt.cpp's selection. Reference
 /// device, 640x480:
 ///
-///     variant                        ns/pixel   vs denom   B/pixel
-///     binCV                            138.11      0.55x     16.54  (5.14 sized)
-///     OpenCV binarized (denominator)    76.06      1.00x     36.94  (29.35 sized)
-///     OpenCV Sobel (stock, different numerics)  59.50  1.28x  29.00
+/// variant ns/pixel vs denom B/pixel
+/// binCV 138.11 0.55x 16.54 (5.14 sized)
+/// OpenCV binarized (denominator) 76.06 1.00x 36.94 (29.35 sized)
+/// OpenCV Sobel (stock, different numerics) 59.50 1.28x 29.00
 ///
 /// **binCV is 2.23x smaller (5.71x once both candidate buffers are sized to the
 /// measured survivor count) and 1.82x slower.** Roughly a third of that 1.82x is
@@ -194,7 +194,7 @@
 /// `sumXX`, `sumYY` and `sumXY` are exact integers bounded by `blockSize^2`. The
 /// response is evaluated as
 ///
-///     (S - sqrt(D)) / 2     with  S = xx + yy,  D = (xx - yy)^2 + 4*xy^2
+/// (S - sqrt(D)) / 2 with S = xx + yy, D = (xx - yy)^2 + 4*xy^2
 ///
 /// rather than as the halved form above, so that **both operands of the square
 /// root are integers and no rounding happens before it**. `S` and `D` are exact in
@@ -210,15 +210,15 @@
 /// **Two consequences worth stating, because the selection below compares
 /// responses with `==`:**
 ///
-///   * **The response is exactly 0.0 if and only if the window's matrix is
-///     singular** (`det = xx*yy - xy^2 == 0`, which includes every empty and every
-///     rank-one window -- a straight edge, or no gradient at all). `S^2 - D =
-///     4*det`, so `det == 0` makes `D` the perfect square `S^2`, the root exact,
-///     and the difference exactly zero. No clamping, no epsilon.
-///   * **Otherwise the response is at least `1/(2*blockSize^2)`**: with `det >= 1`,
-///     `S - sqrt(D) = 4*det/(S + sqrt(D)) >= 2/S >= 1/blockSize^2`. So a positive
-///     response can never round to zero, in `double` or in `float`, and the
-///     `val > threshold` test needs no tolerance.
+/// * **The response is exactly 0.0 if and only if the window's matrix is
+/// singular** (`det = xx*yy - xy^2 == 0`, which includes every empty and every
+/// rank-one window -- a straight edge, or no gradient at all). `S^2 - D =
+/// 4*det`, so `det == 0` makes `D` the perfect square `S^2`, the root exact,
+/// and the difference exactly zero. No clamping, no epsilon.
+/// * **Otherwise the response is at least `1/(2*blockSize^2)`**: with `det >= 1`,
+/// `S - sqrt(D) = 4*det/(S + sqrt(D)) >= 2/S >= 1/blockSize^2`. So a positive
+/// response can never round to zero, in `double` or in `float`, and the
+/// `val > threshold` test needs no tolerance.
 ///
 /// **The map is stored as `float`, which is the reference's own `eig` type and
 /// half the footprint of `double` (2 B/pixel saved -- 614 kB at 640x480, which is
@@ -241,15 +241,15 @@
 /// `goodFeaturesToTrack` performs FOUR steps and their order decides which corners
 /// survive. The reference's order, read out of gftt.cpp:
 ///
-///   1. `maxVal = minMaxLoc(eig)` over the WHOLE map, border included.
-///   2. `threshold(eig, eig, maxVal*qualityLevel, 0, THRESH_TOZERO)` -- strictly
-///      greater than the threshold survives.
-///   3. `dilate(eig, tmp, Mat())` and keep `x` where `val != 0 && val == tmp[x]`,
-///      scanning `y` in `[1, height-1)` and `x` in `[1, width-1)`. That is a 3x3
-///      NON-MAXIMUM SUPPRESSION, and it EXCLUDES the outermost row and column from
-///      ever being a corner.
-///   4. `std::sort` descending by response, then the greedy MINIMUM-DISTANCE
-///      spacing filter, accepting until `maxCorners`.
+/// 1. `maxVal = minMaxLoc(eig)` over the WHOLE map, border included.
+/// 2. `threshold(eig, eig, maxVal*qualityLevel, 0, THRESH_TOZERO)` -- strictly
+/// greater than the threshold survives.
+/// 3. `dilate(eig, tmp, Mat)` and keep `x` where `val != 0 && val == tmp[x]`,
+/// scanning `y` in `[1, height-1)` and `x` in `[1, width-1)`. That is a 3x3
+/// NON-MAXIMUM SUPPRESSION, and it EXCLUDES the outermost row and column from
+/// ever being a corner.
+/// 4. `std::sort` descending by response, then the greedy MINIMUM-DISTANCE
+/// spacing filter, accepting until `maxCorners`.
 ///
 /// **NMS comes BEFORE the sort and the spacing filter, and swapping those two
 /// stages changes the answer.** NMS's kills are not a subset of the spacing
@@ -258,15 +258,15 @@
 /// higher one is ever accepted. The case that pins it, and which
 /// `Corner.SelectionOrder_PinsNmsBeforeDistance` builds as a response map directly:
 ///
-///     A = (10, 10) response 100      B = (13, 10) response 99
-///     C = (14, 10) response 98       minDistance = 3.5
+/// A = (10, 10) response 100 B = (13, 10) response 99
+/// C = (14, 10) response 98 minDistance = 3.5
 ///
-///   * **NMS first (this file, and the reference).** C is beside B, which is
-///     higher, so NMS deletes C. Candidates are `{A, B}`; A is accepted; B is 3
-///     from A and `9 < 12.25` rejects it. Result: **{A}**.
-///   * **Spacing first.** All three are ranked: A accepted; B rejected (9 < 12.25);
-///     C is 4 from A and `16 >= 12.25`, so C is ACCEPTED. Result: **{A, C}** -- a
-///     corner one pixel from a stronger response that was itself discarded.
+/// * **NMS first (this file, and the reference).** C is beside B, which is
+/// higher, so NMS deletes C. Candidates are `{A, B}`; A is accepted; B is 3
+/// from A and `9 < 12.25` rejects it. Result: **{A}**.
+/// * **Spacing first.** All three are ranked: A accepted; B rejected (9 < 12.25);
+/// C is 4 from A and `16 >= 12.25`, so C is ACCEPTED. Result: **{A, C}** -- a
+/// corner one pixel from a stronger response that was itself discarded.
 ///
 /// This file matches the first. The test asserts `{A}` and asserts that the second
 /// order would have produced `{A, C}`, so the case has teeth rather than merely
@@ -288,11 +288,11 @@
 /// `std::vector<const float*>`, pointers INTO the `eig` map collected in ascending
 /// raster order, with
 ///
-///     struct greaterThanPtr {                 // opencv_internal/include/gftt.hpp
-///         bool operator()(const float* a, const float* b) const
-///         // Ensure a fully deterministic result of the sort
-///         { return (*a > *b) ? true : (*a < *b) ? false : (a > b); }
-///     };
+/// struct greaterThanPtr { // opencv_internal/include/gftt.hpp
+/// bool operator(const float* a, const float* b) const
+/// // Ensure a fully deterministic result of the sort
+/// { return (*a > *b) ? true : (*a < *b) ? false : (a > b); }
+/// };
 ///
 /// The comment is the reference's own. That third arm is a strict total order over
 /// distinct addresses, and on a contiguous `CV_32F` map a larger address is a LATER
@@ -311,7 +311,7 @@
 /// ---------------------------------------------------------------------------
 /// THE BORDER, AND THE RING OF SPURIOUS CORNERS THAT IS NOT THERE
 ///
-/// D-19 chose BORDER_REFLECT_101 for the derivative partly BECAUSE a zero fill
+/// the design rule chose BORDER_REFLECT_101 for the derivative partly BECAUSE a zero fill
 /// would manufacture an edge around the whole frame for this operation to detect.
 /// That reasoning is checked rather than repeated: `Corner.BorderRing_*` runs the
 /// detector on a blank frame and on an all-ones frame, at every word type and
@@ -321,8 +321,8 @@
 /// derivative is exactly zero there, a uniform frame has an all-zero response map,
 /// `maxVal` is 0, and THRESH_TOZERO admits nothing.
 ///
-/// **The response map's own border differs from the reference's by design.** T3.6
-/// CLIPS a window at the frame edge (promise 2, D-13) where `cv::boxFilter` in the
+/// **The response map's own border differs from the reference's by design.**
+/// CLIPS a window at the frame edge (promise 2) where `cv::boxFilter` in the
 /// reference replicates it under BORDER_REPLICATE, so this file's response is
 /// smaller than the reference's in the outermost `blockSize/2` rows and columns.
 /// At the reference's `blockSize = 3` that is the outermost row and column alone,
@@ -334,40 +334,40 @@
 /// ---------------------------------------------------------------------------
 /// WHAT THIS OPERATION PROMISES
 ///
-///  1. **Views, never containers, in the kernel** (D-5). The response map is a
-///     caller-owned `float` buffer described by ResponseMap, in the same
-///     pointer/extent/stride shape the bit views use.
-///  2. **NO HEAP, ANYWHERE.** No allocation in the response map, in the NMS scan,
-///     in the ranking or in the spacing filter. The candidate list IS the caller's
-///     output array (see the capacity contract on selectGoodFeatures), the ranking
-///     is an in-place `std::sort` and a bounded `std::push_heap`/`pop_heap`, and
-///     the spacing filter compacts in place. tests/test_corner.cpp counts
-///     `operator new` -- plain and C++17 over-aligned -- across every entry point
-///     and requires zero.
-///  3. **Never throws** (ARCHITECTURE 5.3). Mismatched dimensions, a non-positive
-///     `blockSize`, a stride too short for a row and a null map are programming
-///     errors reported by BINCV_ASSERT in debug builds and undefined in release.
-///     There is no error return.
-///  4. **Ternary planes only, i.e. pyramid level 0.** The container spelling takes
-///     `TernaryMat` and rejects `SignedQuantMat<N>` for `N > 1` at compile time;
-///     the view spelling cannot and does not.
-///     **THIS IS NOW T3.7's OWN LIMIT AND NOT ops/covariance.hpp's.** That file's
-///     promise 1 used to say the same thing and no longer does: T3.10 gave the
-///     covariance a bit-sliced N-bit kernel, because X-20 found the tracker's
-///     accuracy failure IS the 1-bit pyramid. The corner response has not been
-///     widened to match -- it reads `countAndSplit` and `SlidingWindowCount`
-///     directly rather than going through `gradientCovariance`, so widening it is
-///     its own piece of work and not a re-export of T3.10's.
-///  5. **Padding is never counted** (D-13), inherited from the reductions.
-///  6. **There are TWO shapes, and they return the SAME corners.**
-///     `goodFeaturesToTrack` takes a frame-sized `float` map;
-///     `goodFeaturesToTrackStreaming` (T3.11) takes a THREE-ROW ring --
-///     1 228 800 B against 7 680 B at 640x480 -- and returns identical corners,
-///     identical order, identical `CornerResult`. That is a contract proven
-///     element for element by `Corner.Streaming_*`, not a resemblance. The
-///     streaming form is the RECOMMENDED path at the reference pipeline's
-///     `blockSize` 3 (D-22); the frame-map form stays for callers who need the
-///     map itself, and is faster at large blocks. See "STAGE 4" below.
+/// 1. **Views, never containers, in the kernel**. The response map is a
+/// caller-owned `float` buffer described by ResponseMap, in the same
+/// pointer/extent/stride shape the bit views use.
+/// 2. **NO HEAP, ANYWHERE.** No allocation in the response map, in the NMS scan,
+/// in the ranking or in the spacing filter. The candidate list IS the caller's
+/// output array (see the capacity contract on selectGoodFeatures), the ranking
+/// is an in-place `std::sort` and a bounded `std::push_heap`/`pop_heap`, and
+/// the spacing filter compacts in place. tests/test_corner.cpp counts
+/// `operator new` -- plain and C++17 over-aligned -- across every entry point
+/// and requires zero.
+/// 3. **Never throws** (the design notes). Mismatched dimensions, a non-positive
+/// `blockSize`, a stride too short for a row and a null map are programming
+/// errors reported by BINCV_ASSERT in debug builds and undefined in release.
+/// There is no error return.
+/// 4. **Ternary planes only, i.e. pyramid level 0.** The container spelling takes
+/// `TernaryMat` and rejects `SignedQuantMat<N>` for `N > 1` at compile time;
+/// the view spelling cannot and does not.
+/// **THIS IS NOW that work’s OWN LIMIT AND NOT ops/covariance.hpp's.** That file's
+/// promise 1 used to say the same thing and no longer does: gave the
+/// covariance a bit-sliced N-bit kernel, because a measurement found the tracker's
+/// accuracy failure IS the 1-bit pyramid. The corner response has not been
+/// widened to match -- it reads `countAndSplit` and `SlidingWindowCount`
+/// directly rather than going through `gradientCovariance`, so widening it is
+/// its own piece of work and not a re-export of that work’s.
+/// 5. **Padding is never counted**, inherited from the reductions.
+/// 6. **There are TWO shapes, and they return the SAME corners.**
+/// `goodFeaturesToTrack` takes a frame-sized `float` map;
+/// `goodFeaturesToTrackStreaming` takes a THREE-ROW ring --
+/// 1 228 800 B against 7 680 B at 640x480 -- and returns identical corners,
+/// identical order, identical `CornerResult`. That is a contract proven
+/// element for element by `Corner.Streaming_*`, not a resemblance. The
+/// streaming form is the RECOMMENDED path at the reference pipeline's
+/// `blockSize` 3; the frame-map form stays for callers who need the
+/// map itself, and is faster at large blocks. See "STAGE 4" below.
 
 #include <algorithm>  // std::sort, push_heap, pop_heap -- none of which allocates
 #include <cmath>      // std::sqrt, correctly rounded (see PRECISION above)
@@ -387,9 +387,9 @@ inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief A caller-owned, non-owning view of a `float` response map.
 /// @note **API TIER 3 as a TYPE** -- OpenCV passes a `cv::Mat`, and binCV has no
-///       float container. This is the same pointer/extent/stride shape
-///       BinMatConstView uses (D-5), so a caller can point it at a `cv::Mat`'s
-///       rows, a stack array or a pool block without a conversion.
+/// float container. This is the same pointer/extent/stride shape
+/// BinMatConstView uses, so a caller can point it at a `cv::Mat`'s
+/// rows, a stack array or a pool block without a conversion.
 /// @note `stride` is in ELEMENTS, not bytes, matching BinMatView's "in words".
 struct ResponseMap {
     float* data = nullptr;  ///< first element of row 0
@@ -399,16 +399,16 @@ struct ResponseMap {
 
     ResponseMap() = default;
     /// @note **FOUR ARGUMENTS, AND THE CONSTRUCTOR EXISTS SO THREE WILL NOT COMPILE.**
-    ///       As a bare aggregate this type accepted `{data, width, height}` and left
-    ///       `stride` zero, which makes `row(y)` return row 0 for every `y` -- every
-    ///       row of a multi-row map aliased, silently. The `BINCV_ASSERT` in `row()`
-    ///       catches it in a checked build and is a NO-OP in release, so a release
-    ///       binary ran on garbage and looked like it worked.
+    /// As a bare aggregate this type accepted `{data, width, height}` and left
+    /// `stride` zero, which makes `row(y)` return row 0 for every `y` -- every
+    /// row of a multi-row map aliased, silently. The `BINCV_ASSERT` in `row`
+    /// catches it in a checked build and is a NO-OP in release, so a release
+    /// binary ran on garbage and looked like it worked.
     ///
-    ///       **A binCV user hit this**, in `examples/vio_frontend.cpp`, which had
-    ///       exactly that three-argument call; only their checked build caught it.
-    ///       `ConstResponseMap` already had this constructor and so was never
-    ///       vulnerable -- the two views disagreeing is what left the hole.
+    /// **A binCV user hit this**, in `examples/vio_frontend.cpp`, which had
+    /// exactly that three-argument call; only their checked build caught it.
+    /// `ConstResponseMap` already had this constructor and so was never
+    /// vulnerable -- the two views disagreeing is what left the hole.
     ResponseMap(float* data_, size_t width_, size_t height_, size_t stride_)
         : data(data_), width(width_), height(height_), stride(stride_) {}
 
@@ -424,7 +424,7 @@ struct ResponseMap {
     }
 };
 
-/// @brief The read-only spelling of ResponseMap (D-9's two-view-types rule).
+/// @brief The read-only spelling of ResponseMap (the design rule’s two-view-types rule).
 struct ConstResponseMap {
     const float* data = nullptr;
     size_t width = 0;
@@ -434,9 +434,9 @@ struct ConstResponseMap {
     ConstResponseMap() = default;
     ConstResponseMap(const float* data_, size_t width_, size_t height_, size_t stride_)
         : data(data_), width(width_), height(height_), stride(stride_) {}
-    /// @note Implicit, so `selectGoodFeatures(map, ...)` compiles with a mutable
-    ///       ResponseMap. Unlike the bit views this is never a template argument,
-    ///       so D-9's deduction hazard does not arise.
+    /// @note Implicit, so `selectGoodFeatures(map,...)` compiles with a mutable
+    /// ResponseMap. Unlike the bit views this is never a template argument,
+    /// so the design rule’s deduction hazard does not arise.
     ConstResponseMap(const ResponseMap& m)
         : data(m.data), width(m.width), height(m.height), stride(m.stride) {}
 
@@ -450,13 +450,13 @@ struct ConstResponseMap {
 
 /// @brief One detected corner: integer pixel coordinates and its response.
 /// @note **Integer coordinates, matching the reference.** gftt.cpp emits
-///       `cv::Point2f((float)x, (float)y)` -- a float type holding an integer
-///       value, because `cv::goodFeaturesToTrack`'s signature says `Point2f`.
-///       Nothing in this operation is subpixel; T3.8's optical flow is where
-///       subpixel positions come from (ARCHITECTURE 7.9).
+/// `cv::Point2f((float)x, (float)y)` -- a float type holding an integer
+/// value, because `cv::goodFeaturesToTrack`'s signature says `Point2f`.
+/// Nothing in this operation is subpixel; that work’s optical flow is where
+/// subpixel positions come from (the design notes).
 /// @note Deliberately NOT named `KeyPoint`: `cv::KeyPoint` carries size, angle,
-///       octave and class fields this does not have, and Tier 2 borrows call
-///       shapes, not struct layouts.
+/// octave and class fields this does not have, and Tier 2 borrows call
+/// shapes, not struct layouts.
 struct Corner {
     int x = 0;              ///< column
     int y = 0;              ///< row
@@ -464,15 +464,15 @@ struct Corner {
 };
 
 /// @brief The four parameters `goodFeaturesToTrack` takes, defaulted to the values
-///        the reference pipeline actually runs.
+/// the reference pipeline actually runs.
 /// @note The defaults are SEAL/seal_params.yaml verbatim: `gftt_max_corners: 200`,
-///       `gftt_quality_level: 0.01`, `gftt_min_distance: 33.33333333333`,
-///       `gftt_block_size: 3`. `gftt_use_harris_detector: 0` is why there is no
-///       Harris option here at all -- the reference selects the minimum
-///       eigenvalue, and an unused second response function is an untested one.
-///       `gftt_gradient_size: 3` is the Sobel aperture, which the BINARIZED
-///       derivative path ignores (it is a fixed `[-1, 0, 1]` tap), so it has no
-///       field.
+/// `gftt_quality_level: 0.01`, `gftt_min_distance: 33.33333333333`,
+/// `gftt_block_size: 3`. `gftt_use_harris_detector: 0` is why there is no
+/// Harris option here at all -- the reference selects the minimum
+/// eigenvalue, and an unused second response function is an untested one.
+/// `gftt_gradient_size: 3` is the Sobel aperture, which the BINARIZED
+/// derivative path ignores (it is a fixed `[-1, 0, 1]` tap), so it has no
+/// field.
 struct GoodFeaturesParams {
     int maxCorners = 200;                    ///< <= 0 means "no limit" (reference behaviour)
     double qualityLevel = 0.01;              ///< survivors need response > this * max response
@@ -482,8 +482,8 @@ struct GoodFeaturesParams {
 
 /// @brief What `goodFeaturesToTrack` / `selectGoodFeatures` report back.
 /// @note `candidatesTruncated` is not decoration. It is the ONLY way a caller
-///       learns that the answer is a restriction of the reference's rather than
-///       equal to it -- see the capacity contract on selectGoodFeatures.
+/// learns that the answer is a restriction of the reference's rather than
+/// equal to it -- see the capacity contract on selectGoodFeatures.
 struct CornerResult {
     size_t count = 0;                  ///< corners written to the caller's array
     size_t candidatesRanked = 0;       ///< NMS survivors that were ranked
@@ -494,15 +494,15 @@ namespace impl {
 
 /// @brief The smaller eigenvalue of `[[xx, xy], [xy, yy]]`, from exact integers.
 /// @return `(S - sqrt(D))/2` with `S = xx + yy` and `D = (xx - yy)^2 + 4*xy^2`,
-///         rounded once to `float`.
+/// rounded once to `float`.
 /// @note Spelled with INTEGER operands under the root on purpose: the halved form
-///       `(a + c) - sqrt((a - c)^2 + b^2)` that gftt.cpp uses rounds `a`, `b` and
-///       `c` before the root, which is a rounding the root's correct rounding does
-///       not bound. These two agree exactly whenever the halved form is exact, and
-///       this one is exact strictly more often.
+/// `(a + c) - sqrt((a - c)^2 + b^2)` that gftt.cpp uses rounds `a`, `b` and
+/// `c` before the root, which is a rounding the root's correct rounding does
+/// not bound. These two agree exactly whenever the halved form is exact, and
+/// this one is exact strictly more often.
 /// @note Exactly 0.0f iff `xx*yy - xy*xy == 0`; otherwise at least
-///       `1/(2*blockSize^2)`. See PRECISION at the top of the file -- the `!= 0`
-///       test in the selection depends on it and needs no epsilon.
+/// `1/(2*blockSize^2)`. See PRECISION at the top of the file -- the `!= 0`
+/// test in the selection depends on it and needs no epsilon.
 inline float minEigenValue(long long xx, long long yy, long long xy) {
     const double s = static_cast<double>(xx) + static_cast<double>(yy);
     const double d = static_cast<double>(xx) - static_cast<double>(yy);
@@ -512,30 +512,30 @@ inline float minEigenValue(long long xx, long long yy, long long xy) {
 }
 
 /// @brief The window OpenCV's box filter of side `blockSize` reduces at pixel
-///        `(x, y)`, anchored where `cv::Point(-1, -1)` puts it.
+/// `(x, y)`, anchored where `cv::Point(-1, -1)` puts it.
 /// @note `cv::boxFilter`'s default anchor is `ksize/2` by integer division, so an
-///       ODD `blockSize` is centred and an EVEN one leans up and left. Written out
-///       rather than assumed, because "centre" is ambiguous for even sides and the
-///       reference passes 3.
+/// ODD `blockSize` is centred and an EVEN one leans up and left. Written out
+/// rather than assumed, because "centre" is ambiguous for even sides and the
+/// reference passes 3.
 inline Rect blockWindow(int x, int y, int blockSize) {
     const int off = blockSize / 2;
     return Rect(x - off, y - off, blockSize, blockSize);
 }
 
 /// @brief Strict weak ordering over corners: response DESCENDING, ties broken by
-///        DESCENDING raster position -- larger `y` first, then larger `x`.
+/// DESCENDING raster position -- larger `y` first, then larger `x`.
 /// @note **THE TIE RULE IS THE REFERENCE'S, NOT A CHOICE MADE HERE.** gftt.cpp
-///       sorts `std::vector<const float*>` -- pointers INTO the `eig` map,
-///       collected in ascending raster order -- with
-///       `cv_internal::greaterThanPtr`, whose body is
-///       `(*a > *b) ? true : (*a < *b) ? false : (a > b)` and whose comment says
-///       "Ensure a fully deterministic result of the sort". On a contiguous
-///       `CV_32F` map a larger address IS a later raster position, so equal
-///       responses come out LATER-POSITION-FIRST there. This comparator is that
-///       rule spelled on coordinates instead of addresses. See "TIES ARE THE
-///       REFERENCE'S" at the top of the file.
+/// sorts `std::vector<const float*>` -- pointers INTO the `eig` map,
+/// collected in ascending raster order -- with
+/// `cv_internal::greaterThanPtr`, whose body is
+/// `(*a > *b) ? true : (*a < *b) ? false : (a > b)` and whose comment says
+/// "Ensure a fully deterministic result of the sort". On a contiguous
+/// `CV_32F` map a larger address IS a later raster position, so equal
+/// responses come out LATER-POSITION-FIRST there. This comparator is that
+/// rule spelled on coordinates instead of addresses. See "TIES ARE THE
+/// REFERENCE'S" at the top of the file.
 /// @note A TOTAL order over distinct positions, as `greaterThanPtr` is over
-///       distinct addresses -- so `std::sort` needs no stability from either.
+/// distinct addresses -- so `std::sort` needs no stability from either.
 struct CornerStronger {
     bool operator()(const Corner& a, const Corner& b) const {
         if (a.response != b.response) return a.response > b.response;
@@ -551,31 +551,31 @@ struct CornerStronger {
 // ---------------------------------------------------------------------------
 
 /// @brief The minimum-eigenvalue corner response at every pixel, from binarized
-///        ternary derivatives. **API TIER 2** -- `cv::cornerMinEigenVal`'s role
-///        with the reference pipeline's BINARIZED numerics, NOT bit-exact against
-///        it (see the tier note at the top of this file).
-/// @tparam WordType The views' word type (D-1).
+/// ternary derivatives. **API TIER 2** -- `cv::cornerMinEigenVal`'s role
+/// with the reference pipeline's BINARIZED numerics, NOT bit-exact against
+/// it (see the tier note at the top of this file).
+/// @tparam WordType The views' word type.
 /// @param magX Magnitude plane of the x-derivative -- `dx.constMagnitude(0)`.
 /// @param magY Magnitude plane of the y-derivative -- `dy.constMagnitude(0)`.
-/// @param signX Sign plane of the x-derivative -- `dx.constSign()`; set is NEGATIVE.
-/// @param signY Sign plane of the y-derivative -- `dy.constSign()`.
+/// @param signX Sign plane of the x-derivative -- `dx.constSign`; set is NEGATIVE.
+/// @param signY Sign plane of the y-derivative -- `dy.constSign`.
 /// @param blockSize Side of the square covariance window, >= 1. The reference uses
-///        3. Anchored as `cv::boxFilter` anchors it (impl::blockWindow).
+/// 3. Anchored as `cv::boxFilter` anchors it (impl::blockWindow).
 /// @param dst Caller-owned response map with the planes' dimensions. Every pixel
-///        is written; nothing is read from it.
+/// is written; nothing is read from it.
 ///
 /// @note **This is the sliding form.** Two `SlidingWindowCount`s carry `sumXX` and
-///       `sumYY` down each column; only the cross term is recomputed per position,
-///       because nothing in ops/reduce.hpp slides a split. The full argument, and
-///       what it does and does not predict about the speedup, is under "THE
-///       SLIDING FORM" at the top of the file.
-/// @note **Windows CLIP at the frame edge** (T3.6 promise 2, D-13) where the
-///       reference's box filter replicates. See "THE BORDER" above for exactly
-///       which pixels that can move.
+/// `sumYY` down each column; only the cross term is recomputed per position,
+/// because nothing in ops/reduce.hpp slides a split. The full argument, and
+/// what it does and does not predict about the speedup, is under "THE
+/// SLIDING FORM" at the top of the file.
+/// @note **Windows CLIP at the frame edge** (the promise 2) where the
+/// reference's box filter replicates. See "THE BORDER" above for exactly
+/// which pixels that can move.
 /// @note **TERNARY PLANES ONLY, and this overload cannot check it** -- a
-///       `BinMatConstView` carries no plane count, so an N-bit level's planes
-///       compile here and give the LSB plane's response. Prefer the container
-///       spelling. ops/covariance.hpp promise 1 has the measured example.
+/// `BinMatConstView` carries no plane count, so an N-bit level's planes
+/// compile here and give the LSB plane's response. Prefer the container
+/// spelling. ops/covariance.hpp promise 1 has the measured example.
 /// @note Never throws; no allocation; no scratch beyond two accumulators.
 template <typename WordType>
 inline void cornerMinEigenVal(BinMatConstView<WordType> magX, BinMatConstView<WordType> magY,
@@ -609,7 +609,7 @@ inline void cornerMinEigenVal(BinMatConstView<WordType> magX, BinMatConstView<Wo
         for (int y = 0; y < height; ++y) {
             // The one number with no incremental form: `magX & magY` split by
             // `signX ^ signY`, recomputed per position through the four-argument
-            // form -- the one that needs no selector plane (D-15 axis 3).
+            // form -- the one that needs no selector plane (the axis 3).
             const SplitCount xy = countAndSplit<WordType>(magX, magY, signX, signY,
                                                           impl::blockWindow(x, y, blockSize));
             dst.row(static_cast<size_t>(y))[static_cast<size_t>(x)] = impl::minEigenValue(
@@ -625,9 +625,9 @@ inline void cornerMinEigenVal(BinMatConstView<WordType> magX, BinMatConstView<Wo
 /// @param dx Horizontal ternary derivative -- what `derivativeX` writes at level 0.
 /// @param dy Vertical ternary derivative, with `dx`'s dimensions.
 /// @note **Ternary only.** `TernaryMat<W>` is `SignedQuantMat<1, W>`, so an N-bit
-///       level is "no matching function" here rather than a silently wrong map.
+/// level is "no matching function" here rather than a silently wrong map.
 /// @note A thin naming of the view form: the container knows which plane is
-///       magnitude and which is sign, and the kernel does not have to (D-5).
+/// magnitude and which is sign, and the kernel does not have to.
 template <typename WordType>
 inline void cornerMinEigenVal(const TernaryMat<WordType>& dx, const TernaryMat<WordType>& dy,
                               int blockSize, ResponseMap dst) {
@@ -640,48 +640,48 @@ inline void cornerMinEigenVal(const TernaryMat<WordType>& dx, const TernaryMat<W
 // ---------------------------------------------------------------------------
 
 /// @brief The quality threshold, 3x3 non-maximum suppression and minimum-distance
-///        spacing filter `cv::goodFeaturesToTrack` performs, over an existing
-///        response map. **API TIER 2.**
+/// spacing filter `cv::goodFeaturesToTrack` performs, over an existing
+/// response map. **API TIER 2.**
 /// @param response The map, typically from cornerMinEigenVal. Read only.
 /// @param params Quality level, minimum distance and corner cap. `blockSize` is
-///        unused here -- it belongs to the map, which is already computed.
+/// unused here -- it belongs to the map, which is already computed.
 /// @param corners Caller-owned output array. **It is also the candidate buffer**;
-///        see the capacity contract below.
+/// see the capacity contract below.
 /// @param capacity Number of `Corner`s `corners` can hold.
 /// @return `{count, candidatesRanked, candidatesTruncated}`. The first `count`
-///         entries of `corners` are the selected corners, strongest first.
+/// entries of `corners` are the selected corners, strongest first.
 ///
 /// @note **THE CAPACITY CONTRACT, WHICH IS NOT `maxCorners`.** `capacity` bounds
-///       the NMS survivors this call can RANK, not the corners it returns. The
-///       result equals the reference's exactly when `capacity` is at least the
-///       number of survivors -- whose worst case is `(width-2)*(height-2)`, since
-///       every interior pixel of an all-equal map is a 3x3 maximum. When capacity
-///       is smaller, the `capacity` strongest survivors are ranked, the rest are
-///       dropped, and `candidatesTruncated` is set: the returned `count` is then a
-///       LOWER BOUND on the reference's, because a dropped survivor might have
-///       been accepted by the spacing filter after the ranked ones ran out. The
-///       flag is honest at `capacity == 0` too: a zero-length buffer holds no
-///       survivor, so it reports truncation whenever the map has one, and only a
-///       map with no survivor at all gives `{0, 0, false}`.
-///       **Sizing `capacity` to `maxCorners` is the mistake this note exists to
-///       prevent** -- 200 candidates out of 5000 fill the spacing filter's first
-///       few slots and then run out. The reference pays an unbounded
-///       `std::vector<const float*>` for the same thing; this operation takes the
-///       caller's buffer instead, because a kernel does not allocate (D and
-///       CLAUDE.md's hard rules).
+/// the NMS survivors this call can RANK, not the corners it returns. The
+/// result equals the reference's exactly when `capacity` is at least the
+/// number of survivors -- whose worst case is `(width-2)*(height-2)`, since
+/// every interior pixel of an all-equal map is a 3x3 maximum. When capacity
+/// is smaller, the `capacity` strongest survivors are ranked, the rest are
+/// dropped, and `candidatesTruncated` is set: the returned `count` is then a
+/// LOWER BOUND on the reference's, because a dropped survivor might have
+/// been accepted by the spacing filter after the ranked ones ran out. The
+/// flag is honest at `capacity == 0` too: a zero-length buffer holds no
+/// survivor, so it reports truncation whenever the map has one, and only a
+/// map with no survivor at all gives `{0, 0, false}`.
+/// **Sizing `capacity` to `maxCorners` is the mistake this note exists to
+/// prevent** -- 200 candidates out of 5000 fill the spacing filter's first
+/// few slots and then run out. The reference pays an unbounded
+/// `std::vector<const float*>` for the same thing; this operation takes the
+/// caller's buffer instead, because a kernel does not allocate (D and
+/// CLAUDE.md's hard rules).
 /// @note **The order of the four steps IS the specification.** Threshold, then
-///       NMS, then rank, then spacing -- gftt.cpp's order. Swapping NMS and the
-///       spacing filter changes which corners survive; the case that pins it is at
-///       the top of this file and in `Corner.SelectionOrder_PinsNmsBeforeDistance`.
+/// NMS, then rank, then spacing -- gftt.cpp's order. Swapping NMS and the
+/// spacing filter changes which corners survive; the case that pins it is at
+/// the top of this file and in `Corner.SelectionOrder_PinsNmsBeforeDistance`.
 /// @note **The outermost row and column can never be corners.** The reference's
-///       candidate scan runs `[1, height-1) x [1, width-1)` -- so does this one,
-///       which is also why the map's border deviation from the reference cannot
-///       reach the output.
+/// candidate scan runs `[1, height-1) x [1, width-1)` -- so does this one,
+/// which is also why the map's border deviation from the reference cannot
+/// reach the output.
 /// @note Ties in response are broken by DESCENDING raster position, which is what
-///       gftt.cpp's `greaterThanPtr` does on pointers into a contiguous map. See
-///       "TIES ARE THE REFERENCE'S ORDER" at the top of this file.
+/// gftt.cpp's `greaterThanPtr` does on pointers into a contiguous map. See
+/// "TIES ARE THE REFERENCE'S ORDER" at the top of this file.
 /// @note No allocation: an in-place bounded heap, an in-place `std::sort`, and an
-///       in-place compaction. Never throws.
+/// in-place compaction. Never throws.
 inline CornerResult selectGoodFeatures(ConstResponseMap response,
                                        const GoodFeaturesParams& params, Corner* corners,
                                        size_t capacity) {
@@ -713,19 +713,19 @@ inline CornerResult selectGoodFeatures(ConstResponseMap response,
     }
 
     // 2. The THRESH_TOZERO cut, in the reference's own arithmetic: the product is
-    //    formed in double (cv::threshold takes a double) and narrowed to float
-    //    (cv::threshold narrows for a CV_32F source), and the comparison is
-    //    STRICTLY greater. A map that is everywhere zero gives maxVal == 0, thr ==
-    //    0, and no survivor -- which is the blank-frame case, and is why no
-    //    special case for it exists.
+    // formed in double (cv::threshold takes a double) and narrowed to float
+    // (cv::threshold narrows for a CV_32F source), and the comparison is
+    // STRICTLY greater. A map that is everywhere zero gives maxVal == 0, thr ==
+    // 0, and no survivor -- which is the blank-frame case, and is why no
+    // special case for it exists.
     const float threshold = static_cast<float>(static_cast<double>(maxVal) * params.qualityLevel);
 
     // 3. NMS, fused with the threshold. `dilate` + `val == tmp[x]` on the
-    //    THRESHOLDED map is exactly "val > threshold and val is the maximum of its
-    //    3x3 neighbourhood in the RAW map": a neighbour at or below the threshold
-    //    is zeroed and cannot exceed val, which is itself above the threshold. So
-    //    the reference's second frame-sized float buffer is not needed and is not
-    //    taken.
+    // THRESHOLDED map is exactly "val > threshold and val is the maximum of its
+    // 3x3 neighbourhood in the RAW map": a neighbour at or below the threshold
+    // is zeroed and cannot exceed val, which is itself above the threshold. So
+    // the reference's second frame-sized float buffer is not needed and is not
+    // taken.
     size_t ranked = 0;
     for (int y = 1; y + 1 < height; ++y) {
         const float* prev = response.row(static_cast<size_t>(y - 1));
@@ -783,13 +783,13 @@ inline CornerResult selectGoodFeatures(ConstResponseMap response,
     if (ranked == 0) return out;
 
     // 4a. Rank. std::sort is in place and does not allocate; std::stable_sort
-    //     would, which is why the comparator is a TOTAL order instead.
+    // would, which is why the comparator is a TOTAL order instead.
     std::sort(corners, corners + ranked, impl::CornerStronger());
 
     // 4b. The greedy spacing filter, compacting accepted corners to the front. The
-    //     write index never passes the read index, so the compaction is safe in
-    //     place. Exhaustive rather than gridded: see "The grid is not needed for
-    //     the answer" at the top of the file.
+    // write index never passes the read index, so the compaction is safe in
+    // place. Exhaustive rather than gridded: see "The grid is not needed for
+    // the answer" at the top of the file.
     const size_t limit = (params.maxCorners > 0)
                              ? std::min(capacity, static_cast<size_t>(params.maxCorners))
                              : capacity;
@@ -823,43 +823,43 @@ inline CornerResult selectGoodFeatures(ConstResponseMap response,
 // ---------------------------------------------------------------------------
 
 /// @brief `goodFeaturesToTrack` over a binarized ternary derivative pair: the
-///        response map, then the selection. **API TIER 2** -- the same role and
-///        call shape as `cv::goodFeaturesToTrack`, with the reference pipeline's
-///        BINARIZED numerics. **Not bit-exact against OpenCV.**
-/// @tparam WordType The containers' word type (D-1).
+/// response map, then the selection. **API TIER 2** -- the same role and
+/// call shape as `cv::goodFeaturesToTrack`, with the reference pipeline's
+/// BINARIZED numerics. **Not bit-exact against OpenCV.**
+/// @tparam WordType The containers' word type.
 /// @param dx Horizontal ternary derivative (ops/derivative.hpp, level 0).
 /// @param dy Vertical ternary derivative, with `dx`'s dimensions.
 /// @param params Defaults are SEAL/seal_params.yaml's four values.
 /// @param scratch Caller-owned response map with the derivatives' dimensions. It
-///        is written, then read. **This is the operation's whole memory cost**:
-///        4 bytes per pixel, 1 228 800 B at 640x480 -- eight times the four
-///        one-bit planes it reads, and the reason it is the caller's to place,
-///        reuse across frames, or point at a pool. **If the map itself is not
-///        wanted, `goodFeaturesToTrackStreaming` returns the same corners over a
-///        three-row ring** -- 7 680 B, and measurably faster at `blockSize` 3
-///        (D-22, X-23).
+/// is written, then read. **This is the operation's whole memory cost**:
+/// 4 bytes per pixel, 1 228 800 B at 640x480 -- eight times the four
+/// one-bit planes it reads, and the reason it is the caller's to place,
+/// reuse across frames, or point at a pool. **If the map itself is not
+/// wanted, `goodFeaturesToTrackStreaming` returns the same corners over a
+/// three-row ring** -- 7 680 B, and measurably faster at `blockSize` 3
+///.
 /// @param corners Caller-owned output array, also the candidate buffer.
 /// @param capacity Entries in `corners`. **Read selectGoodFeatures' capacity
-///        contract**: this is not `maxCorners`.
+/// contract**: this is not `maxCorners`.
 /// @return `{count, candidatesRanked, candidatesTruncated}`.
 ///
 /// @note **Ternary only** -- `TernaryMat<W>` is `SignedQuantMat<1, W>`, so an
-///       N-bit pyramid level does not match this overload (T3.6 promise 1).
+/// N-bit pyramid level does not match this overload (the promise 1).
 /// @note There is deliberately no mask parameter. `cv::goodFeaturesToTrack` takes
-///       one and the reference passes it through; the MVP pipeline
-///       (ARCHITECTURE 7) has no caller for it, and an untested parameter is worse
-///       than an absent one. A caller wanting a mask can call cornerMinEigenVal,
-///       zero the masked pixels of the map, and call selectGoodFeatures -- which
-///       is the same two-stage split this file already exposes.
+/// one and the reference passes it through; the MVP pipeline
+/// (the design notes) has no caller for it, and an untested parameter is worse
+/// than an absent one. A caller wanting a mask can call cornerMinEigenVal,
+/// zero the masked pixels of the map, and call selectGoodFeatures -- which
+/// is the same two-stage split this file already exposes.
 /// @note **IF WHAT YOU WANTED THE MASK FOR WAS TO AVOID DETECTING ON TOP OF TRACKS
-///       YOU ARE ALREADY FOLLOWING, THAT IS `ops/occupancy.hpp`, NOT A MASK HERE.**
-///       This operation's spacing filter spaces a detection's corners against EACH
-///       OTHER -- `cv::goodFeaturesToTrack`'s job and all of it -- and the previous
-///       frame's tracks are not among its inputs and cannot be, because they are not
-///       a property of the response map. `bincv::spaceCandidates(corners, count,
-///       live, liveCount, radius, freeSlots)` is the second half, and every VIO
-///       frontend needs both. T5.20 exists because this library's own example had
-///       written that loop by hand.
+/// YOU ARE ALREADY FOLLOWING, THAT IS `ops/occupancy.hpp`, NOT A MASK HERE.**
+/// This operation's spacing filter spaces a detection's corners against EACH
+/// OTHER -- `cv::goodFeaturesToTrack`'s job and all of it -- and the previous
+/// frame's tracks are not among its inputs and cannot be, because they are not
+/// a property of the response map. `bincv::spaceCandidates(corners, count,
+/// live, liveCount, radius, freeSlots)` is the second half, and every VIO
+/// frontend needs both. exists because this library's own example had
+/// written that loop by hand.
 /// @note Never throws; allocates nothing.
 template <typename WordType>
 inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
@@ -872,11 +872,11 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 
 
 // ---------------------------------------------------------------------------
-// STAGE 4 -- THE STREAMING SHAPE (T3.11, E-10, EXPERIMENTS.md X-23)
+// STAGE 4 -- THE STREAMING SHAPE 
 //
 // WHY A SECOND SHAPE EXISTS AT ALL, AND WHAT IT IS NOT
 //
-// X-20 measured the whole VIO frontend's peak working set at 640x480 as
+// a measurement measured the whole VIO frontend's peak working set at 640x480 as
 // 1 721 568 B, of which the `float` response map above is 1 228 800 B -- 71.4%,
 // more than every other stage combined, at 4 BYTES per pixel where every image
 // plane in the frontend is one or two BITS. The streaming form keeps only the
@@ -885,7 +885,7 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 // It is NOT a replacement. `cornerMinEigenVal` + `selectGoodFeatures` stay,
 // because a caller who wants to select twice over one map, to mask it (the
 // documented route for a mask), or to hand the map to something else still needs
-// the map. T3.7 made the map caller-provided rather than deciding this; T3.11
+// the map. made the map caller-provided rather than deciding this;
 // adds the other shape beside it.
 //
 // THE HARD PART: THE SELECTION IS NOT LOCAL, AND A THREE-ROW RING GIVES NONE OF
@@ -893,71 +893,71 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 //
 // Two properties of `goodFeaturesToTrack` are GLOBAL, and both are load-bearing:
 //
-//   * the quality threshold is `qualityLevel * the maximum over the WHOLE map`,
-//     border included -- which is not known until the last row is evaluated;
-//   * the greedy spacing filter needs the survivors ordered across the whole
-//     frame, under CornerStronger's exact tie rule.
+// * the quality threshold is `qualityLevel * the maximum over the WHOLE map`,
+// border included -- which is not known until the last row is evaluated;
+// * the greedy spacing filter needs the survivors ordered across the whole
+// frame, under CornerStronger's exact tie rule.
 //
 // The obvious repair is a second pass -- evaluate every response once to find the
 // maximum, then again to threshold and suppress. THAT IS NOT WHAT THIS DOES, and
 // the reason is an exact argument rather than an approximation:
 //
-//   1. **The threshold is a pure POST-FILTER over the raw 3x3 maxima.** The
-//      selection above already rests on this -- it fuses the threshold into the
-//      NMS scan precisely because a thresholded neighbour can never beat an
-//      above-threshold centre. So the candidate set is
-//      `{raw 3x3 maxima} filtered by response > threshold`, and the filter can be
-//      applied last instead of first.
-//   2. **The set the caller's buffer must hold is a TOP-K, and the threshold only
-//      removes the WEAK end.** Let `A` be the raw 3x3 maxima and
-//      `S = {a in A : a.response > threshold}`. `CornerStronger` orders on
-//      response first, so `S` is UPWARD CLOSED in `A`: anything stronger than a
-//      member of `S` is itself in `S`. For an up-set,
-//      `topK(A) intersect S == topK(S)` when `|S| > K`, and `== S` when
-//      `|S| <= K`. **So keeping the K strongest RAW maxima and thresholding
-//      afterwards yields exactly the candidate set the frame-map form ranks** --
-//      not a similar one. `K` is the caller's `capacity`, the same buffer the
-//      frame-map form already uses, so the carry for the global sort is ZERO
-//      EXTRA BYTES.
-//   3. **`candidatesTruncated` survives the same way, from ONE float.** The flag
-//      means `|S| > capacity`. Let `D = A \ topK(A)` be the discarded maxima. If
-//      some `d` in `D` is above the threshold then every retained candidate is at
-//      least as strong, hence also above it, so `|S| >= capacity + 1`; and if
-//      none is, then `S` is contained in the retained set, so `|S| <= capacity`.
-//      Therefore `truncated == (max response over D > threshold)` -- exactly, and
-//      it costs one running `float`.
-//   4. **The plateau problem is handled by a RUNNING threshold, and the prune is
-//      provably answer-preserving.** Un-thresholded, every pixel of a flat plateau
-//      is a 3x3 maximum, and a zero plateau is most of an edge map -- so feeding
-//      the heap every raw maximum would be `(w-2)*(h-2)` heap operations. The
-//      running maximum is monotone non-decreasing, `x -> float(double(x)*q)` is
-//      monotone for `q > 0`, so the running threshold NEVER EXCEEDS the final one
-//      and anything it rejects is permanently below the final threshold, i.e. not
-//      in `S`. Removing non-members of `S` from `A` changes neither
-//      `topK(A) intersect S` nor the discarded-maximum test in item 3, because
-//      both arguments only ever used `S`'s up-set property inside whatever `A`
-//      is. **So the prune is a speed device with no effect on the answer**, which
-//      is why it can be as aggressive as the running maximum allows.
+// 1. **The threshold is a pure POST-FILTER over the raw 3x3 maxima.** The
+// selection above already rests on this -- it fuses the threshold into the
+// NMS scan precisely because a thresholded neighbour can never beat an
+// above-threshold centre. So the candidate set is
+// `{raw 3x3 maxima} filtered by response > threshold`, and the filter can be
+// applied last instead of first.
+// 2. **The set the caller's buffer must hold is a TOP-K, and the threshold only
+// removes the WEAK end.** Let `A` be the raw 3x3 maxima and
+// `S = {a in A : a.response > threshold}`. `CornerStronger` orders on
+// response first, so `S` is UPWARD CLOSED in `A`: anything stronger than a
+// member of `S` is itself in `S`. For an up-set,
+// `topK(A) intersect S == topK(S)` when `|S| > K`, and `== S` when
+// `|S| <= K`. **So keeping the K strongest RAW maxima and thresholding
+// afterwards yields exactly the candidate set the frame-map form ranks** --
+// not a similar one. `K` is the caller's `capacity`, the same buffer the
+// frame-map form already uses, so the carry for the global sort is ZERO
+// EXTRA BYTES.
+// 3. **`candidatesTruncated` survives the same way, from ONE float.** The flag
+// means `|S| > capacity`. Let `D = A \ topK(A)` be the discarded maxima. If
+// some `d` in `D` is above the threshold then every retained candidate is at
+// least as strong, hence also above it, so `|S| >= capacity + 1`; and if
+// none is, then `S` is contained in the retained set, so `|S| <= capacity`.
+// Therefore `truncated == (max response over D > threshold)` -- exactly, and
+// it costs one running `float`.
+// 4. **The plateau problem is handled by a RUNNING threshold, and the prune is
+// provably answer-preserving.** Un-thresholded, every pixel of a flat plateau
+// is a 3x3 maximum, and a zero plateau is most of an edge map -- so feeding
+// the heap every raw maximum would be `(w-2)*(h-2)` heap operations. The
+// running maximum is monotone non-decreasing, `x -> float(double(x)*q)` is
+// monotone for `q > 0`, so the running threshold NEVER EXCEEDS the final one
+// and anything it rejects is permanently below the final threshold, i.e. not
+// in `S`. Removing non-members of `S` from `A` changes neither
+// `topK(A) intersect S` nor the discarded-maximum test in item 3, because
+// both arguments only ever used `S`'s up-set property inside whatever `A`
+// is. **So the prune is a speed device with no effect on the answer**, which
+// is why it can be as aggressive as the running maximum allows.
 //
 // The result is ONE evaluation per pixel, one pass, a three-row ring, and 16 B of
 // scalar carry on top of the candidate array the frame-map form already owns --
 // a running maximum, a running retained count and the strongest discarded
 // response. Only the last of those three has no counterpart in the frame-map
-// form; all three are counted in the footprint table anyway, because X-23 said
+// form; all three are counted in the footprint table anyway, because a measurement said
 // every byte of carry comes off the saving. `Corner.Streaming_*` proves the
 // equality element for element rather than asserting this argument.
 //
 // WHAT IT COSTS AND WHAT IT SAVES -- MEASURED, ON THE REFERENCE DEVICE
 //
-// See D-22 in ARCHITECTURE 8 and X-23 in EXPERIMENTS.md for the full table and
+// See in the design notes and in EXPERIMENTS.md for the full table and
 // for the pre-registered rule the numbers were judged against. 640x480,
 // `uint32_t`, `blockSize` 3 (SEAL's own value), medians of 11 interleaved
 // batches, within-run spreads 0.15-0.27%, arm order swapped and re-run:
 //
-//     form        whole detector   response stage    corner peak    frontend peak
-//     frame map   132.8 ns/px       107.1 ns/px      1 333 848 B      1 721 568 B
-//     streaming   102.8 ns/px        77.1 ns/px        112 744 B        500 464 B
-//                 T = 0.77x                             11.8x            3.44x
+// form whole detector response stage corner peak frontend peak
+// frame map 132.8 ns/px 107.1 ns/px 1 333 848 B 1 721 568 B
+// streaming 102.8 ns/px 77.1 ns/px 112 744 B 500 464 B
+// T = 0.77x 11.8x 3.44x
 //
 // TWO INDEPENDENT DEVICE RUNS, because the within-run spread is not the whole
 // story: the reported run gives T = 0.774x and the other (results/*_scatter.log)
@@ -967,11 +967,11 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 // same verdict at every block size, both word types and both frame sizes.
 //
 // **THE STREAMING FORM IS 1.29x FASTER, NOT 2x SLOWER AS THIS TASK WAS SCHEDULED
-// ON**, and 3.44x smaller across the whole frontend. TASKS.md T3.11, ARCHITECTURE 9's
-// E-10 row, X-20's decision 3 and (found at triage, after the rule's list of three)
-// TASKS.md T3.8's X-20 write-up all said "roughly 2x the response compute"; all four
-// are corrected by name in X-23 rather than quietly. The reason is the
-// traversal: a ring FORCES a row-major sweep, and X-18 already measured the
+// ON**, and 3.44x smaller across the whole frontend., the design notes's
+// row, that measurement’s decision 3 and (found at triage, after the rule's list of three)
+// 's write-up all said "roughly 2x the response compute"; all four
+// are corrected by name in earlier work rather than quietly. The reason is the
+// traversal: a ring FORCES a row-major sweep, and already measured the
 // shipped column-major sliding sweep 1.19x slower than row-major recomputation at
 // `blockSize` 3 -- the streaming form collects that discount before paying for
 // anything.
@@ -979,20 +979,20 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 // It costs where the sliding accumulator earns its keep, which is LARGE blocks --
 // and NOT at the same block size in the two benchmarked word types:
 //
-//     blockSize          3      7     15     31     crossover
-//     T, uint32_t     0.77   0.92   1.00   1.08     between 15 and 31
-//     T, uint64_t     0.77   0.93   1.03   1.13     between  7 and 15
+// blockSize 3 7 15 31 crossover
+// T, uint32_t 0.77 0.92 1.00 1.08 between 15 and 31
+// T, uint64_t 0.77 0.93 1.03 1.13 between 7 and 15
 //
 // In neither is it between 3 and 7, so the MVP's own block size is well clear. A
 // `uint32_t` caller running blockSize 31 and wanting the last 8%, or a `uint64_t`
 // caller at 15 or above wanting the last 3-13%, should take the frame-map form --
 // and will usually want the map anyway. Both device runs agree on both rows.
 //
-// The two-pass shape the estimate described was measured too (X-23's arm S2): it
+// The two-pass shape the estimate described was measured too (that measurement’s arm S2): it
 // is 1.33x at `blockSize` 3 for THE SAME PEAK -- the same three-row ring (it uses
 // ring row 0 as its first pass's scratch) and the same candidate array, differing
 // only by a scalar or two, which is far inside the resolution of any footprint
-// claim. X-23's arm-tie rule therefore cannot separate the two on peak, and its
+// claim. that measurement’s arm-tie rule therefore cannot separate the two on peak, and its
 // second clause -- "unless it is more than 1.10x slower" -- decides: S2 is 1.71x
 // S1. It is not shipped, because nothing should ship two implementations of one
 // answer; it lives in benchmark/corner_streaming_arm_stream2.cpp as the priced
@@ -1002,43 +1002,43 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 
 /// @brief Rows the streaming form's ring must have.
 /// @note THREE, whatever `blockSize` is. The suppression `goodFeaturesToTrack`
-///       performs is a 3x3 `dilate` (gftt.cpp step 3) and does not grow with the
-///       covariance window: the window that grows with `blockSize` is read out of
-///       the BIT planes, which the streaming form does not stream.
+/// performs is a 3x3 `dilate` (gftt.cpp step 3) and does not grow with the
+/// covariance window: the window that grows with `blockSize` is read out of
+/// the BIT planes, which the streaming form does not stream.
 constexpr size_t kResponseRingRows = 3;
 
 /// @brief One ROW of the minimum-eigenvalue response map. **API TIER 2** -- the
-///        same numbers `cornerMinEigenVal` writes into row `y`, bit for bit.
-/// @tparam WordType The views' word type (D-1).
+/// same numbers `cornerMinEigenVal` writes into row `y`, bit for bit.
+/// @tparam WordType The views' word type.
 /// @param magX Magnitude plane of the x-derivative -- `dx.constMagnitude(0)`.
 /// @param magY Magnitude plane of the y-derivative -- `dy.constMagnitude(0)`.
-/// @param signX Sign plane of the x-derivative -- `dx.constSign()`; set is NEGATIVE.
-/// @param signY Sign plane of the y-derivative -- `dy.constSign()`.
+/// @param signX Sign plane of the x-derivative -- `dx.constSign`; set is NEGATIVE.
+/// @param signY Sign plane of the y-derivative -- `dy.constSign`.
 /// @param blockSize Side of the square covariance window, >= 1.
 /// @param y Row of the frame to evaluate, in `[0, height)`.
 /// @param dstRow Caller-owned array of at least `magX.width` floats.
 ///
 /// @note **The building block a caller streams with**, and the one the rolling
-///       form below uses. A caller with a camera and no megabyte can size a
-///       `kResponseRingRows`-row buffer and drive this directly.
+/// form below uses. A caller with a camera and no megabyte can size a
+/// `kResponseRingRows`-row buffer and drive this directly.
 /// @note **Row-major, and therefore RECOMPUTED rather than slid.** Nothing in
-///       ops/reduce.hpp slides SIDEWAYS, and the downward accumulator
-///       `cornerMinEigenVal` uses would need one instance per column -- a
-///       `width`-long scratch array, which is exactly the shape X-11 declined and
-///       exactly the carry T3.11 was told to count. One fused `countCovariance`
-///       per pixel needs none, and X-18 measured that recomputation FASTER than
-///       the sliding form at `blockSize` 3. It is slower at 15 and 31; X-23 has
-///       the crossover.
+/// ops/reduce.hpp slides SIDEWAYS, and the downward accumulator
+/// `cornerMinEigenVal` uses would need one instance per column -- a
+/// `width`-long scratch array, which is exactly the shape declined and
+/// exactly the carry this was told to count. One fused `countCovariance`
+/// per pixel needs none, and a measurement measured that recomputation FASTER than
+/// the sliding form at `blockSize` 3. It is slower at 15 and 31; has
+/// the crossover.
 /// @note **Bit-identical to `cornerMinEigenVal`'s row `y`, not merely close.**
-///       Both feed `impl::minEigenValue` the same exact integers -- the sums are
-///       popcounts and cannot differ between a slid and a recomputed traversal.
-///       `Corner.Streaming_RowMatchesFrameMap_*` compares every pixel.
-/// @note Windows CLIP at the frame edge (T3.6 promise 2, D-13), as above.
+/// Both feed `impl::minEigenValue` the same exact integers -- the sums are
+/// popcounts and cannot differ between a slid and a recomputed traversal.
+/// `Corner.Streaming_RowMatchesFrameMap_*` compares every pixel.
+/// @note Windows CLIP at the frame edge (the promise 2), as above.
 /// @note Never throws; allocates nothing; no scratch at all.
 namespace impl {
 
 // ===========================================================================
-// THE BLOCKSIZE-3 FAST PATH: 3x3 BOX SUMS, BIT-SLICED (X-31).
+// THE BLOCKSIZE-3 FAST PATH: 3x3 BOX SUMS, BIT-SLICED.
 //
 // The per-pixel form below issues one `clipRegion` and ~12 popcounts PER PIXEL,
 // over a window three bits wide in a word of 32 or 64. Sweeping `blockSize`
@@ -1049,14 +1049,14 @@ namespace impl {
 //
 // Every quantity the response needs is a 3x3 BOX SUM OF A BIT-PLANE:
 //
-//     xx        = sum over the window of magX
-//     yy        = sum over the window of magY
-//     crossTerm = sum(magX & magY & ~sel) - sum(magX & magY & sel),  sel = sX ^ sY
+// xx = sum over the window of magX
+// yy = sum over the window of magY
+// crossTerm = sum(magX & magY & ~sel) - sum(magX & magY & sel), sel = sX ^ sY
 //
 // and a box sum of bits is word-parallel. Horizontally `a(x-1) + a(x) + a(x+1)` is
 // ONE FULL ADDER into two planes (0..3); vertically three of those sum into four
 // planes (0..9, and 3+3+3 = 9 fits exactly). So a whole word of pixels is summed
-// at once. This is [D-2](../../../../docs/ARCHITECTURE.md)'s technique and the same shape
+// at once. This is the design rule’s technique and the same shape
 // `pyrDown`'s `boxSum4` already uses; it was simply never applied here, to the
 // largest kernel in the frontend.
 //
@@ -1064,7 +1064,7 @@ namespace impl {
 // window counts only pixels inside the frame. Here a row outside the frame is a
 // null pointer and therefore a ZERO plane; a bit shifted in from a word that does
 // not exist is 0, so the `x-1` term vanishes at x = 0 and the `x+1` term at the
-// right edge; and bits past `width` in the trailing word are zero by D-13. The
+// right edge; and bits past `width` in the trailing word are zero by earlier work. The
 // three counts are the same EXACT INTEGERS the per-pixel form produces, and
 // `minEigenValue` turns the same integers into the same `float` -- so the response
 // map is bit-identical and therefore so are the corners, their order and their
@@ -1146,7 +1146,7 @@ inline void cornerMinEigenValRowSliced(BinMatConstView<WordType> magX,
         // is zero, so minEig is exactly 0 for a whole word of pixels and no sqrt is
         // taken. Measured skip rate on the reference pipeline's own content:
         // 22-39% of words, and it is worth 1.45x on top of the reformulation
-        // (X-31). It is data-dependent by nature -- a dense frame skips nothing.
+        //. It is data-dependent by nature -- a dense frame skips nothing.
         WordType any = 0;
         for (size_t i = 0; i < 3; ++i) {
             for (long long d = -1; d <= 1; ++d) {
@@ -1229,7 +1229,7 @@ inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView
 
     // blockSize 3 is `seal_params.yaml`'s value and the whole frontend's, and it
     // is the case the bit-sliced box sums above cover. Other block sizes keep the
-    // per-pixel form -- the same shape D-22 uses, where the fast path serves the
+    // per-pixel form -- the same shape uses, where the fast path serves the
     // shipped configuration and the general one stays for the rest.
     if (blockSize == 3) {
         impl::cornerMinEigenValRowSliced<WordType>(magX, magY, signX, signY,
@@ -1239,7 +1239,7 @@ inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView
 
     const int width = static_cast<int>(magX.width);
     for (int x = 0; x < width; ++x) {
-        // The fused four-popcount form (D-15): one traversal, no scratch, no
+        // The fused four-popcount form: one traversal, no scratch, no
         // selector plane. The sliding form's `countAndSplit` + two slid row counts
         // produce the same three integers by a different route.
         const CovarianceCount c = countCovariance<WordType>(magX, magY, signX, signY,
@@ -1251,48 +1251,48 @@ inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView
 }
 
 /// @brief `goodFeaturesToTrack` over a THREE-ROW ring instead of a frame-sized
-///        response map. **API TIER 2**, and **bit-for-bit the same corners** as
-///        the frame-map spelling above.
-/// @tparam WordType The views' word type (D-1).
+/// response map. **API TIER 2**, and **bit-for-bit the same corners** as
+/// the frame-map spelling above.
+/// @tparam WordType The views' word type.
 /// @param magX Magnitude plane of the x-derivative -- `dx.constMagnitude(0)`.
 /// @param magY Magnitude plane of the y-derivative -- `dy.constMagnitude(0)`.
-/// @param signX Sign plane of the x-derivative -- `dx.constSign()`.
-/// @param signY Sign plane of the y-derivative -- `dy.constSign()`.
+/// @param signX Sign plane of the x-derivative -- `dx.constSign`.
+/// @param signY Sign plane of the y-derivative -- `dy.constSign`.
 /// @param params Defaults are SEAL/seal_params.yaml's four values.
 /// @param ring Caller-owned scratch: `magX.width` wide, **at least
-///        `kResponseRingRows` rows**, any stride covering a row. 7 680 B at
-///        640 px against the frame map's 1 228 800 B. Written, then read; nothing
-///        is read from it first, and its contents on return are unspecified.
+/// `kResponseRingRows` rows**, any stride covering a row. 7 680 B at
+/// 640 px against the frame map's 1 228 800 B. Written, then read; nothing
+/// is read from it first, and its contents on return are unspecified.
 /// @param corners Caller-owned output array, also the candidate buffer.
 /// @param capacity Entries in `corners`. **The capacity contract on
-///        selectGoodFeatures applies UNCHANGED**, including which counts are
-///        exact and when `candidatesTruncated` is set.
+/// selectGoodFeatures applies UNCHANGED**, including which counts are
+/// exact and when `candidatesTruncated` is set.
 /// @return `{count, candidatesRanked, candidatesTruncated}` -- the same triple,
-///         with the same corners in the same order, as
-///         `goodFeaturesToTrack(dx, dy, params, frameMap, corners, capacity)`.
+/// with the same corners in the same order, as
+/// `goodFeaturesToTrack(dx, dy, params, frameMap, corners, capacity)`.
 ///
 /// @note **EQUALITY IS THE CONTRACT, NOT A RESEMBLANCE.** Same count, same
-///        coordinates, same order, same triple, on every frame -- ties included,
-///        which is where a changed traversal order would show. Why that is exact
-///        rather than approximate is the four-item argument in the section
-///        comment above; `Corner.Streaming_*` proves it by comparing the full
-///        arrays at four word types, six block sizes, several frame sizes and
-///        capacities that truncate.
+/// coordinates, same order, same triple, on every frame -- ties included,
+/// which is where a changed traversal order would show. Why that is exact
+/// rather than approximate is the four-item argument in the section
+/// comment above; `Corner.Streaming_*` proves it by comparing the full
+/// arrays at four word types, six block sizes, several frame sizes and
+/// capacities that truncate.
 /// @note **One pass, not two.** The global maximum is carried as a running
-///        maximum and the threshold applied after the last row; the candidate
-///        heap is a top-K over RAW 3x3 maxima, which the threshold then filters.
-///        See the section comment for why that is the same answer.
+/// maximum and the threshold applied after the last row; the candidate
+/// heap is a top-K over RAW 3x3 maxima, which the threshold then filters.
+/// See the section comment for why that is the same answer.
 /// @note **The whole extra carry is ONE `float`** (the strongest discarded
-///        candidate, which is what `candidatesTruncated` is computed from). No
-///        per-column accumulator, no second candidate array, no carried
-///        derivative rows -- so the true peak is `3 * width * 4` bytes plus the
-///        candidate array the frame-map form already owns.
-/// @note **It does not have a mask parameter either**, for T3.7's reason. And the
-///        documented mask route -- zero the masked pixels of the map, then select
-///        -- needs the map, so a masking caller wants the frame-map spelling.
+/// candidate, which is what `candidatesTruncated` is computed from). No
+/// per-column accumulator, no second candidate array, no carried
+/// derivative rows -- so the true peak is `3 * width * 4` bytes plus the
+/// candidate array the frame-map form already owns.
+/// @note **It does not have a mask parameter either**, for that work’s reason. And the
+/// documented mask route -- zero the masked pixels of the map, then select
+/// -- needs the map, so a masking caller wants the frame-map spelling.
 /// @note **TERNARY PLANES ONLY, and this overload cannot check it** -- a
-///        `BinMatConstView` carries no plane count. Prefer the container
-///        spelling.
+/// `BinMatConstView` carries no plane count. Prefer the container
+/// spelling.
 /// @note Never throws; allocates nothing; the ring is the caller's.
 template <typename WordType>
 inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
@@ -1456,11 +1456,11 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
 /// @brief The container spelling of the streaming form. **API TIER 2.**
 /// @param dx Horizontal ternary derivative (ops/derivative.hpp, level 0).
 /// @param dy Vertical ternary derivative, with `dx`'s dimensions.
-/// @param ring Caller-owned scratch, `dx.cols()` wide and at least
-///        `kResponseRingRows` rows.
+/// @param ring Caller-owned scratch, `dx.cols` wide and at least
+/// `kResponseRingRows` rows.
 /// @note **Ternary only** -- `TernaryMat<W>` is `SignedQuantMat<1, W>`, so an
-///       N-bit pyramid level does not match this overload, exactly as it does not
-///       match `goodFeaturesToTrack`.
+/// N-bit pyramid level does not match this overload, exactly as it does not
+/// match `goodFeaturesToTrack`.
 /// @note Never throws; allocates nothing.
 template <typename WordType>
 inline CornerResult goodFeaturesToTrackStreaming(const TernaryMat<WordType>& dx,

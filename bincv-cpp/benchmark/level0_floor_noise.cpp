@@ -1,11 +1,11 @@
 // ===========================================================================
-// X-27 / E-16 -- THE 1-BIT LEVEL-0 LOCALISATION FLOOR.
+// earlier work -- THE 1-BIT LEVEL-0 LOCALISATION FLOOR.
 //
-// Three pyramid parameters had been measured and none explained T3.8's standing
+// Three pyramid parameters had been measured and none explained that work’s standing
 // accuracy MISS, so the question became whether the REPRESENTATION was the limit.
 // This file answers it, and the answer is no.
 //
-// ARM 1 -- THE PARTITION METHOD, and it replaces the oracle X-27's rule first
+// ARM 1 -- THE PARTITION METHOD, and it replaces the oracle that measurement’s rule first
 // sketched. That sketch was DEGENERATE: it formed candidates the same way as the
 // observation, so the Hamming-nearest candidate was the observation itself and the
 // "floor" would have been exactly zero by construction. The flaw was found and the
@@ -87,8 +87,8 @@ int main(int argc, char** argv) {
         }
     }
     printf("31x31, %zu windows, candidate grid %.2f px, threshold %d\n", rects.size(), step, thr);
-    printf("  sigma (gray levels) |  FLOOR rms px | max px | median px\n");
-    printf("  --------------------+---------------+--------+----------\n");
+    printf(" sigma (gray levels) | FLOOR rms px | max px | median px\n");
+    printf(" --------------------+---------------+--------+----------\n");
 
     std::mt19937 rng(12345);
     for (double sigma : {0.0, 0.5, 1.0, 2.0, 4.0}) {
@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
         std::sort(errs.begin(), errs.end());
         double sq = 0.0;
         for (double e : errs) sq += e * e;
-        printf("  %19.1f | %13.4f | %6.4f | %8.4f\n", sigma,
+        printf(" %19.1f | %13.4f | %6.4f | %8.4f\n", sigma,
                std::sqrt(sq / static_cast<double>(errs.size())), errs.back(),
                errs[errs.size() / 2]);
     }

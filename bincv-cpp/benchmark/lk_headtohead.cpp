@@ -4,14 +4,14 @@
 //
 // The op-count model this is testing, written before the numbers:
 //
-//   binCV, per WORD (32 pixels), at depth N:
-//     residualSums issues 5 tap sums x 2 components x N^2 plane pairs x 2
-//     popcounts = 20N^2 popcounts. At N = 2 that is 80 popcounts per 32 pixels =
-//     2.5 popcount-ops PER PIXEL.
+// binCV, per WORD (32 pixels), at depth N:
+// residualSums issues 5 tap sums x 2 components x N^2 plane pairs x 2
+// popcounts = 20N^2 popcounts. At N = 2 that is 80 popcounts per 32 pixels =
+// 2.5 popcount-ops PER PIXEL.
 //
-//   OpenCV, per PIXEL:
-//     one bilinear diff and two multiply-accumulates, ~7 ops, SIMD 8-16 wide
-//     on CV_16S => ~0.5-0.9 ops per pixel.
+// OpenCV, per PIXEL:
+// one bilinear diff and two multiply-accumulates, ~7 ops, SIMD 8-16 wide
+// on CV_16S => ~0.5-0.9 ops per pixel.
 //
 // So the 32x packing advantage is spent three times over: N^2 plane pairs (4x at
 // N = 2), the five-tap decomposition (binCV keeps four bilinear taps plus self as
@@ -108,7 +108,7 @@ int main() {
         for (int i = 0; i < reps; ++i) fn();
         const double ms =
             std::chrono::duration<double, std::milli>(Clock::now() - t0).count() / reps;
-        std::printf("  %-42s %8.3f ms\n", name, ms);
+        std::printf(" %-42s %8.3f ms\n", name, ms);
         return ms;
     };
 
@@ -132,20 +132,20 @@ int main() {
         // Printing "0.29x slower" is a trap: below 1.0 it means FASTER. Say which.
         return a <= b ? std::string("FASTER") : std::string("slower");
     };
-    std::printf("\n  binCV 1/2/2/2 vs OpenCV : %.2fx  (%s)\n", tB2 <= tCV ? tCV / tB2 : tB2 / tCV,
+    std::printf("\n binCV 1/2/2/2 vs OpenCV : %.2fx (%s)\n", tB2 <= tCV ? tCV / tB2 : tB2 / tCV,
                 ratio(tB2, tCV).c_str());
-    std::printf("  binCV 1/1/1/1 vs OpenCV : %.2fx  (%s)\n", tB1 <= tCV ? tCV / tB1 : tB1 / tCV,
+    std::printf(" binCV 1/1/1/1 vs OpenCV : %.2fx (%s)\n", tB1 <= tCV ? tCV / tB1 : tB1 / tCV,
                 ratio(tB1, tCV).c_str());
-    std::printf("  cost of the N=2 ladder  : %.2fx\n", tB2 / tB1);
+    std::printf(" cost of the N=2 ladder : %.2fx\n", tB2 / tB1);
 
     const double wordsPerWin = 2.0 * 31.0;
     const double pxPerWin = 31.0 * 31.0;
-    std::printf("\n  OP-COUNT MODEL, per pixel per iteration per level:\n");
+    std::printf("\n OP-COUNT MODEL, per pixel per iteration per level:\n");
     for (int N : {1, 2}) {
         const double pc = wordsPerWin * 20.0 * N * N;
-        std::printf("    binCV N=%d : %6.0f popcounts per window = %.2f per pixel\n", N, pc,
+        std::printf(" binCV N=%d : %6.0f popcounts per window = %.2f per pixel\n", N, pc,
                     pc / pxPerWin);
     }
-    std::printf("    OpenCV    : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel\n");
+    std::printf(" OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel\n");
     return 0;
 }

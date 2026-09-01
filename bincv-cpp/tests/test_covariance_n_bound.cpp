@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
 // tests/test_covariance_n_bound.cpp -- a translation unit that MUST NOT COMPILE.
 //
-// T3.10's plane-ARRAY overload of gradientCovariance() is templated on the plane
+// that work’s plane-ARRAY overload of gradientCovariance is templated on the plane
 // count N and, unlike every sibling N-templated entry point in the library
 // (QuantMat 1..8, SignedQuantMat 1..7, pyrDownRoute, derivativeX/derivativeY), it
 // shipped without a bound on it. Nothing in the library can reach an out-of-range
 // N -- a derivative caps at 7 planes -- but the overload's own docstring blesses
 // HAND-ASSEMBLED view arrays, and there the weighting in combineBitSlicedPairs,
 //
-//     const int64_t weight = static_cast<int64_t>(1) << (i + j);
+// const int64_t weight = static_cast<int64_t>(1) << (i + j);
 //
 // is undefined behaviour as soon as 2N - 2 >= 64, and the weights overflow int64_t
 // well before that. Measured before the fix, with a 40-element view array under

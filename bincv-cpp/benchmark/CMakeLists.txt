@@ -16,92 +16,9 @@
 
 file(GLOB BENCHMARK_SOURCES CONFIGURE_DEPENDS *.cpp)
 
-# ---------------------------------------------------------------------------
-# T3.9 / E-4 (X-21): the one MULTI-FILE benchmark here.
-#
-# genericn_benchmark compares three arms -- the generic-N route, the shipped
-# specialization, and a hand-written binary-only reference with no binCV in it at
-# all -- and each arm gets its OWN translation unit for two measured reasons,
-# both spelled out in benchmark/genericn_arms.hpp:
-#
-#   * code size is half of that experiment's metric, and `size` on one object per
-#     arm is a number per arm rather than a number for the sum;
-#   * morphology_path_benchmark.cpp records, measured, that two instantiations of
-#     one kernel in a single object move each other's timings by ~10% through code
-#     layout alone.
-#
-# So the arms are carved out of the one-executable-per-source glob and built as an
-# OBJECT library, whose per-arm .o files are exactly what `size` is run on.
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# T3.11 / E-10 (X-23): the SECOND multi-file benchmark here, for the same measured
-# reason. corner_streaming_benchmark compares three arms -- the shipped frame-map
-# form, a two-pass streaming form and the shipped one-pass streaming form -- and
-# each arm gets its OWN translation unit, because two instantiations of one kernel
-# in a single object move each other's timings by ~10% (morphology_path_benchmark)
-# and the same kernel moves 1.46x between binaries (X-22). An A/B taken inside one
-# object file would be an artefact of that rather than a result.
-# ---------------------------------------------------------------------------
-set(BINCV_CORNER_STREAMING_ARMS
-    ${CMAKE_CURRENT_SOURCE_DIR}/corner_streaming_arm_frame.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/corner_streaming_arm_stream2.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/corner_streaming_arm_stream1.cpp)
-list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_CORNER_STREAMING_ARMS})
-
-add_library(corner_streaming_arms OBJECT ${BINCV_CORNER_STREAMING_ARMS})
-target_link_libraries(corner_streaming_arms PRIVATE bincv_core bincv_warnings)
-target_include_directories(corner_streaming_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-# ---------------------------------------------------------------------------
-# X-29 / E-13: the THIRD multi-file benchmark here, and the one that measures the
-# reason the others exist. covacc_arm_perrow.cpp and covacc_arm_perrow_b.cpp share
-# a body by inclusion and are therefore BIT-IDENTICAL ALGORITHMS in different
-# objects: their timing spread is the code-layout noise floor, which X-29 judges
-# the real comparison against. See benchmark/covacc_arms.hpp.
-# ---------------------------------------------------------------------------
 # X-32: residualSums' tap extraction, one TU per arm (see residual_arms.hpp).
-set(BINCV_RESIDUAL_ARMS
-    ${CMAKE_CURRENT_SOURCE_DIR}/residual_arm_shipped.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/residual_arm_hoisted.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/residual_arm_aligned.cpp)
-list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_RESIDUAL_ARMS})
-
-add_library(residual_arms OBJECT ${BINCV_RESIDUAL_ARMS})
-target_link_libraries(residual_arms PRIVATE bincv_core bincv_warnings)
-target_include_directories(residual_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # X-31: the corner response's three arms, one TU each (see cornerresp_arms.hpp).
-set(BINCV_CORNERRESP_ARMS
-    ${CMAKE_CURRENT_SOURCE_DIR}/cornerresp_arm_perpixel.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/cornerresp_arm_sliced.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/cornerresp_arm_sliced_skip.cpp)
-list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_CORNERRESP_ARMS})
-
-add_library(cornerresp_arms OBJECT ${BINCV_CORNERRESP_ARMS})
-target_link_libraries(cornerresp_arms PRIVATE bincv_core bincv_warnings)
-target_include_directories(cornerresp_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-set(BINCV_COVACC_ARMS
-    ${CMAKE_CURRENT_SOURCE_DIR}/covacc_arm_perrow.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/covacc_arm_perrow_b.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/covacc_arm_window.cpp)
-list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_COVACC_ARMS})
-
-add_library(covacc_arms OBJECT ${BINCV_COVACC_ARMS})
-target_link_libraries(covacc_arms PRIVATE bincv_core bincv_warnings)
-target_include_directories(covacc_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-set(BINCV_GENERICN_ARMS
-    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_generic.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_specialized.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_arm_handwritten.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_diag.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/genericn_diag_accum.cpp)
-list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_GENERICN_ARMS})
-
-add_library(genericn_arms OBJECT ${BINCV_GENERICN_ARMS})
-target_link_libraries(genericn_arms PRIVATE bincv_core bincv_warnings)
-target_include_directories(genericn_arms PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 set(BINCV_BENCH_CORE "")
 set(BINCV_BENCH_OPENCV "")
@@ -136,52 +53,4 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
     target_compile_definitions(${benchmark_name} PRIVATE
         BINCV_REALFRAME_PATH="${CMAKE_CURRENT_SOURCE_DIR}/realframe.bin")
 
-    if(benchmark_name STREQUAL "genericn_benchmark")
-        target_link_libraries(${benchmark_name} PRIVATE genericn_arms)
-    endif()
-
-    if(benchmark_name STREQUAL "corner_streaming_benchmark")
-        target_link_libraries(${benchmark_name} PRIVATE corner_streaming_arms)
-    endif()
-
-    if(benchmark_name STREQUAL "covacc_benchmark")
-        target_link_libraries(${benchmark_name} PRIVATE covacc_arms)
-    endif()
-
-    if(benchmark_name STREQUAL "cornerresp_benchmark")
-        target_link_libraries(${benchmark_name} PRIVATE cornerresp_arms)
-    endif()
-
-    if(benchmark_name STREQUAL "residual_benchmark")
-        target_link_libraries(${benchmark_name} PRIVATE residual_arms)
-    endif()
 endforeach()
-
-# ---------------------------------------------------------------------------
-# X-66 / E-36: the staged-keypoint AVX2 ceiling needs -mavx2 on its own translation
-# unit. NOT `__attribute__((target("avx2")))` -- X-60 measured that blocking
-# inlining, which turned `slicedSignedSum` into 310 real calls per window and cost
-# 1.9x. The flag goes on the target so the whole TU is compiled for it and the
-# intrinsics inline like any other code.
-#
-# Guarded on the compiler accepting it, and the benchmark itself compiles to a
-# one-line "nothing to measure" without __AVX2__, so an aarch64 build still builds.
-# ---------------------------------------------------------------------------
-if(TARGET kpbatch_staged_ceiling)
-    include(CheckCXXCompilerFlag)
-    check_cxx_compiler_flag("-mavx2" BINCV_HAVE_MAVX2)
-    if(BINCV_HAVE_MAVX2)
-        target_compile_options(kpbatch_staged_ceiling PRIVATE -mavx2)
-    endif()
-endif()
-
-# X-71 / E-40: the conversion arms need -mavx2 on their own translation unit, for the
-# reason X-66's target does -- `target("avx2")` on individual functions blocks
-# inlining (X-60 measured 1.9x for exactly that).
-if(TARGET convert_ceiling)
-    include(CheckCXXCompilerFlag)
-    check_cxx_compiler_flag("-mavx2" BINCV_HAVE_MAVX2_CVT)
-    if(BINCV_HAVE_MAVX2_CVT)
-        target_compile_options(convert_ceiling PRIVATE -mavx2)
-    endif()
-endif()

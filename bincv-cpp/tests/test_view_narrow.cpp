@@ -1,5 +1,5 @@
 // ===========================================================================
-// D-73 / narrowLevel -- a 64-bit level tracked through the 32-bit vector kernels.
+// / narrowLevel -- a 64-bit level tracked through the 32-bit vector kernels.
 //
 // binCV's vectorised tracking kernels are gated on 32-bit words, because an LK window
 // is 31 pixels and a wider word is more than half idle. A caller who wants 64-bit words
@@ -54,7 +54,7 @@ BINCV_TEST(Narrow, PlaneReadsIdenticallyAtBothWidths) {
             if (a != b) ++bad;
         }
     }
-    std::printf("  64-bit plane read as 32-bit: %zu of %d pixels differ\n", bad, W * H);
+    std::printf(" 64-bit plane read as 32-bit: %zu of %d pixels differ\n", bad, W * H);
     BINCV_CHECK_EQ(bad, size_t{0});
 }
 
@@ -77,7 +77,7 @@ BINCV_TEST(Narrow, PaddingBitsStayZero) {
                 if (valid < 32 && tail != 0) ++bad;
             }
         }
-        if (bad) std::printf("  width %d: %zu rows carry non-zero padding\n", W, bad);
+        if (bad) std::printf(" width %d: %zu rows carry non-zero padding\n", W, bad);
         BINCV_CHECK_EQ(bad, size_t{0});
     }
 }
@@ -133,9 +133,9 @@ BINCV_TEST(Narrow, TrackingA64BitLevelMatches32BitExactly) {
         if (outN[i].x != outR[i].x || outN[i].y != outR[i].y) ++posDiff;
         if (errN[i] != errR[i]) ++errDiff;
     }
-    std::printf("  %zu points (%zu tracked): narrowed-64 vs native-32 -- %zu positions,"
+    std::printf(" %zu points (%zu tracked): narrowed-64 vs native-32 -- %zu positions,"
                 " %zu status, %zu err differ\n", n, tracked, posDiff, statusDiff, errDiff);
-    std::printf("  kernel for the narrowed level: %s\n",
+    std::printf(" kernel for the narrowed level: %s\n",
                 bincv::lkPathName<bincv::LKLevelN<1, uint32_t>>());
     BINCV_CHECK(n > 100);
     BINCV_CHECK(tracked > 20);

@@ -1,15 +1,15 @@
-// E-2 / T2.9 -- what should BinMat's default word type be?
+// -- what should BinMat's default word type be?
 //
 // The default template argument is uint32_t today and every kernel in the library
 // inherits it. Nothing has measured the alternative on the target.
 //
-// DECISION RULE -- copied verbatim from TASKS.md T2.9, and recorded in
-// EXPERIMENTS.md X-10 before this file was written:
+// DECISION RULE -- copied verbatim from, and recorded in
+// before this file was written:
 //
-//   * uint64_t wins by > 10% on bulk kernels AND does not increase footprint at
-//     representative widths -> change the default
-//   * Within 10%, or footprint increases at small pyramid levels -> keep uint32_t
-//     (memory wins ties)
+// * uint64_t wins by > 10% on bulk kernels AND does not increase footprint at
+// representative widths -> change the default
+// * Within 10%, or footprint increases at small pyramid levels -> keep uint32_t
+// (memory wins ties)
 //
 // And the trap the task states explicitly, which this file exists to not fall
 // into: "wider words round row strides up more coarsely, so the footprint effect
@@ -19,11 +19,11 @@
 // half is exact integer arithmetic and is architecture-independent, so it closes
 // anywhere. The SPEED half closes only on the reference device.
 //
-// VARIANTS   uint8_t, uint16_t, uint32_t, uint64_t, each at its own word
-//            granularity (D-4's default alignment -- the alignment axis is E-1's)
-// WORKLOAD   bitwiseAnd (T2.2) and countNonZero (T2.5), whole image,
-//            640x480 and 94x60
-// METRIC     ns/pixel and allocated bytes at both resolutions
+// VARIANTS uint8_t, uint16_t, uint32_t, uint64_t, each at its own word
+// granularity (the design rule’s default alignment -- the alignment axis is that work’s)
+// WORKLOAD bitwiseAnd and countNonZero, whole image,
+// 640x480 and 94x60
+// METRIC ns/pixel and allocated bytes at both resolutions
 //
 // WHY THIS IS THE MOST 32-BIT-SENSITIVE OF THE THREE EXPERIMENTS. On armv7l every
 // uint64_t operation is synthesised from 32-bit pairs, so the answer would
@@ -31,7 +31,7 @@
 // run on anything but aarch64 for exactly this reason, and the target is printed
 // below so a recorded log carries the evidence rather than the assumption.
 //
-// X-7 CAVEAT, at its sharpest on this axis. binCV builds with no -march flags, so
+// CAVEAT, at its sharpest on this axis. binCV builds with no -march flags, so
 // __builtin_popcountll lowers to `call __popcountdi2@PLT` on x86_64 -- one library
 // call PER WORD, whatever the word is. That makes narrow words look artificially
 // good on x86 (a uint8_t image pays 8x the calls of a uint64_t one but each call
@@ -78,7 +78,7 @@ const Case kCases[] = {
 };
 
 /// @brief Row stride in BYTES at word granularity for a given word size. Exact
-///        integer arithmetic -- this is the footprint half, and it needs no device.
+/// integer arithmetic -- this is the footprint half, and it needs no device.
 size_t rowBytes(int width, size_t wordBytes) {
     const size_t bits = wordBytes * 8;
     const size_t words = (static_cast<size_t>(width) + bits - 1) / bits;
@@ -111,7 +111,7 @@ struct Fixture {
     }
 
     /// @note The SAME seeds as every other width, so the four fixtures hold the
-    ///       same four images and the agreement check below is meaningful.
+    /// same four images and the agreement check below is meaningful.
     static void fill(BinMat<Word>& m, uint64_t seed) {
         uint64_t state = seed;
         for (int y = 0; y < m.rows(); ++y) {
@@ -123,8 +123,8 @@ struct Fixture {
 };
 
 /// @brief Runs both kernels once per image and returns a flat digest of the
-///        results, so that four different word types can be compared for
-///        agreement without four different comparison functions.
+/// results, so that four different word types can be compared for
+/// agreement without four different comparison functions.
 template <typename Word>
 std::vector<uint8_t> digest(Fixture<Word>& f, const Case& c, std::vector<size_t>& counts) {
     std::vector<uint8_t> flat;
@@ -162,7 +162,7 @@ void addBenches(Fixture<Word>& f, const char* name, std::vector<measure::Bench>&
 
 bool runCase(const Case& c) {
     const double pixels = static_cast<double>(c.width) * static_cast<double>(c.height);
-    std::printf("\n=== %s, word granularity (D-4 default alignment) ===\n", c.name);
+    std::printf("\n=== %s, word granularity ( default alignment) ===\n", c.name);
 
     Fixture<uint8_t> f8(c);
     Fixture<uint16_t> f16(c);
@@ -177,10 +177,10 @@ bool runCase(const Case& c) {
     const std::vector<uint8_t> d32 = digest(f32, c, c32);
     const std::vector<uint8_t> d64 = digest(f64, c, c64);
     if (d16 != d8 || d32 != d8 || d64 != d8 || c16 != c8 || c32 != c8 || c64 != c8) {
-        std::printf("  DISAGREEMENT between word widths -- not timing anything\n");
+        std::printf(" DISAGREEMENT between word widths -- not timing anything\n");
         return false;
     }
-    std::printf("  all four widths agree on countNonZero and on every AND pixel "
+    std::printf(" all four widths agree on countNonZero and on every AND pixel "
                 "(%zu set in image 0)\n",
                 c8[0]);
 
@@ -202,34 +202,34 @@ bool runCase(const Case& c) {
                              f64.bytesPerImage};
     const size_t ideal = (static_cast<size_t>(c.width) * static_cast<size_t>(c.height) + 7) / 8;
 
-    std::printf("\n  FOOTPRINT (allocated bytes per image, padding included)\n");
-    std::printf("  %-10s %8s %11s %12s %12s\n", "word", "stride", "bytes/img",
+    std::printf("\n FOOTPRINT (allocated bytes per image, padding included)\n");
+    std::printf(" %-10s %8s %11s %12s %12s\n", "word", "stride", "bytes/img",
                 "vs uint32", "vs ideal");
     for (size_t v = 0; v < 4; ++v) {
-        std::printf("  %-10s %6zu w %11zu %11.1f%% %11.1f%%\n", andB[v].name.c_str(),
+        std::printf(" %-10s %6zu w %11zu %11.1f%% %11.1f%%\n", andB[v].name.c_str(),
                     strides[v], bytes[v],
                     (static_cast<double>(bytes[v]) / static_cast<double>(bytes[2]) - 1.0) * 100.0,
                     (static_cast<double>(bytes[v]) / static_cast<double>(ideal) - 1.0) * 100.0);
     }
-    std::printf("  (ideal = %zu B, the information-theoretic minimum at 1 bit per "
+    std::printf(" (ideal = %zu B, the information-theoretic minimum at 1 bit per "
                 "pixel)\n",
                 ideal);
 
-    std::printf("\n  SPEED (ns/pixel, min / median / max over %d interleaved batches)\n",
+    std::printf("\n SPEED (ns/pixel, min / median / max over %d interleaved batches)\n",
                 kRepeats);
-    std::printf("  %-10s %-26s %-26s\n", "word", "bitwiseAnd", "countNonZero");
+    std::printf(" %-10s %-26s %-26s\n", "word", "bitwiseAnd", "countNonZero");
     for (size_t v = 0; v < 4; ++v) {
-        std::printf("  %-10s %7.4f/%7.4f/%7.4f %7.4f/%7.4f/%7.4f\n", andB[v].name.c_str(),
+        std::printf(" %-10s %7.4f/%7.4f/%7.4f %7.4f/%7.4f/%7.4f\n", andB[v].name.c_str(),
                     andT[v].minNs / pixels, andT[v].medianNs / pixels, andT[v].maxNs / pixels,
                     cnzT[v].minNs / pixels, cnzT[v].medianNs / pixels, cnzT[v].maxNs / pixels);
     }
 
-    std::printf("\n  SPEEDUP vs uint32_t (>1.00 = faster than the current default; the "
+    std::printf("\n SPEEDUP vs uint32_t (>1.00 = faster than the current default; the "
                 "rule reads uint64_t's row)\n");
-    std::printf("  %-10s %12s %12s %12s %12s\n", "word", "bitwiseAnd", "countNonZero",
+    std::printf(" %-10s %12s %12s %12s %12s\n", "word", "bitwiseAnd", "countNonZero",
                 "AND spread", "cnz spread");
     for (size_t v = 0; v < 4; ++v) {
-        std::printf("  %-10s %11.3fx %11.3fx %11.1f%% %11.1f%%\n", andB[v].name.c_str(),
+        std::printf(" %-10s %11.3fx %11.3fx %11.1f%% %11.1f%%\n", andB[v].name.c_str(),
                     andT[2].medianNs / andT[v].medianNs, cnzT[2].medianNs / cnzT[v].medianNs,
                     andT[v].spreadPct(), cnzT[v].spreadPct());
     }
@@ -246,11 +246,11 @@ bool runCase(const Case& c) {
     const double residentAll = (static_cast<double>(bytes[0]) + static_cast<double>(bytes[1]) +
                                 static_cast<double>(bytes[2]) + static_cast<double>(bytes[3])) *
                                perCall;
-    std::printf("\n  sanity: bitwiseAnd (uint32_t) moves %.0f B per call in %.0f ns = "
+    std::printf("\n sanity: bitwiseAnd (uint32_t) moves %.0f B per call in %.0f ns = "
                 "%.2f GB/s\n",
                 andTraffic, andT[2].medianNs, andTraffic / andT[2].medianNs);
-    std::printf("          resident during its batch %.1f KiB (%d images) -- %s;\n"
-                "          all four widths interleaved: %.1f KiB, %s the 1 MiB L2\n",
+    std::printf(" resident during its batch %.1f KiB (%d images) -- %s;\n"
+                " all four widths interleaved: %.1f KiB, %s the 1 MiB L2\n",
                 residentOne / 1024.0, 2 * kInputs + 1,
                 residentOne <= 32.0 * 1024.0
                     ? "inside the reference device's 32 KiB L1D"
@@ -261,33 +261,33 @@ bool runCase(const Case& c) {
     return true;
 }
 
-/// @brief The footprint half of E-2, as exact arithmetic over a pyramid ladder.
+/// @brief The footprint half of earlier work, as exact arithmetic over a pyramid ladder.
 /// @note This is the half the task warns about. It needs no device and no timing:
-///       a row stride is ceil(width / wordBits) words, so a wider word rounds up
-///       more coarsely, and the penalty grows as the level shrinks.
+/// a row stride is ceil(width / wordBits) words, so a wider word rounds up
+/// more coarsely, and the penalty grows as the level shrinks.
 void printPyramidFootprint() {
     const Case ladder[] = {
-        {"640x480  (L0, frame)", 640, 480}, {"320x240  (L1)", 320, 240},
-        {"160x120  (L2)", 160, 120},        {"752x480  (L0, wide frame)", 752, 480},
-        {"188x120  (L2 of 752)", 188, 120}, {"94x60    (L3 of 752)", 94, 60},
-        {"47x30    (L4 of 752)", 47, 30},
+        {"640x480 (L0, frame)", 640, 480}, {"320x240 (L1)", 320, 240},
+        {"160x120 (L2)", 160, 120},        {"752x480 (L0, wide frame)", 752, 480},
+        {"188x120 (L2 of 752)", 188, 120}, {"94x60 (L3 of 752)", 94, 60},
+        {"47x30 (L4 of 752)", 47, 30},
     };
     const size_t wordBytes[4] = {1, 2, 4, 8};
     const char* names[4] = {"uint8", "uint16", "uint32", "uint64"};
 
     std::printf("\n=== FOOTPRINT LADDER -- exact, architecture-independent ===\n");
-    std::printf("  Bytes for one plane at word granularity. The last column is what "
-                "T2.9 warns about:\n");
-    std::printf("  uint64_t's penalty against the current default, worst at the upper "
+    std::printf(" Bytes for one plane at word granularity. The last column is what "
+                " warns about:\n");
+    std::printf(" uint64_t's penalty against the current default, worst at the upper "
                 "levels LK touches every frame.\n\n");
-    std::printf("  %-26s %10s %10s %10s %10s %14s\n", "size", names[0], names[1], names[2],
+    std::printf(" %-26s %10s %10s %10s %10s %14s\n", "size", names[0], names[1], names[2],
                 names[3], "u64 vs u32");
     for (const Case& c : ladder) {
         size_t b[4];
         for (size_t w = 0; w < 4; ++w) {
             b[w] = rowBytes(c.width, wordBytes[w]) * static_cast<size_t>(c.height);
         }
-        std::printf("  %-26s %10zu %10zu %10zu %10zu %13.1f%%\n", c.name, b[0], b[1], b[2],
+        std::printf(" %-26s %10zu %10zu %10zu %10zu %13.1f%%\n", c.name, b[0], b[1], b[2],
                     b[3], (static_cast<double>(b[3]) / static_cast<double>(b[2]) - 1.0) * 100.0);
     }
 }
@@ -295,18 +295,18 @@ void printPyramidFootprint() {
 }  // namespace
 
 int main() {
-    std::printf("=== E-2 / T2.9: default word width ===\n");
+    std::printf("=== default word width ===\n");
 #if defined(__aarch64__)
     std::printf("target: aarch64 -- AUTHORITATIVE for the speed half\n");
 #else
-    std::printf("target: not aarch64 -- speed numbers are INDICATIVE ONLY (see the X-7 "
+    std::printf("target: not aarch64 -- speed numbers are INDICATIVE ONLY (see the "
                 "caveat in this file's header)\n");
 #endif
     std::printf("sizeof(void*) = %zu; a 32-bit host would synthesise every uint64_t "
                 "operation and answer a different question.\n",
                 sizeof(void*));
     std::printf("The decision rule is in this file's header, written before measuring "
-                "(EXPERIMENTS.md X-10).\n");
+                "(EXPERIMENTS.md).\n");
 
     printPyramidFootprint();
 

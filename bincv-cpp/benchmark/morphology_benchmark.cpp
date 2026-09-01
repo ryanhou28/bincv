@@ -1,6 +1,6 @@
-// T3.3 morphology -- erode / dilate / morphologyEx against OpenCV.
+// morphology -- erode / dilate / morphologyEx against OpenCV.
 //
-// THE DENOMINATOR (ARCHITECTURE 10.3, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U -- cv::erode,
 // cv::dilate and cv::morphologyEx with the SAME structuring element, the same
 // anchor and the same border. That is what a user does today without binCV, and
@@ -10,22 +10,22 @@
 // SIX CASES PER SIZE, chosen because they are the things a reader wants to know
 // rather than to make a long table:
 //
-//   erode  3x3 rect      the common case, and the one T3.3 asks to be special-
-//                        cased. Both sides' fastest path.
-//   dilate 3x3 rect      the same shape with the opposite fold and the opposite
-//                        border fill (D-12), so a fill bug shows up as an
-//                        asymmetry between two rows that should match.
-//   erode  5x5 ellipse   the GENERAL path: 17 set cells, no special case, and
-//                        the case where OpenCV stops being separable too.
-//   OPEN   3x3 rect      the compound path, which is where binCV's caller-
-//                        provided scratch frame appears in the working set.
-//   erode 3x3 REPLICATE  } THE BORDER AXIS. See below -- these are not padding.
-//   erode 3x3 REFLECT_101}
+// erode 3x3 rect the common case, and the one asks to be special-
+// cased. Both sides' fastest path.
+// dilate 3x3 rect the same shape with the opposite fold and the opposite
+// border fill, so a fill bug shows up as an
+// asymmetry between two rows that should match.
+// erode 5x5 ellipse the GENERAL path: 17 set cells, no special case, and
+// the case where OpenCV stops being separable too.
+// OPEN 3x3 rect the compound path, which is where binCV's caller-
+// provided scratch frame appears in the working set.
+// erode 3x3 REPLICATE } THE BORDER AXIS. See below -- these are not padding.
+// erode 3x3 REFLECT_101}
 //
 // THE BORDER TYPE IS A CASE AXIS, NOT A CONSTANT. binCV handles BORDER_CONSTANT
 // entirely in the word path and the other four in a per-pixel fixup over the
 // 2 * reach edge columns, so the two have genuinely different cost structures and
-// a ratio measured at one says nothing about the other. Measured during T3.3's
+// a ratio measured at one says nothing about the other. Measured during that work’s
 // review, at a point when that fixup walked the whole row instead of its two
 // bands: erode 3x3 at 640x480 cost 19.5 us under BORDER_CONSTANT and 241-260 us
 // under the other four -- a published 1.11x that was really 0.21x for four of the
@@ -60,28 +60,28 @@
 // ---------------------------------------------------------------------------
 // MEASUREMENT VALIDITY -- the five hazards this directory enumerates:
 //
-//   1. DEAD CODE. Every timed body writes memory the next iteration reads and
-//      feeds one destination word to a volatile sink. That word is NOT the
-//      argument: after the timing every implementation is run once more on image
-//      0 and its destination folded PIXEL BY PIXEL into a checksum printed in the
-//      table. All rows of a case must print the same number.
-//   2. CONSTANT FOLDING. Four distinct random images are rotated through. That
-//      makes the loop's RESIDENT set larger than the working set of ONE call,
-//      which the tables report and which is the number CLAUDE.md asks for: at
-//      640x480 the timed loop keeps 4 sources + 1 destination live, 1500 KiB on
-//      the OpenCV side against 188 KiB at uint32. Only the OpenCV side straddles
-//      a 1 MiB L2, so the asymmetry can only flatter binCV -- it is printed per
-//      size below so a reader can bound it rather than argue about it.
-//   3. CALIBRATED BATCHES. Every case runs enough iterations to fill a target
-//      millisecond budget; the reported figure is the minimum over five batches.
-//   4. THE SIDES MUST AGREE, checked before anything is timed. A disagreement
-//      skips the size and exits non-zero rather than printing a table under a
-//      warning.
-//   5. THE FIXED PER-CALL COST IS MEASURED, NOT ASSUMED. A cv:: call pays a
-//      size-independent dispatch cost, and a ns/PIXEL figure divides it by the
-//      pixel count -- so it grows without limit as the frame shrinks. It is
-//      measured on a 2x2 frame and printed beside every table, for both sides, so
-//      the ladder is read with it rather than mistaken for a cache result.
+// 1. DEAD CODE. Every timed body writes memory the next iteration reads and
+// feeds one destination word to a volatile sink. That word is NOT the
+// argument: after the timing every implementation is run once more on image
+// 0 and its destination folded PIXEL BY PIXEL into a checksum printed in the
+// table. All rows of a case must print the same number.
+// 2. CONSTANT FOLDING. Four distinct random images are rotated through. That
+// makes the loop's RESIDENT set larger than the working set of ONE call,
+// which the tables report and which is the number CLAUDE.md asks for: at
+// 640x480 the timed loop keeps 4 sources + 1 destination live, 1500 KiB on
+// the OpenCV side against 188 KiB at uint32. Only the OpenCV side straddles
+// a 1 MiB L2, so the asymmetry can only flatter binCV -- it is printed per
+// size below so a reader can bound it rather than argue about it.
+// 3. CALIBRATED BATCHES. Every case runs enough iterations to fill a target
+// millisecond budget; the reported figure is the minimum over five batches.
+// 4. THE SIDES MUST AGREE, checked before anything is timed. A disagreement
+// skips the size and exits non-zero rather than printing a table under a
+// warning.
+// 5. THE FIXED PER-CALL COST IS MEASURED, NOT ASSUMED. A cv:: call pays a
+// size-independent dispatch cost, and a ns/PIXEL figure divides it by the
+// pixel count -- so it grows without limit as the frame shrinks. It is
+// measured on a 2x2 frame and printed beside every table, for both sides, so
+// the ladder is read with it rather than mistaken for a cache result.
 //
 // ---------------------------------------------------------------------------
 // WHERE THIS IS AUTHORITATIVE
@@ -89,8 +89,8 @@
 // On x86_64 it is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms"). The
 // numbers that belong in a claim come from the reference device:
 //
-//   BINCV_PI_OPENCV=1 ./scripts/run_on_pi.sh <target>
-//       './benchmark/morphology_benchmark > morphology_benchmark.log'
+// BINCV_PI_OPENCV=1./scripts/run_on_pi.sh <target>
+// './benchmark/morphology_benchmark > morphology_benchmark.log'
 //
 // BINCV_PI_OPENCV=1 is required: the denominator is an OpenCV call, and the
 // device's default build is core-only.
@@ -245,8 +245,8 @@ struct Case {
 };
 
 /// @note `openCvBuffers` is 2 everywhere here, including OPEN, because that is
-///       what cv::morphologyEx was measured to allocate (header note). It is 3
-///       only for MORPH_GRADIENT, which this table does not run.
+/// what cv::morphologyEx was measured to allocate (header note). It is 3
+/// only for MORPH_GRADIENT, which this table does not run.
 std::vector<Case> cases() {
     return {
         {"erode 3x3 rect", bincv::MORPH_ERODE, bincv::StructuringElement::rect(3, 3),
@@ -282,13 +282,13 @@ cv::Mat cvKernel(const Case& c) {
 
 /// @brief OpenCV's side of one case, with the destination pre-allocated.
 /// @note cv::erode / cv::dilate / cv::morphologyEx reuse a destination that
-///       already has the right size and type, so hoisting it out of the loop
-///       measures the operation rather than malloc -- which is the same courtesy
-///       the binCV rows get, since they allocate nothing at all.
+/// already has the right size and type, so hoisting it out of the loop
+/// measures the operation rather than malloc -- which is the same courtesy
+/// the binCV rows get, since they allocate nothing at all.
 void runOpenCv(const Case& c, const cv::Mat& src, cv::Mat& dst, const cv::Mat& kernel) {
-    // morphologyDefaultBorderValue() is what cv::erode/cv::dilate use by default
+    // morphologyDefaultBorderValue is what cv::erode/cv::dilate use by default
     // and is ignored for the non-constant types; passing it explicitly is what
-    // lets the border argument be varied without changing anything else (D-12).
+    // lets the border argument be varied without changing anything else.
     const cv::Scalar bv = cv::morphologyDefaultBorderValue();
     switch (c.op) {
         case bincv::MORPH_ERODE:
@@ -326,8 +326,8 @@ void runBinCv(const Case& c, const bincv::BinMat<WordType>& src, bincv::BinMat<W
 // ---------------------------------------------------------------------------
 //
 // dilate is an OR of shifted copies and erode is an AND of shifted copies
-// (D-12), and this is that sentence written literally with ops/shift.hpp and
-// ops/logic.hpp -- the two kernels T2.3/T2.4 and T2.2 already ship. It is what a
+//, and this is that sentence written literally with ops/shift.hpp and
+// ops/logic.hpp -- the two kernels already ship. It is what a
 // caller would write today without ops/morphology.hpp, and the shipped kernel is
 // its FUSED form.
 //
@@ -385,12 +385,12 @@ int composedTraversals(const bincv::StructuringElement& se) {
 
 /// @brief The size-independent cost of ONE call of `c`, for both sides.
 /// @note PER CASE, not once for the table. The floor is a property of the
-///       operation and its element: measured here, cv::erode 3x3 and
-///       cv::morphologyEx OPEN 3x3 differ by more than 2x, because OPEN issues
-///       two filter calls. Printing one case's floor beside another case's row
-///       -- which this benchmark did until T3.3's review -- understates it most
-///       for exactly the compound row where the ladder argument matters, and the
-///       floor is what X-13's "not cache residency" conclusion rests on.
+/// operation and its element: measured here, cv::erode 3x3 and
+/// cv::morphologyEx OPEN 3x3 differ by more than 2x, because OPEN issues
+/// two filter calls. Printing one case's floor beside another case's row
+/// -- which this benchmark did until that work’s review -- understates it most
+/// for exactly the compound row where the ladder argument matters, and the
+/// floor is what that measurement’s "not cache residency" conclusion rests on.
 void measureCallFloors(const Case& c, double& openCvUs, double& binCvUs) {
     Image tiny;
     makeImage(tiny, 2, 2, UINT64_C(0xF100));
@@ -448,13 +448,13 @@ bool runSize(int width, int height) {
     const double packed32Bytes = static_cast<double>(dst32.sizeInWords() * sizeof(uint32_t));
     const double packed64Bytes = static_cast<double>(dst64.sizeInWords() * sizeof(uint64_t));
 
-    std::printf("  one frame:   binCV uint32 %.0f B, binCV uint64 %.0f B, OpenCV CV_8U %.0f B "
+    std::printf(" one frame: binCV uint32 %.0f B, binCV uint64 %.0f B, OpenCV CV_8U %.0f B "
                 "(%.1fx smaller)\n",
                 packed32Bytes, packed64Bytes, pixels, pixels / packed32Bytes);
     // Hazard 2's cost, stated rather than argued: the timed loop rotates kInputs
     // sources past one destination, so what is RESIDENT is larger than the
     // working set of one call that the tables report.
-    std::printf("  timed loop resident (hazard 2, %d rotated inputs + 1 dst, NOT the working "
+    std::printf(" timed loop resident (hazard 2, %d rotated inputs + 1 dst, NOT the working "
                 "set): binCV uint32 %.0f B, OpenCV CV_8U %.0f B\n",
                 kInputs, static_cast<double>(kInputs + 1) * packed32Bytes,
                 static_cast<double>(kInputs + 1) * pixels);
@@ -465,15 +465,15 @@ bool runSize(int width, int height) {
         double openCvCallFloorUs = 0.0;
         double binCvCallFloorUs = 0.0;
         measureCallFloors(c, openCvCallFloorUs, binCvCallFloorUs);
-        std::printf("\n  --- %s, %s ---\n", c.name, borderName(c.border));
-        std::printf("  WORKING SET of one call (the number CLAUDE.md asks for):\n");
-        std::printf("    binCV uint32   %10.0f B   (%d frames%s)\n",
+        std::printf("\n --- %s, %s ---\n", c.name, borderName(c.border));
+        std::printf(" WORKING SET of one call (the number CLAUDE.md asks for):\n");
+        std::printf(" binCV uint32 %10.0f B (%d frames%s)\n",
                     static_cast<double>(c.binCvBuffers) * packed32Bytes, c.binCvBuffers,
                     c.binCvBuffers == 2 ? ", src + dst, NO scratch"
                                         : ", src + dst + caller scratch");
-        std::printf("    binCV uint64   %10.0f B   (%d frames)\n",
+        std::printf(" binCV uint64 %10.0f B (%d frames)\n",
                     static_cast<double>(c.binCvBuffers) * packed64Bytes, c.binCvBuffers);
-        std::printf("    OpenCV CV_8U   %10.0f B   (%d frames)\n",
+        std::printf(" OpenCV CV_8U %10.0f B (%d frames)\n",
                     static_cast<double>(c.openCvBuffers) * pixels, c.openCvBuffers);
 
         // --- hazard 4: the sides must agree before anything is timed ---------
@@ -483,9 +483,9 @@ bool runSize(int width, int height) {
         const int d32 = comparePixels(dst32, cvDst);
         const int d64 = comparePixels(dst64, cvDst);
         if (d32 != 0 || d64 != 0) {
-            std::printf("  RESULTS DISAGREE (%d / %d pixels) -- SKIPPING THIS CASE.\n"
-                        "  The implementations do not compute the same image, so no timing of\n"
-                        "  them is a comparison.\n",
+            std::printf(" RESULTS DISAGREE (%d / %d pixels) -- SKIPPING THIS CASE.\n"
+                        " The implementations do not compute the same image, so no timing of\n"
+                        " them is a comparison.\n",
                         d32, d64);
             ok = false;
             continue;
@@ -552,7 +552,7 @@ bool runSize(int width, int height) {
                 runComposed<false>(c.se, images[0].packed32, composed32, tmp32);
             }
             if (comparePixels(composed32, cvDst) != 0) {
-                std::printf("  THE COMPOSED SPELLING DISAGREES -- not timed.\n");
+                std::printf(" THE COMPOSED SPELLING DISAGREES -- not timed.\n");
                 ok = false;
             } else {
                 const double ns = measureNs(
@@ -574,47 +574,47 @@ bool runSize(int width, int height) {
                 }
                 rows.push_back(Row{"binCV composed u32", ns / pixels, 3.0 * packed32Bytes,
                                    pixelChecksum(composed32)});
-                std::printf("  composed spelling: shift + bitwise per cell, %d traversals "
+                std::printf(" composed spelling: shift + bitwise per cell, %d traversals "
                             "against the fused kernel's 1, and a THIRD frame.\n",
                             composedTraversals(c.se));
             }
         }
 
         const double reference = rows[0].nsPerPixel;
-        std::printf("\n  %-16s %12s %11s %14s %14s %20s\n", "IMPLEMENTATION", "ns/pixel",
+        std::printf("\n %-16s %12s %11s %14s %14s %20s\n", "IMPLEMENTATION", "ns/pixel",
                     "vs OpenCV", "working set", "vs OpenCV", "checksum");
-        std::printf("  --------------------------------------------------------------------"
+        std::printf(" --------------------------------------------------------------------"
                     "--------------------------------\n");
         for (const Row& row : rows) {
-            std::printf("  %-16s %12.5f %10.2fx %12.0f B %13.2fx %20llu\n", row.impl,
+            std::printf(" %-16s %12.5f %10.2fx %12.0f B %13.2fx %20llu\n", row.impl,
                         row.nsPerPixel,
                         (row.nsPerPixel > 0.0) ? reference / row.nsPerPixel : 0.0, row.workingSet,
                         (row.workingSet > 0.0) ? rows[0].workingSet / row.workingSet : 0.0,
                         static_cast<unsigned long long>(row.checksum));
         }
-        std::printf("  ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).\n");
+        std::printf(" ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).\n");
 
         const double baselineUs = reference * pixels / 1000.0;
         const double binCvUs = rows[1].nsPerPixel * pixels / 1000.0;
-        std::printf("  PER-FRAME: OpenCV %.2f us (fixed per-call cost %.2f us, %.0f%%), "
+        std::printf(" PER-FRAME: OpenCV %.2f us (fixed per-call cost %.2f us, %.0f%%), "
                     "binCV u32 %.2f us (%.2f us, %.0f%%). Both floors are THIS case's.\n",
                     baselineUs, openCvCallFloorUs, 100.0 * openCvCallFloorUs / baselineUs,
                     binCvUs, binCvCallFloorUs, 100.0 * binCvCallFloorUs / binCvUs);
     }
 
-    std::printf("  sink=%llu\n", static_cast<unsigned long long>(g_sink));
+    std::printf(" sink=%llu\n", static_cast<unsigned long long>(g_sink));
     return ok;
 }
 
 }  // namespace
 
 int main() {
-    std::printf("T3.3 morphology -- erode / dilate / morphologyEx vs OpenCV\n");
+    std::printf(" morphology -- erode / dilate / morphologyEx vs OpenCV\n");
     std::printf("================================================================================\n\n");
     std::printf("DENOMINATOR (ARCHITECTURE 10.3): cv::erode / cv::dilate / cv::morphologyEx on\n");
     std::printf("the SAME binary content stored as CV_8U, with the same structuring element,\n");
     std::printf("anchor and border. That is what a user does today without binCV.\n\n");
-    std::printf("binCV rows: ops/morphology.hpp at uint32 (the default word type, D-14) and\n");
+    std::printf("binCV rows: ops/morphology.hpp at uint32 (the default word type,) and\n");
     std::printf("uint64. erode and dilate use NO scratch; morphologyEx(OPEN) uses exactly one\n");
     std::printf("caller-provided frame.\n\n");
     std::printf("Working set is one call's live buffers, not a per-buffer ratio (CLAUDE.md,\n");

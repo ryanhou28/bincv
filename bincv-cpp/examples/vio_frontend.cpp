@@ -2,29 +2,29 @@
 // A BINARY-FRAME VIO VISION FRONTEND, END TO END, ON binCV KERNELS.
 //
 // T4.3b asked whether binCV's kernel set is SUFFICIENT for a real VIO frontend.
-// Every prior end-to-end measurement in this project (X-28, X-38, X-49) runs a
+// Every prior end-to-end measurement in this project runs a
 // benchmark loop: detect wholesale every N frames, track, compare. A real
 // frontend does something structurally different, and this is that loop --
 // modelled on HybVIO's, which is what the SEAL paper's pipeline drives:
 //
-//   1. TEMPORAL / SENSOR STAGE, in OpenCV.  median_filter then
-//      rl_fast_edge_filter_wide (SEAL/src/temporal_processing/) turn an 8-bit
-//      camera frame into a binary one. In SEAL this is dedicated hardware, and
-//      it is NOT binCV's claim: binCV's domain starts at the binary frame,
-//      which ARCHITECTURE 7.2 calls "the input, not a choice".
+// 1. TEMPORAL / SENSOR STAGE, in OpenCV. median_filter then
+// rl_fast_edge_filter_wide (SEAL/src/temporal_processing/) turn an 8-bit
+// camera frame into a binary one. In SEAL this is dedicated hardware, and
+// it is NOT binCV's claim: binCV's domain starts at the binary frame,
+// which the design notes calls "the input, not a choice".
 //
-//   2. EVERYTHING AFTER, in binCV.  Pyramid, derivatives, LK tracking,
-//      detection, and the track lifecycle.
+// 2. EVERYTHING AFTER, in binCV. Pyramid, derivatives, LK tracking,
+// detection, and the track lifecycle.
 //
 // WHAT THIS EXERCISES THAT A BENCHMARK LOOP DOES NOT:
-//   * a PERSISTENT TRACK SET carried across frames, not a per-frame rematch;
-//   * CULLING on LK status and on leaving the frame -- HybVIO's
-//     FAILED_FLOW / FLOW_OUT_OF_RANGE (src/tracker/optical_flow.cpp);
-//   * TOPPING UP by detection only when the count falls below a target, with
-//     spaceCandidates against the SURVIVORS so new corners do not land on
-//     features already being tracked (src/tracker/feature_detector_legacy.cpp).
-//     binCV has no mask parameter by design -- ops/corner.hpp documents the
-//     spacing filter as the route -- and this is that route taken.
+// * a PERSISTENT TRACK SET carried across frames, not a per-frame rematch;
+// * CULLING on LK status and on leaving the frame -- HybVIO's
+// FAILED_FLOW / FLOW_OUT_OF_RANGE (src/tracker/optical_flow.cpp);
+// * TOPPING UP by detection only when the count falls below a target, with
+// spaceCandidates against the SURVIVORS so new corners do not land on
+// features already being tracked (src/tracker/feature_detector_legacy.cpp).
+// binCV has no mask parameter by design -- ops/corner.hpp documents the
+// spacing filter as the route -- and this is that route taken.
 //
 // It reports what a frontend is judged on: how many features it holds, how long
 // they live, and why they die.
@@ -86,11 +86,11 @@ struct Track {
 /// -- which is what makes this a top-up and not a re-detect.
 ///
 /// **THIS FUNCTION USED TO BE THIRTY LINES OF DISTANCE TESTS, AND ITS EXISTENCE WAS THE
-/// EVIDENCE FOR T5.20.** binCV had no operation for it: `goodFeaturesToTrack` spaces a
+/// EVIDENCE FOR.** binCV had no operation for it: `goodFeaturesToTrack` spaces a
 /// detection's corners against EACH OTHER, which is `cv::goodFeaturesToTrack`'s job and
 /// all of it, and the previous frame's tracks are not among its inputs. Every user of
 /// this library wrote this loop. `bincv::spaceCandidates` is now that operation, and
-/// X-93 measured it against a bit-plane alternative before choosing this shape.
+/// a measurement measured it against a bit-plane alternative before choosing this shape.
 size_t spaceAgainstLive(std::vector<Point2f>& fresh, const std::vector<Track>& live, float r) {
     // The tracks' positions, contiguous -- the kernel takes a Point2f array, and a
     // vector of Track is not one. Kept across frames so the top-up allocates nothing.
@@ -105,9 +105,9 @@ size_t spaceAgainstLive(std::vector<Point2f>& fresh, const std::vector<Track>& l
     return kept;
 }
 
-/// binCV's half of the frontend: the shipped 1/2/2/2 ladder (D-23), the box
-/// downsample (D-39 -- `build()` would default to cv::pyrDown's Gaussian), the
-/// derivative ladder, and the streaming response ring (D-26) so detection needs
+/// binCV's half of the frontend: the shipped 1/2/2/2 ladder, the box
+/// downsample ( -- `build` would default to cv::pyrDown's Gaussian), the
+/// derivative ladder, and the streaming response ring so detection needs
 /// no frame-sized float map.
 struct Frontend {
     bincv::Pyramid<W, 1, 2, 2, 2> prev, next;
@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
     const int lowWater = static_cast<int>(lowFrac * kTarget);
     // ONE LINE THAT WOULD HAVE SAVED AN INTEGRATOR DAYS. binCV's tracking speed
     // depends on the word type this program chose and on what the CPU supports, and
-    // neither is visible from the outside -- see D-73.
+    // neither is visible from the outside -- see.
     std::printf("%s\n", bincv::simdStatusString());
     std::printf("LK residual kernel: %s\n", bincv::lkPathName<bincv::LKLevelN<2, W>>());
 
@@ -213,10 +213,10 @@ int main(int argc, char** argv) {
     double sumLive = 0.0, msSensor = 0, msBuild = 0, msTrack = 0, msDetect = 0;
 
     std::printf("=== A binary-frame VIO vision frontend on binCV kernels ===\n");
-    std::printf("    %zu frames, %dx%d, target %d live features, 1/2/2/2 ladder\n",
+    std::printf(" %zu frames, %dx%d, target %d live features, 1/2/2/2 ladder\n",
                 files.size(), w, h, kTarget);
-    std::printf("    sensor stage (median + edge filter) in OpenCV; everything after in binCV\n");
-    std::printf("    detection policy: top up when live < %d (%.0f%% of target)\n\n",
+    std::printf(" sensor stage (median + edge filter) in OpenCV; everything after in binCV\n");
+    std::printf(" detection policy: top up when live < %d (%.0f%% of target)\n\n",
                 lowWater, 100.0 * lowFrac);
 
     for (size_t f = 0; f < files.size(); ++f) {
@@ -297,7 +297,7 @@ int main(int argc, char** argv) {
         std::swap(fe.prev, fe.next);
         ++frames;
         if (frames % 200 == 0) {
-            std::printf("  ... %zu frames, %zu live\n", frames, tracks.size());
+            std::printf(" ... %zu frames, %zu live\n", frames, tracks.size());
         }
     }
     for (const Track& t : tracks) lifetimes.push_back(t.age);   // survivors count too
@@ -311,41 +311,41 @@ int main(int argc, char** argv) {
     };
     const double fd = static_cast<double>(frames ? frames - 1 : 1);
     std::printf("\n--- TRACK LIFECYCLE (what a VIO backend is handed) ---\n");
-    std::printf("  frames processed      : %zu\n", frames);
-    std::printf("  mean live features    : %.1f  (target %d)\n", sumLive / fd, kTarget);
-    std::printf("  features spawned      : %zu over %zu detections (%.1f%% of frames)\n",
+    std::printf(" frames processed : %zu\n", frames);
+    std::printf(" mean live features : %.1f (target %d)\n", sumLive / fd, kTarget);
+    std::printf(" features spawned : %zu over %zu detections (%.1f%% of frames)\n",
                 spawned, detections, 100.0 * static_cast<double>(detections) / fd);
-    std::printf("  track lifetime        : p50 %d  p90 %d  max %d frames\n",
+    std::printf(" track lifetime : p50 %d p90 %d max %d frames\n",
                 pct(0.50), pct(0.90), lifetimes.empty() ? 0 : lifetimes.back());
-    std::printf("  died: FAILED_FLOW %zu, FLOW_OUT_OF_RANGE %zu  (%.1f%% / %.1f%% of spawns)\n",
+    std::printf(" died: FAILED_FLOW %zu, FLOW_OUT_OF_RANGE %zu (%.1f%% / %.1f%% of spawns)\n",
                 diedFlow, diedRange, 100.0 * static_cast<double>(diedFlow) /
                     static_cast<double>(std::max<size_t>(spawned, 1)),
                 100.0 * static_cast<double>(diedRange) /
                     static_cast<double>(std::max<size_t>(spawned, 1)));
-    std::printf("  NMS pool peak         : %zu survivors ranked (capacity %zu)%s\n", maxRanked,
-                cand.size(), truncated ? "  <-- TRUNCATED, see below" : "");
+    std::printf(" NMS pool peak : %zu survivors ranked (capacity %zu)%s\n", maxRanked,
+                cand.size(), truncated ? " <-- TRUNCATED, see below" : "");
     if (truncated) {
-        std::printf("  *** %zu detections truncated the NMS pool. The pool keeps the STRONGEST\n"
-                    "      survivors it can hold, so the loss is the ones dropped before the\n"
-                    "      spacing filter ever saw them: the count returned is a LOWER BOUND on\n"
-                    "      the reference\'s. Size the pool from candidatesRanked, not from\n"
-                    "      maxCorners. ***\n", truncated);
+        std::printf(" *** %zu detections truncated the NMS pool. The pool keeps the STRONGEST\n"
+                    " survivors it can hold, so the loss is the ones dropped before the\n"
+                    " spacing filter ever saw them: the count returned is a LOWER BOUND on\n"
+                    " the reference\'s. Size the pool from candidatesRanked, not from\n"
+                    " maxCorners. ***\n", truncated);
     }
 
     std::printf("\n--- COST PER FRAME ---\n");
-    std::printf("  sensor stage (OpenCV, NOT binCV) %7.3f ms\n", msSensor / fd);
-    std::printf("  build  (pyrDown + derivatives)   %7.3f ms\n", msBuild / fd);
-    std::printf("  track  (LK)                      %7.3f ms\n", msTrack / fd);
-    std::printf("  detect (streaming gftt)          %7.3f ms\n", msDetect / fd);
-    std::printf("  binCV total                      %7.3f ms\n",
+    std::printf(" sensor stage (OpenCV, NOT binCV) %7.3f ms\n", msSensor / fd);
+    std::printf(" build (pyrDown + derivatives) %7.3f ms\n", msBuild / fd);
+    std::printf(" track (LK) %7.3f ms\n", msTrack / fd);
+    std::printf(" detect (streaming gftt) %7.3f ms\n", msDetect / fd);
+    std::printf(" binCV total %7.3f ms\n",
                 (msBuild + msTrack + msDetect) / fd);
-    std::printf("  peak binCV working set           %7zu B\n", fe.bytes());
-    std::printf("\n  DETECTION RAN ON %.1f%% OF FRAMES, and that is set by the policy\n"
-                "  above rather than by binCV. Re-run with BINCV_VIO_LOW=0.6 to see how far\n"
-                "  the profile moves.\n\n"
-                "  The sensor stage is listed separately because it is NOT binCV's claim:\n"
-                "  in SEAL it is dedicated hardware, and binCV's domain starts at the binary\n"
-                "  frame. Judge binCV on the three lines above it.\n",
+    std::printf(" peak binCV working set %7zu B\n", fe.bytes());
+    std::printf("\n DETECTION RAN ON %.1f%% OF FRAMES, and that is set by the policy\n"
+                " above rather than by binCV. Re-run with BINCV_VIO_LOW=0.6 to see how far\n"
+                " the profile moves.\n\n"
+                " The sensor stage is listed separately because it is NOT binCV's claim:\n"
+                " in SEAL it is dedicated hardware, and binCV's domain starts at the binary\n"
+                " frame. Judge binCV on the three lines above it.\n",
                 100.0 * static_cast<double>(detections) / fd);
     return 0;
 }

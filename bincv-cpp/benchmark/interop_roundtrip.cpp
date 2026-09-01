@@ -1,23 +1,23 @@
-// X-47 -- INTEROP OR SPECIALISATION above the bit-width crossover?
+// -- INTEROP OR SPECIALISATION above the bit-width crossover?
 //
-// X-46 measured binCV 2.5-14x slower than OpenCV above the (filter-dependent)
+// a measurement measured binCV 2.5-14x slower than OpenCV above the (filter-dependent)
 // crossover. The candidate answers: specialise wide-N cases internally to a byte
 // representation -- a second storage layout and a second implementation of every
 // kernel -- or make QuantMat<N> <-> cv::Mat conversion first-class and hand wide
 // intermediates to OpenCV, which is already optimal at 8 bits.
 //
 // R = the 8->8 round trip toCVMatNormalized -> cv::pyrDown -> fromCVMat, against
-// B = native pyrDownFiltered<Gaussian5x5, 8, 8> (X-46: 7094 us). Rule and bands
-// are pre-registered in EXPERIMENTS.md X-47.
+// B = native pyrDownFiltered<Gaussian5x5, 8, 8> ( 7094 us). Rule and bands
+// are pre-registered in.
 //
 // The per-direction conversion cost is ALSO the general answer: any operation's
 // interop decision is (native_binCV - native_OpenCV) against that tax, so the
 // tax is timed at N = 8 and N = 3 rather than tabulating every operation.
 //
-// ONE ARM PER PROCESS, selected by argv[1] -- X-46's method note: its first
+// ONE ARM PER PROCESS, selected by argv[1] -- that measurement’s method note: its first
 // version held every arm's working set resident at once, pumped ~1.4 MB through
 // a 1 MB L2 between samples, and inflated the cheap arms threefold. The caller
-// loops: ./scripts/run_on_pi.sh pi4 'bash ../benchmark/interop_sweep.sh'
+// loops:./scripts/run_on_pi.sh pi4 'bash../benchmark/interop_sweep.sh'
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -55,14 +55,14 @@ void fillMat(cv::Mat& m) {
 /// one arm per process there is no interleaving left to absorb drift, so the printed
 /// spread is the only within-run error bar this design can produce.
 void report(int arm, const char* name, const measure::Timing& t) {
-    std::printf("ARM %2d  %-38s %9.1f us  [%9.1f .. %9.1f, spread %4.1f%%]\n", arm, name,
+    std::printf("ARM %2d %-38s %9.1f us [%9.1f .. %9.1f, spread %4.1f%%]\n", arm, name,
                 t.medianNs / 1000.0, t.minNs / 1000.0, t.maxNs / 1000.0, t.spreadPct());
 }
 
 /// Peak live bytes an arm holds, computed rather than measured -- CLAUDE.md requires
 /// memory and speed together, and this experiment settles a memory/speed trade.
 void reportBytes(const char* name, size_t bytes) {
-    std::printf("BYTES   %-38s %9zu B\n", name, bytes);
+    std::printf("BYTES %-38s %9zu B\n", name, bytes);
 }
 } // namespace
 
@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
             bincv::QuantMat<8, W> q(kW, kH);
             fillQuant<8>(q);
             cv::Mat out;
-            std::vector<measure::Bench> b = {{"toCVMatNormalized  N=8 640x480", [&](int) {
+            std::vector<measure::Bench> b = {{"toCVMatNormalized N=8 640x480", [&](int) {
                                                   q.toCVMatNormalized(out);
                                                   measure::g_sink += out.data[0];
                                               }}};
@@ -85,14 +85,14 @@ int main(int argc, char** argv) {
             cv::Mat in(kH, kW, CV_8U);
             fillMat(in);
             bincv::QuantMat<8, W> q;
-            std::vector<measure::Bench> b = {{"fromCVMat          N=8 640x480", [&](int) {
+            std::vector<measure::Bench> b = {{"fromCVMat N=8 640x480", [&](int) {
                                                   q.fromCVMat(in);
                                                   measure::g_sink += q.at(0, 0);
                                               }}};
             report(arm, b[0].name.c_str(), measure::measureInterleaved(b, 9, 60.0)[0]);
             break;
         }
-        case 2: {  // R: the whole round trip X-47's bands are written on
+        case 2: {  // R: the whole round trip that measurement’s bands are written on
             bincv::QuantMat<8, W> src(kW, kH), dst;
             fillQuant<8>(src);
             cv::Mat wide, down;
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
             bincv::QuantMat<8, W> src(kW, kH), dst(kDW, kDH);
             fillQuant<8>(src);
             std::vector<measure::Bench> b = {
-                {"native GAUSSIAN_5x5 8->8 (X-46's B)", [&](int) {
+                {"native GAUSSIAN_5x5 8->8 (the B)", [&](int) {
                      bincv::pyrDownFiltered<PyrDownFilter::Gaussian5x5, 8, 8, W>(src, dst);
                      measure::g_sink += dst.at(0, 0);
                  }}};
@@ -131,7 +131,7 @@ int main(int argc, char** argv) {
             bincv::QuantMat<3, W> q(kW, kH);
             fillQuant<3>(q);
             cv::Mat out;
-            std::vector<measure::Bench> b = {{"toCVMatNormalized  N=3 640x480", [&](int) {
+            std::vector<measure::Bench> b = {{"toCVMatNormalized N=3 640x480", [&](int) {
                                                   q.toCVMatNormalized(out);
                                                   measure::g_sink += out.data[0];
                                               }}};
@@ -142,7 +142,7 @@ int main(int argc, char** argv) {
             cv::Mat in(kH, kW, CV_8U);
             fillMat(in);
             bincv::QuantMat<3, W> q;
-            std::vector<measure::Bench> b = {{"fromCVMat          N=3 640x480", [&](int) {
+            std::vector<measure::Bench> b = {{"fromCVMat N=3 640x480", [&](int) {
                                                   q.fromCVMat(in);
                                                   measure::g_sink += q.at(0, 0);
                                               }}};
@@ -153,7 +153,7 @@ int main(int argc, char** argv) {
             cv::Mat in(kDH, kDW, CV_8U);
             fillMat(in);
             bincv::QuantMat<8, W> q;
-            std::vector<measure::Bench> b = {{"fromCVMat          N=8 320x240", [&](int) {
+            std::vector<measure::Bench> b = {{"fromCVMat N=8 320x240", [&](int) {
                                                   q.fromCVMat(in);
                                                   measure::g_sink += q.at(0, 0);
                                               }}};
@@ -187,14 +187,14 @@ int main(int argc, char** argv) {
                     if (y >= 2 && y < kDH - 2 && x >= 2 && x < kDW - 2) ++diffInterior;
                 }
             }
-            std::printf("AGREE   native vs round trip: %zu of %d pixels differ "
+            std::printf("AGREE native vs round trip: %zu of %d pixels differ "
                         "(%zu of them interior), max |delta| %zu of 255\n",
                         diffAll, kDW * kDH, diffInterior, maxDelta);
             break;
         }
         case 9: {
             // PEAK WORKING SET, both paths, computed exactly. An earlier version of
-            // this experiment reported speed only -- the same defect X-44's rule
+            // this experiment reported speed only -- the same defect that measurement’s rule
             // carried -- while settling a trade whose whole point is that the interop
             // path MATERIALISES A BYTE-PER-PIXEL FRAME, which is what binCV exists
             // to avoid.

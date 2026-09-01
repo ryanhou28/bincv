@@ -1,47 +1,47 @@
-// T3.4 -- the pyramid's bit growth, its footprint, and the cost of the box sum.
+// -- the pyramid's bit growth, its footprint, and the cost of the box sum.
 //
-// THIS IS NOT AN EXPERIMENT AND HAS NO DECISION RULE. T3.4's done-when clauses
-// ask for two numbers that feed E-7 (T4.1) -- bit growth and peak footprint of a
+// THIS IS NOT AN EXPERIMENT AND HAS NO DECISION RULE. that work’s done-when clauses
+// ask for two numbers that feed -- bit growth and peak footprint of a
 // four-level pyramid at several NOut caps -- plus evidence for the cost claim the
-// task's second blocking gap turns on. E-7 is the entry that will WEIGH these
+// task's second blocking gap turns on. this is the entry that will WEIGH these
 // against tracking accuracy, and it is deliberately deferred: parameterizing the
-// cap is what buys the right to defer measuring it (ARCHITECTURE 9).
+// cap is what buys the right to defer measuring it (the design notes).
 //
 // NO OPENCV, so this builds and runs in the reference device's DEFAULT core-only
 // configuration. Three things are measured here and all three are binCV against
 // binCV or binCV against arithmetic:
 //
-//   1. BIT GROWTH. How many distinct values each level of a four-level pyramid
-//      actually holds, and therefore how many bits it needs, for several ladders.
-//      The uncapped ladder (1 -> 3 -> 5 -> 7, i.e. NOut = NIn + 2 at every step)
-//      is the one that answers "how much precision does the box mean create";
-//      the capped ones say what is lost by refusing it.
-//   2. PEAK FOOTPRINT. Total bytes of the coexisting levels, against the CV_8U
-//      byte-per-pixel pyramid a user has today. That denominator is exact
-//      arithmetic -- one byte per pixel per level -- and needs no OpenCV to
-//      compute. It is a PEAK: the levels coexist because a tracker reads all of
-//      them (CLAUDE.md, benchmarking).
-//   3. THE COST OF THE BOX SUM, the shipped formulation against the one T3.4
-//      rejected, at NIn = 1, 2, 3 and 4. Both are the same kernel with the same
-//      requantizer and differ only in how the four NIn-bit operands are summed:
-//      3*NIn + 1 full-adder stages against 4*(2^NIn - 1) single-bit accumulate
-//      steps. The point is the SHAPE of the two curves, not the ratio at any one
-//      NIn -- at NIn = 1 they are the same four inputs and should be close.
+// 1. BIT GROWTH. How many distinct values each level of a four-level pyramid
+// actually holds, and therefore how many bits it needs, for several ladders.
+// The uncapped ladder (1 -> 3 -> 5 -> 7, i.e. NOut = NIn + 2 at every step)
+// is the one that answers "how much precision does the box mean create";
+// the capped ones say what is lost by refusing it.
+// 2. PEAK FOOTPRINT. Total bytes of the coexisting levels, against the CV_8U
+// byte-per-pixel pyramid a user has today. That denominator is exact
+// arithmetic -- one byte per pixel per level -- and needs no OpenCV to
+// compute. It is a PEAK: the levels coexist because a tracker reads all of
+// them (CLAUDE.md, benchmarking).
+// 3. THE COST OF THE BOX SUM, the shipped formulation against the one
+// rejected, at NIn = 1, 2, 3 and 4. Both are the same kernel with the same
+// requantizer and differ only in how the four NIn-bit operands are summed:
+// 3*NIn + 1 full-adder stages against 4*(2^NIn - 1) single-bit accumulate
+// steps. The point is the SHAPE of the two curves, not the ratio at any one
+// NIn -- at NIn = 1 they are the same four inputs and should be close.
 //
 // VALIDITY (EXPERIMENTS.md "Verify the benchmark measures something"):
-//   * measure::g_sink consumes a destination word from every timed call;
-//   * four distinct random sources rotate, so nothing constant-folds;
-//   * the two routes are checked to agree pixel for pixel on every case BEFORE
-//     either is timed -- a benchmark between a right answer and a wrong one is
-//     not a measurement;
-//   * the reported spread bounds within-run noise; a difference smaller than it
-//     is a null result.
+// * measure::g_sink consumes a destination word from every timed call;
+// * four distinct random sources rotate, so nothing constant-folds;
+// * the two routes are checked to agree pixel for pixel on every case BEFORE
+// either is timed -- a benchmark between a right answer and a wrong one is
+// not a measurement;
+// * the reported spread bounds within-run noise; a difference smaller than it
+// is a null result.
 //
 // On x86_64 the TIMING half is indicative only (EXPERIMENTS.md, "Measurement
 // platforms"); the growth and footprint halves are architecture-independent and
 // close anywhere. The authoritative timing run is
 //
-//   ./scripts/run_on_pi.sh pi4 './benchmark/pyramid_benchmark'
+//./scripts/run_on_pi.sh pi4 './benchmark/pyramid_benchmark'
 
 #include <cstddef>
 #include <cstdint>
@@ -60,7 +60,7 @@ using bincv::pyrDownHeight;
 using bincv::pyrDownWidth;
 using bincv::QuantMat;
 
-using Word = uint32_t;  // D-14
+using Word = uint32_t;  //
 
 constexpr int kWidth = 640;
 constexpr int kHeight = 480;
@@ -89,8 +89,8 @@ size_t distinctValues(const QuantMat<N, Word>& m) {
 ///
 /// This is the number that says how many bits a level NEEDS; the distinct count
 /// of an actual frame says how many it happened to CONTAIN, which is a sample
-/// statistic and falls with the frame size. ARCHITECTURE 7.2's 1/3/4/5 is the
-/// second kind of number (X-2 counted a 256x256 frame), and the two disagree --
+/// statistic and falls with the frame size. the design notes's 1/3/4/5 is the
+/// second kind of number (a measurement counted a 256x256 frame), and the two disagree --
 /// see the note under the table.
 ///
 /// The requantized value depends on the SUM alone, so the reachable set at the
@@ -171,7 +171,7 @@ void reportLadder(const char* label) {
     const size_t bytes = pyramid.sizeInBytes();
     const size_t reference = referenceBytes();
 
-    std::printf("  %-22s  %-9s  %-14s  %-14s  %-11s  %8zu  %6.2fx\n", label,
+    std::printf(" %-22s %-9s %-14s %-14s %-11s %8zu %6.2fx\n", label,
                 four(1, N1, N2, N3).c_str(), four(d0, d1, d2, d3).c_str(),
                 four(a0.size(), a1.size(), a2.size(), a3.size()).c_str(),
                 four(bitsFor(a0.size()), bitsFor(a1.size()), bitsFor(a2.size()),
@@ -183,34 +183,34 @@ void reportLadder(const char* label) {
 void reportGrowthAndFootprint() {
     std::printf("\nBIT GROWTH AND PEAK FOOTPRINT -- four levels from %dx%d, uint32_t\n",
                 kWidth, kHeight);
-    std::printf("  the CV_8U denominator is %zu bytes (one byte per pixel, four levels,\n"
-                "  all resident)\n\n",
+    std::printf(" the CV_8U denominator is %zu bytes (one byte per pixel, four levels,\n"
+                " all resident)\n\n",
                 referenceBytes());
-    std::printf("  %-22s  %-9s  %-14s  %-14s  %-11s  %8s  %7s\n", "ladder (NOut caps)",
+    std::printf(" %-22s %-9s %-14s %-14s %-11s %8s %7s\n", "ladder (NOut caps)",
                 "declared", "in the frame", "reachable", "bits needed", "bytes", "vs 8U");
-    std::printf("  %-22s  %-9s  %-14s  %-14s  %-11s  %8s  %7s\n", "----------------------",
+    std::printf(" %-22s %-9s %-14s %-14s %-11s %8s %7s\n", "----------------------",
                 "---------", "--------------", "--------------", "-----------", "--------",
                 "-------");
 
     // Uncapped: NOut = NIn + 2 at every step, so nothing the box mean produces is
     // ever thrown away. This row is the answer to "how much precision does a 2x2
     // box actually create", and every other row is a refusal of some of it.
-    reportLadder<3, 5, 7>("1-3-5-7  uncapped");
-    // The ladder ARCHITECTURE 7.2 measured on the reference pipeline.
-    reportLadder<3, 4, 5>("1-3-4-5  reference");
-    // Progressively harder caps -- E-7's candidates.
+    reportLadder<3, 5, 7>("1-3-5-7 uncapped");
+    // The ladder the design notes measured on the reference pipeline.
+    reportLadder<3, 4, 5>("1-3-4-5 reference");
+    // Progressively harder caps -- that work’s candidates.
     reportLadder<3, 3, 3>("1-3-3-3");
     reportLadder<2, 2, 2>("1-2-2-2");
-    reportLadder<1, 1, 1>("1-1-1-1  re-binarized");
-    reportLadder<8, 8, 8>("1-8-8-8  CV_8U-like");
+    reportLadder<1, 1, 1>("1-1-1-1 re-binarized");
+    reportLadder<8, 8, 8>("1-8-8-8 CV_8U-like");
 
-    std::printf("\n  \"in the frame\" counts DISTINCT VALUES PRESENT in one %dx%d-derived\n"
-                "  level; \"reachable\" is the alphabet the arithmetic can produce at all, and\n"
-                "  \"bits needed\" follows the reachable column. The two differ, and the\n"
-                "  difference matters: EXPERIMENTS.md X-2 reported 2/5/15/26 for the CV_8U\n"
-                "  ladder, which is what a 256x256 frame CONTAINED -- its level 3 is 32x32,\n"
-                "  i.e. 1024 pixels drawn from an alphabet of 65. A frame statistic falls\n"
-                "  with the frame size; the reachable alphabet does not.\n",
+    std::printf("\n \"in the frame\" counts DISTINCT VALUES PRESENT in one %dx%d-derived\n"
+                " level; \"reachable\" is the alphabet the arithmetic can produce at all, and\n"
+                " \"bits needed\" follows the reachable column. The two differ, and the\n"
+                " difference matters: EXPERIMENTS.md reported 2/5/15/26 for the CV_8U\n"
+                " ladder, which is what a 256x256 frame CONTAINED -- its level 3 is 32x32,\n"
+                " i.e. 1024 pixels drawn from an alphabet of 65. A frame statistic falls\n"
+                " with the frame size; the reachable alphabet does not.\n",
                 kWidth, kHeight);
 }
 
@@ -247,7 +247,7 @@ void addCostBenches(std::vector<measure::Bench>& benches,
         for (int y = 0; y < direct->rows(); ++y) {
             for (int x = 0; x < direct->cols(); ++x) {
                 if (direct->at(y, x) != replicated->at(y, x)) {
-                    std::printf("  FATAL: the two box-sum routes disagree at NIn=%zu (%d,%d)\n",
+                    std::printf(" FATAL: the two box-sum routes disagree at NIn=%zu (%d,%d)\n",
                                 NIn, y, x);
                     std::fflush(stdout);
                     std::abort();
@@ -262,7 +262,7 @@ void addCostBenches(std::vector<measure::Bench>& benches,
                                src[static_cast<size_t>(i) % kInputs], *direct);
                            measure::g_sink += direct->data()[0];
                        }});
-    benches.push_back({"NIn=" + std::to_string(NIn) + " replicated  ",
+    benches.push_back({"NIn=" + std::to_string(NIn) + " replicated ",
                        [&src, replicated](int i) {
                            bincv::impl::pyrDownReplicated<NOut, NIn, Word>(
                                src[static_cast<size_t>(i) % kInputs], *replicated);
@@ -273,8 +273,8 @@ void addCostBenches(std::vector<measure::Bench>& benches,
 void reportCost() {
     std::printf("\nTHE 2x2 BOX SUM: LINEAR AGAINST EXPONENTIAL -- %dx%d -> %dx%d, uint32_t\n",
                 kWidth, kHeight, kWidth / 2, kHeight / 2);
-    std::printf("  NOut = NIn + 1 throughout, so the requantizer is the same shape in every\n"
-                "  row and the difference between the pair is the SUM alone.\n\n");
+    std::printf(" NOut = NIn + 1 throughout, so the requantizer is the same shape in every\n"
+                " row and the difference between the pair is the SUM alone.\n\n");
 
     std::vector<measure::Bench> benches;
     std::vector<std::vector<QuantMat<1, Word>>> src1;
@@ -294,9 +294,9 @@ void reportCost() {
 
     const std::vector<measure::Timing> timings = measure::measureInterleaved(benches, 7, 60.0);
 
-    std::printf("  %-24s  %10s  %10s  %8s  %8s  %10s\n", "route", "ns/dst px", "spread",
+    std::printf(" %-24s %10s %10s %8s %8s %10s\n", "route", "ns/dst px", "spread",
                 "stages", "inputs", "vs linear");
-    std::printf("  %-24s  %10s  %10s  %8s  %8s  %10s\n", "------------------------",
+    std::printf(" %-24s %10s %10s %8s %8s %10s\n", "------------------------",
                 "----------", "----------", "--------", "--------", "----------");
     for (size_t i = 0; i < benches.size(); i += 2) {
         const size_t nIn = i / 2 + 1;
@@ -304,22 +304,22 @@ void reportCost() {
             timings[i].medianNs / static_cast<double>(pixels);
         const double replicated =
             timings[i + 1].medianNs / static_cast<double>(pixels);
-        std::printf("  %-24s  %10.4f  %9.1f%%  %8zu  %8s  %10s\n", benches[i].name.c_str(),
+        std::printf(" %-24s %10.4f %9.1f%% %8zu %8s %10s\n", benches[i].name.c_str(),
                     linear, timings[i].spreadPct(), bincv::impl::boxSumFullAdders(nIn), "-", "-");
-        std::printf("  %-24s  %10.4f  %9.1f%%  %8s  %8zu  %9.2fx\n", benches[i + 1].name.c_str(),
+        std::printf(" %-24s %10.4f %9.1f%% %8s %8zu %9.2fx\n", benches[i + 1].name.c_str(),
                     replicated, timings[i + 1].spreadPct(), "-",
                     bincv::impl::boxSum4ReplicatedInputs(nIn), replicated / linear);
     }
-    std::printf("\n  The stage counts are impl::boxSumFullAdders(NIn) = 3*NIn + 1 and\n"
-                "  impl::boxSum4ReplicatedInputs(NIn) = 4*(2^NIn - 1). At NIn = 8 they are 25\n"
-                "  and 1020; the replicated arm refuses to compile above NIn = 5, where its\n"
-                "  input array is already 124 words per destination word.\n");
+    std::printf("\n The stage counts are impl::boxSumFullAdders(NIn) = 3*NIn + 1 and\n"
+                " impl::boxSum4ReplicatedInputs(NIn) = 4*(2^NIn - 1). At NIn = 8 they are 25\n"
+                " and 1020; the replicated arm refuses to compile above NIn = 5, where its\n"
+                " input array is already 124 words per destination word.\n");
 }
 
 }  // namespace
 
 int main() {
-    std::printf("binCV pyramid downsample -- T3.4\n");
+    std::printf("binCV pyramid downsample --\n");
     std::printf("================================\n");
     reportGrowthAndFootprint();
     reportCost();

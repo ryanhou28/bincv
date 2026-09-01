@@ -1,19 +1,19 @@
 // ===========================================================================
-// X-80 / E-43 -- FAST ON A BIT-PLANE, WHICH IS THE OPERATION binCV IS FOR.
+// earlier work -- FAST ON A BIT-PLANE, WHICH IS THE OPERATION binCV IS FOR.
 //
-// [X-77](../../docs/EXPERIMENTS.md) concluded that FAST could only match `cv::FAST`
-// because "FAST's input is 8-bit". That is true of `detectFast(const SrcT*, ...)`,
+// concluded that FAST could only match `cv::FAST`
+// because "FAST's input is 8-bit". That is true of `detectFast(const SrcT*,...)`,
 // whose own header says "on a WIDE image" -- and it is a property of the SIGNATURE,
 // not of FAST. On a one-bit frame the detector collapses to boolean algebra: there is
 // exactly one meaningful threshold, and the test becomes
 //
-//     corner = arc9(ring & ~centre) | arc9(~ring & centre)
+// corner = arc9(ring & ~centre) | arc9(~ring & centre)
 //
 // This measures the three arms on identical content:
 //
-//   (a) `cv::FAST` on the binary frame stored as CV_8U       -- CLAUDE.md's denominator
-//   (b) binCV's WIDE detectFast on the same CV_8U buffer      -- what X-77 measured
-//   (c) binCV's BIT-PLANE detectFast on the same content      -- the question
+// (a) `cv::FAST` on the binary frame stored as CV_8U -- CLAUDE.md's denominator
+// (b) binCV's WIDE detectFast on the same CV_8U buffer -- what a measurement measured
+// (c) binCV's BIT-PLANE detectFast on the same content -- the question
 //
 // MEMORY IS REPORTED WITH SPEED because they trade off and (c)'s input is eight times
 // smaller, which is half of what is being asked.
@@ -90,25 +90,25 @@ void runOne(const cv::Mat& gray, const char* label) {
     const size_t planeBytes = plane.sizeInWords() * sizeof(uint32_t);
     const size_t byteBytes = bin.total();
 
-    std::printf("\n  %s  %dx%d\n", label, bin.cols, bin.rows);
-    std::printf("    corners: cv::FAST %zu   binCV wide %zu   binCV bit-plane %zu%s\n", nCv,
-                nWide, nBit, nBit == nCv ? "   (bit-plane == cv::FAST)" : "   MISMATCH");
-    std::printf("    %-26s %9.1f us   %6s   %9zu B\n", "(a) cv::FAST on CV_8U", cvMin, "1.00x",
+    std::printf("\n %s %dx%d\n", label, bin.cols, bin.rows);
+    std::printf(" corners: cv::FAST %zu binCV wide %zu binCV bit-plane %zu%s\n", nCv,
+                nWide, nBit, nBit == nCv ? " (bit-plane == cv::FAST)" : " MISMATCH");
+    std::printf(" %-26s %9.1f us %6s %9zu B\n", "(a) cv::FAST on CV_8U", cvMin, "1.00x",
                 byteBytes);
-    std::printf("    %-26s %9.1f us   %5.2fx   %9zu B\n", "(b) binCV wide, CV_8U", wideMin,
+    std::printf(" %-26s %9.1f us %5.2fx %9zu B\n", "(b) binCV wide, CV_8U", wideMin,
                 cvMin / wideMin, byteBytes);
-    std::printf("    %-26s %9.1f us   %5.2fx   %9zu B   (%.1fx smaller input)\n",
+    std::printf(" %-26s %9.1f us %5.2fx %9zu B (%.1fx smaller input)\n",
                 "(c) binCV BIT-PLANE", bitMin, cvMin / bitMin, planeBytes,
                 static_cast<double>(byteBytes) / static_cast<double>(planeBytes));
 
-    // X-81: WHERE THE TWO SCORING ARMS CROSS, MEASURED PER ARCHITECTURE RATHER THAN
+    // WHERE THE TWO SCORING ARMS CROSS, MEASURED PER ARCHITECTURE RATHER THAN
     // DERIVED ONCE. The arithmetic says ~2.8 corners per chunk on both -- but a chunk
     // is 256 pixels on AVX2 and 128 on NEON, and a Cortex-A72 has two vector pipes
     // against a modern x86 core's four-plus, so the same operation count is not the
     // same time. The first NEON threshold was taken from the x86 arithmetic and cost
     // the reference device 2.36x -> 2.12x. This sweep is why it is no longer guessed.
     const int savedThreshold = bincv::impl::fastScoreMaskThreshold();
-    std::printf("    scoring-arm crossover sweep (corners per chunk before the arc masks"
+    std::printf(" scoring-arm crossover sweep (corners per chunk before the arc masks"
                 " are used):\n");
     for (int th : {0, 2, 3, 4, 6, 8, 12, 1 << 30}) {
         bincv::impl::fastScoreMaskThreshold() = th;
@@ -125,7 +125,7 @@ void runOne(const cv::Mat& gray, const char* label) {
         const double m = minOf(ts);
         const std::string tag = th == 0 ? "0 (always)"
                                         : (th > 1000 ? "never" : std::to_string(th));
-        std::printf("      threshold %-10s %9.1f us   %5.2fx vs cv::FAST\n", tag.c_str(), m,
+        std::printf(" threshold %-10s %9.1f us %5.2fx vs cv::FAST\n", tag.c_str(), m,
                     cvMin / m);
     }
     bincv::impl::fastScoreMaskThreshold() = savedThreshold;
@@ -153,7 +153,7 @@ cv::Mat loadRealFrame() {
 
 int main(int argc, char** argv) {
     cv::setNumThreads(1);
-    std::printf("=== X-80 / E-43: FAST on a bit-plane against cv::FAST ===\n");
+    std::printf("=== FAST on a bit-plane against cv::FAST ===\n");
     std::printf("one thread; 12 interleaved rounds, minimum reported\n");
     if (argc < 2) {
         const cv::Mat frame = loadRealFrame();

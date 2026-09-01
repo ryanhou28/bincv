@@ -19,7 +19,7 @@
 /// The test is `img[a] < img[b]` on the **grayscale** image, exactly as the reference
 /// implementations do it, because a comparison between two ONE-BIT pixels carries
 /// almost nothing. So this takes `SrcT` like the rest of the sensor stage
-/// ([ARCHITECTURE §7.8](../../../../docs/ARCHITECTURE.md)) and emits bits. The intermediate
+/// (the design notes) and emits bits. The intermediate
 /// byte never exists.
 ///
 /// ---------------------------------------------------------------------------
@@ -30,12 +30,12 @@
 /// is **practical, not legal** -- an earlier version of this comment said the table
 /// "would import a licence question", which overstated it:
 ///
-///   * the ORB paper (Rublee et al., ICCV 2011) describes how the pattern is
-///     *learned*, and that method is free to reimplement;
-///   * the table as it exists is OpenCV source under **Apache-2.0, which permits
-///     copying with attribution.** Vendoring it is allowed, not forbidden.
+/// * the ORB paper (Rublee et al., ICCV 2011) describes how the pattern is
+/// *learned*, and that method is free to reimplement;
+/// * the table as it exists is OpenCV source under **Apache-2.0, which permits
+/// copying with attribution.** Vendoring it is allowed, not forbidden.
 ///
-/// **What actually stops it today is that binCV has no licence file** (T6.1), so it
+/// **What actually stops it today is that binCV has no licence file**, so it
 /// cannot discharge an attribution obligation it would be taking on. Once it has one,
 /// shipping an OpenCV-compatible pattern with proper attribution is a normal thing to
 /// do and would make binCV's descriptors interchangeable with `cv::ORB`'s.
@@ -69,7 +69,7 @@ struct BriefPair {
 
 /// @brief `Bits` comparisons. One descriptor bit per pair.
 /// @note `Bits` must be a multiple of a word so a descriptor occupies whole words --
-///       a descriptor that ended mid-word would make `hammingDistance` read padding.
+/// a descriptor that ended mid-word would make `hammingDistance` read padding.
 template <size_t Bits>
 struct BriefPattern {
     static_assert(Bits % 32 == 0, "descriptor length must be a multiple of 32 bits");
@@ -83,13 +83,13 @@ constexpr size_t descriptorWords() {
 }
 
 /// @brief Fills a pattern by deterministic Gaussian sampling -- BRIEF's own
-///        construction. **API TIER 3.**
+/// construction. **API TIER 3.**
 /// @param sigmaOver5 The Gaussian's standard deviation is `patchSize / sigmaOver5`;
-///        BRIEF's paper uses `patchSize / 5`.
+/// BRIEF's paper uses `patchSize / 5`.
 /// @note Deterministic in `seed`, so two builds agree and a descriptor computed today
-///       matches one computed tomorrow. **That matters more than the sampling being
-///       optimal** -- descriptors from different patterns are incomparable, so a
-///       pattern that silently varied would be a correctness bug, not a quality one.
+/// matches one computed tomorrow. **That matters more than the sampling being
+/// optimal** -- descriptors from different patterns are incomparable, so a
+/// pattern that silently varied would be a correctness bug, not a quality one.
 template <size_t Bits>
 inline void makeBriefPattern(BriefPattern<Bits>& out, int patchSize = 31,
                              uint64_t seed = 0x5EA15EEDull, int sigmaOver5 = 5) {
@@ -120,12 +120,12 @@ inline void makeBriefPattern(BriefPattern<Bits>& out, int patchSize = 31,
 
 /// @brief Computes descriptors for `count` keypoints. **API TIER 3.**
 /// @param keypointsXY `count` (x, y) pairs, interleaved. A raw float array rather
-///        than a point type, so this header depends on nothing but the word helpers:
-///        a descriptor extractor should not drag the tracker's types in.
-/// @param out `count * descriptorWords<Bits, WordType>()` words, filled.
+/// than a point type, so this header depends on nothing but the word helpers:
+/// a descriptor extractor should not drag the tracker's types in.
+/// @param out `count * descriptorWords<Bits, WordType>` words, filled.
 /// @param keep Optional: set to 0 for a keypoint whose patch falls outside the image.
-///        **A keypoint too close to the border has no descriptor**, and inventing one
-///        by clamping would produce a confident match against nothing.
+/// **A keypoint too close to the border has no descriptor**, and inventing one
+/// by clamping would produce a confident match against nothing.
 /// @note Bit `i` is `img[a_i] < img[b_i]`, the reference test. Never allocates.
 template <size_t Bits, typename SrcT, typename WordType>
 inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t stride,
@@ -188,7 +188,7 @@ inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t st
 
 /// @brief `popcount(a ^ b)` over `words`. **API TIER 3.**
 /// @note This is the whole of descriptor matching, and it is the operation binCV is
-///       built out of. On x86 it is `POPCNT` (D-47); on aarch64 `CNT` (D-6).
+/// built out of. On x86 it is `POPCNT`; on aarch64 `CNT`.
 template <typename WordType>
 inline unsigned hammingDistance(const WordType* a, const WordType* b, size_t words) {
     unsigned d = 0;
@@ -207,11 +207,11 @@ struct DescriptorMatch {
 
 /// @brief Brute-force nearest neighbour with Lowe's ratio test. **API TIER 3.**
 /// @param maxRatio Reject unless `best * 100 <= secondBest * maxRatio`. Lowe's 0.8 is
-///        `maxRatio == 80`. **An integer percentage, not a float**, so core needs no
-///        floating-point comparison and the rule is exact.
+/// `maxRatio == 80`. **An integer percentage, not a float**, so core needs no
+/// floating-point comparison and the rule is exact.
 /// @note Brute force on purpose: at a few hundred keypoints a k-d tree loses to a
-///       linear scan of contiguous words, and Hamming space has no useful metric tree
-///       at 256 bits anyway.
+/// linear scan of contiguous words, and Hamming space has no useful metric tree
+/// at 256 bits anyway.
 template <typename WordType>
 inline void matchDescriptors(const WordType* query, size_t queryCount, const WordType* train,
                              size_t trainCount, size_t words, DescriptorMatch* out,

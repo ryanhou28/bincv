@@ -3,9 +3,9 @@
 //
 // THE OPERATION RESTS ON ONE PROPERTY AND THIS FILE PINS IT.
 //
-//   cv::cornerSubPix solves  G q = b  with  G = sum w (grad I)(grad I)^T.
-//   Scaling the image by s scales grad I by s and therefore scales BOTH G and b by
-//   s^2, so q = G^-1 b is UNCHANGED.
+// cv::cornerSubPix solves G q = b with G = sum w (grad I)(grad I)^T.
+// Scaling the image by s scales grad I by s and therefore scales BOTH G and b by
+// s^2, so q = G^-1 b is UNCHANGED.
 //
 // That is why a ternary derivative carrying +/-1 refines to the same place as a byte
 // pipeline carrying +/-255 -- and it is the whole argument for binCV shipping this at
@@ -14,13 +14,13 @@
 // caught.
 //
 // Three claims, in the order they matter:
-//   1. SCALE INVARIANCE -- the property above, on the formula itself.
-//   2. ORACLE EQUALITY -- the bit-plane kernel equals a dense reference on the same
-//      data. The kernel's whole trick is skipping zero-gradient pixels word-wise, and
-//      a skip that drops a contributing pixel is exactly the bug that would not show
-//      up as a crash.
-//   3. IT ACTUALLY REFINES -- on a corner whose true position is known, the refined
-//      position is closer than the integer one it started from.
+// 1. SCALE INVARIANCE -- the property above, on the formula itself.
+// 2. ORACLE EQUALITY -- the bit-plane kernel equals a dense reference on the same
+// data. The kernel's whole trick is skipping zero-gradient pixels word-wise, and
+// a skip that drops a contributing pixel is exactly the bug that would not show
+// up as a crash.
+// 3. IT ACTUALLY REFINES -- on a corner whose true position is known, the refined
+// position is closer than the integer one it started from.
 // ===========================================================================
 
 #include <cmath>
@@ -179,7 +179,7 @@ BINCV_TEST(SubPix, ScaleInvariance_TernaryRefinesWhereBytesDo) {
             ++n;
         }
     }
-    std::printf("  +/-1 vs +/-255 over %zu starts: mean %.3e px, worst %.3e px\n", n,
+    std::printf(" +/-1 vs +/-255 over %zu starts: mean %.3e px, worst %.3e px\n", n,
                 total / static_cast<double>(n), worst);
     BINCV_CHECK(n == 25);
     BINCV_CHECK(worst < 1e-4);   // the user measured 1.8e-4 mean against OpenCV's own
@@ -228,7 +228,7 @@ BINCV_TEST(SubPix, MatchesDenseOracle_TheWordWiseSkipDropsNothing) {
                                     static_cast<double>(mine[i].y) - ref.y);
         worst = d > worst ? d : worst;
     }
-    std::printf("  %zu corners vs dense oracle: worst %.3e px  (refined %zu, singular %zu,"
+    std::printf(" %zu corners vs dense oracle: worst %.3e px (refined %zu, singular %zu,"
                 " clamped %zu)\n", pts.size(), worst, r.refined, r.singular, r.clamped);
     BINCV_CHECK(pts.size() > 40);
     BINCV_CHECK(worst < 1e-5);
@@ -264,7 +264,7 @@ BINCV_TEST(SubPix, ActuallyRefines_TowardsAKnownCorner) {
             ++cases;
         }
     }
-    std::printf("  %zu starts around a known corner: mean distance %.3f -> %.3f px,"
+    std::printf(" %zu starts around a known corner: mean distance %.3f -> %.3f px,"
                 " %zu improved\n", cases, beforeSum / static_cast<double>(cases),
                 afterSum / static_cast<double>(cases), improved);
     BINCV_CHECK(cases == 24);
@@ -319,7 +319,7 @@ BINCV_TEST(SubPix, AgreesWithOpenCVOnTheSameCorner) {
         total += d;
     }
     const double mean = total / static_cast<double>(mine.size());
-    std::printf("  binCV vs cv::cornerSubPix over %zu starts: mean %.4f px, worst %.4f px\n",
+    std::printf(" binCV vs cv::cornerSubPix over %zu starts: mean %.4f px, worst %.4f px\n",
                 mine.size(), mean, worst);
     BINCV_CHECK(mine.size() == 25);
     // A TOLERANCE, NOT AN EQUALITY, and the docstring says why: different gradient
@@ -347,7 +347,7 @@ BINCV_TEST(SubPix, AgreesWithOpenCVOnTheSameCorner) {
 // operators genuinely differ. It reports ~0.47 px, against ~0.0035 px on an ideal
 // symmetric corner -- and that spread is the point: the symmetric number is not
 // representative of what a caller gets on a real frame, and quoting it alone is how
-// D-74 came to advertise 0.0325 px for an operation a user measured at 4.53.
+// came to advertise 0.0325 px for an operation a user measured at 4.53.
 // ---------------------------------------------------------------------------
 #ifdef BINCV_WITH_OPENCV
 BINCV_TEST(SubPix, MaskWidthMatchesOpenCV_OnAsymmetricContent) {
@@ -389,7 +389,7 @@ BINCV_TEST(SubPix, MaskWidthMatchesOpenCV_OnAsymmetricContent) {
         total += d;
     }
     const double mean = total / static_cast<double>(mine.size());
-    std::printf("  ASYMMETRIC, binCV vs cv::cornerSubPix over %zu starts: mean %.4f px, "
+    std::printf(" ASYMMETRIC, binCV vs cv::cornerSubPix over %zu starts: mean %.4f px, "
                 "worst %.4f px\n", mine.size(), mean, worst);
     BINCV_CHECK(mine.size() == 25);
     // The Tier 2 gap on content that shows it. Bound just above the measured 0.4713 --

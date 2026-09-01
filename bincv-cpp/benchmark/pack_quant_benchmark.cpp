@@ -1,5 +1,5 @@
 // ===========================================================================
-// T5.9 -- N-BIT INGESTION WITHOUT OpenCV, AND WHETHER IT COSTS ANYTHING.
+// -- N-BIT INGESTION WITHOUT OpenCV, AND WHETHER IT COSTS ANYTHING.
 //
 // Before this, the only way into a `QuantMat<N>` was `fromCVMat`, which takes a
 // `cv::Mat` -- so N-bit ingestion required linking OpenCV, which is the one thing the
@@ -7,12 +7,12 @@
 //
 // THREE ARMS, AND THE FIRST TWO ARE THE POINT:
 //
-//   (a) the PORTABLE path -- `transpose8x8`, eight pixels and all N planes at a time;
-//   (b) the VECTOR path -- the scale as `MaxValue` byte compares, then one move-mask
-//       per plane;
-//   (c) `packQuantWith`, the arbitrary-map escape hatch, which cannot vectorise.
+// (a) the PORTABLE path -- `transpose8x8`, eight pixels and all N planes at a time;
+// (b) the VECTOR path -- the scale as `MaxValue` byte compares, then one move-mask
+// per plane;
+// (c) `packQuantWith`, the arbitrary-map escape hatch, which cannot vectorise.
 //
-// (a) vs (b) IS ALSO A LIVENESS CHECK, and it is here deliberately. X-89 shipped a
+// (a) vs (b) IS ALSO A LIVENESS CHECK, and it is here deliberately. shipped a
 // vector block that was compiled out by a mis-attached `#define`, measured three
 // "improvements" against it, and only caught it by timing the kernel in isolation and
 // noticing it did not respond to `-mavx2`. **A vector arm that cannot be switched off
@@ -81,8 +81,8 @@ void runOne(const std::vector<uint8_t>& src) {
     const double v = *std::min_element(tv.begin(), tv.end());
     const double p = *std::min_element(tp.begin(), tp.end());
     const double m = *std::min_element(tm.begin(), tm.end());
-    std::printf("  N=%zu   vector %7.1f us   portable %7.1f us  (%4.2fx)   "
-                "packQuantWith %7.1f us  (%4.2fx)\n",
+    std::printf(" N=%zu vector %7.1f us portable %7.1f us (%4.2fx) "
+                "packQuantWith %7.1f us (%4.2fx)\n",
                 N, v, p, p / v, m, p / m);
 }
 
@@ -95,14 +95,14 @@ int main() {
         st = st * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
         b = static_cast<uint8_t>(st >> 41);
     }
-    std::printf("=== T5.9: N-bit ingestion, %zux%zu, 10 interleaved rounds, minimum ===\n",
+    std::printf("=== N-bit ingestion, %zux%zu, 10 interleaved rounds, minimum ===\n",
                 kW, kH);
     std::printf("no OpenCV anywhere in this binary -- which is the claim\n\n");
     runOne<1>(src);
     runOne<2>(src);
     runOne<4>(src);
-    std::printf("\n  (N=8 has MaxValue 255, so the compare-per-level form does not apply\n"
-                "   and both arms take the transpose path -- expect ~1.00x.)\n");
+    std::printf("\n (N=8 has MaxValue 255, so the compare-per-level form does not apply\n"
+                " and both arms take the transpose path -- expect ~1.00x.)\n");
     runOne<8>(src);
     return 0;
 }

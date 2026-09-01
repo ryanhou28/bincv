@@ -1,4 +1,4 @@
-// The minimum-eigenvalue corner response and the good-features selection (T3.7)
+// The minimum-eigenvalue corner response and the good-features selection
 // -- ops/corner.hpp.
 //
 // WHAT THIS SUITE HAS TO STAND BEHIND, GIVEN THAT NOTHING HERE IS BIT-EXACT
@@ -11,35 +11,35 @@
 // bit-exact against and no Tier 1 promise anywhere in the file. Four things stand
 // in its place, and each is a different kind of evidence:
 //
-//   1. A PER-PIXEL REFERENCE FOR THE RESPONSE MAP, written before the kernel and
-//      sharing no code with it: it reads each ternary value as a float in
-//      {-1, 0, +1} and accumulates `xx += a*a; yy += b*b; xy += a*b` one pixel at
-//      a time, with its own clipping ladder. Every pixel of every frame is
-//      compared, at four block sizes and all four word types, with NO TOLERANCE.
-//   2. TWO EXACT PROPERTIES OF THE EIGENVALUE THAT NEED NO SQUARE ROOT AT ALL.
-//      The response is exactly 0.0f iff `det = xx*yy - xy^2` is zero, and where
-//      `D = (xx-yy)^2 + 4xy^2` is a perfect square the response is the exact
-//      half-integer `(S - isqrt(D))/2`. Both are checked with INTEGER arithmetic,
-//      so they do not inherit the library's own rounding, and between them they
-//      cover every zero-response position of every frame -- which on real content
-//      is most of the map.
-//   3. THE SELECTION ORDER, against a literal port of gftt.cpp: `minMaxLoc`,
-//      `threshold(THRESH_TOZERO)`, `dilate` into a second buffer, the
-//      `val != 0 && val == tmp[x]` scan over `[1, h-1) x [1, w-1)`, the descending
-//      sort, and the CELL-GRID minimum-distance filter. ops/corner.hpp fuses the
-//      threshold into the scan and replaces the grid with an exhaustive check; the
-//      port does neither, so agreement is evidence that the two shortcuts are
-//      shortcuts and not changes. And a hand-built three-point map pins the ORDER
-//      itself: NMS-before-spacing keeps {A}, spacing-before-NMS keeps {A, C}, and
-//      the test asserts BOTH -- so the case can fail rather than merely agree.
-//   4. STRUCTURE, not only random content. A checkerboard (a corner at every block
-//      junction), a 45-degree edge (the classic min-eigenvalue discriminator: an
-//      enormous gradient and NO corner), an isolated dot, a blank frame and a
-//      uniform frame.
+// 1. A PER-PIXEL REFERENCE FOR THE RESPONSE MAP, written before the kernel and
+// sharing no code with it: it reads each ternary value as a float in
+// {-1, 0, +1} and accumulates `xx += a*a; yy += b*b; xy += a*b` one pixel at
+// a time, with its own clipping ladder. Every pixel of every frame is
+// compared, at four block sizes and all four word types, with NO TOLERANCE.
+// 2. TWO EXACT PROPERTIES OF THE EIGENVALUE THAT NEED NO SQUARE ROOT AT ALL.
+// The response is exactly 0.0f iff `det = xx*yy - xy^2` is zero, and where
+// `D = (xx-yy)^2 + 4xy^2` is a perfect square the response is the exact
+// half-integer `(S - isqrt(D))/2`. Both are checked with INTEGER arithmetic,
+// so they do not inherit the library's own rounding, and between them they
+// cover every zero-response position of every frame -- which on real content
+// is most of the map.
+// 3. THE SELECTION ORDER, against a literal port of gftt.cpp: `minMaxLoc`,
+// `threshold(THRESH_TOZERO)`, `dilate` into a second buffer, the
+// `val != 0 && val == tmp[x]` scan over `[1, h-1) x [1, w-1)`, the descending
+// sort, and the CELL-GRID minimum-distance filter. ops/corner.hpp fuses the
+// threshold into the scan and replaces the grid with an exhaustive check; the
+// port does neither, so agreement is evidence that the two shortcuts are
+// shortcuts and not changes. And a hand-built three-point map pins the ORDER
+// itself: NMS-before-spacing keeps {A}, spacing-before-NMS keeps {A, C}, and
+// the test asserts BOTH -- so the case can fail rather than merely agree.
+// 4. STRUCTURE, not only random content. A checkerboard (a corner at every block
+// junction), a 45-degree edge (the classic min-eigenvalue discriminator: an
+// enormous gradient and NO corner), an isolated dot, a blank frame and a
+// uniform frame.
 //
 // THE BORDER CHECK IS THE ONE THAT VERIFIES A DECISION RATHER THAN A KERNEL
 //
-// D-19 chose BORDER_REFLECT_101 for the derivative partly BECAUSE a zero fill
+// the design rule chose BORDER_REFLECT_101 for the derivative partly BECAUSE a zero fill
 // manufactures an edge around the whole frame that THIS operation would select as
 // spurious keypoints. `Corner.BorderRing_*` checks that the reasoning holds, and
 // checks it in the only way that can fail: reflect-101 must give ZERO corners on a
@@ -50,24 +50,24 @@
 //
 // WHAT ELSE IS PINNED HERE
 //
-//   * NO HEAP, in any entry point. `operator new` is counted -- the plain AND the
-//     C++17 over-aligned forms -- across the response map, the selection and the
-//     whole operation, and must be zero. The selection is where this has teeth:
-//     the reference grows an unbounded `std::vector<const float*>` of candidates
-//     and allocates a `vector<vector<Point2f>>` grid, and ops/corner.hpp replaces
-//     both with the caller's own array.
-//   * THE MAP DOES NOT DEPEND ON WordType. The same logical frame at uint8_t,
-//     uint16_t, uint32_t and uint64_t must give BIT-IDENTICAL float maps; the
-//     popcount arithmetic is exact and the only rounding is a correctly-rounded
-//     square root, so anything else would be a word-boundary bug.
-//   * THE `float` STORAGE MARGIN IS MEASURED, NOT ASSERTED. ops/corner.hpp says
-//     the map is stored as float, that the headroom over `double` is ~1.3e4 at
-//     blockSize 3 and falls to ~2 by blockSize 31. `Corner.FloatMargin_*` counts
-//     the positions where the float map merges two responses the double oracle
-//     separates, and the NMS survivors that differ between the two maps, and
-//     prints both.
-//   * THE CAPACITY CONTRACT. Truncation is exercised, and `candidatesTruncated`
-//     must be set exactly when the buffer could not hold every NMS survivor.
+// * NO HEAP, in any entry point. `operator new` is counted -- the plain AND the
+// C++17 over-aligned forms -- across the response map, the selection and the
+// whole operation, and must be zero. The selection is where this has teeth:
+// the reference grows an unbounded `std::vector<const float*>` of candidates
+// and allocates a `vector<vector<Point2f>>` grid, and ops/corner.hpp replaces
+// both with the caller's own array.
+// * THE MAP DOES NOT DEPEND ON WordType. The same logical frame at uint8_t,
+// uint16_t, uint32_t and uint64_t must give BIT-IDENTICAL float maps; the
+// popcount arithmetic is exact and the only rounding is a correctly-rounded
+// square root, so anything else would be a word-boundary bug.
+// * THE `float` STORAGE MARGIN IS MEASURED, NOT ASSERTED. ops/corner.hpp says
+// the map is stored as float, that the headroom over `double` is ~1.3e4 at
+// blockSize 3 and falls to ~2 by blockSize 31. `Corner.FloatMargin_*` counts
+// the positions where the float map merges two responses the double oracle
+// separates, and the NMS survivors that differ between the two maps, and
+// prints both.
+// * THE CAPACITY CONTRACT. Truncation is exercised, and `candidatesTruncated`
+// must be set exactly when the buffer could not hold every NMS survivor.
 
 #include <algorithm>
 #include <cmath>
@@ -162,7 +162,7 @@ using bincv::TernaryMat;
 // packed at all four word types and the maps compared bit for bit.
 // ---------------------------------------------------------------------------
 
-// Taller than the largest block size, and pinned. T3.6 shipped a suite whose
+// Taller than the largest block size, and pinned. shipped a suite whose
 // frame was shorter than two of its three window sizes, so every swept position
 // of the two largest windows was clipped and nothing ever reduced a full window.
 // The same mistake is available here and these two lines are what prevent it.
@@ -264,7 +264,7 @@ BinMat<WordType> pack(const Frame& f) {
 // It reads the derivative pair through the CONTAINER accessor, one pixel at a
 // time, into plain signed bytes -- a path that touches no view, no region clip and
 // no word arithmetic -- and then accumulates in FLOAT, which is the formulation
-// ARCHITECTURE 7.5 claims the popcounts replace.
+// the design notes claims the popcounts replace.
 // ---------------------------------------------------------------------------
 
 struct Ternary {
@@ -327,7 +327,7 @@ long long isqrtExact(long long n) {
 }
 
 /// @brief The response in DOUBLE, for the float-margin measurement. Same formula,
-///        stored without the narrowing.
+/// stored without the narrowing.
 double responseDouble(const Triple& t) {
     const double s = static_cast<double>(t.xx) + static_cast<double>(t.yy);
     const double d = static_cast<double>(t.xx) - static_cast<double>(t.yy);
@@ -340,21 +340,21 @@ double responseDouble(const Triple& t) {
 // ---------------------------------------------------------------------------
 
 /// @brief cvRound: nearest, ties to even. `std::nearbyint` under the default
-///        FE_TONEAREST is exactly that.
+/// FE_TONEAREST is exactly that.
 int cvRoundLike(double v) { return static_cast<int>(std::nearbyint(v)); }
 
 /// @brief gftt.cpp's own comparator, copied from
-///        SEAL/opencv_internal/include/gftt.hpp with its comment.
+/// SEAL/opencv_internal/include/gftt.hpp with its comment.
 /// @note **THIS MUST NOT BE `impl::CornerStronger` OR A COPY OF IT.** The library's
-///       comparator is the thing under test; an oracle that shares it cannot
-///       detect a wrong tie order, and equal responses are the RULE in this
-///       operation rather than the exception. So the port sorts POINTERS into the
-///       `eig` buffer, exactly as the reference does, and its tie rule is the
-///       reference's address comparison rather than anything spelled on
-///       coordinates. Measured: with the library's tie order inverted this
-///       comparator fails `Corner.SelectionMatchesReferencePort` and
-///       `Corner.SelectionOnSyntheticMaps`; a copy of `impl::CornerStronger`
-///       passes both.
+/// comparator is the thing under test; an oracle that shares it cannot
+/// detect a wrong tie order, and equal responses are the RULE in this
+/// operation rather than the exception. So the port sorts POINTERS into the
+/// `eig` buffer, exactly as the reference does, and its tie rule is the
+/// reference's address comparison rather than anything spelled on
+/// coordinates. Measured: with the library's tie order inverted this
+/// comparator fails `Corner.SelectionMatchesReferencePort` and
+/// `Corner.SelectionOnSyntheticMaps`; a copy of `impl::CornerStronger`
+/// passes both.
 struct greaterThanPtr {
     bool operator()(const float* a, const float* b) const
 
@@ -520,9 +520,9 @@ struct SweepTally {
     size_t interior = 0;         ///< positions whose window lies fully inside the frame
     size_t clipped = 0;          ///< positions whose window is cut by an edge
     size_t valueMismatch = 0;    ///< map != minEigenValue(reference triple)
-    size_t tripleMismatch = 0;   ///< reference triple != T3.6's gradientCovariance
+    size_t tripleMismatch = 0;   ///< reference triple != that work’s gradientCovariance
     size_t exactChecked = 0;     ///< positions where D is a perfect square
-    size_t exactMismatch = 0;    ///< ... and the map is not the exact half-integer
+    size_t exactMismatch = 0;    ///<... and the map is not the exact half-integer
     size_t zeroMismatch = 0;     ///< (response == 0) != (det == 0)
     size_t gapViolation = 0;     ///< a non-zero response below 1/(2*blockSize^2)
     size_t precisionMismatch = 0; ///< map != narrow(double evaluation of the same triple)
@@ -550,27 +550,27 @@ SweepTally sweepFrame(const Frame& f, int blockSize) {
                                       static_cast<size_t>(x)];
 
             // (a) the map is the eigenvalue of the reference's triple, exactly.
-            //     This pins the TRIPLE -- it calls the same function the kernel
-            //     does, so it says nothing about the eigenvalue formula itself.
+            // This pins the TRIPLE -- it calls the same function the kernel
+            // does, so it says nothing about the eigenvalue formula itself.
             if (got != bincv::impl::minEigenValue(ref.xx, ref.yy, ref.xy)) ++t.valueMismatch;
 
-            // (a2) ... and the map is what a DOUBLE evaluation of the same triple
-            //     narrows to. ops/corner.hpp commits to double for the square root
-            //     and says why; without this the commitment is unbacked, and a
-            //     mutant computing the whole thing in float passed the rest of this
-            //     suite unchanged.
+            // (a2)... and the map is what a DOUBLE evaluation of the same triple
+            // narrows to. ops/corner.hpp commits to double for the square root
+            // and says why; without this the commitment is unbacked, and a
+            // mutant computing the whole thing in float passed the rest of this
+            // suite unchanged.
             if (got != static_cast<float>(responseDouble(ref))) ++t.precisionMismatch;
 
-            // (b) the reference's triple is T3.6's, exactly. This is what tells a
-            //     reader WHICH side is wrong when (a) fails: the sliding sweep or
-            //     the oracle.
+            // (b) the reference's triple is that work’s, exactly. This is what tells a
+            // reader WHICH side is wrong when (a) fails: the sliding sweep or
+            // the oracle.
             const GradientCovariance cov = bincv::gradientCovariance(
                 d.dx, d.dy, Rect(x - off, y - off, blockSize, blockSize));
             if (cov.sumXX != ref.xx || cov.sumYY != ref.yy || cov.sumXY != ref.xy)
                 ++t.tripleMismatch;
 
             // (c) where D is a perfect square the answer is an exact half-integer
-            //     and needs no floating square root to predict.
+            // and needs no floating square root to predict.
             const long long S = ref.xx + ref.yy;
             const long long D = (ref.xx - ref.yy) * (ref.xx - ref.yy) + 4 * ref.xy * ref.xy;
             const long long q = isqrtExact(D);
@@ -585,7 +585,7 @@ SweepTally sweepFrame(const Frame& f, int blockSize) {
             if ((got == 0.0f) != (det == 0)) ++t.zeroMismatch;
 
             // (e) a non-zero response is at least 1/(2*blockSize^2), so it can
-            //     never round to zero and the `> threshold` test needs no epsilon.
+            // never round to zero and the `> threshold` test needs no epsilon.
             if (got != 0.0f) {
                 const double floorValue =
                     1.0 / (2.0 * static_cast<double>(blockSize) * static_cast<double>(blockSize));
@@ -631,7 +631,7 @@ void sweepSuite(const char* wordName) {
                              (sizeof(kBlockSizes) / sizeof(kBlockSizes[0]));
     BINCV_CHECK_EQ(positions, expectedPositions);
     BINCV_CHECK(interior > 0 && clipped > 0 && exact > 0);
-    std::printf("  [%s] %zu positions (%zu interior, %zu clipped), %zu with an exact square root\n",
+    std::printf(" [%s] %zu positions (%zu interior, %zu clipped), %zu with an exact square root\n",
                 wordName, positions, interior, clipped, exact);
 }
 
@@ -648,7 +648,7 @@ BINCV_TEST(Corner, ResponseMap_uint64_t) { sweepSuite<uint64_t>("uint64_t"); }
 // The three sums are exact integers and the only rounding is a correctly-rounded
 // square root, so the same logical frame must give BIT-IDENTICAL float maps at 8,
 // 16, 32 and 64 bits. Anything else is a word-boundary bug -- a residue the column
-// masks get wrong, or a padding bit counted (D-13) -- and it would be invisible to
+// masks get wrong, or a padding bit counted -- and it would be invisible to
 // a suite that only ever ran one width.
 // ---------------------------------------------------------------------------
 
@@ -685,7 +685,7 @@ BINCV_TEST(Corner, WordTypeInvariance) {
         }
     }
     BINCV_CHECK(compared > 0);
-    std::printf("  word-type invariance: %zu positions x 4 word types, bit-identical\n", compared);
+    std::printf(" word-type invariance: %zu positions x 4 word types, bit-identical\n", compared);
 }
 
 // ---------------------------------------------------------------------------
@@ -762,7 +762,7 @@ BINCV_TEST(Corner, FloatMargin) {
                 }
             }
         }
-        std::printf("  float margin at blockSize %2d: %zu positions, %zu merged neighbour pairs, "
+        std::printf(" float margin at blockSize %2d: %zu positions, %zu merged neighbour pairs, "
                     "%zu NMS survivor differences\n",
                     blockSize, positions, merged, survivorDiff);
         BINCV_CHECK(positions > 0);
@@ -838,7 +838,7 @@ BINCV_TEST(Corner, SelectionMatchesReferencePort) {
         }
     }
     BINCV_CHECK(combos > 0);
-    std::printf("  selection: %zu parameter combinations, %zu corners agreed with the gftt.cpp "
+    std::printf(" selection: %zu parameter combinations, %zu corners agreed with the gftt.cpp "
                 "port\n",
                 combos, total);
 }
@@ -852,17 +852,17 @@ BINCV_TEST(Corner, SelectionMatchesReferencePort) {
 // file produces AND the one the other order would produce -- so the case fails if
 // either changes.
 //
-//   A = (10, 10) 100     B = (13, 10) 99     C = (14, 10) 98     minDistance 3.5
+// A = (10, 10) 100 B = (13, 10) 99 C = (14, 10) 98 minDistance 3.5
 //
-//   NMS first (gftt.cpp, and ops/corner.hpp): C dies beside B; {A, B} rank; A is
-//     accepted; B is 3 away and 9 < 12.25 rejects it.                  -> {A}
-//   Spacing first: all three rank; A accepted; B rejected; C is 4 away and
-//     16 >= 12.25 accepts it.                                          -> {A, C}
+// NMS first (gftt.cpp, and ops/corner.hpp): C dies beside B; {A, B} rank; A is
+// accepted; B is 3 away and 9 < 12.25 rejects it. -> {A}
+// Spacing first: all three rank; A accepted; B rejected; C is 4 away and
+// 16 >= 12.25 accepts it. -> {A, C}
 // ---------------------------------------------------------------------------
 
 // Real response maps are not enough to pin the selection, because they never put
 // the global maximum where the candidate scan cannot reach it: reflect-101 makes
-// the outermost row and column of the derivative zero (D-19), so a real map's
+// the outermost row and column of the derivative zero, so a real map's
 // border is weak. `minMaxLoc` in gftt.cpp scans the WHOLE map, border included,
 // and the threshold it sets is what every later stage is measured against -- so a
 // maximum living on the border is a case only a synthetic map can build. Measured:
@@ -905,7 +905,7 @@ BINCV_TEST(Corner, SelectionOnSyntheticMaps) {
     }
     BINCV_CHECK_EQ(borderDominant, static_cast<size_t>(3));
     BINCV_CHECK(combos > 0);
-    std::printf("  synthetic maps: %zu parameter combinations (3 with the maximum on the "
+    std::printf(" synthetic maps: %zu parameter combinations (3 with the maximum on the "
                 "border), %zu corners agreed with the gftt.cpp port\n",
                 combos, corners);
 }
@@ -974,7 +974,7 @@ BINCV_TEST(Corner, SelectionOrder_PinsNmsBeforeDistance) {
     BINCV_CHECK_EQ(spacingFirst.size(), static_cast<size_t>(2));
     BINCV_CHECK_EQ(spacingFirst[1].x, 14);
     BINCV_CHECK_EQ(spacingFirst[1].y, 10);
-    // ... and that is a corner ops/corner.hpp does NOT return.
+    //... and that is a corner ops/corner.hpp does NOT return.
     BINCV_CHECK(r.count != spacingFirst.size());
 }
 
@@ -991,9 +991,9 @@ BINCV_TEST(Corner, SelectionOrder_PinsNmsBeforeDistance) {
 // This case does not depend on the port at all. Two equal responses, one greedy
 // spacing decision, and the answer is one corner or the other:
 //
-//     8x5 map, 1.0f at (1, 1) and (3, 1), minDistance 3.0
-//       ascending tie order  -> (1, 1)      <-- what the bug returned
-//       descending (reference, and this file) -> (3, 1)
+// 8x5 map, 1.0f at (1, 1) and (3, 1), minDistance 3.0
+// ascending tie order -> (1, 1) <-- what the bug returned
+// descending (reference, and this file) -> (3, 1)
 //
 // Ties are not a corner case here: a checkerboard makes the entire interior equal,
 // and a 3x3 window of {-1, 0, 1} derivatives has few distinct responses to begin
@@ -1032,7 +1032,7 @@ BINCV_TEST(Corner, TieOrderIsTheReferenceDescendingRasterOrder) {
     }
 
     // 2. The ROW half of the rule, which an x-only case would not reach: two equal
-    //    responses in different rows, close enough that one excludes the other.
+    // responses in different rows, close enough that one excludes the other.
     {
         const int w = 7, h = 9;
         std::vector<float> storage(static_cast<size_t>(w) * static_cast<size_t>(h), 0.0f);
@@ -1053,7 +1053,7 @@ BINCV_TEST(Corner, TieOrderIsTheReferenceDescendingRasterOrder) {
     }
 
     // 3. The ordering itself, with no spacing filter at all: an all-equal interior
-    //    must come out in descending raster order, which is the reference's sort.
+    // must come out in descending raster order, which is the reference's sort.
     {
         const int w = 6, h = 5;
         std::vector<float> storage(static_cast<size_t>(w) * static_cast<size_t>(h), 3.0f);
@@ -1154,7 +1154,7 @@ BINCV_TEST(Corner, Structure_Checkerboard) {
     // is identical to every other, so their responses must be identical too -- the
     // whole result is then decided by the tie-break, which must be stable. Junctions
     // NEAR the edge are legitimately weaker: reflect-101 makes the outermost row
-    // and column of the derivative exactly zero (D-19), so a window that reaches
+    // and column of the derivative exactly zero, so a window that reaches
     // them sums fewer gradients.
     size_t interiorJunctions = 0, unequal = 0;
     float reference = 0.0f;
@@ -1169,7 +1169,7 @@ BINCV_TEST(Corner, Structure_Checkerboard) {
     BINCV_CHECK(interiorJunctions > 20);
     BINCV_CHECK_EQ(unequal, static_cast<size_t>(0));
     BINCV_CHECK(reference > 0.0f);
-    std::printf("  checkerboard(%d): %zu corners, all at junctions, %zu clear of the edge at "
+    std::printf(" checkerboard(%d): %zu corners, all at junctions, %zu clear of the edge at "
                 "response %g\n",
                 block, r.count, interiorJunctions, static_cast<double>(reference));
 }
@@ -1183,7 +1183,7 @@ BINCV_TEST(Corner, Structure_DiagonalEdgeHasNoCorner) {
     // "Interior" here means a window that sees only INTERIOR derivative rows and
     // columns -- one pixel further in than "the window fits in the frame". The
     // extra pixel is not slack: reflect-101 makes the outermost row and column of
-    // the derivative exactly zero (D-19), so a window that reaches them holds
+    // the derivative exactly zero, so a window that reaches them holds
     // gradients whose y-component was forced to zero, which is no longer parallel
     // to the rest and gives the matrix a second eigenvalue. Measured on this
     // frame, EVERY non-zero interior response is at exactly that distance from an
@@ -1225,7 +1225,7 @@ BINCV_TEST(Corner, Structure_DiagonalEdgeHasNoCorner) {
     BINCV_CHECK(cov.sumXX > 10);
     BINCV_CHECK(cov.sumYY > 10);
     BINCV_CHECK_EQ(cov.sumXX * cov.sumYY - cov.sumXY * cov.sumXY, static_cast<long long>(0));
-    std::printf("  diagonal edge: interior response 0 everywhere; a 15x15 window on the edge is "
+    std::printf(" diagonal edge: interior response 0 everywhere; a 15x15 window on the edge is "
                 "{%lld, %lld, %lld}, det 0\n",
                 static_cast<long long>(cov.sumXX), static_cast<long long>(cov.sumYY),
                 static_cast<long long>(cov.sumXY));
@@ -1247,9 +1247,9 @@ BINCV_TEST(Corner, Structure_IsolatedDot) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. THE BORDER RING D-19 EXISTS TO PREVENT
+// 7. THE BORDER RING EXISTS TO PREVENT
 //
-// T3.5 chose BORDER_REFLECT_101 for the derivative partly BECAUSE a zero fill
+// chose BORDER_REFLECT_101 for the derivative partly BECAUSE a zero fill
 // manufactures an edge around the whole frame that this operation would select as
 // spurious keypoints. That is checked here, in the only form that can fail: the
 // ring must be ABSENT under reflect-101 and PRESENT under BORDER_CONSTANT.
@@ -1305,13 +1305,13 @@ void borderRingSuite(const char* wordName) {
             const CornerResult rc = bincv::goodFeaturesToTrack(zeroFill.dx, zeroFill.dy, p, mapC,
                                                                out.data(), out.size());
             BINCV_CHECK_EQ(rc.count > 0, expectRing);
-            // ... and every one of the spurious corners is ON the border, which is
+            //... and every one of the spurious corners is ON the border, which is
             // what makes it a ring rather than content this frame happens to have.
             const size_t onBorder =
                 cornersNearBorder(out, rc.count, f.width, f.height, blockSize / 2 + 1);
             BINCV_CHECK_EQ(onBorder, rc.count);
             if (blockSize == 3) {
-                std::printf("  [%s] %-12s reflect-101: 0 corners; BORDER_CONSTANT: %zu, all on the "
+                std::printf(" [%s] %-12s reflect-101: 0 corners; BORDER_CONSTANT: %zu, all on the "
                             "border\n",
                             wordName, f.name.c_str(), rc.count);
             }
@@ -1420,7 +1420,7 @@ BINCV_TEST(Corner, CapacityContract) {
     BINCV_CHECK_EQ(none.candidatesRanked, static_cast<size_t>(0));
     BINCV_CHECK_EQ(none.candidatesTruncated, true);
 
-    // ... and the flag stays false when there is genuinely nothing to truncate: an
+    //... and the flag stays false when there is genuinely nothing to truncate: an
     // all-zero map has maxVal 0, threshold 0, and no survivor.
     const std::vector<float> flat(static_cast<size_t>(f.width) * static_cast<size_t>(f.height),
                                   0.0f);
@@ -1529,7 +1529,7 @@ BINCV_TEST(Corner, SpellingsAgree) {
         BINCV_CHECK_EQ(differing, static_cast<size_t>(0));
     }
 
-    // T3.6 promise 1, inherited: the CONTAINER spelling refuses an N-bit level at
+    // the promise 1, inherited: the CONTAINER spelling refuses an N-bit level at
     // compile time rather than returning the LSB plane's response.
     BINCV_CHECK_EQ(ContainerSpellingAccepts<uint32_t>::value, false);
 }
@@ -1609,17 +1609,17 @@ BINCV_TEST(Corner, NoAllocation) {
 }
 
 // ---------------------------------------------------------------------------
-// 12. THE STREAMING SHAPE (T3.11 / E-10): IDENTICAL CORNERS, NOT SIMILAR ONES
+// 12. THE STREAMING SHAPE: IDENTICAL CORNERS, NOT SIMILAR ONES
 //
 // `goodFeaturesToTrackStreaming` keeps three rows where `goodFeaturesToTrack`
 // keeps a frame-sized float map -- 7 680 B against 1 228 800 B at 640x480. Its
 // contract is EQUALITY, and equality is the only thing that makes the trade a
 // trade rather than a different operation:
 //
-//   * the quality threshold is relative to the GLOBAL maximum, which a three-row
-//     ring does not have until the last row;
-//   * the spacing filter needs the survivors ordered across the WHOLE frame under
-//     CornerStronger, whose tie rule is DESCENDING raster position.
+// * the quality threshold is relative to the GLOBAL maximum, which a three-row
+// ring does not have until the last row;
+// * the spacing filter needs the survivors ordered across the WHOLE frame under
+// CornerStronger, whose tie rule is DESCENDING raster position.
 //
 // So the two failure modes this section exists to catch are a threshold taken
 // from a partial maximum, and a tie decided by the order candidates happened to
@@ -1649,7 +1649,7 @@ namespace {
 const int kStreamBlockSizes[] = {3, 4, 5, 7, 15, 31};
 
 /// @brief The parameter sets swept beside the frames. `blockSize` is filled in by
-///        the caller, so this is only the three SELECTION parameters.
+/// the caller, so this is only the three SELECTION parameters.
 struct SelectionParams {
     const char* name;
     int maxCorners;
@@ -1680,7 +1680,7 @@ struct StreamTally {
 };
 
 /// @brief Run both shapes over one frame at one blockSize and one parameter set,
-///        across a capacity sweep, and compare everything.
+/// across a capacity sweep, and compare everything.
 template <typename WordType>
 void compareShapes(const Frame& f, int blockSize, const SelectionParams& sp, StreamTally& t) {
     const Derived<WordType> d(f, BORDER_REFLECT_101);
@@ -1729,7 +1729,7 @@ void compareShapes(const Frame& f, int blockSize, const SelectionParams& sp, Str
 
         std::vector<float> storage = makeMapStorage(f.width, f.height);
         ResponseMap map = mapView(storage, f.width, f.height);
-        std::vector<Corner> a(capacity + 1);  // +1 so `.data()` is never null at 0
+        std::vector<Corner> a(capacity + 1);  // +1 so `.data` is never null at 0
         const CornerResult ra = bincv::goodFeaturesToTrack(d.dx, d.dy, params, map, a.data(),
                                                            capacity);
 
@@ -1765,7 +1765,7 @@ void compareShapes(const Frame& f, int blockSize, const SelectionParams& sp, Str
         }
         if (bad) {
             ++t.mismatches;
-            std::printf("  MISMATCH %s block %d %s capacity %zu: frame-map "
+            std::printf(" MISMATCH %s block %d %s capacity %zu: frame-map "
                         "{%zu, %zu, %d} streaming {%zu, %zu, %d}\n",
                         f.name.c_str(), blockSize, sp.name, capacity, ra.count,
                         ra.candidatesRanked, ra.candidatesTruncated ? 1 : 0, rb.count,
@@ -1804,7 +1804,7 @@ void streamingSuite(const char* wordName) {
     BINCV_CHECK(t.cornersCompared > 0);
     BINCV_CHECK(t.truncatedCells > 0);
     BINCV_CHECK(t.tieCells > 0);
-    std::printf("  [%s] streaming == frame map: %zu cells, %zu corner records, "
+    std::printf(" [%s] streaming == frame map: %zu cells, %zu corner records, "
                 "%zu truncating cells, %zu cells containing a tied response\n",
                 wordName, t.comparisons, t.cornersCompared, t.truncatedCells, t.tieCells);
 }
@@ -1823,7 +1823,7 @@ BINCV_TEST(Corner, Streaming_IdenticalCorners_uint64_t) { streamingSuite<uint64_
 // word types. A frame that size has tens of survivors and a `minDistance` of 33
 // selects two or three corners, so the greedy filter barely runs. These frames
 // are large enough that the spacing filter does real work and the survivor count
-// is in the hundreds -- which is the regime X-23 measures and the frontend runs.
+// is in the hundreds -- which is the regime measures and the frontend runs.
 // ---------------------------------------------------------------------------
 
 BINCV_TEST(Corner, Streaming_IdenticalCorners_LargeFrames) {
@@ -1848,7 +1848,7 @@ BINCV_TEST(Corner, Streaming_IdenticalCorners_LargeFrames) {
     BINCV_CHECK(t32.cornersCompared > 1000);
     BINCV_CHECK(t32.truncatedCells > 0);
     BINCV_CHECK(t32.tieCells > 0);
-    std::printf("  large frames: uint32_t %zu cells / %zu corner records, "
+    std::printf(" large frames: uint32_t %zu cells / %zu corner records, "
                 "uint64_t %zu cells / %zu corner records, all identical\n",
                 t32.comparisons, t32.cornersCompared, t64.comparisons, t64.cornersCompared);
 }
@@ -1900,7 +1900,7 @@ void rowKernelSuite(const char* wordName) {
     }
     BINCV_CHECK_EQ(differing, static_cast<size_t>(0));
     BINCV_CHECK(positions > 0);
-    std::printf("  [%s] row kernel == frame map over %zu positions, bit-identical\n", wordName,
+    std::printf(" [%s] row kernel == frame map over %zu positions, bit-identical\n", wordName,
                 positions);
 }
 
@@ -1981,7 +1981,7 @@ BINCV_TEST(Corner, Streaming_NoAllocation) {
     }
     const std::size_t probeAllocs = g_newCount - probeBefore;
     BINCV_CHECK_EQ(probeAllocs, std::size_t{1});
-    std::printf("  streaming: operator new = %zu across the whole call (%zu candidates ranked)\n",
+    std::printf(" streaming: operator new = %zu across the whole call (%zu candidates ranked)\n",
                 during, r.candidatesRanked);
 }
 

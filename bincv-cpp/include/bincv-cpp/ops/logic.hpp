@@ -1,52 +1,52 @@
 #pragma once
 
 /// @file logic.hpp
-/// @brief Bitwise logic over bit-packed binary images (T2.2). API TIER 1.
+/// @brief Bitwise logic over bit-packed binary images. API TIER 1.
 ///
 /// The first kernels in the project, and the first test of the thesis: a binary
 /// image stored one bit per pixel means an AND over a 640x480 frame is 9600
 /// 32-bit words rather than 307200 bytes, so the same answer moves an eighth of
-/// the memory (ARCHITECTURE 4.6, 6.1).
+/// the memory (the design notes, 6.1).
 ///
 /// Four operations, each bit-exact against its OpenCV counterpart on equivalent
-/// content (ARCHITECTURE 5.1, Tier 1) -- proven across the T2.1 size and fill
+/// content (the design notes, Tier 1) -- proven across the size and fill
 /// matrix by tests/test_logic.cpp, not asserted here.
 ///
 /// ---------------------------------------------------------------------------
 /// WHAT A KERNEL IN THIS FILE PROMISES
 ///
-///  1. **Views, never containers** (D-5). Every kernel takes BinMatConstView /
-///     BinMatView, so it compiles once per WordType and does not care how its
-///     arguments were allocated or aligned. The QuantMat overloads at the bottom
-///     are a plane loop over these kernels, not a second implementation.
+/// 1. **Views, never containers**. Every kernel takes BinMatConstView /
+/// BinMatView, so it compiles once per WordType and does not care how its
+/// arguments were allocated or aligned. The QuantMat overloads at the bottom
+/// are a plane loop over these kernels, not a second implementation.
 ///
-///  2. **Strides may differ between the arguments, and are read per row.** The
-///     single-contiguous-run path is taken only when all three strides equal
-///     ceil(width / WordBits) -- i.e. when the rows really are dense and adjacent
-///     -- and every other case walks row by row through view.row(y). A kernel
-///     that assumed one dense run would be correct on matrices built the same way
-///     and silently wrong the moment one argument is over-aligned (D-4 makes that
-///     a per-object choice) or wraps a caller's buffer with its own stride.
+/// 2. **Strides may differ between the arguments, and are read per row.** The
+/// single-contiguous-run path is taken only when all three strides equal
+/// ceil(width / WordBits) -- i.e. when the rows really are dense and adjacent
+/// -- and every other case walks row by row through view.row(y). A kernel
+/// that assumed one dense run would be correct on matrices built the same way
+/// and silently wrong the moment one argument is over-aligned (the design rule makes that
+/// a per-object choice) or wraps a caller's buffer with its own stride.
 ///
-///  3. **PADDING BITS STAY ZERO** (CLAUDE.md, hard rules). Every kernel here
-///     writes whole words, so the trailing partial word of each row carries bits
-///     past `width` that no pixel comparison can see -- and bitwiseNot SETS every
-///     one of them. They are masked off before the word is stored. Measured
-///     during T2.1: a word-wise NOT without the mask was bit-exact against
-///     cv::bitwise_not on all 240 swept cases at uint64_t and left 826,200
-///     phantom set bits behind, which the next word-wise reduction counts as
-///     pixels. The mask is applied by all four operations, not only by NOT, so a
-///     destination is clean even when an input's padding was dirty (a wrapped
-///     buffer's padding belongs to its caller -- see BinMat's wrap constructor).
+/// 3. **PADDING BITS STAY ZERO** (CLAUDE.md, hard rules). Every kernel here
+/// writes whole words, so the trailing partial word of each row carries bits
+/// past `width` that no pixel comparison can see -- and bitwiseNot SETS every
+/// one of them. They are masked off before the word is stored. Measured
+/// during earlier work: a word-wise NOT without the mask was bit-exact against
+/// cv::bitwise_not on all 240 swept cases at uint64_t and left 826,200
+/// phantom set bits behind, which the next word-wise reduction counts as
+/// pixels. The mask is applied by all four operations, not only by NOT, so a
+/// destination is clean even when an input's padding was dirty (a wrapped
+/// buffer's padding belongs to its caller -- see BinMat's wrap constructor).
 ///
-///  4. **No allocation, and no throw** (ARCHITECTURE 5.3). Mismatched dimensions,
-///     a stride too short to hold a row, and unsafe aliasing are programming
-///     errors, reported by BINCV_ASSERT in debug builds and undefined in release,
-///     exactly as at() is.
+/// 4. **No allocation, and no throw** (the design notes). Mismatched dimensions,
+/// a stride too short to hold a row, and unsafe aliasing are programming
+/// errors, reported by BINCV_ASSERT in debug builds and undefined in release,
+/// exactly as at is.
 ///
-///  5. **A DESTINATION IS WRITTEN A WHOLE WORD AT A TIME.** See the precondition
-///     section below -- it is the one thing about these kernels a caller can get
-///     wrong without any check catching it.
+/// 5. **A DESTINATION IS WRITTEN A WHOLE WORD AT A TIME.** See the precondition
+/// section below -- it is the one thing about these kernels a caller can get
+/// wrong without any check catching it.
 ///
 /// ---------------------------------------------------------------------------
 /// PRECONDITION ON `dst`: IT MAY NOT BE A SUB-WIDTH WINDOW ONTO A WIDER IMAGE
@@ -65,14 +65,14 @@
 /// image, so it is neither an out-of-bounds write nor an aliasing violation, and a
 /// pixel comparison against the window sees the right answer.
 ///
-/// This is the same hazard BinMat's wrap constructor already carries for fill()
-/// and pad(), stated here because a caller building a windowed VIEW never reads
+/// This is the same hazard BinMat's wrap constructor already carries for fill
+/// and pad, stated here because a caller building a windowed VIEW never reads
 /// that constructor. Sources are unaffected: nothing past `width` is ever read.
 ///
 /// ---------------------------------------------------------------------------
 /// ALIASING: `dst` MAY BE `a` OR `b` EXACTLY, OR SHARE NO MEMORY WITH THEM
 ///
-/// In-place is supported and tested: `bitwiseAnd(m.constView(), other, m.view())`
+/// In-place is supported and tested: `bitwiseAnd(m.constView, other, m.view)`
 /// computes m &= other. It is safe because these operations are pointwise in the
 /// word index -- word i of the destination is written from word i of each source
 /// and from nothing else -- so a destination that maps to the same word for every
@@ -88,13 +88,13 @@
 /// "No shared word at all" is checked EXACTLY, per row, and not by comparing the
 /// two views' bounding spans. Two views over one buffer can interleave without
 /// sharing a byte -- alternate row bands (the shape a pyramid downsample takes,
-/// ARCHITECTURE 7.2) and left/right column tiles both do -- and a bounding-box
-/// test rejects every one of them. D-5 says a kernel takes any
+/// the design notes) and left/right column tiles both do -- and a bounding-box
+/// test rejects every one of them. the design rule says a kernel takes any
 /// {ptr, width, height, stride}; rejecting a legal view in debug and accepting it
 /// in release is the worst of both.
 ///
 /// The predicate itself lives in impl/kernel_util.hpp, shared with ops/shift.hpp
-/// (D-11 binds every kernel under ops/, so one copy is the only way the rule
+/// ( binds every kernel under ops/, so one copy is the only way the rule
 /// cannot drift). Note that shift uses the OTHER half of it: the exact-alias case
 /// below is legal only because these operations are pointwise in the word index,
 /// which a shift is not.
@@ -108,8 +108,8 @@
 #include "../core/error.hpp"
 #include "../core/view.hpp"
 // impl::rowTailMask, impl::strideCoversARow and impl::destinationAliasIsSafe --
-// the row-geometry and D-11 aliasing vocabulary shared with every other kernel
-// under ops/. They lived in this file until T2.3 needed the same three, at which
+// the row-geometry and aliasing vocabulary shared with every other kernel
+// under ops/. They lived in this file until needed the same three, at which
 // point one copy became the only way the aliasing rule cannot drift.
 #include "../impl/kernel_util.hpp"
 // QuantMat<N> and BinMat, for the per-plane overloads at the bottom of this file
@@ -151,9 +151,9 @@ struct BitNot {
 
 /// @brief The two-input kernel body: dst = Op(a, b), word-wise, padding cleared.
 /// @note Shared by AND, OR and XOR. They differ in one instruction and in nothing
-///       else -- not in the stride handling, not in the tail mask, not in the
-///       aliasing contract -- so writing them out three times would be three
-///       chances for those to drift apart.
+/// else -- not in the stride handling, not in the tail mask, not in the
+/// aliasing contract -- so writing them out three times would be three
+/// chances for those to drift apart.
 template <typename WordType, typename Op>
 inline void applyBinary(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
                         BinMatView<WordType> dst) {
@@ -178,7 +178,7 @@ inline void applyBinary(BinMatConstView<WordType> a, BinMatConstView<WordType> b
 
     // One contiguous run, and ONLY when the arguments earn it: every row dense
     // (stride == the words a row needs) in all three views, and no partial word
-    // to mask. Anything else -- an over-aligned matrix (D-4), a wrapped buffer
+    // to mask. Anything else -- an over-aligned matrix, a wrapped buffer
     // with the caller's own stride, a width that is not a multiple of WordBits --
     // goes through the row loop below.
     if (tailMask == allOnes && a.stride == words && b.stride == words &&
@@ -211,9 +211,9 @@ inline void applyBinary(BinMatConstView<WordType> a, BinMatConstView<WordType> b
 
 /// @brief The one-input kernel body: dst = Op(src), word-wise, padding cleared.
 /// @note THE PADDING MASK IS LOAD-BEARING HERE in a way it is not for AND: `~`
-///       sets every bit past `width` in the trailing word regardless of what the
-///       source held. See property 3 at the top of this file for what that cost
-///       when it was missing.
+/// sets every bit past `width` in the trailing word regardless of what the
+/// source held. See property 3 at the top of this file for what that cost
+/// when it was missing.
 template <typename WordType, typename Op>
 inline void applyUnary(BinMatConstView<WordType> src, BinMatView<WordType> dst) {
     BINCV_ASSERT(src.width == dst.width && src.height == dst.height,
@@ -257,29 +257,29 @@ inline void applyUnary(BinMatConstView<WordType> src, BinMatView<WordType> dst) 
 } // namespace impl
 
 // ---------------------------------------------------------------------------
-// The kernels (D-5: views, never containers)
+// The kernels ( views, never containers)
 // ---------------------------------------------------------------------------
 
 /// @brief dst = a & b, pixel for pixel. **API TIER 1** -- bit-exact against
-///        cv::bitwise_and on the same binary content stored as CV_8U.
+/// cv::bitwise_and on the same binary content stored as CV_8U.
 /// @param a First source view.
 /// @param b Second source view; must have a's dimensions.
 /// @param dst Destination view; must have a's dimensions. May be `a` or `b`
-///        exactly (in-place), or share no memory with either -- see the aliasing
-///        section at the top of this file.
+/// exactly (in-place), or share no memory with either -- see the aliasing
+/// section at the top of this file.
 /// @note Word-wise, one word per WordBits pixels, reading each view's own stride
-///       per row. Padding bits past `width` are left zero in the destination.
+/// per row. Padding bits past `width` are left zero in the destination.
 /// @note PRECONDITION ON `dst`: it must span its image's full width, or end on a
-///       word boundary. The trailing partial word is stored masked, so bits
-///       [width, minRowWords * WordBits) of each destination row are set to zero;
-///       in a sub-width window onto a wider image those bits are that image's next
-///       pixels and are destroyed. Nothing diagnoses it -- see the precondition
-///       section at the top of this file. Sources are unaffected.
-/// @note Never throws and never allocates (ARCHITECTURE 5.3). Mismatched
-///       dimensions, a stride shorter than a row, and overlapping-but-not-
-///       identical views are programming errors: BINCV_ASSERT reports them in
-///       debug builds, and they are undefined in release, exactly as an
-///       out-of-range at() is.
+/// word boundary. The trailing partial word is stored masked, so bits
+/// [width, minRowWords * WordBits) of each destination row are set to zero;
+/// in a sub-width window onto a wider image those bits are that image's next
+/// pixels and are destroyed. Nothing diagnoses it -- see the precondition
+/// section at the top of this file. Sources are unaffected.
+/// @note Never throws and never allocates (the design notes). Mismatched
+/// dimensions, a stride shorter than a row, and overlapping-but-not-
+/// identical views are programming errors: BINCV_ASSERT reports them in
+/// debug builds, and they are undefined in release, exactly as an
+/// out-of-range at is.
 template <typename WordType>
 inline void bitwiseAnd(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
                        BinMatView<WordType> dst) {
@@ -287,7 +287,7 @@ inline void bitwiseAnd(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
 }
 
 /// @brief dst = a | b, pixel for pixel. **API TIER 1** -- bit-exact against
-///        cv::bitwise_or. See bitwiseAnd() for the shared contract.
+/// cv::bitwise_or. See bitwiseAnd for the shared contract.
 template <typename WordType>
 inline void bitwiseOr(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
                       BinMatView<WordType> dst) {
@@ -295,7 +295,7 @@ inline void bitwiseOr(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
 }
 
 /// @brief dst = a ^ b, pixel for pixel. **API TIER 1** -- bit-exact against
-///        cv::bitwise_xor. See bitwiseAnd() for the shared contract.
+/// cv::bitwise_xor. See bitwiseAnd for the shared contract.
 template <typename WordType>
 inline void bitwiseXor(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
                        BinMatView<WordType> dst) {
@@ -303,19 +303,19 @@ inline void bitwiseXor(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
 }
 
 /// @brief dst = ~src, pixel for pixel. **API TIER 1** -- bit-exact against
-///        cv::bitwise_not on the same binary content stored as CV_8U (which maps
-///        {0, 255} to {255, 0}).
+/// cv::bitwise_not on the same binary content stored as CV_8U (which maps
+/// {0, 255} to {255, 0}).
 /// @param src Source view.
 /// @param dst Destination view; must have src's dimensions. May be `src` exactly
-///        (in-place), or share no memory with it.
+/// (in-place), or share no memory with it.
 /// @note THIS IS THE OPERATION THAT SETS PADDING BITS. Inverting a word sets
-///       every bit past `width` in a row's trailing partial word; they are masked
-///       off before the word is stored, so a destination this kernel wrote is
-///       safe to hand to a word-wise reduction. Nothing about the pixels would
-///       have said otherwise -- see property 3 at the top of this file.
-/// @note Same precondition on `dst` as bitwiseAnd(): full width, or a width that
-///       is a multiple of WordBits. The mask that keeps padding clean is the same
-///       write that would clobber a wider image's next pixels.
+/// every bit past `width` in a row's trailing partial word; they are masked
+/// off before the word is stored, so a destination this kernel wrote is
+/// safe to hand to a word-wise reduction. Nothing about the pixels would
+/// have said otherwise -- see property 3 at the top of this file.
+/// @note Same precondition on `dst` as bitwiseAnd: full width, or a width that
+/// is a multiple of WordBits. The mask that keeps padding clean is the same
+/// write that would clobber a wider image's next pixels.
 template <typename WordType>
 inline void bitwiseNot(BinMatConstView<WordType> src, BinMatView<WordType> dst) {
     impl::applyUnary<WordType, impl::BitNot>(src, dst);
@@ -325,11 +325,11 @@ inline void bitwiseNot(BinMatConstView<WordType> src, BinMatView<WordType> dst) 
 // QuantMat overloads: the same four operations, applied per plane
 // ---------------------------------------------------------------------------
 //
-// Bit-plane logic is plane-wise by construction (ARCHITECTURE 4.1: "logic
-// operations apply per plane and are free"), so these are a loop over plane()
+// Bit-plane logic is plane-wise by construction (the design notes: "logic
+// operations apply per plane and are free"), so these are a loop over plane
 // and nothing else. They are convenience wrappers over the kernels above, NOT
 // kernels themselves -- which is why taking a container here does not contradict
-// D-5: the compiled inner loop is still the view kernel, and a caller who holds
+// the compiled inner loop is still the view kernel, and a caller who holds
 // views rather than containers never reaches this overload.
 //
 // N == 1 comes here too: BinMat IS QuantMat<1> (core/types.hpp), so
@@ -340,14 +340,14 @@ inline void bitwiseNot(BinMatConstView<WordType> src, BinMatView<WordType> dst) 
 // which the signature enforces at compile time rather than at runtime.
 // SignedQuantMat has no overload of its own on purpose: `mag = pos | neg` is
 // plane arithmetic, not signed arithmetic, and the right spelling for it is
-// bitwiseOr(...) over the named planes or over planes() -- an overload taking the
+// bitwiseOr(...) over the named planes or over planes -- an overload taking the
 // interpreted type would suggest these operations respect the sign convention,
 // and they do not.
 
 /// @brief Per-plane dst = a & b over all N planes. **API TIER 1** per plane.
 /// @note Thin wrapper: N calls to the view kernel, one per plane, in plane order.
 /// @note Same aliasing contract as the kernel, applied plane by plane -- `dst`
-///       may be `a` or `b` (the planes then alias exactly, plane for plane).
+/// may be `a` or `b` (the planes then alias exactly, plane for plane).
 template <size_t N, typename WordType>
 inline void bitwiseAnd(const QuantMat<N, WordType>& a, const QuantMat<N, WordType>& b,
                        QuantMat<N, WordType>& dst) {
@@ -376,9 +376,9 @@ inline void bitwiseXor(const QuantMat<N, WordType>& a, const QuantMat<N, WordTyp
 
 /// @brief Per-plane dst = ~src over all N planes. **API TIER 1** per plane.
 /// @note At N > 1 this is a bitwise complement of every plane, i.e. the pixel
-///       value becomes MaxValue - value. That is what "bitwise not" means for an
-///       N-bit unsigned image and what cv::bitwise_not does to a CV_8U one; it is
-///       NOT a negation, and it has nothing to say about a sign plane.
+/// value becomes MaxValue - value. That is what "bitwise not" means for an
+/// N-bit unsigned image and what cv::bitwise_not does to a CV_8U one; it is
+/// NOT a negation, and it has nothing to say about a sign plane.
 template <size_t N, typename WordType>
 inline void bitwiseNot(const QuantMat<N, WordType>& src, QuantMat<N, WordType>& dst) {
     for (size_t p = 0; p < N; ++p) {

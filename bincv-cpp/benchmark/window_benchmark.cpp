@@ -1,28 +1,28 @@
-// E-3 / T2.10 -- incremental versus recomputed window reductions, and the two
-// other T2.6 interface questions that were registered alongside it.
+// -- incremental versus recomputed window reductions, and the two
+// other interface questions that were registered alongside it.
 //
-// T3.6 cannot start until this closes, because all three axes decide the SHAPE of
+// cannot start until this closes, because all three axes decide the SHAPE of
 // ops/reduce.hpp rather than its speed.
 //
 // ===========================================================================
-// WHAT CHANGED WHEN T2.11 LANDED, AND WHY THIS FILE HAD TO BE RE-RUN
+// WHAT CHANGED WHEN LANDED, AND WHY THIS FILE HAD TO BE RE-RUN
 // ===========================================================================
 //
-// E-3 closed against measurement copies: the winning variants lived in this file,
+// closed against measurement copies: the winning variants lived in this file,
 // because writing them into ops/reduce.hpp in the same commit as the measurement
-// that gated them is the inversion EXPERIMENTS.md exists to prevent. T2.11 then
+// that gated them is the inversion EXPERIMENTS.md exists to prevent. then
 // landed them for real, so this file now times the SHIPPED entry points --
 // bincv::SlidingWindowCount, bincv::countCovariance and the four-argument
 // bincv::countAndSplit -- and a copy survives here only where nothing shipped
 // (INC-COL, which axis 1 explicitly declines to expose).
 //
-// T2.11 also landed a FOURTH change that no axis asked for: impl::countViewRegion
+// also landed a FOURTH change that no axis asked for: impl::countViewRegion
 // carried one accumulator across a whole region, one dependency chain through the
 // popcount latency, and its row bodies now each return their own partial sum. That
 // landed FIRST of the four, so the recompute baseline every ratio below is divided
-// by is up to 1.32x faster than the one X-11 measured. The axis-1 ratios here are
-// therefore SMALLER than X-11's, by design and not by regression: X-11 predicted
-// roughly 5.6x and 15x where it had measured 7.3x and 20x. EXPERIMENTS.md X-11
+// by is up to 1.32x faster than the one a measurement measured. The axis-1 ratios here are
+// therefore SMALLER than that measurement’s, by design and not by regression: predicted
+// roughly 5.6x and 15x where it had measured 7.3x and 20x. 
 // records both sets side by side; neither replaces the other, because they answer
 // "what did the accumulator buy" and "what does it buy in the shipped library".
 //
@@ -30,13 +30,13 @@
 // AXIS 1 -- recompute per window versus a sliding accumulator
 // ===========================================================================
 //
-// DECISION RULE, verbatim from TASKS.md T2.10 and recorded in EXPERIMENTS.md X-11
+// DECISION RULE, verbatim from and recorded in 
 // before this file was written:
 //
-//   * Recompute within 15% of incremental at 31x31 -> keep the simpler recompute
-//     API, close E-3, and record that incremental state was rejected on data
-//   * Incremental wins by > 15% at 31x31 -> extend T2.6 with incremental state
-//     BEFORE T3.6 is written against the simpler form
+// * Recompute within 15% of incremental at 31x31 -> keep the simpler recompute
+// API, close, and record that incremental state was rejected on data
+// * Incremental wins by > 15% at 31x31 -> extend with incremental state
+// BEFORE this is written against the simpler form
 //
 // The rule names a window size but not an access pattern, and the two things it
 // asks for -- "~200 keypoints, per the reference gftt_max_corners" and "include
@@ -45,30 +45,30 @@
 // reported separately, and the rule is applied to each rather than to an average
 // that would hide the disagreement:
 //
-//   SPARSE   200 isolated windows at scattered keypoints. ARCHITECTURE 7.5: the
-//            LK covariance per tracked keypoint. Windows barely overlap.
-//   SEARCH   200 keypoints x an 8x8 sweep of window positions = 12800 windows.
-//            Heavy LOCAL overlap; a block-matching / search-region pattern.
-//   DENSE    every window position in the frame. ARCHITECTURE 7.6's corner
-//            response is computed from the same covariance machinery over the
-//            whole image, so this is the frontend's real maximum-overlap case
-//            rather than a synthetic upper bound.
+// SPARSE 200 isolated windows at scattered keypoints. the design notes: the
+// LK covariance per tracked keypoint. Windows barely overlap.
+// SEARCH 200 keypoints x an 8x8 sweep of window positions = 12800 windows.
+// Heavy LOCAL overlap; a block-matching / search-region pattern.
+// DENSE every window position in the frame. the design notes's corner
+// response is computed from the same covariance machinery over the
+// whole image, so this is the frontend's real maximum-overlap case
+// rather than a synthetic upper bound.
 //
 // TWO incremental forms are measured, because "a sliding accumulator" over
 // bit-packed rows is not one design, and they differ in exactly the resource
-// T2.10 asks about (extra memory):
+// asks about (extra memory):
 //
-//   INC-COL  the classic separable box accumulator: per-column running sums over
-//            the window's rows, slid one pixel at a time in x and in y. It issues
-//            NO popcounts at all -- it reads individual bits -- which is the form
-//            most likely to win where popcount is expensive (see X-7). Costs an
-//            array of (sweepWidth + W - 1) uint32 counters, which is the extra
-//            memory the interface would have to let a caller provide (no heap
-//            allocation inside kernels, CLAUDE.md).
-//   INC-ROW  slides vertically only, keeping ONE scalar accumulator: the window
-//            sum gains the incoming row's windowed popcount and loses the
-//            outgoing row's. Word-parallel like the shipped kernel, and needs
-//            essentially no extra memory.
+// INC-COL the classic separable box accumulator: per-column running sums over
+// the window's rows, slid one pixel at a time in x and in y. It issues
+// NO popcounts at all -- it reads individual bits -- which is the form
+// most likely to win where popcount is expensive (see). Costs an
+// array of (sweepWidth + W - 1) uint32 counters, which is the extra
+// memory the interface would have to let a caller provide (no heap
+// allocation inside kernels, CLAUDE.md).
+// INC-ROW slides vertically only, keeping ONE scalar accumulator: the window
+// sum gains the incoming row's windowed popcount and loses the
+// outgoing row's. Word-parallel like the shipped kernel, and needs
+// essentially no extra memory.
 //
 // INC-ROW won and is now bincv::SlidingWindowCount, so this file times the shipped
 // class rather than a copy of it. INC-COL remains MEASUREMENT CODE -- axis 1
@@ -76,35 +76,35 @@
 // because a rejected alternative with no number next to it is an assertion rather
 // than a decision.
 //
-// A FOURTH variant, recompute-1acc, is the recompute path with T2.11 item 4
+// A FOURTH variant, recompute-1acc, is the recompute path with earlier work item 4
 // UNDONE: one accumulator across the whole region. It is timed interleaved with
 // the other three so that item 4's own effect is measured the same way everything
 // else here is, rather than inferred by comparing absolute ns against a run from
-// another session. It also keeps X-11's original denominator alive, so the
+// another session. It also keeps that measurement’s original denominator alive, so the
 // pre-split ratios that entry quotes can be reproduced from this binary.
 //
 // Windows are placed fully inside the image on this axis. Edge clipping is real
-// (ARCHITECTURE 7.5) and axes 2 and 3 below include it; the shipped
+// (the design notes) and axes 2 and 3 below include it; the shipped
 // SlidingWindowCount clips exactly (tests/test_reduce.cpp sweeps whole frames
 // checking it position by position), but INC-COL here does not, and a comparison
-// between two implementations of clipping is not the question E-3 asks.
+// between two implementations of clipping is not the question asks.
 //
 // ===========================================================================
-// AXIS 2 -- the 2x2 covariance composed out of T2.6 versus one fused pass
+// AXIS 2 -- the 2x2 covariance composed out of earlier work versus one fused pass
 // ===========================================================================
 //
-// Registered as T2.10's second axis after X-8 measured 1.30x on the reference
+// Registered as that work’s second axis after a measurement measured 1.30x on the reference
 // device. Rule, verbatim, same threshold: a covariance-shaped entry point
 // (returning xx, yy, whenClear, whenSet from one visitRowWords pass) beats the
-// composition by > 15% at 31x31 -> add it to T2.6 before T3.6 is written; within
+// composition by > 15% at 31x31 -> add it to earlier work before this is written; within
 // 15% -> keep the composition and record that the fused form was rejected on data.
 //
-// The fused side is now bincv::countCovariance. BOTH sides carry T2.11's per-row
+// The fused side is now bincv::countCovariance. BOTH sides carry that work’s per-row
 // accumulator split, so this ratio is still redundant traversal and nothing else:
 // splitting only the fused side would have made it a mixture of two effects.
 //
 // Re-measured here at three window sizes and at two word widths, in the same
-// session as axis 1, rather than resting on X-8's single 31x31 uint64_t point.
+// session as axis 1, rather than resting on that measurement’s single 31x31 uint64_t point.
 //
 // ===========================================================================
 // AXIS 3 -- frame-sized selector plane versus a four-argument countAndSplit
@@ -124,7 +124,7 @@
 // goals conflict and no explicit choice has been made.
 //
 // ===========================================================================
-// X-7 CAVEAT -- strongest on this file
+// CAVEAT -- strongest on this file
 //
 // Every variant here is popcount-bound except INC-COL, which issues none. binCV
 // builds with no -march flags, so __builtin_popcountll is `call __popcountdi2@PLT`
@@ -196,7 +196,7 @@ inline uint32_t bitAt(const BinMatConstView<Word>& v, int y, int x) {
 }
 
 /// @brief A rectangular sweep of window positions: top-left corners
-///        (x0 + i, y0 + j) for i in [0, sx), j in [0, sy).
+/// (x0 + i, y0 + j) for i in [0, sx), j in [0, sy).
 struct Sweep {
     int x0;
     int y0;
@@ -208,18 +208,18 @@ struct Sweep {
 // AXIS 1 -- the three implementations
 // ---------------------------------------------------------------------------
 
-/// @brief The recompute path AS IT WAS BEFORE T2.11 item 4: ONE size_t
-///        accumulator carried across every row and every word of the region.
-///        MEASUREMENT CODE -- the only copy of a shipped kernel left in this file.
+/// @brief The recompute path AS IT WAS BEFORE item 4: ONE size_t
+/// accumulator carried across every row and every word of the region.
+/// MEASUREMENT CODE -- the only copy of a shipped kernel left in this file.
 /// @note It is here because item 4's own effect is otherwise measurable only by
-///       comparing absolute ns across two sessions, which is the one comparison
-///       this harness is built to avoid: every other number in this file is
-///       produced by variants timed INTERLEAVED on identical inputs in one
-///       process. Item 4 is the change the other three are divided by, so what it
-///       is worth had better not rest on a weaker method than they do.
+/// comparing absolute ns across two sessions, which is the one comparison
+/// this harness is built to avoid: every other number in this file is
+/// produced by variants timed INTERLEAVED on identical inputs in one
+/// process. Item 4 is the change the other three are divided by, so what it
+/// is worth had better not rest on a weaker method than they do.
 /// @note Byte for byte the pre-split loop: clip, then one accumulator over the
-///       whole region. The shipped kernel differs from it in exactly one respect,
-///       which is where the sum lands.
+/// whole region. The shipped kernel differs from it in exactly one respect,
+/// which is where the sum lands.
 template <typename Word>
 size_t sweepRecomputeOneAccumulator(const BinMatConstView<Word>& v, const Sweep& s, int W) {
     size_t total = 0;
@@ -241,8 +241,8 @@ size_t sweepRecomputeOneAccumulator(const BinMatConstView<Word>& v, const Sweep&
     return total;
 }
 
-/// @brief What the API ships: one countNonZero per window position, with T2.11
-///        item 4's per-row partial sums inside it.
+/// @brief What the API ships: one countNonZero per window position, with earlier work
+/// item 4's per-row partial sums inside it.
 template <typename Word>
 size_t sweepRecompute(const BinMatConstView<Word>& v, const Sweep& s, int W) {
     size_t total = 0;
@@ -255,9 +255,9 @@ size_t sweepRecompute(const BinMatConstView<Word>& v, const Sweep& s, int W) {
 }
 
 /// @brief INC-COL: the separable box accumulator. Per-column sums over the
-///        window's rows, slid in x and then in y. Issues no popcount.
+/// window's rows, slid in x and then in y. Issues no popcount.
 /// @param colSum Caller-provided scratch -- kernels do not allocate (CLAUDE.md).
-///        Its size, (sx + W - 1) counters, IS the extra memory this design costs.
+/// Its size, (sx + W - 1) counters, IS the extra memory this design costs.
 template <typename Word>
 size_t sweepIncrementalColumns(const BinMatConstView<Word>& v, const Sweep& s, int W,
                                std::vector<uint32_t>& colSum) {
@@ -292,13 +292,13 @@ size_t sweepIncrementalColumns(const BinMatConstView<Word>& v, const Sweep& s, i
 }
 
 /// @brief INC-ROW: the SHIPPED bincv::SlidingWindowCount, one accumulator per
-///        column of window positions. The window sum gains the incoming row's
-///        windowed popcount and loses the outgoing row's, so it stays
-///        word-parallel and needs no scratch array.
+/// column of window positions. The window sum gains the incoming row's
+/// windowed popcount and loses the outgoing row's, so it stays
+/// word-parallel and needs no scratch array.
 /// @note One construction per x offset, which is where the column masks are
-///       clipped -- the same amortization the measurement copy did by hoisting
-///       impl::clipRegion out of the y loop, except that this is the library's own
-///       and includes the row clipping the shipped class does per position.
+/// clipped -- the same amortization the measurement copy did by hoisting
+/// impl::clipRegion out of the y loop, except that this is the library's own
+/// and includes the row clipping the shipped class does per position.
 template <typename Word>
 size_t sweepIncrementalRows(const BinMatConstView<Word>& v, const Sweep& s, int W) {
     size_t total = 0;
@@ -320,7 +320,7 @@ struct Pattern {
 };
 
 /// @brief Builds the three access patterns for one window size. Every window is
-///        fully inside the image; see the header for why.
+/// fully inside the image; see the header for why.
 std::vector<Pattern> buildPatterns(int W) {
     std::vector<Pattern> out;
 
@@ -371,12 +371,12 @@ std::vector<Pattern> buildPatterns(int W) {
 }
 
 bool runAxis1() {
-    using Word = uint32_t;  // the shipped default; E-2 owns the width axis
+    using Word = uint32_t;  // the shipped default; owns the width axis
 
     std::printf("\n===========================================================\n");
     std::printf("AXIS 1 -- recompute per window versus a sliding accumulator\n");
     std::printf("===========================================================\n");
-    std::printf("  %dx%d, uint32_t, %d keypoints. Rule: incremental must beat "
+    std::printf(" %dx%d, uint32_t, %d keypoints. Rule: incremental must beat "
                 "recompute by > 15%% at 31x31.\n",
                 kWidth, kHeight, kKeypoints);
 
@@ -388,10 +388,10 @@ bool runAxis1() {
         imgs.push_back(std::move(m));
     }
 
-    std::printf("\n  %-8s %-4s %13s %13s %13s %13s %9s %9s %9s %10s\n", "pattern", "W",
+    std::printf("\n %-8s %-4s %13s %13s %13s %13s %9s %9s %9s %10s\n", "pattern", "W",
                 "recomp-1acc", "recompute", "INC-COL", "INC-ROW", "item 4", "INC-COL",
                 "INC-ROW", "INC-COL mem");
-    std::printf("  %-8s %-4s %13s %13s %13s %13s %9s %9s %9s %10s\n", "", "", "ns/window",
+    std::printf(" %-8s %-4s %13s %13s %13s %13s %9s %9s %9s %10s\n", "", "", "ns/window",
                 "ns/window", "ns/window", "ns/window", "1acc/rec", "vs recomp", "vs recomp",
                 "bytes");
 
@@ -414,7 +414,7 @@ bool runAxis1() {
                     d += sweepRecomputeOneAccumulator(v, s, W);
                 }
                 if (a != b || a != c || a != d) {
-                    std::printf("  DISAGREEMENT %s W=%d image %d: recompute %zu, "
+                    std::printf(" DISAGREEMENT %s W=%d image %d: recompute %zu, "
                                 "INC-COL %zu, INC-ROW %zu, recompute-1acc %zu\n",
                                 p.name, W, i, a, b, c, d);
                     return false;
@@ -467,21 +467,21 @@ bool runAxis1() {
                 widestSweep = std::max(widestSweep, static_cast<size_t>(s.sx + W - 1));
             }
 
-            std::printf("  %-8s %-4d %13.1f %13.1f %13.1f %13.1f %8.2fx %8.2fx %8.2fx %10zu\n",
+            std::printf(" %-8s %-4d %13.1f %13.1f %13.1f %13.1f %8.2fx %8.2fx %8.2fx %10zu\n",
                         p.name, W, t[0].medianNs / n, t[1].medianNs / n, t[2].medianNs / n,
                         t[3].medianNs / n, t[0].medianNs / t[1].medianNs,
                         t[1].medianNs / t[2].medianNs, t[1].medianNs / t[3].medianNs,
                         widestSweep * sizeof(uint32_t));
-            std::printf("           spread (max-min)/median: recomp-1acc %.1f%%, recompute %.1f%%, "
-                        "INC-COL %.1f%%, INC-ROW %.1f%%   [%s]\n",
+            std::printf(" spread (max-min)/median: recomp-1acc %.1f%%, recompute %.1f%%, "
+                        "INC-COL %.1f%%, INC-ROW %.1f%% [%s]\n",
                         t[0].spreadPct(), t[1].spreadPct(), t[2].spreadPct(), t[3].spreadPct(),
                         p.note);
         }
     }
-    std::printf("\n  \"vs recomp\" > 1.00x means the accumulator is FASTER than the SHIPPED\n");
-    std::printf("  recompute -- i.e. than the post-item-4 baseline, not X-11's pre-split one.\n");
-    std::printf("  \"item 4\" > 1.00x means the per-row accumulator split made recompute faster.\n");
-    std::printf("  axis 3's \"plane/4arg\" > 1.00x means the four-argument form is faster.\n");
+    std::printf("\n \"vs recomp\" > 1.00x means the accumulator is FASTER than the SHIPPED\n");
+    std::printf(" recompute -- i.e. than the post-item-4 baseline, not the pre-split one.\n");
+    std::printf(" \"item 4\" > 1.00x means the per-row accumulator split made recompute faster.\n");
+    std::printf(" axis 3's \"plane/4arg\" > 1.00x means the four-argument form is faster.\n");
     return true;
 }
 
@@ -495,9 +495,9 @@ bool sameCovariance(const bincv::CovarianceCount& a, const bincv::CovarianceCoun
            a.xy.whenSet == b.xy.whenSet;
 }
 
-/// @brief ARCHITECTURE 7.5 through the T2.5/T2.6 primitives: three calls, therefore
-///        three traversals of one window. Still a shipped composition -- a caller
-///        who has not read X-11 writes exactly this -- so it is the denominator.
+/// @brief the design notes through the primitives: three calls, therefore
+/// three traversals of one window. Still a shipped composition -- a caller
+/// who has not read writes exactly this -- so it is the denominator.
 template <typename Word>
 bincv::CovarianceCount covarianceComposed(const BinMatConstView<Word>& magX,
                                           const BinMatConstView<Word>& magY,
@@ -511,8 +511,8 @@ bincv::CovarianceCount covarianceComposed(const BinMatConstView<Word>& magX,
 }
 
 /// @brief Keypoint windows for axes 2 and 3. Unlike axis 1 these DO include
-///        windows that clip at the frame edge, which is the realistic case and
-///        which both sides of these two comparisons handle identically.
+/// windows that clip at the frame edge, which is the realistic case and
+/// which both sides of these two comparisons handle identically.
 std::vector<Rect> keypointWindows(int W) {
     std::vector<Rect> out;
     out.reserve(static_cast<size_t>(kKeypoints));
@@ -526,7 +526,7 @@ std::vector<Rect> keypointWindows(int W) {
 }
 
 /// @brief Ternary derivative inputs plus the precomputed sign_x ^ sign_y plane,
-///        shared by axes 2 and 3.
+/// shared by axes 2 and 3.
 template <typename Word>
 struct DerivativeSet {
     std::vector<bincv::TernaryMat<Word>> dx;
@@ -558,9 +558,9 @@ struct DerivativeSet {
 
 template <typename Word>
 bool runAxis2(const char* wordName, const DerivativeSet<Word>& d) {
-    std::printf("\n  %-9s %-4s %14s %14s %12s %22s\n", "word", "W", "composed",
+    std::printf("\n %-9s %-4s %14s %14s %12s %22s\n", "word", "W", "composed",
                 "fused", "composed/", "spread comp / fused");
-    std::printf("  %-9s %-4s %14s %14s %12s\n", "", "", "ns/keypoint", "ns/keypoint", "fused");
+    std::printf(" %-9s %-4s %14s %14s %12s\n", "", "", "ns/keypoint", "ns/keypoint", "fused");
 
     for (size_t wi = 0; wi < sizeof(kWindows) / sizeof(kWindows[0]); ++wi) {
         const int W = kWindows[wi];
@@ -574,7 +574,7 @@ bool runAxis2(const char* wordName, const DerivativeSet<Word>& d) {
                 const bincv::CovarianceCount b = bincv::countCovariance<Word>(
                     d.dx[k].constMagnitude(0), d.dy[k].constMagnitude(0), d.sel[k].constView(), w);
                 if (!sameCovariance(a, b)) {
-                    std::printf("  DISAGREEMENT composed vs fused at W=%d\n", W);
+                    std::printf(" DISAGREEMENT composed vs fused at W=%d\n", W);
                     return false;
                 }
             }
@@ -609,7 +609,7 @@ bool runAxis2(const char* wordName, const DerivativeSet<Word>& d) {
         const std::vector<measure::Timing> t =
             measure::measureInterleaved(benches, kRepeats, kTargetMs);
         const double n = static_cast<double>(kKeypoints);
-        std::printf("  %-9s %-4d %14.1f %14.1f %11.2fx %10.1f%% / %.1f%%\n", wordName, W,
+        std::printf(" %-9s %-4d %14.1f %14.1f %11.2fx %10.1f%% / %.1f%%\n", wordName, W,
                     t[0].medianNs / n, t[1].medianNs / n, t[0].medianNs / t[1].medianNs,
                     t[0].spreadPct(), t[1].spreadPct());
     }
@@ -617,7 +617,7 @@ bool runAxis2(const char* wordName, const DerivativeSet<Word>& d) {
     // answer that still has to be stated: both forms read the same views and
     // return by value, so neither needs scratch. Axis 1 and axis 3 both carry a
     // byte column; this one would look like an omission without the line.
-    std::printf("  EXTRA MEMORY: 0 B for both forms -- neither needs scratch; the fused "
+    std::printf(" EXTRA MEMORY: 0 B for both forms -- neither needs scratch; the fused "
                 "pass returns four counters in registers.\n");
     return true;
 }
@@ -626,9 +626,9 @@ template <typename Word>
 bool runAxis3(const char* wordName, DerivativeSet<Word>& d) {
     const size_t planeBytes = d.sel[0].sizeInWords() * sizeof(Word);
 
-    std::printf("\n  %-9s %-4s %16s %16s %10s %14s\n", "word", "W", "plane (shipped)",
+    std::printf("\n %-9s %-4s %16s %16s %10s %14s\n", "word", "W", "plane (shipped)",
                 "four-arg XOR", "plane/4arg", "spread p / 4");
-    std::printf("  %-9s %-4s %16s %16s\n", "", "", "ns/keypoint", "ns/keypoint");
+    std::printf(" %-9s %-4s %16s %16s\n", "", "", "ns/keypoint", "ns/keypoint");
 
     for (size_t wi = 0; wi < sizeof(kWindows) / sizeof(kWindows[0]); ++wi) {
         const int W = kWindows[wi];
@@ -644,7 +644,7 @@ bool runAxis3(const char* wordName, DerivativeSet<Word>& d) {
                     d.dx[k].constMagnitude(0), d.dy[k].constMagnitude(0), d.dx[k].constSign(),
                     d.dy[k].constSign(), w);
                 if (a.whenClear != b.whenClear || a.whenSet != b.whenSet) {
-                    std::printf("  DISAGREEMENT plane vs four-arg at W=%d\n", W);
+                    std::printf(" DISAGREEMENT plane vs four-arg at W=%d\n", W);
                     return false;
                 }
             }
@@ -679,7 +679,7 @@ bool runAxis3(const char* wordName, DerivativeSet<Word>& d) {
         const std::vector<measure::Timing> t =
             measure::measureInterleaved(benches, kRepeats, kTargetMs);
         const double n = static_cast<double>(kKeypoints);
-        std::printf("  %-9s %-4d %16.1f %16.1f %9.2fx %7.1f%% / %.1f%%\n", wordName, W,
+        std::printf(" %-9s %-4d %16.1f %16.1f %9.2fx %7.1f%% / %.1f%%\n", wordName, W,
                     t[0].medianNs / n, t[1].medianNs / n, t[0].medianNs / t[1].medianNs,
                     t[0].spreadPct(), t[1].spreadPct());
     }
@@ -710,15 +710,15 @@ bool runAxis3(const char* wordName, DerivativeSet<Word>& d) {
     for (size_t li = 0; li < sizeof(levels) / sizeof(levels[0]); ++li) {
         planeLadder += planeBytes / levels[li];
     }
-    std::printf("\n  MEMORY (%s): the selector plane is %zu B at %dx%d and scales with the "
+    std::printf("\n MEMORY (%s): the selector plane is %zu B at %dx%d and scales with the "
                 "level\n",
                 wordName, planeBytes, kWidth, kHeight);
-    std::printf("  (%zu B at L1, %zu B at L2, ~%zu B summed over a 4-level pyramid), held "
+    std::printf(" (%zu B at L1, %zu B at L2, ~%zu B summed over a 4-level pyramid), held "
                 "for the frame's lifetime.\n",
                 planeBytes / 4, planeBytes / 16, planeLadder);
-    std::printf("  Level-invariant form: +25%% on the derivative working set of every "
+    std::printf(" Level-invariant form: +25%% on the derivative working set of every "
                 "level -- a fifth plane against dx/dy's four.\n");
-    std::printf("  Forming it costs %.1f us at %dx%d (%.1f ns amortized over %d "
+    std::printf(" Forming it costs %.1f us at %dx%d (%.1f ns amortized over %d "
                 "keypoints); the four-argument form allocates nothing, at any level.\n",
                 ft[0].medianNs / 1000.0, kWidth, kHeight,
                 ft[0].medianNs / static_cast<double>(kKeypoints), kKeypoints);
@@ -728,37 +728,37 @@ bool runAxis3(const char* wordName, DerivativeSet<Word>& d) {
 }  // namespace
 
 int main() {
-    std::printf("=== E-3 / T2.10: window reductions -- three interface axes ===\n");
+    std::printf("=== window reductions -- three interface axes ===\n");
 #if defined(__aarch64__)
-    std::printf("target: aarch64 -- AUTHORITATIVE (the reference device closes E-3)\n");
+    std::printf("target: aarch64 -- AUTHORITATIVE (the reference device closes)\n");
 #else
     std::printf("target: not aarch64 -- INDICATIVE ONLY. Every variant here is "
                 "popcount-bound except INC-COL,\n"
-                "        which issues none, so the x86 popcount lowering (X-7) can "
+                " which issues none, so the x86 popcount lowering can "
                 "invert the ranking outright.\n");
 #endif
     std::printf("Decision rules are in this file's header, written before measuring "
-                "(EXPERIMENTS.md X-11).\n");
+                "(EXPERIMENTS.md).\n");
 
     bool ok = runAxis1();
 
     std::printf("\n===========================================================\n");
-    std::printf("AXIS 2 -- the 2x2 covariance composed out of T2.6 versus fused\n");
+    std::printf("AXIS 2 -- the 2x2 covariance composed out of versus fused\n");
     std::printf("===========================================================\n");
-    std::printf("  Rule: fused beats composed by > 15%% at 31x31 -> add a covariance "
-                "entry point to T2.6.\n");
+    std::printf(" Rule: fused beats composed by > 15%% at 31x31 -> add a covariance "
+                "entry point to.\n");
     DerivativeSet<uint32_t> d32;
     DerivativeSet<uint64_t> d64;
     ok = runAxis2<uint32_t>("uint32_t", d32) && ok;
     ok = runAxis2<uint64_t>("uint64_t", d64) && ok;
-    std::printf("  (uint64_t at W=31 is X-8's measurement, repeated here in the same "
+    std::printf(" (uint64_t at W=31 is the measurement, repeated here in the same "
                 "session for comparability.)\n");
 
     std::printf("\n===========================================================\n");
     std::printf("AXIS 3 -- selector plane versus a four-argument countAndSplit\n");
     std::printf("===========================================================\n");
-    std::printf("  No numeric threshold exists for this axis. Both memory and speed "
-                "are reported; the\n  weighing is against CLAUDE.md's tiebreak -- "
+    std::printf(" No numeric threshold exists for this axis. Both memory and speed "
+                "are reported; the\n weighing is against CLAUDE.md's tiebreak -- "
                 "memory wins when the goals conflict.\n");
     ok = runAxis3<uint32_t>("uint32_t", d32) && ok;
 

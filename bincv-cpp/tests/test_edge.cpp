@@ -1,23 +1,23 @@
-// Gradient-magnitude edge extraction (T5.11).
+// Gradient-magnitude edge extraction.
 //
 // TWO HALVES, the split tests/test_bitslice.cpp and tests/test_threshold.cpp use.
 //
-//   1. The CORE half needs no OpenCV, so it runs in all four verification
-//      configurations. It checks ALL TWELVE combinations -- combine {Or, And} x
-//      relation {Ge, Gt} x spatial {Wide, Forward, Backward} -- against a naive
-//      per-pixel oracle that shares no code with the kernel.
+// 1. The CORE half needs no OpenCV, so it runs in all four verification
+// configurations. It checks ALL TWELVE combinations -- combine {Or, And} x
+// relation {Ge, Gt} x spatial {Wide, Forward, Backward} -- against a naive
+// per-pixel oracle that shares no code with the kernel.
 //
-//      A twelve-way option set with one tested combination is a one-combination
-//      operation with eleven untested branches, which is why this is a cross-product
-//      rather than a spot check.
+// A twelve-way option set with one tested combination is a one-combination
+// operation with eleven untested branches, which is why this is a cross-product
+// rather than a spot check.
 //
-//   2. The OPENCV half is the one that matters most: it checks that the DEFAULTS
-//      reproduce the reference's own spelling, `rl_fast_edge_filter_wide`, written
-//      out as the OpenCV calls it uses -- two filter2D in CV_32F, two abs, two
-//      compares, an OR. Bit-exact, not approximately.
+// 2. The OPENCV half is the one that matters most: it checks that the DEFAULTS
+// reproduce the reference's own spelling, `rl_fast_edge_filter_wide`, written
+// out as the OpenCV calls it uses -- two filter2D in CV_32F, two abs, two
+// compares, an OR. Bit-exact, not approximately.
 //
-//      That is what makes "the defaults are the reference" a checked claim rather
-//      than a comment.
+// That is what makes "the defaults are the reference" a checked claim rather
+// than a comment.
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -87,7 +87,7 @@ void checkCombination(const char* label, SrcT t) {
         const uint32_t tail = dst.constView().row(y)[(kW + 31) / 32 - 1] >> (kW % 32);
         if (tail != 0) ++dirty;
     }
-    std::printf("  %-38s %4zu wrong, %zu dirty-padding rows\n", label, wrong, dirty);
+    std::printf(" %-38s %4zu wrong, %zu dirty-padding rows\n", label, wrong, dirty);
     BINCV_CHECK(wrong == 0);
     BINCV_CHECK(dirty == 0);
 }
@@ -96,30 +96,30 @@ void checkCombination(const char* label, SrcT t) {
 
 BINCV_TEST(Edge, AllTwelveCombinations_uint8) {
     using EC = EdgeCombine; using ER = EdgeRelation; using ES = EdgeSpatial;
-    checkCombination<EC::Or,  ER::Ge, ES::Wide,     uint8_t>("Or  Ge Wide     (the reference)", 17);
-    checkCombination<EC::Or,  ER::Gt, ES::Wide,     uint8_t>("Or  Gt Wide", 17);
+    checkCombination<EC::Or,  ER::Ge, ES::Wide,     uint8_t>("Or Ge Wide (the reference)", 17);
+    checkCombination<EC::Or,  ER::Gt, ES::Wide,     uint8_t>("Or Gt Wide", 17);
     checkCombination<EC::And, ER::Ge, ES::Wide,     uint8_t>("And Ge Wide", 17);
     checkCombination<EC::And, ER::Gt, ES::Wide,     uint8_t>("And Gt Wide", 17);
-    checkCombination<EC::Or,  ER::Ge, ES::Forward,  uint8_t>("Or  Ge Forward", 17);
-    checkCombination<EC::Or,  ER::Gt, ES::Forward,  uint8_t>("Or  Gt Forward", 17);
+    checkCombination<EC::Or,  ER::Ge, ES::Forward,  uint8_t>("Or Ge Forward", 17);
+    checkCombination<EC::Or,  ER::Gt, ES::Forward,  uint8_t>("Or Gt Forward", 17);
     checkCombination<EC::And, ER::Ge, ES::Forward,  uint8_t>("And Ge Forward", 17);
     checkCombination<EC::And, ER::Gt, ES::Forward,  uint8_t>("And Gt Forward", 17);
-    checkCombination<EC::Or,  ER::Ge, ES::Backward, uint8_t>("Or  Ge Backward", 17);
-    checkCombination<EC::Or,  ER::Gt, ES::Backward, uint8_t>("Or  Gt Backward", 17);
+    checkCombination<EC::Or,  ER::Ge, ES::Backward, uint8_t>("Or Ge Backward", 17);
+    checkCombination<EC::Or,  ER::Gt, ES::Backward, uint8_t>("Or Gt Backward", 17);
     checkCombination<EC::And, ER::Ge, ES::Backward, uint8_t>("And Ge Backward", 17);
     checkCombination<EC::And, ER::Gt, ES::Backward, uint8_t>("And Gt Backward", 17);
 }
 
 BINCV_TEST(Edge, WideSource_uint16) {
-    // ARCHITECTURE 7.8.1: the wide-source path exists BECAUSE of this operation, so
+    // the design notes: the wide-source path exists BECAUSE of this operation, so
     // a 12-bit-shaped threshold is checked rather than only an 8-bit one.
     using EC = EdgeCombine; using ER = EdgeRelation; using ES = EdgeSpatial;
-    checkCombination<EC::Or,  ER::Ge, ES::Wide, uint16_t>("Or  Ge Wide  u16 t=15", 15);
-    checkCombination<EC::And, ER::Gt, ES::Wide, uint16_t>("And Gt Wide  u16 t=4095", 4095);
+    checkCombination<EC::Or,  ER::Ge, ES::Wide, uint16_t>("Or Ge Wide u16 t=15", 15);
+    checkCombination<EC::And, ER::Gt, ES::Wide, uint16_t>("And Gt Wide u16 t=4095", 4095);
 }
 
 BINCV_TEST(Edge, TruncatingTo8BitLosesEdges) {
-    // The measured form of ARCHITECTURE 7.8.1's argument, so it is a CHECKED claim
+    // The measured form of the design notes's argument, so it is a CHECKED claim
     // rather than a paragraph: a 12-bit image whose gradients are all smaller than
     // 16 counts has real edges at 12-bit precision and NONE after `v >> 4`.
     constexpr size_t kW = 64, kH = 16;
@@ -136,7 +136,7 @@ BINCV_TEST(Edge, TruncatingTo8BitLosesEdges) {
         narrow.data(), kW, kH, kW, truncated.view(), 1);
     const size_t keptFull = static_cast<size_t>(full.countNonZero());
     const size_t keptTrunc = static_cast<size_t>(truncated.countNonZero());
-    std::printf("  12-bit source: %zu edge pixels; after v>>4: %zu\n", keptFull, keptTrunc);
+    std::printf(" 12-bit source: %zu edge pixels; after v>>4: %zu\n", keptFull, keptTrunc);
     BINCV_CHECK(keptFull > 0);
     BINCV_CHECK(keptTrunc == 0);
 }
@@ -175,7 +175,7 @@ BINCV_TEST(Edge, DefaultsMatchTheReferenceSpelling) {
                                 (x % 32)) & 1u) != 0;
             if (want != have) ++diff;
         }
-    std::printf("  vs rl_fast_edge_filter_wide(17): %zu of %d pixels differ\n", diff, kW * kH);
+    std::printf(" vs rl_fast_edge_filter_wide(17): %zu of %d pixels differ\n", diff, kW * kH);
     BINCV_CHECK(diff == 0);
 }
 #endif

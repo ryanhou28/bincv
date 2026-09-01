@@ -1,13 +1,13 @@
 // ===========================================================================
-// T4.3a / E-5 -- END-TO-END VALIDATION OVER A REAL SEQUENCE.
+// T4.3a / -- END-TO-END VALIDATION OVER A REAL SEQUENCE.
 //
 // Three of the four ROADMAP success criteria, and the fourth (tier-1
 // bit-exactness) is already enforced per operation:
 //
-//   2. tier-2 operations agreeing with the REFERENCE FRONTEND frame by frame --
-//      feature positions, flow vectors, track lifetimes
-//   3. several-fold smaller PEAK FOOTPRINT over the frontend operation set
-//   4. FASTER execution against the byte-per-pixel denominator
+// 2. tier-2 operations agreeing with the REFERENCE FRONTEND frame by frame --
+// feature positions, flow vectors, track lifetimes
+// 3. several-fold smaller PEAK FOOTPRINT over the frontend operation set
+// 4. FASTER execution against the byte-per-pixel denominator
 //
 // THE DENOMINATOR IS CLAUDE.md's, NOT A FLATTERING ONE: OpenCV doing the same
 // semantic operation on the SAME BINARY CONTENT stored as CV_8U. Both frontends
@@ -50,7 +50,7 @@
 #include "bincv-cpp/ops/pyramid.hpp"
 
 // The word type is a build-time choice so the SAME binary shape can be measured
-// at 32 and 64 bits. X-54 measured uint64_t on aarch64 and it LOST on track --
+// at 32 and 64 bits. a measurement measured uint64_t on aarch64 and it LOST on track --
 // but only because every NEON path is guarded on sizeof(WordType) == 4 and
 // compiled out. ON x86 THERE ARE NO SUCH GUARDS, so the 2x packing is not paid
 // for with a lost fast path, and that case had never been measured.
@@ -92,12 +92,12 @@ cv::Mat preprocess(const cv::Mat& g, int thr) {
     return referenceEdgeFilter(referenceDenoise(g), thr);
 }
 
-// ---- T5.8: THE SAME TWO STAGES, IN binCV --------------------------------
+// ---- THE SAME TWO STAGES, IN binCV --------------------------------
 //
-// [ARCHITECTURE 7.3](../../docs/ARCHITECTURE.md) puts the edge filter inside the MVP set,
+// the design notes puts the edge filter inside the MVP set,
 // and this benchmark used to run BOTH frontends on an OpenCV-preprocessed frame with a
 // comment calling that stage "deliberately NOT binCV's claim". Those disagreed. binCV
-// has had `medianWide` and `edgeThreshold` since T5.10/T5.11 -- bit-exact against the
+// has had `medianWide` and `edgeThreshold` since earlier work -- bit-exact against the
 // reference, 0 of 1219 and 0 of 3367 pixels differing -- and they were tested but never
 // USED.
 //
@@ -140,7 +140,7 @@ size_t binaryFramesAgree(const bincv::BinMat<W>& mine, const cv::Mat& theirs) {
     return bad;
 }
 
-// ---- binCV's frontend state, ladder 1/2/2/2 (D-23) -----------------------
+// ---- binCV's frontend state, ladder 1/2/2/2 -----------------------
 struct BincvFrontend {
     static constexpr size_t kLevels = 4;
     bincv::Pyramid<W, 1, 2, 2, 2> prev, next;
@@ -160,7 +160,7 @@ struct BincvFrontend {
           ring(bincv::kResponseRingRows * static_cast<size_t>(width)), w(width), h(height),
           hold(width, height) {}
 
-    double msLoad = 0.0;   ///< T5.8: binCV's OWN sensor stage -- `medianWide` then
+    double msLoad = 0.0;   ///< binCV's OWN sensor stage -- `medianWide` then
                            ///< `edgeThreshold`, straight from grayscale into bit-planes.
                            ///< This used to be `fromCVMat` unpacking a CV_8U binary frame
                            ///< somebody else had produced; binCV produces it now, so the
@@ -187,12 +187,12 @@ struct BincvFrontend {
         hold = next.level<0>();
         msLoad += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
     }
-    double msPyrDown = 0.0, msDeriv = 0.0;   ///< X-65 put `build` at 52% of the
+    double msPyrDown = 0.0, msDeriv = 0.0;   ///< put `build` at 52% of the
                                             ///< frontend at T=12; this splits it,
-                                            ///< because X-58 found `derivative`
+                                            ///< because a measurement found `derivative`
                                             ///< auto-vectorises and `pyrDown` does
                                             ///< not, so the two halves have very
-                                            ///< different priors (E-33).
+                                            ///< different priors.
     void build() {
         auto t = Clock::now();
         prev.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
@@ -240,14 +240,14 @@ struct Stats {
     size_t bTried = 0, bSurvived = 0, oTried = 0, oSurvived = 0;
     double flowRmsPx = 0.0, flowMaxPx = 0.0;
     size_t compared = 0, agreeWithin1px = 0;
-    std::vector<double> flowErrs;   // X-25's lesson: this distribution has a tail
+    std::vector<double> flowErrs;   // that measurement’s lesson: this distribution has a tail
     double bincvMs = 0.0, opencvMs = 0.0;
-    // PER-STAGE, INSIDE THE REAL LOOP. X-30 profiled one detection and one track
+    // PER-STAGE, INSIDE THE REAL LOOP. profiled one detection and one track
     // per frame; the real frontend re-detects on a few percent of frames, and that
-    // over-weighted detection ~33x and sent D-27's target list to the wrong kernel.
+    // over-weighted detection ~33x and sent the design rule’s target list to the wrong kernel.
     // These timers are taken at the ACTUAL duty cycle.
     double msBuild = 0.0, msDetect = 0.0, msTrack = 0.0;
-    size_t preprocMismatch = 0;   ///< T5.8: binCV's sensor stage vs OpenCV's
+    size_t preprocMismatch = 0;   ///< binCV's sensor stage vs OpenCV's
     std::vector<int> bincvLifetimes, opencvLifetimes;
 };
 
@@ -259,10 +259,10 @@ double median(std::vector<int> v) {
 
 } // namespace
 
-// X-65 / E-35 -> T5.1. The benchmark's own thread pool and point-array splitter are
+// earlier work ->. The benchmark's own thread pool and point-array splitter are
 // GONE: binCV ships `bincv::ThreadPool` and `bincv::parallelFor`, and
 // `calcOpticalFlowPyrLK` splits over keypoints internally. What used to be thirty
-// lines here is now one `install()` -- which is the whole point of T5.1, since the
+// lines here is now one `install` -- which is the whole point of earlier work, since the
 // speedup was never missing, only the way to ask for it.
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
@@ -286,12 +286,12 @@ int main(int argc, char** argv) {
     // gets for free, because `run_on_pi.sh` runs under `taskset -c 3` and OpenCV's
     // threads cannot escape a single pinned core.
     //
-    // X-64: leaving it unset let the x86 runs compare SINGLE-THREADED binCV against
+    // leaving it unset let the x86 runs compare SINGLE-THREADED binCV against
     // TWELVE-THREADED OpenCV, and the resulting 0.65x was read as a SIMD deficit for
     // most of a working session. binCV has no threading at all, so an unpinned x86
     // box silently changes what the ratio means; the reference device never could.
     // Set BINCV_OPENCV_THREADS to compare against a multi-core OpenCV deliberately.
-    // X-65: binCV's thread count for the track stage, and the exactness check.
+    // binCV's thread count for the track stage, and the exactness check.
     int lkThreads = 1;
     if (const char* t = std::getenv("BINCV_LK_THREADS")) lkThreads = std::atoi(t);
     if (lkThreads < 1) lkThreads = 1;
@@ -300,7 +300,7 @@ int main(int argc, char** argv) {
     bincv::ThreadPool pool(lkThreads);
     if (lkThreads > 1) pool.install();
 
-    // X-79 / D-53: the keypoint batch's WHOLE-FRONTEND arm. X-62 measured 1.75x in a
+    // earlier work: the keypoint batch's WHOLE-FRONTEND arm. a measurement measured 1.75x in a
     // kernel and 0.31x on the frontend, so a kernel number is not a result here --
     // and lockstep batching changes the very quantity that did that, how many
     // iterations run. BINCV_LK_BATCH=0 takes the scalar path in the same binary.
@@ -323,7 +323,7 @@ int main(int argc, char** argv) {
 
     const cv::Mat first = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
     const int w = first.cols, h = first.rows;
-    std::printf("=== T4.3a / E-5: frontend over %zu frames, %dx%d ===\n", files.size(), w, h);
+    std::printf("=== a / frontend over %zu frames, %dx%d ===\n", files.size(), w, h);
     std::printf("both frontends see bit-identical input: median_filter then "
                 "rl_fast_edge_filter_wide(17)\n\n");
 
@@ -332,9 +332,9 @@ int main(int argc, char** argv) {
     // measured how many iterations the tracker actually NEEDS, and at 94.7% of
     // frontend time an unnecessary iteration is the most expensive thing there is.
     if (const char* it = std::getenv("BINCV_LK_ITERS")) lk.maxIterations = std::atoi(it);
-    // X-95 / E-48. The residual reject, so the rule can be measured against TRACK
+    // earlier work. The residual reject, so the rule can be measured against TRACK
     // LIFETIME on a real sequence rather than against the synthetic gap that made it
-    // look free. D-53: a rule that removes the failures by also removing the tracks is
+    // look free. a rule that removes the failures by also removing the tracks is
     // not a fix.
     if (const char* r = std::getenv("BINCV_LK_MAX_RESIDUAL")) {
         lk.maxResidual = static_cast<float>(std::atof(r));
@@ -353,7 +353,7 @@ int main(int argc, char** argv) {
     // 20000 yields 193 against OpenCV's 200. The earlier version of this harness
     // passed maxCorners and read the shortfall as a binCV defect; `CornerResult
     // ::candidatesTruncated` was reporting the truncation the whole time, which is
-    // exactly what T3.11 added it for.
+    // exactly what added it for.
     std::vector<bincv::Corner> corners(20000);
     size_t truncatedDetections = 0;
 
@@ -369,7 +369,7 @@ int main(int argc, char** argv) {
         const cv::Mat gray = cv::imread(files[f].string(), cv::IMREAD_GRAYSCALE);
         if (gray.empty()) continue;
         // ---------------- binCV ----------------
-        // T5.8: binCV builds its own binary frame from the grayscale input, INSIDE its
+        // binCV builds its own binary frame from the grayscale input, INSIDE its
         // own timing. OpenCV builds the same frame, inside its own, below.
         auto t0 = Clock::now();
         auto tStage = t0;
@@ -404,7 +404,7 @@ int main(int argc, char** argv) {
         st.bincvMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 
         // ---------------- OpenCV, from the SAME grayscale input ----------------
-        // T5.8: OpenCV builds its own binary frame too, inside its own timing. Before
+        // OpenCV builds its own binary frame too, inside its own timing. Before
         // this, both sides were handed one for free and neither total included it.
         t0 = Clock::now();
         const cv::Mat binNext = preprocess(gray, 17);
@@ -482,7 +482,7 @@ int main(int argc, char** argv) {
         };
         st.bTried += bPts.size();
         // THE CONTROL, outside both timings: OpenCV's spelling of the sensor stage is
-        // what binCV's must reproduce. T5.8 turns `preprocess` from the thing binCV
+        // what binCV's must reproduce. turns `preprocess` from the thing binCV
         // depends on into the thing binCV is checked against.
         st.preprocMismatch += binaryFramesAgree(fe.hold, binNext);
 
@@ -494,7 +494,7 @@ int main(int argc, char** argv) {
         st.oSurvived += oPts.size();
 
         ++st.frames;
-        if (st.frames % 200 == 0) std::printf("  ... %zu frames\n", st.frames);
+        if (st.frames % 200 == 0) std::printf(" ... %zu frames\n", st.frames);
     }
 
     // surviving tracks count too, or long-lived tracks are invisible
@@ -505,9 +505,9 @@ int main(int argc, char** argv) {
     const size_t ocvBytes = opencvBytes(w, h, 4, lk.winWidth);
 
     std::printf("\n--- CRITERION 2: agreement with the reference frontend ---\n");
-    std::printf("  flow vectors compared : %zu over %zu frames (%zu re-detections)\n",
+    std::printf(" flow vectors compared : %zu over %zu frames (%zu re-detections)\n",
                 st.compared, st.frames, st.detections);
-    // REPORTED AS PERCENTILES, NOT AS RMS. X-25 established that this project's
+    // REPORTED AS PERCENTILES, NOT AS RMS. a measurement established that this project's
     // flow errors are a tight body with a small catastrophic tail, and that an RMS
     // over everything reports the tail as though it were the body -- that finding
     // cost two experiments' worth of misattribution, so it is applied here.
@@ -519,92 +519,92 @@ int main(int argc, char** argv) {
                                                               f * static_cast<double>(
                                                                       st.flowErrs.size())))];
     };
-    std::printf("  flow difference       : median %.4f px   p90 %.4f   p99 %.4f   max %.4f\n",
+    std::printf(" flow difference : median %.4f px p90 %.4f p99 %.4f max %.4f\n",
                 pct(0.50), pct(0.90), pct(0.99), st.flowMaxPx);
-    std::printf("  (RMS over all         : %.4f px -- reported for completeness; the\n"
-                "   comparisons)           percentiles above are the honest summary, see X-25\n",
+    std::printf(" (RMS over all : %.4f px -- reported for completeness; the\n"
+                " comparisons) percentiles above are the honest summary, see\n",
                 st.compared ? std::sqrt(st.flowRmsPx / static_cast<double>(st.compared)) : 0.0);
-    std::printf("  agreeing within 1 px  : %.1f%%\n",
+    std::printf(" agreeing within 1 px : %.1f%%\n",
                 st.compared ? 100.0 * static_cast<double>(st.agreeWithin1px) /
                                   static_cast<double>(st.compared) : 0.0);
-    std::printf("  track lifetime median : binCV %.0f frames   OpenCV %.0f frames\n",
+    std::printf(" track lifetime median : binCV %.0f frames OpenCV %.0f frames\n",
                 median(st.bincvLifetimes), median(st.opencvLifetimes));
-    std::printf("  tracks observed       : binCV %zu   OpenCV %zu\n", st.bincvLifetimes.size(),
+    std::printf(" tracks observed : binCV %zu OpenCV %zu\n", st.bincvLifetimes.size(),
                 st.opencvLifetimes.size());
-    std::printf("  per-frame survival    : binCV %.1f%%   OpenCV %.1f%%\n",
+    std::printf(" per-frame survival : binCV %.1f%% OpenCV %.1f%%\n",
                 st.bTried ? 100.0 * static_cast<double>(st.bSurvived) /
                                 static_cast<double>(st.bTried) : 0.0,
                 st.oTried ? 100.0 * static_cast<double>(st.oSurvived) /
                                 static_cast<double>(st.oTried) : 0.0);
 
-    std::printf("  detections truncated  : %zu of %zu (capacity %zu)\n", truncatedDetections,
+    std::printf(" detections truncated : %zu of %zu (capacity %zu)\n", truncatedDetections,
                 st.detections, corners.size());
     std::printf("\n--- CRITERION 3: peak footprint over the frontend operation set ---\n");
-    std::printf("  binCV  : %8zu B   (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)\n",
+    std::printf(" binCV : %8zu B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)\n",
                 bcvBytes);
-    std::printf("  OpenCV : %8zu B   (CV_8U pyramid x2 with %d-px border/level, CV_32F eigen map)\n",
+    std::printf(" OpenCV : %8zu B (CV_8U pyramid x2 with %d-px border/level, CV_32F eigen map)\n",
                 ocvBytes, lk.winWidth);
-    std::printf("  RATIO  : %.2fx smaller\n",
+    std::printf(" RATIO : %.2fx smaller\n",
                 static_cast<double>(ocvBytes) / static_cast<double>(bcvBytes));
 
     std::printf("\n--- binCV per-stage, AT THE REAL DUTY CYCLE ---\n");
     {
         const double f = static_cast<double>(st.frames);
         const double tot = st.msBuild + st.msDetect + st.msTrack;
-        std::printf("  %-28s %8.3f ms/frame  %5.1f%%   (%zu detections in %zu frames = %.1f%%)\n",
+        std::printf(" %-28s %8.3f ms/frame %5.1f%% (%zu detections in %zu frames = %.1f%%)\n",
                     "detect", st.msDetect / f, 100.0 * st.msDetect / tot, st.detections,
                     st.frames, 100.0 * static_cast<double>(st.detections) / f);
-        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "track (LK)", st.msTrack / f,
+        std::printf(" %-28s %8.3f ms/frame %5.1f%%\n", "track (LK)", st.msTrack / f,
                     100.0 * st.msTrack / tot);
-        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "build (pyrDown + derivatives)",
+        std::printf(" %-28s %8.3f ms/frame %5.1f%%\n", "build (pyrDown + derivatives)",
                     st.msBuild / f, 100.0 * st.msBuild / tot);
-        // E-33 needs to know which half of `build` it is aiming at.
-        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "    ... sensor stage (T5.8)",
+        // needs to know which half of `build` it is aiming at.
+        std::printf(" %-28s %8.3f ms/frame %5.1f%%\n", " ... sensor stage",
                     fe.msLoad / f, 100.0 * fe.msLoad / tot);
-        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "        ... median",
+        std::printf(" %-28s %8.3f ms/frame %5.1f%%\n", " ... median",
                     gMsMedian / f, 100.0 * gMsMedian / tot);
-        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "        ... edge",
+        std::printf(" %-28s %8.3f ms/frame %5.1f%%\n", " ... edge",
                     gMsEdge / f, 100.0 * gMsEdge / tot);
-        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "    ... pyrDown", fe.msPyrDown / f,
+        std::printf(" %-28s %8.3f ms/frame %5.1f%%\n", " ... pyrDown", fe.msPyrDown / f,
                     100.0 * fe.msPyrDown / tot);
-        std::printf("  %-28s %8.3f ms/frame  %5.1f%%\n", "    ... derivatives",
+        std::printf(" %-28s %8.3f ms/frame %5.1f%%\n", " ... derivatives",
                     fe.msDeriv / f, 100.0 * fe.msDeriv / tot);
     }
-    std::printf("\n  sensor stage vs OpenCV's: %s (%zu pixels differ over %zu frames)\n",
+    std::printf("\n sensor stage vs OpenCV's: %s (%zu pixels differ over %zu frames)\n",
                 st.preprocMismatch == 0 ? "BIT-EXACT" : "MISMATCH", st.preprocMismatch,
                 st.frames);
     if (lkThreads > 1) {
-        std::printf("\n--- T5.1: binCV track stage on %d threads ---\n",
+        std::printf("\n--- binCV track stage on %d threads ---\n",
                     bincv::getNumThreads());
-        std::printf("  bit-exactness is pinned by tests/test_parallel.cpp, not re-checked here\n");
+        std::printf(" bit-exactness is pinned by tests/test_parallel.cpp, not re-checked here\n");
     }
     std::printf("\n--- CRITERION 4: speed against the byte-per-pixel denominator ---\n");
-    std::printf("  binCV  : %8.3f ms/frame\n", st.bincvMs / static_cast<double>(st.frames));
-    std::printf("  OpenCV : %8.3f ms/frame\n", st.opencvMs / static_cast<double>(st.frames));
-    std::printf("  RATIO  : %.2fx\n", st.opencvMs / st.bincvMs);
-    std::printf("  NOTE: OpenCV threads = %d (binCV is single-threaded, always), and its\n"
-                "        LK and gftt are SIMD-vectorized.\n",
+    std::printf(" binCV : %8.3f ms/frame\n", st.bincvMs / static_cast<double>(st.frames));
+    std::printf(" OpenCV : %8.3f ms/frame\n", st.opencvMs / static_cast<double>(st.frames));
+    std::printf(" RATIO : %.2fx\n", st.opencvMs / st.bincvMs);
+    std::printf(" NOTE: OpenCV threads = %d (binCV is single-threaded, always), and its\n"
+                " LK and gftt are SIMD-vectorized.\n",
                 cv::getNumThreads());
     if (cv::getNumThreads() != 1) {
-        std::printf("        *** NOT THE RECORDED DENOMINATOR. Every entry in EXPERIMENTS.md\n"
-                    "        *** that states its thread count states ONE. binCV has no threading,\n"
-                    "        *** so this ratio mixes a parallelism difference into what reads as\n"
-                    "        *** an implementation difference. See X-64.\n");
+        std::printf(" *** NOT THE RECORDED DENOMINATOR. Every entry in EXPERIMENTS.md\n"
+                    " *** that states its thread count states ONE. binCV has no threading,\n"
+                    " *** so this ratio mixes a parallelism difference into what reads as\n"
+                    " *** an implementation difference. See.\n");
     }
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
-    std::printf("        binCV has its NEON path here (D-30, D-33), so this is SIMD against\n"
-                "        SIMD on the deployment target -- the comparison criterion 4 is about.\n");
+    std::printf(" binCV has its NEON path here, so this is SIMD against\n"
+                " SIMD on the deployment target -- the comparison criterion 4 is about.\n");
 #else
-    // STALE UNTIL T5.16/T5.8. This used to read "binCV has NO VECTOR PATH ON x86
+    // STALE UNTIL. This used to read "binCV has NO VECTOR PATH ON x86
     // (ROADMAP 5.3 is unwritten), so this is binCV SCALAR against OpenCV SSE" -- and
     // this same program prints "LK residual kernel: AVX2, eight keypoints per batch"
     // five hundred lines earlier. One output contradicting itself is worse than either
     // claim alone, because a reader believes whichever half they read first.
-    std::printf("        binCV has its AVX2 paths here -- the eight-keypoint LK batch (D-66),\n"
-                "        the sensor stage's median and edge kernels (X-89), and packing --\n"
-                "        so this is SIMD against SIMD, as the aarch64 arm is. What X-64\n"
-                "        measured remains the point: at equal threads binCV LEADS, and the\n"
-                "        x86 deficit reported before it was THREADS, not vector width.\n");
+    std::printf(" binCV has its AVX2 paths here -- the eight-keypoint LK batch,\n"
+                " the sensor stage's median and edge kernels, and packing --\n"
+                " so this is SIMD against SIMD, as the aarch64 arm is. What\n"
+                " measured remains the point: at equal threads binCV LEADS, and the\n"
+                " x86 deficit reported before it was THREADS, not vector width.\n");
 #endif
     return 0;
 }

@@ -33,7 +33,7 @@ inline Config parseArgs(int argc, char* argv[]) {
         else if (arg == "--dtype") cfg.dtype = argv[++i];
         else if (arg == "--sparsity") cfg.sparsity = std::stof(argv[++i]);
         // Through the project's error policy like every other check, so that
-        // BINCV_THROW really is the single one (T1.4). The .c_str() is what lets
+        // BINCV_THROW really is the single one. The.c_str is what lets
         // one spelling serve both expansions: the throw path takes the message by
         // std::string or by const char*, the abort path prints a const char*.
         else BINCV_THROW(std::invalid_argument, ("Unknown argument: " + arg).c_str());

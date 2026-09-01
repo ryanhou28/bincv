@@ -7,7 +7,7 @@
 /// THE `none` BACKEND OF `bincv_io`, AND WHY IT IS THE DEFAULT ONE
 ///
 /// A PNG decoder is **eight times the size of everything binCV does** — measured, in
-/// [ARCHITECTURE §7.8](../../../../docs/ARCHITECTURE.md): `libpng` + `libz` is 336 KB against
+/// the design notes: `libpng` + `libz` is 336 KB against
 /// binCV's ~41 KB of code, and `libjpeg` is 510 KB. binCV must not carry one.
 ///
 /// PNM is the format whose whole encoder is a header and a copy, and whose decoder is
@@ -74,10 +74,10 @@ inline size_t pnmNumber(const uint8_t* d, size_t n, size_t i, size_t& out) {
 
 /// @brief Parses a binary PGM (`P5`) header. **API TIER 3.**
 /// @note `P5` only. `P2` is ASCII pixels and exists mostly in tutorials; supporting it
-///       would double the parser to read images nobody produces.
+/// would double the parser to read images nobody produces.
 /// @note Never allocates and never throws. A malformed buffer returns `valid == false`
-///       rather than reporting an error some other way -- this is core, and core has
-///       neither exceptions nor an error channel.
+/// rather than reporting an error some other way -- this is core, and core has
+/// neither exceptions nor an error channel.
 inline PgmHeader readPgmHeader(const uint8_t* data, size_t size) {
     PgmHeader h;
     if (data == nullptr || size < 2 || data[0] != 'P' || data[1] != '5') return h;
@@ -107,10 +107,10 @@ inline PgmHeader readPgmHeader(const uint8_t* data, size_t size) {
 /// @brief Reads a binary PGM straight into bits, under a `PackRule`. **API TIER 3.**
 /// @return False if the buffer is not a usable `P5`, or `dst` is the wrong size.
 /// @note **8-bit maxima only.** A 16-bit PGM stores big-endian samples, which is a
-///       byte order binCV would have to swap; `readPgmHeader` reports `maxValue` so a
-///       caller can detect and reject one rather than being handed silent nonsense.
+/// byte order binCV would have to swap; `readPgmHeader` reports `maxValue` so a
+/// caller can detect and reject one rather than being handed silent nonsense.
 /// @note The pixels never become an 8-bit image inside binCV -- this packs from the
-///       file's own buffer.
+/// file's own buffer.
 template <PackRule R, typename WordType>
 inline bool readPgm(const uint8_t* data, size_t size, BinMatView<WordType> dst,
                     uint8_t t = 0) {

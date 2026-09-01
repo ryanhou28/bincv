@@ -64,7 +64,7 @@ namespace impl {
 
 /// @brief The 16-pixel Bresenham ring of radius 3, clockwise from straight up.
 /// @note The order matters: contiguity is defined ALONG this ring, so a different
-///       winding would accept different corners. This is `cv::FAST`'s order.
+/// winding would accept different corners. This is `cv::FAST`'s order.
 inline constexpr int kFastRingX[16] = {0, 1, 2, 3, 3, 3, 2, 1, 0, -1, -2, -3, -3, -3, -2, -1};
 inline constexpr int kFastRingY[16] = {-3, -3, -2, -1, 0, 1, 2, 3, 3, 3, 2, 1, 0, -1, -2, -3};
 
@@ -86,10 +86,10 @@ namespace impl {
 /// whose run reaches `arcLength` is a corner. No transpose, no per-lane branch.
 ///
 /// @note The comparisons are UNSIGNED via saturating arithmetic: `v > hi` is
-///       `subs_epu8(v, hi) != 0`. SSE/AVX byte compares are signed, and the bias trick
-///       ops/pack.hpp uses would cost two extra ops per ring position here.
-///       Saturation also gives the clamp for free -- `c + t` saturating at 255 means
-///       "nothing is brighter", which is exactly right.
+/// `subs_epu8(v, hi) != 0`. SSE/AVX byte compares are signed, and the bias trick
+/// ops/pack.hpp uses would cost two extra ops per ring position here.
+/// Saturation also gives the clamp for free -- `c + t` saturating at 255 means
+/// "nothing is brighter", which is exactly right.
 __attribute__((target("avx2"))) inline uint32_t fastMask32(const uint8_t* p, long long stride,
                                                            const long long* ringOff,
                                                            int threshold, int arcLength,
@@ -111,7 +111,7 @@ __attribute__((target("avx2"))) inline uint32_t fastMask32(const uint8_t* p, lon
     // holds 0. So a group where neither passes cannot contain a 9-arc, and two loads
     // settle it where four were being paid.
     //
-    // This is where the time actually is. A threshold sweep (X-77) showed binCV
+    // This is where the time actually is. A threshold sweep showed binCV
     // WINNING 1.67-1.86x at high corner density -- the contiguity test is good -- and
     // LOSING 2.4x at zero density, where nothing runs but the reject. At a realistic
     // 1.1% the two cancelled to 1.09x. The reject path was the whole gap.
@@ -155,9 +155,9 @@ __attribute__((target("avx2"))) inline uint32_t fastMask32(const uint8_t* p, lon
         if ((k & 3) == 0) continue;   // already loaded above
         const __m256i v =
             _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + ringOff[k]));
-        // v > hi  <=>  subs_epu8(v, hi) != 0
+        // v > hi <=> subs_epu8(v, hi) != 0
         mHi[k] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(v, hi), zero), allOnes);
-        // v < lo  <=>  subs_epu8(lo, v) != 0
+        // v < lo <=> subs_epu8(lo, v) != 0
         mLo[k] = _mm256_xor_si256(_mm256_cmpeq_epi8(_mm256_subs_epu8(lo, v), zero), allOnes);
     }
 
@@ -213,7 +213,7 @@ inline uint32_t fastMask32(const uint8_t* p, long long stride, const long long* 
     // holds 0. So a group where neither passes cannot contain a 9-arc, and two loads
     // settle it where four were being paid.
     //
-    // This is where the time actually is. A threshold sweep (X-77) showed binCV
+    // This is where the time actually is. A threshold sweep showed binCV
     // WINNING 1.67-1.86x at high corner density -- the contiguity test is good -- and
     // LOSING 2.4x at zero density, where nothing runs but the reject. At a realistic
     // 1.1% the two cancelled to 1.09x. The reject path was the whole gap.
@@ -284,17 +284,17 @@ constexpr size_t kFastLanes = 16;
 /// @brief Detects FAST corners. **API TIER 2** -- see the tier note.
 ///
 /// @param arcLength Contiguous ring pixels required. 9 is `cv::FAST`'s default and
-///        the one ORB uses.
+/// the one ORB uses.
 /// @param out,capacity Caller-provided; **no allocation happens here**
-///        ([CLAUDE.md](../../../../CLAUDE.md)).
+/// ([CLAUDE.md](../../../../CLAUDE.md)).
 /// @param truncated Set when more corners were found than `capacity` held. **A
-///        silently truncated detection looks like a sparse image**, which is the kind
-///        of failure that gets diagnosed as a tuning problem for weeks.
+/// silently truncated detection looks like a sparse image**, which is the kind
+/// of failure that gets diagnosed as a tuning problem for weeks.
 /// @return How many corners were written.
 ///
 /// @note Pixels within 3 of a border are never candidates: the ring would fall
-///       outside, and there is no sensible border rule for "is this a corner" --
-///       reflecting the image would invent structure that is not there.
+/// outside, and there is no sensible border rule for "is this a corner" --
+/// reflecting the image would invent structure that is not there.
 template <typename SrcT>
 inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t stride,
                          long long threshold, FastCorner* out, size_t capacity,
@@ -437,7 +437,7 @@ inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t st
 }
 
 // ===========================================================================
-// X-80 / E-43: THE SAME DETECTOR, ON binCV'S OWN TYPE.
+// earlier work: THE SAME DETECTOR, ON binCV'S OWN TYPE.
 //
 // Everything above this line takes `const SrcT*` and a byte stride -- a WIDE image.
 // That is why it can only match `cv::FAST`: both sides load the same bytes into the
@@ -448,7 +448,7 @@ inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t st
 // and `p_ring < p_centre - t` only for `ring = 0, centre = 1`. There is exactly ONE
 // meaningful threshold, and the whole test becomes
 //
-//     corner = arc9( ring & ~centre )  |  arc9( ~ring & centre )
+// corner = arc9( ring & ~centre ) | arc9( ~ring & centre )
 //
 // -- sixteen AND-NOTs and an AND-tree, over WHOLE WORDS. **The same instruction that
 // decided one pixel now decides thirty-two**, or two hundred and fifty-six in a vector
@@ -457,10 +457,10 @@ inline size_t detectFast(const SrcT* img, size_t width, size_t height, size_t st
 
 namespace impl {
 
-/// @brief Bits `[w*B + dx, w*B + dx + B)` of a row. **INTERNAL** (X-80).
+/// @brief Bits `[w*B + dx, w*B + dx + B)` of a row. **INTERNAL**.
 /// @note `dx` is a PIXEL offset in `[-(B-1), B-1]`; FAST needs `|dx| <= 3`. Words
-///       outside the row read as zero, which is correct here because every pixel whose
-///       ring reaches outside the image is a border pixel and is masked off anyway.
+/// outside the row read as zero, which is correct here because every pixel whose
+/// ring reaches outside the image is a border pixel and is masked off anyway.
 template <typename WordType>
 inline WordType fastShiftedWord(const WordType* row, size_t words, size_t w, int dx) {
     constexpr size_t kBits = bitsPerWord<WordType>();
@@ -487,7 +487,7 @@ inline WordType fastShiftedWord(const WordType* row, size_t words, size_t w, int
 /// at `k`" for any `s <= L`, so doubling 1 -> 2 -> 4 -> 8 and finishing with `s = 1`
 /// reaches nine. Written in place, saving only the `s` entries the wrap-around
 /// consumes — which is what keeps the AVX2 form of this inside sixteen registers.
-/// [X-80](../../../../docs/EXPERIMENTS.md) measured a four-array version and it ran at **0.7
+/// a measurement measured a four-array version and it ran at **0.7
 /// operations per cycle**, three times worse than its own operation count.
 ///
 /// The schedule is derived from `arcLength` rather than tabulated, so an unusual
@@ -513,7 +513,7 @@ inline WordType fastArcAny(const WordType src[16], int arcLength) {
 }
 
 /// @brief The longest run of set bits at ONE pixel, around the cyclic ring.
-///        **INTERNAL** (X-80) -- the Tier 2 score, computed only for detected corners.
+/// **INTERNAL** -- the Tier 2 score, computed only for detected corners.
 inline int fastLongestRun(unsigned ring, int arcLength) {
     // The ring doubled end to end, so a run that wraps is a run in the middle. Each
     // `x &= x >> 1` shortens every run by one, so the number of passes before nothing
@@ -522,7 +522,7 @@ inline int fastLongestRun(unsigned ring, int arcLength) {
     // **BRANCHLESS, AND THAT IS THE POINT.** The obvious `while (x) { x &= x >> 1; }`
     // is a data-dependent loop with an unpredictable exit, run once per corner --
     // and on a real binarized frame corners are 2% of pixels, which made SCORING a
-    // third of this operation's time (X-80). The caller only asks about pixels that
+    // third of this operation's time. The caller only asks about pixels that
     // already passed the arc test, so the first `arcLength - 1` passes are known to
     // survive and need no test at all; the remaining ones are counted, not branched on.
     unsigned x = (ring & 0xFFFFu) | ((ring & 0xFFFFu) << 16);
@@ -540,7 +540,7 @@ inline int fastLongestRun(unsigned ring, int arcLength) {
 #define BINCV_FASTBIT_FN __attribute__((target("avx2"), always_inline)) inline
 
 /// @brief 256 consecutive pixels of a bit-plane row, starting `dx` pixels along.
-///        **INTERNAL** (X-80).
+/// **INTERNAL**.
 ///
 /// **A BIT-PLANE ROW IS AN LSB-FIRST BIT STREAM AND THAT IS WHY THIS IS FIVE
 /// INSTRUCTIONS.** `bitMask(x)` is `1 << (x % WordBits)` and the words are
@@ -562,16 +562,16 @@ BINCV_FASTBIT_FN __m256i fastRing256(const uint8_t* p, int dx) {
 }
 
 /// @brief `OR over all 16 starts of (AND of `arcLength` consecutive)`, for 256 pixels.
-///        **INTERNAL** (X-80). `fastArcAny`'s schedule, in place, for the same reason.
+/// **INTERNAL**. `fastArcAny`'s schedule, in place, for the same reason.
 /// @note **In place is not a tidiness choice, it is the whole difference.** The first
-///       version of this held `r2`, `r4`, `r8` and an accumulator — sixty-four live
-///       `__m256i` against a register file of sixteen — and ran at 0.7 operations per
-///       cycle. Reusing one array of sixteen plus the wrap saves fits.
+/// version of this held `r2`, `r4`, `r8` and an accumulator — sixty-four live
+/// `__m256i` against a register file of sixteen — and ran at 0.7 operations per
+/// cycle. Reusing one array of sixteen plus the wrap saves fits.
 /// @brief One doubling step, with the step a COMPILE-TIME constant. **INTERNAL.**
 /// @note **This is a template and not a parameter for a measured reason.** With a
-///       runtime step every index into `v` is variable, so the compiler cannot unroll
-///       and `v` has to live in memory — turning each `vpand` into load-load-and-store.
-///       [X-80](../../../../docs/EXPERIMENTS.md) measured that costing **1.6×** on its own.
+/// runtime step every index into `v` is variable, so the compiler cannot unroll
+/// and `v` has to live in memory — turning each `vpand` into load-load-and-store.
+/// a measurement measured that costing **1.6×** on its own.
 template <int Step>
 BINCV_FASTBIT_FN void fastArcStep256(__m256i* v) {
     __m256i save[static_cast<size_t>(Step)];
@@ -624,13 +624,13 @@ BINCV_FASTBIT_FN __m256i fastArcAny256(__m256i* v, int arcLength) {
     return any;
 }
 
-/// @brief The arc-length masks `L = 9..16`, for 256 pixels. **INTERNAL** (X-81).
+/// @brief The arc-length masks `L = 9..16`, for 256 pixels. **INTERNAL**.
 ///
 /// **THE SCORE IS ALREADY HALF-COMPUTED BY THE DETECTION AND THIS COLLECTS IT.** After
-/// the three doublings `v[k]` is `AND(diff[k .. k+7])` — a run of eight — and for any
+/// the three doublings `v[k]` is `AND(diff[k.. k+7])` — a run of eight — and for any
 /// `L` in 9..16,
 ///
-///     AND(diff[k .. k+L-1])  ==  v[k] & v[(k + L - 8) & 15]
+/// AND(diff[k.. k+L-1]) == v[k] & v[(k + L - 8) & 15]
 ///
 /// because two overlapping runs of eight cover any `L <= 16`. So every arc length costs
 /// one pass of sixteen ANDs and an OR-reduce, and `L = 9` is the corner mask the
@@ -650,13 +650,13 @@ BINCV_FASTBIT_FN void fastArcMask256(const __m256i* v, uint32_t* out) {
                         _mm256_or_si256(a0, a1));
 }
 
-/// @brief The seven masks `L = 10..16`. **INTERNAL** (X-81).
-/// @note **Unrolled with `L` a template parameter, and X-81 measured why.** Written as a
-///       loop over a runtime `L`, the index `v[(k + L - 8) & 15]` is variable — so `v`
-///       cannot stay in registers and the whole array goes to memory. On x86 that is
-///       nearly free because sixteen `__m256i` were spilling anyway; **on aarch64,
-///       where they FIT in the thirty-two registers, it cost 2.36× → 1.98× on the
-///       reference device.** The same mistake `fastArcStep256` was already fixed for.
+/// @brief The seven masks `L = 10..16`. **INTERNAL**.
+/// @note **Unrolled with `L` a template parameter, and a measurement measured why.** Written as a
+/// loop over a runtime `L`, the index `v[(k + L - 8) & 15]` is variable — so `v`
+/// cannot stay in registers and the whole array goes to memory. On x86 that is
+/// nearly free because sixteen `__m256i` were spilling anyway; **on aarch64,
+/// where they FIT in the thirty-two registers, it cost 2.36× → 1.98× on the
+/// reference device.** The same mistake `fastArcStep256` was already fixed for.
 BINCV_FASTBIT_FN void fastArcMasksRest256(const __m256i* v, uint32_t* out) {
     fastArcMask256<10>(v, out);
     fastArcMask256<11>(v, out);
@@ -668,7 +668,7 @@ BINCV_FASTBIT_FN void fastArcMasksRest256(const __m256i* v, uint32_t* out) {
 }
 
 /// @brief One 256-pixel chunk: the corner mask, and the score inputs. **INTERNAL,
-///        and the one function carrying `target`** (X-80, X-81).
+/// and the one function carrying `target`**.
 ///
 /// **THIS IS WHERE THE THESIS PAYS.** The scalar word form of this loop does the same
 /// sixteen XORs and the same AND-tree — and a `uint32_t` holds thirty-two pixels, which
@@ -677,10 +677,10 @@ BINCV_FASTBIT_FN void fastArcMasksRest256(const __m256i* v, uint32_t* out) {
 /// decides two hundred and fifty-six pixels instead of thirty-two.
 ///
 /// @return True when `masks[1..7]` were filled, so the caller scores from them; false
-///         when it should transpose each corner's ring instead.
+/// when it should transpose each corner's ring instead.
 ///
 /// **THE CHOICE IS PER CHUNK AND IT IS A MEASURED CROSSOVER, NOT A PREFERENCE.**
-/// [X-81](../../../../docs/EXPERIMENTS.md) measured both scoring arms across corner densities:
+/// a measurement measured both scoring arms across corner densities:
 /// the seven extra mask passes cost ~217 vector operations per chunk **whatever the
 /// density**, and a per-corner transpose costs ~78 scalar operations **per corner** —
 /// so the masks win above about three corners in a chunk and lose by up to **1.5×**
@@ -729,10 +729,10 @@ inline bool hasFastBitAvx2() {
 
 /// @brief 128 consecutive pixels of a bit-plane row, `Dx` pixels along. **INTERNAL.**
 /// @note The AVX2 identity unchanged: a bit-plane row is an LSB-first bit stream, so a
-///       pixel displacement is a byte offset and a shift of at most seven, and the bits
-///       that would cross a 64-bit lane are supplied by a second load one byte along.
+/// pixel displacement is a byte offset and a shift of at most seven, and the bits
+/// that would cross a 64-bit lane are supplied by a second load one byte along.
 /// @note `Dx` is a TEMPLATE parameter because `vshrq_n_u64` takes an immediate. The
-///       ring is a compile-time constant, so nothing is lost by saying so.
+/// ring is a compile-time constant, so nothing is lost by saying so.
 template <int Dx>
 BINCV_FASTBIT_NEON uint8x16_t fastRingNeon(const uint8_t* p) {
     constexpr int kByteOff = Dx >= 0 ? 0 : -1;
@@ -759,7 +759,7 @@ BINCV_FASTBIT_NEON void fastArcStepNeon(uint8x16_t* v) {
 
 BINCV_FASTBIT_NEON uint8x16_t fastArcAnyNeon(uint8x16_t* v, int arcLength) {
     // aarch64 has THIRTY-TWO vector registers, so the sixteen the tree needs fit with
-    // room to spare -- the spilling that dominated the first AVX2 version (X-80) does
+    // room to spare -- the spilling that dominated the first AVX2 version does
     // not arise here at all.
     if (arcLength == 9) {
         fastArcStepNeon<1>(v);
@@ -801,9 +801,9 @@ BINCV_FASTBIT_NEON void fastRingLoadNeon(const uint8_t* const* ringRow, size_t c
     }
 }
 
-/// @brief Corner mask for 128 consecutive pixels. **INTERNAL** (X-80).
+/// @brief Corner mask for 128 consecutive pixels. **INTERNAL**.
 ///
-/// **NO ADAPTIVE SCORING HERE, AND [X-81](../../../../docs/EXPERIMENTS.md) MEASURED WHY.** The
+/// **NO ADAPTIVE SCORING HERE, AND MEASURED WHY.** The
 /// AVX2 path chooses per chunk between transposing each corner's ring and reading the
 /// score off eight nested arc-length masks, and that choice is worth **1.39× → 1.71×**
 /// there. Ported to NEON it made the reference device **SLOWER — 2.36× → 2.10×** — and
@@ -813,12 +813,12 @@ BINCV_FASTBIT_NEON void fastRingLoadNeon(const uint8_t* const* ringRow, size_t c
 /// The reason is that the mask form must keep all sixteen `v` vectors live across up to
 /// eight passes, where this fold **consumes them in place** and they are dead after.
 /// x86 was spilling those sixteen anyway; aarch64's thirty-two registers were holding
-/// them, and that is exactly what X-80's 2.36× was made of.
+/// them, and that is exactly what that measurement’s 2.36× was made of.
 ///
 /// **A cross-architecture win is not a win. Both were measured, and the two backends
 /// keep different code because the measurement said to.**
 /// @note NEON is baseline on aarch64, so unlike the AVX2 form there is nothing to
-///       dispatch on.
+/// dispatch on.
 inline void fastBitMask128(const uint8_t* const* ringRow, const uint8_t* centreRow,
                            size_t chunkByte, int arcLength, uint8_t* out, uint8_t* diffOut) {
     const uint8x16_t centre = vld1q_u8(centreRow + chunkByte);
@@ -830,12 +830,12 @@ inline void fastBitMask128(const uint8_t* const* ringRow, const uint8_t* centreR
 #endif  // BINCV_FAST_NEON
 
 /// @brief Corners in a chunk above which scoring switches to the ARC-LENGTH MASKS.
-///        **INTERNAL** (X-81).
+/// **INTERNAL**.
 ///
 /// **A MEASURED CROSSOVER, AND THE REASON THERE IS A KNOB AT ALL.** The two ways to
 /// score cost differently in the density: the seven extra mask passes are ~217 vector
 /// operations per chunk **whatever the density**, and transposing a corner's ring is
-/// ~78 scalar operations **per corner**. [X-81](../../../../docs/EXPERIMENTS.md) measured both
+/// ~78 scalar operations **per corner**. a measurement measured both
 /// across a density sweep and they cross at about three corners per chunk — below it
 /// the masks lose by up to 1.5×, above it they win by up to 1.42×.
 ///
@@ -871,10 +871,10 @@ inline int& fastScoreMaskThreshold() {
 /// @param arcLength Contiguous ring pixels required; 9 is `cv::FAST`'s default.
 ///
 /// @note There is **no threshold parameter and that is not an omission**. A one-bit
-///       alphabet admits exactly one, and offering a knob with one legal value would
-///       be worse than not offering it.
+/// alphabet admits exactly one, and offering a knob with one legal value would
+/// be worse than not offering it.
 /// @note Pixels within 3 of a border are never candidates, matching the wide-image
-///       overload and `cv::FAST`.
+/// overload and `cv::FAST`.
 template <typename WordType>
 inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
                          size_t capacity, bool* truncated = nullptr, int arcLength = 9) {
@@ -928,7 +928,7 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
         }
     };
 
-    // X-81's arm B: the score read straight off the nested arc-length masks. A pixel's
+    // that measurement’s arm B: the score read straight off the nested arc-length masks. A pixel's
     // score is `8 + the number of masks holding its bit`, because a run of L implies a
     // run of every shorter length -- so the count IS the maximum, with no transpose and
     // no run loop.
@@ -973,7 +973,7 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
         // THE CHUNK IS THE VECTOR WIDTH IN PIXELS: 256 on AVX2, 128 on NEON. That
         // number IS the result -- a `uint32_t` holds 32 pixels, which is exactly what a
         // vector register of BYTES holds, so the bit packing buys nothing until the
-        // boolean algebra moves into a vector register (X-80).
+        // boolean algebra moves into a vector register.
 #if defined(BINCV_FAST_RUNTIME_AVX2)
         constexpr size_t kChunkBytes = 32;
         const bool vectorReady = impl::hasFastBitAvx2();
@@ -1003,7 +1003,7 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
 #else
                 impl::fastBitMask128(ringBytes, centreBytes, w * sizeof(WordType), arcLength,
                                      maskBuf, diffBuf);
-                constexpr bool scored = false;   // X-81: measured a LOSS on NEON
+                constexpr bool scored = false;   // measured a LOSS on NEON
 #endif
                 const WordType* chunk = reinterpret_cast<const WordType*>(maskBuf);
                 for (size_t j = 0; j < kChunkWords && !overflow; ++j) {

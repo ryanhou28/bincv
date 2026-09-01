@@ -2,7 +2,7 @@
 
 /// @file medianWide.hpp
 /// @brief The reference pipeline's median filter, on a WIDE (8- or 16-bit) image,
-///        with a caller-chosen neighbourhood. **API TIER 3.**
+/// with a caller-chosen neighbourhood. **API TIER 3.**
 ///
 /// ---------------------------------------------------------------------------
 /// WHY THIS EXISTS ALONGSIDE ops/denoise.hpp
@@ -75,8 +75,8 @@ struct MedianPattern {
 
 /// @brief The reference's `three_pix_median_filter`: above, centre, right.
 /// @note An asymmetric **L**, not a line and not a square. It is chosen for what it
-///       costs in race logic, not for isotropy, which is why no OpenCV kernel
-///       matches it.
+/// costs in race logic, not for isotropy, which is why no OpenCV kernel
+/// matches it.
 inline constexpr MedianPattern<3> kMedianReferenceL{{{-1, 0}, {0, 0}, {0, 1}}};
 
 /// @brief The reference's `five_pix_median_filter`: the plus.
@@ -117,7 +117,7 @@ inline void med3Store(const uint8_t* a, const uint8_t* b, const uint8_t* c, uint
 
 /// @brief One pixel by the scalar rule, border included. **INTERNAL.**
 /// @note The vector sweep covers the interior and calls this for everything else, so
-///       the out-of-range-reads-as-zero rule stays written down exactly once.
+/// the out-of-range-reads-as-zero rule stays written down exactly once.
 template <size_t K, typename SrcT>
 inline void med3Scalar(const SrcT* src, size_t width, size_t height, size_t srcStride,
                        SrcT* dst, size_t dstStride, const MedianPattern<K>& pattern,
@@ -148,8 +148,8 @@ inline void med3Scalar(const SrcT* src, size_t width, size_t height, size_t srcS
 
 /// @brief Median filter over a caller-chosen neighbourhood. **API TIER 3.**
 /// @param src,dst Row-major, strides in ELEMENTS. **`src` and `dst` must not alias**
-///        -- every output reads neighbours that a partial in-place write would have
-///        already changed.
+/// -- every output reads neighbours that a partial in-place write would have
+/// already changed.
 /// @note Out-of-range samples read as **zero**; see the border note above.
 /// @note Never allocates and never throws.
 template <size_t K, typename SrcT>
@@ -161,13 +161,13 @@ inline void medianWide(const SrcT* src, size_t width, size_t height, size_t srcS
                  "medianWide: a non-empty image needs non-null pointers");
 
     // ==================================================================
-    // X-89 / T5.8: THE THREE-SAMPLE MEDIAN IS MIN AND MAX, AND NOTHING ELSE.
+    // earlier work: THE THREE-SAMPLE MEDIAN IS MIN AND MAX, AND NOTHING ELSE.
     //
-    //     med3(a, b, c) = max(min(a, b), min(max(a, b), c))
+    // med3(a, b, c) = max(min(a, b), min(max(a, b), c))
     //
     // Five register operations for as many pixels as fit — thirty-two on AVX2, sixteen
     // on NEON — against a scalar sorting network **and three bounds-checked gathers**
-    // per pixel. T5.8 put this kernel at **78% of the whole frontend** the moment it
+    // per pixel. put this kernel at **78% of the whole frontend** the moment it
     // was wired in, which is what made it worth writing.
     //
     // ONLY THE INTERIOR. A row or column where any offset leaves the image keeps the

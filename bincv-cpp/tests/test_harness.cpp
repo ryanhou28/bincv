@@ -1,4 +1,4 @@
-// Regression-check of the test harness itself (T1.7 "Done when": a deliberately
+// Regression-check of the test harness itself ( "Done when": a deliberately
 // failing assertion still produces a non-zero exit code).
 //
 // The hazard this closes is not hypothetical. The harness this file checks
@@ -8,11 +8,11 @@
 // consumes the attention that would otherwise notice.
 //
 // Built TWICE from this one source:
-//   test_harness           -- ordinary suite, must pass
-//   test_harness_failing   -- same file with BINCV_HARNESS_EXPECT_FAILURE, so one
-//                             case fails on purpose; ctest runs it with
-//                             WILL_FAIL TRUE, which passes only if it exits
-//                             non-zero.
+// test_harness -- ordinary suite, must pass
+// test_harness_failing -- same file with BINCV_HARNESS_EXPECT_FAILURE, so one
+// case fails on purpose; ctest runs it with
+// WILL_FAIL TRUE, which passes only if it exits
+// non-zero.
 // Both are built in EVERY configuration, so the claim is checked against both
 // backends -- Google Test where it is used, the built-in harness in the
 // dependency-free build.

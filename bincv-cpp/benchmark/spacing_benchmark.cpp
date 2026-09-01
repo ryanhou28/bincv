@@ -1,14 +1,14 @@
 // ===========================================================================
-// X-93 / E-46 -- SPACING NEW DETECTIONS AGAINST LIVE TRACKS: WHICH ARM?
+// earlier work -- SPACING NEW DETECTIONS AGAINST LIVE TRACKS: WHICH ARM?
 //
 // A VIO frontend detects to top up, so every fresh corner must be rejected if it lands
 // on a track already being followed. Two shapes, and the DECISION RULE WAS FIXED BEFORE
-// EITHER EXISTED (EXPERIMENTS.md X-93):
+// EITHER EXISTED :
 //
-//   (a) EXHAUSTIVE -- O(new x live) float distance tests. Vectorised eight-wide on
-//       AVX2, four-wide on NEON. COSTS NO MEMORY.
-//   (b) OCCUPANCY MASK -- stamp a disc of `radius` per live track into a 1-bit frame,
-//       then one bit test per candidate. COSTS ONE 1-BIT FRAME: 38 400 B at 640x480.
+// (a) EXHAUSTIVE -- O(new x live) float distance tests. Vectorised eight-wide on
+// AVX2, four-wide on NEON. COSTS NO MEMORY.
+// (b) OCCUPANCY MASK -- stamp a disc of `radius` per live track into a 1-bit frame,
+// then one bit test per candidate. COSTS ONE 1-BIT FRAME: 38 400 B at 640x480.
 //
 // The rule: the mask becomes the recommended path only if it is FASTER at the
 // frontend's own operating point on BOTH architectures. Parity is a loss -- CLAUDE.md
@@ -19,10 +19,10 @@
 // the mask LOSES at small candidate counts and wins past new ~ pi*r^2/WordBits ~ 100.
 //
 // TWO CONTROLS, BOTH REQUIRED BY CLAUDE.md's BENCHMARKING RULES:
-//   - the exhaustive arm is timed with the vector path forced OFF as well as on, so
-//     the vector arm is shown to be RUNNING rather than assumed to be;
-//   - `live = 4` is below the vector width in both ISAs, so its vector/scalar ratio
-//     must come back at ~1.00x. If it does not, the "vector" arm is not what it says.
+// - the exhaustive arm is timed with the vector path forced OFF as well as on, so
+// the vector arm is shown to be RUNNING rather than assumed to be;
+// - `live = 4` is below the vector width in both ISAs, so its vector/scalar ratio
+// must come back at ~1.00x. If it does not, the "vector" arm is not what it says.
 //
 // Parameters are the reference's, not chosen: radius 32 is HybVIO's
 // relativeMaskRadius 0.0667 x min(640,480), and maxTracks is 200.
@@ -66,7 +66,7 @@ double minOf(const std::vector<double>& v) { return *std::min_element(v.begin(),
 }  // namespace
 
 int main() {
-    std::printf("=== X-93 / E-46: spacing new detections against live tracks ===\n");
+    std::printf("=== spacing new detections against live tracks ===\n");
     std::printf("%zux%zu, radius %.0f, %d interleaved rounds, minimum reported\n",
                 kWidth, kHeight, static_cast<double>(kRadius), kRounds);
 #if defined(BINCV_OCCUPANCY_AVX2)
@@ -76,7 +76,7 @@ int main() {
 #else
     std::printf("distance arm: portable scalar (no vector arm compiled)\n");
 #endif
-    std::printf("\nmemory: exhaustive 0 B   |   mask %zu B (one 1-bit frame)\n\n",
+    std::printf("\nmemory: exhaustive 0 B | mask %zu B (one 1-bit frame)\n\n",
                 (kWidth / 32) * kHeight * sizeof(W));
 
     bincv::BinMat<W> mask(kWidth, kHeight);
@@ -194,7 +194,7 @@ int main() {
             // out NEGATIVE. A number that can be negative is not a measurement.
             (void)tsel;
             // A benchmark whose arms disagree is measuring two different operations.
-            const char* agree = (keptV == keptS && keptV == keptM) ? "" : "  <-- ARMS DISAGREE";
+            const char* agree = (keptV == keptS && keptV == keptM) ? "" : " <-- ARMS DISAGREE";
             std::printf("%6zu %6zu | %11.0f %11.0f %8.2f | %11.0f %11.0f %11.0f | "
                         "%8.2f %6zu%s\n",
                         liveCount, newCount, V, S, S / V, C, M, L, L > 0 ? V / L : 0.0,
@@ -250,8 +250,8 @@ int main() {
                          kReps);
             bincv::impl::spacingSimdEnabled() = true;
         }
-        std::printf("\nGATE CONTROL  live=4, limit=1 (neither scan reaches the vector width)\n");
-        std::printf("  vector %8.0f ns   scalar %8.0f ns   ratio %5.2fx  (must be ~1.00)\n",
+        std::printf("\nGATE CONTROL live=4, limit=1 (neither scan reaches the vector width)\n");
+        std::printf(" vector %8.0f ns scalar %8.0f ns ratio %5.2fx (must be ~1.00)\n",
                     minOf(tv), minOf(ts), minOf(ts) / minOf(tv));
     }
 
@@ -299,12 +299,12 @@ int main() {
                          kReps);
         }
         const double A = minOf(ta), B = minOf(tb);
-        std::printf("\nOPERATING POINT  live=120, new=300, limit=80, radius=32\n");
-        std::printf("  (a) exhaustive  %9.0f ns   0 B\n", A);
-        std::printf("  (b) mask        %9.0f ns   %zu B\n", B, (kWidth / 32) * kHeight * sizeof(W));
-        std::printf("  exhaustive is %.2fx %s   (kept %zu / %zu)%s\n", (B > A) ? B / A : A / B,
+        std::printf("\nOPERATING POINT live=120, new=300, limit=80, radius=32\n");
+        std::printf(" (a) exhaustive %9.0f ns 0 B\n", A);
+        std::printf(" (b) mask %9.0f ns %zu B\n", B, (kWidth / 32) * kHeight * sizeof(W));
+        std::printf(" exhaustive is %.2fx %s (kept %zu / %zu)%s\n", (B > A) ? B / A : A / B,
                     (B > A) ? "FASTER" : "SLOWER", keptA, keptB,
-                    (keptA == keptB) ? "" : "  <-- ARMS DISAGREE");
+                    (keptA == keptB) ? "" : " <-- ARMS DISAGREE");
     }
     return 0;
 }

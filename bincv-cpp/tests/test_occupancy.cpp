@@ -3,7 +3,7 @@
 //
 // TWO ARMS THAT MUST RETURN THE SAME POINTS. One does `O(new x live)` float distance
 // tests; the other stamps a disc per live track into a 1-bit frame and reads one bit
-// per candidate. E-46 chooses between them on SPEED, which only means anything if the
+// per candidate. chooses between them on SPEED, which only means anything if the
 // answer is identical -- so that is the first and largest thing in this file.
 //
 // The disagreement to worry about is not a wild one. It is a single boundary pixel:
@@ -13,11 +13,11 @@
 // a sweep of sub-pixel centres against the float predicate rather than sampling.
 //
 // Four claims:
-//   1. THE MASK IS THE DISTANCE TEST -- pixel for pixel, no tolerance.
-//   2. THE ARMS AGREE -- same kept points, same order, over random populations.
-//   3. THE VECTOR ARM IS THE SCALAR ARM -- and can be switched off, so it is checked.
-//   4. IT DOES THE JOB IT WAS ADDED FOR -- a candidate on top of a live track is
-//      rejected, which is the thing binCV could not do before T5.20.
+// 1. THE MASK IS THE DISTANCE TEST -- pixel for pixel, no tolerance.
+// 2. THE ARMS AGREE -- same kept points, same order, over random populations.
+// 3. THE VECTOR ARM IS THE SCALAR ARM -- and can be switched off, so it is checked.
+// 4. IT DOES THE JOB IT WAS ADDED FOR -- a candidate on top of a live track is
+// rejected, which is the thing binCV could not do before earlier work.
 // ===========================================================================
 
 #include <cmath>
@@ -83,7 +83,7 @@ BINCV_TEST(Occupancy, MaskMatchesFloatDistance) {
 
     size_t checked = 0, disagreements = 0;
     Rng rng;
-    // Sub-pixel centres deliberately including .0 and .5, where a boundary pixel is
+    // Sub-pixel centres deliberately including.0 and.5, where a boundary pixel is
     // exactly at distance `radius` and the strict `<` decides it.
     const float kCentres[] = {0.0f, 0.25f, 0.5f, 0.75f};
     const float kRadii[] = {1.0f, 2.5f, 4.0f, 7.5f, 13.0f, 32.0f};
@@ -120,7 +120,7 @@ BINCV_TEST(Occupancy, MaskMatchesFloatDistance) {
             }
         }
     }
-    std::printf("  %zu pixels against the float predicate: %zu disagreements\n", checked,
+    std::printf(" %zu pixels against the float predicate: %zu disagreements\n", checked,
                 disagreements);
     BINCV_CHECK(checked > 300000);
     BINCV_CHECK_EQ(disagreements, size_t{0});
@@ -212,7 +212,7 @@ BINCV_TEST(Occupancy, ArmsAgreeExactly) {
         ++populations;
         totalKept += want.size();
     }
-    std::printf("  %zu populations, %zu kept points: both arms match the float oracle\n",
+    std::printf(" %zu populations, %zu kept points: both arms match the float oracle\n",
                 populations, totalKept);
     BINCV_CHECK_EQ(populations, size_t{24});
     BINCV_CHECK(totalKept > 200);
@@ -256,7 +256,7 @@ BINCV_TEST(Occupancy, VectorDistanceArmMatchesScalar) {
             ++compared;
         }
     }
-    std::printf("  %zu (liveCount, radius) pairs: vector arm == scalar arm\n", compared);
+    std::printf(" %zu (liveCount, radius) pairs: vector arm == scalar arm\n", compared);
     BINCV_CHECK_EQ(compared, size_t{63});
 }
 
@@ -270,15 +270,15 @@ BINCV_TEST(Occupancy, RejectsCandidatesOnTopOfLiveTracks) {
 
     // Three live tracks and five candidates: one exactly on a track, one just inside
     // the radius, one just outside, and two far away. This is the case binCV could not
-    // express before T5.20 -- ops/corner.hpp spaces candidates against each other and
+    // express before earlier work -- ops/corner.hpp spaces candidates against each other and
     // has never seen `live`.
     const std::vector<Point2f> live = {{20.0f, 20.0f}, {60.4f, 33.7f}, {100.0f, 90.0f}};
     const float radius = 10.0f;
     std::vector<Point2f> cand = {
-        {20.0f, 20.0f},    // exactly on a track            -> rejected
-        {66.0f, 33.0f},    // 5.6 px from the second track  -> rejected
-        {71.0f, 34.0f},    // 10.6 px from it               -> KEPT
-        {10.0f, 110.0f},   // far from everything           -> KEPT
+        {20.0f, 20.0f},    // exactly on a track -> rejected
+        {66.0f, 33.0f},    // 5.6 px from the second track -> rejected
+        {71.0f, 34.0f},    // 10.6 px from it -> KEPT
+        {10.0f, 110.0f},   // far from everything -> KEPT
         {14.0f, 112.0f},   // 4.5 px from the one just kept -> rejected (self-spacing)
     };
 

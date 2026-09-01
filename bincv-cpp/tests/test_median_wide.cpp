@@ -1,4 +1,4 @@
-// The reference pipeline's median filter on a WIDE image (T5.10).
+// The reference pipeline's median filter on a WIDE image.
 //
 // ops/denoise.hpp already implements this neighbourhood for BINARY input, where the
 // median collapses to maj3. But the reference filters the GRAYSCALE image before
@@ -8,7 +8,7 @@
 //
 // THE OPENCV HALF IS THE ONE THAT MATTERS: it checks medianWide against the
 // reference's OWN spelling, ported call for call --
-//     Median = max(min(p1,p2), min(max(p1,p2), p3))
+// Median = max(min(p1,p2), min(max(p1,p2), p3))
 // over zero-filled shifted matrices -- so "the default pattern is the reference's" is
 // a checked claim rather than a comment. The zero-fill border is the reference's too,
 // and it comes from cv::Mat::zeros: the row and column that fall off the edge KEEP
@@ -58,17 +58,17 @@ void checkAgainstOracle(const char* label, const MedianPattern<K>& pat) {
             if (out[y * kW + x] != v[K / 2]) ++wrong;
         }
     }
-    std::printf("  %-34s %4zu pixels differ from the oracle\n", label, wrong);
+    std::printf(" %-34s %4zu pixels differ from the oracle\n", label, wrong);
     BINCV_CHECK(wrong == 0);
 }
 
 } // namespace
 
 BINCV_TEST(MedianWide, PatternsAgainstOracle) {
-    checkAgainstOracle<3, uint8_t>("reference L      u8", kMedianReferenceL);
-    checkAgainstOracle<5, uint8_t>("reference plus   u8", kMedianReferencePlus);
-    checkAgainstOracle<3, uint16_t>("reference L      u16", kMedianReferenceL);
-    checkAgainstOracle<5, uint16_t>("reference plus   u16", kMedianReferencePlus);
+    checkAgainstOracle<3, uint8_t>("reference L u8", kMedianReferenceL);
+    checkAgainstOracle<5, uint8_t>("reference plus u8", kMedianReferencePlus);
+    checkAgainstOracle<3, uint16_t>("reference L u16", kMedianReferenceL);
+    checkAgainstOracle<5, uint16_t>("reference plus u16", kMedianReferencePlus);
     // An arbitrary neighbourhood is a template argument, not a fork -- that is the
     // whole point of the pattern parameter, so one that is neither shipped constant
     // is exercised here.
@@ -107,7 +107,7 @@ BINCV_TEST(MedianWide, ReferenceLMatchesTheReferenceSpelling) {
         for (int x = 0; x < kW; ++x)
             if (got[static_cast<size_t>(y) * static_cast<size_t>(kW) +
                     static_cast<size_t>(x)] != want.at<uint8_t>(y, x)) ++diff;
-    std::printf("  vs three_pix_median_filter: %zu of %d pixels differ\n", diff, kW * kH);
+    std::printf(" vs three_pix_median_filter: %zu of %d pixels differ\n", diff, kW * kH);
     BINCV_CHECK(diff == 0);
 }
 #endif

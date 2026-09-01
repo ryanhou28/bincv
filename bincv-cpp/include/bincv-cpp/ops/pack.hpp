@@ -15,7 +15,7 @@
 /// A sensor hands a driver a buffer. That buffer is what this file takes.
 ///
 /// ---------------------------------------------------------------------------
-/// THE INPUT CONTRACT ([ARCHITECTURE §7.8](../../../../docs/ARCHITECTURE.md))
+/// THE INPUT CONTRACT (the design notes)
 ///
 /// binCV accepts a SINGLE-CHANNEL, INTEGER-TYPED, STRIDED pixel array and turns
 /// it into bits. Getting to that array is the caller's job. The Y plane of a
@@ -29,11 +29,11 @@
 /// ---------------------------------------------------------------------------
 /// WHY THE RULE IS A TEMPLATE PARAMETER AND NOT A FUNCTION POINTER
 ///
-/// [X-71](../../../../docs/EXPERIMENTS.md) measured this loop at **46x** on x86 and
+/// a measurement measured this loop at **46x** on x86 and
 /// **14x** on aarch64 by turning it into a compare and a move-mask. That only
 /// works if the comparison is ONE PREDICATE the compiler can see. A runtime
 /// callback would put a call in the inner loop and give the whole factor back --
-/// [X-72](../../../../docs/EXPERIMENTS.md) measured a mere runtime BRANCH costing 17%
+/// a measurement measured a mere runtime BRANCH costing 17%
 /// elsewhere in this library.
 ///
 /// So the shipped rules are an enum, resolved at compile time. `packBitsIf`
@@ -46,7 +46,7 @@
 #include "../binMat.hpp"
 #include "../impl/kernel_util.hpp"
 
-// T5.9: the N-bit packer's vector path, selected at RUN TIME on x86 so the library's
+// the N-bit packer's vector path, selected at RUN TIME on x86 so the library's
 // baseline ISA is unchanged, and baseline on aarch64 where NEON always exists.
 // F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
 // compiler's own macros on aarch64, so an include-only integration still gets the
@@ -77,8 +77,8 @@ namespace impl {
 
 /// @brief `PackRule` mapped onto the internal `PackCmp`. **INTERNAL.**
 /// @note Two enums exist because impl/binMat_impl.hpp owns the row packer and cannot
-///       include this file -- pack.hpp includes binMat.hpp, which includes that one.
-///       The row packer is shared; only the name of the tag differs.
+/// include this file -- pack.hpp includes binMat.hpp, which includes that one.
+/// The row packer is shared; only the name of the tag differs.
 template <PackRule R>
 constexpr PackCmp toPackCmp() {
     if constexpr (R == PackRule::NonZero) {
@@ -105,9 +105,9 @@ constexpr PackCmp toPackCmp() {
 /// @param src The first row of the chunk; `srcStride` ELEMENTS between rows.
 /// @param dstRow Which row of `dst` this chunk begins at.
 /// @note Rows are independent -- nothing here reads a neighbouring row -- so chunk
-///       boundaries cannot change the result. That is what makes streaming exact
-///       rather than approximate, and it is why the ops that DO read neighbours
-///       (ops/edge.hpp, ops/medianWide.hpp) have no such entry point.
+/// boundaries cannot change the result. That is what makes streaming exact
+/// rather than approximate, and it is why the ops that DO read neighbours
+/// (ops/edge.hpp, ops/medianWide.hpp) have no such entry point.
 template <PackRule R, typename SrcT, typename WordType>
 inline void packRows(const SrcT* src, size_t width, size_t rowCount, size_t srcStride,
                      BinMatView<WordType> dst, size_t dstRow, SrcT t = SrcT{0}) {
@@ -131,7 +131,7 @@ inline void packRows(const SrcT* src, size_t width, size_t rowCount, size_t srcS
 /// @param t Threshold; ignored by `NonZero`.
 /// @note `dst`'s padding bits are zero on return.
 /// @note Never allocates and never throws. Mismatched dimensions are a
-///       programming error, reported by `BINCV_ASSERT` in debug builds.
+/// programming error, reported by `BINCV_ASSERT` in debug builds.
 template <PackRule R, typename SrcT, typename WordType>
 inline void packBits(const SrcT* src, size_t width, size_t height, size_t srcStride,
                      BinMatView<WordType> dst, SrcT t = SrcT{0}) {
@@ -146,7 +146,7 @@ inline void packBits(const SrcT* src, size_t width, size_t height, size_t srcStr
 }
 
 // ===========================================================================
-// T5.9 -- N BITS PER PIXEL, WITHOUT OpenCV.
+// -- N BITS PER PIXEL, WITHOUT OpenCV.
 //
 // Everything above writes ONE bit per pixel. At `N > 1` the only way into binCV was
 // `QuantMat<N>::fromCVMat`, which takes a `cv::Mat` -- so **N-bit ingestion required
@@ -162,7 +162,7 @@ inline void packBits(const SrcT* src, size_t width, size_t height, size_t srcStr
 /// @brief How a source pixel becomes an N-bit value. **Compile-time.**
 enum class QuantRule {
     Scale,   ///< `round(v * MaxValue / SrcMax)`. `QuantMat<N>::fromCVMat`'s rule, and
-             ///< the exact inverse of `toCVMatNormalized` (D-42).
+             ///< the exact inverse of `toCVMatNormalized`.
 };
 
 namespace impl {
@@ -177,9 +177,9 @@ namespace impl {
 /// @brief Is AVX2 present? Asked once, not once per row.
 /// @brief Force the portable path, for the benchmark and the tests. **INTERNAL.**
 /// @note Not a tuning knob. It is how the vector path is held to BIT-EXACTNESS and how
-///       a benchmark can show it is actually RUNNING -- X-89 shipped a vector block
-///       that was compiled out and measured three "improvements" against it before the
-///       kernel was timed in isolation and found not to respond to `-mavx2`.
+/// a benchmark can show it is actually RUNNING -- shipped a vector block
+/// that was compiled out and measured three "improvements" against it before the
+/// kernel was timed in isolation and found not to respond to `-mavx2`.
 inline bool& packQuantSimdEnabled() {
     static bool on = true;
     return on;
@@ -192,8 +192,8 @@ inline bool hasPackQuantSimd() {
 
 /// @brief Thirty-two pixels quantised and transposed into N plane words. **INTERNAL.**
 /// @param bits `out[p]` receives plane `p`'s thirty-two bits, LSB = lowest x, which is
-///        `bitMask(x) = 1 << (x % WordBits)` -- the same convention X-71 relies on, so
-///        `movemask_epi8`'s result IS the word with no shuffle.
+/// `bitMask(x) = 1 << (x % WordBits)` -- the same convention relies on, so
+/// `movemask_epi8`'s result IS the word with no shuffle.
 template <size_t N>
 __attribute__((target("avx2"))) inline void quantMask32(const uint8_t* src,
                                                         const uint8_t* thresholds,
@@ -224,7 +224,7 @@ inline bool hasPackQuantSimd() { return packQuantSimdEnabled(); }
 
 /// @brief The same, without a move-mask. **INTERNAL.**
 /// @note aarch64 has none, so AND with per-lane bit weights and let pairwise adds fold
-///       sixteen byte masks into sixteen bits -- X-71's substitute, unchanged.
+/// sixteen byte masks into sixteen bits -- that measurement’s substitute, unchanged.
 template <size_t N>
 inline void quantMask32(const uint8_t* src, const uint8_t* thresholds, unsigned maxValue,
                         uint32_t* bits) {
@@ -256,15 +256,15 @@ inline void quantMask32(const uint8_t* src, const uint8_t* thresholds, unsigned 
 
 /// @brief Packs a pixel array to **N bits per pixel**, no OpenCV. **API TIER 3.**
 ///
-/// @tparam R The quantisation rule, at compile time -- [X-72](../../../../docs/EXPERIMENTS.md)
-///         measured a runtime flag in a hot loop costing 17%, and this one is hotter.
+/// @tparam R The quantisation rule, at compile time --
+/// measured a runtime flag in a hot loop costing 17%, and this one is hotter.
 /// @param dst The N destination planes, LSB first, exactly `QuantMat<N>::plane(i)`.
-///        **Views, not the container** (CLAUDE.md): a kernel must not care how its
-///        arguments were allocated.
+/// **Views, not the container** (CLAUDE.md): a kernel must not care how its
+/// arguments were allocated.
 ///
 /// @note `Scale`'s defaults reproduce `QuantMat<N>::fromCVMat` **bit for bit**, which
-///       `test_pack.cpp` pins against it. That rule is load-bearing: it is
-///       `toCVMatNormalized`'s exact inverse.
+/// `test_pack.cpp` pins against it. That rule is load-bearing: it is
+/// `toCVMatNormalized`'s exact inverse.
 /// @note Each destination plane's padding bits are zero on return.
 /// @note Never allocates and never throws.
 template <QuantRule R, size_t N, typename SrcT, typename WordType>
@@ -301,7 +301,7 @@ inline void packQuant(const SrcT* src, size_t width, size_t height, size_t srcSt
         // THE SCALE IS A HANDFUL OF COMPARISONS AND THE TRANSPOSE IS A MOVE-MASK.
         // `quantScale` is monotonic, so the value is the number of thresholds a pixel
         // clears -- `MaxValue` byte compares, three at N = 2. Extracting plane p is then
-        // one AND, one compare and one move-mask per plane, which is X-71's trick with
+        // one AND, one compare and one move-mask per plane, which is that measurement’s trick with
         // the comparison replaced. A 256-entry lookup table, which is what
         // `fromCVMat` uses, cannot be done in a vector register at all.
         if constexpr (sizeof(SrcT) == 1 && sizeof(WordType) == 4 && kMaxValue <= 15) {
@@ -343,11 +343,11 @@ inline void packQuant(const SrcT* src, size_t width, size_t height, size_t srcSt
 
 /// @brief `packQuant` with an arbitrary per-pixel map. **API TIER 3.**
 /// @param map Anything callable as `unsigned(SrcT)`, returning `0..(1 << N) - 1`. A
-///        256-entry lookup table is `[&](SrcT v) { return lut[v]; }`.
+/// 256-entry lookup table is `[&](SrcT v) { return lut[v]; }`.
 /// @note **Slower on purpose**, for the reason `packBitsIf` is: a map the compiler
-///       cannot see is a map the vector path cannot use. Reach for `packQuant` first.
+/// cannot see is a map the vector path cannot use. Reach for `packQuant` first.
 /// @note Values above `(1 << N) - 1` are a programming error; the extra bits are
-///       dropped rather than silently corrupting a neighbouring plane.
+/// dropped rather than silently corrupting a neighbouring plane.
 template <size_t N, typename SrcT, typename WordType, typename Map>
 inline void packQuantWith(const SrcT* src, size_t width, size_t height, size_t srcStride,
                           BinMatView<WordType> (&dst)[N], Map map) {
@@ -377,8 +377,8 @@ inline void packQuantWith(const SrcT* src, size_t width, size_t height, size_t s
 
 /// @brief `packBits` with an arbitrary per-pixel predicate. **API TIER 3.**
 /// @note **Slower on purpose.** A predicate the compiler cannot see is a predicate
-///       the vector path cannot use, so this is the portable loop always. Reach for
-///       `PackRule` first; use this for a lookup table or a non-monotonic rule.
+/// the vector path cannot use, so this is the portable loop always. Reach for
+/// `PackRule` first; use this for a lookup table or a non-monotonic rule.
 template <typename SrcT, typename WordType, typename Pred>
 inline void packBitsIf(const SrcT* src, size_t width, size_t height, size_t srcStride,
                        BinMatView<WordType> dst, Pred pred) {
@@ -403,8 +403,8 @@ inline void packBitsIf(const SrcT* src, size_t width, size_t height, size_t srcS
 /// @brief The reverse: one bit per pixel out to one byte per pixel. **API TIER 3.**
 /// @param onValue What a set bit becomes; `zeroValue` what a clear bit becomes.
 /// @note **8 bits out is always enough and that is not a shortcut.** `QuantMat`
-///       asserts `N <= 8`, so nothing binCV holds exceeds 255. The asymmetry with
-///       the input side -- which needs 16 -- falls straight out of that.
+/// asserts `N <= 8`, so nothing binCV holds exceeds 255. The asymmetry with
+/// the input side -- which needs 16 -- falls straight out of that.
 template <typename WordType>
 inline void unpackTo8Bit(BinMatConstView<WordType> src, uint8_t* dst, size_t dstStride,
                          uint8_t onValue = 255, uint8_t zeroValue = 0) {
@@ -416,17 +416,17 @@ inline void unpackTo8Bit(BinMatConstView<WordType> src, uint8_t* dst, size_t dst
 }
 
 /// @brief Writes a binary image as a binary PGM (`P5`) to a caller-supplied buffer.
-///        **API TIER 3.**
+/// **API TIER 3.**
 /// @return Bytes written, or the bytes REQUIRED if `cap` is too small (and nothing is
-///         written). Call once with `cap == 0` to size the buffer.
+/// written). Call once with `cap == 0` to size the buffer.
 /// @note **This is the only way to look at what binCV produced on a target with no
-///       OpenCV**, and debugging a frontend you cannot see is not debugging. PGM is
-///       chosen because it is the only image format whose encoder is a `printf` and a
-///       `memcpy` -- binCV must not carry a real codec
-///       ([ARCHITECTURE §7.8](../../../../docs/ARCHITECTURE.md): a PNG decoder is **eight
-///       times the size of everything binCV does**, measured).
+/// OpenCV**, and debugging a frontend you cannot see is not debugging. PGM is
+/// chosen because it is the only image format whose encoder is a `printf` and a
+/// `memcpy` -- binCV must not carry a real codec
+/// (the design notes: a PNG decoder is **eight
+/// times the size of everything binCV does**, measured).
 /// @note Takes a buffer rather than a path: `bincv_core` does no file I/O, has no
-///       allocator and builds without exceptions. Where the bytes go is the caller's.
+/// allocator and builds without exceptions. Where the bytes go is the caller's.
 template <typename WordType>
 inline size_t writePgm(BinMatConstView<WordType> src, uint8_t* out, size_t cap,
                        uint8_t onValue = 255, uint8_t zeroValue = 0) {

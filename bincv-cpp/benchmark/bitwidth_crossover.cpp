@@ -1,6 +1,6 @@
-// X-46 -- WHERE DOES BIT-SLICING STOP PAYING?
+// -- WHERE DOES BIT-SLICING STOP PAYING?
 //
-// X-45 measured the two endpoints of pyrDown against cv::pyrDown: 5.52x FASTER at
+// a measurement measured the two endpoints of pyrDown against cv::pyrDown: 5.52x FASTER at
 // 1 -> 3 bits, 13.7x SLOWER at 8 -> 8. The crossover between them has never been
 // measured, and it is the number that decides binCV's operating range -- whether
 // "low bit width" means <= 3, <= 5 or <= 7, and where an 8-bit specialisation would
@@ -12,9 +12,9 @@
 // exists to exploit.
 //
 // Two sweeps, because they answer different questions:
-//   N -> N   what an 8-bit-style pipeline costs at each width
-//   1 -> N   what binCV's OWN pipeline costs: binary in, N bits out, which is what
-//            pyrDown does at level 0 of every ladder
+// N -> N what an 8-bit-style pipeline costs at each width
+// 1 -> N what binCV's OWN pipeline costs: binary in, N bits out, which is what
+// pyrDown does at level 0 of every ladder
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -49,7 +49,7 @@ template <PyrDownFilter F, size_t NIn, size_t NOut>
 void runArm(int arm, const char* name) {
     // Allocated INSIDE the measurement, so nothing else is resident and nothing
     // outlives its lambda. The first version of this file declared every width up
-    // front -- 1 + 2 + ... + 8 planes of 640x480, ~1.4 MB against a 1 MB L2 -- and
+    // front -- 1 + 2 +... + 8 planes of 640x480, ~1.4 MB against a 1 MB L2 -- and
     // measureInterleaved pumped that whole set between samples, inflating the cheap
     // arms threefold: it reported `box 1 -> 3` at 352.7 us where
     // benchmark/pyrfilter_benchmark.cpp measures the identical call at 112.1 us.
@@ -61,7 +61,7 @@ void runArm(int arm, const char* name) {
     std::vector<measure::Bench> b = {
         {name, [&](int) { bincv::pyrDownFiltered<F, NOut, NIn, W>(src, dst); }}};
     const auto t = measure::measureInterleaved(b, 9, 60.0);
-    std::printf("ARM %2d  %-30s %10.1f us\n", arm, name, t[0].medianNs / 1000.0);
+    std::printf("ARM %2d %-30s %10.1f us\n", arm, name, t[0].medianNs / 1000.0);
 }
 
 int main(int argc, char** argv) {
@@ -76,13 +76,13 @@ int main(int argc, char** argv) {
         case 5:  runArm<G, 8, 8>(arm, "gauss 8 -> 8"); break;
         case 6:  runArm<G, 1, 3>(arm, "gauss 1 -> 3 (binary in)"); break;
         case 7:  runArm<G, 1, 5>(arm, "gauss 1 -> 5 (binary in)"); break;
-        case 8:  runArm<B, 1, 1>(arm, "box   1 -> 1"); break;
-        case 9:  runArm<B, 2, 2>(arm, "box   2 -> 2"); break;
-        case 10: runArm<B, 3, 3>(arm, "box   3 -> 3"); break;
-        case 11: runArm<B, 4, 4>(arm, "box   4 -> 4"); break;
-        case 12: runArm<B, 5, 5>(arm, "box   5 -> 5"); break;
-        case 13: runArm<B, 8, 8>(arm, "box   8 -> 8"); break;
-        case 14: runArm<B, 1, 3>(arm, "box   1 -> 3 (SHIPPED shape)"); break;
+        case 8:  runArm<B, 1, 1>(arm, "box 1 -> 1"); break;
+        case 9:  runArm<B, 2, 2>(arm, "box 2 -> 2"); break;
+        case 10: runArm<B, 3, 3>(arm, "box 3 -> 3"); break;
+        case 11: runArm<B, 4, 4>(arm, "box 4 -> 4"); break;
+        case 12: runArm<B, 5, 5>(arm, "box 5 -> 5"); break;
+        case 13: runArm<B, 8, 8>(arm, "box 8 -> 8"); break;
+        case 14: runArm<B, 1, 3>(arm, "box 1 -> 3 (SHIPPED shape)"); break;
 #if defined(BINCV_WITH_OPENCV)
         case 15: {
             cv::Mat cvSrc(kH, kW, CV_8U), cvDst;
@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
             std::vector<measure::Bench> b = {
                 {"cv::pyrDown 8U (denominator)", [&](int) { cv::pyrDown(cvSrc, cvDst); }}};
             const auto t = measure::measureInterleaved(b, 9, 60.0);
-            std::printf("ARM %2d  %-30s %10.1f us\n", arm,
+            std::printf("ARM %2d %-30s %10.1f us\n", arm,
                         "cv::pyrDown 8U (denominator)", t[0].medianNs / 1000.0);
             break;
         }

@@ -1,29 +1,29 @@
-// Horizontal decimation by two (E-8 / X-14): destination bit j is source bit 2j.
+// Horizontal decimation by two: destination bit j is source bit 2j.
 //
 // CORE ONLY, AND NOT BY OMISSION. OpenCV has no operation that subsamples columns
 // without also filtering -- cv::resize(INTER_NEAREST) resamples both axes on a
 // byte image, and its column mapping for an odd width is a rounding rule rather
 // than "keep the even columns" -- so there is no Tier 1 denominator to compare
 // against and nothing here sits behind BINCV_WITH_OPENCV. ops/resample.hpp is
-// Tier 3 (ARCHITECTURE 5.1), and this file is the whole of what stands behind it.
+// Tier 3 (the design notes), and this file is the whole of what stands behind it.
 //
 // THREE IMPLEMENTATIONS, ONE REFERENCE
 //
-// X-14 compares three routes to the same destination, and the protocol
+// compares three routes to the same destination, and the protocol
 // (EXPERIMENTS.md) requires every one of them to be correct BEFORE any of them is
 // timed -- a benchmark between a right answer and a wrong one is not a
-// measurement. So each variant is checked against refDecimate(), which is a
-// per-pixel loop over at(): `expected(y, j) = src.at(y, 2j)`, sharing no
+// measurement. So each variant is checked against refDecimate, which is a
+// per-pixel loop over at: `expected(y, j) = src.at(y, 2j)`, sharing no
 // expression with any of the three kernels. Whether the three also agree with
 // EACH OTHER is then implied rather than asserted separately.
 //
-//   A  impl::decimateColumnsBy2Gather        per-pixel gather loop
-//   B  decimateColumnsBy2                    word-local Morton deinterleave --
-//                                            the PUBLIC entry point, because
-//                                            X-14 chose it (D-17), so the suite
-//                                            tests the shipped function rather
-//                                            than a copy of it
-//   C  impl::decimateColumnsBy2FrameMasked   big-integer masked unshuffle
+// A impl::decimateColumnsBy2Gather per-pixel gather loop
+// B decimateColumnsBy2 word-local Morton deinterleave --
+// the PUBLIC entry point, because
+// chose it, so the suite
+// tests the shipped function rather
+// than a copy of it
+// C impl::decimateColumnsBy2FrameMasked big-integer masked unshuffle
 //
 // WHAT THE WIDTH SWEEP IS FOR
 //
@@ -31,7 +31,7 @@
 // multiple of the word size, and there are two independent ways to be off by one:
 // the SOURCE tail (an odd source width keeps its last column, so dst.width is
 // ceil(src.width / 2)) and the DESTINATION tail (whose padding bits must stay
-// zero, D-13). The sweep therefore runs every width from 0 to 3*WordBits + 3
+// zero,). The sweep therefore runs every width from 0 to 3*WordBits + 3
 // PLUS the pyramid ladder's own widths, at all four word types, so the boundary
 // cases are covered by construction rather than by choosing them.
 //
@@ -91,7 +91,7 @@ void fillRandom(BinMat<WordType>& m, uint64_t seed) {
     }
 }
 
-/// The reference: keep every even column. One at() per destination pixel, and no
+/// The reference: keep every even column. One at per destination pixel, and no
 /// word arithmetic anywhere, so it cannot fail the same way a kernel does.
 template <typename WordType>
 std::vector<bool> refDecimate(const BinMat<WordType>& src) {
@@ -106,14 +106,14 @@ std::vector<bool> refDecimate(const BinMat<WordType>& src) {
 }
 
 /// Reads a destination pixel straight out of the view's words, rather than through
-/// BinMat::at(), so that a kernel and its checker do not share an accessor.
+/// BinMat::at, so that a kernel and its checker do not share an accessor.
 template <typename WordType>
 bool viewBit(const BinMatConstView<WordType>& v, size_t y, size_t x) {
     constexpr size_t B = sizeof(WordType) * 8;
     return ((v.row(y)[x / B] >> (x % B)) & 1u) != 0;
 }
 
-/// Every bit at or above `width` in every row's words, which D-13 requires to be
+/// Every bit at or above `width` in every row's words, which the design rule requires to be
 /// zero. Returns the first offending (row, bit) as a string, or "" if clean.
 template <typename WordType>
 std::string paddingDirt(const BinMatConstView<WordType>& v) {
@@ -156,7 +156,7 @@ void runVariant(Variant variant, const BinMatConstView<WordType>& src,
             return;
         case Variant::FrameMasked: {
             // The mask table and scratch are the caller's (no heap in a kernel),
-            // which is exactly the footprint X-14 weighs against zero for the
+            // which is exactly the footprint weighs against zero for the
             // other two. Built per call here on purpose: a plan reused across
             // calls is the benchmark's job, and a test that built it once would
             // not notice buildFrameMaskedPlan writing the wrong number of words.
@@ -174,8 +174,8 @@ void runVariant(Variant variant, const BinMatConstView<WordType>& src,
 /// One case: fill a source, decimate it with `variant`, compare every destination
 /// pixel against the reference, and check the destination's padding.
 /// @param dirtySource sets every source bit at or above the width to 1 first, so
-///        that "a dirty source cannot reach a live destination pixel" is checked
-///        rather than argued (see the file header of ops/resample.hpp).
+/// that "a dirty source cannot reach a live destination pixel" is checked
+/// rather than argued (see the file header of ops/resample.hpp).
 template <typename WordType>
 void checkCase(Variant variant, const char* wordName, size_t width, size_t height,
                uint64_t seed, bool dirtySource) {
@@ -227,7 +227,7 @@ void checkCase(Variant variant, const char* wordName, size_t width, size_t heigh
 
     if (outWidth > 0 && height > 0) {
         const std::string dirt = paddingDirt(dstConst);
-        RESAMPLE_EXPECT(dirt.empty(), "destination padding bits stay zero (D-13)",
+        RESAMPLE_EXPECT(dirt.empty(), "destination padding bits stay zero",
                         label + ": " + dirt);
     }
 }
@@ -239,7 +239,7 @@ void checkCase(Variant variant, const char* wordName, size_t width, size_t heigh
 std::vector<size_t> sweepWidths(size_t wordBits) {
     std::vector<size_t> widths;
     for (size_t w = 0; w <= 3 * wordBits + 3; ++w) widths.push_back(w);
-    // The pyramid ladder T3.4 will actually call this with, plus one odd width
+    // The pyramid ladder this will actually call this with, plus one odd width
     // whose word count is not a power of two (which is variant C's padding case).
     for (size_t w : {size_t{94}, size_t{160}, size_t{320}, size_t{640}}) widths.push_back(w);
     return widths;
@@ -269,7 +269,7 @@ void testDirtySource(const char* wordName, Variant variant) {
 }
 
 /// Strides that differ between source and destination, which is the layout a
-/// pyramid produces (D-5 says a kernel may not care) -- here by over-allocating
+/// pyramid produces (the design rule says a kernel may not care) -- here by over-allocating
 /// the source's row alignment so its stride is longer than its rows need.
 template <typename WordType>
 void testDifferingStrides(const char* wordName, Variant variant) {
@@ -325,7 +325,7 @@ void testDegenerate(const char* wordName, Variant variant) {
 }
 
 /// The free half: rowsDecimatedBy2 is a view, so it must alias the source's own
-/// memory and read rows 0, 2, 4, ... -- no copy, no allocation.
+/// memory and read rows 0, 2, 4,... -- no copy, no allocation.
 template <typename WordType>
 void testRowView(const char* wordName) {
     for (size_t height : {size_t{1}, size_t{2}, size_t{5}, size_t{8}}) {

@@ -1,40 +1,40 @@
 // ===========================================================================
-// X-24 / E-7 -- THE SPEED AXIS OF THE PYRAMID-DEPTH CHOICE.
+// earlier work -- THE SPEED AXIS OF THE PYRAMID-DEPTH CHOICE.
 //
-// X-24's accuracy and footprint axes are exact and device-independent and closed
+// that measurement’s accuracy and footprint axes are exact and device-independent and closed
 // on the development machine. This is the third axis, and it is the reference
-// device's alone: X-22's caveat 1 measured the SAME kernel moving 1.46x between
+// device's alone: that measurement’s caveat 1 measured the SAME kernel moving 1.46x between
 // two binaries built from unchanged source, so a ladder chosen on a laptop timing
 // would not survive contact with the device it has to run on.
 //
-// THE COST MODEL, WRITTEN OUT BEFORE MEASURING -- it is X-24's hypothesis 3,
+// THE COST MODEL, WRITTEN OUT BEFORE MEASURING -- it is that measurement’s hypothesis 3,
 // restated here as numbers so the measurement can contradict it.
 //
 // The two stages weight the levels OPPOSITELY, and that is the whole point:
 //
-//   * BUILD (pyrDown down the ladder, then a derivative per level) is PER PIXEL.
-//     Level l has 1/4^l of level 0's pixels, so deepening the COARSE levels is
-//     nearly free. Against a 1/1/1/1 ladder the per-pixel work grows roughly as
-//     sum_l (pixels_l * cost(N_l)) / sum_l pixels_l, and with 4/3 of the pixels in
-//     level 0 the coarse levels can barely move it.
+// * BUILD (pyrDown down the ladder, then a derivative per level) is PER PIXEL.
+// Level l has 1/4^l of level 0's pixels, so deepening the COARSE levels is
+// nearly free. Against a 1/1/1/1 ladder the per-pixel work grows roughly as
+// sum_l (pixels_l * cost(N_l)) / sum_l pixels_l, and with 4/3 of the pixels in
+// level 0 the coarse levels can barely move it.
 //
-//   * TRACK is PER POINT PER WINDOW, and EVERY LEVEL TRACKS THE SAME POINTS
-//     THROUGH THE SAME 31x31 WINDOW. residualSums issues 20*N^2 popcounts per
-//     word and gradientCovariance 3N^2+N, so a level's tracking cost is paid IN
-//     FULL however few pixels it has. The prediction is therefore
+// * TRACK is PER POINT PER WINDOW, and EVERY LEVEL TRACKS THE SAME POINTS
+// THROUGH THE SAME 31x31 WINDOW. residualSums issues 20*N^2 popcounts per
+// word and gradientCovariance 3N^2+N, so a level's tracking cost is paid IN
+// FULL however few pixels it has. The prediction is therefore
 //
-//         relative track cost  ~  sum_l N_l^2 / sum_l 1^2
+// relative track cost ~ sum_l N_l^2 / sum_l 1^2
 //
-//     ladder     sum N_l^2    predicted
-//     1/1/1/1        4          1.00x
-//     1/2/2/2       13          3.25x
-//     1/3/3/3       28          7.00x
-//     1/3/4/4       42         10.50x
-//     1/3/5/5       60         15.00x
-//     1/3/5/7       84         21.00x
+// ladder sum N_l^2 predicted
+// 1/1/1/1 4 1.00x
+// 1/2/2/2 13 3.25x
+// 1/3/3/3 28 7.00x
+// 1/3/4/4 42 10.50x
+// 1/3/5/5 60 15.00x
+// 1/3/5/7 84 21.00x
 //
-// So the binding constraint on E-7 is predicted to be TRACKER TIME, not
-// footprint, and 1/2/2/2 -- X-24's accuracy leader -- is predicted to cost 3.25x
+// So the binding constraint on this is predicted to be TRACKER TIME, not
+// footprint, and 1/2/2/2 -- that measurement’s accuracy leader -- is predicted to cost 3.25x
 // the shipped ladder's tracking time for 1.16x its bytes. IF FOOTPRINT BINDS
 // FIRST, OR IF THE TRACK RATIOS COME IN FLAT, THE MODEL ABOVE IS WRONG AND THE
 // ENTRY MUST SAY SO RATHER THAN RE-FITTING.
@@ -44,7 +44,7 @@
 // is 47x30, whose height is under the 31-pixel window, so usableLevelCount stops
 // at ONE and the tracker never touches a level deeper than level 0 -- which is
 // 1 bit in every ladder. The informative column there is BUILD, where the
-// per-row prologue X-21 flagged is paid 5.4x more often per pixel than at
+// per-row prologue flagged is paid 5.4x more often per pixel than at
 // 640x480. The track model is only testable where the coarse levels are actually
 // used, i.e. in the 640x480 block.
 //
@@ -124,9 +124,9 @@ struct Ladder {
     Ladder(int w, int h) : prev(w, h), next(w, h), dx(w, h), dy(w, h) {}
 
     /// The measured BUILD stage: pyrDown both ladders, derivative every level.
-    /// @tparam F The downsampling filter, because X-50 sweeps ladder AND filter --
-    ///         X-39 showed the two are coupled, so pricing them separately would
-    ///         answer neither.
+    /// @tparam F The downsampling filter, because sweeps ladder AND filter --
+    /// a measurement showed the two are coupled, so pricing them separately would
+    /// answer neither.
     template <bincv::PyrDownFilter F = bincv::PyrDownFilter::Box2x2,
               bincv::PyrDownBorder Bo = bincv::PyrDownBorder::Replicate>
     void buildStage() {
@@ -280,20 +280,20 @@ void runAt(int w, int h, int step, int margin, int repeats, double targetMs) {
     constexpr auto BOX2 = bincv::PyrDownFilter::Box2x2;
     constexpr auto BOX3 = bincv::PyrDownFilter::Box3x3;
     addArm<W, BOX2, 1, 1, 1, 1>(arms, keep, "1/1/1/1 b2", sumOfSquares({1, 1, 1, 1}), w, h, pts);
-    // THE INTERMEDIATE LADDERS (X-50). E-19 named these and nobody had ever run
+    // THE INTERMEDIATE LADDERS. named these and nobody had ever run
     // them, on either axis. They ask the question 1/2/2/2 answers by assertion:
     // does EVERY coarse level need two bits, or only the first one that is no
     // longer binary? The deepening arms below answer the opposite direction and
-    // X-39 has already closed it -- BOX_2x2 is flat from N=2 to N=7 -- so these
+    // has already closed it -- BOX_2x2 is flat from N=2 to N=7 -- so these
     // are where the remaining uncertainty is.
     addArm<W, BOX2, 1, 2, 1, 1>(arms, keep, "1/2/1/1 b2", sumOfSquares({1, 2, 1, 1}), w, h, pts);
     addArm<W, BOX3, 1, 2, 1, 1>(arms, keep, "1/2/1/1 b3", sumOfSquares({1, 2, 1, 1}), w, h, pts);
     addArm<W, BOX2, 1, 2, 2, 1>(arms, keep, "1/2/2/1 b2", sumOfSquares({1, 2, 2, 1}), w, h, pts);
     addArm<W, BOX3, 1, 2, 2, 1>(arms, keep, "1/2/2/1 b3", sumOfSquares({1, 2, 2, 1}), w, h, pts);
     addArm<W, BOX2, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b2", sumOfSquares({1, 2, 2, 2}), w, h, pts);
-    // X-54 / E-9: the SAME ladder and filter at uint64_t. Every NEON path in the
+    // earlier work: the SAME ladder and filter at uint64_t. Every NEON path in the
     // tracker is guarded on sizeof(WordType) == 4, so this arm runs LK fully
-    // scalar -- which is the cost the guards impose and the thing E-9 needs priced.
+    // scalar -- which is the cost the guards impose and the thing needs priced.
     addArm<uint64_t, BOX2, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b2 u64",
                                        sumOfSquares({1, 2, 2, 2}), w, h, pts);
     addArm<uint64_t, BOX2, 1, 1, 1, 1>(arms, keep, "1/1/1/1 b2 u64",
@@ -312,20 +312,20 @@ void runAt(int w, int h, int step, int margin, int repeats, double targetMs) {
     const auto bt = measure::measureInterleaved(buildBenches, repeats, targetMs);
     const auto tt = measure::measureInterleaved(trackBenches, repeats, targetMs);
 
-    std::printf("\n  level 0 = %dx%d, %zu keypoints, 31x31 window, 4 levels\n", w, h, pts.size());
-    std::printf("  %-11s %6s | %11s %7s | %11s %7s %9s | %9s\n", "ladder", "sumN^2", "build us",
+    std::printf("\n level 0 = %dx%d, %zu keypoints, 31x31 window, 4 levels\n", w, h, pts.size());
+    std::printf(" %-11s %6s | %11s %7s | %11s %7s %9s | %9s\n", "ladder", "sumN^2", "build us",
                 "vs 1bit", "track us", "vs 1bit", "predicted", "bytes");
-    std::printf("  ---------------------------------------------------------------"
+    std::printf(" ---------------------------------------------------------------"
                 "---------------------\n");
     const double buildBase = bt[0].medianNs;
     const double trackBase = tt[0].medianNs;
     for (size_t i = 0; i < arms.size(); ++i) {
-        std::printf("  %-11s %6.0f | %11.1f %6.2fx | %11.1f %6.2fx %8.2fx | %9zu\n",
+        std::printf(" %-11s %6.0f | %11.1f %6.2fx | %11.1f %6.2fx %8.2fx | %9zu\n",
                     arms[i].name.c_str(), arms[i].sumNsq, bt[i].medianNs / 1000.0,
                     bt[i].medianNs / buildBase, tt[i].medianNs / 1000.0,
                     tt[i].medianNs / trackBase, arms[i].sumNsq / arms[0].sumNsq, arms[i].bytes);
     }
-    std::printf("  spread (max-min)/median: build");
+    std::printf(" spread (max-min)/median: build");
     for (const auto& t : bt) std::printf(" %.0f%%", t.spreadPct());
     std::printf(" | track");
     for (const auto& t : tt) std::printf(" %.0f%%", t.spreadPct());
@@ -335,7 +335,7 @@ void runAt(int w, int h, int step, int margin, int repeats, double targetMs) {
 } // namespace
 
 int main() {
-    std::printf("=== X-24 / E-7: pyramid depth, the SPEED axis ===\n");
+    std::printf("=== pyramid depth, the SPEED axis ===\n");
     std::printf("Cost model written before measuring: build is per-pixel and should\n"
                 "barely move; track should scale as sum_l N_l^2 (1.00 / 3.25 / 7.00 /\n"
                 "10.50 / 13.00 / 21.00). A flat track column refutes it.\n");

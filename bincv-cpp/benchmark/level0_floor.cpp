@@ -1,11 +1,11 @@
 // ===========================================================================
-// X-27 / E-16 -- THE 1-BIT LEVEL-0 LOCALISATION FLOOR.
+// earlier work -- THE 1-BIT LEVEL-0 LOCALISATION FLOOR.
 //
-// Three pyramid parameters had been measured and none explained T3.8's standing
+// Three pyramid parameters had been measured and none explained that work’s standing
 // accuracy MISS, so the question became whether the REPRESENTATION was the limit.
 // This file answers it, and the answer is no.
 //
-// ARM 1 -- THE PARTITION METHOD, and it replaces the oracle X-27's rule first
+// ARM 1 -- THE PARTITION METHOD, and it replaces the oracle that measurement’s rule first
 // sketched. That sketch was DEGENERATE: it formed candidates the same way as the
 // observation, so the Hamming-nearest candidate was the observation itself and the
 // "floor" would have been exactly zero by construction. The flaw was found and the
@@ -86,11 +86,11 @@ int main(int argc, char** argv) {
     }
     printf("frame %dx%d, threshold %d, %d displacement samples at %.3f px\n", gray.cols,
            gray.rows, thr, N, step);
-    printf("  set%%: %.3f\n", 100.0 * cv::countNonZero(bin[0]) / static_cast<double>(gray.total()));
+    printf(" set%%: %.3f\n", 100.0 * cv::countNonZero(bin[0]) / static_cast<double>(gray.total()));
 
-    printf("\n  win |  windows | mean set px | distinct states | mean interval px |"
-           "  FLOOR rms px | max px\n");
-    printf("  ----+----------+-------------+-----------------+------------------+"
+    printf("\n win | windows | mean set px | distinct states | mean interval px |"
+           " FLOOR rms px | max px\n");
+    printf(" ----+----------+-------------+-----------------+------------------+"
            "---------------+--------\n");
     for (int win : {11, 21, 31, 41}) {
         const int half = win / 2;
@@ -144,7 +144,7 @@ int main(int argc, char** argv) {
                 ++windows;
             }
         }
-        printf("  %3d | %8zu | %11.1f | %15.1f | %16.4f | %13.4f | %6.4f\n", win, windows,
+        printf(" %3d | %8zu | %11.1f | %15.1f | %16.4f | %13.4f | %6.4f\n", win, windows,
                sumSet / static_cast<double>(windows), sumStates / static_cast<double>(windows),
                sumInterval / sumStates, std::sqrt(sumSqErr / static_cast<double>(samples)),
                maxErr);

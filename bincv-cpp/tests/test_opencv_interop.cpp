@@ -23,7 +23,7 @@
 // ---------------------------------------------------------------------------
 // One-shot allocation failure
 //
-// fromCVMat() must build its new buffer before it commits the new dimensions;
+// fromCVMat must build its new buffer before it commits the new dimensions;
 // otherwise a failed allocation leaves the matrix describing storage it does not
 // have, and every later read trusts those dimensions. Proving that needs an
 // allocation that fails on demand, so the global operators are replaced here.
@@ -162,8 +162,8 @@ void testFromCVMatAllocationFailure() {
     // Dimensions, storage, and contents all still describe the ORIGINAL buffer.
     // If the dimensions had been committed first, m would claim to be 64x64 over
     // 4 words, and every subsequent read would trust that claim -- more so since
-    // T1.4, because at() no longer bounds-checks in release and so cannot catch
-    // it. The word count is the check that matters: sizeInWords() must equal
+    //, because at no longer bounds-checks in release and so cannot catch
+    // it. The word count is the check that matters: sizeInWords must equal
     // height * alignedWidth for the ORIGINAL shape, not the attempted one --
     // which pins the same property the deleted BINCV_CHECK_THROWS(m.at(63, 63))
     // used to pin, and pins it directly rather than through an accessor. That
@@ -192,7 +192,7 @@ void testSampleImage() {
 
     cv::Mat input = cv::imread(imagePath, cv::IMREAD_GRAYSCALE);
     if (input.empty()) {
-        std::cout << "  (skipped: sample image not found at " << imagePath << ")\n";
+        std::cout << " (skipped: sample image not found at " << imagePath << ")\n";
         return;
     }
 
@@ -210,22 +210,22 @@ void testSampleImage() {
                                  output.data, input.cols, input.rows);
     bincv::util::save_test_image("test_opencv_conv_output_normalized.png",
                                  outputNormalized.data, input.cols, input.rows);
-    std::cout << "  saved test_opencv_conv_output{,_normalized}.png\n";
+    std::cout << " saved test_opencv_conv_output{,_normalized}.png\n";
 
     // Memory: 1 bit per pixel versus OpenCV's 8
     const size_t binBytes = bin.sizeInWords() * sizeof(bincv::BinMat<>::WordType);
     const size_t cvBytes = input.total() * input.elemSize();
-    std::cout << "  memory: binCV " << binBytes << " B vs OpenCV " << cvBytes
+    std::cout << " memory: binCV " << binBytes << " B vs OpenCV " << cvBytes
               << " B (" << (static_cast<double>(cvBytes) / static_cast<double>(binBytes))
               << "x reduction)\n";
     BINCV_CHECK(binBytes < cvBytes);
 }
 
 // ---------------------------------------------------------------------------
-// T3.7 ON A REAL FRAME -- the "Done when" bullet tests/test_corner.cpp cannot reach
+// ON A REAL FRAME -- the "Done when" bullet tests/test_corner.cpp cannot reach
 //
 // test_corner.cpp is a CORE suite: it must build without OpenCV, so it cannot
-// decode a PNG and every frame in it is synthesised. T3.7's first Done-when bullet
+// decode a PNG and every frame in it is synthesised. that work’s first Done-when bullet
 // asks for detected corners matched against the reference on real content, and
 // that check has to live where an image decoder does. It lives here.
 //
@@ -238,11 +238,11 @@ void testSampleImage() {
 // comparator, not the selection.
 //
 // TWO DELIBERATE ALIGNMENTS, so that a disagreement means something:
-//   * the box filter uses BORDER_CONSTANT, because a SUM with a zero fill is
-//     exactly T3.6's clipped window (D-13). The reference's BORDER_REPLICATE is a
-//     separate, documented deviation (ops/corner.hpp, "THE BORDER").
-//   * the derivative uses BORDER_REFLECT_101, which is D-19's choice and
-//     filter2D's default.
+// * the box filter uses BORDER_CONSTANT, because a SUM with a zero fill is
+// exactly that work’s clipped window. The reference's BORDER_REPLICATE is a
+// separate, documented deviation (ops/corner.hpp, "THE BORDER").
+// * the derivative uses BORDER_REFLECT_101, which is the design rule’s choice and
+// filter2D's default.
 // Everything else is the reference's own arithmetic in the reference's own order.
 // ---------------------------------------------------------------------------
 
@@ -255,13 +255,13 @@ struct GreaterThanPtr {
 };
 
 void testRealFrameCorners() {
-    std::cout << "\n--- T3.7 corners on a real frame, against the gftt.cpp pipeline ---\n";
+    std::cout << "\n--- corners on a real frame, against the gftt.cpp pipeline ---\n";
 
     const std::string imagePath = std::filesystem::path(__FILE__).parent_path().string()
         + "/images/1403715887284058112_bin_normalized.png";
     cv::Mat input = cv::imread(imagePath, cv::IMREAD_GRAYSCALE);
     if (input.empty()) {
-        std::cout << "  (skipped: sample image not found at " << imagePath << ")\n";
+        std::cout << " (skipped: sample image not found at " << imagePath << ")\n";
         return;
     }
     const int w = input.cols, h = input.rows;
@@ -381,25 +381,25 @@ void testRealFrameCorners() {
         if (got[i].x != want[i].x || got[i].y != want[i].y) ++differing;
     BINCV_CHECK_EQ(differing, static_cast<size_t>(0));
 
-    std::cout << "  " << w << "x" << h << " real frame: " << r.candidatesRanked
+    std::cout << " " << w << "x" << h << " real frame: " << r.candidatesRanked
               << " NMS survivors, " << r.count << " corners, ALL at the same positions as the "
               << "gftt.cpp pipeline; response map bit-identical over " << (w * h)
               << " pixels\n";
 }
 
 // ===========================================================================
-// QuantMat<N> conversions (X-47) -- the wide-intermediate bridge
+// QuantMat<N> conversions -- the wide-intermediate bridge
 //
-// Above the (filter-dependent) bit-width crossover X-46 measured, the fast
+// Above the (filter-dependent) bit-width crossover a measurement measured, the fast
 // implementation of an 8-bit operation is OpenCV's, and these conversions are
 // the way there. Three properties, each load-bearing:
-//   1. The transpose-based loops equal a per-pixel reference -- any bit-order
-//      slip in transpose8x8's wiring shows here.
-//   2. fromCVMat(toCVMatNormalized(m)) == m, exactly, at every N. X-47's rule
-//      derives this (255 and MaxValue odd, so no rounding ties); the test is
-//      what makes the derivation checkable rather than trusted.
-//   3. Padding bits are zero after fromCVMat (D-13) -- a conversion that set
-//      them would make every later word-wise reduction over-count.
+// 1. The transpose-based loops equal a per-pixel reference -- any bit-order
+// slip in transpose8x8's wiring shows here.
+// 2. fromCVMat(toCVMatNormalized(m)) == m, exactly, at every N. that measurement’s rule
+// derives this (255 and MaxValue odd, so no rounding ties); the test is
+// what makes the derivation checkable rather than trusted.
+// 3. Padding bits are zero after fromCVMat -- a conversion that set
+// them would make every later word-wise reduction over-count.
 // ===========================================================================
 
 template <size_t N, typename WordType>
@@ -434,12 +434,12 @@ void quantConvertOne(int w, int h) {
     BINCV_CHECK_EQ(badNorm, static_cast<size_t>(0));
 
     // 2. The exact round trip. `back` carries a NON-DEFAULT row alignment, which
-    //    does double duty: it is the only way the padding check below sees any
-    //    alignment words past the used ones (with a default-aligned destination
-    //    that half of the check is vacuous), and it is what catches a fromCVMat
-    //    that rebuilds at word granularity instead of preserving the caller's
-    //    stride. An `empty() ? DefaultRowAlignment : getRowAlignment()` guard in
-    //    fromCVMat did exactly that, and no test saw it.
+    // does double duty: it is the only way the padding check below sees any
+    // alignment words past the used ones (with a default-aligned destination
+    // that half of the check is vacuous), and it is what catches a fromCVMat
+    // that rebuilds at word granularity instead of preserving the caller's
+    // stride. An `empty ? DefaultRowAlignment : getRowAlignment` guard in
+    // fromCVMat did exactly that, and no test saw it.
     bincv::QuantMat<N, WordType> back(0, 0, 64);
     BINCV_CHECK_EQ(back.getRowAlignment(), static_cast<size_t>(64));
     back.fromCVMat(norm);
@@ -453,7 +453,7 @@ void quantConvertOne(int w, int h) {
     BINCV_CHECK_EQ(badTrip, static_cast<size_t>(0));
 
     // 3. Padding bits zero after fromCVMat, in every plane of every row --
-    //    both the tail bits of the last used word and any alignment words past it.
+    // both the tail bits of the last used word and any alignment words past it.
     const WordType tail = bincv::impl::rowTailMask<WordType>(static_cast<size_t>(w));
     const size_t used = bincv::impl::minRowWords<WordType>(static_cast<size_t>(w));
     size_t badPad = 0;
@@ -469,7 +469,7 @@ void quantConvertOne(int w, int h) {
     BINCV_CHECK_EQ(badPad, static_cast<size_t>(0));
 
     // 4. Empty in, empty out -- the branch both exports carry and which no test
-    //    reached before.
+    // reached before.
     bincv::QuantMat<N, WordType> none;
     cv::Mat emptyOut(3, 3, CV_8U);
     none.toCVMat(emptyOut);
@@ -490,7 +490,7 @@ void testQuantMatConversions() {
     quantConvertOne<7, uint32_t>(96, 4);
     quantConvertOne<8, uint32_t>(33, 9);
     quantConvertOne<8, uint64_t>(257, 3);
-    std::cout << "  QuantMat<N> conversions: transpose == per-pixel reference, "
+    std::cout << " QuantMat<N> conversions: transpose == per-pixel reference, "
                  "round trip exact, padding clear, at N in {2,3,5,7,8}\n";
 }
 
@@ -511,7 +511,7 @@ void testQuantMatFromCVMatQuantizes() {
     BINCV_CHECK_EQ(bad, static_cast<size_t>(0));
 
     // N == 8 is the identity in BOTH directions: fromCVMat then toCVMat must
-    // reproduce the input byte for byte -- the interop configuration X-47 times.
+    // reproduce the input byte for byte -- the interop configuration times.
     bincv::QuantMat<8, uint32_t> q8;
     q8.fromCVMat(all);
     cv::Mat out;
@@ -521,13 +521,13 @@ void testQuantMatFromCVMatQuantizes() {
         for (int x = 0; x < 256; ++x)
             if (out.at<uint8_t>(y, x) != all.at<uint8_t>(y, x)) ++badId;
     BINCV_CHECK_EQ(badId, static_cast<size_t>(0));
-    std::cout << "  fromCVMat quantizes all 256 byte values correctly; N=8 is the identity\n";
+    std::cout << " fromCVMat quantizes all 256 byte values correctly; N=8 is the identity\n";
 }
 
 void testQuantMatAlignmentSurvivesReuse() {
     // THE REALISTIC TRIGGER for the alignment bug, which is buffer reuse rather
     // than the degenerate constructor: a moved-from matrix is empty but keeps its
-    // alignment, so a fromCVMat that consulted empty() rebuilt it at word
+    // alignment, so a fromCVMat that consulted empty rebuilt it at word
     // granularity and silently dropped an opt-in Tier 2 / DMA stride.
     cv::Mat m(4, 100, CV_8U);
     for (int y = 0; y < 4; ++y)
@@ -550,7 +550,7 @@ void testQuantMatAlignmentSurvivesReuse() {
     for (int x = 0; x < 100; ++x)
         if (src.at(0, x) != (static_cast<unsigned>(x) * 15u + 127u) / 255u) ++bad;
     BINCV_CHECK_EQ(bad, static_cast<size_t>(0));
-    std::cout << "  fromCVMat preserves an opt-in row alignment across buffer reuse\n";
+    std::cout << " fromCVMat preserves an opt-in row alignment across buffer reuse\n";
 }
 
 void testQuantMatConversionErrors() {

@@ -1,21 +1,21 @@
-// The equivalence harness's own test suite (T2.1).
+// The equivalence harness's own test suite.
 //
 // Two jobs, and the second is the one that matters:
 //
-//   1. DEMONSTRATE the harness end to end on an already-implemented operation --
-//      countNonZero against cv::countNonZero -- across the full T2.1 size and
-//      fill matrix, so that T2.2..T2.7 inherit something known to work rather
-//      than something newly written alongside the kernel it is meant to judge.
+// 1. DEMONSTRATE the harness end to end on an already-implemented operation --
+// countNonZero against cv::countNonZero -- across the full size and
+// fill matrix, so that.. inherit something known to work rather
+// than something newly written alongside the kernel it is meant to judge.
 //
-//   2. PROVE THE HARNESS CAN FAIL. A harness that passes everything is worse
-//      than no harness, because it licenses every kernel built on it. The
-//      Comparator* cases below feed it deliberate faults -- a one-column
-//      off-by-one, a dropped trailing partial word, a transposed row/column, a
-//      single flipped pixel, a size change -- and require it to report each one,
-//      at the right place, with the right count. tests/CMakeLists.txt goes
-//      further and rebuilds this whole file with each fault compiled INTO the
-//      conversion, registered WILL_FAIL, so "the harness detects a real
-//      discrepancy" is three ctest results rather than a paragraph.
+// 2. PROVE THE HARNESS CAN FAIL. A harness that passes everything is worse
+// than no harness, because it licenses every kernel built on it. The
+// Comparator* cases below feed it deliberate faults -- a one-column
+// off-by-one, a dropped trailing partial word, a transposed row/column, a
+// single flipped pixel, a size change -- and require it to report each one,
+// at the right place, with the right count. tests/CMakeLists.txt goes
+// further and rebuilds this whole file with each fault compiled INTO the
+// conversion, registered WILL_FAIL, so "the harness detects a real
+// discrepancy" is three ctest results rather than a paragraph.
 //
 // Requires OpenCV; tests/CMakeLists.txt only builds it when OpenCV was found.
 // The core-only, no-exceptions and Debug configurations never see this file.
@@ -41,7 +41,7 @@
 
 #include "bincv-cpp/binMat.hpp"
 // QuantMat, for the bit-plane row of the packing anchor: a plane view is the one
-// conversion T2.2's per-plane Tier 1 checks depend on, and it is not a BinMat view.
+// conversion that work’s per-plane Tier 1 checks depend on, and it is not a BinMat view.
 #include "bincv-cpp/quantMat.hpp"
 #include "equivalence.hpp"
 #include "test_util.hpp"
@@ -73,7 +73,7 @@ uint64_t caseSeed(int width, int height, size_t fillIndex) {
            static_cast<uint64_t>(fillIndex);
 }
 
-// An opt-in row alignment (D-4) large enough that every supported word type gets
+// An opt-in row alignment large enough that every supported word type gets
 // a stride strictly greater than the ceil(width / WordBits) words its rows need:
 // 32 bytes is a whole number of 1-, 2-, 4- and 8-byte words, and 8 words even at
 // uint64_t. This is what puts a stride > minimum into the sweep.
@@ -150,11 +150,11 @@ cv::Mat perturb(const cv::Mat& src, MatFault fault, size_t wordBits) {
 }
 
 /// @brief Independently confirms that (mm.row, mm.col) really is the FIRST pixel
-///        at which the two masks differ, scanning row-major.
+/// at which the two masks differ, scanning row-major.
 /// @note The locator is the part of this harness a reader will trust without
-///       checking -- "it said row 12, col 65, so that is where to look". This is
-///       what makes that trustworthy: a separate scan, not a re-run of the same
-///       loop, which also has to agree about the byte values it reported.
+/// checking -- "it said row 12, col 65, so that is where to look". This is
+/// what makes that trustworthy: a separate scan, not a re-run of the same
+/// loop, which also has to agree about the byte values it reported.
 bool locationIsGenuinelyFirst(const cv::Mat& a, const cv::Mat& b, const Mismatch& mm) {
     if (!mm.found || mm.shapeMismatch) return false;
     for (int y = 0; y < a.rows; ++y) {
@@ -172,7 +172,7 @@ bool locationIsGenuinelyFirst(const cv::Mat& a, const cv::Mat& b, const Mismatch
 
 /// @brief FNV-1a over the row-major pixel stream, as a portability witness.
 /// @note uint64_t throughout, and it reads one bit per pixel rather than the
-///       byte, so it says the same thing about a {0,1} mask and a {0,255} one.
+/// byte, so it says the same thing about a {0,1} mask and a {0,255} one.
 uint64_t pixelDigest(const cv::Mat& mask) {
     uint64_t hash = UINT64_C(1469598103934665603);
     for (int y = 0; y < mask.rows; ++y) {
@@ -186,8 +186,8 @@ uint64_t pixelDigest(const cv::Mat& mask) {
 }
 
 /// @brief Counts pixels on which two BinMats of the same shape disagree.
-/// @note Through at(), deliberately: it is a third reader, independent of both
-///       the view arithmetic in unpackTo8U and the packing in randomBinary.
+/// @note Through at, deliberately: it is a third reader, independent of both
+/// the view arithmetic in unpackTo8U and the packing in randomBinary.
 template <typename A, typename B>
 int pixelDisagreements(const A& lhs, const B& rhs) {
     if (lhs.getWidth() != rhs.getWidth() || lhs.getHeight() != rhs.getHeight()) return -1;
@@ -258,7 +258,7 @@ void testGeneratorWordTypeIndependent() {
 
     // The same seed must give the same PICTURE at 8, 16, 32 and 64 bits per word.
     // Drawing whole words instead of pixels would have made this false, and the
-    // T2.1 matrix exists partly to compare word widths against each other -- which
+    // the matrix exists partly to compare word widths against each other -- which
     // is only meaningful if they are looking at the same image.
     const int sizes[][2] = {{1, 1}, {7, 3}, {31, 17}, {33, 2}, {65, 37}, {70, 17}, {640, 3}};
     for (const auto& size : sizes) {
@@ -298,7 +298,7 @@ void testGeneratorFillRatios() {
         bincv::BinMat32 m = randomBinary<uint32_t>(640, 480, fill, 99);
         const double observed = static_cast<double>(m.countNonZero()) / pixels;
         const double error = observed - static_cast<double>(fill);
-        std::cout << "  fill " << fill << " -> " << observed << "\n";
+        std::cout << " fill " << fill << " -> " << observed << "\n";
         BINCV_CHECK(error > -0.005 && error < 0.005);
     }
 }
@@ -351,12 +351,12 @@ void testGeneratorGoldenValues() {
 
 /// @brief Feeds the comparator one deliberate fault and requires it to report it.
 /// @tparam WordType The word width the case is built at -- ACTUALLY built at.
-///         This used to be a `size_t wordBits` parameter while the body
-///         hardcoded BinMat32, so the three "at each supported word width"
-///         DropTrailingColumns cases were the same case three times: no
-///         BinMat8/16/64 was ever constructed, and at width 70 the tail begins
-///         at column 64 for all four word widths (64 being a multiple of every
-///         one of them), so perturb() zeroed identical columns in each.
+/// This used to be a `size_t wordBits` parameter while the body
+/// hardcoded BinMat32, so the three "at each supported word width"
+/// DropTrailingColumns cases were the same case three times: no
+/// BinMat8/16/64 was ever constructed, and at width 70 the tail begins
+/// at column 64 for all four word widths (64 being a multiple of every
+/// one of them), so perturb zeroed identical columns in each.
 template <typename WordType>
 void expectComparatorCatches(MatFault fault, const char* wordTypeName, int width, int height,
                              float fill, bool countPreserving) {
@@ -372,7 +372,7 @@ void expectComparatorCatches(MatFault fault, const char* wordTypeName, int width
     const cv::Mat bad = perturb(good, fault, wordBits);
 
     const Mismatch mm = compareMasks(good, bad);
-    std::cout << "  " << caseLabel(wordTypeName, width, height, fill)
+    std::cout << " " << caseLabel(wordTypeName, width, height, fill)
               << " -> " << mm.describe() << "\n";
 
     BINCV_CHECK(mm.found);
@@ -388,7 +388,7 @@ void expectComparatorCatches(MatFault fault, const char* wordTypeName, int width
         BINCV_CHECK_EQ(static_cast<int>(mm.total),
                        static_cast<int>(good.rows * good.cols));
 
-        // ... and the location it reports is really the first difference.
+        //... and the location it reports is really the first difference.
         BINCV_CHECK(locationIsGenuinelyFirst(good, bad, mm));
     } else {
         BINCV_CHECK(mm.shapeMismatch);
@@ -463,7 +463,7 @@ void testComparatorAcceptsIdentical() {
 // ===========================================================================
 // 2b. expectBitExact itself must be able to fail
 //
-// The comparator cases above assert on compareMasks() directly and never call
+// The comparator cases above assert on compareMasks directly and never call
 // expectBitExact, which left the harness's PRIMARY entry point -- and the large
 // majority of this suite's checks -- with its failure path unexecuted. Measured:
 // rewriting expectBitExact's `if (!m.found)` to `if (true)`, so that it reported
@@ -523,8 +523,8 @@ void testExpectBitExactReportsFailures() {
     }
 
     // (b) one flipped pixel -> reported, and the note carries both the caller's
-    //     context and the LOCATION. A failure that does not say where is not
-    //     actionable over a 640x480 frame, which is why firstMismatch exists.
+    // context and the LOCATION. A failure that does not say where is not
+    // actionable over a 640x480 frame, which is why firstMismatch exists.
     {
         const cv::Mat bad = perturb(good, MatFault::FlipOnePixel, 32);
         const auto verdicts = captureBitExact(m.constView(), bad, "self-test [flipped]");
@@ -551,9 +551,9 @@ void testExpectBitExactReportsFailures() {
     }
 
     // (e) THE ONE THE PIXEL COMPARISON CANNOT SEE. Same pixels, dirty padding:
-    //     70 columns at 32 bits per word leaves bits 6..31 of word 2 as padding.
-    //     This is the defect CLAUDE.md names as a hard rule and the shape a
-    //     word-wise kernel takes when it forgets clearTrailingBits().
+    // 70 columns at 32 bits per word leaves bits 6..31 of word 2 as padding.
+    // This is the defect CLAUDE.md names as a hard rule and the shape a
+    // word-wise kernel takes when it forgets clearTrailingBits.
     {
         bincv::BinMat32 dirty = randomBinary<uint32_t>(70, 37, 0.5f, UINT64_C(0xBE11A5));
         dirty.ptr(0)[2] = static_cast<uint32_t>(dirty.ptr(0)[2] | 0xFFFFFFC0u);
@@ -563,7 +563,7 @@ void testExpectBitExactReportsFailures() {
         BINCV_CHECK(!pixelsOnly.found);
         BINCV_CHECK_EQ(dirty.countNonZero(), cv::countNonZero(good));
 
-        // ... and expectBitExact still reports it, through the padding verdict.
+        //... and expectBitExact still reports it, through the padding verdict.
         const auto verdicts = captureBitExact(dirty.constView(), good, "self-test [dirty padding]");
         BINCV_CHECK_EQ(static_cast<int>(verdicts.size()), 2);
         BINCV_CHECK_EQ(static_cast<int>(failureCountOf(verdicts)), 1);
@@ -574,9 +574,9 @@ void testExpectBitExactReportsFailures() {
 
 /// @brief The padding check, over every word width and both stride regimes.
 /// @note Its own case rather than a line inside the anchor, because it is the
-///       check whose absence was invisible: with it removed, a stand-in
-///       word-wise bitwiseNot passed 240 of 240 swept cases at uint64_t while
-///       leaving 826,200 phantom set bits behind.
+/// check whose absence was invisible: with it removed, a stand-in
+/// word-wise bitwiseNot passed 240 of 240 swept cases at uint64_t while
+/// leaving 826,200 phantom set bits behind.
 template <typename WordType>
 void testPaddingInvariant(const char* wordTypeName) {
     std::cout << "\n--- padding invariant: " << wordTypeName << " ---\n";
@@ -640,10 +640,10 @@ void testPaddingInvariant(const char* wordTypeName) {
 }
 
 /// @brief A faulted build must actually behave differently from an unfaulted one.
-/// @note The only use of faultInjected(), and the reason it is not dead code: a
-///       CMake typo that stopped passing BINCV_EQUIVALENCE_INJECT_FAULT would
-///       leave a WILL_FAIL target that fails for no reason at all, and an
-///       inverted result looks identical either way.
+/// @note The only use of faultInjected, and the reason it is not dead code: a
+/// CMake typo that stopped passing BINCV_EQUIVALENCE_INJECT_FAULT would
+/// leave a WILL_FAIL target that fails for no reason at all, and an
+/// inverted result looks identical either way.
 void testInjectedFaultIsLive() {
     std::cout << "\n--- the injected fault is live (or absent) as declared ---\n";
 
@@ -659,9 +659,9 @@ void testInjectedFaultIsLive() {
         if (bincv::test::firstDirtyPaddingBit(m.constView()).found) paddingDirty = true;
     }
 
-    std::cout << "  faultInjected()=" << (bincv::test::faultInjected() ? "true" : "false")
-              << "  conversionDiffers=" << conversionDiffers
-              << "  paddingDirty=" << paddingDirty << "\n";
+    std::cout << " faultInjected()=" << (bincv::test::faultInjected() ? "true" : "false")
+              << " conversionDiffers=" << conversionDiffers
+              << " paddingDirty=" << paddingDirty << "\n";
 
     if (bincv::test::faultInjected()) {
         // Something must be visibly wrong, or the WILL_FAIL target is passing for
@@ -679,12 +679,12 @@ void testInjectedFaultIsLive() {
 // 3. The anchor: the conversion, pinned against content it never touched
 // ===========================================================================
 
-/// @brief The full T2.1 sweep, per word type.
-/// @note This is what stops the harness being circular. randomCvMask() builds the
-///       same content directly as CV_8U without constructing a BinMat or calling
-///       unpackTo8U, so an off-by-one or a dropped tail in the conversion shows up
-///       here even though it would CANCEL inside any pointwise-kernel test built
-///       on the same conversion (see equivalence.hpp).
+/// @brief The full the sweep, per word type.
+/// @note This is what stops the harness being circular. randomCvMask builds the
+/// same content directly as CV_8U without constructing a BinMat or calling
+/// unpackTo8U, so an off-by-one or a dropped tail in the conversion shows up
+/// here even though it would CANCEL inside any pointwise-kernel test built
+/// on the same conversion (see equivalence.hpp).
 template <typename WordType>
 void testPackingAnchor(const char* wordTypeName) {
     std::cout << "\n--- packing anchor: " << wordTypeName << " ---\n";
@@ -704,41 +704,41 @@ void testPackingAnchor(const char* wordTypeName) {
                 BINCV_EXPECT_BIT_EXACT(generated.constView(), reference, label + " [generated]");
 
                 // (b) so does content that entered through fromCVMat -- an
-                //     already-implemented operation, and the one every future
-                //     Tier 1 test will use to build its inputs
+                // already-implemented operation, and the one every future
+                // Tier 1 test will use to build its inputs
                 bincv::BinMat<WordType> loaded;
                 loaded.fromCVMat(reference);
                 BINCV_EXPECT_BIT_EXACT(loaded.constView(), reference, label + " [fromCVMat]");
 
                 // (c) and so does the same content in a matrix whose rows are
-                //     OVER-ALIGNED, so the view's stride exceeds the
-                //     ceil(width / WordBits) words the row needs.
+                // OVER-ALIGNED, so the view's stride exceeds the
+                // ceil(width / WordBits) words the row needs.
                 //
-                //     Measured on the default-alignment sweep: stride was the
-                //     minimum in 48 of 48 cases, so nothing here exercised a
-                //     stride a kernel could get wrong -- and "strides may differ
-                //     between arguments" is precisely what D-5 and T2.2 warn
-                //     about. A stand-in kernel that walked src and dst as one
-                //     dense run and ignored view.stride was reported identical
-                //     on every matrix this sweep used to build.
+                // Measured on the default-alignment sweep: stride was the
+                // minimum in 48 of 48 cases, so nothing here exercised a
+                // stride a kernel could get wrong -- and "strides may differ
+                // between arguments" is precisely what warn
+                // about. A stand-in kernel that walked src and dst as one
+                // dense run and ignored view.stride was reported identical
+                // on every matrix this sweep used to build.
                 bincv::BinMat<WordType> padded =
                     randomBinary<WordType>(width, height, fill, seed, PADDED_ROW_ALIGNMENT);
                 BINCV_EXPECT_BIT_EXACT(padded.constView(), reference, label + " [padded stride]");
 
                 // (d) and so does a QuantMat<3> BIT PLANE, which is a different
-                //     view entirely: same word type and stride, but offset by the
-                //     plane pitch (height * strideWords) rather than starting at
-                //     the allocation.
+                // view entirely: same word type and stride, but offset by the
+                // plane pitch (height * strideWords) rather than starting at
+                // the allocation.
                 //
-                //     Added because the anchor pinned only BinMat views while
-                //     T2.2's plane overloads are checked through constPlane() ->
-                //     unpackTo8U on the binCV side -- so the one conversion those
-                //     2592 checks depend on was the one conversion nothing here
-                //     pinned. A plane pitch off by a row would be invisible to any
-                //     test that also built its expectation from constPlane().
+                // Added because the anchor pinned only BinMat views while
+                // that work’s plane overloads are checked through constPlane ->
+                // unpackTo8U on the binCV side -- so the one conversion those
+                // 2592 checks depend on was the one conversion nothing here
+                // pinned. A plane pitch off by a row would be invisible to any
+                // test that also built its expectation from constPlane.
                 //
-                //     Each plane carries INDEPENDENT content, so a plane loop that
-                //     read the wrong plane cannot pass by symmetry.
+                // Each plane carries INDEPENDENT content, so a plane loop that
+                // read the wrong plane cannot pass by symmetry.
                 if (width > 0 && height > 0) {
                     cv::Mat planeMasks[3];
                     for (size_t p = 0; p < 3; ++p) {
@@ -773,16 +773,16 @@ void testPackingAnchor(const char* wordTypeName) {
 // 4. The demonstration: countNonZero against cv::countNonZero
 // ===========================================================================
 
-/// @brief T2.1's "done when": the harness, on an operation that already exists.
-/// @note The denominator is ARCHITECTURE 10.3's -- OpenCV performing the same
-///       semantic operation on the SAME binary content stored as CV_8U, which is
-///       what toCvMask() produces.
+/// @brief that work’s "done when": the harness, on an operation that already exists.
+/// @note The denominator is the design notes's -- OpenCV performing the same
+/// semantic operation on the SAME binary content stored as CV_8U, which is
+/// what toCvMask produces.
 /// @note Note what this case can and cannot see. countNonZero reduces an image to
-///       one number, so it agrees under any permutation of the pixels: the
-///       comparator cases above show a cyclic column rotation passing a
-///       count-only check. Bit-exactness of the CONTENT is testPackingAnchor's
-///       job, and the two together are what make this demonstration mean
-///       something.
+/// one number, so it agrees under any permutation of the pixels: the
+/// comparator cases above show a cyclic column rotation passing a
+/// count-only check. Bit-exactness of the CONTENT is testPackingAnchor's
+/// job, and the two together are what make this demonstration mean
+/// something.
 template <typename WordType>
 void testCountNonZeroEquivalence(const char* wordTypeName) {
     std::cout << "\n--- countNonZero vs cv::countNonZero: " << wordTypeName << " ---\n";
@@ -805,22 +805,22 @@ void testCountNonZeroEquivalence(const char* wordTypeName) {
 // 5. A second demonstration, on an operation that PRODUCES an image
 // ===========================================================================
 
-/// @brief transposed() against cv::transpose, through expectBitExact().
+/// @brief transposed against cv::transpose, through expectBitExact.
 /// @note countNonZero returns a scalar, so it cannot exercise the pixel-by-pixel
-///       comparison that every Tier 1 kernel in T2.2..T2.7 will assert through.
-///       This does: an already-implemented binCV operation, its exact OpenCV
-///       equivalent, and the two compared through the harness.
-/// @note Deliberately smaller than the full sweep -- transposed() is a naive
-///       per-pixel copy (its @todo says so), and this file is on the critical
-///       path of a gate that should stay cheap to run.
+/// comparison that every Tier 1 kernel in earlier work..this will assert through.
+/// This does: an already-implemented binCV operation, its exact OpenCV
+/// equivalent, and the two compared through the harness.
+/// @note Deliberately smaller than the full sweep -- transposed is a naive
+/// per-pixel copy (its @todo says so), and this file is on the critical
+/// path of a gate that should stay cheap to run.
 /// @note MEASURED, and it is the clearest evidence for why testPackingAnchor
-///       exists: with ConversionFault::TransposeRowCol compiled in, this case
-///       still PASSES. The fault transposes toCvMask's output AND unpackTo8U's,
-///       cv::transpose sits between them, and the two cancel exactly. The
-///       countNonZero case likewise survives ColumnOffByOne, a cyclic
-///       permutation being count-preserving. A conversion bug is invisible to a
-///       test whose two sides share the conversion; only the anchor, whose
-///       expectation comes from randomCvMask, can see it.
+/// exists: with ConversionFault::TransposeRowCol compiled in, this case
+/// still PASSES. The fault transposes toCvMask's output AND unpackTo8U's,
+/// cv::transpose sits between them, and the two cancel exactly. The
+/// countNonZero case likewise survives ColumnOffByOne, a cyclic
+/// permutation being count-preserving. A conversion bug is invisible to a
+/// test whose two sides share the conversion; only the anchor, whose
+/// expectation comes from randomCvMask, can see it.
 template <typename WordType>
 void testTransposeEquivalence(const char* wordTypeName) {
     std::cout << "\n--- transposed() vs cv::transpose: " << wordTypeName << " ---\n";

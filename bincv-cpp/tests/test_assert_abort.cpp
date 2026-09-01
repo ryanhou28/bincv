@@ -5,12 +5,12 @@
 // type compiled it. Without that, this suite would be dead source in every
 // configuration the project actually verifies: all three V-ALL builds are
 // Release, so NDEBUG is set in all of them, and the debug half of the error
-// policy -- the live BINCV_ASSERT, and the bounds checks that at() and set() are
+// policy -- the live BINCV_ASSERT, and the bounds checks that at and set are
 // specified to have -- would never be compiled or run.
 //
-// WHAT IT REPLACES: before T1.4, out-of-range at()/set() threw std::out_of_range
+// WHAT IT REPLACES: before earlier work, out-of-range at/set threw std::out_of_range
 // and tests/test_binMat.cpp asserted that with three BINCV_CHECK_THROWS lines
-// (plus one in tests/test_opencv_interop.cpp). D-7 removed the throw, and those
+// (plus one in tests/test_opencv_interop.cpp). removed the throw, and those
 // four assertions were deleted with it and not replaced -- deleting both bounds
 // checks from binMat_impl.hpp left Release, Debug and -fno-exceptions all
 // reporting 100% passed. These cases are that coverage, restored at the checked
@@ -81,7 +81,7 @@ int caseSetRow() {
 int caseSetCol() {
     Mat m = makeMat();
     // Column 25 is past `width` but inside the first word. In release this
-    // silently sets a padding bit that countNonZero() cannot see, which is the
+    // silently sets a padding bit that countNonZero cannot see, which is the
     // invariant break the check exists to catch (CLAUDE.md: padding bits stay
     // zero).
     m.set(0, 25, true);
@@ -101,12 +101,12 @@ int caseConstViewStride() {
     return static_cast<int>(*v.row(2));
 }
 
-// The N-plane container's own per-pixel preconditions (T1.5/T1.6). Same policy as
-// at() and set() above: debug-checked, gone in release, so the only place they can
+// The N-plane container's own per-pixel preconditions. Same policy as
+// at and set above: debug-checked, gone in release, so the only place they can
 // be observed is a process that does not survive them.
 //
-// NOT here, deliberately: the plane-index checks. plane(), constPlane() and
-// magnitude() are view factories rather than per-pixel access, and are validated
+// NOT here, deliberately: the plane-index checks. plane, constPlane and
+// magnitude are view factories rather than per-pixel access, and are validated
 // through BINCV_THROW in every build -- so their cases live in
 // tests/test_error_abort.cpp with the other validation sites.
 using Quant = bincv::QuantMat<3, uint32_t>;
@@ -166,7 +166,7 @@ int caseSignedSetIntMin() {
     return m.at(0, 0);
 }
 
-// The T2.2 kernel preconditions. Kernels never throw (ARCHITECTURE 5.3), so
+// The the kernel preconditions. Kernels never throw (the design notes), so
 // mismatched dimensions and an unsafe destination alias are BINCV_ASSERT sites --
 // which means they are observable only from outside the process, exactly like the
 // per-pixel checks above.
@@ -200,7 +200,7 @@ int caseLogicAlias() {
     //
     // Half a row apart, deliberately. The predicate accepts two views over one
     // buffer whose ROWS never meet -- interleaved row bands and column tiles are
-    // legal (D-5) and are covered in-process by Logic.AliasAccepts_* -- so a case
+    // legal and are covered in-process by Logic.AliasAccepts_* -- so a case
     // that merely shared a buffer would no longer prove anything. This one shares
     // words: dst row 0 is src words 1..2, and word 1 is read after it was written.
     const bincv::BinMatConstView<uint32_t> src{g_logicA, 64, 3, 2};
@@ -212,7 +212,7 @@ int caseLogicAlias() {
 // A stride shorter than the row it has to hold: consecutive rows overlap, so the
 // kernel reads each row through the previous one's tail. BinMat's wrap constructor
 // rejects the same numbers by name; a hand-built view is what a kernel takes
-// (D-5), so the kernel carries the check. Measured before it existed: this call
+//, so the kernel carries the check. Measured before it existed: this call
 // produced three rows of ffff0000 from a source of 0000ffff, in every build, with
 // nothing reported.
 int caseLogicShortStride() {
@@ -222,11 +222,11 @@ int caseLogicShortStride() {
     return static_cast<int>(g_logicDst[0]);
 }
 
-// The T2.3/T2.4 shift preconditions. Two of them say something the logic cases
+// The shift preconditions. Two of them say something the logic cases
 // above do not.
 //
 // `shift-in-place` is the important one. ops/logic.hpp ACCEPTS a destination that
-// is exactly a source -- D-11's in-place idiom -- because those kernels are
+// is exactly a source -- the design rule’s in-place idiom -- because those kernels are
 // pointwise in the word index. A shift is not: word i of the destination is built
 // from words i +/- wordShift of the source, so the same call that is legal for
 // bitwiseAnd is undefined here. That difference is invisible in a release build
@@ -279,13 +279,13 @@ int caseShiftBorderType() {
     // 99 into it is UNSPECIFIED, and -Wconversion says so ("the result of the
     // conversion is unspecified because '99' is outside the range of type"). 7 is
     // a representable value that is not one of the five, which is exactly the
-    // input isKnownBorderType() exists to reject.
+    // input isKnownBorderType exists to reject.
     bincv::shift(src, dst, 1, 1, static_cast<bincv::BorderType>(7), false);
     return static_cast<int>(g_shiftDst[0]);
 }
 
-// The T2.5/T2.6 reduction preconditions. A reduction READS ONLY, so it has no
-// aliasing case at all -- D-11 binds kernels that write, and countAndSplit(m, m,
+// The reduction preconditions. A reduction READS ONLY, so it has no
+// aliasing case at all -- binds kernels that write, and countAndSplit(m, m,
 // m, r) is a supported call that an alias predicate copied in from ops/logic.hpp
 // would abort on. What is left is the two checks a reduction can still fail:
 // dimensions that disagree between the masked arguments, and a stride too short
@@ -310,7 +310,7 @@ int caseReduceSplitDims() {
     return static_cast<int>(bincv::countAndSplit(a, a, c, bincv::Rect(0, 0, 64, 3)).whenSet);
 }
 
-// T2.11 added a FOURTH view argument and two more entry points, each with its own
+// added a FOURTH view argument and two more entry points, each with its own
 // dimension assert, and each therefore its own way to be deleted unnoticed. That
 // is not hypothetical: deleting `&& a.width == c1.width && a.height == c1.height`
 // from both four-argument overloads and the stride assert from
@@ -371,7 +371,7 @@ int caseReduceEmptyExtent() {
     return static_cast<int>(r.lastWord);
 }
 
-// T3.1's preconditions. `denoise-in-place` is the one no case above states:
+// that work’s preconditions. `denoise-in-place` is the one no case above states:
 // denoiseMedian3 reads SOURCE ROW y - 1 while writing destination row y, so it is
 // not pointwise in the word index and the in-place spelling ops/logic.hpp
 // supports is undefined here. Nothing diagnoses it -- the memory is valid and the
@@ -400,8 +400,8 @@ int caseDenoiseShortStride() {
     return static_cast<int>(g_denDst[0]);
 }
 
-// T3.2's preconditions. `binarize-dims` is a PER-PLANE check: an N-bit source
-// arrives as N separate views (D-5), and a check that only inspected plane 0
+// that work’s preconditions. `binarize-dims` is a PER-PLANE check: an N-bit source
+// arrives as N separate views, and a check that only inspected plane 0
 // would read the rest at plane 0's geometry. The narrowed plane here is plane 1,
 // not plane 0, so a loop that stops after the first plane does not fire.
 uint32_t g_binPlanes[3][16] = {{0}, {0}, {0}};
@@ -443,23 +443,23 @@ int caseBinarizeShortStride() {
     return static_cast<int>(g_binDst[0]);
 }
 
-// T3.3's preconditions. Two of these say something NO OTHER CASE IN THIS FILE
+// that work’s preconditions. Two of these say something NO OTHER CASE IN THIS FILE
 // says, because no other kernel in the project takes a caller-provided scratch
 // view and none takes a shape object:
 //
-//   `morphex-scratch-size` and `morphex-scratch-overlap` are the D-16 scratch
-//   contract. morphologyEx's five compound ops write an intermediate frame the
-//   CALLER owns (a kernel may not allocate one), so a scratch that is too small
-//   or that aliases src or dst is a silent wrong answer or a buffer overrun --
-//   `erode(src, scratch)` followed by `dilate(scratch, dst)` reads every word of
-//   scratch back, so an undersized one runs off the end of the caller's array.
+// `morphex-scratch-size` and `morphex-scratch-overlap` are the scratch
+// contract. morphologyEx's five compound ops write an intermediate frame the
+// CALLER owns (a kernel may not allocate one), so a scratch that is too small
+// or that aliases src or dst is a silent wrong answer or a buffer overrun --
+// `erode(src, scratch)` followed by `dilate(scratch, dst)` reads every word of
+// scratch back, so an undersized one runs off the end of the caller's array.
 //
-//   `morph-element-invalid` is the only precondition anywhere that checks an
-//   ARGUMENT'S OWN INTERNAL CONSISTENCY rather than a relationship between views.
-//   StructuringElement::valid() has no other caller: without this case, deleting
-//   it changes nothing observable, and an element with zero set cells makes every
-//   destination pixel the fold's identity -- a plausible all-black or all-white
-//   frame rather than a crash.
+// `morph-element-invalid` is the only precondition anywhere that checks an
+// ARGUMENT'S OWN INTERNAL CONSISTENCY rather than a relationship between views.
+// StructuringElement::valid has no other caller: without this case, deleting
+// it changes nothing observable, and an element with zero set cells makes every
+// destination pixel the fold's identity -- a plausible all-black or all-white
+// frame rather than a crash.
 //
 // The frames are 64 x 3 at uint32_t, i.e. two words per row, which is what makes
 // the short-stride case (stride 1) a violation rather than a tight fit.
@@ -493,10 +493,10 @@ int caseMorphInPlace() {
 int caseMorphBorderType() {
     const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
     const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
-    // 7, not 99, for the reason caseShiftBorderType() gives above: BorderType's
+    // 7, not 99, for the reason caseShiftBorderType gives above: BorderType's
     // enumerators span 0..4, so the type's value range is 0..7 and casting 99 into
     // it is UNSPECIFIED (-Wconversion says so). 7 is representable and not one of
-    // the five, which is exactly what isKnownBorderType() rejects.
+    // the five, which is exactly what isKnownBorderType rejects.
     bincv::dilate(src, dst, bincv::rect3x3(), static_cast<bincv::BorderType>(7));
     return static_cast<int>(g_morphDst[0]);
 }
@@ -505,7 +505,7 @@ int caseMorphElementInvalid() {
     const bincv::BinMatConstView<uint32_t> src{g_morphSrc, 64, 3, 2};
     const bincv::BinMatView<uint32_t> dst{g_morphDst, 64, 3, 2};
     // A cross whose every cell is cleared: cols and rows are positive and the
-    // anchor is in range, so only the set-cell half of valid() rejects it.
+    // anchor is in range, so only the set-cell half of valid rejects it.
     static const uint8_t emptyMask[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
     bincv::erode(src, dst, bincv::StructuringElement::custom(emptyMask, 3, 3));
     return static_cast<int>(g_morphDst[0]);
@@ -544,7 +544,7 @@ struct Case {
     int (*run)();
 };
 
-// The T2.7 bit-sliced preconditions. Two of them say something no case above does.
+// The bit-sliced preconditions. Two of them say something no case above does.
 //
 // `bitslice-dims` is the three-source dimension check. ops/logic.hpp's kernels
 // compare two views, majority3 compares three, and a check that forgot the third
@@ -575,7 +575,7 @@ int caseBitSliceDims() {
 int caseBitSliceAlias() {
     // Same shape, same buffer, one word apart -- half a row, so the two views
     // really do share words rather than merely sharing a buffer (the disjoint
-    // cases are legal under D-5 and are covered in-process).
+    // cases are legal under earlier work and are covered in-process).
     const bincv::BinMatConstView<uint32_t> a{g_majA, 64, 3, 2};
     const bincv::BinMatConstView<uint32_t> b{g_majB, 64, 3, 2};
     const bincv::BinMatConstView<uint32_t> c{g_majC, 64, 3, 2};
@@ -602,29 +602,29 @@ int caseBitSliceSumOverlap() {
     return static_cast<int>(g_sumBuffer[0]);
 }
 
-// T3.5's preconditions. TWO OF THESE ARE A CLASS NO OTHER KERNEL IN THE PROJECT
+// that work’s preconditions. TWO OF THESE ARE A CLASS NO OTHER KERNEL IN THE PROJECT
 // HAS, which is why they lead the block rather than trail it.
 //
-//   `derivative-sign-alias` / `derivative-mag-alias` are DESTINATION-VERSUS-
-//   DESTINATION. Every other kernel here writes one plane, so "no aliasing" has
-//   only ever meant src-versus-dst; the derivative writes N magnitude planes AND
-//   a sign plane, so the destinations must be distinct from EACH OTHER too. The
-//   failure is silent and specific: a sign plane that shares words with a
-//   magnitude plane leaves pixels at magnitude 0 with the sign bit SET, which is
-//   precisely the canonical-zero violation ops/derivative.hpp's header says
-//   "would compile, run, and quietly produce an image where the canonical-zero
-//   rule no longer holds" -- and which corrupts only T3.6's sumXY, leaving sumXX
-//   and sumYY correct. No magnitude-checking test can see it.
+// `derivative-sign-alias` / `derivative-mag-alias` are DESTINATION-VERSUS-
+// DESTINATION. Every other kernel here writes one plane, so "no aliasing" has
+// only ever meant src-versus-dst; the derivative writes N magnitude planes AND
+// a sign plane, so the destinations must be distinct from EACH OTHER too. The
+// failure is silent and specific: a sign plane that shares words with a
+// magnitude plane leaves pixels at magnitude 0 with the sign bit SET, which is
+// precisely the canonical-zero violation ops/derivative.hpp's header says
+// "would compile, run, and quietly produce an image where the canonical-zero
+// rule no longer holds" -- and which corrupts only that work’s sumXY, leaving sumXX
+// and sumYY correct. No magnitude-checking test can see it.
 //
-//   `derivative-border-type` goes through derivativeY rather than derivativeX, so
-//   the shared impl::checkDerivativeArgs is covered from both entry points; the
-//   same device tests/CMakeLists.txt uses for erode/dilate above.
+// `derivative-border-type` goes through derivativeY rather than derivativeX, so
+// the shared impl::checkDerivativeArgs is covered from both entry points; the
+// same device tests/CMakeLists.txt uses for erode/dilate above.
 //
 // Measured before these existed: replacing every condition inside
 // impl::checkDerivativeArgs with a literal `true` -- all fourteen -- left
 // tests/test_derivative.cpp reporting a BYTE-IDENTICAL 47593/47593 checks passed
 // in the Debug core-only build (the only configuration where BINCV_ASSERT is
-// live), and ./scripts/verify.sh ALL CONFIGURATIONS GREEN. The whole precondition
+// live), and./scripts/verify.sh ALL CONFIGURATIONS GREEN. The whole precondition
 // block was deletable. Preconditions with no death test are not covered by a
 // correctness suite that never violates them.
 uint32_t g_derSrc[32] = {0};
@@ -685,22 +685,22 @@ int caseDerivativeBorderType() {
     const bincv::BinMatConstView<uint32_t> src[1] = {{g_derSrc, 64, 3, 2}};
     bincv::BinMatView<uint32_t> mag[1] = {{g_derMag, 64, 3, 2}};
     const bincv::BinMatView<uint32_t> sign{g_derSign, 64, 3, 2};
-    // 7, not 99, for the reason caseShiftBorderType() gives above: BorderType's
+    // 7, not 99, for the reason caseShiftBorderType gives above: BorderType's
     // enumerators span 0..4, so the type's value range is 0..7 and casting 99 into
     // it is UNSPECIFIED (-Wconversion says so). 7 is representable and not one of
-    // the five, which is exactly what isKnownBorderType() rejects.
+    // the five, which is exactly what isKnownBorderType rejects.
     bincv::derivativeY<1, uint32_t>(src, mag, sign, static_cast<bincv::BorderType>(7), false);
     return static_cast<int>(g_derMag[0]);
 }
 
 // ---------------------------------------------------------------------------
-// The tracker's one D-11 predicate (T3.8). ops/opticalFlow.hpp writes EVERY
+// The tracker's one predicate. ops/opticalFlow.hpp writes EVERY
 // `nextPts` entry for a level before it reads ANY `prevPts` entry for that level,
 // so an in-place call tracks every point from an anchor that has already been
 // overwritten. It is the only kernel in the library whose destination is an array
 // of points rather than a view, and it was the only one with no overlap check at
 // all: measured before this case existed, `calcOpticalFlowPyrLK(levels, n, a, a,
-// ...)` returned status 1 for every point and answers up to 23 px away from the
+//...)` returned status 1 for every point and answers up to 23 px away from the
 // correct ones, in the Debug build, silently.
 // ---------------------------------------------------------------------------
 uint32_t g_flowPlane[16] = {0};
@@ -784,7 +784,7 @@ const Case kCases[] = {
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "usage: %s <case>\ncases:\n", argv[0]);
-        for (const Case& c : kCases) std::fprintf(stderr, "  %s\n", c.name);
+        for (const Case& c : kCases) std::fprintf(stderr, " %s\n", c.name);
         return 2;
     }
 
