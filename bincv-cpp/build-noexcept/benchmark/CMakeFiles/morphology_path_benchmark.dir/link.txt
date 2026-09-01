@@ -1,0 +1,1 @@
+/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/morphology_path_benchmark.dir/morphology_path_benchmark.cpp.o -o morphology_path_benchmark

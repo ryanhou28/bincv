@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/wordtype_narrow.dir/wordtype_narrow.cpp.o -o wordtype_narrow

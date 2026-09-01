@@ -1,0 +1,1 @@
+/usr/bin/c++ -g CMakeFiles/test_storage.dir/test_storage.cpp.o -o test_storage  /usr/lib/x86_64-linux-gnu/libgtest.a

@@ -1,0 +1,1 @@
+/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_logic.dir/test_logic.cpp.o -o test_logic

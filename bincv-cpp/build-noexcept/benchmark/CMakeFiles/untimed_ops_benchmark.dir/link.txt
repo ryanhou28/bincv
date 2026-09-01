@@ -1,0 +1,1 @@
+/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/untimed_ops_benchmark.dir/untimed_ops_benchmark.cpp.o -o untimed_ops_benchmark

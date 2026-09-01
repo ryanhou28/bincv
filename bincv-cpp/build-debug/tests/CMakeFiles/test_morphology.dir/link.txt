@@ -1,0 +1,1 @@
+/usr/bin/c++ -g CMakeFiles/test_morphology.dir/test_morphology.cpp.o -o test_morphology  /usr/lib/x86_64-linux-gnu/libgtest.a

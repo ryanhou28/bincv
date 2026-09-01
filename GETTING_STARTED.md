@@ -51,6 +51,7 @@ Threshold a grayscale frame straight into bit-planes — no OpenCV, no 8-bit int
 #include <cstdio>
 #include <vector>
 #include "bincv-cpp/ops/edge.hpp"
+#include "bincv-cpp/ops/reduce.hpp"
 
 int main() {
     const size_t w = 640, h = 480;

@@ -1,0 +1,1 @@
+/usr/bin/c++ -g CMakeFiles/decimate_benchmark.dir/decimate_benchmark.cpp.o -o decimate_benchmark

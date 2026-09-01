@@ -1,29 +1,14 @@
 bincv-cuda/build/*
 bincv-cpp/build/*
+build/
 
 # Benchmark output.
-#
-# The DIRECTORY is ignored but the committed logs are not: CLAUDE.md requires
-# every performance claim to be reproducible and several tasks say "results
-# committed under results/" in as many words. With the whole directory ignored
-# that was unmeetable -- `git add bincv-cpp/results/logic_benchmark.log` refused,
-# `git ls-files bincv-cpp/results` was empty, and T2.2 was marked DONE anyway
-# while TASKS.md quoted figures from a file no one else could read. Result logs
-# are the evidence for a published number; scratch output is not, so it keeps
-# whatever other extension it likes.
 bincv-cpp/results/
+results/
 
-# Maintainer-only working files. The measurement log, the backlog, the roadmap, the
-# reference-device setup and the script that drives it are kept OUT of the repository:
-# they are one person's working notes and one person's hardware, and a reader of this
-# library needs none of them.
+# Maintainer-only working files. The measurement log, the backlog, the reference-device
+# setup and the script that drives it, and the one-off measurement probes are kept OUT of
+# the repository: they are one person's working notes and one person's hardware, and a
+# reader of this library needs none of them.
 .local/
 bincv-cpp/experiments/
-
-# Alternate build trees (core-only, cross-compiled, etc.)
-build*/
-bincv-cpp/build*/
-bincv-cuda/build*/
-
-# Test image output
-bincv-cpp/tests/output/

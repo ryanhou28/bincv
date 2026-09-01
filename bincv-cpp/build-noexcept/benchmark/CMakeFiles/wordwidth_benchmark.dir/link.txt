@@ -1,0 +1,1 @@
+/usr/bin/c++ -fno-exceptions -O3 -DNDEBUG CMakeFiles/wordwidth_benchmark.dir/wordwidth_benchmark.cpp.o -o wordwidth_benchmark

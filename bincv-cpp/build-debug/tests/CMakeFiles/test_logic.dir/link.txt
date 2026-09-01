@@ -1,0 +1,1 @@
+/usr/bin/c++ -g CMakeFiles/test_logic.dir/test_logic.cpp.o -o test_logic  /usr/lib/x86_64-linux-gnu/libgtest.a

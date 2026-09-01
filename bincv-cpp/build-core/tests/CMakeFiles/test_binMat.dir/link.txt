@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/test_binMat.dir/test_binMat.cpp.o -o test_binMat  /usr/lib/x86_64-linux-gnu/libgtest.a

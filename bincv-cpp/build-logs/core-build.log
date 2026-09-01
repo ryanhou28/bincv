@@ -1,0 +1,156 @@
+[  2%] Building CXX object tests/CMakeFiles/test_quantMat.dir/test_quantMat.cpp.o
+[  2%] Building CXX object tests/CMakeFiles/test_binMat.dir/test_binMat.cpp.o
+[  3%] Building CXX object tests/CMakeFiles/test_parallel.dir/test_parallel.cpp.o
+[  4%] Building CXX object tests/CMakeFiles/test_error.dir/test_error.cpp.o
+[  5%] Building CXX object tests/CMakeFiles/test_storage.dir/test_storage.cpp.o
+[  6%] Building CXX object tests/CMakeFiles/test_bitslice.dir/test_bitslice.cpp.o
+[  7%] Building CXX object tests/CMakeFiles/test_logic.dir/test_logic.cpp.o
+[  8%] Building CXX object tests/CMakeFiles/test_error_checked.dir/test_error_checked.cpp.o
+[  9%] Building CXX object tests/CMakeFiles/test_shift.dir/test_shift.cpp.o
+[ 10%] Building CXX object tests/CMakeFiles/test_threshold.dir/test_threshold.cpp.o
+[ 11%] Building CXX object tests/CMakeFiles/test_reduce.dir/test_reduce.cpp.o
+[ 12%] Building CXX object tests/CMakeFiles/test_denoise.dir/test_denoise.cpp.o
+[ 13%] Linking CXX executable test_error_checked
+[ 13%] Linking CXX executable test_error
+[ 13%] Built target test_error_checked
+[ 14%] Building CXX object tests/CMakeFiles/test_morphology.dir/test_morphology.cpp.o
+[ 14%] Built target test_error
+[ 15%] Building CXX object tests/CMakeFiles/test_resample.dir/test_resample.cpp.o
+[ 16%] Linking CXX executable test_storage
+[ 17%] Linking CXX executable test_parallel
+[ 17%] Built target test_storage
+[ 18%] Building CXX object tests/CMakeFiles/test_pyramid.dir/test_pyramid.cpp.o
+[ 18%] Built target test_parallel
+[ 19%] Building CXX object tests/CMakeFiles/test_derivative.dir/test_derivative.cpp.o
+[ 20%] Linking CXX executable test_shift
+[ 20%] Built target test_shift
+[ 21%] Building CXX object tests/CMakeFiles/test_covariance.dir/test_covariance.cpp.o
+[ 22%] Linking CXX executable test_denoise
+[ 22%] Built target test_denoise
+[ 23%] Building CXX object tests/CMakeFiles/test_corner.dir/test_corner.cpp.o
+[ 24%] Linking CXX executable test_quantMat
+[ 24%] Built target test_quantMat
+[ 25%] Building CXX object tests/CMakeFiles/test_opticalflow.dir/test_opticalflow.cpp.o
+[ 26%] Linking CXX executable test_resample
+[ 26%] Built target test_resample
+[ 27%] Building CXX object tests/CMakeFiles/test_pack.dir/test_pack.cpp.o
+[ 28%] Linking CXX executable test_bitslice
+[ 29%] Linking CXX executable test_logic
+[ 29%] Built target test_bitslice
+[ 30%] Building CXX object tests/CMakeFiles/test_edge.dir/test_edge.cpp.o
+[ 30%] Built target test_logic
+[ 31%] Building CXX object tests/CMakeFiles/test_median_wide.dir/test_median_wide.cpp.o
+[ 32%] Linking CXX executable test_median_wide
+[ 32%] Built target test_median_wide
+[ 33%] Building CXX object tests/CMakeFiles/test_descriptor.dir/test_descriptor.cpp.o
+[ 34%] Linking CXX executable test_pack
+[ 35%] Linking CXX executable test_edge
+[ 35%] Built target test_pack
+[ 36%] Building CXX object tests/CMakeFiles/test_fast.dir/test_fast.cpp.o
+[ 36%] Built target test_edge
+[ 37%] Building CXX object tests/CMakeFiles/test_subpix.dir/test_subpix.cpp.o
+[ 38%] Linking CXX executable test_reduce
+[ 38%] Built target test_reduce
+[ 39%] Building CXX object tests/CMakeFiles/test_view_narrow.dir/test_view_narrow.cpp.o
+[ 39%] Linking CXX executable test_binMat
+[ 39%] Built target test_binMat
+[ 40%] Linking CXX executable test_descriptor
+[ 40%] Building CXX object tests/CMakeFiles/test_occupancy.dir/test_occupancy.cpp.o
+[ 40%] Built target test_descriptor
+[ 40%] Building CXX object tests/CMakeFiles/test_simd.dir/test_simd.cpp.o
+[ 41%] Linking CXX executable test_subpix
+[ 41%] Built target test_subpix
+[ 42%] Building CXX object tests/CMakeFiles/test_harness.dir/test_harness.cpp.o
+[ 43%] Linking CXX executable test_simd
+[ 44%] Linking CXX executable test_fast
+[ 44%] Built target test_simd
+[ 45%] Building CXX object tests/CMakeFiles/test_harness_failing.dir/test_harness.cpp.o
+[ 45%] Built target test_fast
+[ 46%] Building CXX object tests/CMakeFiles/test_error_abort.dir/test_error_abort.cpp.o
+[ 47%] Linking CXX executable test_error_abort
+[ 47%] Built target test_error_abort
+[ 48%] Building CXX object tests/CMakeFiles/test_assert_abort.dir/test_assert_abort.cpp.o
+[ 52%] Linking CXX executable test_view_narrow
+[ 52%] Linking CXX executable test_harness_failing
+[ 52%] Linking CXX executable test_occupancy
+[ 53%] Linking CXX executable test_morphology
+[ 54%] Linking CXX executable test_harness
+[ 54%] Built target test_harness_failing
+[ 54%] Built target test_morphology
+[ 54%] Built target test_occupancy
+[ 55%] Building CXX object benchmark/CMakeFiles/blockmatch_benchmark.dir/blockmatch_benchmark.cpp.o
+[ 55%] Building CXX object benchmark/CMakeFiles/alignment_benchmark.dir/alignment_benchmark.cpp.o
+[ 56%] Building CXX object benchmark/CMakeFiles/corner_benchmark.dir/corner_benchmark.cpp.o
+[ 56%] Built target test_view_narrow
+[ 56%] Built target test_harness
+[ 57%] Building CXX object benchmark/CMakeFiles/covariance_nbit_benchmark.dir/covariance_nbit_benchmark.cpp.o
+[ 58%] Building CXX object benchmark/CMakeFiles/covariance_benchmark.dir/covariance_benchmark.cpp.o
+[ 59%] Linking CXX executable test_corner
+[ 59%] Built target test_corner
+[ 60%] Building CXX object benchmark/CMakeFiles/decimate_benchmark.dir/decimate_benchmark.cpp.o
+[ 61%] Linking CXX executable corner_benchmark
+[ 62%] Linking CXX executable test_derivative
+[ 62%] Built target corner_benchmark
+[ 63%] Building CXX object benchmark/CMakeFiles/frontend_profile.dir/frontend_profile.cpp.o
+[ 64%] Linking CXX executable covariance_benchmark
+[ 64%] Built target test_derivative
+[ 65%] Building CXX object benchmark/CMakeFiles/lk_initial_flow.dir/lk_initial_flow.cpp.o
+[ 66%] Linking CXX executable alignment_benchmark
+[ 66%] Built target covariance_benchmark
+[ 67%] Building CXX object benchmark/CMakeFiles/lk_memorybound.dir/lk_memorybound.cpp.o
+[ 68%] Linking CXX executable test_assert_abort
+[ 68%] Built target alignment_benchmark
+[ 69%] Building CXX object benchmark/CMakeFiles/morphology_path_benchmark.dir/morphology_path_benchmark.cpp.o
+[ 70%] Linking CXX executable decimate_benchmark
+[ 70%] Built target decimate_benchmark
+[ 71%] Building CXX object benchmark/CMakeFiles/pack_quant_benchmark.dir/pack_quant_benchmark.cpp.o
+[ 71%] Built target test_assert_abort
+[ 72%] Building CXX object benchmark/CMakeFiles/pyramid_benchmark.dir/pyramid_benchmark.cpp.o
+[ 73%] Linking CXX executable blockmatch_benchmark
+[ 73%] Built target blockmatch_benchmark
+[ 74%] Building CXX object benchmark/CMakeFiles/pyramid_depth_benchmark.dir/pyramid_depth_benchmark.cpp.o
+[ 75%] Linking CXX executable pack_quant_benchmark
+[ 75%] Built target pack_quant_benchmark
+[ 76%] Building CXX object benchmark/CMakeFiles/reduce_target_benchmark.dir/reduce_target_benchmark.cpp.o
+[ 77%] Linking CXX executable test_threshold
+[ 77%] Built target test_threshold
+[ 77%] Linking CXX executable lk_memorybound
+[ 78%] Building CXX object benchmark/CMakeFiles/residual_n1.dir/residual_n1.cpp.o
+[ 78%] Built target lk_memorybound
+[ 79%] Building CXX object benchmark/CMakeFiles/spacing_benchmark.dir/spacing_benchmark.cpp.o
+[ 83%] Linking CXX executable lk_initial_flow
+[ 83%] Linking CXX executable covariance_nbit_benchmark
+[ 83%] Linking CXX executable frontend_profile
+[ 83%] Linking CXX executable reduce_target_benchmark
+[ 83%] Built target reduce_target_benchmark
+[ 84%] Linking CXX executable morphology_path_benchmark
+[ 84%] Built target frontend_profile
+[ 85%] Building CXX object benchmark/CMakeFiles/untimed_ops_benchmark.dir/untimed_ops_benchmark.cpp.o
+[ 85%] Built target lk_initial_flow
+[ 85%] Built target covariance_nbit_benchmark
+[ 86%] Building CXX object benchmark/CMakeFiles/window_benchmark.dir/window_benchmark.cpp.o
+[ 87%] Building CXX object benchmark/CMakeFiles/wordtype_narrow.dir/wordtype_narrow.cpp.o
+[ 88%] Building CXX object benchmark/CMakeFiles/wordwidth_benchmark.dir/wordwidth_benchmark.cpp.o
+[ 88%] Built target morphology_path_benchmark
+[ 89%] Linking CXX executable residual_n1
+[ 90%] Linking CXX executable spacing_benchmark
+[ 90%] Built target spacing_benchmark
+[ 90%] Built target residual_n1
+[ 91%] Linking CXX executable wordtype_narrow
+[ 91%] Built target wordtype_narrow
+[ 92%] Linking CXX executable untimed_ops_benchmark
+[ 92%] Built target untimed_ops_benchmark
+[ 93%] Linking CXX executable pyramid_benchmark
+[ 94%] Linking CXX executable wordwidth_benchmark
+[ 94%] Built target pyramid_benchmark
+[ 94%] Built target wordwidth_benchmark
+[ 95%] Linking CXX executable window_benchmark
+[ 95%] Built target window_benchmark
+[ 96%] Linking CXX executable test_pyramid
+[ 96%] Built target test_pyramid
+[ 97%] Linking CXX executable test_opticalflow
+[ 97%] Built target test_opticalflow
+[ 98%] Linking CXX executable pyramid_depth_benchmark
+[ 98%] Built target pyramid_depth_benchmark
+[100%] Linking CXX executable test_covariance
+[100%] Built target test_covariance
