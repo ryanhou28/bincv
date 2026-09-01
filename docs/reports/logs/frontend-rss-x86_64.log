@@ -1,0 +1,11 @@
+# frontend-rss -- x86-64  (peak RSS against thread count)
+# commit:   25065d7
+# method:   /usr/bin/time -v, Maximum resident set size, whole process
+# date:     2026-09-01T12:35:00-07:00
+
+### BINCV_LK_THREADS=1
+	Maximum resident set size (kbytes): 29180
+### BINCV_LK_THREADS=4
+	Maximum resident set size (kbytes): 29164
+### BINCV_LK_THREADS=12
+	Maximum resident set size (kbytes): 29156

@@ -1,0 +1,26 @@
+# fast_bitplane -- aarch64
+# host:     
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# governor: performance
+# throttled:throttled=0x80000
+# pinning:  taskset -c 3 (applied by the runner)
+# date:     2026-09-01T12:23:18-07:00
+
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2054.5 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2051.0 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            865.3 us  2.37x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     863.5 us  2.38x vs cv::FAST
+ threshold 2              863.5 us  2.38x vs cv::FAST
+ threshold 3              863.2 us  2.38x vs cv::FAST
+ threshold 4              863.1 us  2.38x vs cv::FAST
+ threshold 6              863.4 us  2.38x vs cv::FAST
+ threshold 8              863.3 us  2.38x vs cv::FAST
+ threshold 12             863.5 us  2.38x vs cv::FAST
+ threshold never          863.6 us  2.38x vs cv::FAST

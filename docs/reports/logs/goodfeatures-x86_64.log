@@ -1,0 +1,52 @@
+# goodfeatures -- x86-64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   25065d7
+# pinning:  taskset -c 2
+# date:     2026-09-01T12:04:46-07:00
+
+binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
+OpenCV 4.8.0-dev, cv::getNumThreads() = 1; binCV is single-threaded
+frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33333
+(SEAL/seal_params.yaml verbatim; word uint32_t)
+
+ AGREEMENT with the OpenCV binarized pipeline over 4 frames:
+ binCV corners 723, OpenCV corners 723, EXACT position matches 723
+ worst displacement of a binCV corner from the nearest OpenCV one: 0.00 px
+ (not bit-exact and not claimed to be -- TIER 2. The two sides share the
+ covariance integers exactly; the remaining gap is the float eig map and
+ how ties fall out of it.)
+
+ PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
+ binCV
+ source, 1 bit/pixel     38400 B
+ four one-bit derivative planes    153600 B
+ float response map (caller scratch)   1228800 B
+ corner array = candidate buffer   3659568 B
+ TOTAL   5080368 B (16.54 B/pixel)
+ OpenCV binarized (the denominator), every buffer read off itself
+ source, CV_8U    307200 B
+ dx, dy CV_32F   2457600 B
+ xx, yy, xy CV_32F   3686400 B
+ eig + dilate destination CV_32F   2457600 B
+ candidate pointer vector   2439712 B
+ TOTAL  11348512 B (36.94 B/pixel)
+ OpenCV Sobel (stock call), ACCOUNTED from what the call materializes
+ TOTAL   8908800 B (29.00 B/pixel)
+ -> binCV footprint vs the denominator: 2.23x smaller
+
+ THE SAME ACCOUNTING AT THE MEASURED SURVIVOR COUNT (13272 over 4 frames),
+ which is what a caller reserves once it knows the content:
+ binCV   1580064 B ( 5.14 B/pixel)
+ OpenCV binarized (the denominator)   9014976 B (29.35 B/pixel)
+ -> binCV footprint vs the denominator: 5.71x smaller
+
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   8005612     26.060   35.70%        0.53x      16.54
+ OpenCV binarized        4261787     13.873   16.63%        1.00x      36.94
+ OpenCV Sobel            3986471     12.977   47.55%        1.07x      29.00
+
+ READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
+ question alone, and for this operation they point opposite ways.
+ sink 210250

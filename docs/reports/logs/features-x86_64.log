@@ -1,0 +1,27 @@
+# features -- x86-64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   25065d7
+# pinning:  taskset -c 2
+# date:     2026-09-01T12:04:52-07:00
+
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 343899.2        1.05x
+ FAST cv::FAST                              362762.2             
+ describe binCV BRIEF                       140567.3        4.69x
+ describe cv::ORB (does more)               659500.2             
+ match kNN=2 binCV                         1946816.4        4.72x
+ match kNN=2 cv::BFMatcher                 9183922.6             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 16321582

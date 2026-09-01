@@ -1,0 +1,19 @@
+# frontend-repeats -- aarch64
+# host:     
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# governor: performance
+# throttled:throttled=0x80000
+# pinning:  taskset -c 3 (applied by the runner)
+# date:     2026-09-01T12:23:35-07:00
+
+### run 2
+--- CRITERION 4: speed against the byte-per-pixel denominator ---
+ binCV :    4.906 ms/frame
+ OpenCV :   23.273 ms/frame
+ RATIO : 4.74x
+### run 3
+--- CRITERION 4: speed against the byte-per-pixel denominator ---
+ binCV :    4.917 ms/frame
+ OpenCV :   23.249 ms/frame
+ RATIO : 4.73x

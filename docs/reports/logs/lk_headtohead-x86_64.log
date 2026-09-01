@@ -1,0 +1,37 @@
+# lk_headtohead -- x86-64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# compiler: c++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   25065d7
+# pinning:  taskset -c 2
+# date:     2026-09-01T12:11:28-07:00
+
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.543 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.136 ms
+ OpenCV LK on the same bits as CV_8U           3.871 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.13x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 28.53x (FASTER)
+ cost of the N=2 ladder : 4.00x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+
+### BINCV_FORCE_ITERS=1 -- both trackers run exactly 20 iterations
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations FORCED (eps=0), OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.881 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.194 ms
+ OpenCV LK on the same bits as CV_8U           8.403 ms
+
+ binCV 1/2/2/2 vs OpenCV : 9.54x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 43.28x (FASTER)
+ cost of the N=2 ladder : 4.54x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel

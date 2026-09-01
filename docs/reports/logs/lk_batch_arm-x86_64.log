@@ -1,0 +1,41 @@
+# lk_batch_arm -- x86-64  (same binary, BINCV_LK_BATCH=0/1)
+# commit:   25065d7
+# pinning:  taskset -c 2
+# date:     2026-09-01T12:13:05-07:00
+
+### BINCV_LK_BATCH=0
+LK keypoint batch: off
+ binCV :   436704 B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)
+ OpenCV :  2719832 B (CV_8U pyramid x2 with 31-px border/level, CV_32F eigen map)
+ RATIO : 6.23x smaller
+ track (LK)                      1.363 ms/frame  76.5%
+ binCV :    1.782 ms/frame
+ OpenCV :    4.090 ms/frame
+ RATIO : 2.30x
+### BINCV_LK_BATCH=1
+LK keypoint batch: ON (AVX2, 8 lanes, lane refill)
+ binCV :   436704 B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)
+ OpenCV :  2719832 B (CV_8U pyramid x2 with 31-px border/level, CV_32F eigen map)
+ RATIO : 6.23x smaller
+ track (LK)                      0.820 ms/frame  68.3%
+ binCV :    1.201 ms/frame
+ OpenCV :    4.221 ms/frame
+ RATIO : 3.51x
+### BINCV_LK_BATCH=0
+LK keypoint batch: off
+ binCV :   436704 B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)
+ OpenCV :  2719832 B (CV_8U pyramid x2 with 31-px border/level, CV_32F eigen map)
+ RATIO : 6.23x smaller
+ track (LK)                      1.407 ms/frame  78.0%
+ binCV :    1.804 ms/frame
+ OpenCV :    4.222 ms/frame
+ RATIO : 2.34x
+### BINCV_LK_BATCH=1
+LK keypoint batch: ON (AVX2, 8 lanes, lane refill)
+ binCV :   436704 B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)
+ OpenCV :  2719832 B (CV_8U pyramid x2 with 31-px border/level, CV_32F eigen map)
+ RATIO : 6.23x smaller
+ track (LK)                      0.747 ms/frame  66.7%
+ binCV :    1.120 ms/frame
+ OpenCV :    3.991 ms/frame
+ RATIO : 3.56x

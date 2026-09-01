@@ -1,0 +1,26 @@
+# lk_memorybound -- aarch64
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# governor: performance
+# pinning:  taskset -c 3 (applied by the runner)
+
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8478        24.2230
+       80       1.7878        22.3479
+      140       3.2617        23.2978
+      300       7.3182        24.3942
+      560      13.7894        24.6239
+     1160      29.6436        25.5549
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.5932        25.6658
+      640x480       37.5       3.2630        23.3072
+     1280x960      150.0       3.8135        27.2393
+    1920x1440      337.5       3.7781        26.9865
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.

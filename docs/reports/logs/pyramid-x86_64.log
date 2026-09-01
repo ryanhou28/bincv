@@ -1,0 +1,51 @@
+# pyramid -- x86-64
+# commit:   25065d7
+# compiler: c++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# pinning:  taskset -c 2
+# date:     2026-09-01T12:06:37-07:00
+
+binCV pyramid downsample --
+================================
+
+BIT GROWTH AND PEAK FOOTPRINT -- four levels from 640x480, uint32_t
+ the CV_8U denominator is 408000 bytes (one byte per pixel, four levels,
+ all resident)
+
+ ladder (NOut caps)     declared  in the frame   reachable      bits needed    bytes   vs 8U
+ ---------------------- --------- -------------- -------------- ----------- -------- -------
+ 1-3-5-7 uncapped       1/3/5/7   2/8/16/31      2/5/26/121     1/3/5/7        84240   4.84x
+ 1-3-4-5 reference      1/3/4/5   2/8/8/9        2/5/16/32      1/3/4/5        80400   5.07x
+ 1-3-3-3                1/3/3/3   2/8/4/3        2/5/8/8        1/3/3/3        76560   5.33x
+ 1-2-2-2                1/2/2/2   2/4/2/2        2/4/4/4        1/2/2/2        63840   6.39x
+ 1-1-1-1 re-binarized   1/1/1/1   2/2/2/2        2/2/2/2        1/1/1/1        51120   7.98x
+ 1-8-8-8 CV_8U-like     1/8/8/8   2/233/113/54   2/5/21/95      1/3/5/7       140160   2.91x
+
+ "in the frame" counts DISTINCT VALUES PRESENT in one 640x480-derived
+ level; "reachable" is the alphabet the arithmetic can produce at all, and
+ "bits needed" follows the reachable column. The two differ, and the
+ difference matters: EXPERIMENTS.md reported 2/5/15/26 for the CV_8U
+ ladder, which is what a 256x256 frame CONTAINED -- its level 3 is 32x32,
+ i.e. 1024 pixels drawn from an alphabet of 65. A frame statistic falls
+ with the frame size; the reachable alphabet does not.
+
+THE 2x2 BOX SUM: LINEAR AGAINST EXPONENTIAL -- 640x480 -> 320x240, uint32_t
+ NOut = NIn + 1 throughout, so the requantizer is the same shape in every
+ row and the difference between the pair is the SUM alone.
+
+ route                     ns/dst px     spread   stages   inputs  vs linear
+ ------------------------ ---------- ---------- -------- -------- ----------
+ NIn=1 linear adder           0.3795     106.8%        4        -          -
+ NIn=1 replicated             0.8138      71.8%        -        4      2.14x
+ NIn=2 linear adder           0.7700      18.1%        7        -          -
+ NIn=2 replicated             1.7244      30.9%        -       12      2.24x
+ NIn=3 linear adder           1.8442      96.2%       10        -          -
+ NIn=3 replicated             4.4568      31.8%        -       28      2.42x
+ NIn=4 linear adder           2.5996      19.9%       13        -          -
+ NIn=4 replicated             8.6082      29.1%        -       60      3.31x
+
+ The stage counts are impl::boxSumFullAdders(NIn) = 3*NIn + 1 and
+ impl::boxSum4ReplicatedInputs(NIn) = 4*(2^NIn - 1). At NIn = 8 they are 25
+ and 1020; the replicated arm refuses to compile above NIn = 5, where its
+ input array is already 124 words per destination word.
+
+sink = 103262438795108

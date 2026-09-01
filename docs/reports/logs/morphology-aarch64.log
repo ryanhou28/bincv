@@ -1,0 +1,410 @@
+# morphology -- aarch64
+# host:     
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# governor: performance
+# throttled:throttled=0x80000
+# pinning:  taskset -c 3 (applied by the runner)
+# date:     2026-09-01T12:21:34-07:00
+
+ morphology -- erode / dilate / morphologyEx vs OpenCV
+================================================================================
+
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+
+DENOMINATOR (ARCHITECTURE 10.3): cv::erode / cv::dilate / cv::morphologyEx on
+the SAME binary content stored as CV_8U, with the same structuring element,
+anchor and border. That is what a user does today without binCV.
+
+binCV rows: ops/morphology.hpp at uint32 (the default word type,) and
+uint64. erode and dilate use NO scratch; morphologyEx(OPEN) uses exactly one
+caller-provided frame.
+
+Working set is one call's live buffers, not a per-buffer ratio (CLAUDE.md,
+ARCHITECTURE 10.4). Both columns are ratios against the OpenCV row.
+
+FIXED PER-CALL COST (hazard 5) is measured on a 2x2 frame FOR EACH CASE and
+printed on that case's PER-FRAME line -- it is the part of the row that is not
+the operation. Divided by a frame's pixel count it is what a small frame's
+ns/pixel is mostly made of. It is NOT subtracted from the tables.
+
+================ 640 x 480 (307200 pixels) ================
+ one frame: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x smaller)
+ timed loop resident (hazard 2, 4 rotated inputs + 1 dst, NOT the working set): binCV uint32 192000 B, OpenCV CV_8U 1536000 B
+
+ --- erode 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      76800 B (2 frames, src + dst, NO scratch)
+ binCV uint64      76800 B (2 frames)
+ OpenCV CV_8U     614400 B (2 frames)
+ composed spelling: shift + bitwise per cell, 17 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          0.71993       1.00x       614400 B          1.00x  1260696139571710162
+ binCV uint32          0.72012       1.00x        76800 B          8.00x  1260696139571710162
+ binCV uint64          0.37774       1.91x        76800 B          8.00x  1260696139571710162
+ binCV composed u32      1.53057       0.47x       115200 B          5.33x  1260696139571710162
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 221.16 us (fixed per-call cost 2.85 us, 1%), binCV u32 221.22 us (0.22 us, 0%). Both floors are THIS case's.
+
+ --- dilate 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      76800 B (2 frames, src + dst, NO scratch)
+ binCV uint64      76800 B (2 frames)
+ OpenCV CV_8U     614400 B (2 frames)
+ composed spelling: shift + bitwise per cell, 17 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          0.72416       1.00x       614400 B          1.00x 17458488903720496321
+ binCV uint32          0.48424       1.50x        76800 B          8.00x 17458488903720496321
+ binCV uint64          0.26193       2.76x        76800 B          8.00x 17458488903720496321
+ binCV composed u32      1.36982       0.53x       115200 B          5.33x 17458488903720496321
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 222.46 us (fixed per-call cost 2.79 us, 1%), binCV u32 148.76 us (0.22 us, 0%). Both floors are THIS case's.
+
+ --- erode 5x5 ellipse, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      76800 B (2 frames, src + dst, NO scratch)
+ binCV uint64      76800 B (2 frames)
+ OpenCV CV_8U     614400 B (2 frames)
+ composed spelling: shift + bitwise per cell, 33 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          1.81575       1.00x       614400 B          1.00x  8785782558382229500
+ binCV uint32          3.58631       0.51x        76800 B          8.00x  8785782558382229500
+ binCV uint64          2.54125       0.71x        76800 B          8.00x  8785782558382229500
+ binCV composed u32      2.96732       0.61x       115200 B          5.33x  8785782558382229500
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 557.80 us (fixed per-call cost 3.48 us, 1%), binCV u32 1101.71 us (1.08 us, 0%). Both floors are THIS case's.
+
+ --- open 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32     115200 B (3 frames, src + dst + caller scratch)
+ binCV uint64     115200 B (3 frames)
+ OpenCV CV_8U     614400 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          1.34128       1.00x       614400 B          1.00x 10950020587041844635
+ binCV uint32          1.20437       1.11x       115200 B          5.33x 10950020587041844635
+ binCV uint64          0.64372       2.08x       115200 B          5.33x 10950020587041844635
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 412.04 us (fixed per-call cost 5.86 us, 1%), binCV u32 369.98 us (0.44 us, 0%). Both floors are THIS case's.
+
+ --- erode 3x3 rect, BORDER_REPLICATE ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      76800 B (2 frames, src + dst, NO scratch)
+ binCV uint64      76800 B (2 frames)
+ OpenCV CV_8U     614400 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          0.67176       1.00x       614400 B          1.00x  1260696139571710162
+ binCV uint32          0.93004       0.72x        76800 B          8.00x  1260696139571710162
+ binCV uint64          0.61364       1.09x        76800 B          8.00x  1260696139571710162
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 206.37 us (fixed per-call cost 2.36 us, 1%), binCV u32 285.71 us (0.53 us, 0%). Both floors are THIS case's.
+
+ --- erode 3x3 rect, BORDER_REFLECT_101 ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      76800 B (2 frames, src + dst, NO scratch)
+ binCV uint64      76800 B (2 frames)
+ OpenCV CV_8U     614400 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          0.67158       1.00x       614400 B          1.00x  1260696139571710162
+ binCV uint32          0.94380       0.71x        76800 B          8.00x  1260696139571710162
+ binCV uint64          0.63447       1.06x        76800 B          8.00x  1260696139571710162
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 206.31 us (fixed per-call cost 2.38 us, 1%), binCV u32 289.94 us (0.57 us, 0%). Both floors are THIS case's.
+ sink=13835072034410025360
+
+================ 320 x 240 (76800 pixels) ================
+ one frame: binCV uint32 9600 B, binCV uint64 9600 B, OpenCV CV_8U 76800 B (8.0x smaller)
+ timed loop resident (hazard 2, 4 rotated inputs + 1 dst, NOT the working set): binCV uint32 48000 B, OpenCV CV_8U 384000 B
+
+ --- erode 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      19200 B (2 frames, src + dst, NO scratch)
+ binCV uint64      19200 B (2 frames)
+ OpenCV CV_8U     153600 B (2 frames)
+ composed spelling: shift + bitwise per cell, 17 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          0.82822       1.00x       153600 B          1.00x 16899824580364343907
+ binCV uint32          0.73258       1.13x        19200 B          8.00x 16899824580364343907
+ binCV uint64          0.39947       2.07x        19200 B          8.00x 16899824580364343907
+ binCV composed u32      1.58868       0.52x        28800 B          5.33x 16899824580364343907
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 63.61 us (fixed per-call cost 2.82 us, 4%), binCV u32 56.26 us (0.22 us, 0%). Both floors are THIS case's.
+
+ --- dilate 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      19200 B (2 frames, src + dst, NO scratch)
+ binCV uint64      19200 B (2 frames)
+ OpenCV CV_8U     153600 B (2 frames)
+ composed spelling: shift + bitwise per cell, 17 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          0.83124       1.00x       153600 B          1.00x 17245620134016516892
+ binCV uint32          0.49803       1.67x        19200 B          8.00x 17245620134016516892
+ binCV uint64          0.30382       2.74x        19200 B          8.00x 17245620134016516892
+ binCV composed u32      1.34497       0.62x        28800 B          5.33x 17245620134016516892
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 63.84 us (fixed per-call cost 2.76 us, 4%), binCV u32 38.25 us (0.22 us, 1%). Both floors are THIS case's.
+
+ --- erode 5x5 ellipse, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      19200 B (2 frames, src + dst, NO scratch)
+ binCV uint64      19200 B (2 frames)
+ OpenCV CV_8U     153600 B (2 frames)
+ composed spelling: shift + bitwise per cell, 33 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          1.94237       1.00x       153600 B          1.00x 14841181594570105892
+ binCV uint32          4.01659       0.48x        19200 B          8.00x 14841181594570105892
+ binCV uint64          2.84153       0.68x        19200 B          8.00x 14841181594570105892
+ binCV composed u32      3.07154       0.63x        28800 B          5.33x 14841181594570105892
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 149.17 us (fixed per-call cost 3.33 us, 2%), binCV u32 308.47 us (1.08 us, 0%). Both floors are THIS case's.
+
+ --- open 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      28800 B (3 frames, src + dst + caller scratch)
+ binCV uint64      28800 B (3 frames)
+ OpenCV CV_8U     153600 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          1.66432       1.00x       153600 B          1.00x   972669361060794485
+ binCV uint32          1.23944       1.34x        28800 B          5.33x   972669361060794485
+ binCV uint64          0.70255       2.37x        28800 B          5.33x   972669361060794485
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 127.82 us (fixed per-call cost 5.83 us, 5%), binCV u32 95.19 us (0.44 us, 0%). Both floors are THIS case's.
+
+ --- erode 3x3 rect, BORDER_REPLICATE ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      19200 B (2 frames, src + dst, NO scratch)
+ binCV uint64      19200 B (2 frames)
+ OpenCV CV_8U     153600 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          0.79800       1.00x       153600 B          1.00x 16899824580364343907
+ binCV uint32          1.16168       0.69x        19200 B          8.00x 16899824580364343907
+ binCV uint64          0.86888       0.92x        19200 B          8.00x 16899824580364343907
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 61.29 us (fixed per-call cost 2.36 us, 4%), binCV u32 89.22 us (0.53 us, 1%). Both floors are THIS case's.
+
+ --- erode 3x3 rect, BORDER_REFLECT_101 ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32      19200 B (2 frames, src + dst, NO scratch)
+ binCV uint64      19200 B (2 frames)
+ OpenCV CV_8U     153600 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          0.79909       1.00x       153600 B          1.00x 16899824580364343907
+ binCV uint32          1.18746       0.67x        19200 B          8.00x 16899824580364343907
+ binCV uint64          0.92134       0.87x        19200 B          8.00x 16899824580364343907
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 61.37 us (fixed per-call cost 2.37 us, 4%), binCV u32 91.20 us (0.57 us, 1%). Both floors are THIS case's.
+ sink=13835121138379720081
+
+================ 160 x 120 (19200 pixels) ================
+ one frame: binCV uint32 2400 B, binCV uint64 2880 B, OpenCV CV_8U 19200 B (8.0x smaller)
+ timed loop resident (hazard 2, 4 rotated inputs + 1 dst, NOT the working set): binCV uint32 12000 B, OpenCV CV_8U 96000 B
+
+ --- erode 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       4800 B (2 frames, src + dst, NO scratch)
+ binCV uint64       5760 B (2 frames)
+ OpenCV CV_8U      38400 B (2 frames)
+ composed spelling: shift + bitwise per cell, 17 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          1.30549       1.00x        38400 B          1.00x  6672898377854772647
+ binCV uint32          0.78951       1.65x         4800 B          8.00x  6672898377854772647
+ binCV uint64          0.55678       2.34x         5760 B          6.67x  6672898377854772647
+ binCV composed u32      1.81581       0.72x         7200 B          5.33x  6672898377854772647
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 25.07 us (fixed per-call cost 2.76 us, 11%), binCV u32 15.16 us (0.22 us, 1%). Both floors are THIS case's.
+
+ --- dilate 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       4800 B (2 frames, src + dst, NO scratch)
+ binCV uint64       5760 B (2 frames)
+ OpenCV CV_8U      38400 B (2 frames)
+ composed spelling: shift + bitwise per cell, 17 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          1.32134       1.00x        38400 B          1.00x  5962701929781620181
+ binCV uint32          0.58231       2.27x         4800 B          8.00x  5962701929781620181
+ binCV uint64          0.43894       3.01x         5760 B          6.67x  5962701929781620181
+ binCV composed u32      1.68691       0.78x         7200 B          5.33x  5962701929781620181
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 25.37 us (fixed per-call cost 2.80 us, 11%), binCV u32 11.18 us (0.22 us, 2%). Both floors are THIS case's.
+
+ --- erode 5x5 ellipse, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       4800 B (2 frames, src + dst, NO scratch)
+ binCV uint64       5760 B (2 frames)
+ OpenCV CV_8U      38400 B (2 frames)
+ composed spelling: shift + bitwise per cell, 33 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          2.34525       1.00x        38400 B          1.00x   309550808958009125
+ binCV uint32          4.56909       0.51x         4800 B          8.00x   309550808958009125
+ binCV uint64          3.96316       0.59x         5760 B          6.67x   309550808958009125
+ binCV composed u32      3.51966       0.67x         7200 B          5.33x   309550808958009125
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 45.03 us (fixed per-call cost 3.32 us, 7%), binCV u32 87.73 us (1.08 us, 1%). Both floors are THIS case's.
+
+ --- open 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       7200 B (3 frames, src + dst + caller scratch)
+ binCV uint64       8640 B (3 frames)
+ OpenCV CV_8U      38400 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          2.64133       1.00x        38400 B          1.00x  8933051777254023257
+ binCV uint32          1.36569       1.93x         7200 B          5.33x  8933051777254023257
+ binCV uint64          0.99494       2.65x         8640 B          4.44x  8933051777254023257
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 50.71 us (fixed per-call cost 5.83 us, 12%), binCV u32 26.22 us (0.44 us, 2%). Both floors are THIS case's.
+
+ --- erode 3x3 rect, BORDER_REPLICATE ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       4800 B (2 frames, src + dst, NO scratch)
+ binCV uint64       5760 B (2 frames)
+ OpenCV CV_8U      38400 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          1.25377       1.00x        38400 B          1.00x  6672898377854772647
+ binCV uint32          1.63477       0.77x         4800 B          8.00x  6672898377854772647
+ binCV uint64          1.49370       0.84x         5760 B          6.67x  6672898377854772647
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 24.07 us (fixed per-call cost 2.36 us, 10%), binCV u32 31.39 us (0.53 us, 2%). Both floors are THIS case's.
+
+ --- erode 3x3 rect, BORDER_REFLECT_101 ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       4800 B (2 frames, src + dst, NO scratch)
+ binCV uint64       5760 B (2 frames)
+ OpenCV CV_8U      38400 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          1.25407       1.00x        38400 B          1.00x  6672898377854772647
+ binCV uint32          1.68514       0.74x         4800 B          8.00x  6672898377854772647
+ binCV uint64          1.59973       0.78x         5760 B          6.67x  6672898377854772647
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 24.08 us (fixed per-call cost 2.38 us, 10%), binCV u32 32.35 us (0.57 us, 2%). Both floors are THIS case's.
+ sink=7122558434147435394
+
+================ 94 x 60 (5640 pixels) ================
+ one frame: binCV uint32 720 B, binCV uint64 960 B, OpenCV CV_8U 5640 B (7.8x smaller)
+ timed loop resident (hazard 2, 4 rotated inputs + 1 dst, NOT the working set): binCV uint32 3600 B, OpenCV CV_8U 28200 B
+
+ --- erode 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       1440 B (2 frames, src + dst, NO scratch)
+ binCV uint64       1920 B (2 frames)
+ OpenCV CV_8U      11280 B (2 frames)
+ composed spelling: shift + bitwise per cell, 17 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          2.71101       1.00x        11280 B          1.00x  6702297977393400249
+ binCV uint32          0.92715       2.92x         1440 B          7.83x  6702297977393400249
+ binCV uint64          0.79147       3.43x         1920 B          5.88x  6702297977393400249
+ binCV composed u32      2.83984       0.95x         2160 B          5.22x  6702297977393400249
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 15.29 us (fixed per-call cost 2.74 us, 18%), binCV u32 5.23 us (0.22 us, 4%). Both floors are THIS case's.
+
+ --- dilate 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       1440 B (2 frames, src + dst, NO scratch)
+ binCV uint64       1920 B (2 frames)
+ OpenCV CV_8U      11280 B (2 frames)
+ composed spelling: shift + bitwise per cell, 17 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          2.72274       1.00x        11280 B          1.00x 15660457014326852390
+ binCV uint32          0.75470       3.61x         1440 B          7.83x 15660457014326852390
+ binCV uint64          0.61910       4.40x         1920 B          5.88x 15660457014326852390
+ binCV composed u32      2.72913       1.00x         2160 B          5.22x 15660457014326852390
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 15.36 us (fixed per-call cost 2.87 us, 19%), binCV u32 4.26 us (0.22 us, 5%). Both floors are THIS case's.
+
+ --- erode 5x5 ellipse, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       1440 B (2 frames, src + dst, NO scratch)
+ binCV uint64       1920 B (2 frames)
+ OpenCV CV_8U      11280 B (2 frames)
+ composed spelling: shift + bitwise per cell, 33 traversals against the fused kernel's 1, and a THIRD frame.
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          4.84099       1.00x        11280 B          1.00x  1211060612208259525
+ binCV uint32          5.70298       0.85x         1440 B          7.83x  1211060612208259525
+ binCV uint64          5.31580       0.91x         1920 B          5.88x  1211060612208259525
+ binCV composed u32      5.58671       0.87x         2160 B          5.22x  1211060612208259525
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 27.30 us (fixed per-call cost 3.41 us, 12%), binCV u32 32.16 us (1.08 us, 3%). Both floors are THIS case's.
+
+ --- open 3x3 rect, BORDER_CONSTANT ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       2160 B (3 frames, src + dst + caller scratch)
+ binCV uint64       2880 B (3 frames)
+ OpenCV CV_8U      11280 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          5.45358       1.00x        11280 B          1.00x 13077777752020252438
+ binCV uint32          1.68050       3.25x         2160 B          5.22x 13077777752020252438
+ binCV uint64          1.41101       3.87x         2880 B          3.92x 13077777752020252438
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 30.76 us (fixed per-call cost 5.83 us, 19%), binCV u32 9.48 us (0.44 us, 5%). Both floors are THIS case's.
+
+ --- erode 3x3 rect, BORDER_REPLICATE ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       1440 B (2 frames, src + dst, NO scratch)
+ binCV uint64       1920 B (2 frames)
+ OpenCV CV_8U      11280 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          2.53776       1.00x        11280 B          1.00x  6702297977393400249
+ binCV uint32          2.37830       1.07x         1440 B          7.83x  6702297977393400249
+ binCV uint64          2.39751       1.06x         1920 B          5.88x  6702297977393400249
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 14.31 us (fixed per-call cost 2.35 us, 16%), binCV u32 13.41 us (0.54 us, 4%). Both floors are THIS case's.
+
+ --- erode 3x3 rect, BORDER_REFLECT_101 ---
+ WORKING SET of one call (the number CLAUDE.md asks for):
+ binCV uint32       1440 B (2 frames, src + dst, NO scratch)
+ binCV uint64       1920 B (2 frames)
+ OpenCV CV_8U      11280 B (2 frames)
+
+ IMPLEMENTATION       ns/pixel   vs OpenCV    working set      vs OpenCV             checksum
+ ----------------------------------------------------------------------------------------------------
+ OpenCV CV_8U          2.54402       1.00x        11280 B          1.00x  6702297977393400249
+ binCV uint32          2.48046       1.03x         1440 B          7.83x  6702297977393400249
+ binCV uint64          2.58460       0.98x         1920 B          5.88x  6702297977393400249
+ ratio > 1 means binCV is better. All checksums must be EQUAL (hazard 1).
+ PER-FRAME: OpenCV 14.35 us (fixed per-call cost 2.36 us, 16%), binCV u32 13.99 us (0.57 us, 4%). Both floors are THIS case's.
+ sink=5864926293091562315
+

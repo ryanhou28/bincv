@@ -1,0 +1,25 @@
+# fast_bitplane -- x86-64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   25065d7
+# pinning:  taskset -c 2
+# date:     2026-09-01T12:05:06-07:00
+
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U          266.2 us  1.00x    360960 B
+ (b) binCV wide, CV_8U          262.5 us  1.01x    360960 B
+ (c) binCV BIT-PLANE            177.0 us  1.50x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     189.9 us  1.40x vs cv::FAST
+ threshold 2              187.2 us  1.42x vs cv::FAST
+ threshold 3              177.1 us  1.50x vs cv::FAST
+ threshold 4              175.8 us  1.51x vs cv::FAST
+ threshold 6              171.9 us  1.55x vs cv::FAST
+ threshold 8              172.0 us  1.55x vs cv::FAST
+ threshold 12             175.7 us  1.52x vs cv::FAST
+ threshold never          182.8 us  1.46x vs cv::FAST

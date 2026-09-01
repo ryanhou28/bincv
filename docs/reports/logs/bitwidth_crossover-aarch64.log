@@ -1,0 +1,25 @@
+# bitwidth_crossover -- aarch64
+# host:     
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# governor: performance
+# throttled:throttled=0x80000
+# pinning:  taskset -c 3 (applied by the runner)
+# date:     2026-09-01T12:25:30-07:00
+
+ARM  0 gauss 1 -> 1                        538.5 us
+ARM  1 gauss 2 -> 2                       1448.5 us
+ARM  2 gauss 3 -> 3                       2126.3 us
+ARM  3 gauss 4 -> 4                       2711.4 us
+ARM  4 gauss 5 -> 5                       4397.0 us
+ARM  5 gauss 8 -> 8                       7597.0 us
+ARM  6 gauss 1 -> 3 (binary in)            673.2 us
+ARM  7 gauss 1 -> 5 (binary in)            719.8 us
+ARM  8 box 1 -> 1                          319.8 us
+ARM  9 box 2 -> 2                          205.1 us
+ARM 10 box 3 -> 3                          306.5 us
+ARM 11 box 4 -> 4                          444.2 us
+ARM 12 box 5 -> 5                          648.1 us
+ARM 13 box 8 -> 8                         2604.4 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          275.6 us
+ARM 15 cv::pyrDown 8U (denominator)        514.7 us

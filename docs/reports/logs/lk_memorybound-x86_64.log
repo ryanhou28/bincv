@@ -1,0 +1,25 @@
+# lk_memorybound -- x86-64
+# commit:   25065d7
+# pinning:  taskset -c 2
+# date:     2026-09-01T12:12:51-07:00
+
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.2014         5.7546
+       80       0.3416         4.2700
+      140       0.5852         4.1798
+      300       1.3531         4.5104
+      560       2.5798         4.6067
+     1160       5.6271         4.8510
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       0.6744         4.8170
+      640x480       37.5       0.6171         4.4075
+     1280x960      150.0       0.6657         4.7553
+    1920x1440      337.5       0.7582         5.4160
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.

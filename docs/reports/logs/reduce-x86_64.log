@@ -1,0 +1,79 @@
+# reduce -- x86-64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   25065d7
+# pinning:  taskset -c 2
+# date:     2026-09-01T12:04:28-07:00
+
+=== binCV reduction benchmark ===
+OpenCV 4.8.0-dev, cv::getNumThreads() = 1; binCV is single-threaded
+Denominator: cv::countNonZero on the same content as CV_8U (ARCHITECTURE 10.3)
+popcount lowering: x86-64 with POPCNT: popcntq per word
+x86_64 numbers are INDICATIVE. close on the reference device.
+
+--- 94 x 60 (5640 pixels) ---
+ all implementations agree (2786 set pixels in image 0)
+[BENCH] countNonZero             binCV uint8           0.03759 ns/px     3.33 GB/s read        705 B/buffer
+[BENCH] countNonZero             binCV uint16          0.01899 ns/px     6.58 GB/s read        705 B/buffer
+[BENCH] countNonZero             binCV uint32          0.01072 ns/px    11.91 GB/s read        720 B/buffer
+[BENCH] countNonZero             binCV uint64          0.00726 ns/px    17.22 GB/s read        705 B/buffer
+[BENCH] countNonZero             binCV per-pixel       0.44822 ns/px     0.28 GB/s read        720 B/buffer
+[BENCH] countNonZero             OpenCV CV_8U          0.02067 ns/px    48.37 GB/s read       5640 B/buffer
+ ratio vs OpenCV: uint32 1.93x, uint64 2.85x | vs the per-pixel loop: 41.8x
+[BENCH] countAnd                 binCV uint32          0.01340 ns/px    19.06 GB/s read        720 B/buffer
+[BENCH] countAnd                 OpenCV composite      0.04863 ns/px    61.69 GB/s read      11280 B/buffer
+ ratio vs the OpenCV composite: 3.63x (and binCV allocates no temporary)
+[BENCH] countAndSplit            binCV uint32             11.0 ns/window over 240 windows (7x7)
+[BENCH] countAndSplit            binCV uint32             19.7 ns/window over 240 windows (15x15)
+[BENCH] countAndSplit            binCV uint32             40.2 ns/window over 240 windows (31x31)
+
+--- 640 x 480 (307200 pixels) ---
+ all implementations agree (153288 set pixels in image 0)
+[BENCH] countNonZero             binCV uint8           0.03126 ns/px     4.00 GB/s read      38400 B/buffer
+[BENCH] countNonZero             binCV uint16          0.01578 ns/px     7.92 GB/s read      38400 B/buffer
+[BENCH] countNonZero             binCV uint32          0.00956 ns/px    13.08 GB/s read      38400 B/buffer
+[BENCH] countNonZero             binCV uint64          0.00598 ns/px    20.91 GB/s read      38400 B/buffer
+[BENCH] countNonZero             binCV per-pixel       0.44753 ns/px     0.28 GB/s read      38400 B/buffer
+[BENCH] countNonZero             OpenCV CV_8U          0.01548 ns/px    64.59 GB/s read     307200 B/buffer
+ ratio vs OpenCV: uint32 1.62x, uint64 2.59x | vs the per-pixel loop: 46.8x
+[BENCH] countAnd                 binCV uint32          0.01199 ns/px    20.85 GB/s read      38400 B/buffer
+[BENCH] countAnd                 OpenCV composite      0.04164 ns/px    72.05 GB/s read     614400 B/buffer
+ ratio vs the OpenCV composite: 3.47x (and binCV allocates no temporary)
+[BENCH] countAndSplit            binCV uint32             13.4 ns/window over 200 windows (7x7)
+[BENCH] countAndSplit            binCV uint32             25.8 ns/window over 200 windows (15x15)
+[BENCH] countAndSplit            binCV uint32             48.6 ns/window over 200 windows (31x31)
+
+--- 1024 x 1024 (1048576 pixels) ---
+ all implementations agree (523817 set pixels in image 0)
+[BENCH] countNonZero             binCV uint8           0.03167 ns/px     3.95 GB/s read     131072 B/buffer
+[BENCH] countNonZero             binCV uint16          0.01566 ns/px     7.98 GB/s read     131072 B/buffer
+[BENCH] countNonZero             binCV uint32          0.00870 ns/px    14.37 GB/s read     131072 B/buffer
+[BENCH] countNonZero             binCV uint64          0.00636 ns/px    19.66 GB/s read     131072 B/buffer
+[BENCH] countNonZero             binCV per-pixel       0.45408 ns/px     0.28 GB/s read     131072 B/buffer
+[BENCH] countNonZero             OpenCV CV_8U          0.01475 ns/px    67.79 GB/s read    1048576 B/buffer
+ ratio vs OpenCV: uint32 1.70x, uint64 2.32x | vs the per-pixel loop: 52.2x
+[BENCH] countAnd                 binCV uint32          0.01224 ns/px    20.42 GB/s read     131072 B/buffer
+[BENCH] countAnd                 OpenCV composite      0.04360 ns/px    68.80 GB/s read    2097152 B/buffer
+ ratio vs the OpenCV composite: 3.56x (and binCV allocates no temporary)
+[BENCH] countAndSplit            binCV uint32             11.2 ns/window over 231 windows (7x7)
+[BENCH] countAndSplit            binCV uint32             22.7 ns/window over 231 windows (15x15)
+[BENCH] countAndSplit            binCV uint32             48.2 ns/window over 231 windows (31x31)
+
+--- 8192 x 4096 (33554432 pixels) ---
+ all implementations agree (16779624 set pixels in image 0)
+[BENCH] countNonZero             binCV uint8           0.03007 ns/px     4.16 GB/s read    4194304 B/buffer
+[BENCH] countNonZero             binCV uint16          0.01562 ns/px     8.00 GB/s read    4194304 B/buffer
+[BENCH] countNonZero             binCV uint32          0.00859 ns/px    14.54 GB/s read    4194304 B/buffer
+[BENCH] countNonZero             binCV uint64          0.00788 ns/px    15.85 GB/s read    4194304 B/buffer
+[BENCH] countNonZero             binCV per-pixel       0.44596 ns/px     0.28 GB/s read    4194304 B/buffer
+[BENCH] countNonZero             OpenCV CV_8U          0.05770 ns/px    17.33 GB/s read   33554432 B/buffer
+ ratio vs OpenCV: uint32 6.71x, uint64 7.32x | vs the per-pixel loop: 51.9x
+[BENCH] countAnd                 binCV uint32          0.01538 ns/px    16.26 GB/s read    4194304 B/buffer
+[BENCH] countAnd                 OpenCV composite      0.18539 ns/px    16.18 GB/s read   67108864 B/buffer
+ ratio vs the OpenCV composite: 12.06x (and binCV allocates no temporary)
+[BENCH] countAndSplit            binCV uint32             17.0 ns/window over 231 windows (7x7)
+[BENCH] countAndSplit            binCV uint32             51.9 ns/window over 231 windows (15x15)
+[BENCH] countAndSplit            binCV uint32            154.8 ns/window over 231 windows (31x31)
+
+sink: 302589177883 (printed so no reduction above can be optimized away)

@@ -1,0 +1,66 @@
+# frontend -- aarch64
+# cpu:              Raspberry Pi 4 Model B Rev 1.5
+# arch / kernel:    aarch64 / 6.18.34+rpt-rpi-v8
+# compiler:         g++ (Debian 14.2.0-19) 14.2.0
+# governor:         performance (restored to ondemand on exit)
+# core pinning:     taskset -c 3
+# throttled before: throttled=0x80000
+# throttled after:  throttled=0x80000
+# commit:           25065d7
+# note:     throttled=0x80000 is sticky history -- a soft temperature limit recorded
+#           since boot, not an active bit. Before and after are identical, which is
+#           the condition the runner requires, so the run is valid.
+
+binCV SIMD: NEON=yes AVX2=n/a popcount=hardware (fast paths active)
+LK residual kernel: NEON
+LK keypoint batch: off
+
+=== a / frontend over 1710 frames, 752x480 ===
+both frontends see bit-identical input: median_filter then rl_fast_edge_filter_wide(17)
+
+ ... 200 frames
+ ... 400 frames
+ ... 600 frames
+ ... 800 frames
+ ... 1000 frames
+ ... 1200 frames
+ ... 1400 frames
+ ... 1600 frames
+
+--- CRITERION 2: agreement with the reference frontend ---
+ flow vectors compared : 2007 over 1709 frames (82 re-detections)
+ flow difference : median 0.0434 px p90 0.1614 p99 22.4941 max 213.8032
+ (RMS over all : 7.0893 px -- reported for completeness; the
+ comparisons) percentiles above are the honest summary, see
+ agreeing within 1 px : 95.4%
+ track lifetime median : binCV 11 frames OpenCV 12 frames
+ tracks observed : binCV 10279 OpenCV 10129
+ per-frame survival : binCV 96.4% OpenCV 96.6%
+ detections truncated : 1 of 82 (capacity 20000)
+
+--- CRITERION 3: peak footprint over the frontend operation set ---
+ binCV :   436704 B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)
+ OpenCV :  2719832 B (CV_8U pyramid x2 with 31-px border/level, CV_32F eigen map)
+ RATIO : 6.23x smaller
+
+--- binCV per-stage, AT THE REAL DUTY CYCLE ---
+ detect                          0.570 ms/frame  11.5% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      3.307 ms/frame  66.8%
+ build (pyrDown + derivatives)    1.072 ms/frame  21.7%
+  ... sensor stage               0.543 ms/frame  11.0%
+  ... median                     0.176 ms/frame   3.5%
+  ... edge                       0.328 ms/frame   6.6%
+  ... pyrDown                    0.377 ms/frame   7.6%
+  ... derivatives                0.149 ms/frame   3.0%
+
+ sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
+
+--- CRITERION 4: speed against the byte-per-pixel denominator ---
+ binCV :    4.949 ms/frame
+ OpenCV :   23.451 ms/frame
+ RATIO : 4.74x
+ NOTE: OpenCV threads = 1 (binCV is single-threaded, always), and its
+ LK and gftt are SIMD-vectorized.
+ binCV has its NEON path here, so this is SIMD against
+ SIMD on the deployment target -- the comparison criterion 4 is about.
+------------------------------------------------------------

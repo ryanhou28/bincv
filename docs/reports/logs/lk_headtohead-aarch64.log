@@ -1,0 +1,20 @@
+# lk_headtohead -- aarch64
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# governor: performance
+# pinning:  taskset -c 3 (applied by the runner)
+
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            2.843 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.609 ms
+ OpenCV LK on the same bits as CV_8U          23.476 ms
+
+ binCV 1/2/2/2 vs OpenCV : 8.26x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 38.54x (FASTER)
+ cost of the N=2 ladder : 4.67x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
