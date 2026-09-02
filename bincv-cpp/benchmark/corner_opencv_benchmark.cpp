@@ -94,12 +94,12 @@ using Word = uint32_t;  // the design rule’s default, and what a VIO frontend 
 constexpr int kWidth = 640;
 constexpr int kHeight = 480;
 constexpr int kInputs = 4;
-constexpr int kBlockSize = 3;              // seal_params.yaml's gftt_block_size
+constexpr int kBlockSize = 3;              // gftt_block_size in the reference frontend
 constexpr int kMaxCorners = 200;           // gftt_max_corners
 constexpr double kQualityLevel = 0.01;     // gftt_quality_level
 constexpr double kMinDistance = 33.33333333333;  // gftt_min_distance
 
-/// @brief gftt.cpp's comparator, from SEAL/opencv_internal/include/gftt.hpp, with
+/// @brief gftt.cpp's comparator, from the vendored OpenCV good-features header it calls, with
 /// its comment. Ties go to the LATER raster position, because a larger
 /// address in a contiguous CV_32F map is a later pixel.
 struct GreaterThanPtr {
@@ -243,7 +243,7 @@ int main() {
                 CV_VERSION, cv::getNumThreads());
     std::printf("frame %dx%d, blockSize %d, maxCorners %d, qualityLevel %.2f, minDistance %.5f\n",
                 kWidth, kHeight, kBlockSize, kMaxCorners, kQualityLevel, kMinDistance);
-    std::printf("(SEAL/seal_params.yaml verbatim; word uint32_t)\n\n");
+    std::printf("(the reference frontend's parameters verbatim; word uint32_t)\n\n");
 
     std::vector<bincv::BinMat<Word>> bins;
     std::vector<cv::Mat> bytes;

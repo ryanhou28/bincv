@@ -24,7 +24,7 @@
 /// {-1, 0, +1}. `cv::cornerMinEigenVal` runs a 3x3 Sobel over a byte image.
 /// Those are different numbers before any window is summed. That is the
 /// reference pipeline's own choice -- `gftt_corner_derivative_type: BINARIZED`
-/// in SEAL/seal_params.yaml -- and this file reproduces THAT, not OpenCV's
+/// in the reference frontend's parameters -- and this file reproduces THAT, not OpenCV's
 /// default path.
 /// * **`cv::cornerMinEigenVal` works in float and cannot be compared exactly.**
 /// Its `eig` map is `CV_32F` produced by a float box filter over float
@@ -40,8 +40,8 @@
 /// ---------------------------------------------------------------------------
 /// THE OPERATION, READ OUT OF THE REFERENCE RATHER THAN INFERRED
 ///
-/// SEAL/src/keypoint_detection/gftt.cpp and SEAL/src/keypoint_detection/corner.cpp,
-/// with `SEAL/seal_params.yaml`'s values (`gftt_max_corners: 200`,
+/// the reference frontend's detector and corner stages,
+/// with the reference frontend's values (`gftt_max_corners: 200`,
 /// `gftt_quality_level: 0.01`, `gftt_min_distance: 33.33333333333`,
 /// `gftt_block_size: 3`, `gftt_use_harris_detector: 0` -- so MINIMUM EIGENVALUE,
 /// not Harris; GoodFeaturesParams' defaults are those four values and say so).
@@ -132,7 +132,7 @@
 /// between 3 and 7, the net between 7 and 15 -- because the traversal penalty is
 /// still 7% where the incremental win is only 4%. Their sum is **20% SLOWER than
 /// the obvious row-major recomputation at `blockSize = 3`, which is exactly what
-/// SEAL/seal_params.yaml runs.**
+/// the reference frontend runs.**
 ///
 /// The spreads above are WITHIN-run. RUN-TO-RUN scatter was measured separately
 /// over four device runs of the same binary (`results/corner_benchmark_pi4_scatter.log`):
@@ -466,7 +466,7 @@ struct Corner {
 
 /// @brief The four parameters `goodFeaturesToTrack` takes, defaulted to the values
 /// the reference pipeline actually runs.
-/// @note The defaults are SEAL/seal_params.yaml verbatim: `gftt_max_corners: 200`,
+/// @note The defaults are the reference frontend's parameters verbatim: `gftt_max_corners: 200`,
 /// `gftt_quality_level: 0.01`, `gftt_min_distance: 33.33333333333`,
 /// `gftt_block_size: 3`. `gftt_use_harris_detector: 0` is why there is no
 /// Harris option here at all -- the reference selects the minimum
@@ -954,7 +954,7 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
 /// @tparam WordType The containers' word type.
 /// @param dx Horizontal ternary derivative (ops/derivative.hpp, level 0).
 /// @param dy Vertical ternary derivative, with `dx`'s dimensions.
-/// @param params Defaults are SEAL/seal_params.yaml's four values.
+/// @param params Defaults are the reference frontend's four values.
 /// @param scratch Caller-owned response map with the derivatives' dimensions. It
 /// is written, then read. **This is the operation's whole memory cost**:
 /// 4 bytes per pixel, 1 228 800 B at 640x480 -- eight times the four
@@ -1077,7 +1077,7 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 //
 // See in the design notes and in EXPERIMENTS.md for the full table and
 // for the pre-registered rule the numbers were judged against. 640x480,
-// `uint32_t`, `blockSize` 3 (SEAL's own value), medians of 11 interleaved
+// `uint32_t`, `blockSize` 3 (the reference frontend's own value), medians of 11 interleaved
 // batches, within-run spreads 0.15-0.27%, arm order swapped and re-run:
 //
 // form whole detector response stage corner peak frontend peak
@@ -1353,7 +1353,7 @@ inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView
     BINCV_ASSERT(y >= 0 && y < static_cast<int>(magX.height),
                  "corner: the row index must be inside the frame");
 
-    // blockSize 3 is `seal_params.yaml`'s value and the whole frontend's, and it
+    // blockSize 3 is the reference frontend's value and the whole frontend's, and it
     // is the case the bit-sliced box sums above cover. Other block sizes keep the
     // per-pixel form -- the same shape uses, where the fast path serves the
     // shipped configuration and the general one stays for the rest.
@@ -1384,7 +1384,7 @@ inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView
 /// @param magY Magnitude plane of the y-derivative -- `dy.constMagnitude(0)`.
 /// @param signX Sign plane of the x-derivative -- `dx.constSign`.
 /// @param signY Sign plane of the y-derivative -- `dy.constSign`.
-/// @param params Defaults are SEAL/seal_params.yaml's four values.
+/// @param params Defaults are the reference frontend's four values.
 /// @param ring Caller-owned scratch: `magX.width` wide, **at least
 /// `kResponseRingRows` rows**, any stride covering a row. 7 680 B at
 /// 640 px against the frame map's 1 228 800 B. Written, then read; nothing

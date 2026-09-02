@@ -7,7 +7,7 @@
 /// ---------------------------------------------------------------------------
 /// READ OUT OF THE REFERENCE, NOT INFERRED
 ///
-/// `SEAL/src/temporal_processing/edge_filter.cpp`, `rl_fast_edge_filter_wide`:
+/// the reference frontend's edge filter, `rl_fast_edge_filter_wide`:
 ///
 /// kernel_x = [-1 0 1] diff_x = |filter2D(img, kernel_x)|
 /// kernel_y = [-1 0 1]^T diff_y = |filter2D(img, kernel_y)|

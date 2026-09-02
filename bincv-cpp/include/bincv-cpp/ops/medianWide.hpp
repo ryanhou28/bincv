@@ -12,7 +12,7 @@
 /// That is the right kernel and it is not going anywhere.
 ///
 /// But the reference filters the **grayscale** image, BEFORE binarization:
-/// `SEALProcessor.cpp` runs `three_pix_median_filter(img)` and only then
+/// the reference frontend's top level runs `three_pix_median_filter(img)` and only then
 /// `rl_fast_edge_filter_wide(img, t)`. A binary-only median cannot sit where the
 /// reference puts it, so a frontend that wanted the reference's pipeline had to
 /// borrow OpenCV for this one step.
@@ -20,7 +20,7 @@
 /// ---------------------------------------------------------------------------
 /// THE NEIGHBOURHOOD IS THE CALLER'S, AND THE REFERENCE HAS TWO OF THEM
 ///
-/// `SEAL/src/temporal_processing/denoise.cpp` carries `three_pix_median_filter` --
+/// the reference frontend's denoiser carries `three_pix_median_filter` --
 /// the asymmetric L, `p1` above / `p2` center / `p3` right -- **and**
 /// `five_pix_median_filter`, the plus. Both ship here as named constants, and an
 /// arbitrary offset set is a template argument rather than a fork.

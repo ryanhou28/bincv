@@ -92,7 +92,7 @@
 /// popcount: only two of the three numbers slide, and the accumulator forces a
 /// column-major traversal. On the reference device at 640x480 the sliding corner
 /// sweep is 1.22x faster at a 31x31 window and **1.20x SLOWER at 3x3** -- the block
-/// size SEAL/seal_params.yaml runs -- over four runs whose ranking never changes.
+/// size the reference frontend runs -- over four runs whose ranking never changes.
 /// The advice above stands
 /// for large windows and is wrong for small ones; ops/corner.hpp carries the table.
 ///

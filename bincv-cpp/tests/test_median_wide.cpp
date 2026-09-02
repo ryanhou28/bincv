@@ -2,7 +2,7 @@
 //
 // ops/denoise.hpp already implements this neighbourhood for BINARY input, where the
 // median collapses to maj3. But the reference filters the GRAYSCALE image before
-// binarization -- SEALProcessor.cpp runs three_pix_median_filter(img) and only then
+// binarization -- the reference frontend's top level runs three_pix_median_filter(img) and only then
 // rl_fast_edge_filter_wide -- so a binary-only median cannot sit where the reference
 // puts it. This is the wide-input form and the caller-chosen neighbourhood.
 //
@@ -79,7 +79,7 @@ BINCV_TEST(MedianWide, PatternsAgainstOracle) {
 #ifdef BINCV_WITH_OPENCV
 BINCV_TEST(MedianWide, ReferenceLMatchesTheReferenceSpelling) {
     // three_pix_median_filter, ported call for call from
-    // SEAL/src/temporal_processing/denoise.cpp.
+    // the reference frontend's denoiser.
     constexpr int kW = 53, kH = 23;
     cv::Mat img(kH, kW, CV_8U);
     uint64_t st = 4242;

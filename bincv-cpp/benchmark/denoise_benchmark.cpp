@@ -4,7 +4,7 @@
 // THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that denominator is not a judgement call -- it is
-// SEAL/src/temporal_processing/denoise.cpp's `three_pix_median_filter`, ported
+// the reference frontend's denoiser, `three_pix_median_filter`, ported
 // call for call, because that IS what the pipeline runs today without binCV.
 // The two `cv::Mat::zeros` neighbour matrices and the two range-limited copyTo
 // calls are part of the work, not setup: they are how that implementation
@@ -143,7 +143,7 @@ void makeImage(Image& out, int width, int height, uint64_t seed) {
 // The denominator: the reference implementation, ported call for call
 // ---------------------------------------------------------------------------
 
-/// @brief SEAL's three_pix_median_filter, in two spellings: the denominator, and
+/// @brief The reference frontend's three-pixel median, in two spellings: the denominator, and
 /// the reference exactly as written.
 /// @note WHAT IS HOISTED, PRECISELY. The reference constructs SEVEN cv::Mats per
 /// call with `cv::Mat::zeros`, i.e. seven allocations and six zero-fills
@@ -560,7 +560,7 @@ int main() {
     std::printf("================================================================================\n\n");
     std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n\n",
                 CV_VERSION, cv::getNumThreads());
-    std::printf("DENOMINATOR (ARCHITECTURE 10.3): SEAL's three_pix_median_filter on the SAME\n");
+    std::printf("DENOMINATOR (ARCHITECTURE 10.3): the reference frontend's three-pixel median on the SAME\n");
     std::printf("binary content stored as CV_8U -- cv::min/cv::max over two zero-filled\n");
     std::printf("neighbour matrices, ported call for call. That is what the pipeline runs\n");
     std::printf("today without binCV.\n\n");

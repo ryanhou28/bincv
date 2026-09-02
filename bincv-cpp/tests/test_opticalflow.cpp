@@ -593,7 +593,7 @@ std::vector<Point2f> eligiblePoints(const TernaryMat<WordType>& dx,
     ResponseMap map{mapStorage.data(), static_cast<size_t>(width), static_cast<size_t>(height),
                     static_cast<size_t>(width)};
     std::vector<Corner> found(static_cast<size_t>(width) * static_cast<size_t>(height));
-    GoodFeaturesParams params;  // seal_params.yaml verbatim
+    GoodFeaturesParams params;  // the reference frontend's parameters verbatim
     const CornerResult r =
         bincv::goodFeaturesToTrack(dx, dy, params, map, found.data(), found.size());
 
@@ -724,7 +724,7 @@ FlowStats measure(const std::vector<Point2f>& prevPts, const std::vector<Point2f
 template <typename WordType>
 FlowStats runPoints(const char* label, Frontend<WordType>& fe, const Warp& warp,
                     const std::vector<Point2f>& pts, double modelError, bool enforce) {
-    LKParams params;  // seal_params.yaml verbatim
+    LKParams params;  // the reference frontend's parameters verbatim
     std::vector<Point2f> out(pts.size());
     std::vector<uint8_t> status(pts.size());
     std::vector<float> err(pts.size());
@@ -771,7 +771,7 @@ FlowStats runOnFrames(const char* label, Frontend<WordType>& fe, const Warp& war
 /// field and run.
 template <typename WordType>
 FlowStats runCase(const char* label, int width, int height, const Warp& warp, double modelError) {
-    const int levelCount = 4;  // seal_params.yaml: lk_max_level 3
+    const int levelCount = 4;  // the reference frontend's parameters: lk_max_level 3
     Frontend<WordType> fe(width, height, levelCount);
     renderWarped(fe.prev[0], Warp{});
     renderWarped(fe.next[0], warp);
@@ -902,7 +902,7 @@ FlowStats runLadder(const char* label, const BinMat<WordType>& prevSrc,
     fe.build();
     if (bytesOut != nullptr) *bytesOut = fe.bytes();
 
-    LKParams params;  // seal_params.yaml verbatim
+    LKParams params;  // the reference frontend's parameters verbatim
     std::vector<Point2f> out(pts.size());
     std::vector<uint8_t> status(pts.size());
     bincv::calcOpticalFlowPyrLK(fe.levels, pts.data(), out.data(), status.data(), nullptr,
@@ -933,8 +933,8 @@ constexpr int kH = 240;
 // the synthetic cases. Two copies of a tolerance is how two tolerances happen.
 //
 // THE BINARIZATION IS THE REFERENCE PIPELINE'S OWN, NOT A THRESHOLD CHOSEN HERE.
-// `rl_fast_edge_filter_wide` (SEAL/src/temporal_processing/edge_filter.cpp) with
-// `edge_threshold: 17` is what produces the frames the SEAL frontend actually
+// `rl_fast_edge_filter_wide` (the reference frontend's edge filter) with
+// `edge_threshold: 17` is what produces the frames the reference frontend actually
 // tracks: `|[-1,0,1] * I| >= 17` horizontally OR vertically. Ported below, it
 // reproduces the repo's shipped `_bin_normalized.png` to within 0.024% of pixels,
 // which is how it is known to be the right function rather than a plausible one.
@@ -955,7 +955,7 @@ constexpr int kH = 240;
 
 /// @brief `rl_fast_edge_filter_wide`, ported call for call.
 /// @brief `three_pix_median_filter`, ported line for line from
-/// `SEAL/src/temporal_processing/denoise.cpp`. **STAGE ONE of the reference
+/// the reference frontend's denoiser. **STAGE ONE of the reference
 /// preprocessing, and it was missing from this file until 2026-08-21.**
 /// @note p1 is the pixel ABOVE, p2 the center, p3 the pixel to the RIGHT:
 /// `median = max(min(p1,p2), min(max(p1,p2), p3))`. Borders are ZERO-filled,
@@ -991,14 +991,14 @@ cv::Mat referenceEdgeFilter(const cv::Mat& gray, int edgeThreshold) {
 }
 
 /// @brief THE REFERENCE PREPROCESSING, BOTH STAGES, in the order
-/// `SEALProcessor::temporal_process` runs them.
+/// the reference frontend's temporal stage runs them.
 ///
 /// ```
-/// if (cfg.seal_denoiser_on) median_filter(img, cfg.denoiser_type);
-/// if (cfg.seal_edge_filter_on) rl_fast_edge_filter_wide(img, cfg.edge_threshold);
+/// if (cfg.denoiser_on) median_filter(img, cfg.denoiser_type);
+/// if (cfg.edge_filter_on) rl_fast_edge_filter_wide(img, cfg.edge_threshold);
 /// ```
 ///
-/// `seal_params.yaml` sets `seal_denoiser_on: 1`, `denoiser_type:
+/// the reference frontend's parameters enables the denoiser, `denoiser_type:
 /// "THREE_PIX_MEDIAN"`, `edge_threshold: 17` -- so both stages run and this is the
 /// content the reference frontend actually sees.
 ///
@@ -1779,8 +1779,8 @@ std::uint64_t cornerDigest(const Corner* c, std::size_t n) {
 BINCV_TEST(Flow, FrontendFootprint_640x480) {
     constexpr int W = 640;
     constexpr int H = 480;
-    constexpr int LEVELS = 4;   // seal_params.yaml: lk_max_level 3
-    constexpr int POINTS = 200; // seal_params.yaml: gftt_max_corners 200
+    constexpr int LEVELS = 4;   // the reference frontend's parameters: lk_max_level 3
+    constexpr int POINTS = 200; // the reference frontend's parameters: gftt_max_corners 200
     using Word = uint32_t;      //
 
     std::printf("\n PEAK FOOTPRINT OF THE FULL FRONTEND, %dx%d, %d pyramid levels,\n"
@@ -2666,7 +2666,7 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
     BINCV_CHECK(oneDiag2.stuck > 0);
 
     // ---- failure mode (2): the pyramid, and the clipping control ---------
-    std::printf("\n FOUR 1-bit levels -- seal_params.yaml's lk_max_level 3:\n");
+    std::printf("\n FOUR 1-bit levels -- the reference frontend's lk_max_level 3:\n");
     const FlowStats four025 = runRealFrameCase<uint32_t>(gray, "real: shift (0.25, 0.25)",
                                                          translation(0.25, 0.25), 0.0, 4, false);
     runRealFrameCase<uint32_t>(gray, "real: shift (0.50, 0.50)", translation(0.50, 0.50), 0.0, 4,
@@ -2989,7 +2989,7 @@ Yield runArm(const char* label, const BinMat<WordType>& prevSrc, const BinMat<Wo
     seedLevelZero(fe, prevSrc, nextSrc);
     fe.build();
 
-    LKParams params;  // seal_params.yaml verbatim, except the policy under test
+    LKParams params;  // the reference frontend's parameters verbatim, except the policy under test
     params.entryLevel = policy;
     std::vector<Point2f> out(pts.size());
     std::vector<uint8_t> status(pts.size());
