@@ -373,6 +373,7 @@
 #include <cmath>      // std::sqrt, correctly rounded (see PRECISION above)
 #include <cstddef>
 #include <cstdint>
+#include <new>  // std::nothrow -- the owning overload at the bottom, and nothing else
 
 #include "../core/error.hpp"
 #include "../core/types.hpp"
@@ -488,6 +489,9 @@ struct CornerResult {
     size_t count = 0;                  ///< corners written to the caller's array
     size_t candidatesRanked = 0;       ///< NMS survivors that were ranked
     bool candidatesTruncated = false;  ///< true when `capacity` could not hold every NMS survivor
+    /// @brief The owning overload could not obtain its ring. Nothing else ever sets it:
+    /// every other entry point takes the caller's scratch and cannot fail this way.
+    bool allocationFailed = false;
 };
 
 namespace impl {
@@ -662,6 +666,40 @@ inline void cornerMinEigenVal(const TernaryMat<WordType>& dx, const TernaryMat<W
 // STAGE 2 -- the selection
 // ---------------------------------------------------------------------------
 
+namespace impl {
+
+/// @brief Admits every pixel -- the selection's behaviour when no mask is given.
+/// **INTERNAL.**
+struct AdmitAll {
+    bool operator()(int, int) const { return true; }
+};
+
+/// @brief Admits the pixels whose mask bit is set. **INTERNAL.**
+/// @note A mask is a binary image, so in binCV it is a `BinMatConstView` and costs
+/// one bit per pixel -- 38 400 B at 640x480 against the 307 200 B `cv::Mat`
+/// OpenCV takes for the same thing.
+template <typename WordType>
+struct AdmitMasked {
+    BinMatConstView<WordType> mask;
+
+    bool operator()(int x, int y) const {
+        constexpr size_t kBits = bitsPerWord<WordType>();
+        const size_t ux = static_cast<size_t>(x);
+        const WordType bit = static_cast<WordType>(WordType{1} << (ux % kBits));
+        return (mask.row(static_cast<size_t>(y))[ux / kBits] & bit) != 0;
+    }
+};
+
+/// @brief The selection, over whichever pixels `admit` admits. **INTERNAL.**
+/// @note One body, two instantiations: the mask is resolved once at the call
+/// rather than tested per pixel through a branch that is uniform anyway.
+template <typename Admit>
+inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admit& admit,
+                                           const GoodFeaturesParams& params, Corner* corners,
+                                           size_t capacity);
+
+} // namespace impl
+
 /// @brief The quality threshold, 3x3 non-maximum suppression and minimum-distance
 /// spacing filter `cv::goodFeaturesToTrack` performs, over an existing
 /// response map. **API TIER 2.**
@@ -708,6 +746,53 @@ inline void cornerMinEigenVal(const TernaryMat<WordType>& dx, const TernaryMat<W
 inline CornerResult selectGoodFeatures(ConstResponseMap response,
                                        const GoodFeaturesParams& params, Corner* corners,
                                        size_t capacity) {
+    return impl::selectGoodFeaturesWith(response, impl::AdmitAll{}, params, corners, capacity);
+}
+
+/// @brief The same selection, restricted to the pixels a mask admits. **API TIER 2**
+/// -- `cv::goodFeaturesToTrack`'s `mask` argument, over an existing response map.
+/// @tparam WordType The mask's word type.
+/// @param response The map, typically from cornerMinEigenVal. Read only.
+/// @param mask One bit per pixel, the response map's dimensions; a SET bit admits its
+/// pixel. **An empty mask admits everything**, which is what a defaulted
+/// `cv::noArray()` does.
+/// @param params Quality level, minimum distance and corner cap.
+/// @param corners Caller-owned output array, also the candidate buffer.
+/// @param capacity Entries in `corners`. The capacity contract above applies unchanged.
+/// @return `{count, candidatesRanked, candidatesTruncated}`.
+///
+/// @note **THE MASK GATES CANDIDATES AND THE QUALITY THRESHOLD, NOT THE SUPPRESSION.**
+/// That is `cv::goodFeaturesToTrack`'s behaviour and it is not an accident of it:
+/// `minMaxLoc` takes the mask, so the threshold is a fraction of the strongest
+/// ADMITTED response; the 3x3 dilate does not, so a masked-out pixel still
+/// suppresses an admitted neighbour it dominates. Zeroing the masked pixels of
+/// the map instead -- the route this file used to document -- gets the first
+/// right and the second wrong, and the two differ at every mask boundary.
+/// @note **A mask is a binary image, so here it is one bit per pixel** -- 38 400 B at
+/// 640x480, against the 307 200 B `CV_8U` mask OpenCV takes for the same thing.
+/// @note **This is not how you avoid re-detecting on top of live tracks.** Those are
+/// not a property of this frame's response map; `bincv::spaceCandidates` is that
+/// operation, and a VIO frontend needs both.
+/// @note Never throws; allocates nothing.
+template <typename WordType>
+inline CornerResult selectGoodFeatures(ConstResponseMap response, BinMatConstView<WordType> mask,
+                                       const GoodFeaturesParams& params, Corner* corners,
+                                       size_t capacity) {
+    if (mask.empty()) {
+        return impl::selectGoodFeaturesWith(response, impl::AdmitAll{}, params, corners, capacity);
+    }
+    BINCV_ASSERT(mask.width == response.width && mask.height == response.height,
+                 "corner: the mask must have the response map's dimensions");
+    return impl::selectGoodFeaturesWith(response, impl::AdmitMasked<WordType>{mask}, params,
+                                        corners, capacity);
+}
+
+namespace impl {
+
+template <typename Admit>
+inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admit& admit,
+                                           const GoodFeaturesParams& params, Corner* corners,
+                                           size_t capacity) {
     BINCV_ASSERT(params.qualityLevel > 0.0, "corner: qualityLevel must be positive");
     BINCV_ASSERT(params.minDistance >= 0.0, "corner: minDistance must not be negative");
     BINCV_ASSERT(corners != nullptr || capacity == 0,
@@ -726,14 +811,26 @@ inline CornerResult selectGoodFeatures(ConstResponseMap response,
     const int width = static_cast<int>(response.width);
     const int height = static_cast<int>(response.height);
 
-    // 1. maxVal over the WHOLE map, border included -- cv::minMaxLoc's region.
-    float maxVal = response.row(0)[0];
+    // 1. maxVal over the WHOLE map, border included -- cv::minMaxLoc's region, and
+    // over the ADMITTED pixels of it, because cv::minMaxLoc takes the mask too. With
+    // no mask every pixel is admitted and this is the plain maximum, seeded from
+    // (0, 0) exactly as it was before the mask existed.
+    float maxVal = 0.0f;
+    bool admittedAny = false;
     for (int y = 0; y < height; ++y) {
         const float* r = response.row(static_cast<size_t>(y));
         for (int x = 0; x < width; ++x) {
-            if (r[static_cast<size_t>(x)] > maxVal) maxVal = r[static_cast<size_t>(x)];
+            if (!admit(x, y)) continue;
+            const float v = r[static_cast<size_t>(x)];
+            if (!admittedAny || v > maxVal) {
+                maxVal = v;
+                admittedAny = true;
+            }
         }
     }
+    // A mask that admits nothing leaves no pixel that could become a candidate, so
+    // there is nothing for the threshold to be a fraction OF and nothing to rank.
+    if (!admittedAny) return out;
 
     // 2. The THRESH_TOZERO cut, in the reference's own arithmetic: the product is
     // formed in double (cv::threshold takes a double) and narrowed to float
@@ -763,6 +860,9 @@ inline CornerResult selectGoodFeatures(ConstResponseMap response,
                 if (prev[c] > val || cur[c] > val || next[c] > val) isMax = false;
             }
             if (!isMax) continue;
+            // AFTER the suppression, not before it: a masked-out neighbour still
+            // suppresses, which is what the dilate in the reference does.
+            if (!admit(x, y)) continue;
 
             Corner candidate;
             candidate.x = x;
@@ -841,6 +941,8 @@ inline CornerResult selectGoodFeatures(ConstResponseMap response,
     return out;
 }
 
+} // namespace impl
+
 // ---------------------------------------------------------------------------
 // STAGE 3 -- the whole operation
 // ---------------------------------------------------------------------------
@@ -868,12 +970,11 @@ inline CornerResult selectGoodFeatures(ConstResponseMap response,
 ///
 /// @note **Ternary only** -- `TernaryMat<W>` is `SignedQuantMat<1, W>`, so an
 /// N-bit pyramid level does not match this overload (the promise 1).
-/// @note There is deliberately no mask parameter. `cv::goodFeaturesToTrack` takes
-/// one and the reference passes it through; the MVP pipeline
-/// (the design notes) has no caller for it, and an untested parameter is worse
-/// than an absent one. A caller wanting a mask can call cornerMinEigenVal,
-/// zero the masked pixels of the map, and call selectGoodFeatures -- which
-/// is the same two-stage split this file already exposes.
+/// @param mask Optional, one bit per pixel, the derivatives' dimensions; a SET bit
+/// admits its pixel. **Empty admits everything**, which is what a defaulted
+/// `cv::noArray()` does. It gates candidates and the quality threshold but
+/// not the suppression -- see `selectGoodFeatures`' masked overload, which
+/// spells out why those three are not the same choice.
 /// @note **IF WHAT YOU WANTED THE MASK FOR WAS TO AVOID DETECTING ON TOP OF TRACKS
 /// YOU ARE ALREADY FOLLOWING, THAT IS `ops/occupancy.hpp`, NOT A MASK HERE.**
 /// This operation's spacing filter spaces a detection's corners against EACH
@@ -888,9 +989,11 @@ template <typename WordType>
 inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
                                         const TernaryMat<WordType>& dy,
                                         const GoodFeaturesParams& params, ResponseMap scratch,
-                                        Corner* corners, size_t capacity) {
+                                        Corner* corners, size_t capacity,
+                                        BinMatConstView<WordType> mask = {}) {
     cornerMinEigenVal<WordType>(dx, dy, params.blockSize, scratch);
-    return selectGoodFeatures(ConstResponseMap(scratch), params, corners, capacity);
+    return selectGoodFeatures<WordType>(ConstResponseMap(scratch), mask, params, corners,
+                                        capacity);
 }
 
 
@@ -1324,7 +1427,8 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
                                                  BinMatConstView<WordType> signY,
                                                  const GoodFeaturesParams& params,
                                                  ResponseMap ring, Corner* corners,
-                                                 size_t capacity) {
+                                                 size_t capacity,
+                                                 BinMatConstView<WordType> mask = {}) {
     BINCV_ASSERT(magX.width == magY.width && magX.height == magY.height &&
                      magX.width == signX.width && magX.height == signX.height &&
                      magX.width == signY.width && magX.height == signY.height,
@@ -1343,6 +1447,14 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
     BINCV_ASSERT(ring.height >= kResponseRingRows,
                  "corner: the ring needs kResponseRingRows rows -- three, at every blockSize");
     BINCV_ASSERT(ring.stride >= ring.width, "corner: the ring's stride must cover a whole row");
+    BINCV_ASSERT(mask.empty() || (mask.width == magX.width && mask.height == magX.height),
+                 "corner: the mask must have the derivative planes' dimensions");
+
+    // Hoisted out of both loops: `masked` is a constant for the whole call, so the
+    // no-mask path pays a predictable branch and never touches the mask's memory.
+    const bool masked = !mask.empty();
+    const impl::AdmitMasked<WordType> masked_admit{mask};
+    const auto admit = [&](int mx, int my) { return !masked || masked_admit(mx, my); };
 
     const int width = static_cast<int>(magX.width);
     const int height = static_cast<int>(magX.height);
@@ -1370,6 +1482,10 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
         float* cur = ring.row(static_cast<size_t>(y) % kResponseRingRows);
         cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, y, cur);
         for (int x = 0; x < width; ++x) {
+            // The mask gates this the way it gates the frame-map form's maxVal: the
+            // threshold is a fraction of the strongest ADMITTED response, because
+            // that is the region cv::minMaxLoc is given.
+            if (!admit(x, y)) continue;
             if (cur[static_cast<size_t>(x)] > runningMax) runningMax = cur[static_cast<size_t>(x)];
         }
 
@@ -1396,6 +1512,9 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
                 if (above[c] > val || mid[c] > val || below[c] > val) isMax = false;
             }
             if (!isMax) continue;
+            // AFTER the suppression, as in the frame-map form: a masked-out pixel
+            // still suppresses an admitted neighbour it dominates.
+            if (!admit(x, cy)) continue;
 
             Corner candidate;
             candidate.x = x;
@@ -1489,10 +1608,61 @@ template <typename WordType>
 inline CornerResult goodFeaturesToTrackStreaming(const TernaryMat<WordType>& dx,
                                                  const TernaryMat<WordType>& dy,
                                                  const GoodFeaturesParams& params, ResponseMap ring,
-                                                 Corner* corners, size_t capacity) {
+                                                 Corner* corners, size_t capacity,
+                                                 BinMatConstView<WordType> mask = {}) {
     return goodFeaturesToTrackStreaming<WordType>(dx.constMagnitude(0), dy.constMagnitude(0),
                                                   dx.constSign(), dy.constSign(), params, ring,
-                                                  corners, capacity);
+                                                  corners, capacity, mask);
+}
+
+/// @brief `goodFeaturesToTrack` with `cv::goodFeaturesToTrack`'s shape: no caller
+/// scratch. **API TIER 2.**
+/// @tparam WordType The containers' word type.
+/// @param dx Horizontal ternary derivative (ops/derivative.hpp, level 0).
+/// @param dy Vertical ternary derivative, with `dx`'s dimensions.
+/// @param params Quality level, minimum distance, corner cap and block size.
+/// @param corners Caller-owned output array, also the candidate buffer.
+/// @param capacity Entries in `corners`. **Read selectGoodFeatures' capacity
+/// contract**: this is not `maxCorners`.
+/// @param mask Optional, one bit per pixel; a SET bit admits its pixel. Empty admits
+/// everything.
+/// @return `{count, candidatesRanked, candidatesTruncated, allocationFailed}`, the same
+/// corners in the same order as either scratch-taking spelling.
+///
+/// @note **THIS IS THE ONLY ENTRY POINT IN THE LIBRARY THAT ALLOCATES**, and it is here
+/// so that a hosted caller porting from OpenCV does not have to learn what a
+/// response ring is to make one call. It takes a three-row ring -- 7 680 B at
+/// 640 px, not the frame-sized map -- and releases it before returning.
+/// @note **IT IS A WRAPPER, NOT A SECOND IMPLEMENTATION.** It forwards to
+/// `goodFeaturesToTrackStreaming`, which is the kernel. Nothing here is duplicated,
+/// which is the property that stops the two from drifting apart.
+/// @note **A TARGET WITH NO HEAP NEVER INSTANTIATES IT.** This is a template, so a
+/// build that does not call it does not emit it, and the rest of the header keeps
+/// the library's rule that a kernel does not allocate. On such a target, call
+/// `goodFeaturesToTrackStreaming` and own the ring.
+/// @note **Allocation failure is a RETURN VALUE, not a throw.** The library builds with
+/// exceptions disabled, so this uses `new (std::nothrow)` and reports
+/// `allocationFailed`; a caller cannot check for a failed allocation in advance,
+/// which is what makes it a return value under this library's error policy.
+template <typename WordType>
+inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
+                                        const TernaryMat<WordType>& dy,
+                                        const GoodFeaturesParams& params, Corner* corners,
+                                        size_t capacity, BinMatConstView<WordType> mask = {}) {
+    CornerResult out;
+    const BinMatConstView<WordType> plane = dx.constMagnitude(0);
+    if (plane.width == 0 || plane.height == 0) return out;
+
+    float* ring = new (std::nothrow) float[kResponseRingRows * plane.width];
+    if (ring == nullptr) {
+        out.allocationFailed = true;
+        return out;
+    }
+    const ResponseMap ringView{ring, plane.width, kResponseRingRows, plane.width};
+    out = goodFeaturesToTrackStreaming<WordType>(dx, dy, params, ringView, corners, capacity,
+                                                 mask);
+    delete[] ring;
+    return out;
 }
 
 } // inline namespace BINCV_ABI_NAMESPACE
