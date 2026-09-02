@@ -155,7 +155,22 @@ caller exactly as far from bits as before.
 gradient of 15 counts becomes exactly zero once the operands are truncated to 8 bits, and
 low-contrast scenes are where a frontend needs every edge it can get.
 
-Above the image processing — geometry, estimation, sensor fusion — is the application's.
+### What binCV computes, as opposed to what it accepts
+
+The paragraphs above are the **input** boundary and they are a rule. What binCV *computes*
+is not a rule, and it is worth saying so plainly rather than implying a taxonomy that does
+not exist.
+
+binCV provides memory- and performance-optimized versions of operations a vision pipeline
+already runs. It takes no position on which algorithm a caller should use; the point is to
+make the one they chose cost less. So the operation set grows with the use cases that turn
+up. An operation belongs here when a caller needs it on their path *and* binCV can make it
+smaller or faster — and does not when binCV would contribute nothing but a second
+implementation to keep correct.
+
+That covers image processing, features and tracking, and the geometry the frontend consumes
+downstream of them. IMU fusion and bundle adjustment are absent because nothing has needed
+them yet, which is a fact about the use cases rather than a line drawn on principle.
 
 ---
 
