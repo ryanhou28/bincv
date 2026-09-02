@@ -115,8 +115,19 @@ Settled decisions. If one seems wrong, say so rather than working around it.
 
 ## Scope
 
-binCV is the image processing. Geometry and estimation — RANSAC, PnP, IMU fusion, bundle
-adjustment — belong to the application above it.
+**binCV provides memory- and performance-optimized versions of operations a vision
+pipeline already runs.** It takes no position on which algorithm a caller should use —
+that is their choice, and binCV's job is to make the one they chose cheaper.
+
+**The operation set follows the use cases that turn up, not a fixed taxonomy.** binCV is
+not trying to replace OpenCV. An operation is in scope when it is on a path a caller
+needs *and* binCV can make it smaller or faster; it is out of scope when binCV would add
+nothing but a second implementation to keep correct.
+
+Today that means image processing, features and tracking, and the geometry the frontend
+consumes — RANSAC-based estimation is in scope for that reason. IMU fusion and bundle
+adjustment are not, because no use case has asked for them yet. That is a statement about
+what has come up, not a boundary on principle.
 
 **The input boundary is a rule, not a list:** binCV accepts a **single-channel,
 integer-typed, strided pixel array** and turns it into an N-bit matrix. Getting to that

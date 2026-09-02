@@ -171,9 +171,14 @@ a 16 KB stack. The library exposes `stagingStackBytes<N, W>()` for the exact fig
 build-time budget that fails compilation rather than overflowing at run time — but no timing
 on those parts exists, here or elsewhere.
 
-**Geometry and estimation are outside the library** — RANSAC, PnP, IMU fusion, bundle
-adjustment. binCV produces features and flow; what a pose estimator does with them is the
-application's, and no trajectory-accuracy claim is made anywhere in these reports.
+**No trajectory-accuracy claim is made anywhere in these reports.** binCV produces features
+and flow; what a pose estimator does with them is a property of the whole integration, and
+these reports measure kernels. The agreement figures in [frontend.md](frontend.md) are
+evidence that the kernels are sufficient, not a claim about pose error.
+
+The operation set is also smaller than a vision pipeline needs, and grows with the use cases
+that turn up rather than from a fixed taxonomy — so an operation's absence here says nothing
+about whether it belongs.
 
 ## Reproduce
 
