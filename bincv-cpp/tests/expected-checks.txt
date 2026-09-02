@@ -917,6 +917,7 @@ opencv	test_subpix	14	0
 opencv	test_view_narrow	10	0
 opencv	test_occupancy	13697	0
 opencv	test_simd	10	0
+opencv	test_ransac	49	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	169	0
 opencv	test_equivalence	16403	0
@@ -949,6 +950,7 @@ core	test_subpix	8	0
 core	test_view_narrow	10	0
 core	test_occupancy	13697	0
 core	test_simd	10	0
+core	test_ransac	45	0
 core	test_harness	8	0
 
 noexcept	test_parallel	9	0
@@ -979,6 +981,7 @@ noexcept	test_subpix	8	0
 noexcept	test_view_narrow	10	0
 noexcept	test_occupancy	13697	0
 noexcept	test_simd	10	0
+noexcept	test_ransac	45	0
 noexcept	test_harness	8	0
 
 debug	test_parallel	9	0
@@ -1009,5 +1012,6 @@ debug	test_subpix	8	0
 debug	test_view_narrow	10	0
 debug	test_occupancy	13697	0
 debug	test_simd	10	0
+debug	test_ransac	45	0
 debug	test_harness	8	0
 
