@@ -906,8 +906,8 @@ opencv	test_resample	245312	0
 opencv	test_pyramid	262324	0
 opencv	test_derivative	48526	0
 opencv	test_covariance	17704	0
-opencv	test_corner	3655	0
-opencv	test_opticalflow	319	0
+opencv	test_corner	3671	0
+opencv	test_opticalflow	327	0
 opencv	test_pack	44	0
 opencv	test_edge	31	0
 opencv	test_median_wide	6	0
@@ -938,8 +938,8 @@ core	test_resample	245312	0
 core	test_pyramid	236431	0
 core	test_derivative	47675	0
 core	test_covariance	17704	0
-core	test_corner	3655	0
-core	test_opticalflow	227	0
+core	test_corner	3671	0
+core	test_opticalflow	235	0
 core	test_pack	44	0
 core	test_edge	30	0
 core	test_median_wide	5	0
@@ -968,8 +968,8 @@ noexcept	test_resample	245312	0
 noexcept	test_pyramid	236431	0
 noexcept	test_derivative	47675	0
 noexcept	test_covariance	17704	0
-noexcept	test_corner	3655	0
-noexcept	test_opticalflow	227	0
+noexcept	test_corner	3671	0
+noexcept	test_opticalflow	235	0
 noexcept	test_pack	44	0
 noexcept	test_edge	30	0
 noexcept	test_median_wide	5	0
@@ -998,8 +998,8 @@ debug	test_resample	245312	0
 debug	test_pyramid	236431	0
 debug	test_derivative	47675	0
 debug	test_covariance	17704	0
-debug	test_corner	3655	0
-debug	test_opticalflow	227	0
+debug	test_corner	3671	0
+debug	test_opticalflow	235	0
 debug	test_pack	44	0
 debug	test_edge	30	0
 debug	test_median_wide	5	0
