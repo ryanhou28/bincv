@@ -1,0 +1,27 @@
+# wordtype_narrow -- x86-64
+# commit:   25065d7
+# pinning:  taskset -c 2
+# date:     2026-09-01T12:52:01-07:00
+
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     21310 ns 1.00x
+ (B) uint64 buffer, scalar fallback    958683 ns  0.02x
+ (C) uint64 buffer, narrowed view     22070 ns  0.97x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.

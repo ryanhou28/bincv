@@ -1,0 +1,22 @@
+# frontend-threads -- x86-64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# compiler: c++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   25065d7
+# note:     unpinned; a threading arm is unmeasurable under taskset -c N
+# date:     2026-09-01T12:10:13-07:00
+
+### binCV 1 threads vs OpenCV 1 threads
+--- CRITERION 4: speed against the byte-per-pixel denominator ---
+ binCV :    1.172 ms/frame
+ OpenCV :    3.944 ms/frame
+ RATIO : 3.36x
+### binCV 2 threads vs OpenCV 2 threads
+--- CRITERION 4: speed against the byte-per-pixel denominator ---
+ binCV :    0.942 ms/frame
+ OpenCV :    2.832 ms/frame
+ RATIO : 3.01x
+### binCV 4 threads vs OpenCV 4 threads
+--- CRITERION 4: speed against the byte-per-pixel denominator ---
+ binCV :    0.940 ms/frame
+ OpenCV :    2.407 ms/frame
+ RATIO : 2.56x

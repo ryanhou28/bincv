@@ -1,0 +1,77 @@
+# goodfeatures -- x86-64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: c++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   83087b0
+# pinning:  taskset -c 2
+# date:     2026-09-01T16:30:34-07:00
+# note:     shared machine, load ~2-3. OpenCV's row is stable at 13.6-14.4 ns/px;
+#           binCV's arms carry 12-63% spread. Full run first, then two repeats of
+#           the timing table so the run-to-run range is visible.
+
+binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
+OpenCV 4.8.0-dev, cv::getNumThreads() = 1; binCV is single-threaded
+frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33333
+(SEAL/seal_params.yaml verbatim; word uint32_t)
+
+ AGREEMENT with the OpenCV binarized pipeline over 4 frames:
+ binCV corners 723, OpenCV corners 723, EXACT position matches 723
+ worst displacement of a binCV corner from the nearest OpenCV one: 0.00 px
+ (not bit-exact and not claimed to be -- TIER 2. The two sides share the
+ covariance integers exactly; the remaining gap is the float eig map and
+ how ties fall out of it.)
+
+ FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
+
+ PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
+ binCV
+ source, 1 bit/pixel     38400 B
+ four one-bit derivative planes    153600 B
+ float response map (caller scratch)   1228800 B
+ corner array = candidate buffer   3659568 B
+ TOTAL   5080368 B (16.54 B/pixel)
+ binCV streaming -- the same call over a three-row ring
+ three-row response ring (caller scratch)      7680 B
+ TOTAL   3859248 B (12.56 B/pixel)
+ OpenCV binarized (the denominator), every buffer read off itself
+ source, CV_8U    307200 B
+ dx, dy CV_32F   2457600 B
+ xx, yy, xy CV_32F   3686400 B
+ eig + dilate destination CV_32F   2457600 B
+ candidate pointer vector   2439712 B
+ TOTAL  11348512 B (36.94 B/pixel)
+ OpenCV Sobel (stock call), ACCOUNTED from what the call materializes
+ TOTAL   8908800 B (29.00 B/pixel)
+ -> binCV footprint vs the denominator: 2.23x smaller
+
+ THE SAME ACCOUNTING AT THE MEASURED SURVIVOR COUNT (13272 over 4 frames),
+ which is what a caller reserves once it knows the content:
+ binCV   1580064 B ( 5.14 B/pixel)
+ OpenCV binarized (the denominator)   9014976 B (29.35 B/pixel)
+ -> binCV footprint vs the denominator: 5.71x smaller
+
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4521853     14.720    4.79%        0.97x      16.54
+ binCV streaming         4443445     14.464    7.82%        0.98x      12.56
+ OpenCV binarized        4374442     14.240   36.07%        1.00x      36.94
+ OpenCV Sobel            2941480      9.575   83.30%        1.49x      29.00
+
+ READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
+ question alone, and for this operation they point opposite ways.
+ sink 348475
+
+### repeat 2 (timing table only)
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4901394     15.955   48.37%        0.85x      16.54
+ binCV streaming         4548093     14.805   10.75%        0.92x      12.56
+ OpenCV binarized        4188284     13.634   47.92%        1.00x      36.94
+ OpenCV Sobel            2591607      8.436   47.65%        1.62x      29.00
+
+
+### repeat 3 (timing table only)
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4663440     15.180   33.79%        0.91x      16.54
+ binCV streaming         4612335     15.014    5.89%        0.92x      12.56
+ OpenCV binarized        4233739     13.782    6.42%        1.00x      36.94
+ OpenCV Sobel            2667639      8.684   35.74%        1.59x      29.00
+

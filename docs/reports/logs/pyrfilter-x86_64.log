@@ -1,0 +1,29 @@
+# pyrfilter -- x86-64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   25065d7
+# pinning:  taskset -c 2
+# date:     2026-09-01T12:04:56-07:00
+
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.5     0.92x
+ pyrDown (shipped BOX_2x2 route) N=3          31.0     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 6.0     0.19x
+ filtered BOX_2x2 N=3                         33.6     1.08x
+ filtered BOX_3x3 N=3                         83.0     2.68x
+ filtered GAUSSIAN_3x3 N=3                    85.5     2.76x
+ filtered GAUSSIAN_5x5 N=3                   195.4     6.31x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2034.4    65.69x
+ filtered BOX_2x2 8 -> 8                     707.6    22.85x
+ GAUSSIAN_5x5 1->3 border=Reflect101         188.1     6.07x
+ GAUSSIAN_5x5 1->3 border=Zero               169.4     5.47x
+ BOX_3x3 1->3 border=Reflect101               86.0     2.78x
+ BOX_2x2 1->3 border=Reflect101               33.6     1.08x
+ cv::pyrDown 8U 640x480 (the denominator)       48.3     1.56x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the frontend, and a level-0 pass is the
+ largest of the three the ladder runs.

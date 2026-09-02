@@ -234,7 +234,13 @@ void openCvBinarized(const cv::Mat& src, CvBuffers& b, std::vector<cv::Point>& o
 } // namespace
 
 int main() {
+    // binCV is single-threaded here, so OpenCV is held to one thread too. Left at its
+    // default a multi-core box turns the ratio into a measurement of parallelism.
+    cv::setNumThreads(1);
+
     std::printf("binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)\n");
+    std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n",
+                CV_VERSION, cv::getNumThreads());
     std::printf("frame %dx%d, blockSize %d, maxCorners %d, qualityLevel %.2f, minDistance %.5f\n",
                 kWidth, kHeight, kBlockSize, kMaxCorners, kQualityLevel, kMinDistance);
     std::printf("(SEAL/seal_params.yaml verbatim; word uint32_t)\n\n");
@@ -258,6 +264,14 @@ int main() {
                                   0.0f);
     bincv::ResponseMap mapView{mapStorage.data(), static_cast<size_t>(kWidth),
                                static_cast<size_t>(kHeight), static_cast<size_t>(kWidth)};
+    // THE STREAMING SHAPE, MEASURED BESIDE THE FRAME MAP RATHER THAN INSTEAD OF IT.
+    // Both spellings return the same corners; they differ only in whether the
+    // response is materialized for the whole frame or kept three rows at a time.
+    // Timing only the frame map once hid a 2.3x gap between the two, because the
+    // frame-map form was still on the pre-bit-sliced response kernel.
+    std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<size_t>(kWidth), 0.0f);
+    bincv::ResponseMap ringView{ringStorage.data(), static_cast<size_t>(kWidth),
+                                bincv::kResponseRingRows, static_cast<size_t>(kWidth)};
     // CAPACITY IS NOT maxCorners (ops/corner.hpp's capacity contract): the array is
     // also the candidate buffer, so it is sized to the worst-case survivor count.
     // That is the honest binCV footprint and it is what the memory table charges.
@@ -311,6 +325,32 @@ int main() {
                 " covariance integers exactly; the remaining gap is the float eig map and\n"
                 " how ties fall out of it.)\n\n");
 
+    // THE TWO binCV SPELLINGS MUST RETURN THE SAME CORNERS. ops/corner.hpp promises
+    // it -- same count, same coordinates, same order -- and a benchmark that times
+    // both without checking would happily report a ratio between two different
+    // answers. Timed below; compared here, once, before anything is timed.
+    {
+        std::vector<bincv::Corner> mapCorners(capacity), ringCorners(capacity);
+        bincv::derivativeX(bins[0], dxs[0]);
+        bincv::derivativeY(bins[0], dys[0]);
+        const bincv::CornerResult rm = bincv::goodFeaturesToTrack(
+            dxs[0], dys[0], params, mapView, mapCorners.data(), mapCorners.size());
+        const bincv::CornerResult rr = bincv::goodFeaturesToTrackStreaming(
+            dxs[0], dys[0], params, ringView, ringCorners.data(), ringCorners.size());
+        size_t positionsDiffer = 0;
+        for (size_t i = 0; i < rm.count && i < rr.count; ++i) {
+            if (mapCorners[i].x != ringCorners[i].x || mapCorners[i].y != ringCorners[i].y) {
+                ++positionsDiffer;
+            }
+        }
+        std::printf(" FRAME MAP vs STREAMING: %zu and %zu corners, %zu positions differ\n\n",
+                    rm.count, rr.count, positionsDiffer);
+        if (rm.count != rr.count || positionsDiffer != 0) {
+            std::printf(" THE TWO SPELLINGS DISAGREE -- no ratio below is meaningful.\n");
+            return 1;
+        }
+    }
+
     // -----------------------------------------------------------------------
     // FOOTPRINT, BEFORE THE TIMINGS -- the column this file was added for.
     // -----------------------------------------------------------------------
@@ -318,8 +358,14 @@ int main() {
     const size_t planeBytes = plane.stride * plane.height * sizeof(Word);
     const size_t srcPlane = bins[0].sizeInWords() * sizeof(Word);
     const size_t binCvMap = mapStorage.size() * sizeof(float);
+    const size_t binCvRing = ringStorage.size() * sizeof(float);
     const size_t binCvCorners = corners.size() * sizeof(bincv::Corner);
     const size_t binCvSet = srcPlane + 4 * planeBytes + binCvMap + binCvCorners;
+    // The streaming row holds three response rows where the frame-map row holds the
+    // whole map. Everything else -- source plane, four derivative planes, the
+    // candidate array -- is identical, so this is the map against the ring and
+    // nothing else.
+    const size_t binCvStreamSet = srcPlane + 4 * planeBytes + binCvRing + binCvCorners;
 
     const size_t cvSrc = bytes[0].total() * bytes[0].elemSize();
     const size_t cvSet = cvSrc + cvb.bytes();
@@ -339,6 +385,10 @@ int main() {
     std::printf(" corner array = candidate buffer %9zu B\n", binCvCorners);
     std::printf(" TOTAL %9zu B (%5.2f B/pixel)\n",
                 binCvSet, static_cast<double>(binCvSet) / static_cast<double>(pixels));
+    std::printf(" binCV streaming -- the same call over a three-row ring\n");
+    std::printf(" three-row response ring (caller scratch) %9zu B\n", binCvRing);
+    std::printf(" TOTAL %9zu B (%5.2f B/pixel)\n", binCvStreamSet,
+                static_cast<double>(binCvStreamSet) / static_cast<double>(pixels));
     std::printf(" OpenCV binarized (the denominator), every buffer read off itself\n");
     std::printf(" source, CV_8U %9zu B\n", cvSrc);
     std::printf(" dx, dy CV_32F %9zu B\n", 2 * pixels * 4);
@@ -386,6 +436,14 @@ int main() {
                                dxs[k], dys[k], params, mapView, corners.data(), corners.size());
                            measure::g_sink += r.count;
                        }});
+    benches.push_back({"binCV streaming", [&](int i) {
+                           const size_t k = static_cast<size_t>(i % kInputs);
+                           bincv::derivativeX(bins[k], dxs[k]);
+                           bincv::derivativeY(bins[k], dys[k]);
+                           const bincv::CornerResult r = bincv::goodFeaturesToTrackStreaming(
+                               dxs[k], dys[k], params, ringView, corners.data(), corners.size());
+                           measure::g_sink += r.count;
+                       }});
     benches.push_back({"OpenCV binarized", [&](int i) {
                            const size_t k = static_cast<size_t>(i % kInputs);
                            openCvBinarized(bytes[k], cvb, cvBinarized);
@@ -400,11 +458,11 @@ int main() {
                        }});
 
     const std::vector<measure::Timing> t = measure::measureInterleaved(benches, 5, 200.0);
-    const double denom = t[1].medianNs;
+    const double denom = t[2].medianNs;
 
     std::printf(" %-18s %12s %10s %8s %12s %10s\n", "variant", "ns/frame", "ns/pixel", "spread",
                 "vs OpenCV", "B/pixel");
-    const size_t setBytes[3] = {binCvSet, cvSet, cvSobelSet};
+    const size_t setBytes[4] = {binCvSet, binCvStreamSet, cvSet, cvSobelSet};
     for (size_t i = 0; i < benches.size(); ++i) {
         std::printf(" %-18s %12.0f %10.3f %7.2f%% %11.2fx %10.2f\n", benches[i].name.c_str(),
                     t[i].medianNs, t[i].medianNs / static_cast<double>(pixels), t[i].spreadPct(),

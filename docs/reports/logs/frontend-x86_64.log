@@ -1,0 +1,63 @@
+# frontend -- x86-64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: c++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   83087b0
+# pinning:  taskset -c 2
+# date:     2026-09-01T16:28:32-07:00
+
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+LK residual kernel: AVX2, eight keypoints per batch
+LK keypoint batch: ON (AVX2, 8 lanes, lane refill)
+
+=== a / frontend over 1710 frames, 752x480 ===
+both frontends see bit-identical input: median_filter then rl_fast_edge_filter_wide(17)
+
+ ... 200 frames
+ ... 400 frames
+ ... 600 frames
+ ... 800 frames
+ ... 1000 frames
+ ... 1200 frames
+ ... 1400 frames
+ ... 1600 frames
+
+--- CRITERION 2: agreement with the reference frontend ---
+ flow vectors compared : 2029 over 1709 frames (82 re-detections)
+ flow difference : median 0.0437 px p90 0.1614 p99 22.4941 max 213.8032
+ (RMS over all : 7.0313 px -- reported for completeness; the
+ comparisons) percentiles above are the honest summary, see
+ agreeing within 1 px : 95.6%
+ track lifetime median : binCV 11 frames OpenCV 12 frames
+ tracks observed : binCV 10279 OpenCV 10108
+ per-frame survival : binCV 96.4% OpenCV 96.6%
+ detections truncated : 1 of 82 (capacity 20000)
+
+--- CRITERION 3: peak footprint over the frontend operation set ---
+ binCV :   436704 B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)
+ OpenCV :  2719832 B (CV_8U pyramid x2 with 31-px border/level, CV_32F eigen map)
+ RATIO : 6.23x smaller
+
+--- binCV per-stage, AT THE REAL DUTY CYCLE ---
+ detect                          0.179 ms/frame  14.6% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      0.778 ms/frame  63.5%
+ build (pyrDown + derivatives)    0.268 ms/frame  21.9%
+  ... sensor stage               0.102 ms/frame   8.3%
+  ... median                     0.060 ms/frame   4.9%
+  ... edge                       0.035 ms/frame   2.9%
+  ... pyrDown                    0.125 ms/frame  10.2%
+  ... derivatives                0.042 ms/frame   3.4%
+
+ sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
+
+--- CRITERION 4: speed against the byte-per-pixel denominator ---
+ binCV :    1.226 ms/frame
+ OpenCV :    4.049 ms/frame
+ RATIO : 3.30x
+ NOTE: OpenCV threads = 1 (binCV is single-threaded, always), and its
+ LK and gftt are SIMD-vectorized.
+ binCV has its AVX2 paths here -- the eight-keypoint LK batch,
+ the sensor stage's median and edge kernels, and packing --
+ so this is SIMD against SIMD, as the aarch64 arm is. What
+ measured remains the point: at equal threads binCV LEADS, and the
+ x86 deficit reported before it was THREADS, not vector width.

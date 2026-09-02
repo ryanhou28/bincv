@@ -6,6 +6,7 @@
 | [../GETTING_STARTED.md](../GETTING_STARTED.md) | a user | build it, use it, conventions |
 | [API.md](API.md) | a user | **the API reference** — every public entry point, its brief and its tier |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | a contributor | how the library is put together, and why |
+| [reports/](reports/README.md) | anyone weighing it up | **what it costs and what it saves** — measured against OpenCV on x86-64 and aarch64, wins and losses both |
 
 ## The API reference
 

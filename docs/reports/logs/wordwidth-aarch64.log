@@ -1,0 +1,86 @@
+# wordwidth -- aarch64
+# host:     
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# governor: performance
+# throttled:throttled=0x80000
+# pinning:  taskset -c 3 (applied by the runner)
+# date:     2026-09-01T12:23:26-07:00
+
+=== default word width ===
+target: aarch64 -- AUTHORITATIVE for the speed half
+sizeof(void*) = 8; a 32-bit host would synthesise every uint64_t operation and answer a different question.
+The decision rule is in this file's header, written before measuring (EXPERIMENTS.md).
+
+=== FOOTPRINT LADDER -- exact, architecture-independent ===
+ Bytes for one plane at word granularity. The last column is what  warns about:
+ uint64_t's penalty against the current default, worst at the upper levels LK touches every frame.
+
+ size                            uint8     uint16     uint32     uint64     u64 vs u32
+ 640x480 (L0, frame)             38400      38400      38400      38400           0.0%
+ 320x240 (L1)                     9600       9600       9600       9600           0.0%
+ 160x120 (L2)                     2400       2400       2400       2880          20.0%
+ 752x480 (L0, wide frame)        45120      45120      46080      46080           0.0%
+ 188x120 (L2 of 752)              2880       2880       2880       2880           0.0%
+ 94x60 (L3 of 752)                 720        720        720        960          33.3%
+ 47x30 (L4 of 752)                 180        180        240        240           0.0%
+
+=== 640x480 frame, word granularity ( default alignment) ===
+ all four widths agree on countNonZero and on every AND pixel (153532 set in image 0)
+
+ FOOTPRINT (allocated bytes per image, padding included)
+ word         stride   bytes/img    vs uint32     vs ideal
+ uint8_t        80 w       38400         0.0%         0.0%
+ uint16_t       40 w       38400         0.0%         0.0%
+ uint32_t       20 w       38400         0.0%         0.0%
+ uint64_t       10 w       38400         0.0%         0.0%
+ (ideal = 38400 B, the information-theoretic minimum at 1 bit per pixel)
+
+ SPEED (ns/pixel, min / median / max over 9 interleaved batches)
+ word       bitwiseAnd                 countNonZero              
+ uint8_t     0.0300/ 0.0312/ 0.0333  0.2632/ 0.2632/ 0.2634
+ uint16_t    0.0311/ 0.0323/ 0.0336  0.1416/ 0.1417/ 0.1419
+ uint32_t    0.0309/ 0.0314/ 0.0332  0.0631/ 0.0631/ 0.0632
+ uint64_t    0.0289/ 0.0307/ 0.0346  0.0330/ 0.0330/ 0.0330
+
+ SPEEDUP vs uint32_t (>1.00 = faster than the current default; the rule reads uint64_t's row)
+ word         bitwiseAnd countNonZero   AND spread   cnz spread
+ uint8_t          1.009x       0.240x        10.6%         0.1%
+ uint16_t         0.975x       0.446x         7.8%         0.2%
+ uint32_t         1.000x       1.000x         7.4%         0.1%
+ uint64_t         1.023x       1.914x        18.4%         0.1%
+
+ sanity: bitwiseAnd (uint32_t) moves 115200 B per call in 9659 ns = 11.93 GB/s
+ resident during its batch 337.5 KiB (9 images) -- inside its 1 MiB L2, so rates above DRAM's ~4-6 GB/s are expected;
+ all four widths interleaved: 1350.0 KiB, beyond the 1 MiB L2
+
+=== 94x60 pyramid L3, word granularity ( default alignment) ===
+ all four widths agree on countNonZero and on every AND pixel (2846 set in image 0)
+
+ FOOTPRINT (allocated bytes per image, padding included)
+ word         stride   bytes/img    vs uint32     vs ideal
+ uint8_t        12 w         720         0.0%         2.1%
+ uint16_t        6 w         720         0.0%         2.1%
+ uint32_t        3 w         720         0.0%         2.1%
+ uint64_t        2 w         960        33.3%        36.2%
+ (ideal = 705 B, the information-theoretic minimum at 1 bit per pixel)
+
+ SPEED (ns/pixel, min / median / max over 9 interleaved batches)
+ word       bitwiseAnd                 countNonZero              
+ uint8_t     0.1362/ 0.1362/ 0.1362  0.2686/ 0.2686/ 0.2689
+ uint16_t    0.1413/ 0.1413/ 0.1414  0.1486/ 0.1486/ 0.1488
+ uint32_t    0.0840/ 0.0840/ 0.0840  0.0822/ 0.0822/ 0.0823
+ uint64_t    0.0638/ 0.0638/ 0.0639  0.0579/ 0.0580/ 0.0580
+
+ SPEEDUP vs uint32_t (>1.00 = faster than the current default; the rule reads uint64_t's row)
+ word         bitwiseAnd countNonZero   AND spread   cnz spread
+ uint8_t          0.617x       0.306x         0.0%         0.1%
+ uint16_t         0.595x       0.553x         0.1%         0.1%
+ uint32_t         1.000x       1.000x         0.0%         0.1%
+ uint64_t         1.317x       1.419x         0.1%         0.2%
+
+ sanity: bitwiseAnd (uint32_t) moves 2160 B per call in 474 ns = 4.56 GB/s
+ resident during its batch 6.3 KiB (9 images) -- inside the reference device's 32 KiB L1D;
+ all four widths interleaved: 27.4 KiB, inside the 1 MiB L2
+
+sink: 14428119468478485176 (printed so nothing above can be optimized away)

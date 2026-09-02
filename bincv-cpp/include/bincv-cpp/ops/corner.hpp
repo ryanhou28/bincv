@@ -550,6 +550,15 @@ struct CornerStronger {
 // STAGE 1 -- the response map
 // ---------------------------------------------------------------------------
 
+// Declared here so the frame-map form below can fill itself a row at a time. The
+// definition, and the documentation, live with the streaming shape it was written
+// for -- a plain comment rather than a docstring, so the reference does not list
+// the same function twice.
+template <typename WordType>
+inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView<WordType> magY,
+                                 BinMatConstView<WordType> signX, BinMatConstView<WordType> signY,
+                                 int blockSize, int y, float* dstRow);
+
 /// @brief The minimum-eigenvalue corner response at every pixel, from binarized
 /// ternary derivatives. **API TIER 2** -- `cv::cornerMinEigenVal`'s role
 /// with the reference pipeline's BINARIZED numerics, NOT bit-exact against
@@ -594,6 +603,20 @@ inline void cornerMinEigenVal(BinMatConstView<WordType> magX, BinMatConstView<Wo
     BINCV_ASSERT(dst.data != nullptr, "corner: a non-empty response map needs a non-null pointer");
     BINCV_ASSERT(dst.stride >= dst.width || dst.height <= 1,
                  "corner: multi-row map needs a stride covering a whole row");
+
+    // AT blockSize 3 THE ROW FORM WRITES THIS SAME MAP, BIT FOR BIT, FROM BIT-SLICED
+    // BOX SUMS -- measured 2.3x to 2.6x faster than the sliding sweep below at
+    // 640x480, over 307 200 response pixels of which none differ. Above 3 the sweep
+    // wins: 5 through 9 measure as a tie and 11 upward favour it, so the dispatch
+    // sits at the one size where the difference is not inside the noise. It is also
+    // the size every frontend here runs.
+    if (blockSize == 3) {
+        for (size_t y = 0; y < magX.height; ++y) {
+            cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize,
+                                           static_cast<int>(y), dst.row(y));
+        }
+        return;
+    }
 
     const int width = static_cast<int>(magX.width);
     const int height = static_cast<int>(magX.height);
