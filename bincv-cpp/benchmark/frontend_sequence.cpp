@@ -327,8 +327,8 @@ int main(int argc, char** argv) {
     std::printf("both frontends see bit-identical input: median_filter then "
                 "rl_fast_edge_filter_wide(17)\n\n");
 
-    bincv::LKParams lk;                       // seal_params.yaml verbatim
-    // The iteration cap is seal_params.yaml's 20. Nothing in this project has ever
+    bincv::LKParams lk;                       // the reference frontend's parameters verbatim
+    // The iteration cap is the reference frontend's 20. Nothing in this project has ever
     // measured how many iterations the tracker actually NEEDS, and at 94.7% of
     // frontend time an unnecessary iteration is the most expensive thing there is.
     if (const char* it = std::getenv("BINCV_LK_ITERS")) lk.maxIterations = std::atoi(it);

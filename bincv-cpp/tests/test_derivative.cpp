@@ -1,7 +1,7 @@
 // The binarized spatial derivative: derivativeX / derivativeY.
 //
 // THE CORRECTNESS BAR IS THE REFERENCE IMPLEMENTATION, NOT A FORMULA. The
-// operation is SEAL/src/keypoint_tracking/gradients.cpp's calcBinarizedDeriv, and
+// operation is the reference frontend's gradient stage, calcBinarizedDeriv, and
 // that function is two cv::filter2D calls with [-1, 0, 1] as a 1x3 and a 3x1.
 // Two properties of cv::filter2D decide whether binCV agrees with it, and both
 // are the kind that produce a plausible-looking image when got backwards:

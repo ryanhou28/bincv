@@ -20,7 +20,7 @@
 // a claim -- the same reason ops/resample.hpp keeps that work’s losing arms.
 // 3. THE REFERENCE PIPELINE'S BOX_2x2 PATH, behind BINCV_WITH_OPENCV:
 // cv::blur(2x2) then subsample with the Gaussian disabled, which is what
-// SEAL/src/keypoint_tracking/pyramids.cpp does. Two things are checked
+// the reference frontend's pyramid does. Two things are checked
 // there and neither is a tier promise: that binCV at NOut = 8 reproduces
 // the reference's value set exactly on the aligned block, and that
 // cv::blur's DEFAULT anchor really does shift its window half a pixel up
@@ -837,9 +837,9 @@ void testPyramidLadder(const char* wordName) {
 
 #ifdef BINCV_WITH_OPENCV
 
-/// SEAL's BOX_2x2 pyrDown, transcribed.
+/// the reference frontend's BOX_2x2 pyrDown, transcribed.
 ///
-/// @note This is a PORT of what SEAL/src/keypoint_tracking/pyramids.cpp does, not
+/// @note This is a PORT of what the reference frontend's pyramid does, not
 /// a paraphrase: `cv::blur(_src, _src_new, cv::Size(2, 2))` with OpenCV's
 /// DEFAULT anchor and border, then -- because `disableGaussian` is true for
 /// every filter type except GAUSSIAN_5x5 -- PyrDownInvoker's early-out,
@@ -904,9 +904,9 @@ void testAgainstReferencePipeline(const char* wordName) {
     // The WHOLE-LEVEL distance to the reference pipeline, which is a different
     // quantity from the one-LSB arithmetic bound above and is measured here rather
     // than described. See check 6.
-    size_t sealPixels = 0;
-    size_t sealSame = 0;
-    int sealMaxDelta = 0;
+    size_t refPixels = 0;
+    size_t refSame = 0;
+    int refMaxDelta = 0;
     for (int width : {16, 63, 64, 65, 128}) {
         for (int height : {8, 15, 16}) {
             const cv::Mat cvSrc = randomBinaryMat(
@@ -977,20 +977,20 @@ void testAgainstReferencePipeline(const char* wordName) {
             }
 
             // 4. THE SAME DEVIATION AT THE LEVEL, not just inside the blur: the
-            // SEAL path's destination (y, x) is the 2x2 block at source rows
+            // the reference path's destination (y, x) is the 2x2 block at source rows
             // 2y-1..2y and columns 2x-1..2x, where binCV's is 2y..2y+1 by
             // 2x..2x+1. Checked on destination pixels whose shifted block is
             // wholly inside the image, so the border rule is not the subject.
-            const cv::Mat sealLevel = referenceBox2x2(cvSrc);
-            for (int y = 1; y < sealLevel.rows; ++y) {
-                for (int x = 1; x < sealLevel.cols; ++x) {
+            const cv::Mat refLevel = referenceBox2x2(cvSrc);
+            for (int y = 1; y < refLevel.rows; ++y) {
+                for (int x = 1; x < refLevel.cols; ++x) {
                     const int r0 = 2 * y - 1;
                     const int c0 = 2 * x - 1;
                     if (r0 + 1 >= cvSrc.rows || c0 + 1 >= cvSrc.cols) continue;
                     const int shifted = openCvBoxRule(
                         cvSrc.at<uchar>(r0, c0), cvSrc.at<uchar>(r0, c0 + 1),
                         cvSrc.at<uchar>(r0 + 1, c0), cvSrc.at<uchar>(r0 + 1, c0 + 1));
-                    PYR_EXPECT(static_cast<int>(sealLevel.at<uchar>(y, x)) == shifted,
+                    PYR_EXPECT(static_cast<int>(refLevel.at<uchar>(y, x)) == shifted,
                                "the reference BOX_2x2 level is the 2x2 block one source "
                                "pixel up and to the left of binCV's",
                                label + " at (" + std::to_string(y) + "," + std::to_string(x) +
@@ -1026,19 +1026,19 @@ void testAgainstReferencePipeline(const char* wordName) {
             // bounds binCV against the ALIGNED block by one LSB; that bound was
             // once described as agreement with "the reference pipeline's
             // BOX_2x2", which it is not. Measure the actual whole-level
-            // distance to referenceBox2x2 (default anchor, the SEAL path) so
+            // distance to referenceBox2x2 (default anchor, the reference path) so
             // the deviation is a number the header can quote, and assert that
             // it is emphatically NOT within one LSB -- if it ever became so,
             // the phase deviation would have silently disappeared and the three
             // documented deviations would need re-deriving.
-            for (int y = 0; y < sealLevel.rows; ++y) {
-                for (int x = 0; x < sealLevel.cols; ++x) {
-                    ++sealPixels;
+            for (int y = 0; y < refLevel.rows; ++y) {
+                for (int x = 0; x < refLevel.cols; ++x) {
+                    ++refPixels;
                     const int delta = static_cast<int>(dst.at(y, x)) -
-                                      static_cast<int>(sealLevel.at<uchar>(y, x));
+                                      static_cast<int>(refLevel.at<uchar>(y, x));
                     const int mag = delta < 0 ? -delta : delta;
-                    if (mag == 0) ++sealSame;
-                    if (mag > sealMaxDelta) sealMaxDelta = mag;
+                    if (mag == 0) ++refSame;
+                    if (mag > refMaxDelta) refMaxDelta = mag;
                 }
             }
         }
@@ -1046,21 +1046,21 @@ void testAgainstReferencePipeline(const char* wordName) {
 
     // Asserted once over the whole sweep, because it is a property of the
     // deviation and not of any one frame.
-    PYR_EXPECT(sealPixels > 0 && sealMaxDelta > 1,
+    PYR_EXPECT(refPixels > 0 && refMaxDelta > 1,
                "the distance to the reference pipeline's own BOX_2x2 level is NOT the "
                "one-LSB arithmetic bound -- it carries the phase deviation too, and a "
                "run where it did not would mean the phase deviation had vanished",
                std::string(wordName) + ": max |binCV - reference| = " +
-                   std::to_string(sealMaxDelta));
-    PYR_EXPECT(sealMaxDelta <= 255,
+                   std::to_string(refMaxDelta));
+    PYR_EXPECT(refMaxDelta <= 255,
                "and it is bounded by full scale at NOut = 8",
-               std::string(wordName) + ": " + std::to_string(sealMaxDelta));
-    PYR_EXPECT(sealSame < sealPixels / 2,
+               std::string(wordName) + ": " + std::to_string(refMaxDelta));
+    PYR_EXPECT(refSame < refPixels / 2,
                "most destination pixels differ from the reference level -- the phase "
                "deviation dominates, which is why check 3's bound is scoped to the "
                "aligned block",
-               std::string(wordName) + ": " + std::to_string(sealSame) + " of " +
-                   std::to_string(sealPixels) + " identical");
+               std::string(wordName) + ": " + std::to_string(refSame) + " of " +
+                   std::to_string(refPixels) + " identical");
 
     std::cout << "\n--- pyrDownBox<8, 1> against OpenCV's 2x2 box ARITHMETIC on the ALIGNED "
                  "block (binCV's own geometry): "
@@ -1070,9 +1070,9 @@ void testAgainstReferencePipeline(const char* wordName) {
               << " (OpenCV rounds the mean up; binCV rounds to nearest)\n"
               << "--- and against the reference pipeline's WHOLE BOX_2x2 level "
                  "(default anchor), which also carries the phase deviation ---\n"
-              << " identical " << sealSame << " of " << sealPixels
+              << " identical " << refSame << " of " << refPixels
               << " destination pixels\n"
-              << " max |delta| " << sealMaxDelta << " of 255 (all of it phase)\n";
+              << " max |delta| " << refMaxDelta << " of 255 (all of it phase)\n";
 }
 
 #endif // BINCV_WITH_OPENCV

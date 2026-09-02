@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
     const cv::Mat first = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
     const int w = first.cols, h = first.rows;
 
-    bincv::LKParams lk;                     // seal_params.yaml verbatim
+    bincv::LKParams lk;                     // the reference frontend's parameters verbatim
     bincv::GoodFeaturesParams gftt;
     const int kMinTracks = 60;
     // (the ladder depth; the stage counters are per point-level, not per level)

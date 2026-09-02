@@ -76,7 +76,7 @@ void verticalEdgeFilter8b(const uint8_t* h_input, uint8_t* h_output, int width, 
     cudaFree(d_output);
 }
 
-__global__ void sealEdgeFilter8bKernel(const uint8_t* input, uint8_t* output, int width, int height, uint8_t threshold) {
+__global__ void edgeFilter8bKernel(const uint8_t* input, uint8_t* output, int width, int height, uint8_t threshold) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -96,7 +96,7 @@ __global__ void sealEdgeFilter8bKernel(const uint8_t* input, uint8_t* output, in
     output[idx] = hor | ver;
 }
 
-void SEALEdgeFilter8b(const uint8_t* h_input, uint8_t* h_output, int width, int height, uint8_t threshold) {
+void edgeFilter8b(const uint8_t* h_input, uint8_t* h_output, int width, int height, uint8_t threshold) {
     size_t imageSize = width * height * sizeof(uint8_t);
     uint8_t *d_input, *d_output;
 
@@ -109,7 +109,7 @@ void SEALEdgeFilter8b(const uint8_t* h_input, uint8_t* h_output, int width, int 
     dim3 gridDim((width + blockDim.x - 1) / blockDim.x,
                  (height + blockDim.y - 1) / blockDim.y);
 
-    sealEdgeFilter8bKernel<<<gridDim, blockDim>>>(d_input, d_output, width, height, threshold);
+    edgeFilter8bKernel<<<gridDim, blockDim>>>(d_input, d_output, width, height, threshold);
 
     cudaMemcpy(h_output, d_output, imageSize, cudaMemcpyDeviceToHost);
 

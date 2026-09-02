@@ -122,7 +122,7 @@
 /// `iterations`. `cv::erode(..., iterations = n)` is `n` sequential erosions, and
 /// n > 1 needs a second buffer to ping-pong through. A caller that wants it can
 /// write the loop with the scratch it already owns, and the MVP's pipeline does
-/// not (SEAL uses single-pass 3x3 morphology). Adding a parameter that silently
+/// not (the reference frontend uses single-pass 3x3 morphology). Adding a parameter that silently
 /// requires more memory than the signature shows would be the wrong default for
 /// this project.
 ///

@@ -12,7 +12,7 @@
 /// ---------------------------------------------------------------------------
 /// THE NEIGHBOURHOOD, READ OUT OF THE REFERENCE RATHER THAN INFERRED
 ///
-/// SEAL/src/temporal_processing/denoise.cpp, three_pix_median_filter:
+/// the reference frontend's denoiser, three_pix_median_filter:
 ///
 /// cv::Mat right_pixels = cv::Mat::zeros(img.size, img.type);
 /// cv::Mat above_pixels = cv::Mat::zeros(img.size, img.type);
