@@ -2,7 +2,7 @@
 //
 // THE CORRECTNESS BAR IS NOT "MATCHES A FORMULA I WROTE DOWN". It is "matches
 // the reference implementation pixel for pixel on binary input", and the
-// reference is SEAL/src/temporal_processing/denoise.cpp. Two consequences shape
+// reference is the reference frontend's denoiser. Two consequences shape
 // this file:
 //
 // * The OpenCV half PORTS THE REFERENCE'S ACTUAL cv:: CALLS -- cv::Mat::zeros
@@ -149,7 +149,7 @@ bool refMedian3(bool p1, bool p2, bool p3) {
 
 /// @brief The reference filter's three-pixel L, per pixel, with the zero border.
 /// @note THE NEIGHBOURHOOD AND THE BORDER, both from
-/// SEAL/src/temporal_processing/denoise.cpp:
+/// the reference frontend's denoiser:
 /// p1 = src[y - 1][x] -- `above_pixels`, whose rowRange(1, rows) is the
 /// only part ever written, so row 0 reads the
 /// cv::Mat::zeros it was built with.
@@ -526,10 +526,10 @@ void testDisjointViewsAccepted(const char* wordTypeName) {
 
 #ifdef BINCV_WITH_OPENCV
 
-/// @brief SEAL's three_pix_median_filter, transcribed.
+/// @brief The reference frontend's three-pixel median, transcribed.
 ///
 /// @note This is a PORT, not a paraphrase. Every line below appears in
-/// SEAL/src/temporal_processing/denoise.cpp in this order, including the
+/// the reference frontend's denoiser in this order, including the
 /// two `cv::Mat::zeros` constructions and the two range-limited copyTo
 /// calls that are the entire border specification:
 ///

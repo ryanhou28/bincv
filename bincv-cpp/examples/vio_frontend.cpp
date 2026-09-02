@@ -5,11 +5,11 @@
 // Every prior end-to-end measurement in this project runs a
 // benchmark loop: detect wholesale every N frames, track, compare. A real
 // frontend does something structurally different, and this is that loop --
-// modelled on HybVIO's, which is what the SEAL paper's pipeline drives:
+// modelled on HybVIO's, which is what the reference pipeline drives:
 //
 // 1. TEMPORAL / SENSOR STAGE, in OpenCV. median_filter then
-// rl_fast_edge_filter_wide (SEAL/src/temporal_processing/) turn an 8-bit
-// camera frame into a binary one. In SEAL this is dedicated hardware, and
+// rl_fast_edge_filter_wide (the reference frontend's temporal stage) turn an 8-bit
+// camera frame into a binary one. In the reference system this is dedicated hardware, and
 // it is NOT binCV's claim: binCV's domain starts at the binary frame,
 // which the design notes calls "the input, not a choice".
 //
@@ -56,8 +56,8 @@ using bincv::Point2f;
 namespace {
 
 // ---- 1. The temporal/sensor stage. OpenCV, and deliberately not binCV. ----
-// SEAL/src/temporal_processing/denoise.cpp: a three-pixel median.
-// SEAL/src/temporal_processing/edge_filter.cpp: |d/dx| + |d/dy| over [-1,0,1],
+// the reference frontend's denoiser: a three-pixel median.
+// the reference frontend's edge filter: |d/dx| + |d/dy| over [-1,0,1],
 // thresholded. Read from the reference rather than inferred (CLAUDE.md).
 cv::Mat sensorStage(const cv::Mat& gray, int edgeThreshold) {
     cv::Mat med;
@@ -176,7 +176,7 @@ int main(int argc, char** argv) {
     const int w = first.cols, h = first.rows;
 
     constexpr int kTarget = 200;        // features a VIO frontend wants live
-    constexpr int kEdgeThreshold = 17;  // seal_params.yaml
+    constexpr int kEdgeThreshold = 17;  // the reference frontend's edge_threshold
     bincv::GoodFeaturesParams gf;
     gf.maxCorners = kTarget;
     bincv::LKParams lk;
@@ -344,7 +344,7 @@ int main(int argc, char** argv) {
                 " above rather than by binCV. Re-run with BINCV_VIO_LOW=0.6 to see how far\n"
                 " the profile moves.\n\n"
                 " The sensor stage is listed separately because it is NOT binCV's claim:\n"
-                " in SEAL it is dedicated hardware, and binCV's domain starts at the binary\n"
+                " in the reference system it is dedicated hardware, and binCV's domain starts at the binary\n"
                 " frame. Judge binCV on the three lines above it.\n",
                 100.0 * static_cast<double>(detections) / fd);
     return 0;

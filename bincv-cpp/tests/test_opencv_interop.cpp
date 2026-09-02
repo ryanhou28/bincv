@@ -246,7 +246,7 @@ void testSampleImage() {
 // Everything else is the reference's own arithmetic in the reference's own order.
 // ---------------------------------------------------------------------------
 
-/// @brief gftt.cpp's comparator, from SEAL/opencv_internal/include/gftt.hpp.
+/// @brief gftt.cpp's comparator, from the vendored OpenCV good-features header it calls.
 struct GreaterThanPtr {
     bool operator()(const float* a, const float* b) const
 
@@ -278,7 +278,7 @@ void testRealFrameCorners() {
     bin.fromCVMat(input);
     BINCV_CHECK_EQ(bin.countNonZero(), cv::countNonZero(input));
 
-    bincv::GoodFeaturesParams params;  // SEAL/seal_params.yaml verbatim
+    bincv::GoodFeaturesParams params;  // the reference frontend's parameters verbatim
     bincv::TernaryMat<uint32_t> dx(static_cast<size_t>(w), static_cast<size_t>(h));
     bincv::TernaryMat<uint32_t> dy(static_cast<size_t>(w), static_cast<size_t>(h));
     bincv::derivativeX(bin, dx);

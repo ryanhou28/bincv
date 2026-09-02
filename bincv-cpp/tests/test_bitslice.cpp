@@ -10,7 +10,7 @@
 //
 // 2. The OPENCV half checks majority3 against the reference pipeline's own
 // three-pixel median, written as OpenCV calls: max(min(a,b), min(max(a,b), c))
-// over CV_8U (SEAL/src/temporal_processing/denoise.cpp). That is a SECOND
+// over CV_8U (the reference frontend's denoiser). That is a SECOND
 // REFERENCE, not a tier promise -- bit-sliced arithmetic is Tier 3
 // (the design notes) and OpenCV has no pointwise median of three images.
 // It is here because must match that formula, and the cheapest way to
@@ -130,7 +130,7 @@ constexpr size_t wordBits() {
 // ---------------------------------------------------------------------------
 
 /// @brief Median of three binary pixels, as the reference pipeline computes it.
-/// @note max(min(a, b), min(max(a, b), c)), i.e. SEAL's three_pix_median_filter
+/// @note max(min(a, b), min(max(a, b), c)), i.e. the reference frontend's three-pixel median
 /// with cv::min / cv::max read as && / || on {0, 255}. Deliberately NOT
 /// (a&b)|(b&c)|(a&c): a reference that restates the implementation cannot
 /// disagree with it.
@@ -945,7 +945,7 @@ void testThresholdPaddingContract(const char* wordTypeName) {
 
 #ifdef BINCV_WITH_OPENCV
 
-/// @brief max(min(a, b), min(max(a, b), c)) over CV_8U -- SEAL's three-pixel
+/// @brief max(min(a, b), min(max(a, b), c)) over CV_8U -- the reference frontend's three-pixel
 /// median, unchanged.
 /// @note NOT a Tier 1 claim: OpenCV has no pointwise median of three images, and
 /// bit-sliced arithmetic is Tier 3 (the design notes). This is a second,

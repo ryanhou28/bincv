@@ -177,7 +177,7 @@
 #   test_bitslice  351620 under opencv, 350540 everywhere else. The 1080
 #             difference is majority3 against the reference pipeline's own median
 #             -- max(min(a,b), min(max(a,b),c)) as cv::min/cv::max over CV_8U,
-#             which is SEAL's three_pix_median_filter unchanged. That is a SECOND
+#             which is the reference frontend's three-pixel median unchanged. That is a SECOND
 #             REFERENCE and not a tier promise: bit-sliced arithmetic is Tier 3
 #             (ARCHITECTURE 5.1) and OpenCV has no pointwise median of three
 #             images. It is worth its 1080 checks because T3.1 has to reproduce
@@ -255,7 +255,7 @@
 #             bitslice-short-stride and bitslice-sum-overlap alongside it. The
 #             ctest count rises by those four.
 #   test_denoise  9744 under opencv, 7584 everywhere else. The 2160 difference is
-#             the reference implementation itself: SEAL's three_pix_median_filter
+#             the reference implementation itself: the reference frontend's three-pixel median
 #             PORTED CALL FOR CALL -- two cv::Mat::zeros neighbour matrices, the
 #             two range-limited copyTo calls, then cv::min/cv::max in its order --
 #             over the full T2.1 size, height and fill matrix at all four word
@@ -495,7 +495,7 @@
 #   test_pyramid  262008 under opencv, 236122 everywhere else. The 25886
 #             difference is the reference pipeline's own BOX_2x2 path (T3.4,
 #             X-15): cv::blur(2x2) then PyrDownInvoker's disableGaussian
-#             early-out, which is what SEAL/src/keypoint_tracking/pyramids.cpp
+#             early-out, which is what the reference frontend's pyramid
 #             runs. It is a SECOND REFERENCE and not a tier promise -- pyrDown is
 #             Tier 2 (ARCHITECTURE 5.1), so there is no bit-exactness to check --
 #             and it carries three separate claims: that cv::blur on CV_8U is
@@ -906,8 +906,8 @@ opencv	test_resample	245312	0
 opencv	test_pyramid	262324	0
 opencv	test_derivative	48526	0
 opencv	test_covariance	17704	0
-opencv	test_corner	3655	0
-opencv	test_opticalflow	319	0
+opencv	test_corner	3671	0
+opencv	test_opticalflow	327	0
 opencv	test_pack	44	0
 opencv	test_edge	31	0
 opencv	test_median_wide	6	0
@@ -938,8 +938,8 @@ core	test_resample	245312	0
 core	test_pyramid	236431	0
 core	test_derivative	47675	0
 core	test_covariance	17704	0
-core	test_corner	3655	0
-core	test_opticalflow	227	0
+core	test_corner	3671	0
+core	test_opticalflow	235	0
 core	test_pack	44	0
 core	test_edge	30	0
 core	test_median_wide	5	0
@@ -968,8 +968,8 @@ noexcept	test_resample	245312	0
 noexcept	test_pyramid	236431	0
 noexcept	test_derivative	47675	0
 noexcept	test_covariance	17704	0
-noexcept	test_corner	3655	0
-noexcept	test_opticalflow	227	0
+noexcept	test_corner	3671	0
+noexcept	test_opticalflow	235	0
 noexcept	test_pack	44	0
 noexcept	test_edge	30	0
 noexcept	test_median_wide	5	0
@@ -998,8 +998,8 @@ debug	test_resample	245312	0
 debug	test_pyramid	236431	0
 debug	test_derivative	47675	0
 debug	test_covariance	17704	0
-debug	test_corner	3655	0
-debug	test_opticalflow	227	0
+debug	test_corner	3671	0
+debug	test_opticalflow	235	0
 debug	test_pack	44	0
 debug	test_edge	30	0
 debug	test_median_wide	5	0
