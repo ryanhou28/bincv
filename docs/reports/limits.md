@@ -72,7 +72,8 @@ is not a ratio on a deployment part, in either direction.**
 Bit packing gives a `uint32_t` thirty-two pixels. An AVX2 register of bytes holds exactly
 thirty-two pixels too. Against a mature vectorised byte kernel, packing alone buys nothing
 until the boolean algebra also moves into a vector register — and where OpenCV has already
-done that work, binCV ties or loses.
+done that work, binCV ties or loses. Where OpenCV has done less of it, the same binCV code
+wins, which is why the two columns below disagree as often as they agree.
 
 | operation | x86-64 | aarch64 | what happened |
 |---|---|---|---|
@@ -81,7 +82,7 @@ done that work, binCV ties or loses.
 | `erode`, `BORDER_REPLICATE` | 0.64× | 0.72× | a rim pass `BORDER_CONSTANT` does not need |
 | `erode`, `BORDER_REFLECT_101` | 0.62× | 0.71× | the same |
 | `erode`, 3×3 rect | 1.04× | 1.00× | dead heat with a vectorised byte kernel |
-| `goodFeaturesToTrack` | 0.92× | *pending* | seven float planes of locality binCV declines to buy |
+| `goodFeaturesToTrack` | 0.92× | *1.45× — ahead* | seven float planes of locality binCV declines to buy |
 | `countNonZero` | 1.62× | 2.69× | both sides are bandwidth-bound; binCV moves less data, that is all |
 
 Parity on FAST ships as parity. A caller who is holding bytes should not be told to pack
@@ -89,11 +90,14 @@ them first, and for that caller the honest answer is that binCV costs nothing to
 gains nothing either. The [bit-plane overload](features.md#fast) is where the thesis actually
 applies, and it is 1.50× on x86 and 2.37× on the device.
 
-`goodFeaturesToTrack` is on this list at 0.92× rather than the 0.53× an earlier version of
-these reports published. That figure measured the frame-map spelling while it was still on an
-older response kernel than the streaming spelling every frontend here calls; the two now
-share one kernel. The aarch64 column is marked pending rather than reprinted, because the
-device figure was taken before that change and would move with it.
+**`goodFeaturesToTrack` is on this list for x86 only, and it is the sharpest illustration of
+the point above it.** An earlier version of these reports published 0.53× on *both*
+architectures and concluded that this was "a property of the operation rather than of one
+machine's dispatch". Both halves of that were wrong. The figure measured the frame-map
+spelling while it was still on an older response kernel than the streaming spelling every
+frontend here calls, and once the two share one kernel the operation is 0.92× on x86 and
+**1.45× on the reference device** — a loss on the desktop and a win on the deployment part,
+from identical code over identical buffers returning identical corners.
 
 ## 4. A footprint win is not a speed win
 

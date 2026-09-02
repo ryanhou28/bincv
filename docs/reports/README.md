@@ -32,7 +32,7 @@ The whole result in one table — same commit, same sequence, one thread on each
 | `pyrDown`, 1 bit in | 1.56× | 5.56× |
 | `erode` 3×3 | 1.04× | 1.00× |
 | FAST, wide image | 1.05× | 0.96× |
-| `goodFeaturesToTrack` | 0.92× | *pending* |
+| `goodFeaturesToTrack` | 0.92× | **1.45×** |
 | `erode`, 5×5 ellipse | 0.32× | 0.51× |
 
 ## What these are not

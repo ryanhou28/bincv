@@ -5,8 +5,8 @@ replaces. One thread on both sides. Setup and denominator rule: [README.md](READ
 
 These are the operations closest to what a tracking frontend actually spends its time on,
 and they are also where the results are least uniform. Optical flow is seven to eight times
-faster, FAST on a wide image is at parity, and corner detection is about twice as slow while
-holding a fifth of the memory.
+faster, FAST on a wide image is at parity, and corner detection is slightly behind on the
+desktop and ahead on the deployment target — while holding a fifth of the memory on both.
 
 ## Summary
 
@@ -18,7 +18,7 @@ holding a fifth of the memory.
 | Hamming matching, kNN=2 | `cv::BFMatcher` | **4.72×** | 1.97× | — |
 | FAST, wide image | `cv::FAST` | 1.05× | 0.96× | — |
 | FAST, bit-plane | `cv::FAST` | **1.50×** | **2.37×** | 7.8× smaller input |
-| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` | 0.92× | *pending* ‡‡ | 5.71× smaller |
+| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` | 0.92× | **1.45×** | 5.71× smaller |
 
 † `cv::ORB::compute` also computes orientation and rotates its pattern per keypoint. It is
 not a like-for-like comparison and is printed for scale rather than claimed.
@@ -26,11 +26,6 @@ not a like-for-like comparison and is printed for scale rather than claimed.
 ‡ The tracking benchmark measures time, not footprint. The 6.23× memory result is a
 whole-frontend figure and belongs to [frontend.md](frontend.md); it is not a per-call
 property of `calcOpticalFlowPyrLK`.
-
-‡‡ The corner detector's response kernel changed after the aarch64 numbers were taken —
-see [Corner detection](#corner-detection). The device figure would move with it, so the
-stale one is withdrawn rather than reprinted, and the row will be filled when the
-reference device is next free.
 
 ## Optical flow
 
@@ -61,7 +56,7 @@ population counts per window row at every level regardless of how small that lev
 keypoint yield up.
 
 **This is Lucas–Kanade against Lucas–Kanade, not the whole frontend.** The end-to-end figure
-is 3.36×, and the gap between the two is the honest part of the result — the stages around
+is 3.30×, and the gap between the two is the honest part of the result — the stages around
 tracking do not have this ratio. See [frontend.md](frontend.md).
 
 ## Descriptors and matching
@@ -120,21 +115,27 @@ a Tier 2 operation.
 
 ## Corner detection
 
-**binCV is slightly behind here — around 0.92× — and roughly five times smaller.**
+**Slightly behind on x86 at 0.92×, and 1.45× ahead on the reference device — while holding a
+fifth of the memory on both.**
 
-Both spellings, x86-64, at 640×480. The two return the same corners and are timed in the
-same interleaved run:
+Both spellings, at 640×480. The two return the same corners and are timed in the same
+interleaved run:
 
-| variant | ns/pixel | vs OpenCV | bytes/pixel |
-|---|---|---|---|
-| binCV, frame map | 14.72–15.96 | 0.85–0.97× | 16.54 |
-| binCV, streaming ring | 14.46–15.01 | 0.92–0.98× | **12.56** |
-| OpenCV, binarized (the denominator) | 13.63–14.24 | 1.00× | 36.94 |
-| `cv::goodFeaturesToTrack` (stock, different numerics) | 8.53 | 1.60× | 29.00 |
+| variant | x86 ns/pixel | vs OpenCV | aarch64 ns/pixel | vs OpenCV | bytes/pixel |
+|---|---|---|---|---|---|
+| binCV, frame map | 14.72–15.96 | 0.85–0.97× | 51.64–51.67 | **1.45–1.47×** | 16.54 |
+| binCV, streaming ring | 14.46–15.01 | 0.92–0.98× | 51.25–51.31 | **1.46–1.48×** | **12.56** |
+| OpenCV, binarized (the denominator) | 13.63–14.24 | 1.00× | 75.02–75.82 | 1.00× | 36.94 |
+| `cv::goodFeaturesToTrack` (stock, different numerics) | 8.53 | 1.60× | 59.34–59.44 | 1.26–1.28× | 29.00 |
 
 Agreement is exact against OpenCV: 723 corners against 723, every position matching, worst
 displacement 0.00 px. And the two binCV spellings agree with each other corner for corner,
 which the benchmark now asserts before it times anything.
+
+**The device numbers are the trustworthy ones here.** Their spreads are 0.08% to 1.62%
+against 5% to 63% on the shared x86 box, which is the difference between a pinned,
+governor-locked, single-purpose machine and a desktop under a hypervisor carrying other
+work.
 
 **An earlier version of this report published 0.53× here, and that was wrong.** The number
 was real but it measured a path the library does not ship. `goodFeaturesToTrack` and
@@ -145,15 +146,17 @@ calls the streaming form; the benchmark called the other one. They now share one
 the frame-map form went from 26.06 to about 14.9 ns/pixel — the whole of the difference
 between "twice as slow" and "a little behind".
 
-The remaining gap is a deliberate trade and the clearest example of the library's tie-break.
-OpenCV's detector materialises seven `float` planes — 28 bytes per pixel — to buy locality
-binCV declines to buy, sweeping a three-row ring instead. binCV holds 5.14 bytes per pixel at
-the measured survivor count against 29.35.
+**The correction also reversed the conclusion, not just the number.** This operation used to
+be the report's clearest example of "memory wins, speed loses" — the trade where binCV
+declines the seven `float` planes of locality OpenCV's detector materialises, 28 bytes per
+pixel against binCV's 5.14 at the measured survivor count, and pays for it in time. The
+footprint half is unchanged and still the point. The speed half turned out not to be a trade
+at all on the machine binCV is aimed at: same buffers, same corners, 1.45× faster.
 
-Two qualifications. **The spreads on this host are wide** — 5% to 63% on binCV's arms across
-runs, against 6–48% on OpenCV's — so read this as "roughly parity, slightly behind" rather
-than as three significant figures. And detection is 11.5–14.6% of the frontend at this
-benchmark's duty cycle, so the end-to-end cost is small either way.
+What remains true is the caveat this whole report keeps running into. On x86 the same call is
+0.92×, because OpenCV's x86 detector is AVX2-dispatched and its aarch64 one is relatively
+weaker against the same machine. Detection is 11.5–14.6% of the frontend at this benchmark's
+duty cycle, so the end-to-end cost either way is small.
 
 ## Reproduce
 
