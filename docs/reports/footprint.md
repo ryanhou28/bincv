@@ -161,7 +161,7 @@ built for and would have taken the frontend from about 1.52× to 1.65× against 
 92,160 additional bytes on a 436,704-byte peak, taking the footprint result from 6.23× to
 5.15×. Twenty-one percent of the footprint advantage for eight percent of the speed is not a
 trade this library makes. The 1.52× baseline it was weighed against is an older frontend
-figure, superseded by the 3.36× and 4.73× in [frontend.md](frontend.md); the proportions are
+figure, superseded by the 3.30× and 4.73× in [frontend.md](frontend.md); the proportions are
 what the decision turned on.
 
 Two other figures on this page come from that same development record rather than from a
