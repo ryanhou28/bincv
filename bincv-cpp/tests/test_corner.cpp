@@ -120,6 +120,18 @@ void* countedAllocateAligned(std::size_t bytes, std::size_t alignment) {
     return p;
 }
 
+// The nothrow forms, which the counters would otherwise miss. binCV has exactly one
+// allocating entry point -- goodFeaturesToTrack's owning overload -- and because the
+// library builds with exceptions disabled it allocates through `new (std::nothrow)`.
+// Replacing only the throwing forms left that allocation on the default operator new
+// and its release on this file's operator delete, which is a genuine mismatch and
+// which -Wmismatched-new-delete reports.
+void* countedAllocateNoThrow(std::size_t bytes) noexcept {
+    ++g_newCount;
+    if (bytes > static_cast<std::size_t>(PTRDIFF_MAX)) return nullptr;
+    return std::malloc(bytes == 0 ? 1 : bytes);
+}
+
 void countedFree(void* p) noexcept { std::free(p); }
 } // namespace
 
@@ -129,6 +141,15 @@ void operator delete(void* p) noexcept                { countedFree(p); }
 void operator delete[](void* p) noexcept              { countedFree(p); }
 void operator delete(void* p, std::size_t) noexcept   { countedFree(p); }
 void operator delete[](void* p, std::size_t) noexcept { countedFree(p); }
+
+void* operator new(std::size_t bytes, const std::nothrow_t&) noexcept {
+    return countedAllocateNoThrow(bytes);
+}
+void* operator new[](std::size_t bytes, const std::nothrow_t&) noexcept {
+    return countedAllocateNoThrow(bytes);
+}
+void operator delete(void* p, const std::nothrow_t&) noexcept   { countedFree(p); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { countedFree(p); }
 
 void* operator new(std::size_t bytes, std::align_val_t a) {
     return countedAllocateAligned(bytes, static_cast<std::size_t>(a));
@@ -1983,6 +2004,162 @@ BINCV_TEST(Corner, Streaming_NoAllocation) {
     BINCV_CHECK_EQ(probeAllocs, std::size_t{1});
     std::printf(" streaming: operator new = %zu across the whole call (%zu candidates ranked)\n",
                 during, r.candidatesRanked);
+}
+
+// ---------------------------------------------------------------------------
+// THE MASK. `cv::goodFeaturesToTrack` takes one; so does this. The three tests
+// below pin the three things that are easy to get wrong about it, and the third
+// is the one that separates a real mask from zeroing the map by hand.
+// ---------------------------------------------------------------------------
+
+/// @brief A mask admitting the columns in `[x0, x1)` of every row.
+template <typename WordType>
+BinMat<WordType> columnMask(int w, int h, int x0, int x1) {
+    BinMat<WordType> m(w, h);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) m.set(y, x, (x >= x0 && x < x1) ? 1u : 0u);
+    return m;
+}
+
+BINCV_TEST(Corner, Mask_EmptyAdmitsEverything) {
+    const Frame f = randomFrame(kWideW, kWideH, 0x4A5C01ULL);
+    const std::vector<float> storage = mapFor<uint32_t>(f, 3, BORDER_REFLECT_101);
+    ConstResponseMap view(storage.data(), static_cast<size_t>(f.width),
+                          static_cast<size_t>(f.height), static_cast<size_t>(f.width));
+    GoodFeaturesParams p;
+    p.blockSize = 3;
+    p.minDistance = 3.0;
+    p.maxCorners = 0;
+
+    const size_t cap = static_cast<size_t>(f.width) * static_cast<size_t>(f.height);
+    std::vector<Corner> a(cap), b(cap);
+    const CornerResult ra = bincv::selectGoodFeatures(view, p, a.data(), cap);
+    const CornerResult rb =
+        bincv::selectGoodFeatures<uint32_t>(view, BinMatConstView<uint32_t>{}, p, b.data(), cap);
+
+    BINCV_CHECK_EQ(ra.count, rb.count);
+    BINCV_CHECK_EQ(ra.candidatesRanked, rb.candidatesRanked);
+    size_t differ = 0;
+    for (size_t i = 0; i < ra.count; ++i)
+        if (a[i].x != b[i].x || a[i].y != b[i].y) ++differ;
+    BINCV_CHECK_EQ(differ, size_t{0});
+    std::printf(" mask: empty == absent, %zu corners either way\n", ra.count);
+}
+
+BINCV_TEST(Corner, Mask_RestrictsCandidatesAndAdmitsNothing) {
+    const Frame f = randomFrame(kWideW, kWideH, 0x4A5C02ULL);
+    const std::vector<float> storage = mapFor<uint32_t>(f, 3, BORDER_REFLECT_101);
+    ConstResponseMap view(storage.data(), static_cast<size_t>(f.width),
+                          static_cast<size_t>(f.height), static_cast<size_t>(f.width));
+    GoodFeaturesParams p;
+    p.blockSize = 3;
+    p.minDistance = 0.0;
+    p.maxCorners = 0;
+
+    const size_t cap = static_cast<size_t>(f.width) * static_cast<size_t>(f.height);
+    std::vector<Corner> out(cap);
+
+    // Every corner returned under a half-frame mask is inside the mask.
+    const int half = f.width / 2;
+    const BinMat<uint32_t> left = columnMask<uint32_t>(f.width, f.height, 0, half);
+    const CornerResult rl =
+        bincv::selectGoodFeatures<uint32_t>(view, left.constView(), p, out.data(), cap);
+    size_t outside = 0;
+    for (size_t i = 0; i < rl.count; ++i)
+        if (out[i].x >= half) ++outside;
+    BINCV_CHECK_EQ(outside, size_t{0});
+    BINCV_CHECK(rl.count > 0);
+
+    // A mask admitting nothing returns nothing, and says so rather than dividing by
+    // a maximum that does not exist.
+    const BinMat<uint32_t> none = columnMask<uint32_t>(f.width, f.height, 0, 0);
+    const CornerResult rn =
+        bincv::selectGoodFeatures<uint32_t>(view, none.constView(), p, out.data(), cap);
+    BINCV_CHECK_EQ(rn.count, size_t{0});
+    BINCV_CHECK_EQ(rn.candidatesRanked, size_t{0});
+    BINCV_CHECK_EQ(rn.candidatesTruncated, false);
+    std::printf(" mask: %zu corners under a half mask, all inside it; empty mask -> 0\n",
+                rl.count);
+}
+
+BINCV_TEST(Corner, Mask_DoesNotChangeSuppression) {
+    // A hand-built map with a strong pixel and a weaker neighbour it suppresses.
+    // The strong one is masked OUT. The reference dilates the whole map, so the
+    // weaker pixel stays suppressed and neither is returned. Zeroing the masked
+    // pixels of the map instead would return the weaker one -- that is the
+    // difference this test exists to hold.
+    const int w = 9, h = 7;
+    std::vector<float> storage(static_cast<size_t>(w) * static_cast<size_t>(h), 0.0f);
+    ResponseMap m = mapView(storage, w, h);
+    m.row(3)[4] = 10.0f;  // strong, and masked out
+    m.row(3)[5] = 6.0f;   // its neighbour, weaker, admitted
+    m.row(1)[1] = 4.0f;   // far away and admitted, so something survives either way
+    ConstResponseMap view(m);
+
+    GoodFeaturesParams p;
+    p.blockSize = 3;
+    p.minDistance = 0.0;
+    p.maxCorners = 0;
+    p.qualityLevel = 0.01;
+
+    BinMat<uint32_t> mask(w, h);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) mask.set(y, x, (y == 3 && x == 4) ? 0u : 1u);
+
+    std::vector<Corner> out(64);
+    const CornerResult r =
+        bincv::selectGoodFeatures<uint32_t>(view, mask.constView(), p, out.data(), out.size());
+
+    bool sawStrong = false, sawSuppressed = false, sawFar = false;
+    for (size_t i = 0; i < r.count; ++i) {
+        if (out[i].x == 4 && out[i].y == 3) sawStrong = true;
+        if (out[i].x == 5 && out[i].y == 3) sawSuppressed = true;
+        if (out[i].x == 1 && out[i].y == 1) sawFar = true;
+    }
+    BINCV_CHECK_EQ(sawStrong, false);      // masked out
+    BINCV_CHECK_EQ(sawSuppressed, false);  // suppressed BY the masked-out pixel
+    BINCV_CHECK_EQ(sawFar, true);          // unaffected
+    std::printf(" mask: a masked-out pixel still suppresses (%zu corners kept)\n", r.count);
+}
+
+BINCV_TEST(Corner, Mask_StreamingMatchesFrameMap) {
+    const Frame f = randomFrame(kWideW, kWideH, 0x4A5C03ULL);
+    const Derived<uint32_t> d(f, BORDER_REFLECT_101);
+    GoodFeaturesParams p;
+    p.blockSize = 3;
+    p.minDistance = 2.0;
+    p.maxCorners = 0;
+
+    const BinMat<uint32_t> mask =
+        columnMask<uint32_t>(f.width, f.height, f.width / 4, (3 * f.width) / 4);
+
+    const size_t cap = static_cast<size_t>(f.width) * static_cast<size_t>(f.height);
+    std::vector<float> storage = makeMapStorage(f.width, f.height);
+    const ResponseMap frameMap = mapView(storage, f.width, f.height);
+    std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<size_t>(f.width));
+    const ResponseMap ring{ringStorage.data(), static_cast<size_t>(f.width),
+                           bincv::kResponseRingRows, static_cast<size_t>(f.width)};
+
+    std::vector<Corner> a(cap), b(cap), c(cap);
+    const CornerResult ra =
+        bincv::goodFeaturesToTrack(d.dx, d.dy, p, frameMap, a.data(), cap, mask.constView());
+    const CornerResult rb = bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, p, ring, b.data(),
+                                                                cap, mask.constView());
+    // The owning overload: same answer, no caller scratch at all.
+    const CornerResult rc =
+        bincv::goodFeaturesToTrack(d.dx, d.dy, p, c.data(), cap, mask.constView());
+
+    BINCV_CHECK_EQ(ra.count, rb.count);
+    BINCV_CHECK_EQ(ra.count, rc.count);
+    BINCV_CHECK_EQ(rc.allocationFailed, false);
+    BINCV_CHECK(ra.count > 0);
+    size_t differ = 0;
+    for (size_t i = 0; i < ra.count; ++i) {
+        if (a[i].x != b[i].x || a[i].y != b[i].y) ++differ;
+        if (a[i].x != c[i].x || a[i].y != c[i].y) ++differ;
+    }
+    BINCV_CHECK_EQ(differ, size_t{0});
+    std::printf(" mask: frame map, ring and owning overload agree on %zu corners\n", ra.count);
 }
 
 BINCV_TEST_MAIN("test_corner")
