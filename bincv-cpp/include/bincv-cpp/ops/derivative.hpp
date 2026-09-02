@@ -15,7 +15,7 @@
 /// ---------------------------------------------------------------------------
 /// THE OPERATION, READ OUT OF THE REFERENCE RATHER THAN INFERRED
 ///
-/// SEAL/src/keypoint_tracking/gradients.cpp, `calcBinarizedDeriv`:
+/// the reference frontend's gradient stage, `calcBinarizedDeriv`:
 ///
 /// cv::Mat kernelX = (cv::Mat_<int>(1, 3) << -1, 0, 1);
 /// cv::Mat kernelY = (cv::Mat_<int>(3, 1) << -1, 0, 1);

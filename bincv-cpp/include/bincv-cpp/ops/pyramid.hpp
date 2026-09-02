@@ -187,7 +187,7 @@
 /// file's multi-bit one.
 /// 3. **The reference pipeline's own BOX_2x2 path** for the 1-bit level-0 case
 /// -- cv::blur(2x2) then subsample, with the Gaussian disabled, which is what
-/// SEAL/src/keypoint_tracking/pyramids.cpp does.
+/// the reference frontend's pyramid does.
 ///
 /// **Three documented deviations from that reference. The first is a rounding
 /// difference and the other two are not:**
@@ -650,7 +650,7 @@ inline void gatherPhases(WordType w0, WordType w1, WordType& evenPhase,
 // THE DOWNSAMPLING FILTER AXIS (earlier work)
 //
 // The reference defines SIX `LKPyrDownFilterType` variants and binCV implemented
-// exactly one, `BOX_2x2`, because that is what `seal_params.yaml` selects. Every
+// exactly one, `BOX_2x2`, because that is what the reference frontend selects. Every
 // accuracy result in this project was therefore measured at one point of a
 // two-dimensional design space -- and a measurement showed the
 // two axes are NOT independent: a 2x2 box sum of four values has five possible
@@ -670,7 +670,7 @@ inline void gatherPhases(WordType w0, WordType w1, WordType& evenPhase,
 // (`MEDIAN_3x3` is an order statistic, not a weighted sum, and is not here.
 // a measurement measured it 7.53 points BELOW the box anyway: a median of a mostly-zero
 // neighbourhood returns zero, so it erodes a sparse edge map rather than blurring
-// it. It belongs in the temporal denoiser, which is where SEAL uses it.)
+// it. It belongs in the temporal denoiser, which is where the reference frontend uses it.)
 //
 // WHY THE TAPS ARE CHEAP. Output column x reads source column 2x + dx, and
 // `gatherPhases` already separates a source row into its even and odd column
@@ -924,7 +924,7 @@ namespace impl {
 /// the 2x2 sum at source rows 2y, 2y+1 and columns 2x, 2x+1, rounded half
 /// up. Read the file header for why the rescale is there and what it costs.
 /// @note **Deviation from the reference pipeline, recorded per that work’s spec.** The
-/// reference (SEAL, `LKPyrDownFilterType::BOX_2x2`) lets precision grow into
+/// reference (`LKPyrDownFilterType::BOX_2x2`) lets precision grow into
 /// CV_8U and never re-binarizes, so its levels are 1/3/4/5 bits by
 /// measurement (the design notes). binCV caps each level at NOut and stores
 /// the nearest representable value. The reference also anchors its 2x2

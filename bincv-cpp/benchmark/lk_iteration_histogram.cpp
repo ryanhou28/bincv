@@ -16,7 +16,7 @@
 // iterations run.
 //
 // This harness reproduces frontend_sequence's frontend exactly: the same
-// preprocessing, the same 1/2/2/2 ladder, the same seal_params.yaml parameters and
+// preprocessing, the same 1/2/2/2 ladder, the same reference-frontend parameters and
 // the same re-detection schedule, so the distribution is the one the shipped
 // tracker sees and not one a synthetic frame produced.
 //
@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
     const cv::Mat first = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
     const int w = first.cols, h = first.rows;
 
-    bincv::LKParams lk;                     // seal_params.yaml verbatim
+    bincv::LKParams lk;                     // the reference frontend's parameters verbatim
     bincv::GoodFeaturesParams gftt;
     const int kMinTracks = 60;
     constexpr size_t kLevels = 4;

@@ -3,7 +3,7 @@
 // THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that is not a judgement call either -- it is
-// SEAL/src/keypoint_tracking/gradients.cpp's calcBinarizedDeriv, which is two
+// the reference frontend's gradient stage, calcBinarizedDeriv, which is two
 // cv::filter2D calls with [-1, 0, 1] as a 1x3 and a 3x1. That IS what the
 // pipeline runs today without binCV.
 //
@@ -722,7 +722,7 @@ int main() {
     std::printf("================================================================================\n\n");
     std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n\n",
                 CV_VERSION, cv::getNumThreads());
-    std::printf("DENOMINATOR (ARCHITECTURE 10.3): SEAL's calcBinarizedDeriv on the SAME binary\n");
+    std::printf("DENOMINATOR (ARCHITECTURE 10.3): the reference frontend's calcBinarizedDeriv on the SAME binary\n");
     std::printf("content stored as CV_8U -- two cv::filter2D calls with [-1, 0, 1] as a 1x3 and\n");
     std::printf("a 3x1, ported. That is what the pipeline runs today without binCV.\n\n");
     std::printf("The DENOMINATOR row is 'OpenCV filter2D x2' -- the derivative and nothing else.\n");
@@ -737,7 +737,7 @@ int main() {
     std::printf("READ THE WORKING-SET COLUMN WITH THE RATIO. binCV's whole working set is five\n");
     std::printf("BIT-planes where OpenCV's is one byte-plane and two 16-bit planes -- 8x smaller\n");
     std::printf("-- so on a 1 MiB-L2 Cortex-A part of any large ratio at 640x480 is residency\n");
-    std::printf("rather than arithmetic, exactly as in. The size ladder is\n");
+    std::printf("rather than arithmetic. The size ladder is\n");
     std::printf("there to separate the two: if the ratio collapses once BOTH sides fit in cache,\n");
     std::printf("the headline figure was residency; if it holds, it is the operation.\n");
 

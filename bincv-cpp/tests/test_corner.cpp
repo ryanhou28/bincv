@@ -365,7 +365,7 @@ double responseDouble(const Triple& t) {
 int cvRoundLike(double v) { return static_cast<int>(std::nearbyint(v)); }
 
 /// @brief gftt.cpp's own comparator, copied from
-/// SEAL/opencv_internal/include/gftt.hpp with its comment.
+/// the vendored OpenCV good-features header it calls with its comment.
 /// @note **THIS MUST NOT BE `impl::CornerStronger` OR A COPY OF IT.** The library's
 /// comparator is the thing under test; an oracle that shares it cannot
 /// detect a wrong tie order, and equal responses are the RULE in this
@@ -1679,8 +1679,8 @@ struct SelectionParams {
 };
 
 const SelectionParams kStreamParams[] = {
-    // seal_params.yaml verbatim -- the configuration the decision is taken at.
-    {"seal-defaults", 200, 0.01, 33.33333333333},
+    // the reference frontend's parameters verbatim -- the configuration the decision is taken at.
+    {"reference-defaults", 200, 0.01, 33.33333333333},
     // The spacing filter DISABLED (gftt.cpp's `else` branch), so the answer is a
     // pure top-`maxCorners` and every tie in the sort is visible in the output.
     {"no-spacing", 200, 0.01, 0.0},

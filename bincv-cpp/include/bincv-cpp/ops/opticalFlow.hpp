@@ -82,9 +82,8 @@
 /// ===========================================================================
 /// WHAT IS DELIBERATELY DIFFERENT FROM THE REFERENCE, AND WHY
 /// ===========================================================================
-/// Reference: `SEAL/src/keypoint_tracking/SparsePyrLKOpticalFlowSealImpl.cpp` and
-/// `SEAL/opencv_internal/src/LKTrackerInvoker.cpp`, with
-/// `SEAL/seal_params.yaml`'s parameters (win 31x31, maxLevel 3, maxCount 20,
+/// Ported from the reference frontend's tracker and the vendored OpenCV LK
+/// invoker it calls, with that frontend's parameters (win 31x31, maxLevel 3, maxCount 20,
 /// eps 0.03, minEig 0.001, BINARIZED derivative, BOX_2x2 pyrDown) -- all of which
 /// are this file's defaults, verbatim.
 ///
@@ -136,7 +135,7 @@
 ///
 /// **(vi) A LEVEL NO LARGER THAN THE WINDOW IS IGNORED, NOT REFUSED.** The
 /// reference stops BUILDING levels at the first one that is not strictly larger
-/// than `winSize` (`SparsePyrLKOpticalFlowSealImpl.cpp`'s `if (sz.width <=
+/// than `winSize` (the reference tracker's `if (sz.width <=
 /// winSize.width || sz.height <= winSize.height)`) and truncates `maxLevel`. Here
 /// the caller owns the pyramid, so the same rule is applied at USE: levels
 /// are consumed as a prefix and one at or below the window size ends it. This is
@@ -177,7 +176,7 @@
 /// clamps `criteria.maxCount`.
 /// * **Converged when `|delta|^2 <= epsilon^2`.** The reference squares
 /// `criteria.epsilon` once up front and compares `delta.ddot(delta)`; 0.03 px
-/// is `seal_params.yaml`'s value and the default here.
+/// is the reference frontend's value and the default here.
 /// * **The oscillation rule, which is NOT the epsilon rule.** From iteration 1
 /// on, if `|delta + prevDelta| < 0.01` in both components -- i.e. this step
 /// almost exactly undoes the last one -- the point is declared converged, the
@@ -201,7 +200,7 @@
 /// accuracy".
 ///
 /// `minEigThreshold` is quoted in the REFERENCE's units so that
-/// `seal_params.yaml`'s 0.001 can be used verbatim.
+/// the reference frontend's 0.001 can be used verbatim.
 /// `impl::kReferenceMinEigScale` is the conversion, and it is a derivation and not
 /// a fitted constant: the reference's `A11` is `FLT_SCALE * sum(ixval^2)` with
 /// `ixval = 16*255*Ix`, i.e. `(16*255)^2 / 2^20 = 65025/4096 = 15.875244...` times
@@ -285,14 +284,14 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// because this operation's whole job is to produce fractional positions.
 /// @note Deliberately NOT reused for ops/corner.hpp's `Corner`, which is integer
 /// by construction and carries a response.
-/// @brief The tracker's parameters, defaulted to `SEAL/seal_params.yaml` verbatim.
+/// @brief The tracker's parameters, defaulted to the reference frontend's verbatim.
 /// @note `lk_win_size_width/height: 31`, `lk_term_criteria_max_count: 20`,
 /// `lk_term_criteria_eps: 0.03`, `lk_min_eig_threshold: 0.001`.
 /// `lk_max_level: 3` is not a field: the number of levels is `levelCount`,
 /// because the caller owns the pyramid.
 /// `lk_use_initial_flow: 0` IS a field -- `useInitialFlow` below. It used to be
 /// absent, on the grounds that an unused mode is an untested one; that was
-/// checked against `seal_params.yaml`, where the flag is off, and not against
+/// checked against the reference frontend's parameters, where the flag is off, and not against
 /// the pipeline around it, where `predictOpticalFlow` turns it on.
 /// @brief Which pyramid level a keypoint ENTERS at. **earlier work.**
 /// @note Not a border and not a padding scheme: it is a policy about which levels
@@ -1639,7 +1638,7 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
     // Measured on the reference device: **2.13x**, bit-exact.
     //
     // Guarded on the window fitting a word -- `LKParams` allows any `winWidth`,
-    // and at 31x31 (`seal_params.yaml`) it fits at every word type binCV supports.
+    // and at 31x31 (the reference frontend's window) it fits at every word type binCV supports.
     // ===================================================================
     if (r.x1 - r.x0 <= bitsPerWord<WordType>()) {
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
@@ -1900,7 +1899,7 @@ inline long long floorToLL(float v) { return static_cast<long long>(std::floor(v
 
 namespace impl {
 
-/// The most pyramid levels the tracker will consume. `seal_params.yaml`'s
+/// The most pyramid levels the tracker will consume. The reference frontend's
 /// `lk_max_level: 3` is four; a 640x480 frame stalls at 1 pixel after 10. Fixed so
 /// that `LKContext` can carry every level's extent WITHOUT a scratch allocation.
 constexpr size_t kMaxLevels = 16;
@@ -2962,7 +2961,7 @@ inline size_t usableLevelCount(size_t levelCount, int winW, int winH, DimFn dims
 /// @tparam WordType The planes' word type.
 /// @param levels `levelCount` per-level view bundles, **level 0 (the finest)
 /// first**. Every level's six planes must share that level's dimensions.
-/// @param levelCount Number of pyramid levels. `seal_params.yaml`'s
+/// @param levelCount Number of pyramid levels. The reference frontend's
 /// `lk_max_level: 3` means four levels. **Levels at or below the window
 /// size are ignored** (deviation (vi)), so passing more of them than the
 /// frame can carry is harmless rather than silently wrong; 0 is legal and
@@ -2983,7 +2982,7 @@ inline size_t usableLevelCount(size_t levelCount, int winW, int winH, DimFn dims
 /// pixel count and not the window area.
 /// @param pointCount Number of keypoints.
 /// @param params Window, iteration limit, epsilon and minimum-eigenvalue
-/// threshold; defaulted to `seal_params.yaml`.
+/// threshold; defaulted to the reference frontend's parameters.
 ///
 /// @note **No allocation, no scratch, no throw.** The four arrays are the
 /// caller's and nothing else is needed; tests/test_opticalflow.cpp counts

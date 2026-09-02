@@ -177,7 +177,7 @@
 #   test_bitslice  351620 under opencv, 350540 everywhere else. The 1080
 #             difference is majority3 against the reference pipeline's own median
 #             -- max(min(a,b), min(max(a,b),c)) as cv::min/cv::max over CV_8U,
-#             which is SEAL's three_pix_median_filter unchanged. That is a SECOND
+#             which is the reference frontend's three-pixel median unchanged. That is a SECOND
 #             REFERENCE and not a tier promise: bit-sliced arithmetic is Tier 3
 #             (ARCHITECTURE 5.1) and OpenCV has no pointwise median of three
 #             images. It is worth its 1080 checks because T3.1 has to reproduce
@@ -255,7 +255,7 @@
 #             bitslice-short-stride and bitslice-sum-overlap alongside it. The
 #             ctest count rises by those four.
 #   test_denoise  9744 under opencv, 7584 everywhere else. The 2160 difference is
-#             the reference implementation itself: SEAL's three_pix_median_filter
+#             the reference implementation itself: the reference frontend's three-pixel median
 #             PORTED CALL FOR CALL -- two cv::Mat::zeros neighbour matrices, the
 #             two range-limited copyTo calls, then cv::min/cv::max in its order --
 #             over the full T2.1 size, height and fill matrix at all four word
@@ -495,7 +495,7 @@
 #   test_pyramid  262008 under opencv, 236122 everywhere else. The 25886
 #             difference is the reference pipeline's own BOX_2x2 path (T3.4,
 #             X-15): cv::blur(2x2) then PyrDownInvoker's disableGaussian
-#             early-out, which is what SEAL/src/keypoint_tracking/pyramids.cpp
+#             early-out, which is what the reference frontend's pyramid
 #             runs. It is a SECOND REFERENCE and not a tier promise -- pyrDown is
 #             Tier 2 (ARCHITECTURE 5.1), so there is no bit-exactness to check --
 #             and it carries three separate claims: that cv::blur on CV_8U is
