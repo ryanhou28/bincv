@@ -13,6 +13,7 @@ was cut from is in [logs/](logs/).
 | [features.md](features.md) | corner detection, FAST, descriptors, matching, optical flow | **7.13× / 8.26×** on optical flow |
 | [footprint.md](footprint.md) | the memory result on its own, and the speed declined to protect it | **6.23×** over the frontend |
 | [limits.md](limits.md) | where binCV ties, loses, or stops paying at all | four ways it stops working |
+| [methodology-memory.md](methodology-memory.md) | how memory is measured, and the errors that shaped it | read before quoting a memory number |
 
 Paired figures are x86-64 then aarch64. The two are different measurements against different
 OpenCV builds and are never averaged.
@@ -102,15 +103,21 @@ reported beside it. Arms are run round-robin so drift moves all of them together
 are consumed through a `volatile` sink and inputs are varied, because a loop whose result is
 unused is deleted by the optimizer and the resulting number looks excellent.
 
-**Memory is the peak working set, computed from buffer geometry** — the live buffers of one
-call, or of one frame through the pipeline, counted in bytes. It is arithmetic over
-container sizes rather than a sampled RSS, which is why it is exact, reproducible, and
-identical on both architectures. Two things make that honest rather than convenient: no
-binCV kernel allocates, so scratch appears in the caller's signature and therefore in the
-count; and the counts are checked against an instrumented `operator new` that requires zero
-allocations inside kernels. Where the OpenCV side allocates internally, that was probed
-rather than assumed — `cv::morphologyEx` turned out to allocate nothing of its own for
-`OPEN`, which moved binCV's advantage there from 8.0× to 5.33×.
+**Memory is the peak working set, and [methodology-memory.md](methodology-memory.md) says
+how it is measured.** Read that page before quoting a memory number from these reports. It
+names the four different quantities that get called "memory", gives the instruments, and
+lists the four measurement errors this project actually published — including one that made
+OpenCV look 17× smaller than it is, and one that came from measuring binCV's stack against
+OpenCV's heap.
+
+For the image pipeline the figure is computed from buffer geometry — the live buffers of
+one call or one frame, counted in bytes. That is arithmetic over container sizes rather
+than a sampled RSS, which is why it is exact, reproducible and identical on both
+architectures, and it works because no binCV kernel allocates, so scratch appears in the
+caller's signature and therefore in the count. **Where the OpenCV side allocates
+internally, buffer arithmetic cannot see it** and an allocator-level probe is required;
+`cv::morphologyEx` was measured that way rather than assumed, which moved binCV's advantage
+there from 8.0× to 5.33×.
 
 One figure is a sampled RSS rather than a computed working set, and says so where it appears:
 the effect of thread count on peak memory, since thread stacks are the one thing buffer

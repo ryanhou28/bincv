@@ -25,10 +25,16 @@
 //
 // HOW THE MEMORY COLUMN IS MEASURED, NOT ACCOUNTED
 //
-// `operator new` is replaced in this translation unit. That replacement is global --
-// it binds for the whole program, OpenCV's own allocations included -- so the counts
-// below are readings rather than estimates from what a call is known to materialize.
-// Both sides are measured the same way, with the same counter, around one call.
+// heap_probe interposes the C allocator, so it sees every path into the heap --
+// including `cv::fastMalloc`, which `cv::Mat` uses and which a replaced
+// `operator new` never observes. This file used to replace `operator new` and so
+// under-reported OpenCV badly; see heap_probe.hpp for the size of that error.
+//
+// The figure is the HIGH-WATER of simultaneously-live bytes, not the sum of every
+// allocation. The sum counts a buffer that was already handed back, and OpenCV
+// allocates and releases repeatedly inside its loop, so summing overstates it.
+// Peak live and allocator traffic are reported as two rows because they are two
+// claims.
 //
 // VALIDITY
 //
@@ -42,19 +48,16 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <new>
 #include <vector>
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
 
 #include "bincv-cpp/ops/ransac.hpp"
+#include "heap_probe.hpp"
 #include "measure_util.hpp"
 
 namespace {
-
-std::size_t g_newCount = 0;
-std::size_t g_newBytes = 0;
 
 using bincv::Affine2D;
 using bincv::Point2f;
@@ -95,19 +98,6 @@ Scene makeScene(size_t count, int outlierPct, uint64_t seed) {
     return s;
 }
 
-struct Counted {
-    std::size_t calls = 0;
-    std::size_t bytes = 0;
-};
-
-/// @brief Allocation performed by one call, read rather than accounted.
-template <typename F>
-Counted countOneCall(F&& f) {
-    const std::size_t c0 = g_newCount, b0 = g_newBytes;
-    f();
-    return Counted{g_newCount - c0, g_newBytes - b0};
-}
-
 void runSize(size_t count, int outlierPct) {
     Scene s = makeScene(count, outlierPct, 0xA11CE + count);
 
@@ -138,13 +128,13 @@ void runSize(size_t count, int outlierPct) {
     }
 
     // --- allocation, read from a replaced operator new ------------------------
-    const Counted binAlloc = countOneCall([&]() {
+    const heapprobe::Reading binAlloc = heapprobe::around([&]() {
         bincv::Affine2D m2;
         const bincv::RansacResult rr = bincv::estimateAffine2D(s.from.data(), s.to.data(), count,
                                                                p, scratch, &m2, mask.data());
         measure::g_sink += rr.inliers;
     });
-    const Counted cvAlloc = countOneCall([&]() {
+    const heapprobe::Reading cvAlloc = heapprobe::around([&]() {
         std::vector<uint8_t> mk;
         const cv::Mat mm = cv::estimateAffine2D(s.cvFrom, s.cvTo, mk, cv::RANSAC, kThreshold);
         measure::g_sink += static_cast<size_t>(mm.rows) + mk.size();
@@ -155,21 +145,22 @@ void runSize(size_t count, int outlierPct) {
     // caller, it did not disappear, and the comparison worth making is working set
     // against working set.
     const size_t binSet = bincv::ransacScratchBytes(count);
-    std::printf("\n WORKING SET OF ONE CALL\n");
-    std::printf("   binCV  %9zu B   caller-owned, known before the call via"
-                " ransacScratchBytes()\n", binSet);
+    std::printf("\n PEAK SIMULTANEOUSLY-LIVE HEAP OF ONE CALL"
+                " (allocator-level; sees cv::fastMalloc)\n");
+    std::printf("   binCV  %9zu B   plus %zu B of caller-owned scratch, which is known\n"
+                "                     before the call via ransacScratchBytes()\n",
+                binAlloc.peakLive, binSet);
     std::printf("   OpenCV %9zu B   allocated internally; not visible from its signature\n",
-                cvAlloc.bytes);
-    std::printf("   -> %.1fx smaller, and it is a number a caller can budget rather than"
-                " discover\n", static_cast<double>(cvAlloc.bytes) / static_cast<double>(binSet));
-    std::printf("\n ALLOCATOR TRAFFIC DURING ONE CALL (operator new replaced; both sides,"
-                " same counter)\n");
+                cvAlloc.peakLive);
+    std::printf("   -> %.1fx smaller, counting binCV's scratch against OpenCV's peak live\n",
+                static_cast<double>(cvAlloc.peakLive) / static_cast<double>(binSet));
+    std::printf("\n ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE\n");
     std::printf("   binCV  %6zu calls   the caller's buffer is reused across frames\n",
                 binAlloc.calls);
     std::printf("   OpenCV %6zu calls   per call, so ~%zu/second in a 20 Hz frame loop\n",
                 cvAlloc.calls, cvAlloc.calls * 20);
-    std::printf("   A SEPARATE CLAIM from the one above: this is about jitter and allocator\n"
-                "   pressure, not about how many bytes are live.\n");
+    std::printf("   Peak live says how many bytes must exist at once; traffic says how\n"
+                "   often the allocator is entered. Neither substitutes for the other.\n");
 
     // --- time ----------------------------------------------------------------
     std::vector<measure::Bench> benches;
@@ -209,6 +200,14 @@ int main() {
     std::printf("threshold %.1f px, confidence 0.99, iteration cap 2000, seeded and"
                 " deterministic\n", kThreshold);
 
+    // The instrument proves itself before any figure below is believed.
+    std::printf("\n HEAP PROBE SELF-CHECK -- known answers it must recover\n");
+    if (!heapprobe::selfCheck()) {
+        std::printf("\n THE HEAP PROBE FAILED ITS OWN CHECKS. No figure below would be\n"
+                    " evidence, so none is printed.\n");
+        return 1;
+    }
+
     runSize(200, 30);
     runSize(1000, 30);
     runSize(2000, 50);
@@ -216,38 +215,3 @@ int main() {
     std::printf("\n sink %zu\n", static_cast<size_t>(measure::g_sink));
     return 0;
 }
-
-// ---------------------------------------------------------------------------
-// Replaced globally, so OpenCV's own allocations are counted too. Every form,
-// including the nothrow ones -- a partial replacement would leave a mismatch.
-// ---------------------------------------------------------------------------
-namespace {
-void* countedAllocate(std::size_t bytes) {
-    ++g_newCount;
-    g_newBytes += bytes;
-    void* p = std::malloc(bytes == 0 ? 1 : bytes);
-    if (p == nullptr) std::abort();
-    return p;
-}
-void* countedAllocateNoThrow(std::size_t bytes) noexcept {
-    ++g_newCount;
-    g_newBytes += bytes;
-    return std::malloc(bytes == 0 ? 1 : bytes);
-}
-void countedFree(void* p) noexcept { std::free(p); }
-} // namespace
-
-void* operator new(std::size_t bytes) { return countedAllocate(bytes); }
-void* operator new[](std::size_t bytes) { return countedAllocate(bytes); }
-void operator delete(void* p) noexcept { countedFree(p); }
-void operator delete[](void* p) noexcept { countedFree(p); }
-void operator delete(void* p, std::size_t) noexcept { countedFree(p); }
-void operator delete[](void* p, std::size_t) noexcept { countedFree(p); }
-void* operator new(std::size_t bytes, const std::nothrow_t&) noexcept {
-    return countedAllocateNoThrow(bytes);
-}
-void* operator new[](std::size_t bytes, const std::nothrow_t&) noexcept {
-    return countedAllocateNoThrow(bytes);
-}
-void operator delete(void* p, const std::nothrow_t&) noexcept { countedFree(p); }
-void operator delete[](void* p, const std::nothrow_t&) noexcept { countedFree(p); }
