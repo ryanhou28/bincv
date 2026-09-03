@@ -111,8 +111,9 @@ Counted countOneCall(F&& f) {
 void runSize(size_t count, int outlierPct) {
     Scene s = makeScene(count, outlierPct, 0xA11CE + count);
 
-    std::vector<uint8_t> best(count), cand(count), mask(count);
-    const bincv::RansacScratch scratch{best.data(), cand.data(), count};
+    std::vector<uint32_t> flags(2 * bincv::ransacScratchWords(count));
+    std::vector<uint8_t> mask(count);
+    const bincv::RansacScratch scratch{flags.data(), count};
     bincv::RansacParams p;
     p.threshold = kThreshold;
     Affine2D model;

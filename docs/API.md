@@ -35,7 +35,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 21 entries
 - [`ops/pack.hpp`](#opspackhpp) — 9 entries
 - [`ops/pyramid.hpp`](#opspyramidhpp) — 41 entries
-- [`ops/ransac.hpp`](#opsransachpp) — 10 entries
+- [`ops/ransac.hpp`](#opsransachpp) — 11 entries
 - [`ops/reduce.hpp`](#opsreducehpp) — 19 entries
 - [`ops/resample.hpp`](#opsresamplehpp) — 6 entries
 - [`ops/shift.hpp`](#opsshifthpp) — 12 entries
@@ -414,6 +414,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `RansacParams` *(struct)* | 2 | The four parameters a RANSAC call takes |
 | `RansacResult` *(struct)* | 2 | What a RANSAC call reports back |
 | `RansacScratch` *(struct)* | 3 | Caller-owned scratch: one flag per correspondence, twice |
+| `ransacScratchWords` | — | Words in one inlier set over `correspondences` points |
 | `ransacScratchBytes` | — | Bytes of scratch a call over `correspondences` points needs |
 | `ransac` | 2 | Fit `Model` to the correspondences by random sample consensus |
 | `Affine2D` *(struct)* | 2 | A 2D affine transform, row-major: `[m[0] m[1] m[2]; m[3] m[4] m[5]]` |

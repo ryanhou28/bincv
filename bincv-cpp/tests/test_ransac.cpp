@@ -73,14 +73,14 @@ Correspondences makeScene(const Affine2D& t, size_t count, int outlierEvery, uin
 
 struct Fixture {
     Correspondences scene;
-    std::vector<uint8_t> best, cand, mask;
+    std::vector<uint32_t> flags;
+    std::vector<uint8_t> mask;
     RansacScratch scratch;
 
     explicit Fixture(const Correspondences& s) : scene(s) {
-        best.assign(scene.from.size(), 0);
-        cand.assign(scene.from.size(), 0);
+        flags.assign(2 * ransacScratchWords(scene.from.size()), 0);
         mask.assign(scene.from.size(), 0);
-        scratch = RansacScratch{best.data(), cand.data(), scene.from.size()};
+        scratch = RansacScratch{flags.data(), scene.from.size()};
     }
 };
 
@@ -146,8 +146,8 @@ BINCV_TEST(Ransac, DegenerateAndUndersizedInputs) {
     // Fewer correspondences than the minimal set: no model, and the output is not touched.
     Affine2D untouched;
     untouched.m[2] = 1234.0f;
-    std::vector<uint8_t> b(2), c(2);
-    RansacScratch sc{b.data(), c.data(), 2};
+    std::vector<uint32_t> fl(2 * ransacScratchWords(2));
+    RansacScratch sc{fl.data(), 2};
     const Correspondences two = makeScene(kTruth, 2, 0, 1);
     RansacParams p;
     const RansacResult r =
@@ -187,7 +187,7 @@ BINCV_TEST(Ransac, AllocatesNothing) {
     BINCV_CHECK_EQ(during, std::size_t{0});
     BINCV_CHECK_EQ(r.found, true);
     // The declared cost is the whole cost: two flags per correspondence.
-    BINCV_CHECK_EQ(ransacScratchBytes(500), std::size_t{1000});
+    BINCV_CHECK_EQ(ransacScratchBytes(500), std::size_t{128});
     std::printf(" ransac: operator new called %zu times across the call, scratch %zu B\n",
                 during, ransacScratchBytes(500));
 }

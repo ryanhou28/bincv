@@ -126,20 +126,29 @@ struct RansacResult {
 /// compare a candidate's support against the best so far without having
 /// scored the best again.
 struct RansacScratch {
-    uint8_t* best = nullptr;       ///< inlier flags of the best model so far
-    uint8_t* candidate = nullptr;  ///< inlier flags of the model being scored
-    size_t capacity = 0;           ///< entries in each, >= the correspondence count
+    /// @brief `2 * ransacScratchWords(count)` words: the best model's inlier flags
+    /// followed by the candidate's.
+    uint32_t* words = nullptr;
+    size_t capacity = 0;  ///< correspondences it can cover
 
-    bool empty() const { return best == nullptr || candidate == nullptr || capacity == 0; }
+    bool empty() const { return words == nullptr || capacity == 0; }
 };
 
+/// @brief Words in one inlier set over `correspondences` points.
+inline constexpr size_t ransacScratchWords(size_t correspondences) {
+    return (correspondences + 31) / 32;
+}
+
 /// @brief Bytes of scratch a call over `correspondences` points needs.
-/// @note **This is the operation's whole memory cost**, and it is here so a caller
-/// can size a buffer before the call rather than discover it during one. Two
-/// bytes per correspondence: 4 000 B at 2 000 correspondences, against an
-/// OpenCV call whose internal allocation is not visible from its signature.
+/// @note **AN INLIER FLAG IS ONE BIT, NOT ONE BYTE**, which is the whole premise of
+/// this library applied to its own scratch. Two sets of flags at one bit each
+/// is 256 B at 1 000 correspondences where a byte each would be 2 000 -- and
+/// copying the winning set becomes a word copy rather than a byte loop.
+/// @note This is the operation's whole caller-visible memory cost, and it is here
+/// so a caller can size a buffer before the call rather than discover it
+/// during one.
 inline constexpr size_t ransacScratchBytes(size_t correspondences) {
-    return 2 * correspondences;
+    return 2 * ransacScratchWords(correspondences) * sizeof(uint32_t);
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +268,11 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
                  "ransac: scratch capacity must cover every correspondence");
 
     const float threshold = static_cast<float>(params.threshold);
+    const size_t words = ransacScratchWords(count);
+    uint32_t* bestFlags = scratch.words;
+    uint32_t* candFlags = scratch.words + words;
+    for (size_t w = 0; w < words; ++w) bestFlags[w] = 0;
+
     size_t indices[Model::kMinimalSetSize];
     typename Model::Type models[Model::kMaxModels];
 
@@ -273,18 +287,21 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
 
         const size_t produced = Model::estimate(from, to, indices, models);
         for (size_t m = 0; m < produced; ++m) {
+            for (size_t w = 0; w < words; ++w) candFlags[w] = 0;
             size_t support = 0;
             for (size_t i = 0; i < count; ++i) {
-                const bool in = Model::residual(models[m], from[i], to[i]) < threshold;
-                scratch.candidate[i] = in ? uint8_t{1} : uint8_t{0};
-                support += in ? size_t{1} : size_t{0};
+                if (Model::residual(models[m], from[i], to[i]) < threshold) {
+                    candFlags[i >> 5] |= static_cast<uint32_t>(1u) << (i & 31u);
+                    ++support;
+                }
             }
             if (support <= bestInliers) continue;
 
             bestInliers = support;
             *bestModel = models[m];
             out.found = true;
-            for (size_t i = 0; i < count; ++i) scratch.best[i] = scratch.candidate[i];
+            // A word copy, where a byte-per-flag scratch would be a byte loop.
+            for (size_t w = 0; w < words; ++w) bestFlags[w] = candFlags[w];
 
             // Tighten the cap as the support estimate improves. This is where the
             // iteration count actually comes from; maxIterations is a backstop.
@@ -297,8 +314,11 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
 
     out.inliers = bestInliers;
     if (inlierMask != nullptr) {
+        // Unpacked on the way out, because the MASK is the caller's and OpenCV's
+        // shape for it is a byte per point.
         for (size_t i = 0; i < count; ++i) {
-            inlierMask[i] = out.found ? scratch.best[i] : uint8_t{0};
+            const bool in = out.found && ((bestFlags[i >> 5] >> (i & 31u)) & 1u) != 0u;
+            inlierMask[i] = in ? uint8_t{1} : uint8_t{0};
         }
     }
     return out;
@@ -414,12 +434,12 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
                            uint8_t* inlierMask = nullptr) {
     RansacResult out;
     if (count == 0) return out;
-    uint8_t* flags = new (std::nothrow) uint8_t[ransacScratchBytes(count)];
+    uint32_t* flags = new (std::nothrow) uint32_t[2 * ransacScratchWords(count)];
     if (flags == nullptr) {
         out.allocationFailed = true;
         return out;
     }
-    const RansacScratch scratch{flags, flags + count, count};
+    const RansacScratch scratch{flags, count};
     out = ransac<Model>(from, to, count, params, scratch, bestModel, inlierMask);
     delete[] flags;
     return out;

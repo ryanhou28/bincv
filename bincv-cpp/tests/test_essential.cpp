@@ -201,9 +201,9 @@ BINCV_TEST(Essential, RansacSeparatesInliersFromOutliers) {
             }
         }
 
-        std::vector<uint8_t> best(static_cast<size_t>(kPoints)), cand(static_cast<size_t>(kPoints)),
-            mask(static_cast<size_t>(kPoints));
-        const RansacScratch scratch{best.data(), cand.data(), static_cast<size_t>(kPoints)};
+        std::vector<uint32_t> flags(2 * ransacScratchWords(static_cast<size_t>(kPoints)));
+        std::vector<uint8_t> mask(static_cast<size_t>(kPoints));
+        const RansacScratch scratch{flags.data(), static_cast<size_t>(kPoints)};
         RansacParams params;
         params.threshold = 0.002;
         params.maxIterations = 500;
@@ -240,8 +240,8 @@ BINCV_TEST(Essential, DeterministicAndDegenerate) {
     for (int i = 0; i < kPoints; ++i) {
         project(pose, rng, from[static_cast<size_t>(i)], to[static_cast<size_t>(i)]);
     }
-    std::vector<uint8_t> b(static_cast<size_t>(kPoints)), c(static_cast<size_t>(kPoints));
-    const RansacScratch scratch{b.data(), c.data(), static_cast<size_t>(kPoints)};
+    std::vector<uint32_t> fl(2 * ransacScratchWords(static_cast<size_t>(kPoints)));
+    const RansacScratch scratch{fl.data(), static_cast<size_t>(kPoints)};
     RansacParams params;
     params.threshold = 0.002;
 
@@ -283,8 +283,8 @@ BINCV_TEST(Essential, AllocatesNothing) {
     for (int i = 0; i < kPoints; ++i) {
         project(pose, rng, from[static_cast<size_t>(i)], to[static_cast<size_t>(i)]);
     }
-    std::vector<uint8_t> b(static_cast<size_t>(kPoints)), c(static_cast<size_t>(kPoints));
-    const RansacScratch scratch{b.data(), c.data(), static_cast<size_t>(kPoints)};
+    std::vector<uint32_t> fl(2 * ransacScratchWords(static_cast<size_t>(kPoints)));
+    const RansacScratch scratch{fl.data(), static_cast<size_t>(kPoints)};
     RansacParams params;
     params.threshold = 0.002;
     EssentialMatrix e;
@@ -325,9 +325,9 @@ BINCV_TEST(Essential, AgreesWithOpenCV) {
                                        to[static_cast<size_t>(i)].y));
         }
 
-        std::vector<uint8_t> b(static_cast<size_t>(kPoints)), c(static_cast<size_t>(kPoints)),
-            mask(static_cast<size_t>(kPoints));
-        const RansacScratch scratch{b.data(), c.data(), static_cast<size_t>(kPoints)};
+        std::vector<uint32_t> flags(2 * ransacScratchWords(static_cast<size_t>(kPoints)));
+        std::vector<uint8_t> mask(static_cast<size_t>(kPoints));
+        const RansacScratch scratch{flags.data(), static_cast<size_t>(kPoints)};
         RansacParams params;
         params.threshold = 0.002;
         params.maxIterations = 500;
