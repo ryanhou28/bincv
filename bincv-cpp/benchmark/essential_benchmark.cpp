@@ -15,6 +15,14 @@
 // anything is timed, because two randomised searches that disagree about the
 // consensus set are not comparable on speed.
 //
+// THE TWO SIDES COMPUTE THE SAME LAST STEP, which is what makes the timing column
+// here mean more than the one in ransac_benchmark.cpp. `cv::findEssentialMat`
+// hands its points to a RANSAC registrator and returns what that found; there is
+// no least-squares refinement afterwards, unlike `cv::estimateAffine2D`, which
+// runs Levenberg-Marquardt over its consensus set. So neither side refits and the
+// ratio below is a like-for-like one. Verified against OpenCV's own source rather
+// than assumed -- five-point.cpp calls run() and nothing else.
+//
 // THE HEAP COLUMN IS PEAK LIVE, AND IT IS THE SMALLER HALF OF THE STORY --
 // essential_stack_benchmark measures the stack, which is where both solvers keep
 // their working arrays and where the real comparison is.

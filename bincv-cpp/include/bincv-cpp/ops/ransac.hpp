@@ -243,11 +243,17 @@ inline int ransacIterationsNeeded(size_t inliers, size_t total, size_t minimalSe
 /// architectures. Nothing here reads a global generator.
 /// @note **No allocation and no throw**, as everywhere else in this library.
 /// @note **The returned model is the minimal-set fit, not a refit over its
-/// inliers.** OpenCV's estimators follow RANSAC with a least-squares
-/// refinement over the consensus set, so their model will differ slightly
-/// even when the two agree on which correspondences are inliers. A caller who
-/// wants the refinement can do it over `inlierMask`; doing it here would mean
-/// carrying a solver this file deliberately does not have.
+/// inliers.** Whether that matches OpenCV depends on which estimator you are
+/// comparing against, and the difference is worth knowing before reading a
+/// speed ratio. `cv::findEssentialMat` does not refit either -- it returns
+/// what its registrator found -- so that comparison is like for like.
+/// `cv::estimateAffine2D` does: it runs up to `refineIters` Levenberg-Marquardt
+/// steps over the consensus set, which is work this driver never does. Its
+/// model will differ slightly even when the two agree on which correspondences
+/// are inliers, and part of any speed advantage measured against it is that
+/// difference rather than a faster implementation of the same thing. A caller
+/// who wants the refinement can do it over `inlierMask`; doing it here would
+/// mean carrying a solver this file deliberately does not have.
 template <typename Model>
 inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
                            const RansacParams& params, RansacScratch scratch,
