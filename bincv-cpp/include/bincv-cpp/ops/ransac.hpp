@@ -78,6 +78,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
+#include <new>  // std::nothrow -- the owning overloads at the bottom, and nothing else
 
 #include "../core/error.hpp"
 #include "../core/types.hpp"
@@ -113,6 +114,10 @@ struct RansacResult {
     /// @brief False when no model was found -- too few correspondences, or every
     /// minimal sample degenerate. The output model is then untouched.
     bool found = false;
+    /// @brief The owning overload could not obtain its flags. Nothing else sets it:
+    /// every scratch-taking entry point takes the caller's buffer and cannot
+    /// fail this way.
+    bool allocationFailed = false;
 };
 
 /// @brief Caller-owned scratch: one flag per correspondence, twice.
@@ -388,6 +393,44 @@ inline RansacResult estimateAffine2D(const Point2f* from, const Point2f* to, siz
                                      const RansacParams& params, RansacScratch scratch,
                                      Affine2D* model, uint8_t* inlierMask = nullptr) {
     return ransac<Affine2DModel>(from, to, count, params, scratch, model, inlierMask);
+}
+
+/// @brief `ransac` with no scratch parameter: it takes the flags itself.
+/// **API TIER 2** -- the call shape OpenCV's estimators have.
+/// @note **THIS IS THE ONLY PART OF THIS FILE THAT ALLOCATES**, and it exists so a
+/// caller porting from OpenCV does not have to restructure to make one call.
+/// It is a WRAPPER over the form above, not a second implementation.
+/// @note **It does not reduce the memory the operation needs** -- the same two
+/// flags per correspondence are live either way. What the scratch-taking form
+/// buys is that the number is knowable before the call and the buffer can be
+/// reused across frames; what this form buys is convenience.
+/// @note A target with no heap never instantiates it: this is a template, so a
+/// build that does not call it does not emit it.
+/// @note Allocation failure is a RETURN VALUE (`allocationFailed`), not a throw --
+/// the library builds with exceptions disabled.
+template <typename Model>
+inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
+                           const RansacParams& params, typename Model::Type* bestModel,
+                           uint8_t* inlierMask = nullptr) {
+    RansacResult out;
+    if (count == 0) return out;
+    uint8_t* flags = new (std::nothrow) uint8_t[ransacScratchBytes(count)];
+    if (flags == nullptr) {
+        out.allocationFailed = true;
+        return out;
+    }
+    const RansacScratch scratch{flags, flags + count, count};
+    out = ransac<Model>(from, to, count, params, scratch, bestModel, inlierMask);
+    delete[] flags;
+    return out;
+}
+
+/// @brief `estimateAffine2D` with no scratch parameter. **API TIER 2.**
+/// @note See the owning `ransac` above for what this does and does not buy.
+inline RansacResult estimateAffine2D(const Point2f* from, const Point2f* to, size_t count,
+                                     const RansacParams& params, Affine2D* model,
+                                     uint8_t* inlierMask = nullptr) {
+    return ransac<Affine2DModel>(from, to, count, params, model, inlierMask);
 }
 
 } // inline namespace BINCV_ABI_NAMESPACE
