@@ -26,6 +26,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/derivative.hpp`](#opsderivativehpp) — 6 entries
 - [`ops/descriptor.hpp`](#opsdescriptorhpp) — 8 entries
 - [`ops/edge.hpp`](#opsedgehpp) — 6 entries
+- [`ops/essential.hpp`](#opsessentialhpp) — 7 entries
 - [`ops/fast.hpp`](#opsfasthpp) — 6 entries
 - [`ops/logic.hpp`](#opslogichpp) — 6 entries
 - [`ops/medianWide.hpp`](#opsmedianWidehpp) — 5 entries
@@ -34,6 +35,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 21 entries
 - [`ops/pack.hpp`](#opspackhpp) — 9 entries
 - [`ops/pyramid.hpp`](#opspyramidhpp) — 41 entries
+- [`ops/ransac.hpp`](#opsransachpp) — 12 entries
 - [`ops/reduce.hpp`](#opsreducehpp) — 19 entries
 - [`ops/resample.hpp`](#opsresamplehpp) — 6 entries
 - [`ops/shift.hpp`](#opsshifthpp) — 12 entries
@@ -213,6 +215,20 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `edgeFold16` | — | Sixteen byte masks into sixteen bits, LSB first |
 | `edgeThreshold` | 3 | Gradient-magnitude edge extraction straight into bits |
 
+## `ops/essential.hpp`
+
+[`bincv-cpp/include/bincv-cpp/ops/essential.hpp`](../bincv-cpp/include/bincv-cpp/ops/essential.hpp)
+
+| | tier | |
+|---|---|---|
+| `EssentialMatrix` *(struct)* | 2 | A 3x3 essential matrix, row-major |
+| `essentialSolverStackBytes` | 3 | Stack the five-point solver uses for one call, in bytes |
+| `fivePointEssential` | 2 | Up to ten essential matrices through five correspondences |
+| `EssentialModel` *(struct)* | 2 | The five-point model policy, for `bincv::ransac` |
+| `refine` | — | No refit |
+| `residual` | — | Sampson distance -- the first-order approximation of geometric reprojection error, which is what `cv::findEssentialMat`'s threshold is in |
+| `findEssentialMat` | 2 | `cv::findEssentialMat(..., cv::RANSAC, ...)`'s role over caller-owned scratch |
+
 ## `ops/fast.hpp`
 
 [`bincv-cpp/include/bincv-cpp/ops/fast.hpp`](../bincv-cpp/include/bincv-cpp/ops/fast.hpp)
@@ -389,6 +405,25 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `pyrDownFiltered` | 3 | One pyramid level under a chosen downsampling filter |
 | `pyrDownBox` | 2 | One pyramid level by 2x2 box mean, `BORDER_REPLICATE` |
 | `pyrDown` | 1 | One pyramid level, EXACTLY as `cv::pyrDown` computes it: a 5x5 `[1,4,6,4,1]` Gaussian with `BORDER_REFLECT_101`, subsampled by 2 |
+
+## `ops/ransac.hpp`
+
+[`bincv-cpp/include/bincv-cpp/ops/ransac.hpp`](../bincv-cpp/include/bincv-cpp/ops/ransac.hpp)
+
+| | tier | |
+|---|---|---|
+| `RansacParams` *(struct)* | 2 | The four parameters a RANSAC call takes |
+| `RansacResult` *(struct)* | 2 | What a RANSAC call reports back |
+| `RansacScratch` *(struct)* | 3 | Caller-owned scratch: one flag per correspondence, twice |
+| `ransacScratchWords` | — | Words in one inlier set over `correspondences` points |
+| `ransacScratchBytes` | — | Bytes of scratch a call over `correspondences` points needs |
+| `ransac` | 2 | Fit `Model` to the correspondences by random sample consensus |
+| `Affine2D` *(struct)* | 2 | A 2D affine transform, row-major: `[m[0] m[1] m[2]; m[3] m[4] m[5]]` |
+| `Affine2DModel` *(struct)* | 2 | The 3-point affine model policy |
+| `estimate` | — | Solve the affine through the three sampled correspondences |
+| `refine` | — | Least-squares refit over the consensus set, which is what makes this agree with `cv::estimateAffine2D` on noisy data rather than merely on clean data |
+| `residual` | — | Euclidean reprojection error, in pixels -- the units `cv::estimateAffine2D`'s `ransacReprojThreshold` is in |
+| `estimateAffine2D` | 2 | `cv::estimateAffine2D(..., RANSAC, ...)`'s role over caller-owned scratch |
 
 ## `ops/reduce.hpp`
 

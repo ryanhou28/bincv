@@ -54,9 +54,17 @@ Four of those deserve the qualification they carry.
 
 **`morphologyEx` is 5.33×, not 8×**, because binCV's fused kernel needs a caller-provided
 scratch frame — three frames live against OpenCV's two — where `erode` and `dilate` need
-none. `cv::morphologyEx` allocates nothing of its own for `OPEN`, which was probed rather
-than assumed: the process high-water mark does not move around the call. Reporting 8× here
-would have been wrong by a factor of 1.5 on the number most likely to be quoted.
+none. Reporting 8× here would have been wrong by a factor of 1.5 on the number most likely
+to be quoted.
+
+`cv::morphologyEx` does not materialise an intermediate frame for `OPEN`, which is what
+that correction turned on. It is not, however, allocation-free: measured at the allocator
+with the destination preallocated, it takes **5,784 B** of row buffers at 640×480 — and
+that figure tracks width, not area, which is what says they are row buffers (3,224 B at
+320 wide, 10,904 B at 1,280 wide, unchanged when only the height doubles). An earlier note
+here said it allocated nothing, on the strength of the process high-water mark not moving;
+page-granular RSS cannot resolve 5.8 KB and never could. Counting it puts the row at
+620,184 B and 5.38×, which is why the headline is unchanged.
 
 **`goodFeaturesToTrack` has two footprints, because it has two spellings.** Over the whole
 call at worst-case provisioning, the frame-map form holds 16.54 bytes per pixel and the
