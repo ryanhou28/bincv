@@ -1,0 +1,83 @@
+# essential -- aarch64
+# host:     Raspberry Pi 4 Model B Rev 1.5
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# governor: performance
+# throttled:throttled=0x80000
+# date:     2026-09-03T14:08:10-07:00
+
+Five-point essential matrix -- binCV against cv::findEssentialMat(RANSAC)
+=========================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+normalised coordinates, threshold 0.0020, confidence 0.99, cap 500
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 20% outliers ================
+ planted inliers 160 | binCV 160 (12 iterations) | OpenCV 160
+
+ PEAK SIMULTANEOUSLY-LIVE HEAP OF ONE CALL (allocator-level; sees cv::fastMalloc)
+   binCV          0 B   nothing at all; the caller's scratch is 56 B and is
+                     reused across frames
+   OpenCV     16168 B   net 0 B at the end of the call
+
+ ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE
+   binCV       0 calls   |  OpenCV   1787 calls, 1101 under 128 B
+   Peak live says how many bytes must exist at once; traffic says how
+   often the allocator is entered. Neither substitutes for the other.
+
+   THE HEAP IS THE SMALLER HALF. Both solvers keep their working arrays
+   on the STACK; run benchmark/essential_stack_benchmark for that, where
+   the probe first has to recover two known answers before it reports.
+
+ variant                       us/call   spread   vs OpenCV
+ binCV five-point               1468.3     0.1%       5.71x
+ cv::findEssentialMat           8380.7     0.7%       1.00x
+
+================ 500 correspondences, 30% outliers ================
+ planted inliers 350 | binCV 350 (26 iterations) | OpenCV 350
+
+ PEAK SIMULTANEOUSLY-LIVE HEAP OF ONE CALL (allocator-level; sees cv::fastMalloc)
+   binCV          0 B   nothing at all; the caller's scratch is 128 B and is
+                     reused across frames
+   OpenCV     27576 B   net 0 B at the end of the call
+
+ ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE
+   binCV       0 calls   |  OpenCV   2830 calls, 1736 under 128 B
+   Peak live says how many bytes must exist at once; traffic says how
+   often the allocator is entered. Neither substitutes for the other.
+
+   THE HEAP IS THE SMALLER HALF. Both solvers keep their working arrays
+   on the STACK; run benchmark/essential_stack_benchmark for that, where
+   the probe first has to recover two known answers before it reports.
+
+ variant                       us/call   spread   vs OpenCV
+ binCV five-point              17636.3     0.1%       0.89x
+ cv::findEssentialMat          15676.7     0.4%       1.00x
+
+================ 1000 correspondences, 40% outliers ================
+ planted inliers 600 | binCV 607 (54 iterations) | OpenCV 607
+
+ PEAK SIMULTANEOUSLY-LIVE HEAP OF ONE CALL (allocator-level; sees cv::fastMalloc)
+   binCV          0 B   nothing at all; the caller's scratch is 256 B and is
+                     reused across frames
+   OpenCV     46616 B   net 0 B at the end of the call
+
+ ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE
+   binCV       0 calls   |  OpenCV   6385 calls, 3937 under 128 B
+   Peak live says how many bytes must exist at once; traffic says how
+   often the allocator is entered. Neither substitutes for the other.
+
+   THE HEAP IS THE SMALLER HALF. Both solvers keep their working arrays
+   on the STACK; run benchmark/essential_stack_benchmark for that, where
+   the probe first has to recover two known answers before it reports.
+
+ variant                       us/call   spread   vs OpenCV
+ binCV five-point              27522.6     0.0%       1.54x
+ cv::findEssentialMat          42364.5     0.3%       1.00x
+
+ sink 280881

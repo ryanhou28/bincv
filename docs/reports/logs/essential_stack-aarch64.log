@@ -1,0 +1,27 @@
+# essential_stack -- aarch64
+# host:     Raspberry Pi 4 Model B Rev 1.5
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# governor: performance
+# throttled:throttled=0x80000
+# date:     2026-09-03T14:08:21-07:00
+
+Stack a caller must reserve for one call, 1000 correspondences, deepest of 6 scenes
+Probe: guard-page bisection on a 512 KiB thread stack, 16 B granularity, 3 repeats
+
+CALIBRATION -- known answers the probe must recover
+  workload consuming 4 096 B             4096 B
+  workload consuming 16 384 B           16384 B
+  both recovered within tolerance -- the figures below are readings
+
+  probe limit -- 65 536 B frame, two bytes written: reads 16 B
+  UNDER-READ: a large sparse frame steps over the guard page
+
+STACK USED BY ONE CALL, net of the empty workload
+  binCV fivePointEssential alone         6928 B
+  binCV findEssentialMat (whole)         7216 B
+  cv::findEssentialMat (whole)          15392 B
+
+  A measured figure is a LOWER BOUND on worst-case stack: it is the
+  deepest of the paths that ran, over 6 scenes. Budget with margin.
+  guard 0

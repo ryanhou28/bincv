@@ -1,0 +1,86 @@
+# ransac -- aarch64
+# host:     Raspberry Pi 4 Model B Rev 1.5
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# governor: performance
+# throttled:throttled=0x80000
+# date:     2026-09-03T14:08:25-07:00
+
+RANSAC -- bincv::estimateAffine2D against cv::estimateAffine2D(RANSAC)
+======================================================================
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+threshold 3.0 px, confidence 0.99, iteration cap 2000, seeded and deterministic
+
+ HEAP PROBE SELF-CHECK -- known answers it must recover
+   sees malloc, and free returns the bytes        ok -- peak 100008 B, released 100008 B
+   sees operator new                              ok -- peak 50008 B
+   peak live is not the sum of allocations        ok -- peak 10008 B over 10 calls
+   balanced work nets to zero                     ok -- net 0 B
+
+================ 200 correspondences, 30% outliers ================
+ planted inliers 140 | binCV 140 (11 iterations) | OpenCV 140
+
+ PEAK SIMULTANEOUSLY-LIVE HEAP OF ONE CALL (allocator-level; sees cv::fastMalloc)
+   binCV          0 B   plus 56 B of caller-owned scratch, which is known
+                     before the call via ransacScratchBytes()
+   OpenCV     27256 B   allocated internally; not visible from its signature
+   -> 486.7x smaller, counting binCV's scratch against OpenCV's peak live
+
+ ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE
+   binCV       0 calls   the caller's buffer is reused across frames
+   OpenCV     60 calls   per call, so ~1200/second in a 20 Hz frame loop
+   Peak live says how many bytes must exist at once; traffic says how
+   often the allocator is entered. Neither substitutes for the other.
+
+ variant                       us/call   spread   vs OpenCV
+ binCV                           18.53     0.1%      10.79x
+ cv::estimateAffine2D           199.97     0.1%       1.00x
+ NOTE: binCV returns the minimal-set fit; OpenCV refits over its consensus
+ set. The two do not compute the same last step, which is a difference in
+ WHAT is computed and is why the timing column is the secondary one here.
+
+================ 1000 correspondences, 30% outliers ================
+ planted inliers 700 | binCV 700 (11 iterations) | OpenCV 700
+
+ PEAK SIMULTANEOUSLY-LIVE HEAP OF ONE CALL (allocator-level; sees cv::fastMalloc)
+   binCV          0 B   plus 256 B of caller-owned scratch, which is known
+                     before the call via ransacScratchBytes()
+   OpenCV    121496 B   allocated internally; not visible from its signature
+   -> 474.6x smaller, counting binCV's scratch against OpenCV's peak live
+
+ ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE
+   binCV       0 calls   the caller's buffer is reused across frames
+   OpenCV     60 calls   per call, so ~1200/second in a 20 Hz frame loop
+   Peak live says how many bytes must exist at once; traffic says how
+   often the allocator is entered. Neither substitutes for the other.
+
+ variant                       us/call   spread   vs OpenCV
+ binCV                           85.31     0.1%       9.95x
+ cv::estimateAffine2D           848.92     0.3%       1.00x
+ NOTE: binCV returns the minimal-set fit; OpenCV refits over its consensus
+ set. The two do not compute the same last step, which is a difference in
+ WHAT is computed and is why the timing column is the secondary one here.
+
+================ 2000 correspondences, 50% outliers ================
+ planted inliers 1000 | binCV 1000 (35 iterations) | OpenCV 1000
+
+ PEAK SIMULTANEOUSLY-LIVE HEAP OF ONE CALL (allocator-level; sees cv::fastMalloc)
+   binCV          0 B   plus 504 B of caller-owned scratch, which is known
+                     before the call via ransacScratchBytes()
+   OpenCV    181704 B   allocated internally; not visible from its signature
+   -> 360.5x smaller, counting binCV's scratch against OpenCV's peak live
+
+ ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE
+   binCV       0 calls   the caller's buffer is reused across frames
+   OpenCV     59 calls   per call, so ~1180/second in a 20 Hz frame loop
+   Peak live says how many bytes must exist at once; traffic says how
+   often the allocator is entered. Neither substitutes for the other.
+
+ variant                       us/call   spread   vs OpenCV
+ binCV                          542.60     0.1%       2.56x
+ cv::estimateAffine2D          1386.86     0.8%       1.00x
+ NOTE: binCV returns the minimal-set fit; OpenCV refits over its consensus
+ set. The two do not compute the same last step, which is a difference in
+ WHAT is computed and is why the timing column is the secondary one here.
+
+ sink 25432646

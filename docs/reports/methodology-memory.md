@@ -197,11 +197,31 @@ maximum is ever observed. Callers budgeting a thread from these numbers should k
 margin.
 
 **A guard page catches a stack pointer that walks into it, not one that steps over it.**
-A large frame that is reserved and left mostly unwritten is the case where this technique
-can under-read, so the benchmark measures it: a 65,536 B frame with only its shallow end
-written reads as 65,536 B here, with `-fstack-clash-protection` off. The limitation did
-not bite at these frame sizes, and the diagnostic row is there so a future change that
-makes it bite is visible rather than silent.
+A large frame that is reserved and left mostly unwritten is where this technique can
+under-read, so the benchmark measures that case directly — and **the two architectures
+differ**. A 65,536 B frame with only its shallow end written reads as 65,536 B on x86-64
+and as **16 B on aarch64**, where the stack pointer clears the guard page in one step and
+nothing faults. The diagnostic row prints `UNDER-READ` when that happens, which is how
+this was found.
+
+It does not affect the figures reported here, and that is checked rather than assumed:
+
+- The *dense* calibration passes exactly on aarch64 — 4,096 B and 16,384 B both read back
+  to the byte — and 4–16 KiB is the range the measured frames fall in. The failure needs a
+  frame that is both large and untouched, which a dense linear-algebra solver does not
+  produce.
+- Cross-checked against the compiler on the device. Every frame in the five-point call
+  graph is `static`, so `-fstack-usage` gives a real bound rather than an estimate:
+  `fivePointEssential` is 5,120 B and the deepest call path sums to about 6,432 B. The
+  probe reads 6,928 B — *above* the static bound, which is the safe direction and is what
+  rules out a skipped frame.
+
+```bash
+# on the device, from the repository root
+g++ -O2 -std=c++17 -I bincv-cpp/include -fstack-usage -c su_probe.cpp -o su_probe.o
+sort -t$'\t' -k2 -rn su_probe.su      # frames, largest first
+grep -c dynamic su_probe.su           # 0 means every frame is a real bound
+```
 
 **The comparison is symmetric, which is what the numbers rest on.** Both sides are
 measured by the same instrument in the same process around one call, and both sides'

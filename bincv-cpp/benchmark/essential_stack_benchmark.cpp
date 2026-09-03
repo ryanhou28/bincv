@@ -45,6 +45,15 @@
 // different scenes and the figure is the deepest of them, which widens the coverage
 // without changing what is being claimed. A caller budgeting against these numbers
 // should keep margin.
+//
+// A GUARD PAGE CATCHES A STACK POINTER THAT WALKS INTO IT, NOT ONE THAT STEPS OVER
+// IT, so a large frame that is reserved and left unwritten can be missed. The sparse
+// row below measures exactly that, and the two architectures differ: x86-64 catches a
+// 65 536 B sparse frame, aarch64 reads it as 16 B and the row prints UNDER-READ. It
+// does not reach the figures here -- the DENSE calibration passes to the byte on both,
+// in the 4-16 KiB range the measured frames occupy, and on the device -fstack-usage
+// puts the deepest five-point path near 6 432 B where this probe reads 6 928 B, which
+// is above the static bound rather than below it.
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
@@ -310,6 +319,5 @@ int main() {
     std::printf("\n  A measured figure is a LOWER BOUND on worst-case stack: it is the\n"
                 "  deepest of the paths that ran, over %d scenes. Budget with margin.\n",
                 kScenes);
-    std::printf("  guard %d\n", g_guard);
     return 0;
 }
