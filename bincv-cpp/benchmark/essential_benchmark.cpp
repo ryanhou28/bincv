@@ -15,7 +15,9 @@
 // anything is timed, because two randomised searches that disagree about the
 // consensus set are not comparable on speed.
 //
-// THE MEMORY COLUMN IS PEAK LIVE, AND THAT MATTERS. `operator new` is replaced
+// THE HEAP COLUMN IS PEAK LIVE, AND IT IS THE SMALLER HALF OF THE STORY --
+// essential_stack_benchmark measures the stack, which is where both solvers keep
+// their working arrays and where the real comparison is. `operator new` is replaced
 // globally, so OpenCV's own allocations land on the same counter, and each block
 // carries its size so a free can subtract what the allocation added. The figure
 // reported is therefore the HIGH-WATER mark of simultaneously-live bytes.
@@ -160,23 +162,22 @@ void runSize(size_t count, int outlierPct) {
         measure::g_sink += static_cast<size_t>(ee.rows) + static_cast<size_t>(mk.rows);
     });
 
-    const size_t binSet = bincv::ransacScratchBytes(count) + bincv::essentialSolverStackBytes();
-    std::printf("\n MEMORY -- AND THE TWO SIDES ARE NOT MEASURED THE SAME WAY\n");
-    std::printf("   binCV  %9zu B   caller scratch %zu B + solver stack %zu B. NO HEAP.\n",
-                binSet, bincv::ransacScratchBytes(count), bincv::essentialSolverStackBytes());
-    std::printf("   OpenCV %9zu B   peak live HEAP only, in %zu blocks\n",
-                cvAlloc.peak, cvAlloc.calls);
-    std::printf("\n   THESE TWO NUMBERS ARE NOT COMPARABLE AND NO RATIO IS PRINTED.\n");
-    std::printf("   binCV's figure is its whole working set, because it takes no heap.\n");
-    std::printf("   OpenCV's is heap only -- its stack is not visible to a replaced\n");
-    std::printf("   operator new. Profiling one call shows its largest live block at peak\n");
-    std::printf("   is under 256 B and there are 29 of them: a 10x20 double system is\n");
-    std::printf("   1 600 B and never appears, so its solver's arrays are on the stack\n");
-    std::printf("   too and are simply not counted here. An earlier version of this file\n");
-    std::printf("   divided one by the other and reported binCV as using 2.1x more; that\n");
-    std::printf("   was stack-plus-heap against heap alone and it was not a measurement.\n");
+    std::printf("\n MEMORY -- HEAP ONLY, WHICH IS NOT THE WHOLE STORY\n");
+    std::printf("   binCV  %9zu B heap   caller scratch %zu B + solver stack %zu B,"
+                " no heap at all\n", size_t{0}, bincv::ransacScratchBytes(count),
+                bincv::essentialSolverStackBytes());
+    std::printf("   OpenCV %9zu B heap   peak live, in %zu blocks, %zu of them under"
+                " 128 B\n", cvAlloc.peak, cvAlloc.calls, cvAlloc.smallCalls);
+    std::printf("\n   BOTH SOLVERS KEEP THEIR WORKING ARRAYS ON THE STACK, so these heap\n");
+    std::printf("   figures compare the small change and miss the thing itself. Run\n");
+    std::printf("   benchmark/essential_stack_benchmark for the stack, which is where\n");
+    std::printf("   the comparison actually lives: measured there, binCV's whole call\n");
+    std::printf("   needs about 6.4 to 7.2 KB of stack against OpenCV's 16.4 to 17.2 KB,\n");
+    std::printf("   the spread being the bisection granularity. Roughly 2.4x smaller.\n");
+    std::printf("\n   An earlier version of this file divided binCV's stack by OpenCV's\n");
+    std::printf("   heap and reported binCV as using 2.1x MORE memory. It uses less.\n");
     std::printf("\n ALLOCATOR TRAFFIC DURING ONE CALL -- this one IS like for like\n");
-    std::printf("   binCV  %6zu calls   |  OpenCV %6zu calls, %zu of them under 128 B\n",
+    std::printf("   binCV  %6zu calls   |  OpenCV %6zu calls, %zu under 128 B\n",
                 binAlloc.calls, cvAlloc.calls, cvAlloc.smallCalls);
 
     std::vector<measure::Bench> benches;

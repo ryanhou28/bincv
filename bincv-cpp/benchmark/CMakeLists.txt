@@ -47,6 +47,12 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
 
     add_executable(${benchmark_name} ${benchmark_src})
     target_link_libraries(${benchmark_name} PRIVATE bincv_core bincv_warnings)
+    # The stack probe runs each trial on a thread inside a forked child, so it needs
+    # Threads. Nothing else here does, and bincv_core deliberately does not.
+    if(benchmark_name STREQUAL "essential_stack_benchmark")
+        find_package(Threads REQUIRED)
+        target_link_libraries(${benchmark_name} PRIVATE Threads::Threads)
+    endif()
     target_include_directories(${benchmark_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     # The real binarized frame, for benchmarks whose arms differ in CONVERGENCE
     # behavior and therefore cannot use synthetic content (X-50).
