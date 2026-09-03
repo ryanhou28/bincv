@@ -26,6 +26,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/derivative.hpp`](#opsderivativehpp) — 6 entries
 - [`ops/descriptor.hpp`](#opsdescriptorhpp) — 8 entries
 - [`ops/edge.hpp`](#opsedgehpp) — 6 entries
+- [`ops/essential.hpp`](#opsessentialhpp) — 6 entries
 - [`ops/fast.hpp`](#opsfasthpp) — 6 entries
 - [`ops/logic.hpp`](#opslogichpp) — 6 entries
 - [`ops/medianWide.hpp`](#opsmedianWidehpp) — 5 entries
@@ -213,6 +214,19 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `__attribute__` | — | Thirty-two pixels of the edge predicate, as thirty-two bits |
 | `edgeFold16` | — | Sixteen byte masks into sixteen bits, LSB first |
 | `edgeThreshold` | 3 | Gradient-magnitude edge extraction straight into bits |
+
+## `ops/essential.hpp`
+
+[`bincv-cpp/include/bincv-cpp/ops/essential.hpp`](../bincv-cpp/include/bincv-cpp/ops/essential.hpp)
+
+| | tier | |
+|---|---|---|
+| `EssentialMatrix` *(struct)* | 2 | A 3x3 essential matrix, row-major |
+| `essentialSolverStackBytes` | 3 | Stack the five-point solver uses for one call, in bytes |
+| `fivePointEssential` | 2 | Up to ten essential matrices through five correspondences |
+| `EssentialModel` *(struct)* | 2 | The five-point model policy, for `bincv::ransac` |
+| `residual` | — | Sampson distance -- the first-order approximation of geometric reprojection error, which is what `cv::findEssentialMat`'s threshold is in |
+| `findEssentialMat` | 2 | `cv::findEssentialMat(..., cv::RANSAC, ...)`'s role over caller-owned scratch |
 
 ## `ops/fast.hpp`
 
