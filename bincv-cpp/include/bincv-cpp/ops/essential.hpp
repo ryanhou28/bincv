@@ -348,16 +348,20 @@ inline int eRealRoots(const double* c, int degree, double* out, int maxOut) {
 
 /// @brief Stack the five-point solver uses for one call, in bytes.
 /// @note **API TIER 3** -- OpenCV has nothing to report here because it allocates.
-/// This is the number that decides whether the solver fits on a small part,
-/// and it is a compile-time constant because every buffer in the solver is a
-/// fixed-size automatic array.
+/// This is the number that decides whether the solver fits on a small part.
+/// @note **MEASURED, NOT ADDED UP.** An earlier version of this function summed the
+/// sizes of the solver's arrays and returned 4 536 while the real frame was
+/// 6 240 -- a published budget that was 27% low, which is worse than no budget
+/// at all. The figure below comes from the compiler:
+///
+/// g++ -std=c++17 -O2 -DNDEBUG -fstack-usage -c <a TU calling it>
+/// grep fivePointEssential *.su
+///
+/// Re-measure it when the solver changes. It is a ceiling with a little
+/// margin, not the exact frame, because the frame moves with the compiler
+/// and the optimisation level.
 inline constexpr size_t essentialSolverStackBytes() {
-    return sizeof(double) * 10 * 20          // the ten cubics over twenty monomials
-         + sizeof(impl::EPolyZ3) * 36        // M(z), degree 3 per entry
-         + sizeof(double) * (9 * 5 + 5 * 9)  // the 9x5 Householder QR and its reflectors
-         + sizeof(double) * (36 + 11 + 11)   // one 6x6 determinant, and the interpolation
-         + sizeof(double) * 11               // the degree-10 coefficients
-         + 512;                              // the rest, rounded up
+    return 5376;  // measured 5 136 with g++ 11.4 at -O2, rounded up
 }
 
 /// @brief Up to ten essential matrices through five correspondences.
@@ -374,184 +378,211 @@ inline int fivePointEssential(const Point2f* from, const Point2f* to, EssentialM
     BINCV_ASSERT(from != nullptr && to != nullptr && out != nullptr,
                  "essential: five-point needs five correspondences and somewhere to write");
 
-    // 1. The five epipolar constraints, and the four-dimensional nullspace of the
-    //    resulting 5x9.
+    // THE PHASES ARE SEQUENTIAL, SO THEIR STORAGE OVERLAPS.
     //
-    //    HOUSEHOLDER ON THE 9x5 TRANSPOSE, NOT AN EIGENDECOMPOSITION OF A^T A.
-    //    Forming the normal matrix squares the condition number, and it costs a 9x9
-    //    of eigenvectors this only needs four columns of. Reflecting the last four
-    //    standard basis vectors through the same five reflectors gives an
-    //    orthonormal basis of the nullspace directly: 648 B against 1 368, and
-    //    better conditioned rather than merely smaller.
-    double at[9][5];  // A^T, one column per correspondence
-    for (int p = 0; p < 5; ++p) {
-        const double q1[3] = {static_cast<double>(from[p].x), static_cast<double>(from[p].y), 1.0};
-        const double q2[3] = {static_cast<double>(to[p].x), static_cast<double>(to[p].y), 1.0};
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < 3; ++j) at[i * 3 + j][p] = q2[i] * q1[j];
-        }
-    }
+    // The nullspace scratch is dead before the cubics exist; the cubics are dead
+    // before the roots. Writing them as one flat frame kept all of it live at once
+    // for no reason -- it made the solver's peak the SUM of the phases where it only
+    // ever needs the MAXIMUM. Each phase is scoped so its locals die at the brace,
+    // and only what the next phase reads crosses it.
+    //
+    // Peak is the cubic-construction phase. `essentialSolverStackBytes()` reports
+    // what -fstack-usage measures, not what the arrays add up to.
 
-    double reflector[5][9];
-    for (int k = 0; k < 5; ++k) {
-        double norm = 0.0;
-        for (int i = k; i < 9; ++i) norm += at[i][k] * at[i][k];
-        norm = std::sqrt(norm);
-        if (!(norm > 1e-14)) return 0;  // rank-deficient: the sample is degenerate
-        const double alpha = (at[k][k] > 0.0) ? -norm : norm;
+    double basis[4][9];  // crosses every phase: E is built from it at the end
 
-        double v[9];
-        for (int i = 0; i < 9; ++i) v[i] = (i < k) ? 0.0 : at[i][k];
-        v[k] -= alpha;
-        double vn = 0.0;
-        for (int i = k; i < 9; ++i) vn += v[i] * v[i];
-        if (!(vn > 1e-30)) {
-            for (int i = 0; i < 9; ++i) reflector[k][i] = 0.0;
-            continue;
-        }
-        vn = std::sqrt(vn);
-        for (int i = 0; i < 9; ++i) reflector[k][i] = v[i] / vn;
-
-        // Apply to the remaining columns.
-        for (int c = k; c < 5; ++c) {
-            double dot = 0.0;
-            for (int i = k; i < 9; ++i) dot += reflector[k][i] * at[i][c];
-            dot *= 2.0;
-            for (int i = k; i < 9; ++i) at[i][c] -= dot * reflector[k][i];
-        }
-    }
-
-    // Columns 5..8 of Q span the nullspace: reflect e5..e8 back through H0..H4.
-    double basis[4][9];
-    for (int b = 0; b < 4; ++b) {
-        for (int i = 0; i < 9; ++i) basis[b][i] = (i == b + 5) ? 1.0 : 0.0;
-        for (int k = 4; k >= 0; --k) {
-            double dot = 0.0;
-            for (int i = 0; i < 9; ++i) dot += reflector[k][i] * basis[b][i];
-            dot *= 2.0;
-            for (int i = 0; i < 9; ++i) basis[b][i] -= dot * reflector[k][i];
-        }
-    }
-
-    // 2. The ten cubics over the twenty degree-3 monomials.
-    impl::EPoly1 e[3][3];
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            e[i][j].c[0] = basis[0][i * 3 + j];
-            e[i][j].c[1] = basis[1][i * 3 + j];
-            e[i][j].c[2] = basis[2][i * 3 + j];
-            e[i][j].c[3] = basis[3][i * 3 + j];
-        }
-    }
-    impl::EPoly2 eet[3][3];
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            impl::EPoly2 acc;
-            for (int k = 0; k < 3; ++k) acc = impl::ePolyAdd2(acc, impl::ePolyMul11(e[i][k], e[j][k]));
-            eet[i][j] = acc;
-        }
-    }
-    const impl::EPoly2 tr = impl::ePolyAdd2(impl::ePolyAdd2(eet[0][0], eet[1][1]), eet[2][2]);
-
-    double a[10][20];
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            impl::EPoly3 acc;
-            for (int k = 0; k < 3; ++k) {
-                acc = impl::ePolyAdd3(acc, impl::ePolyMul21(eet[i][k], e[k][j]));
-            }
-            const impl::EPoly3 eq = impl::ePolyAdd3(
-                impl::ePolyScale3(acc, 2.0), impl::ePolyScale3(impl::ePolyMul21(tr, e[i][j]), -1.0));
-            for (int c = 0; c < 20; ++c) a[i * 3 + j][c] = eq.c[c];
-        }
-    }
+    // --- phase 1: the nullspace of the 5x9, by Householder on its transpose ------
+    //
+    // Not an eigendecomposition of A^T A: forming the normal matrix squares the
+    // condition number, and it costs a 9x9 of eigenvectors this needs four columns
+    // of. Reflecting the last four standard basis vectors back through the same
+    // five reflectors gives an orthonormal nullspace basis directly.
     {
-        impl::EPoly3 d = impl::ePolyMul21(impl::ePolyMul11(e[1][1], e[2][2]), e[0][0]);
-        d = impl::ePolyAdd3(d, impl::ePolyScale3(
-                                   impl::ePolyMul21(impl::ePolyMul11(e[1][2], e[2][1]), e[0][0]), -1.0));
-        d = impl::ePolyAdd3(d, impl::ePolyScale3(
-                                   impl::ePolyMul21(impl::ePolyMul11(e[1][0], e[2][2]), e[0][1]), -1.0));
-        d = impl::ePolyAdd3(d, impl::ePolyMul21(impl::ePolyMul11(e[1][2], e[2][0]), e[0][1]));
-        d = impl::ePolyAdd3(d, impl::ePolyMul21(impl::ePolyMul11(e[1][0], e[2][1]), e[0][2]));
-        d = impl::ePolyAdd3(d, impl::ePolyScale3(
-                                   impl::ePolyMul21(impl::ePolyMul11(e[1][1], e[2][0]), e[0][2]), -1.0));
-        for (int c = 0; c < 20; ++c) a[9][c] = d.c[c];
-    }
-
-    // 3. Eliminate the four pure-cubic columns. Their coefficients carry no z, so
-    //    the pivots are constants and the z-degrees below survive untouched.
-    bool used[10] = {false};
-    for (int col = 0; col < 4; ++col) {
-        int piv = -1;
-        double best = 0.0;
-        for (int r = 0; r < 10; ++r) {
-            if (used[r]) continue;
-            if (std::fabs(a[r][col]) > best) {
-                best = std::fabs(a[r][col]);
-                piv = r;
+        double at[9][5];
+        for (int p = 0; p < 5; ++p) {
+            const double q1[3] = {static_cast<double>(from[p].x),
+                                  static_cast<double>(from[p].y), 1.0};
+            const double q2[3] = {static_cast<double>(to[p].x),
+                                  static_cast<double>(to[p].y), 1.0};
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < 3; ++j) at[i * 3 + j][p] = q2[i] * q1[j];
             }
         }
-        if (piv < 0 || best < 1e-12) return 0;
-        used[piv] = true;
-        const double inv = 1.0 / a[piv][col];
-        for (int c = 0; c < 20; ++c) a[piv][c] *= inv;
-        for (int r = 0; r < 10; ++r) {
-            if (r == piv) continue;
-            const double f = a[r][col];
-            if (f == 0.0) continue;
-            for (int c = 0; c < 20; ++c) a[r][c] -= f * a[piv][c];
+
+        double reflector[5][9];
+        for (int k = 0; k < 5; ++k) {
+            double norm = 0.0;
+            for (int i = k; i < 9; ++i) norm += at[i][k] * at[i][k];
+            norm = std::sqrt(norm);
+            if (!(norm > 1e-14)) return 0;  // rank-deficient: the sample is degenerate
+            const double alpha = (at[k][k] > 0.0) ? -norm : norm;
+
+            double v[9];
+            for (int i = 0; i < 9; ++i) v[i] = (i < k) ? 0.0 : at[i][k];
+            v[k] -= alpha;
+            double vn = 0.0;
+            for (int i = k; i < 9; ++i) vn += v[i] * v[i];
+            if (!(vn > 1e-30)) {
+                for (int i = 0; i < 9; ++i) reflector[k][i] = 0.0;
+                continue;
+            }
+            vn = std::sqrt(vn);
+            for (int i = 0; i < 9; ++i) reflector[k][i] = v[i] / vn;
+
+            for (int c = k; c < 5; ++c) {
+                double dot = 0.0;
+                for (int i = k; i < 9; ++i) dot += reflector[k][i] * at[i][c];
+                dot *= 2.0;
+                for (int i = k; i < 9; ++i) at[i][c] -= dot * reflector[k][i];
+            }
+        }
+
+        for (int b = 0; b < 4; ++b) {
+            for (int i = 0; i < 9; ++i) basis[b][i] = (i == b + 5) ? 1.0 : 0.0;
+            for (int k = 4; k >= 0; --k) {
+                double dot = 0.0;
+                for (int i = 0; i < 9; ++i) dot += reflector[k][i] * basis[b][i];
+                dot *= 2.0;
+                for (int i = 0; i < 9; ++i) basis[b][i] -= dot * reflector[k][i];
+            }
         }
     }
 
-    // 4. The six survivors are M(z) over {x2, xy, y2, x, y, 1}.
-    impl::EPolyZ3 m[6][6];
-    int mr = 0;
-    for (int r = 0; r < 10 && mr < 6; ++r) {
-        if (used[r]) continue;
-        const double* c = a[r];
-        m[mr][0].c[0] = c[10]; m[mr][0].c[1] = c[4];
-        m[mr][1].c[0] = c[11]; m[mr][1].c[1] = c[5];
-        m[mr][2].c[0] = c[12]; m[mr][2].c[1] = c[6];
-        m[mr][3].c[0] = c[16]; m[mr][3].c[1] = c[13]; m[mr][3].c[2] = c[7];
-        m[mr][4].c[0] = c[17]; m[mr][4].c[1] = c[14]; m[mr][4].c[2] = c[8];
-        m[mr][5].c[0] = c[19]; m[mr][5].c[1] = c[18];
-        m[mr][5].c[2] = c[15]; m[mr][5].c[3] = c[9];
-        ++mr;
+    impl::EPolyZ3 m[6][6];  // crosses into the root phases; the cubics do not
+
+    // --- phases 2 and 3: the ten cubics, then eliminate the pure-cubic columns ---
+    {
+        double a[10][20];
+        {
+            impl::EPoly1 e[3][3];
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < 3; ++j) {
+                    e[i][j].c[0] = basis[0][i * 3 + j];
+                    e[i][j].c[1] = basis[1][i * 3 + j];
+                    e[i][j].c[2] = basis[2][i * 3 + j];
+                    e[i][j].c[3] = basis[3][i * 3 + j];
+                }
+            }
+            // E E^T is symmetric, so six entries rather than nine.
+            impl::EPoly2 eet[3][3];
+            for (int i = 0; i < 3; ++i) {
+                for (int j = i; j < 3; ++j) {
+                    impl::EPoly2 acc;
+                    for (int k = 0; k < 3; ++k) {
+                        acc = impl::ePolyAdd2(acc, impl::ePolyMul11(e[i][k], e[j][k]));
+                    }
+                    eet[i][j] = acc;
+                    if (i != j) eet[j][i] = acc;
+                }
+            }
+            const impl::EPoly2 tr =
+                impl::ePolyAdd2(impl::ePolyAdd2(eet[0][0], eet[1][1]), eet[2][2]);
+
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < 3; ++j) {
+                    impl::EPoly3 acc;
+                    for (int k = 0; k < 3; ++k) {
+                        acc = impl::ePolyAdd3(acc, impl::ePolyMul21(eet[i][k], e[k][j]));
+                    }
+                    const impl::EPoly3 eq = impl::ePolyAdd3(
+                        impl::ePolyScale3(acc, 2.0),
+                        impl::ePolyScale3(impl::ePolyMul21(tr, e[i][j]), -1.0));
+                    for (int c = 0; c < 20; ++c) a[i * 3 + j][c] = eq.c[c];
+                }
+            }
+            {
+                impl::EPoly3 d = impl::ePolyMul21(impl::ePolyMul11(e[1][1], e[2][2]), e[0][0]);
+                d = impl::ePolyAdd3(d, impl::ePolyScale3(
+                        impl::ePolyMul21(impl::ePolyMul11(e[1][2], e[2][1]), e[0][0]), -1.0));
+                d = impl::ePolyAdd3(d, impl::ePolyScale3(
+                        impl::ePolyMul21(impl::ePolyMul11(e[1][0], e[2][2]), e[0][1]), -1.0));
+                d = impl::ePolyAdd3(d, impl::ePolyMul21(impl::ePolyMul11(e[1][2], e[2][0]), e[0][1]));
+                d = impl::ePolyAdd3(d, impl::ePolyMul21(impl::ePolyMul11(e[1][0], e[2][1]), e[0][2]));
+                d = impl::ePolyAdd3(d, impl::ePolyScale3(
+                        impl::ePolyMul21(impl::ePolyMul11(e[1][1], e[2][0]), e[0][2]), -1.0));
+                for (int c = 0; c < 20; ++c) a[9][c] = d.c[c];
+            }
+        }
+
+        // The four pure-cubic columns carry no z, so the pivots are constants and
+        // the z-degrees of everything else survive untouched.
+        bool used[10] = {false};
+        for (int col = 0; col < 4; ++col) {
+            int piv = -1;
+            double best = 0.0;
+            for (int r = 0; r < 10; ++r) {
+                if (used[r]) continue;
+                if (std::fabs(a[r][col]) > best) {
+                    best = std::fabs(a[r][col]);
+                    piv = r;
+                }
+            }
+            if (piv < 0 || best < 1e-12) return 0;
+            used[piv] = true;
+            const double inv = 1.0 / a[piv][col];
+            for (int c = 0; c < 20; ++c) a[piv][c] *= inv;
+            for (int r = 0; r < 10; ++r) {
+                if (r == piv) continue;
+                const double f = a[r][col];
+                if (f == 0.0) continue;
+                for (int c = 0; c < 20; ++c) a[r][c] -= f * a[piv][c];
+            }
+        }
+
+        int mr = 0;
+        for (int r = 0; r < 10 && mr < 6; ++r) {
+            if (used[r]) continue;
+            const double* c = a[r];
+            m[mr][0].c[0] = c[10]; m[mr][0].c[1] = c[4];
+            m[mr][1].c[0] = c[11]; m[mr][1].c[1] = c[5];
+            m[mr][2].c[0] = c[12]; m[mr][2].c[1] = c[6];
+            m[mr][3].c[0] = c[16]; m[mr][3].c[1] = c[13]; m[mr][3].c[2] = c[7];
+            m[mr][4].c[0] = c[17]; m[mr][4].c[1] = c[14]; m[mr][4].c[2] = c[8];
+            m[mr][5].c[0] = c[19]; m[mr][5].c[1] = c[18];
+            m[mr][5].c[2] = c[15]; m[mr][5].c[3] = c[9];
+            ++mr;
+        }
+        if (mr < 6) return 0;
     }
-    if (mr < 6) return 0;
 
-    // 5. det M(z) = 0, degree ten, and its real roots.
-    double detCoeff[11];
-    impl::eDetPoly(m, detCoeff);
+    // --- phase 4: det M(z) = 0, degree ten, and its real roots ------------------
     double roots[10];
-    const int nroots = impl::eRealRoots(detCoeff, 10, roots, 10);
+    int nroots = 0;
+    {
+        double detCoeff[11];
+        impl::eDetPoly(m, detCoeff);
+        nroots = impl::eRealRoots(detCoeff, 10, roots, 10);
+    }
 
-    // 6. At each root the nullvector of M gives x and y, and E follows.
+    // --- phase 5: at each root the nullvector of M gives x and y ----------------
     int found = 0;
     for (int k = 0; k < nroots && found < 10; ++k) {
         const double z = roots[k];
-        double n[6][6];
-        for (int i = 0; i < 6; ++i) {
-            for (int j = 0; j < 6; ++j) n[i][j] = impl::ePolyZ3Eval(m[i][j], z);
-        }
-        double ntn[6][6];
-        for (int i = 0; i < 6; ++i) {
-            for (int j = 0; j < 6; ++j) {
-                double acc = 0.0;
-                for (int t = 0; t < 6; ++t) acc += n[t][i] * n[t][j];
-                ntn[i][j] = acc;
+        double x = 0.0, y = 0.0;
+        {
+            double n[6][6];
+            for (int i = 0; i < 6; ++i) {
+                for (int j = 0; j < 6; ++j) n[i][j] = impl::ePolyZ3Eval(m[i][j], z);
             }
+            double ntn[6][6];
+            for (int i = 0; i < 6; ++i) {
+                for (int j = 0; j < 6; ++j) {
+                    double acc = 0.0;
+                    for (int t = 0; t < 6; ++t) acc += n[t][i] * n[t][j];
+                    ntn[i][j] = acc;
+                }
+            }
+            double nv[6][6], nw[6];
+            impl::eJacobi<6u>(ntn, nv, nw);
+            int mn = 0;
+            for (int i = 1; i < 6; ++i) {
+                if (nw[i] < nw[mn]) mn = i;
+            }
+            const double w5 = nv[5][mn];
+            if (std::fabs(w5) < 1e-9) continue;
+            x = nv[3][mn] / w5;
+            y = nv[4][mn] / w5;
         }
-        double nv[6][6], nw[6];
-        impl::eJacobi<6u>(ntn, nv, nw);
-        int mn = 0;
-        for (int i = 1; i < 6; ++i) {
-            if (nw[i] < nw[mn]) mn = i;
-        }
-        const double w5 = nv[5][mn];
-        if (std::fabs(w5) < 1e-9) continue;
-        const double x = nv[3][mn] / w5;
-        const double y = nv[4][mn] / w5;
 
         EssentialMatrix& dst = out[found];
         double norm = 0.0;

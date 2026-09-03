@@ -167,9 +167,11 @@ void runSize(size_t count, int outlierPct) {
                 " signature\n", cvAlloc.peak);
     const double ratio = static_cast<double>(binSet) / static_cast<double>(cvAlloc.peak);
     if (ratio > 1.0) {
-        std::printf("   -> binCV holds %.1fx MORE, and the solver stack is why: it is one\n"
-                    "      frame held for the whole call, where OpenCV takes small buffers\n"
-                    "      and releases them again. Peak LIVE on both sides.\n", ratio);
+        std::printf("   -> binCV holds %.1fx MORE. Peak LIVE on both sides.\n"
+                    "      The solver's scratch is dense floating-point work on a handful of\n"
+                    "      small matrices -- there are no bits to pack, so this library's\n"
+                    "      footprint argument has nothing to offer here. What it has instead\n"
+                    "      is the row below.\n", ratio);
     } else {
         std::printf("   -> binCV holds %.1fx less. Peak LIVE on both sides.\n", 1.0 / ratio);
     }
