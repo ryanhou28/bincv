@@ -4,7 +4,7 @@
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # governor: performance
 # throttled:throttled=0x80000
-# date:     2026-09-03T16:19:41-07:00
+# date:     2026-09-03T16:49:32-07:00
 
 Stack a caller must reserve for one call, 1000 correspondences, deepest of 6 scenes
 Probe: guard-page bisection on a 512 KiB thread stack, 16 B granularity, 3 repeats

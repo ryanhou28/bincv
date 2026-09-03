@@ -4,7 +4,7 @@
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # governor: performance
 # throttled:throttled=0x80000
-# date:     2026-09-03T16:07:34-07:00
+# date:     2026-09-03T16:49:35-07:00
 
 RANSAC -- bincv::estimateAffine2D against cv::estimateAffine2D(RANSAC)
 ======================================================================
@@ -25,6 +25,13 @@ threshold 3.0 px, confidence 0.99, iteration cap 2000, seeded and deterministic
                      before the call via ransacScratchBytes()
    OpenCV     27256 B   allocated internally; not visible from its signature
    -> 486.7x smaller, counting binCV's scratch against OpenCV's peak live
+   ATTRIBUTED: 6688 B of OpenCV's peak is the SEARCH and 20568 B is the REFIT
+   (its refineIters=0 arm, on the same counter). Most of the ratio above is
+   the refinement, which binCV does in closed form and on the stack -- it is
+   not a leaner RANSAC.
+   binCV's own stack is measured by essential_stack_benchmark, not here:
+   192 B on x86-64 against OpenCV's 11 440 B. A heap-only figure would
+   flatter a library whose rule is that kernels do not allocate.
 
  ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE
    binCV       0 calls   the caller's buffer is reused across frames
@@ -33,13 +40,16 @@ threshold 3.0 px, confidence 0.99, iteration cap 2000, seeded and deterministic
    often the allocator is entered. Neither substitutes for the other.
 
  variant                       us/call   spread   vs OpenCV
- binCV                           18.53     0.1%      11.49x
- cv::estimateAffine2D           212.83     0.2%       1.00x
- NOTE: both sides refit over their consensus set, so this compares the
- same work. binCV's refit is a closed-form least squares; OpenCV's is a
- bounded Levenberg-Marquardt, which for a model linear in its parameters
- converges to the same point. Accuracy against a planted transform is
- asserted in tests/test_ransac.cpp, not here.
+ binCV                           20.57     0.1%       9.79x
+ cv::estimateAffine2D           201.42     0.1%       1.00x
+ binCV, search only              18.36     0.1%      10.97x
+ cv::, search only               37.91     0.9%       5.31x
+ READ THE LAST TWO ROWS BEFORE QUOTING THE FIRST TWO. Both sides refit, so
+ this is like for like -- but the two SEARCH loops are close, and nearly all
+ of the difference is the refit: OpenCV iterates Levenberg-Marquardt where
+ binCV solves the same least squares in closed form, the model being linear
+ in its parameters. "binCV's RANSAC is faster" is not what this shows.
+ Accuracy against a planted transform is asserted in tests/test_ransac.cpp.
 
 ================ 1000 correspondences, 30% outliers ================
  planted inliers 700 | binCV 700 (11 iterations) | OpenCV 700
@@ -49,6 +59,13 @@ threshold 3.0 px, confidence 0.99, iteration cap 2000, seeded and deterministic
                      before the call via ransacScratchBytes()
    OpenCV    121496 B   allocated internally; not visible from its signature
    -> 474.6x smaller, counting binCV's scratch against OpenCV's peak live
+   ATTRIBUTED: 25088 B of OpenCV's peak is the SEARCH and 96408 B is the REFIT
+   (its refineIters=0 arm, on the same counter). Most of the ratio above is
+   the refinement, which binCV does in closed form and on the stack -- it is
+   not a leaner RANSAC.
+   binCV's own stack is measured by essential_stack_benchmark, not here:
+   192 B on x86-64 against OpenCV's 11 440 B. A heap-only figure would
+   flatter a library whose rule is that kernels do not allocate.
 
  ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE
    binCV       0 calls   the caller's buffer is reused across frames
@@ -57,13 +74,16 @@ threshold 3.0 px, confidence 0.99, iteration cap 2000, seeded and deterministic
    often the allocator is entered. Neither substitutes for the other.
 
  variant                       us/call   spread   vs OpenCV
- binCV                           85.39     0.0%       9.91x
- cv::estimateAffine2D           845.96     0.3%       1.00x
- NOTE: both sides refit over their consensus set, so this compares the
- same work. binCV's refit is a closed-form least squares; OpenCV's is a
- bounded Levenberg-Marquardt, which for a model linear in its parameters
- converges to the same point. Accuracy against a planted transform is
- asserted in tests/test_ransac.cpp, not here.
+ binCV                           94.21     0.0%       8.91x
+ cv::estimateAffine2D           838.94     0.2%       1.00x
+ binCV, search only              83.24     0.0%      10.08x
+ cv::, search only              101.75     0.2%       8.25x
+ READ THE LAST TWO ROWS BEFORE QUOTING THE FIRST TWO. Both sides refit, so
+ this is like for like -- but the two SEARCH loops are close, and nearly all
+ of the difference is the refit: OpenCV iterates Levenberg-Marquardt where
+ binCV solves the same least squares in closed form, the model being linear
+ in its parameters. "binCV's RANSAC is faster" is not what this shows.
+ Accuracy against a planted transform is asserted in tests/test_ransac.cpp.
 
 ================ 2000 correspondences, 50% outliers ================
  planted inliers 1000 | binCV 1000 (35 iterations) | OpenCV 1000
@@ -73,6 +93,13 @@ threshold 3.0 px, confidence 0.99, iteration cap 2000, seeded and deterministic
                      before the call via ransacScratchBytes()
    OpenCV    181704 B   allocated internally; not visible from its signature
    -> 360.5x smaller, counting binCV's scratch against OpenCV's peak live
+   ATTRIBUTED: 48080 B of OpenCV's peak is the SEARCH and 133624 B is the REFIT
+   (its refineIters=0 arm, on the same counter). Most of the ratio above is
+   the refinement, which binCV does in closed form and on the stack -- it is
+   not a leaner RANSAC.
+   binCV's own stack is measured by essential_stack_benchmark, not here:
+   192 B on x86-64 against OpenCV's 11 440 B. A heap-only figure would
+   flatter a library whose rule is that kernels do not allocate.
 
  ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE
    binCV       0 calls   the caller's buffer is reused across frames
@@ -81,12 +108,15 @@ threshold 3.0 px, confidence 0.99, iteration cap 2000, seeded and deterministic
    often the allocator is entered. Neither substitutes for the other.
 
  variant                       us/call   spread   vs OpenCV
- binCV                          558.60     0.1%       2.50x
- cv::estimateAffine2D          1398.20     0.7%       1.00x
- NOTE: both sides refit over their consensus set, so this compares the
- same work. binCV's refit is a closed-form least squares; OpenCV's is a
- bounded Levenberg-Marquardt, which for a model linear in its parameters
- converges to the same point. Accuracy against a planted transform is
- asserted in tests/test_ransac.cpp, not here.
+ binCV                          553.00     0.1%       2.56x
+ cv::estimateAffine2D          1417.93     0.3%       1.00x
+ binCV, search only             533.91     0.1%       2.66x
+ cv::, search only              540.02     0.1%       2.63x
+ READ THE LAST TWO ROWS BEFORE QUOTING THE FIRST TWO. Both sides refit, so
+ this is like for like -- but the two SEARCH loops are close, and nearly all
+ of the difference is the refit: OpenCV iterates Levenberg-Marquardt where
+ binCV solves the same least squares in closed form, the model being linear
+ in its parameters. "binCV's RANSAC is faster" is not what this shows.
+ Accuracy against a planted transform is asserted in tests/test_ransac.cpp.
 
- sink 25449422
+ sink 49296648
