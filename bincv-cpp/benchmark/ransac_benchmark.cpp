@@ -20,6 +20,18 @@
 // refits by default now, the arm is switchable through RansacParams::refine, and
 // this benchmark times the default.
 //
+// AND THE HEADLINE RATIO IS NOT ABOUT THE RANSAC. Measured with the arms below, the
+// two search loops are within about 1.07x of each other at 1 000 correspondences.
+// Effectively the whole difference is the REFIT: OpenCV runs up to `refineIters`
+// Levenberg-Marquardt steps, and binCV solves the same least-squares problem in
+// closed form because an affine transform is linear in its six parameters. The
+// same split governs the memory -- 80% of OpenCV's peak live heap here is the
+// refinement, not the search.
+//
+// This decomposition is printed rather than described, because "binCV's RANSAC is
+// 10x faster" is a false reading of the default-versus-default number and would be
+// the natural one to take from a single ratio.
+//
 // The primary columns are WORKING SET and ALLOCATOR TRAFFIC, and they are two claims
 // rather than one. binCV's working set is `ransacScratchBytes(n)` -- two flags per
 // correspondence -- which is smaller than OpenCV's and, more usefully, knowable before
@@ -139,6 +151,14 @@ void runSize(size_t count, int outlierPct) {
                                                                p, scratch, &m2, mask.data());
         measure::g_sink += rr.inliers;
     });
+    // OpenCV with its refinement disabled, so the heap figure can be attributed the
+    // same way the timing is: how much of it is the search, and how much the refit.
+    const heapprobe::Reading cvSearchOnly = heapprobe::around([&]() {
+        std::vector<uint8_t> mk;
+        const cv::Mat mm = cv::estimateAffine2D(s.cvFrom, s.cvTo, mk, cv::RANSAC, kThreshold,
+                                                2000, 0.99, 0);
+        measure::g_sink += static_cast<size_t>(mm.rows) + mk.size();
+    });
     const heapprobe::Reading cvAlloc = heapprobe::around([&]() {
         std::vector<uint8_t> mk;
         const cv::Mat mm = cv::estimateAffine2D(s.cvFrom, s.cvTo, mk, cv::RANSAC, kThreshold);
@@ -159,6 +179,16 @@ void runSize(size_t count, int outlierPct) {
                 cvAlloc.peakLive);
     std::printf("   -> %.1fx smaller, counting binCV's scratch against OpenCV's peak live\n",
                 static_cast<double>(cvAlloc.peakLive) / static_cast<double>(binSet));
+    std::printf("   ATTRIBUTED: %zu B of OpenCV's peak is the SEARCH and %zu B is the REFIT\n"
+                "   (its refineIters=0 arm, on the same counter). Most of the ratio above is\n"
+                "   the refinement, which binCV does in closed form and on the stack -- it is\n"
+                "   not a leaner RANSAC.\n",
+                cvSearchOnly.peakLive,
+                cvAlloc.peakLive > cvSearchOnly.peakLive
+                    ? cvAlloc.peakLive - cvSearchOnly.peakLive : size_t{0});
+    std::printf("   binCV's own stack is measured by essential_stack_benchmark, not here:\n"
+                "   192 B on x86-64 against OpenCV's 11 440 B. A heap-only figure would\n"
+                "   flatter a library whose rule is that kernels do not allocate.\n");
     std::printf("\n ALLOCATOR TRAFFIC DURING ONE CALL -- A SEPARATE CLAIM FROM THE ABOVE\n");
     std::printf("   binCV  %6zu calls   the caller's buffer is reused across frames\n",
                 binAlloc.calls);
@@ -168,6 +198,8 @@ void runSize(size_t count, int outlierPct) {
                 "   often the allocator is entered. Neither substitutes for the other.\n");
 
     // --- time ----------------------------------------------------------------
+    // Four arms, so the ratio can be attributed rather than just reported: each
+    // side with its refit on (the default a caller gets) and off (the search alone).
     std::vector<measure::Bench> benches;
     benches.push_back({"binCV", [&](int) {
                            Affine2D m2;
@@ -182,6 +214,23 @@ void runSize(size_t count, int outlierPct) {
                                cv::estimateAffine2D(s.cvFrom, s.cvTo, mk, cv::RANSAC, kThreshold);
                            measure::g_sink += static_cast<size_t>(mm.rows);
                        }});
+    benches.push_back({"binCV, search only", [&](int) {
+                           bincv::RansacParams q = p;
+                           q.refine = false;
+                           Affine2D m2;
+                           const bincv::RansacResult rr =
+                               bincv::estimateAffine2D(s.from.data(), s.to.data(), count, q,
+                                                       scratch, &m2, nullptr);
+                           measure::g_sink += rr.inliers;
+                       }});
+    benches.push_back({"cv::, search only", [&](int) {
+                           std::vector<uint8_t> mk;
+                           const cv::Mat mm =
+                               cv::estimateAffine2D(s.cvFrom, s.cvTo, mk, cv::RANSAC, kThreshold,
+                                                    2000, 0.99, 0);
+                           measure::g_sink += static_cast<size_t>(mm.rows);
+                       }});
+
     const std::vector<measure::Timing> t = measure::measureInterleaved(benches, 7, 120.0);
 
     std::printf("\n %-24s %12s %8s %11s\n", "variant", "us/call", "spread", "vs OpenCV");
@@ -189,11 +238,12 @@ void runSize(size_t count, int outlierPct) {
         std::printf(" %-24s %12.2f %7.1f%% %10.2fx\n", benches[i].name.c_str(),
                     t[i].medianNs / 1000.0, t[i].spreadPct(), t[1].medianNs / t[i].medianNs);
     }
-    std::printf(" NOTE: both sides refit over their consensus set, so this compares the\n"
-                " same work. binCV's refit is a closed-form least squares; OpenCV's is a\n"
-                " bounded Levenberg-Marquardt, which for a model linear in its parameters\n"
-                " converges to the same point. Accuracy against a planted transform is\n"
-                " asserted in tests/test_ransac.cpp, not here.\n");
+    std::printf(" READ THE LAST TWO ROWS BEFORE QUOTING THE FIRST TWO. Both sides refit, so\n"
+                " this is like for like -- but the two SEARCH loops are close, and nearly all\n"
+                " of the difference is the refit: OpenCV iterates Levenberg-Marquardt where\n"
+                " binCV solves the same least squares in closed form, the model being linear\n"
+                " in its parameters. \"binCV's RANSAC is faster\" is not what this shows.\n"
+                " Accuracy against a planted transform is asserted in tests/test_ransac.cpp.\n");
 }
 
 } // namespace

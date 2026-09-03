@@ -300,6 +300,117 @@ BINCV_TEST(Ransac, RefitIsSkippedWhenTheConsensusSetIsDegenerate) {
     for (int i = 0; i < 6; ++i) BINCV_CHECK(std::isfinite(m.m[i]));
 }
 
+BINCV_TEST(Ransac, AdversarialInputs) {
+    // Inputs a frontend will eventually hand this, none of which the happy-path
+    // scenes produce. The bar throughout is: never NaN, never a model claimed on
+    // evidence that cannot support one, never a refit reported that did not happen.
+    RansacParams p;
+    p.threshold = 3.0;
+
+    // 1. Every correspondence is an outlier -- no transform explains the data.
+    //    RANSAC will still return its best-supported sample; what must hold is that
+    //    the support is small and the model is finite.
+    {
+        Correspondences c;
+        uint64_t st = 0x99;
+        auto nf = [&st]() {
+            st = st * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+            return static_cast<float>((st >> 33) % 100000) / 100000.0f;
+        };
+        for (int i = 0; i < 200; ++i) {
+            c.from.push_back({nf() * 640.0f, nf() * 480.0f});
+            c.to.push_back({nf() * 640.0f, nf() * 480.0f});
+            c.truth.push_back(0);
+        }
+        Fixture f(c);
+        Affine2D m;
+        const RansacResult r = estimateAffine2D(f.scene.from.data(), f.scene.to.data(),
+                                                f.scene.from.size(), p, f.scratch, &m);
+        for (int i = 0; i < 6; ++i) BINCV_CHECK(std::isfinite(m.m[i]));
+        // Random data should not look like a consensus. A tenth of the set is a
+        // generous ceiling for three points drawn at random agreeing with more.
+        if (r.found) BINCV_CHECK(r.inliers < f.scene.from.size() / 10);
+    }
+
+    // 2. Every point identical. Every minimal sample is degenerate, so no model can
+    //    be built and `found` must say so rather than reporting a fit of zero area.
+    {
+        Correspondences c;
+        for (int i = 0; i < 50; ++i) {
+            c.from.push_back({10.0f, 20.0f});
+            c.to.push_back({30.0f, 40.0f});
+            c.truth.push_back(1);
+        }
+        Fixture f(c);
+        Affine2D m{};
+        const RansacResult r = estimateAffine2D(f.scene.from.data(), f.scene.to.data(),
+                                                f.scene.from.size(), p, f.scratch, &m);
+        BINCV_CHECK_EQ(r.found, false);
+        BINCV_CHECK_EQ(r.refined, false);
+        BINCV_CHECK_EQ(r.inliers, size_t{0});
+    }
+
+    // 3. Exactly the minimal set, clean. There is nothing to refit against beyond
+    //    the sample itself, and the answer must still be the planted transform.
+    {
+        Fixture f(makeScene(kTruth, 3, 0, 0x1234ULL));
+        Affine2D m;
+        const RansacResult r = estimateAffine2D(f.scene.from.data(), f.scene.to.data(),
+                                                f.scene.from.size(), p, f.scratch, &m);
+        BINCV_CHECK_EQ(r.found, true);
+        BINCV_CHECK_EQ(r.inliers, size_t{3});
+        for (int i = 0; i < 6; ++i) {
+            BINCV_CHECK(std::fabs(static_cast<double>(m.m[i] - kTruth.m[i])) < 1e-3);
+        }
+    }
+
+    // 4. Large coordinates. The refit's normal matrix is formed about the centroid
+    //    precisely so this stays conditioned; uncentred it would carry entries near
+    //    1e12 beside entries near 1 and lose the small ones.
+    {
+        Correspondences c = makeScene(kTruth, 300, 6, 0xBEEF1ULL, 0.5f);
+        for (size_t i = 0; i < c.from.size(); ++i) {
+            c.from[i].x += 1.0e6f;
+            c.from[i].y += 1.0e6f;
+            c.to[i].x += 1.0e6f;
+            c.to[i].y += 1.0e6f;
+        }
+        Fixture f(c);
+        Affine2D m;
+        const RansacResult r = estimateAffine2D(f.scene.from.data(), f.scene.to.data(),
+                                                f.scene.from.size(), p, f.scratch, &m);
+        BINCV_CHECK_EQ(r.found, true);
+        for (int i = 0; i < 6; ++i) BINCV_CHECK(std::isfinite(m.m[i]));
+        // The linear part survives the offset even though the translation does not:
+        // shifting both sides by the same vector changes the intercept by design.
+        for (int i : {0, 1, 3, 4}) {
+            BINCV_CHECK(std::fabs(static_cast<double>(m.m[i] - kTruth.m[i])) < 1e-2);
+        }
+    }
+
+    // 5. Duplicated correspondences, which make degenerate samples common without
+    //    making them universal. A model must still be found and stay finite.
+    {
+        Correspondences base = makeScene(kTruth, 100, 5, 0xD0D0ULL);
+        Correspondences c;
+        for (int rep = 0; rep < 3; ++rep) {
+            for (size_t i = 0; i < base.from.size(); ++i) {
+                c.from.push_back(base.from[i]);
+                c.to.push_back(base.to[i]);
+                c.truth.push_back(base.truth[i]);
+                if (base.truth[i]) ++c.inlierCount;
+            }
+        }
+        Fixture f(c);
+        Affine2D m;
+        const RansacResult r = estimateAffine2D(f.scene.from.data(), f.scene.to.data(),
+                                                f.scene.from.size(), p, f.scratch, &m);
+        BINCV_CHECK_EQ(r.found, true);
+        for (int i = 0; i < 6; ++i) BINCV_CHECK(std::isfinite(m.m[i]));
+        BINCV_CHECK_EQ(r.inliers, c.inlierCount);
+    }
+}
+
 #ifdef BINCV_WITH_OPENCV
 BINCV_TEST(Ransac, ConsensusRuleAgreesWithOpenCV) {
     // The tier claim. Two RANSAC runs cannot be compared model to model -- they are

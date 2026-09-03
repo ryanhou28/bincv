@@ -107,6 +107,51 @@ void project(const Pose& pose, Rng& rng, Point2f& a, Point2f& b) {
     b.y = static_cast<float>(xc[1] / xc[2]);
 }
 
+/// @brief The geometries a five-point estimator is actually judged on.
+enum class Degenerate { PureRotation, PlanarScene, TinyBaseline };
+
+/// @brief A scene of `n` correspondences under a degenerate configuration.
+/// @note NONE of these is detected as degenerate, by binCV or by OpenCV, and that
+/// is the point of testing them: a caller who reads a high inlier count here as
+/// evidence of a valid essential matrix is wrong, and the library should behave
+/// the same way OpenCV does rather than differently-wrong.
+void buildDegenerate(Degenerate kind, size_t n, std::vector<Point2f>& a,
+                     std::vector<Point2f>& b) {
+    Rng rng(UINT64_C(0xD36E));
+    const double ang = 0.15;
+    const double r[3][3] = {{std::cos(ang), 0.0, std::sin(ang)},
+                            {0.0, 1.0, 0.0},
+                            {-std::sin(ang), 0.0, std::cos(ang)}};
+    double t[3] = {0.0, 0.0, 0.0};
+    if (kind == Degenerate::TinyBaseline) {
+        t[0] = 3e-5;
+        t[1] = 1e-5;
+        t[2] = 1e-4;
+    } else if (kind == Degenerate::PlanarScene) {
+        t[0] = 0.28;
+        t[1] = 0.09;
+        t[2] = 0.95;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        double x[3] = {rng.uniform() * 2.0, rng.uniform() * 2.0, 4.0 + rng.uniform()};
+        if (kind == Degenerate::PlanarScene) x[2] = 5.0;  // every point on one plane
+        double xc[3];
+        for (int k = 0; k < 3; ++k) {
+            double acc = 0.0;
+            for (int j = 0; j < 3; ++j) acc += r[k][j] * x[j];
+            xc[k] = acc + t[k];
+        }
+        Point2f p{static_cast<float>(x[0] / x[2]), static_cast<float>(x[1] / x[2])};
+        Point2f q{static_cast<float>(xc[0] / xc[2]), static_cast<float>(xc[1] / xc[2])};
+        if (i % 10 == 0) {
+            q.x += static_cast<float>(rng.uniform() * 0.2);
+            q.y += static_cast<float>(rng.uniform() * 0.2);
+        }
+        a.push_back(p);
+        b.push_back(q);
+    }
+}
+
 /// @brief |q2^T E q1|, normalised by the matrix scale so the bound means something.
 double epipolar(const EssentialMatrix& e, Point2f a, Point2f b) {
     const double q1[3] = {static_cast<double>(a.x), static_cast<double>(a.y), 1.0};
@@ -281,6 +326,40 @@ BINCV_TEST(Essential, DeterministicAndDegenerate) {
     std::printf(" essential: deterministic across runs; degenerate five-point returns %d\n", n);
 }
 
+BINCV_TEST(Essential, DegenerateGeometryStaysFiniteAndNormalised) {
+    // Pure rotation admits NO essential matrix -- E = [t]x R with t = 0 is the zero
+    // matrix -- and a tiny baseline is arbitrarily close to that. A planar scene
+    // leaves the five-point problem with a family of solutions rather than a point.
+    // None of these is detected here, exactly as none is detected by OpenCV. What
+    // must hold regardless is that whatever comes back is a USABLE matrix and not
+    // NaN, and that a zero matrix is never passed off as a fit: a zero E satisfies
+    // q2^T E q1 = 0 for every correspondence and would make every point an inlier.
+    const Degenerate kinds[] = {Degenerate::PureRotation, Degenerate::PlanarScene,
+                                Degenerate::TinyBaseline};
+    for (Degenerate k : kinds) {
+        std::vector<Point2f> a, b;
+        buildDegenerate(k, 400, a, b);
+        std::vector<uint32_t> flags(2 * ransacScratchWords(a.size()), 0);
+        RansacScratch scratch{flags.data(), a.size()};
+        RansacParams p;
+        p.threshold = 0.002;
+        p.maxIterations = 500;
+        EssentialMatrix e{};
+        const RansacResult r = findEssentialMat(a.data(), b.data(), a.size(), p, scratch, &e);
+        double fro = 0.0;
+        for (int i = 0; i < 9; ++i) {
+            BINCV_CHECK(std::isfinite(e.m[i]));
+            fro += static_cast<double>(e.m[i]) * static_cast<double>(e.m[i]);
+        }
+        if (r.found) {
+            // Unit Frobenius norm, which is also what rules out the zero matrix.
+            BINCV_CHECK(std::fabs(std::sqrt(fro) - 1.0) < 1e-3);
+            BINCV_CHECK(r.inliers >= EssentialModel::kMinimalSetSize);
+        }
+        BINCV_CHECK_EQ(r.refined, false);
+    }
+}
+
 BINCV_TEST(Essential, AllocatesNothing) {
     Rng rng(0xA110C);
     const Pose pose = makePose(rng, 0.4);
@@ -358,6 +437,45 @@ BINCV_TEST(Essential, AgreesWithOpenCV) {
     BINCV_CHECK_EQ(agreed, kScenes);
     std::printf(" essential: inlier counts agree with cv::findEssentialMat on %d/%d scenes\n",
                 agreed, kScenes);
+}
+
+BINCV_TEST(Essential, DegenerateGeometryIsNoWorseThanOpenCV) {
+    // The bar for a Tier 2 drop-in on a degenerate configuration is not "gets it
+    // right" -- there is no right answer for pure rotation -- but "does not behave
+    // worse than the call it stands in for". Both find a large consensus set on all
+    // three, which is a property of the geometry rather than of either implementation.
+    const Degenerate kinds[] = {Degenerate::PureRotation, Degenerate::PlanarScene,
+                                Degenerate::TinyBaseline};
+    const char* names[] = {"pure rotation", "planar scene", "tiny baseline"};
+    for (int ki = 0; ki < 3; ++ki) {
+        std::vector<Point2f> a, b;
+        buildDegenerate(kinds[ki], 400, a, b);
+        std::vector<cv::Point2f> ca, cb;
+        for (size_t i = 0; i < a.size(); ++i) {
+            ca.push_back(cv::Point2f(a[i].x, a[i].y));
+            cb.push_back(cv::Point2f(b[i].x, b[i].y));
+        }
+        std::vector<uint32_t> flags(2 * ransacScratchWords(a.size()), 0);
+        RansacScratch scratch{flags.data(), a.size()};
+        RansacParams p;
+        p.threshold = 0.002;
+        p.maxIterations = 500;
+        EssentialMatrix e{};
+        const RansacResult r = findEssentialMat(a.data(), b.data(), a.size(), p, scratch, &e);
+        cv::Mat mask;
+        const cv::Mat cvE = cv::findEssentialMat(ca, cb, 1.0, cv::Point2d(0, 0), cv::RANSAC,
+                                                 0.99, 0.002, mask);
+        size_t cvIn = 0;
+        for (int i = 0; i < mask.rows; ++i) cvIn += mask.at<uint8_t>(i, 0) != 0 ? 1u : 0u;
+        BINCV_CHECK_EQ(r.found, true);
+        BINCV_CHECK(!cvE.empty());
+        // Within 5% of the correspondences of each other. Not equality: two random
+        // searches over a degenerate family land on different members of it.
+        const double gap = std::fabs(static_cast<double>(cvIn) - static_cast<double>(r.inliers));
+        BINCV_CHECK(gap <= 0.05 * static_cast<double>(a.size()));
+        std::printf(" essential: %-14s binCV %zu inliers, OpenCV %zu"
+                    " (neither detects the degeneracy)\n", names[ki], r.inliers, cvIn);
+    }
 }
 
 BINCV_TEST(Essential, ModelAccuracyMatchesOpenCVUnderNoise) {
