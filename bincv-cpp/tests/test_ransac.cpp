@@ -12,9 +12,20 @@
 //     the same correspondences as inliers
 //   * nothing allocates
 //
-// The last-but-one is the one that matters for the tier claim. Comparing the two
-// MODELS would compare two random draws; comparing the two INLIER SETS under one
+//   * the returned model is ACCURATE, not merely supported by the right points
+//
+// The consensus-rule one matters for the tier claim. Comparing the two MODELS
+// directly would compare two random draws; comparing the two INLIER SETS under one
 // model compares the thing the threshold actually defines.
+//
+// THAT ARGUMENT WAS ONCE USED TO SKIP ACCURACY ENTIRELY, AND IT IS WRONG TO. Two
+// draws cannot be compared to each other, but both can be compared to a PLANTED
+// transform, and that is a real check the suite went without. It went without it
+// because every inlier here used to be generated exactly from the transform, which
+// makes a minimal-set fit through three exact points exact -- so a refit over the
+// consensus set changed nothing and its absence was invisible. With noise on the
+// inliers the un-refitted model was 13x further from the truth than OpenCV's.
+// `makeScene` therefore takes a noise level, and the tests below use it.
 #include <cstdint>
 #include <cmath>
 #include <cstdio>
@@ -48,12 +59,21 @@ struct Correspondences {
 
 /// @brief `count` correspondences under `t`, of which every `outlierEvery`-th is
 /// displaced far enough to be an unambiguous outlier.
-Correspondences makeScene(const Affine2D& t, size_t count, int outlierEvery, uint64_t seed) {
+/// @param noiseSd Gaussian noise on the INLIERS, in pixels. Zero makes every inlier
+/// exact, which makes a minimal-set fit exact and hides whether the model was
+/// refitted at all -- so accuracy tests must pass something non-zero.
+Correspondences makeScene(const Affine2D& t, size_t count, int outlierEvery, uint64_t seed,
+                          float noiseSd = 0.0f) {
     Correspondences c;
     uint64_t s = seed;
     auto nextf = [&s]() {
         s = s * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
         return static_cast<float>((s >> 33) % 100000) / 100000.0f;
+    };
+    auto gauss = [&nextf]() {  // Box-Muller
+        const double u1 = static_cast<double>(nextf()) + 1e-9;
+        const double u2 = static_cast<double>(nextf());
+        return std::sqrt(-2.0 * std::log(u1)) * std::cos(6.283185307179586 * u2);
     };
     for (size_t i = 0; i < count; ++i) {
         const Point2f a{nextf() * 640.0f, nextf() * 480.0f};
@@ -62,6 +82,9 @@ Correspondences makeScene(const Affine2D& t, size_t count, int outlierEvery, uin
         if (outlier) {
             b.x += 60.0f + nextf() * 120.0f;
             b.y -= 55.0f + nextf() * 110.0f;
+        } else if (noiseSd > 0.0f) {
+            b.x += static_cast<float>(gauss()) * noiseSd;
+            b.y += static_cast<float>(gauss()) * noiseSd;
         }
         c.from.push_back(a);
         c.to.push_back(b);
@@ -85,6 +108,27 @@ struct Fixture {
 };
 
 const Affine2D kTruth{{1.10f, -0.20f, 12.0f, 0.15f, 0.95f, -7.0f}};
+
+/// @brief RMS distance, in pixels, between where `m` sends each source point and
+/// where `kTruth` sends it. Scores the MODEL against the planted transform rather
+/// than against one noise realisation, so it is comparable across implementations.
+double modelRms(const Affine2D& m, const std::vector<Point2f>& pts) {
+    double acc = 0.0;
+    for (const Point2f& a : pts) {
+        const double ex = static_cast<double>(m.m[0]) * a.x + static_cast<double>(m.m[1]) * a.y +
+                          static_cast<double>(m.m[2]) -
+                          (static_cast<double>(kTruth.m[0]) * a.x +
+                           static_cast<double>(kTruth.m[1]) * a.y +
+                           static_cast<double>(kTruth.m[2]));
+        const double ey = static_cast<double>(m.m[3]) * a.x + static_cast<double>(m.m[4]) * a.y +
+                          static_cast<double>(m.m[5]) -
+                          (static_cast<double>(kTruth.m[3]) * a.x +
+                           static_cast<double>(kTruth.m[4]) * a.y +
+                           static_cast<double>(kTruth.m[5]));
+        acc += ex * ex + ey * ey;
+    }
+    return std::sqrt(acc / static_cast<double>(pts.size()));
+}
 
 } // namespace
 
@@ -192,6 +236,70 @@ BINCV_TEST(Ransac, AllocatesNothing) {
                 during, ransacScratchBytes(500));
 }
 
+BINCV_TEST(Ransac, RefitOverTheConsensusSetBeatsTheMinimalFit) {
+    // THE REGRESSION GUARD. A minimal-set fit is exact only when its three sampled
+    // correspondences are exact. Put noise on the inliers and it carries that
+    // sample's error into the answer; the refit averages it away. Without this test
+    // the whole difference is invisible, because a noise-free scene makes the two
+    // identical.
+    double sumRefit = 0.0, sumMinimal = 0.0;
+    int scenes = 0;
+    for (int k = 0; k < 12; ++k) {
+        Fixture f(makeScene(kTruth, 400, 4, 0xACCU + static_cast<uint64_t>(k) * 7919u, 0.5f));
+        RansacParams p;
+        p.threshold = 3.0;
+
+        Affine2D refit;
+        const RansacResult a = estimateAffine2D(f.scene.from.data(), f.scene.to.data(),
+                                                f.scene.from.size(), p, f.scratch, &refit);
+        p.refine = false;
+        Affine2D minimal;
+        const RansacResult b = estimateAffine2D(f.scene.from.data(), f.scene.to.data(),
+                                                f.scene.from.size(), p, f.scratch, &minimal);
+        if (!a.found || !b.found) continue;
+        BINCV_CHECK_EQ(a.refined, true);
+        BINCV_CHECK_EQ(b.refined, false);
+        // The consensus set is the same either way: refining changes the model, not
+        // which correspondences supported it.
+        BINCV_CHECK_EQ(a.inliers, b.inliers);
+        sumRefit += modelRms(refit, f.scene.from);
+        sumMinimal += modelRms(minimal, f.scene.from);
+        ++scenes;
+    }
+    BINCV_CHECK(scenes >= 10);
+    const double refitRms = sumRefit / scenes, minimalRms = sumMinimal / scenes;
+    // Measured around 0.06 px against 0.90 px at this noise level. The bar is set
+    // at 3x rather than at the measured 13x so that it fails on a REGRESSION rather
+    // than on ordinary drift.
+    BINCV_CHECK(refitRms * 3.0 < minimalRms);
+    BINCV_CHECK(refitRms < 0.25);
+    std::printf(" ransac: refit %.4f px vs minimal-set %.4f px at 0.5 px inlier noise\n",
+                refitRms, minimalRms);
+}
+
+BINCV_TEST(Ransac, RefitIsSkippedWhenTheConsensusSetIsDegenerate) {
+    // Collinear sources cannot determine an affine, so the refit must decline and
+    // leave the minimal-set model rather than divide by a near-zero determinant.
+    Correspondences c;
+    for (int i = 0; i < 40; ++i) {
+        const Point2f a{static_cast<float>(i) * 5.0f, 100.0f};  // one horizontal line
+        c.from.push_back(a);
+        c.to.push_back({kTruth.m[0] * a.x + kTruth.m[1] * a.y + kTruth.m[2],
+                        kTruth.m[3] * a.x + kTruth.m[4] * a.y + kTruth.m[5]});
+        c.truth.push_back(1);
+        ++c.inlierCount;
+    }
+    Fixture f(c);
+    RansacParams p;
+    p.threshold = 3.0;
+    Affine2D m;
+    const RansacResult r = estimateAffine2D(f.scene.from.data(), f.scene.to.data(),
+                                            f.scene.from.size(), p, f.scratch, &m);
+    // Whatever the sampler managed, it must not report a refit it could not do.
+    BINCV_CHECK_EQ(r.refined, false);
+    for (int i = 0; i < 6; ++i) BINCV_CHECK(std::isfinite(m.m[i]));
+}
+
 #ifdef BINCV_WITH_OPENCV
 BINCV_TEST(Ransac, ConsensusRuleAgreesWithOpenCV) {
     // The tier claim. Two RANSAC runs cannot be compared model to model -- they are
@@ -242,6 +350,48 @@ BINCV_TEST(Ransac, ConsensusRuleAgreesWithOpenCV) {
     std::printf(" ransac: same model -> %zu inlier disagreements with OpenCV's rule;"
                 " independent runs %zu vs %zu inliers\n",
                 differ, r.inliers, cvInliers);
+}
+
+BINCV_TEST(Ransac, ModelAccuracyMatchesOpenCVUnderNoise) {
+    // Both estimators are compared to the PLANTED transform, which two random draws
+    // can both be measured against even though they cannot be measured against each
+    // other. This is what says binCV's estimateAffine2D fills the same role as
+    // cv::estimateAffine2D rather than merely finding the same inliers.
+    double binSum = 0.0, cvSum = 0.0;
+    int scenes = 0;
+    for (int k = 0; k < 12; ++k) {
+        Fixture f(makeScene(kTruth, 400, 4, 0xF00DU + static_cast<uint64_t>(k) * 7919u, 0.5f));
+        RansacParams p;
+        p.threshold = 3.0;
+        Affine2D m;
+        const RansacResult r = estimateAffine2D(f.scene.from.data(), f.scene.to.data(),
+                                                f.scene.from.size(), p, f.scratch, &m);
+        std::vector<cv::Point2f> src, dst;
+        for (size_t i = 0; i < f.scene.from.size(); ++i) {
+            src.push_back(cv::Point2f(f.scene.from[i].x, f.scene.from[i].y));
+            dst.push_back(cv::Point2f(f.scene.to[i].x, f.scene.to[i].y));
+        }
+        std::vector<uint8_t> cvMask;
+        const cv::Mat cvModel = cv::estimateAffine2D(src, dst, cvMask, cv::RANSAC, p.threshold);
+        if (!r.found || cvModel.empty()) continue;
+        Affine2D cm;
+        for (int i = 0; i < 6; ++i) {
+            cm.m[i] = static_cast<float>(cvModel.at<double>(i / 3, i % 3));
+        }
+        binSum += modelRms(m, f.scene.from);
+        cvSum += modelRms(cm, f.scene.from);
+        ++scenes;
+    }
+    BINCV_CHECK(scenes >= 10);
+    const double binRms = binSum / scenes, cvRms = cvSum / scenes;
+    // Not equality: the two search different hypotheses, so they land on different
+    // consensus sets and different fits. The claim is that binCV is not WORSE, with
+    // a 1.5x band for the difference in draws. Measured, binCV comes out slightly
+    // ahead -- it solves the least squares exactly where OpenCV runs a bounded
+    // number of Levenberg-Marquardt steps.
+    BINCV_CHECK(binRms <= cvRms * 1.5);
+    std::printf(" ransac: model error vs planted truth -- binCV %.4f px,"
+                " OpenCV %.4f px (0.5 px inlier noise)\n", binRms, cvRms);
 }
 #endif
 

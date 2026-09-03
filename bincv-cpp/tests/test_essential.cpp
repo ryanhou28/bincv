@@ -43,6 +43,12 @@ struct Rng {
         s = s * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
         return 2.0 * (static_cast<double>((s >> 33) % 1000001) / 1000000.0) - 1.0;
     }
+    /// @brief Standard normal, for putting noise on the INLIERS. A scene whose
+    /// inliers are exact cannot tell an accurate estimator from a lucky one.
+    double gaussian() {
+        const double u1 = 0.5 * (uniform() + 1.0) + 1e-9, u2 = 0.5 * (uniform() + 1.0);
+        return std::sqrt(-2.0 * std::log(u1)) * std::cos(6.283185307179586 * u2);
+    }
 };
 
 /// @brief A camera pair and the essential matrix it induces, planted so that
@@ -353,7 +359,79 @@ BINCV_TEST(Essential, AgreesWithOpenCV) {
     std::printf(" essential: inlier counts agree with cv::findEssentialMat on %d/%d scenes\n",
                 agreed, kScenes);
 }
-#endif
+
+BINCV_TEST(Essential, ModelAccuracyMatchesOpenCVUnderNoise) {
+    // Neither side refits here -- cv::findEssentialMat returns what its RANSAC
+    // registrator found, exactly as this driver does -- so this asks whether the
+    // five-point solve itself is as good, on data that is not exact.
+    //
+    // The sibling test in test_ransac.cpp exists because the AFFINE estimator was
+    // NOT equivalent: OpenCV refits there and binCV did not, which cost 13x in
+    // accuracy and was invisible while every inlier was noise-free. This test is
+    // the check that the same gap does not exist for the essential matrix.
+    double binSum = 0.0, cvSum = 0.0;
+    int scenes = 0;
+    for (int k = 0; k < 10; ++k) {
+        Rng rng(UINT64_C(0x5CE9E) + static_cast<uint64_t>(k) * UINT64_C(7919));
+        const Pose pose = makePose(rng, 0.2);
+        const size_t n = 400;
+        std::vector<Point2f> from(n), to(n), cleanFrom, cleanTo;
+        std::vector<cv::Point2f> cf, ct;
+        for (size_t i = 0; i < n; ++i) {
+            Point2f a{}, b{};
+            project(pose, rng, a, b);
+            const bool outlier = (i % 5) == 0;
+            if (!outlier) {
+                cleanFrom.push_back(a);
+                cleanTo.push_back(b);
+                b.x += static_cast<float>(rng.gaussian() * 0.001);
+                b.y += static_cast<float>(rng.gaussian() * 0.001);
+            } else {
+                b.x += static_cast<float>(rng.uniform() * 0.2);
+                b.y += static_cast<float>(rng.uniform() * 0.2);
+            }
+            from[i] = a;
+            to[i] = b;
+            cf.push_back(cv::Point2f(a.x, a.y));
+            ct.push_back(cv::Point2f(b.x, b.y));
+        }
+        std::vector<uint32_t> flags(2 * ransacScratchWords(n), 0);
+        RansacScratch scratch{flags.data(), n};
+        RansacParams p;
+        p.threshold = 0.002;
+        p.maxIterations = 500;
+        EssentialMatrix e;
+        const RansacResult r = findEssentialMat(from.data(), to.data(), n, p, scratch, &e);
+        cv::Mat mask;
+        const cv::Mat cvE = cv::findEssentialMat(cf, ct, 1.0, cv::Point2d(0, 0), cv::RANSAC,
+                                                 0.99, 0.002, mask);
+        if (!r.found || cvE.empty() || cvE.rows < 3) continue;
+        // A refit is not claimed for this model, and must not be reported.
+        BINCV_CHECK_EQ(r.refined, false);
+        EssentialMatrix ce;
+        for (int i = 0; i < 9; ++i) {
+            ce.m[i] = static_cast<float>(cvE.at<double>(i / 3, i % 3));
+        }
+        // Scored on the CLEAN correspondences, so the number is the model's error
+        // and not the noise it was fitted through.
+        double bAcc = 0.0, cAcc = 0.0;
+        for (size_t i = 0; i < cleanFrom.size(); ++i) {
+            bAcc += epipolar(e, cleanFrom[i], cleanTo[i]);
+            cAcc += epipolar(ce, cleanFrom[i], cleanTo[i]);
+        }
+        binSum += bAcc / static_cast<double>(cleanFrom.size());
+        cvSum += cAcc / static_cast<double>(cleanFrom.size());
+        ++scenes;
+    }
+    BINCV_CHECK(scenes >= 8);
+    const double binErr = binSum / scenes, cvErr = cvSum / scenes;
+    // Two different random draws, so not equality. The claim is that binCV is not
+    // worse, with a band for the difference in hypotheses each happened to see.
+    BINCV_CHECK(binErr <= cvErr * 1.5);
+    std::printf(" essential: epipolar error on clean pairs -- binCV %.6f,"
+                " OpenCV %.6f (0.001 inlier noise)\n", binErr, cvErr);
+}
+#endif  // BINCV_WITH_OPENCV
 
 namespace {
 void* countedAllocate(std::size_t bytes) {

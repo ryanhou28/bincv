@@ -10,10 +10,15 @@
 // a 3x3 -- and bit packing has nothing to say about it. The one structurally
 // bit-parallel step is counting inliers, over a few hundred flags: 25-250 bytes,
 // resident in L1 either way, which this project has already measured to be worth
-// nothing at that scale. If binCV comes out ahead on time it will be because it does
-// not refit over the consensus set and OpenCV does, which is a difference in what the
-// two compute rather than in how fast they compute it. That is stated here so the
-// timing column is read as the secondary one it is.
+// nothing at that scale. That is stated here so the timing column is read as the
+// secondary one it is.
+//
+// BOTH SIDES NOW REFIT, so the timing column is a like-for-like one. binCV used to
+// return the minimal-set fit while cv::estimateAffine2D refined over its consensus
+// set, which made it faster partly by doing less -- and, more seriously, left its
+// model 13x further from a planted transform at 0.5 px of inlier noise. The driver
+// refits by default now, the arm is switchable through RansacParams::refine, and
+// this benchmark times the default.
 //
 // The primary columns are WORKING SET and ALLOCATOR TRAFFIC, and they are two claims
 // rather than one. binCV's working set is `ransacScratchBytes(n)` -- two flags per
@@ -184,9 +189,11 @@ void runSize(size_t count, int outlierPct) {
         std::printf(" %-24s %12.2f %7.1f%% %10.2fx\n", benches[i].name.c_str(),
                     t[i].medianNs / 1000.0, t[i].spreadPct(), t[1].medianNs / t[i].medianNs);
     }
-    std::printf(" NOTE: binCV returns the minimal-set fit; OpenCV refits over its consensus\n"
-                " set. The two do not compute the same last step, which is a difference in\n"
-                " WHAT is computed and is why the timing column is the secondary one here.\n");
+    std::printf(" NOTE: both sides refit over their consensus set, so this compares the\n"
+                " same work. binCV's refit is a closed-form least squares; OpenCV's is a\n"
+                " bounded Levenberg-Marquardt, which for a model linear in its parameters\n"
+                " converges to the same point. Accuracy against a planted transform is\n"
+                " asserted in tests/test_ransac.cpp, not here.\n");
 }
 
 } // namespace

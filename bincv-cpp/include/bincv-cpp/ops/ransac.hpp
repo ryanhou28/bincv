@@ -102,6 +102,20 @@ struct RansacParams {
     /// @brief Seeds the sampler. **The same seed gives the same answer**, which is
     /// the whole reason this is a parameter rather than a global.
     uint64_t seed = UINT64_C(0x9E3779B97F4A7C15);
+    /// @brief Refit the winning model over its consensus set before returning.
+    ///
+    /// **On by default, because off is measurably wrong.** A minimal-set fit is
+    /// exact only when its sample is exact; with noise on the inliers it carries
+    /// that sample's error into the answer. Measured against a planted transform
+    /// at 0.5 px of inlier noise, the un-refitted affine model lands 0.90 px from
+    /// the truth where the refitted one lands 0.068 px -- a factor of 13, and the
+    /// factor grows as the noise falls. `cv::estimateAffine2D` refits, so leaving
+    /// this off also makes the two disagree for no stated reason.
+    ///
+    /// Switchable so a benchmark can time both arms and so a caller who only wants
+    /// the consensus set can skip the work. Models with no closed-form refit ignore
+    /// it; `EssentialModel` is one, and `cv::findEssentialMat` does not refit either.
+    bool refine = true;
 };
 
 /// @brief What a RANSAC call reports back. **API TIER 2.**
@@ -118,6 +132,12 @@ struct RansacResult {
     /// every scratch-taking entry point takes the caller's buffer and cannot
     /// fail this way.
     bool allocationFailed = false;
+    /// @brief The returned model is a least-squares fit over its consensus set
+    /// rather than the minimal-set fit. False when `RansacParams::refine` was off,
+    /// when the model has no closed-form refit, or when the consensus set turned
+    /// out to be degenerate for one. Reported because it changes what the model
+    /// IS, and a caller comparing against another implementation needs to know.
+    bool refined = false;
 };
 
 /// @brief Caller-owned scratch: one flag per correspondence, twice.
@@ -242,18 +262,19 @@ inline int ransacIterationsNeeded(size_t inliers, size_t total, size_t minimalSe
 /// @note **Deterministic.** Same seed, same inputs, same answer, on both
 /// architectures. Nothing here reads a global generator.
 /// @note **No allocation and no throw**, as everywhere else in this library.
-/// @note **The returned model is the minimal-set fit, not a refit over its
-/// inliers.** Whether that matches OpenCV depends on which estimator you are
-/// comparing against, and the difference is worth knowing before reading a
-/// speed ratio. `cv::findEssentialMat` does not refit either -- it returns
-/// what its registrator found -- so that comparison is like for like.
-/// `cv::estimateAffine2D` does: it runs up to `refineIters` Levenberg-Marquardt
-/// steps over the consensus set, which is work this driver never does. Its
-/// model will differ slightly even when the two agree on which correspondences
-/// are inliers, and part of any speed advantage measured against it is that
-/// difference rather than a faster implementation of the same thing. A caller
-/// who wants the refinement can do it over `inlierMask`; doing it here would
-/// mean carrying a solver this file deliberately does not have.
+/// @note **The returned model is refit over its consensus set** when the policy
+/// offers a refit and `RansacParams::refine` is on, which is the default;
+/// `RansacResult::refined` says which you got. This matches what each OpenCV
+/// counterpart does, and matching matters more than it sounds:
+/// `cv::estimateAffine2D` refines with up to `refineIters` Levenberg-Marquardt
+/// steps, and while binCV skipped that its model sat 13x further from a planted
+/// transform at 0.5 px of inlier noise. `cv::findEssentialMat` does not refine,
+/// and neither does `EssentialModel` -- there the minimal-set model is what both
+/// return and the two measure the same.
+/// @note The inlier mask is NOT recomputed after a refit, which is also what
+/// OpenCV does. The reported count is the support the stopping rule actually
+/// used, so re-scoring would let it drift away from the number that ended the
+/// search.
 template <typename Model>
 inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
                            const RansacParams& params, RansacScratch scratch,
@@ -319,6 +340,18 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
     }
 
     out.inliers = bestInliers;
+
+    // Refit over the consensus set. The minimal-set model got us the right SUBSET;
+    // it is not the best fit to that subset once the inliers carry noise.
+    //
+    // The mask is deliberately NOT recomputed afterwards, which is what
+    // cv::estimateAffine2D does: it refines the model and keeps the mask RANSAC
+    // produced. Re-scoring would let the reported inlier count drift away from the
+    // count the stopping rule actually used.
+    if (out.found && params.refine) {
+        out.refined = Model::refine(from, to, bestFlags, count, bestModel);
+    }
+
     if (inlierMask != nullptr) {
         // Unpacked on the way out, because the MASK is the caller's and OpenCV's
         // shape for it is a byte per point.
@@ -391,6 +424,76 @@ struct Affine2DModel {
         out->m[4] = static_cast<float>(bv);
         out->m[5] = static_cast<float>(cv);
         return 1;
+    }
+
+    /// @brief Least-squares refit over the consensus set, which is what makes this
+    /// agree with `cv::estimateAffine2D` on noisy data rather than merely on clean
+    /// data. **Closed form, not iterative:** the affine model is linear in its six
+    /// parameters, so the least-squares optimum is a solve, and OpenCV's
+    /// Levenberg-Marquardt refinement converges to that same point.
+    ///
+    /// Solved about the centroid. The rows decouple once centred, leaving one 2x2
+    /// normal matrix shared by both, and centring is what keeps it conditioned:
+    /// on raw 640x480 coordinates the uncentred matrix carries entries near 1e8
+    /// beside entries near 1, and the small ones stop carrying information.
+    /// @param flags Bit-packed inlier flags, one bit per correspondence.
+    /// @return false when the consensus set is too small or its source points are
+    /// collinear, in which case `model` is left as the minimal-set fit.
+    static bool refine(const Point2f* from, const Point2f* to, const uint32_t* flags,
+                       size_t count, Affine2D* model) {
+        double mx = 0.0, my = 0.0, mu = 0.0, mv = 0.0;
+        size_t used = 0;
+        for (size_t i = 0; i < count; ++i) {
+            if (((flags[i >> 5] >> (i & 31u)) & 1u) == 0u) continue;
+            mx += static_cast<double>(from[i].x);
+            my += static_cast<double>(from[i].y);
+            mu += static_cast<double>(to[i].x);
+            mv += static_cast<double>(to[i].y);
+            ++used;
+        }
+        if (used < kMinimalSetSize) return false;
+        const double n = static_cast<double>(used);
+        mx /= n;
+        my /= n;
+        mu /= n;
+        mv /= n;
+
+        double sxx = 0.0, sxy = 0.0, syy = 0.0;
+        double sxu = 0.0, syu = 0.0, sxv = 0.0, syv = 0.0;
+        for (size_t i = 0; i < count; ++i) {
+            if (((flags[i >> 5] >> (i & 31u)) & 1u) == 0u) continue;
+            const double x = static_cast<double>(from[i].x) - mx;
+            const double y = static_cast<double>(from[i].y) - my;
+            const double u = static_cast<double>(to[i].x) - mu;
+            const double v = static_cast<double>(to[i].y) - mv;
+            sxx += x * x;
+            sxy += x * y;
+            syy += y * y;
+            sxu += x * u;
+            syu += y * u;
+            sxv += x * v;
+            syv += y * v;
+        }
+        const double det = sxx * syy - sxy * sxy;
+        // Scale-relative, because sxx and syy grow with the point count and the
+        // square of the coordinate range; an absolute epsilon would mean something
+        // different at every image size.
+        const double scale = sxx + syy;
+        if (!(std::fabs(det) > 1e-12 * scale * scale)) return false;
+
+        const double inv = 1.0 / det;
+        const double a0 = (sxu * syy - syu * sxy) * inv;
+        const double a1 = (syu * sxx - sxu * sxy) * inv;
+        const double a3 = (sxv * syy - syv * sxy) * inv;
+        const double a4 = (syv * sxx - sxv * sxy) * inv;
+
+        model->m[0] = static_cast<float>(a0);
+        model->m[1] = static_cast<float>(a1);
+        model->m[2] = static_cast<float>(mu - a0 * mx - a1 * my);
+        model->m[3] = static_cast<float>(a3);
+        model->m[4] = static_cast<float>(a4);
+        model->m[5] = static_cast<float>(mv - a3 * mx - a4 * my);
+        return true;
     }
 
     /// @brief Euclidean reprojection error, in pixels -- the units
