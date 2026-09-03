@@ -4,7 +4,7 @@
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # governor: performance
 # throttled:throttled=0x80000
-# date:     2026-09-03T16:07:30-07:00
+# date:     2026-09-03T16:19:41-07:00
 
 Stack a caller must reserve for one call, 1000 correspondences, deepest of 6 scenes
 Probe: guard-page bisection on a 512 KiB thread stack, 16 B granularity, 3 repeats
@@ -21,6 +21,10 @@ STACK USED BY ONE CALL, net of the empty workload
   binCV fivePointEssential alone         6928 B
   binCV findEssentialMat (whole)         7216 B
   cv::findEssentialMat (whole)          15392 B
+
+  and the affine pair, so its memory claim is not heap-only either:
+  binCV estimateAffine2D                 1168 B
+  cv::estimateAffine2D                   9904 B
 
   A measured figure is a LOWER BOUND on worst-case stack: it is the
   deepest of the paths that ran, over 6 scenes. Budget with margin.

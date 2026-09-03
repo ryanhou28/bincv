@@ -1,10 +1,17 @@
-// HOW MUCH STACK MUST A CALLER RESERVE FOR ONE CALL? binCV against cv::findEssentialMat.
+// HOW MUCH STACK MUST A CALLER RESERVE FOR ONE CALL? Both estimators this library
+// ships, against the OpenCV call each stands in for.
 //
-// WHY THIS FILE EXISTS. The heap comparison in essential_benchmark.cpp cannot see
-// this: both solvers keep their working arrays on the STACK. Reporting only the heap
-// therefore compares the small change and misses the thing itself, and comparing
-// binCV's stack against OpenCV's heap -- which an earlier version of that file did --
-// is not a measurement at all.
+// WHY THIS FILE EXISTS. The heap comparisons in essential_benchmark.cpp and
+// ransac_benchmark.cpp cannot see this: the solvers keep their working arrays on
+// the STACK. Reporting only the heap therefore compares the small change and misses
+// the thing itself, and comparing binCV's stack against OpenCV's heap -- which an
+// earlier version of the first of those did -- is not a measurement at all.
+//
+// The affine arms are here for the same reason. binCV's no-allocation rule means a
+// heap-only instrument credits it with a saving it did not make; the only way that
+// claim is honest is if both storage classes are measured on both sides. See
+// docs/reports/methodology-memory.md, which puts a number on how wrong heap-only
+// gets: 64x, from storage class alone.
 //
 // WHAT IS MEASURED, AND WHY THIS QUANTITY. The smallest thread stack on which the
 // call completes without hitting the guard page. That is what a caller sizing a
@@ -59,6 +66,7 @@
 #include <opencv2/core.hpp>
 
 #include "bincv-cpp/ops/essential.hpp"
+#include "bincv-cpp/ops/ransac.hpp"
 
 #include <pthread.h>
 #include <sys/wait.h>
@@ -85,6 +93,37 @@ struct Scene {
 Scene g_scene[kScenes];
 std::vector<uint32_t> g_flags;
 volatile int g_guard = 0;
+
+/// @brief Pixel-coordinate correspondences under a fixed affine, for the affine
+/// arms. The essential scenes are in normalised coordinates and are not reusable
+/// here.
+struct AffineScene {
+    std::vector<bincv::Point2f> from, to;
+    std::vector<cv::Point2f> cf, ct;
+};
+AffineScene g_affine[kScenes];
+
+void buildAffineScene(AffineScene& s, uint64_t seed) {
+    const bincv::Affine2D t{{1.10f, -0.20f, 12.0f, 0.15f, 0.95f, -7.0f}};
+    uint64_t st = seed;
+    auto nextf = [&st]() {
+        st = st * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+        return static_cast<float>((st >> 33) % 100000) / 100000.0f;
+    };
+    for (int i = 0; i < kPoints; ++i) {
+        const bincv::Point2f a{nextf() * 640.0f, nextf() * 480.0f};
+        bincv::Point2f b{t.m[0] * a.x + t.m[1] * a.y + t.m[2],
+                         t.m[3] * a.x + t.m[4] * a.y + t.m[5]};
+        if (i % 4 == 0) {
+            b.x += 60.0f + nextf() * 120.0f;
+            b.y -= 55.0f + nextf() * 110.0f;
+        }
+        s.from.push_back(a);
+        s.to.push_back(b);
+        s.cf.push_back(cv::Point2f(a.x, a.y));
+        s.ct.push_back(cv::Point2f(b.x, b.y));
+    }
+}
 
 void buildScene(Scene& s, uint64_t seed) {
     uint64_t st = seed;
@@ -179,6 +218,29 @@ void* wOpenCv(void*) {
     return nullptr;
 }
 
+void* wBincvAffine(void*) {
+    for (int i = 0; i < kScenes; ++i) {
+        const bincv::RansacScratch sc{g_flags.data(), static_cast<size_t>(kPoints)};
+        bincv::RansacParams p;
+        p.threshold = 3.0;
+        bincv::Affine2D m;
+        g_guard += static_cast<int>(
+            bincv::estimateAffine2D(g_affine[i].from.data(), g_affine[i].to.data(),
+                                    static_cast<size_t>(kPoints), p, sc, &m).inliers);
+    }
+    return nullptr;
+}
+
+void* wOpenCvAffine(void*) {
+    for (int i = 0; i < kScenes; ++i) {
+        std::vector<uint8_t> mask;
+        const cv::Mat m = cv::estimateAffine2D(g_affine[i].cf, g_affine[i].ct, mask,
+                                               cv::RANSAC, 3.0);
+        g_guard += m.rows;
+    }
+    return nullptr;
+}
+
 // --- the probe -------------------------------------------------------------
 
 size_t g_pad = 0;
@@ -249,6 +311,9 @@ void printRow(const char* name, Reading r) {
 
 int main() {
     for (int i = 0; i < kScenes; ++i) buildScene(g_scene[i], 99 + 7777 * static_cast<uint64_t>(i));
+    for (int i = 0; i < kScenes; ++i) {
+        buildAffineScene(g_affine[i], 5150 + 7919 * static_cast<uint64_t>(i));
+    }
     g_flags.assign(2 * bincv::ransacScratchWords(static_cast<size_t>(kPoints)), 0);
     cv::setNumThreads(1);
 
@@ -261,6 +326,10 @@ int main() {
     {
         bincv::EssentialMatrix e[10];
         bincv::fivePointEssential(g_scene[0].ba.data(), g_scene[0].bb.data(), e);
+    }
+    {
+        std::vector<uint8_t> mk;
+        cv::estimateAffine2D(g_affine[0].cf, g_affine[0].ct, mk, cv::RANSAC, 3.0);
     }
 
     std::printf("Stack a caller must reserve for one call, %d correspondences,"
@@ -316,6 +385,9 @@ int main() {
     printRow("binCV fivePointEssential alone", measure(wFivePoint, padBaseline));
     printRow("binCV findEssentialMat (whole)", measure(wBincvRansac, padBaseline));
     printRow("cv::findEssentialMat (whole)", measure(wOpenCv, padBaseline));
+    std::printf("\n  and the affine pair, so its memory claim is not heap-only either:\n");
+    printRow("binCV estimateAffine2D", measure(wBincvAffine, padBaseline));
+    printRow("cv::estimateAffine2D", measure(wOpenCvAffine, padBaseline));
     std::printf("\n  A measured figure is a LOWER BOUND on worst-case stack: it is the\n"
                 "  deepest of the paths that ran, over %d scenes. Budget with margin.\n",
                 kScenes);
