@@ -4,7 +4,7 @@
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # governor: performance
 # throttled:throttled=0x80000
-# date:     2026-09-03T14:08:21-07:00
+# date:     2026-09-03T14:11:19-07:00
 
 Stack a caller must reserve for one call, 1000 correspondences, deepest of 6 scenes
 Probe: guard-page bisection on a 512 KiB thread stack, 16 B granularity, 3 repeats
@@ -24,4 +24,3 @@ STACK USED BY ONE CALL, net of the empty workload
 
   A measured figure is a LOWER BOUND on worst-case stack: it is the
   deepest of the paths that ran, over 6 scenes. Budget with margin.
-  guard 0
