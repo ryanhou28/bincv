@@ -45,6 +45,7 @@
 namespace {
 
 std::size_t g_newCount = 0;
+std::size_t g_smallCount = 0;
 std::size_t g_liveBytes = 0;
 std::size_t g_peakBytes = 0;
 constexpr std::size_t kAllocHeader = 16;
@@ -102,8 +103,9 @@ Scene makeScene(size_t count, int outlierPct, uint64_t seed) {
 }
 
 struct Counted {
-    std::size_t calls = 0;   ///< allocator round-trips
-    std::size_t peak = 0;    ///< HIGH-WATER live bytes, not the sum of allocations
+    std::size_t calls = 0;       ///< allocator round-trips
+    std::size_t smallCalls = 0;  ///< of those, blocks under 128 B
+    std::size_t peak = 0;        ///< HIGH-WATER live bytes, not the sum of allocations
 };
 /// @brief Peak simultaneously-live bytes across one call, which is the quantity a
 /// caller has to budget. Summing every allocation instead would count a
@@ -111,11 +113,11 @@ struct Counted {
 /// and releases repeatedly inside its loop -- so the sum overstates it badly.
 template <typename F>
 Counted countOneCall(F&& f) {
-    const std::size_t c0 = g_newCount;
+    const std::size_t c0 = g_newCount, s0 = g_smallCount;
     const std::size_t base = g_liveBytes;
     g_peakBytes = g_liveBytes;
     f();
-    return Counted{g_newCount - c0, g_peakBytes - base};
+    return Counted{g_newCount - c0, g_smallCount - s0, g_peakBytes - base};
 }
 
 void runSize(size_t count, int outlierPct) {
@@ -159,24 +161,23 @@ void runSize(size_t count, int outlierPct) {
     });
 
     const size_t binSet = bincv::ransacScratchBytes(count) + bincv::essentialSolverStackBytes();
-    std::printf("\n WORKING SET OF ONE CALL\n");
-    std::printf("   binCV  %9zu B   %zu B caller scratch + %zu B solver stack, both known"
-                " before the call\n",
+    std::printf("\n MEMORY -- AND THE TWO SIDES ARE NOT MEASURED THE SAME WAY\n");
+    std::printf("   binCV  %9zu B   caller scratch %zu B + solver stack %zu B. NO HEAP.\n",
                 binSet, bincv::ransacScratchBytes(count), bincv::essentialSolverStackBytes());
-    std::printf("   OpenCV %9zu B   PEAK live, allocated internally; not visible from its"
-                " signature\n", cvAlloc.peak);
-    const double ratio = static_cast<double>(binSet) / static_cast<double>(cvAlloc.peak);
-    if (ratio > 1.0) {
-        std::printf("   -> binCV holds %.1fx MORE. Peak LIVE on both sides.\n"
-                    "      The solver's scratch is dense floating-point work on a handful of\n"
-                    "      small matrices -- there are no bits to pack, so this library's\n"
-                    "      footprint argument has nothing to offer here. What it has instead\n"
-                    "      is the row below.\n", ratio);
-    } else {
-        std::printf("   -> binCV holds %.1fx less. Peak LIVE on both sides.\n", 1.0 / ratio);
-    }
-    std::printf("\n ALLOCATOR TRAFFIC DURING ONE CALL\n");
-    std::printf("   binCV  %6zu calls   |  OpenCV %6zu calls\n", binAlloc.calls, cvAlloc.calls);
+    std::printf("   OpenCV %9zu B   peak live HEAP only, in %zu blocks\n",
+                cvAlloc.peak, cvAlloc.calls);
+    std::printf("\n   THESE TWO NUMBERS ARE NOT COMPARABLE AND NO RATIO IS PRINTED.\n");
+    std::printf("   binCV's figure is its whole working set, because it takes no heap.\n");
+    std::printf("   OpenCV's is heap only -- its stack is not visible to a replaced\n");
+    std::printf("   operator new. Profiling one call shows its largest live block at peak\n");
+    std::printf("   is under 256 B and there are 29 of them: a 10x20 double system is\n");
+    std::printf("   1 600 B and never appears, so its solver's arrays are on the stack\n");
+    std::printf("   too and are simply not counted here. An earlier version of this file\n");
+    std::printf("   divided one by the other and reported binCV as using 2.1x more; that\n");
+    std::printf("   was stack-plus-heap against heap alone and it was not a measurement.\n");
+    std::printf("\n ALLOCATOR TRAFFIC DURING ONE CALL -- this one IS like for like\n");
+    std::printf("   binCV  %6zu calls   |  OpenCV %6zu calls, %zu of them under 128 B\n",
+                binAlloc.calls, cvAlloc.calls, cvAlloc.smallCalls);
 
     std::vector<measure::Bench> benches;
     benches.push_back({"binCV five-point", [&](int) {
@@ -219,6 +220,7 @@ int main() {
 namespace {
 void* countedAllocate(std::size_t bytes) {
     ++g_newCount;
+    if (bytes < 128) ++g_smallCount;
     void* raw = std::malloc(bytes + kAllocHeader);
     if (raw == nullptr) std::abort();
     *static_cast<std::size_t*>(raw) = bytes;
@@ -228,6 +230,7 @@ void* countedAllocate(std::size_t bytes) {
 }
 void* countedAllocateNoThrow(std::size_t bytes) noexcept {
     ++g_newCount;
+    if (bytes < 128) ++g_smallCount;
     void* raw = std::malloc(bytes + kAllocHeader);
     if (raw == nullptr) return nullptr;
     *static_cast<std::size_t*>(raw) = bytes;
