@@ -15,9 +15,13 @@
 // two compute rather than in how fast they compute it. That is stated here so the
 // timing column is read as the secondary one it is.
 //
-// The primary column is ALLOCATION. binCV's whole working set is
-// `ransacScratchBytes(n)` -- two flags per correspondence, caller-owned, knowable
-// before the call. OpenCV's is not visible from its signature at all.
+// The primary columns are WORKING SET and ALLOCATOR TRAFFIC, and they are two claims
+// rather than one. binCV's working set is `ransacScratchBytes(n)` -- two flags per
+// correspondence -- which is smaller than OpenCV's and, more usefully, knowable before
+// the call rather than during it. Separately, binCV makes no allocator calls at all,
+// because that buffer is the caller's and is reused across frames. Reporting the second
+// as though it were the first would say binCV uses no memory, which is false: the
+// memory moved to the caller, it did not disappear.
 //
 // HOW THE MEMORY COLUMN IS MEASURED, NOT ACCOUNTED
 //
@@ -145,16 +149,26 @@ void runSize(size_t count, int outlierPct) {
         measure::g_sink += static_cast<size_t>(mm.rows) + mk.size();
     });
 
-    std::printf("\n ALLOCATION DURING ONE CALL (operator new replaced; both sides, same counter)\n");
-    std::printf("   binCV  %6zu calls %9zu B      caller scratch %zu B, declared by"
-                " ransacScratchBytes()\n",
-                binAlloc.calls, binAlloc.bytes, bincv::ransacScratchBytes(count));
-    std::printf("   OpenCV %6zu calls %9zu B      not visible from its signature\n",
-                cvAlloc.calls, cvAlloc.bytes);
-    if (binAlloc.calls == 0) {
-        std::printf("   -> binCV allocates NOTHING; its whole working set is the caller's %zu B.\n",
-                    bincv::ransacScratchBytes(count));
-    }
+    // TWO DIFFERENT QUANTITIES, AND CONFLATING THEM OVERSTATES THE RESULT. binCV's
+    // allocator traffic is zero; its MEMORY is not. The working set moved to the
+    // caller, it did not disappear, and the comparison worth making is working set
+    // against working set.
+    const size_t binSet = bincv::ransacScratchBytes(count);
+    std::printf("\n WORKING SET OF ONE CALL\n");
+    std::printf("   binCV  %9zu B   caller-owned, known before the call via"
+                " ransacScratchBytes()\n", binSet);
+    std::printf("   OpenCV %9zu B   allocated internally; not visible from its signature\n",
+                cvAlloc.bytes);
+    std::printf("   -> %.1fx smaller, and it is a number a caller can budget rather than"
+                " discover\n", static_cast<double>(cvAlloc.bytes) / static_cast<double>(binSet));
+    std::printf("\n ALLOCATOR TRAFFIC DURING ONE CALL (operator new replaced; both sides,"
+                " same counter)\n");
+    std::printf("   binCV  %6zu calls   the caller's buffer is reused across frames\n",
+                binAlloc.calls);
+    std::printf("   OpenCV %6zu calls   per call, so ~%zu/second in a 20 Hz frame loop\n",
+                cvAlloc.calls, cvAlloc.calls * 20);
+    std::printf("   A SEPARATE CLAIM from the one above: this is about jitter and allocator\n"
+                "   pressure, not about how many bytes are live.\n");
 
     // --- time ----------------------------------------------------------------
     std::vector<measure::Bench> benches;
