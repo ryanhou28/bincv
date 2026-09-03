@@ -4,7 +4,7 @@
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # governor: performance
 # throttled:throttled=0x80000
-# date:     2026-09-03T14:11:23-07:00
+# date:     2026-09-03T16:07:34-07:00
 
 RANSAC -- bincv::estimateAffine2D against cv::estimateAffine2D(RANSAC)
 ======================================================================
@@ -33,11 +33,13 @@ threshold 3.0 px, confidence 0.99, iteration cap 2000, seeded and deterministic
    often the allocator is entered. Neither substitutes for the other.
 
  variant                       us/call   spread   vs OpenCV
- binCV                           18.52     0.2%      12.25x
- cv::estimateAffine2D           226.83     0.1%       1.00x
- NOTE: binCV returns the minimal-set fit; OpenCV refits over its consensus
- set. The two do not compute the same last step, which is a difference in
- WHAT is computed and is why the timing column is the secondary one here.
+ binCV                           18.53     0.1%      11.49x
+ cv::estimateAffine2D           212.83     0.2%       1.00x
+ NOTE: both sides refit over their consensus set, so this compares the
+ same work. binCV's refit is a closed-form least squares; OpenCV's is a
+ bounded Levenberg-Marquardt, which for a model linear in its parameters
+ converges to the same point. Accuracy against a planted transform is
+ asserted in tests/test_ransac.cpp, not here.
 
 ================ 1000 correspondences, 30% outliers ================
  planted inliers 700 | binCV 700 (11 iterations) | OpenCV 700
@@ -55,11 +57,13 @@ threshold 3.0 px, confidence 0.99, iteration cap 2000, seeded and deterministic
    often the allocator is entered. Neither substitutes for the other.
 
  variant                       us/call   spread   vs OpenCV
- binCV                           91.29     0.1%       9.26x
- cv::estimateAffine2D           844.98     0.3%       1.00x
- NOTE: binCV returns the minimal-set fit; OpenCV refits over its consensus
- set. The two do not compute the same last step, which is a difference in
- WHAT is computed and is why the timing column is the secondary one here.
+ binCV                           85.39     0.0%       9.91x
+ cv::estimateAffine2D           845.96     0.3%       1.00x
+ NOTE: both sides refit over their consensus set, so this compares the
+ same work. binCV's refit is a closed-form least squares; OpenCV's is a
+ bounded Levenberg-Marquardt, which for a model linear in its parameters
+ converges to the same point. Accuracy against a planted transform is
+ asserted in tests/test_ransac.cpp, not here.
 
 ================ 2000 correspondences, 50% outliers ================
  planted inliers 1000 | binCV 1000 (35 iterations) | OpenCV 1000
@@ -77,10 +81,12 @@ threshold 3.0 px, confidence 0.99, iteration cap 2000, seeded and deterministic
    often the allocator is entered. Neither substitutes for the other.
 
  variant                       us/call   spread   vs OpenCV
- binCV                          576.97     0.2%       2.42x
- cv::estimateAffine2D          1398.19     0.6%       1.00x
- NOTE: binCV returns the minimal-set fit; OpenCV refits over its consensus
- set. The two do not compute the same last step, which is a difference in
- WHAT is computed and is why the timing column is the secondary one here.
+ binCV                          558.60     0.1%       2.50x
+ cv::estimateAffine2D          1398.20     0.7%       1.00x
+ NOTE: both sides refit over their consensus set, so this compares the
+ same work. binCV's refit is a closed-form least squares; OpenCV's is a
+ bounded Levenberg-Marquardt, which for a model linear in its parameters
+ converges to the same point. Accuracy against a planted transform is
+ asserted in tests/test_ransac.cpp, not here.
 
- sink 24684512
+ sink 25449422

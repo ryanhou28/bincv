@@ -98,6 +98,15 @@ comparison of the implementations.
 computed the same image — bit-exact for Tier 1 operations, and a stated agreement bound for
 Tier 2. A benchmark whose arms disagree fails rather than reporting a ratio.
 
+**A synthetic scene must be noisy enough to separate a good estimator from a lucky one.**
+Where a benchmark plants a ground-truth model and asks whether binCV recovers it, the
+planted data carries noise, because exact data hides whole classes of error. The RANSAC
+estimators are the case that taught this: their scenes generated every inlier *exactly*
+from the transform, which makes a fit through any three of them exact, which made a missing
+least-squares refit a no-op — invisible to every test while costing 13× in accuracy on data
+with noise in it. Agreement on the inlier *set* did not catch it, because the inlier set was
+right; only the model was wrong.
+
 **Speed is the median of many interleaved batches**, with the minimum, maximum and spread
 reported beside it. Arms are run round-robin so drift moves all of them together. Results
 are consumed through a `volatile` sink and inputs are varied, because a loop whose result is

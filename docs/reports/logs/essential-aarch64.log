@@ -4,7 +4,7 @@
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # governor: performance
 # throttled:throttled=0x80000
-# date:     2026-09-03T14:11:08-07:00
+# date:     2026-09-03T16:07:19-07:00
 
 Five-point essential matrix -- binCV against cv::findEssentialMat(RANSAC)
 =========================================================================
@@ -35,8 +35,8 @@ normalised coordinates, threshold 0.0020, confidence 0.99, cap 500
    the probe first has to recover two known answers before it reports.
 
  variant                       us/call   spread   vs OpenCV
- binCV five-point               1468.9     0.2%       5.67x
- cv::findEssentialMat           8335.7     0.4%       1.00x
+ binCV five-point               1467.2     0.1%       5.71x
+ cv::findEssentialMat           8376.6     0.5%       1.00x
 
 ================ 500 correspondences, 30% outliers ================
  planted inliers 350 | binCV 350 (26 iterations) | OpenCV 350
@@ -56,8 +56,8 @@ normalised coordinates, threshold 0.0020, confidence 0.99, cap 500
    the probe first has to recover two known answers before it reports.
 
  variant                       us/call   spread   vs OpenCV
- binCV five-point              17642.3     0.1%       0.89x
- cv::findEssentialMat          15721.6     0.3%       1.00x
+ binCV five-point              17635.2     0.1%       0.89x
+ cv::findEssentialMat          15713.4     0.5%       1.00x
 
 ================ 1000 correspondences, 40% outliers ================
  planted inliers 600 | binCV 607 (54 iterations) | OpenCV 607
@@ -77,7 +77,7 @@ normalised coordinates, threshold 0.0020, confidence 0.99, cap 500
    the probe first has to recover two known answers before it reports.
 
  variant                       us/call   spread   vs OpenCV
- binCV five-point              27527.3     0.1%       1.54x
- cv::findEssentialMat          42318.2     0.2%       1.00x
+ binCV five-point              27500.4     0.1%       1.54x
+ cv::findEssentialMat          42371.6     0.4%       1.00x
 
  sink 280881
