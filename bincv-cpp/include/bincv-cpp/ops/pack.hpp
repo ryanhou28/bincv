@@ -489,12 +489,17 @@ inline size_t pbmRowBytes(size_t width) { return (width + 7) / 8; }
 template <typename WordType>
 inline size_t writePbm(BinMatConstView<WordType> src, uint8_t* out, size_t cap) {
     uint8_t header[32];
-    const size_t h = impl::pnmHeaderBytes('4', src.width, src.height, header, sizeof(header));
+    // CLAMPED BEFORE IT REACHES `need`, AND THAT ORDER IS LOAD-BEARING. `pnmHeaderBytes`
+    // cannot exceed the buffer it is given, but the compiler only knows that if it
+    // inlines the whole emitter; a shared out-of-line one leaves the length opaque, so
+    // `cap < need` stops being provable, the early return stops looking taken, and
+    // -Warray-bounds reports the vector store below as overrunning a short `out`.
+    // Bounding here states the fact once and keeps it through the arithmetic.
+    const size_t raw = impl::pnmHeaderBytes('4', src.width, src.height, header, sizeof(header));
+    const size_t headerBytes = raw < sizeof(header) ? raw : sizeof(header);
     const size_t rowBytes = impl::pbmRowBytes(src.width);
-    const size_t need = h + rowBytes * src.height;
+    const size_t need = headerBytes + rowBytes * src.height;
     if (out == nullptr || cap < need) return need;
-    // See writePgm: the clamp is what lets -Warray-bounds prove the copy is in range.
-    const size_t headerBytes = h < sizeof(header) ? h : sizeof(header);
     for (size_t i = 0; i < headerBytes; ++i) out[i] = header[i];
     if (src.width == 0 || src.height == 0) return need;
 
@@ -529,8 +534,28 @@ inline size_t writePbm(BinMatConstView<WordType> src, uint8_t* out, size_t cap) 
 template <typename WordType>
 inline size_t writePgm(BinMatConstView<WordType> src, uint8_t* out, size_t cap,
                        uint8_t onValue = 255, uint8_t zeroValue = 0) {
+    // "P5\n<w> <h>\n255\n", built here rather than through `impl::pnmHeaderBytes`, and
+    // NOT because of <cstdio> -- that is why it is built by hand at all, since a
+    // freestanding target reliably lacks it. It is built INLINE because the length has
+    // to stay transparent to the optimizer: routed through a shared out-of-line emitter,
+    // `h` goes opaque, `cap < need` stops being provable, and -Warray-bounds reports
+    // unpackTo8Bit's aarch64 vector store as overrunning a short `out`. Measured: that
+    // exact refactor turned the aarch64 -fno-exceptions build red while all four x86
+    // configurations stayed green.
     uint8_t header[32];
-    const size_t h = impl::pnmHeaderBytes('5', src.width, src.height, header, sizeof(header));
+    size_t h = 0;
+    auto put = [&](char c) { if (h < sizeof(header)) header[h++] = static_cast<uint8_t>(c); };
+    auto putNum = [&](size_t v) {
+        char tmp[24];
+        size_t n = 0;
+        if (v == 0) tmp[n++] = '0';
+        while (v > 0) { tmp[n++] = static_cast<char>('0' + (v % 10)); v /= 10; }
+        while (n > 0) put(tmp[--n]);
+    };
+    put('P'); put('5'); put('\n');
+    putNum(src.width); put(' '); putNum(src.height); put('\n');
+    putNum(255); put('\n');
+
     const size_t need = h + src.width * src.height;
     if (out == nullptr || cap < need) return need;
     // `h` is bounded by `header`'s extent by construction (`put` refuses past it),

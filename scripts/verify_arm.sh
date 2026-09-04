@@ -193,6 +193,22 @@ for m in re.finditer(r'bincv_add_death_test\(\s*(\S+)\s+(\S+)\s*\n?\s*"([^"]*)"\
         continue
     deaths.append(m.groups())
 
+# Translation units that MUST NOT COMPILE: registered as a ctest case that BUILDS the
+# target, with WILL_FAIL, so the case passes only when compilation fails. They are not
+# suites -- compiling one is the check, and a SUCCESSFUL compile is the failure.
+nocompile = []
+for m in re.finditer(r'set_tests_properties\(\s*([A-Za-z0-9_]+)\s+PROPERTIES\s+WILL_FAIL\s+TRUE',
+                     src):
+    name = m.group(1)
+    if is_guarded(m.start()):
+        continue
+    if re.search(r'set_target_properties\(\s*%s\s+PROPERTIES\s+EXCLUDE_FROM_ALL\s+TRUE' % name,
+                 src):
+        nocompile.append(name)
+        if name in suites:
+            suites.remove(name)
+
+print("NOCOMPILE\t" + " ".join(nocompile))
 print("SUITES\t" + " ".join(suites))
 print("DEATH_BINS\t" + " ".join(sorted({d[0] for d in deaths})))
 for d in deaths:
@@ -201,6 +217,15 @@ PY
 
 SUITES="$(awk -F'\t' '$1=="SUITES"{print $2}' "$LOGS/manifest.txt")"
 DEATH_BINS="$(awk -F'\t' '$1=="DEATH_BINS"{print $2}' "$LOGS/manifest.txt")"
+NOCOMPILE="$(awk -F'\t' '$1=="NOCOMPILE"{print $2}' "$LOGS/manifest.txt")"
+
+# Suites whose check count CANNOT match x86_64, because asserting an architecture's own
+# facts is what they are for. test_simd checks four things on aarch64 -- isAarch64,
+# !isX86, neon, hardwarePopcount -- against three on x86, so equality is the wrong
+# assertion for it and demanding equality fails the gate on a correct tree. Their counts
+# are still printed: a suite that is skipped silently is how a real difference goes
+# missing, which is the failure this whole comparison block exists to prevent.
+ARCH_SUITES="test_simd"
 awk -F'\t' '$1=="CASE"{printf "%s\t%s\t%s\n", $2, $3, $4}' "$LOGS/manifest.txt" > "$LOGS/expected.txt"
 
 if [ -z "$SUITES" ] || [ -z "$DEATH_BINS" ]; then
@@ -248,6 +273,24 @@ build_config() {
         grep "warning:" "$LOGS/$name-build.log" | sort -u | sed -n '1,20{s/^/      /;p}'
         return 1
     fi
+
+    # The must-not-compile translation units, which ctest drives with WILL_FAIL. Here
+    # the equivalent is to compile each and require a NON-ZERO exit: a successful
+    # compile means the bound it pins has gone missing.
+    #
+    # These used to sit in $SUITES, so the compile everyone expects to fail was read as
+    # a build failure and every configuration went red on every architecture. This gate
+    # had therefore never passed, which is worse than a gate nobody has watched fail --
+    # a result that is always red carries no information at all.
+    for s in $NOCOMPILE; do
+        if g++ $BASE $WARN $extra "$SRC/tests/$s.cpp" -o "$dir/$s" \
+                > "$LOGS/$name-$s-nocompile.log" 2>&1; then
+            echo "    $s COMPILED, and it must not -- the bound it pins is gone"
+            return 1
+        fi
+        echo "    $s correctly failed to compile"
+    done
+
     echo "    build ok, warning-free"
     return 0
 }
@@ -302,7 +345,10 @@ run_config() {
     local deaths=0
     for bin in $DEATH_BINS; do
         local cases want_n got_n
-        cases="$("$dir/$bin" 2>&1 | sed -n 's/^  \([A-Za-z0-9_-][A-Za-z0-9_-]*\)$/\1/p')"
+        # ONE OR MORE leading spaces. The binaries indent their case list by one; this
+        # pattern demanded two, so it matched nothing, every binary "enumerated 0 cases"
+        # and all 75 death tests were reported failed no matter what they did.
+        cases="$("$dir/$bin" 2>&1 | sed -n 's/^[[:space:]]\{1,\}\([A-Za-z0-9_-][A-Za-z0-9_-]*\)$/\1/p')"
         got_n="$(printf '%s\n' "$cases" | grep -c . || true)"
         want_n="$(expected_case_count "$bin")"
         if [ "$got_n" -ne "$want_n" ]; then
@@ -440,11 +486,22 @@ for cfg in core noexcept; do
         echo "    $cfg: no suite ran on both sides -- nothing was compared"
         ok=0
     fi
-    awk -F'\t' '$2!=$4 || $3!=$5 {printf "%s: x86_64 %s+%ss, aarch64 %s+%ss\n", $1, $2, $3, $4, $5}' \
-        /tmp/joined.txt > /tmp/diff.txt
+    : > /tmp/archdiff.txt
+    awk -F'\t' -v skip=" $ARCH_SUITES " '
+        index(skip, " " $1 " ") {
+            printf "%s: x86_64 %s+%ss, aarch64 %s+%ss\n", $1, $2, $3, $4, $5 > "/tmp/archdiff.txt"
+            next
+        }
+        $2!=$4 || $3!=$5 {printf "%s: x86_64 %s+%ss, aarch64 %s+%ss\n", $1, $2, $3, $4, $5}
+    ' /tmp/joined.txt > /tmp/diff.txt
+
+    if [ -s /tmp/archdiff.txt ]; then
+        echo "    $cfg: architecture-dependent by construction, reported but not compared --"
+        sed 's/^/      /' /tmp/archdiff.txt
+    fi
 
     if [ "$ok" = "1" ] && [ ! -s /tmp/diff.txt ]; then
-        echo "    $cfg: identical to x86_64 on all $(wc -l < /tmp/joined.txt) suites both ran"
+        echo "    $cfg: identical to x86_64 on all $(( $(wc -l < /tmp/joined.txt) - $(wc -l < /tmp/archdiff.txt) )) suites compared"
     else
         [ -s /tmp/diff.txt ] && { echo "    $cfg: DIFFERS from x86_64 --"; sed 's/^/      /' /tmp/diff.txt; }
         STATUS_REF="FAIL"; FAILED=1
