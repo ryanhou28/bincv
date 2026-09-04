@@ -33,7 +33,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/morphology.hpp`](#opsmorphologyhpp) — 27 entries
 - [`ops/occupancy.hpp`](#opsoccupancyhpp) — 6 entries
 - [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 21 entries
-- [`ops/pack.hpp`](#opspackhpp) — 9 entries
+- [`ops/pack.hpp`](#opspackhpp) — 10 entries
 - [`ops/pyramid.hpp`](#opspyramidhpp) — 41 entries
 - [`ops/ransac.hpp`](#opsransachpp) — 12 entries
 - [`ops/reduce.hpp`](#opsreducehpp) — 19 entries
@@ -41,7 +41,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/shift.hpp`](#opsshifthpp) — 12 entries
 - [`ops/subpix.hpp`](#opssubpixhpp) — 3 entries
 - [`ops/threshold.hpp`](#opsthresholdhpp) — 2 entries
-- [`io/pnm.hpp`](#iopnmhpp) — 3 entries
+- [`io/pnm.hpp`](#iopnmhpp) — 7 entries
 - [`core/parallel.hpp`](#coreparallelhpp) — 4 entries
 - [`core/simd.hpp`](#coresimdhpp) — 3 entries
 - [`core/storage.hpp`](#corestoragehpp) — 11 entries
@@ -356,6 +356,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `packQuantWith` | 3 | `packQuant` with an arbitrary per-pixel map |
 | `packBitsIf` | 3 | `packBits` with an arbitrary per-pixel predicate |
 | `unpackTo8Bit` | 3 | The reverse: one bit per pixel out to one byte per pixel |
+| `writePbm` | 3 | Writes a binary image as a binary PBM (`P4`) to a caller-supplied buffer |
 | `writePgm` | 3 | Writes a binary image as a binary PGM (`P5`) to a caller-supplied buffer |
 
 ## `ops/pyramid.hpp`
@@ -509,8 +510,12 @@ Anything marked INTERNAL in its docstring is omitted here.
 | | tier | |
 |---|---|---|
 | `PgmHeader` *(struct)* | — | What a `readPgm` call found, or why it did not |
+| `PbmHeader` *(struct)* | — | What a `readPbm` call found, or why it did not |
 | `readPgmHeader` | 3 | Parses a binary PGM (`P5`) header |
+| `readPgmHeaderFromPrefix` | 3 | The same parse, from a prefix of the file |
+| `readPbmHeader` | 3 | Parses a binary PBM (`P4`) header |
 | `readPgm` | 3 | Reads a binary PGM straight into bits, under a `PackRule` |
+| `readPbm` | 3 | Reads a binary PBM (`P4`) into a bit matrix |
 
 ## `core/parallel.hpp`
 

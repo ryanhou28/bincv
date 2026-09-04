@@ -117,7 +117,33 @@ int main() {
         std::printf(" unpackTo8Bit %8.1f us %5.2f ns/px\n", m,
                     m * 1000.0 / static_cast<double>(kW * kH));
     }
-    std::printf("\n (readPgm is deliberately not here: it parses a header and memcpies,\n"
-                " runs once per file, and is on no per-frame path.)\n");
+    // THE TWO WAYS TO WRITE A BINARY IMAGE OUT, AGAINST EACH OTHER. The decision to
+    // prefer P4 is a memory argument, so the bytes are the headline and are reported
+    // next to the time rather than instead of it. The bytes are exact and identical
+    // everywhere; the times are a host measurement and this host is not timing-grade.
+    {
+        const size_t pbmBytes = bincv::writePbm<uint32_t>(bits.constPlane(0), nullptr, 0);
+        const size_t pgmBytes = bincv::writePgm<uint32_t>(bits.constPlane(0), nullptr, 0);
+        std::vector<uint8_t> out(pgmBytes);
+        std::vector<double> tp, tg;
+        for (int r = 0; r < kRounds; ++r) {
+            auto t = Clock::now();
+            for (int i = 0; i < kReps; ++i)
+                bincv::writePbm<uint32_t>(bits.constPlane(0), out.data(), out.size());
+            tp.push_back(
+                std::chrono::duration<double, std::micro>(Clock::now() - t).count() / kReps);
+            t = Clock::now();
+            for (int i = 0; i < kReps; ++i)
+                bincv::writePgm<uint32_t>(bits.constPlane(0), out.data(), out.size());
+            tg.push_back(
+                std::chrono::duration<double, std::micro>(Clock::now() - t).count() / kReps);
+        }
+        const double mp = minOf(tp), mg = minOf(tg);
+        std::printf(" writePbm     %8.1f us %8zu bytes\n", mp, pbmBytes);
+        std::printf(" writePgm     %8.1f us %8zu bytes  (%.2fx the buffer)\n", mg, pgmBytes,
+                    static_cast<double>(pgmBytes) / static_cast<double>(pbmBytes));
+    }
+    std::printf("\n (the PNM readers are deliberately not here: they parse a header and\n"
+                " memcpy, run once per file, and are on no per-frame path.)\n");
     return 0;
 }

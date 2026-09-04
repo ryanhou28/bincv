@@ -88,8 +88,13 @@ stage, pyramid, derivatives, corner detection, Lucas–Kanade, and re-detection 
 run out. It is the best starting point for anything larger than one operation.
 
 ```bash
-./build/examples/vio_frontend <directory-of-pgm-or-png-frames>
+./build/examples/vio_frontend <directory-of-png-frames>
 ```
+
+The example reads PNG through OpenCV, which it already needs for the sensor stage it
+deliberately runs outside binCV. binCV itself links no codec on any target — see
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) — and the library's own file I/O is PNM
+(`readPbm`/`writePbm`, `readPgm`/`writePgm`), which needs nothing.
 
 ## Embedded targets
 
