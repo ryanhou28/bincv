@@ -74,8 +74,10 @@ one thread against many measures the parallelism rather than the implementation.
 - **Features and tracking** — pyramid, derivatives, gradient covariance, corner response,
   `goodFeaturesToTrack`, pyramidal Lucas–Kanade, FAST, BRIEF descriptors and Hamming
   matching, sub-pixel refinement.
-- **Interop** — `cv::Mat` in and out when OpenCV is present; PGM and raw buffers when it
-  is not.
+- **Interop** — `cv::Mat` in and out when OpenCV is present; raw buffers and PNM (`P4`,
+  `P5`) when it is not. binCV links no codec on any target: a camera's Y plane, a V4L2
+  buffer and a sensor's DMA rows are already the input contract, so decoding sits on no
+  path binCV is on.
 
 Every public entry point states an **API tier**: bit-exact with the OpenCV function it
 names, the same role with different numerics, or no OpenCV equivalent. See

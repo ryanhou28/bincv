@@ -172,6 +172,43 @@ That covers image processing, features and tracking, and the geometry the fronte
 downstream of them. IMU fusion and bundle adjustment are absent because nothing has needed
 them yet, which is a fact about the use cases rather than a line drawn on principle.
 
+### binCV links no codec, on any target
+
+This follows from the input boundary rather than from a size budget. **Every tier's real
+frame source already is the input contract.** A capture SDK's buffer, a camera's YUV420 Y
+plane, a V4L2 buffer and a sensor's DMA rows are all single-channel, integer-typed, strided
+pixel arrays — which is why `packBits` and `packRows` take a stride, so they consume one
+with no conversion at all. Nothing on a caller's path decodes anything.
+
+Encoded files turn up in exactly one place, identically on every tier: reading a **dataset**
+to test or benchmark against. That is tooling, and tooling runs on a host — including on
+desktop, where the host already has OpenCV.
+
+So there is no optional decoder target and no vendored codec. The measured size argument —
+`libpng` + `libz` at 336 KB against the frontend's 436,704-byte peak working set — is real
+but secondary; it argues about linkage. The decisive point is that a decoder would sit on a
+path nobody walks. It is also worth noting where a vendored decoder fits worst: the target
+with no package manager is the one that can hold neither the decoder nor the wide frame it
+would produce, and it is the target that argument was aimed at.
+
+binCV therefore reads and writes **PNM only** — `P4` and `P5` — because that is a header and
+a copy rather than a codec. Two properties keep this honest, and both are load-bearing:
+
+- **Output costs the representation's footprint, not the source image's.** `P4` stores one
+  bit per pixel, which is binCV's own layout, so a 752×480 frame writes as 45,131 bytes.
+  `P5` stores a byte per pixel and writes the same frame as 360,975 — an 8× buffer, on the
+  target where buffers are scarcest, for the one use that justifies carrying a format at
+  all. `writePbm` is the default; `writePgm` remains for grey levels. `writePbm` is also
+  roughly twice as slow, which is the trade: both run once per file, off every per-frame
+  path, so the buffer is what counts and memory wins.
+- **Input streams; a resident wide frame is never assumed.** A `P5` body is a byte per
+  pixel, so reading one whole costs exactly the frame binCV exists not to hold. That is
+  free out of memory-mapped flash and not free off a UART or an SD card, so
+  `readPgmHeaderFromPrefix` parses the header from the first bytes to arrive and `packRows`
+  takes the pixels a chunk of rows at a time. Rows are independent, so the streamed result
+  is bit-identical to the whole-buffer one. `P4` needs no such path: its file already is
+  the matrix.
+
 ---
 
 ## 8. Platforms

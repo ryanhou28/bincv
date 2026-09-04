@@ -415,26 +415,16 @@ inline void unpackTo8Bit(BinMatConstView<WordType> src, uint8_t* dst, size_t dst
                                     dstStride, onValue, zeroValue);
 }
 
-/// @brief Writes a binary image as a binary PGM (`P5`) to a caller-supplied buffer.
-/// **API TIER 3.**
-/// @return Bytes written, or the bytes REQUIRED if `cap` is too small (and nothing is
-/// written). Call once with `cap == 0` to size the buffer.
-/// @note **This is the only way to look at what binCV produced on a target with no
-/// OpenCV**, and debugging a frontend you cannot see is not debugging. PGM is
-/// chosen because it is the only image format whose encoder is a `printf` and a
-/// `memcpy` -- binCV must not carry a real codec
-/// (the design notes: a PNG decoder is **eight
-/// times the size of everything binCV does**, measured).
-/// @note Takes a buffer rather than a path: `bincv_core` does no file I/O, has no
-/// allocator and builds without exceptions. Where the bytes go is the caller's.
-template <typename WordType>
-inline size_t writePgm(BinMatConstView<WordType> src, uint8_t* out, size_t cap,
-                       uint8_t onValue = 255, uint8_t zeroValue = 0) {
-    // "P5\n<w> <h>\n255\n" -- built by hand because <cstdio> into a fixed buffer is
-    // the one thing a freestanding target reliably lacks.
-    uint8_t header[32];
+namespace impl {
+
+/// @brief Builds a PNM header into `header`, returning its length. **INTERNAL.**
+/// @param magic `'4'` for PBM, which has no maximum-value line, or `'5'` for PGM.
+/// @note Built by hand because `<cstdio>` into a fixed buffer is the one thing a
+/// freestanding target reliably lacks.
+inline size_t pnmHeaderBytes(char magic, size_t width, size_t height, uint8_t* header,
+                             size_t cap) {
     size_t h = 0;
-    auto put = [&](char c) { if (h < sizeof(header)) header[h++] = static_cast<uint8_t>(c); };
+    auto put = [&](char c) { if (h < cap) header[h++] = static_cast<uint8_t>(c); };
     auto putNum = [&](size_t v) {
         char tmp[24];
         size_t n = 0;
@@ -442,10 +432,105 @@ inline size_t writePgm(BinMatConstView<WordType> src, uint8_t* out, size_t cap,
         while (v > 0) { tmp[n++] = static_cast<char>('0' + (v % 10)); v /= 10; }
         while (n > 0) put(tmp[--n]);
     };
-    put('P'); put('5'); put('\n');
-    putNum(src.width); put(' '); putNum(src.height); put('\n');
-    putNum(255); put('\n');
+    put('P'); put(magic); put('\n');
+    putNum(width); put(' '); putNum(height); put('\n');
+    if (magic == '5') { putNum(255); put('\n'); }
+    return h;
+}
 
+/// @brief Reverses the eight bits of a byte. **INTERNAL.**
+/// @note Three masked swaps rather than a 256-byte lookup table. The table would be
+/// the largest constant object in a build that carries very little else, and this
+/// runs once per file rather than once per frame.
+inline uint8_t reverseByte(uint8_t b) {
+    b = static_cast<uint8_t>(((b & 0xF0u) >> 4) | ((b & 0x0Fu) << 4));
+    b = static_cast<uint8_t>(((b & 0xCCu) >> 2) | ((b & 0x33u) << 2));
+    b = static_cast<uint8_t>(((b & 0xAAu) >> 1) | ((b & 0x55u) << 1));
+    return b;
+}
+
+/// @brief Bytes one P4 row occupies: `width` bits rounded up to a byte. **INTERNAL.**
+inline size_t pbmRowBytes(size_t width) { return (width + 7) / 8; }
+
+} // namespace impl
+
+/// @brief Writes a binary image as a binary PBM (`P4`) to a caller-supplied buffer.
+/// **API TIER 3.**
+/// @return Bytes written, or the bytes REQUIRED if `cap` is too small (and nothing is
+/// written). Call once with `cap == 0` to size the buffer.
+///
+/// @note **Prefer this to `writePgm` for looking at a binary image.** P4 stores one bit
+/// per pixel, which is binCV's own layout, so the file is the size of the matrix:
+/// 45,131 bytes for a 752x480 frame against `writePgm`'s 360,975. That 8x buys
+/// nothing but the expansion to a byte per pixel, and it is spent on the target
+/// where buffers are scarcest, for the one use -- looking at the output -- that
+/// justifies carrying a format at all. `writePgm` stays for a reader that wants
+/// grey levels, or for a tool that only speaks PGM.
+/// @note The two formats differ only in bit order. binCV puts pixel `x` at bit
+/// `x % WordBits`, least significant first; P4 puts a row's leftmost pixel at the
+/// most significant bit of its first byte. `WordBits` is a multiple of eight and a
+/// row starts at bit zero, so a byte's eight pixels never straddle two words, and
+/// they are extracted by shifting a `WordType` rather than aliasing its bytes --
+/// which is why this does not depend on the machine's endianness.
+/// @note **It is SLOWER than `writePgm`, and that is the trade being made.** Measured
+/// at 752x480 by `benchmark/untimed_ops_benchmark`: an eighth of the buffer for
+/// roughly twice the time on an x86 host, because a byte-at-a-time bit reversal has
+/// nothing like `unpackTo8Bit`'s bulk expansion behind it. Both run once per file and
+/// neither is on a per-frame path, so the buffer is the figure that matters and
+/// memory wins.
+/// @note **`P4` sets a bit for BLACK**, which is the format's convention and the
+/// opposite of this file's `writePgm` default, where a set bit becomes white. There
+/// is no `onValue` here to change it with -- inverting would mean the file is no
+/// longer the matrix, which is the whole reason to use `P4`. `readPbm` agrees, so a
+/// round trip is exact and a viewer simply shows set pixels dark; pass
+/// `onValue = 0, zeroValue = 255` to `writePgm` if the two need to look alike.
+/// @note Padding bits past `width` are zero in a binCV row and are written as zero,
+/// which is what P4 asks for in its own row padding.
+template <typename WordType>
+inline size_t writePbm(BinMatConstView<WordType> src, uint8_t* out, size_t cap) {
+    uint8_t header[32];
+    const size_t h = impl::pnmHeaderBytes('4', src.width, src.height, header, sizeof(header));
+    const size_t rowBytes = impl::pbmRowBytes(src.width);
+    const size_t need = h + rowBytes * src.height;
+    if (out == nullptr || cap < need) return need;
+    // See writePgm: the clamp is what lets -Warray-bounds prove the copy is in range.
+    const size_t headerBytes = h < sizeof(header) ? h : sizeof(header);
+    for (size_t i = 0; i < headerBytes; ++i) out[i] = header[i];
+    if (src.width == 0 || src.height == 0) return need;
+
+    constexpr size_t kWordBits = BinMatConstView<WordType>::WordBits;
+    for (size_t y = 0; y < src.height; ++y) {
+        const WordType* in = src.row(y);
+        uint8_t* o = out + headerBytes + y * rowBytes;
+        for (size_t j = 0; j < rowBytes; ++j) {
+            const size_t x0 = j * 8;
+            const uint8_t lsbFirst =
+                static_cast<uint8_t>((in[x0 / kWordBits] >> (x0 % kWordBits)) & 0xFFu);
+            o[j] = impl::reverseByte(lsbFirst);
+        }
+    }
+    return need;
+}
+
+/// @brief Writes a binary image as a binary PGM (`P5`) to a caller-supplied buffer.
+/// **API TIER 3.**
+/// @return Bytes written, or the bytes REQUIRED if `cap` is too small (and nothing is
+/// written). Call once with `cap == 0` to size the buffer.
+/// @note **Looking at what binCV produced on a target with no OpenCV**, and debugging
+/// a frontend you cannot see is not debugging. PNM is chosen because it is the only
+/// image format whose encoder is a header and a copy -- binCV carries no real codec,
+/// on any target, because nothing on a caller's path decodes anything (the design
+/// notes).
+/// @note **`writePbm` is the smaller way to do this** and is usually the one to reach
+/// for: it emits one bit per pixel rather than one byte, so it needs an eighth of the
+/// buffer. Use `writePgm` when `onValue`/`zeroValue` matter or a tool only reads PGM.
+/// @note Takes a buffer rather than a path: `bincv_core` does no file I/O, has no
+/// allocator and builds without exceptions. Where the bytes go is the caller's.
+template <typename WordType>
+inline size_t writePgm(BinMatConstView<WordType> src, uint8_t* out, size_t cap,
+                       uint8_t onValue = 255, uint8_t zeroValue = 0) {
+    uint8_t header[32];
+    const size_t h = impl::pnmHeaderBytes('5', src.width, src.height, header, sizeof(header));
     const size_t need = h + src.width * src.height;
     if (out == nullptr || cap < need) return need;
     // `h` is bounded by `header`'s extent by construction (`put` refuses past it),
