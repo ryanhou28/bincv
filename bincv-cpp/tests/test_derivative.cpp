@@ -880,15 +880,21 @@ BINCV_TEST(Derivative, Stages) {
         BINCV_CHECK(bincv::derivativeAdderStages(n) <= bincv::derivativeReplicatedInputs(n));
     }
     // THE DOMAIN, pinned. derivativeReplicatedInputs is a public constexpr taking
-    // a size_t, and its body is `size_t{1} << n`, which is UNDEFINED at
-    // n >= 64 rather than ill-formed -- so before the guard it returned 0 for
-    // n = 64 and 137438953470 for n = 100 under -fsanitize=undefined, and
-    // -Wconversion cannot see it. The saturation is the only value that keeps
-    // "the replication route is worse" true out of domain, so it is what is
-    // checked. Both branches of the guard are exercised, because a guard that is
-    // never taken and a guard that is always taken fail the same way.
-    static_assert(bincv::derivativeReplicatedInputs(63) ==
-                      2 * ((size_t{1} << 63) - 1),
+    // a size_t, and its body is `size_t{1} << n`, which is UNDEFINED once n
+    // reaches the width of size_t rather than ill-formed -- so before the guard
+    // it returned 0 for n = 64 and 137438953470 for n = 100 on a 64-bit host
+    // under -fsanitize=undefined, and -Wconversion cannot see it. The saturation
+    // is the only value that keeps "the replication route is worse" true out of
+    // domain, so it is what is checked. Both branches of the guard are exercised,
+    // because a guard that is never taken and a guard that is always taken fail
+    // the same way.
+    //
+    // The last in-domain n is `sizeof(size_t) * 8 - 1` rather than a literal 63,
+    // because size_t is 32 bits on the 32-bit ARM and Cortex-M targets: a literal
+    // 63 shifts past the end of the word there, which is a hard error inside a
+    // static_assert rather than a failing check.
+    static_assert(bincv::derivativeReplicatedInputs(sizeof(size_t) * 8 - 1) ==
+                      2 * ((size_t{1} << (sizeof(size_t) * 8 - 1)) - 1),
                   "the last in-domain n must still compute the real value");
     static_assert(bincv::derivativeReplicatedInputs(sizeof(size_t) * 8) ==
                       static_cast<size_t>(-1),
