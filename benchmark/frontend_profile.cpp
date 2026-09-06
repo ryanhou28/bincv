@@ -115,10 +115,10 @@ int main() {
                                                                      corners.size());
              measure::g_sink += res.count;
          }},
-        // ONE pyrDown pass, not two: #8 removed the redundant rebuild -- the frontend
+        // ONE pyrDown pass, not two: the redundant rebuild is gone -- the frontend
         // swaps the previous frame's pyramid in and builds only the incoming one, so
         // pricing two builds here would restore the waste in the denominator that
-        // decides what to optimise next (#9 reads this number).
+        // decides what to optimise next.
         {"build: pyrDown + both derivative ladders",
          [&](int) {
              next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();

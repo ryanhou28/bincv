@@ -41,6 +41,8 @@
 #include <utility>
 #include <vector>
 
+#include "reference_sensor.hpp"
+
 #include "bincv/core/simd.hpp"
 #include "bincv/ops/corner.hpp"
 #include "bincv/ops/edge.hpp"
@@ -64,34 +66,9 @@ using Clock = std::chrono::steady_clock;
 namespace {
 
 // ---- the reference pipeline's preprocessing, both stages ------------------
-cv::Mat referenceDenoise(const cv::Mat& img) {
-    cv::Mat right = cv::Mat::zeros(img.size(), img.type());
-    cv::Mat above = cv::Mat::zeros(img.size(), img.type());
-    img.colRange(1, img.cols).copyTo(right.colRange(0, img.cols - 1));
-    img.rowRange(0, img.rows - 1).copyTo(above.rowRange(1, img.rows));
-    cv::Mat a, b, c, out;
-    cv::min(above, img, a);
-    cv::max(above, img, b);
-    cv::min(b, right, c);
-    cv::max(a, c, out);
-    return out;
-}
-cv::Mat referenceEdgeFilter(const cv::Mat& gray, int thr) {
-    const cv::Mat kx = (cv::Mat_<float>(1, 3) << -1, 0, 1);
-    const cv::Mat ky = (cv::Mat_<float>(3, 1) << -1, 0, 1);
-    cv::Mat dx, dy;
-    cv::filter2D(gray, dx, CV_32F, kx);
-    cv::filter2D(gray, dy, CV_32F, ky);
-    dx = cv::abs(dx);
-    dy = cv::abs(dy);
-    const cv::Mat mask = (dx >= thr) | (dy >= thr);
-    cv::Mat out = cv::Mat::zeros(gray.size(), CV_8U);
-    out.setTo(255, mask);
-    return out;
-}
-cv::Mat preprocess(const cv::Mat& g, int thr) {
-    return referenceEdgeFilter(referenceDenoise(g), thr);
-}
+// One definition, shared with accuracy_realframes.cpp -- see the header on why
+// a copy in each file would be how the two harnesses silently diverge.
+using refsensor::preprocess;
 
 // ---- THE SAME TWO STAGES, IN binCV --------------------------------
 //
@@ -200,7 +177,7 @@ struct BincvFrontend {
     /// ONE pyramid build per frame, not two. `prev` arrived built via the swap; only
     /// the incoming frame's levels are computed. OpenCV's `calcOpticalFlowPyrLK`
     /// still rebuilds both of its pyramids per call -- the redundancy was symmetric,
-    /// and the owner's decision (2026-08-31, #8) is to remove it on binCV's side and
+    /// and the owner's decision (2026-08-31) is to remove it on binCV's side and
     /// leave OpenCV its own method, stated openly in the criterion-4 note below.
     void build() {
         auto t = Clock::now();
@@ -370,7 +347,7 @@ int main(int argc, char** argv) {
     std::vector<cv::Point2f> oPts;                    // OpenCV's live tracks
     std::vector<int> oAge;
 
-    // #8's PROOF OBLIGATION. The swap scheme's saving is only real if the reused
+    // THE SWAP SCHEME'S PROOF OBLIGATION. Its saving is only real if the reused
     // pyramid is BIT-IDENTICAL to a rebuilt one, and tracking agreeing would not
     // prove that -- it would prove a difference missed every keypoint. With
     // BINCV_PYR_CHECK=1 every frame rebuilds `prev`'s upper levels from its own
@@ -625,7 +602,7 @@ int main(int argc, char** argv) {
     std::printf(" binCV : %8.3f ms/frame\n", st.bincvMs / static_cast<double>(st.frames));
     std::printf(" OpenCV : %8.3f ms/frame\n", st.opencvMs / static_cast<double>(st.frames));
     std::printf(" RATIO : %.2fx\n", st.opencvMs / st.bincvMs);
-    std::printf(" NOTE: binCV builds ONE pyramid per frame (#8: the previous frame's is\n"
+    std::printf(" NOTE: binCV builds ONE pyramid per frame (the previous frame's is\n"
                 " swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's\n"
                 " calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the\n"
                 " redundancy was symmetric, and removing it on binCV's side only is the\n"

@@ -15,8 +15,9 @@
 //   3. FAST per level on the BIT-PLANE frame, budgeted per level and spaced with
 //      spaceCandidates -- the mechanism is binCV's, the budget split is a POLICY
 //      and marked as such.
-//   4. ORIENTATION from the intensity centroid, on the bit-plane at the level the
-//      keypoint was detected -- the binCV-native spelling.
+//   4. ORIENTATION from the intensity centroid, on the SAME wide frame the
+//      descriptor samples, at level-0 coordinates -- angle and patch must
+//      measure the same support, or the steering answers a different image.
 //   5. STEERED BRIEF descriptors on the incoming wide frame at level-0
 //      coordinates, angles from step 4.
 //   6. MATCHING against the previous frame's descriptors (ratio test), then the
@@ -46,6 +47,7 @@
 //   BINCV_SLAM_FX/FY/CX/CY override the intrinsics (defaults: EuRoC cam0).
 // ===========================================================================
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -100,11 +102,12 @@ cv::Mat sensorStage(const cv::Mat& gray, int edgeThreshold) {
 
 /// The keypoint record the descriptor and geometry stages consume: position at
 /// LEVEL 0 (the exact Box2x2 center map, so no per-level bias accumulates), the
-/// octave it was detected at, its arc score there, and its orientation.
+/// octave it was detected at, and its orientation. The FAST arc score orders the
+/// per-level candidates and is spent there -- nothing downstream reads it, so it
+/// is deliberately not carried.
 struct SlamKeypoint {
     float x, y;
     int octave;
-    long long score;
     float angle;
 };
 
@@ -181,12 +184,13 @@ int main(int argc, char** argv) {
     std::vector<bincv::FastCorner> corners(static_cast<size_t>(w) *
                                            static_cast<size_t>(h) / 8);
     std::vector<Point2f> cand;
+    std::vector<float> angles;
     std::vector<bincv::DescriptorMatch> matches;
     std::vector<Point2f> fromN, toN;   // matched pairs, normalized coordinates
     std::vector<uint8_t> keep;
 
     size_t frames = 0, truncated = 0;
-    size_t sumKp = 0, sumMatched = 0, sumAccepted = 0, sumInliers = 0, geomFrames = 0;
+    size_t sumKp = 0, sumQueried = 0, sumAccepted = 0, sumInliers = 0, geomFrames = 0;
     size_t perLevelKept[kLevels] = {0, 0, 0, 0};
     double perLevelMs[kLevels] = {0, 0, 0, 0};
     double msSensor = 0, msBuild = 0, msDetect = 0, msOrient = 0, msDescribe = 0,
@@ -214,8 +218,6 @@ int main(int argc, char** argv) {
 
         // ---- detect per level, budget, space, record the octave ----
         cur.kp.clear();
-        double frameOrient = 0.0;
-        std::vector<float> lvlXY, lvlAngle;
         const auto detectLevel = [&](const auto& level, size_t li) {
             const auto tL = std::chrono::steady_clock::now();
             bool trunc = false;
@@ -225,7 +227,9 @@ int main(int argc, char** argv) {
             if (trunc) ++truncated;
             // Strongest first, then the greedy spacing filter -- the same order
             // vio_frontend.cpp argues for. Ties break on raster position so the
-            // result is deterministic.
+            // result is deterministic. The arc score is spent here: it decides
+            // which candidates the spacing filter sees first, and nothing after
+            // this lambda reads it.
             std::sort(corners.begin(), corners.begin() + static_cast<ptrdiff_t>(n),
                       [](const bincv::FastCorner& a, const bincv::FastCorner& b) {
                           if (a.score != b.score) return a.score > b.score;
@@ -240,80 +244,74 @@ int main(int argc, char** argv) {
             const float spacing = kMinSpacing / static_cast<float>(1u << li);
             const size_t kept = bincv::spaceCandidates(cand.data(), cand.size(), nullptr,
                                                        0, spacing, kBudget[li]);
-            // The spacing filter kept `cand[0, kept)` -- map each back to its
-            // FastCorner score by position. Positions are unique, so a linear
-            // rescan per keypoint would be O(kept * n); instead re-find by the
-            // sorted order: spaceCandidates preserves arrival order, so walk both.
-            size_t ci = 0;
             for (size_t i = 0; i < kept; ++i) {
-                while (ci < n && (static_cast<float>(corners[ci].x) != cand[i].x ||
-                                  static_cast<float>(corners[ci].y) != cand[i].y)) ++ci;
                 SlamKeypoint kp;
                 kp.x = bincv::pyrLevelToBase(cand[i].x, li);
                 kp.y = bincv::pyrLevelToBase(cand[i].y, li);
                 kp.octave = static_cast<int>(li);
-                kp.score = ci < n ? corners[ci].score : 0;
                 kp.angle = 0.0f;
                 cur.kp.push_back(kp);
             }
             perLevelKept[li] += kept;
             perLevelMs[li] += msSince(tL);
-
-            // ---- orientation, on this level's bit-plane, at LEVEL coordinates ----
-            const auto tO = std::chrono::steady_clock::now();
-            lvlXY.clear();
-            for (size_t i = 0; i < kept; ++i) {
-                lvlXY.push_back(cand[i].x);
-                lvlXY.push_back(cand[i].y);
-            }
-            lvlAngle.assign(kept, 0.0f);
-            bincv::keypointOrientation<W>(level.constView(), lvlXY.data(), kept,
-                                          lvlAngle.data());
-            const size_t firstNew = cur.kp.size() - kept;
-            for (size_t i = 0; i < kept; ++i) cur.kp[firstNew + i].angle = lvlAngle[i];
-            frameOrient += msSince(tO);
         };
         t0 = std::chrono::steady_clock::now();
         detectLevel(pyr.level<0>(), 0);
         detectLevel(pyr.level<1>(), 1);
         detectLevel(pyr.level<2>(), 2);
         detectLevel(pyr.level<3>(), 3);
-        msDetect += msSince(t0) - frameOrient;   // sort + space included; orientation separate
-        msOrient += frameOrient;
+        msDetect += msSince(t0);
 
-        // ---- describe on the incoming wide frame, at level-0 coordinates ----
-        t0 = std::chrono::steady_clock::now();
+        // ---- orient, then describe, both on the incoming wide frame ----
+        // The angle and the patch it steers must measure the same support: both
+        // read the wide frame at level-0 coordinates, radius 15 pairing with the
+        // 31-pixel patch. (The bit-plane orientation spelling serves a pipeline
+        // that detects AND describes on bits; feeding a wide-frame descriptor an
+        // angle measured over a 2^octave-wider binary disc would steer a patch by
+        // a different image's structure.) Coordinates are ROUNDED to the nearest
+        // pixel for the sampling kernels -- the exact center map lands coarse
+        // keypoints on half-pixels, and truncation would bias every one of their
+        // patches half a pixel toward the origin. The record keeps the exact
+        // coordinates; the geometry stage wants those.
         cur.count = cur.kp.size();
         cur.xy.clear();
-        cur.desc.assign(cur.count * kWords, 0);
-        keep.assign(cur.count, 0);
-        std::vector<float> angles(cur.count);
+        angles.assign(cur.count, 0.0f);
         for (size_t i = 0; i < cur.count; ++i) {
-            cur.xy.push_back(cur.kp[i].x);
-            cur.xy.push_back(cur.kp[i].y);
-            angles[i] = cur.kp[i].angle;
+            cur.xy.push_back(std::floor(cur.kp[i].x + 0.5f));
+            cur.xy.push_back(std::floor(cur.kp[i].y + 0.5f));
         }
+        t0 = std::chrono::steady_clock::now();
+        bincv::keypointOrientation<uint8_t>(gray.ptr<uint8_t>(0), static_cast<size_t>(w),
+                                            static_cast<size_t>(h), gray.step,
+                                            cur.xy.data(), cur.count, angles.data());
+        for (size_t i = 0; i < cur.count; ++i) cur.kp[i].angle = angles[i];
+        msOrient += msSince(t0);
+
+        t0 = std::chrono::steady_clock::now();
+        cur.desc.resize(cur.count * kWords);   // every keypoint's words are written
+        keep.assign(cur.count, 0);
         bincv::computeBriefSteered<kBits, uint8_t, uint32_t>(
             gray.ptr<uint8_t>(0), static_cast<size_t>(w), static_cast<size_t>(h),
             gray.step, cur.xy.data(), cur.count, angles.data(), steered, cur.desc.data(),
             keep.data());
         // Keypoints whose patch left the frame have no descriptor; drop them so the
-        // matcher never sees a zeroed 256-bit string pretending to be data.
+        // matcher never sees a zeroed 256-bit string pretending to be data. The
+        // steered reach (~21 px for a square-sampled base pattern) covers the
+        // orientation disc's 15, so no surviving keypoint carries a border-zeroed
+        // angle either.
         size_t out = 0;
         for (size_t i = 0; i < cur.count; ++i) {
             if (!keep[i]) continue;
             cur.kp[out] = cur.kp[i];
+            cur.xy[2 * out] = cur.xy[2 * i];
+            cur.xy[2 * out + 1] = cur.xy[2 * i + 1];
             for (size_t j = 0; j < kWords; ++j)
                 cur.desc[out * kWords + j] = cur.desc[i * kWords + j];
             ++out;
         }
         cur.count = out;
         cur.kp.resize(out);
-        cur.xy.clear();
-        for (size_t i = 0; i < out; ++i) {
-            cur.xy.push_back(cur.kp[i].x);
-            cur.xy.push_back(cur.kp[i].y);
-        }
+        cur.xy.resize(2 * out);
         msDescribe += msSince(t0);
         sumKp += cur.count;
 
@@ -335,7 +333,9 @@ int main(int argc, char** argv) {
                 fromN.push_back(Point2f{(a.x - cx) / fx, (a.y - cy) / fy});
                 toN.push_back(Point2f{(b.x - cx) / fx, (b.y - cy) / fy});
             }
-            sumMatched += matches.size();
+            // fromN holds exactly the ratio-test survivors; the denominator the
+            // summary prints is the QUERY count, and it is labeled as such.
+            sumQueried += cur.count;
             sumAccepted += fromN.size();
             if (fromN.size() >= 8) {
                 bincv::RansacParams rp;
@@ -371,10 +371,10 @@ int main(int argc, char** argv) {
                     li, static_cast<double>(perLevelKept[li]) / fd, kBudget[li],
                     perLevelMs[li] / fd);
     }
-    std::printf(" ratio-test accepted     : %.1f of %.1f matched/frame (%.1f%%)\n",
-                static_cast<double>(sumAccepted) / fd, static_cast<double>(sumMatched) / fd,
-                sumMatched ? 100.0 * static_cast<double>(sumAccepted) /
-                                 static_cast<double>(sumMatched)
+    std::printf(" ratio-test accepted     : %.1f of %.1f queried/frame (%.1f%%)\n",
+                static_cast<double>(sumAccepted) / fd, static_cast<double>(sumQueried) / fd,
+                sumQueried ? 100.0 * static_cast<double>(sumAccepted) /
+                                 static_cast<double>(sumQueried)
                            : 0.0);
     std::printf(" RANSAC inliers          : %.1f/frame = %.1f%% of accepted -- THE HEADLINE\n",
                 static_cast<double>(sumInliers) / fg,

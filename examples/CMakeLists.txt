@@ -3,7 +3,7 @@
 # (T4.3b).
 #
 # NOT gated on OpenCV. The core-only build is the configuration the whole memory
-# argument rests on, and until #30 this directory was skipped there -- so the one
+# argument rests on, and this directory used to be skipped there -- so the one
 # thing a reader could RUN to check the embedded claim needed the dependency the
 # claim is about not needing. vio_frontend now builds in every configuration: its
 # OpenCV pieces (cv::imread over a directory, the cv:: sensor arm) sit behind
@@ -23,9 +23,21 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
     return()
 endif()
 
+# Examples that REQUIRE OpenCV, named explicitly rather than detected from an
+# include scan: vio_frontend also mentions opencv2 headers, but behind a guard,
+# so the benchmark directory's include-grep partition would misclassify it. An
+# example belongs on this list only when its OpenCV use is structural -- here,
+# slam_frontend's frame source and sensor stage. It should come OFF the list the
+# way vio_frontend did: by growing a blob-fed core arm, not by weakening the gate.
+set(BINCV_EXAMPLES_NEED_OPENCV slam_frontend)
+
 file(GLOB EXAMPLE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 foreach(example_src ${EXAMPLE_SOURCES})
     get_filename_component(example_name ${example_src} NAME_WE)
+    if(NOT BINCV_OPENCV_FOUND AND example_name IN_LIST BINCV_EXAMPLES_NEED_OPENCV)
+        message(STATUS "Examples: skipping ${example_name}; it needs OpenCV")
+        continue()
+    endif()
     add_executable(${example_name} ${example_src})
     target_link_libraries(${example_name} PRIVATE bincv_core bincv_warnings)
 endforeach()

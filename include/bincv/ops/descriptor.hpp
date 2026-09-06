@@ -224,14 +224,21 @@ inline constexpr size_t kBriefAngleBins = 30;
 
 /// @brief Which rotation bin an angle selects: the nearest 12-degree step,
 /// wrapped. **API TIER 3.**
-/// @param angleRadians Any finite angle; `keypointOrientation`'s (-pi, pi] needs
-/// no pre-conditioning.
+/// @param angleRadians An angle in **[-2*pi, 2*pi]** -- `keypointOrientation`'s
+/// (-pi, pi] needs no pre-conditioning; an accumulated or otherwise
+/// unwrapped angle is the CALLER's to wrap first. The bound is asserted,
+/// because outside it the float-to-unsigned cast below is undefined
+/// behavior and the two ISAs this library measures resolve it
+/// DIFFERENTLY -- the exact cross-platform descriptor divergence the
+/// hardcoded rotation table exists to prevent.
 /// @note Integer arithmetic after one multiply, no <cmath>: the +30 shift makes
-/// the value positive so truncation IS floor, and the +0.5 makes floor
-/// round-to-nearest.
+/// the value positive over the asserted domain, so truncation IS floor,
+/// and the +0.5 makes floor round-to-nearest.
 inline unsigned briefAngleBin(float angleRadians) {
-    constexpr float kBinsPerRadian =
-        static_cast<float>(kBriefAngleBins) / 6.28318530717958647692f;
+    constexpr float kTwoPi = 6.28318530717958647692f;
+    BINCV_ASSERT(angleRadians >= -kTwoPi && angleRadians <= kTwoPi,
+                 "briefAngleBin: angle outside [-2*pi, 2*pi] -- wrap it first");
+    constexpr float kBinsPerRadian = static_cast<float>(kBriefAngleBins) / kTwoPi;
     const float t = angleRadians * kBinsPerRadian + static_cast<float>(kBriefAngleBins);
     const unsigned r = static_cast<unsigned>(t + 0.5f);
     return r % kBriefAngleBins;

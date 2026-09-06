@@ -1603,6 +1603,13 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
         }
     }
 
+    // A mask that admitted NOTHING leaves the seed untouched. The frame-map form
+    // returns the empty result before it forms a threshold, so this form must
+    // too -- a threshold formed from the -1 sentinel goes negative, and at
+    // qualityLevel > 1 the `maxDiscarded > threshold` reconstruction below would
+    // then report a truncation the frame-map form does not.
+    if (masked && runningMax == -1.0f) return out;
+
     // The threshold, now that the last row has been seen. Formed exactly as
     // selectGoodFeatures forms it -- product in `double`, narrowed to `float`,
     // strictly-greater comparison -- because equality of the two forms is

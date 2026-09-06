@@ -1,6 +1,6 @@
 // ===========================================================================
-// THE REAL-FRAME ACCURACY HARNESS -- the candidate resolution #12 asks to have
-// priced before anyone adopts it.
+// THE REAL-FRAME ACCURACY HARNESS -- the candidate resolution to the synthetic
+// harness's known failure, priced before anyone adopts it.
 //
 // The synthetic-warp harness and the frontend disagree by ~4.2 yield points on
 // the same configuration, and the float-cascade hypothesis is dead: correcting
@@ -39,6 +39,8 @@
 #include <string>
 #include <vector>
 
+#include "reference_sensor.hpp"
+
 #include "bincv/ops/corner.hpp"
 #include "bincv/ops/derivative.hpp"
 #include "bincv/ops/edge.hpp"
@@ -52,31 +54,11 @@ using bincv::Point2f;
 
 namespace {
 
-// The reference sensor stage, the same spelling frontend_sequence.cpp checks
-// bit-exact against binCV's own -- both trackers see identical binary content,
-// so the only variable is the tracking configuration under test.
-cv::Mat preprocess(const cv::Mat& g, int thr) {
-    cv::Mat right = cv::Mat::zeros(g.size(), g.type());
-    cv::Mat above = cv::Mat::zeros(g.size(), g.type());
-    g.colRange(1, g.cols).copyTo(right.colRange(0, g.cols - 1));
-    g.rowRange(0, g.rows - 1).copyTo(above.rowRange(1, g.rows));
-    cv::Mat a, b, c, med;
-    cv::min(above, g, a);
-    cv::max(above, g, b);
-    cv::min(b, right, c);
-    cv::max(a, c, med);
-    const cv::Mat kx = (cv::Mat_<float>(1, 3) << -1, 0, 1);
-    const cv::Mat ky = (cv::Mat_<float>(3, 1) << -1, 0, 1);
-    cv::Mat dx, dy;
-    cv::filter2D(med, dx, CV_32F, kx);
-    cv::filter2D(med, dy, CV_32F, ky);
-    dx = cv::abs(dx);
-    dy = cv::abs(dy);
-    const cv::Mat mask = (dx >= thr) | (dy >= thr);
-    cv::Mat out = cv::Mat::zeros(g.size(), CV_8U);
-    out.setTo(255, mask);
-    return out;
-}
+// The reference sensor stage -- ONE definition shared with frontend_sequence.cpp,
+// which checks binCV's own sensor stage bit-exact against it every frame. Both
+// trackers here see identical binary content, so the only variable is the
+// tracking configuration under test.
+using refsensor::preprocess;
 
 struct PairResult {
     size_t both = 0;      ///< tracked by both binCV and the reference
@@ -181,8 +163,8 @@ int main(int argc, char** argv) {
     };
     // The axis the disagreement lives on: the synthetic harness said the ladder
     // barely matters (-0.42 for dropping level 3's second bit at BOX_3x3) and the
-    // frontend said it matters a lot (-4.60). These six cells reproduce X-53's
-    // sweep on real pairs.
+    // frontend said it matters a lot (-4.60). These six cells reproduce that
+    // recorded sweep on real pairs.
     Config configs[] = {
         {"1/1/1/1 BOX_2x2", &runPair<1, 1, 1, bincv::PyrDownFilter::Box2x2>, {}},
         {"1/1/1/1 BOX_3x3", &runPair<1, 1, 1, bincv::PyrDownFilter::Box3x3>, {}},

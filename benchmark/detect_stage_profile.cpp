@@ -1,6 +1,6 @@
 // ===========================================================================
-// WHERE ONE STREAMING DETECTION'S ~5 ms ACTUALLY SITS -- the profile #7 asked
-// for before any optimisation is allowed to start.
+// WHERE ONE STREAMING DETECTION'S TIME ACTUALLY SITS -- the profile that has to
+// exist before any optimisation of it is allowed to start.
 //
 // `goodFeaturesToTrackStreaming` has four stages: the response row sweep, the
 // NMS scan with its top-K heap, the rank (std::sort over the ranked pool), and
@@ -33,6 +33,7 @@
 #include "bincv/binMat.hpp"
 #include "bincv/ops/corner.hpp"
 #include "bincv/ops/derivative.hpp"
+#include "bincv/ops/pack.hpp"
 #include "bincv/quantMat.hpp"
 #include "measure_util.hpp"
 
@@ -43,10 +44,11 @@ namespace {
 int gW = 0, gH = 0;
 
 std::vector<uint8_t> loadRealFrame() {
+    // BINCV_REALFRAME_PATH is the build system's absolute path to the frame --
+    // the same macro every realframe consumer here uses, so this benchmark runs
+    // from any working directory and cannot drift onto a different file.
     std::vector<uint8_t> px;
-    FILE* f = std::fopen("benchmark/realframe.bin", "rb");
-    if (!f) f = std::fopen("realframe.bin", "rb");
-    if (!f) f = std::fopen("../benchmark/realframe.bin", "rb");
+    FILE* f = std::fopen(BINCV_REALFRAME_PATH, "rb");
     if (!f) return px;
     uint32_t fw = 0, fh = 0;
     if (std::fread(&fw, 4, 1, f) != 1 || std::fread(&fh, 4, 1, f) != 1) {
@@ -73,9 +75,7 @@ int main() {
     const size_t w = static_cast<size_t>(gW), h = static_cast<size_t>(gH);
 
     bincv::BinMat<W> bin(gW, gH);
-    for (int y = 0; y < gH; ++y)
-        for (int x = 0; x < gW; ++x)
-            bin.set(y, x, frame[static_cast<size_t>(y) * w + static_cast<size_t>(x)] ? 1u : 0u);
+    bincv::packBits<bincv::PackRule::NonZero>(frame.data(), w, h, w, bin.view());
     bincv::SignedQuantMat<1, W> dx(gW, gH), dy(gW, gH);
     bincv::derivativeX(bin, dx);
     bincv::derivativeY(bin, dy);

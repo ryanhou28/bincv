@@ -2185,6 +2185,20 @@ BINCV_TEST(Corner, Mask_StreamingSeedRowObeysTheMask) {
     for (size_t i = 0; i < ra.count && i < rb.count; ++i)
         if (a[i].x != b[i].x || a[i].y != b[i].y) ++differ;
     BINCV_CHECK_EQ(differ, size_t{0});
+
+    // The other seed edge: a mask that admits NOTHING, at a qualityLevel above 1
+    // -- where a threshold formed from an untouched seed would go negative and
+    // fabricate a truncation flag. Both forms must report the same empty triple.
+    const BinMat<uint32_t> nothing(w, h);   // zero-filled: admits no pixel
+    p.qualityLevel = 2.0;
+    const CornerResult ea =
+        bincv::goodFeaturesToTrack(d.dx, d.dy, p, frameMap, a.data(), cap, nothing.constView());
+    const CornerResult eb = bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, p, ring, b.data(),
+                                                                cap, nothing.constView());
+    BINCV_CHECK_EQ(ea.count, size_t{0});
+    BINCV_CHECK_EQ(eb.count, size_t{0});
+    BINCV_CHECK_EQ(ea.candidatesRanked, eb.candidatesRanked);
+    BINCV_CHECK_EQ(ea.candidatesTruncated, eb.candidatesTruncated);
 }
 
 BINCV_TEST(Corner, Mask_StreamingMatchesFrameMap) {

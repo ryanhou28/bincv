@@ -76,12 +76,15 @@ struct StereoMatchParams {
     int rowTolerance = 2;
 
     /// @brief Largest descriptor Hamming distance the coarse stage accepts.
-    /// @note An absolute bit count, so it scales with the descriptor length the
-    /// caller chose; 100 is the ORB-SLAM family's high threshold at 256
-    /// bits. A ratio test is deliberately NOT applied here: along an
-    /// epipolar row the second-best candidate is often the true match's
-    /// neighbour, and rejecting on that ratio throws away exactly the
-    /// matches the refinement stage exists to sharpen.
+    /// @note An ABSOLUTE bit count, and the default encodes ONE configuration:
+    /// 100 is the ORB-SLAM family's high threshold at 256 bits. A caller
+    /// with shorter descriptors must scale it down themselves -- at 128
+    /// bits the default gates almost nothing, and wrong coarse matches
+    /// come out of refinement as confident sub-pixel depths. A ratio test
+    /// is deliberately NOT applied here: along an epipolar row the
+    /// second-best candidate is often the true match's neighbour, and
+    /// rejecting on that ratio throws away exactly the matches the
+    /// refinement stage exists to sharpen.
     unsigned maxHamming = 100;
 
     /// @brief Refinement window, pixels, > 2 on a side.
@@ -155,7 +158,11 @@ inline void stereoDescriptorMatch(const float* leftXY, size_t leftCount,
             }
         }
         StereoMatch m;
-        if (best <= params.maxHamming) {
+        // The no-candidate sentinel is excluded EXPLICITLY, not by the Hamming
+        // gate: a caller who raises maxHamming to "accept everything" must get
+        // "no candidate", never a match fabricated from rightXY[0] -- and with
+        // an empty right set, never a read through a null rightXY.
+        if (best != 0xFFFFFFFFu && best <= params.maxHamming) {
             m.disparity = xL - rightXY[2 * bestIdx];
             m.distance = best;
             m.rightIndex = bestIdx;
