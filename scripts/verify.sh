@@ -9,6 +9,7 @@
 #   ./scripts/verify.sh --incremental          # fast inner-loop re-run (see the caveat)
 #   ./scripts/verify.sh --only core            # one configuration by name
 #   ./scripts/verify.sh --arm                  # also run scripts/verify_arm.sh at the end
+#   ./scripts/verify.sh --cortex-m             # also run scripts/verify_cortex_m.sh
 #   ./scripts/verify.sh --update-checks-baseline   # raise tests/expected-checks.txt
 #
 # ---------------------------------------------------------------------------
@@ -88,6 +89,7 @@ fi
 JOBS="$( (command -v nproc >/dev/null && nproc) || echo 4)"
 INCREMENTAL=0
 RUN_ARM=0
+RUN_CORTEX_M=0
 UPDATE_BASELINE=0
 ONLY=""
 
@@ -112,11 +114,12 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --incremental|-i) INCREMENTAL=1 ;;
         --arm)            RUN_ARM=1 ;;
+        --cortex-m)       RUN_CORTEX_M=1 ;;
         --update-checks-baseline) UPDATE_BASELINE=1 ;;
         --only)           need_value "$1" "${2:-}"; ONLY="$2"; shift ;;
         -j)               need_value "$1" "${2:-}"; JOBS="$2"; shift ;;
         -h|--help)
-            sed -n '3,14p' "${SELF}" | sed 's/^# \{0,1\}//'
+            sed -n '3,15p' "${SELF}" | sed 's/^# \{0,1\}//'
             echo
             echo "Configurations: ${CONFIG_NAMES[*]}"
             exit 0 ;;
@@ -735,6 +738,24 @@ if [[ ${RUN_ARM} -eq 1 ]]; then
     esac
 fi
 
+# Same 77 contract as aarch64, and for the same reason: a Cortex-M run that could
+# not find a cross-compiler verified nothing, and must not print as OK. This is a
+# COMPILE-ONLY gate -- see the script's header -- because the host cannot execute
+# an M-profile image.
+CORTEX_M_NOTE=""
+if [[ ${RUN_CORTEX_M} -eq 1 ]]; then
+    echo
+    cm_rc=0
+    "${REPO_ROOT}/scripts/verify_cortex_m.sh" || cm_rc=$?
+    case ${cm_rc} in
+        0)  echo "  cortex-m: OK (compile-only)" ;;
+        77) echo "  cortex-m: SKIPPED -- NOT verified (see the message above)"
+            CORTEX_M_NOTE="skipped" ;;
+        *)  echo "  cortex-m: FAILED"
+            FAILED=1 ;;
+    esac
+fi
+
 echo
 if [[ ${FAILED} -eq 0 ]]; then
     echo "  ALL CONFIGURATIONS GREEN"
@@ -742,6 +763,11 @@ if [[ ${FAILED} -eq 0 ]]; then
         echo "  x86_64 only. ./scripts/verify_arm.sh checks the primary target"
         echo "  (aarch64) for correctness under emulation -- cheap, and the bugs it"
         echo "  finds are expensive to find later."
+    fi
+    if [[ ${RUN_CORTEX_M} -eq 0 || -n "${CORTEX_M_NOTE}" ]]; then
+        echo "  ./scripts/verify_cortex_m.sh compiles the suites for Cortex-M7 at"
+        echo "  32-bit size_t, where a third of the type-width surface is exercised"
+        echo "  for the only time -- it needs an arm-none-eabi toolchain."
     fi
     echo
     exit 0
