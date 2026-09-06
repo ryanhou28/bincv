@@ -38,6 +38,7 @@
 #include <thread>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "bincv/core/simd.hpp"
@@ -149,7 +150,6 @@ struct BincvFrontend {
     bincv::LKLevels<W, 1, 2, 2, 2> levels;
     std::vector<float> ring;  // kResponseRingRows rows, the streaming response
     int w, h;
-    bincv::BinMat<W> hold;   ///< last frame's binary, so it is preprocessed ONCE
 
     BincvFrontend(int width, int height)
         : prev(width, height), next(width, height), dx0(width, height), dy0(width, height),
@@ -157,8 +157,7 @@ struct BincvFrontend {
           dy1(width / 2 + (width & 1), height / 2 + (height & 1)),
           dx2((width + 3) / 4, (height + 3) / 4), dy2((width + 3) / 4, (height + 3) / 4),
           dx3((width + 7) / 8, (height + 7) / 8), dy3((width + 7) / 8, (height + 7) / 8),
-          ring(bincv::kResponseRingRows * static_cast<size_t>(width)), w(width), h(height),
-          hold(width, height) {}
+          ring(bincv::kResponseRingRows * static_cast<size_t>(width)), w(width), h(height) {}
 
     double msLoad = 0.0;   ///< binCV's OWN sensor stage -- `medianWide` then
                            ///< `edgeThreshold`, straight from grayscale into bit-planes.
@@ -167,24 +166,29 @@ struct BincvFrontend {
                            ///< conversion is gone rather than optimized.
     std::vector<uint8_t> medianScratch;
 
-    /// Frame 0's binary, so frame 1 has a real `prev`. Untimed: it is setup, and the
-    /// loop below would otherwise lose every track on its first frame and re-detect.
+    /// Frame 0's whole pyramid, so frame 1's swap hands it a fully built `prev`.
+    /// Untimed: it is setup, and the loop below would otherwise lose every track on
+    /// its first frame and re-detect.
     void seed(const cv::Mat& gray, int thr) {
         medianScratch.resize(static_cast<size_t>(gray.cols) * static_cast<size_t>(gray.rows));
         bincvPreprocess(gray, medianScratch, next.level<0>().plane(0), thr);
-        hold = next.level<0>();
+        next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
     }
 
-    /// The new frame becomes `next`; last frame's result becomes `prev`.
-    void loadLevel0(const cv::Mat& gray, int thr, bool haveHold) {
+    /// The new frame becomes `next`; last frame's pyramid becomes `prev` -- ALL of it.
+    /// `pyrDown` is a pure function of level 0, so the swapped levels 1..3 are the
+    /// ones a rebuild would produce; BINCV_PYR_CHECK below asserts that word for word
+    /// rather than assuming it from the purity argument. The swap replaces what used
+    /// to be two frame copies of level 0 through a `hold` buffer -- a buffer the
+    /// footprint number never counted -- and half of every frame's pyrDown work.
+    void loadLevel0(const cv::Mat& gray, int thr) {
         const auto t = Clock::now();
         if (medianScratch.empty()) {
             medianScratch.resize(static_cast<size_t>(gray.cols) *
                                  static_cast<size_t>(gray.rows));
         }
+        std::swap(prev, next);
         bincvPreprocess(gray, medianScratch, next.level<0>().plane(0), thr);
-        if (haveHold) prev.level<0>() = hold;
-        hold = next.level<0>();
         msLoad += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
     }
     double msPyrDown = 0.0, msDeriv = 0.0;   ///< put `build` at 52% of the
@@ -193,9 +197,13 @@ struct BincvFrontend {
                                             ///< auto-vectorizes and `pyrDown` does
                                             ///< not, so the two halves have very
                                             ///< different priors.
+    /// ONE pyramid build per frame, not two. `prev` arrived built via the swap; only
+    /// the incoming frame's levels are computed. OpenCV's `calcOpticalFlowPyrLK`
+    /// still rebuilds both of its pyramids per call -- the redundancy was symmetric,
+    /// and the owner's decision (2026-08-31, #8) is to remove it on binCV's side and
+    /// leave OpenCV its own method, stated openly in the criterion-4 note below.
     void build() {
         auto t = Clock::now();
-        prev.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
         next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
         msPyrDown += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
         t = Clock::now();
@@ -362,6 +370,25 @@ int main(int argc, char** argv) {
     std::vector<cv::Point2f> oPts;                    // OpenCV's live tracks
     std::vector<int> oAge;
 
+    // #8's PROOF OBLIGATION. The swap scheme's saving is only real if the reused
+    // pyramid is BIT-IDENTICAL to a rebuilt one, and tracking agreeing would not
+    // prove that -- it would prove a difference missed every keypoint. With
+    // BINCV_PYR_CHECK=1 every frame rebuilds `prev`'s upper levels from its own
+    // level 0 into a shadow pyramid and compares WHOLE WORDS, so padding bits --
+    // which word-wise reductions count -- are compared too, not just pixels.
+    const bool pyrCheck = std::getenv("BINCV_PYR_CHECK") != nullptr;
+    bincv::Pyramid<W, 1, 2, 2, 2> shadow(pyrCheck ? w : 1, pyrCheck ? h : 1);
+    size_t pyrWordsCompared = 0, pyrWordsDiffer = 0;
+    auto pyrDiff = [&](const auto& reused, const auto& rebuilt) {
+        const W* a = reused.data();
+        const W* b = rebuilt.data();
+        const size_t n = reused.sizeInWords();
+        for (size_t i = 0; i < n; ++i) {
+            if (a[i] != b[i]) ++pyrWordsDiffer;
+        }
+        pyrWordsCompared += n;
+    };
+
     // The first frame's binary, for OpenCV's `prev` on frame 1.
     cv::Mat binPrev = preprocess(first, 17);
     fe.seed(first, 17);   // the same, for binCV
@@ -373,7 +400,7 @@ int main(int argc, char** argv) {
         // own timing. OpenCV builds the same frame, inside its own, below.
         auto t0 = Clock::now();
         auto tStage = t0;
-        fe.loadLevel0(gray, 17, true);
+        fe.loadLevel0(gray, 17);
         fe.build();
         st.msBuild += std::chrono::duration<double, std::milli>(Clock::now() - tStage).count();
         tStage = Clock::now();
@@ -402,6 +429,17 @@ int main(int argc, char** argv) {
         }
         st.msTrack += std::chrono::duration<double, std::milli>(Clock::now() - tStage).count();
         st.bincvMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+
+        // Outside the timing: the reused-pyramid identity check. Frame 1 checks the
+        // seed path; a re-detection frame checks nothing different but is checked
+        // anyway, because "the frames where it matters" is not a set worth curating.
+        if (pyrCheck) {
+            shadow.level<0>() = fe.prev.level<0>();
+            shadow.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
+            pyrDiff(fe.prev.level<1>(), shadow.level<1>());
+            pyrDiff(fe.prev.level<2>(), shadow.level<2>());
+            pyrDiff(fe.prev.level<3>(), shadow.level<3>());
+        }
 
         // ---------------- OpenCV, from the SAME grayscale input ----------------
         // OpenCV builds its own binary frame too, inside its own timing. Before
@@ -484,7 +522,7 @@ int main(int argc, char** argv) {
         // THE CONTROL, outside both timings: OpenCV's spelling of the sensor stage is
         // what binCV's must reproduce. turns `preprocess` from the thing binCV
         // depends on into the thing binCV is checked against.
-        st.preprocMismatch += binaryFramesAgree(fe.hold, binNext);
+        st.preprocMismatch += binaryFramesAgree(fe.next.level<0>(), binNext);
 
         binPrev = binNext;   // OpenCV's `prev` for the next frame
         st.oTried += oPts.size();
@@ -573,6 +611,11 @@ int main(int argc, char** argv) {
     std::printf("\n sensor stage vs OpenCV's: %s (%zu pixels differ over %zu frames)\n",
                 st.preprocMismatch == 0 ? "BIT-EXACT" : "MISMATCH", st.preprocMismatch,
                 st.frames);
+    if (pyrCheck) {
+        std::printf(" pyramid reuse vs rebuild: %s (%zu of %zu words differ, padding included)\n",
+                    pyrWordsDiffer == 0 ? "BIT-IDENTICAL" : "MISMATCH", pyrWordsDiffer,
+                    pyrWordsCompared);
+    }
     if (lkThreads > 1) {
         std::printf("\n--- binCV track stage on %d threads ---\n",
                     bincv::getNumThreads());
@@ -582,6 +625,11 @@ int main(int argc, char** argv) {
     std::printf(" binCV : %8.3f ms/frame\n", st.bincvMs / static_cast<double>(st.frames));
     std::printf(" OpenCV : %8.3f ms/frame\n", st.opencvMs / static_cast<double>(st.frames));
     std::printf(" RATIO : %.2fx\n", st.opencvMs / st.bincvMs);
+    std::printf(" NOTE: binCV builds ONE pyramid per frame (#8: the previous frame's is\n"
+                " swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's\n"
+                " calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the\n"
+                " redundancy was symmetric, and removing it on binCV's side only is the\n"
+                " owner's recorded decision, not an oversight in the comparison.\n");
     std::printf(" NOTE: OpenCV threads = %d (binCV is single-threaded, always), and its\n"
                 " LK and gftt are SIMD-vectorized.\n",
                 cv::getNumThreads());
@@ -606,5 +654,7 @@ int main(int argc, char** argv) {
                 " measured remains the point: at equal threads binCV LEADS, and the\n"
                 " x86 deficit reported before it was THREADS, not vector width.\n");
 #endif
+    // The reuse check is a gate, not a statistic: a mismatch is a wrong answer.
+    if (pyrCheck && pyrWordsDiffer != 0) return 1;
     return 0;
 }
