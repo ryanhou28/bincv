@@ -7,14 +7,22 @@
 // frontend does something structurally different, and this is that loop --
 // modelled on HybVIO's, which is what the reference pipeline drives:
 //
-// 1. TEMPORAL / SENSOR STAGE, in OpenCV. median_filter then
-// rl_fast_edge_filter_wide (the reference frontend's temporal stage) turn an 8-bit
-// camera frame into a binary one. In the reference system this is dedicated hardware, and
-// it is NOT binCV's claim: binCV's domain starts at the binary frame,
-// which the design notes calls "the input, not a choice".
+// 1. TEMPORAL / SENSOR STAGE -- median then edge filter, an 8-bit camera frame
+// into a binary one. TWO spellings ship, and the choice between them is the
+// input boundary made concrete; see the comment at sensorStage below.
+// In the reference system this stage is dedicated hardware.
 //
 // 2. EVERYTHING AFTER, in binCV. Pyramid, derivatives, LK tracking,
 // detection, and the track lifecycle.
+//
+// FRAMES COME FROM EITHER OF TWO SOURCES:
+// * a directory of .png frames through cv::imread (OpenCV builds only);
+// * a .bsq sequence blob made by scripts/make_sequence_blob.py -- which is
+// what lets a CORE-ONLY build run real dataset frames at all (io/sequence.hpp),
+// and is read STREAMING: one fread-ed frame resident at a time, never the
+// blob, because an 8-bit frame is the buffer binCV exists not to hold.
+// A packed (mode 1) blob arrives already binary, so the sensor stage is
+// skipped and the run exercises the tracker only.
 //
 // WHAT THIS EXERCISES THAT A BENCHMARK LOOP DOES NOT:
 // * a PERSISTENT TRACK SET carried across frames, not a per-frame rematch;
@@ -33,32 +41,60 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <chrono>
-#include <filesystem>
 #include <string>
 #include <vector>
 
+#ifdef BINCV_WITH_OPENCV
+#include <filesystem>
 #include <opencv2/opencv.hpp>
+#endif
 
 #include "bincv/core/simd.hpp"
+#include "bincv/io/sequence.hpp"
 #include "bincv/ops/corner.hpp"
 #include "bincv/ops/denoise.hpp"
+#include "bincv/ops/edge.hpp"
+#include "bincv/ops/medianWide.hpp"
 #include "bincv/ops/occupancy.hpp"
 #include "bincv/ops/derivative.hpp"
 #include "bincv/ops/opticalFlow.hpp"
 #include "bincv/ops/pyramid.hpp"
 #include "bincv/quantMat.hpp"
 
+#ifdef BINCV_WITH_OPENCV
 namespace fs = std::filesystem;
+#endif
 using W = uint32_t;
 using bincv::Point2f;
 
 namespace {
 
-// ---- 1. The temporal/sensor stage. OpenCV, and deliberately not binCV. ----
-// the reference frontend's denoiser: a three-pixel median.
-// the reference frontend's edge filter: |d/dx| + |d/dy| over [-1,0,1],
-// thresholded. Read from the reference rather than inferred (CLAUDE.md).
+// ---- 1. The temporal/sensor stage, in TWO spellings, both deliberate. ----
+//
+// THE OPENCV ARM (sensorStage, the default wherever OpenCV is present) is the
+// CALLER'S half of the input boundary, shown as a caller would write it:
+// cv::medianBlur, cv::filter2D, cv::threshold, in the caller's own vocabulary.
+// That is the reading the example exists for -- "the caller brings a wide
+// image; binCV does everything after" -- and it is why this arm survives the
+// binCV one existing. It is a caller's PARAPHRASE of the reference stage, not
+// a port of it (a 3x3 square median where the reference's is the L; `>` where
+// the reference compares `>=`), which is fine for an arm whose point is the
+// boundary, not bit equality.
+//
+// THE binCV ARM (sensorStageBincv) is the same stage in binCV's own spelling:
+// `medianWide` with the reference's L neighbourhood, then `edgeThreshold`,
+// whose no-argument defaults ARE the reference's operation (ops/edge.hpp) --
+// straight from the gray buffer into bit-planes, no 8-bit edge image at any
+// point. benchmark/frontend_sequence.cpp holds this spelling bit-identical to
+// the reference pipeline every frame, so this example adds no new claim. It is
+// what the CORE-ONLY build runs, because it is what an embedded caller runs:
+// nothing upstream of it but the sensor buffer.
+//
+// Where OpenCV is present, BINCV_VIO_SENSOR=bincv selects the binCV arm so the
+// two can be compared in one binary; core-only builds have only the binCV arm.
+#ifdef BINCV_WITH_OPENCV
 cv::Mat sensorStage(const cv::Mat& gray, int edgeThreshold) {
     cv::Mat med;
     cv::medianBlur(gray, med, 3);
@@ -72,6 +108,19 @@ cv::Mat sensorStage(const cv::Mat& gray, int edgeThreshold) {
     cv::threshold(mag, bin, static_cast<double>(edgeThreshold), 255.0, cv::THRESH_BINARY);
     bin.convertTo(bin, CV_8U);
     return bin;
+}
+#endif
+
+/// The binCV arm; see the comment above. `scratch` holds the median output --
+/// the one wide intermediate this stage needs, reused across frames.
+void sensorStageBincv(const uint8_t* gray, size_t width, size_t height, size_t stride,
+                      std::vector<uint8_t>& scratch, bincv::BinMatView<W> dst,
+                      int edgeThreshold) {
+    bincv::medianWide<3, uint8_t>(gray, width, height, stride, scratch.data(), width,
+                                  bincv::kMedianReferenceL);
+    bincv::edgeThreshold<bincv::EdgeCombine::Or, bincv::EdgeRelation::Ge,
+                         bincv::EdgeSpatial::Wide, uint8_t, W>(
+        scratch.data(), width, height, width, dst, static_cast<uint8_t>(edgeThreshold));
 }
 
 /// One tracked feature. `age` is what a VIO backend cares about: a feature seen
@@ -125,8 +174,9 @@ struct Frontend {
           dx3((width + 7) / 8, (height + 7) / 8), dy3((width + 7) / 8, (height + 7) / 8),
           ring(bincv::kResponseRingRows * static_cast<size_t>(width)), w(width), h(height) {}
 
-    void buildFrom(const cv::Mat& binary) {
-        next.level<0>().fromCVMat(binary);
+    /// Level 0 was just filled (by a sensor arm, or straight from a packed
+    /// frame); build the ladder above it.
+    void buildLadder() {
         next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
     }
     /// Derivatives come from `prev`, which is what LK linearises about.
@@ -157,23 +207,82 @@ double msSince(std::chrono::steady_clock::time_point t0) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::printf("usage: vio_frontend <frame-dir> [max-frames]\n");
+        std::printf("usage: vio_frontend <frame-dir | sequence.bsq> [max-frames]\n");
+        std::printf("  a .bsq blob comes from scripts/make_sequence_blob.py, and is the\n"
+                    "  only frame source a core-only build has -- that is the point of it\n");
         return 2;
     }
     const size_t maxFrames = argc > 2 ? static_cast<size_t>(std::atoi(argv[2])) : 0;
+#ifdef BINCV_WITH_OPENCV
     cv::setNumThreads(1);
+#endif
 
+    // ---- the frame source: a sequence blob, or a directory of images -------
+    const std::string arg = argv[1];
+    const bool isBlob = arg.size() > 4 && arg.compare(arg.size() - 4, 4, ".bsq") == 0;
+
+    std::FILE* blob = nullptr;
+    bincv::SequenceHeader sh;
+    std::vector<uint8_t> body;   // ONE frame's body -- the blob is never resident
+#ifdef BINCV_WITH_OPENCV
     std::vector<fs::path> files;
-    for (const auto& e : fs::directory_iterator(argv[1])) {
-        if (e.path().extension() == ".png") files.push_back(e.path());
-    }
-    std::sort(files.begin(), files.end());
-    if (maxFrames && files.size() > maxFrames) files.resize(maxFrames);
-    if (files.size() < 2) { std::printf("need at least 2 frames\n"); return 2; }
+#endif
+    int w = 0, h = 0;
+    size_t totalFrames = 0;
 
-    const cv::Mat first = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
-    if (first.empty()) { std::printf("cannot read %s\n", files[0].string().c_str()); return 2; }
-    const int w = first.cols, h = first.rows;
+    if (isBlob) {
+        blob = std::fopen(arg.c_str(), "rb");
+        if (blob == nullptr) { std::printf("cannot open %s\n", arg.c_str()); return 2; }
+        uint8_t head[bincv::kSequenceHeaderBytes];
+        if (std::fread(head, 1, sizeof(head), blob) != sizeof(head) ||
+            !(sh = bincv::readSequenceHeader(head, sizeof(head))).valid) {
+            std::printf("%s is not a BSQ1 sequence blob\n", arg.c_str());
+            std::fclose(blob);
+            return 2;
+        }
+        w = static_cast<int>(sh.width);
+        h = static_cast<int>(sh.height);
+        totalFrames = sh.frameCount;
+        body.resize(sh.frameBytes);
+    } else {
+#ifdef BINCV_WITH_OPENCV
+        for (const auto& e : fs::directory_iterator(arg)) {
+            if (e.path().extension() == ".png") files.push_back(e.path());
+        }
+        std::sort(files.begin(), files.end());
+        totalFrames = files.size();
+        if (totalFrames > 0) {
+            const cv::Mat first = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
+            if (first.empty()) {
+                std::printf("cannot read %s\n", files[0].string().c_str());
+                return 2;
+            }
+            w = first.cols;
+            h = first.rows;
+        }
+#else
+        std::printf("%s: this build has no OpenCV, so it cannot read an image directory.\n"
+                    "Make a blob on any host that can:\n"
+                    "  scripts/make_sequence_blob.py %s -o frames.bsq --mode 8bit\n",
+                    arg.c_str(), arg.c_str());
+        return 2;
+#endif
+    }
+    if (maxFrames && totalFrames > maxFrames) totalFrames = maxFrames;
+    if (totalFrames < 2) { std::printf("need at least 2 frames\n"); return 2; }
+
+    // ---- which sensor arm runs (see the comment at sensorStage) ------------
+    const bool packedFrames = isBlob && sh.mode == bincv::kSequenceModePacked;
+#ifdef BINCV_WITH_OPENCV
+    const char* sensorEnv = std::getenv("BINCV_VIO_SENSOR");
+    const bool useBincvSensor = sensorEnv != nullptr && std::strcmp(sensorEnv, "bincv") == 0;
+#else
+    const bool useBincvSensor = true;
+#endif
+    std::vector<uint8_t> medianScratch;
+    if (useBincvSensor && !packedFrames) {
+        medianScratch.resize(static_cast<size_t>(w) * static_cast<size_t>(h));
+    }
 
     constexpr int kTarget = 200;        // features a VIO frontend wants live
     constexpr int kEdgeThreshold = 17;  // the reference frontend's edge_threshold
@@ -212,23 +321,63 @@ int main(int argc, char** argv) {
     size_t maxRanked = 0;
     double sumLive = 0.0, msSensor = 0, msBuild = 0, msTrack = 0, msDetect = 0;
 
+    const char* sensorDesc =
+        packedFrames ? "skipped -- frames arrive packed (it ran on the host, in the tool)"
+        : useBincvSensor ? "binCV (medianWide L + edgeThreshold, the reference's spelling)"
+                         : "OpenCV (medianBlur + filter2D + threshold, the caller's half)";
     std::printf("=== A binary-frame VIO vision frontend on binCV kernels ===\n");
     std::printf(" %zu frames, %dx%d, target %d live features, 1/2/2/2 ladder\n",
-                files.size(), w, h, kTarget);
-    std::printf(" sensor stage (median + edge filter) in OpenCV; everything after in binCV\n");
+                totalFrames, w, h, kTarget);
+    std::printf(" frames from %s\n",
+                packedFrames ? "a sequence blob, packed 1-bit bodies"
+                : isBlob     ? "a sequence blob, 8-bit bodies"
+                             : "a directory, via cv::imread");
+    std::printf(" sensor stage (median + edge filter): %s\n", sensorDesc);
     std::printf(" detection policy: top up when live < %d (%.0f%% of target)\n\n",
                 lowWater, 100.0 * lowFrac);
 
-    for (size_t f = 0; f < files.size(); ++f) {
-        const cv::Mat gray = cv::imread(files[f].string(), cv::IMREAD_GRAYSCALE);
-        if (gray.empty() || gray.cols != w || gray.rows != h) continue;
-
+    for (size_t f = 0; f < totalFrames; ++f) {
+        // ---- produce level 0 of `fe.next`: this frame, as bits ----
         auto t0 = std::chrono::steady_clock::now();
-        const cv::Mat binary = sensorStage(gray, kEdgeThreshold);
+        if (isBlob) {
+            if (std::fread(body.data(), 1, body.size(), blob) != body.size()) {
+                std::printf(" blob truncated at frame %zu; stopping\n", f);
+                break;
+            }
+            if (packedFrames) {
+                // Already binary: no sensor stage in EITHER spelling. The time
+                // recorded here is the P4-body unpack alone.
+                bincv::readSequenceFrameBody<W>(sh, body.data(), body.size(),
+                                               fe.next.level<0>().plane(0));
+            } else if (useBincvSensor) {
+                sensorStageBincv(body.data(), sh.width, sh.height, sh.width, medianScratch,
+                                 fe.next.level<0>().plane(0), kEdgeThreshold);
+            }
+#ifdef BINCV_WITH_OPENCV
+            else {
+                // Zero-copy wrap of the streamed body; the input contract as a cv::Mat.
+                const cv::Mat gray(h, w, CV_8UC1, body.data());
+                fe.next.level<0>().fromCVMat(sensorStage(gray, kEdgeThreshold));
+            }
+#endif
+        }
+#ifdef BINCV_WITH_OPENCV
+        else {
+            const cv::Mat gray = cv::imread(files[f].string(), cv::IMREAD_GRAYSCALE);
+            if (gray.empty() || gray.cols != w || gray.rows != h) continue;
+            if (useBincvSensor) {
+                sensorStageBincv(gray.ptr<uint8_t>(0), static_cast<size_t>(w),
+                                 static_cast<size_t>(h), gray.step, medianScratch,
+                                 fe.next.level<0>().plane(0), kEdgeThreshold);
+            } else {
+                fe.next.level<0>().fromCVMat(sensorStage(gray, kEdgeThreshold));
+            }
+        }
+#endif
         msSensor += msSince(t0);
 
         t0 = std::chrono::steady_clock::now();
-        fe.buildFrom(binary);
+        fe.buildLadder();
         msBuild += msSince(t0);
 
         if (f == 0) { std::swap(fe.prev, fe.next); ++frames; continue; }
@@ -300,6 +449,7 @@ int main(int argc, char** argv) {
             std::printf(" ... %zu frames, %zu live\n", frames, tracks.size());
         }
     }
+    if (blob != nullptr) std::fclose(blob);
     for (const Track& t : tracks) lifetimes.push_back(t.age);   // survivors count too
 
     std::sort(lifetimes.begin(), lifetimes.end());
@@ -333,7 +483,11 @@ int main(int argc, char** argv) {
     }
 
     std::printf("\n--- COST PER FRAME ---\n");
-    std::printf(" sensor stage (OpenCV, NOT binCV) %7.3f ms\n", msSensor / fd);
+    std::printf(" %s %7.3f ms\n",
+                packedFrames ? "unpack packed frame (sensor ran on the host)"
+                : useBincvSensor ? "sensor stage (binCV medianWide+edgeThreshold)"
+                                 : "sensor stage (OpenCV, NOT binCV)",
+                msSensor / fd);
     std::printf(" build (pyrDown + derivatives) %7.3f ms\n", msBuild / fd);
     std::printf(" track (LK) %7.3f ms\n", msTrack / fd);
     std::printf(" detect (streaming gftt) %7.3f ms\n", msDetect / fd);
@@ -342,10 +496,21 @@ int main(int argc, char** argv) {
     std::printf(" peak binCV working set %7zu B\n", fe.bytes());
     std::printf("\n DETECTION RAN ON %.1f%% OF FRAMES, and that is set by the policy\n"
                 " above rather than by binCV. Re-run with BINCV_VIO_LOW=0.6 to see how far\n"
-                " the profile moves.\n\n"
-                " The sensor stage is listed separately because it is NOT binCV's claim:\n"
-                " in the reference system it is dedicated hardware, and binCV's domain starts at the binary\n"
-                " frame. Judge binCV on the three lines above it.\n",
+                " the profile moves.\n\n",
                 100.0 * static_cast<double>(detections) / fd);
+    if (packedFrames) {
+        std::printf(" The sensor stage ran on the HOST when this blob was packed, which is the\n"
+                    " packed mode's trade: 8x more frames in the same flash, against losing the\n"
+                    " sensor stage and the packer from what this run exercises. Judge binCV on\n"
+                    " the three lines above the total.\n");
+    } else if (useBincvSensor) {
+        std::printf(" The sensor stage ran in binCV's own spelling here, but it is kept out of\n"
+                    " the binCV total and listed on the same line as the OpenCV arm's, so runs\n"
+                    " of the two arms stay comparable line for line.\n");
+    } else {
+        std::printf(" The sensor stage is listed separately because it is NOT binCV's claim:\n"
+                    " in the reference system it is dedicated hardware, and binCV's domain starts at the binary\n"
+                    " frame. Judge binCV on the three lines above it.\n");
+    }
     return 0;
 }
