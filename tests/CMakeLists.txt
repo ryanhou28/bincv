@@ -313,7 +313,7 @@ set_tests_properties(test_harness_failing PROPERTIES WILL_FAIL TRUE)
 # Deliberately NOT ported to GTest's EXPECT_DEATH by T1.7. EXPECT_DEATH exists in
 # every configuration binCV builds (verified, -fno-exceptions included), but it
 # works by forking the test process and re-running it, which is materially more
-# fragile under the QEMU user-mode emulation scripts/verify_arm.sh runs in than
+# fragile under the QEMU user-mode emulation scripts/verify_cross.sh runs in than
 # "start this process and check how it ended". These cases are the only coverage
 # the no-exceptions build has for the validation checks, so they are the last
 # thing that should acquire a new way to fail.

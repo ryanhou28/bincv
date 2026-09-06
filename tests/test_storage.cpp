@@ -49,7 +49,7 @@ inline void escape(const void* p) { g_sink = p; }
 //
 // g++ 11.4 (x86_64) -O0 -O1 -O2 -O3
 // g++ 12.5 (x86_64, gcc:12) -O0 -O1 -O2 -O3
-// g++ 12.5 (arm64v8/gcc:12) -O0 -O2 <- the image scripts/verify_arm.sh uses
+// g++ 12.5 (arm64v8/gcc:12) -O0 -O2 <- the image scripts/verify_cross.sh uses
 // clang++ 18 (x86_64) -O0 -O2
 //
 // The -Walloc-size-larger-than= claim that used to sit on the guard below did not

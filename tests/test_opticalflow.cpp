@@ -1202,8 +1202,8 @@ void residualIdentity(const char* typeName) {
 //
 // `UseNeon` is a template parameter precisely so both spellings compile on one
 // machine. On x86 the NEON path compiles out and this compares the scalar path
-// with itself, which is a tautology and says so; `scripts/verify_arm.sh` runs the
-// aarch64 build under emulation, and THAT is where this test has teeth.
+// with itself, which is a tautology and says so; `scripts/verify_cross.sh` runs
+// the aarch64 build under emulation, and THAT is where this test has teeth.
 // ===========================================================================
 namespace {
 
