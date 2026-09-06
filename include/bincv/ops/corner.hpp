@@ -374,6 +374,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <new>  // std::nothrow -- the owning overload at the bottom, and nothing else
+#include <type_traits>  // is_same_v -- the mask-free max-reduce specialization
 
 #include "../core/error.hpp"
 #include "../core/types.hpp"
@@ -815,16 +816,35 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
     // over the ADMITTED pixels of it, because cv::minMaxLoc takes the mask too. With
     // no mask every pixel is admitted and this is the plain maximum, seeded from
     // (0, 0) exactly as it was before the mask existed.
+    // The mask-free path is split out, and the split is a MEASURED fix, not
+    // tidiness: with the admit test inside, the per-pixel branch kept the
+    // compiler from turning this into the vector max-reduce it plainly is --
+    // max over floats is exact, so the vector form is the same answer -- and
+    // the equivalent pass in the streaming form was 29% of a whole detection
+    // on the reference device. `Admit` is a compile-time type, so the no-mask
+    // specialization resolves at instantiation, not per pixel.
     float maxVal = 0.0f;
     bool admittedAny = false;
-    for (int y = 0; y < height; ++y) {
-        const float* r = response.row(static_cast<size_t>(y));
-        for (int x = 0; x < width; ++x) {
-            if (!admit(x, y)) continue;
-            const float v = r[static_cast<size_t>(x)];
-            if (!admittedAny || v > maxVal) {
-                maxVal = v;
-                admittedAny = true;
+    if constexpr (std::is_same_v<Admit, AdmitAll>) {
+        maxVal = response.row(0)[0];
+        for (int y = 0; y < height; ++y) {
+            const float* r = response.row(static_cast<size_t>(y));
+            for (int x = 0; x < width; ++x) {
+                const float v = r[static_cast<size_t>(x)];
+                maxVal = v > maxVal ? v : maxVal;
+            }
+        }
+        admittedAny = true;
+    } else {
+        for (int y = 0; y < height; ++y) {
+            const float* r = response.row(static_cast<size_t>(y));
+            for (int x = 0; x < width; ++x) {
+                if (!admit(x, y)) continue;
+                const float v = r[static_cast<size_t>(x)];
+                if (!admittedAny || v > maxVal) {
+                    maxVal = v;
+                    admittedAny = true;
+                }
             }
         }
     }
@@ -1460,14 +1480,40 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
     const int height = static_cast<int>(magX.height);
     const int blockSize = params.blockSize;
 
-    // Row 0 seeds the running maximum, so that no per-pixel "have we seen one
-    // yet" branch is needed and the seed is the same pixel `selectGoodFeatures`
-    // seeds `maxVal` from.
+    // Row 0 seeds the running maximum. UNDER A MASK THE SEED IS GATED TOO: an
+    // earlier version read row 0 unmasked, and a strong unadmitted pixel there
+    // inflated the running maximum past the strongest ADMITTED response -- the
+    // final threshold then exceeded the frame-map form's and the two forms
+    // parted company, which is exactly the equality this function promises.
+    // `Corner.Mask_StreamingSeedRowObeysTheMask` pins the adversarial case.
+    //
+    // The unmasked path seeds from `first[0]` and runs a bare max-reduce -- max
+    // over floats is exact, so the compiler is free to vectorize it, and the
+    // masked path's per-pixel gate is kept out of its way on purpose: this loop
+    // and its per-row twin below were 29% of a whole detection on the reference
+    // device before the split.
+    //
+    // The masked seed starts BELOW every response (-1: a response is never
+    // negative, see PRECISION above). Until the first admitted pixel arrives the
+    // running threshold is then negative, which only UNDER-prunes -- and the
+    // top-K argument in the section comment already tolerates any running
+    // threshold at or below the final one, so the answer is unchanged.
     float* first = ring.row(0);
     cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, 0, first);
-    float runningMax = first[0];
-    for (int x = 1; x < width; ++x) {
-        if (first[static_cast<size_t>(x)] > runningMax) runningMax = first[static_cast<size_t>(x)];
+    float runningMax;
+    if (masked) {
+        runningMax = -1.0f;
+        for (int x = 0; x < width; ++x) {
+            if (!masked_admit(x, 0)) continue;
+            if (first[static_cast<size_t>(x)] > runningMax)
+                runningMax = first[static_cast<size_t>(x)];
+        }
+    } else {
+        runningMax = first[0];
+        for (int x = 1; x < width; ++x) {
+            const float v = first[static_cast<size_t>(x)];
+            runningMax = v > runningMax ? v : runningMax;
+        }
     }
 
     // The whole carry, beside the caller's two buffers: the number of retained
@@ -1481,12 +1527,21 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
     for (int y = 1; y < height; ++y) {
         float* cur = ring.row(static_cast<size_t>(y) % kResponseRingRows);
         cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, y, cur);
-        for (int x = 0; x < width; ++x) {
-            // The mask gates this the way it gates the frame-map form's maxVal: the
-            // threshold is a fraction of the strongest ADMITTED response, because
-            // that is the region cv::minMaxLoc is given.
-            if (!admit(x, y)) continue;
-            if (cur[static_cast<size_t>(x)] > runningMax) runningMax = cur[static_cast<size_t>(x)];
+        // The mask gates this the way it gates the frame-map form's maxVal: the
+        // threshold is a fraction of the strongest ADMITTED response, because
+        // that is the region cv::minMaxLoc is given. The unmasked twin is the
+        // bare max-reduce -- see the seed loop on why the two are split.
+        if (masked) {
+            for (int x = 0; x < width; ++x) {
+                if (!masked_admit(x, y)) continue;
+                if (cur[static_cast<size_t>(x)] > runningMax)
+                    runningMax = cur[static_cast<size_t>(x)];
+            }
+        } else {
+            for (int x = 0; x < width; ++x) {
+                const float v = cur[static_cast<size_t>(x)];
+                runningMax = v > runningMax ? v : runningMax;
+            }
         }
 
         if (y < 2) continue;  // row `y - 1` has no row above it yet
