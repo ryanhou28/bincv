@@ -51,7 +51,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `binMat.hpp`
 
-[`bincv-cpp/include/bincv-cpp/binMat.hpp`](../bincv-cpp/include/bincv-cpp/binMat.hpp)
+[`include/bincv/binMat.hpp`](../include/bincv/binMat.hpp)
 
 | | tier | |
 |---|---|---|
@@ -72,7 +72,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `quantMat.hpp`
 
-[`bincv-cpp/include/bincv-cpp/quantMat.hpp`](../bincv-cpp/include/bincv-cpp/quantMat.hpp)
+[`include/bincv/quantMat.hpp`](../include/bincv/quantMat.hpp)
 
 | | tier | |
 |---|---|---|
@@ -108,7 +108,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/bitslice.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/bitslice.hpp`](../bincv-cpp/include/bincv-cpp/ops/bitslice.hpp)
+[`include/bincv/ops/bitslice.hpp`](../include/bincv/ops/bitslice.hpp)
 
 | | tier | |
 |---|---|---|
@@ -121,7 +121,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/blockMatch.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp`](../bincv-cpp/include/bincv-cpp/ops/blockMatch.hpp)
+[`include/bincv/ops/blockMatch.hpp`](../include/bincv/ops/blockMatch.hpp)
 
 | | tier | |
 |---|---|---|
@@ -133,7 +133,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/corner.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/corner.hpp`](../bincv-cpp/include/bincv-cpp/ops/corner.hpp)
+[`include/bincv/ops/corner.hpp`](../include/bincv/ops/corner.hpp)
 
 | | tier | |
 |---|---|---|
@@ -157,7 +157,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/covariance.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/covariance.hpp`](../bincv-cpp/include/bincv-cpp/ops/covariance.hpp)
+[`include/bincv/ops/covariance.hpp`](../include/bincv/ops/covariance.hpp)
 
 | | tier | |
 |---|---|---|
@@ -167,7 +167,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/denoise.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/denoise.hpp`](../bincv-cpp/include/bincv-cpp/ops/denoise.hpp)
+[`include/bincv/ops/denoise.hpp`](../include/bincv/ops/denoise.hpp)
 
 | | tier | |
 |---|---|---|
@@ -176,7 +176,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/derivative.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/derivative.hpp`](../bincv-cpp/include/bincv-cpp/ops/derivative.hpp)
+[`include/bincv/ops/derivative.hpp`](../include/bincv/ops/derivative.hpp)
 
 | | tier | |
 |---|---|---|
@@ -189,7 +189,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/descriptor.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/descriptor.hpp`](../bincv-cpp/include/bincv-cpp/ops/descriptor.hpp)
+[`include/bincv/ops/descriptor.hpp`](../include/bincv/ops/descriptor.hpp)
 
 | | tier | |
 |---|---|---|
@@ -204,7 +204,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/edge.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/edge.hpp`](../bincv-cpp/include/bincv-cpp/ops/edge.hpp)
+[`include/bincv/ops/edge.hpp`](../include/bincv/ops/edge.hpp)
 
 | | tier | |
 |---|---|---|
@@ -217,7 +217,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/essential.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/essential.hpp`](../bincv-cpp/include/bincv-cpp/ops/essential.hpp)
+[`include/bincv/ops/essential.hpp`](../include/bincv/ops/essential.hpp)
 
 | | tier | |
 |---|---|---|
@@ -231,7 +231,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/fast.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/fast.hpp`](../bincv-cpp/include/bincv-cpp/ops/fast.hpp)
+[`include/bincv/ops/fast.hpp`](../include/bincv/ops/fast.hpp)
 
 | | tier | |
 |---|---|---|
@@ -244,7 +244,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/logic.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/logic.hpp`](../bincv-cpp/include/bincv-cpp/ops/logic.hpp)
+[`include/bincv/ops/logic.hpp`](../include/bincv/ops/logic.hpp)
 
 | | tier | |
 |---|---|---|
@@ -257,7 +257,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/medianWide.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/medianWide.hpp`](../bincv-cpp/include/bincv-cpp/ops/medianWide.hpp)
+[`include/bincv/ops/medianWide.hpp`](../include/bincv/ops/medianWide.hpp)
 
 | | tier | |
 |---|---|---|
@@ -269,7 +269,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/morphology.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/morphology.hpp`](../bincv-cpp/include/bincv-cpp/ops/morphology.hpp)
+[`include/bincv/ops/morphology.hpp`](../include/bincv/ops/morphology.hpp)
 
 | | tier | |
 |---|---|---|
@@ -303,7 +303,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/occupancy.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/occupancy.hpp`](../bincv-cpp/include/bincv-cpp/ops/occupancy.hpp)
+[`include/bincv/ops/occupancy.hpp`](../include/bincv/ops/occupancy.hpp)
 
 | | tier | |
 |---|---|---|
@@ -316,7 +316,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/opticalFlow.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/opticalFlow.hpp`](../bincv-cpp/include/bincv-cpp/ops/opticalFlow.hpp)
+[`include/bincv/ops/opticalFlow.hpp`](../include/bincv/ops/opticalFlow.hpp)
 
 | | tier | |
 |---|---|---|
@@ -344,7 +344,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/pack.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/pack.hpp`](../bincv-cpp/include/bincv-cpp/ops/pack.hpp)
+[`include/bincv/ops/pack.hpp`](../include/bincv/ops/pack.hpp)
 
 | | tier | |
 |---|---|---|
@@ -361,7 +361,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/pyramid.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/pyramid.hpp`](../bincv-cpp/include/bincv-cpp/ops/pyramid.hpp)
+[`include/bincv/ops/pyramid.hpp`](../include/bincv/ops/pyramid.hpp)
 
 | | tier | |
 |---|---|---|
@@ -409,7 +409,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/ransac.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/ransac.hpp`](../bincv-cpp/include/bincv-cpp/ops/ransac.hpp)
+[`include/bincv/ops/ransac.hpp`](../include/bincv/ops/ransac.hpp)
 
 | | tier | |
 |---|---|---|
@@ -428,7 +428,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/reduce.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/reduce.hpp`](../bincv-cpp/include/bincv-cpp/ops/reduce.hpp)
+[`include/bincv/ops/reduce.hpp`](../include/bincv/ops/reduce.hpp)
 
 | | tier | |
 |---|---|---|
@@ -454,7 +454,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/resample.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/resample.hpp`](../bincv-cpp/include/bincv-cpp/ops/resample.hpp)
+[`include/bincv/ops/resample.hpp`](../include/bincv/ops/resample.hpp)
 
 | | tier | |
 |---|---|---|
@@ -467,7 +467,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/shift.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/shift.hpp`](../bincv-cpp/include/bincv-cpp/ops/shift.hpp)
+[`include/bincv/ops/shift.hpp`](../include/bincv/ops/shift.hpp)
 
 | | tier | |
 |---|---|---|
@@ -486,7 +486,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/subpix.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/subpix.hpp`](../bincv-cpp/include/bincv-cpp/ops/subpix.hpp)
+[`include/bincv/ops/subpix.hpp`](../include/bincv/ops/subpix.hpp)
 
 | | tier | |
 |---|---|---|
@@ -496,7 +496,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `ops/threshold.hpp`
 
-[`bincv-cpp/include/bincv-cpp/ops/threshold.hpp`](../bincv-cpp/include/bincv-cpp/ops/threshold.hpp)
+[`include/bincv/ops/threshold.hpp`](../include/bincv/ops/threshold.hpp)
 
 | | tier | |
 |---|---|---|
@@ -505,7 +505,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `io/pnm.hpp`
 
-[`bincv-cpp/include/bincv-cpp/io/pnm.hpp`](../bincv-cpp/include/bincv-cpp/io/pnm.hpp)
+[`include/bincv/io/pnm.hpp`](../include/bincv/io/pnm.hpp)
 
 | | tier | |
 |---|---|---|
@@ -519,7 +519,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `core/parallel.hpp`
 
-[`bincv-cpp/include/bincv-cpp/core/parallel.hpp`](../bincv-cpp/include/bincv-cpp/core/parallel.hpp)
+[`include/bincv/core/parallel.hpp`](../include/bincv/core/parallel.hpp)
 
 | | tier | |
 |---|---|---|
@@ -530,7 +530,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `core/simd.hpp`
 
-[`bincv-cpp/include/bincv-cpp/core/simd.hpp`](../bincv-cpp/include/bincv-cpp/core/simd.hpp)
+[`include/bincv/core/simd.hpp`](../include/bincv/core/simd.hpp)
 
 | | tier | |
 |---|---|---|
@@ -540,7 +540,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `core/storage.hpp`
 
-[`bincv-cpp/include/bincv-cpp/core/storage.hpp`](../bincv-cpp/include/bincv-cpp/core/storage.hpp)
+[`include/bincv/core/storage.hpp`](../include/bincv/core/storage.hpp)
 
 | | tier | |
 |---|---|---|
@@ -558,7 +558,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `core/types.hpp`
 
-[`bincv-cpp/include/bincv-cpp/core/types.hpp`](../bincv-cpp/include/bincv-cpp/core/types.hpp)
+[`include/bincv/core/types.hpp`](../include/bincv/core/types.hpp)
 
 | | tier | |
 |---|---|---|
@@ -571,7 +571,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `core/view.hpp`
 
-[`bincv-cpp/include/bincv-cpp/core/view.hpp`](../bincv-cpp/include/bincv-cpp/core/view.hpp)
+[`include/bincv/core/view.hpp`](../include/bincv/core/view.hpp)
 
 | | tier | |
 |---|---|---|
@@ -584,7 +584,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 ## `threads/pool.hpp`
 
-[`bincv-cpp/include/bincv-cpp/threads/pool.hpp`](../bincv-cpp/include/bincv-cpp/threads/pool.hpp)
+[`include/bincv/threads/pool.hpp`](../include/bincv/threads/pool.hpp)
 
 | | tier | |
 |---|---|---|

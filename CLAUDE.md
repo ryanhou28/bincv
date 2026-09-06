@@ -19,7 +19,29 @@ choice has been made, memory wins.**
 | [GETTING_STARTED.md](GETTING_STARTED.md) | Build, use, conventions |
 
 Maintainer-only working files — the measurement log, the reference-device scripts, the
-one-off probes — live in `.local/` and are **not** part of the repository.
+one-off probes — live in `.local/` and `experiments/`, and are **not** part of the
+repository.
+
+The tree is one axis: the library, the things that exercise it, the places it runs.
+
+```
+include/bincv/   the library — header-only, zero dependencies
+src/             the handful of non-header sources
+tests/ benchmark/ examples/   consumers of the library
+targets/         bare-metal harnesses that RUN it on a device
+backends/        alternative compute backends (cuda/)
+cmake/ scripts/ docs/
+```
+
+**A backend shares the representation and forks the kernels.** The format, the views
+and the invariants have one definition, because the copy that drifts is silently wrong
+in a way that looks like a correct answer. Kernels are not shared: a device traversal
+has nothing in common with a row loop, and pretending otherwise costs the performance
+the backend exists for. A backend is **never a drop-in dispatch target** — device types
+stay device-typed, so no call can hide where its memory lives.
+
+`backends/cuda/` today holds a prototype that predates that decision and shares none of
+the representation. What replaces it is open work, not an open question about shape.
 
 ## How performance and footprint decisions get made
 
@@ -80,7 +102,7 @@ Read the two numbers in its summary table:
 
 - **CTEST** — cases run.
 - **CHECKS** — assertions executed. A drop is a regression even when every case still
-  passes, so per-suite floors live in `bincv-cpp/tests/expected-checks.txt` and a count
+  passes, so per-suite floors live in `tests/expected-checks.txt` and a count
   below one of them fails the run. Raising a floor is a reviewed edit
   (`./scripts/verify.sh --update-checks-baseline`, then commit the diff).
 
@@ -98,7 +120,7 @@ It is **compile-only** (the host cannot execute an M-profile image) and, like
 `verify_arm.sh`, exits **77** when it cannot run at all, which is not a pass.
 
 **Warnings are project policy, not the script's.** They live in
-`bincv-cpp/cmake/BincvWarnings.cmake` and are on in every build:
+`cmake/BincvWarnings.cmake` and are on in every build:
 `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion`. `-Werror` is off by
 default so a mid-edit build still finishes; the gate turns it on. Warnings apply to
 first-party targets only — never to `bincv_core`'s interface, because a consumer's warning
@@ -156,7 +178,9 @@ image into another and leave the caller exactly as far from bits as before. Ever
 from such an array down to bits is binCV's, **including sources wider than 8 bits**,
 because downconverting first destroys small gradients before the threshold can see them.
 
-GPU backends are a **TODO**, not out of scope. A CUDA prototype lives in `bincv-cuda/`.
+GPU backends are a **TODO**, not out of scope. A CUDA prototype lives in
+`backends/cuda/`, and it predates the decision above: it is byte-per-pixel and shares
+none of binCV's representation, so it is a placeholder rather than a foundation.
 
 ## Style
 

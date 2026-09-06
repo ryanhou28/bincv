@@ -5,7 +5,7 @@ binCV is header-only and needs a C++17 compiler. OpenCV is optional.
 ## Build
 
 ```bash
-cmake -S bincv-cpp -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
@@ -15,30 +15,52 @@ Run the tests:
 cd build && ctest --output-on-failure
 ```
 
-Without OpenCV:
+Without OpenCV — this is the core-only configuration an embedded target uses:
 
 ```bash
-cmake -S bincv-cpp -B build -DCMAKE_BUILD_TYPE=Release -DBINCV_USE_OPENCV=OFF
+cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Release -DBINCV_USE_OPENCV=OFF
 ```
+
+### Options
+
+| Option | Default | Effect |
+|---|---|---|
+| `BINCV_USE_OPENCV` | ON | Interop, the interop tests, and the OpenCV-comparison benchmarks |
+| `BINCV_BUILD_TESTS` | ON | Build the suites and register them with ctest |
+| `BINCV_BUILD_BENCHMARKS` | ON | Benchmarks. The binCV-versus-binCV ones build without OpenCV; the comparisons are skipped without it |
+| `BINCV_BUILD_EMBEDDED` | OFF | The bare-metal targets under `targets/`. Needs an arm-none-eabi cross build — see `cmake/toolchain-cortex-m7.cmake` |
+| `BINCV_X86_POPCNT` | ON | Build with `-mpopcnt`. Off is supported and slower; see the comment in `CMakeLists.txt` |
+
+## Benchmark
+
+```bash
+./build/benchmark/fill_benchmark --width 640 --height 480 \
+    --iterations 100 --dtype binary --sparsity 0.5
+```
+
+Or the full sweep, `./scripts/run_all_benchmarks.sh`.
+
+**Always benchmark a Release build**, and read the rules below on the comparison
+denominator before quoting a ratio.
 
 ## Use it in your project
 
 With CMake — **do this rather than adding the include path by hand:**
 
 ```cmake
-add_subdirectory(path/to/bincv-cpp)
+add_subdirectory(path/to/bincv)
 target_link_libraries(your_target PRIVATE bincv_core)
 ```
 
 The ISA flags that select the fast paths ride on the `bincv_core` target. Adding
-`bincv-cpp/include` to your include path alone gives you a correct library that is
+the `include/` directory to your include path alone gives you a correct library that is
 several times slower, with no warning — the vector kernels produce identical results, so
 nothing looks wrong.
 
 **Log this once at start-up and you will never wonder:**
 
 ```cpp
-#include "bincv-cpp/core/simd.hpp"
+#include "bincv/core/simd.hpp"
 std::printf("%s\n", bincv::simdStatusString());
 // binCV SIMD: NEON=yes AVX2=n/a popcount=hardware  (fast paths active)
 ```
@@ -50,8 +72,8 @@ Threshold a grayscale frame straight into bit-planes — no OpenCV, no 8-bit int
 ```cpp
 #include <cstdio>
 #include <vector>
-#include "bincv-cpp/ops/edge.hpp"
-#include "bincv-cpp/ops/reduce.hpp"
+#include "bincv/ops/edge.hpp"
+#include "bincv/ops/reduce.hpp"
 
 int main() {
     const size_t w = 640, h = 480;
@@ -83,7 +105,7 @@ twice the stride — and it runs at native 32-bit speed.
 
 ## A tracking frontend
 
-`bincv-cpp/examples/vio_frontend.cpp` is a complete keypoint-tracking frontend: sensor
+`examples/vio_frontend.cpp` is a complete keypoint-tracking frontend: sensor
 stage, pyramid, derivatives, corner detection, Lucas–Kanade, and re-detection when tracks
 run out. It is the best starting point for anything larger than one operation.
 

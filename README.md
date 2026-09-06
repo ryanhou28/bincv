@@ -4,9 +4,9 @@
 bit width.** One bit per pixel, not eight, with OpenCV's API shape.
 
 ```cpp
-#include "bincv-cpp/ops/logic.hpp"
-#include "bincv-cpp/ops/morphology.hpp"
-#include "bincv-cpp/ops/reduce.hpp"
+#include "bincv/ops/logic.hpp"
+#include "bincv/ops/morphology.hpp"
+#include "bincv/ops/reduce.hpp"
 
 // Binary images, one bit per pixel. A 640x480 mask is 38 KB, not 307 KB.
 bincv::BinMat<uint32_t> mask(640, 480), roi(640, 480);
@@ -54,7 +54,7 @@ and the machine — so rather than quote a number here, the benchmarks are in th
 repository and report on your hardware:
 
 ```bash
-cmake -S bincv-cpp -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/benchmark/logic_benchmark          # a primitive, against OpenCV
 ./build/benchmark/frontend_sequence <dir>  # a whole tracking frontend, against OpenCV
@@ -99,12 +99,12 @@ whether it is active.
 ## Building
 
 ```bash
-cmake -S bincv-cpp -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
 OpenCV is optional: `-DBINCV_USE_OPENCV=OFF` builds the library and its tests without it.
-binCV is header-only, so you can also just add `bincv-cpp/include` to your include path —
+binCV is header-only, so you can also just add the `include/` directory to your include path —
 but **link the `bincv_core` target if you use CMake**, because the ISA flags ride on it.
 
 See [GETTING_STARTED.md](GETTING_STARTED.md).

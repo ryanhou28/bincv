@@ -13,7 +13,7 @@ import re
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-INC = ROOT / "bincv-cpp" / "include" / "bincv-cpp"
+INC = ROOT / "include" / "bincv"
 OUT = ROOT / "docs" / "API.md"
 
 # A declaration we consider public API: a function, type or enum at namespace scope.
@@ -89,7 +89,7 @@ def main():
         for path in sorted(d.glob("*.hpp")):
             entries = briefs(path)
             if entries:
-                rel = path.relative_to(INC.parent.parent.parent)
+                rel = path.relative_to(ROOT)
                 groups.append((f"{sub + '/' if sub else ''}{path.name}", rel, entries))
 
     lines = [
