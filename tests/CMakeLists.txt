@@ -227,7 +227,7 @@ set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_erro
                      test_pyramid test_derivative test_covariance test_corner
                      test_opticalflow test_pack test_edge test_median_wide test_descriptor test_fast
                      test_subpix test_view_narrow test_occupancy test_simd test_ransac test_essential
-                     test_orientation)
+                     test_orientation test_stereo)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
