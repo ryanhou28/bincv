@@ -110,13 +110,19 @@ stage, pyramid, derivatives, corner detection, Lucas–Kanade, and re-detection 
 run out. It is the best starting point for anything larger than one operation.
 
 ```bash
-./build/examples/vio_frontend <directory-of-png-frames>
+./build/examples/vio_frontend <directory-of-png-frames>   # OpenCV builds
+./build/examples/vio_frontend frames.bsq                  # any build, core-only included
 ```
 
-The example reads PNG through OpenCV, which it already needs for the sensor stage it
-deliberately runs outside binCV. binCV itself links no codec on any target — see
-[ARCHITECTURE.md](docs/ARCHITECTURE.md) — and the library's own file I/O is PNM
-(`readPbm`/`writePbm`, `readPgm`/`writePgm`), which needs nothing.
+With OpenCV present it reads PNG through `cv::imread` and runs the sensor stage in
+OpenCV's vocabulary — deliberately, to show the caller's half of the input boundary. A
+core-only build reads a **sequence blob** instead (`scripts/make_sequence_blob.py` turns
+a frame directory into one on any host) and runs the sensor stage in binCV's own
+spelling (`medianWide` + `edgeThreshold`), so the embedded configuration runs real
+dataset frames end to end with no OpenCV anywhere. binCV itself links no codec on any
+target — see [ARCHITECTURE.md](docs/ARCHITECTURE.md) — and the library's own file I/O
+is PNM (`readPbm`/`writePbm`, `readPgm`/`writePgm`) plus the blob reader
+(`io/sequence.hpp`), which need nothing.
 
 ## Embedded targets
 

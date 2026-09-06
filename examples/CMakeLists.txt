@@ -11,6 +11,18 @@
 # from a sequence blob (scripts/make_sequence_blob.py) and runs binCV's own
 # sensor stage. An example that cannot compile core-clean with its OpenCV half
 # guarded off does not belong in this directory.
+#
+# Freestanding targets are the one real exclusion. The examples are HOSTED
+# programs -- they fopen a blob or a directory, allocate, and read a clock --
+# so on a bare-metal configure (CMAKE_SYSTEM_NAME Generic, the Cortex-M7
+# toolchain file) they cannot link: newlib with no OS has no syscalls under
+# fopen. The library they demonstrate still compiles there; that is what
+# scripts/verify_cortex_m.sh checks, suite by suite.
+if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
+    message(STATUS "Examples: skipping; hosted programs (files, heap, clock) on a freestanding target")
+    return()
+endif()
+
 file(GLOB EXAMPLE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 foreach(example_src ${EXAMPLE_SOURCES})
     get_filename_component(example_name ${example_src} NAME_WE)
