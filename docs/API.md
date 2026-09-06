@@ -44,6 +44,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/subpix.hpp`](#opssubpixhpp) — 3 entries
 - [`ops/threshold.hpp`](#opsthresholdhpp) — 2 entries
 - [`io/pnm.hpp`](#iopnmhpp) — 7 entries
+- [`io/sequence.hpp`](#iosequencehpp) — 6 entries
 - [`core/parallel.hpp`](#coreparallelhpp) — 4 entries
 - [`core/simd.hpp`](#coresimdhpp) — 3 entries
 - [`core/storage.hpp`](#corestoragehpp) — 11 entries
@@ -544,6 +545,19 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `readPbmHeader` | 3 | Parses a binary PBM (`P4`) header |
 | `readPgm` | 3 | Reads a binary PGM straight into bits, under a `PackRule` |
 | `readPbm` | 3 | Reads a binary PBM (`P4`) into a bit matrix |
+
+## `io/sequence.hpp`
+
+[`include/bincv/io/sequence.hpp`](../include/bincv/io/sequence.hpp)
+
+| | tier | |
+|---|---|---|
+| `SequenceHeader` *(struct)* | — | What a `readSequenceHeader` call found, or why it did not |
+| `SequenceFrameRange` *(struct)* | — | One frame's body within a blob, or `valid == false` |
+| `readSequenceHeader` | 3 | Parses a `BSQ1` header from the first 32 bytes |
+| `sequenceFrame` | 3 | Frame `i`'s body bytes, bounds-checked |
+| `readSequenceFrameBody` | 3 | Unpacks ONE mode-1 frame body into a bit matrix |
+| `readSequenceFrame` | 3 | Reads mode-1 frame `i` of a whole blob into a bit matrix |
 
 ## `core/parallel.hpp`
 

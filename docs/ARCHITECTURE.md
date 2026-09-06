@@ -212,6 +212,15 @@ a copy rather than a codec. Two properties keep this honest, and both are load-b
   is bit-identical to the whole-buffer one. `P4` needs no such path: its file already is
   the matrix.
 
+A frame **sequence** travels the same way. `io/sequence.hpp`'s blob is a fixed 32-byte
+header followed by `P4`- or `P5`-shaped bodies back to back — the same two layouts,
+concatenated, no third pixel format and still no codec — so a filesystem-less target can
+be fed a whole dataset from one byte range: a file to `fread` or mmap, an app asset, an
+`xxd -i` array in flash, a stream over USB/UART. `scripts/make_sequence_blob.py` writes
+one on the host, which is where the decoders live; its packed mode also runs the sensor
+stage there, trading coverage for 8× more frames in the same flash, and the header
+records which trade a blob made so a reader cannot confuse them.
+
 ---
 
 ## 8. Platforms
@@ -235,7 +244,7 @@ have not been built, and until they are, nothing here is a claim about them.
 Measured on an STM32H753ZI (Cortex-M7) with arm-none-eabi GCC 14.2, `-fno-exceptions
 -fno-rtti`, newlib, and no vendor SDK:
 
-**Runs.** `bincv_core` in full — containers, views and the `ops/` kernels. 33 of the 34
+**Runs.** `bincv_core` in full — containers, views and the `ops/` kernels. 34 of the 35
 test suites cross-compile clean under the whole warning set at 32-bit `size_t`, a pointer
 width the four-word-type sweep had never been compiled at before; the one 64-bit
 assumption it exposed was in a test, not the library.

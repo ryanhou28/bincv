@@ -156,6 +156,37 @@ inline PnmHead pnmParse(const uint8_t* d, size_t n, char magic, bool requireBody
     return h;
 }
 
+/// @brief Unpacks a `P4` BODY -- MSB-first bytes, rows padded to a byte -- into
+/// bits. **INTERNAL.**
+/// @note The body layout exists in exactly one place, here. `readPbm` consumes it
+/// with a header in front; io/sequence.hpp's packed frames are the same bytes
+/// with no header at all. A second copy of this loop would be the layout
+/// defined twice, and the copy that drifts reads a plausible image wrongly.
+/// @note `dst`'s dimensions are the caller's promise; `body` must hold
+/// `pbmRowBytes(width) * height` bytes. `dst`'s padding bits are zero on
+/// return -- the file may carry anything in ITS row padding, binCV may not.
+template <typename WordType>
+inline void readP4Body(const uint8_t* body, BinMatView<WordType> dst) {
+    constexpr size_t kWordBits = BinMatView<WordType>::WordBits;
+    const size_t rowBytes = pbmRowBytes(dst.width);
+    const size_t words = minRowWords<WordType>(dst.width);
+    for (size_t y = 0; y < dst.height; ++y) {
+        WordType* out = dst.row(y);
+        for (size_t i = 0; i < words; ++i) out[i] = 0;
+        const uint8_t* in = body + y * rowBytes;
+        for (size_t j = 0; j < rowBytes; ++j) {
+            const size_t x0 = j * 8;
+            uint8_t b = reverseByte(in[j]);
+            if (x0 + 8 > dst.width) {
+                b = static_cast<uint8_t>(b & ((1u << (dst.width - x0)) - 1u));
+            }
+            const WordType bits = static_cast<WordType>(static_cast<WordType>(b)
+                                                        << (x0 % kWordBits));
+            out[x0 / kWordBits] = static_cast<WordType>(out[x0 / kWordBits] | bits);
+        }
+    }
+}
+
 } // namespace impl
 
 /// @brief Parses a binary PGM (`P5`) header. **API TIER 3.**
@@ -259,24 +290,7 @@ inline bool readPbm(const uint8_t* data, size_t size, BinMatView<WordType> dst) 
     if (dst.width == 0 || dst.height == 0) return true;
     if (dst.ptr == nullptr) return false;
 
-    constexpr size_t kWordBits = BinMatView<WordType>::WordBits;
-    const size_t rowBytes = impl::pbmRowBytes(dst.width);
-    const size_t words = impl::minRowWords<WordType>(dst.width);
-    for (size_t y = 0; y < dst.height; ++y) {
-        WordType* out = dst.row(y);
-        for (size_t i = 0; i < words; ++i) out[i] = 0;
-        const uint8_t* in = data + h.pixelOffset + y * rowBytes;
-        for (size_t j = 0; j < rowBytes; ++j) {
-            const size_t x0 = j * 8;
-            uint8_t b = impl::reverseByte(in[j]);
-            if (x0 + 8 > dst.width) {
-                b = static_cast<uint8_t>(b & ((1u << (dst.width - x0)) - 1u));
-            }
-            const WordType bits = static_cast<WordType>(static_cast<WordType>(b)
-                                                        << (x0 % kWordBits));
-            out[x0 / kWordBits] = static_cast<WordType>(out[x0 / kWordBits] | bits);
-        }
-    }
+    impl::readP4Body<WordType>(data + h.pixelOffset, dst);
     return true;
 }
 
