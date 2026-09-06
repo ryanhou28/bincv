@@ -8,7 +8,7 @@
 > build on, not a component.
 
 When GPU work resumes, the storage model
-([ARCHITECTURE §4.3](../docs/ARCHITECTURE.md#43-storage-model-and-views)) is designed
+([ARCHITECTURE §4.3](../../docs/ARCHITECTURE.md#43-storage-model-and-views)) is designed
 to make it possible without an API break: non-owning views over externally
 allocated memory are the same mechanism used for DMA and unified memory.
 

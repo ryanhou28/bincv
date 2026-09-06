@@ -29,10 +29,19 @@ include/bincv/   the library — header-only, zero dependencies
 src/             the handful of non-header sources
 tests/ benchmark/ examples/   consumers of the library
 targets/         bare-metal harnesses that RUN it on a device
+backends/        alternative compute backends (cuda/)
 cmake/ scripts/ docs/
 ```
 
-`bincv-cuda/` sits outside that, and what it should become is an open decision.
+**A backend shares the representation and forks the kernels.** The format, the views
+and the invariants have one definition, because the copy that drifts is silently wrong
+in a way that looks like a correct answer. Kernels are not shared: a device traversal
+has nothing in common with a row loop, and pretending otherwise costs the performance
+the backend exists for. A backend is **never a drop-in dispatch target** — device types
+stay device-typed, so no call can hide where its memory lives.
+
+`backends/cuda/` today holds a prototype that predates that decision and shares none of
+the representation. What replaces it is open work, not an open question about shape.
 
 ## How performance and footprint decisions get made
 
@@ -169,7 +178,9 @@ image into another and leave the caller exactly as far from bits as before. Ever
 from such an array down to bits is binCV's, **including sources wider than 8 bits**,
 because downconverting first destroys small gradients before the threshold can see them.
 
-GPU backends are a **TODO**, not out of scope. A CUDA prototype lives in `bincv-cuda/`.
+GPU backends are a **TODO**, not out of scope. A CUDA prototype lives in
+`backends/cuda/`, and it predates the decision above: it is byte-per-pixel and shares
+none of binCV's representation, so it is a placeholder rather than a foundation.
 
 ## Style
 

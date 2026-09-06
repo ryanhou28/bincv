@@ -1,8 +1,8 @@
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <filesystem>
-#include "bincv-cuda/edge_filter.hpp"
-#include "bincv-cuda/util.hpp"
+#include "bincv/cuda/edge_filter.hpp"
+#include "bincv/cuda/util.hpp"
 
 int main() {
     std::string imagePath = std::filesystem::path(__FILE__).parent_path().string()

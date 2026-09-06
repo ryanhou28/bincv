@@ -1,4 +1,4 @@
-#include "bincv-cuda/util.hpp"
+#include "bincv/cuda/util.hpp"
 #include <cuda_runtime.h>
 #include <stdint.h>
 

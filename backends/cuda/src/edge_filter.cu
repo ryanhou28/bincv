@@ -1,4 +1,4 @@
-#include "bincv-cuda/edge_filter.hpp"
+#include "bincv/cuda/edge_filter.hpp"
 #include <cuda_runtime.h>
 #include <stdint.h>
 

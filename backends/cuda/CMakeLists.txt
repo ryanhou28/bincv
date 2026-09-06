@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # Include path for public headers
-include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Source files (both .cpp and .cu)
 file(GLOB_RECURSE SRC_FILES
