@@ -41,7 +41,7 @@
 # Before T1.8 nothing in this project enabled a single warning flag, so the
 # "must build warning-free" requirement in CLAUDE.md, TASKS.md and
 # GETTING_STARTED.md passed vacuously (OVERNIGHT_LOG finding 5). The flags now
-# live in bincv-cpp/cmake/BincvWarnings.cmake and this script configures every
+# live in cmake/BincvWarnings.cmake and this script configures every
 # build with -DBINCV_WERROR=ON, so a warning stops the build here even though a
 # plain `cmake --build` still only prints it.
 #
@@ -77,7 +77,7 @@ if command -v readlink >/dev/null 2>&1 && readlink -f "${SELF}" >/dev/null 2>&1;
     SELF="$(readlink -f "${SELF}")"
 fi
 REPO_ROOT="$(cd "$(dirname "${SELF}")/.." && pwd)"
-SRC_DIR="${REPO_ROOT}/bincv-cpp"
+SRC_DIR="${REPO_ROOT}"
 LOG_DIR="${SRC_DIR}/build-logs"
 BASELINE_FILE="${SRC_DIR}/tests/expected-checks.txt"
 
@@ -718,7 +718,7 @@ done
 echo "================================================================================"
 echo "  CHECKS is assertions executed, not ctest cases; '+Ns' is checks the"
 echo "  configuration cannot express in-process and covers as death tests instead."
-echo "  Floors live in bincv-cpp/tests/expected-checks.txt; a drop there is red."
+echo "  Floors live in tests/expected-checks.txt; a drop there is red."
 echo "  logs: ${LOG_DIR}"
 
 ARM_NOTE=""

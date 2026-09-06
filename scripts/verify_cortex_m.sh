@@ -19,7 +19,7 @@
 # part is a heavier dependency than a gate should carry. Issue #13 allows exactly
 # this ("qemu-user or a cross-compiler suffices, since this is a correctness
 # axis"). Execution is verified on real hardware -- see
-# bincv-cpp/targets/stm32h753/README.md -- and nothing here is a timing result.
+# targets/stm32h753/README.md -- and nothing here is a timing result.
 #
 #   ./scripts/verify_cortex_m.sh
 #
@@ -38,7 +38,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-SRC_DIR="${REPO_ROOT}/bincv-cpp"
+SRC_DIR="${REPO_ROOT}"
 
 MCPU="-mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard"
 WARN="-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Werror"
@@ -193,7 +193,7 @@ if [[ ${failed} -eq 0 && ${warned} -eq 0 ]]; then
     echo "  CORTEX-M OK -- ${compiled} suites compile clean at 32-bit size_t,"
     echo "  the negative test still fails, and the bare-metal image links."
     echo "  Compile-only: nothing was executed. Execution is verified on hardware,"
-    echo "  see bincv-cpp/targets/stm32h753/README.md."
+    echo "  see targets/stm32h753/README.md."
     echo "============================================================"
     exit 0
 fi

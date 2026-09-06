@@ -176,7 +176,7 @@ holds.
 ## Reproducing
 
 ```bash
-cmake -S bincv-cpp -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/benchmark/logic_benchmark                     # a primitive, against OpenCV
 ./build/benchmark/frontend_sequence <euroc-cam0-dir>  # the whole frontend, against OpenCV

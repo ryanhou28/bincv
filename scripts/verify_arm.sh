@@ -61,8 +61,8 @@ PLATFORM="linux/arm64"
 # so rather than pass.
 REQUIRE_REFERENCE="${BINCV_ARM_REQUIRE_REFERENCE:-0}"
 
-if [[ ! -f "${REPO_ROOT}/bincv-cpp/CMakeLists.txt" ]]; then
-    echo "verify_arm.sh: ${REPO_ROOT}/bincv-cpp/CMakeLists.txt not found -- this does not look like the binCV repo" >&2
+if [[ ! -f "${REPO_ROOT}/CMakeLists.txt" ]]; then
+    echo "verify_arm.sh: ${REPO_ROOT}/CMakeLists.txt not found -- this does not look like the binCV repo" >&2
     exit 2
 fi
 
@@ -113,7 +113,7 @@ if ! docker run --rm --platform "${PLATFORM}" "${IMAGE}" uname -m 2>/dev/null | 
 fi
 echo "  ok -- ${IMAGE} reports aarch64"
 
-STAMP="$(source_stamp "${REPO_ROOT}/bincv-cpp")"
+STAMP="$(source_stamp "${REPO_ROOT}")"
 echo "  sources: ${STAMP}"
 echo
 
@@ -129,7 +129,7 @@ docker run --rm -i \
     "${IMAGE}" bash -s <<'CONTAINER_SCRIPT'
 set -euo pipefail
 
-SRC=/src/bincv-cpp
+SRC=/src
 OUT=/tmp/bincv-arm
 LOGS=/tmp/bincv-arm-logs
 mkdir -p "$OUT" "$LOGS"
@@ -160,7 +160,7 @@ echo
 # ---------------------------------------------------------------------------
 python3 - <<'PY' > "$LOGS/manifest.txt"
 import re
-src = open('/src/bincv-cpp/tests/CMakeLists.txt').read()
+src = open('/src/tests/CMakeLists.txt').read()
 
 # Regions guarded by if(BINCV_OPENCV_FOUND) ... endif()
 guarded = []
@@ -420,7 +420,7 @@ fi
 STATUS_REF="PASS"
 echo "  comparing check counts against the x86_64 run"
 for cfg in core noexcept; do
-    ref="/src/bincv-cpp/build-logs/checks-$cfg.txt"
+    ref="/src/build-logs/checks-$cfg.txt"
     mine="$LOGS/$cfg-checks.txt"
 
     if [ ! -f "$ref" ]; then

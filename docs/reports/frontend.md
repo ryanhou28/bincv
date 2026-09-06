@@ -154,7 +154,7 @@ here, and a frontend figure quoted without its sequence is not a figure.
 ## Reproduce
 
 ```bash
-cmake -S bincv-cpp -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 ./build/benchmark/frontend_sequence <euroc-V1_02-cam0-dir>
 
 # equal thread counts on both sides

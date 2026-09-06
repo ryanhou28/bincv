@@ -8,7 +8,7 @@
 PROJECT_NAME           = "binCV"
 PROJECT_BRIEF          = "Low-bit-width image processing at true bit width"
 OUTPUT_DIRECTORY       = docs/api
-INPUT                  = bincv-cpp/include
+INPUT                  = include
 FILE_PATTERNS          = *.hpp
 RECURSIVE              = YES
 

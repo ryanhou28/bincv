@@ -19,7 +19,20 @@ choice has been made, memory wins.**
 | [GETTING_STARTED.md](GETTING_STARTED.md) | Build, use, conventions |
 
 Maintainer-only working files — the measurement log, the reference-device scripts, the
-one-off probes — live in `.local/` and are **not** part of the repository.
+one-off probes — live in `.local/` and `experiments/`, and are **not** part of the
+repository.
+
+The tree is one axis: the library, the things that exercise it, the places it runs.
+
+```
+include/bincv/   the library — header-only, zero dependencies
+src/             the handful of non-header sources
+tests/ benchmark/ examples/   consumers of the library
+targets/         bare-metal harnesses that RUN it on a device
+cmake/ scripts/ docs/
+```
+
+`bincv-cuda/` sits outside that, and what it should become is an open decision.
 
 ## How performance and footprint decisions get made
 
@@ -80,7 +93,7 @@ Read the two numbers in its summary table:
 
 - **CTEST** — cases run.
 - **CHECKS** — assertions executed. A drop is a regression even when every case still
-  passes, so per-suite floors live in `bincv-cpp/tests/expected-checks.txt` and a count
+  passes, so per-suite floors live in `tests/expected-checks.txt` and a count
   below one of them fails the run. Raising a floor is a reviewed edit
   (`./scripts/verify.sh --update-checks-baseline`, then commit the diff).
 
@@ -98,7 +111,7 @@ It is **compile-only** (the host cannot execute an M-profile image) and, like
 `verify_arm.sh`, exits **77** when it cannot run at all, which is not a pass.
 
 **Warnings are project policy, not the script's.** They live in
-`bincv-cpp/cmake/BincvWarnings.cmake` and are on in every build:
+`cmake/BincvWarnings.cmake` and are on in every build:
 `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion`. `-Werror` is off by
 default so a mid-edit build still finishes; the gate turns it on. Warnings apply to
 first-party targets only — never to `bincv_core`'s interface, because a consumer's warning

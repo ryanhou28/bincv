@@ -94,7 +94,7 @@ favour is the one that gets published, but the discipline is the same either way
 
 ### Heap — allocator interposition
 
-[`benchmark/heap_probe.cpp`](../../bincv-cpp/benchmark/heap_probe.cpp) defines `malloc`,
+[`benchmark/heap_probe.cpp`](../../benchmark/heap_probe.cpp) defines `malloc`,
 `free`, `calloc`, `realloc`, `memalign`, `aligned_alloc` and `posix_memalign`. The
 executable's definitions preempt libc's for every dynamically linked caller, OpenCV
 included, which is what makes it see `fastMalloc`. Block sizes come from
@@ -116,7 +116,7 @@ reported 42,344 B where the probe read 46,968 B for the same call — the differ
 
 ### Stack — guard-page bisection
 
-[`benchmark/essential_stack_benchmark.cpp`](../../bincv-cpp/benchmark/essential_stack_benchmark.cpp)
+[`benchmark/essential_stack_benchmark.cpp`](../../benchmark/essential_stack_benchmark.cpp)
 runs the call on a thread with a bounded stack inside a forked child and bisects for the
 smallest stack it survives, at 16 B granularity.
 
@@ -218,7 +218,7 @@ It does not affect the figures reported here, and that is checked rather than as
 
 ```bash
 # on the device, from the repository root
-g++ -O2 -std=c++17 -I bincv-cpp/include -fstack-usage -c su_probe.cpp -o su_probe.o
+g++ -O2 -std=c++17 -I include -fstack-usage -c su_probe.cpp -o su_probe.o
 sort -t$'\t' -k2 -rn su_probe.su      # frames, largest first
 grep -c dynamic su_probe.su           # 0 means every frame is a real bound
 ```
@@ -305,7 +305,7 @@ the reason both sides here are measured with a binary-level instrument instead.
 ## Reproduce
 
 ```bash
-cmake -S bincv-cpp -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/benchmark/essential_benchmark        # heap, both sides, with its self-check
 ./build/benchmark/essential_stack_benchmark  # stack, with its calibration rows
