@@ -169,8 +169,11 @@ smaller or faster — and does not when binCV would contribute nothing but a sec
 implementation to keep correct.
 
 That covers image processing, features and tracking, and the geometry the frontend consumes
-downstream of them. IMU fusion and bundle adjustment are absent because nothing has needed
-them yet, which is a fact about the use cases rather than a line drawn on principle.
+downstream of them. The SLAM use case brought the descriptor path — orientation, steered
+BRIEF, Hamming matching — and sparse rectified stereo, for the same reason tracking brought
+LK: a caller's pipeline runs them, and bits make them cheaper. IMU fusion and bundle
+adjustment are absent because nothing has needed them yet, which is a fact about the use
+cases rather than a line drawn on principle.
 
 ### binCV links no codec, on any target
 

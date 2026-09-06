@@ -113,6 +113,16 @@ run out. It is the best starting point for anything larger than one operation.
 ./build/examples/vio_frontend <directory-of-png-frames>
 ```
 
+`examples/slam_frontend.cpp` is the descriptor-association counterpart — the
+SLAM-shaped loop: FAST per pyramid level, intensity-centroid orientation, steered
+BRIEF, Hamming matching against the previous frame, and the five-point essential
+matrix under RANSAC. It prints a per-stage, per-level profile and its headline is
+the RANSAC inlier rate.
+
+```bash
+./build/examples/slam_frontend <directory-of-png-frames>
+```
+
 The example reads PNG through OpenCV, which it already needs for the sensor stage it
 deliberately runs outside binCV. binCV itself links no codec on any target — see
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) — and the library's own file I/O is PNM
