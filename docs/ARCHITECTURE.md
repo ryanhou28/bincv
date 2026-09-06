@@ -220,19 +220,49 @@ differ in what they make expensive.
 |---|---|
 | **x86-64** — desktop, laptops | `POPCNT` is required. AVX2 is selected at run time, so the baseline ISA is unchanged and one binary runs everywhere |
 | **aarch64 Cortex-A** — mobile, single-board | NEON throughout. Population count is a vector instruction, which is why reductions are bulk-only |
-| **Cortex-M** — microcontrollers | No population count and no NEON, so the software fallback is the only path. Stack is the binding constraint, not throughput |
+| **Cortex-M** — microcontrollers | No population count and no NEON, so the software path is the only path. Built and run on a Cortex-M7 |
 | **RISC-V** | Population count is in an optional extension, so it is the Cortex-M question on a target where it may go either way |
 
-The first two are measured. The other two are supported targets that have not yet been
-built and measured, and until they are, the claims here are about the first two.
+x86-64 and aarch64 are measured throughout these notes. **Cortex-M is built, run and
+partly measured** — see below for exactly how far that goes. 32-bit Cortex-A and RISC-V
+have not been built, and until they are, nothing here is a claim about them.
 
-**The embedded constraint that actually bites is the stack.** The tracker stages each
-window into stack buffers, and their size grows with the bit depth: about 4 KB at the
-shipped depth, 15 KB at the deepest supported. On a desktop that is nothing; on a part
-with a 16 KB stack it is everything, and overflowing one is silent corruption rather than
-a crash. `BINCV_STAGING_BUDGET_BYTES` declares the budget and a static assertion checks
-it, so a build that would not fit fails to compile instead. `stagingStackBytes<N, W>()`
-gives the exact figure.
+### What runs freestanding, and what does not
+
+Measured on an STM32H753ZI (Cortex-M7) with arm-none-eabi GCC 14.2, `-fno-exceptions
+-fno-rtti`, newlib, and no vendor SDK:
+
+**Runs.** `bincv_core` in full — containers, views and the `ops/` kernels. 33 of the 34
+test suites cross-compile clean under the whole warning set at 32-bit `size_t`, a pointer
+width the four-word-type sweep had never been compiled at before; the one 64-bit
+assumption it exposed was in a test, not the library.
+
+**Does not, by design.** `threads/pool.hpp` needs `<thread>`, `<mutex>` and
+`<condition_variable>`, which newlib does not supply. That is section 9 behaving as
+intended rather than a gap: binCV is serial by default and threads through a
+caller-installed backend, so a target with no threads never installs one.
+
+**Needs care, neither on a kernel path.** `std::aligned_alloc` is absent from newlib's
+`std` even though `::aligned_alloc` exists, and `simdStatusString` uses `snprintf`, which
+drags in enough of newlib's stdio to want `_sbrk` at link time. No kernel allocates,
+throws or does I/O, so neither reaches one.
+
+**What is NOT measured there:** any OpenCV comparison, any frontend or tracker timing, and
+anything at the part's full clock — the reductions were timed at the 64 MHz reset default.
+
+**The stack was expected to be the binding constraint. On the first real part it was
+not.** The tracker stages each window into stack buffers whose size grows with the bit
+depth: about 4 KB at the shipped depth, 15 KB at the deepest supported. Measured on the
+STM32H753ZI, that is **4,120 bytes at N = 2 against a 16 KB stack** — a quarter of it, and
+comfortable. The prediction still holds at the deepest depths, where 15 KB of a 16 KB
+stack leaves nothing, and it would hold on a smaller part; it simply did not bite here.
+
+The mechanism is what makes that checkable rather than hopeful:
+`BINCV_STAGING_BUDGET_BYTES` declares the budget and a static assertion fails the build
+rather than overflowing at run time, which matters because overflowing a stack is silent
+corruption rather than a crash. `stagingStackBytes<N, W>()` gives the exact figure, and
+the bare-metal target sets the budget from the same number its linker script reserves so
+the two cannot drift.
 
 ---
 

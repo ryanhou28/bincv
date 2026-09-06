@@ -163,13 +163,18 @@ these benchmarks on your own machine.
 
 ## What is not measured at all
 
-**32-bit ARM, Cortex-M and RISC-V are supported targets that have not been built or timed.**
-Nothing in these reports says anything about them. The constraint expected to bite there is
-stack rather than throughput: the tracker stages each window into stack buffers whose size
-grows with the bit depth, which is nothing on a desktop and can be everything on a part with
-a 16 KB stack. The library exposes `stagingStackBytes<N, W>()` for the exact figure and a
-build-time budget that fails compilation rather than overflowing at run time — but no timing
-on those parts exists, here or elsewhere.
+**32-bit ARM Cortex-A and RISC-V are supported targets that have not been built or timed.**
+Nothing in these reports says anything about them.
+
+**Cortex-M has now been built and partly measured, and none of it is in these reports.**
+binCV runs on an STM32H753ZI (Cortex-M7): the reductions are bit-exact against the
+library's own entry point, a 752×480 frame occupies 46,080 bytes, and the tracker's staging
+buffers measure 4,120 bytes at N = 2 against that board's 16 KB stack — so the constraint
+this section expected to bite did not. What does **not** exist for that part is any
+OpenCV comparison, any frontend or tracker timing, and any figure at the part's full clock;
+the one operation timed there ran at the reset default of 64 MHz. `stagingStackBytes<N, W>()`
+gives the exact stack figure for a configuration, and the build-time budget fails
+compilation rather than overflowing at run time.
 
 **No trajectory-accuracy claim is made anywhere in these reports.** binCV produces features
 and flow; what a pose estimator does with them is a property of the whole integration, and
