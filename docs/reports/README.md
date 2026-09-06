@@ -42,9 +42,11 @@ They are not a survey of binCV against every alternative, and they are not tuned
 comparisons. Every number is one build of binCV against one build of OpenCV on one
 machine, taken on a single commit, with the losses reported alongside the wins.
 
-Nothing here is a claim about a target that has not been measured. binCV supports 32-bit
-ARM, Cortex-M and RISC-V, and none of them appear in these reports because none of them
-have been built and timed.
+Nothing here is a claim about a target that has not been measured. binCV also supports
+32-bit ARM Cortex-A and RISC-V, and neither appears in these reports because neither has
+been built and timed. Cortex-M has since been built and partly measured on an STM32H753ZI
+— see [limits.md](limits.md) for what that covers — but it produced no OpenCV comparison,
+so nothing about it belongs here either.
 
 ## Platforms
 

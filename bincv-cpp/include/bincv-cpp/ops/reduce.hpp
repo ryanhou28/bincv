@@ -425,9 +425,14 @@ namespace impl {
 /// **INTERNAL.**
 /// @note Not decoration, and not dead source. binCV's claim is that it needs a
 /// C++17 compiler and nothing else; MSVC has no __builtin_popcountll, so
-/// without this the header would silently be GCC/clang-only. It is also the
-/// sequence a Cortex-M build compiles to, where no popcount instruction
-/// exists at any width (the design notes).
+/// without this the header would silently be GCC/clang-only.
+/// @note **This is NOT the sequence a Cortex-M build compiles to**, which this
+/// comment used to claim. Measured on a Cortex-M7 (STM32H753ZI, GCC 14.2):
+/// GCC proves the upper half of a widened `uint32_t` is zero and calls
+/// libgcc's `__popcountsi2`, a 32-bit SWAR. This function widens to
+/// `uint64_t` and keeps the widening, so it costs **1.85x** what the target
+/// actually gets. It is the MSVC and no-builtin fallback. It is not the
+/// M-profile path, and selecting it there would nearly double the cost.
 /// @note **Compiled unconditionally, on every toolchain, and tested against the
 /// builtin** by Reduce.PortablePopcount_*. Guarding the definition itself
 /// behind the #if would make it source that no configuration this project

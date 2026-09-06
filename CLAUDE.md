@@ -29,6 +29,19 @@ stated decision rule.
 
 - **Write the decision rule before measuring.** What result favors which choice, written
   down first. Deciding afterwards invites fitting the conclusion to the numbers.
+- **The rule names its metrics and the magnitude required on each, and it is written
+  per case.** There is no project-wide "X% is worth it" threshold, and inventing one
+  is not the same as having one: a bar that came from nowhere makes an arbitrary
+  judgement look derived, and the write-it-first rule then launders it. Say which
+  metrics decide this case — speed, peak memory, code size, portability, how much
+  hand-written code has to stay bit-exact forever — and how much of each is needed.
+  **If the threshold is a judgement nobody has made yet, that is a "stop and ask",
+  not a number to fill in.**
+- **State what the measurement covers.** A microbenchmark result is not an end-to-end
+  result. A kernel that is 12% faster in a loop that does nothing else moves a
+  pipeline by 12% times its share of that pipeline, and quoting the first number
+  where the second decides is how a real gain gets adopted for nothing — or a real
+  one dismissed.
 - **Compare alternatives**, not one option, on representative workloads.
 - **Report memory and speed together** — they trade off, so one alone cannot be weighed
   against goals that conflict.
@@ -52,8 +65,9 @@ if that case does not report ~1.00×, the fast path is not running where you thi
 ## Verify before committing
 
 ```bash
-./scripts/verify.sh      # ~35 s, four configurations, warnings fatal
-./scripts/verify_arm.sh  # aarch64 correctness under emulation; skips without Docker
+./scripts/verify.sh           # ~35 s, four configurations, warnings fatal
+./scripts/verify_arm.sh       # aarch64 correctness under emulation; skips without Docker
+./scripts/verify_cortex_m.sh  # Cortex-M7 compile gate; skips without arm-none-eabi
 python3 scripts/check_links.py
 ```
 
@@ -76,6 +90,12 @@ the build flags back out of a built binary and fails on a mismatch.
 **A third of `ops/opticalFlow.hpp` is invisible to every x86 build.** The NEON region is
 behind `#if BINCV_HAVE_NEON && __aarch64__`, so an edit there can be structurally broken
 and still pass all four x86 configurations. `verify_arm.sh` covers it under emulation.
+
+**`verify_cortex_m.sh` is the only place `size_t` is 32 bits.** Every index, stride and
+`planeWords()` is a `size_t`, and the four-word-type sweep is otherwise compiled solely at
+64-bit pointer width — the first run of that gate found a test asserting `size_t{1} << 63`.
+It is **compile-only** (the host cannot execute an M-profile image) and, like
+`verify_arm.sh`, exits **77** when it cannot run at all, which is not a pass.
 
 **Warnings are project policy, not the script's.** They live in
 `bincv-cpp/cmake/BincvWarnings.cmake` and are on in every build:

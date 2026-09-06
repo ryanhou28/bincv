@@ -68,6 +68,28 @@
 #if defined(BINCV_NO_NEON) && defined(BINCV_HAVE_NEON)
 #error "BINCV_NO_NEON and BINCV_HAVE_NEON are both defined -- pick one"
 #endif
+// -------------------------------------------------------------------------------
+// M-PROFILE HAS NO NEON, AND THE COMPILER WILL NOT SAY SO ON ITS OWN.
+//
+// `arm-none-eabi-g++ -mcpu=cortex-m7 -mfpu=neon` exits 0, emits no diagnostic, and
+// defines `__ARM_NEON`. So a build system that concludes "this target has NEON"
+// from a `-mfpu=neon` compile check concludes it on a Cortex-M7, and `simdStatus`
+// then reports NEON=yes on a part that has no vector unit at all. That is F-5 with
+// the sign reversed: not a fast path silently missing, but a fast path silently
+// claimed -- and it is worse, because the number it would corrupt is the population
+// count measurement that the M-profile port exists to make.
+//
+// `__ARM_ARCH_PROFILE` is the macro that does know: 'M' on Cortex-M, 'A' on
+// Cortex-A. Consulting it keeps the gate on the compiler's own macros, which is
+// where this project puts a gate the compiler can decide.
+//
+// An #error rather than a quiet #undef, because on an M-profile target the define
+// can only have come from a build system asserting something untrue, and the line
+// GETTING_STARTED tells a reader to log at start-up is the one place that must not
+// lie about which paths are live.
+#if defined(BINCV_HAVE_NEON) && defined(__ARM_ARCH_PROFILE) && (__ARM_ARCH_PROFILE == 'M')
+#error "BINCV_HAVE_NEON is defined for an M-profile target, which has no NEON. A -mfpu=neon compile check is not a NEON test on Cortex-M: it succeeds there. Drop the define; the scalar path is the only path on this part."
+#endif
 
 #include "error.hpp"
 
@@ -129,12 +151,24 @@ inline const char* simdStatusString() {
                                          : "compiled, unsupported by this CPU";
     // The verdict is spelled out because a reader who has to work out which combination
     // is bad is a reader who will not notice the bad one.
+    //
+    // Three verdicts, not two. A target with no vector unit and no population count
+    // instruction is not misconfigured -- the software path is the ONLY path, and
+    // "link bincv_core" is advice that would change nothing there. Cortex-M is that
+    // target, and with only the two flags below this line read
+    // "popcount=SOFTWARE (fast paths active)" on a Cortex-M7: self-contradictory in
+    // its own sentence, on the one line GETTING_STARTED tells a reader to trust.
+    // `neon` keeps armv7-A out of this branch, where NEON is a real fast path that
+    // the aarch64 flag does not cover.
+    const bool noFastPath = !s.isX86 && !s.isAarch64 && !s.neon;
     const bool slow = (s.isAarch64 && !s.neon) || (s.isX86 && !s.hardwarePopcount);
+    const char* verdict =
+        noFastPath ? "scalar only -- this target has no vector or popcount instruction"
+        : slow     ? "SLOW -- link the bincv_core target, do not just add its include path"
+                   : "fast paths active";
     std::snprintf(buf, sizeof(buf),
                   "binCV SIMD: NEON=%s AVX2=%s popcount=%s (%s)", s.neon ? "yes" : "NO",
-                  avx2, s.hardwarePopcount ? "hardware" : "SOFTWARE",
-                  slow ? "SLOW -- link the bincv_core target, do not just add its include path"
-                       : "fast paths active");
+                  avx2, s.hardwarePopcount ? "hardware" : "SOFTWARE", verdict);
     return buf;
 }
 

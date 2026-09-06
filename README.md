@@ -89,7 +89,8 @@ names, the same role with different numerics, or no OpenCV equivalent. See
 |---|---|
 | **x86-64** — desktop | measured. `POPCNT` required; AVX2 selected at run time |
 | **aarch64** — mobile and embedded Cortex-A | measured. NEON |
-| **32-bit ARM, Cortex-M** | supported target; not yet built or measured |
+| **Cortex-M** — microcontrollers | built and run on an STM32H753ZI (Cortex-M7): correct, and a 752×480 frame is 46 KB. Scalar only — no NEON, no popcount instruction. Only the reductions are timed so far |
+| **32-bit ARM Cortex-A** | supported target; not yet built or measured |
 | **RISC-V** | supported target; not yet built or measured |
 
 Log `bincv::simdStatusString()` once at start-up — it names every vector path and says

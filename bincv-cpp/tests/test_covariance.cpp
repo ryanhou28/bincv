@@ -136,7 +136,10 @@ void* countedAllocateAligned(std::size_t bytes, std::size_t alignment) {
     if (alignment < sizeof(void*)) alignment = sizeof(void*);
     const std::size_t wanted = (bytes == 0) ? 1 : bytes;
     const std::size_t rounded = ((wanted + alignment - 1) / alignment) * alignment;
-    void* p = std::aligned_alloc(alignment, rounded);
+    // `::aligned_alloc`, not `std::aligned_alloc`: newlib declares it in the global
+    // namespace and does not pull it into `std`, so the qualified spelling fails to
+    // compile for arm-none-eabi. Both name the same function everywhere else.
+    void* p = ::aligned_alloc(alignment, rounded);
     if (p == nullptr) std::abort();
     return p;
 }
