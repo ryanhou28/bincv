@@ -1422,4 +1422,23 @@ BINCV_TEST(Pyramid, Gaussian5x5MatchesCvPyrDown_8to8) {
 }
 #endif // BINCV_WITH_OPENCV
 
+BINCV_TEST(Pyramid, LevelCoordinateMappingIsExact) {
+    // The Box2x2 center map, by hand: level-1 pixel 0 covers level-0 {0, 1}, whose
+    // center is 0.5; level-2 pixel 0 covers level-0 {0..3}, center 1.5. Every factor
+    // is a power of two, so the round trip is float-EXACT -- equality, not tolerance.
+    BINCV_CHECK(bincv::pyrLevelToBase(0.0f, 0) == 0.0f);
+    BINCV_CHECK(bincv::pyrLevelToBase(7.25f, 0) == 7.25f);
+    BINCV_CHECK(bincv::pyrLevelToBase(0.0f, 1) == 0.5f);
+    BINCV_CHECK(bincv::pyrLevelToBase(1.0f, 1) == 2.5f);
+    BINCV_CHECK(bincv::pyrLevelToBase(0.0f, 2) == 1.5f);
+    BINCV_CHECK(bincv::pyrLevelToBase(10.0f, 3) == 83.5f);
+    for (size_t level = 0; level <= 4; ++level) {
+        for (int c = 0; c < 100; c += 7) {
+            const float lc = static_cast<float>(c) + 0.25f;
+            BINCV_CHECK(bincv::pyrBaseToLevel(bincv::pyrLevelToBase(lc, level), level) == lc);
+            BINCV_CHECK(bincv::pyrLevelToBase(bincv::pyrBaseToLevel(lc, level), level) == lc);
+        }
+    }
+}
+
 BINCV_TEST_MAIN("test_pyramid")
