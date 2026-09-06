@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "bincv/ops/descriptor.hpp"
+#include "bincv/ops/orientation.hpp"
 #include "test_util.hpp"
 
 namespace {
@@ -165,6 +166,166 @@ BINCV_TEST(Descriptor, RatioTestNeedsTwoCandidates) {
     matchDescriptors<uint32_t>(q.data(), 1, t.data(), 1, kWords, &m, 80);
     std::printf(" single-candidate train set: valid=%d\n", m.valid ? 1 : 0);
     BINCV_CHECK(!m.valid);
+}
+
+namespace {
+
+/// A SMOOTH texture, not raw noise: the rotation-invariance claim is about content
+/// where a one-pixel sampling error keeps most of the signal, which raw noise (zero
+/// spatial correlation) deliberately does not. Two box-blur passes per axis.
+std::vector<uint8_t> smoothImage(size_t w, size_t h, uint64_t seed) {
+    std::vector<uint8_t> img = texturedImage(w, h, seed);
+    std::vector<uint8_t> tmp(w * h);
+    for (int pass = 0; pass < 2; ++pass) {
+        for (size_t y = 0; y < h; ++y)
+            for (size_t x = 2; x + 2 < w; ++x) {
+                unsigned s = 0;
+                for (int d = -2; d <= 2; ++d)
+                    s += img[y * w + x + static_cast<size_t>(d + 2) - 2u];
+                tmp[y * w + x] = static_cast<uint8_t>(s / 5);
+            }
+        for (size_t y = 2; y + 2 < h; ++y)
+            for (size_t x = 0; x < w; ++x) {
+                unsigned s = 0;
+                for (int d = -2; d <= 2; ++d)
+                    s += tmp[(y + static_cast<size_t>(d + 2) - 2u) * w + x];
+                img[y * w + x] = static_cast<uint8_t>(s / 5);
+            }
+    }
+    return img;
+}
+} // namespace
+
+BINCV_TEST(Steered, BinZeroIsTheBasePatternExactly) {
+    // The Q16 identity rotation is exact -- cos = 65536, sin = 0 rounds every offset
+    // to itself -- so bin 0 must BE the base pattern, byte for byte.
+    BriefPattern<kBits> base;
+    makeBriefPattern<kBits>(base);
+    SteeredBriefPattern<kBits> steered;
+    makeSteeredBriefPattern<kBits>(steered, base);
+    size_t diff = 0;
+    for (size_t i = 0; i < kBits; ++i)
+        if (steered.bin[0].pair[i].ax != base.pair[i].ax ||
+            steered.bin[0].pair[i].ay != base.pair[i].ay ||
+            steered.bin[0].pair[i].bx != base.pair[i].bx ||
+            steered.bin[0].pair[i].by != base.pair[i].by) ++diff;
+    BINCV_CHECK(diff == 0);
+    // And a half-turn is exact too: (x, y) -> (-x, -y), no rounding involved.
+    size_t diffHalf = 0;
+    for (size_t i = 0; i < kBits; ++i)
+        if (steered.bin[15].pair[i].ax != -base.pair[i].ax ||
+            steered.bin[15].pair[i].ay != -base.pair[i].ay) ++diffHalf;
+    BINCV_CHECK(diffHalf == 0);
+}
+
+BINCV_TEST(Steered, AngleBinsQuantizeToNearestStep) {
+    const float deg = 0.017453292519943295f;
+    BINCV_CHECK(briefAngleBin(0.0f) == 0);
+    BINCV_CHECK(briefAngleBin(3.0f * deg) == 0);     // inside bin 0's half-width
+    BINCV_CHECK(briefAngleBin(12.0f * deg) == 1);    // a bin center
+    BINCV_CHECK(briefAngleBin(-12.0f * deg) == 29);  // wraps, does not clamp
+    BINCV_CHECK(briefAngleBin(180.0f * deg) == 15);
+    BINCV_CHECK(briefAngleBin(-180.0f * deg) == 15);
+}
+
+BINCV_TEST(Steered, ZeroAnglesReproduceComputeBriefBitForBit) {
+    // Steering is an EXTENSION, not a reinterpretation: with every angle in bin 0 the
+    // steered kernel must produce computeBrief's exact output, keep flags included.
+    constexpr size_t kW = 160, kH = 120;
+    const std::vector<uint8_t> img = texturedImage(kW, kH, 21);
+    BriefPattern<kBits> base;
+    makeBriefPattern<kBits>(base);
+    SteeredBriefPattern<kBits> steered;
+    makeSteeredBriefPattern<kBits>(steered, base);
+
+    std::vector<float> kp;
+    for (int y = 5; y < static_cast<int>(kH) - 5; y += 13)
+        for (int x = 5; x < static_cast<int>(kW) - 5; x += 17) {
+            kp.push_back(static_cast<float>(x));
+            kp.push_back(static_cast<float>(y));
+        }
+    const size_t n = kp.size() / 2;
+    const std::vector<float> angles(n, 0.0f);
+    std::vector<uint32_t> plain(n * kWords), rot(n * kWords);
+    std::vector<uint8_t> keepP(n), keepR(n);
+    computeBrief<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, kp.data(), n, base,
+                                           plain.data(), keepP.data());
+    computeBriefSteered<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, kp.data(), n,
+                                                  angles.data(), steered, rot.data(),
+                                                  keepR.data());
+    size_t same = 0;
+    for (size_t i = 0; i < n * kWords; ++i)
+        if (plain[i] == rot[i]) ++same;
+    std::printf(" zero-angle: %zu of %zu words identical\n", same, n * kWords);
+    BINCV_CHECK(same == n * kWords);
+    for (size_t i = 0; i < n; ++i) BINCV_CHECK(keepP[i] == keepR[i]);
+}
+
+BINCV_TEST(Steered, AQuarterTurnIsRecoveredAndUnsteeredBriefLosesIt) {
+    // The ORB paper's own figure, as a test: rotate the content 90 degrees, and
+    // unsteered BRIEF's matches die while steered ones survive. The margin is the
+    // whole reason steering exists, so it is asserted, not just printed.
+    constexpr size_t kW = 240, kH = 240;
+    const std::vector<uint8_t> a = smoothImage(kW, kH, 77);
+    std::vector<uint8_t> b(kW * kH);
+    for (size_t y = 0; y < kH; ++y)
+        for (size_t x = 0; x < kW; ++x)
+            b[x * kW + (kH - 1 - y)] = a[y * kW + x];   // (x, y) -> (kH-1-y, x)
+
+    std::vector<float> kpA, kpB;
+    for (int y = 40; y < 200; y += 12)
+        for (int x = 40; x < 200; x += 12) {
+            kpA.push_back(static_cast<float>(x));
+            kpA.push_back(static_cast<float>(y));
+            kpB.push_back(static_cast<float>(static_cast<int>(kH) - 1 - y));
+            kpB.push_back(static_cast<float>(x));
+        }
+    const size_t n = kpA.size() / 2;
+
+    BriefPattern<kBits> base;
+    makeBriefPattern<kBits>(base);
+    SteeredBriefPattern<kBits> steered;
+    makeSteeredBriefPattern<kBits>(steered, base);
+
+    std::vector<float> angA(n), angB(n);
+    keypointOrientation<uint8_t>(a.data(), kW, kH, kW, kpA.data(), n, angA.data());
+    keypointOrientation<uint8_t>(b.data(), kW, kH, kW, kpB.data(), n, angB.data());
+
+    std::vector<uint32_t> dA(n * kWords), dB(n * kWords), uA(n * kWords), uB(n * kWords);
+    computeBriefSteered<kBits, uint8_t, uint32_t>(a.data(), kW, kH, kW, kpA.data(), n,
+                                                  angA.data(), steered, dA.data());
+    computeBriefSteered<kBits, uint8_t, uint32_t>(b.data(), kW, kH, kW, kpB.data(), n,
+                                                  angB.data(), steered, dB.data());
+    computeBrief<kBits, uint8_t, uint32_t>(a.data(), kW, kH, kW, kpA.data(), n, base,
+                                           uA.data());
+    computeBrief<kBits, uint8_t, uint32_t>(b.data(), kW, kH, kW, kpB.data(), n, base,
+                                           uB.data());
+
+    unsigned long long steeredDist = 0, unsteeredDist = 0;
+    for (size_t i = 0; i < n; ++i) {
+        steeredDist += hammingDistance<uint32_t>(dA.data() + i * kWords,
+                                                 dB.data() + i * kWords, kWords);
+        unsteeredDist += hammingDistance<uint32_t>(uA.data() + i * kWords,
+                                                   uB.data() + i * kWords, kWords);
+    }
+    std::vector<DescriptorMatch> mS(n), mU(n);
+    matchDescriptors<uint32_t>(dB.data(), n, dA.data(), n, kWords, mS.data(), 80);
+    matchDescriptors<uint32_t>(uB.data(), n, uA.data(), n, kWords, mU.data(), 80);
+    size_t okS = 0, okU = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (mS[i].valid && mS[i].trainIndex == i) ++okS;
+        if (mU[i].valid && mU[i].trainIndex == i) ++okU;
+    }
+    std::printf(" quarter turn, %zu keypoints: mean distance steered %.1f unsteered %.1f"
+                " (of %zu bits); correct matches steered %zu unsteered %zu\n",
+                n, static_cast<double>(steeredDist) / static_cast<double>(n),
+                static_cast<double>(unsteeredDist) / static_cast<double>(n), kBits, okS,
+                okU);
+    // A same-point steered pair must be far below chance (128); unsteered at a quarter
+    // turn IS chance. The match-rate margin is the practical statement of the same.
+    BINCV_CHECK(steeredDist * 2 < unsteeredDist);
+    BINCV_CHECK(okS > (n * 3) / 5);
+    BINCV_CHECK(okU < n / 5);
 }
 
 BINCV_TEST_MAIN("test_descriptor")
