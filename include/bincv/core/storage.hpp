@@ -230,7 +230,7 @@ private:
     /// pointer, which is precisely the bug the warning exists to catch.
     /// Freeing last removes the question instead of answering it, and costs
     /// nothing -- the two orders are otherwise indistinguishable.
-    /// @note Found by scripts/verify_arm.sh: its container ships GCC 12, where
+    /// @note Found by scripts/verify_cross.sh: its container ships GCC 12, where
     /// -Wall enables this warning. GCC 11 -- the desktop compiler this
     /// project has been developed against -- does not have it at all, so
     /// "builds warning-free" was true of one compiler and not of the next.
