@@ -205,7 +205,7 @@ if(BINCV_BUILD_EMBEDDED)
             "BINCV_BUILD_EMBEDDED is ON but this is not an M-profile cross build. "
             "Configure with -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-cortex-m7.cmake.")
     endif()
-    add_subdirectory(embedded/stm32h753)
+    add_subdirectory(targets/stm32h753)
 endif()
 
 # Every first-party target now exists, so the warning policy can be checked.

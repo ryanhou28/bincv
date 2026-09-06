@@ -19,7 +19,7 @@
 # part is a heavier dependency than a gate should carry. Issue #13 allows exactly
 # this ("qemu-user or a cross-compiler suffices, since this is a correctness
 # axis"). Execution is verified on real hardware -- see
-# bincv-cpp/embedded/stm32h753/README.md -- and nothing here is a timing result.
+# bincv-cpp/targets/stm32h753/README.md -- and nothing here is a timing result.
 #
 #   ./scripts/verify_cortex_m.sh
 #
@@ -165,15 +165,15 @@ if cmake -S "${SRC_DIR}" -B "${FW_DIR}" \
         fw_ok=1
         # The SIMD line the firmware would print is the one GETTING_STARTED tells a
         # reader to trust, and on this target it must not claim a fast path.
-        if grep -q 'scalar only' "${FW_DIR}/embedded/stm32h753/bincv_m7.elf" 2>/dev/null || \
-           strings "${FW_DIR}/embedded/stm32h753/bincv_m7.elf" 2>/dev/null | grep -q 'scalar only'; then
+        if grep -q 'scalar only' "${FW_DIR}/targets/stm32h753/bincv_m7.elf" 2>/dev/null || \
+           strings "${FW_DIR}/targets/stm32h753/bincv_m7.elf" 2>/dev/null | grep -q 'scalar only'; then
             echo "    ok -- image links, and its SIMD status reports 'scalar only'"
         else
             echo "    FAILED: the image links but does not carry the 'scalar only' status"
             echo "            string, so simdStatusString may be claiming a fast path here."
             failed=$((failed + 1))
         fi
-        size_line="$("${CXX%g++}size" "${FW_DIR}/embedded/stm32h753/bincv_m7.elf" 2>/dev/null | tail -1)"
+        size_line="$("${CXX%g++}size" "${FW_DIR}/targets/stm32h753/bincv_m7.elf" 2>/dev/null | tail -1)"
         [[ -n "${size_line}" ]] && echo "    size (text/data/bss): ${size_line}"
     else
         echo "    FAILED to build:"
@@ -193,7 +193,7 @@ if [[ ${failed} -eq 0 && ${warned} -eq 0 ]]; then
     echo "  CORTEX-M OK -- ${compiled} suites compile clean at 32-bit size_t,"
     echo "  the negative test still fails, and the bare-metal image links."
     echo "  Compile-only: nothing was executed. Execution is verified on hardware,"
-    echo "  see bincv-cpp/embedded/stm32h753/README.md."
+    echo "  see bincv-cpp/targets/stm32h753/README.md."
     echo "============================================================"
     exit 0
 fi

@@ -1,7 +1,7 @@
 /// @file reduce_loop_benchmark.cpp
 /// @brief Four loop shapes for a bulk bit-count, timed against each other on the
 /// host. The same four arms are timed on the Cortex-M7 by
-/// embedded/stm32h753/main.cpp, so the two targets are comparable.
+/// targets/stm32h753/main.cpp, so the two targets are comparable.
 ///
 /// **Run this build twice** -- once with `-DBINCV_X86_POPCNT=ON` (the default) and
 /// once with `OFF`. Those are the two architecture families the arms behave
