@@ -24,7 +24,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/covariance.hpp`](#opscovariancehpp) — 3 entries
 - [`ops/denoise.hpp`](#opsdenoisehpp) — 2 entries
 - [`ops/derivative.hpp`](#opsderivativehpp) — 6 entries
-- [`ops/descriptor.hpp`](#opsdescriptorhpp) — 8 entries
+- [`ops/descriptor.hpp`](#opsdescriptorhpp) — 12 entries
 - [`ops/edge.hpp`](#opsedgehpp) — 6 entries
 - [`ops/essential.hpp`](#opsessentialhpp) — 7 entries
 - [`ops/fast.hpp`](#opsfasthpp) — 6 entries
@@ -33,12 +33,14 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/morphology.hpp`](#opsmorphologyhpp) — 27 entries
 - [`ops/occupancy.hpp`](#opsoccupancyhpp) — 6 entries
 - [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 21 entries
+- [`ops/orientation.hpp`](#opsorientationhpp) — 1 entries
 - [`ops/pack.hpp`](#opspackhpp) — 10 entries
-- [`ops/pyramid.hpp`](#opspyramidhpp) — 41 entries
+- [`ops/pyramid.hpp`](#opspyramidhpp) — 43 entries
 - [`ops/ransac.hpp`](#opsransachpp) — 12 entries
 - [`ops/reduce.hpp`](#opsreducehpp) — 19 entries
 - [`ops/resample.hpp`](#opsresamplehpp) — 6 entries
 - [`ops/shift.hpp`](#opsshifthpp) — 12 entries
+- [`ops/stereo.hpp`](#opsstereohpp) — 5 entries
 - [`ops/subpix.hpp`](#opssubpixhpp) — 3 entries
 - [`ops/threshold.hpp`](#opsthresholdhpp) — 2 entries
 - [`io/pnm.hpp`](#iopnmhpp) — 7 entries
@@ -198,6 +200,10 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `descriptorWords` | — | Words a `Bits`-bit descriptor occupies |
 | `makeBriefPattern` | 3 | Fills a pattern by deterministic Gaussian sampling -- BRIEF's own construction |
 | `computeBrief` | 3 | Computes descriptors for `count` keypoints |
+| `briefAngleBin` | 3 | Which rotation bin an angle selects: the nearest 12-degree step, wrapped |
+| `SteeredBriefPattern` *(struct)* | — | `Bits` comparisons at each of the 30 rotations: ~30 KB at 256 bits, built once and reused for every frame |
+| `makeSteeredBriefPattern` | 3 | Builds the 30 rotated copies of `base` |
+| `computeBriefSteered` | 3 | `computeBrief` steered by per-keypoint angles |
 | `hammingDistance` | 3 | `popcount(a ^ b)` over `words` |
 | `DescriptorMatch` *(struct)* | — | One query's best and second-best match |
 | `matchDescriptors` | 3 | Brute-force nearest neighbour with Lowe's ratio test |
@@ -342,6 +348,14 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `LKLevels` *(struct)* | 2 | A tracking ladder whose levels have DIFFERENT bit depths, level 0 first |
 | `stagingStackBytes` | 3 | Stack bytes the tracker's staging buffers occupy at `(N, WordType)` |
 
+## `ops/orientation.hpp`
+
+[`include/bincv/ops/orientation.hpp`](../include/bincv/ops/orientation.hpp)
+
+| | tier | |
+|---|---|---|
+| `keypointOrientation` | 3 | Orientation of `count` keypoints on a WIDE image, from the intensity centroid over a disc of `radius` |
+
 ## `ops/pack.hpp`
 
 [`include/bincv/ops/pack.hpp`](../include/bincv/ops/pack.hpp)
@@ -367,6 +381,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 |---|---|---|
 | `pyrDownWidth` | 3 | Destination width of one pyramid level: ceil(srcWidth / 2) |
 | `pyrDownHeight` | 3 | Destination height of one pyramid level: ceil(srcHeight / 2) |
+| `pyrLevelToBase` | 3 | Where a level-`level` pixel CENTER sits in level-0 coordinates, one axis |
+| `pyrBaseToLevel` | 3 | The inverse: a level-0 coordinate in level-`level` pixels |
 | `boxSumFullAdders` | — | Full-adder stages the 2x2 box sum costs at a given source depth |
 | `boxSum4ReplicatedInputs` | — | Single-bit inputs the REJECTED replication route would need |
 | `pyrDownAdderStages` | — | Total adder-class stages one destination word costs: box plus rescale |
@@ -483,6 +499,18 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `shiftRight` | 3 | dst[y][x] = src[y][x - k] -- moves the image RIGHT by k columns |
 | `shiftUp` | 3 | dst[y][x] = src[y + k][x] -- moves the image UP by k rows |
 | `shiftDown` | 3 | dst[y][x] = src[y - k][x] -- moves the image DOWN by k rows |
+
+## `ops/stereo.hpp`
+
+[`include/bincv/ops/stereo.hpp`](../include/bincv/ops/stereo.hpp)
+
+| | tier | |
+|---|---|---|
+| `StereoMatchParams` *(struct)* | — | Search and window parameters for the sparse rectified stereo matcher |
+| `StereoMatch` *(struct)* | — | One left keypoint's stereo result |
+| `stereoDescriptorMatch` | 3 | COARSE stage: each left descriptor against the right keypoints in its row band and disparity range |
+| `stereoRefineDisparity` | 3 | FINE stage: slide a window along the epipolar row around each valid match's disparity, score by Hamming distance on the packed frames, and refine to sub-pixel |
+| `stereoMatchRectified` | 3 | Both stages: descriptor search, then window refinement |
 
 ## `ops/subpix.hpp`
 
