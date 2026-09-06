@@ -145,7 +145,8 @@ BINCV_TEST(Sequence, HeaderParsesAndRejects) {
     const std::vector<uint8_t> h8 = blobHeader(0, 32, 24, 3);
     const SequenceHeader a = readSequenceHeader(h8.data(), h8.size());
     std::printf(" 8-bit header: valid=%d mode=%u %zux%zu x%zu, %zu B/frame\n",
-                a.valid ? 1 : 0, a.mode, a.width, a.height, a.frameCount, a.frameBytes);
+                a.valid ? 1 : 0, static_cast<unsigned>(a.mode), a.width, a.height,
+                a.frameCount, a.frameBytes);
     BINCV_CHECK(a.valid);
     BINCV_CHECK(a.mode == kSequenceMode8Bit);
     BINCV_CHECK(a.width == 32 && a.height == 24 && a.frameCount == 3);
