@@ -151,6 +151,27 @@ frame, and the whole-frontend ratio comes out on the other side of the compariso
 difference larger than most of the effects these reports measure. Only `V1_02` numbers appear
 here, and a frontend figure quoted without its sequence is not a figure.
 
+## Addendum, 2026-09-06: one pyramid build per frame
+
+The redundant pyramid rebuild was removed after this report's numbers were taken:
+the frontend now swaps the previous frame's pyramid in and builds only the incoming
+one, **proven bit-identical to a rebuild** — `BINCV_PYR_CHECK=1` compares every
+level of every frame at word granularity, padding bits included; 0 of 12,920,040
+words differ over the full sequence, on both architectures. The removed `hold`
+buffer also drops a full binary frame the footprint table never counted. OpenCV's
+`calcOpticalFlowPyrLK` still rebuilds both of its pyramids per call; removing the
+redundancy on binCV's side only is a recorded owner decision, and the benchmark's
+output now says so beside the ratio.
+
+One governor-locked device run after the change: build 1.072 → 0.836 ms/frame
+(the predicted pyrDown halving), detect 0.570 (identical to the table), track
+3.787 against the table's 3.307 — 14% above the recorded runs **for reasons not
+established** (the device's soft-temperature-limit flag had tripped at some point
+in the session; the table's conditions differ in something unrecorded). The
+structural change and the build-stage saving are the results this addendum
+records; the full table stands as the recorded measurement until a proper
+re-measurement session replaces it whole rather than row by row.
+
 ## Reproduce
 
 ```bash
