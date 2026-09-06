@@ -76,10 +76,37 @@ include(CheckCXXCompilerFlag)
 set(BINCV_SIMD "scalar")
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|aarch64|ARM|AARCH64")
-    check_cxx_compiler_flag("-mfpu=neon" HAVE_NEON_FLAG)
-    if(HAVE_NEON_FLAG OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
-        target_compile_definitions(bincv_core INTERFACE BINCV_HAVE_NEON)
-        set(BINCV_SIMD "NEON")
+    # -------------------------------------------------------------------------
+    # M-PROFILE FIRST, BECAUSE -mfpu=neon IS NOT A NEON TEST THERE.
+    #
+    # `arm-none-eabi-g++ -mcpu=cortex-m7 -mfpu=neon` compiles cleanly and defines
+    # `__ARM_NEON`. Measured on Arm GNU Toolchain 14.2: exit 0, no diagnostic. So
+    # the flag check below returns Success on a Cortex-M7 and this branch used to
+    # report "SIMD: NEON" for a part with no vector unit -- every kernel gate also
+    # requires `__aarch64__` so no wrong code was generated, but `simdStatus()`
+    # reported NEON=yes, which is the one line GETTING_STARTED tells a reader to
+    # trust about which paths are live.
+    #
+    # `__ARM_ARCH_PROFILE` is the compiler's own answer ('M' vs 'A'), so ask it
+    # rather than inferring from a flag the compiler declines to reject.
+    # core/simd.hpp carries the matching #error, so the two cannot drift apart.
+    # -------------------------------------------------------------------------
+    include(CheckCXXSourceCompiles)
+    check_cxx_source_compiles("
+#if defined(__ARM_ARCH_PROFILE) && (__ARM_ARCH_PROFILE == 'M')
+#error M-profile
+#endif
+int main() { return 0; }
+" BINCV_ARM_NOT_M_PROFILE)
+
+    if(NOT BINCV_ARM_NOT_M_PROFILE)
+        set(BINCV_SIMD "scalar (M-profile: no NEON, no hardware popcount)")
+    else()
+        check_cxx_compiler_flag("-mfpu=neon" HAVE_NEON_FLAG)
+        if(HAVE_NEON_FLAG OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+            target_compile_definitions(bincv_core INTERFACE BINCV_HAVE_NEON)
+            set(BINCV_SIMD "NEON")
+        endif()
     endif()
 else()
     # -------------------------------------------------------------------------
@@ -90,8 +117,16 @@ else()
     # fallback in the portable build -- measured: zero `popcnt` instructions in
     # the shipped binary. X-57 priced that at **3.75x on the whole frontend**:
     # binCV goes 12.9 -> 3.4 ms and from 3.8x SLOWER than OpenCV to 0.91x, near
-    # parity, at 6.23x less memory. binCV counts bits for a living, so it pays
-    # for this instruction more than almost any other library would.
+    # parity, at 6.23x less memory.
+    #
+    # Why one flag moves a whole frontend: the bit-plane representation turns
+    # several of the operations ON that frontend INTO population counts -- the
+    # reductions, and the tracker's gradient covariance, which is three popcounts
+    # over masks instead of a multiply (ARCHITECTURE 1 and 4). So a software
+    # popcount lands squarely on the hot path. That is a CONSEQUENCE of the
+    # representation, not binCV's purpose: the library is about processing
+    # low-bit-width images at their true bit width, and counting bits is one
+    # technique that falls out of doing so.
     #
     # ON by default: binCV's x86 baseline is a POPCNT-capable CPU. Nehalem (2008)
     # and Barcelona (2007) both have it, so this excludes hardware older than
@@ -157,6 +192,21 @@ endif()
 # only place the kernel set is shown composing into a pipeline shape rather than
 # a benchmark loop.
 add_subdirectory(examples)
+
+# ---------------------------------------------------------------------------
+# Bare-metal targets. OFF by default and guarded on the profile, because they need
+# a linker script and a reset vector that mean nothing to a hosted build -- and
+# because the point of the option is that a host build stays exactly what it was.
+# ---------------------------------------------------------------------------
+option(BINCV_BUILD_EMBEDDED "Build the bare-metal Cortex-M targets (needs an arm-none-eabi toolchain)" OFF)
+if(BINCV_BUILD_EMBEDDED)
+    if(BINCV_ARM_NOT_M_PROFILE OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm|ARM")
+        message(FATAL_ERROR
+            "BINCV_BUILD_EMBEDDED is ON but this is not an M-profile cross build. "
+            "Configure with -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-cortex-m7.cmake.")
+    endif()
+    add_subdirectory(embedded/stm32h753)
+endif()
 
 # Every first-party target now exists, so the warning policy can be checked.
 # FATAL_ERRORs if any of them compiles without the flags -- see the function's

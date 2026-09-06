@@ -52,9 +52,19 @@ BINCV_TEST(Simd, StatusAgreesWithTheBuildItDescribes) {
     // THE VERDICT IS THE POINT OF THE LINE. A build missing a fast path must say so in
     // words -- a reader who has to work out which combination is bad will not notice
     // the bad one.
+    // Three verdicts, mirroring simdStatusString. A target with neither a vector unit
+    // nor a popcount instruction is not misconfigured -- the software path is the only
+    // path, and "link bincv_core" would change nothing there -- so it gets its own
+    // wording. Measured on a Cortex-M7 before that branch existed, this line read
+    // "popcount=SOFTWARE (fast paths active)", which contradicts itself.
+    const bool noFastPath = !s.isX86 && !s.isAarch64 && !s.neon;
     const bool slow = (s.isAarch64 && !s.neon) || (s.isX86 && !s.hardwarePopcount);
     BINCV_CHECK((std::strstr(line, "SLOW") != nullptr) == slow);
-    if (!slow) BINCV_CHECK(std::strstr(line, "fast paths active") != nullptr);
+    if (noFastPath) {
+        BINCV_CHECK(std::strstr(line, "scalar only") != nullptr);
+    } else if (!slow) {
+        BINCV_CHECK(std::strstr(line, "fast paths active") != nullptr);
+    }
 
     // The define and the report are the same fact, so they cannot drift apart.
 #if defined(BINCV_HAVE_NEON)
