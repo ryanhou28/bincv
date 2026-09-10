@@ -20,19 +20,20 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`quantMat.hpp`](#quantMathpp) — 29 entries
 - [`ops/bitslice.hpp`](#opsbitslicehpp) — 6 entries
 - [`ops/blockMatch.hpp`](#opsblockMatchhpp) — 5 entries
-- [`ops/corner.hpp`](#opscornerhpp) — 17 entries
+- [`ops/corner.hpp`](#opscornerhpp) — 18 entries
 - [`ops/covariance.hpp`](#opscovariancehpp) — 3 entries
 - [`ops/denoise.hpp`](#opsdenoisehpp) — 2 entries
 - [`ops/derivative.hpp`](#opsderivativehpp) — 6 entries
-- [`ops/descriptor.hpp`](#opsdescriptorhpp) — 12 entries
+- [`ops/descriptor.hpp`](#opsdescriptorhpp) — 13 entries
 - [`ops/edge.hpp`](#opsedgehpp) — 6 entries
 - [`ops/essential.hpp`](#opsessentialhpp) — 7 entries
-- [`ops/fast.hpp`](#opsfasthpp) — 6 entries
+- [`ops/fast.hpp`](#opsfasthpp) — 8 entries
 - [`ops/logic.hpp`](#opslogichpp) — 6 entries
 - [`ops/medianWide.hpp`](#opsmedianWidehpp) — 5 entries
 - [`ops/morphology.hpp`](#opsmorphologyhpp) — 27 entries
 - [`ops/occupancy.hpp`](#opsoccupancyhpp) — 6 entries
-- [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 21 entries
+- [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 25 entries
+- [`ops/orbPattern.hpp`](#opsorbPatternhpp) — 1 entries
 - [`ops/orientation.hpp`](#opsorientationhpp) — 1 entries
 - [`ops/pack.hpp`](#opspackhpp) — 10 entries
 - [`ops/pyramid.hpp`](#opspyramidhpp) — 43 entries
@@ -44,7 +45,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/subpix.hpp`](#opssubpixhpp) — 3 entries
 - [`ops/threshold.hpp`](#opsthresholdhpp) — 2 entries
 - [`io/pnm.hpp`](#iopnmhpp) — 7 entries
-- [`io/sequence.hpp`](#iosequencehpp) — 6 entries
+- [`io/sequence.hpp`](#iosequencehpp) — 9 entries
 - [`core/parallel.hpp`](#coreparallelhpp) — 4 entries
 - [`core/simd.hpp`](#coresimdhpp) — 3 entries
 - [`core/storage.hpp`](#corestoragehpp) — 11 entries
@@ -151,6 +152,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `cornerMinEigenVal` | 2 | The minimum-eigenvalue corner response at every pixel, from binarized ternary derivatives |
 | `selectGoodFeatures` | 2 | The quality threshold, 3x3 non-maximum suppression and minimum-distance spacing filter `cv::goodFeaturesToTrack` performs, over an existing response map |
 | `goodFeaturesToTrack` | 2 | `goodFeaturesToTrack` over a binarized ternary derivative pair: the response map, then the selection |
+| `kResponseRingRows` *(constant)* | — | Rows the streaming form's ring must have |
 | `boxHorizontal3` | — | `h = L + C + R` for one bit-plane: one full adder, two output planes |
 | `boxVertical3` | — | Sum three 2-bit numbers into four planes (0..9) |
 | `boxValueAt` | — | The 0..9 value carried by four bit-planes at bit `bit` |
@@ -201,6 +203,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `descriptorWords` | — | Words a `Bits`-bit descriptor occupies |
 | `makeBriefPattern` | 3 | Fills a pattern by deterministic Gaussian sampling -- BRIEF's own construction |
 | `computeBrief` | 3 | Computes descriptors for `count` keypoints |
+| `kBriefAngleBins` *(constant)* | — | Rotation bins a steered pattern is built at: 12-degree steps, the ORB paper's own discretization |
 | `briefAngleBin` | 3 | Which rotation bin an angle selects: the nearest 12-degree step, wrapped |
 | `SteeredBriefPattern` *(struct)* | — | `Bits` comparisons at each of the 30 rotations: ~30 KB at 256 bits, built once and reused for every frame |
 | `makeSteeredBriefPattern` | 3 | Builds the 30 rotated copies of `base` |
@@ -243,6 +246,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 | | tier | |
 |---|---|---|
 | `FastCorner` *(struct)* | — | One detected corner |
+| `kFastRingX` *(constant)* | — | The 16-pixel Bresenham ring of radius 3, clockwise from straight up |
+| `kFastLanes` *(constant)* | — | Pixels per vector iteration |
 | `hasFastAvx2` | — | NEON is baseline on aarch64, so there is nothing to dispatch on |
 | `detectFast` | 2 | Detects FAST corners |
 | `hasFastBitAvx2` | — | Is AVX2 present? |
@@ -332,6 +337,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `lkLevel` | 2 | Names a level's containers into an LKLevel |
 | `LKLevelN` *(struct)* | — | One pyramid level at N bits per pixel: both frames' bit-planes, and the previous frame's N-bit signed derivative |
 | `StageTiming` *(struct)* | — | Where `track`'s time actually goes, by stage |
+| `kCentralDifferenceScale` *(constant)* | — | The factor the raw `[-1, 0, 1]` tap needs to become a central difference |
+| `kReferenceMinEigScale` *(constant)* | — | binCV's integer minimum eigenvalue, in the units the reference's `minEigThreshold` is quoted in: `(16*255)^2 / 2^20` |
 | `referenceMinEigScale` | — | `kReferenceMinEigScale` at an arbitrary bit depth |
 | `floorDiv` | — | `floor(a / b)` for integers with `b > 0`, rounding toward MINUS infinity |
 | `sourceWord` | — | The source word `k`, with the trailing partial word masked and any index outside the row reading as zero (the replicate fill covers it) |
@@ -339,15 +346,25 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `displacedRow` | — | Builds a displaced reader for row `y` of `plane`, clamped vertically |
 | `TapSums` *(struct)* | — | The five integer sums one gradient component's residual needs |
 | `combine` | — | `w00*t00 + w01*t01 + w10*t10 + w11*t11 - self` |
+| `kStagedMaxRows` *(constant)* | — | Rows the staging path handles |
 | `floorToLL` | — | `floor(v)` as a `long long`, for a value already known to be finite and within the frame's range |
 | `IterationTrace` *(struct)* | — | that measurement’s iteration counter |
 | `windowFitsAtLevel` | — | Is point `p`'s window entirely inside level `li`? |
 | `entryLevelFor` | — | The coarsest usable level whose window contains point `p`, or 0 |
+| `kLkVectorPath` *(constant)* | — | Does this level reach a VECTORIZED residual kernel? |
 | `calcOpticalFlowPyrLK` | 2 | Pyramidal Lucas-Kanade tracking of sparse keypoints between two binary frames |
 | `narrowLevel` | 2 | Pyramidal Lucas-Kanade over a ladder of levels that are all the SAME depth `N` |
 | `lkPathName` | 3 | Which residual kernel this level type will actually run, as a string |
 | `LKLevels` *(struct)* | 2 | A tracking ladder whose levels have DIFFERENT bit depths, level 0 first |
 | `stagingStackBytes` | 3 | Stack bytes the tracker's staging buffers occupy at `(N, WordType)` |
+
+## `ops/orbPattern.hpp`
+
+[`include/bincv/ops/orbPattern.hpp`](../include/bincv/ops/orbPattern.hpp)
+
+| | tier | |
+|---|---|---|
+| `kOrbBriefPattern` *(constant)* | 3 | `cv::ORB`'s learned sampling table as a `BriefPattern<256>`: pair i is OpenCV's points (x1, y1) -> a and (x2, y2) -> b, in OpenCV's order |
 
 ## `ops/orientation.hpp`
 
@@ -552,6 +569,9 @@ Anything marked INTERNAL in its docstring is omitted here.
 
 | | tier | |
 |---|---|---|
+| `kSequenceMode8Bit` *(constant)* | — | `mode` value for 8-bit (`P5`-shaped) frame bodies |
+| `kSequenceModePacked` *(constant)* | — | `mode` value for packed 1-bit (`P4`-shaped) frame bodies |
+| `kSequenceHeaderBytes` *(constant)* | — | The fixed header size; frame 0's body starts here |
 | `SequenceHeader` *(struct)* | — | What a `readSequenceHeader` call found, or why it did not |
 | `SequenceFrameRange` *(struct)* | — | One frame's body within a blob, or `valid == false` |
 | `readSequenceHeader` | 3 | Parses a `BSQ1` header from the first 32 bytes |

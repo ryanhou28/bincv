@@ -16,11 +16,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 INC = ROOT / "include" / "bincv"
 OUT = ROOT / "docs" / "API.md"
 
-# A declaration we consider public API: a function, type or enum at namespace scope.
+# A declaration we consider public API: a function, type, enum or named constant
+# at namespace scope. Constants ride on the k-prefix convention, which is what
+# keeps documented struct MEMBERS with initializers out of the index.
 DECL = re.compile(
     r"^(?:template\s*<[^>]*>\s*)?"
     r"(?:inline\s+|constexpr\s+|static\s+)*"
     r"(?:(?P<kind>struct|class|enum\s+class)\s+(?P<type>\w+)"
+    r"|[\w:<>,&*\s]+?\b(?P<var>k[A-Z]\w*)\s*(?:\[[^\]]*\])?\s*="
     r"|[\w:<>,&*\s]+?\b(?P<fn>\w+)\s*\()"
 )
 TIER = re.compile(r"\*\*API TIER (\d)|\*\*INTERNAL", re.I)
@@ -68,10 +71,11 @@ def briefs(path):
             d = DECL.match(decl)
         if d is None:
             continue
-        name = d.group("type") or d.group("fn")
+        name = d.group("type") or d.group("var") or d.group("fn")
         if not name or name.startswith("operator") or name in ("if", "for", "return"):
             continue
-        kind = (d.group("kind") or "function").replace("enum class", "enum")
+        kind = (d.group("kind") or ("constant" if d.group("var") else "function"))
+        kind = kind.replace("enum class", "enum")
         key = (name, kind)
         if key in seen:
             continue                      # overloads collapse to one row
