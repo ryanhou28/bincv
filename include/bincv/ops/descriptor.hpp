@@ -23,30 +23,24 @@
 /// byte never exists.
 ///
 /// ---------------------------------------------------------------------------
-/// WHAT THIS IS NOT (YET): OpenCV-COMPATIBLE ORB
+/// OpenCV-COMPATIBLE ORB: THE TABLE SHIPS, IN ITS OWN HEADER
 ///
-/// `cv::ORB` uses a **specific 256-pair table**, `bit_pattern_31_`, plus an
-/// orientation from the intensity centroid. binCV reproduces neither, and the reason
-/// is **practical, not legal** -- an earlier version of this comment said the table
-/// "would import a license question", which overstated it:
+/// `cv::ORB` samples with a **specific learned 256-pair table**, `bit_pattern_31_`,
+/// and descriptors are only comparable across implementations when the table is
+/// IDENTICAL -- re-running the paper's learning procedure yields a different one.
+/// That table is vendored as `kOrbBriefPattern` in
+/// [ops/orbPattern.hpp](orbPattern.hpp), with the notice its license requires
+/// carried in the same file and in THIRD_PARTY_NOTICES.md. (An earlier version of
+/// this comment called the source Apache-2.0 and said vendoring had to wait for
+/// binCV's own license file; both were wrong -- orb.cpp's file-level license is
+/// BSD 3-clause, its condition is retaining the notice, and a third-party notice
+/// needs no first-party license to live beside. binCV's own license remains an
+/// open, deliberately deferred decision.)
 ///
-/// * the ORB paper (Rublee et al., ICCV 2011) describes how the pattern is
-/// *learned*, and that method is free to reimplement;
-/// * the table as it exists is OpenCV source under **Apache-2.0, which permits
-/// copying with attribution.** Vendoring it is allowed, not forbidden.
-///
-/// **What actually stops it today is that binCV has no license file**, so it
-/// cannot discharge an attribution obligation it would be taking on. Once it has one,
-/// shipping an OpenCV-compatible pattern with proper attribution is a normal thing to
-/// do and would make binCV's descriptors interchangeable with `cv::ORB`'s.
-///
-/// Until then `BriefPattern` is an explicit argument, so a caller **can already pass
-/// OpenCV's table in themselves** and get comparable descriptors.
-///
-/// The default pattern is a deterministic Gaussian sample -- the original BRIEF
-/// construction. **Descriptors from two different patterns are not comparable**, which
-/// is true of BRIEF generally and is why the pattern is an argument rather than a
-/// hidden constant.
+/// The default pattern here is a deterministic Gaussian sample -- the original
+/// BRIEF construction. **Descriptors from two different patterns are not
+/// comparable**, which is true of BRIEF generally and is why the pattern is an
+/// argument rather than a hidden constant.
 ///
 /// Orientation compensation (ORB's rBRIEF) IS implemented, as the paper describes
 /// it rather than as `cv::ORB` does: the orientation

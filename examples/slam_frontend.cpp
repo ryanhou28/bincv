@@ -63,6 +63,7 @@
 #include "bincv/ops/essential.hpp"
 #include "bincv/ops/fast.hpp"
 #include "bincv/ops/occupancy.hpp"
+#include "bincv/ops/orbPattern.hpp"
 #include "bincv/ops/orientation.hpp"
 #include "bincv/ops/pyramid.hpp"
 #include "bincv/quantMat.hpp"
@@ -174,11 +175,13 @@ int main(int argc, char** argv) {
     bincv::Pyramid<W, 1, 1, 1, 1> pyr(w, h);
 
     // The steered pattern set: built once, 30 720 B, the price of rotation
-    // invariance with no per-keypoint trigonometry.
-    bincv::BriefPattern<kBits> base;
-    bincv::makeBriefPattern<kBits>(base);
+    // invariance with no per-keypoint trigonometry. The base is cv::ORB's own
+    // learned table -- the loop claims to be the ORB-SLAM shape, and with this
+    // table its descriptors are the ones that shape actually matches on; the
+    // table's samples also reach at most ~18.4 px, so the steered set rotates
+    // inside a tighter border than the square-sampled default would.
     bincv::SteeredBriefPattern<kBits> steered;
-    bincv::makeSteeredBriefPattern<kBits>(steered, base);
+    bincv::makeSteeredBriefPattern<kBits>(steered, bincv::kOrbBriefPattern);
 
     FrameFeatures cur, prev;
     std::vector<bincv::FastCorner> corners(static_cast<size_t>(w) *
