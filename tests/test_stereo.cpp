@@ -1,10 +1,15 @@
 // Sparse rectified stereo matching.
 //
-// Core-only. The correctness story runs on SYNTHETIC disparity: a shifted frame is
-// exact ground truth for the whole path -- the descriptor stage's candidate gating,
-// the Hamming refinement's integer optimum, and the parabola's behavior at it --
-// with no dataset involved. The real-pair arm belongs to the stereo frontend
-// example and waits on a rectified pair sequence.
+// Core-only, with one OpenCV-gated cross-check. The correctness story runs on
+// SYNTHETIC disparity, where a constructed pair is exact ground truth for the
+// whole path: constant shift, a TWO-BAND scene with a real occlusion (the case
+// that catches a sign or off-by-one a global shift cancels), and a genuinely
+// FRACTIONAL disparity that the parabola must recover off the integer grid.
+// Where OpenCV is present, cv::StereoBM closes the reference triangle: both
+// implementations against the truth and therefore against each other -- the
+// same left-reference convention and the same d = xL - xR sign, which is
+// exactly what that test would catch being wrong. The real-pair arm belongs to
+// the stereo frontend example and waits on a rectified pair sequence.
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -16,6 +21,11 @@
 #include "bincv/ops/stereo.hpp"
 #include "bincv/ops/pack.hpp"
 #include "test_util.hpp"
+
+#ifdef BINCV_WITH_OPENCV
+#include <opencv2/calib3d.hpp>
+#include <opencv2/core.hpp>
+#endif
 
 namespace {
 using namespace bincv;
@@ -209,5 +219,186 @@ BINCV_TEST(Stereo, AWindowOffTheFrameReportsInvalidNotClamped) {
     stereoRefineDisparity<uint32_t>(l.constView(), r.constView(), kp, 1, &m, p);
     BINCV_CHECK(m.valid == 0);
 }
+
+BINCV_TEST(Stereo, PiecewiseDisparityLandsPerBand) {
+    // A constant shift cannot catch a sign error or an off-by-one that happens to
+    // cancel; a scene with TWO disparities can. The right image is built the way
+    // a real rig sees one: each left column band lands at its own disparity, and
+    // the near band overwrites the far one in the contested zone -- a real
+    // occlusion. Keypoints keep clear of the band boundary and the occlusion, and
+    // every one must land on ITS band's disparity, not a blend.
+    constexpr size_t kW = 400, kH = 200;
+    constexpr int kDNear = 24, kDFar = 10, kSplit = 200;
+    const std::vector<uint8_t> lw = smoothImage(kW, kH, 91);
+    std::vector<uint8_t> rw(kW * kH, 0);
+    for (size_t y = 0; y < kH; ++y) {
+        for (int xL = 0; xL < static_cast<int>(kW); ++xL) {
+            const int d = xL < kSplit ? kDFar : kDNear;
+            const int xR = xL - d;
+            if (xR >= 0) rw[y * kW + static_cast<size_t>(xR)] = lw[y * kW + static_cast<size_t>(xL)];
+        }
+    }
+    BinMat<uint32_t> lb(kW, kH), rb(kW, kH);
+    packBits<PackRule::GreaterThan>(lw.data(), kW, kH, kW, lb.view(), uint8_t{127});
+    packBits<PackRule::GreaterThan>(rw.data(), kW, kH, kW, rb.view(), uint8_t{127});
+
+    std::vector<float> kpL, kpR;
+    std::vector<int> truth;
+    for (int y = 30; y < 170; y += 15) {
+        for (int x = 60; x <= 340; x += 20) {
+            if (x > 150 && x < 260) continue;   // boundary + occlusion margin
+            const int d = x < kSplit ? kDFar : kDNear;
+            kpL.push_back(static_cast<float>(x));
+            kpL.push_back(static_cast<float>(y));
+            kpR.push_back(static_cast<float>(x - d));
+            kpR.push_back(static_cast<float>(y));
+            truth.push_back(d);
+        }
+    }
+    const size_t n = truth.size();
+    BriefPattern<kBits> pat;
+    makeBriefPattern<kBits>(pat);
+    std::vector<uint32_t> dl(n * kWords), dr(n * kWords);
+    computeBrief<kBits, uint8_t, uint32_t>(lw.data(), kW, kH, kW, kpL.data(), n, pat, dl.data());
+    computeBrief<kBits, uint8_t, uint32_t>(rw.data(), kW, kH, kW, kpR.data(), n, pat, dr.data());
+
+    StereoMatchParams p;
+    p.maxDisparity = 40;
+    std::vector<StereoMatch> m(n);
+    stereoMatchRectified<uint32_t>(lb.constView(), rb.constView(), kpL.data(), n, dl.data(),
+                                   kpR.data(), n, dr.data(), kWords, m.data(), p);
+    size_t good = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (m[i].valid &&
+            std::abs(m[i].disparity - static_cast<float>(truth[i])) < 0.5f) ++good;
+    }
+    std::printf(" two-band scene: %zu of %zu keypoints on their own band's disparity\n",
+                good, n);
+    BINCV_CHECK_EQ(good, n);
+}
+
+BINCV_TEST(Stereo, TheParabolaRecoversAFractionalDisparity) {
+    // Depth is 1/disparity, so the sub-pixel fit is the whole reason the refine
+    // stage carries any float at all. Ground truth at 12.5 px: the right image is
+    // the left sampled at x + 12.5 by exact 2-tap averaging, THEN binarized -- so
+    // the packed pair genuinely carries a half-pixel offset and an integer-only
+    // matcher is wrong by 0.5 on every keypoint. The fit must beat that clearly,
+    // not marginally.
+    constexpr size_t kW = 320, kH = 160;
+    const std::vector<uint8_t> lw = smoothImage(kW, kH, 123);
+    std::vector<uint8_t> rw(kW * kH, 0);
+    for (size_t y = 0; y < kH; ++y)
+        for (size_t x = 0; x + 13 < kW; ++x)
+            rw[y * kW + x] = static_cast<uint8_t>(
+                (static_cast<unsigned>(lw[y * kW + x + 12]) +
+                 static_cast<unsigned>(lw[y * kW + x + 13]) + 1u) / 2u);
+    BinMat<uint32_t> lb(kW, kH), rb(kW, kH);
+    packBits<PackRule::GreaterThan>(lw.data(), kW, kH, kW, lb.view(), uint8_t{127});
+    packBits<PackRule::GreaterThan>(rw.data(), kW, kH, kW, rb.view(), uint8_t{127});
+
+    std::vector<float> kp;
+    for (int y = 30; y < 130; y += 12)
+        for (int x = 60; x < 280; x += 16) {
+            kp.push_back(static_cast<float>(x));
+            kp.push_back(static_cast<float>(y));
+        }
+    const size_t n = kp.size() / 2;
+    std::vector<StereoMatch> m(n);
+    for (auto& e : m) {
+        e.valid = 1;
+        e.disparity = 12.0f;
+    }
+    StereoMatchParams p;
+    p.maxDisparity = 40;
+    stereoRefineDisparity<uint32_t>(lb.constView(), rb.constView(), kp.data(), n, m.data(), p);
+    double sum = 0.0;
+    size_t inside = 0;
+    for (size_t i = 0; i < n; ++i) {
+        BINCV_CHECK(m[i].valid == 1);
+        sum += static_cast<double>(m[i].disparity);
+        if (m[i].disparity > 12.0f && m[i].disparity < 13.0f) ++inside;
+    }
+    const double mean = sum / static_cast<double>(n);
+    std::printf(" fractional truth 12.5: mean refined %.3f, %zu of %zu strictly inside"
+                " (12, 13)\n", mean, inside, n);
+    // The mean must sit near the true half-pixel -- an integer-only answer means
+    // 12.0 or 13.0 -- and most individual fits must leave the integer grid.
+    BINCV_CHECK(std::abs(mean - 12.5) < 0.25);
+    BINCV_CHECK(inside * 3 >= n * 2);
+}
+
+#ifdef BINCV_WITH_OPENCV
+BINCV_TEST(Stereo, AgreesWithCvStereoBMOnCleanGroundTruth) {
+    // The reference-implementation cross-check. cv::StereoBM prices a DIFFERENT
+    // operation (dense, SAD on prefiltered bytes) so agreement is a sanity
+    // triangle, not an equality: on a clean constant-disparity pair, binCV's
+    // sparse matcher and StereoBM must both land on the truth, and therefore
+    // near each other -- same left-reference convention, same disparity sign
+    // (d = xL - xR), which is exactly what this test would catch being wrong.
+    constexpr size_t kW = 400, kH = 200;
+    constexpr int kDisp = 16;
+    const std::vector<uint8_t> lw = smoothImage(kW, kH, 777);
+    std::vector<uint8_t> rw(kW * kH, 0);
+    for (size_t y = 0; y < kH; ++y)
+        for (size_t x = 0; x + kDisp < kW; ++x) rw[y * kW + x] = lw[y * kW + x + kDisp];
+
+    cv::Mat lcv(static_cast<int>(kH), static_cast<int>(kW), CV_8U), rcv = lcv.clone();
+    for (size_t y = 0; y < kH; ++y)
+        for (size_t x = 0; x < kW; ++x) {
+            lcv.at<uint8_t>(static_cast<int>(y), static_cast<int>(x)) = lw[y * kW + x];
+            rcv.at<uint8_t>(static_cast<int>(y), static_cast<int>(x)) = rw[y * kW + x];
+        }
+    cv::Ptr<cv::StereoBM> bm = cv::StereoBM::create(64, 21);
+    cv::Mat disp16;
+    bm->compute(lcv, rcv, disp16);
+
+    BinMat<uint32_t> lb(kW, kH), rb(kW, kH);
+    packBits<PackRule::GreaterThan>(lw.data(), kW, kH, kW, lb.view(), uint8_t{127});
+    packBits<PackRule::GreaterThan>(rw.data(), kW, kH, kW, rb.view(), uint8_t{127});
+
+    // Keypoints inside StereoBM's valid region: it blanks x < numDisparities and
+    // a blockSize/2 rim, so start well right of 64 + 10.
+    std::vector<float> kpL, kpR;
+    for (int y = 30; y < 170; y += 15)
+        for (int x = 100; x < 340; x += 20) {
+            kpL.push_back(static_cast<float>(x));
+            kpL.push_back(static_cast<float>(y));
+            kpR.push_back(static_cast<float>(x - kDisp));
+            kpR.push_back(static_cast<float>(y));
+        }
+    const size_t n = kpL.size() / 2;
+    BriefPattern<kBits> pat;
+    makeBriefPattern<kBits>(pat);
+    std::vector<uint32_t> dl(n * kWords), dr(n * kWords);
+    computeBrief<kBits, uint8_t, uint32_t>(lw.data(), kW, kH, kW, kpL.data(), n, pat, dl.data());
+    computeBrief<kBits, uint8_t, uint32_t>(rw.data(), kW, kH, kW, kpR.data(), n, pat, dr.data());
+    StereoMatchParams p;
+    p.maxDisparity = 40;
+    std::vector<StereoMatch> m(n);
+    stereoMatchRectified<uint32_t>(lb.constView(), rb.constView(), kpL.data(), n, dl.data(),
+                                   kpR.data(), n, dr.data(), kWords, m.data(), p);
+
+    size_t oursGood = 0, bmValid = 0, bmGood = 0, agree = 0;
+    for (size_t i = 0; i < n; ++i) {
+        BINCV_CHECK(m[i].valid == 1);
+        const float ours = m[i].disparity;
+        if (std::abs(ours - static_cast<float>(kDisp)) <= 0.5f) ++oursGood;
+        const short raw = disp16.at<short>(static_cast<int>(kpL[2 * i + 1]),
+                                           static_cast<int>(kpL[2 * i]));
+        if (raw < 0) continue;   // StereoBM's own invalid marker
+        ++bmValid;
+        const float bmD = static_cast<float>(raw) / 16.0f;
+        if (std::abs(bmD - static_cast<float>(kDisp)) <= 1.0f) ++bmGood;
+        if (std::abs(bmD - ours) <= 1.5f) ++agree;
+    }
+    std::printf(" truth %d: ours within 0.5 px on %zu/%zu; StereoBM valid at %zu, within"
+                " 1 px on %zu; the two within 1.5 px of each other on %zu\n",
+                kDisp, oursGood, n, bmValid, bmGood, agree);
+    BINCV_CHECK_EQ(oursGood, n);
+    BINCV_CHECK(bmValid > n / 2);        // BM validity is its own business
+    BINCV_CHECK_EQ(bmGood, bmValid);     // where BM speaks, it agrees with truth
+    BINCV_CHECK_EQ(agree, bmValid);      // and therefore with us
+}
+#endif // BINCV_WITH_OPENCV
 
 BINCV_TEST_MAIN("test_stereo")
