@@ -167,15 +167,20 @@ Settled decisions. If one seems wrong, say so rather than working around it.
 pipeline already runs.** It takes no position on which algorithm a caller should use —
 that is their choice, and binCV's job is to make the one they chose cheaper.
 
-**The operation set follows the use cases that turn up, not a fixed taxonomy.** binCV is
-not trying to replace OpenCV. An operation is in scope when it is on a path a caller
-needs *and* binCV can make it smaller or faster; it is out of scope when binCV would add
-nothing but a second implementation to keep correct.
+**The operation set follows what users need, not a fixed taxonomy.** binCV is not
+trying to replace OpenCV. An operation is in scope when it sits on a path **users**
+run *and* binCV can make it smaller or faster. A library's users include people
+outside this repository, so "no in-repo caller yet" is not a veto — that reading was
+corrected by the owner (2026-09-11); an in-repo caller is what *prices* an operation
+honestly (the benchmark-at-birth rule below), not a gate on whether it may exist. An
+operation is out of scope when binCV would add nothing but a second implementation to
+keep correct.
 
-Today that means image processing, features and tracking, and the geometry the frontend
-consumes — RANSAC-based estimation is in scope for that reason. IMU fusion and bundle
-adjustment are not, because no use case has asked for them yet. That is a statement about
-what has come up, not a boundary on principle.
+Today that means image processing, features and tracking, stereo, and the geometry the
+frontend consumes — RANSAC-based estimation is in scope for that reason. IMU fusion and
+bundle adjustment are out on the second prong, not the first: they are float linear
+algebra with no low-bit-width representation to exploit, so binCV would make them
+neither smaller nor faster.
 
 **The input boundary is a rule, not a list:** binCV accepts a **single-channel,
 integer-typed, strided pixel array** and turns it into an N-bit matrix. Getting to that

@@ -163,17 +163,20 @@ not exist.
 
 binCV provides memory- and performance-optimized versions of operations a vision pipeline
 already runs. It takes no position on which algorithm a caller should use; the point is to
-make the one they chose cost less. So the operation set grows with the use cases that turn
-up. An operation belongs here when a caller needs it on their path *and* binCV can make it
-smaller or faster — and does not when binCV would contribute nothing but a second
-implementation to keep correct.
+make the one they chose cost less. An operation belongs here when it sits on a path
+**users** run *and* binCV can make it smaller or faster — and does not when binCV would
+contribute nothing but a second implementation to keep correct. A library's users include
+people outside this repository, so an operation does not wait for an in-repo caller to
+exist (owner's decision, 2026-09-11). What an in-repo caller *is* for is pricing: every
+operation still gets a benchmark arm the day it is written, and a representative pipeline
+is what turns kernel numbers into shares.
 
-That covers image processing, features and tracking, and the geometry the frontend consumes
-downstream of them. The SLAM use case brought the descriptor path — orientation, steered
-BRIEF, Hamming matching — and sparse rectified stereo, for the same reason tracking brought
-LK: a caller's pipeline runs them, and bits make them cheaper. IMU fusion and bundle
-adjustment are absent because nothing has needed them yet, which is a fact about the use
-cases rather than a line drawn on principle.
+That covers image processing, features and tracking, stereo, and the geometry the frontend
+consumes downstream of them. The SLAM use case brought the descriptor path — orientation,
+steered BRIEF, Hamming matching — and sparse rectified stereo, for the same reason tracking
+brought LK: users' pipelines run them, and bits make them cheaper. Dense disparity is
+scheduled on the same test. IMU fusion and bundle adjustment are absent on the second
+prong, not the first: float linear algebra offers the representation nothing to exploit.
 
 ### binCV links no codec, on any target
 

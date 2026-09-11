@@ -13,10 +13,15 @@
 //
 // THIS FILE IS THE OTHER BARGAIN: real consecutive frame pairs, with OpenCV's
 // LK on the SAME binary content as the reference instead of a known warp. It
-// trades exact ground truth for representativeness. What decides whether the
-// trade is worth taking is ONE question: does this harness reproduce the
-// FRONTEND's configuration deltas (which the synthetic harness does not),
-// while staying cheap enough to sweep with?
+// trades exact ground truth for representativeness. The question that decided
+// whether the trade was worth taking: does this harness reproduce the FRONTEND's
+// configuration deltas (which the synthetic harness does not), while staying
+// cheap enough to sweep with? Measured: it does -- on the axis where the
+// synthetic harness said -0.42 and the frontend said -4.60, this said -7.24 --
+// and the owner ADOPTED it (2026-09-11): this harness may guide ladder/filter
+// accuracy decisions, with a full frontend run remaining the final gate before
+// any shipped default changes. The synthetic harness stays restricted to
+// sensitivity questions.
 //
 // Yield here is: of the keypoints BOTH trackers report tracked, the fraction
 // whose flows agree within 1 px. It is agreement with a reference
@@ -215,9 +220,10 @@ int main(int argc, char** argv) {
                     cfg.name, y, y - anchor, cfg.total.both);
     }
     std::printf("\n whole sweep: %.1f s for six configurations -- the price of a harness\n"
-                " that tracks real pairs. The synthetic harness stays for sensitivity\n"
-                " questions; THIS one exists to be checked against the frontend's\n"
-                " deltas before its numbers are trusted for ladder decisions.\n",
+                " that tracks real pairs. Adopted for ladder/filter DIRECTION decisions\n"
+                " (owner, 2026-09-11); a full frontend run remains the final gate before\n"
+                " a shipped default changes, and the synthetic harness answers only\n"
+                " sensitivity questions.\n",
                 secs);
     return 0;
 }
