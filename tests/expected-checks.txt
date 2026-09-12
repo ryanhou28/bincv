@@ -921,7 +921,8 @@ opencv	test_simd	10	0
 opencv	test_ransac	134	0
 opencv	test_essential	304	0
 opencv	test_orientation	832	0
-opencv	test_stereo	139	0
+opencv	test_stereo	392	0
+opencv	test_census	102	0
 opencv	test_harness	8	0
 opencv	test_opencv_interop	169	0
 opencv	test_equivalence	16403	0
@@ -958,7 +959,8 @@ core	test_simd	10	0
 core	test_ransac	128	0
 core	test_essential	282	0
 core	test_orientation	832	0
-core	test_stereo	139	0
+core	test_stereo	268	0
+core	test_census	102	0
 core	test_harness	8	0
 
 noexcept	test_parallel	9	0
@@ -993,7 +995,8 @@ noexcept	test_simd	10	0
 noexcept	test_ransac	128	0
 noexcept	test_essential	282	0
 noexcept	test_orientation	832	0
-noexcept	test_stereo	139	0
+noexcept	test_stereo	268	0
+noexcept	test_census	102	0
 noexcept	test_harness	8	0
 
 debug	test_parallel	9	0
@@ -1028,6 +1031,7 @@ debug	test_simd	10	0
 debug	test_ransac	128	0
 debug	test_essential	282	0
 debug	test_orientation	832	0
-debug	test_stereo	139	0
+debug	test_stereo	268	0
+debug	test_census	102	0
 debug	test_harness	8	0
 

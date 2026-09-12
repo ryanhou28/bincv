@@ -20,6 +20,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`quantMat.hpp`](#quantMathpp) — 29 entries
 - [`ops/bitslice.hpp`](#opsbitslicehpp) — 6 entries
 - [`ops/blockMatch.hpp`](#opsblockMatchhpp) — 5 entries
+- [`ops/census.hpp`](#opscensushpp) — 5 entries
 - [`ops/corner.hpp`](#opscornerhpp) — 18 entries
 - [`ops/covariance.hpp`](#opscovariancehpp) — 3 entries
 - [`ops/denoise.hpp`](#opsdenoisehpp) — 2 entries
@@ -134,6 +135,18 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `blockMatchLevel` | 3 | Names two frames' level into a BlockMatchLevel |
 | `parabolicOffset` | — | The vertex of the parabola through `(-1, cm)`, `(0, c0)`, `(+1, cp)` |
 | `calcOpticalFlowBlockMatch` | 3 | Pyramidal keypoint tracking by integer Hamming block matching |
+
+## `ops/census.hpp`
+
+[`include/bincv/ops/census.hpp`](../include/bincv/ops/census.hpp)
+
+| | tier | |
+|---|---|---|
+| `CensusOffset` *(struct)* | — | One census comparison offset, relative to the pixel being written |
+| `CensusPattern` *(struct)* | — | A census neighbourhood: `K` offsets, none of them (0, 0) |
+| `kCensus3x3` *(constant)* | 3 | The 8-neighbour census (3x3 minus center), raster order |
+| `kCensus5x5` *(constant)* | 3 | The 24-comparison census (5x5 minus center), raster order -- the neighbourhood the dense-stereo design is written against |
+| `censusTransform` | 3 | Census transform: plane `k` of `planes` gets `I(p + pattern.at[k]) > I(p)` at every pixel `p` |
 
 ## `ops/corner.hpp`
 
