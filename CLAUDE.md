@@ -88,7 +88,7 @@ if that case does not report ~1.00×, the fast path is not running where you thi
 
 ```bash
 ./scripts/verify.sh           # ~35 s, four configurations, warnings fatal
-./scripts/verify_arm.sh       # aarch64 correctness under emulation; skips without Docker
+./scripts/verify_cross.sh     # the other architecture under emulation; skips without Docker
 ./scripts/verify_cortex_m.sh  # Cortex-M7 compile gate; skips without arm-none-eabi
 python3 scripts/check_links.py
 ```
@@ -109,15 +109,21 @@ Read the two numbers in its summary table:
 Each configuration also has to *be* the configuration it claims to be: `verify.sh` reads
 the build flags back out of a built binary and fails on a mismatch.
 
-**A third of `ops/opticalFlow.hpp` is invisible to every x86 build.** The NEON region is
-behind `#if BINCV_HAVE_NEON && __aarch64__`, so an edit there can be structurally broken
-and still pass all four x86 configurations. `verify_arm.sh` covers it under emulation.
+**`verify.sh` covers the architecture it runs on, and nothing else.** A third of
+`ops/opticalFlow.hpp` is invisible to every x86 build — the NEON region is behind
+`#if BINCV_HAVE_NEON && __aarch64__` — and the AVX2 paths in `ops/pack.hpp` are invisible
+to every aarch64 build, so an edit in either region can be structurally broken and still
+pass every native configuration on the other side. `verify_cross.sh` detects the host
+with `uname -m` and emulates the architecture the native run cannot see: aarch64 from an
+x86_64 host, x86_64 from an aarch64 one. (`verify_arm.sh` still works; it forwards
+there.) It refuses to compare check counts against a reference from its own
+architecture — that diff cannot fail, so it reports `NOT PERFORMED` and exits 77.
 
 **`verify_cortex_m.sh` is the only place `size_t` is 32 bits.** Every index, stride and
 `planeWords()` is a `size_t`, and the four-word-type sweep is otherwise compiled solely at
 64-bit pointer width — the first run of that gate found a test asserting `size_t{1} << 63`.
 It is **compile-only** (the host cannot execute an M-profile image) and, like
-`verify_arm.sh`, exits **77** when it cannot run at all, which is not a pass.
+`verify_cross.sh`, exits **77** when it cannot run at all, which is not a pass.
 
 **Warnings are project policy, not the script's.** They live in
 `cmake/BincvWarnings.cmake` and are on in every build:
@@ -161,15 +167,20 @@ Settled decisions. If one seems wrong, say so rather than working around it.
 pipeline already runs.** It takes no position on which algorithm a caller should use —
 that is their choice, and binCV's job is to make the one they chose cheaper.
 
-**The operation set follows the use cases that turn up, not a fixed taxonomy.** binCV is
-not trying to replace OpenCV. An operation is in scope when it is on a path a caller
-needs *and* binCV can make it smaller or faster; it is out of scope when binCV would add
-nothing but a second implementation to keep correct.
+**The operation set follows what users need, not a fixed taxonomy.** binCV is not
+trying to replace OpenCV. An operation is in scope when it sits on a path **users**
+run *and* binCV can make it smaller or faster. A library's users include people
+outside this repository, so "no in-repo caller yet" is not a veto — that reading was
+corrected by the owner (2026-09-11); an in-repo caller is what *prices* an operation
+honestly (the benchmark-at-birth rule below), not a gate on whether it may exist. An
+operation is out of scope when binCV would add nothing but a second implementation to
+keep correct.
 
-Today that means image processing, features and tracking, and the geometry the frontend
-consumes — RANSAC-based estimation is in scope for that reason. IMU fusion and bundle
-adjustment are not, because no use case has asked for them yet. That is a statement about
-what has come up, not a boundary on principle.
+Today that means image processing, features and tracking, stereo, and the geometry the
+frontend consumes — RANSAC-based estimation is in scope for that reason. IMU fusion and
+bundle adjustment are out on the second prong, not the first: they are float linear
+algebra with no low-bit-width representation to exploit, so binCV would make them
+neither smaller nor faster.
 
 **The input boundary is a rule, not a list:** binCV accepts a **single-channel,
 integer-typed, strided pixel array** and turns it into an N-bit matrix. Getting to that

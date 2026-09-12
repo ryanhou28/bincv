@@ -163,14 +163,20 @@ not exist.
 
 binCV provides memory- and performance-optimized versions of operations a vision pipeline
 already runs. It takes no position on which algorithm a caller should use; the point is to
-make the one they chose cost less. So the operation set grows with the use cases that turn
-up. An operation belongs here when a caller needs it on their path *and* binCV can make it
-smaller or faster — and does not when binCV would contribute nothing but a second
-implementation to keep correct.
+make the one they chose cost less. An operation belongs here when it sits on a path
+**users** run *and* binCV can make it smaller or faster — and does not when binCV would
+contribute nothing but a second implementation to keep correct. A library's users include
+people outside this repository, so an operation does not wait for an in-repo caller to
+exist (owner's decision, 2026-09-11). What an in-repo caller *is* for is pricing: every
+operation still gets a benchmark arm the day it is written, and a representative pipeline
+is what turns kernel numbers into shares.
 
-That covers image processing, features and tracking, and the geometry the frontend consumes
-downstream of them. IMU fusion and bundle adjustment are absent because nothing has needed
-them yet, which is a fact about the use cases rather than a line drawn on principle.
+That covers image processing, features and tracking, stereo, and the geometry the frontend
+consumes downstream of them. The SLAM use case brought the descriptor path — orientation,
+steered BRIEF, Hamming matching — and sparse rectified stereo, for the same reason tracking
+brought LK: users' pipelines run them, and bits make them cheaper. Dense disparity is
+scheduled on the same test. IMU fusion and bundle adjustment are absent on the second
+prong, not the first: float linear algebra offers the representation nothing to exploit.
 
 ### binCV links no codec, on any target
 
@@ -209,6 +215,15 @@ a copy rather than a codec. Two properties keep this honest, and both are load-b
   is bit-identical to the whole-buffer one. `P4` needs no such path: its file already is
   the matrix.
 
+A frame **sequence** travels the same way. `io/sequence.hpp`'s blob is a fixed 32-byte
+header followed by `P4`- or `P5`-shaped bodies back to back — the same two layouts,
+concatenated, no third pixel format and still no codec — so a filesystem-less target can
+be fed a whole dataset from one byte range: a file to `fread` or mmap, an app asset, an
+`xxd -i` array in flash, a stream over USB/UART. `scripts/make_sequence_blob.py` writes
+one on the host, which is where the decoders live; its packed mode also runs the sensor
+stage there, trading coverage for 8× more frames in the same flash, and the header
+records which trade a blob made so a reader cannot confuse them.
+
 ---
 
 ## 8. Platforms
@@ -232,7 +247,7 @@ have not been built, and until they are, nothing here is a claim about them.
 Measured on an STM32H753ZI (Cortex-M7) with arm-none-eabi GCC 14.2, `-fno-exceptions
 -fno-rtti`, newlib, and no vendor SDK:
 
-**Runs.** `bincv_core` in full — containers, views and the `ops/` kernels. 33 of the 34
+**Runs.** `bincv_core` in full — containers, views and the `ops/` kernels. 34 of the 35
 test suites cross-compile clean under the whole warning set at 32-bit `size_t`, a pointer
 width the four-word-type sweep had never been compiled at before; the one 64-bit
 assumption it exposed was in a test, not the library.

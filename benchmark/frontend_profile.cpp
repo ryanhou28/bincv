@@ -56,8 +56,11 @@ int main() {
                                                                                            : 0u);
         }
     }
-    prev.build();
-    next.build();
+    // Box2x2/Replicate, NOT the default Gaussian: pyramid.hpp says it plainly -- the
+    // default exists so the container's meaning matches OpenCV's, and the frontend
+    // this file profiles never runs it. This file did, for every build it timed.
+    prev.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
+    next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
     bincv::derivativeX(prev.level<0>(), dx0); bincv::derivativeY(prev.level<0>(), dy0);
     bincv::derivativeX(prev.level<1>(), dx1); bincv::derivativeY(prev.level<1>(), dy1);
     bincv::derivativeX(prev.level<2>(), dx2); bincv::derivativeY(prev.level<2>(), dy2);
@@ -112,10 +115,13 @@ int main() {
                                                                      corners.size());
              measure::g_sink += res.count;
          }},
-        {"build: pyrDown x2 + both derivative ladders",
+        // ONE pyrDown pass, not two: the redundant rebuild is gone -- the frontend
+        // swaps the previous frame's pyramid in and builds only the incoming one, so
+        // pricing two builds here would restore the waste in the denominator that
+        // decides what to optimise next.
+        {"build: pyrDown + both derivative ladders",
          [&](int) {
-             prev.build();
-             next.build();
+             next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
              bincv::derivativeX(prev.level<0>(), dx0); bincv::derivativeY(prev.level<0>(), dy0);
              bincv::derivativeX(prev.level<1>(), dx1); bincv::derivativeY(prev.level<1>(), dy1);
              bincv::derivativeX(prev.level<2>(), dx2); bincv::derivativeY(prev.level<2>(), dy2);

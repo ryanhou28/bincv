@@ -221,12 +221,21 @@ endfunction()
 # Phase 4 needs; it is a test rather than a benchmark because the thing it pins --
 # which stage dominates -- is a structural property that must fail loudly when it
 # changes, not a timing that is allowed to drift.
+# test_sequence is core for the most literal version of the pack/pnm reason: the
+# sequence blob (io/sequence.hpp) exists so a target with NO filesystem and no
+# OpenCV can be fed real dataset frames, so its reader has to be verified in the
+# configurations that have neither. Its fixtures under tests/images/ were written
+# once by scripts/make_sequence_blob.py and are compared against their committed
+# .pgm sources -- for the packed mode, against binCV's own medianWide +
+# edgeThreshold at zero tolerance -- so the tool-to-reader agreement is enforced
+# on every run without python in the loop.
 set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_error_checked
                      test_logic test_shift test_reduce test_bitslice
                      test_denoise test_threshold test_morphology test_resample
                      test_pyramid test_derivative test_covariance test_corner
-                     test_opticalflow test_pack test_edge test_median_wide test_descriptor test_fast
-                     test_subpix test_view_narrow test_occupancy test_simd test_ransac test_essential)
+                     test_opticalflow test_pack test_sequence test_edge test_median_wide test_descriptor test_fast
+                     test_subpix test_view_narrow test_occupancy test_simd test_ransac test_essential
+                     test_orientation test_stereo test_census)
 
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
@@ -304,7 +313,7 @@ set_tests_properties(test_harness_failing PROPERTIES WILL_FAIL TRUE)
 # Deliberately NOT ported to GTest's EXPECT_DEATH by T1.7. EXPECT_DEATH exists in
 # every configuration binCV builds (verified, -fno-exceptions included), but it
 # works by forking the test process and re-running it, which is materially more
-# fragile under the QEMU user-mode emulation scripts/verify_arm.sh runs in than
+# fragile under the QEMU user-mode emulation scripts/verify_cross.sh runs in than
 # "start this process and check how it ended". These cases are the only coverage
 # the no-exceptions build has for the validation checks, so they are the last
 # thing that should acquire a new way to fail.

@@ -72,8 +72,14 @@ one thread against many measures the parallelism rather than the implementation.
 - **Primitives** — logic, shifts, bulk and windowed reductions, morphology, resampling,
   bit-sliced arithmetic, thresholding.
 - **Features and tracking** — pyramid, derivatives, gradient covariance, corner response,
-  `goodFeaturesToTrack`, pyramidal Lucas–Kanade, FAST, BRIEF descriptors and Hamming
-  matching, sub-pixel refinement.
+  `goodFeaturesToTrack`, pyramidal Lucas–Kanade, FAST (wide and bit-plane), sub-pixel
+  refinement.
+- **Descriptors and stereo** — intensity-centroid orientation, BRIEF and steered
+  (rotation-compensated) BRIEF with caller-supplied patterns, Hamming matching, and
+  sparse rectified stereo matching with sub-pixel disparity. The SLAM half of the
+  feature path; `examples/slam_frontend.cpp` runs it end to end.
+- **Geometry** — RANSAC over caller-owned scratch: 2D affine, and the five-point
+  essential matrix.
 - **Interop** — `cv::Mat` in and out when OpenCV is present; raw buffers and PNM (`P4`,
   `P5`) when it is not. binCV links no codec on any target: a camera's Y plane, a V4L2
   buffer and a sensor's DMA rows are already the input contract, so decoding sits on no

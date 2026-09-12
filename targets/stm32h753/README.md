@@ -221,9 +221,13 @@ Two things this turned up that are worth more than L2 was:
   X-57's 12.9 -> 3.4 ms) and the conditions to reproduce X-57 are not recorded here.
   It is a discrepancy large enough to be worth resolving before the 3.75x is quoted
   again.
-- **The biggest stage is not popcount-bound at all.** The corner response sweep is
-  56-61% of the frontend and moves 1.13x. Whatever governs it is where the frontend's
-  time actually is.
+- **The biggest stage is not popcount-bound at all.** The corner response sweep moves
+  **1.13x** where the LK covariance moves 2.30x, so whatever governs it is not the
+  population count. It is **56-61% of detect**, and 42-43% of this profile's whole
+  frontend — but that second figure assumes detection runs every frame, which #7
+  records as the misleading assumption: detection's share is a function of the duty
+  cycle, not a property of the operation. The 1.13x is the part that does not depend
+  on the duty cycle, and it is the part worth carrying to #7.
 
 If the covariance is worth attacking, the shape that fits it is L2's *idea* applied
 across a window's rows and its `3N^2 + N` sums -- accumulate lanes, collapse once per

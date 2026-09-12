@@ -23,34 +23,36 @@
 /// byte never exists.
 ///
 /// ---------------------------------------------------------------------------
-/// WHAT THIS IS NOT (YET): OpenCV-COMPATIBLE ORB
+/// OpenCV-COMPATIBLE ORB: THE TABLE SHIPS, IN ITS OWN HEADER
 ///
-/// `cv::ORB` uses a **specific 256-pair table**, `bit_pattern_31_`, plus an
-/// orientation from the intensity centroid. binCV reproduces neither, and the reason
-/// is **practical, not legal** -- an earlier version of this comment said the table
-/// "would import a license question", which overstated it:
+/// `cv::ORB` samples with a **specific learned 256-pair table**, `bit_pattern_31_`,
+/// and descriptors are only comparable across implementations when the table is
+/// IDENTICAL -- re-running the paper's learning procedure yields a different one.
+/// That table is vendored as `kOrbBriefPattern` in
+/// [ops/orbPattern.hpp](orbPattern.hpp), with the notice its license requires
+/// carried in the same file and in THIRD_PARTY_NOTICES.md. (An earlier version of
+/// this comment called the source Apache-2.0 and said vendoring had to wait for
+/// binCV's own license file; both were wrong -- orb.cpp's file-level license is
+/// BSD 3-clause, its condition is retaining the notice, and a third-party notice
+/// needs no first-party license to live beside. binCV's own license remains an
+/// open, deliberately deferred decision.)
 ///
-/// * the ORB paper (Rublee et al., ICCV 2011) describes how the pattern is
-/// *learned*, and that method is free to reimplement;
-/// * the table as it exists is OpenCV source under **Apache-2.0, which permits
-/// copying with attribution.** Vendoring it is allowed, not forbidden.
+/// The default pattern here is a deterministic Gaussian sample -- the original
+/// BRIEF construction. **Descriptors from two different patterns are not
+/// comparable**, which is true of BRIEF generally and is why the pattern is an
+/// argument rather than a hidden constant.
 ///
-/// **What actually stops it today is that binCV has no license file**, so it
-/// cannot discharge an attribution obligation it would be taking on. Once it has one,
-/// shipping an OpenCV-compatible pattern with proper attribution is a normal thing to
-/// do and would make binCV's descriptors interchangeable with `cv::ORB`'s.
-///
-/// Until then `BriefPattern` is an explicit argument, so a caller **can already pass
-/// OpenCV's table in themselves** and get comparable descriptors.
-///
-/// The default pattern is a deterministic Gaussian sample -- the original BRIEF
-/// construction. **Descriptors from two different patterns are not comparable**, which
-/// is true of BRIEF generally and is why the pattern is an argument rather than a
-/// hidden constant.
-///
-/// Orientation compensation (ORB's rBRIEF) is **not implemented**: it needs the
-/// intensity centroid and a rotated pattern lookup, and it is a separate piece of work
-/// rather than a flag on this one.
+/// Orientation compensation (ORB's rBRIEF) IS implemented, as the paper describes
+/// it rather than as `cv::ORB` does: the orientation
+/// ([ops/orientation.hpp](orientation.hpp)) selects one of **30 pre-rotated copies
+/// of the pattern** -- 12-degree bins, the paper's own discretization -- where
+/// OpenCV rotates per keypoint with the exact angle. The discretized form is the
+/// one that fits binCV: the rotated patterns are integer and built once, the
+/// kernel needs no per-keypoint trigonometry, and the rotation table is
+/// **hardcoded fixed-point** so two platforms' libm cannot disagree about what
+/// the pattern is. Descriptors from different bin counts are incomparable
+/// exactly as descriptors from different patterns are, which is why the count is
+/// a constant of the type rather than a parameter.
 
 #include <cstddef>
 #include <cstdint>
@@ -81,6 +83,54 @@ template <size_t Bits, typename WordType>
 constexpr size_t descriptorWords() {
     return Bits / impl::bitsPerWord<WordType>();
 }
+
+namespace impl {
+
+/// @brief The pattern as flat offsets, once per call; returns its reach. **INTERNAL.**
+/// @note `q.ay * stride + q.ax` was two MULTIPLIES per pair inside a
+/// 256-iteration loop -- half a million of them for a thousand keypoints, all
+/// recomputing the same 512 numbers. The same mistake, and the same fix, as
+/// ops/fast.hpp's ring offsets. `reach` comes with them: the bounds test
+/// belongs per KEYPOINT, not per pair.
+template <size_t Bits>
+inline int briefFlattenPattern(const BriefPair* pairs, size_t stride, long long* offA,
+                               long long* offB) {
+    int reach = 0;
+    for (size_t i = 0; i < Bits; ++i) {
+        const BriefPair& q = pairs[i];
+        offA[i] = static_cast<long long>(q.ay) * static_cast<long long>(stride) + q.ax;
+        offB[i] = static_cast<long long>(q.by) * static_cast<long long>(stride) + q.bx;
+        const int e[4] = {q.ax < 0 ? -q.ax : q.ax, q.ay < 0 ? -q.ay : q.ay,
+                          q.bx < 0 ? -q.bx : q.bx, q.by < 0 ? -q.by : q.by};
+        for (int j = 0; j < 4; ++j)
+            if (e[j] > reach) reach = e[j];
+    }
+    return reach;
+}
+
+/// @brief One keypoint's descriptor from prebuilt flat offsets. **INTERNAL.**
+/// @note Every sample is in range by construction, so the inner loop is two
+/// loads and a compare: no bounds test, no multiply, and no read-modify-write
+/// on the descriptor -- the word is ACCUMULATED in a register and stored once
+/// per `kBits` pairs.
+template <size_t Bits, typename SrcT, typename WordType>
+inline void briefDescribeOne(const SrcT* center, const long long* offA,
+                             const long long* offB, WordType* d) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    constexpr size_t kWords = Bits / kBits;
+    for (size_t w = 0; w < kWords; ++w) {
+        WordType acc = 0;
+        const size_t base = w * kBits;
+        for (size_t b = 0; b < kBits; ++b) {
+            const size_t i = base + b;
+            acc = static_cast<WordType>(
+                acc | (static_cast<WordType>(center[offA[i]] < center[offB[i]]) << b));
+        }
+        d[w] = acc;
+    }
+}
+
+} // namespace impl
 
 /// @brief Fills a pattern by deterministic Gaussian sampling -- BRIEF's own
 /// construction. **API TIER 3.**
@@ -132,29 +182,13 @@ inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t st
                          const float* keypointsXY, size_t count,
                          const BriefPattern<Bits>& pattern, WordType* out,
                          uint8_t* keep = nullptr) {
-    constexpr size_t kBits = impl::bitsPerWord<WordType>();
-    constexpr size_t kWords = Bits / kBits;
+    constexpr size_t kWords = Bits / impl::bitsPerWord<WordType>();
     if (count == 0) return;
     BINCV_ASSERT(img != nullptr && keypointsXY != nullptr && out != nullptr,
                  "computeBrief: null argument");
 
-    // THE PATTERN AS FLAT OFFSETS, ONCE PER CALL. `q.ay * stride + q.ax` was two
-    // MULTIPLIES per pair inside a 256-iteration loop -- half a million of them for a
-    // thousand keypoints, all recomputing the same 512 numbers. The same mistake, and
-    // the same fix, as ops/fast.hpp's ring offsets.
-    //
-    // `reach` comes with them: the bounds test belongs per KEYPOINT, not per pair.
     long long offA[Bits], offB[Bits];
-    int reach = 0;
-    for (size_t i = 0; i < Bits; ++i) {
-        const BriefPair& q = pattern.pair[i];
-        offA[i] = static_cast<long long>(q.ay) * static_cast<long long>(stride) + q.ax;
-        offB[i] = static_cast<long long>(q.by) * static_cast<long long>(stride) + q.bx;
-        const int e[4] = {q.ax < 0 ? -q.ax : q.ax, q.ay < 0 ? -q.ay : q.ay,
-                          q.bx < 0 ? -q.bx : q.bx, q.by < 0 ? -q.by : q.by};
-        for (int j = 0; j < 4; ++j)
-            if (e[j] > reach) reach = e[j];
-    }
+    const int reach = impl::briefFlattenPattern<Bits>(pattern.pair, stride, offA, offB);
 
     for (size_t k = 0; k < count; ++k) {
         WordType* d = out + k * kWords;
@@ -165,24 +199,162 @@ inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t st
                             cx + reach < static_cast<long long>(width) &&
                             cy + reach < static_cast<long long>(height);
         if (inside) {
-            // Every sample is in range by construction, so the inner loop is two loads
-            // and a compare: no bounds test, no multiply, and no read-modify-write on
-            // the descriptor -- the word is ACCUMULATED in a register and stored once
-            // per `kBits` pairs.
             const SrcT* center = img + static_cast<size_t>(cy) * stride +
                                  static_cast<size_t>(cx);
-            for (size_t w = 0; w < kWords; ++w) {
-                WordType acc = 0;
-                const size_t base = w * kBits;
-                for (size_t b = 0; b < kBits; ++b) {
-                    const size_t i = base + b;
-                    acc = static_cast<WordType>(
-                        acc | (static_cast<WordType>(center[offA[i]] < center[offB[i]]) << b));
-                }
-                d[w] = acc;
-            }
+            impl::briefDescribeOne<Bits, SrcT, WordType>(center, offA, offB, d);
         }
         if (keep != nullptr) keep[k] = inside ? uint8_t{1} : uint8_t{0};
+    }
+}
+
+// ---------------------------------------------------------------------------
+// STEERED BRIEF -- the second half of rotation invariance. The first half,
+// the intensity-centroid angle, lives in ops/orientation.hpp.
+// ---------------------------------------------------------------------------
+
+/// @brief Rotation bins a steered pattern is built at: 12-degree steps, the ORB
+/// paper's own discretization.
+inline constexpr size_t kBriefAngleBins = 30;
+
+/// @brief Which rotation bin an angle selects: the nearest 12-degree step,
+/// wrapped. **API TIER 3.**
+/// @param angleRadians An angle in **[-2*pi, 2*pi]** -- `keypointOrientation`'s
+/// (-pi, pi] needs no pre-conditioning; an accumulated or otherwise
+/// unwrapped angle is the CALLER's to wrap first. The bound is asserted,
+/// because outside it the float-to-unsigned cast below is undefined
+/// behavior and the two ISAs this library measures resolve it
+/// DIFFERENTLY -- the exact cross-platform descriptor divergence the
+/// hardcoded rotation table exists to prevent.
+/// @note Integer arithmetic after one multiply, no <cmath>: the +30 shift makes
+/// the value positive over the asserted domain, so truncation IS floor,
+/// and the +0.5 makes floor round-to-nearest.
+inline unsigned briefAngleBin(float angleRadians) {
+    constexpr float kTwoPi = 6.28318530717958647692f;
+    BINCV_ASSERT(angleRadians >= -kTwoPi && angleRadians <= kTwoPi,
+                 "briefAngleBin: angle outside [-2*pi, 2*pi] -- wrap it first");
+    constexpr float kBinsPerRadian = static_cast<float>(kBriefAngleBins) / kTwoPi;
+    const float t = angleRadians * kBinsPerRadian + static_cast<float>(kBriefAngleBins);
+    const unsigned r = static_cast<unsigned>(t + 0.5f);
+    return r % kBriefAngleBins;
+}
+
+/// @brief `Bits` comparisons at each of the 30 rotations: ~30 KB at 256 bits,
+/// built once and reused for every frame.
+/// @note A CONTAINER in the descriptor path's sense -- built at setup, read by
+/// the kernel. It is plain aggregate data so a bare-metal caller can put it
+/// wherever its memory map wants it, flash included.
+template <size_t Bits>
+struct SteeredBriefPattern {
+    BriefPattern<Bits> bin[kBriefAngleBins];
+};
+
+namespace impl {
+
+/// @brief cos/sin of each 12-degree bin center, Q16 fixed point. **INTERNAL.**
+/// @note HARDCODED, not computed, and that is load-bearing: a pattern that
+/// silently varied between two libms would make their descriptors
+/// incomparable -- the correctness bug `makeBriefPattern`'s determinism
+/// note warns about, arriving through <cmath> instead of the seed.
+inline constexpr int kBriefRotQ16[kBriefAngleBins][2] = {
+    { 65536,      0}, { 64104,  13626}, { 59870,  26656}, { 53020,  38521},
+    { 43852,  48703}, { 32768,  56756}, { 20252,  62328}, {  6850,  65177},
+    { -6850,  65177}, {-20252,  62328}, {-32768,  56756}, {-43852,  48703},
+    {-53020,  38521}, {-59870,  26656}, {-64104,  13626}, {-65536,      0},
+    {-64104, -13626}, {-59870, -26656}, {-53020, -38521}, {-43852, -48703},
+    {-32768, -56756}, {-20252, -62328}, { -6850, -65177}, {  6850, -65177},
+    { 20252, -62328}, { 32768, -56756}, { 43852, -48703}, { 53020, -38521},
+    { 59870, -26656}, { 64104, -13626}};
+
+/// @brief Q16 product back to pixels, rounding half away from zero. **INTERNAL.**
+/// @note Division, not a shift: `>>` on a negative value is implementation-defined
+/// before C++20, and this number must be THE SAME on every compiler.
+inline int briefRotRound(long long v) {
+    return static_cast<int>((v >= 0 ? v + 32768 : v - 32768) / 65536);
+}
+
+} // namespace impl
+
+/// @brief Builds the 30 rotated copies of `base`. **API TIER 3.**
+/// @note Rotation preserves a pair's distance from the keypoint, so a base
+/// pattern sampled in the SQUARE (as `makeBriefPattern`'s is, clamped to
+/// +/- patchSize/2 per axis) reaches up to sqrt(2) further once rotated --
+/// about 21 pixels for a 31-pixel patch -- and keypoints that close to the
+/// border lose their descriptor at some angles and not others. A pattern
+/// whose samples respect the DISC of radius patchSize/2 (OpenCV's learned
+/// table does) keeps the same reach at every angle. Both work; the border
+/// behavior is the difference, and it is the base pattern's property.
+template <size_t Bits>
+inline void makeSteeredBriefPattern(SteeredBriefPattern<Bits>& out,
+                                    const BriefPattern<Bits>& base) {
+    for (size_t k = 0; k < kBriefAngleBins; ++k) {
+        const long long c = impl::kBriefRotQ16[k][0];
+        const long long s = impl::kBriefRotQ16[k][1];
+        for (size_t i = 0; i < Bits; ++i) {
+            const BriefPair& q = base.pair[i];
+            const int coords[4] = {q.ax, q.ay, q.bx, q.by};
+            int rot[4];
+            for (int j = 0; j < 4; j += 2) {
+                const long long x = coords[j], y = coords[j + 1];
+                rot[j] = impl::briefRotRound(x * c - y * s);
+                rot[j + 1] = impl::briefRotRound(x * s + y * c);
+                BINCV_ASSERT(rot[j] >= -128 && rot[j] <= 127 && rot[j + 1] >= -128 &&
+                                 rot[j + 1] <= 127,
+                             "makeSteeredBriefPattern: rotated offset does not fit int8");
+            }
+            out.bin[k].pair[i] = BriefPair{
+                static_cast<int8_t>(rot[0]), static_cast<int8_t>(rot[1]),
+                static_cast<int8_t>(rot[2]), static_cast<int8_t>(rot[3])};
+        }
+    }
+}
+
+/// @brief `computeBrief` steered by per-keypoint angles. **API TIER 3.**
+/// @param angles One angle per keypoint, radians -- `keypointOrientation`'s
+/// output, byte for byte.
+/// @param keep As `computeBrief`'s: 0 when the SELECTED bin's pattern falls
+/// outside the image at this keypoint. The reach is the bin's own, so a
+/// border keypoint can have a descriptor at one angle and not another --
+/// see `makeSteeredBriefPattern` on why, and on the base pattern that
+/// avoids it.
+/// @note Runs bin by bin: one bin's flat offsets on the stack (the same ~4 KB
+/// `computeBrief` uses), then every keypoint of that bin -- so the cost
+/// over `computeBrief` is 30 pattern flattens per CALL, not a rotation per
+/// keypoint, and the stack does not grow with the bin count. Bin 0 is the
+/// identity rotation: all-zero angles reproduce `computeBrief` bit for bit
+/// (tests/test_descriptor.cpp holds it to that).
+template <size_t Bits, typename SrcT, typename WordType>
+inline void computeBriefSteered(const SrcT* img, size_t width, size_t height, size_t stride,
+                                const float* keypointsXY, size_t count, const float* angles,
+                                const SteeredBriefPattern<Bits>& pattern, WordType* out,
+                                uint8_t* keep = nullptr) {
+    constexpr size_t kWords = Bits / impl::bitsPerWord<WordType>();
+    if (count == 0) return;
+    BINCV_ASSERT(img != nullptr && keypointsXY != nullptr && angles != nullptr &&
+                     out != nullptr,
+                 "computeBriefSteered: null argument");
+
+    long long offA[Bits], offB[Bits];
+    for (unsigned b = 0; b < kBriefAngleBins; ++b) {
+        int reach = -1;   // flattened lazily: most calls populate a few bins
+        for (size_t k = 0; k < count; ++k) {
+            if (briefAngleBin(angles[k]) != b) continue;
+            if (reach < 0)
+                reach = impl::briefFlattenPattern<Bits>(pattern.bin[b].pair, stride, offA,
+                                                        offB);
+            WordType* d = out + k * kWords;
+            for (size_t w = 0; w < kWords; ++w) d[w] = 0;
+            const long long cx = static_cast<long long>(keypointsXY[2 * k]);
+            const long long cy = static_cast<long long>(keypointsXY[2 * k + 1]);
+            const bool inside = cx - reach >= 0 && cy - reach >= 0 &&
+                                cx + reach < static_cast<long long>(width) &&
+                                cy + reach < static_cast<long long>(height);
+            if (inside) {
+                const SrcT* center = img + static_cast<size_t>(cy) * stride +
+                                     static_cast<size_t>(cx);
+                impl::briefDescribeOne<Bits, SrcT, WordType>(center, offA, offB, d);
+            }
+            if (keep != nullptr) keep[k] = inside ? uint8_t{1} : uint8_t{0};
+        }
     }
 }
 

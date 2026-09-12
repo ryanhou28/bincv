@@ -317,6 +317,23 @@ constexpr size_t pyrDownWidth(size_t srcWidth) { return (srcWidth + 1) / 2; }
 /// **API TIER 3**, with pyrDownWidth.
 constexpr size_t pyrDownHeight(size_t srcHeight) { return (srcHeight + 1) / 2; }
 
+/// @brief Where a level-`level` pixel CENTER sits in level-0 coordinates, one axis.
+/// **API TIER 3.**
+/// @note The Box2x2 geometry: destination pixel `j` is the mean of source pixels
+/// `{2j, 2j+1}`, whose center is `2j + 0.5`; composing down the ladder gives
+/// `(c + 0.5) * 2^level - 0.5`. Every factor is a power of two, so the map
+/// and its inverse below are EXACT in float and round-trip without drift --
+/// which is what lets a keypoint detected at level L be described, matched
+/// and reported at level 0 without accumulating a half-pixel bias per level.
+constexpr float pyrLevelToBase(float c, size_t level) {
+    return (c + 0.5f) * static_cast<float>(1u << level) - 0.5f;
+}
+
+/// @brief The inverse: a level-0 coordinate in level-`level` pixels. **API TIER 3.**
+constexpr float pyrBaseToLevel(float c, size_t level) {
+    return (c + 0.5f) / static_cast<float>(1u << level) - 0.5f;
+}
+
 namespace impl {
 
 // ---------------------------------------------------------------------------

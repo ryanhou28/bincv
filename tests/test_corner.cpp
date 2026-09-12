@@ -2125,6 +2125,82 @@ BINCV_TEST(Corner, Mask_DoesNotChangeSuppression) {
     std::printf(" mask: a masked-out pixel still suppresses (%zu corners kept)\n", r.count);
 }
 
+BINCV_TEST(Corner, Mask_StreamingSeedRowObeysTheMask) {
+    // The adversarial case for the streaming form's running-maximum seed: the
+    // GLOBAL maximum response sits in row 0, OUTSIDE the mask, while the admitted
+    // region holds only a weak corner. The frame-map form's threshold is a
+    // fraction of the strongest ADMITTED response (cv::minMaxLoc takes the mask),
+    // so the weak corner survives; a seed loop that reads row 0 unmasked inflates
+    // the streaming threshold past it and the two forms part company. Found by
+    // reading the seed loop while vectorizing it, then pinned here.
+    const int w = 64, h = 32;
+    Frame f = makeFrame("seed-row-adversary", w, h);
+    // Dense structure in image rows 0..3, columns 0..15: strong responses in the
+    // response map's own row 0, all outside the mask below.
+    uint64_t st = 0xD00DULL;
+    for (int y = 0; y <= 3; ++y)
+        for (int x = 0; x <= 15; ++x)
+            f.set(y, x, static_cast<unsigned>(nextRandom(st) & 1ULL));
+    // A diagonal dot pair in the admitted half: a weaker corner than a lone dot,
+    // but still a real one.
+    f.set(16, 48, 1);
+    f.set(17, 49, 1);
+
+    const Derived<uint32_t> d(f, BORDER_REFLECT_101);
+    const BinMat<uint32_t> mask = columnMask<uint32_t>(w, h, 32, 64);
+
+    GoodFeaturesParams p;
+    p.blockSize = 3;
+    p.minDistance = 2.0;
+    p.maxCorners = 0;
+    p.qualityLevel = 0.5;   // the inflated threshold must actually bite
+
+    const size_t cap = static_cast<size_t>(w) * static_cast<size_t>(h);
+    std::vector<float> storage = makeMapStorage(w, h);
+    const ResponseMap frameMap = mapView(storage, w, h);
+    std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<size_t>(w));
+    const ResponseMap ring{ringStorage.data(), static_cast<size_t>(w),
+                           bincv::kResponseRingRows, static_cast<size_t>(w)};
+
+    std::vector<Corner> a(cap), b(cap);
+    const CornerResult ra =
+        bincv::goodFeaturesToTrack(d.dx, d.dy, p, frameMap, a.data(), cap, mask.constView());
+    const CornerResult rb = bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, p, ring, b.data(),
+                                                                cap, mask.constView());
+    float row0Max = 0.0f, admittedMax = 0.0f;
+    for (int x = 0; x < w; ++x) row0Max = std::max(row0Max, storage[static_cast<size_t>(x)]);
+    for (int y = 0; y < h; ++y)
+        for (int x = 32; x < w; ++x)
+            admittedMax = std::max(admittedMax,
+                                   storage[static_cast<size_t>(y) * static_cast<size_t>(w) +
+                                           static_cast<size_t>(x)]);
+    std::printf(" seed-row adversary: frame map %zu corners, streaming %zu"
+                " (row0 max %.3f, admitted max %.3f)\n",
+                ra.count, rb.count, static_cast<double>(row0Max),
+                static_cast<double>(admittedMax));
+    BINCV_CHECK(ra.count > 0);   // the weak admitted corner must be real, or the
+                                 // case constructs nothing
+    BINCV_CHECK_EQ(ra.count, rb.count);
+    size_t differ = 0;
+    for (size_t i = 0; i < ra.count && i < rb.count; ++i)
+        if (a[i].x != b[i].x || a[i].y != b[i].y) ++differ;
+    BINCV_CHECK_EQ(differ, size_t{0});
+
+    // The other seed edge: a mask that admits NOTHING, at a qualityLevel above 1
+    // -- where a threshold formed from an untouched seed would go negative and
+    // fabricate a truncation flag. Both forms must report the same empty triple.
+    const BinMat<uint32_t> nothing(w, h);   // zero-filled: admits no pixel
+    p.qualityLevel = 2.0;
+    const CornerResult ea =
+        bincv::goodFeaturesToTrack(d.dx, d.dy, p, frameMap, a.data(), cap, nothing.constView());
+    const CornerResult eb = bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, p, ring, b.data(),
+                                                                cap, nothing.constView());
+    BINCV_CHECK_EQ(ea.count, size_t{0});
+    BINCV_CHECK_EQ(eb.count, size_t{0});
+    BINCV_CHECK_EQ(ea.candidatesRanked, eb.candidatesRanked);
+    BINCV_CHECK_EQ(ea.candidatesTruncated, eb.candidatesTruncated);
+}
+
 BINCV_TEST(Corner, Mask_StreamingMatchesFrameMap) {
     const Frame f = randomFrame(kWideW, kWideH, 0x4A5C03ULL);
     const Derived<uint32_t> d(f, BORDER_REFLECT_101);

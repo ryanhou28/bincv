@@ -31,7 +31,7 @@
 #   0   Cortex-M compilation verified
 #   1   verification FAILED
 #   77  could not run at all (no arm-none-eabi toolchain) -- NOT a pass, the same
-#       contract scripts/verify_arm.sh uses so that a caller can tell a skipped
+#       contract scripts/verify_cross.sh uses so that a caller can tell a skipped
 #       run from a verified one.
 
 set -uo pipefail

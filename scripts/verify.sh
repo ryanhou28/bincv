@@ -8,7 +8,7 @@
 #   ./scripts/verify.sh                        # the gate: clean builds, warnings fatal
 #   ./scripts/verify.sh --incremental          # fast inner-loop re-run (see the caveat)
 #   ./scripts/verify.sh --only core            # one configuration by name
-#   ./scripts/verify.sh --arm                  # also run scripts/verify_arm.sh at the end
+#   ./scripts/verify.sh --cross                # also run scripts/verify_cross.sh (--arm: old name)
 #   ./scripts/verify.sh --cortex-m             # also run scripts/verify_cortex_m.sh
 #   ./scripts/verify.sh --update-checks-baseline   # raise tests/expected-checks.txt
 #
@@ -88,10 +88,23 @@ fi
 
 JOBS="$( (command -v nproc >/dev/null && nproc) || echo 4)"
 INCREMENTAL=0
-RUN_ARM=0
+RUN_CROSS=0
 RUN_CORTEX_M=0
 UPDATE_BASELINE=0
 ONLY=""
+
+# What this host is, measured rather than assumed. Everything below verifies
+# HOST_ARCH and nothing else; the banner, the reference files and the final
+# summary all say which, because this script once printed "x86_64 only" as a
+# constant string -- true on the machine it was written on, and a falsehood the
+# first time an aarch64 machine ran it. CROSS_ARCH is the architecture
+# scripts/verify_cross.sh would cover from here.
+HOST_ARCH="$(uname -m)"
+case "${HOST_ARCH}" in
+    x86_64|amd64)  HOST_ARCH="x86_64";  CROSS_ARCH="aarch64" ;;
+    aarch64|arm64) HOST_ARCH="aarch64"; CROSS_ARCH="x86_64" ;;
+    *)             CROSS_ARCH="" ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Configurations
@@ -113,7 +126,7 @@ need_value() {   # flag -- errors the way an unknown flag does, not silently
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --incremental|-i) INCREMENTAL=1 ;;
-        --arm)            RUN_ARM=1 ;;
+        --cross|--arm)    RUN_CROSS=1 ;;
         --cortex-m)       RUN_CORTEX_M=1 ;;
         --update-checks-baseline) UPDATE_BASELINE=1 ;;
         --only)           need_value "$1" "${2:-}"; ONLY="$2"; shift ;;
@@ -241,7 +254,7 @@ print_first() {
 }
 
 # A content hash of everything that determines the check counts. Stamped into
-# build-logs/checks-<cfg>.txt so scripts/verify_arm.sh can tell a reference that
+# build-logs/checks-<cfg>.txt so scripts/verify_cross.sh can tell a reference that
 # describes the tree it just built from one left over by an earlier, greener run.
 # git rev-parse HEAD would not do: the counts follow the working tree, dirty or not.
 source_stamp() {
@@ -320,6 +333,7 @@ STAMP="$(source_stamp "${SRC_DIR}")"
 echo
 echo "binCV verification -- $(date '+%Y-%m-%d %H:%M:%S')"
 echo "  repo      : ${REPO_ROOT}"
+echo "  arch      : ${HOST_ARCH} (native -- this run covers no other architecture)"
 echo "  compiler  : $(${CXX:-c++} --version 2>/dev/null | head -1)"
 echo "  jobs      : ${JOBS}"
 echo "  sources   : ${STAMP}  (include/ + tests/ content hash)"
@@ -422,7 +436,7 @@ for name in "${CONFIG_NAMES[@]}"; do
     echo "  ${label}"
     echo "=============================================================="
 
-    # An out-of-date reference is worse than none: scripts/verify_arm.sh diffs
+    # An out-of-date reference is worse than none: scripts/verify_cross.sh diffs
     # against these, and one left behind by an earlier green run described a tree
     # that no longer exists. Removed now, rewritten only if this configuration
     # passes.
@@ -518,8 +532,12 @@ for name in "${CONFIG_NAMES[@]}"; do
         total=0
         skipped=0
         any=0
+        # The arch line is load-bearing: scripts/verify_cross.sh refuses to diff
+        # a reference against a run of the same architecture, and a file that
+        # does not say which architecture wrote it cannot be diffed at all.
         {
             printf '# stamp\t%s\n' "${STAMP}"
+            printf '# arch\t%s\n' "${HOST_ARCH}"
             printf '# config\t%s\n' "${name}"
             printf '# generated\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')"
         } > "${checks_tmp}"
@@ -642,8 +660,8 @@ for name in "${CONFIG_NAMES[@]}"; do
         fi
     fi
 
-    # The reference scripts/verify_arm.sh diffs its emulated aarch64 run against
-    # is published only by a configuration that passed. A partial or stale file
+    # The reference scripts/verify_cross.sh diffs its emulated run against is
+    # published only by a configuration that passed. A partial or stale file
     # made that script report DIFFERS for two configurations that were both fine.
     if [[ -f "${checks_tmp}" ]]; then
         if [[ "${status}" == "PASS" ]]; then
@@ -721,19 +739,20 @@ echo "  configuration cannot express in-process and covers as death tests instea
 echo "  Floors live in tests/expected-checks.txt; a drop there is red."
 echo "  logs: ${LOG_DIR}"
 
-ARM_NOTE=""
-if [[ ${RUN_ARM} -eq 1 ]]; then
+CROSS_NOTE=""
+if [[ ${RUN_CROSS} -eq 1 ]]; then
     echo
-    # verify_arm.sh exits 77 when it could not run at all. That is not a failure
-    # and not a pass: printing "aarch64: OK" under its own "aarch64 correctness
-    # was NOT verified" message is the one thing this must not do.
-    arm_rc=0
-    BINCV_ARM_REQUIRE_REFERENCE=1 "${REPO_ROOT}/scripts/verify_arm.sh" || arm_rc=$?
-    case ${arm_rc} in
-        0)  echo "  aarch64: OK" ;;
-        77) echo "  aarch64: SKIPPED -- NOT verified (see the message above)"
-            ARM_NOTE="skipped" ;;
-        *)  echo "  aarch64: FAILED"
+    # verify_cross.sh exits 77 when it could not run at all, or when its count
+    # comparison would have diffed an architecture against itself. That is not a
+    # failure and not a pass: printing "OK" under its own "NOT verified" message
+    # is the one thing this must not do.
+    cross_rc=0
+    BINCV_CROSS_REQUIRE_REFERENCE=1 "${REPO_ROOT}/scripts/verify_cross.sh" || cross_rc=$?
+    case ${cross_rc} in
+        0)  echo "  ${CROSS_ARCH:-cross}: OK" ;;
+        77) echo "  ${CROSS_ARCH:-cross}: SKIPPED -- NOT verified (see the message above)"
+            CROSS_NOTE="skipped" ;;
+        *)  echo "  ${CROSS_ARCH:-cross}: FAILED"
             FAILED=1 ;;
     esac
 fi
@@ -759,10 +778,16 @@ fi
 echo
 if [[ ${FAILED} -eq 0 ]]; then
     echo "  ALL CONFIGURATIONS GREEN"
-    if [[ ${RUN_ARM} -eq 0 || -n "${ARM_NOTE}" ]]; then
-        echo "  x86_64 only. ./scripts/verify_arm.sh checks the primary target"
-        echo "  (aarch64) for correctness under emulation -- cheap, and the bugs it"
-        echo "  finds are expensive to find later."
+    if [[ ${RUN_CROSS} -eq 0 || -n "${CROSS_NOTE}" ]]; then
+        if [[ -n "${CROSS_ARCH}" ]]; then
+            echo "  ${HOST_ARCH} only. ./scripts/verify_cross.sh covers ${CROSS_ARCH} under"
+            echo "  emulation -- each architecture has gated code the other never compiles,"
+            echo "  and the bugs there are cheap to catch now and expensive to attribute"
+            echo "  later."
+        else
+            echo "  ${HOST_ARCH} only, and scripts/verify_cross.sh defines no emulation"
+            echo "  target for this host -- x86_64 and aarch64 both went unchecked."
+        fi
     fi
     if [[ ${RUN_CORTEX_M} -eq 0 || -n "${CORTEX_M_NOTE}" ]]; then
         echo "  ./scripts/verify_cortex_m.sh compiles the suites for Cortex-M7 at"
