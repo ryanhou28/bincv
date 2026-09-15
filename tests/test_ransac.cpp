@@ -541,4 +541,73 @@ void* operator new[](std::size_t bytes, const std::nothrow_t&) noexcept {
 void operator delete(void* p, const std::nothrow_t&) noexcept { countedFree(p); }
 void operator delete[](void* p, const std::nothrow_t&) noexcept { countedFree(p); }
 
+BINCV_TEST(Ransac, OrderedSamplingConvergesEarlierOnATruthfulOrder) {
+    // The PROSAC-shaped prefix: a caller who can rank correspondences (a
+    // descriptor matcher's distances) puts inliers first, and early hypotheses
+    // come from that clean prefix. Three claims, each asserted: same-seed
+    // determinism; fewer-or-equal iterations than uniform on a truthful order,
+    // with the model at least as supported; and a WRONG order degrades toward
+    // uniform rather than breaking.
+    const Correspondences base = makeScene(kTruth, 240, 3, 0xABCDEFULL, 0.4f);
+
+    // A truthful best-first order: inliers, then outliers.
+    Correspondences ordered;
+    for (int pass = 0; pass < 2; ++pass)
+        for (size_t i = 0; i < base.from.size(); ++i)
+            if ((base.truth[i] == 1) == (pass == 0)) {
+                ordered.from.push_back(base.from[i]);
+                ordered.to.push_back(base.to[i]);
+                ordered.truth.push_back(base.truth[i]);
+            }
+    ordered.inlierCount = base.inlierCount;
+
+    RansacParams up;   // uniform
+    RansacParams op;   // ordered
+    op.orderedSampling = true;
+
+    Fixture fu(ordered), fo(ordered), fo2(ordered);
+    Affine2D mu, mo, mo2;
+    const RansacResult ru = ransac<Affine2DModel>(ordered.from.data(), ordered.to.data(),
+                                                  ordered.from.size(), up, fu.scratch, &mu);
+    const RansacResult ro = ransac<Affine2DModel>(ordered.from.data(), ordered.to.data(),
+                                                  ordered.from.size(), op, fo.scratch, &mo);
+    const RansacResult ro2 = ransac<Affine2DModel>(ordered.from.data(), ordered.to.data(),
+                                                   ordered.from.size(), op, fo2.scratch,
+                                                   &mo2);
+    BINCV_CHECK(ru.found && ro.found);
+    // Determinism in the seed, ordered arm included.
+    BINCV_CHECK_EQ(ro.inliers, ro2.inliers);
+    BINCV_CHECK_EQ(ro.iterations, ro2.iterations);
+    size_t modelSame = 0;
+    for (int i = 0; i < 6; ++i)
+        if (mo.m[i] == mo2.m[i]) ++modelSame;
+    BINCV_CHECK_EQ(modelSame, size_t{6});
+
+    std::printf(" truthful order: uniform %d iterations / %zu inliers,"
+                " ordered %d / %zu\n",
+                ru.iterations, ru.inliers, ro.iterations, ro.inliers);
+    BINCV_CHECK(ro.iterations <= ru.iterations);
+    BINCV_CHECK(ro.inliers + 4 >= ru.inliers);   // as supported, within tie noise
+    BINCV_CHECK(modelRms(mo, ordered.from) < 1.0);
+
+    // The wrong order: outliers first. The prefix poisons the early hypotheses
+    // and the growth recovers -- found, and still accurate.
+    Correspondences reversed;
+    for (size_t i = ordered.from.size(); i-- > 0;) {
+        reversed.from.push_back(ordered.from[i]);
+        reversed.to.push_back(ordered.to[i]);
+        reversed.truth.push_back(ordered.truth[i]);
+    }
+    reversed.inlierCount = ordered.inlierCount;
+    Fixture fr(reversed);
+    Affine2D mr;
+    const RansacResult rr = ransac<Affine2DModel>(reversed.from.data(), reversed.to.data(),
+                                                  reversed.from.size(), op, fr.scratch,
+                                                  &mr);
+    std::printf(" adversarial order: found=%d, %d iterations, %zu inliers\n",
+                rr.found ? 1 : 0, rr.iterations, rr.inliers);
+    BINCV_CHECK(rr.found);
+    BINCV_CHECK(modelRms(mr, reversed.from) < 1.0);
+}
+
 BINCV_TEST_MAIN("test_ransac")

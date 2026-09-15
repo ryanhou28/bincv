@@ -184,11 +184,12 @@ int main(int argc, char** argv) {
     // the total is a ratio-dependent trade, not a free win.
     const int gateWindow = static_cast<int>(envF("BINCV_SLAM_GATE", 48.0f));
     const unsigned maxRatio = static_cast<unsigned>(envF("BINCV_SLAM_RATIO", 75.0f));
+    const bool prosac = envF("BINCV_SLAM_PROSAC", 0.0f) > 0.0f;
 
     std::printf("%s\n", bincv::simdStatusString());
-    std::printf("matching: %s, window %d px, ratio %u\n",
+    std::printf("matching: %s, window %d px, ratio %u; sampling: %s\n",
                 gateWindow > 0 ? "gated (position window + octave band)" : "brute force",
-                gateWindow, maxRatio);
+                gateWindow, maxRatio, prosac ? "ordered (distance-ranked)" : "uniform");
 
     // The binary pyramid: 1 bit at every level. ~60 KB at 752x480 against the
     // ~480 KB an 8-bit ladder would hold resident.
@@ -209,6 +210,7 @@ int main(int argc, char** argv) {
     std::vector<Point2f> cand;
     std::vector<float> angles;
     std::vector<int> curOct, prevOct;
+    std::vector<size_t> order;
     std::vector<bincv::DescriptorMatch> matches;
     std::vector<Point2f> fromN, toN;   // matched pairs, normalized coordinates
     std::vector<uint8_t> keep;
@@ -369,10 +371,23 @@ int main(int argc, char** argv) {
             msMatch += msSince(t0);
 
             t0 = std::chrono::steady_clock::now();
+            // Accepted pairs, BEST-FIRST by descriptor distance when the ordered
+            // sampler is on -- the ranking the matcher already computed and used
+            // to throw away. Uniform sampling ignores the order, so sorting only
+            // when asked keeps the arms honest.
+            order.clear();
+            for (size_t i = 0; i < cur.count; ++i)
+                if (matches[i].valid) order.push_back(i);
+            if (prosac) {
+                std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+                    if (matches[a].distance != matches[b].distance)
+                        return matches[a].distance < matches[b].distance;
+                    return a < b;   // total order, so the arms stay deterministic
+                });
+            }
             fromN.clear();
             toN.clear();
-            for (size_t i = 0; i < cur.count; ++i) {
-                if (!matches[i].valid) continue;
+            for (size_t i : order) {
                 const SlamKeypoint& a = prev.kp[matches[i].trainIndex];
                 const SlamKeypoint& b = cur.kp[i];
                 fromN.push_back(Point2f{(a.x - cx) / fx, (a.y - cy) / fy});
@@ -385,6 +400,7 @@ int main(int argc, char** argv) {
             if (fromN.size() >= 8) {
                 bincv::RansacParams rp;
                 rp.threshold = 1.5 / static_cast<double>(fx);   // ~1.5 px, in normalized units
+                rp.orderedSampling = prosac;
                 bincv::EssentialMatrix E;
                 const bincv::RansacResult rr = bincv::findEssentialMat(
                     fromN.data(), toN.data(), fromN.size(), rp, &E);

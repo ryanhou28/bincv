@@ -116,6 +116,23 @@ struct RansacParams {
     /// the consensus set can skip the work. Models with no closed-form refit ignore
     /// it; `EssentialModel` is one, and `cv::findEssentialMat` does not refit either.
     bool refine = true;
+
+    /// @brief Sample from a GROWING PREFIX of the correspondences instead of the
+    /// whole set: iteration `i` draws its minimal set from the first
+    /// `minimalSet + i` correspondences (clamped to `count`). PROSAC's idea,
+    /// in its simplest deterministic schedule.
+    ///
+    /// **The caller's obligation is the ORDER**: correspondences must arrive
+    /// best-first by some quality the caller trusts -- a descriptor matcher's
+    /// distances are exactly that, and were previously thrown away. With a
+    /// truthful order the first clean sample arrives iterations earlier and
+    /// the adaptive stop does the rest; with a WRONG order this degrades
+    /// toward uniform sampling as the prefix grows, it does not break. The
+    /// stopping rule is unchanged (it argues from the support actually seen),
+    /// determinism in `seed` is unchanged, and uniform sampling remains the
+    /// default because a caller with unordered correspondences should not
+    /// get a silent behavior change.
+    bool orderedSampling = false;
 };
 
 /// @brief What a RANSAC call reports back. **API TIER 2.**
@@ -310,7 +327,16 @@ inline RansacResult ransac(const Point2f* from, const Point2f* to, size_t count,
         out.iterations = iter + 1;
 
         const uint64_t counter = params.seed + static_cast<uint64_t>(iter) * UINT64_C(0x9E3779B9);
-        if (!impl::ransacSample(count, Model::kMinimalSetSize, counter, indices)) continue;
+        // Ordered sampling draws from a prefix that starts at the minimal set
+        // and grows by one per iteration -- early hypotheses come from the
+        // caller's best-ranked correspondences, late ones approach uniform.
+        const size_t pool =
+            params.orderedSampling
+                ? (Model::kMinimalSetSize + static_cast<size_t>(iter) < count
+                       ? Model::kMinimalSetSize + static_cast<size_t>(iter)
+                       : count)
+                : count;
+        if (!impl::ransacSample(pool, Model::kMinimalSetSize, counter, indices)) continue;
 
         const size_t produced = Model::estimate(from, to, indices, models);
         for (size_t m = 0; m < produced; ++m) {
