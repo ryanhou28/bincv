@@ -20,12 +20,13 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`quantMat.hpp`](#quantMathpp) — 29 entries
 - [`ops/bitslice.hpp`](#opsbitslicehpp) — 6 entries
 - [`ops/blockMatch.hpp`](#opsblockMatchhpp) — 5 entries
-- [`ops/census.hpp`](#opscensushpp) — 5 entries
+- [`ops/census.hpp`](#opscensushpp) — 4 entries
 - [`ops/corner.hpp`](#opscornerhpp) — 18 entries
 - [`ops/covariance.hpp`](#opscovariancehpp) — 3 entries
 - [`ops/denoise.hpp`](#opsdenoisehpp) — 2 entries
+- [`ops/denseDisparity.hpp`](#opsdenseDisparityhpp) — 5 entries
 - [`ops/derivative.hpp`](#opsderivativehpp) — 6 entries
-- [`ops/descriptor.hpp`](#opsdescriptorhpp) — 13 entries
+- [`ops/descriptor.hpp`](#opsdescriptorhpp) — 14 entries
 - [`ops/edge.hpp`](#opsedgehpp) — 6 entries
 - [`ops/essential.hpp`](#opsessentialhpp) — 7 entries
 - [`ops/fast.hpp`](#opsfasthpp) — 8 entries
@@ -146,7 +147,6 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `CensusPattern` *(struct)* | — | A census neighbourhood: `K` offsets, none of them (0, 0) |
 | `kCensus3x3` *(constant)* | 3 | The 8-neighbour census (3x3 minus center), raster order |
 | `kCensus5x5` *(constant)* | 3 | The 24-comparison census (5x5 minus center), raster order -- the neighbourhood the dense-stereo design is written against |
-| `censusTransform` | 3 | Census transform: plane `k` of `planes` gets `I(p + pattern.at[k]) > I(p)` at every pixel `p` |
 
 ## `ops/corner.hpp`
 
@@ -192,6 +192,18 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `medianRow3` | — | One destination row of the three-pixel median |
 | `denoiseMedian3` | 3 | dst[y][x] = median(src[y-1][x], src[y][x], src[y][x+1]), with the out-of-image neighbours reading 0 |
 
+## `ops/denseDisparity.hpp`
+
+[`include/bincv/ops/denseDisparity.hpp`](../include/bincv/ops/denseDisparity.hpp)
+
+| | tier | |
+|---|---|---|
+| `kDenseDisparityInvalid` *(constant)* | — | The disparity byte written where no candidate could be evaluated |
+| `DenseDisparityParams` *(struct)* | — | Search and aggregation parameters for `denseDisparity` |
+| `denseDisparityScratchWords` | 3 | WordType units of scratch `denseDisparity` needs: the two census bands and the accumulator ladder |
+| `denseDisparityScratchRows` | 3 | uint16_t units of scratch `denseDisparity` needs: the extraction row and the two running-best rows |
+| `denseDisparity` | 3 | Dense disparity over a rectified pair: census cost, box aggregation, winner-take-all, one byte per pixel |
+
 ## `ops/derivative.hpp`
 
 [`include/bincv/ops/derivative.hpp`](../include/bincv/ops/derivative.hpp)
@@ -224,6 +236,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `hammingDistance` | 3 | `popcount(a ^ b)` over `words` |
 | `DescriptorMatch` *(struct)* | — | One query's best and second-best match |
 | `matchDescriptors` | 3 | Brute-force nearest neighbour with Lowe's ratio test |
+| `matchDescriptorsGated` | 3 | `matchDescriptors` restricted to candidates a frontend's priors admit: a position window, and optionally an octave band |
 
 ## `ops/edge.hpp`
 

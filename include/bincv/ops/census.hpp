@@ -91,6 +91,45 @@ inline constexpr CensusPattern<24> kCensus5x5 = {
 /// correct, and priced by its benchmark arm from birth; the word-parallel
 /// restructuring is the dense pipeline's optimization to claim once a
 /// caller's share is known.
+namespace impl {
+
+/// @brief One plane-row of the census: the comparisons of image row `y` against
+/// its `(dx, dy)` neighbours, packed into `dst`. **INTERNAL.**
+/// @note THE one definition of the census row, shared by the full-frame
+/// transform and the dense-disparity pipeline's streaming band -- a second
+/// copy is how the two would silently diverge. Writes every word of the
+/// row; padding bits end zero.
+template <typename SrcT, typename WordType>
+inline void censusRow(const SrcT* img, size_t width, size_t height, size_t stride,
+                      long long dx, long long dy, size_t y, WordType* dst) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    const size_t words = minRowWords<WordType>(width);
+    // Columns whose neighbour stays inside the row: [xLo, xHi).
+    const long long xLo = dx < 0 ? -dx : 0;
+    const long long xHi = static_cast<long long>(width) - (dx > 0 ? dx : 0);
+    const long long yn = static_cast<long long>(y) + dy;
+    if (yn < 0 || yn >= static_cast<long long>(height) || xLo >= xHi) {
+        for (size_t w = 0; w < words; ++w) dst[w] = 0;
+        return;
+    }
+    const SrcT* rowC = img + y * stride;
+    const SrcT* rowN = img + static_cast<size_t>(yn) * stride;
+    for (size_t w = 0; w < words; ++w) {
+        WordType acc = 0;
+        const size_t base = w * kBits;
+        const size_t xEnd = base + kBits < width ? base + kBits : width;
+        for (size_t x = base; x < xEnd; ++x) {
+            const long long xs = static_cast<long long>(x);
+            if (xs < xLo || xs >= xHi) continue;
+            acc = static_cast<WordType>(
+                acc | (static_cast<WordType>(rowN[xs + dx] > rowC[x]) << (x - base)));
+        }
+        dst[w] = acc;
+    }
+}
+
+} // namespace impl
+
 template <size_t K, typename SrcT, typename WordType>
 inline void censusTransform(const SrcT* img, size_t width, size_t height, size_t stride,
                             const CensusPattern<K>& pattern,
@@ -100,48 +139,21 @@ inline void censusTransform(const SrcT* img, size_t width, size_t height, size_t
     BINCV_ASSERT(stride >= width, "censusTransform: stride must cover a row");
     if (width == 0 || height == 0) return;
 
-    constexpr size_t kBits = impl::bitsPerWord<WordType>();
-    const size_t words = impl::minRowWords<WordType>(width);
-
     for (size_t k = 0; k < K; ++k) {
         BINCV_ASSERT(planes[k].width == width && planes[k].height == height,
                      "censusTransform: plane extent must match the image");
         BINCV_ASSERT(impl::strideCoversARow<WordType>(planes[k].width, planes[k].height,
                                                       planes[k].stride),
                      "censusTransform: a plane's stride must cover a whole row");
-        const long long dx = pattern.at[k].dx;
-        const long long dy = pattern.at[k].dy;
-        BINCV_ASSERT(dx != 0 || dy != 0, "censusTransform: a (0, 0) offset compares"
-                                         " a pixel with itself and is always 0");
-        // Columns whose neighbour stays inside the row: [xLo, xHi).
-        const long long xLo = dx < 0 ? -dx : 0;
-        const long long xHi = static_cast<long long>(width) - (dx > 0 ? dx : 0);
-
+        BINCV_ASSERT(pattern.at[k].dx != 0 || pattern.at[k].dy != 0,
+                     "censusTransform: a (0, 0) offset compares a pixel with itself"
+                     " and is always 0");
         BinMatView<WordType> plane = planes[k];   // a copy: views are three words,
                                                   // and a const array element's
                                                   // row() would be const too
         for (size_t y = 0; y < height; ++y) {
-            WordType* dst = plane.row(y);
-            const long long yn = static_cast<long long>(y) + dy;
-            if (yn < 0 || yn >= static_cast<long long>(height) || xLo >= xHi) {
-                for (size_t w = 0; w < words; ++w) dst[w] = 0;
-                continue;
-            }
-            const SrcT* rowC = img + y * stride;
-            const SrcT* rowN = img + static_cast<size_t>(yn) * stride;
-            for (size_t w = 0; w < words; ++w) {
-                WordType acc = 0;
-                const size_t base = w * kBits;
-                const size_t xEnd = base + kBits < width ? base + kBits : width;
-                for (size_t x = base; x < xEnd; ++x) {
-                    const long long xs = static_cast<long long>(x);
-                    if (xs < xLo || xs >= xHi) continue;
-                    acc = static_cast<WordType>(
-                        acc |
-                        (static_cast<WordType>(rowN[xs + dx] > rowC[x]) << (x - base)));
-                }
-                dst[w] = acc;
-            }
+            impl::censusRow<SrcT, WordType>(img, width, height, stride, pattern.at[k].dx,
+                                            pattern.at[k].dy, y, plane.row(y));
         }
     }
 }

@@ -415,5 +415,78 @@ inline void matchDescriptors(const WordType* query, size_t queryCount, const Wor
     }
 }
 
+/// @brief `matchDescriptors` restricted to candidates a frontend's priors admit:
+/// a position window, and optionally an octave band. **API TIER 3.**
+/// @param queryXY / trainXY (x, y) per keypoint, interleaved -- the descriptor
+/// family's raw-array contract. Positions are whatever frame the caller
+/// matches in; frame-to-frame association passes both sets in the same
+/// image plane and `maxDx/maxDy` bound the motion.
+/// @param maxDx,maxDy Half-extents of the admission window, in the positions'
+/// own units. The gate is two float compares per candidate, against the
+/// `words` XORs and popcounts it saves -- which is the whole point: a
+/// frontend measured brute force at the cost of a full detection level,
+/// while knowing priors the matcher ignored.
+/// @param queryOctave / trainOctave Optional (both or neither): admit only
+/// candidates within `maxOctaveDelta` pyramid levels -- a keypoint rarely
+/// jumps more than one octave between consecutive frames.
+/// @note THE RATIO TEST RUNS INSIDE THE GATE: best and second-best are the best
+/// ADMITTED candidates, and validity needs two of them. That is the honest
+/// semantics -- a distant second-best the gate excluded was never a real
+/// rival -- and it makes an unbounded window reproduce `matchDescriptors`
+/// exactly, which the tests pin.
+/// @note Never allocates; O(queryCount * trainCount) gate tests, with the
+/// descriptor work paid only inside the window.
+template <typename WordType>
+inline void matchDescriptorsGated(const WordType* query, const float* queryXY,
+                                  size_t queryCount, const WordType* train,
+                                  const float* trainXY, size_t trainCount, size_t words,
+                                  float maxDx, float maxDy, DescriptorMatch* out,
+                                  unsigned maxRatio = 80, const int* queryOctave = nullptr,
+                                  const int* trainOctave = nullptr,
+                                  int maxOctaveDelta = 1) {
+    if (queryCount == 0) return;
+    BINCV_ASSERT(query != nullptr && queryXY != nullptr && out != nullptr,
+                 "matchDescriptorsGated: null query argument");
+    BINCV_ASSERT(trainCount == 0 || (train != nullptr && trainXY != nullptr),
+                 "matchDescriptorsGated: null train argument");
+    BINCV_ASSERT((queryOctave == nullptr) == (trainOctave == nullptr),
+                 "matchDescriptorsGated: octave arrays come as a pair or not at all");
+    BINCV_ASSERT(maxDx >= 0.0f && maxDy >= 0.0f,
+                 "matchDescriptorsGated: the window must not be negative");
+
+    for (size_t q = 0; q < queryCount; ++q) {
+        const float qx = queryXY[2 * q], qy = queryXY[2 * q + 1];
+        unsigned best = 0xFFFFFFFFu, second = 0xFFFFFFFFu;
+        size_t bestIdx = 0, admitted = 0;
+        for (size_t t = 0; t < trainCount; ++t) {
+            const float dx = trainXY[2 * t] - qx;
+            const float dy = trainXY[2 * t + 1] - qy;
+            if (dx > maxDx || dx < -maxDx || dy > maxDy || dy < -maxDy) continue;
+            if (queryOctave != nullptr) {
+                const int od = queryOctave[q] - trainOctave[t];
+                if (od > maxOctaveDelta || od < -maxOctaveDelta) continue;
+            }
+            ++admitted;
+            const unsigned d = hammingDistance<WordType>(query + q * words,
+                                                         train + t * words, words);
+            if (d < best) {
+                second = best;
+                best = d;
+                bestIdx = t;
+            } else if (d < second) {
+                second = d;
+            }
+        }
+        DescriptorMatch m;
+        m.trainIndex = bestIdx;
+        m.distance = best;
+        m.secondDistance = second;
+        m.valid = admitted >= 2 && second != 0xFFFFFFFFu &&
+                  static_cast<uint64_t>(best) * 100u <=
+                      static_cast<uint64_t>(second) * maxRatio;
+        out[q] = m;
+    }
+}
+
 } // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv
