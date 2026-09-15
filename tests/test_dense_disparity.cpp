@@ -10,7 +10,9 @@
 #include <cstdio>
 #include <vector>
 
+#include "bincv/binMat.hpp"
 #include "bincv/ops/denseDisparity.hpp"
+#include "bincv/ops/pack.hpp"
 #include "test_util.hpp"
 
 #ifdef BINCV_WITH_OPENCV
@@ -211,6 +213,104 @@ BINCV_TEST(DenseDisparity, TheTwoVerticalArmsAreBitIdentical) {
     };
     runBoth(uint32_t{});
     runBoth(uint64_t{});
+}
+
+BINCV_TEST(DenseDisparity, TheBinaryNativePathIsExactOnItsOwnRepresentation) {
+    // The premise-native spelling: packed frames in, no census -- the cost is
+    // the tracker's own window Hamming, densely. Same equalities as the wide
+    // path: constant shift exact at every word type in the supported region,
+    // both vertical arms bit-identical, the two-band depth edge respected.
+    constexpr size_t kW = 200, kH = 80;
+    constexpr int kDisp = 16;
+    const std::vector<uint8_t> lw = smoothImage(kW, kH, 606);
+    std::vector<uint8_t> rw(kW * kH, 0);
+    for (size_t y = 0; y < kH; ++y)
+        for (size_t x = 0; x + kDisp < kW; ++x) rw[y * kW + x] = lw[y * kW + x + kDisp];
+
+    const auto runOne = [&](auto wordTag) {
+        using W = decltype(wordTag);
+        BinMat<W> lb(kW, kH), rb(kW, kH);
+        packBits<PackRule::GreaterThan>(lw.data(), kW, kH, kW, lb.view(), uint8_t{127});
+        packBits<PackRule::GreaterThan>(rw.data(), kW, kH, kW, rb.view(), uint8_t{127});
+
+        DenseDisparityParams p;
+        p.maxDisparity = 32;
+        std::vector<W> sw(denseDisparityBinaryScratchWords<W>(kW, p));
+        std::vector<uint16_t> sr(denseDisparityScratchRows(kW));
+        std::vector<uint8_t> slide(kW * kH, 0);
+        denseDisparityBinary<W>(lb.constView(), rb.constView(), p, sw.data(), sw.size(),
+                                sr.data(), sr.size(), slide.data(), kW);
+
+        const size_t hw = static_cast<size_t>(p.winWidth / 2);
+        const size_t hh = static_cast<size_t>(p.winHeight / 2);
+        size_t exact = 0, total = 0;
+        for (size_t y = hh; y + hh < kH; ++y)
+            for (size_t x = static_cast<size_t>(p.maxDisparity) + hw;
+                 x + kDisp + hw < kW; ++x) {
+                ++total;
+                if (slide[y * kW + x] == kDisp) ++exact;
+            }
+        std::printf(" binary W=%zu-bit: %zu of %zu supported pixels exact\n",
+                    sizeof(W) * 8, exact, total);
+        BINCV_CHECK_EQ(exact, total);
+
+        p.recomputeVertical = true;
+        std::vector<W> sw2(denseDisparityBinaryScratchWords<W>(kW, p));
+        std::vector<uint8_t> recomp(kW * kH, 1);
+        denseDisparityBinary<W>(lb.constView(), rb.constView(), p, sw2.data(), sw2.size(),
+                                sr.data(), sr.size(), recomp.data(), kW);
+        size_t differ = 0;
+        for (size_t i = 0; i < slide.size(); ++i)
+            if (slide[i] != recomp[i]) ++differ;
+        BINCV_CHECK_EQ(differ, size_t{0});
+    };
+    runOne(uint8_t{});
+    runOne(uint16_t{});
+    runOne(uint32_t{});
+    runOne(uint64_t{});
+}
+
+BINCV_TEST(DenseDisparity, TheBinaryPathRespectsADepthEdge) {
+    constexpr size_t kW = 260, kH = 80;
+    constexpr int kDFar = 10, kDNear = 24, kSplit = 130;
+    const std::vector<uint8_t> lw = smoothImage(kW, kH, 91);
+    std::vector<uint8_t> rw(kW * kH, 0);
+    for (size_t y = 0; y < kH; ++y)
+        for (int xL = 0; xL < static_cast<int>(kW); ++xL) {
+            const int d = xL < kSplit ? kDFar : kDNear;
+            if (xL - d >= 0)
+                rw[y * kW + static_cast<size_t>(xL - d)] =
+                    lw[y * kW + static_cast<size_t>(xL)];
+        }
+    BinMat<uint64_t> lb(kW, kH), rb(kW, kH);
+    packBits<PackRule::GreaterThan>(lw.data(), kW, kH, kW, lb.view(), uint8_t{127});
+    packBits<PackRule::GreaterThan>(rw.data(), kW, kH, kW, rb.view(), uint8_t{127});
+
+    DenseDisparityParams p;
+    p.maxDisparity = 32;
+    std::vector<uint64_t> sw(denseDisparityBinaryScratchWords<uint64_t>(kW, p));
+    std::vector<uint16_t> sr(denseDisparityScratchRows(kW));
+    std::vector<uint8_t> disp(kW * kH, 0);
+    denseDisparityBinary<uint64_t>(lb.constView(), rb.constView(), p, sw.data(),
+                                   sw.size(), sr.data(), sr.size(), disp.data(), kW);
+    const int farMargin = (kDNear - kDFar) + p.winWidth + 2;
+    const int margin = p.winWidth / 2 + 4;
+    size_t farOk = 0, farN = 0, nearOk = 0, nearN = 0;
+    for (size_t y = 8; y + 8 < kH; ++y) {
+        for (int x = p.maxDisparity + p.winWidth; x < kSplit - farMargin; ++x) {
+            ++farN;
+            if (disp[y * kW + static_cast<size_t>(x)] == kDFar) ++farOk;
+        }
+        for (int x = kSplit + margin + kDNear; x + p.winWidth < static_cast<int>(kW);
+             ++x) {
+            ++nearN;
+            if (disp[y * kW + static_cast<size_t>(x)] == kDNear) ++nearOk;
+        }
+    }
+    std::printf(" binary two-band: far %zu/%zu, near %zu/%zu\n", farOk, farN, nearOk,
+                nearN);
+    BINCV_CHECK_EQ(farOk, farN);
+    BINCV_CHECK_EQ(nearOk, nearN);
 }
 
 #ifdef BINCV_WITH_OPENCV

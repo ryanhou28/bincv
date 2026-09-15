@@ -426,5 +426,210 @@ inline void denseDisparity(const SrcT* left, const SrcT* right, size_t width,
     }
 }
 
+/// @brief WordType units of scratch `denseDisparityBinary` needs. **API TIER 3.**
+/// @note No census band exists on this path -- the packed frames ARE the band --
+/// so the whole scratch is the accumulator ladder: per-disparity when
+/// sliding, one ladder when recomputing.
+template <typename WordType>
+inline size_t denseDisparityBinaryScratchWords(size_t width,
+                                               const DenseDisparityParams& p) {
+    const size_t rowWords = impl::minRowWords<WordType>(width);
+    const size_t accPlanes = bitSlicedSumPlanes(static_cast<size_t>(p.winHeight));
+    const size_t range = p.recomputeVertical
+                             ? 1
+                             : static_cast<size_t>(p.maxDisparity - p.minDisparity) + 1;
+    return range * accPlanes * rowWords;
+}
+
+/// @brief Dense disparity over an ALREADY-BINARY rectified pair: the cost is
+/// `popcount((L ^ shift(R, d)) over window)` -- one XOR per word of 64
+/// pixels, no census, no wide image anywhere. **API TIER 3.**
+///
+/// THIS IS THE PREMISE-NATIVE PATH. The census spelling above exists for
+/// callers holding WIDE frames; a binCV pipeline already holds bits, and on
+/// bits the dense cost is the same window Hamming the block-match tracker
+/// runs -- with an arithmetic budget an order of magnitude BELOW a byte SAD's,
+/// which is what being custom-built for this representation is supposed to
+/// buy. Same output contract, same arms, same invalid marker as the census
+/// spelling; the aggregation window doubles as the matching support, so
+/// `winWidth * winHeight <= 255` keeps the extraction in bytes (asserted).
+///
+/// @note A window with no texture (all-equal bits against all-equal bits) has
+/// an ambiguous cost everywhere and resolves to the smallest disparity by
+/// the tie rule. A texture-validity gate is a caller-side filter today --
+/// `countAnd`/windowed counts price one cheaply -- and a recorded
+/// follow-up, not a silent promise.
+template <typename WordType>
+inline void denseDisparityBinary(BinMatConstView<WordType> left,
+                                 BinMatConstView<WordType> right,
+                                 const DenseDisparityParams& params,
+                                 WordType* scratchWords, size_t scratchWordCount,
+                                 uint16_t* scratchRows, size_t scratchRowCount,
+                                 uint8_t* disparity, size_t dispStride) {
+    BINCV_ASSERT(disparity != nullptr, "denseDisparityBinary: null output");
+    BINCV_ASSERT(left.width == right.width && left.height == right.height,
+                 "denseDisparityBinary: the pair must share its extent");
+    const size_t width = left.width, height = left.height;
+    BINCV_ASSERT(dispStride >= width, "denseDisparityBinary: dispStride must cover a row");
+    BINCV_ASSERT(params.winWidth >= 3 && params.winHeight >= 3 &&
+                     (params.winWidth & 1) == 1 && (params.winHeight & 1) == 1,
+                 "denseDisparityBinary: the window must be odd and at least 3 on a side");
+    BINCV_ASSERT(params.winWidth * params.winHeight <= 255,
+                 "denseDisparityBinary: winWidth * winHeight must fit a byte");
+    BINCV_ASSERT(params.minDisparity >= 0 && params.maxDisparity >= params.minDisparity &&
+                     params.maxDisparity <= 254,
+                 "denseDisparityBinary: need 0 <= min <= max <= 254 (255 marks invalid)");
+    BINCV_ASSERT((scratchWords != nullptr &&
+                  scratchWordCount >=
+                      denseDisparityBinaryScratchWords<WordType>(width, params)),
+                 "denseDisparityBinary: word scratch too small");
+    BINCV_ASSERT((scratchRows != nullptr &&
+                  scratchRowCount >= denseDisparityScratchRows(width)),
+                 "denseDisparityBinary: row scratch too small");
+    static_cast<void>(scratchWordCount);
+    static_cast<void>(scratchRowCount);
+    if (width == 0 || height == 0) return;
+
+    const size_t winH = static_cast<size_t>(params.winHeight);
+    const int hw = params.winWidth / 2;
+    const size_t hh = winH / 2;
+    const size_t rowWords = impl::minRowWords<WordType>(width);
+    const size_t accPlanes = bitSlicedSumPlanes(winH);
+    const WordType tailMask = impl::rowTailMask<WordType>(width);
+    const size_t range = params.recomputeVertical
+                             ? 1
+                             : static_cast<size_t>(params.maxDisparity -
+                                                   params.minDisparity) + 1;
+
+    WordType* accBase = scratchWords;
+    uint16_t* ext = scratchRows;
+    uint16_t* bestC = ext + width;
+    uint16_t* bestD = bestC + width;
+
+    const auto invalidRow = [&](size_t y) {
+        uint8_t* out = disparity + y * dispStride;
+        for (size_t x = 0; x < width; ++x) out[x] = kDenseDisparityInvalid;
+    };
+    // The 1-bit raw cost of word `i` of image row `r` at disparity `d`.
+    const auto costWord = [&](size_t r, int d, size_t i) {
+        return static_cast<WordType>(
+            left.row(r)[i] ^ impl::censusWordShiftedRight<WordType>(
+                                 right.row(r), rowWords, tailMask, i, d));
+    };
+    const auto accFor = [&](int d) {
+        return accBase + (params.recomputeVertical
+                              ? size_t{0}
+                              : static_cast<size_t>(d - params.minDisparity) *
+                                    accPlanes * rowWords);
+    };
+
+    const long long dMaxSupported =
+        static_cast<long long>(width) - static_cast<long long>(params.winWidth);
+    const int dEnd = params.maxDisparity <= dMaxSupported
+                         ? params.maxDisparity
+                         : static_cast<int>(dMaxSupported);
+    if (height < winH || static_cast<size_t>(params.winWidth) > width ||
+        dEnd < params.minDisparity) {
+        for (size_t y = 0; y < height; ++y) invalidRow(y);
+        return;
+    }
+    static_cast<void>(range);
+
+    for (size_t y = 0; y < hh; ++y) invalidRow(y);
+    for (size_t y = height - hh; y < height; ++y) invalidRow(y);
+
+    if (!params.recomputeVertical) {
+        for (size_t w = 0;
+             w < (static_cast<size_t>(dEnd - params.minDisparity) + 1) * accPlanes *
+                     rowWords;
+             ++w)
+            accBase[w] = 0;
+        for (int d = params.minDisparity; d <= dEnd; ++d) {
+            WordType* acc = accFor(d);
+            for (size_t wr = 0; wr < winH; ++wr) {
+                for (size_t i = 0; i < rowWords; ++i) {
+                    const WordType c = costWord(wr, d, i);
+                    impl::accAddWord<WordType>(acc, accPlanes, rowWords, i, &c, 1);
+                }
+            }
+        }
+    }
+
+    constexpr size_t wb = impl::bitsPerWord<WordType>();
+    for (size_t y = hh; y + hh < height; ++y) {
+        if (y > hh && !params.recomputeVertical) {
+            const size_t leave = y - 1 - hh;
+            const size_t enter = y + hh;
+            for (int d = params.minDisparity; d <= dEnd; ++d) {
+                WordType* acc = accFor(d);
+                for (size_t i = 0; i < rowWords; ++i) {
+                    const WordType cl = costWord(leave, d, i);
+                    impl::accSubWord<WordType>(acc, accPlanes, rowWords, i, &cl, 1);
+                    const WordType ce = costWord(enter, d, i);
+                    impl::accAddWord<WordType>(acc, accPlanes, rowWords, i, &ce, 1);
+                }
+            }
+        }
+
+        for (size_t x = 0; x < width; ++x) {
+            bestC[x] = 0xFFFFu;
+            bestD[x] = 0xFFFFu;
+        }
+
+        for (int d = params.minDisparity; d <= dEnd; ++d) {
+            WordType* acc = accFor(d);
+            if (params.recomputeVertical) {
+                for (size_t w = 0; w < accPlanes * rowWords; ++w) acc[w] = 0;
+                for (size_t wr = y - hh; wr <= y + hh; ++wr) {
+                    for (size_t i = 0; i < rowWords; ++i) {
+                        const WordType c = costWord(wr, d, i);
+                        impl::accAddWord<WordType>(acc, accPlanes, rowWords, i, &c, 1);
+                    }
+                }
+            }
+
+            for (size_t x0 = 0; x0 < width; x0 += 8) {
+                const size_t wi = x0 / wb;
+                const unsigned b8 = static_cast<unsigned>(((x0 % wb) / 8) * 8);
+                uint64_t gather = 0;
+                for (size_t pp = 0; pp < accPlanes; ++pp) {
+                    gather |= static_cast<uint64_t>((acc[pp * rowWords + wi] >> b8) &
+                                                    static_cast<WordType>(0xFF))
+                              << (8 * pp);
+                }
+                const uint64_t t = impl::transpose8x8(gather);
+                const size_t lim = width - x0 < 8 ? width - x0 : 8;
+                for (size_t j = 0; j < lim; ++j)
+                    ext[x0 + j] = static_cast<uint16_t>((t >> (8 * j)) & 0xFFu);
+            }
+
+            const size_t xLo =
+                static_cast<size_t>(hw) > static_cast<size_t>(d) + static_cast<size_t>(hw)
+                    ? static_cast<size_t>(hw)
+                    : static_cast<size_t>(d) + static_cast<size_t>(hw);
+            if (xLo + static_cast<size_t>(hw) >= width) continue;
+            int sum = 0;
+            for (size_t u = xLo - static_cast<size_t>(hw);
+                 u <= xLo + static_cast<size_t>(hw); ++u)
+                sum += ext[u];
+            for (size_t x = xLo; x + static_cast<size_t>(hw) < width; ++x) {
+                if (x > xLo)
+                    sum += static_cast<int>(ext[x + static_cast<size_t>(hw)]) -
+                           static_cast<int>(ext[x - static_cast<size_t>(hw) - 1]);
+                if (static_cast<unsigned>(sum) < bestC[x]) {
+                    bestC[x] = static_cast<uint16_t>(sum);
+                    bestD[x] = static_cast<uint16_t>(d);
+                }
+            }
+        }
+
+        uint8_t* out = disparity + y * dispStride;
+        for (size_t x = 0; x < width; ++x) {
+            out[x] = bestD[x] <= 254u ? static_cast<uint8_t>(bestD[x])
+                                      : kDenseDisparityInvalid;
+        }
+    }
+}
+
 } // inline namespace BINCV_ABI_NAMESPACE
 } // namespace bincv

@@ -16,7 +16,9 @@
 #include <cstdio>
 #include <vector>
 
+#include "bincv/binMat.hpp"
 #include "bincv/ops/denseDisparity.hpp"
+#include "bincv/ops/pack.hpp"
 #include "measure_util.hpp"
 
 namespace {
@@ -93,6 +95,36 @@ int main() {
     runArm<uint32_t>(lw, rw, p, disp, "D=64, 5x5, u32 sliding");
     std::printf("\n sliding vs recompute at u64: %.2fx (the arm the default buys)\n",
                 d64r / d64w);
+
+    // THE PREMISE-NATIVE ARM: the pair as packed binary frames, no census --
+    // the cost is one XOR per word of 64 pixels. This is the operating point a
+    // binCV pipeline (which already holds bits) actually runs.
+    {
+        bincv::BinMat<uint64_t> lb(kW, kH), rb(kW, kH);
+        bincv::packBits<bincv::PackRule::GreaterThan>(lw.data(), size_t{kW}, size_t{kH},
+                                                      size_t{kW}, lb.view(), uint8_t{127});
+        bincv::packBits<bincv::PackRule::GreaterThan>(rw.data(), size_t{kW}, size_t{kH},
+                                                      size_t{kW}, rb.view(), uint8_t{127});
+        bincv::DenseDisparityParams bp;
+        bp.maxDisparity = 64;
+        std::vector<uint64_t> sw(
+            bincv::denseDisparityBinaryScratchWords<uint64_t>(kW, bp));
+        std::vector<uint16_t> sr(bincv::denseDisparityScratchRows(kW));
+        std::vector<measure::Bench> bb = {
+            {"BINARY-NATIVE D=64, 9x9, u64 sliding", [&](int) {
+                 bincv::denseDisparityBinary<uint64_t>(
+                     lb.constView(), rb.constView(), bp, sw.data(), sw.size(), sr.data(),
+                     sr.size(), disp.data(), kW);
+                 measure::g_sink += disp[static_cast<size_t>(kH / 2) * kW + kW / 2];
+             }}};
+        const auto tb = measure::measureInterleaved(bb, 5, 60.0);
+        std::printf("\n %-40s %10.2f ms  scratch %zu B  spread %.0f%%\n",
+                    bb[0].name.c_str(), tb[0].medianNs / 1e6,
+                    sw.size() * sizeof(uint64_t) + sr.size() * sizeof(uint16_t),
+                    tb[0].spreadPct());
+        std::printf(" (the caller already holds the bits; the wide arms above pay census\n"
+                    "  for the privilege of not having them)\n");
+    }
 
     std::printf("\n D=64 vs D=32 time ratio %.2fx (the design trades time linear in D\n"
                 " for peak memory independent of it; this is the linearity check).\n",
