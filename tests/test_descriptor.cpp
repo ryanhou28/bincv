@@ -175,6 +175,106 @@ BINCV_TEST(Descriptor, RatioTestNeedsTwoCandidates) {
     BINCV_CHECK(!m.valid);
 }
 
+BINCV_TEST(Descriptor, GatedWithAnUnboundedWindowIsBruteForceExactly) {
+    // The gated matcher's contract: the gate ADMITS, the ratio test decides, and
+    // a window nothing escapes reproduces matchDescriptors field for field --
+    // which is what makes the two arms comparable in a benchmark.
+    constexpr size_t kW = 160, kH = 120, kN = 60;
+    const std::vector<uint8_t> img = texturedImage(kW, kH, 314);
+    BriefPattern<kBits> pat;
+    makeBriefPattern<kBits>(pat);
+    std::vector<float> xyA, xyB;
+    uint64_t st = 99;
+    for (size_t i = 0; i < kN; ++i) {
+        st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+        xyA.push_back(static_cast<float>(20 + (st >> 33) % (kW - 40)));
+        st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+        xyA.push_back(static_cast<float>(20 + (st >> 33) % (kH - 40)));
+        st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+        xyB.push_back(static_cast<float>(20 + (st >> 33) % (kW - 40)));
+        st = st * 6364136223846793005ULL + 1442695040888963407ULL;
+        xyB.push_back(static_cast<float>(20 + (st >> 33) % (kH - 40)));
+    }
+    std::vector<uint32_t> da(kN * kWords), db(kN * kWords);
+    computeBrief<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, xyA.data(), kN, pat,
+                                           da.data());
+    computeBrief<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, xyB.data(), kN, pat,
+                                           db.data());
+    std::vector<DescriptorMatch> brute(kN), gated(kN);
+    matchDescriptors<uint32_t>(da.data(), kN, db.data(), kN, kWords, brute.data(), 80);
+    matchDescriptorsGated<uint32_t>(da.data(), xyA.data(), kN, db.data(), xyB.data(), kN,
+                                    kWords, 1e9f, 1e9f, gated.data(), 80);
+    size_t differ = 0;
+    for (size_t i = 0; i < kN; ++i) {
+        if (brute[i].valid != gated[i].valid || brute[i].trainIndex != gated[i].trainIndex ||
+            brute[i].distance != gated[i].distance ||
+            brute[i].secondDistance != gated[i].secondDistance) ++differ;
+    }
+    std::printf(" unbounded gate vs brute force: %zu of %zu results differ\n", differ, kN);
+    BINCV_CHECK_EQ(differ, size_t{0});
+}
+
+BINCV_TEST(Descriptor, TheWindowExcludesADistantImpostor) {
+    // The failure mode the gate exists to prevent measuring as a success: an
+    // IDENTICAL descriptor far across the frame (repeated texture) would win a
+    // brute-force match; the window keeps association local, so the near, merely
+    // similar candidate must win instead.
+    constexpr size_t kW = 200, kH = 100;
+    const std::vector<uint8_t> img = texturedImage(kW, kH, 21);
+    BriefPattern<kBits> pat;
+    makeBriefPattern<kBits>(pat);
+    const float q[2] = {50.0f, 50.0f};
+    // Train: the impostor at the query's own patch but 120 px away by claimed
+    // position; a near candidate from a neighbouring patch; and a second near
+    // candidate so the ratio test has its rival.
+    const float t[6] = {170.0f, 50.0f, 53.0f, 50.0f, 47.0f, 53.0f};
+    std::vector<uint32_t> dq(kWords), dt(3 * kWords);
+    computeBrief<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, q, 1, pat, dq.data());
+    const float near2[4] = {53.0f, 50.0f, 47.0f, 53.0f};
+    computeBrief<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, near2, 2, pat,
+                                           dt.data() + kWords);
+    for (size_t w = 0; w < kWords; ++w) dt[w] = dq[w];   // the impostor: distance 0
+
+    DescriptorMatch brute, gated;
+    matchDescriptors<uint32_t>(dq.data(), 1, dt.data(), 3, kWords, &brute, 100);
+    matchDescriptorsGated<uint32_t>(dq.data(), q, 1, dt.data(), t, 3, kWords, 20.0f, 20.0f,
+                                    &gated, 100);
+    std::printf(" brute picks train %zu (d=%u); gated picks train %zu (d=%u)\n",
+                brute.trainIndex, brute.distance, gated.trainIndex, gated.distance);
+    BINCV_CHECK_EQ(brute.trainIndex, size_t{0});   // the impostor, at distance 0
+    BINCV_CHECK(gated.trainIndex != 0);            // excluded by geometry
+}
+
+BINCV_TEST(Descriptor, TheOctaveBandAndTheTwoAdmittedRuleHold) {
+    constexpr size_t kW = 120, kH = 90;
+    const std::vector<uint8_t> img = texturedImage(kW, kH, 8);
+    BriefPattern<kBits> pat;
+    makeBriefPattern<kBits>(pat);
+    const float q[2] = {60.0f, 45.0f};
+    const float t[6] = {62.0f, 45.0f, 58.0f, 44.0f, 60.0f, 47.0f};
+    std::vector<uint32_t> dq(kWords), dt(3 * kWords);
+    computeBrief<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, q, 1, pat, dq.data());
+    computeBrief<kBits, uint8_t, uint32_t>(img.data(), kW, kH, kW, t, 3, pat, dt.data());
+    const int qo[1] = {0};
+
+    // Octave band: candidates at octaves {0, 3, 1} under delta 1 admit only
+    // indices 0 and 2 -- and the winner must come from the admitted set.
+    const int to[3] = {0, 3, 1};
+    DescriptorMatch m;
+    matchDescriptorsGated<uint32_t>(dq.data(), q, 1, dt.data(), t, 3, kWords, 50.0f, 50.0f,
+                                    &m, 100, qo, to, 1);
+    BINCV_CHECK(m.trainIndex != 1);
+
+    // One admitted candidate is no match, even at distance 0: with no rival
+    // inside the gate there is no ratio to test, exactly as matchDescriptors
+    // treats a one-element train set.
+    const int toFar[3] = {0, 3, 3};
+    matchDescriptorsGated<uint32_t>(dq.data(), q, 1, dt.data(), t, 3, kWords, 50.0f, 50.0f,
+                                    &m, 100, qo, toFar, 1);
+    std::printf(" one admitted candidate: valid=%d\n", m.valid ? 1 : 0);
+    BINCV_CHECK(!m.valid);
+}
+
 namespace {
 
 /// A SMOOTH texture, not raw noise: the rotation-invariance claim is about content

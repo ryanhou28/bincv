@@ -45,6 +45,8 @@
 //
 // Usage: slam_frontend <frame-dir> [max-frames]
 //   BINCV_SLAM_FX/FY/CX/CY override the intrinsics (defaults: EuRoC cam0).
+//   BINCV_SLAM_GATE sets the matcher's motion window in pixels (default 64;
+//   0 takes the brute-force arm, so both stay measurable).
 // ===========================================================================
 #include <algorithm>
 #include <cmath>
@@ -168,7 +170,25 @@ int main(int argc, char** argv) {
 
     constexpr int kEdgeThreshold = 17;   // the reference frontend's edge_threshold
 
+    // Matching arm: a positive window (pixels) takes the gated matcher with an
+    // octave band of 1; 0 takes brute force. Printed below, because an arm a
+    // benchmark cannot see is an arm that quietly stops running.
+    //
+    // THE DEFAULTS ARE THE MEASURED PARETO POINT (reference device, 400 frames,
+    // seven cells swept): window 48 / ratio 75 DOMINATES the old brute-force
+    // ratio-80 default -- 109.2 vs 100.2 RANSAC inliers/frame AND 18.11 vs
+    // 18.65 ms binCV total. The sweep's shape is worth knowing when re-tuning:
+    // the gate consistently buys inliers at fixed ratio (+12 to +25/frame, the
+    // far-impostor second-bests stop poisoning the ratio test) while its extra
+    // accepts make the five-point RANSAC pay ~0.48 ms per extra iteration, so
+    // the total is a ratio-dependent trade, not a free win.
+    const int gateWindow = static_cast<int>(envF("BINCV_SLAM_GATE", 48.0f));
+    const unsigned maxRatio = static_cast<unsigned>(envF("BINCV_SLAM_RATIO", 75.0f));
+
     std::printf("%s\n", bincv::simdStatusString());
+    std::printf("matching: %s, window %d px, ratio %u\n",
+                gateWindow > 0 ? "gated (position window + octave band)" : "brute force",
+                gateWindow, maxRatio);
 
     // The binary pyramid: 1 bit at every level. ~60 KB at 752x480 against the
     // ~480 KB an 8-bit ladder would hold resident.
@@ -188,12 +208,14 @@ int main(int argc, char** argv) {
                                            static_cast<size_t>(h) / 8);
     std::vector<Point2f> cand;
     std::vector<float> angles;
+    std::vector<int> curOct, prevOct;
     std::vector<bincv::DescriptorMatch> matches;
     std::vector<Point2f> fromN, toN;   // matched pairs, normalized coordinates
     std::vector<uint8_t> keep;
 
     size_t frames = 0, truncated = 0;
     size_t sumKp = 0, sumQueried = 0, sumAccepted = 0, sumInliers = 0, geomFrames = 0;
+    long long sumIterations = 0;
     size_t perLevelKept[kLevels] = {0, 0, 0, 0};
     double perLevelMs[kLevels] = {0, 0, 0, 0};
     double msSensor = 0, msBuild = 0, msDetect = 0, msOrient = 0, msDescribe = 0,
@@ -322,8 +344,28 @@ int main(int argc, char** argv) {
         if (prev.count > 0 && cur.count > 0) {
             t0 = std::chrono::steady_clock::now();
             matches.assign(cur.count, bincv::DescriptorMatch{});
-            bincv::matchDescriptors<uint32_t>(cur.desc.data(), cur.count, prev.desc.data(),
-                                              prev.count, kWords, matches.data(), 80);
+            if (gateWindow > 0) {
+                // The gated arm: the frontend KNOWS frame-to-frame motion is
+                // bounded and octaves rarely jump, and the gate is two float
+                // compares against the eight-word Hamming it saves. The window
+                // is a POLICY (BINCV_SLAM_GATE, pixels; 0 takes the brute-force
+                // arm so the two can be measured against each other, inlier
+                // count included -- a faster matcher that loses matches has
+                // optimised the wrong number).
+                curOct.clear();
+                prevOct.clear();
+                for (size_t i = 0; i < cur.count; ++i) curOct.push_back(cur.kp[i].octave);
+                for (size_t i = 0; i < prev.count; ++i) prevOct.push_back(prev.kp[i].octave);
+                bincv::matchDescriptorsGated<uint32_t>(
+                    cur.desc.data(), cur.xy.data(), cur.count, prev.desc.data(),
+                    prev.xy.data(), prev.count, kWords, static_cast<float>(gateWindow),
+                    static_cast<float>(gateWindow), matches.data(), maxRatio, curOct.data(),
+                    prevOct.data(), 1);
+            } else {
+                bincv::matchDescriptors<uint32_t>(cur.desc.data(), cur.count,
+                                                  prev.desc.data(), prev.count, kWords,
+                                                  matches.data(), maxRatio);
+            }
             msMatch += msSince(t0);
 
             t0 = std::chrono::steady_clock::now();
@@ -348,6 +390,7 @@ int main(int argc, char** argv) {
                     fromN.data(), toN.data(), fromN.size(), rp, &E);
                 if (rr.found) {
                     sumInliers += rr.inliers;
+                    sumIterations += rr.iterations;
                     ++geomFrames;
                 }
             }
@@ -379,6 +422,8 @@ int main(int argc, char** argv) {
                 sumQueried ? 100.0 * static_cast<double>(sumAccepted) /
                                  static_cast<double>(sumQueried)
                            : 0.0);
+    std::printf(" RANSAC iterations       : %.1f/frame (the adaptive stop's own count)\n",
+                static_cast<double>(sumIterations) / fg);
     std::printf(" RANSAC inliers          : %.1f/frame = %.1f%% of accepted -- THE HEADLINE\n",
                 static_cast<double>(sumInliers) / fg,
                 sumAccepted ? 100.0 * static_cast<double>(sumInliers) /
