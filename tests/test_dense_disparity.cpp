@@ -164,6 +164,55 @@ BINCV_TEST(DenseDisparity, DegenerateGeometryIsAllInvalidNotPlausible) {
     BINCV_CHECK_EQ(bad, size_t{0});
 }
 
+BINCV_TEST(DenseDisparity, TheTwoVerticalArmsAreBitIdentical) {
+    // The sliding accumulator exists for speed and pays scratch linear in D;
+    // the recompute arm keeps scratch independent of D. They are ONE answer
+    // with two costs, and this holds them to identical output maps -- byte for
+    // byte, on a scene with a real depth edge, at two word types -- so neither
+    // arm can drift into being "the fast one that answers differently".
+    constexpr size_t kW = 260, kH = 60;
+    constexpr int kSplit = 130;
+    const std::vector<uint8_t> lw = smoothImage(kW, kH, 4242);
+    std::vector<uint8_t> rw(kW * kH, 0);
+    for (size_t y = 0; y < kH; ++y)
+        for (int xL = 0; xL < static_cast<int>(kW); ++xL) {
+            const int d = xL < kSplit ? 8 : 19;
+            if (xL - d >= 0)
+                rw[y * kW + static_cast<size_t>(xL - d)] =
+                    lw[y * kW + static_cast<size_t>(xL)];
+        }
+
+    const auto runBoth = [&](auto wordTag) {
+        using W = decltype(wordTag);
+        DenseDisparityParams p;
+        p.maxDisparity = 32;
+        std::vector<uint8_t> slide(kW * kH, 0), recomp(kW * kH, 1);
+        {
+            std::vector<W> sw(denseDisparityScratchWords<24, W>(kW, p));
+            std::vector<uint16_t> sr(denseDisparityScratchRows(kW));
+            denseDisparity<24, uint8_t, W>(lw.data(), rw.data(), kW, kH, kW, kW,
+                                           kCensus5x5, p, sw.data(), sw.size(),
+                                           sr.data(), sr.size(), slide.data(), kW);
+        }
+        p.recomputeVertical = true;
+        {
+            std::vector<W> sw(denseDisparityScratchWords<24, W>(kW, p));
+            std::vector<uint16_t> sr(denseDisparityScratchRows(kW));
+            denseDisparity<24, uint8_t, W>(lw.data(), rw.data(), kW, kH, kW, kW,
+                                           kCensus5x5, p, sw.data(), sw.size(),
+                                           sr.data(), sr.size(), recomp.data(), kW);
+        }
+        size_t differ = 0;
+        for (size_t i = 0; i < slide.size(); ++i)
+            if (slide[i] != recomp[i]) ++differ;
+        std::printf(" W=%zu-bit: %zu of %zu map bytes differ between the arms\n",
+                    sizeof(W) * 8, differ, slide.size());
+        BINCV_CHECK_EQ(differ, size_t{0});
+    };
+    runBoth(uint32_t{});
+    runBoth(uint64_t{});
+}
+
 #ifdef BINCV_WITH_OPENCV
 BINCV_TEST(DenseDisparity, TheStereoBMTriangleClosesOnCleanGroundTruth) {
     // The reference-implementation cross-check, exactly as the sparse matcher

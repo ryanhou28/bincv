@@ -72,6 +72,14 @@ stated decision rule.
   option, not the worst. Measuring against a fallback nobody would use makes anything
   look like a win.
 
+**An operation SHIPS only when it holds up on both axes (owner's rule,
+2026-09-15).** Correct-but-far-behind is a stage, not a product: a kernel that
+loses its role comparison badly against the best existing option does not merge
+on the strength of a stated price -- it gets optimized first, or the owner
+explicitly accepts the gap with the memory-side argument stated. The premise of
+this library is fast AND lightweight out of the box; half of that is not a
+smaller claim, it is a different product.
+
 **A new operation gets a benchmark arm when it is written, even with no caller.** A kernel
 nobody calls makes no performance claim, so it ships correct, untimed and unoptimized, and
 nothing notices until something calls it. That has happened here: two kernels written
