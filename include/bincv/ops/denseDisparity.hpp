@@ -192,6 +192,29 @@ inline WordType laneShiftDown(const WordType* row, size_t rowWords, size_t i, un
 template <typename WordType>
 inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap,
                              size_t rowWords, unsigned j) {
+    // Plane-outer with a carry ROW: each pass is a straight word loop with no
+    // cross-iteration dependence, which is the shape the vectorizer takes. The
+    // arrays here are a handful of L1-resident rows, so this is NOT the
+    // row-staging that measured slower on the band -- that one paid strided
+    // gathers across 24 staged rows; this one re-walks at most eight.
+    constexpr size_t kCarryCap = 128;   // 1 KB at uint64; a row wider than this
+                                        // (a >8K-pixel frame at uint64, narrower
+                                        // sooner) takes the word-inner path.
+    if (rowWords <= kCarryCap) {
+        WordType carryRow[kCarryCap];
+        for (size_t i = 0; i < rowWords; ++i) carryRow[i] = 0;
+        for (size_t p = 0; p < planeCap; ++p) {
+            WordType* a = dst + p * rowWords;
+            const WordType* sp = src + p * rowWords;
+            for (size_t i = 0; i < rowWords; ++i) {
+                const WordType v = laneShiftDown<WordType>(sp, rowWords, i, j);
+                const WordType sum = static_cast<WordType>(a[i] ^ v ^ carryRow[i]);
+                carryRow[i] = maj3<WordType>(a[i], v, carryRow[i]);
+                a[i] = sum;
+            }
+        }
+        return;
+    }
     for (size_t i = 0; i < rowWords; ++i) {
         WordType carry = 0;
         for (size_t p = 0; p < planeCap; ++p) {
