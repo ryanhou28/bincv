@@ -80,14 +80,19 @@ int main() {
 
     bincv::DenseDisparityParams p;
     p.maxDisparity = 64;
-    const double d64 = runArm<uint32_t>(lw, rw, p, disp, "D=64, 9x9, u32");
-    runArm<uint64_t>(lw, rw, p, disp, "D=64, 9x9, u64");
+    const double d64 = runArm<uint32_t>(lw, rw, p, disp, "D=64, 9x9, u32 sliding");
+    const double d64w = runArm<uint64_t>(lw, rw, p, disp, "D=64, 9x9, u64 sliding");
+    p.recomputeVertical = true;
+    const double d64r = runArm<uint64_t>(lw, rw, p, disp, "D=64, 9x9, u64 RECOMPUTE arm");
+    p.recomputeVertical = false;
     p.maxDisparity = 32;
-    const double d32 = runArm<uint32_t>(lw, rw, p, disp, "D=32, 9x9, u32");
+    const double d32 = runArm<uint32_t>(lw, rw, p, disp, "D=32, 9x9, u32 sliding");
     p.maxDisparity = 64;
     p.winWidth = 5;
     p.winHeight = 5;
-    runArm<uint32_t>(lw, rw, p, disp, "D=64, 5x5, u32");
+    runArm<uint32_t>(lw, rw, p, disp, "D=64, 5x5, u32 sliding");
+    std::printf("\n sliding vs recompute at u64: %.2fx (the arm the default buys)\n",
+                d64r / d64w);
 
     std::printf("\n D=64 vs D=32 time ratio %.2fx (the design trades time linear in D\n"
                 " for peak memory independent of it; this is the linearity check).\n",

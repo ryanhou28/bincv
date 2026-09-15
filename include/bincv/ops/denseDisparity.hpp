@@ -18,24 +18,36 @@
 ///     aggregated cost is computed and folded into a running per-pixel best.
 ///     Nothing outlives the row but the answer.
 ///
-/// Peak scratch at 752x480, K = 24, 9x9, uint32: ~43 KB of census band + a few
-/// hundred bytes of accumulator planes + three uint16 rows -- INDEPENDENT OF THE
-/// DISPARITY RANGE. The price is recomputation: each output row re-evaluates its
-/// window's raw cost per disparity instead of sliding it; whether a sliding
-/// accumulator buys that back is a measured question the benchmark arm exists to
-/// answer, not a foregone one.
+/// Two vertical-aggregation arms, both under the rule, chosen by
+/// `DenseDisparityParams::recomputeVertical`:
+///
+///   * SLIDING (the default): a per-disparity accumulator ring -- each row
+///     advance costs one bit-sliced add and one subtract per disparity instead
+///     of re-evaluating the window's rows. Scratch grows LINEAR in D at ~0.8 KB
+///     per disparity (u64): ~92 KB total at the reference configuration --
+///     still an order of magnitude under StereoBM's output alone.
+///   * RECOMPUTE: v1's shape, scratch INDEPENDENT of D (~47 KB), for the target
+///     where that property outranks ~4x of the band work. The equality of the
+///     two arms' output maps is a test, not a hope.
 ///
 /// ---------------------------------------------------------------------------
-/// WHAT IS BIT-SLICED AND WHAT IS NOT, IN v1
+/// WHAT IS BIT-SLICED AND WHAT IS NOT
 ///
 /// The raw cost is fully word-parallel: per word of pixels, K census XORs and a
-/// `bitSlicedSum` fold to a 5-bit lane-wise Hamming distance, then a ripple
-/// carry adds the window's rows into an accumulator ladder -- W pixels per gate
-/// throughout. The HORIZONTAL aggregation and the winner-take-all then run per
-/// pixel from extracted integers. That scalarization is v1's known cost, priced
-/// by the benchmark from birth; the bit-sliced borrow-compare WTA is the
-/// restructuring the profile will justify or decline, exactly as the census
-/// transform's own per-pixel v1 records its successor's target.
+/// `bitSlicedSum` fold to a lane-wise Hamming distance, rippled into the
+/// vertical accumulator -- W pixels per gate throughout. Extraction to integers
+/// runs eight pixels at a time through the 8x8 bit transpose whenever the
+/// accumulator fits eight planes (K * winHeight <= 255 -- the shipped 5x5/9x9
+/// configuration is 216), with the per-pixel loop as the general fallback. The
+/// horizontal rolling sum and the winner-take-all stay scalar: two adds and a
+/// compare per pixel, measured cheap enough to leave.
+///
+/// WORD TYPE, measured rather than defaulted: this kernel is pure word
+/// arithmetic with no narrow-guarded vector paths, and its scratch is a band,
+/// not a frame -- so the library's uint32 default (argued from row-stride waste)
+/// buys nothing here, and **uint64 measured 1.63x faster on the reference
+/// device**. Callers should instantiate this kernel at uint64 unless they have
+/// measured a reason otherwise.
 ///
 /// ---------------------------------------------------------------------------
 /// CONTRACTS
@@ -76,6 +88,14 @@ struct DenseDisparityParams {
     /// the map and blur depth edges -- the standard trade, the caller's.
     int winWidth = 9;
     int winHeight = 9;
+
+    /// @brief Take the RECOMPUTE arm: re-evaluate the vertical window per row
+    /// per disparity, keeping scratch INDEPENDENT of the disparity range
+    /// (v1's shape). Off by default -- the sliding accumulator is ~4x the
+    /// band work back for ~0.8 KB of scratch per disparity -- and switchable
+    /// so the benchmark can time both and the tests can hold them to
+    /// IDENTICAL output maps.
+    bool recomputeVertical = false;
 };
 
 /// @brief WordType units of scratch `denseDisparity` needs: the two census
@@ -85,7 +105,12 @@ inline size_t denseDisparityScratchWords(size_t width, const DenseDisparityParam
     const size_t rowWords = impl::minRowWords<WordType>(width);
     const size_t winH = static_cast<size_t>(p.winHeight);
     const size_t accPlanes = bitSlicedSumPlanes(K * winH);
-    return (2 * K * winH + accPlanes) * rowWords;
+    // The sliding arm keeps one accumulator per candidate disparity; the
+    // recompute arm keeps one, full stop. Both sit beside the census band.
+    const size_t range = p.recomputeVertical
+                             ? 1
+                             : static_cast<size_t>(p.maxDisparity - p.minDisparity) + 1;
+    return (2 * K * winH + range * accPlanes) * rowWords;
 }
 
 /// @brief uint16_t units of scratch `denseDisparity` needs: the extraction row
@@ -112,6 +137,39 @@ inline WordType censusWordShiftedRight(const WordType* row, size_t rowWords,
         extendedRowWord<WordType>(row, j - 1, rowWords, tailMask, WordType{0});
     return static_cast<WordType>(static_cast<WordType>(hi << r) |
                                  static_cast<WordType>(lo >> (wb - r)));
+}
+
+/// @brief `acc += v`, bit-sliced: `v` carries `vPlanes` planes, `acc` carries
+/// `accPlanes`, at word column `i` of rows `rowWords` wide. The plane budget
+/// bounds the value, so the final carry is zero by construction. **INTERNAL.**
+template <typename WordType>
+inline void accAddWord(WordType* acc, size_t accPlanes, size_t rowWords, size_t i,
+                       const WordType* v, size_t vPlanes) {
+    WordType carry = 0;
+    for (size_t p = 0; p < accPlanes; ++p) {
+        const WordType vp = p < vPlanes ? v[p] : WordType{0};
+        WordType* a = acc + p * rowWords + i;
+        const WordType sum = static_cast<WordType>(*a ^ vp ^ carry);
+        carry = maj3<WordType>(*a, vp, carry);
+        *a = sum;
+    }
+}
+
+/// @brief `acc -= v`, bit-sliced borrow ripple. The accumulator always holds at
+/// least the row being removed (it was added by the same arithmetic), so
+/// the final borrow is zero by construction. **INTERNAL.**
+template <typename WordType>
+inline void accSubWord(WordType* acc, size_t accPlanes, size_t rowWords, size_t i,
+                       const WordType* v, size_t vPlanes) {
+    WordType borrow = 0;
+    for (size_t p = 0; p < accPlanes; ++p) {
+        const WordType vp = p < vPlanes ? v[p] : WordType{0};
+        WordType* a = acc + p * rowWords + i;
+        const WordType diff = static_cast<WordType>(*a ^ vp ^ borrow);
+        borrow = static_cast<WordType>(
+            (static_cast<WordType>(~*a) & (vp | borrow)) | (vp & borrow));
+        *a = diff;
+    }
 }
 
 } // namespace impl
@@ -173,7 +231,11 @@ inline void denseDisparity(const SrcT* left, const SrcT* right, size_t width,
 
     WordType* cenL = scratchWords;
     WordType* cenR = cenL + K * winH * rowWords;
-    WordType* acc = cenR + K * winH * rowWords;
+    WordType* accBase = cenR + K * winH * rowWords;
+    const size_t range = params.recomputeVertical
+                             ? 1
+                             : static_cast<size_t>(params.maxDisparity -
+                                                   params.minDisparity) + 1;
     uint16_t* ext = scratchRows;
     uint16_t* bestC = ext + width;
     uint16_t* bestD = bestC + width;
@@ -197,6 +259,28 @@ inline void denseDisparity(const SrcT* left, const SrcT* right, size_t width,
         uint8_t* out = disparity + y * dispStride;
         for (size_t x = 0; x < width; ++x) out[x] = kDenseDisparityInvalid;
     };
+    // The raw census cost of word `i` of band row `wr` at disparity `d`:
+    // K XORs against the shifted right census, folded lane-wise. Deliberately
+    // PER WORD, computed in registers: a row-staged spelling (shift and XOR
+    // whole rows into scratch, then gather columns for the fold) measured 12%
+    // SLOWER on the reference device -- the strided column gather across K
+    // staged rows costs more cache traffic than the autovectorizer's straight
+    // loops give back. Recorded so it is not retried on the same shape.
+    const auto rawCostWord = [&](size_t wr, int d, size_t i, WordType* cost) {
+        WordType xr[K];
+        for (size_t k = 0; k < K; ++k) {
+            xr[k] = static_cast<WordType>(
+                bandL(k, wr)[i] ^ impl::censusWordShiftedRight<WordType>(
+                                      bandR(k, wr), rowWords, tailMask, i, d));
+        }
+        bitSlicedSum<WordType>(xr, K, cost);
+    };
+    const auto accFor = [&](int d) {
+        return accBase + (params.recomputeVertical
+                              ? size_t{0}
+                              : static_cast<size_t>(d - params.minDisparity) *
+                                    accPlanes * rowWords);
+    };
 
     // The largest disparity any column can support with a full window.
     const long long dMaxSupported =
@@ -215,8 +299,54 @@ inline void denseDisparity(const SrcT* left, const SrcT* right, size_t width,
 
     for (size_t r = 0; r < winH; ++r) fillBandRow(r);
 
+    // The sliding arm's accumulators, seeded from the first window.
+    if (!params.recomputeVertical) {
+        for (size_t w = 0; w < range * accPlanes * rowWords; ++w) accBase[w] = 0;
+        for (int d = params.minDisparity; d <= dEnd; ++d) {
+            WordType* acc = accFor(d);
+            for (size_t wr = 0; wr < winH; ++wr) {
+                for (size_t i = 0; i < rowWords; ++i) {
+                    WordType cost[8];
+                    rawCostWord(wr, d, i, cost);
+                    impl::accAddWord<WordType>(acc, accPlanes, rowWords, i, cost,
+                                               costPlanes);
+                }
+            }
+        }
+    }
+
+    constexpr size_t wb = impl::bitsPerWord<WordType>();
     for (size_t y = hh; y + hh < height; ++y) {
-        if (y > hh) fillBandRow(y + hh);   // the band slides one row
+        if (y > hh) {
+            if (!params.recomputeVertical) {
+                // The leaving row still occupies its ring slot -- the entering
+                // row lands in the SAME slot (they are winHeight rows apart) --
+                // so the order is: subtract, refill, add.
+                const size_t leave = y - 1 - hh;
+                for (int d = params.minDisparity; d <= dEnd; ++d) {
+                    WordType* acc = accFor(d);
+                    for (size_t i = 0; i < rowWords; ++i) {
+                        WordType cost[8];
+                        rawCostWord(leave, d, i, cost);
+                        impl::accSubWord<WordType>(acc, accPlanes, rowWords, i, cost,
+                                                   costPlanes);
+                    }
+                }
+                fillBandRow(y + hh);
+                const size_t enter = y + hh;
+                for (int d = params.minDisparity; d <= dEnd; ++d) {
+                    WordType* acc = accFor(d);
+                    for (size_t i = 0; i < rowWords; ++i) {
+                        WordType cost[8];
+                        rawCostWord(enter, d, i, cost);
+                        impl::accAddWord<WordType>(acc, accPlanes, rowWords, i, cost,
+                                                   costPlanes);
+                    }
+                }
+            } else {
+                fillBandRow(y + hh);
+            }
+        }
 
         for (size_t x = 0; x < width; ++x) {
             bestC[x] = 0xFFFFu;
@@ -224,48 +354,54 @@ inline void denseDisparity(const SrcT* left, const SrcT* right, size_t width,
         }
 
         for (int d = params.minDisparity; d <= dEnd; ++d) {
-            for (size_t w = 0; w < accPlanes * rowWords; ++w) acc[w] = 0;
-
-            for (size_t wr = y - hh; wr <= y + hh; ++wr) {
-                for (size_t i = 0; i < rowWords; ++i) {
-                    WordType xr[K];
-                    for (size_t k = 0; k < K; ++k) {
-                        xr[k] = static_cast<WordType>(
-                            bandL(k, wr)[i] ^
-                            impl::censusWordShiftedRight<WordType>(bandR(k, wr), rowWords,
-                                                                   tailMask, i, d));
-                    }
-                    WordType cost[8];
-                    bitSlicedSum<WordType>(xr, K, cost);
-                    // Ripple the 5-bit lane costs into the accumulator ladder.
-                    // The plane budget bounds the value at K * winH, so the
-                    // final carry is zero by construction.
-                    WordType carry = 0;
-                    for (size_t p = 0; p < accPlanes; ++p) {
-                        const WordType v = p < costPlanes ? cost[p] : WordType{0};
-                        WordType* a = acc + p * rowWords + i;
-                        const WordType sum = static_cast<WordType>(*a ^ v ^ carry);
-                        carry = maj3<WordType>(*a, v, carry);
-                        *a = sum;
+            WordType* acc = accFor(d);
+            if (params.recomputeVertical) {
+                for (size_t w = 0; w < accPlanes * rowWords; ++w) acc[w] = 0;
+                for (size_t wr = y - hh; wr <= y + hh; ++wr) {
+                    for (size_t i = 0; i < rowWords; ++i) {
+                        WordType cost[8];
+                        rawCostWord(wr, d, i, cost);
+                        impl::accAddWord<WordType>(acc, accPlanes, rowWords, i, cost,
+                                                   costPlanes);
                     }
                 }
             }
 
-            // Extraction and the per-pixel half: window-column sum by rolling,
-            // then the running best. v1's scalar stage, and the profile's
-            // named target.
-            constexpr size_t wb = impl::bitsPerWord<WordType>();
-            for (size_t x = 0; x < width; ++x) {
-                unsigned v = 0;
-                const size_t wi = x / wb, b = x % wb;
-                for (size_t p = 0; p < accPlanes; ++p) {
-                    v |= static_cast<unsigned>((acc[p * rowWords + wi] >> b) & 1u) << p;
+            // Extraction. Eight pixels per 8x8 bit transpose when the ladder
+            // fits eight planes (K * winHeight <= 255); the per-pixel loop is
+            // the general fallback. Both produce the same integers.
+            if (accPlanes <= 8) {
+                for (size_t x0 = 0; x0 < width; x0 += 8) {
+                    const size_t wi = x0 / wb;
+                    const unsigned b8 = static_cast<unsigned>(((x0 % wb) / 8) * 8);
+                    uint64_t gather = 0;
+                    for (size_t pp = 0; pp < accPlanes; ++pp) {
+                        gather |= static_cast<uint64_t>(
+                                      (acc[pp * rowWords + wi] >> b8) &
+                                      static_cast<WordType>(0xFF))
+                                  << (8 * pp);
+                    }
+                    const uint64_t t = impl::transpose8x8(gather);
+                    const size_t lim = width - x0 < 8 ? width - x0 : 8;
+                    for (size_t j = 0; j < lim; ++j)
+                        ext[x0 + j] = static_cast<uint16_t>((t >> (8 * j)) & 0xFFu);
                 }
-                ext[x] = static_cast<uint16_t>(v);
+            } else {
+                for (size_t x = 0; x < width; ++x) {
+                    unsigned v = 0;
+                    const size_t wi = x / wb, b = x % wb;
+                    for (size_t pp = 0; pp < accPlanes; ++pp) {
+                        v |= static_cast<unsigned>((acc[pp * rowWords + wi] >> b) & 1u)
+                             << pp;
+                    }
+                    ext[x] = static_cast<uint16_t>(v);
+                }
             }
-            const size_t xLo = static_cast<size_t>(hw) > static_cast<size_t>(d) + static_cast<size_t>(hw)
-                                   ? static_cast<size_t>(hw)
-                                   : static_cast<size_t>(d) + static_cast<size_t>(hw);
+
+            const size_t xLo =
+                static_cast<size_t>(hw) > static_cast<size_t>(d) + static_cast<size_t>(hw)
+                    ? static_cast<size_t>(hw)
+                    : static_cast<size_t>(d) + static_cast<size_t>(hw);
             if (xLo + static_cast<size_t>(hw) >= width) continue;
             int sum = 0;
             for (size_t u = xLo - static_cast<size_t>(hw);
