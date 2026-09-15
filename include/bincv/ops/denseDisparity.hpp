@@ -172,6 +172,74 @@ inline void accSubWord(WordType* acc, size_t accPlanes, size_t rowWords, size_t 
     }
 }
 
+/// @brief Word `i` of a plane row with LANES SHIFTED DOWN by `j` (lane x reads
+/// lane x + j); out-of-row lanes read 0. **INTERNAL.**
+template <typename WordType>
+inline WordType laneShiftDown(const WordType* row, size_t rowWords, size_t i, unsigned j) {
+    const size_t wb = bitsPerWord<WordType>();
+    const size_t sWords = j / wb;
+    const unsigned r = static_cast<unsigned>(j % wb);
+    const size_t lo = i + sWords;
+    const WordType a = lo < rowWords ? row[lo] : WordType{0};
+    if (r == 0) return a;
+    const WordType b = lo + 1 < rowWords ? row[lo + 1] : WordType{0};
+    return static_cast<WordType>(static_cast<WordType>(a >> r) |
+                                 static_cast<WordType>(b << (wb - r)));
+}
+
+/// @brief `dst += shift(src, j)` over `planes` plane rows, bit-sliced ripple,
+/// all arrays `planeCap` planes wide. **INTERNAL.**
+template <typename WordType>
+inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap,
+                             size_t rowWords, unsigned j) {
+    for (size_t i = 0; i < rowWords; ++i) {
+        WordType carry = 0;
+        for (size_t p = 0; p < planeCap; ++p) {
+            const WordType v = laneShiftDown<WordType>(src + p * rowWords, rowWords, i, j);
+            WordType* a = dst + p * rowWords + i;
+            const WordType sum = static_cast<WordType>(*a ^ v ^ carry);
+            carry = maj3<WordType>(*a, v, carry);
+            *a = sum;
+        }
+    }
+}
+
+/// @brief The lanes where `h < best`, as a mask word per row word: the borrow
+/// out of the lane-wise subtraction `h - best`. **INTERNAL.**
+template <typename WordType>
+inline void planesLess(const WordType* h, const WordType* best, size_t planeCap,
+                       size_t rowWords, WordType* maskOut) {
+    for (size_t i = 0; i < rowWords; ++i) {
+        WordType borrow = 0;
+        for (size_t p = 0; p < planeCap; ++p) {
+            const WordType hp = h[p * rowWords + i];
+            const WordType bp = best[p * rowWords + i];
+            borrow = static_cast<WordType>(
+                (static_cast<WordType>(~hp) & (bp | borrow)) | (bp & borrow));
+        }
+        maskOut[i] = borrow;
+    }
+}
+
+/// @brief The word mask of lanes in `[lo, hi]` (inclusive), for word `i`.
+/// **INTERNAL.**
+template <typename WordType>
+inline WordType laneRangeMask(size_t i, long long lo, long long hi) {
+    const long long wb = static_cast<long long>(bitsPerWord<WordType>());
+    const long long base = static_cast<long long>(i) * wb;
+    long long a = lo - base, b = hi - base;
+    if (b < 0 || a >= wb) return 0;
+    if (a < 0) a = 0;
+    if (b >= wb) b = wb - 1;
+    const WordType full = static_cast<WordType>(~WordType{0});
+    const WordType upTo =
+        b + 1 >= wb ? full
+                    : static_cast<WordType>(
+                          static_cast<WordType>(WordType{1} << (b + 1)) - WordType{1});
+    return static_cast<WordType>(upTo &
+                                 static_cast<WordType>(full << a));
+}
+
 } // namespace impl
 
 /// @brief Dense disparity over a rectified pair: census cost, box aggregation,
@@ -438,7 +506,12 @@ inline size_t denseDisparityBinaryScratchWords(size_t width,
     const size_t range = p.recomputeVertical
                              ? 1
                              : static_cast<size_t>(p.maxDisparity - p.minDisparity) + 1;
-    return range * accPlanes * rowWords;
+    // The winner-take-all's plane arrays: window sums (hPlanes), a doubling
+    // block of the same width, best cost (hPlanes), best disparity (8), and a
+    // compare-mask row.
+    const size_t hPlanes = bitSlicedSumPlanes(static_cast<size_t>(p.winWidth) *
+                                              static_cast<size_t>(p.winHeight));
+    return (range * accPlanes + 2 * hPlanes + hPlanes + 8) * rowWords + rowWords;
 }
 
 /// @brief Dense disparity over an ALREADY-BINARY rectified pair: the cost is
@@ -501,10 +574,15 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
                              : static_cast<size_t>(params.maxDisparity -
                                                    params.minDisparity) + 1;
 
+    const size_t hPlanes = bitSlicedSumPlanes(static_cast<size_t>(params.winWidth) *
+                                              winH);
     WordType* accBase = scratchWords;
-    uint16_t* ext = scratchRows;
-    uint16_t* bestC = ext + width;
-    uint16_t* bestD = bestC + width;
+    WordType* wtaH = accBase + range * accPlanes * rowWords;
+    WordType* wtaBlock = wtaH + hPlanes * rowWords;
+    WordType* wtaBestC = wtaBlock + hPlanes * rowWords;
+    WordType* wtaBestD = wtaBestC + hPlanes * rowWords;
+    WordType* wtaMask = wtaBestD + 8 * rowWords;
+    static_cast<void>(scratchRows);   // the bit-sliced stage needs no integer rows
 
     const auto invalidRow = [&](size_t y) {
         uint8_t* out = disparity + y * dispStride;
@@ -571,10 +649,16 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
             }
         }
 
-        for (size_t x = 0; x < width; ++x) {
-            bestC[x] = 0xFFFFu;
-            bestD[x] = 0xFFFFu;
-        }
+        // ---- the bit-sliced winner-take-all ----
+        // Everything stays word-parallel until one extraction per ROW: the
+        // horizontal window is a doubling tree of lane-shifted adds, the
+        // compare is a lane-wise borrow, the update is a masked select, and
+        // the disparity itself lives as eight bit-planes until the row is
+        // written. Anchor convention: lane x carries the window COVERING
+        // lanes [x, x + winWidth), i.e. the center x + hw -- the output loop
+        // shifts back by hw.
+        for (size_t w = 0; w < hPlanes * rowWords; ++w) wtaBestC[w] = static_cast<WordType>(~WordType{0});
+        for (size_t w = 0; w < 8 * rowWords; ++w) wtaBestD[w] = static_cast<WordType>(~WordType{0});
 
         for (int d = params.minDisparity; d <= dEnd; ++d) {
             WordType* acc = accFor(d);
@@ -588,45 +672,73 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
                 }
             }
 
-            for (size_t x0 = 0; x0 < width; x0 += 8) {
-                const size_t wi = x0 / wb;
-                const unsigned b8 = static_cast<unsigned>(((x0 % wb) / 8) * 8);
-                uint64_t gather = 0;
-                for (size_t pp = 0; pp < accPlanes; ++pp) {
-                    gather |= static_cast<uint64_t>((acc[pp * rowWords + wi] >> b8) &
-                                                    static_cast<WordType>(0xFF))
-                              << (8 * pp);
+            // H = sum over j in [0, winWidth) of laneShift(acc, j), by binary
+            // decomposition: `block` holds the sum of a power-of-two run.
+            for (size_t w = 0; w < hPlanes * rowWords; ++w) wtaH[w] = 0;
+            for (size_t p = 0; p < accPlanes; ++p)
+                for (size_t i = 0; i < rowWords; ++i)
+                    wtaBlock[p * rowWords + i] = acc[p * rowWords + i];
+            for (size_t p = accPlanes; p < hPlanes; ++p)
+                for (size_t i = 0; i < rowWords; ++i) wtaBlock[p * rowWords + i] = 0;
+            unsigned runWidth = 1, offset = 0;
+            unsigned remaining = static_cast<unsigned>(params.winWidth);
+            while (true) {
+                if (remaining & 1u) {
+                    impl::planesAddShifted<WordType>(wtaH, wtaBlock, hPlanes, rowWords,
+                                                     offset);
+                    offset += runWidth;
                 }
-                const uint64_t t = impl::transpose8x8(gather);
-                const size_t lim = width - x0 < 8 ? width - x0 : 8;
-                for (size_t j = 0; j < lim; ++j)
-                    ext[x0 + j] = static_cast<uint16_t>((t >> (8 * j)) & 0xFFu);
+                remaining >>= 1u;
+                if (remaining == 0) break;
+                // block <- block + shift(block, runWidth): a run twice as wide.
+                impl::planesAddShifted<WordType>(wtaBlock, wtaBlock, hPlanes, rowWords,
+                                                 runWidth);
+                runWidth *= 2u;
             }
 
-            const size_t xLo =
-                static_cast<size_t>(hw) > static_cast<size_t>(d) + static_cast<size_t>(hw)
-                    ? static_cast<size_t>(hw)
-                    : static_cast<size_t>(d) + static_cast<size_t>(hw);
-            if (xLo + static_cast<size_t>(hw) >= width) continue;
-            int sum = 0;
-            for (size_t u = xLo - static_cast<size_t>(hw);
-                 u <= xLo + static_cast<size_t>(hw); ++u)
-                sum += ext[u];
-            for (size_t x = xLo; x + static_cast<size_t>(hw) < width; ++x) {
-                if (x > xLo)
-                    sum += static_cast<int>(ext[x + static_cast<size_t>(hw)]) -
-                           static_cast<int>(ext[x - static_cast<size_t>(hw) - 1]);
-                if (static_cast<unsigned>(sum) < bestC[x]) {
-                    bestC[x] = static_cast<uint16_t>(sum);
-                    bestD[x] = static_cast<uint16_t>(d);
+            // Lanes this disparity may claim: anchors in [d, width - winWidth].
+            impl::planesLess<WordType>(wtaH, wtaBestC, hPlanes, rowWords, wtaMask);
+            const long long anchorHi =
+                static_cast<long long>(width) - params.winWidth;
+            for (size_t i = 0; i < rowWords; ++i) {
+                wtaMask[i] = static_cast<WordType>(
+                    wtaMask[i] & impl::laneRangeMask<WordType>(i, d, anchorHi));
+            }
+            for (size_t p = 0; p < hPlanes; ++p) {
+                for (size_t i = 0; i < rowWords; ++i) {
+                    WordType* b = wtaBestC + p * rowWords + i;
+                    const WordType hp = wtaH[p * rowWords + i];
+                    *b = static_cast<WordType>((*b & static_cast<WordType>(~wtaMask[i])) |
+                                               (hp & wtaMask[i]));
+                }
+            }
+            for (size_t p = 0; p < 8; ++p) {
+                const bool bit = ((static_cast<unsigned>(d) >> p) & 1u) != 0;
+                for (size_t i = 0; i < rowWords; ++i) {
+                    WordType* b = wtaBestD + p * rowWords + i;
+                    const WordType dp = bit ? wtaMask[i] : WordType{0};
+                    *b = static_cast<WordType>((*b & static_cast<WordType>(~wtaMask[i])) |
+                                               dp);
                 }
             }
         }
 
+        // One extraction per row: best-disparity planes to bytes, shifted from
+        // anchors back to centers. Unclaimed lanes hold all-ones = 255 = the
+        // invalid marker, so the sentinel semantics fall out of the init.
         uint8_t* out = disparity + y * dispStride;
         for (size_t x = 0; x < width; ++x) {
-            out[x] = bestD[x] <= 254u ? static_cast<uint8_t>(bestD[x])
-                                      : kDenseDisparityInvalid;
+            const size_t xa = x - static_cast<size_t>(hw);
+            uint8_t v = kDenseDisparityInvalid;
+            if (x >= static_cast<size_t>(hw) && x + static_cast<size_t>(hw) < width) {
+                unsigned acc8 = 0;
+                const size_t wi = xa / wb, b = xa % wb;
+                for (size_t p = 0; p < 8; ++p)
+                    acc8 |= static_cast<unsigned>((wtaBestD[p * rowWords + wi] >> b) & 1u)
+                            << p;
+                v = static_cast<uint8_t>(acc8);
+            }
+            out[x] = v;
         }
     }
 }
