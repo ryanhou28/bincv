@@ -75,8 +75,10 @@ one thread against many measures the parallelism rather than the implementation.
   `goodFeaturesToTrack`, pyramidal Lucas–Kanade, FAST (wide and bit-plane), sub-pixel
   refinement.
 - **Descriptors and stereo** — intensity-centroid orientation, BRIEF and steered
-  (rotation-compensated) BRIEF with caller-supplied patterns, Hamming matching, and
-  sparse rectified stereo matching with sub-pixel disparity. The SLAM half of the
+  (rotation-compensated) BRIEF with caller-supplied patterns (cv::ORB's own table
+  included, byte-exact), Hamming matching plain and prior-gated, sparse rectified
+  stereo matching with sub-pixel disparity, and dense disparity via the census
+  transform — streamed, so the cost volume never exists. The SLAM half of the
   feature path; `examples/slam_frontend.cpp` runs it end to end.
 - **Geometry** — RANSAC over caller-owned scratch: 2D affine, and the five-point
   essential matrix.
