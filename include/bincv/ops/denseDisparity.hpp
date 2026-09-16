@@ -261,7 +261,11 @@ inline WordType laneShiftDown(const WordType* row, size_t rowWords, size_t i, un
 /// all arrays `planeCap` planes wide. **INTERNAL.**
 template <typename WordType>
 inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap,
-                             size_t rowWords, unsigned j) {
+                             size_t rowWords, unsigned j, size_t srcPlanes) {
+    // `srcPlanes <= planeCap`: src planes at or above it are KNOWN ZERO and are
+    // never read -- the ripple continues to planeCap in the two-op carry-only
+    // form. The tree's runs are bounded per stage, and rippling seven planes
+    // where four can be nonzero was a third of its work.
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     // The tree owned two thirds of the binary path's time on the reference
     // device before this arm existed, so it is the one that pays for lanes.
@@ -279,7 +283,7 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
         // leaves the second issue port idle waiting on it.
         for (; i + 4 <= rowWords && i + s + 5 <= rowWords; i += 4) {
             uint64x2_t c0 = vdupq_n_u64(0), c1 = vdupq_n_u64(0);
-            for (size_t p = 0; p < planeCap; ++p) {
+            for (size_t p = 0; p < srcPlanes; ++p) {
                 uint64_t* a = dst + p * rowWords + i;
                 const uint64x2_t a0 = vld1q_u64(a);
                 const uint64x2_t a1 = vld1q_u64(a + 2);
@@ -293,10 +297,19 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
                 c0 = vorrq_u64(vandq_u64(a0, v0), vandq_u64(c0, t0));
                 c1 = vorrq_u64(vandq_u64(a1, v1), vandq_u64(c1, t1));
             }
+            for (size_t p = srcPlanes; p < planeCap; ++p) {
+                uint64_t* a = dst + p * rowWords + i;
+                const uint64x2_t a0 = vld1q_u64(a);
+                const uint64x2_t a1 = vld1q_u64(a + 2);
+                vst1q_u64(a, veorq_u64(a0, c0));
+                vst1q_u64(a + 2, veorq_u64(a1, c1));
+                c0 = vandq_u64(c0, a0);
+                c1 = vandq_u64(c1, a1);
+            }
         }
         for (; i + 2 <= rowWords && i + s + 3 <= rowWords; i += 2) {
             uint64x2_t carry = vdupq_n_u64(0);
-            for (size_t p = 0; p < planeCap; ++p) {
+            for (size_t p = 0; p < srcPlanes; ++p) {
                 uint64_t* a = dst + p * rowWords + i;
                 const uint64x2_t av = vld1q_u64(a);
                 const uint64x2_t vv = laneShiftDownPair(src + p * rowWords, i, s, r);
@@ -304,18 +317,30 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
                 vst1q_u64(a, veorq_u64(t, carry));
                 carry = vorrq_u64(vandq_u64(av, vv), vandq_u64(carry, t));
             }
+            for (size_t p = srcPlanes; p < planeCap; ++p) {
+                uint64_t* a = dst + p * rowWords + i;
+                const uint64x2_t av = vld1q_u64(a);
+                vst1q_u64(a, veorq_u64(av, carry));
+                carry = vandq_u64(carry, av);
+            }
         }
         // The words whose shifted reads the pair loop cannot prove in-row:
         // the original word-inner ripple, whose bounds-checked read is the
         // contract here.
         for (; i < rowWords; ++i) {
             uint64_t carry = 0;
-            for (size_t p = 0; p < planeCap; ++p) {
+            for (size_t p = 0; p < srcPlanes; ++p) {
                 const uint64_t v =
                     laneShiftDown<uint64_t>(src + p * rowWords, rowWords, i, j);
                 uint64_t* a = dst + p * rowWords + i;
                 const uint64_t sum = *a ^ v ^ carry;
                 carry = maj3<uint64_t>(*a, v, carry);
+                *a = sum;
+            }
+            for (size_t p = srcPlanes; p < planeCap; ++p) {
+                uint64_t* a = dst + p * rowWords + i;
+                const uint64_t sum = *a ^ carry;
+                carry &= *a;
                 *a = sum;
             }
         }
@@ -333,7 +358,7 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
     if (rowWords <= kCarryCap) {
         WordType carryRow[kCarryCap];
         for (size_t i = 0; i < rowWords; ++i) carryRow[i] = 0;
-        for (size_t p = 0; p < planeCap; ++p) {
+        for (size_t p = 0; p < srcPlanes; ++p) {
             WordType* a = dst + p * rowWords;
             const WordType* sp = src + p * rowWords;
             for (size_t i = 0; i < rowWords; ++i) {
@@ -343,15 +368,29 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
                 a[i] = sum;
             }
         }
+        for (size_t p = srcPlanes; p < planeCap; ++p) {
+            WordType* a = dst + p * rowWords;
+            for (size_t i = 0; i < rowWords; ++i) {
+                const WordType sum = static_cast<WordType>(a[i] ^ carryRow[i]);
+                carryRow[i] = static_cast<WordType>(carryRow[i] & a[i]);
+                a[i] = sum;
+            }
+        }
         return;
     }
     for (size_t i = 0; i < rowWords; ++i) {
         WordType carry = 0;
-        for (size_t p = 0; p < planeCap; ++p) {
+        for (size_t p = 0; p < srcPlanes; ++p) {
             const WordType v = laneShiftDown<WordType>(src + p * rowWords, rowWords, i, j);
             WordType* a = dst + p * rowWords + i;
             const WordType sum = static_cast<WordType>(*a ^ v ^ carry);
             carry = maj3<WordType>(*a, v, carry);
+            *a = sum;
+        }
+        for (size_t p = srcPlanes; p < planeCap; ++p) {
+            WordType* a = dst + p * rowWords + i;
+            const WordType sum = static_cast<WordType>(*a ^ carry);
+            carry = static_cast<WordType>(carry & *a);
             *a = sum;
         }
     }
@@ -967,26 +1006,49 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
             const uint64_t tTree = impl::denseStageNow();
 #endif
             // H = sum over j in [0, winWidth) of laneShift(acc, j), by binary
-            // decomposition: `block` holds the sum of a power-of-two run.
-            for (size_t w = 0; w < hPlanes * rowWords; ++w) wtaH[w] = 0;
+            // decomposition: `block` holds the sum of a power-of-two run. Each
+            // stage carries its plane BOUND -- a run of n lanes is at most
+            // n * winHeight -- so a ripple stops at the planes its values can
+            // reach instead of all of hPlanes, and the first term (offset 0,
+            // winWidth is odd) is a copy into the zeroed upper planes, not a
+            // ripple.
+            for (size_t p = accPlanes; p < hPlanes; ++p)
+                for (size_t i = 0; i < rowWords; ++i) {
+                    wtaH[p * rowWords + i] = 0;
+                    wtaBlock[p * rowWords + i] = 0;
+                }
             for (size_t p = 0; p < accPlanes; ++p)
                 for (size_t i = 0; i < rowWords; ++i)
                     wtaBlock[p * rowWords + i] = acc[p * rowWords + i];
-            for (size_t p = accPlanes; p < hPlanes; ++p)
-                for (size_t i = 0; i < rowWords; ++i) wtaBlock[p * rowWords + i] = 0;
+            size_t blockBound = winH;
+            size_t blockPlanes = accPlanes;
+            size_t hBound = 0;
             unsigned runWidth = 1, offset = 0;
             unsigned remaining = static_cast<unsigned>(params.winWidth);
             while (true) {
                 if (remaining & 1u) {
-                    impl::planesAddShifted<WordType>(wtaH, wtaBlock, hPlanes, rowWords,
-                                                     offset);
+                    if (hBound == 0) {
+                        for (size_t p = 0; p < blockPlanes; ++p)
+                            for (size_t i = 0; i < rowWords; ++i)
+                                wtaH[p * rowWords + i] = wtaBlock[p * rowWords + i];
+                        hBound = blockBound;
+                    } else {
+                        hBound += blockBound;
+                        impl::planesAddShifted<WordType>(wtaH, wtaBlock,
+                                                         bitSlicedSumPlanes(hBound),
+                                                         rowWords, offset, blockPlanes);
+                    }
                     offset += runWidth;
                 }
                 remaining >>= 1u;
                 if (remaining == 0) break;
                 // block <- block + shift(block, runWidth): a run twice as wide.
-                impl::planesAddShifted<WordType>(wtaBlock, wtaBlock, hPlanes, rowWords,
-                                                 runWidth);
+                const size_t grown = blockBound * 2;
+                impl::planesAddShifted<WordType>(wtaBlock, wtaBlock,
+                                                 bitSlicedSumPlanes(grown), rowWords,
+                                                 runWidth, blockPlanes);
+                blockBound = grown;
+                blockPlanes = bitSlicedSumPlanes(grown);
                 runWidth *= 2u;
             }
 
