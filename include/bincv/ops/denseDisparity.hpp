@@ -46,8 +46,9 @@
 /// arithmetic with no narrow-guarded vector paths, and its scratch is a band,
 /// not a frame -- so the library's uint32 default (argued from row-stride waste)
 /// buys nothing here, and **uint64 measured 1.63x faster on the reference
-/// device**. Callers should instantiate this kernel at uint64 unless they have
-/// measured a reason otherwise.
+/// device**. The binary path's NEON arm exists at uint64 only, for the same
+/// reason it is the recommended type. Callers should instantiate this kernel at
+/// uint64 unless they have measured a reason otherwise.
 ///
 /// ---------------------------------------------------------------------------
 /// CONTRACTS
@@ -64,6 +65,20 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
+
+#ifdef BINCV_DENSE_STAGE_TIMING
+#include <chrono>
+#endif
+
+// The winner-take-all's vector arm. F-5: BEFORE THE GATE, NOT AFTER -- simd.hpp
+// defines BINCV_HAVE_NEON from the compiler's own macros on aarch64, so an
+// include-only integration still gets the NEON kernels, and BINCV_NO_NEON
+// remains the deliberate off-switch a benchmark times the scalar arm through.
+#include "../core/simd.hpp"
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 #include "../core/error.hpp"
 #include "../impl/kernel_util.hpp"
@@ -119,6 +134,31 @@ inline size_t denseDisparityScratchRows(size_t width) { return 3 * width; }
 
 namespace impl {
 
+#ifdef BINCV_DENSE_STAGE_TIMING
+/// @brief Where `denseDisparityBinary`'s time goes, by stage. **DIAGNOSTIC ONLY —
+/// off by default and compiled out otherwise.** Exists so a vector pass lands on
+/// the stage that owns the time instead of the one that looks expensive; the LK
+/// stage profile earned its keep the same way after three guessed optimizations
+/// in a row measured under 2%. Nanoseconds, accumulated; the clock reads sit in
+/// the per-disparity loop, a few percent of overhead that is compared only
+/// against itself.
+struct DenseStageTiming {
+    uint64_t ringNs = 0;     ///< the vertical accumulator slide, all disparities
+    uint64_t treeNs = 0;     ///< the horizontal doubling tree, all disparities
+    uint64_t wtaNs = 0;      ///< compare, range mask and the masked selects
+    uint64_t extractNs = 0;  ///< best-disparity planes to output bytes
+};
+inline DenseStageTiming& denseStageTiming() {
+    static DenseStageTiming t;
+    return t;
+}
+inline uint64_t denseStageNow() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now().time_since_epoch())
+                                     .count());
+}
+#endif
+
 /// @brief Word `i` of a census row shifted RIGHT by `d` pixels -- the read that
 /// aligns right-image column `x - d` under left column `x`. Out-of-row
 /// bits read 0, so a left column with no right support accumulates a
@@ -138,6 +178,36 @@ inline WordType censusWordShiftedRight(const WordType* row, size_t rowWords,
     return static_cast<WordType>(static_cast<WordType>(hi << r) |
                                  static_cast<WordType>(lo >> (wb - r)));
 }
+
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+/// @brief Two uint64 words of `laneShiftDown` -- words `i` and `i+1` of the
+/// result, whose reads (`i+s` .. `i+s+2`) the CALLER has bounds-checked; the
+/// scalar body keeps the words it cannot prove in-row. `j = 64*s + r`.
+/// **INTERNAL.**
+/// @note `r == 0` needs no branch: a USHL by 64 reads as zero, so the high
+/// word contributes nothing and the low word passes through unshifted.
+inline uint64x2_t laneShiftDownPair(const uint64_t* row, size_t i, size_t s,
+                                    unsigned r) {
+    const uint64x2_t lo = vld1q_u64(row + i + s);
+    const uint64x2_t hi = vld1q_u64(row + i + s + 1);
+    const int64x2_t shr = vdupq_n_s64(-static_cast<int64_t>(r));
+    const int64x2_t shl = vdupq_n_s64(static_cast<int64_t>(64u - r));
+    return vorrq_u64(vshlq_u64(lo, shr), vshlq_u64(hi, shl));
+}
+
+/// @brief Two uint64 words of `censusWordShiftedRight`, same caller-checked
+/// bounds contract as `laneShiftDownPair` (reads `i-s-1` .. `i-s+1`, all
+/// strictly inside the row, so the tail mask never applies). `d = 64*s + r`.
+/// **INTERNAL.**
+inline uint64x2_t censusShiftRightPair(const uint64_t* row, size_t i, size_t s,
+                                       unsigned r) {
+    const uint64x2_t hi = vld1q_u64(row + i - s);
+    const uint64x2_t lo = vld1q_u64(row + i - s - 1);
+    const int64x2_t shl = vdupq_n_s64(static_cast<int64_t>(r));
+    const int64x2_t shr = vdupq_n_s64(-static_cast<int64_t>(64u - r));
+    return vorrq_u64(vshlq_u64(hi, shl), vshlq_u64(lo, shr));
+}
+#endif  // BINCV_HAVE_NEON && __aarch64__
 
 /// @brief `acc += v`, bit-sliced: `v` carries `vPlanes` planes, `acc` carries
 /// `accPlanes`, at word column `i` of rows `rowWords` wide. The plane budget
@@ -192,6 +262,46 @@ inline WordType laneShiftDown(const WordType* row, size_t rowWords, size_t i, un
 template <typename WordType>
 inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap,
                              size_t rowWords, unsigned j) {
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    // The tree owned two thirds of the binary path's time on the reference
+    // device before this arm existed, so it is the one that pays for lanes.
+    // Word-pair outer, planes inner, the carry in a REGISTER: the plane loop's
+    // serial carry chain that forced the scalar body plane-outer is two lanes
+    // wide here and never touches memory. In-place doubling (`dst == src`) is
+    // safe the same way it is in scalar: every read of a pair's words happens
+    // before its store, and reads never reach below the writing index.
+    if constexpr (std::is_same_v<WordType, uint64_t>) {
+        const size_t s = j / 64u;
+        const unsigned r = j % 64u;
+        size_t i = 0;
+        for (; i + 2 <= rowWords && i + s + 3 <= rowWords; i += 2) {
+            uint64x2_t carry = vdupq_n_u64(0);
+            for (size_t p = 0; p < planeCap; ++p) {
+                uint64_t* a = dst + p * rowWords + i;
+                const uint64x2_t av = vld1q_u64(a);
+                const uint64x2_t vv = laneShiftDownPair(src + p * rowWords, i, s, r);
+                const uint64x2_t t = veorq_u64(av, vv);
+                vst1q_u64(a, veorq_u64(t, carry));
+                carry = vorrq_u64(vandq_u64(av, vv), vandq_u64(carry, t));
+            }
+        }
+        // The words whose shifted reads the pair loop cannot prove in-row:
+        // the original word-inner ripple, whose bounds-checked read is the
+        // contract here.
+        for (; i < rowWords; ++i) {
+            uint64_t carry = 0;
+            for (size_t p = 0; p < planeCap; ++p) {
+                const uint64_t v =
+                    laneShiftDown<uint64_t>(src + p * rowWords, rowWords, i, j);
+                uint64_t* a = dst + p * rowWords + i;
+                const uint64_t sum = *a ^ v ^ carry;
+                carry = maj3<uint64_t>(*a, v, carry);
+                *a = sum;
+            }
+        }
+        return;
+    }
+#endif
     // Plane-outer with a carry ROW: each pass is a straight word loop with no
     // cross-iteration dependence, which is the shape the vectorizer takes. The
     // arrays here are a handful of L1-resident rows, so this is NOT the
@@ -232,6 +342,34 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
 template <typename WordType>
 inline void planesLess(const WordType* h, const WordType* best, size_t planeCap,
                        size_t rowWords, WordType* maskOut) {
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    // Same shape as the adder's arm: the per-word borrow chain that keeps the
+    // scalar body word-inner rides in a register, two lanes at a time. No
+    // shifted reads, so only an odd last word falls to scalar.
+    if constexpr (std::is_same_v<WordType, uint64_t>) {
+        size_t i = 0;
+        for (; i + 2 <= rowWords; i += 2) {
+            uint64x2_t borrow = vdupq_n_u64(0);
+            for (size_t p = 0; p < planeCap; ++p) {
+                const uint64x2_t hp = vld1q_u64(h + p * rowWords + i);
+                const uint64x2_t bp = vld1q_u64(best + p * rowWords + i);
+                borrow = vorrq_u64(vbicq_u64(vorrq_u64(bp, borrow), hp),
+                                   vandq_u64(bp, borrow));
+            }
+            vst1q_u64(maskOut + i, borrow);
+        }
+        for (; i < rowWords; ++i) {
+            uint64_t borrow = 0;
+            for (size_t p = 0; p < planeCap; ++p) {
+                const uint64_t hp = h[p * rowWords + i];
+                const uint64_t bp = best[p * rowWords + i];
+                borrow = (~hp & (bp | borrow)) | (bp & borrow);
+            }
+            maskOut[i] = borrow;
+        }
+        return;
+    }
+#endif
     for (size_t i = 0; i < rowWords; ++i) {
         WordType borrow = 0;
         for (size_t p = 0; p < planeCap; ++p) {
@@ -241,6 +379,93 @@ inline void planesLess(const WordType* h, const WordType* best, size_t planeCap,
                 (static_cast<WordType>(~hp) & (bp | borrow)) | (bp & borrow));
         }
         maskOut[i] = borrow;
+    }
+}
+
+/// @brief `best = mask ? h : best`, per plane -- the winner-take-all's masked
+/// cost update. **INTERNAL.**
+template <typename WordType>
+inline void planesSelect(WordType* best, const WordType* h, const WordType* mask,
+                         size_t planeCap, size_t rowWords) {
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    if constexpr (std::is_same_v<WordType, uint64_t>) {
+        for (size_t p = 0; p < planeCap; ++p) {
+            uint64_t* b = best + p * rowWords;
+            const uint64_t* hp = h + p * rowWords;
+            size_t i = 0;
+            for (; i + 2 <= rowWords; i += 2)
+                vst1q_u64(b + i, vbslq_u64(vld1q_u64(mask + i), vld1q_u64(hp + i),
+                                           vld1q_u64(b + i)));
+            for (; i < rowWords; ++i)
+                b[i] = (b[i] & ~mask[i]) | (hp[i] & mask[i]);
+        }
+        return;
+    }
+#endif
+    for (size_t p = 0; p < planeCap; ++p) {
+        for (size_t i = 0; i < rowWords; ++i) {
+            WordType* b = best + p * rowWords + i;
+            const WordType hp = h[p * rowWords + i];
+            *b = static_cast<WordType>((*b & static_cast<WordType>(~mask[i])) |
+                                       (hp & mask[i]));
+        }
+    }
+}
+
+/// @brief One row-slide of one disparity's vertical accumulator: subtract the
+/// leaving cost row, add the entering one, both computed in place from the
+/// packed inputs. **INTERNAL.**
+///
+/// The vector arm fuses the two ripples per plane -- the borrow reads the
+/// PRE-subtract word and the carry the post-subtract one, which is exactly the
+/// sequential sub-then-add composed column-wise, so the scalar arm below and
+/// this one produce identical words.
+template <typename WordType>
+inline void accSlideRow(WordType* acc, size_t accPlanes, size_t rowWords,
+                        const WordType* leftLeave, const WordType* rightLeave,
+                        const WordType* leftEnter, const WordType* rightEnter,
+                        WordType tailMask, int d) {
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    if constexpr (std::is_same_v<WordType, uint64_t>) {
+        const size_t s = static_cast<size_t>(d) / 64u;
+        const unsigned r = static_cast<unsigned>(static_cast<size_t>(d) % 64u);
+        const auto scalarWord = [&](size_t i) {
+            const uint64_t cl = leftLeave[i] ^ censusWordShiftedRight<uint64_t>(
+                                                   rightLeave, rowWords, tailMask, i, d);
+            accSubWord<uint64_t>(acc, accPlanes, rowWords, i, &cl, 1);
+            const uint64_t ce = leftEnter[i] ^ censusWordShiftedRight<uint64_t>(
+                                                   rightEnter, rowWords, tailMask, i, d);
+            accAddWord<uint64_t>(acc, accPlanes, rowWords, i, &ce, 1);
+        };
+        size_t i = 0;
+        for (; i < rowWords && i < s + 1; ++i) scalarWord(i);
+        for (; i + 2 <= rowWords && i + 3 <= rowWords + s; i += 2) {
+            uint64x2_t borrow = veorq_u64(vld1q_u64(leftLeave + i),
+                                          censusShiftRightPair(rightLeave, i, s, r));
+            uint64x2_t carry = veorq_u64(vld1q_u64(leftEnter + i),
+                                         censusShiftRightPair(rightEnter, i, s, r));
+            for (size_t p = 0; p < accPlanes; ++p) {
+                uint64_t* a = acc + p * rowWords + i;
+                const uint64x2_t av = vld1q_u64(a);
+                const uint64x2_t t = veorq_u64(av, borrow);
+                borrow = vbicq_u64(borrow, av);
+                vst1q_u64(a, veorq_u64(t, carry));
+                carry = vandq_u64(t, carry);
+            }
+        }
+        for (; i < rowWords; ++i) scalarWord(i);
+        return;
+    }
+#endif
+    for (size_t i = 0; i < rowWords; ++i) {
+        const WordType cl = static_cast<WordType>(
+            leftLeave[i] ^
+            censusWordShiftedRight<WordType>(rightLeave, rowWords, tailMask, i, d));
+        accSubWord<WordType>(acc, accPlanes, rowWords, i, &cl, 1);
+        const WordType ce = static_cast<WordType>(
+            leftEnter[i] ^
+            censusWordShiftedRight<WordType>(rightEnter, rowWords, tailMask, i, d));
+        accAddWord<WordType>(acc, accPlanes, rowWords, i, &ce, 1);
     }
 }
 
@@ -550,6 +775,11 @@ inline size_t denseDisparityBinaryScratchWords(size_t width,
 /// spelling; the aggregation window doubles as the matching support, so
 /// `winWidth * winHeight <= 255` keeps the extraction in bytes (asserted).
 ///
+/// On aarch64 at uint64 the plane loops run a NEON arm -- two words per lane
+/// with the ripple carries in registers -- switchable off with BINCV_NO_NEON
+/// and bit-exact against the scalar arm, which every test pins to the same
+/// output maps on both architectures.
+///
 /// @note A window with no texture (all-equal bits against all-equal bits) has
 /// an ambiguous cost everywhere and resolves to the smallest disparity by
 /// the tie rule. A texture-validity gate is a caller-side filter today --
@@ -659,17 +889,20 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
     constexpr size_t wb = impl::bitsPerWord<WordType>();
     for (size_t y = hh; y + hh < height; ++y) {
         if (y > hh && !params.recomputeVertical) {
+#ifdef BINCV_DENSE_STAGE_TIMING
+            const uint64_t t0 = impl::denseStageNow();
+#endif
             const size_t leave = y - 1 - hh;
             const size_t enter = y + hh;
             for (int d = params.minDisparity; d <= dEnd; ++d) {
-                WordType* acc = accFor(d);
-                for (size_t i = 0; i < rowWords; ++i) {
-                    const WordType cl = costWord(leave, d, i);
-                    impl::accSubWord<WordType>(acc, accPlanes, rowWords, i, &cl, 1);
-                    const WordType ce = costWord(enter, d, i);
-                    impl::accAddWord<WordType>(acc, accPlanes, rowWords, i, &ce, 1);
-                }
+                impl::accSlideRow<WordType>(accFor(d), accPlanes, rowWords,
+                                            left.row(leave), right.row(leave),
+                                            left.row(enter), right.row(enter),
+                                            tailMask, d);
             }
+#ifdef BINCV_DENSE_STAGE_TIMING
+            impl::denseStageTiming().ringNs += impl::denseStageNow() - t0;
+#endif
         }
 
         // ---- the bit-sliced winner-take-all ----
@@ -695,6 +928,9 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
                 }
             }
 
+#ifdef BINCV_DENSE_STAGE_TIMING
+            const uint64_t tTree = impl::denseStageNow();
+#endif
             // H = sum over j in [0, winWidth) of laneShift(acc, j), by binary
             // decomposition: `block` holds the sum of a power-of-two run.
             for (size_t w = 0; w < hPlanes * rowWords; ++w) wtaH[w] = 0;
@@ -719,6 +955,10 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
                 runWidth *= 2u;
             }
 
+#ifdef BINCV_DENSE_STAGE_TIMING
+            const uint64_t tWta = impl::denseStageNow();
+            impl::denseStageTiming().treeNs += tWta - tTree;
+#endif
             // Lanes this disparity may claim: anchors in [d, width - winWidth].
             impl::planesLess<WordType>(wtaH, wtaBestC, hPlanes, rowWords, wtaMask);
             const long long anchorHi =
@@ -727,14 +967,7 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
                 wtaMask[i] = static_cast<WordType>(
                     wtaMask[i] & impl::laneRangeMask<WordType>(i, d, anchorHi));
             }
-            for (size_t p = 0; p < hPlanes; ++p) {
-                for (size_t i = 0; i < rowWords; ++i) {
-                    WordType* b = wtaBestC + p * rowWords + i;
-                    const WordType hp = wtaH[p * rowWords + i];
-                    *b = static_cast<WordType>((*b & static_cast<WordType>(~wtaMask[i])) |
-                                               (hp & wtaMask[i]));
-                }
-            }
+            impl::planesSelect<WordType>(wtaBestC, wtaH, wtaMask, hPlanes, rowWords);
             for (size_t p = 0; p < 8; ++p) {
                 const bool bit = ((static_cast<unsigned>(d) >> p) & 1u) != 0;
                 for (size_t i = 0; i < rowWords; ++i) {
@@ -744,8 +977,14 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
                                                dp);
                 }
             }
+#ifdef BINCV_DENSE_STAGE_TIMING
+            impl::denseStageTiming().wtaNs += impl::denseStageNow() - tWta;
+#endif
         }
 
+#ifdef BINCV_DENSE_STAGE_TIMING
+        const uint64_t tExtract = impl::denseStageNow();
+#endif
         // One extraction per row: best-disparity planes to bytes, shifted from
         // anchors back to centers. Unclaimed lanes hold all-ones = 255 = the
         // invalid marker, so the sentinel semantics fall out of the init.
@@ -763,6 +1002,9 @@ inline void denseDisparityBinary(BinMatConstView<WordType> left,
             }
             out[x] = v;
         }
+#ifdef BINCV_DENSE_STAGE_TIMING
+        impl::denseStageTiming().extractNs += impl::denseStageNow() - tExtract;
+#endif
     }
 }
 

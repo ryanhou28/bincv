@@ -122,6 +122,9 @@ int main() {
                     bb[0].name.c_str(), tb[0].medianNs / 1e6,
                     sw.size() * sizeof(uint64_t) + sr.size() * sizeof(uint16_t),
                     tb[0].spreadPct());
+        // Which arm that number timed -- the rule is that a vector arm must be
+        // switchable off (BINCV_NO_NEON) and the benchmark must show it is on.
+        std::printf(" (%s)\n", bincv::simdStatusString());
         std::printf(" (the caller already holds the bits; the wide arms above pay census\n"
                     "  for the privilege of not having them)\n");
     }
