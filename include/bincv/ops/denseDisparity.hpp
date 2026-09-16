@@ -274,6 +274,26 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
         const size_t s = j / 64u;
         const unsigned r = j % 64u;
         size_t i = 0;
+        // Four words -- two pairs with INDEPENDENT carries -- per iteration:
+        // the carry is a serial two-op chain per plane, and one pair alone
+        // leaves the second issue port idle waiting on it.
+        for (; i + 4 <= rowWords && i + s + 5 <= rowWords; i += 4) {
+            uint64x2_t c0 = vdupq_n_u64(0), c1 = vdupq_n_u64(0);
+            for (size_t p = 0; p < planeCap; ++p) {
+                uint64_t* a = dst + p * rowWords + i;
+                const uint64x2_t a0 = vld1q_u64(a);
+                const uint64x2_t a1 = vld1q_u64(a + 2);
+                const uint64x2_t v0 = laneShiftDownPair(src + p * rowWords, i, s, r);
+                const uint64x2_t v1 =
+                    laneShiftDownPair(src + p * rowWords, i + 2, s, r);
+                const uint64x2_t t0 = veorq_u64(a0, v0);
+                const uint64x2_t t1 = veorq_u64(a1, v1);
+                vst1q_u64(a, veorq_u64(t0, c0));
+                vst1q_u64(a + 2, veorq_u64(t1, c1));
+                c0 = vorrq_u64(vandq_u64(a0, v0), vandq_u64(c0, t0));
+                c1 = vorrq_u64(vandq_u64(a1, v1), vandq_u64(c1, t1));
+            }
+        }
         for (; i + 2 <= rowWords && i + s + 3 <= rowWords; i += 2) {
             uint64x2_t carry = vdupq_n_u64(0);
             for (size_t p = 0; p < planeCap; ++p) {
@@ -348,6 +368,21 @@ inline void planesLess(const WordType* h, const WordType* best, size_t planeCap,
     // shifted reads, so only an odd last word falls to scalar.
     if constexpr (std::is_same_v<WordType, uint64_t>) {
         size_t i = 0;
+        // Two independent borrow chains per iteration, same reasoning as the
+        // adder's four-word loop.
+        for (; i + 4 <= rowWords; i += 4) {
+            uint64x2_t b0 = vdupq_n_u64(0), b1 = vdupq_n_u64(0);
+            for (size_t p = 0; p < planeCap; ++p) {
+                const uint64x2_t h0 = vld1q_u64(h + p * rowWords + i);
+                const uint64x2_t h1 = vld1q_u64(h + p * rowWords + i + 2);
+                const uint64x2_t p0 = vld1q_u64(best + p * rowWords + i);
+                const uint64x2_t p1 = vld1q_u64(best + p * rowWords + i + 2);
+                b0 = vorrq_u64(vbicq_u64(vorrq_u64(p0, b0), h0), vandq_u64(p0, b0));
+                b1 = vorrq_u64(vbicq_u64(vorrq_u64(p1, b1), h1), vandq_u64(p1, b1));
+            }
+            vst1q_u64(maskOut + i, b0);
+            vst1q_u64(maskOut + i + 2, b1);
+        }
         for (; i + 2 <= rowWords; i += 2) {
             uint64x2_t borrow = vdupq_n_u64(0);
             for (size_t p = 0; p < planeCap; ++p) {
