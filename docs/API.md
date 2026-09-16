@@ -24,7 +24,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/corner.hpp`](#opscornerhpp) — 18 entries
 - [`ops/covariance.hpp`](#opscovariancehpp) — 3 entries
 - [`ops/denoise.hpp`](#opsdenoisehpp) — 2 entries
-- [`ops/denseDisparity.hpp`](#opsdenseDisparityhpp) — 7 entries
+- [`ops/denseDisparity.hpp`](#opsdenseDisparityhpp) — 8 entries
 - [`ops/derivative.hpp`](#opsderivativehpp) — 6 entries
 - [`ops/descriptor.hpp`](#opsdescriptorhpp) — 14 entries
 - [`ops/edge.hpp`](#opsedgehpp) — 6 entries
@@ -202,6 +202,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `DenseDisparityParams` *(struct)* | — | Search and aggregation parameters for `denseDisparity` |
 | `denseDisparityScratchWords` | 3 | WordType units of scratch `denseDisparity` needs: the two census bands and the accumulator ladder |
 | `denseDisparityScratchRows` | 3 | uint16_t units of scratch `denseDisparity` needs: the extraction row and the two running-best rows |
+| `DenseStageTiming` *(struct)* | — | Where `denseDisparityBinary`'s time goes, by stage |
 | `denseDisparity` | 3 | Dense disparity over a rectified pair: census cost, box aggregation, winner-take-all, one byte per pixel |
 | `denseDisparityBinaryScratchWords` | 3 | WordType units of scratch `denseDisparityBinary` needs |
 | `denseDisparityBinary` | 3 | Dense disparity over an ALREADY-BINARY rectified pair: the cost is `popcount((L ^ shift(R, d)) over window)` -- one XOR per word of 64 pixels, no census, no wide image anywhere |
