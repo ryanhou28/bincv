@@ -125,6 +125,27 @@ int main() {
         // Which arm that number timed -- the rule is that a vector arm must be
         // switchable off (BINCV_NO_NEON) and the benchmark must show it is on.
         std::printf(" (%s)\n", bincv::simdStatusString());
+#if defined(BINCV_DENSE_SIMD)
+        // The portable arm from the same binary, through the runtime switch.
+        // If the ratio reads ~1.00x, the vector arm is not running where the
+        // line above says it is.
+        if (bincv::impl::hasDenseSimd()) {
+            bincv::impl::denseSimdEnabled() = false;
+            std::vector<measure::Bench> bs = {
+                {"BINARY-NATIVE, portable arm (switch off)", [&](int) {
+                     bincv::denseDisparityBinary<uint64_t>(
+                         lb.constView(), rb.constView(), bp, sw.data(), sw.size(),
+                         sr.data(), sr.size(), disp.data(), kW);
+                     measure::g_sink +=
+                         disp[static_cast<size_t>(kH / 2) * kW + kW / 2];
+                 }}};
+            const auto ts = measure::measureInterleaved(bs, 5, 60.0);
+            bincv::impl::denseSimdEnabled() = true;
+            std::printf(" %-40s %10.2f ms  spread %.0f%%  (vector arm %.2fx)\n",
+                        bs[0].name.c_str(), ts[0].medianNs / 1e6, ts[0].spreadPct(),
+                        ts[0].medianNs / tb[0].medianNs);
+        }
+#endif
         std::printf(" (the caller already holds the bits; the wide arms above pay census\n"
                     "  for the privilege of not having them)\n");
     }

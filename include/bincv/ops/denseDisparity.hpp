@@ -46,9 +46,13 @@
 /// arithmetic with no narrow-guarded vector paths, and its scratch is a band,
 /// not a frame -- so the library's uint32 default (argued from row-stride waste)
 /// buys nothing here, and **uint64 measured 1.63x faster on the reference
-/// device**. The binary path's NEON arm exists at uint64 only, for the same
-/// reason it is the recommended type. Callers should instantiate this kernel at
-/// uint64 unless they have measured a reason otherwise.
+/// device**. The binary path's vector arms (NEON, AVX2) exist at uint64 only,
+/// for the same reason it is the recommended type there. **The guidance is for
+/// 64-bit cores and INVERTS at 32-bit pointer width**: on a Cortex-M7, where
+/// every uint64 operation is synthesized from register pairs, uint64 measured
+/// 1.30x SLOWER than uint32 on this kernel (targets/stm32h753). Callers on
+/// 64-bit cores should instantiate at uint64, and at the native word size
+/// elsewhere, unless they have measured a reason otherwise.
 ///
 /// ---------------------------------------------------------------------------
 /// CONTRACTS
@@ -78,6 +82,10 @@
 #include "../core/simd.hpp"
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
 #include <arm_neon.h>
+#endif
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#define BINCV_DENSE_AVX2 1
+#include <immintrin.h>
 #endif
 
 #include "../core/error.hpp"
@@ -209,6 +217,7 @@ inline uint64x2_t censusShiftRightPair(const uint64_t* row, size_t i, size_t s,
 }
 #endif  // BINCV_HAVE_NEON && __aarch64__
 
+
 /// @brief `acc += v`, bit-sliced: `v` carries `vPlanes` planes, `acc` carries
 /// `accPlanes`, at word column `i` of rows `rowWords` wide. The plane budget
 /// bounds the value, so the final carry is zero by construction. **INTERNAL.**
@@ -257,6 +266,396 @@ inline WordType laneShiftDown(const WordType* row, size_t rowWords, size_t i, un
                                  static_cast<WordType>(b << (wb - r)));
 }
 
+#if defined(BINCV_DENSE_AVX2)
+/// @brief Four uint64 words of `laneShiftDown`; the caller has bounds-checked
+/// reads `i+s` .. `i+s+4`. Shift counts of 64 read as zero, so `r == 0`
+/// needs no branch -- same contract as the NEON pair. **INTERNAL.**
+__attribute__((target("avx2"))) inline __m256i laneShiftDownQuad(const uint64_t* row,
+                                                                 size_t i, size_t s,
+                                                                 unsigned r) {
+    const __m256i lo =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + i + s));
+    const __m256i hi =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + i + s + 1));
+    const __m128i cr = _mm_cvtsi32_si128(static_cast<int>(r));
+    const __m128i cl = _mm_cvtsi32_si128(static_cast<int>(64u - r));
+    return _mm256_or_si256(_mm256_srl_epi64(lo, cr), _mm256_sll_epi64(hi, cl));
+}
+
+/// @brief Four uint64 words of `censusWordShiftedRight`; caller-checked reads
+/// `i-s-1` .. `i-s+3`, all strictly inside the row. **INTERNAL.**
+__attribute__((target("avx2"))) inline __m256i censusShiftRightQuad(const uint64_t* row,
+                                                                    size_t i, size_t s,
+                                                                    unsigned r) {
+    const __m256i hi =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + i - s));
+    const __m256i lo =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + i - s - 1));
+    const __m128i cl = _mm_cvtsi32_si128(static_cast<int>(r));
+    const __m128i cr = _mm_cvtsi32_si128(static_cast<int>(64u - r));
+    return _mm256_or_si256(_mm256_sll_epi64(hi, cl), _mm256_srl_epi64(lo, cr));
+}
+
+/// @brief The AVX2 arm of `planesAddShifted`, four words per lane with a
+/// two-word SSE pass and a scalar ripple behind it for the words whose
+/// shifted reads it cannot prove in-row. **INTERNAL.**
+__attribute__((target("avx2"))) inline void planesAddShiftedAvx2(
+    uint64_t* dst, const uint64_t* src, size_t planeCap, size_t rowWords, unsigned j,
+    size_t srcPlanes) {
+    const size_t s = j / 64u;
+    const unsigned r = j % 64u;
+    size_t i = 0;
+    for (; i + 4 <= rowWords && i + s + 5 <= rowWords; i += 4) {
+        __m256i carry = _mm256_setzero_si256();
+        for (size_t p = 0; p < srcPlanes; ++p) {
+            uint64_t* a = dst + p * rowWords + i;
+            const __m256i av = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+            const __m256i vv = laneShiftDownQuad(src + p * rowWords, i, s, r);
+            const __m256i t = _mm256_xor_si256(av, vv);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(a),
+                                _mm256_xor_si256(t, carry));
+            carry = _mm256_or_si256(_mm256_and_si256(av, vv),
+                                    _mm256_and_si256(carry, t));
+        }
+        for (size_t p = srcPlanes; p < planeCap; ++p) {
+            uint64_t* a = dst + p * rowWords + i;
+            const __m256i av = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(a),
+                                _mm256_xor_si256(av, carry));
+            carry = _mm256_and_si256(carry, av);
+        }
+    }
+    const __m128i cr = _mm_cvtsi32_si128(static_cast<int>(r));
+    const __m128i cl = _mm_cvtsi32_si128(static_cast<int>(64u - r));
+    for (; i + 2 <= rowWords && i + s + 3 <= rowWords; i += 2) {
+        __m128i carry = _mm_setzero_si128();
+        for (size_t p = 0; p < srcPlanes; ++p) {
+            uint64_t* a = dst + p * rowWords + i;
+            const __m128i av = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+            const __m128i lo = _mm_loadu_si128(
+                reinterpret_cast<const __m128i*>(src + p * rowWords + i + s));
+            const __m128i hi = _mm_loadu_si128(
+                reinterpret_cast<const __m128i*>(src + p * rowWords + i + s + 1));
+            const __m128i vv =
+                _mm_or_si128(_mm_srl_epi64(lo, cr), _mm_sll_epi64(hi, cl));
+            const __m128i t = _mm_xor_si128(av, vv);
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(a), _mm_xor_si128(t, carry));
+            carry = _mm_or_si128(_mm_and_si128(av, vv), _mm_and_si128(carry, t));
+        }
+        for (size_t p = srcPlanes; p < planeCap; ++p) {
+            uint64_t* a = dst + p * rowWords + i;
+            const __m128i av = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(a), _mm_xor_si128(av, carry));
+            carry = _mm_and_si128(carry, av);
+        }
+    }
+    for (; i < rowWords; ++i) {
+        uint64_t carry = 0;
+        for (size_t p = 0; p < srcPlanes; ++p) {
+            const uint64_t v = laneShiftDown<uint64_t>(src + p * rowWords, rowWords, i, j);
+            uint64_t* a = dst + p * rowWords + i;
+            const uint64_t sum = *a ^ v ^ carry;
+            carry = maj3<uint64_t>(*a, v, carry);
+            *a = sum;
+        }
+        for (size_t p = srcPlanes; p < planeCap; ++p) {
+            uint64_t* a = dst + p * rowWords + i;
+            const uint64_t sum = *a ^ carry;
+            carry &= *a;
+            *a = sum;
+        }
+    }
+}
+
+/// @brief The AVX2 arm of `planesLess`. **INTERNAL.**
+__attribute__((target("avx2"))) inline void planesLessAvx2(const uint64_t* h,
+                                                           const uint64_t* best,
+                                                           size_t planeCap,
+                                                           size_t rowWords,
+                                                           uint64_t* maskOut) {
+    size_t i = 0;
+    for (; i + 4 <= rowWords; i += 4) {
+        __m256i borrow = _mm256_setzero_si256();
+        for (size_t p = 0; p < planeCap; ++p) {
+            const __m256i hp =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(h + p * rowWords + i));
+            const __m256i bp = _mm256_loadu_si256(
+                reinterpret_cast<const __m256i*>(best + p * rowWords + i));
+            borrow = _mm256_or_si256(
+                _mm256_andnot_si256(hp, _mm256_or_si256(bp, borrow)),
+                _mm256_and_si256(bp, borrow));
+        }
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(maskOut + i), borrow);
+    }
+    for (; i < rowWords; ++i) {
+        uint64_t borrow = 0;
+        for (size_t p = 0; p < planeCap; ++p) {
+            const uint64_t hp = h[p * rowWords + i];
+            const uint64_t bp = best[p * rowWords + i];
+            borrow = (~hp & (bp | borrow)) | (bp & borrow);
+        }
+        maskOut[i] = borrow;
+    }
+}
+
+/// @brief The AVX2 arm of `planesSelect`. **INTERNAL.**
+__attribute__((target("avx2"))) inline void planesSelectAvx2(uint64_t* best,
+                                                             const uint64_t* h,
+                                                             const uint64_t* mask,
+                                                             size_t planeCap,
+                                                             size_t rowWords) {
+    for (size_t p = 0; p < planeCap; ++p) {
+        uint64_t* b = best + p * rowWords;
+        const uint64_t* hp = h + p * rowWords;
+        size_t i = 0;
+        for (; i + 4 <= rowWords; i += 4) {
+            const __m256i m =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(mask + i));
+            const __m256i bv =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b + i));
+            const __m256i hv =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(hp + i));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(b + i),
+                                _mm256_or_si256(_mm256_andnot_si256(m, bv),
+                                                _mm256_and_si256(hv, m)));
+        }
+        for (; i < rowWords; ++i) b[i] = (b[i] & ~mask[i]) | (hp[i] & mask[i]);
+    }
+}
+
+/// @brief The AVX2 arm of `accSlideRow`, same fused sub-then-add ripple as the
+/// NEON one. **INTERNAL.**
+__attribute__((target("avx2"))) inline void accSlideRowAvx2(
+    uint64_t* acc, size_t accPlanes, size_t rowWords, const uint64_t* leftLeave,
+    const uint64_t* rightLeave, const uint64_t* leftEnter, const uint64_t* rightEnter,
+    uint64_t tailMask, int d) {
+    const size_t s = static_cast<size_t>(d) / 64u;
+    const unsigned r = static_cast<unsigned>(static_cast<size_t>(d) % 64u);
+    const auto scalarWord = [&](size_t i) {
+        const uint64_t cl = leftLeave[i] ^ censusWordShiftedRight<uint64_t>(
+                                               rightLeave, rowWords, tailMask, i, d);
+        accSubWord<uint64_t>(acc, accPlanes, rowWords, i, &cl, 1);
+        const uint64_t ce = leftEnter[i] ^ censusWordShiftedRight<uint64_t>(
+                                               rightEnter, rowWords, tailMask, i, d);
+        accAddWord<uint64_t>(acc, accPlanes, rowWords, i, &ce, 1);
+    };
+    size_t i = 0;
+    for (; i < rowWords && i < s + 1; ++i) scalarWord(i);
+    for (; i + 4 <= rowWords && i + 5 <= rowWords + s; i += 4) {
+        __m256i borrow = _mm256_xor_si256(
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(leftLeave + i)),
+            censusShiftRightQuad(rightLeave, i, s, r));
+        __m256i carry = _mm256_xor_si256(
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(leftEnter + i)),
+            censusShiftRightQuad(rightEnter, i, s, r));
+        for (size_t p = 0; p < accPlanes; ++p) {
+            uint64_t* a = acc + p * rowWords + i;
+            const __m256i av = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(a));
+            const __m256i t = _mm256_xor_si256(av, borrow);
+            borrow = _mm256_andnot_si256(av, borrow);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(a),
+                                _mm256_xor_si256(t, carry));
+            carry = _mm256_and_si256(t, carry);
+        }
+    }
+    for (; i < rowWords; ++i) scalarWord(i);
+}
+#endif  // BINCV_DENSE_AVX2
+
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+/// @brief The NEON arm of `planesAddShifted`. **INTERNAL.**
+inline void planesAddShiftedNeon(uint64_t* dst, const uint64_t* src, size_t planeCap,
+                                 size_t rowWords, unsigned j, size_t srcPlanes) {
+    const size_t s = j / 64u;
+    const unsigned r = j % 64u;
+    size_t i = 0;
+    // Four words -- two pairs with INDEPENDENT carries -- per iteration:
+    // the carry is a serial two-op chain per plane, and one pair alone
+    // leaves the second issue port idle waiting on it.
+    for (; i + 4 <= rowWords && i + s + 5 <= rowWords; i += 4) {
+        uint64x2_t c0 = vdupq_n_u64(0), c1 = vdupq_n_u64(0);
+        for (size_t p = 0; p < srcPlanes; ++p) {
+            uint64_t* a = dst + p * rowWords + i;
+            const uint64x2_t a0 = vld1q_u64(a);
+            const uint64x2_t a1 = vld1q_u64(a + 2);
+            const uint64x2_t v0 = laneShiftDownPair(src + p * rowWords, i, s, r);
+            const uint64x2_t v1 =
+                laneShiftDownPair(src + p * rowWords, i + 2, s, r);
+            const uint64x2_t t0 = veorq_u64(a0, v0);
+            const uint64x2_t t1 = veorq_u64(a1, v1);
+            vst1q_u64(a, veorq_u64(t0, c0));
+            vst1q_u64(a + 2, veorq_u64(t1, c1));
+            c0 = vorrq_u64(vandq_u64(a0, v0), vandq_u64(c0, t0));
+            c1 = vorrq_u64(vandq_u64(a1, v1), vandq_u64(c1, t1));
+        }
+        for (size_t p = srcPlanes; p < planeCap; ++p) {
+            uint64_t* a = dst + p * rowWords + i;
+            const uint64x2_t a0 = vld1q_u64(a);
+            const uint64x2_t a1 = vld1q_u64(a + 2);
+            vst1q_u64(a, veorq_u64(a0, c0));
+            vst1q_u64(a + 2, veorq_u64(a1, c1));
+            c0 = vandq_u64(c0, a0);
+            c1 = vandq_u64(c1, a1);
+        }
+    }
+    for (; i + 2 <= rowWords && i + s + 3 <= rowWords; i += 2) {
+        uint64x2_t carry = vdupq_n_u64(0);
+        for (size_t p = 0; p < srcPlanes; ++p) {
+            uint64_t* a = dst + p * rowWords + i;
+            const uint64x2_t av = vld1q_u64(a);
+            const uint64x2_t vv = laneShiftDownPair(src + p * rowWords, i, s, r);
+            const uint64x2_t t = veorq_u64(av, vv);
+            vst1q_u64(a, veorq_u64(t, carry));
+            carry = vorrq_u64(vandq_u64(av, vv), vandq_u64(carry, t));
+        }
+        for (size_t p = srcPlanes; p < planeCap; ++p) {
+            uint64_t* a = dst + p * rowWords + i;
+            const uint64x2_t av = vld1q_u64(a);
+            vst1q_u64(a, veorq_u64(av, carry));
+            carry = vandq_u64(carry, av);
+        }
+    }
+    // The words whose shifted reads the pair loop cannot prove in-row:
+    // the original word-inner ripple, whose bounds-checked read is the
+    // contract here.
+    for (; i < rowWords; ++i) {
+        uint64_t carry = 0;
+        for (size_t p = 0; p < srcPlanes; ++p) {
+            const uint64_t v =
+                laneShiftDown<uint64_t>(src + p * rowWords, rowWords, i, j);
+            uint64_t* a = dst + p * rowWords + i;
+            const uint64_t sum = *a ^ v ^ carry;
+            carry = maj3<uint64_t>(*a, v, carry);
+            *a = sum;
+        }
+        for (size_t p = srcPlanes; p < planeCap; ++p) {
+            uint64_t* a = dst + p * rowWords + i;
+            const uint64_t sum = *a ^ carry;
+            carry &= *a;
+            *a = sum;
+        }
+    }
+}
+
+/// @brief The NEON arm of `planesLess`. **INTERNAL.**
+inline void planesLessNeon(const uint64_t* h, const uint64_t* best, size_t planeCap,
+                           size_t rowWords, uint64_t* maskOut) {
+    size_t i = 0;
+    // Two independent borrow chains per iteration, same reasoning as the
+    // adder's four-word loop.
+    for (; i + 4 <= rowWords; i += 4) {
+        uint64x2_t b0 = vdupq_n_u64(0), b1 = vdupq_n_u64(0);
+        for (size_t p = 0; p < planeCap; ++p) {
+            const uint64x2_t h0 = vld1q_u64(h + p * rowWords + i);
+            const uint64x2_t h1 = vld1q_u64(h + p * rowWords + i + 2);
+            const uint64x2_t p0 = vld1q_u64(best + p * rowWords + i);
+            const uint64x2_t p1 = vld1q_u64(best + p * rowWords + i + 2);
+            b0 = vorrq_u64(vbicq_u64(vorrq_u64(p0, b0), h0), vandq_u64(p0, b0));
+            b1 = vorrq_u64(vbicq_u64(vorrq_u64(p1, b1), h1), vandq_u64(p1, b1));
+        }
+        vst1q_u64(maskOut + i, b0);
+        vst1q_u64(maskOut + i + 2, b1);
+    }
+    for (; i + 2 <= rowWords; i += 2) {
+        uint64x2_t borrow = vdupq_n_u64(0);
+        for (size_t p = 0; p < planeCap; ++p) {
+            const uint64x2_t hp = vld1q_u64(h + p * rowWords + i);
+            const uint64x2_t bp = vld1q_u64(best + p * rowWords + i);
+            borrow = vorrq_u64(vbicq_u64(vorrq_u64(bp, borrow), hp),
+                               vandq_u64(bp, borrow));
+        }
+        vst1q_u64(maskOut + i, borrow);
+    }
+    for (; i < rowWords; ++i) {
+        uint64_t borrow = 0;
+        for (size_t p = 0; p < planeCap; ++p) {
+            const uint64_t hp = h[p * rowWords + i];
+            const uint64_t bp = best[p * rowWords + i];
+            borrow = (~hp & (bp | borrow)) | (bp & borrow);
+        }
+        maskOut[i] = borrow;
+    }
+}
+
+/// @brief The NEON arm of `planesSelect`. **INTERNAL.**
+inline void planesSelectNeon(uint64_t* best, const uint64_t* h, const uint64_t* mask,
+                             size_t planeCap, size_t rowWords) {
+    for (size_t p = 0; p < planeCap; ++p) {
+        uint64_t* b = best + p * rowWords;
+        const uint64_t* hp = h + p * rowWords;
+        size_t i = 0;
+        for (; i + 2 <= rowWords; i += 2)
+            vst1q_u64(b + i, vbslq_u64(vld1q_u64(mask + i), vld1q_u64(hp + i),
+                                       vld1q_u64(b + i)));
+        for (; i < rowWords; ++i)
+            b[i] = (b[i] & ~mask[i]) | (hp[i] & mask[i]);
+    }
+}
+
+/// @brief The NEON arm of `accSlideRow`. **INTERNAL.**
+inline void accSlideRowNeon(uint64_t* acc, size_t accPlanes, size_t rowWords,
+                            const uint64_t* leftLeave, const uint64_t* rightLeave,
+                            const uint64_t* leftEnter, const uint64_t* rightEnter,
+                            uint64_t tailMask, int d) {
+    const size_t s = static_cast<size_t>(d) / 64u;
+    const unsigned r = static_cast<unsigned>(static_cast<size_t>(d) % 64u);
+    const auto scalarWord = [&](size_t i) {
+        const uint64_t cl = leftLeave[i] ^ censusWordShiftedRight<uint64_t>(
+                                               rightLeave, rowWords, tailMask, i, d);
+        accSubWord<uint64_t>(acc, accPlanes, rowWords, i, &cl, 1);
+        const uint64_t ce = leftEnter[i] ^ censusWordShiftedRight<uint64_t>(
+                                               rightEnter, rowWords, tailMask, i, d);
+        accAddWord<uint64_t>(acc, accPlanes, rowWords, i, &ce, 1);
+    };
+    size_t i = 0;
+    for (; i < rowWords && i < s + 1; ++i) scalarWord(i);
+    for (; i + 2 <= rowWords && i + 3 <= rowWords + s; i += 2) {
+        uint64x2_t borrow = veorq_u64(vld1q_u64(leftLeave + i),
+                                      censusShiftRightPair(rightLeave, i, s, r));
+        uint64x2_t carry = veorq_u64(vld1q_u64(leftEnter + i),
+                                     censusShiftRightPair(rightEnter, i, s, r));
+        for (size_t p = 0; p < accPlanes; ++p) {
+            uint64_t* a = acc + p * rowWords + i;
+            const uint64x2_t av = vld1q_u64(a);
+            const uint64x2_t t = veorq_u64(av, borrow);
+            borrow = vbicq_u64(borrow, av);
+            vst1q_u64(a, veorq_u64(t, carry));
+            carry = vandq_u64(t, carry);
+        }
+    }
+    for (; i < rowWords; ++i) scalarWord(i);
+}
+#endif  // BINCV_HAVE_NEON && __aarch64__
+
+#if defined(BINCV_DENSE_AVX2) || (defined(BINCV_HAVE_NEON) && defined(__aarch64__))
+#define BINCV_DENSE_SIMD 1
+// The arm choice is read in loops that run ~150K times per frame, so both
+// halves are namespace-scope inline variables -- plain loads -- rather than
+// function-local statics, whose thread-safe init guard costs a fenced check
+// per call and measured 2% of the whole kernel on the reference device.
+#if defined(BINCV_DENSE_AVX2)
+inline const bool kDenseSimdAvailable = __builtin_cpu_supports("avx2") != 0;
+#else
+inline const bool kDenseSimdAvailable = true;   // NEON is baseline on aarch64
+#endif
+inline bool gDenseSimdOn = true;
+
+/// @brief Force the portable path, for the benchmark and the tests. **INTERNAL.**
+/// @note Not a tuning knob: it is how a vector arm is held to bit-exactness in
+/// ONE binary and how a benchmark shows the arm it timed -- the same contract
+/// packQuantSimdEnabled carries, for the same historical reason. It gates the
+/// NEON arm as well as the AVX2 one, so the check-count of the arm-equality
+/// test is the same on both architectures.
+inline bool& denseSimdEnabled() {
+    return gDenseSimdOn;
+}
+
+/// @brief Is a vector arm available AND enabled? Two plain loads. **INTERNAL.**
+inline bool hasDenseSimd() {
+    return kDenseSimdAvailable && gDenseSimdOn;
+}
+#endif  // BINCV_DENSE_SIMD
+
 /// @brief `dst += shift(src, j)` over `planes` plane rows, bit-sliced ripple,
 /// all arrays `planeCap` planes wide. **INTERNAL.**
 template <typename WordType>
@@ -266,6 +665,14 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
     // never read -- the ripple continues to planeCap in the two-op carry-only
     // form. The tree's runs are bounded per stage, and rippling seven planes
     // where four can be nonzero was a third of its work.
+#if defined(BINCV_DENSE_AVX2)
+    if constexpr (std::is_same_v<WordType, uint64_t>) {
+        if (hasDenseSimd()) {
+            planesAddShiftedAvx2(dst, src, planeCap, rowWords, j, srcPlanes);
+            return;
+        }
+    }
+#endif
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     // The tree owned two thirds of the binary path's time on the reference
     // device before this arm existed, so it is the one that pays for lanes.
@@ -275,76 +682,10 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
     // safe the same way it is in scalar: every read of a pair's words happens
     // before its store, and reads never reach below the writing index.
     if constexpr (std::is_same_v<WordType, uint64_t>) {
-        const size_t s = j / 64u;
-        const unsigned r = j % 64u;
-        size_t i = 0;
-        // Four words -- two pairs with INDEPENDENT carries -- per iteration:
-        // the carry is a serial two-op chain per plane, and one pair alone
-        // leaves the second issue port idle waiting on it.
-        for (; i + 4 <= rowWords && i + s + 5 <= rowWords; i += 4) {
-            uint64x2_t c0 = vdupq_n_u64(0), c1 = vdupq_n_u64(0);
-            for (size_t p = 0; p < srcPlanes; ++p) {
-                uint64_t* a = dst + p * rowWords + i;
-                const uint64x2_t a0 = vld1q_u64(a);
-                const uint64x2_t a1 = vld1q_u64(a + 2);
-                const uint64x2_t v0 = laneShiftDownPair(src + p * rowWords, i, s, r);
-                const uint64x2_t v1 =
-                    laneShiftDownPair(src + p * rowWords, i + 2, s, r);
-                const uint64x2_t t0 = veorq_u64(a0, v0);
-                const uint64x2_t t1 = veorq_u64(a1, v1);
-                vst1q_u64(a, veorq_u64(t0, c0));
-                vst1q_u64(a + 2, veorq_u64(t1, c1));
-                c0 = vorrq_u64(vandq_u64(a0, v0), vandq_u64(c0, t0));
-                c1 = vorrq_u64(vandq_u64(a1, v1), vandq_u64(c1, t1));
-            }
-            for (size_t p = srcPlanes; p < planeCap; ++p) {
-                uint64_t* a = dst + p * rowWords + i;
-                const uint64x2_t a0 = vld1q_u64(a);
-                const uint64x2_t a1 = vld1q_u64(a + 2);
-                vst1q_u64(a, veorq_u64(a0, c0));
-                vst1q_u64(a + 2, veorq_u64(a1, c1));
-                c0 = vandq_u64(c0, a0);
-                c1 = vandq_u64(c1, a1);
-            }
+        if (hasDenseSimd()) {
+            planesAddShiftedNeon(dst, src, planeCap, rowWords, j, srcPlanes);
+            return;
         }
-        for (; i + 2 <= rowWords && i + s + 3 <= rowWords; i += 2) {
-            uint64x2_t carry = vdupq_n_u64(0);
-            for (size_t p = 0; p < srcPlanes; ++p) {
-                uint64_t* a = dst + p * rowWords + i;
-                const uint64x2_t av = vld1q_u64(a);
-                const uint64x2_t vv = laneShiftDownPair(src + p * rowWords, i, s, r);
-                const uint64x2_t t = veorq_u64(av, vv);
-                vst1q_u64(a, veorq_u64(t, carry));
-                carry = vorrq_u64(vandq_u64(av, vv), vandq_u64(carry, t));
-            }
-            for (size_t p = srcPlanes; p < planeCap; ++p) {
-                uint64_t* a = dst + p * rowWords + i;
-                const uint64x2_t av = vld1q_u64(a);
-                vst1q_u64(a, veorq_u64(av, carry));
-                carry = vandq_u64(carry, av);
-            }
-        }
-        // The words whose shifted reads the pair loop cannot prove in-row:
-        // the original word-inner ripple, whose bounds-checked read is the
-        // contract here.
-        for (; i < rowWords; ++i) {
-            uint64_t carry = 0;
-            for (size_t p = 0; p < srcPlanes; ++p) {
-                const uint64_t v =
-                    laneShiftDown<uint64_t>(src + p * rowWords, rowWords, i, j);
-                uint64_t* a = dst + p * rowWords + i;
-                const uint64_t sum = *a ^ v ^ carry;
-                carry = maj3<uint64_t>(*a, v, carry);
-                *a = sum;
-            }
-            for (size_t p = srcPlanes; p < planeCap; ++p) {
-                uint64_t* a = dst + p * rowWords + i;
-                const uint64_t sum = *a ^ carry;
-                carry &= *a;
-                *a = sum;
-            }
-        }
-        return;
     }
 #endif
     // Plane-outer with a carry ROW: each pass is a straight word loop with no
@@ -401,47 +742,23 @@ inline void planesAddShifted(WordType* dst, const WordType* src, size_t planeCap
 template <typename WordType>
 inline void planesLess(const WordType* h, const WordType* best, size_t planeCap,
                        size_t rowWords, WordType* maskOut) {
+#if defined(BINCV_DENSE_AVX2)
+    if constexpr (std::is_same_v<WordType, uint64_t>) {
+        if (hasDenseSimd()) {
+            planesLessAvx2(h, best, planeCap, rowWords, maskOut);
+            return;
+        }
+    }
+#endif
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     // Same shape as the adder's arm: the per-word borrow chain that keeps the
     // scalar body word-inner rides in a register, two lanes at a time. No
     // shifted reads, so only an odd last word falls to scalar.
     if constexpr (std::is_same_v<WordType, uint64_t>) {
-        size_t i = 0;
-        // Two independent borrow chains per iteration, same reasoning as the
-        // adder's four-word loop.
-        for (; i + 4 <= rowWords; i += 4) {
-            uint64x2_t b0 = vdupq_n_u64(0), b1 = vdupq_n_u64(0);
-            for (size_t p = 0; p < planeCap; ++p) {
-                const uint64x2_t h0 = vld1q_u64(h + p * rowWords + i);
-                const uint64x2_t h1 = vld1q_u64(h + p * rowWords + i + 2);
-                const uint64x2_t p0 = vld1q_u64(best + p * rowWords + i);
-                const uint64x2_t p1 = vld1q_u64(best + p * rowWords + i + 2);
-                b0 = vorrq_u64(vbicq_u64(vorrq_u64(p0, b0), h0), vandq_u64(p0, b0));
-                b1 = vorrq_u64(vbicq_u64(vorrq_u64(p1, b1), h1), vandq_u64(p1, b1));
-            }
-            vst1q_u64(maskOut + i, b0);
-            vst1q_u64(maskOut + i + 2, b1);
+        if (hasDenseSimd()) {
+            planesLessNeon(h, best, planeCap, rowWords, maskOut);
+            return;
         }
-        for (; i + 2 <= rowWords; i += 2) {
-            uint64x2_t borrow = vdupq_n_u64(0);
-            for (size_t p = 0; p < planeCap; ++p) {
-                const uint64x2_t hp = vld1q_u64(h + p * rowWords + i);
-                const uint64x2_t bp = vld1q_u64(best + p * rowWords + i);
-                borrow = vorrq_u64(vbicq_u64(vorrq_u64(bp, borrow), hp),
-                                   vandq_u64(bp, borrow));
-            }
-            vst1q_u64(maskOut + i, borrow);
-        }
-        for (; i < rowWords; ++i) {
-            uint64_t borrow = 0;
-            for (size_t p = 0; p < planeCap; ++p) {
-                const uint64_t hp = h[p * rowWords + i];
-                const uint64_t bp = best[p * rowWords + i];
-                borrow = (~hp & (bp | borrow)) | (bp & borrow);
-            }
-            maskOut[i] = borrow;
-        }
-        return;
     }
 #endif
     for (size_t i = 0; i < rowWords; ++i) {
@@ -461,19 +778,20 @@ inline void planesLess(const WordType* h, const WordType* best, size_t planeCap,
 template <typename WordType>
 inline void planesSelect(WordType* best, const WordType* h, const WordType* mask,
                          size_t planeCap, size_t rowWords) {
+#if defined(BINCV_DENSE_AVX2)
+    if constexpr (std::is_same_v<WordType, uint64_t>) {
+        if (hasDenseSimd()) {
+            planesSelectAvx2(best, h, mask, planeCap, rowWords);
+            return;
+        }
+    }
+#endif
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     if constexpr (std::is_same_v<WordType, uint64_t>) {
-        for (size_t p = 0; p < planeCap; ++p) {
-            uint64_t* b = best + p * rowWords;
-            const uint64_t* hp = h + p * rowWords;
-            size_t i = 0;
-            for (; i + 2 <= rowWords; i += 2)
-                vst1q_u64(b + i, vbslq_u64(vld1q_u64(mask + i), vld1q_u64(hp + i),
-                                           vld1q_u64(b + i)));
-            for (; i < rowWords; ++i)
-                b[i] = (b[i] & ~mask[i]) | (hp[i] & mask[i]);
+        if (hasDenseSimd()) {
+            planesSelectNeon(best, h, mask, planeCap, rowWords);
+            return;
         }
-        return;
     }
 #endif
     for (size_t p = 0; p < planeCap; ++p) {
@@ -499,36 +817,22 @@ inline void accSlideRow(WordType* acc, size_t accPlanes, size_t rowWords,
                         const WordType* leftLeave, const WordType* rightLeave,
                         const WordType* leftEnter, const WordType* rightEnter,
                         WordType tailMask, int d) {
+#if defined(BINCV_DENSE_AVX2)
+    if constexpr (std::is_same_v<WordType, uint64_t>) {
+        if (hasDenseSimd()) {
+            accSlideRowAvx2(acc, accPlanes, rowWords, leftLeave, rightLeave, leftEnter,
+                            rightEnter, tailMask, d);
+            return;
+        }
+    }
+#endif
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     if constexpr (std::is_same_v<WordType, uint64_t>) {
-        const size_t s = static_cast<size_t>(d) / 64u;
-        const unsigned r = static_cast<unsigned>(static_cast<size_t>(d) % 64u);
-        const auto scalarWord = [&](size_t i) {
-            const uint64_t cl = leftLeave[i] ^ censusWordShiftedRight<uint64_t>(
-                                                   rightLeave, rowWords, tailMask, i, d);
-            accSubWord<uint64_t>(acc, accPlanes, rowWords, i, &cl, 1);
-            const uint64_t ce = leftEnter[i] ^ censusWordShiftedRight<uint64_t>(
-                                                   rightEnter, rowWords, tailMask, i, d);
-            accAddWord<uint64_t>(acc, accPlanes, rowWords, i, &ce, 1);
-        };
-        size_t i = 0;
-        for (; i < rowWords && i < s + 1; ++i) scalarWord(i);
-        for (; i + 2 <= rowWords && i + 3 <= rowWords + s; i += 2) {
-            uint64x2_t borrow = veorq_u64(vld1q_u64(leftLeave + i),
-                                          censusShiftRightPair(rightLeave, i, s, r));
-            uint64x2_t carry = veorq_u64(vld1q_u64(leftEnter + i),
-                                         censusShiftRightPair(rightEnter, i, s, r));
-            for (size_t p = 0; p < accPlanes; ++p) {
-                uint64_t* a = acc + p * rowWords + i;
-                const uint64x2_t av = vld1q_u64(a);
-                const uint64x2_t t = veorq_u64(av, borrow);
-                borrow = vbicq_u64(borrow, av);
-                vst1q_u64(a, veorq_u64(t, carry));
-                carry = vandq_u64(t, carry);
-            }
+        if (hasDenseSimd()) {
+            accSlideRowNeon(acc, accPlanes, rowWords, leftLeave, rightLeave,
+                            leftEnter, rightEnter, tailMask, d);
+            return;
         }
-        for (; i < rowWords; ++i) scalarWord(i);
-        return;
     }
 #endif
     for (size_t i = 0; i < rowWords; ++i) {

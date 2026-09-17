@@ -263,6 +263,24 @@ BINCV_TEST(DenseDisparity, TheBinaryNativePathIsExactOnItsOwnRepresentation) {
         for (size_t i = 0; i < slide.size(); ++i)
             if (slide[i] != recomp[i]) ++differ;
         BINCV_CHECK_EQ(differ, size_t{0});
+
+#if defined(BINCV_DENSE_SIMD)
+        // The vector arm against the portable arm in ONE binary, via the
+        // runtime switch -- the same contract the packer's arm carries.
+        if (sizeof(W) == 8 && impl::hasDenseSimd()) {
+            p.recomputeVertical = false;
+            std::vector<uint8_t> scalarMap(kW * kH, 2);
+            impl::denseSimdEnabled() = false;
+            denseDisparityBinary<W>(lb.constView(), rb.constView(), p, sw.data(),
+                                    sw.size(), sr.data(), sr.size(), scalarMap.data(),
+                                    kW);
+            impl::denseSimdEnabled() = true;
+            size_t armDiffer = 0;
+            for (size_t i = 0; i < slide.size(); ++i)
+                if (slide[i] != scalarMap[i]) ++armDiffer;
+            BINCV_CHECK_EQ(armDiffer, size_t{0});
+        }
+#endif
     };
     runOne(uint8_t{});
     runOne(uint16_t{});
