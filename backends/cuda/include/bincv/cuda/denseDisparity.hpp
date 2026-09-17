@@ -35,7 +35,7 @@ namespace impl {
 /// the tests. **INTERNAL.** The backend's spelling of the project rule that a
 /// fast arm is switchable off, held to bit-exactness in one binary, and shown
 /// by the benchmark to be the arm it timed.
-bool& denseTiledEnabled();
+bool& denseFastArmEnabled();
 } // namespace impl
 
 /// @brief Dense disparity over an ALREADY-BINARY rectified pair in device
