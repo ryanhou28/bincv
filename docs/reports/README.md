@@ -12,7 +12,7 @@ was cut from is in [logs/](logs/).
 | [primitives.md](primitives.md) | logic, reductions, denoise, morphology, derivative, pyramid downsample | 1.0× to 58×, by operation |
 | [features.md](features.md) | corner detection, FAST, descriptors, matching, optical flow | **7.13× / 8.26×** on optical flow |
 | [stereo.md](stereo.md) | dense disparity against `cv::StereoBM` | **faster on both architectures at ~22× less working set** |
-| [cuda.md](cuda.md) | the CUDA backend, GPU against GPU | **2.0× faster than `cv::cuda::StereoBM` at 5× less device memory** |
+| [cuda.md](cuda.md) | the CUDA backend, GPU against GPU | **2.1× faster than `cv::cuda::StereoBM` at 5× less device memory** |
 | [footprint.md](footprint.md) | the memory result on its own, and the speed declined to protect it | **6.23×** over the frontend |
 | [limits.md](limits.md) | where binCV ties, loses, or stops paying at all | four ways it stops working |
 | [methodology-memory.md](methodology-memory.md) | how memory is measured, and the errors that shaped it | read before quoting a memory number |

@@ -134,7 +134,97 @@ cudaError_t launchCensus(DeviceImageConstView<SrcT> img, const CensusOffsetsPod&
     return cudaGetLastError();
 }
 
+/// @brief The packed layout's kernel: one thread, one pixel, one word out.
+/// The same tile-and-apron staging as the plane arm, so each source byte is
+/// still read once no matter how many comparisons the pattern has.
+template <typename SrcT>
+__global__ void censusPackedKernel(DeviceImageConstView<SrcT> img,
+                                   CensusOffsetsPod pattern,
+                                   DeviceImageView<uint32_t> dst, int apron) {
+    extern __shared__ unsigned char smemRaw[];
+    SrcT* tile = reinterpret_cast<SrcT*>(smemRaw);
+    const int tw = 32 + 2 * apron;
+    const int th = 8 + 2 * apron;
+    const size_t X0 = static_cast<size_t>(blockIdx.x) * 32;
+    const size_t Y0 = static_cast<size_t>(blockIdx.y) * 8;
+
+    const unsigned tid = threadIdx.y * 32 + threadIdx.x;
+    for (unsigned idx = tid; idx < static_cast<unsigned>(tw * th); idx += 256) {
+        const int lx = static_cast<int>(idx) % tw;
+        const int ly = static_cast<int>(idx) / tw;
+        const long long gx = static_cast<long long>(X0) - apron + lx;
+        const long long gy = static_cast<long long>(Y0) - apron + ly;
+        tile[idx] = (gx >= 0 && gx < static_cast<long long>(img.width) && gy >= 0 &&
+                     gy < static_cast<long long>(img.height))
+                        ? img.row(static_cast<size_t>(gy))[gx]
+                        : SrcT{0};
+    }
+    __syncthreads();
+
+    const size_t x = X0 + threadIdx.x;
+    const size_t y = Y0 + threadIdx.y;
+    if (x >= img.width || y >= img.height) return;
+    const SrcT c =
+        tile[(threadIdx.y + static_cast<unsigned>(apron)) * static_cast<unsigned>(tw) +
+             threadIdx.x + static_cast<unsigned>(apron)];
+    uint32_t desc = 0;
+    for (int k = 0; k < pattern.planes; ++k) {
+        const int dx = pattern.dx[k];
+        const int dy = pattern.dy[k];
+        const long long gx = static_cast<long long>(x) + dx;
+        const long long gy = static_cast<long long>(y) + dy;
+        // A neighbour outside the frame contributes 0, exactly as it does in
+        // the plane layout.
+        if (gx >= 0 && gx < static_cast<long long>(img.width) && gy >= 0 &&
+            gy < static_cast<long long>(img.height)) {
+            const SrcT nb = tile[(threadIdx.y + static_cast<unsigned>(apron + dy)) *
+                                     static_cast<unsigned>(tw) +
+                                 threadIdx.x + static_cast<unsigned>(apron + dx)];
+            if (nb > c) desc |= (1u << k);
+        }
+    }
+    dst.row(y)[x] = desc;
+}
+
+template <typename SrcT>
+cudaError_t launchCensusPacked(DeviceImageConstView<SrcT> img,
+                               const CensusOffsetsPod& pattern,
+                               DeviceImageView<uint32_t> dst, cudaStream_t stream) {
+    if (img.width == 0 || img.height == 0) return cudaSuccess;
+    BINCV_ASSERT(img.ptr != nullptr && dst.ptr != nullptr,
+                 "cuda censusTransformPacked: a non-empty image needs non-null pointers");
+    int apron = 0;
+    for (int k = 0; k < pattern.planes; ++k) {
+        const int ax = pattern.dx[k] < 0 ? -pattern.dx[k] : pattern.dx[k];
+        const int ay = pattern.dy[k] < 0 ? -pattern.dy[k] : pattern.dy[k];
+        if (ax > apron) apron = ax;
+        if (ay > apron) apron = ay;
+    }
+    const dim3 block(32, 8);
+    const dim3 grid(static_cast<unsigned>((img.width + 31) / 32),
+                    static_cast<unsigned>((img.height + 7) / 8));
+    const size_t sharedBytes = static_cast<size_t>(32 + 2 * apron) *
+                               static_cast<size_t>(8 + 2 * apron) * sizeof(SrcT);
+    censusPackedKernel<SrcT><<<grid, block, sharedBytes, stream>>>(img, pattern, dst,
+                                                                   apron);
+    return cudaGetLastError();
+}
+
 } // namespace
+
+cudaError_t censusTransformPackedImpl(DeviceImageConstView<uint8_t> img,
+                                      const CensusOffsetsPod& pattern,
+                                      DeviceImageView<uint32_t> dst,
+                                      cudaStream_t stream) {
+    return launchCensusPacked<uint8_t>(img, pattern, dst, stream);
+}
+
+cudaError_t censusTransformPackedImpl(DeviceImageConstView<uint16_t> img,
+                                      const CensusOffsetsPod& pattern,
+                                      DeviceImageView<uint32_t> dst,
+                                      cudaStream_t stream) {
+    return launchCensusPacked<uint16_t>(img, pattern, dst, stream);
+}
 
 bool& censusTiledEnabled() {
     static bool on = true;

@@ -30,9 +30,16 @@ time (CUDA events, medians):
 
 | | time | device memory | role |
 |---|---|---|---|
-| **binCV binary entry** | **0.39 ms** | **2.0 MB** | Hamming on packed bits |
-| `cv::cuda::StereoBM(64, 9)` | 0.78 ms | 10.0 MB | SAD on prefiltered bytes |
-| binCV vs StereoBM | **2.0× faster** | **5× smaller** | role only — different maps |
+| **binCV binary entry** (pair already packed) | **0.39 ms** | **2.0 MB** | Hamming on packed bits |
+| binCV census entry (wide frames in) | 1.04 ms | 6.0 MB | Hamming on census descriptors |
+| `cv::cuda::StereoBM(64, 9)` | 0.83 ms | 10.0 MB | SAD on prefiltered bytes |
+| binary vs StereoBM | **2.1× faster** | **5× smaller** | role only — different maps |
+| census vs StereoBM | 1.25× slower | 1.7× smaller | the wide-input comparison |
+
+The **binary entry leads its role bar on both axes**. The **census entry** —
+the like-for-like comparison for a caller holding wide 8-bit frames, which is
+what StereoBM takes — sits just behind on time at less memory, having started
+this work 15× behind.
 
 Role only: the two match different costs and produce different maps;
 correctness is settled against the host library, not against StereoBM. The
@@ -71,40 +78,58 @@ actually running" check.
 | binary, reference | kernel | 1.66 ms | — |
 | binary, upload + kernel + download | e2e | **0.62 ms** | — |
 | binary, host CPU arm (same machine) | cpu | ~19 ms (17% spread) | — |
-| census transform (both frames) | kernel | 0.14 ms | 17.4× over reference |
-| census matcher (K=24), sliding | kernel | **7.8 ms** | 5.1× over reference |
-| census, wide frames up to map down | e2e | 8.4 ms | — |
-| census, host CPU path (same machine) | cpu | ~387 ms (27% spread) | — |
+| census transform, packed (both frames) | kernel | 0.12 ms | — |
+| census matcher (K=24), packed | kernel | **0.91 ms** | 43× over reference |
+| census matcher (K=24), plane layout | kernel | 7.75 ms | 5.1× over reference |
+| census, wide frames up to map down | e2e | **1.42 ms** | — |
+| census, host CPU path (same machine) | cpu | ~295 ms (38% spread) | — |
 
 The **binary end-to-end round trip — packed pair up, matcher, map down — is
 0.62 ms, comfortably under StereoBM's 0.78 ms kernel-resident time.** The
 device working set is 442 KB against the 23 MB cost volume the design refuses.
 
-### The census entry is still behind, and by how much
+### The census entry, and the layout that closed its gap
 
 The **census entry** is the wide-input story: upload two 8-bit frames, census
-on device, match, download — 8.4 ms end to end, 46× the host census path but
-**still about 10× behind `cv::cuda::StereoBM`**, which serves the same caller.
-That gap is stated here rather than averaged into the headline, and it is the
-one place this backend does not lead its role bar.
+on device, match, download — **1.42 ms end to end**, 208× the host census path
+and within **1.25×** of `cv::cuda::StereoBM` resident-to-resident, at less
+device memory.
 
-The sliding arm below narrowed it from ~15× to ~10×; it did not close it. Two
-reasons, and only the first is fundamental:
+It started 15× behind. The last and largest step was not a kernel trick but a
+**layout** one, and it is worth stating plainly because the first two guesses
+were wrong about where the time went.
 
-- **Census compares 24 planes where SAD compares one byte.** A census cost is
-  24 bit-comparisons per pixel pair against SAD's single subtract-and-add.
-  That is the descriptor's price for illumination invariance, and no kernel
-  shape removes it.
-- **One pixel per thread wastes the popcount.** The kernel counts a 9-bit
-  window with a 32-bit `__popc`, so roughly three quarters of every count is
-  idle. The host solves exactly this with bit-sliced arithmetic — 32 pixels per
-  word operation — and that shape has not been tried here. It is a real
-  avenue, not a floor, and it is recorded as open below rather than attempted.
+The matcher reads a census descriptor **one pixel at a time, across all K
+comparisons at once**. In binCV's plane block those K bits live in K *different
+arrays*, so one pixel pair cost K loads and K popcounts — and each `__popc`
+counted a single useful bit out of 32. At K = 24 and 64 disparities that is
+about 4,200 word loads per output pixel: the kernel was load-bound, not
+arithmetic-bound.
 
-The binary path is the operating point a binCV pipeline runs, and it leads on
-both axes; the census path is for callers who arrive with wide frames and no
-bits yet, and today it buys them device residency and memory, not a win on
-time.
+Packed — a pixel's whole 24-bit descriptor in one `uint32` — the same pixel
+pair is one load each, one XOR, one `__popc` with 24 of 32 bits doing useful
+work. Measured: **7.75 ms → 0.91 ms, 8.55×**, well past the ~2.7× predicted
+from popcount utilization alone, because it fixed the load traffic too.
+
+This is issue #34's anticipated case and its prescribed answer: *add a second
+documented layout to the shared core rather than fork, because two independent
+definitions mean neither can be checked against the other.* Both layouts come
+from the same pattern and the same comparison rule, and the packed matcher's
+output map is held byte-equal to the host's wide path by test — Hamming
+distance is invariant under a permutation of a descriptor's bits, so the bit
+order carries no meaning beyond "both images use one".
+
+**The trade, stated:** packed costs 32 bits per pixel against the plane block's
+24, so the census working set goes from ~3.3 MB to ~4.0 MB — a 21% increase for
+8.55× on the matcher. Both paths ship and both are bit-exact;
+`denseDisparityCensus` (plane block) remains for a caller who wants the smaller
+intermediate and can pay the time.
+
+What remains fundamental is unchanged: census compares 24 bits per pixel pair
+where SAD compares one byte. That is the descriptor's price for illumination
+invariance, and it is why the census entry sits just behind StereoBM rather
+than ahead of it, while the binary entry — the operating point a binCV pipeline
+runs — leads on both axes.
 
 ## Foundation and sensor ops
 
@@ -171,8 +196,16 @@ reachable and both held to the same map:
 |---|---|---|---|
 | reference kernel (one thread per pixel) | 1.66 ms | 39.3 ms | 1.23 ms |
 | shared-memory tiling, 8-wide disparity tiles | 0.58 ms | 11.7 ms | — |
-| sliding vertical window, 16-row strips | **0.39 ms** | **7.8 ms** | — |
+| sliding vertical window, 16-row strips | **0.39 ms** | 7.75 ms | — |
+| packed descriptor layout | — | **0.91 ms** | — |
 | shared-memory tile + all-K ballots | — | — | **0.071 ms** |
+
+The census matcher is **43× its reference kernel** across those steps, and the
+two largest factors came from different places: tiling and sliding are kernel
+shape, the last one is data layout. The order is worth noting — two rounds of
+kernel tuning bought 5.1× before anyone asked what the memory access pattern
+actually was, and the answer (K separate arrays per pixel) was worth another
+8.55× on its own.
 
 The last matcher step is the one binCV had already taken on the CPU and not
 yet here. Both earlier arms re-evaluated the whole window for every output row,
@@ -210,11 +243,13 @@ what is currently parallel.
   "Unknown Error" on counter access), so these are event-and-wall-clock timings,
   not occupancy or memory-throughput profiles. The stage-by-stage method stood
   in for a profiler: each optimization was measured against the arm it replaced.
-- **The census matcher's remaining ~10× has an untried avenue.** The sliding
-  reformulation is done (5.1× over the reference arm), and the kernel still
-  counts a 9-bit window with a 32-bit `__popc` — three quarters of every count
-  idle. Processing 32 pixels per thread word-parallel, the host's bit-sliced
-  shape, would use the whole instruction, but it needs bit-sliced adders for
-  the window sums and is a different kernel rather than a tuning change. Not
-  attempted, and not assumed to win: recorded so the next attempt starts from
-  the measurement rather than the guess.
+- **The census entry's remaining 1.25× is not chased further here.** Horizontal
+  incremental aggregation — making the 9-pixel row sum O(1) in x as the vertical
+  one is now O(1) in y — is the next available step and would plausibly reach
+  parity. It needs either a per-disparity cost buffer (a ~360 KB intermediate,
+  not a cost volume) or a different thread mapping, so it is a design choice
+  rather than a tuning change. Recorded, not attempted.
+- **The plane-layout matcher is kept but is 8.55× slower** than the packed one.
+  It ships because it consumes the host's own layout and costs less memory, not
+  because it is the fast path; a caller with wide frames should use
+  `censusTransformPacked` + `denseDisparityCensusPacked`.

@@ -107,20 +107,21 @@ int main() {
         bincv::cuda::DeviceImage<uint8_t> dLw(kW, kH), dRw(kW, kH);
         bincv::cuda::uploadImage<uint8_t>(lw.data(), kW, kH, kW, dLw.view());
         bincv::cuda::uploadImage<uint8_t>(rw.data(), kW, kH, kW, dRw.view());
-        bincv::cuda::DeviceBinMat cenL(kW, kK * kH), cenR(kW, kK * kH);
+        bincv::cuda::DeviceImage<uint32_t> descL(kW, kH), descR(kW, kH);
         bincv::cuda::DeviceImage<uint8_t> dDisp(kW, kH);
         cudaDeviceSynchronize();
         const size_t used = before - freeBytes();
         const auto t = cudabench::timeKernel(
             [&] {
-                bincv::cuda::censusTransform<kK>(dLw.constView(), bincv::kCensus5x5,
-                                                 cenL.view());
-                bincv::cuda::censusTransform<kK>(dRw.constView(), bincv::kCensus5x5,
-                                                 cenR.view());
-                bincv::cuda::denseDisparityCensus(cenL.constView(), cenR.constView(),
-                                                  kK, kH, p, dDisp.view());
+                bincv::cuda::censusTransformPacked<kK>(dLw.constView(),
+                                                       bincv::kCensus5x5, descL.view());
+                bincv::cuda::censusTransformPacked<kK>(dRw.constView(),
+                                                       bincv::kCensus5x5, descR.view());
+                bincv::cuda::denseDisparityCensusPacked(descL.constView(),
+                                                        descR.constView(), p,
+                                                        dDisp.view());
             },
-            4, 7);
+            8, 9);
         cudabench::printArm("binCV census entry (transform + match)", t, "kernel");
         std::printf("   device memory delta: %.1f MB\n", static_cast<double>(used) / 1048576.0);
     }

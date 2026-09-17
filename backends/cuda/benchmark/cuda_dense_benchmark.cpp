@@ -113,8 +113,12 @@ int main() {
 
     const size_t binaryDeviceBytes =
         2 * kH * dl.getAlignedWidth() * 4 + kW * kH;  // two planes + the map
-    const size_t censusDeviceBytes =
+    // Two intermediates, two footprints: the plane block holds K bits per
+    // pixel, the packed descriptor a whole 32-bit word. Both are printed, since
+    // the 21% the packed layout costs is the other half of its 8.55x.
+    const size_t censusPlaneBytes =
         2 * kK * kH * cenL.getAlignedWidth() * 4 + 2 * kW * kH + kW * kH;
+    const size_t censusPackedBytes = 2 * kW * kH * 4 + 2 * kW * kH + kW * kH;
 
     std::printf("\n--- binary entry (pair already packed): D=64, 9x9 ---\n");
     std::printf(" device working set: %zu KB (the refused cost volume: 23 MB)\n\n",
@@ -174,7 +178,8 @@ int main() {
     }
 
     std::printf("\n--- census entry (wide 8-bit pair): D=64, 9x9, census 5x5 ---\n");
-    std::printf(" device working set: %zu KB\n\n", censusDeviceBytes / 1024);
+    std::printf(" device working set: %zu KB plane layout, %zu KB packed\n\n",
+                censusPlaneBytes / 1024, censusPackedBytes / 1024);
 
     // GPU census transform alone, then the matcher, kernel-resident.
     const auto tCen = cudabench::timeKernel([&] {
@@ -190,7 +195,28 @@ int main() {
                                               kH, p, dDisp.view());
         },
         4, 7);
-    cudabench::printArm("GPU census matcher (K=24, sliding arm)", tMatch, "kernel");
+    cudabench::printArm("GPU census matcher (K=24, PLANE layout)", tMatch, "kernel");
+
+    // The packed-descriptor layout: one word per pixel, so a pixel pair costs
+    // one load and one popcount instead of K of each. Same map, byte for byte.
+    bincv::cuda::DeviceImage<uint32_t> descL(kW, kH), descR(kW, kH);
+    const auto tCenPacked = cudabench::timeKernel([&] {
+        bincv::cuda::censusTransformPacked<kK>(dLw.constView(), bincv::kCensus5x5,
+                                               descL.view());
+        bincv::cuda::censusTransformPacked<kK>(dRw.constView(), bincv::kCensus5x5,
+                                               descR.view());
+    });
+    cudabench::printArm("GPU census transform PACKED, both frames", tCenPacked,
+                        "kernel");
+    const auto tMatchPacked = cudabench::timeKernel(
+        [&] {
+            bincv::cuda::denseDisparityCensusPacked(descL.constView(), descR.constView(),
+                                                    p, dDisp.view());
+        },
+        8, 9);
+    std::printf(" %-44s %9.3f ms  spread %4.0f%%  [kernel]  (vs plane %.2fx)\n",
+                "GPU census matcher, PACKED layout", tMatchPacked.medianMs,
+                tMatchPacked.spreadPct(), tMatch.medianMs / tMatchPacked.medianMs);
     bincv::cuda::impl::denseFastArmEnabled() = false;
     const auto tMatchRef = cudabench::timeKernel(
         [&] {
@@ -203,16 +229,17 @@ int main() {
                 "GPU census matcher, reference arm", tMatchRef.medianMs,
                 tMatchRef.spreadPct(), tMatchRef.medianMs / tMatch.medianMs);
 
+    // End to end on the PACKED path -- the wide-input entry's shipped route.
     const double e2eCensus = hostWallMs(
         [&] {
             bincv::cuda::uploadImage<uint8_t>(lw.data(), kW, kH, kW, dLw.view());
             bincv::cuda::uploadImage<uint8_t>(rw.data(), kW, kH, kW, dRw.view());
-            bincv::cuda::censusTransform<kK>(dLw.constView(), bincv::kCensus5x5,
-                                             cenL.view());
-            bincv::cuda::censusTransform<kK>(dRw.constView(), bincv::kCensus5x5,
-                                             cenR.view());
-            bincv::cuda::denseDisparityCensus(cenL.constView(), cenR.constView(), kK,
-                                              kH, p, dDisp.view());
+            bincv::cuda::censusTransformPacked<kK>(dLw.constView(), bincv::kCensus5x5,
+                                                   descL.view());
+            bincv::cuda::censusTransformPacked<kK>(dRw.constView(), bincv::kCensus5x5,
+                                                   descR.view());
+            bincv::cuda::denseDisparityCensusPacked(descL.constView(),
+                                                    descR.constView(), p, dDisp.view());
             bincv::cuda::downloadImage<uint8_t>(dDisp.constView(), disp.data(), kW);
             cudaDeviceSynchronize();
         },
@@ -236,7 +263,7 @@ int main() {
         std::printf(" %-44s %9.3f ms  spread %4.0f%%  [cpu]\n",
                     "CPU census path (host library)", t[0].medianNs / 1e6,
                     t[0].spreadPct());
-        const double gpuCensusTotal = tCen.medianMs + tMatch.medianMs;
+        const double gpuCensusTotal = tCenPacked.medianMs + tMatchPacked.medianMs;
         std::printf("\n resident (census+match) speedup vs CPU: %.1fx   end-to-end: %.1fx\n",
                     t[0].medianNs / 1e6 / gpuCensusTotal, t[0].medianNs / 1e6 / e2eCensus);
     }

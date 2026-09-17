@@ -777,6 +777,66 @@ BINCV_TEST(CudaDense, CensusEntryMatchesHostWidePath) {
     bincv::cuda::impl::denseFastArmEnabled() = true;
 }
 
+// The packed-descriptor census path: a different intermediate LAYOUT for the
+// same comparisons, so it must land on the same map as the host wide path and
+// as the plane-block device path. Hamming distance is invariant under a
+// permutation of a descriptor's bits, and this is what holds that to account.
+BINCV_TEST(CudaDense, PackedCensusMatchesHostAndPlaneForm) {
+    constexpr size_t K = 24;
+    const size_t sizes[][2] = {{160, 96}, {131, 47}};
+    for (const auto& sz : sizes) {
+        const size_t w = sz[0], h = sz[1];
+        const auto lw = smoothFrame(w, h, 0xACE1 + w);
+        std::vector<uint8_t> rw(w * h, 0);
+        const size_t shift = 9;
+        for (size_t y = 0; y < h; ++y)
+            for (size_t x = 0; x + shift < w; ++x) rw[y * w + x] = lw[y * w + x + shift];
+
+        bincv::DenseDisparityParams p;
+        p.maxDisparity = 32;
+
+        std::vector<uint32_t> sw(bincv::denseDisparityScratchWords<K, uint32_t>(w, p));
+        std::vector<uint16_t> sr(bincv::denseDisparityScratchRows(w));
+        std::vector<uint8_t> expect(w * h, 0xAA);
+        bincv::denseDisparity<K, uint8_t, uint32_t>(lw.data(), rw.data(), w, h, w, w,
+                                                    bincv::kCensus5x5, p, sw.data(),
+                                                    sw.size(), sr.data(), sr.size(),
+                                                    expect.data(), w);
+
+        bincv::cuda::DeviceImage<uint8_t> dL(static_cast<int>(w), static_cast<int>(h));
+        bincv::cuda::DeviceImage<uint8_t> dR(static_cast<int>(w), static_cast<int>(h));
+        bincv::cuda::uploadImage<uint8_t>(lw.data(), w, h, w, dL.view());
+        bincv::cuda::uploadImage<uint8_t>(rw.data(), w, h, w, dR.view());
+        bincv::cuda::DeviceImage<uint32_t> descL(static_cast<int>(w),
+                                                 static_cast<int>(h));
+        bincv::cuda::DeviceImage<uint32_t> descR(static_cast<int>(w),
+                                                 static_cast<int>(h));
+        BINCV_CHECK_EQ(bincv::cuda::censusTransformPacked<K>(dL.constView(),
+                                                             bincv::kCensus5x5,
+                                                             descL.view()),
+                       cudaSuccess);
+        BINCV_CHECK_EQ(bincv::cuda::censusTransformPacked<K>(dR.constView(),
+                                                             bincv::kCensus5x5,
+                                                             descR.view()),
+                       cudaSuccess);
+        bincv::cuda::DeviceImage<uint8_t> dDisp(static_cast<int>(w),
+                                                static_cast<int>(h));
+        BINCV_CHECK_EQ(bincv::cuda::denseDisparityCensusPacked(descL.constView(),
+                                                               descR.constView(), p,
+                                                               dDisp.view()),
+                       cudaSuccess);
+        std::vector<uint8_t> got(w * h, 0x55);
+        BINCV_CHECK_EQ(bincv::cuda::downloadImage<uint8_t>(dDisp.constView(), got.data(),
+                                                           w),
+                       cudaSuccess);
+        BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        size_t bad = 0;
+        for (size_t i = 0; i < w * h; ++i)
+            if (expect[i] != got[i]) ++bad;
+        BINCV_CHECK_EQ(bad, 0u);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Entry point: probe the device first, and report "not performed" as 77 --
 // a pass this binary did not earn is worse than a skip it announces.

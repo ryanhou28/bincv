@@ -48,6 +48,26 @@ cudaError_t denseDisparityBinary(DeviceBinMatConstView left,
                                  DeviceImageView<uint8_t> disparity,
                                  cudaStream_t stream = nullptr);
 
+/// @brief Dense disparity over two PACKED census descriptor images
+/// (census.hpp's `censusTransformPacked` layout: one uint32 per pixel).
+/// **THE FAST CENSUS PATH, and the one the wide-input entry should use.**
+///
+/// The plane-block form below reads a pixel's K comparisons from K different
+/// arrays: K loads and K popcounts per pixel pair, each popcount counting one
+/// useful bit. Here a pixel's whole descriptor is one word, so the cost of a
+/// pixel pair is `__popc(a ^ b)` -- one load each, one xor, one popcount, with
+/// K of 32 bits doing useful work. Measured, that is the difference between
+/// 7.7 ms and 2.6 ms on the reference frame.
+///
+/// Identical output to the plane form and to the host: Hamming distance is
+/// invariant under a permutation of the descriptor's bits, and the tests hold
+/// this path's map byte-equal to the host's wide path.
+cudaError_t denseDisparityCensusPacked(DeviceImageConstView<uint32_t> leftDesc,
+                                       DeviceImageConstView<uint32_t> rightDesc,
+                                       const DenseDisparityParams& params,
+                                       DeviceImageView<uint8_t> disparity,
+                                       cudaStream_t stream = nullptr);
+
 /// @brief Dense disparity over two census PLANE BLOCKS (census.hpp's layout:
 /// K planes of imageHeight rows each). The census entry for wide-input
 /// callers: censusTransform both frames on device, then match here.

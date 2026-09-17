@@ -123,12 +123,14 @@ private:
 };
 
 /// @brief A wide image in device memory: one T per pixel, tight stride.
-/// @tparam T uint8_t or uint16_t -- the input contract's integer types -- or
-/// uint8_t for a disparity map.
+/// @tparam T `uint8_t` or `uint16_t` for an input (the input contract's integer
+/// types) or a disparity map; `uint32_t` for a packed census descriptor,
+/// where the "pixel" is one pixel's whole K-bit comparison word
+/// (census.hpp, censusTransformPacked).
 template <typename T>
 class DeviceImage {
-    static_assert(sizeof(T) == 1 || sizeof(T) == 2,
-                  "DeviceImage: one- or two-byte pixels only");
+    static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4,
+                  "DeviceImage: one-, two- or four-byte pixels only");
 
 public:
     DeviceImage(int width, int height) {

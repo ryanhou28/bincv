@@ -25,8 +25,8 @@ none allocating inside a kernel:
 | `reduce.hpp` | `countNonZero`, `countAnd`, `countAndSplit`, `countCovariance` (both selector forms), and **`countCovarianceBatchAsync`** — N windows in one launch |
 | `pack.hpp` | `packBits`, `packRows`, `packQuant` (N-bit), `unpackTo8Bit` |
 | `packCustom.cuh` | `packBitsIf`, `packQuantWith` — arbitrary device predicates; **requires an nvcc-compiled caller** |
-| `census.hpp` | `censusTransform` — wide image to a K-plane block |
-| `denseDisparity.hpp` | `denseDisparityBinary`, `denseDisparityCensus` |
+| `census.hpp` | `censusTransform` (K-plane block, the host's layout) and `censusTransformPacked` (one descriptor word per pixel) |
+| `denseDisparity.hpp` | `denseDisparityBinary`, `denseDisparityCensusPacked` (the fast wide-input path), `denseDisparityCensus` (plane block) |
 
 These five host operation headers have **complete** device arms. The rest of
 binCV's operation set does not yet — the remaining work is filed as issues
@@ -37,6 +37,15 @@ and geometry).
 whole window set and issues one launch; measured, that is **467× faster** than
 looping the single-region form over 200 keypoints, because a per-window launch
 is latency against nanoseconds of work. Anything keypoint-shaped should use it.
+
+**Wide-input stereo should use the packed census path.** A dense matcher reads
+a descriptor one pixel at a time across all K comparisons, and in the plane
+block those K bits sit in K different arrays — K loads and K popcounts per
+pixel pair. `censusTransformPacked` puts a pixel's whole descriptor in one
+word, so `denseDisparityCensusPacked` pays one load, one XOR and one `__popc`:
+measured **8.55× faster** (7.75 → 0.91 ms) for 21% more intermediate memory.
+Both layouts are bit-exact against the host; the plane form stays for callers
+who want the smaller intermediate.
 
 ## Requirements
 

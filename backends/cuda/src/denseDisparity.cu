@@ -223,6 +223,105 @@ __global__ void denseKernelSliding(DeviceBinMatConstView left,
     }
 }
 
+// ---------------------------------------------------------------------------
+// The PACKED-DESCRIPTOR matcher. Same sliding strip, same disparity tile; the
+// only change is the input layout, and it is the change that matters. Reading
+// a pixel's K census comparisons from K plane arrays costs K loads and K
+// popcounts, each counting ONE useful bit out of 32. Reading them from one
+// packed word costs one load and one popcount, with K bits doing useful work.
+// ---------------------------------------------------------------------------
+
+/// @brief Add (or subtract) one image row's windowed cost, packed layout.
+template <int DT>
+__device__ __forceinline__ void accumulateRowPacked(
+    unsigned* sum, DeviceImageConstView<uint32_t> left,
+    DeviceImageConstView<uint32_t> right, size_t yy, size_t a, int d0, int dEnd,
+    int winW, bool add) {
+    const uint32_t* rowL = left.row(yy);
+    const uint32_t* rowR = right.row(yy);
+    for (int i = 0; i < winW; ++i) {
+        const uint32_t lv = __ldg(rowL + a + static_cast<size_t>(i));
+#pragma unroll
+        for (int j = 0; j < DT; ++j) {
+            const int d = d0 + j;
+            if (d <= dEnd && static_cast<size_t>(d) <= a) {
+                const uint32_t rv =
+                    __ldg(rowR + a + static_cast<size_t>(i) - static_cast<size_t>(d));
+                const unsigned c = static_cast<unsigned>(__popc(lv ^ rv));
+                sum[j] = add ? sum[j] + c : sum[j] - c;
+            }
+        }
+    }
+}
+
+__global__ void denseKernelPacked(DeviceImageConstView<uint32_t> left,
+                                  DeviceImageConstView<uint32_t> right, int minD,
+                                  int dEnd, int winW, int winH,
+                                  DeviceImageView<uint8_t> disparity, size_t outRows) {
+    const size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int hw = winW / 2;
+    const int hh = winH / 2;
+    if (x < static_cast<size_t>(hw) || x + static_cast<size_t>(hw) >= disparity.width)
+        return;
+    const size_t a = x - static_cast<size_t>(hw);
+    const size_t sFirst = static_cast<size_t>(blockIdx.y) * kStrip;
+    if (sFirst >= outRows) return;
+    const size_t yFirst = static_cast<size_t>(hh) + sFirst;
+    const size_t rowsHere =
+        (outRows - sFirst < static_cast<size_t>(kStrip)) ? (outRows - sFirst)
+                                                         : static_cast<size_t>(kStrip);
+
+    unsigned bestCost[kStrip];
+    unsigned bestDisp[kStrip];
+#pragma unroll
+    for (int s = 0; s < kStrip; ++s) {
+        bestCost[s] = 0xFFFFFFFFu;
+        bestDisp[s] = 0xFFFFu;
+    }
+
+    for (int d0 = minD; d0 <= dEnd; d0 += kDTile) {
+        unsigned sum[kDTile];
+#pragma unroll
+        for (int j = 0; j < kDTile; ++j) sum[j] = 0;
+
+        const size_t yTop = yFirst - static_cast<size_t>(hh);
+        for (int r = 0; r < winH; ++r) {
+            accumulateRowPacked<kDTile>(sum, left, right, yTop + static_cast<size_t>(r),
+                                        a, d0, dEnd, winW, true);
+        }
+
+#pragma unroll
+        for (int s = 0; s < kStrip; ++s) {
+            if (static_cast<size_t>(s) >= rowsHere) break;
+#pragma unroll
+            for (int j = 0; j < kDTile; ++j) {
+                const int d = d0 + j;
+                if (d <= dEnd && static_cast<size_t>(d) <= a && sum[j] < bestCost[s]) {
+                    bestCost[s] = sum[j];
+                    bestDisp[s] = static_cast<unsigned>(d);
+                }
+            }
+            if (static_cast<size_t>(s) + 1 < rowsHere) {
+                const size_t y = yFirst + static_cast<size_t>(s);
+                accumulateRowPacked<kDTile>(sum, left, right,
+                                            y - static_cast<size_t>(hh), a, d0, dEnd,
+                                            winW, false);
+                accumulateRowPacked<kDTile>(sum, left, right,
+                                            y + static_cast<size_t>(hh) + 1, a, d0,
+                                            dEnd, winW, true);
+            }
+        }
+    }
+
+#pragma unroll
+    for (int s = 0; s < kStrip; ++s) {
+        if (static_cast<size_t>(s) >= rowsHere) break;
+        if (bestDisp[s] <= 254u)
+            disparity.row(yFirst + static_cast<size_t>(s))[x] =
+                static_cast<uint8_t>(bestDisp[s]);
+    }
+}
+
 cudaError_t launchDense(DeviceBinMatConstView left, DeviceBinMatConstView right,
                         size_t planes, size_t imgHeight,
                         const DenseDisparityParams& params,
@@ -308,6 +407,53 @@ cudaError_t denseDisparityBinary(DeviceBinMatConstView left,
     BINCV_ASSERT(params.winWidth * params.winHeight <= 255,
                  "cuda denseDisparityBinary: winWidth * winHeight must fit a byte");
     return launchDense(left, right, 1, left.height, params, disparity, stream);
+}
+
+cudaError_t denseDisparityCensusPacked(DeviceImageConstView<uint32_t> leftDesc,
+                                       DeviceImageConstView<uint32_t> rightDesc,
+                                       const DenseDisparityParams& params,
+                                       DeviceImageView<uint8_t> disparity,
+                                       cudaStream_t stream) {
+    const size_t width = leftDesc.width, height = leftDesc.height;
+    BINCV_ASSERT(leftDesc.width == rightDesc.width && leftDesc.height == rightDesc.height,
+                 "cuda denseDisparityCensusPacked: the pair must share its extent");
+    BINCV_ASSERT(disparity.width == width && disparity.height == height,
+                 "cuda denseDisparityCensusPacked: disparity extent must match");
+    BINCV_ASSERT(params.winWidth >= 3 && params.winHeight >= 3 &&
+                     (params.winWidth & 1) == 1 && (params.winHeight & 1) == 1,
+                 "cuda denseDisparityCensusPacked: window odd and >= 3 on a side");
+    BINCV_ASSERT(params.minDisparity >= 0 &&
+                     params.maxDisparity >= params.minDisparity &&
+                     params.maxDisparity <= 254,
+                 "cuda denseDisparityCensusPacked: need 0 <= min <= max <= 254");
+    if (width == 0 || height == 0) return cudaSuccess;
+    BINCV_ASSERT(leftDesc.ptr != nullptr && rightDesc.ptr != nullptr &&
+                     disparity.ptr != nullptr,
+                 "cuda denseDisparityCensusPacked: non-empty views need pointers");
+
+    const long long dMaxSupported =
+        static_cast<long long>(width) - static_cast<long long>(params.winWidth);
+    const int dEnd = params.maxDisparity <= dMaxSupported
+                         ? params.maxDisparity
+                         : static_cast<int>(dMaxSupported);
+    if (height < static_cast<size_t>(params.winHeight) ||
+        static_cast<size_t>(params.winWidth) > width || dEnd < params.minDisparity) {
+        return cudaMemset2DAsync(disparity.ptr, disparity.stride, kDenseDisparityInvalid,
+                                 disparity.width, disparity.height, stream);
+    }
+    cudaError_t err =
+        cudaMemset2DAsync(disparity.ptr, disparity.stride, kDenseDisparityInvalid,
+                          disparity.width, disparity.height, stream);
+    if (err != cudaSuccess) return err;
+    const size_t outRows = height - 2 * static_cast<size_t>(params.winHeight / 2);
+    constexpr unsigned kColBlock = 128;
+    const dim3 grid(static_cast<unsigned>((width + kColBlock - 1) / kColBlock),
+                    static_cast<unsigned>((outRows + kStrip - 1) / kStrip));
+    denseKernelPacked<<<grid, kColBlock, 0, stream>>>(leftDesc, rightDesc,
+                                                      params.minDisparity, dEnd,
+                                                      params.winWidth, params.winHeight,
+                                                      disparity, outRows);
+    return cudaGetLastError();
 }
 
 cudaError_t denseDisparityCensus(DeviceBinMatConstView leftPlanes,
