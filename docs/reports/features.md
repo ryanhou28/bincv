@@ -19,9 +19,17 @@ desktop and ahead on the deployment target — while holding a fifth of the memo
 | FAST, wide image | `cv::FAST` | 1.05× | 0.96× | — |
 | FAST, bit-plane | `cv::FAST` | **1.50×** | **2.37×** | 7.8× smaller input |
 | `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` | 0.92× | **1.45×** | 5.71× smaller |
+| `cornerSubPix` | `cv::cornerSubPix` | **~13×** | **13.70×** | refines in place, no allocation |
 
 † `cv::ORB::compute` also computes orientation and rotates its pattern per keypoint. It is
 not a like-for-like comparison and is printed for scale rather than claimed.
+
+The corner rows above predate a later optimization of the response sweep (its
+per-pixel tail now runs eight pixels at a time; detection measures 16% faster on the
+reference device than when this table was recorded), so they are conservative.
+`cornerSubPix` refines the same seeds from its already-computed ternary derivatives
+against `cv::cornerSubPix` on the 8-bit image — each side's own natural input;
+reproduce with `corner_subpix_benchmark`.
 
 ‡ The tracking benchmark measures time, not footprint. The 6.23× memory result is a
 whole-frontend figure and belongs to [frontend.md](frontend.md); it is not a per-call

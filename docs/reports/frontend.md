@@ -45,6 +45,14 @@ AVX2 on x86, NEON against NEON on the device. The run prints both.
 |---|---|---|---|
 | **x86-64**, ms/frame | 1.134–1.283 | 3.841–4.485 | **3.30×** (conservative of five runs) |
 | **aarch64**, ms/frame | 4.906–4.949 | 23.249–23.451 | **4.73×** (conservative of three runs) |
+
+Re-verified after the corner-sweep and census optimizations landed: 6.17 vs 29.3 ms/frame
+on the same device and sequence at 120 frames — **4.76×**, unchanged within spread. The
+detect stage itself runs 12% faster (0.336 → 0.295 ms/frame), but at this sequence's 1.7%
+re-detection duty cycle that amortizes to under 1% of the whole frontend — the duty-cycle
+dependence issue #7 records. A re-detect-heavy configuration sees the full detect win.
+(The absolute ms/frame differ from the table's because the runs differ in frame count and
+warm-up; the ratio is the claim, and it held.)
 | **peak working set**, bytes | 436,704 | 2,719,832 | **6.23× smaller** |
 
 The footprint figure is computed from buffer geometry and is identical on both

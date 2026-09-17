@@ -176,9 +176,17 @@ inline bool isEdge(const SrcT* src, size_t width, size_t height, size_t stride, 
 // `EdgeSpatial`, and the oracle `tests/test_edge.cpp` compares against.
 
 #if defined(BINCV_EDGE_AVX2)
+/// @brief Force the portable arm, for the benchmark and the tests: the rule is
+/// that a vector arm is switchable off and the benchmark shows it is on.
+/// **INTERNAL.**
+inline bool& edgeSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
 inline bool hasEdgeSimd() {
     static const bool kYes = __builtin_cpu_supports("avx2");
-    return kYes;
+    return kYes && edgeSimdEnabled();
 }
 
 /// @brief `|a - b| >= tp` for thirty-two unsigned bytes, as a byte mask.
@@ -209,7 +217,13 @@ __attribute__((target("avx2"))) inline uint32_t edgeMask32(const uint8_t* rowUp,
     return static_cast<uint32_t>(_mm256_movemask_epi8(m));
 }
 #elif defined(BINCV_EDGE_NEON)
-inline bool hasEdgeSimd() { return true; }
+/// @brief Force the portable arm, for the benchmark and the tests. **INTERNAL.**
+inline bool& edgeSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
+inline bool hasEdgeSimd() { return edgeSimdEnabled(); }
 
 inline uint8x16_t edgePass16(uint8x16_t a, uint8x16_t b, int tp) {
     const uint8x16_t d = vorrq_u8(vqsubq_u8(a, b), vqsubq_u8(b, a));

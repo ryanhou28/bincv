@@ -29,9 +29,9 @@ Anything marked INTERNAL in its docstring is omitted here.
 - [`ops/descriptor.hpp`](#opsdescriptorhpp) — 14 entries
 - [`ops/edge.hpp`](#opsedgehpp) — 6 entries
 - [`ops/essential.hpp`](#opsessentialhpp) — 7 entries
-- [`ops/fast.hpp`](#opsfasthpp) — 8 entries
+- [`ops/fast.hpp`](#opsfasthpp) — 7 entries
 - [`ops/logic.hpp`](#opslogichpp) — 6 entries
-- [`ops/medianWide.hpp`](#opsmedianWidehpp) — 5 entries
+- [`ops/medianWide.hpp`](#opsmedianWidehpp) — 4 entries
 - [`ops/morphology.hpp`](#opsmorphologyhpp) — 27 entries
 - [`ops/occupancy.hpp`](#opsoccupancyhpp) — 6 entries
 - [`ops/opticalFlow.hpp`](#opsopticalFlowhpp) — 25 entries
@@ -277,7 +277,6 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `FastCorner` *(struct)* | — | One detected corner |
 | `kFastRingX` *(constant)* | — | The 16-pixel Bresenham ring of radius 3, clockwise from straight up |
 | `kFastLanes` *(constant)* | — | Pixels per vector iteration |
-| `hasFastAvx2` | — | NEON is baseline on aarch64, so there is nothing to dispatch on |
 | `detectFast` | 2 | Detects FAST corners |
 | `hasFastBitAvx2` | — | Is AVX2 present? |
 | `fastArcStepNeon` | — | One doubling step of the arc test, the step a compile-time constant |
@@ -304,7 +303,6 @@ Anything marked INTERNAL in its docstring is omitted here.
 |---|---|---|
 | `MedianOffset` *(struct)* | — | One sample position, relative to the pixel being written |
 | `MedianPattern` *(struct)* | — | A neighbourhood: `K` offsets, `K` odd so the median is a single element |
-| `hasMedianSimd` | — | Is AVX2 present? |
 | `med3Store` | — | `med3` for sixteen pixels |
 | `medianWide` | 3 | Median filter over a caller-chosen neighbourhood |
 

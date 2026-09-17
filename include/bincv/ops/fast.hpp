@@ -173,9 +173,17 @@ __attribute__((target("avx2"))) inline uint32_t fastMask32(const uint8_t* p, lon
     return static_cast<uint32_t>(_mm256_movemask_epi8(found));
 }
 
+/// @brief Force the portable arm, for the benchmark and the tests: the rule is
+/// that a vector arm is switchable off and the benchmark shows it is on. Gates
+/// BOTH FAST paths (byte and bitplane). **INTERNAL.**
+inline bool& fastSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
 inline bool hasFastAvx2() {
     static const bool kYes = __builtin_cpu_supports("avx2");
-    return kYes;
+    return kYes && fastSimdEnabled();
 }
 /// @brief Pixels per vector iteration. AVX2 is 32 bytes wide.
 constexpr size_t kFastLanes = 32;
@@ -274,7 +282,13 @@ inline uint32_t fastMask32(const uint8_t* p, long long stride, const long long* 
 }
 
 /// @brief NEON is baseline on aarch64, so there is nothing to dispatch on.
-inline bool hasFastAvx2() { return true; }
+/// @brief Force the portable arm, for the benchmark and the tests. **INTERNAL.**
+inline bool& fastSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
+inline bool hasFastAvx2() { return fastSimdEnabled(); }
 /// @brief Pixels per vector iteration. NEON is 16 bytes wide.
 constexpr size_t kFastLanes = 16;
 #endif
@@ -718,7 +732,7 @@ __attribute__((target("avx2"))) inline bool fastBitChunk256(const uint8_t* const
 /// @brief Is AVX2 present? Asked once. (`hasFastAvx2` above serves the byte path.)
 inline bool hasFastBitAvx2() {
     static const bool kYes = __builtin_cpu_supports("avx2");
-    return kYes;
+    return kYes && fastSimdEnabled();
 }
 
 #endif  // BINCV_FAST_RUNTIME_AVX2
@@ -979,7 +993,7 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
         const bool vectorReady = impl::hasFastBitAvx2();
 #else
         constexpr size_t kChunkBytes = 16;
-        const bool vectorReady = true;
+        const bool vectorReady = impl::fastSimdEnabled();
 #endif
         constexpr size_t kChunkWords = kChunkBytes / sizeof(WordType);
         if (vectorReady && kChunkWords >= 1 && y >= 4 && y + 4 < height) {
