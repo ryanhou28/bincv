@@ -129,6 +129,25 @@ void runOne(const cv::Mat& gray, const char* label) {
                     cvMin / m);
     }
     bincv::impl::fastScoreMaskThreshold() = savedThreshold;
+
+    // The bit-plane detector with its vector arm OFF, same binary: the rule is
+    // the arm is switchable and the benchmark shows it is on.
+    {
+        bincv::impl::fastSimdEnabled() = false;
+        std::vector<double> ts;
+        for (int r = 0; r < kRounds; ++r) {
+            auto t = Clock::now();
+            for (int i = 0; i < kReps; ++i) {
+                nBit = bincv::detectFast(plane.constView(), corners.data(), corners.size(),
+                                         &truncated);
+            }
+            ts.push_back(std::chrono::duration<double, std::micro>(Clock::now() - t).count() /
+                         kReps);
+        }
+        bincv::impl::fastSimdEnabled() = true;
+        std::printf(" bit-plane, scalar arm  %9.1f us  (against the arm lines above;"
+                    " parity = arm not running)\n", minOf(ts));
+    }
 }
 
 /// The committed binarized frame, so this runs on the reference device with no dataset

@@ -192,7 +192,7 @@ inline void medianWide(const SrcT* src, size_t width, size_t height, size_t srcS
         const bool haveSimd = impl::hasMedianSimd();
 #else
         constexpr size_t kStep = 16;
-        const bool haveSimd = true;
+        const bool haveSimd = impl::hasMedianSimd();
 #endif
         // The interior in y and x: every offset must land inside the image.
         long long dyLo = 0, dyHi = 0, dxLo = 0, dxHi = 0;

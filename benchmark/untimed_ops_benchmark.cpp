@@ -101,6 +101,24 @@ int main() {
         const double m = minOf(ts);
         std::printf(" packBits<GreaterEqual> %8.1f us %5.2f ns/px\n", m,
                     m * 1000.0 / static_cast<double>(kW * kH));
+
+        // The same packer with its vector arm off, from the same binary -- the
+        // rule is the arm is switchable and the benchmark shows it is on.
+        bincv::impl::packVectorEnabled() = false;
+        std::vector<double> ts2;
+        for (int r = 0; r < kRounds; ++r) {
+            auto t = Clock::now();
+            for (int i = 0; i < kReps; ++i) {
+                bincv::packBits<bincv::PackRule::GreaterEqual, uint8_t, uint32_t>(
+                    gray.data(), kW, kH, kW, bits.plane(0), uint8_t{17});
+            }
+            ts2.push_back(
+                std::chrono::duration<double, std::micro>(Clock::now() - t).count() / kReps);
+        }
+        bincv::impl::packVectorEnabled() = true;
+        const double m2 = minOf(ts2);
+        std::printf(" packBits, scalar arm   %8.1f us  (vector arm buys %.2fx;"
+                    " ~1.00x = arm not running)\n", m2, m2 / m);
     }
     {
         std::vector<uint8_t> out(kW * kH);
