@@ -45,6 +45,19 @@
 #include <cstddef>
 #include <cstdint>
 
+// The comparison rows' vector arm. F-5: BEFORE THE GATE, NOT AFTER -- simd.hpp
+// defines BINCV_HAVE_NEON from the compiler's own macros on aarch64. The x86
+// arm is SSE2, which is baseline for x86-64, so neither arm needs a CPU probe;
+// the runtime switch below exists for the rule, not for dispatch.
+#include "../core/simd.hpp"
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+#include <arm_neon.h>
+#define BINCV_CENSUS_SIMD 1
+#elif defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#include <emmintrin.h>
+#define BINCV_CENSUS_SIMD 1
+#endif
+
 #include "../core/error.hpp"
 #include "../core/view.hpp"
 #include "../impl/kernel_util.hpp"
@@ -99,6 +112,38 @@ namespace impl {
 /// transform and the dense-disparity pipeline's streaming band -- a second
 /// copy is how the two would silently diverge. Writes every word of the
 /// row; padding bits end zero.
+#if defined(BINCV_CENSUS_SIMD)
+/// @brief Force the portable row, for the benchmark and the tests: the rule is
+/// that a vector arm is switchable off and the benchmark shows it is on.
+/// **INTERNAL.**
+inline bool& censusSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
+/// @brief Sixteen comparison bits, LSB = lowest x: `n[i] > c[i]`. **INTERNAL.**
+inline unsigned censusMask16(const uint8_t* c, const uint8_t* n) {
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    const uint8x16_t weights = {1, 2, 4, 8, 16, 32, 64, 128,
+                                1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8x16_t gt = vcgtq_u8(vld1q_u8(n), vld1q_u8(c));
+    const uint8x16_t w = vandq_u8(gt, weights);
+    uint8x8_t f = vpadd_u8(vget_low_u8(w), vget_high_u8(w));
+    f = vpadd_u8(f, f);
+    f = vpadd_u8(f, f);
+    return vget_lane_u16(vreinterpret_u16_u8(f), 0);
+#else
+    // Unsigned compare via the sign-bias trick: SSE2 has only the signed one.
+    const __m128i bias = _mm_set1_epi8(static_cast<char>(0x80));
+    const __m128i vc = _mm_xor_si128(
+        _mm_loadu_si128(reinterpret_cast<const __m128i*>(c)), bias);
+    const __m128i vn = _mm_xor_si128(
+        _mm_loadu_si128(reinterpret_cast<const __m128i*>(n)), bias);
+    return static_cast<unsigned>(_mm_movemask_epi8(_mm_cmpgt_epi8(vn, vc)));
+#endif
+}
+#endif  // BINCV_CENSUS_SIMD
+
 template <typename SrcT, typename WordType>
 inline void censusRow(const SrcT* img, size_t width, size_t height, size_t stride,
                       long long dx, long long dy, size_t y, WordType* dst) {
@@ -114,6 +159,47 @@ inline void censusRow(const SrcT* img, size_t width, size_t height, size_t strid
     }
     const SrcT* rowC = img + y * stride;
     const SrcT* rowN = img + static_cast<size_t>(yn) * stride;
+#if defined(BINCV_CENSUS_SIMD)
+    // Sixteen comparisons per step over the interior; the scalar body keeps the
+    // border columns and every non-byte source. This transform priced at
+    // 27.5 ms/frame on the reference device (5x5, u32) with the bit built one
+    // pixel at a time -- pure byte compares, the same shape edgeThreshold's arm
+    // serves.
+    if constexpr (sizeof(SrcT) == 1) {
+        if (kBits >= 16 && censusSimdEnabled()) {
+            const uint8_t* c8 = reinterpret_cast<const uint8_t*>(rowC);
+            const uint8_t* n8 = reinterpret_cast<const uint8_t*>(rowN);
+            for (size_t w = 0; w < words; ++w) {
+                WordType acc = 0;
+                const size_t base = w * kBits;
+                const size_t xEnd = base + kBits < width ? base + kBits : width;
+                size_t x = base;
+                for (; x < xEnd && static_cast<long long>(x) < xLo; ++x) {
+                }
+                const size_t vEnd =
+                    xHi < static_cast<long long>(xEnd) ? static_cast<size_t>(xHi) : xEnd;
+                for (; x + 16 <= vEnd; x += 16) {
+                    const size_t xn =
+                        static_cast<size_t>(static_cast<long long>(x) + dx);
+                    acc = static_cast<WordType>(
+                        acc | (static_cast<WordType>(censusMask16(c8 + x, n8 + xn))
+                               << (x - base)));
+                }
+                for (; x < xEnd; ++x) {
+                    const long long xv = static_cast<long long>(x);
+                    if (xv < xLo || xv >= xHi) continue;
+                    acc = static_cast<WordType>(
+                        acc |
+                        (static_cast<WordType>(
+                             n8[static_cast<size_t>(xv + dx)] > c8[x])
+                         << (x - base)));
+                }
+                dst[w] = acc;
+            }
+            return;
+        }
+    }
+#endif
     for (size_t w = 0; w < words; ++w) {
         WordType acc = 0;
         const size_t base = w * kBits;

@@ -91,6 +91,17 @@ int main() {
              measure::g_sink += static_cast<size_t>(p24w.store[0].data()[0]);
          }},
     };
+    // The 5x5/u32 arm with the vector rows off, same binary -- the rule is a
+    // vector arm is switchable and the benchmark shows it is on.
+    bincv::impl::censusSimdEnabled() = false;
+    std::vector<measure::Bench> sc = {{"census 5x5 u32, scalar rows", [&](int) {
+        bincv::censusTransform<24, uint8_t, uint32_t>(
+            img.data(), kW, kH, kW, bincv::kCensus5x5, p24.views.data());
+        measure::g_sink += p24.store[0].data()[0];
+    }}};
+    const auto ts = measure::measureInterleaved(sc, 5, 30.0);
+    bincv::impl::censusSimdEnabled() = true;
+
     const auto t = measure::measureInterleaved(bs, 7, 60.0);
     std::printf(" %-34s %12s %14s\n", "arm", "ms/frame", "ns/px/plane");
     for (size_t i = 0; i < bs.size(); ++i) {
@@ -100,6 +111,11 @@ int main() {
                     t[i].medianNs / (static_cast<double>(kW) * kH * planes),
                     t[i].spreadPct());
     }
+    std::printf(" %-34s %12.3f %14s  spread %.0f%%  (vector rows buy %.2fx;"
+                " ~1.00x = arm not running)\n",
+                sc[0].name.c_str(), ts[0].medianNs / 1e6, "-", ts[0].spreadPct(),
+                ts[0].medianNs / t[1].medianNs);
+
     std::printf("\n per-pixel v1: the number the word-parallel restructuring has to"
                 " beat.\n sink %zu\n", static_cast<size_t>(measure::g_sink));
     return 0;
