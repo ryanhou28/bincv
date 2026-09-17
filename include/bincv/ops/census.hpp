@@ -53,7 +53,9 @@
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
 #include <arm_neon.h>
 #define BINCV_CENSUS_SIMD 1
-#elif defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#elif defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)) && !defined(__CUDACC__)
+// !__CUDACC__: the portable row for CUDA translation units, matching every
+// other x86 arm's gate (impl/binMat_impl.hpp has the full note).
 #include <emmintrin.h>
 #define BINCV_CENSUS_SIMD 1
 #endif

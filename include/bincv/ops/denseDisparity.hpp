@@ -83,7 +83,9 @@
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
 #include <arm_neon.h>
 #endif
-#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)) && !defined(__CUDACC__)
+// !__CUDACC__: the portable arms for CUDA translation units, matching every
+// other x86 arm's gate (impl/binMat_impl.hpp has the full note).
 #define BINCV_DENSE_AVX2 1
 #include <immintrin.h>
 #endif

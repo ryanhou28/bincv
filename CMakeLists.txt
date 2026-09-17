@@ -208,6 +208,16 @@ if(BINCV_BUILD_EMBEDDED)
     add_subdirectory(targets/stm32h753)
 endif()
 
+# ---------------------------------------------------------------------------
+# CUDA backend. OFF by default: it needs the CUDA toolkit, and a host build
+# stays exactly what it was. Shares the representation, forks the kernels
+# (ARCHITECTURE, backends); scripts/verify_cuda.sh is its gate.
+# ---------------------------------------------------------------------------
+option(BINCV_CUDA "Build the CUDA backend (backends/cuda; needs the CUDA toolkit)" OFF)
+if(BINCV_CUDA)
+    add_subdirectory(backends/cuda)
+endif()
+
 # Every first-party target now exists, so the warning policy can be checked.
 # FATAL_ERRORs if any of them compiles without the flags -- see the function's
 # comment for why a build-log scan cannot substitute for this.

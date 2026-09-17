@@ -20,7 +20,11 @@
 // its gate before its first core include.
 #include "../core/simd.hpp"
 
-#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+// !__CUDACC__: a CUDA translation unit including this header takes the portable
+// arm. No vector arm is reachable from device code, and nvcc's frontend cannot
+// digest gcc's AVX-512 headers under -O3 (__OPTIMIZE__ exposes builtins the
+// CUDA 11 frontend does not define), so the gate asks the compiler, as always.
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(__CUDACC__)
 #define BINCV_X86_RUNTIME_AVX2 1
 #include <immintrin.h>
 #endif
