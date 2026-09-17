@@ -41,6 +41,24 @@ the like-for-like comparison for a caller holding wide 8-bit frames, which is
 what StereoBM takes — sits just behind on time at less memory, having started
 this work 15× behind.
 
+**Which of these is binCV's claim, and which is the on-ramp.** Only the binary
+entry rests on the representation: its caller already holds one bit per pixel,
+its cost is an XOR and a population count, and its working set is 442 KB where
+StereoBM's is 10 MB. The census entry is a **standard stereo technique
+implemented in the standard way** — census *expands* data rather than
+compressing it (8 bits per pixel in, 24 out), and the layout that finally made
+it fast is the conventional one-word-per-pixel descriptor, not binCV's
+bit-planes. It exists so a caller arriving with ordinary camera frames has a way
+in, and it is competitive; it is not where the thesis pays, and nothing here
+should be read as claiming otherwise.
+
+One number makes the distinction concrete. Binary does a twenty-fourth of
+census's work, and the host captures that: **17× on x86-64, 7.6× on aarch64**
+([stereo.md](stereo.md)). This device kernel captures **2.3×** — so the path
+that matters is still leaving most of its structural advantage unexploited.
+Issue #63 records the evidence and the word-parallel bit-sliced shape that would
+collect it.
+
 Role only: the two match different costs and produce different maps;
 correctness is settled against the host library, not against StereoBM. The
 memory figures are `cudaMemGetInfo` deltas around each side's working-set
@@ -257,6 +275,14 @@ what is currently parallel.
   "Unknown Error" on counter access), so these are event-and-wall-clock timings,
   not occupancy or memory-throughput profiles. The stage-by-stage method stood
   in for a profiler: each optimization was measured against the arm it replaced.
+- **The binary matcher was chased too, and three attempts all failed.**
+  A `planes == 1` compile-time specialization measured 0.485 ms against 0.395
+  (1.23× slower, register pressure); hoisting the disparity tile's right-image
+  loads — at one bit per pixel its eight candidates span only 16 bits, so all
+  eight come from two words — measured null; strip length is at its optimum (8
+  → 0.421, 32 → 0.649). All three attacked *memory*, which together is good
+  evidence the kernel is not load-bound. The remaining idea attacks arithmetic
+  density instead and is filed as #63.
 - **The census entry's remaining 1.25× was chased and did not fall.** The
   shared-memory attempt above lost, and the packed matcher's tile width is at
   its measured optimum, so this kernel is at a local optimum for its shape.
