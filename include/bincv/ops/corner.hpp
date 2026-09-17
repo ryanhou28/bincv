@@ -1348,11 +1348,40 @@ inline void cornerMinEigenValRowSliced(BinMatConstView<WordType> magX,
         boxVertical3<WordType>(hP[0], hP[1], hP[2], vP);
         boxVertical3<WordType>(hN[0], hN[1], hN[2], vN);
 
-        for (size_t x = lo; x < hi; ++x) {
-            const size_t bit = x - lo;
-            dstRow[x] = minEigenValue(boxValueAt<WordType>(vA, bit), boxValueAt<WordType>(vB, bit),
-                                      boxValueAt<WordType>(vP, bit) -
-                                          boxValueAt<WordType>(vN, bit));
+        // Eight pixels per step through the 8x8 bit transpose, not one bit test
+        // per (pixel, plane): the per-pixel gathers were 38% of the whole sweep
+        // on the reference device when this loop read the planes a bit at a
+        // time. vA and vB ride one transpose (nibble each), vP and vN the
+        // other, so a byte comes out holding a pixel's two values.
+        for (size_t x0 = lo; x0 < hi; x0 += 8) {
+            const unsigned b8 = static_cast<unsigned>(x0 - lo);
+            uint64_t gAB = 0, gPN = 0;
+            for (size_t pp = 0; pp < 4; ++pp) {
+                gAB |= static_cast<uint64_t>((vA[pp] >> b8) & WordType{0xFF}) << (8 * pp);
+                gAB |= static_cast<uint64_t>((vB[pp] >> b8) & WordType{0xFF})
+                       << (8 * (pp + 4));
+                gPN |= static_cast<uint64_t>((vP[pp] >> b8) & WordType{0xFF}) << (8 * pp);
+                gPN |= static_cast<uint64_t>((vN[pp] >> b8) & WordType{0xFF})
+                       << (8 * (pp + 4));
+            }
+            const uint64_t tAB = transpose8x8(gAB);
+            const uint64_t tPN = transpose8x8(gPN);
+            const size_t lim = hi - x0 < 8 ? hi - x0 : 8;
+            for (size_t j = 0; j < lim; ++j) {
+                const unsigned ab = static_cast<unsigned>((tAB >> (8 * j)) & 0xFFu);
+                const unsigned pn = static_cast<unsigned>((tPN >> (8 * j)) & 0xFFu);
+                // A pixel with every count zero is exactly 0 -- the word skip
+                // above catches empty WORDS, and on edge-sparse content most
+                // pixels of a surviving word are still empty. Same integers,
+                // no sqrt.
+                if ((ab | pn) == 0u) {
+                    dstRow[x0 + j] = 0.0f;
+                    continue;
+                }
+                dstRow[x0 + j] = minEigenValue(
+                    static_cast<long long>(ab & 0xFu), static_cast<long long>(ab >> 4),
+                    static_cast<long long>(pn & 0xFu) - static_cast<long long>(pn >> 4));
+            }
         }
     }
 }
