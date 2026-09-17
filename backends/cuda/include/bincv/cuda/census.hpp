@@ -24,6 +24,11 @@ namespace cuda {
 
 namespace impl {
 
+/// @brief Force the reference kernel, for the benchmark and the tests.
+/// **INTERNAL.** Same contract as denseTiledEnabled: the fast arm must be
+/// switchable off, held to bit-exactness in one binary, and shown running.
+bool& censusTiledEnabled();
+
 /// @brief The pattern as plain kernel-argument data. **INTERNAL.**
 struct CensusOffsetsPod {
     int8_t dx[32];

@@ -167,7 +167,18 @@ int main() {
                                                           views.data());
             measure::g_sink += planes[0].data()[0];
         });
-        cudabench::printArm("censusTransform GPU (24 planes)", t, "kernel");
+        cudabench::printArm("censusTransform GPU (24 planes, tiled)", t, "kernel");
+        bincv::cuda::impl::censusTiledEnabled() = false;
+        const auto tRef = cudabench::timeKernel(
+            [&] {
+                bincv::cuda::censusTransform<kK>(dImg.constView(), bincv::kCensus5x5,
+                                                 dBlock.view());
+            },
+            20, 9);
+        bincv::cuda::impl::censusTiledEnabled() = true;
+        std::printf(" %-44s %9.3f ms  spread %4.0f%%  [kernel]  (tiled arm %.2fx)\n",
+                    "censusTransform GPU, reference arm", tRef.medianMs,
+                    tRef.spreadPct(), tRef.medianMs / t.medianMs);
         std::printf(" %-44s %9.3f ms            [cpu]\n",
                     "censusTransform CPU (vector arm)", cpu);
     }

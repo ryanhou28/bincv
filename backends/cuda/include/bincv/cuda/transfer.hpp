@@ -44,6 +44,19 @@ inline cudaError_t upload(BinMatConstView<WordType> src, DeviceBinMatView dst,
     BINCV_ASSERT(src.ptr != nullptr && dst.ptr != nullptr,
                  "upload: a non-empty transfer needs non-null pointers");
     const size_t pixelBytes = (src.width + 7) / 8;
+    constexpr size_t wb = sizeof(WordType) * 8;
+    // Tight on both sides -- the default stride everywhere -- means the plane
+    // is ONE contiguous byte run: equal pitches with no words beyond the row's
+    // own. The pitched copy degenerates to a DMA per row otherwise (measured
+    // 0.64 ms for 45 KB, ~10x the wide frame's rate); one linear copy is the
+    // shape the shared format promises. The extra bytes inside the tail word
+    // are the padding bits, zero on both sides by the invariant.
+    if (src.stride * sizeof(WordType) == dst.stride * sizeof(uint32_t) &&
+        src.stride == (src.width + wb - 1) / wb && dst.stride == rowWords(dst.width)) {
+        return cudaMemcpyAsync(dst.ptr, src.ptr,
+                               src.stride * sizeof(WordType) * src.height,
+                               cudaMemcpyHostToDevice, stream);
+    }
     return cudaMemcpy2DAsync(dst.ptr, dst.stride * sizeof(uint32_t), src.ptr,
                              src.stride * sizeof(WordType), pixelBytes, src.height,
                              cudaMemcpyHostToDevice, stream);
@@ -61,6 +74,14 @@ inline cudaError_t download(DeviceBinMatConstView src, BinMatView<WordType> dst,
     BINCV_ASSERT(src.ptr != nullptr && dst.ptr != nullptr,
                  "download: a non-empty transfer needs non-null pointers");
     const size_t pixelBytes = (src.width + 7) / 8;
+    constexpr size_t wb = sizeof(WordType) * 8;
+    // The upload fast path, mirrored; see there.
+    if (dst.stride * sizeof(WordType) == src.stride * sizeof(uint32_t) &&
+        dst.stride == (dst.width + wb - 1) / wb && src.stride == rowWords(src.width)) {
+        return cudaMemcpyAsync(dst.ptr, src.ptr,
+                               dst.stride * sizeof(WordType) * dst.height,
+                               cudaMemcpyDeviceToHost, stream);
+    }
     return cudaMemcpy2DAsync(dst.ptr, dst.stride * sizeof(WordType), src.ptr,
                              src.stride * sizeof(uint32_t), pixelBytes, src.height,
                              cudaMemcpyDeviceToHost, stream);

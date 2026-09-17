@@ -304,27 +304,31 @@ void testCensus(const bincv::CensusPattern<K>& pattern) {
     BINCV_CHECK_EQ(bincv::cuda::uploadImage<SrcT>(frame.data(), w, h, w, dImg.view()),
                    cudaSuccess);
     bincv::cuda::DeviceBinMat dBlock(static_cast<int>(w), static_cast<int>(K * h));
-    BINCV_CHECK_EQ(bincv::cuda::censusTransform<K>(dImg.constView(), pattern,
-                                                   dBlock.view()),
-                   cudaSuccess);
-    bincv::BinMat<uint32_t> gotBlock(static_cast<int>(w), static_cast<int>(K * h));
-    BINCV_CHECK_EQ(bincv::cuda::download(dBlock.constView(), gotBlock.view()),
-                   cudaSuccess);
-    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    for (const bool tiled : {true, false}) {
+        bincv::cuda::impl::censusTiledEnabled() = tiled;
+        BINCV_CHECK_EQ(bincv::cuda::censusTransform<K>(dImg.constView(), pattern,
+                                                       dBlock.view()),
+                       cudaSuccess);
+        bincv::BinMat<uint32_t> gotBlock(static_cast<int>(w), static_cast<int>(K * h));
+        BINCV_CHECK_EQ(bincv::cuda::download(dBlock.constView(), gotBlock.view()),
+                       cudaSuccess);
+        BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
 
-    size_t badPlanes = 0;
-    const size_t words = bincv::impl::minRowWords<uint32_t>(w);
-    for (size_t k = 0; k < K; ++k) {
-        size_t bad = 0;
-        for (size_t y = 0; y < h; ++y) {
-            const uint32_t* a = planes[k].constView().row(y);
-            const uint32_t* b = gotBlock.constView().row(k * h + y);
-            for (size_t i = 0; i < words; ++i)
-                if (a[i] != b[i]) ++bad;
+        size_t badPlanes = 0;
+        const size_t words = bincv::impl::minRowWords<uint32_t>(w);
+        for (size_t k = 0; k < K; ++k) {
+            size_t bad = 0;
+            for (size_t y = 0; y < h; ++y) {
+                const uint32_t* a = planes[k].constView().row(y);
+                const uint32_t* b = gotBlock.constView().row(k * h + y);
+                for (size_t i = 0; i < words; ++i)
+                    if (a[i] != b[i]) ++bad;
+            }
+            if (bad != 0) ++badPlanes;
         }
-        if (bad != 0) ++badPlanes;
+        BINCV_CHECK_EQ(badPlanes, 0u);
     }
-    BINCV_CHECK_EQ(badPlanes, 0u);
+    bincv::cuda::impl::censusTiledEnabled() = true;
 }
 } // namespace
 
