@@ -234,6 +234,63 @@ across a window's rows and its `3N^2 + N` sums -- accumulate lanes, collapse onc
 window -- not L2's code. Even done perfectly that is bounded by the covariance's
 13.7% share of the software-popcount frontend.
 
+## Dense disparity, and the word-type claim (rule written before the board ran it)
+
+`denseDisparity.hpp` directs callers to instantiate the binary dense kernel at
+`uint64` "unless they have measured a reason otherwise" — a guidance measured on a
+64-bit A72, where it is worth 1.63x. On this core every `uint64` operation is
+synthesized from register pairs, so the guidance is a documented claim this target
+has never tested. This is also the first time the kernel **executes** on M-profile
+at all: the compile gate proves it builds at 32-bit `size_t`, and building is not
+running.
+
+### What is compared
+
+`denseDisparityBinary` at 320x240, D=32, 9x9 — a frame the part's RAM holds with
+room to spare (the 752x480 output map alone would be 361 KB of its 512 KB AXI
+SRAM) — at `uint32` against `uint64`, over the same bits: the `uint64` buffers are
+byte copies of the `uint32` ones, and a 320-pixel row has zero padding at both
+widths, so the two arms read identical frames.
+
+### Metrics, and the gate on reporting them
+
+DWT cycles per frame, median of interleaved repeats, with milliseconds at the
+stated clock and scratch bytes for both types beside it. Correctness gates the
+timing, as everywhere in this harness: the pair is a known constant shift, the
+supported region must answer with EXACTLY that constant, and the two word types'
+maps must agree byte for byte — a faster arm that computes something else is not a
+result.
+
+### No adopt threshold
+
+There is no decision to gate: both word types ship today and the caller chooses.
+Whichever wins, the header's word-type note gains the measured fact for 32-bit
+cores; if the 64-bit guidance is contradicted here, that is reported as a
+measurement against a documented claim, not silently edited around. Absolute
+milliseconds at 64 MHz HSI are a floor, not the part's number, like every other
+figure in this file.
+
+### Result
+
+Measured on the board: HSI 64 MHz, I+D cache on, 320x240, D=32, 9x9, median of 3
+interleaved repeats. Both word types exact on the supported region, and the two
+maps byte-identical -- the kernel's first execution on M-profile is bit-exact.
+
+| word type | cycles | ms @ 64 MHz | scratch |
+|---|---|---|---|
+| `uint32` | 52 823 363 | **825** | 6 480 B |
+| `uint64` | 68 807 055 | 1 075 | 6 480 B |
+
+**u64 is 1.30x the u32 time: the header's 64-bit guidance inverts here**, as a
+32-bit core synthesizing every 64-bit ripple from register pairs would suggest --
+and now as a measurement rather than a suggestion. The header's word-type note
+carries the corrected, width-qualified guidance. The scratch tie is geometry, not
+a rule: at this width both types happen to pack the same bytes.
+
+The milliseconds are the 64 MHz HSI floor, not the part's number, per Status
+below. For scale only: a QVGA depth map on a microcontroller in under a second at
+an eighth of the part's clock, in 6.5 KB of scratch.
+
 ## Status
 
 The clock is the reset default — **HSI at 64 MHz**, no PLL. That is deliberate for
