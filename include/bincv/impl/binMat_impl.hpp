@@ -416,10 +416,18 @@ __attribute__((target("avx2"))) inline uint32_t movemask32(const SrcT* p, SrcT t
     }
 }
 
+/// @brief Force the portable packer, for the benchmark and the tests: the rule
+/// is that a vector arm is switchable off and the benchmark shows it is on.
+/// **INTERNAL.**
+inline bool& packVectorEnabled() {
+    static bool on = true;
+    return on;
+}
+
 /// @brief Is AVX2 present on this machine? Asked once, not once per row.
 inline bool hasVectorPack() {
     static const bool kYes = __builtin_cpu_supports("avx2");
-    return kYes;
+    return kYes && packVectorEnabled();
 }
 #define BINCV_HAVE_VECTOR_PACK 1
 #elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
@@ -469,7 +477,13 @@ inline uint32_t movemask32(const SrcT* p, SrcT t) {
     }
     return m;
 }
-inline bool hasVectorPack() { return true; }
+/// @brief Force the portable packer, for the benchmark and the tests. **INTERNAL.**
+inline bool& packVectorEnabled() {
+    static bool on = true;
+    return on;
+}
+
+inline bool hasVectorPack() { return packVectorEnabled(); }
 #define BINCV_HAVE_VECTOR_PACK 1
 #endif
 
@@ -550,7 +564,7 @@ __attribute__((target("avx2"))) inline void unpackWord32(uint32_t w, uint8_t* ou
                                            _mm256_set1_epi8(static_cast<char>(onValue)), m));
 }
 #elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
-inline bool unpackVectorReady() { return true; }
+inline bool unpackVectorReady() { return packVectorEnabled(); }
 
 inline void unpackWord32(uint32_t w, uint8_t* out, uint8_t onValue, uint8_t zeroValue) {
     static const uint8_t kSel[16] = {1, 2, 4, 8, 16, 32, 64, 128,

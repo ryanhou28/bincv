@@ -87,9 +87,15 @@ namespace impl {
 
 #if defined(BINCV_MEDIAN_AVX2)
 /// @brief Is AVX2 present? Asked once, not once per row.
+/// @brief Force the portable arm, for the benchmark and the tests. **INTERNAL.**
+inline bool& medianSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
 inline bool hasMedianSimd() {
     static const bool kYes = __builtin_cpu_supports("avx2");
-    return kYes;
+    return kYes && medianSimdEnabled();
 }
 
 /// @brief `med3` for thirty-two pixels: `max(min(a,b), min(max(a,b), c))`.
@@ -104,7 +110,13 @@ __attribute__((target("avx2"))) inline void med3Store(const uint8_t* a, const ui
                         _mm256_max_epu8(lo, _mm256_min_epu8(hi, vc)));
 }
 #elif defined(BINCV_MEDIAN_NEON)
-inline bool hasMedianSimd() { return true; }
+/// @brief Force the portable arm, for the benchmark and the tests. **INTERNAL.**
+inline bool& medianSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
+inline bool hasMedianSimd() { return medianSimdEnabled(); }
 
 /// @brief `med3` for sixteen pixels. NEON is baseline on aarch64; nothing to dispatch on.
 inline void med3Store(const uint8_t* a, const uint8_t* b, const uint8_t* c, uint8_t* out) {
