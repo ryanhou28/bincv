@@ -40,8 +40,11 @@ has nothing in common with a row loop, and pretending otherwise costs the perfor
 the backend exists for. A backend is **never a drop-in dispatch target** — device types
 stay device-typed, so no call can hide where its memory lives.
 
-`backends/cuda/` today holds a prototype that predates that decision and shares none of
-the representation. What replaces it is open work, not an open question about shape.
+`backends/cuda/` is that backend: `bincv::cuda::` device-typed views over the host's
+byte layout, `uint32_t` device words (a CUDA core is a 32-bit machine, and
+`__ballot_sync` packs the format's own word in one instruction), kernels forked and
+proven bit-exact against the host by `scripts/verify_cuda.sh`. See
+[docs/ARCHITECTURE.md §8.5](docs/ARCHITECTURE.md) and [docs/reports/cuda.md](docs/reports/cuda.md).
 
 ## How performance and footprint decisions get made
 
@@ -197,9 +200,11 @@ image into another and leave the caller exactly as far from bits as before. Ever
 from such an array down to bits is binCV's, **including sources wider than 8 bits**,
 because downconverting first destroys small gradients before the threshold can see them.
 
-GPU backends are a **TODO**, not out of scope. A CUDA prototype lives in
-`backends/cuda/`, and it predates the decision above: it is byte-per-pixel and shares
-none of binCV's representation, so it is a placeholder rather than a foundation.
+The GPU backend lives in `backends/cuda/`: it shares the representation and forks the
+kernels (the decision above), providing logic, reductions, the sensor stage, census and
+dense disparity on the device, each bit-exact against the host. On the reference GPU the
+binary dense path beats `cv::cuda::StereoBM` on both speed and device memory
+([docs/reports/cuda.md](docs/reports/cuda.md)).
 
 ## Style
 
