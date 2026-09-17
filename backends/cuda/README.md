@@ -22,10 +22,21 @@ none allocating inside a kernel:
 | `deviceBinMat.hpp` | `DeviceBinMat`, `DeviceImage<T>` — owning device containers, value semantics |
 | `transfer.hpp` | `upload` / `download` (any host word width), `uploadImage` / `downloadImage` |
 | `logic.hpp` | `bitwiseAnd` / `Or` / `Xor` / `Not` |
-| `reduce.hpp` | `countNonZero` (whole view and clipped region), async and sync forms |
-| `pack.hpp` | `packBits` — the sensor stage, `uint8_t` and `uint16_t` sources |
+| `reduce.hpp` | `countNonZero`, `countAnd`, `countAndSplit`, `countCovariance` (both selector forms), and **`countCovarianceBatchAsync`** — N windows in one launch |
+| `pack.hpp` | `packBits`, `packRows`, `packQuant` (N-bit), `unpackTo8Bit` |
+| `packCustom.cuh` | `packBitsIf`, `packQuantWith` — arbitrary device predicates; **requires an nvcc-compiled caller** |
 | `census.hpp` | `censusTransform` — wide image to a K-plane block |
 | `denseDisparity.hpp` | `denseDisparityBinary`, `denseDisparityCensus` |
+
+These five host operation headers have **complete** device arms. The rest of
+binCV's operation set does not yet — the remaining work is filed as issues
+#58 (frontend), #59 (tracking), #60 (per-pixel families) and #61 (sparse stereo
+and geometry).
+
+**Reductions are batched, not per-call.** `countCovarianceBatchAsync` takes the
+whole window set and issues one launch; measured, that is **467× faster** than
+looping the single-region form over 200 keypoints, because a per-window launch
+is latency against nanoseconds of work. Anything keypoint-shaped should use it.
 
 ## Requirements
 

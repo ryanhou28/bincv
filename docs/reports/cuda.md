@@ -7,9 +7,15 @@ against `cv::cuda::StereoBM` as the best existing GPU option. Design:
 
 The backend shares binCV's format and forks its kernels, so every number here
 sits on top of a bit-exactness result: `scripts/verify_cuda.sh` proves each
-device kernel gives the host library's answer byte for byte (284 checks), and
-every optimized arm is held to its own reference arm's map in the same binary.
-Speed is what follows once correctness is settled.
+device kernel gives the host library's answer byte for byte (527 checks across
+two suites), and every optimized arm is held to its own reference arm's map in
+the same binary. Speed is what follows once correctness is settled.
+
+**Coverage, stated plainly.** Five host operation headers have complete device
+arms — `logic`, `reduce`, `pack`, `census`, `denseDisparity` — which is the
+sensor stage, the reductions, and dense stereo end to end. The rest of the
+operation set does not, and the remaining work is filed as issues #58–#61
+rather than implied here.
 
 ## The headline
 
@@ -95,8 +101,39 @@ from these.
 | download wide frame (361 KB) | 0.080 ms | — | |
 | `bitwiseAnd` | 0.007 ms | 0.002 ms | memcpy-bound both sides |
 | `countNonZero` | 0.014 ms | 0.004 ms | |
-| `packBits` (sensor stage) | 0.009 ms | 0.027 ms | `__ballot_sync` packer |
-| `censusTransform` (24 planes) | 0.071 ms | 3.03 ms | shared-memory tile, 17.4× over its own reference |
+| `packBits` (sensor stage) | 0.010 ms | 0.025 ms | `__ballot_sync` packer |
+| `packQuant` N=2 (N-bit ingestion) | 0.015 ms | 0.064 ms | N ballots per 32 pixels |
+| `censusTransform` (24 planes) | 0.073 ms | 2.02 ms | shared-memory tile, 17.1× over its own reference |
+
+### The covariance, and the measurement that chose its signature
+
+The gradient covariance is the operation ARCHITECTURE §1's identity turns into
+population counts, and the one issue #34 predicted would pay best here —
+`__popc` is a single instruction on a GPU where it costs two register-domain
+crossings on aarch64. The interesting result is not the arithmetic, though; it
+is the **signature**.
+
+200 keypoints, 31×31 windows — the tracker's shape:
+
+| arm | time | |
+|---|---|---|
+| `countCovarianceBatchAsync` — one launch | **0.008 ms** | |
+| per-window loop — 200 launches of the single-region form | 3.667 ms | **the batch is 467× faster** |
+| host `countCovariance` ×200 | 0.015 ms | batch is 1.9× the CPU |
+
+Both device forms compute identical counts — integer addition, and the tests
+pin the batch against both the single-region form and the host — so the 467×
+is *purely* what the signature costs. A per-window launch pays ~5–10 µs of
+launch overhead against a window whose work is nanoseconds; batching pays it
+once. This is the "ceiling versus signature" question from binCV's own notes,
+answered: the cap was the signature's, not the operation's.
+
+Against the CPU the honest figure is **1.9×**, not a headline. 200 windows of
+31×31 is 0.015 ms of host work — too little to beat by much once a launch is in
+the path at all. The batched form earns its place by being the shape a resident
+tracker can use at all, not by winning this microbenchmark; what it will be
+judged on is the frontend it is built for (issue #58), where the planes are
+already on device and the launch is amortized over the whole frame.
 
 The foundation ops are individually so cheap on both sides that their
 microbenchmark ratios are dominated by launch and loop overhead — they are
@@ -122,6 +159,16 @@ Recorded negatives (measured, reverted, not to be retried on the same shape):
 widening the disparity tile from 8 to 16 was 2.1× slower on the binary matcher
 and 2.4× on census (register pressure); tile width 4 and block width 256 were
 null against spread.
+
+The reductions took a different lesson. Their kernels were never the problem —
+the 467× came from changing what a caller may *ask for*, not from changing how
+a window is counted. Two traversals ship for that reason: grid-stride with one
+atomic per warp for a single region that may be a whole frame, and one block
+per region with no atomics for a batch of windows. The host's
+`SlidingWindowCount` is deliberately **not** ported: it exists because
+consecutive CPU windows re-read the same words *serially*, and on the device
+every window is already its own block, so a sliding traversal would serialize
+what is currently parallel.
 
 ## What is not measured
 

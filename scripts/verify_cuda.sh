@@ -88,7 +88,8 @@ if ! cmake "${CMAKE_ARGS[@]}" >"${BUILD_DIR}.configure.log" 2>&1; then
 fi
 
 echo "  building..."
-if ! cmake --build "${BUILD_DIR}" --target bincv_cuda test_cuda_backend -j"$(nproc)" \
+if ! cmake --build "${BUILD_DIR}" --target bincv_cuda test_cuda_backend \
+        test_cuda_custom -j"$(nproc)" \
         >"${BUILD_DIR}.build.log" 2>&1; then
     cat "${BUILD_DIR}".build.log
     echo "  BUILD FAILED"
@@ -102,16 +103,17 @@ if grep -q "warning:" "${BUILD_DIR}".build.log; then
     exit 1
 fi
 
-echo "  running device-vs-host suite..."
-TEST_BIN="${BUILD_DIR}/backends/cuda/tests/test_cuda_backend"
-"${TEST_BIN}"
-RC=$?
-if [ ${RC} -eq 77 ]; then
-    skip "built cleanly, but no CUDA device is available to run the suite"
-elif [ ${RC} -ne 0 ]; then
-    echo "  DEVICE-VS-HOST SUITE FAILED"
-    exit 1
-fi
+echo "  running device-vs-host suites..."
+for suite in test_cuda_backend test_cuda_custom; do
+    "${BUILD_DIR}/backends/cuda/tests/${suite}"
+    RC=$?
+    if [ ${RC} -eq 77 ]; then
+        skip "built cleanly, but no CUDA device is available to run ${suite}"
+    elif [ ${RC} -ne 0 ]; then
+        echo "  DEVICE-VS-HOST SUITE FAILED: ${suite}"
+        exit 1
+    fi
+done
 
 echo
 echo "  CUDA BACKEND VERIFIED"

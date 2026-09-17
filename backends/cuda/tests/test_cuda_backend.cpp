@@ -231,6 +231,172 @@ BINCV_TEST(CudaReduce, CountNonZeroMatchesHost) {
 }
 
 // ---------------------------------------------------------------------------
+// The masked reductions and the covariance: every form against the host, over
+// the same rectangle set, including negative origins and empty clips.
+// ---------------------------------------------------------------------------
+namespace {
+const bincv::Rect kRects[] = {
+    {0, 0, 200, 90},     {3, 5, 60, 40},   {-10, -10, 50, 50}, {150, 60, 500, 500},
+    {31, 0, 34, 90},     {0, 89, 200, 1},  {199, 0, 1, 90},    {5, 5, 0, 10},
+    {-300, 4, 20, 20},   {64, 32, 31, 31}, {1, 1, 63, 63},     {170, 70, 40, 40},
+};
+} // namespace
+
+BINCV_TEST(CudaReduce, MaskedFormsMatchHost) {
+    const size_t w = 200, h = 90;
+    const auto a = randomBits<uint32_t>(w, h, 0xAA01);
+    const auto b = randomBits<uint32_t>(w, h, 0xBB02);
+    const auto c0 = randomBits<uint32_t>(w, h, 0xCC03);
+    const auto c1 = randomBits<uint32_t>(w, h, 0xDD04);
+
+    bincv::cuda::DeviceBinMat da(w, h), db(w, h), dc0(w, h), dc1(w, h);
+    BINCV_CHECK_EQ(bincv::cuda::upload(a.constView(), da.view()), cudaSuccess);
+    BINCV_CHECK_EQ(bincv::cuda::upload(b.constView(), db.view()), cudaSuccess);
+    BINCV_CHECK_EQ(bincv::cuda::upload(c0.constView(), dc0.view()), cudaSuccess);
+    BINCV_CHECK_EQ(bincv::cuda::upload(c1.constView(), dc1.view()), cudaSuccess);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+
+    for (const auto& r : kRects) {
+        // countAnd
+        BINCV_CHECK_EQ(bincv::cuda::countAnd(da.constView(), db.constView(), r),
+                       bincv::countAnd<uint32_t>(a.constView(), b.constView(), r));
+
+        // countAndSplit, selector-plane form
+        const auto hSplit =
+            bincv::countAndSplit<uint32_t>(a.constView(), b.constView(), c0.constView(), r);
+        const auto dSplit = bincv::cuda::countAndSplit(da.constView(), db.constView(),
+                                                       dc0.constView(), r);
+        BINCV_CHECK_EQ(dSplit.whenClear, hSplit.whenClear);
+        BINCV_CHECK_EQ(dSplit.whenSet, hSplit.whenSet);
+        BINCV_CHECK_EQ(dSplit.crossTerm(), hSplit.crossTerm());
+
+        // countAndSplit, the no-plane (c0 ^ c1) form the covariance calls
+        const auto hSplitX = bincv::countAndSplit<uint32_t>(
+            a.constView(), b.constView(), c0.constView(), c1.constView(), r);
+        const auto dSplitX = bincv::cuda::countAndSplit(
+            da.constView(), db.constView(), dc0.constView(), dc1.constView(), r);
+        BINCV_CHECK_EQ(dSplitX.whenClear, hSplitX.whenClear);
+        BINCV_CHECK_EQ(dSplitX.whenSet, hSplitX.whenSet);
+
+        // countCovariance, both forms
+        const auto hCov = bincv::countCovariance<uint32_t>(a.constView(), b.constView(),
+                                                           c0.constView(), r);
+        const auto dCov = bincv::cuda::countCovariance(da.constView(), db.constView(),
+                                                       dc0.constView(), r);
+        BINCV_CHECK_EQ(dCov.xx, hCov.xx);
+        BINCV_CHECK_EQ(dCov.yy, hCov.yy);
+        BINCV_CHECK_EQ(dCov.xy.whenClear, hCov.xy.whenClear);
+        BINCV_CHECK_EQ(dCov.xy.whenSet, hCov.xy.whenSet);
+        BINCV_CHECK_EQ(dCov.crossTerm(), hCov.crossTerm());
+
+        const auto hCovX = bincv::countCovariance<uint32_t>(
+            a.constView(), b.constView(), c0.constView(), c1.constView(), r);
+        const auto dCovX = bincv::cuda::countCovariance(
+            da.constView(), db.constView(), dc0.constView(), dc1.constView(), r);
+        BINCV_CHECK_EQ(dCovX.xx, hCovX.xx);
+        BINCV_CHECK_EQ(dCovX.yy, hCovX.yy);
+        BINCV_CHECK_EQ(dCovX.crossTerm(), hCovX.crossTerm());
+    }
+}
+
+// The batched form is the entry point a tracker uses, so it is held to BOTH
+// the host and the single-region device form -- a batch that agreed with
+// neither would be a plausible-looking wrong answer.
+BINCV_TEST(CudaReduce, BatchMatchesHostAndSingleRegion) {
+    const size_t w = 200, h = 90;
+    const auto a = randomBits<uint32_t>(w, h, 0x1A01);
+    const auto b = randomBits<uint32_t>(w, h, 0x2B02);
+    const auto c0 = randomBits<uint32_t>(w, h, 0x3C03);
+    const auto c1 = randomBits<uint32_t>(w, h, 0x4D04);
+
+    bincv::cuda::DeviceBinMat da(w, h), db(w, h), dc0(w, h), dc1(w, h);
+    bincv::cuda::upload(a.constView(), da.view());
+    bincv::cuda::upload(b.constView(), db.view());
+    bincv::cuda::upload(c0.constView(), dc0.view());
+    bincv::cuda::upload(c1.constView(), dc1.view());
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+
+    const size_t n = sizeof(kRects) / sizeof(kRects[0]);
+    bincv::Rect* dRegions = nullptr;
+    bincv::cuda::DeviceCovarianceCount* dOut = nullptr;
+    BINCV_CHECK_EQ(cudaMalloc(&dRegions, n * sizeof(bincv::Rect)), cudaSuccess);
+    BINCV_CHECK_EQ(cudaMalloc(&dOut, n * sizeof(bincv::cuda::DeviceCovarianceCount)),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(cudaMemcpy(dRegions, kRects, n * sizeof(bincv::Rect),
+                              cudaMemcpyHostToDevice),
+                   cudaSuccess);
+
+    // The XOR form.
+    BINCV_CHECK_EQ(bincv::cuda::countCovarianceBatchAsync(da.constView(), db.constView(),
+                                                          dc0.constView(),
+                                                          dc1.constView(), dRegions, n,
+                                                          dOut),
+                   cudaSuccess);
+    std::vector<bincv::cuda::DeviceCovarianceCount> got(n);
+    BINCV_CHECK_EQ(cudaMemcpy(got.data(), dOut,
+                              n * sizeof(bincv::cuda::DeviceCovarianceCount),
+                              cudaMemcpyDeviceToHost),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+
+    size_t badVsHost = 0, badVsSingle = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const auto host = bincv::countCovariance<uint32_t>(
+            a.constView(), b.constView(), c0.constView(), c1.constView(), kRects[i]);
+        const auto batch = bincv::cuda::toHost(got[i]);
+        if (batch.xx != host.xx || batch.yy != host.yy ||
+            batch.xy.whenClear != host.xy.whenClear ||
+            batch.xy.whenSet != host.xy.whenSet)
+            ++badVsHost;
+        const auto single = bincv::cuda::countCovariance(
+            da.constView(), db.constView(), dc0.constView(), dc1.constView(), kRects[i]);
+        if (batch.xx != single.xx || batch.yy != single.yy ||
+            batch.crossTerm() != single.crossTerm())
+            ++badVsSingle;
+    }
+    BINCV_CHECK_EQ(badVsHost, 0u);
+    BINCV_CHECK_EQ(badVsSingle, 0u);
+
+    // The selector-plane form of the batch.
+    BINCV_CHECK_EQ(bincv::cuda::countCovarianceBatchAsync(da.constView(), db.constView(),
+                                                          dc0.constView(), dRegions, n,
+                                                          dOut),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(cudaMemcpy(got.data(), dOut,
+                              n * sizeof(bincv::cuda::DeviceCovarianceCount),
+                              cudaMemcpyDeviceToHost),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    size_t badPlaneForm = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const auto host = bincv::countCovariance<uint32_t>(
+            a.constView(), b.constView(), c0.constView(), kRects[i]);
+        const auto batch = bincv::cuda::toHost(got[i]);
+        if (batch.xx != host.xx || batch.yy != host.yy ||
+            batch.crossTerm() != host.crossTerm())
+            ++badPlaneForm;
+    }
+    BINCV_CHECK_EQ(badPlaneForm, 0u);
+
+    // A batch of one and a batch of zero: the degenerate counts a tracker
+    // reaches on its first and last frames.
+    BINCV_CHECK_EQ(bincv::cuda::countCovarianceBatchAsync(da.constView(), db.constView(),
+                                                          dc0.constView(),
+                                                          dc1.constView(), dRegions, 1,
+                                                          dOut),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(bincv::cuda::countCovarianceBatchAsync(da.constView(), db.constView(),
+                                                          dc0.constView(),
+                                                          dc1.constView(), dRegions, 0,
+                                                          dOut),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+
+    cudaFree(dRegions);
+    cudaFree(dOut);
+}
+
+// ---------------------------------------------------------------------------
 // The sensor stage: device packBits against host packBits, all three rules,
 // both source widths.
 // ---------------------------------------------------------------------------
@@ -278,6 +444,125 @@ void testPack(const char* label) {
 
 BINCV_TEST(CudaPack, MatchesHost_uint8_t) { testPack<uint8_t>("uint8_t"); }
 BINCV_TEST(CudaPack, MatchesHost_uint16_t) { testPack<uint16_t>("uint16_t"); }
+
+// packQuant: the N-bit ingestion path, every supported depth, against the host
+// packer -- which is what pins "the device computes the same integer
+// expression" rather than leaving it as a claim in a comment.
+namespace {
+template <size_t N, typename SrcT>
+void testPackQuant() {
+    const size_t w = 133, h = 41;
+    const auto frame = randomFrame<SrcT>(w, h, 0x9000 + N);
+
+    bincv::BinMatView<uint32_t> views[N];
+    std::vector<bincv::BinMat<uint32_t>> planes;
+    planes.reserve(N);
+    for (size_t p = 0; p < N; ++p)
+        planes.emplace_back(static_cast<int>(w), static_cast<int>(h));
+    for (size_t p = 0; p < N; ++p) views[p] = planes[p].view();
+    bincv::packQuant<bincv::QuantRule::Scale, N, SrcT, uint32_t>(frame.data(), w, h, w,
+                                                                 views);
+
+    bincv::cuda::DeviceImage<SrcT> dImg(static_cast<int>(w), static_cast<int>(h));
+    BINCV_CHECK_EQ(bincv::cuda::uploadImage<SrcT>(frame.data(), w, h, w, dImg.view()),
+                   cudaSuccess);
+    bincv::cuda::DeviceBinMat dBlock(static_cast<int>(w), static_cast<int>(N * h));
+    BINCV_CHECK_EQ(bincv::cuda::packQuant(dImg.constView(), dBlock.view(), N),
+                   cudaSuccess);
+    bincv::BinMat<uint32_t> gotBlock(static_cast<int>(w), static_cast<int>(N * h));
+    BINCV_CHECK_EQ(bincv::cuda::download(dBlock.constView(), gotBlock.view()),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+
+    const size_t words = bincv::impl::minRowWords<uint32_t>(w);
+    size_t badPlanes = 0;
+    for (size_t p = 0; p < N; ++p) {
+        size_t bad = 0;
+        for (size_t y = 0; y < h; ++y) {
+            const uint32_t* x = planes[p].constView().row(y);
+            const uint32_t* g = gotBlock.constView().row(p * h + y);
+            for (size_t i = 0; i < words; ++i)
+                if (x[i] != g[i]) ++bad;
+        }
+        if (bad != 0) ++badPlanes;
+    }
+    BINCV_CHECK_EQ(badPlanes, 0u);
+}
+} // namespace
+
+BINCV_TEST(CudaPack, Quant_N1_uint8_t) { testPackQuant<1, uint8_t>(); }
+BINCV_TEST(CudaPack, Quant_N2_uint8_t) { testPackQuant<2, uint8_t>(); }
+BINCV_TEST(CudaPack, Quant_N4_uint8_t) { testPackQuant<4, uint8_t>(); }
+BINCV_TEST(CudaPack, Quant_N8_uint8_t) { testPackQuant<8, uint8_t>(); }
+BINCV_TEST(CudaPack, Quant_N2_uint16_t) { testPackQuant<2, uint16_t>(); }
+BINCV_TEST(CudaPack, Quant_N5_uint16_t) { testPackQuant<5, uint16_t>(); }
+
+// packRows: a chunked fill must be identical to the whole-frame one, which is
+// the property that makes banded packing exact rather than approximate.
+BINCV_TEST(CudaPack, RowsChunkedEqualsWhole) {
+    const size_t w = 197, h = 60;
+    const auto frame = randomFrame<uint8_t>(w, h, 0x7070);
+    bincv::cuda::DeviceImage<uint8_t> dImg(static_cast<int>(w), static_cast<int>(h));
+    bincv::cuda::uploadImage<uint8_t>(frame.data(), w, h, w, dImg.view());
+
+    bincv::cuda::DeviceBinMat whole(static_cast<int>(w), static_cast<int>(h));
+    BINCV_CHECK_EQ(bincv::cuda::packBits(dImg.constView(), whole.view(),
+                                         bincv::PackRule::GreaterThan, uint8_t{127}),
+                   cudaSuccess);
+
+    // The same frame in three bands, through packRows.
+    bincv::cuda::DeviceBinMat banded(static_cast<int>(w), static_cast<int>(h));
+    const size_t bands[][2] = {{0, 17}, {17, 23}, {40, 20}};
+    for (const auto& band : bands) {
+        bincv::cuda::DeviceImageConstView<uint8_t> chunk(
+            dImg.constView().ptr + band[0] * dImg.getStride(), w, band[1],
+            dImg.getStride());
+        BINCV_CHECK_EQ(bincv::cuda::packRows(chunk, banded.view(), band[0],
+                                             bincv::PackRule::GreaterThan, uint8_t{127}),
+                       cudaSuccess);
+    }
+    bincv::BinMat<uint32_t> wholeHost(static_cast<int>(w), static_cast<int>(h));
+    bincv::BinMat<uint32_t> bandedHost(static_cast<int>(w), static_cast<int>(h));
+    bincv::cuda::download(whole.constView(), wholeHost.view());
+    bincv::cuda::download(banded.constView(), bandedHost.view());
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    BINCV_CHECK_EQ(mismatchWords<uint32_t>(wholeHost, bandedHost), 0u);
+}
+
+// unpackTo8Bit: the reverse, against the host's.
+BINCV_TEST(CudaPack, UnpackMatchesHost) {
+    const size_t w = 157, h = 33;
+    const auto bits = randomBits<uint32_t>(w, h, 0x5A5A);
+    std::vector<uint8_t> expect(w * h, 0xCC);
+    bincv::unpackTo8Bit<uint32_t>(bits.constView(), expect.data(), w, 255, 0);
+
+    bincv::cuda::DeviceBinMat dBits(static_cast<int>(w), static_cast<int>(h));
+    bincv::cuda::upload(bits.constView(), dBits.view());
+    bincv::cuda::DeviceImage<uint8_t> dOut(static_cast<int>(w), static_cast<int>(h));
+    BINCV_CHECK_EQ(bincv::cuda::unpackTo8Bit(dBits.constView(), dOut.view(), 255, 0),
+                   cudaSuccess);
+    std::vector<uint8_t> got(w * h, 0x33);
+    BINCV_CHECK_EQ(bincv::cuda::downloadImage<uint8_t>(dOut.constView(), got.data(), w),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    size_t bad = 0;
+    for (size_t i = 0; i < w * h; ++i)
+        if (expect[i] != got[i]) ++bad;
+    BINCV_CHECK_EQ(bad, 0u);
+
+    // A non-default on/off pair, since those are separate parameters.
+    std::vector<uint8_t> expect2(w * h, 0);
+    bincv::unpackTo8Bit<uint32_t>(bits.constView(), expect2.data(), w, 7, 3);
+    BINCV_CHECK_EQ(bincv::cuda::unpackTo8Bit(dBits.constView(), dOut.view(), 7, 3),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(bincv::cuda::downloadImage<uint8_t>(dOut.constView(), got.data(), w),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    bad = 0;
+    for (size_t i = 0; i < w * h; ++i)
+        if (expect2[i] != got[i]) ++bad;
+    BINCV_CHECK_EQ(bad, 0u);
+}
 
 // ---------------------------------------------------------------------------
 // Census: every plane of the device block against the host transform, both

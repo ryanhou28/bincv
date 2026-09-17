@@ -183,6 +183,111 @@ int main() {
                     "censusTransform CPU (vector arm)", cpu);
     }
 
+    // ---- the covariance, and why the batched entry point exists ----
+    //
+    // THE MEASUREMENT THAT DECIDES THE SIGNATURE. 200 keypoints, 31x31 windows
+    // -- the tracker's shape. Per-window launches pay ~5-10 us of launch each
+    // against nanoseconds of work; the batch pays one. Both produce identical
+    // counts (the tests pin that), so this is purely what the signature costs.
+    {
+        constexpr size_t kKeypoints = 200;
+        constexpr int kWin = 31;
+        const auto f3 = randomFrame(3), f4 = randomFrame(4);
+        bincv::BinMat<uint32_t> magX(kW, kH), magY(kW, kH), sgnX(kW, kH), sgnY(kW, kH);
+        bincv::packBits<bincv::PackRule::GreaterThan>(f1.data(), kW, kH, kW, magX.view(),
+                                                      uint8_t{100});
+        bincv::packBits<bincv::PackRule::GreaterThan>(f2.data(), kW, kH, kW, magY.view(),
+                                                      uint8_t{100});
+        bincv::packBits<bincv::PackRule::GreaterThan>(f3.data(), kW, kH, kW, sgnX.view(),
+                                                      uint8_t{127});
+        bincv::packBits<bincv::PackRule::GreaterThan>(f4.data(), kW, kH, kW, sgnY.view(),
+                                                      uint8_t{127});
+        bincv::cuda::DeviceBinMat dMagX(kW, kH), dMagY(kW, kH), dSgnX(kW, kH),
+            dSgnY(kW, kH);
+        bincv::cuda::upload(magX.constView(), dMagX.view());
+        bincv::cuda::upload(magY.constView(), dMagY.view());
+        bincv::cuda::upload(sgnX.constView(), dSgnX.view());
+        bincv::cuda::upload(sgnY.constView(), dSgnY.view());
+
+        std::vector<bincv::Rect> rects(kKeypoints);
+        uint64_t seed = 0xC0FFEE;
+        for (auto& r : rects) {
+            const int x = static_cast<int>(measure::nextRandom(seed) % (kW - kWin));
+            const int y = static_cast<int>(measure::nextRandom(seed) % (kH - kWin));
+            r = bincv::Rect{x, y, kWin, kWin};
+        }
+        bincv::Rect* dRects = nullptr;
+        bincv::cuda::DeviceCovarianceCount* dCov = nullptr;
+        cudaMalloc(&dRects, kKeypoints * sizeof(bincv::Rect));
+        cudaMalloc(&dCov, kKeypoints * sizeof(bincv::cuda::DeviceCovarianceCount));
+        cudaMemcpy(dRects, rects.data(), kKeypoints * sizeof(bincv::Rect),
+                   cudaMemcpyHostToDevice);
+        cudaDeviceSynchronize();
+
+        std::printf("\n covariance over %zu keypoints, %dx%d windows (the tracker's shape)\n",
+                    kKeypoints, kWin, kWin);
+        const auto tBatch = cudabench::timeKernel(
+            [&] {
+                bincv::cuda::countCovarianceBatchAsync(dMagX.constView(),
+                                                       dMagY.constView(),
+                                                       dSgnX.constView(),
+                                                       dSgnY.constView(), dRects,
+                                                       kKeypoints, dCov);
+            },
+            20, 9);
+        cudabench::printArm("  countCovariance BATCH (one launch)", tBatch, "kernel");
+
+        // The same work through the single-region entry: 200 launches.
+        const auto tLoop = cudabench::timeKernel(
+            [&] {
+                for (size_t i = 0; i < kKeypoints; ++i)
+                    bincv::cuda::countCovarianceAsync(dMagX.constView(),
+                                                      dMagY.constView(),
+                                                      dSgnX.constView(),
+                                                      dSgnY.constView(), rects[i],
+                                                      dCov + i);
+            },
+            3, 7);
+        std::printf(" %-44s %9.3f ms  spread %4.0f%%  [kernel]  (batch %.1fx)\n",
+                    "  per-window loop (200 launches)", tLoop.medianMs,
+                    tLoop.spreadPct(), tLoop.medianMs / tBatch.medianMs);
+
+        const double cpu = cpuMedianMs("cov", [&](int) {
+            for (size_t i = 0; i < kKeypoints; ++i) {
+                const auto c = bincv::countCovariance<uint32_t>(
+                    magX.constView(), magY.constView(), sgnX.constView(),
+                    sgnY.constView(), rects[i]);
+                measure::g_sink += c.xx;
+            }
+        });
+        std::printf(" %-44s %9.3f ms            [cpu]\n",
+                    "  host countCovariance x200", cpu);
+        std::printf("  batch vs host CPU: %.1fx\n", cpu / tBatch.medianMs);
+        cudaFree(dRects);
+        cudaFree(dCov);
+    }
+
+    // ---- the N-bit ingestion path ----
+    {
+        constexpr size_t kN = 2;   // the shipped tracking depth
+        bincv::cuda::DeviceBinMat dQuant(kW, kN * kH);
+        const auto t = cudabench::timeKernel(
+            [&] { bincv::cuda::packQuant(dImg.constView(), dQuant.view(), kN); }, 50, 9);
+        std::vector<bincv::BinMat<uint32_t>> planes;
+        for (size_t p = 0; p < kN; ++p) planes.emplace_back(kW, kH);
+        bincv::BinMatView<uint32_t> views[kN];
+        for (size_t p = 0; p < kN; ++p) views[p] = planes[p].view();
+        const double cpu = cpuMedianMs("packQuant", [&](int) {
+            bincv::packQuant<bincv::QuantRule::Scale, kN, uint8_t, uint32_t>(
+                f1.data(), kW, kH, kW, views);
+            measure::g_sink += planes[0].data()[0];
+        });
+        std::printf("\n");
+        cudabench::printArm("packQuant N=2 GPU", t, "kernel");
+        std::printf(" %-44s %9.3f ms            [cpu]\n",
+                    "packQuant N=2 CPU (vector arm)", cpu);
+    }
+
     cudaFree(dCount);
     std::printf("\n sink %zu\n", static_cast<size_t>(measure::g_sink));
     return 0;
