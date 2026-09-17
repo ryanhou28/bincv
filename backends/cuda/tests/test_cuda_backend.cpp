@@ -364,18 +364,25 @@ void testDenseBinary(size_t w, size_t h, const bincv::DenseDisparityParams& p,
     BINCV_CHECK_EQ(bincv::cuda::upload(lb.constView(), dl.view()), cudaSuccess);
     BINCV_CHECK_EQ(bincv::cuda::upload(rb.constView(), dr.view()), cudaSuccess);
     bincv::cuda::DeviceImage<uint8_t> dDisp(static_cast<int>(w), static_cast<int>(h));
-    BINCV_CHECK_EQ(bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
-                                                     dDisp.view()),
-                   cudaSuccess);
-    std::vector<uint8_t> got(w * h, 0x55);
-    BINCV_CHECK_EQ(bincv::cuda::downloadImage<uint8_t>(dDisp.constView(), got.data(), w),
-                   cudaSuccess);
-    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
 
-    size_t bad = 0;
-    for (size_t i = 0; i < w * h; ++i)
-        if (expect[i] != got[i]) ++bad;
-    BINCV_CHECK_EQ(bad, 0u);
+    // Both device arms answer to the same host map: the tiled arm the launcher
+    // prefers, and the reference arm behind the switch.
+    for (const bool tiled : {true, false}) {
+        bincv::cuda::impl::denseTiledEnabled() = tiled;
+        BINCV_CHECK_EQ(bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(),
+                                                         p, dDisp.view()),
+                       cudaSuccess);
+        std::vector<uint8_t> got(w * h, 0x55);
+        BINCV_CHECK_EQ(bincv::cuda::downloadImage<uint8_t>(dDisp.constView(), got.data(),
+                                                           w),
+                       cudaSuccess);
+        BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        size_t bad = 0;
+        for (size_t i = 0; i < w * h; ++i)
+            if (expect[i] != got[i]) ++bad;
+        BINCV_CHECK_EQ(bad, 0u);
+    }
+    bincv::cuda::impl::denseTiledEnabled() = true;
 }
 } // namespace
 
@@ -462,18 +469,23 @@ BINCV_TEST(CudaDense, CensusEntryMatchesHostWidePath) {
                                                    cenR.view()),
                    cudaSuccess);
     bincv::cuda::DeviceImage<uint8_t> dDisp(static_cast<int>(w), static_cast<int>(h));
-    BINCV_CHECK_EQ(bincv::cuda::denseDisparityCensus(cenL.constView(), cenR.constView(),
-                                                     K, h, p, dDisp.view()),
-                   cudaSuccess);
-    std::vector<uint8_t> got(w * h, 0x55);
-    BINCV_CHECK_EQ(bincv::cuda::downloadImage<uint8_t>(dDisp.constView(), got.data(), w),
-                   cudaSuccess);
-    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
-
-    size_t bad = 0;
-    for (size_t i = 0; i < w * h; ++i)
-        if (expect[i] != got[i]) ++bad;
-    BINCV_CHECK_EQ(bad, 0u);
+    for (const bool tiled : {true, false}) {
+        bincv::cuda::impl::denseTiledEnabled() = tiled;
+        BINCV_CHECK_EQ(bincv::cuda::denseDisparityCensus(cenL.constView(),
+                                                         cenR.constView(), K, h, p,
+                                                         dDisp.view()),
+                       cudaSuccess);
+        std::vector<uint8_t> got(w * h, 0x55);
+        BINCV_CHECK_EQ(bincv::cuda::downloadImage<uint8_t>(dDisp.constView(), got.data(),
+                                                           w),
+                       cudaSuccess);
+        BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        size_t bad = 0;
+        for (size_t i = 0; i < w * h; ++i)
+            if (expect[i] != got[i]) ++bad;
+        BINCV_CHECK_EQ(bad, 0u);
+    }
+    bincv::cuda::impl::denseTiledEnabled() = true;
 }
 
 // ---------------------------------------------------------------------------

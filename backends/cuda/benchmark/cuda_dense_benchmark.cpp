@@ -125,7 +125,20 @@ int main() {
         bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
                                           dDisp.view());
     });
-    cudabench::printArm("GPU binary, resident", tKernel, "kernel");
+    cudabench::printArm("GPU binary, resident (tiled arm)", tKernel, "kernel");
+
+    // The reference arm from the same binary, through the switch. If the
+    // ratio reads ~1.00x, the tiled arm is not running where the line above
+    // says it is -- the same check every host vector arm carries.
+    bincv::cuda::impl::denseTiledEnabled() = false;
+    const auto tRef = cudabench::timeKernel([&] {
+        bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
+                                          dDisp.view());
+    });
+    bincv::cuda::impl::denseTiledEnabled() = true;
+    std::printf(" %-44s %9.3f ms  spread %4.0f%%  [kernel]  (tiled arm %.2fx)\n",
+                "GPU binary, reference arm (switch off)", tRef.medianMs,
+                tRef.spreadPct(), tRef.medianMs / tKernel.medianMs);
 
     // GPU, end-to-end: packed pair up, map down, synchronized.
     const double e2e = hostWallMs([&] {
@@ -177,7 +190,18 @@ int main() {
                                               kH, p, dDisp.view());
         },
         4, 7);
-    cudabench::printArm("GPU census matcher (K=24), resident", tMatch, "kernel");
+    cudabench::printArm("GPU census matcher (K=24, tiled arm)", tMatch, "kernel");
+    bincv::cuda::impl::denseTiledEnabled() = false;
+    const auto tMatchRef = cudabench::timeKernel(
+        [&] {
+            bincv::cuda::denseDisparityCensus(cenL.constView(), cenR.constView(), kK,
+                                              kH, p, dDisp.view());
+        },
+        2, 5);
+    bincv::cuda::impl::denseTiledEnabled() = true;
+    std::printf(" %-44s %9.3f ms  spread %4.0f%%  [kernel]  (tiled arm %.2fx)\n",
+                "GPU census matcher, reference arm", tMatchRef.medianMs,
+                tMatchRef.spreadPct(), tMatchRef.medianMs / tMatch.medianMs);
 
     const double e2eCensus = hostWallMs(
         [&] {

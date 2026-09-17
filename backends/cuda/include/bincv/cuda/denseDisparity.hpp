@@ -30,6 +30,14 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 namespace cuda {
 
+namespace impl {
+/// @brief Force the straightforward reference kernel, for the benchmark and
+/// the tests. **INTERNAL.** The backend's spelling of the project rule that a
+/// fast arm is switchable off, held to bit-exactness in one binary, and shown
+/// by the benchmark to be the arm it timed.
+bool& denseTiledEnabled();
+} // namespace impl
+
 /// @brief Dense disparity over an ALREADY-BINARY rectified pair in device
 /// memory -- the premise-native path, cost = windowed popcount(L ^ shift(R)).
 /// Device twin of the host denseDisparityBinary; output map equal by test.
