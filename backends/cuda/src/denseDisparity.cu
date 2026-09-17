@@ -223,6 +223,12 @@ __global__ void denseKernelSliding(DeviceBinMatConstView left,
     }
 }
 
+/// @brief The packed matcher's disparity tile, swept independently of the
+/// plane kernel's because its register pressure differs (no plane loop).
+/// Measured on the reference frame: 4 gave 1.97 ms and 16 gave 1.11 ms
+/// against this value's 0.91 -- eight is the optimum, not an inherited default.
+constexpr int kPackDTile = 8;
+
 // ---------------------------------------------------------------------------
 // The PACKED-DESCRIPTOR matcher. Same sliding strip, same disparity tile; the
 // only change is the input layout, and it is the change that matters. Reading
@@ -279,14 +285,14 @@ __global__ void denseKernelPacked(DeviceImageConstView<uint32_t> left,
         bestDisp[s] = 0xFFFFu;
     }
 
-    for (int d0 = minD; d0 <= dEnd; d0 += kDTile) {
-        unsigned sum[kDTile];
+    for (int d0 = minD; d0 <= dEnd; d0 += kPackDTile) {
+        unsigned sum[kPackDTile];
 #pragma unroll
-        for (int j = 0; j < kDTile; ++j) sum[j] = 0;
+        for (int j = 0; j < kPackDTile; ++j) sum[j] = 0;
 
         const size_t yTop = yFirst - static_cast<size_t>(hh);
         for (int r = 0; r < winH; ++r) {
-            accumulateRowPacked<kDTile>(sum, left, right, yTop + static_cast<size_t>(r),
+            accumulateRowPacked<kPackDTile>(sum, left, right, yTop + static_cast<size_t>(r),
                                         a, d0, dEnd, winW, true);
         }
 
@@ -294,7 +300,7 @@ __global__ void denseKernelPacked(DeviceImageConstView<uint32_t> left,
         for (int s = 0; s < kStrip; ++s) {
             if (static_cast<size_t>(s) >= rowsHere) break;
 #pragma unroll
-            for (int j = 0; j < kDTile; ++j) {
+            for (int j = 0; j < kPackDTile; ++j) {
                 const int d = d0 + j;
                 if (d <= dEnd && static_cast<size_t>(d) <= a && sum[j] < bestCost[s]) {
                     bestCost[s] = sum[j];
@@ -303,10 +309,10 @@ __global__ void denseKernelPacked(DeviceImageConstView<uint32_t> left,
             }
             if (static_cast<size_t>(s) + 1 < rowsHere) {
                 const size_t y = yFirst + static_cast<size_t>(s);
-                accumulateRowPacked<kDTile>(sum, left, right,
+                accumulateRowPacked<kPackDTile>(sum, left, right,
                                             y - static_cast<size_t>(hh), a, d0, dEnd,
                                             winW, false);
-                accumulateRowPacked<kDTile>(sum, left, right,
+                accumulateRowPacked<kPackDTile>(sum, left, right,
                                             y + static_cast<size_t>(hh) + 1, a, d0,
                                             dEnd, winW, true);
             }
@@ -321,6 +327,8 @@ __global__ void denseKernelPacked(DeviceImageConstView<uint32_t> left,
                 static_cast<uint8_t>(bestDisp[s]);
     }
 }
+
+constexpr unsigned kPackBlock = 128;
 
 cudaError_t launchDense(DeviceBinMatConstView left, DeviceBinMatConstView right,
                         size_t planes, size_t imgHeight,
@@ -446,13 +454,19 @@ cudaError_t denseDisparityCensusPacked(DeviceImageConstView<uint32_t> leftDesc,
                           disparity.width, disparity.height, stream);
     if (err != cudaSuccess) return err;
     const size_t outRows = height - 2 * static_cast<size_t>(params.winHeight / 2);
-    constexpr unsigned kColBlock = 128;
-    const dim3 grid(static_cast<unsigned>((width + kColBlock - 1) / kColBlock),
+    const dim3 grid(static_cast<unsigned>((width + kPackBlock - 1) / kPackBlock),
                     static_cast<unsigned>((outRows + kStrip - 1) / kStrip));
-    denseKernelPacked<<<grid, kColBlock, 0, stream>>>(leftDesc, rightDesc,
-                                                      params.minDisparity, dEnd,
-                                                      params.winWidth, params.winHeight,
-                                                      disparity, outRows);
+    // MEASURED NEGATIVE, do not retry on this shape: staging each pixel pair's
+    // raw cost in shared memory so the winWidth overlapping windows share one
+    // load -- the obvious next step, since neighbouring threads' windows differ by
+    // one pixel -- measured 1.16 ms against this kernel's 0.91 ms, 1.28x
+    // SLOWER. The redundant loads were already L1 hits, so what the staging
+    // bought was nothing and what it cost was 624 __syncthreads() per block
+    // plus byte-wide shared-memory bank conflicts.
+    denseKernelPacked<<<grid, kPackBlock, 0, stream>>>(leftDesc, rightDesc,
+                                                       params.minDisparity, dEnd,
+                                                       params.winWidth, params.winHeight,
+                                                       disparity, outRows);
     return cudaGetLastError();
 }
 

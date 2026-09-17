@@ -221,7 +221,21 @@ gave 1.53×, and **32 regressed to 0.6× as the register file spilled**.
 Recorded negatives (measured, reverted, not to be retried on the same shape):
 widening the disparity tile from 8 to 16 was 2.1× slower on the binary matcher
 and 2.4× on census (register pressure); tile width 4 and block width 256 were
-null against spread.
+null against spread. The packed matcher's own tile was swept separately — 4 gave
+1.97 ms and 16 gave 1.11 ms against 8's 0.91 — so eight is measured there too
+rather than inherited.
+
+**The one that looked obvious and lost.** After the packed layout won, the
+next step appeared to be sharing the horizontal window: neighbouring threads'
+9-pixel windows overlap by 8, so a block loads nearly every word nine times.
+Staging each pixel pair's raw cost in shared memory once, for all overlapping
+windows to read, measured **1.16 ms against 0.91 — 1.28× slower**, and was
+reverted. The redundant loads were already L1 hits, so the staging bought
+nothing while costing 624 `__syncthreads()` per block and byte-wide
+shared-memory bank conflicts. The lesson generalizes past this kernel: the
+packed-layout win came from touching *less distinct memory* (24 arrays down to
+one), not from issuing fewer load instructions, and those are not the same
+quantity.
 
 The reductions took a different lesson. Their kernels were never the problem —
 the 467× came from changing what a caller may *ask for*, not from changing how
@@ -243,12 +257,16 @@ what is currently parallel.
   "Unknown Error" on counter access), so these are event-and-wall-clock timings,
   not occupancy or memory-throughput profiles. The stage-by-stage method stood
   in for a profiler: each optimization was measured against the arm it replaced.
-- **The census entry's remaining 1.25× is not chased further here.** Horizontal
-  incremental aggregation — making the 9-pixel row sum O(1) in x as the vertical
-  one is now O(1) in y — is the next available step and would plausibly reach
-  parity. It needs either a per-disparity cost buffer (a ~360 KB intermediate,
-  not a cost volume) or a different thread mapping, so it is a design choice
-  rather than a tuning change. Recorded, not attempted.
+- **The census entry's remaining 1.25× was chased and did not fall.** The
+  shared-memory attempt above lost, and the packed matcher's tile width is at
+  its measured optimum, so this kernel is at a local optimum for its shape.
+  What remains are genuine rewrites rather than tuning, each with an uncertain
+  payoff: marching a thread along x so the horizontal window slides in
+  registers (no barriers, unlike the attempt that failed); a two-pass separable
+  box filter over a per-disparity cost buffer (~360 KB, textbook, O(1) per
+  pixel-disparity, but 64 launches or a fused loop to schedule); and vectorized
+  `uint4` loads for the consecutive right-image words. None attempted; the
+  measurement, not the guess, is what the next attempt should start from.
 - **The plane-layout matcher is kept but is 8.55× slower** than the packed one.
   It ships because it consumes the host's own layout and costs less memory, not
   because it is the fast path; a caller with wide frames should use
