@@ -9,6 +9,7 @@
 #include <cstdint>
 
 #include "board.h"
+#include "dense_m7.hpp"
 #include "popcount_arms.hpp"
 #include "reduce_loop_arms.hpp"
 
@@ -264,6 +265,8 @@ int main() {
         if (checkArmsAgree()) runBenchmark();
         boardPutc('\n');
         runLoopBenchmark();
+        boardPutc('\n');
+        densebench::runDenseBenchmark();
         boardPuts("\n=== end of report ===\n\n");
         delayCycles(3u * BINCV_M7_CLOCK_HZ);
     }
