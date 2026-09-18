@@ -281,6 +281,73 @@ the two cannot drift.
 
 ---
 
+## 8.5 Backends
+
+A backend runs binCV's operations on a different compute device. There is one
+today, `backends/cuda/`, and the shape it takes is a settled decision rather
+than an open question (issue #34).
+
+**The format and the contract are shared; containers, kernels and the execution
+model are forked entirely.** A device bit-plane is byte-identical to a host one
+— pixel `x` at bit `x % 32` of word `x / 32`, rows a stride apart, padding bits
+zero — so the invariants of section 1 have exactly one definition, upload and
+download are raw pitched copies with no conversion, and "the GPU gives the CPU's
+answer" is a byte comparison a test runs, not an aspiration. What is *not*
+shared is every line that touches the device: allocation, streams, tiling, the
+warp. A device traversal has nothing in common with a row loop, and pretending
+otherwise would cost the performance the backend exists for.
+
+**A backend is never a drop-in dispatch target.** Data location is visible in
+the type. `bincv::cuda::DeviceBinMatView` is a distinct type from
+`BinMatView<uint32_t>` — layout-identical, asserted so — precisely so that
+handing a host pointer to a device kernel is a compile error rather than a
+late, memory-corrupting runtime one. Operations live in `bincv::cuda::`, take
+device views and an explicit stream, and allocate nothing (section 2's rule,
+unchanged); upload and download are the only operations that name host memory.
+A kernel launch is microseconds against operations measured in microseconds, so
+a per-op host/device switch would be latency-bound regardless — the GPU wins
+only when a whole pipeline stays resident, which is a different API shape, not a
+hidden copy behind a familiar call.
+
+**The device word type is `uint32_t`, and only that.** A CUDA core is a 32-bit
+integer machine: there is no 64-bit integer datapath, so a `uint64_t` operation
+is two 32-bit operations and a register pair — the Cortex-M result (section 3's
+inversion: `uint64_t` slower at 32-bit width), not the aarch64 one. The 32-bit
+granule is also the width the hardware's own primitives speak: `__popc` counts a
+32-bit register, and `__ballot_sync` returns one bit per lane of a 32-lane warp
+— a packed 32-pixel word produced in a single instruction, which is how the
+device sensor stage and census transform pack. Wider *memory* access still
+happens, as 128-bit `uint4` loads inside a kernel; load width and format word
+width are independent, exactly as a NEON load moves 128 bits of 32-bit-word
+plane on the host. No caller is restricted by the choice: on little-endian a
+plane at any host word width is byte-identical to a `uint32_t` plane (section 3,
+`narrowPlane`), so upload accepts all four host word types as a byte copy.
+
+Because the views are forked rather than the core types annotated, `core/`
+compiles unchanged off-CUDA — there is no `__host__ __device__` macro threaded
+through it, and the Cortex-M gate is unaffected because nothing changed for it
+to be affected by. The shared layer is the byte layout, the contracts, and the
+equality tests; the two device copies of the row-geometry helpers
+(`rowWords`, `rowTailMask`) are asserted equal to the host originals across
+widths rather than trusted to stay in step.
+
+**What runs, and what is measured.** The backend provides bitwise logic, bulk
+population-count reductions, the sensor stage (`packBits`), the census
+transform, and dense disparity by both entries — an already-binary pair, and a
+wide 8-bit pair transformed to census on device. Correctness is bit-exactness
+against the host library, proven by `backends/cuda/tests` and gated by
+`scripts/verify_cuda.sh` (which exits 77 without a GPU, the "not performed" code
+the other cross-target gates use). Speed is measured on an **RTX 3070 Ti (SM
+8.6) under WSL2**, both kernel-resident and end-to-end, next to the host
+library's own arm on the same machine and against `cv::cuda::StereoBM` as the
+best existing GPU option; the numbers and what each covers are in
+`docs/reports/cuda.md`. As with every other platform in section 8, a number is a
+claim only about the hardware it was measured on: **no Jetson or other device
+has been run**, so nothing here is a claim about one — though the design is
+built to accommodate one without a rewrite (the ops take views, so a unified- or
+managed-memory pointer wraps into a device view with no copy, and the target SM
+is a build setting, not a source change).
+
 ## 9. Threading
 
 binCV is **serial by default and threads through a caller-installed backend**. It does not

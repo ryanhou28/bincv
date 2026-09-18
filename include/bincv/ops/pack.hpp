@@ -54,7 +54,10 @@
 // its gate before its first core include.
 #include "../core/simd.hpp"
 
-#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+// !__CUDACC__: the portable arm for CUDA translation units -- no vector arm is
+// reachable from device code, and nvcc's frontend rejects gcc's AVX-512 headers
+// under -O3 (impl/binMat_impl.hpp has the full note).
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(__CUDACC__)
 #define BINCV_PACKQUANT_AVX2 1
 #define BINCV_PACKQUANT_SIMD 1
 #include <immintrin.h>

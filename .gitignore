@@ -2,6 +2,8 @@
 build*/
 **/build*/
 cmake-build*/
+# scripts/verify_cuda.sh writes its configure and build logs beside the tree.
+build-cuda-gate.*.log
 
 # Benchmark output.
 results/

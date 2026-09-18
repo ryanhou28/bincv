@@ -62,13 +62,15 @@ if(MSVC)
         target_compile_options(bincv_warnings INTERFACE /WX)
     endif()
 else()
+    # Guarded by language: nvcc rejects gcc's warning flags at top level, so a
+    # CUDA translation unit receives the same set through -Xcompiler, applied to
+    # the host half of the .cu compile (the device half is cicc's, which has no
+    # equivalent flags). -Wpedantic is the one exclusion: it diagnoses nvcc's
+    # own generated host code, which nobody here can fix, and a gate that
+    # prints warnings nobody can act on is a gate people learn to ignore.
     target_compile_options(bincv_warnings INTERFACE
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Wshadow
-        -Wconversion
-        -Wsign-conversion)
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic;-Wshadow;-Wconversion;-Wsign-conversion>
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wall,-Wextra,-Wshadow,-Wconversion,-Wsign-conversion>)
     # -Werror is a GATE flag, not a development flag.
     #
     # Always-on -Werror makes an unrelated compiler upgrade break every working
@@ -87,7 +89,9 @@ else()
     # find. bincv_assert_warning_policy() below is what covers that case, and it
     # covers it structurally rather than by inspection of output.
     if(BINCV_WERROR)
-        target_compile_options(bincv_warnings INTERFACE -Werror)
+        target_compile_options(bincv_warnings INTERFACE
+            $<$<COMPILE_LANGUAGE:CXX>:-Werror>
+            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Werror>)
     endif()
 endif()
 
