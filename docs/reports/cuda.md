@@ -43,14 +43,14 @@ this work 15× behind.
 
 **Which of these is binCV's claim, and which is the on-ramp.** Only the binary
 entry rests on the representation: its caller already holds one bit per pixel,
-its cost is an XOR and a population count, and its working set is 442 KB where
-StereoBM's is 10 MB. The census entry is a **standard stereo technique
-implemented in the standard way** — census *expands* data rather than
-compressing it (8 bits per pixel in, 24 out), and the layout that finally made
-it fast is the conventional one-word-per-pixel descriptor, not binCV's
-bit-planes. It exists so a caller arriving with ordinary camera frames has a way
-in, and it is competitive; it is not where the thesis pays, and nothing here
-should be read as claiming otherwise.
+its cost is an XOR and a population count, and its device memory is 2.0 MB
+where StereoBM's is 10 MB on the same meter. The census entry is a **standard
+stereo technique implemented in the standard way** — census *expands* data
+rather than compressing it (8 bits per pixel in, 24 out), and the layout that
+finally made it fast is the conventional one-word-per-pixel descriptor, not
+binCV's bit-planes. It exists so a caller arriving with ordinary camera frames
+has a way in, and it is competitive; it is not where the thesis pays, and
+nothing here should be read as claiming otherwise.
 
 One number makes the distinction concrete. Binary does a twenty-fourth of
 census's work, and the host captures that: **17× on x86-64, 7.6× on aarch64**
@@ -64,6 +64,19 @@ correctness is settled against the host library, not against StereoBM. The
 memory figures are `cudaMemGetInfo` deltas around each side's working-set
 allocation, measured identically on both sides (GpuMat may pool, so StereoBM's
 is an upper reading).
+
+**One meter per comparison, named at the number.** Two memory meters appear in
+this report and they do not mix. A `cudaMemGetInfo` delta measures what the
+driver reserves; it is the meter for every figure that crosses libraries,
+because it is the only one readable on both sides. An allocation sum — what the
+arrays themselves ask for, the figure `cuda_dense_benchmark` prints — measures
+binCV against binCV and against the cost volume the design refuses. Crossing
+them inflates: binCV's 442 KB of arrays set beside StereoBM's 10 MB reading
+would look like 23×, and that ratio answers no question. On this driver
+`cudaMemGetInfo` moves in 2 MB steps — a one-byte allocation reads 2.00 MB — so
+the binary entry's 2.0 MB is the meter's floor rather than its footprint, which
+makes the 5× above a lower bound on the memory lead and not a measurement of
+it.
 
 ## Setup
 
@@ -103,8 +116,10 @@ actually running" check.
 | census, host CPU path (same machine) | cpu | ~295 ms (38% spread) | — |
 
 The **binary end-to-end round trip — packed pair up, matcher, map down — is
-0.62 ms, comfortably under StereoBM's 0.78 ms kernel-resident time.** The
-device working set is 442 KB against the 23 MB cost volume the design refuses.
+0.62 ms, comfortably under StereoBM's 0.83 ms kernel-resident time.** The
+device working set is 442 KB of arrays against the 23 MB cost volume the design
+refuses — an allocation sum on both sides, not the `cudaMemGetInfo` reading the
+role table uses.
 
 ### The census entry, and the layout that closed its gap
 
