@@ -654,10 +654,10 @@ void testDenseBinary(size_t w, size_t h, const bincv::DenseDisparityParams& p,
     BINCV_CHECK_EQ(bincv::cuda::upload(rb.constView(), dr.view()), cudaSuccess);
     bincv::cuda::DeviceImage<uint8_t> dDisp(static_cast<int>(w), static_cast<int>(h));
 
-    // Both device arms answer to the same host map: the tiled arm the launcher
+    // Both device arms answer to the same host map: the fast arm the launcher
     // prefers, and the reference arm behind the switch.
-    for (const bool tiled : {true, false}) {
-        bincv::cuda::impl::denseFastArmEnabled() = tiled;
+    for (const bool fastArm : {true, false}) {
+        bincv::cuda::impl::denseFastArmEnabled() = fastArm;
         BINCV_CHECK_EQ(bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(),
                                                          p, dDisp.view()),
                        cudaSuccess);
@@ -758,8 +758,8 @@ BINCV_TEST(CudaDense, CensusEntryMatchesHostWidePath) {
                                                    cenR.view()),
                    cudaSuccess);
     bincv::cuda::DeviceImage<uint8_t> dDisp(static_cast<int>(w), static_cast<int>(h));
-    for (const bool tiled : {true, false}) {
-        bincv::cuda::impl::denseFastArmEnabled() = tiled;
+    for (const bool fastArm : {true, false}) {
+        bincv::cuda::impl::denseFastArmEnabled() = fastArm;
         BINCV_CHECK_EQ(bincv::cuda::denseDisparityCensus(cenL.constView(),
                                                          cenR.constView(), K, h, p,
                                                          dDisp.view()),

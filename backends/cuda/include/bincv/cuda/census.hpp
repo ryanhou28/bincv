@@ -2,14 +2,22 @@
 
 /// @file census.hpp
 /// @brief The census transform on the device: a wide image in GPU memory into
-/// K comparison bit-planes, semantics identical to ops/census.hpp --
+/// K comparisons per pixel, semantics identical to ops/census.hpp --
 /// `bit = I(p + offset) > I(p)`, out-of-frame comparisons write 0, padding
 /// bits end zero. The pattern types and tables are the HOST's own.
 ///
-/// PLANE BLOCK LAYOUT: the K planes live in ONE device matrix of height
-/// K * imageHeight, plane k occupying rows [k * H, (k + 1) * H) at the common
-/// stride. One allocation, one stride, and the dense-disparity census entry
-/// consumes the same shape.
+/// TWO OUTPUT LAYOUTS, and which to use:
+///
+/// * `censusTransform` writes a PLANE BLOCK -- the K planes in one device
+/// matrix of height `K * imageHeight`, plane k occupying rows
+/// `[k * H, (k + 1) * H)` at the common stride. This is binCV's own
+/// representation, so it compares plane-for-plane against the host.
+/// * `censusTransformPacked` writes ONE WORD PER PIXEL, a pixel's whole
+/// descriptor in a `uint32`. **This is what the dense matcher should
+/// consume** -- see denseDisparity.hpp for the 8.5x and why.
+///
+/// Both come from the same pattern and the same comparison, and both are held
+/// to the host's answer by test.
 
 #include <cstdint>
 
@@ -24,9 +32,13 @@ namespace cuda {
 
 namespace impl {
 
-/// @brief Force the reference kernel, for the benchmark and the tests.
-/// **INTERNAL.** Same contract as denseTiledEnabled: the fast arm must be
-/// switchable off, held to bit-exactness in one binary, and shown running.
+/// @brief Force the PLANE transform's reference kernel, for the benchmark and
+/// the tests. **INTERNAL.** Same contract as `denseFastArmEnabled`: a fast arm
+/// must be switchable off, held to bit-exactness in one binary, and shown by
+/// the benchmark to be the arm it timed.
+/// @note The packed transform has a single implementation and so no switch;
+/// what pins it is that its descriptors must drive the dense matcher to
+/// the host's own disparity map, which the test suite checks.
 bool& censusTiledEnabled();
 
 /// @brief The pattern as plain kernel-argument data. **INTERNAL.**
