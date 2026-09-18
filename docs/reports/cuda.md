@@ -275,14 +275,21 @@ what is currently parallel.
   "Unknown Error" on counter access), so these are event-and-wall-clock timings,
   not occupancy or memory-throughput profiles. The stage-by-stage method stood
   in for a profiler: each optimization was measured against the arm it replaced.
-- **The binary matcher was chased too, and three attempts all failed.**
-  A `planes == 1` compile-time specialization measured 0.485 ms against 0.395
-  (1.23× slower, register pressure); hoisting the disparity tile's right-image
-  loads — at one bit per pixel its eight candidates span only 16 bits, so all
-  eight come from two words — measured null; strip length is at its optimum (8
-  → 0.421, 32 → 0.649). All three attacked *memory*, which together is good
-  evidence the kernel is not load-bound. The remaining idea attacks arithmetic
-  density instead and is filed as #63.
+- **The binary matcher was chased too — six attempts, and together they locate
+  the limit.** `ptxas -v` reports 116 registers and no spills for the binary
+  kernel, 255 (the ceiling) for the census one. *Not memory-traffic bound:*
+  shared staging (1.28× slower), hoisting the disparity tile's right-image
+  loads (null), and a `planes == 1` specialization (1.23× slower) all failed —
+  a warp's lanes read consecutive anchors, so its loads already coalesce into
+  one or two lines. *Not occupancy bound:* packing cost and disparity into one
+  register (`(cost << 8) | d` orders exactly as the tie rule needs) cut the
+  binary kernel to **84 registers**, enough for another block per SM, and the
+  runtime did not move. *Not register-starved:* `__launch_bounds__` at 4, 6 and
+  8 blocks/SM made both kernels **worse**, so the compiler's occupancy-for-ILP
+  trade is already the right one. What remains is instructions per useful bit —
+  roughly 19 instructions to produce 9 bit-comparisons, because `__popc` is
+  handed a 9-bit run in a 32-bit register. Attacking that means word-parallel
+  bit-slicing, filed with the full evidence as #63.
 - **The census entry's remaining 1.25× was chased and did not fall.** The
   shared-memory attempt above lost, and the packed matcher's tile width is at
   its measured optimum, so this kernel is at a local optimum for its shape.
