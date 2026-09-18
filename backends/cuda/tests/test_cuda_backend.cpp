@@ -654,10 +654,12 @@ void testDenseBinary(size_t w, size_t h, const bincv::DenseDisparityParams& p,
     BINCV_CHECK_EQ(bincv::cuda::upload(rb.constView(), dr.view()), cudaSuccess);
     bincv::cuda::DeviceImage<uint8_t> dDisp(static_cast<int>(w), static_cast<int>(h));
 
-    // Both device arms answer to the same host map: the fast arm the launcher
-    // prefers, and the reference arm behind the switch.
-    for (const bool fastArm : {true, false}) {
-        bincv::cuda::impl::denseFastArmEnabled() = fastArm;
+    // All three device arms answer to the same host map: the word-parallel
+    // bit-sliced arm the launcher prefers, the per-pixel sliding arm behind the
+    // first switch, and the straightforward reference kernel behind the second.
+    for (int arm = 0; arm < 3; ++arm) {
+        bincv::cuda::impl::denseFastArmEnabled() = arm < 2;
+        bincv::cuda::impl::denseBitSlicedEnabled() = arm == 0;
         BINCV_CHECK_EQ(bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(),
                                                          p, dDisp.view()),
                        cudaSuccess);
@@ -672,6 +674,7 @@ void testDenseBinary(size_t w, size_t h, const bincv::DenseDisparityParams& p,
         BINCV_CHECK_EQ(bad, 0u);
     }
     bincv::cuda::impl::denseFastArmEnabled() = true;
+    bincv::cuda::impl::denseBitSlicedEnabled() = true;
 }
 } // namespace
 
@@ -717,6 +720,36 @@ BINCV_TEST(CudaDense, Binary_UnevenWidth) {
     p.winWidth = 11;
     p.winHeight = 5;
     testDenseBinary(157, 83, p, 13);
+}
+
+// A word-parallel kernel makes the row's TAIL WORD dangerous in a way the
+// per-pixel arms are not: its padding lanes past `width` take part in the same
+// arithmetic as the real ones, and a shifted read runs off the end of the row.
+// These two widths put the last anchor inside a partly-padded word -- 97 leaves
+// one pixel in the tail word, 67 leaves three -- so a padding lane that is not
+// zero, or a neighbouring word read past the row, changes the map.
+BINCV_TEST(CudaDense, Binary_TailWordOnePixel) {
+    bincv::DenseDisparityParams p;
+    p.maxDisparity = 24;
+    testDenseBinary(97, 40, p, 7);
+}
+
+// The reference frame and search the benchmark prices, held to the host map
+// here: a speed claim about a configuration nothing checks is a claim about an
+// unverified kernel.
+BINCV_TEST(CudaDense, Binary_ReferenceFrame) {
+    bincv::DenseDisparityParams p;
+    p.maxDisparity = 64;
+    testDenseBinary(752, 480, p, 21);
+}
+
+BINCV_TEST(CudaDense, Binary_TailWordThreePixels) {
+    bincv::DenseDisparityParams p;
+    p.minDisparity = 2;
+    p.maxDisparity = 20;
+    p.winWidth = 7;
+    p.winHeight = 7;
+    testDenseBinary(67, 29, p, 5);
 }
 
 // ---------------------------------------------------------------------------

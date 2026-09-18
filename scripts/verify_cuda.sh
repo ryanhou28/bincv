@@ -25,6 +25,11 @@
 #   BINCV_CUDA_NVCC=/usr/local/cuda-11.1/bin/nvcc ./scripts/verify_cuda.sh
 #   BINCV_CUDA_HOST_COMPILER=g++-9 ./scripts/verify_cuda.sh   # nvcc's -ccbin
 #
+# A CUDA build tree is large and a machine's root filesystem may not be where it
+# belongs, so the build directory is overridable:
+#
+#   BINCV_CUDA_BUILD_DIR=/scratch/bincv-cuda-gate ./scripts/verify_cuda.sh
+#
 # EXIT CODES
 #   0   CUDA backend built and the device-vs-host suite passed
 #   1   verification FAILED (build error, a warning under -Werror, or a check)
@@ -36,7 +41,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BUILD_DIR="${REPO_ROOT}/build-cuda-gate"
+BUILD_DIR="${BINCV_CUDA_BUILD_DIR:-${REPO_ROOT}/build-cuda-gate}"
 
 echo "============================================================"
 echo "  binCV -- CUDA backend (device-vs-host bit-exactness)"

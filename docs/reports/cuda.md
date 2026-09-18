@@ -7,7 +7,7 @@ against `cv::cuda::StereoBM` as the best existing GPU option. Design:
 
 The backend shares binCV's format and forks its kernels, so every number here
 sits on top of a bit-exactness result: `scripts/verify_cuda.sh` proves each
-device kernel gives the host library's answer byte for byte (527 checks across
+device kernel gives the host library's answer byte for byte (605 checks across
 two suites), and every optimized arm is held to its own reference arm's map in
 the same binary. Speed is what follows once correctness is settled.
 
@@ -30,11 +30,11 @@ time (CUDA events, medians):
 
 | | time | device memory | role |
 |---|---|---|---|
-| **binCV binary entry** (pair already packed) | **0.39 ms** | **2.0 MB** | Hamming on packed bits |
-| binCV census entry (wide frames in) | 1.04 ms | 6.0 MB | Hamming on census descriptors |
-| `cv::cuda::StereoBM(64, 9)` | 0.83 ms | 10.0 MB | SAD on prefiltered bytes |
-| binary vs StereoBM | **2.1× faster** | **5× smaller** | role only — different maps |
-| census vs StereoBM | 1.25× slower | 1.7× smaller | the wide-input comparison |
+| **binCV binary entry** (pair already packed) | **0.069 ms** | **2.0 MB** | Hamming on packed bits |
+| binCV census entry (wide frames in) | 1.08 ms | 6.0 MB | Hamming on census descriptors |
+| `cv::cuda::StereoBM(64, 9)` | 0.84 ms | 10.0 MB | SAD on prefiltered bytes |
+| binary vs StereoBM | **12.2× faster** | **5× smaller** | role only — different maps |
+| census vs StereoBM | 1.29× slower | 1.7× smaller | the wide-input comparison |
 
 The **binary entry leads its role bar on both axes**. The **census entry** —
 the like-for-like comparison for a caller holding wide 8-bit frames, which is
@@ -54,10 +54,11 @@ nothing here should be read as claiming otherwise.
 
 One number makes the distinction concrete. Binary does a twenty-fourth of
 census's work, and the host captures that: **17× on x86-64, 7.6× on aarch64**
-([stereo.md](stereo.md)). This device kernel captures **2.3×** — so the path
-that matters is still leaving most of its structural advantage unexploited.
-Issue #63 records the evidence and the word-parallel bit-sliced shape that would
-collect it.
+([stereo.md](stereo.md)). This device kernel captures **13.7×**, inside that
+band — but only since the matcher started treating a word as a word. The
+per-pixel arm it replaced captured 2.3×, because it spent a 32-bit `__popc` on
+a 9-bit window and never used the fact that 32 pixels share a register. The
+word-parallel arm below is what collecting the rest looks like.
 
 Role only: the two match different costs and produce different maps;
 correctness is settled against the host library, not against StereoBM. The
@@ -105,27 +106,35 @@ actually running" check.
 
 | arm | clock | time | vs its reference |
 |---|---|---|---|
-| binary, sliding | kernel | **0.39 ms** | 4.2× over reference |
-| binary, reference | kernel | 1.66 ms | — |
-| binary, upload + kernel + download | e2e | **0.62 ms** | — |
+| binary, word-parallel | kernel | **0.069 ms** | 25× over reference |
+| binary, per-pixel sliding | kernel | 0.408 ms | 4.2× over reference |
+| binary, reference | kernel | 1.71 ms | — |
+| binary, upload + kernel + download | e2e | **0.28 ms** | — |
 | binary, host CPU arm (same machine) | cpu | ~19 ms (17% spread) | — |
-| census transform, packed (both frames) | kernel | 0.12 ms | — |
-| census matcher (K=24), packed | kernel | **0.91 ms** | 43× over reference |
-| census matcher (K=24), plane layout | kernel | 7.75 ms | 5.1× over reference |
-| census, wide frames up to map down | e2e | **1.42 ms** | — |
-| census, host CPU path (same machine) | cpu | ~295 ms (38% spread) | — |
+| census transform, packed (both frames) | kernel | 0.14 ms | — |
+| census matcher (K=24), packed | kernel | **0.94 ms** | 44× over reference |
+| census matcher (K=24), plane layout | kernel | 7.78 ms | 5.3× over reference |
+| census, wide frames up to map down | e2e | **1.51 ms** | — |
+| census, host CPU path (same machine) | cpu | ~309 ms (5% spread) | — |
+
+Every row above comes from one re-measurement session — seven independent runs
+of `cuda_dense_benchmark`, medians of medians — so the ratios between rows are
+ratios between numbers taken the same afternoon. The census arms did not change
+in it; they read a few percent off their previously published values, which is
+what this host's run-to-run spread looks like.
 
 The **binary end-to-end round trip — packed pair up, matcher, map down — is
-0.62 ms, comfortably under StereoBM's 0.83 ms kernel-resident time.** The
-device working set is 442 KB of arrays against the 23 MB cost volume the design
-refuses — an allocation sum on both sides, not the `cudaMemGetInfo` reading the
-role table uses.
+0.28 ms, a third of StereoBM's 0.84 ms kernel-resident time.** Transfers now
+dominate that round trip three to one, which is the shape a resident pipeline
+exists to remove. The device working set is 442 KB of arrays against the 23 MB
+cost volume the design refuses — an allocation sum on both sides, not the
+`cudaMemGetInfo` reading the role table uses.
 
 ### The census entry, and the layout that closed its gap
 
 The **census entry** is the wide-input story: upload two 8-bit frames, census
-on device, match, download — **1.42 ms end to end**, 208× the host census path
-and within **1.25×** of `cv::cuda::StereoBM` resident-to-resident, at less
+on device, match, download — **1.51 ms end to end**, 205× the host census path
+and within **1.29×** of `cv::cuda::StereoBM` resident-to-resident, at less
 device memory.
 
 It started 15× behind. The last and largest step was not a kernel trick but a
@@ -227,11 +236,40 @@ reachable and both held to the same map:
 
 | stage | binary matcher | census matcher | census transform |
 |---|---|---|---|
-| reference kernel (one thread per pixel) | 1.66 ms | 39.3 ms | 1.23 ms |
+| reference kernel (one thread per pixel) | 1.71 ms | 39.3 ms | 1.23 ms |
 | shared-memory tiling, 8-wide disparity tiles | 0.58 ms | 11.7 ms | — |
-| sliding vertical window, 16-row strips | **0.39 ms** | 7.75 ms | — |
-| packed descriptor layout | — | **0.91 ms** | — |
+| sliding vertical window, 16-row strips | 0.408 ms | 7.75 ms | — |
+| packed descriptor layout | — | **0.94 ms** | — |
+| word-parallel bit-slicing, one thread per word | **0.069 ms** | — | — |
 | shared-memory tile + all-K ballots | — | — | **0.071 ms** |
+
+The binary matcher's last step is the one that collects the representation's
+advantage rather than tuning around it. Every earlier arm mapped one thread to
+one output pixel, so each candidate cost a 32-bit `__popc` on a 9-bit window —
+a wide instruction doing narrow work, and no use at all of the 32 pixels
+sharing the register. The word-parallel arm gives a thread one *word* of
+output: the raw cost for 32 pixels is one XOR, the nine-wide horizontal sum is
+a carry-save tree into four bit-planes, and the winner-take-all is a borrow
+chain and a masked select — the host library's own `planesLess`/`planesSelect`,
+ported rather than reinvented. That is **6.0× over the arm it replaced** and 25×
+over the reference, at an unchanged 442 KB and zero shared memory.
+
+Three shapes had to be settled by measurement rather than argument. Summing
+horizontally *before* vertically reverses the host's order, because on the
+device a lane shift crosses into the neighbouring thread's registers and would
+cost a warp shuffle per plane per stage; addition commutes, so the map is
+identical. Eight disparity chunks per word fold through a warp shuffle, because
+word-parallel work is dense enough that the reference frame is otherwise 1,416
+threads — under one warp per SM. And the fold compares `(cost, disparity)`
+lexicographically in one borrow chain: a cost-only "strictly less wins" is
+correct for a linear scan but not for a tree, whose second step already holds
+winners from non-adjacent chunks. That last one was a real bug, caught by the
+suite on 22 pixels out of 12,000.
+
+At 69 µs the arm is close enough to this host's launch floor that its own
+spread runs 24–60% where the arm it replaced runs 7–18%. The figures here are
+medians of seven independent runs, each itself a median of nine batches; the
+two arms' sample ranges do not overlap in any pairing.
 
 The census matcher is **43× its reference kernel** across those steps, and the
 two largest factors came from different places: tiling and sliding are kernel
@@ -317,10 +355,13 @@ what is currently parallel.
   binary kernel to **84 registers**, enough for another block per SM, and the
   runtime did not move. *Not register-starved:* `__launch_bounds__` at 4, 6 and
   8 blocks/SM made both kernels **worse**, so the compiler's occupancy-for-ILP
-  trade is already the right one. What remains is instructions per useful bit —
-  roughly 19 instructions to produce 9 bit-comparisons, because `__popc` is
-  handed a 9-bit run in a 32-bit register. Attacking that means word-parallel
-  bit-slicing, filed with the full evidence as #63.
+  trade is already the right one. What all six located was instructions per
+  useful bit — roughly 19 instructions to produce 9 bit-comparisons, because
+  `__popc` was handed a 9-bit run in a 32-bit register. That is what the
+  word-parallel arm above attacks, and it is the one thing on this kernel that
+  worked: the six failures were all attempts to relieve *memory* pressure on a
+  kernel that was never memory-bound. Reading them as a set is what pointed at
+  arithmetic density; reading any one alone would not have.
 - **The census entry's remaining 1.25× was chased and did not fall.** The
   shared-memory attempt above lost, and the packed matcher's tile width is at
   its measured optimum, so this kernel is at a local optimum for its shape.

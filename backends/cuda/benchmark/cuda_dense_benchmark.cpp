@@ -124,23 +124,33 @@ int main() {
     std::printf(" device working set: %zu KB (the refused cost volume: 23 MB)\n\n",
                 binaryDeviceBytes / 1024);
 
-    // GPU, kernel-resident.
+    // GPU, kernel-resident: the arm the launcher prefers.
     const auto tKernel = cudabench::timeKernel([&] {
         bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
                                           dDisp.view());
     });
-    cudabench::printArm("GPU binary, resident (sliding arm)", tKernel, "kernel");
+    cudabench::printArm("GPU binary, resident (word-parallel arm)", tKernel, "kernel");
 
-    // The reference arm from the same binary, through the switch. If the
-    // ratio reads ~1.00x, the fast arm is not running where the line above
-    // says it is -- the same check every host vector arm carries.
+    // The two arms behind it, from the same binary, through the switches. If
+    // either ratio reads ~1.00x, the arm above is not the one running -- the
+    // same check every host vector arm carries.
+    bincv::cuda::impl::denseBitSlicedEnabled() = false;
+    const auto tSliding = cudabench::timeKernel([&] {
+        bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
+                                          dDisp.view());
+    });
+    bincv::cuda::impl::denseBitSlicedEnabled() = true;
+    std::printf(" %-44s %9.3f ms  spread %4.0f%%  [kernel]  (word-parallel %.2fx)\n",
+                "GPU binary, per-pixel sliding arm", tSliding.medianMs,
+                tSliding.spreadPct(), tSliding.medianMs / tKernel.medianMs);
+
     bincv::cuda::impl::denseFastArmEnabled() = false;
     const auto tRef = cudabench::timeKernel([&] {
         bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
                                           dDisp.view());
     });
     bincv::cuda::impl::denseFastArmEnabled() = true;
-    std::printf(" %-44s %9.3f ms  spread %4.0f%%  [kernel]  (fast arm %.2fx)\n",
+    std::printf(" %-44s %9.3f ms  spread %4.0f%%  [kernel]  (word-parallel %.2fx)\n",
                 "GPU binary, reference arm (switch off)", tRef.medianMs,
                 tRef.spreadPct(), tRef.medianMs / tKernel.medianMs);
 
