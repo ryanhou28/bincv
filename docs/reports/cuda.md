@@ -271,10 +271,26 @@ what is currently parallel.
   and nothing else, exactly as ARCHITECTURE §8 treats every platform. The design
   accommodates a unified-memory device without a rewrite (ops take views, the
   target SM is a build setting), but that is a design property, not a result.
-- **`ncu` counters are unavailable under this WSL2 setup** (the driver returns
-  "Unknown Error" on counter access), so these are event-and-wall-clock timings,
-  not occupancy or memory-throughput profiles. The stage-by-stage method stood
-  in for a profiler: each optimization was measured against the arm it replaced.
+- **No hardware profiler was available, and that shaped the method.** Nsight
+  Compute (`ncu` 2024.2.1) fails with `Unknown Error on device 0` — reproduced
+  on a three-line kernel with a single basic metric, so it is device-level
+  counter access being refused rather than anything about these kernels. The
+  usual cause on a GeForce part is NVIDIA's default of restricting GPU
+  performance counters to administrators; the fix is Windows-side and needs a
+  reboot (NVIDIA Control Panel → Desktop → Enable Developer Settings →
+  Developer → *Allow access to the GPU performance counters to all users*, or
+  `RmProfilingAdminOnly = 0` under
+  `HKLM\SYSTEM\CurrentControlSet\Services\nvlddmkm\Global\NVTweak`). Nsight
+  Systems is no fallback here either: the `nsys` bundled with CUDA 11.1 crashes
+  on this glibc (`__libc_dlsym` left the private ABI in 2.35).
+
+  So everything here is CUDA-event timing, `nvcc -Xptxas -v` for the static
+  picture (registers, spills, occupancy arithmetic), and controlled A/B against
+  the arm each change replaced. That was enough to locate the dense matchers'
+  limiter, but it took six experiments where a stall-reason profile would have
+  taken one run. **Anyone picking up #62 or #63 should get `ncu` working
+  first** — `smsp__pcsamp_warps_issue_stalled_*` answers directly what those six
+  experiments had to triangulate.
 - **The binary matcher was chased too — six attempts, and together they locate
   the limit.** `ptxas -v` reports 116 registers and no spills for the binary
   kernel, 255 (the ceiling) for the census one. *Not memory-traffic bound:*
