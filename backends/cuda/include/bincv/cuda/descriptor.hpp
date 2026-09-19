@@ -25,13 +25,26 @@
 ///    keypoint gathers inside a single 39x39 patch instead of 32 scattered
 ///    ones. A device-kernel win, and one anybody could take.
 /// 2. No wide pyramid and no blurred copy in the working set.
-/// 3. **The descriptor comes out as `uint32_t` WORDS, and that is load-bearing
-///    downstream.** `cv::cuda`'s BFMatcher popcounts descriptors as `uchar`
-///    elements -- `HammingDist::reduceIter` is `__popc(a ^ b)` instantiated at
-///    `uchar` -- so it issues 32 popcounts per 256-bit descriptor where a
-///    matcher reading these words issues 8. That 4x is real, it is on the
-///    MATCHING side rather than here, and the only way to give it away is to
-///    emit bytes. This header does not.
+/// 3. **The descriptor comes out as `uint32_t` WORDS.** `cv::cuda`'s BFMatcher
+///    popcounts descriptors as `uchar` elements -- `HammingDist::reduceIter` is
+///    `__popc(a ^ b)` instantiated at `uchar` -- so it issues 32 popcounts per
+///    256-bit descriptor where a matcher reading these words issues 8.
+///
+///    **That 4x is an instruction count and it buys nothing here, measured.**
+///    The same OpenCV matcher run over identical bytes as `CV_8U` and as
+///    `CV_32S` -- `matchHamming_gpu<int>` is instantiated, so both are real
+///    paths -- reads 5.233 ms against 5.143 ms at 5000x5000: **1.02x**. The
+///    profile says why: `math_pipe_throttle` is 871 of ~108,000 warp stall
+///    samples, under 1%, while `barrier` is 35,540. The matcher is
+///    `__syncthreads()`-bound, and a kernel that is not math-bound does not
+///    care how wide its popcounts are.
+///
+///    The device matcher's 9.1x lead over that arm is **kernel shape**, not
+///    popcount width: two barriers per launch against one per descriptor chunk
+///    per train block, and 0.25% of peak DRAM against 12.5%. Word emission is
+///    still the right output -- it is what lets a matcher hold a descriptor in
+///    eight registers and costs nothing to keep -- but it is not where the
+///    lead comes from, and this header no longer says it is.
 ///
 /// The case for a device arm rests on residency and on memory: once keypoints
 /// are on the device, the alternative is downloading a 361 KB frame to describe

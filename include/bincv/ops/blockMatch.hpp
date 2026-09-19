@@ -147,7 +147,12 @@ inline long long hammingAt(const BlockMatchLevel<WordType>& lv, const RegionWord
 /// cost surface `cm == c0 == cp` happens on any flat plateau, and the
 /// denominator is then exactly zero. A non-convex triple means the integer
 /// minimum is not a minimum along this axis, and 0 is the honest answer.
-inline double parabolicOffset(long long cm, long long c0, long long cp) {
+/// @note BINCV_HOST_DEVICE. Three integers in, one double out, no memory and no
+/// traversal. The CUDA arms of this operation and of ops/stereo.hpp call it
+/// rather than restating it: the non-convex guard and the +/-0.5 clamp ARE
+/// the sub-pixel contract, and both backends' results are compared bit for
+/// bit as floats, so a second copy has nothing to absorb a difference.
+BINCV_HOST_DEVICE inline double parabolicOffset(long long cm, long long c0, long long cp) {
     const double denom = static_cast<double>(cm - 2 * c0 + cp);
     if (!(denom > 0.0)) return 0.0;
     const double offset = 0.5 * static_cast<double>(cm - cp) / denom;

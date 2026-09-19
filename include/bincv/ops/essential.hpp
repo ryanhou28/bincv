@@ -63,6 +63,24 @@
 /// operation actually runs at.
 ///
 /// ---------------------------------------------------------------------------
+/// ONE SOURCE, TWO TARGETS
+///
+/// The solver chain below carries `BINCV_HOST_DEVICE`, so a GPU backend compiles
+/// THIS elimination rather than keeping a second one in agreement with it. The
+/// annotation is admissible because none of these functions is a traversal: they
+/// are straight-line double-precision arithmetic over fixed-size arrays and five
+/// points, with no loop over pixels, rows or words and no pointer into an image.
+/// `bincv::ransac` itself is NOT annotated and must not be -- it walks every
+/// correspondence, which is exactly where a host row loop and a device warp
+/// disagree.
+///
+/// Off nvcc the macro expands to nothing, so a host build is byte-identical and
+/// this file still needs no CUDA. What the annotation buys is that a device arm
+/// cannot drift from the numerics recorded above; what it costs is that the two
+/// compilations have to be held to the same answer by a test, because the device
+/// has its own libm and its own licence to contract.
+///
+/// ---------------------------------------------------------------------------
 /// MEMORY
 ///
 /// Nothing here allocates. The solver's working set is stack, and
@@ -106,7 +124,7 @@ struct EPoly1 { double c[4] = {0, 0, 0, 0}; };
 struct EPoly2 { double c[10] = {0}; };
 struct EPoly3 { double c[20] = {0}; };
 
-inline EPoly2 ePolyMul11(const EPoly1& a, const EPoly1& b) {
+BINCV_HOST_DEVICE inline EPoly2 ePolyMul11(const EPoly1& a, const EPoly1& b) {
     static const int kT[4][4] = {{0, 1, 3, 6}, {1, 2, 4, 7}, {3, 4, 5, 8}, {6, 7, 8, 9}};
     EPoly2 r;
     for (int i = 0; i < 4; ++i) {
@@ -115,7 +133,7 @@ inline EPoly2 ePolyMul11(const EPoly1& a, const EPoly1& b) {
     return r;
 }
 
-inline EPoly3 ePolyMul21(const EPoly2& a, const EPoly1& b) {
+BINCV_HOST_DEVICE inline EPoly3 ePolyMul21(const EPoly2& a, const EPoly1& b) {
     static const int kX[10] = {0, 1, 2, 4, 5, 7, 10, 11, 13, 16};
     static const int kY[10] = {1, 2, 3, 5, 6, 8, 11, 12, 14, 17};
     static const int kZ[10] = {4, 5, 6, 7, 8, 9, 13, 14, 15, 18};
@@ -130,17 +148,17 @@ inline EPoly3 ePolyMul21(const EPoly2& a, const EPoly1& b) {
     return r;
 }
 
-inline EPoly2 ePolyAdd2(const EPoly2& a, const EPoly2& b) {
+BINCV_HOST_DEVICE inline EPoly2 ePolyAdd2(const EPoly2& a, const EPoly2& b) {
     EPoly2 r;
     for (int i = 0; i < 10; ++i) r.c[i] = a.c[i] + b.c[i];
     return r;
 }
-inline EPoly3 ePolyAdd3(const EPoly3& a, const EPoly3& b) {
+BINCV_HOST_DEVICE inline EPoly3 ePolyAdd3(const EPoly3& a, const EPoly3& b) {
     EPoly3 r;
     for (int i = 0; i < 20; ++i) r.c[i] = a.c[i] + b.c[i];
     return r;
 }
-inline EPoly3 ePolyScale3(const EPoly3& a, double s) {
+BINCV_HOST_DEVICE inline EPoly3 ePolyScale3(const EPoly3& a, double s) {
     EPoly3 r;
     for (int i = 0; i < 20; ++i) r.c[i] = a.c[i] * s;
     return r;
@@ -160,12 +178,12 @@ struct EPolyZ3 {
     double c[4] = {0, 0, 0, 0};
 };
 
-inline double ePolyZ3Eval(const EPolyZ3& p, double z) {
+BINCV_HOST_DEVICE inline double ePolyZ3Eval(const EPolyZ3& p, double z) {
     return ((p.c[3] * z + p.c[2]) * z + p.c[1]) * z + p.c[0];
 }
 
 /// @brief `det M(z0)` by LU with partial pivoting. **INTERNAL.**
-inline double eDet6At(const EPolyZ3 m[6][6], double z) {
+BINCV_HOST_DEVICE inline double eDet6At(const EPolyZ3 m[6][6], double z) {
     double a[6][6];
     for (size_t i = 0; i < 6; ++i) {
         for (size_t j = 0; j < 6; ++j) a[i][j] = ePolyZ3Eval(m[i][j], z);
@@ -209,7 +227,7 @@ inline double eDet6At(const EPolyZ3 m[6][6], double z) {
 /// under 3, and the coefficients are what the root finder consumes.
 /// @note Newton divided differences, then expanded to the monomial basis. Solving
 /// a Vandermonde system directly would be shorter and far worse conditioned.
-inline void eDetPoly(const EPolyZ3 m[6][6], double* coeff) {
+BINCV_HOST_DEVICE inline void eDetPoly(const EPolyZ3 m[6][6], double* coeff) {
     constexpr int kN = 11;
     double node[kN], value[kN];
     for (int i = 0; i < kN; ++i) {
@@ -239,7 +257,7 @@ inline void eDetPoly(const EPolyZ3 m[6][6], double* coeff) {
 /// @note Jacobi rather than anything faster because it is unconditionally stable
 /// on symmetric input and short enough to be read. `N` is 9 or 6 here.
 template <size_t N>
-inline void eJacobi(double a[N][N], double v[N][N], double w[N]) {
+BINCV_HOST_DEVICE inline void eJacobi(double a[N][N], double v[N][N], double w[N]) {
     for (size_t i = 0; i < N; ++i) {
         for (size_t j = 0; j < N; ++j) v[i][j] = (i == j) ? 1.0 : 0.0;
     }
@@ -283,7 +301,8 @@ inline void eJacobi(double a[N][N], double v[N][N], double w[N]) {
 /// @note All roots at once rather than one-then-deflate: deflation on a degree-10
 /// polynomial loses accuracy in the later roots, and every root here is a
 /// candidate solution that RANSAC will score anyway.
-inline int eRealRoots(const double* c, int degree, double* out, int maxOut) {
+BINCV_HOST_DEVICE inline int eRealRoots(const double* c, int degree, double* out,
+                                        int maxOut) {
     int n = degree;
     while (n > 0 && std::fabs(c[n]) < 1e-14) --n;
     if (n < 1) return 0;
@@ -374,7 +393,8 @@ inline constexpr size_t essentialSolverStackBytes() {
 /// this solver has no notion of focal length or principal point, exactly as
 /// `cv::findEssentialMat`'s five-point core does not.
 /// @note Never throws; allocates nothing. See `essentialSolverStackBytes()`.
-inline int fivePointEssential(const Point2f* from, const Point2f* to, EssentialMatrix* out) {
+BINCV_HOST_DEVICE inline int fivePointEssential(const Point2f* from, const Point2f* to,
+                                                EssentialMatrix* out) {
     BINCV_ASSERT(from != nullptr && to != nullptr && out != nullptr,
                  "essential: five-point needs five correspondences and somewhere to write");
 
@@ -615,13 +635,14 @@ struct EssentialModel {
     /// constraints, so a refit is a constrained nonlinear problem rather than the
     /// solve `Affine2DModel` gets to do. That is the solver this library
     /// deliberately does not carry.
-    static bool refine(const Point2f*, const Point2f*, const uint32_t*, size_t,
-                       EssentialMatrix*) {
+    BINCV_HOST_DEVICE static bool refine(const Point2f*, const Point2f*, const uint32_t*,
+                                        size_t, EssentialMatrix*) {
         return false;
     }
 
-    static size_t estimate(const Point2f* from, const Point2f* to, const size_t* idx,
-                           EssentialMatrix* out) {
+    BINCV_HOST_DEVICE static size_t estimate(const Point2f* from, const Point2f* to,
+                                             const size_t* idx,
+                                             EssentialMatrix* out) {
         Point2f f[5], t[5];
         for (int i = 0; i < 5; ++i) {
             f[i] = from[idx[i]];
@@ -636,7 +657,8 @@ struct EssentialModel {
     /// @note NOT the raw algebraic residual `q2^T E q1`. That is not a distance:
     /// it scales with the magnitude of the coordinates, so a fixed threshold
     /// on it accepts far more at the image edge than at its centre.
-    static float residual(const EssentialMatrix& e, Point2f a, Point2f b) {
+    BINCV_HOST_DEVICE static float residual(const EssentialMatrix& e, Point2f a,
+                                            Point2f b) {
         const double x1 = static_cast<double>(a.x), y1 = static_cast<double>(a.y);
         const double x2 = static_cast<double>(b.x), y2 = static_cast<double>(b.y);
 

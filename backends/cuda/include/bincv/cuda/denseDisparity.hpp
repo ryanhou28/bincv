@@ -53,7 +53,10 @@ bool& denseBitSlicedEnabled();
 
 /// @brief Dense disparity over an ALREADY-BINARY rectified pair in device
 /// memory -- the premise-native path, cost = windowed popcount(L ^ shift(R)).
-/// Device twin of the host denseDisparityBinary; output map equal by test.
+/// **API TIER 3.** Device twin of the host denseDisparityBinary; output map
+/// equal by test. No OpenCV numerical equivalent: the role bar is
+/// `cv::cuda::StereoBM`, which matches SAD over bytes and gives a different
+/// map by design.
 ///
 /// **WORD-PARALLEL.** A thread owns 32 output anchors, not one: the candidate
 /// cost of all 32 is one xor, the window sums are bit-sliced counts, and the
@@ -71,7 +74,9 @@ cudaError_t denseDisparityBinary(DeviceBinMatConstView left,
 
 /// @brief Dense disparity over two PACKED census descriptor images
 /// (census.hpp's `censusTransformPacked` layout: one uint32 per pixel).
-/// **THE FAST CENSUS PATH, and the one the wide-input entry should use.**
+/// **API TIER 3. THE FAST CENSUS PATH, and the one the wide-input entry should
+/// use.** Priced against `cv::cuda::StereoBM` for its ROLE only; the maps
+/// differ and no numerical agreement is claimed anywhere.
 ///
 /// The plane-block form below reads a pixel's K comparisons from K different
 /// arrays: K loads and K popcounts per pixel pair, each popcount counting one
@@ -90,8 +95,8 @@ cudaError_t denseDisparityCensusPacked(DeviceImageConstView<uint32_t> leftDesc,
                                        cudaStream_t stream = nullptr);
 
 /// @brief Dense disparity over two census PLANE BLOCKS (census.hpp's layout:
-/// K planes of imageHeight rows each). The census entry for wide-input
-/// callers: censusTransform both frames on device, then match here.
+/// K planes of imageHeight rows each). **API TIER 3.** The census entry for
+/// wide-input callers: censusTransform both frames on device, then match here.
 /// Output map equal to the host census path by test.
 cudaError_t denseDisparityCensus(DeviceBinMatConstView leftPlanes,
                                  DeviceBinMatConstView rightPlanes, size_t planes,

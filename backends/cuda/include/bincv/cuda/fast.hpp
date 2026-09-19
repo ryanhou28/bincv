@@ -49,18 +49,33 @@
 /// benchmark/cuda_fast_benchmark.cpp, not the derived one.
 ///
 /// ---------------------------------------------------------------------------
-/// RASTER ORDER, AND WHY THERE IS A SORT
+/// RASTER ORDER, AND WHY THERE IS NO LONGER A SORT
 ///
 /// The host emits in raster order and truncates by keeping the first `capacity`
 /// of it. An atomic append cannot produce that order -- compaction.hpp says so
-/// and refuses to promise it. So a COMPLETE run is sorted, in place, on the
-/// unique key `(y, x)`, which restores exactly one sequence: the host's. That is
-/// what lets the suite `memcmp` the two arrays rather than compare them as sets.
+/// and refuses to promise it, and points at the alternative: "a family that
+/// genuinely needs the host's truncation ORDER cannot get it from an atomic and
+/// must compact by prefix sum instead."
 ///
-/// **A TRUNCATED run is still not the host's prefix**, and the sort does not make
-/// it one: the atomic decided which corners were stored before the sort saw them.
-/// `DeviceAppendResult::truncated()` is how a caller finds out, and
-/// `found()` is exactly the capacity a complete re-run needs.
+/// That is what the shipped arm does, and it is where this operation's cost
+/// used to be. A single-block bitonic network over the stored corners was
+/// **98.5% of a 752x480 detection at the reference corner density** -- 2.236 ms
+/// against 0.0328 ms of detection -- and its cost tracked `nextPow2(found)`
+/// rather than the frame. There is nothing to sort: a word's corners are the set
+/// bits of one mask and peeling them low bit first is already ascending `x`,
+/// while the `(row, word)` UNITS are already in raster order. So the arm counts
+/// each unit's corners, prefix-sums the counts over words (11,376 numbers for a
+/// 752x480 frame, not 360,960), and writes every corner at the index the host
+/// would have put it at. No two corners are ever compared.
+///
+/// **On that arm a TRUNCATED run IS the host's prefix**, because an index below
+/// `capacity` is exactly a raster rank below `capacity`. That is a property of
+/// the arm and not a promise of the operation: `impl::fastOrderedEnabled(false)`
+/// selects the append-and-sort arm, whose atomic decided which corners were
+/// stored before the sort saw them. The contract is unchanged --
+/// `DeviceAppendResult::truncated()` is how a caller finds out, and `found()` is
+/// exactly the capacity a complete re-run needs -- and the suite compares
+/// truncated runs by `found()` for that reason.
 ///
 /// ---------------------------------------------------------------------------
 /// THE DEVICE DOMAIN, NAMED because it is narrower than the host's
@@ -92,9 +107,11 @@ namespace cuda {
 /// which switch is set, on `arcLength`, or on the shared-memory budget: a
 /// sizing function whose answer changes when an implementation detail moves
 /// turns a correct caller into a device-side out-of-bounds write with no
-/// signal. The answer is the sort's padded working area and nothing else --
+/// signal. The answer is the sort arm's padded working area --
 /// `nextPow2(capacity)` corner records -- and it is the same number whichever
-/// detection arm ran.
+/// detection arm ran. The ordered arm needs far less of it (one `uint32_t` per
+/// block, 380 bytes for a 752x480 frame), which is why the number did not move
+/// when that arm was added.
 /// @note Returns 0 for a capacity of 0 or 1, where there is nothing to order.
 size_t fastScratchBytes(size_t capacity);
 
@@ -158,6 +175,25 @@ bool& fastMaskScoreEnabled();
 /// lesson applies verbatim. `arcLength = 10` is therefore the control case
 /// that must read ~1.00x between switch positions.
 bool fastTiledApplies(int arcLength);
+
+/// @brief Forces the append-and-sort arm, for the benchmark and the tests.
+/// **INTERNAL.** `true` (default) selects the prefix-sum arm: raster order by
+/// construction, no comparison between corners at all.
+/// @note Both arms are held to the same corner array in one binary for every
+/// COMPLETE run, which is the only run the operation's contract orders.
+bool& fastOrderedEnabled();
+
+/// @brief Whether the ordered arm would run for this frame and capacity.
+/// **INTERNAL** -- the benchmark and the suite need to name the gate-excluded
+/// case without restating the gate.
+/// @note The gate is the caller's own scratch: the arm needs one `uint32_t` per
+/// block, and `fastScratchBytes(capacity)` is what supplies them. A capacity too
+/// small to hold them -- below 48 corners on a 752x480 frame -- is also a
+/// capacity at which the network this arm replaces runs over at most `capacity`
+/// elements and costs less than the prefix sum would, so the crossover is where
+/// it belongs rather than where it was convenient. That is the case the
+/// benchmark must report at ~1.00x between switch positions.
+bool fastOrderedApplies(size_t width, size_t height, size_t capacity);
 
 } // namespace impl
 

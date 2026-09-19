@@ -172,7 +172,12 @@ struct RansacScratch {
 };
 
 /// @brief Words in one inlier set over `correspondences` points.
-inline constexpr size_t ransacScratchWords(size_t correspondences) {
+/// @note Annotated for both targets: it is the flag layout's own rule -- which
+/// word a correspondence's bit lives in -- and anything that writes those
+/// flags has to agree with it. A device kernel re-deriving `(n + 31) / 32`
+/// would be a second definition of the layout, which is the drift the shared
+/// format exists to prevent.
+BINCV_HOST_DEVICE inline constexpr size_t ransacScratchWords(size_t correspondences) {
     return (correspondences + 31) / 32;
 }
 
@@ -199,7 +204,11 @@ namespace impl {
 /// @note Counter-based rather than stateful-stream so that a run is reproducible
 /// from the seed alone, with no dependence on how many values were drawn
 /// before it.
-inline uint64_t ransacMix(uint64_t x) {
+/// @note Annotated for both targets: the sequence is a pure integer function of
+/// the counter, so anything reproducing that counter draws the SAME minimal
+/// sets and the two sides can be compared per hypothesis rather than only in
+/// distribution.
+BINCV_HOST_DEVICE inline uint64_t ransacMix(uint64_t x) {
     x += UINT64_C(0x9E3779B97F4A7C15);
     x = (x ^ (x >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
     x = (x ^ (x >> 27)) * UINT64_C(0x94D049BB133111EB);
@@ -211,7 +220,8 @@ inline uint64_t ransacMix(uint64_t x) {
 /// @note Rejection against the indices already drawn. `k` is 3 to 8 for every
 /// minimal solver worth having, so the quadratic scan is a handful of
 /// comparisons and needs no set.
-inline bool ransacSample(size_t n, size_t k, uint64_t counter, size_t* out) {
+BINCV_HOST_DEVICE inline bool ransacSample(size_t n, size_t k, uint64_t counter,
+                                           size_t* out) {
     if (n < k) return false;
     for (size_t i = 0; i < k; ++i) {
         // A fresh draw per attempt, so a collision does not bias the retry.

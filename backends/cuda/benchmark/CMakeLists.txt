@@ -223,17 +223,24 @@ set_target_properties(cuda_role_benchmark PROPERTIES
     CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
 
 if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
+    # cudaoptflow joins the list for round 3's Lucas-Kanade bar. It is a
+    # contrib module, so a build that lacks it loses every row in this file
+    # rather than only the LK one -- which is the behaviour the guard below
+    # already documents (everything reports UNMEASURED), and it is preferred to
+    # a second #if that would let one row silently vanish from a run that still
+    # printed fourteen others.
     find_package(OpenCV QUIET COMPONENTS core imgproc cudaarithm cudafilters cudawarping
-                 cudastereo cudafeatures2d cudaimgproc
+                 cudastereo cudafeatures2d cudaimgproc cudaoptflow
                  PATHS ${BINCV_CUDA_OPENCV_DIR} NO_DEFAULT_PATH)
     if(OpenCV_FOUND AND TARGET opencv_cudaarithm AND TARGET opencv_cudafilters
                     AND TARGET opencv_cudawarping AND TARGET opencv_cudastereo
-                    AND TARGET opencv_cudafeatures2d AND TARGET opencv_cudaimgproc)
+                    AND TARGET opencv_cudafeatures2d AND TARGET opencv_cudaimgproc
+                    AND TARGET opencv_cudaoptflow)
         target_compile_definitions(cuda_role_benchmark PRIVATE BINCV_CUDA_ROLE_OPENCV=1)
         target_link_libraries(cuda_role_benchmark PRIVATE
             opencv_core opencv_imgproc opencv_cudaarithm opencv_cudafilters
             opencv_cudawarping opencv_cudastereo opencv_cudafeatures2d
-            opencv_cudaimgproc)
+            opencv_cudaimgproc opencv_cudaoptflow)
         target_include_directories(cuda_role_benchmark SYSTEM PRIVATE
             ${OpenCV_INCLUDE_DIRS})
         message(STATUS "cuda_role_benchmark: every cv::cuda role bar in one binary "
@@ -241,7 +248,7 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
     else()
         message(WARNING "BINCV_CUDA_OPENCV_DIR set but no OpenCV with cudaarithm + "
                         "cudafilters + cudawarping + cudastereo + cudafeatures2d + "
-                        "cudaimgproc found there; "
+                        "cudaimgproc + cudaoptflow found there; "
                         "cuda_role_benchmark keeps building and reports every role "
                         "bar as UNMEASURED.")
     endif()
@@ -424,3 +431,174 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
                         "arms and reports both role bars as BLOCKED.")
     endif()
 endif()
+
+# ---------------------------------------------------------------------------
+# Lucas-Kanade on the device: both arms through their runtime switches, the one
+# gate-excluded control that must read ~1.00x, the deciding role row against
+# cv::cuda::SparsePyrLKOpticalFlow with BOTH SIDES' PYRAMIDS RESIDENT, and the
+# memory reading with its region pinned on both sides.
+#
+# PLAIN C++, NOT A CUDA TRANSLATION UNIT, and that is load-bearing here for the
+# reason cuda_median_benchmark gives: this file times the HOST library's tracker
+# next to the device's, and ops/opticalFlow.hpp gates its AVX2 eight-keypoint
+# batch off under __CUDACC__. Compiled by nvcc the host row would silently become
+# the scalar arm and the context figure would be against a kernel no x86 caller
+# runs. Only cuda_bench_null.cu needs nvcc here.
+#
+# ONE EXECUTABLE, ALWAYS BUILT, with the cv::cuda arms behind
+# BINCV_CUDA_LKFLOW_OPENCV inside it -- the shape cuda_window_benchmark,
+# cuda_sensor_benchmark and cuda_frontend_benchmark use, and for the reason they
+# give: scripts/verify_cuda.sh derives its benchmark list from the TEXT of this
+# file and hand-excludes exactly one name, so a target that exists only when an
+# OpenCV is pointed at is one the gate tries to build on every machine that has
+# not built one. Without that OpenCV the binary keeps every binCV arm and reports
+# the role bar as BLOCKED -- which, by the both-axes ship rule, makes the
+# operation a stage rather than a product. It does not substitute the CPU rows
+# for a GPU bar.
+#
+# ITS OWN find_package WITH ITS OWN COMPONENT LIST, appended after the others and
+# linking IMPORTED TARGETS rather than ${OpenCV_LIBS}: adding cudaoptflow to an
+# earlier call would make OpenCV_FOUND false for every target that call feeds on
+# any prefix carrying cudastereo but not cudaoptflow -- including the one that
+# reproduces the binary-vs-StereoBM headline.
+# ---------------------------------------------------------------------------
+add_executable(cuda_opticalflow_benchmark cuda_opticalflow_benchmark.cpp
+                                          cuda_bench_null.cu)
+target_link_libraries(cuda_opticalflow_benchmark PRIVATE
+    bincv_core bincv_cuda bincv_warnings)
+target_include_directories(cuda_opticalflow_benchmark PRIVATE
+    ${BINCV_POLICY_ROOT}/benchmark)
+set_target_properties(cuda_opticalflow_benchmark PROPERTIES
+    CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+# The host oracle this file times is compiled into it, so it is pinned the same
+# way the test suite's is -- see backends/cuda/tests/CMakeLists.txt.
+target_compile_options(cuda_opticalflow_benchmark PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
+
+if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
+    find_package(OpenCV QUIET COMPONENTS core cudaoptflow cudawarping cudaarithm
+                 PATHS ${BINCV_CUDA_OPENCV_DIR} NO_DEFAULT_PATH)
+    if(OpenCV_FOUND AND TARGET opencv_cudaoptflow AND TARGET opencv_cudawarping)
+        target_compile_definitions(cuda_opticalflow_benchmark PRIVATE
+            BINCV_CUDA_LKFLOW_OPENCV=1)
+        target_link_libraries(cuda_opticalflow_benchmark PRIVATE
+            opencv_core opencv_cudaoptflow opencv_cudawarping opencv_cudaarithm)
+        target_include_directories(cuda_opticalflow_benchmark SYSTEM PRIVATE
+            ${OpenCV_INCLUDE_DIRS})
+        message(STATUS "cuda_opticalflow_benchmark: role comparison against "
+                       "cv::cuda::SparsePyrLKOpticalFlow enabled "
+                       "(OpenCV ${OpenCV_VERSION} from ${BINCV_CUDA_OPENCV_DIR})")
+    else()
+        message(WARNING "BINCV_CUDA_OPENCV_DIR set but no cudaoptflow-capable OpenCV "
+                        "found there; cuda_opticalflow_benchmark keeps its binCV arms "
+                        "and reports the cv::cuda::SparsePyrLKOpticalFlow role bar as "
+                        "BLOCKED.")
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# The RANSAC geometry question, and the measurement that answered it.
+#
+# THIS TARGET DOES NOT PRICE AN OPERATION, because the answer was that there
+# should not be one. It exists so the negative is reproducible: a claim that
+# something is not worth building has to be as checkable as a claim that it is,
+# or it gets re-opened from memory in six months.
+#
+# It builds cuda_ransac_kernels.cu, which carries the device round kernels and
+# is NOT compiled into bincv_cuda -- the same separation cuda_bench_null.cu has,
+# and for a stronger reason: an empty kernel is apparatus the library has no
+# business carrying, and so is a device arm the measurement rejected. The suite
+# test_cuda_ransac compiles the same file, so there is one copy of it.
+#
+# PLAIN C++ apart from those two .cu files, for the reason cuda_median_benchmark
+# gives: this binary times the HOST library's arms next to the device's, and a
+# host header compiled by nvcc is not the host arm a caller runs.
+#
+# NO OpenCV arm and no guard. OpenCV has no cv::cuda essential-matrix or 2D-2D
+# estimator, so there is no GPU role bar to run -- and the binary says that in
+# its own output rather than substituting the CPU arm for one. The CPU bar it
+# does need, cv::findEssentialMat, is already timed and heap-probed beside
+# binCV's in benchmark/essential_benchmark.cpp, which is where that comparison
+# is made once.
+# ---------------------------------------------------------------------------
+add_executable(cuda_ransac_benchmark cuda_ransac_benchmark.cpp cuda_ransac_kernels.cu
+                                     cuda_bench_null.cu)
+target_link_libraries(cuda_ransac_benchmark PRIVATE bincv_core bincv_cuda bincv_warnings)
+target_include_directories(cuda_ransac_benchmark PRIVATE ${BINCV_POLICY_ROOT}/benchmark)
+set_target_properties(cuda_ransac_benchmark PROPERTIES
+    CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+
+# ---------------------------------------------------------------------------
+# Sparse stereo, block matching and descriptor matching: every arm through its
+# runtime switch, three gate-excluded controls that must read ~1.00x, the
+# measured tile-width sweep that chose the shipped default, and the decision
+# rule printed before the first number.
+#
+# PLAIN C++ apart from two small .cu files, and that is load-bearing for the
+# reason cuda_median_benchmark gives: this file times the HOST library's
+# matcher next to the device's, and a host header compiled by nvcc is not the
+# host arm a caller runs. Only cuda_bench_null.cu (the launch floor's empty
+# kernel) and cuda_sparse_bench_kernels.cu need nvcc.
+#
+# cuda_sparse_bench_kernels.cu carries ONE kernel and it belongs to the
+# MEASUREMENT, not to the library: it applies Lowe's ratio to cv::cuda
+# knnMatchAsync(k=2) output on the device. binCV's matcher returns the ratio
+# verdict from its own launch, and OpenCV's only route to the same answer --
+# knnMatchConvert -- is a HOST download. Timing a download inside a
+# kernel-resident window would compare binCV's resident kernel against an
+# OpenCV round trip and hand binCV a win it did not earn, so the OpenCV arm
+# gets a committed device pass instead and knnMatchConvert stays outside the
+# event window.
+#
+# ONE executable, ALWAYS BUILT, with the cv::cuda arms behind
+# BINCV_CUDA_SPARSE_OPENCV inside it -- the shape cuda_sensor_benchmark and
+# cuda_frontend_benchmark use, and for the reason their blocks give:
+# scripts/verify_cuda.sh derives its benchmark list from the TEXT of this file
+# and hand-excludes exactly one name, so a target that exists only when an
+# OpenCV is pointed at is one the gate tries to build on every machine that has
+# not built one. Without that OpenCV every binCV arm still runs and the role
+# verdicts print BLOCKED; no substitute bar is invented and no CPU number is
+# quoted as a GPU one.
+#
+# Its own find_package with its own component list, appended after the others:
+# adding components to an earlier call would make OpenCV_FOUND false for every
+# target that call feeds. imgcodecs is in the list because the numbers that
+# decide CASE B come from REAL frames -- the gate's whole claim is about where
+# keypoints actually sit -- and the binary says so loudly when it falls back.
+# ---------------------------------------------------------------------------
+add_executable(cuda_sparse_benchmark cuda_sparse_benchmark.cpp
+                                     cuda_sparse_bench_kernels.cu cuda_bench_null.cu)
+target_link_libraries(cuda_sparse_benchmark PRIVATE bincv_core bincv_cuda bincv_warnings)
+target_include_directories(cuda_sparse_benchmark PRIVATE ${BINCV_POLICY_ROOT}/benchmark)
+set_target_properties(cuda_sparse_benchmark PROPERTIES
+    CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+
+if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
+    find_package(OpenCV QUIET COMPONENTS core imgcodecs cudafeatures2d cudaoptflow
+                 PATHS ${BINCV_CUDA_OPENCV_DIR} NO_DEFAULT_PATH)
+    if(OpenCV_FOUND AND TARGET opencv_cudafeatures2d AND TARGET opencv_cudaoptflow)
+        target_compile_definitions(cuda_sparse_benchmark PRIVATE BINCV_CUDA_SPARSE_OPENCV=1)
+        target_link_libraries(cuda_sparse_benchmark PRIVATE
+            opencv_core opencv_imgcodecs opencv_cudafeatures2d opencv_cudaoptflow)
+        target_include_directories(cuda_sparse_benchmark SYSTEM PRIVATE
+            ${OpenCV_INCLUDE_DIRS})
+        message(STATUS "cuda_sparse_benchmark: role comparisons against "
+                       "cv::cuda::DescriptorMatcher and "
+                       "cv::cuda::SparsePyrLKOpticalFlow enabled "
+                       "(OpenCV ${OpenCV_VERSION} from ${BINCV_CUDA_OPENCV_DIR})")
+    else()
+        message(WARNING "BINCV_CUDA_OPENCV_DIR set but no OpenCV with cudafeatures2d + "
+                        "cudaoptflow found there; cuda_sparse_benchmark keeps its binCV "
+                        "arms and reports CASE A and CASE D as BLOCKED.")
+    endif()
+endif()
+
+# The packed census matcher's two arms priced against each other on one
+# explicit stream, with both memory meters beside them and the gate-excluded
+# case that must read ~1.00x. Self-contained: no OpenCV, because the bar this
+# arm answers to is binCV's own shipped kernel, not a role comparison.
+add_executable(cuda_census_box_benchmark cuda_census_box_benchmark.cpp cuda_bench_null.cu)
+target_link_libraries(cuda_census_box_benchmark PRIVATE bincv_core bincv_cuda bincv_warnings)
+target_include_directories(cuda_census_box_benchmark PRIVATE ${BINCV_POLICY_ROOT}/benchmark)
+set_target_properties(cuda_census_box_benchmark PROPERTIES
+    CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)

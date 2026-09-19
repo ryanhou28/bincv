@@ -33,6 +33,10 @@
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 namespace cuda {
+
+/// @brief The spread launch's block, in threads. One warp.
+constexpr unsigned kSpreadThreads = 32u;
+
 namespace {
 
 struct SubPixViews {
@@ -208,6 +212,13 @@ bool& subPixSkipEnabled() {
     return on;
 }
 
+bool& subPixSpreadEnabled() {
+    static bool on = true;
+    return on;
+}
+
+bool subPixSpreadApplies(uint32_t count) { return count > kSpreadThreads; }
+
 } // namespace impl
 
 DeviceSubPixMask::DeviceSubPixMask(const SubPixParams& params) {
@@ -253,7 +264,16 @@ cudaError_t cornerSubPixAsync(DeviceBinMatConstView magX, DeviceBinMatConstView 
     if (cornersXY == nullptr || mask == nullptr) return cudaErrorInvalidValue;
     if (magX.width == 0 || magX.height == 0) return cudaSuccess;
 
-    const unsigned threads = 256u;
+    // ONE CORNER PER THREAD is the bit-exactness requirement, so the only lever
+    // over the launch is how many SMs the corners land on -- and on this part
+    // that lever is the whole operation. A block of 256 puts a 200-corner
+    // refinement on ONE SM, and sm_86 runs FP64 at 1/64 of FP32: two FP64 pipes
+    // for the entire call. A block of one WARP puts the same 200 corners on
+    // seven SMs and seven times the FP64 issue. It is not smaller than a warp,
+    // because the pipe's cost is per warp-instruction rather than per active
+    // lane -- a block of 8 would engage more SMs and issue a quarter of the work
+    // per instruction, which is the trade running the wrong way.
+    const unsigned threads = impl::subPixSpreadEnabled() ? kSpreadThreads : 256u;
     const dim3 grid((count + threads - 1u) / threads);
     const double eps2 = params.epsilon * params.epsilon;
     if (impl::subPixSkipEnabled()) {

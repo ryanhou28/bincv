@@ -203,3 +203,95 @@ target_include_directories(test_cuda_keypoints PRIVATE ${BINCV_POLICY_ROOT}/test
 
 add_test(NAME cuda_keypoints COMMAND test_cuda_keypoints)
 set_tests_properties(cuda_keypoints PROPERTIES SKIP_RETURN_CODE 77)
+
+# The device Lucas-Kanade tracker against its host twin, bit for bit.
+#
+# A .cpp rather than a CUDA translation unit, and here that is load-bearing
+# rather than a preference. The ORACLE in this suite is the HOST tracker, and
+# ops/opticalFlow.hpp gates its AVX2 eight-keypoint batch off under __CUDACC__ --
+# compiled by nvcc the host arm of the comparison would silently become the
+# scalar one, and the suite would be holding the device to an arm no x86 caller
+# runs. It runs both host arms deliberately instead. Same reason
+# test_cuda_frontend_corner.cpp and test_cuda_keypoints.cpp give.
+#
+# -ffp-contract=off IS HALF OF WHAT THIS SUITE PINS, not a tuning flag. The
+# device tracker's equality claim is "device equals host when the host header is
+# compiled without FMA contraction"; src/opticalFlow.cu carries -fmad=false for
+# the other half. GCC's own default is -ffp-contract=fast, so without this flag
+# the claim would be true here by luck of the host ISA rather than by
+# construction -- and FmaContractionIsPinnedOnBothTargets exists so that losing
+# either flag fails the suite instead of silently changing which points
+# converge.
+bincv_add_test_target(test_cuda_opticalflow test_cuda_opticalflow.cpp)
+target_link_libraries(test_cuda_opticalflow PRIVATE bincv_cuda)
+target_include_directories(test_cuda_opticalflow PRIVATE ${BINCV_POLICY_ROOT}/tests)
+target_compile_options(test_cuda_opticalflow PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
+
+add_test(NAME cuda_optical_flow COMMAND test_cuda_opticalflow)
+set_tests_properties(cuda_optical_flow PROPERTIES SKIP_RETURN_CODE 77)
+
+# The five-point solver and the RANSAC sampler compiled for BOTH targets and
+# held to the same answer.
+#
+# ops/essential.hpp and ops/ransac.hpp carry BINCV_HOST_DEVICE on the solver
+# chain and the sampler, so a device compiles THAT elimination rather than
+# keeping a second one in agreement with it. This suite is what makes that
+# annotation a checked claim instead of a hopeful one: same source is not the
+# same answer when the device has its own libm behind std::cos, its own
+# double-precision hardware, and its own licence to contract a multiply and an
+# add into one rounding -- and the chain runs two loops that BREAK ON
+# CONVERGENCE, so a last-bit difference does not stay a last-bit difference.
+#
+# A CUDA translation unit, necessarily: the claim is about what nvcc's device
+# pass produces, and only a .cu has one.
+#
+# It compiles the benchmark directory's device apparatus. That apparatus is not
+# an operation and is not in bincv_cuda -- see cuda_ransac_kernels.hpp -- but the
+# suite and the benchmark must exercise ONE copy of it, because a kernel written
+# twice is the drift this project keeps finding.
+bincv_add_test_target(test_cuda_ransac test_cuda_ransac.cu
+                      ${CMAKE_CURRENT_SOURCE_DIR}/../benchmark/cuda_ransac_kernels.cu)
+target_link_libraries(test_cuda_ransac PRIVATE bincv_cuda)
+target_include_directories(test_cuda_ransac PRIVATE
+    ${BINCV_POLICY_ROOT}/tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/../benchmark)
+set_target_properties(test_cuda_ransac PROPERTIES CUDA_STANDARD 17
+                                                  CUDA_STANDARD_REQUIRED ON)
+
+add_test(NAME cuda_ransac COMMAND test_cuda_ransac)
+set_tests_properties(cuda_ransac PROPERTIES SKIP_RETURN_CODE 77)
+
+# Descriptor matching, sparse rectified stereo and Hamming block matching,
+# device against host. A CUDA translation unit, and it has to be one: two of its
+# cases call __device__ code AS A UNIT rather than through a kernel that uses it
+# -- the displaced-row builder over a device view, and the RowSpan extraction
+# built on it -- and those are the two pieces of arithmetic in this family whose
+# failure mode is a plausible disparity rather than a crash. Pinning them
+# against the host struct BEFORE the kernels that call them is what makes a
+# sweep failure name the primitive instead of the operation.
+#
+# It is ALSO where the -fmad=false on src/sparseMatch.cu becomes a checked
+# claim rather than a hopeful one: `disparity` and `nextPts` are compared with
+# memcmp as floats, so a contracted anchor -- which moves the window by a whole
+# pixel, not the result by a last bit -- fails here.
+bincv_add_test_target(test_cuda_sparse_match test_cuda_sparse_match.cu)
+target_link_libraries(test_cuda_sparse_match PRIVATE bincv_cuda)
+target_include_directories(test_cuda_sparse_match PRIVATE ${BINCV_POLICY_ROOT}/tests)
+set_target_properties(test_cuda_sparse_match PROPERTIES CUDA_STANDARD 17
+                                                        CUDA_STANDARD_REQUIRED ON)
+
+add_test(NAME cuda_sparse_match COMMAND test_cuda_sparse_match)
+set_tests_properties(cuda_sparse_match PROPERTIES SKIP_RETURN_CODE 77)
+
+# The packed census matcher's two arms -- the shipped per-pixel sliding kernel
+# and the warp-cooperative separable-box arm -- against the host wide path and
+# against each other, in one binary through the runtime switch. A plain C++
+# translation unit: every case here is a host-side comparison of downloaded
+# maps, and nothing in it calls __device__ code as a unit.
+bincv_add_test_target(test_cuda_census_box test_cuda_census_box.cpp)
+target_link_libraries(test_cuda_census_box PRIVATE bincv_cuda)
+target_include_directories(test_cuda_census_box PRIVATE ${BINCV_POLICY_ROOT}/tests)
+
+add_test(NAME cuda_census_box COMMAND test_cuda_census_box)
+set_tests_properties(cuda_census_box PROPERTIES SKIP_RETURN_CODE 77)

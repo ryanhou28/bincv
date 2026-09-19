@@ -66,11 +66,13 @@
 //   and no substitute bar is invented here.
 // * The optional host arm (BINCV_CUDA_VIO_HOST=1) is a same-machine CPU
 //   measurement against a GPU one. It is CONTEXT, printed with that label.
-// * It is a DETECT-AND-DESCRIBE frontend, not a TRACKING one. There is no
-//   device Lucas-Kanade in this backend, so the stage that dominates the host
-//   frontend (62-67% of it) has no device twin and is absent from both arms
-//   here. Comparing this program's total against docs/reports/frontend.md's
-//   would be comparing two different pipelines.
+// * It is a DETECT-AND-DESCRIBE frontend, not a TRACKING one. A device
+//   Lucas-Kanade now exists (cuda/opticalFlow.hpp), but this program does not
+//   call it: the stage that dominates the host frontend (62-67% of it) is
+//   absent from BOTH arms here, so the two totals stay comparable to each
+//   other and to nothing else. The tracking pipeline is timed end to end by
+//   `cuda_role_benchmark sequence`. Comparing this program's total against
+//   docs/reports/frontend.md's would be comparing two different pipelines.
 //
 // FRAMES
 //
@@ -1125,8 +1127,9 @@ int main(int argc, char** argv) {
                 "  worth optimizing next. A stage at 3%% of the frame cannot be worth more\n"
                 "  than 1.03x however fast it gets.\n");
     std::printf("  DOES NOT SHOW: a GPU-vs-GPU speed result (no counterpart exists); a\n"
-                "  TRACKING frontend (there is no device Lucas-Kanade in this backend, so\n"
-                "  the stage that is 62-67%% of the host frontend is absent from both arms\n"
-                "  here); or anything about pose error, which is outside this library.\n");
+                "  TRACKING frontend (a device Lucas-Kanade exists but this program does\n"
+                "  not call it, so the stage that is 62-67%% of the host frontend is absent\n"
+                "  from BOTH arms here -- cuda_role_benchmark sequence times that one); or\n"
+                "  anything about pose error, which is outside this library.\n");
     return 0;
 }

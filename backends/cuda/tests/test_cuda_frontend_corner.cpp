@@ -197,13 +197,17 @@ void checkFastMatches(const BinMat<Word>& img, int arcLength, const char* what) 
 /// Every arm combination, held to one answer -- which is what makes the runtime
 /// switches a claim rather than a comment.
 void checkFastAllArms(const BinMat<Word>& img, int arcLength, const char* what) {
-    for (int tiled = 1; tiled >= 0; --tiled) {
-        for (int maskScore = 1; maskScore >= 0; --maskScore) {
-            bc::impl::fastTiledEnabled() = tiled != 0;
-            bc::impl::fastMaskScoreEnabled() = maskScore != 0;
-            checkFastMatches(img, arcLength, what);
+    for (int ordered = 1; ordered >= 0; --ordered) {
+        for (int tiled = 1; tiled >= 0; --tiled) {
+            for (int maskScore = 1; maskScore >= 0; --maskScore) {
+                bc::impl::fastOrderedEnabled() = ordered != 0;
+                bc::impl::fastTiledEnabled() = tiled != 0;
+                bc::impl::fastMaskScoreEnabled() = maskScore != 0;
+                checkFastMatches(img, arcLength, what);
+            }
         }
     }
+    bc::impl::fastOrderedEnabled() = true;
     bc::impl::fastTiledEnabled() = true;
     bc::impl::fastMaskScoreEnabled() = true;
 }
@@ -315,6 +319,58 @@ BINCV_TEST(CudaFast, TruncationCountsTheTruthAndSaysSo) {
     const DeviceFastRun none = runDeviceFast(img, 0, 9);
     BINCV_CHECK_EQ(none.found, 0u);
     BINCV_CHECK(!none.truncated);
+}
+
+BINCV_TEST(CudaFast, TheOrderedArmTruncatesTheHostsWay) {
+    // The two arms differ on a TRUNCATED run and the difference is a property of
+    // the arms, not of the operation: an atomic decides which corners the sort
+    // arm stored, while a prefix sum writes every corner at its raster RANK, so
+    // an index below `capacity` is the host's prefix by construction. Both are
+    // held to the same `found()`; only the ordered one is held to the prefix.
+    const BinMat<Word> img = structuredBits(97, 29, 0x5150);
+    const size_t generous = 97 * 29 + 16;
+    std::vector<FastCorner> host(generous);
+    bool ht = false;
+    const size_t total = bincv::detectFast<Word>(img.constView(), host.data(), generous, &ht, 9);
+    BINCV_CHECK(total > 8);
+
+    const size_t small = total / 2;
+    BINCV_CHECK(bc::impl::fastOrderedApplies(97, 29, small));
+    const DeviceFastRun dev = runDeviceFast(img, small, 9);
+    BINCV_CHECK(dev.truncated);
+    BINCV_CHECK_EQ(static_cast<size_t>(dev.found), total);
+    BINCV_CHECK_EQ(dev.corners.size(), small);
+    const bool prefix =
+        std::memcmp(dev.corners.data(), host.data(), small * sizeof(FastCorner)) == 0;
+    BINCV_CHECK(prefix);
+
+    // Capacity 1 is the sharpest form of it: the single corner kept must be the
+    // FIRST in raster order, not whichever thread arrived first.
+    if (bc::impl::fastOrderedApplies(97, 29, 1)) {
+        const DeviceFastRun one = runDeviceFast(img, 1, 9);
+        BINCV_CHECK_EQ(one.corners.size(), size_t{1});
+        BINCV_CHECK(std::memcmp(one.corners.data(), host.data(), sizeof(FastCorner)) == 0);
+    }
+}
+
+BINCV_TEST(CudaFast, TheOrderedArmsGateIsTheCallersScratch) {
+    // The gate-excluded case, named through the predicate rather than restated:
+    // a capacity too small to hold one `uint32_t` per block cannot run the
+    // ordered arm, and there both switch positions are the same code. The
+    // benchmark reports ~1.00x for exactly this case.
+    BINCV_CHECK(bc::impl::fastOrderedApplies(752, 480, 32768));
+    BINCV_CHECK(bc::impl::fastOrderedApplies(752, 480, 512));
+    BINCV_CHECK(!bc::impl::fastOrderedApplies(752, 480, 8));
+    BINCV_CHECK(!bc::impl::fastOrderedApplies(752, 480, 0));
+    // And it still answers correctly there -- the fallback is an arm, not a gap.
+    const BinMat<Word> img = structuredBits(752, 37, 0x0A11);
+    const size_t generous = 752 * 37 + 16;
+    std::vector<FastCorner> host(generous);
+    bool ht = false;
+    const size_t total = bincv::detectFast<Word>(img.constView(), host.data(), generous, &ht, 9);
+    BINCV_CHECK(total > 8);
+    const DeviceFastRun gated = runDeviceFast(img, 8, 9);
+    BINCV_CHECK_EQ(static_cast<size_t>(gated.found), total);
 }
 
 BINCV_TEST(CudaFast, RefusesAnArcLengthOutsideTheRing) {
@@ -480,36 +536,50 @@ void checkCornersMatch(const BinMat<Word>& frame, const GoodFeaturesParams& para
     // Big enough for every raw 3x3 maximum the frame can have, so the device is
     // answering the same question the host is.
     const size_t candidateCapacity = w > 2 && h > 2 ? (w - 2) * (h - 2) : 1;
-    for (int fused = 1; fused >= 0; --fused) {
-        const DeviceCornerRun dev =
-            runDeviceCorners(d, w, h, params, capacity, candidateCapacity, fused != 0);
-        BINCV_CHECK_EQ(static_cast<int>(dev.err), static_cast<int>(cudaSuccess));
-        BINCV_CHECK_EQ(dev.result.candidateOverflow, 0u);
-        BINCV_CHECK_EQ(static_cast<size_t>(dev.result.count), hr.count);
-        BINCV_CHECK_EQ(static_cast<size_t>(dev.result.candidatesRanked), hr.candidatesRanked);
-        BINCV_CHECK_EQ(dev.result.candidatesTruncated != 0, hr.candidatesTruncated);
-        if (dev.result.count != hr.count) {
-            std::printf("  [%s] fused %d: device %u corners, host %zu\n", what, fused,
-                        dev.result.count, hr.count);
-            continue;
-        }
-        const bool same = hr.count == 0 || std::memcmp(dev.corners.data(), host.data(),
-                                                       hr.count * sizeof(Corner)) == 0;
-        BINCV_CHECK(same);
-        if (!same) {
-            for (size_t i = 0; i < hr.count; ++i) {
-                if (dev.corners[i].x != host[i].x || dev.corners[i].y != host[i].y ||
-                    dev.corners[i].response != host[i].response) {
-                    std::printf("  [%s] fused %d: first mismatch at %zu: device "
-                                "(%d,%d,%.9g) host (%d,%d,%.9g)\n",
-                                what, fused, i, dev.corners[i].x, dev.corners[i].y,
-                                static_cast<double>(dev.corners[i].response), host[i].x,
-                                host[i].y, static_cast<double>(host[i].response));
-                    break;
+    // Three switches, every position, all held to the ONE host answer: the
+    // candidate arm, the sort's parallelism and the spacing filter's shape. The
+    // spacing pair is also where the integer distance test is proven -- the
+    // reference arm keeps the host's double comparison, so agreement here is the
+    // proof that `s < ceil(minDistanceSq)` is the same predicate.
+    for (int sortPar = 1; sortPar >= 0; --sortPar) {
+        for (int chunked = 1; chunked >= 0; --chunked) {
+            bc::impl::cornerSortParallelEnabled() = sortPar != 0;
+            bc::impl::cornerSpacingChunkedEnabled() = chunked != 0;
+            for (int fused = 1; fused >= 0; --fused) {
+                const DeviceCornerRun dev =
+                    runDeviceCorners(d, w, h, params, capacity, candidateCapacity, fused != 0);
+                BINCV_CHECK_EQ(static_cast<int>(dev.err), static_cast<int>(cudaSuccess));
+                BINCV_CHECK_EQ(dev.result.candidateOverflow, 0u);
+                BINCV_CHECK_EQ(static_cast<size_t>(dev.result.count), hr.count);
+                BINCV_CHECK_EQ(static_cast<size_t>(dev.result.candidatesRanked),
+                               hr.candidatesRanked);
+                BINCV_CHECK_EQ(dev.result.candidatesTruncated != 0, hr.candidatesTruncated);
+                if (dev.result.count != hr.count) {
+                    std::printf("  [%s] fused %d: device %u corners, host %zu\n", what, fused,
+                                dev.result.count, hr.count);
+                    continue;
+                }
+                const bool same = hr.count == 0 || std::memcmp(dev.corners.data(), host.data(),
+                                                               hr.count * sizeof(Corner)) == 0;
+                BINCV_CHECK(same);
+                if (!same) {
+                    for (size_t i = 0; i < hr.count; ++i) {
+                        if (dev.corners[i].x != host[i].x || dev.corners[i].y != host[i].y ||
+                            dev.corners[i].response != host[i].response) {
+                            std::printf("  [%s] fused %d: first mismatch at %zu: device "
+                                        "(%d,%d,%.9g) host (%d,%d,%.9g)\n",
+                                        what, fused, i, dev.corners[i].x, dev.corners[i].y,
+                                        static_cast<double>(dev.corners[i].response), host[i].x,
+                                        host[i].y, static_cast<double>(host[i].response));
+                            break;
+                        }
+                    }
                 }
             }
         }
     }
+    bc::impl::cornerSortParallelEnabled() = true;
+    bc::impl::cornerSpacingChunkedEnabled() = true;
     bc::impl::cornerFusedEnabled() = true;
 }
 
@@ -738,6 +808,18 @@ BINCV_TEST(CudaCorner, RefusesOutsideItsDocumentedDomain) {
                        dres.data())),
                    static_cast<int>(cudaErrorInvalidValue));
     BINCV_CHECK_EQ(static_cast<int>(cudaGetLastError()), static_cast<int>(cudaSuccess));
+
+    // A frame wider than the ordering key's 16 bits per axis. Refused, not
+    // wrapped -- the key packs `CornerStronger`'s tie rule into those bits, and
+    // a wrapped coordinate would order corners plausibly and wrongly.
+    bc::DeviceBinMat wideFrame(65537, 1);
+    work.scratchBytes = bc::goodFeaturesScratchBytes(64);
+    BINCV_CHECK_EQ(static_cast<int>(bc::goodFeaturesToTrackAsync(
+                       wideFrame.constView(), wideFrame.constView(), wideFrame.constView(),
+                       wideFrame.constView(), GoodFeaturesParams(), work, dout.data(), 16u,
+                       dres.data())),
+                   static_cast<int>(cudaErrorInvalidValue));
+    BINCV_CHECK_EQ(static_cast<int>(cudaGetLastError()), static_cast<int>(cudaSuccess));
 #endif
 }
 
@@ -757,6 +839,7 @@ void checkSubPixMatches(const BinMat<Word>& frame, const SubPixParams& params,
 
     bc::DeviceSubPixMask mask(params);
     for (int skip = 1; skip >= 0; --skip) {
+        bc::impl::subPixSpreadEnabled() = skip != 0;
         bc::impl::subPixSkipEnabled() = skip != 0;
         bc::DeviceArray<float> dxy(seeds.size() * 2);
         cudaMemcpy(dxy.data(), seeds.data(), seeds.size() * sizeof(Point2f),
@@ -798,6 +881,7 @@ void checkSubPixMatches(const BinMat<Word>& frame, const SubPixParams& params,
         BINCV_CHECK_EQ(static_cast<size_t>(dr.diverged), hr.diverged);
     }
     bc::impl::subPixSkipEnabled() = true;
+    bc::impl::subPixSpreadEnabled() = true;
 }
 
 std::vector<Point2f> gridSeeds(size_t w, size_t h, int step) {

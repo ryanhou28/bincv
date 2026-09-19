@@ -629,13 +629,38 @@ BINCV_TEST(CudaCensus, Census5x5_uint16_t) { testCensus<24, uint16_t>(bincv::kCe
 // byte, across parameter shapes including the degenerate ones.
 // ---------------------------------------------------------------------------
 namespace {
-void testDenseBinary(size_t w, size_t h, const bincv::DenseDisparityParams& p,
-                     int shift) {
+/// @brief Breaks the exact-shift relationship between a stereo pair.
+///
+/// A right image built as an EXACT shift of the left makes the correct
+/// disparity's window cost zero and every other candidate's cost hundreds, so
+/// the argmin is insensitive to window-sum errors of a few hundred. A suite
+/// built only that way passes a matcher whose window aggregation is wrong: the
+/// census box matcher's first suite did exactly that, accepting a halo one lane
+/// too wide on every shape with a byte-identical map. Perturbing the right
+/// image leaves a correct matcher's answer defined by the host and makes a
+/// wrong window sum able to change it.
+///
+/// Deterministic and content-dependent, so the two backends see one image.
+void breakExactShift(std::vector<uint8_t>& rw, size_t w, size_t h, uint32_t seed) {
+    uint32_t st = seed | 1u;
+    for (size_t i = 0; i < w * h; ++i) {
+        st ^= st << 13;
+        st ^= st >> 17;
+        st ^= st << 5;
+        const int delta = static_cast<int>(st % 61u) - 30;
+        const int v = static_cast<int>(rw[i]) + delta;
+        rw[i] = static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+    }
+}
+
+void testDenseBinary(size_t w, size_t h, const bincv::DenseDisparityParams& p, int shift,
+                     bool perturb = false) {
     const auto lw = smoothFrame(w, h, 0xD15B + w);
     std::vector<uint8_t> rw(w * h, 0);
     for (size_t y = 0; y < h; ++y)
         for (size_t x = 0; x + static_cast<size_t>(shift) < w; ++x)
             rw[y * w + x] = lw[y * w + x + static_cast<size_t>(shift)];
+    if (perturb) breakExactShift(rw, w, h, 0x5EED0001u + static_cast<uint32_t>(w));
 
     bincv::BinMat<uint64_t> lb(static_cast<int>(w), static_cast<int>(h));
     bincv::BinMat<uint64_t> rb(static_cast<int>(w), static_cast<int>(h));
@@ -693,6 +718,23 @@ BINCV_TEST(CudaDense, Binary_D64_5x5) {
     p.winWidth = 5;
     p.winHeight = 5;
     testDenseBinary(200, 60, p, 21);
+}
+
+// The same shapes on content that is NOT an exact shift. This is what makes the
+// byte-for-byte comparison above able to see a window-aggregation error at all;
+// see breakExactShift.
+BINCV_TEST(CudaDense, Binary_D32_9x9_NotAnExactShift) {
+    bincv::DenseDisparityParams p;
+    p.maxDisparity = 32;
+    testDenseBinary(160, 120, p, 11, true);
+}
+
+BINCV_TEST(CudaDense, Binary_D64_5x5_NotAnExactShift) {
+    bincv::DenseDisparityParams p;
+    p.maxDisparity = 64;
+    p.winWidth = 5;
+    p.winHeight = 5;
+    testDenseBinary(200, 60, p, 21, true);
 }
 
 BINCV_TEST(CudaDense, Binary_MinDisparity) {
@@ -762,11 +804,15 @@ BINCV_TEST(CudaDense, Binary_TailWordThreePixels) {
 BINCV_TEST(CudaDense, CensusEntryMatchesHostWidePath) {
     const size_t w = 160, h = 96;
     constexpr size_t K = 24;
+    // Two contents: an exact shift, and one that is not. Only the second can see
+    // a window-aggregation error at all -- see breakExactShift.
+    for (int perturb = 0; perturb < 2; ++perturb) {
     const auto lw = smoothFrame(w, h, 0xCE2255);
     std::vector<uint8_t> rw(w * h, 0);
     const size_t shift = 9;
     for (size_t y = 0; y < h; ++y)
         for (size_t x = 0; x + shift < w; ++x) rw[y * w + x] = lw[y * w + x + shift];
+    if (perturb) breakExactShift(rw, w, h, 0x5EED0002u);
 
     bincv::DenseDisparityParams p;
     p.maxDisparity = 32;
@@ -811,6 +857,7 @@ BINCV_TEST(CudaDense, CensusEntryMatchesHostWidePath) {
         BINCV_CHECK_EQ(bad, 0u);
     }
     bincv::cuda::impl::denseFastArmEnabled() = true;
+    }
 }
 
 // The packed-descriptor census path: a different intermediate LAYOUT for the
@@ -819,7 +866,10 @@ BINCV_TEST(CudaDense, CensusEntryMatchesHostWidePath) {
 // permutation of a descriptor's bits, and this is what holds that to account.
 BINCV_TEST(CudaDense, PackedCensusMatchesHostAndPlaneForm) {
     constexpr size_t K = 24;
-    const size_t sizes[][2] = {{160, 96}, {131, 47}};
+    // Third column: whether the right image stays an EXACT shift of the left.
+    // Every shape runs both ways, because only the perturbed content can see a
+    // window-aggregation error at all -- see breakExactShift.
+    const size_t sizes[][3] = {{160, 96, 0}, {131, 47, 0}, {160, 96, 1}, {131, 47, 1}};
     for (const auto& sz : sizes) {
         const size_t w = sz[0], h = sz[1];
         const auto lw = smoothFrame(w, h, 0xACE1 + w);
@@ -827,6 +877,7 @@ BINCV_TEST(CudaDense, PackedCensusMatchesHostAndPlaneForm) {
         const size_t shift = 9;
         for (size_t y = 0; y < h; ++y)
             for (size_t x = 0; x + shift < w; ++x) rw[y * w + x] = lw[y * w + x + shift];
+        if (sz[2]) breakExactShift(rw, w, h, 0x5EED0003u + static_cast<uint32_t>(w));
 
         bincv::DenseDisparityParams p;
         p.maxDisparity = 32;

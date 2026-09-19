@@ -93,6 +93,41 @@
 /// an optimisation, and one that would have been wrong.
 ///
 /// ---------------------------------------------------------------------------
+/// THE ORDER COSTS LESS THAN THE CORNER: THE SELECTION IS NOT ONE BLOCK
+///
+/// The selection used to be one block for the whole tail -- a bitonic network
+/// over 16-byte corner records, then a greedy spacing filter that rescanned
+/// every surviving candidate once per acceptance. On the reference frame, with
+/// 25,115 candidates and 200 corners kept, that was 5.6 ms of sort and 23.1 ms
+/// of spacing against 0.13 ms of candidate generation: 98% of the operation, on
+/// one of 48 SMs, at 1.29% of the part's throughput.
+///
+/// Two facts about the REPRESENTATION replace it, and both are the same fact.
+///
+/// 1. **`CornerStronger` is a 64-bit unsigned comparison, and the key is the
+/// corner.** A response is never negative and never NaN (the PRECISION
+/// section below), so its IEEE bit pattern orders exactly as the float does;
+/// `x` and `y` are below 65536. So
+/// `key = (~responseBits) << 32 | (0xFFFF - y) << 16 | (0xFFFF - x)`
+/// makes ASCENDING key order identical to `CornerStronger`, and the pack is
+/// LOSSLESS -- the corner comes back out with three shifts. The sort moves
+/// 8 bytes per element instead of 16, no payload array exists, and the
+/// spacing filter reads a position out of 4 bytes. Keys are unique because
+/// positions are, so the sorted sequence is unique and the sort's own
+/// order-dependence cannot reach the answer.
+/// 2. **The spacing filter TESTS, it does not kill.** Killing is one pass over
+/// every survivor per acceptance. Testing -- the host's own loop: for each
+/// candidate in rank order, accept it when no accepted corner is within
+/// `minDistance` -- is one pass over the candidates, and the accepted set is
+/// at most `maxCorners` points in shared memory. A block tests 1024
+/// candidates at once and then resolves the acceptances inside that chunk
+/// serially, which is at most one round per corner kept.
+///
+/// The sort is a standard bitonic network made device-wide: a block sorts 4096
+/// keys in shared memory and the stages wider than a chunk are their own
+/// launches, because a block barrier is not a device barrier.
+///
+/// ---------------------------------------------------------------------------
 /// THE DEVICE DOMAIN, NAMED because it is narrower than the host's (ruling R4)
 ///
 /// * Word type `uint32_t`. The host compiles at 8, 16, 32 and 64.
@@ -105,6 +140,10 @@
 /// be discovered.
 /// * Candidate counts, capacities and corner counts are `uint32_t`
 /// (compaction.hpp's domain), asserted and refused rather than narrowed.
+/// * **At most 65536 pixels on a side.** The selection's ordering key packs
+/// `CornerStronger`'s tie rule -- y descending, then x descending -- into 16
+/// bits per axis, which is what makes the key lossless and the sort a plain
+/// unsigned comparison. A larger frame is refused, not wrapped.
 
 #include <cstddef>
 #include <cstdint>
@@ -252,6 +291,40 @@ bool cornerSlicedApplies(int blockSize);
 /// materialises no frame-sized bytes at all. Both are held to the same corner
 /// array and the same result triple in one binary.
 bool& cornerFusedEnabled();
+
+/// @brief Selects the DEVICE-WIDE sort (default) or the one-block network.
+/// **INTERNAL.** Both sort the same 64-bit ordering keys with the same bitonic
+/// network and are held to the same corner array in one binary; the difference
+/// is whether the stages wider than a shared-memory chunk are their own
+/// launches or another pass of one block.
+/// @note The one-block arm is what the operation shipped with, and on the
+/// reference frame it was 5.6 ms of a 9.8 ms detection.
+bool& cornerSortParallelEnabled();
+
+/// @brief Whether the device-wide sort would differ from the one-block sort for
+/// this candidate capacity. **INTERNAL** -- the benchmark and the suite need to
+/// name the gate-excluded case without restating the gate.
+/// @note The gate is `nextPow2(candidateCapacity) > 2048`: at or below one
+/// shared-memory chunk the "device-wide" ladder IS one block sorting one chunk,
+/// so both switch positions run the same network and the benchmark must report
+/// ~1.00x.
+bool cornerSortParallelApplies(size_t candidateCapacity);
+
+/// @brief Selects the chunked spacing filter (default) or the reference arm that
+/// kills forward once per acceptance. **INTERNAL.**
+/// @note The two are the same answer and the chunked one is the HOST's own loop:
+/// for each candidate in rank order, accept it when no accepted corner is within
+/// `minDistance`. The reference arm reaches that answer by marking the losers
+/// instead, which costs one pass over every surviving candidate per acceptance
+/// -- 200 passes over 25,115 candidates on the reference frame, and 23.1 ms of a
+/// 28.9 ms detection when it was measured alone.
+bool& cornerSpacingChunkedEnabled();
+
+/// @brief Whether the spacing filter runs at all for these parameters.
+/// **INTERNAL.** The gate is `minDistance >= 1.0`, which is `cv::gftt`'s own:
+/// below it there is no spacing pass, both switch positions take the same
+/// branch, and the benchmark must report ~1.00x.
+bool cornerSpacingChunkedApplies(const GoodFeaturesParams& params);
 
 } // namespace impl
 

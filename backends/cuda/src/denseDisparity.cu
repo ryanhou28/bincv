@@ -13,6 +13,7 @@
 // Binary and census are ONE kernel: the binary path is the census path at
 // planes = 1. Plane k of a block sits at rows [k * H, (k + 1) * H).
 
+#include "bincv/cuda/denseCensusBox.hpp"
 #include "bincv/cuda/denseDisparity.hpp"
 
 namespace bincv {
@@ -903,6 +904,16 @@ cudaError_t denseDisparityCensusPacked(DeviceImageConstView<uint32_t> leftDesc,
                           disparity.width, disparity.height, stream);
     if (err != cudaSuccess) return err;
     const size_t outRows = height - 2 * static_cast<size_t>(params.winHeight / 2);
+    // The warp-cooperative separable-box arm, when its gate accepts the shape:
+    // the horizontal half of the window sum is shared across lanes instead of
+    // recomputed per column, which is what the shipped kernel's profile asks
+    // for (its stall histogram is dominated by dependency wait at 15% occupancy
+    // and by the load-store instruction queue, not by memory). Switchable off,
+    // held byte-equal to the kernel below in one binary.
+    if (impl::densePackedBoxEnabled() && impl::densePackedBoxAccepts(params)) {
+        return impl::launchDensePackedWarpBox(leftDesc, rightDesc, params.minDisparity,
+                                              dEnd, params, disparity, outRows, stream);
+    }
     const dim3 grid(static_cast<unsigned>((width + kPackBlock - 1) / kPackBlock),
                     static_cast<unsigned>((outRows + kStrip - 1) / kStrip));
     // MEASURED NEGATIVE, do not retry on this shape: staging each pixel pair's

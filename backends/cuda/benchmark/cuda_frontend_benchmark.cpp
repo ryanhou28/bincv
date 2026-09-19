@@ -370,7 +370,48 @@ const uint32_t kFastCapacity = 16384;
                 kFastCapacity, fastRes.truncated() ? ", TRUNCATED" : "");
 
     {
+        // THE ORDERING ARM, and it is this section's headline. Both arms return
+        // the host's raster order on a complete run; one gets there with a
+        // single-block bitonic network over the stored corners, the other by
+        // prefix-summing per-word popcounts so every corner is written at its
+        // raster rank. No corner is ever compared with another on the fast arm.
         bincv::cuda::impl::fastMaskScoreEnabled() = true;
+        bincv::cuda::impl::fastTiledEnabled() = true;
+        const PairedTiming ordered = timeKernelPaired(
+            [&] { bincv::cuda::impl::fastOrderedEnabled() = true; runFast(9); },
+            [&] { bincv::cuda::impl::fastOrderedEnabled() = false; runFast(9); }, 10, 10,
+            kRounds, gStream);
+        printPaired("detectFast, ORDERED arm (prefix sum, no sort)",
+                    "detectFast, append-and-SORT arm", ordered, "kernel");
+        std::printf("   off-switch ratio sort/ordered: %.2fx  at %u corners\n\n",
+                    ordered.ratioMedian, fastRes.found());
+
+        // THE GATE-EXCLUDED CONTROL for the ordering arm: a capacity too small
+        // to hold one uint32 per block in the caller's scratch. Both switch
+        // positions then run the append-and-sort arm and this MUST read ~1.00x.
+        bincv::cuda::impl::fastOrderedEnabled() = true;
+        bc::DeviceArray<bc::DeviceFastCorner> tiny(8);
+        bc::DeviceAppendCounter tinyCounter;
+        const bc::DeviceFastCornerBuffer tinyBuf(tiny.data(), tinyCounter.devicePtr(), 8u);
+        bc::DeviceArray<uint8_t> tinyScratch(bc::fastScratchBytes(8) + 16);
+        const auto runTiny = [&] {
+            tinyCounter.reset(gStream);
+            bc::detectFastAsync(dframe.constView(), tinyBuf, tinyScratch.data(),
+                                bc::fastScratchBytes(8), 9, gStream);
+        };
+        const PairedTiming orderControl = timeKernelPaired(
+            [&] { bincv::cuda::impl::fastOrderedEnabled() = true; runTiny(); },
+            [&] { bincv::cuda::impl::fastOrderedEnabled() = false; runTiny(); }, 10, 10,
+            kRounds, gStream);
+        printPaired("CONTROL capacity 8, switch ON  (gate excludes it)",
+                    "CONTROL capacity 8, switch OFF", orderControl, "kernel",
+                    /*expect1x=*/true);
+        std::printf("   fastOrderedApplies(%zu, %zu, 8) = %s -- the gate's own answer.\n\n",
+                    kWidth, kHeight,
+                    bincv::cuda::impl::fastOrderedApplies(kWidth, kHeight, 8) ? "true"
+                                                                             : "FALSE");
+        bincv::cuda::impl::fastOrderedEnabled() = true;
+
         const PairedTiming tiled = timeKernelPaired(
             [&] { bincv::cuda::impl::fastTiledEnabled() = true; runFast(9); },
             [&] { bincv::cuda::impl::fastTiledEnabled() = false; runFast(9); }, 10, 10,
@@ -404,13 +445,14 @@ const uint32_t kFastCapacity = 16384;
         bincv::cuda::impl::fastTiledEnabled() = true;
     }
 
-    // THE SORT'S SHARE, ISOLATED -- and it is the finding of this section.
-    // The sort is not an optimization and has no off-switch: it is what makes a
-    // complete run byte-comparable with the host, because an atomic append has no
-    // order and compaction.hpp refuses to promise one. But it is a SINGLE-BLOCK
-    // bitonic network, O(n log^2 n) on one SM with 47 idle, so its cost is a
-    // function of how many corners were STORED and nothing else. Two capacities
-    // over the identical detection work is what separates it from the detector.
+    // WHAT THE ORDERING COSTS NOW, isolated the same way it was when it was the
+    // whole operation: two capacities over IDENTICAL detection work, so the only
+    // difference is how many corners are ordered. With the append-and-sort arm
+    // this pair read 0.03 ms against 2.24 ms, because a single-block bitonic
+    // network is O(n log^2 n) on one SM with 47 idle and its cost tracks
+    // nextPow2(stored). With the prefix-sum arm the ordering is O(n) and the two
+    // capacities do the same work, so the pair should now read near 1.00x -- and
+    // if it does not, the ordering still scales with the corner count.
     {
         bc::DeviceArray<bc::DeviceFastCorner> small(512);
         bc::DeviceAppendCounter smallCounter;
@@ -423,15 +465,13 @@ const uint32_t kFastCapacity = 16384;
                                     bc::fastScratchBytes(512), 9, gStream);
             },
             [&] { runFast(9); }, 10, 10, kRounds, gStream);
-        printPaired("detectFast, capacity 512  (sorts 512 slots)",
-                    "detectFast, full capacity (sorts every stored corner)", bySort, "kernel");
+        printPaired("detectFast, capacity 512  (orders 512 corners)",
+                    "detectFast, full capacity (orders every stored corner)", bySort, "kernel");
         std::printf("   IDENTICAL DETECTION WORK on both sides -- every pixel of the frame\n"
                     "   is tested either way, and only the number of STORED corners differs.\n"
-                    "   The gap is therefore the raster sort, and at a capacity a frontend\n"
-                    "   would actually use it is small. THE OPEN ITEM THIS NAMES: at high\n"
-                    "   corner counts the single-block sort is most of the operation, and a\n"
-                    "   multi-block network or a positional prefix-sum compaction would\n"
-                    "   remove it. Measured here, not assumed, and not fixed in this round.\n\n");
+                    "   The gap is therefore the ordering. A ratio near 1.00x is the claim:\n"
+                    "   the ordering no longer scales with the corner count, because it is a\n"
+                    "   prefix sum over WORDS and not a comparison network over corners.\n\n");
         sortShare = bySort.ratioMedian;
         sortOnlyMs = bySort.a.medianMs;
     }
@@ -566,6 +606,97 @@ const uint32_t kFastCapacity = 16384;
         bincv::cuda::impl::cornerFusedEnabled() = true;
     }
 
+    // THE TWO SELECTION ARMS. The tail the reference positions run -- one block,
+    // a bitonic network over 16-byte corner records, then a greedy filter that
+    // rescans every surviving candidate once per acceptance -- measured 5.6 ms
+    // of sort and 23.1 ms of spacing on a real frame with 25,115 candidates.
+    // Both are switchable and both are held to the same corner array by the
+    // suite.
+    {
+        const PairedTiming sortArm = timeKernelPaired(
+            [&] { bincv::cuda::impl::cornerSortParallelEnabled() = true; runCorners(); },
+            [&] { bincv::cuda::impl::cornerSortParallelEnabled() = false; runCorners(); }, 5, 5,
+            kRounds, gStream);
+        printPaired("goodFeaturesToTrack, DEVICE-WIDE sort ladder",
+                    "goodFeaturesToTrack, one-block sort", sortArm, "kernel");
+        std::printf("   off-switch ratio one-block/device-wide: %.2fx\n\n",
+                    sortArm.ratioMedian);
+        bincv::cuda::impl::cornerSortParallelEnabled() = true;
+
+        const PairedTiming spaceArm = timeKernelPaired(
+            [&] { bincv::cuda::impl::cornerSpacingChunkedEnabled() = true; runCorners(); },
+            [&] { bincv::cuda::impl::cornerSpacingChunkedEnabled() = false; runCorners(); }, 5,
+            5, kRounds, gStream);
+        printPaired("goodFeaturesToTrack, CHUNKED spacing (test)",
+                    "goodFeaturesToTrack, kill-forward spacing", spaceArm, "kernel");
+        std::printf("   off-switch ratio kill/chunked: %.2fx\n"
+                    "   The chunked arm is the HOST's own loop -- for each candidate in rank\n"
+                    "   order, accept it when no accepted corner is within minDistance --\n"
+                    "   with the test spread over a block. The reference arm reaches the same\n"
+                    "   answer by marking losers, which is one pass over every survivor per\n"
+                    "   acceptance. It also keeps the host's DOUBLE distance comparison,\n"
+                    "   which is what makes the suite's agreement the proof that the chunked\n"
+                    "   arm's integer test is the same predicate.\n\n",
+                    spaceArm.ratioMedian);
+        bincv::cuda::impl::cornerSpacingChunkedEnabled() = true;
+
+        // GATE-EXCLUDED CONTROLS. minDistance < 1 takes gftt.cpp's own `else`
+        // branch, so there is no spacing pass for either switch position to
+        // differ over; both MUST read ~1.00x.
+        bincv::GoodFeaturesParams noSpace = params;
+        noSpace.minDistance = 0.0;
+        const auto runNoSpace = [&] {
+            candCounter.reset(gStream);
+            cudaMemsetAsync(dmaxBits.data(), 0, sizeof(uint32_t), gStream);
+            bc::goodFeaturesToTrackAsync(dmagX.constView(), dmagY.constView(),
+                                         dsignX.constView(), dsignY.constView(), noSpace, work,
+                                         dcorners.data(), kCornerCapacity, dresult.data(),
+                                         gStream);
+        };
+        const PairedTiming spaceControl = timeKernelPaired(
+            [&] { bincv::cuda::impl::cornerSpacingChunkedEnabled() = true; runNoSpace(); },
+            [&] { bincv::cuda::impl::cornerSpacingChunkedEnabled() = false; runNoSpace(); }, 5,
+            5, kRounds, gStream);
+        printPaired("CONTROL minDistance 0, chunked ON  (gate excludes it)",
+                    "CONTROL minDistance 0, chunked OFF", spaceControl, "kernel",
+                    /*expect1x=*/true);
+        std::printf("   cornerSpacingChunkedApplies(minDistance 0) = %s\n\n",
+                    bincv::cuda::impl::cornerSpacingChunkedApplies(noSpace) ? "true" : "FALSE");
+        bincv::cuda::impl::cornerSpacingChunkedEnabled() = true;
+
+        // And the sort ladder's own gate: at a candidate capacity inside one
+        // shared-memory chunk the "device-wide" ladder IS one block sorting one
+        // chunk, so both positions run the same network.
+        const uint32_t kSmallPool = 1024;
+        bc::DeviceArray<bc::DeviceCorner> smallCand(kSmallPool);
+        bc::DeviceAppendCounter smallCounter;
+        bc::DeviceArray<uint8_t> smallScratch(bc::goodFeaturesScratchBytes(kSmallPool));
+        bc::DeviceGoodFeaturesWorkspace smallWork = work;
+        smallWork.candidates =
+            bc::DeviceCornerBuffer(smallCand.data(), smallCounter.devicePtr(), kSmallPool);
+        smallWork.scratch = smallScratch.data();
+        smallWork.scratchBytes = bc::goodFeaturesScratchBytes(kSmallPool);
+        const auto runSmall = [&] {
+            smallCounter.reset(gStream);
+            cudaMemsetAsync(dmaxBits.data(), 0, sizeof(uint32_t), gStream);
+            bc::goodFeaturesToTrackAsync(dmagX.constView(), dmagY.constView(),
+                                         dsignX.constView(), dsignY.constView(), params,
+                                         smallWork, dcorners.data(), kCornerCapacity,
+                                         dresult.data(), gStream);
+        };
+        const PairedTiming sortControl = timeKernelPaired(
+            [&] { bincv::cuda::impl::cornerSortParallelEnabled() = true; runSmall(); },
+            [&] { bincv::cuda::impl::cornerSortParallelEnabled() = false; runSmall(); }, 5, 5,
+            kRounds, gStream);
+        printPaired("CONTROL pool 1024, ladder ON  (gate excludes it)",
+                    "CONTROL pool 1024, ladder OFF", sortControl, "kernel", /*expect1x=*/true);
+        std::printf("   cornerSortParallelApplies(1024) = %s  (this pool OVERFLOWS on this\n"
+                    "   frame, which is a refusal and not a wrong answer -- the control is\n"
+                    "   timing the launch ladder, which is what it is for)\n\n",
+                    bincv::cuda::impl::cornerSortParallelApplies(kSmallPool) ? "true" : "FALSE");
+        bincv::cuda::impl::cornerSortParallelEnabled() = true;
+    }
+
     // WHERE THE TIME ACTUALLY IS, isolated -- because the family's design
     // inherited this on trust and the review was right to say so. The selection
     // tail is ONE BLOCK: a bitonic sort over the candidates, then the greedy
@@ -586,18 +717,16 @@ const uint32_t kFastCapacity = 16384;
             [&] { runCorners(); }, 5, 5, kRounds, gStream);
         printPaired("whole op, spacing OFF (sort only in the tail)",
                     "whole op, spacing ON  (sort + greedy filter)", split, "kernel");
-        std::printf("   THE MEASURED FINDING, and it contradicts what the family's design\n"
-                    "   assumed: the cost centre of this operation is the ONE-BLOCK SELECTION\n"
-                    "   TAIL, not the response tile the design scheduled a sweep for. With\n"
-                    "   %u raw maxima on this frame the tail runs a bitonic network over the\n"
-                    "   surviving candidates on a single SM with 47 idle. Raising the block\n"
-                    "   from 256 to 1024 threads took the whole operation from 24.4 ms to\n"
-                    "   %.1f ms in this binary, which is itself the evidence that the tail is\n"
-                    "   what is being measured. THE OPEN ITEM: the top-`capacity` selection\n"
-                    "   does not need a full sort -- the response domain at blockSize 3 is\n"
-                    "   small, so a histogram cut to the capacity boundary plus a much\n"
-                    "   smaller sort is exact and is the obvious next round. Not done here,\n"
-                    "   and named rather than left for the next reader to rediscover.\n\n",
+        std::printf("   The tail is still where this operation's time is -- %u raw maxima\n"
+                    "   on this frame, %.3f ms with the spacing filter on -- but the split is\n"
+                    "   no longer what it was. The sort is now a device-wide ladder and the\n"
+                    "   spacing filter tests rather than kills, so what remains is the\n"
+                    "   spacing pass itself, and it is ONE BLOCK because the acceptances are\n"
+                    "   sequential. THE OPEN ITEM, named rather than left to be\n"
+                    "   rediscovered: that pass costs `ranked x kept` distance tests, and a\n"
+                    "   spatial index over the accepted points would make it `ranked x O(1)`\n"
+                    "   -- accepted corners are pairwise at least minDistance apart, so a\n"
+                    "   cell of that side holds at most four of them. Not done here.\n\n",
                     candFound, split.b.medianMs);
     }
 
@@ -656,6 +785,42 @@ const uint32_t kFastCapacity = 16384;
     };
 
     {
+        // THE SPREAD ARM, and it is this section's headline. One corner per thread
+        // is a bit-exactness requirement, so the only lever is how many SMs the
+        // corners reach: a 256-thread block puts 200 corners on ONE SM, and this
+        // part issues FP64 at 1/64 of FP32 -- two pipes for the whole frame.
+        const PairedTiming spread = timeKernelPaired(
+            [&] { bincv::cuda::impl::subPixSpreadEnabled() = true; runSubPix(false); },
+            [&] { bincv::cuda::impl::subPixSpreadEnabled() = false; runSubPix(false); }, 20, 20,
+            kRounds, gStream);
+        printPaired("cornerSubPix, SPREAD launch (one warp per block)",
+                    "cornerSubPix, packed 256-thread blocks", spread, "kernel");
+        std::printf("   off-switch ratio packed/spread: %.2fx at %u corners, which is\n"
+                    "   %u blocks against 1.\n\n",
+                    spread.ratioMedian, kSubPixCorners, (kSubPixCorners + 31u) / 32u);
+        bincv::cuda::impl::subPixSpreadEnabled() = true;
+
+        // THE SPREAD ARM'S GATE-EXCLUDED CONTROL: at 32 corners or fewer both
+        // geometries are a single block on a single SM, so this MUST read ~1.00x.
+        const auto runSubPixFew = [&] {
+            cudaMemcpyAsync(dseeds.data(), seeds.data(), 32 * sizeof(bincv::Point2f),
+                            cudaMemcpyHostToDevice, gStream);
+            cudaMemsetAsync(dsub.data(), 0, sizeof(bc::DeviceSubPixResult), gStream);
+            bc::cornerSubPixAsync(dmagX.constView(), dmagY.constView(), dsignX.constView(),
+                                  dsignY.constView(), dseeds.data(), 32u, sp, mask.devicePtr(),
+                                  dsub.data(), gStream);
+        };
+        const PairedTiming spreadControl = timeKernelPaired(
+            [&] { bincv::cuda::impl::subPixSpreadEnabled() = true; runSubPixFew(); },
+            [&] { bincv::cuda::impl::subPixSpreadEnabled() = false; runSubPixFew(); }, 20, 20,
+            kRounds, gStream);
+        printPaired("CONTROL 32 corners, spread ON  (gate excludes it)",
+                    "CONTROL 32 corners, spread OFF", spreadControl, "kernel",
+                    /*expect1x=*/true);
+        std::printf("   subPixSpreadApplies(32) = %s\n\n",
+                    bincv::cuda::impl::subPixSpreadApplies(32u) ? "true" : "FALSE");
+        bincv::cuda::impl::subPixSpreadEnabled() = true;
+
         const PairedTiming skip = timeKernelPaired([&] { runSubPix(false); },
                                                    [&] { runSubPix(true); }, 20, 20, kRounds,
                                                    gStream);
@@ -756,11 +921,22 @@ const uint32_t kFastCapacity = 16384;
                     left, rightWhole, left < rightWhole ? "RULE MET" : "RULE MISSED", left,
                     rightBands, left < rightBands ? "RULE MET" : "RULE MISSED");
         std::printf("   The tighter of the two baselines is the denominator, per 'pick the\n"
-                    "   right baseline'. %s\n\n",
+                    "   right baseline'. %s\n",
                     rightBands < rightWhole
                         ? "The band download is the tighter one and is what decides."
                         : "The whole-plane download is the tighter one, which is itself a "
                           "finding: 200 pitched copies cost more than one big one.");
+        std::printf("   THE LEFT SIDE IS AT ITS CEILING AT THIS CORNER COUNT, and the number\n"
+                    "   comes from the profiler rather than from an A/B. One corner per\n"
+                    "   thread is the bit-exactness requirement, so 200 corners are 7 warps\n"
+                    "   of work; spread one warp per block they occupy 7 SMs at ONE warp\n"
+                    "   each, and a single warp cannot keep an SM's two FP64 pipes busy --\n"
+                    "   measured, sm__inst_executed_pipe_fp64 reads 45.7%% of peak on the\n"
+                    "   active SMs. So the spread buys 7 x 0.457 = 3.20x where a naive\n"
+                    "   reading of 'seven times the SMs' predicts 7x, and the arm ratio\n"
+                    "   above reads 3.18x. The remaining 2.2x needs a SECOND warp per SM,\n"
+                    "   which needs about 450 corners; at 200 there is not enough work to\n"
+                    "   fill the part and no launch geometry changes that.\n\n");
         printMemoryHeader("cornerSubPixAsync");
         printAllocSum("Gaussian mask, winHalf 5", mask.size() * sizeof(double));
         printAllocSum("corner positions, 200", kSubPixCorners * 2 * sizeof(float));
@@ -809,21 +985,17 @@ const uint32_t kFastCapacity = 16384;
                     "   not invent that number.\n",
                     fastRole.ratioMedian,
                     fastRole.ratioMedian >= 1.0 ? "MET" : "MISSED");
-        std::printf("   WHERE THE SHORTFALL IS, AND IT IS NOT THE RING ALGEBRA. The\n"
-                    "   capacity pair above isolates the single-block raster sort at %.1fx of\n"
-                    "   this whole operation. The capped arm -- every pixel still tested, but\n"
-                    "   only 512 corners stored and 512 slots ordered -- runs at %.3f ms\n"
-                    "   against OpenCV's %.3f ms, so the detector's own half clears the\n"
-                    "   parity bar several times over and the ordering stage loses it. Stated\n"
-                    "   exactly: that arm is detection PLUS a small sort, not detection\n"
-                    "   alone, so it is an upper bound on the detector and the conclusion is\n"
-                    "   safe in the direction it is used. That points at a\n"
-                    "   specific fix -- a multi-block network, or the prefix-sum compaction\n"
-                    "   compaction.hpp names for a family that needs the host's order -- and\n"
-                    "   at a STOP AND ASK: must the device detector return RASTER ORDER at\n"
-                    "   all, or is the corner SET the contract? The order is what makes the\n"
-                    "   suite's memcmp against the host possible; a frontend consuming\n"
-                    "   keypoints has not been shown to need it.\n",
+        std::printf("   WHERE THE COST USED TO BE. With the append-and-sort arm this\n"
+                    "   operation measured 11.7x OpenCV's time and the whole of it was one\n"
+                    "   single-block raster sort: 2.236 ms of a 2.236 ms call, against\n"
+                    "   0.033 ms for the detector with the sort capped out. The capacity\n"
+                    "   pair above is that isolation re-run -- %.2fx now, %.3f ms capped\n"
+                    "   against %.3f ms for OpenCV -- and the raster order is now produced\n"
+                    "   by a prefix sum over per-word popcounts, so nothing in this\n"
+                    "   operation compares two corners. The open question that shortfall\n"
+                    "   raised -- must a device detector return RASTER ORDER at all, or is\n"
+                    "   the corner SET the contract -- is therefore WITHDRAWN rather than\n"
+                    "   answered: the order is returned and it no longer costs anything.\n",
                     sortShare, sortOnlyMs, fastRole.b.medianMs);
         if (!fastRole.separated()) {
             std::printf("   *** THE TWO SAMPLE RANGES OVERLAP. This is NOT a result at this\n"

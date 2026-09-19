@@ -85,6 +85,7 @@
 #include <opencv2/core/cuda_stream_accessor.hpp>
 #include <opencv2/cudaarithm.hpp>
 #include <opencv2/cudafeatures2d.hpp>
+#include <opencv2/cudaoptflow.hpp>
 #include <opencv2/cudafilters.hpp>
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudastereo.hpp>
@@ -94,6 +95,8 @@
 #include "bincv/binMat.hpp"
 #include "bincv/io/sequence.hpp"
 #include "bincv/cuda/corner.hpp"
+#include "bincv/cuda/census.hpp"
+#include "bincv/cuda/denseCensusBox.hpp"
 #include "bincv/cuda/denseDisparity.hpp"
 #include "bincv/cuda/derivative.hpp"
 #include "bincv/cuda/descriptor.hpp"
@@ -102,13 +105,22 @@
 #include "bincv/cuda/fast.hpp"
 #include "bincv/cuda/keypoints.hpp"
 #include "bincv/cuda/median.hpp"
+#include "bincv/cuda/opticalFlow.hpp"
 #include "bincv/cuda/morphology.hpp"
 #include "bincv/cuda/orientation.hpp"
 #include "bincv/cuda/pyramid.hpp"
 #include "bincv/cuda/shift.hpp"
+#include "bincv/cuda/sparseMatch.hpp"
 #include "bincv/cuda/threshold.hpp"
 #include "bincv/cuda/transfer.hpp"
+#include "bincv/ops/census.hpp"
+#include "bincv/ops/corner.hpp"
+#include "bincv/ops/derivative.hpp"
+#include "bincv/ops/edge.hpp"
+#include "bincv/ops/medianWide.hpp"
 #include "bincv/ops/morphology.hpp"
+#include "bincv/ops/opticalFlow.hpp"
+#include "bincv/ops/pyramid.hpp"
 #include "bincv/ops/orbPattern.hpp"
 #include "bincv/ops/pack.hpp"
 #include "cuda_bench_util.hpp"
@@ -415,13 +427,266 @@ void printMemPair(const char* what, const char* geom, size_t binBytes, size_t oc
                     "   so its rounding is a large fraction of the reading. Raise that\n"
                     "   side's replica count before quoting this pair.\n");
     } else {
-        std::printf("   ratio OpenCV/binCV = %.3fx  -- binCV smaller by that factor.\n"
+        // THE DIRECTION IS PRINTED, NOT ASSUMED. This helper used to say
+        // "binCV smaller by that factor" whatever the ratio was, which reads as
+        // a claim rather than a reading on any row where OpenCV is the smaller
+        // side -- and round 3 produced one (the census entry). The ratio is
+        // still OpenCV/binCV everywhere so the rows stay comparable; only the
+        // sentence under it follows the number.
+        std::printf("   ratio OpenCV/binCV = %.3fx  -- %s by %.3fx.\n"
                     "   The OpenCV side is an UPPER BOUND: GpuMat pads its pitch, and any\n"
                     "   filter buffer or NPP scratch held past the call is inside this\n"
                     "   delta. binCV's side is cudaMalloc with nothing in between.\n",
-                    ocvPer / binPer);
+                    ocvPer / binPer,
+                    ocvPer >= binPer ? "binCV is SMALLER" : "OpenCV is SMALLER",
+                    ocvPer >= binPer ? ocvPer / binPer : binPer / ocvPer);
     }
 }
+
+// ---------------------------------------------------------------------------
+// ROUND 3: the tracker state, on device and on the host, so section 14's role
+// row and section 16's sequence row are built from ONE definition of "what a
+// tracker holds". A second definition would let the two sections quietly
+// measure two different working sets.
+// ---------------------------------------------------------------------------
+
+using Ladder = bc::DevicePyramid<1, 2, 2, 2>;
+constexpr int kLkLevels = 4;
+constexpr int kLkWin = 31;        ///< the reference frontend's window
+constexpr int kLkIterCap = 20;    ///< ...and its iteration cap
+constexpr int kEdgeThr = 17;      ///< ...and its edge threshold
+constexpr uint32_t kTrackCapacity = 2048;
+constexpr uint32_t kRankCapacity = 32768;
+
+/// The derivative planes of ONE ladder: `bits + 1` planes per axis per level.
+/// LK linearises about the PREVIOUS frame, so only one ladder's derivatives
+/// ever exist -- which is what halves this footprint against a naive reading.
+struct DerivLadder {
+    bc::DeviceBinMat dx[kLkLevels];
+    bc::DeviceBinMat dy[kLkLevels];
+    size_t bits[kLkLevels] = {1, 2, 2, 2};
+
+    DerivLadder() {
+        int w = static_cast<int>(kW), h = static_cast<int>(kH);
+        for (int i = 0; i < kLkLevels; ++i) {
+            const int rows = static_cast<int>((bits[i] + 1) * static_cast<size_t>(h));
+            dx[i] = bc::DeviceBinMat(w, rows);
+            dy[i] = bc::DeviceBinMat(w, rows);
+            w = static_cast<int>(bc::pyrDownWidth(static_cast<size_t>(w)));
+            h = static_cast<int>(bc::pyrDownHeight(static_cast<size_t>(h)));
+        }
+    }
+    bc::DevicePlaneBlockView dxAt(int i) { return bc::planeBlock(dx[i].view(), bits[i] + 1); }
+    bc::DevicePlaneBlockView dyAt(int i) { return bc::planeBlock(dy[i].view(), bits[i] + 1); }
+    size_t bytes() const {
+        size_t t = 0;
+        for (int i = 0; i < kLkLevels; ++i) {
+            t += dx[i].getHeight() * dx[i].getAlignedWidth() * sizeof(uint32_t);
+            t += dy[i].getHeight() * dy[i].getAlignedWidth() * sizeof(uint32_t);
+        }
+        return t;
+    }
+};
+
+/// THE DEVICE TRACKER'S WHOLE RESIDENT STATE -- both ladders, the previous
+/// frame's derivatives, the keypoint arrays, and the sensor stage's two wide
+/// staging frames. The wide frames ARE counted here, unlike in the optical-flow
+/// family's own Gate 3 where the comparison was tracker-to-tracker: a SEQUENCE
+/// number is what a caller pays per frame end to end, and the frame has to
+/// arrive somewhere.
+struct DeviceTracker {
+    Ladder prev, next;
+    DerivLadder deriv;
+    bc::DeviceImage<uint8_t> wide, denoised;
+    bc::DeviceArray<float> prevXY, nextXY;
+    bc::DeviceArray<uint8_t> status;
+    // The detector's own working set, allocated once and reused -- a tracker
+    // that allocated per detection would be timing cudaMalloc.
+    bc::DeviceArray<bc::DeviceCorner> candidates, corners;
+    bc::DeviceAppendCounter counter;
+    bc::DeviceArray<uint32_t> maxBits;
+    bc::DeviceArray<uint8_t> gfScratch;
+    bc::DeviceArray<bc::DeviceCornerResult> result;
+
+    DeviceTracker()
+        : prev(static_cast<int>(kW), static_cast<int>(kH)),
+          next(static_cast<int>(kW), static_cast<int>(kH)),
+          wide(static_cast<int>(kW), static_cast<int>(kH)),
+          denoised(static_cast<int>(kW), static_cast<int>(kH)),
+          prevXY(2 * kTrackCapacity), nextXY(2 * kTrackCapacity), status(kTrackCapacity),
+          // THE CAPACITY CONTRACT, AND IT IS NOT `maxCorners`. Both headers
+          // say so and this harness got it wrong first: `capacity` bounds the
+          // survivors that can be RANKED, and the greedy spacing filter then
+          // accepts from that ranked list in rank order. Sizing it to
+          // `maxCorners` silently shortens the list the filter sees -- measured
+          // here as 132 device corners against the host's 204 on the same
+          // frame, with the 132 an exact PREFIX of the 204. Both arms now rank
+          // the same 32768.
+          candidates(kRankCapacity), corners(kRankCapacity), maxBits(1),
+          gfScratch(bc::goodFeaturesScratchBytes(kRankCapacity)), result(1) {}
+
+    /// METER 1: the allocation sum from the containers' own closed formulas.
+    /// binCV to binCV only; never divided into the driver meter's reading.
+    size_t bytes() const {
+        return prev.sizeInBytes() + next.sizeInBytes() + deriv.bytes() +
+               2 * kW * kH +                                  // wide + denoised
+               4 * kTrackCapacity * sizeof(float) +           // prevXY + nextXY
+               kTrackCapacity +                               // status
+               2 * kRankCapacity * sizeof(bc::DeviceCorner) +
+               bc::goodFeaturesScratchBytes(kRankCapacity) + sizeof(uint32_t) +
+               sizeof(bc::DeviceCornerResult);
+    }
+    /// The same without the detector's ranking pool and without the wide staging
+    /// frames: what the TRACKER alone holds, for the reader who wants the two
+    /// separated rather than folded.
+    size_t trackerOnlyBytes() const {
+        return prev.sizeInBytes() + next.sizeInBytes() + deriv.bytes() +
+               4 * kTrackCapacity * sizeof(float) + kTrackCapacity;
+    }
+};
+
+/// One frame's sensor stage and ladder, ENQUEUED. Everything after the upload
+/// reads memory that is already on the device; nothing comes back.
+void deviceLoadFrame(DeviceTracker& t, const uint8_t* hostFrame, Ladder& ladder,
+                     cudaStream_t s) {
+    bc::uploadImage<uint8_t>(hostFrame, kW, kH, kW, t.wide.view(), s);
+    bc::medianWide<3>(t.wide.constView(), t.denoised.view(), bincv::kMedianReferenceL, s);
+    bc::edgeThreshold(t.denoised.constView(), ladder.levelAt(0).plane(0),
+                      static_cast<uint8_t>(kEdgeThr), bincv::EdgeCombine::Or,
+                      bincv::EdgeRelation::Ge, bincv::EdgeSpatial::Wide, s);
+    bc::buildPyramidBox(ladder, s);
+}
+
+void deviceDerivatives(DeviceTracker& t, Ladder& of, cudaStream_t s) {
+    for (int i = 0; i < kLkLevels; ++i) {
+        bc::derivativeXY(of.levelAt(static_cast<size_t>(i)), t.deriv.dxAt(i),
+                         t.deriv.dyAt(i), bincv::BORDER_REFLECT_101, false, s);
+    }
+}
+
+void deviceBuildLevels(DeviceTracker& t, bc::DeviceLKLevel (&levels)[kLkLevels]) {
+    for (int i = 0; i < kLkLevels; ++i) {
+        const size_t li = static_cast<size_t>(i);
+        levels[i] = bc::deviceLkLevel(t.prev.levelAt(li), t.next.levelAt(li),
+                                      t.deriv.dxAt(i), t.deriv.dyAt(i));
+    }
+}
+
+/// The detector, ENQUEUED except for the one 4-byte read of its own count.
+/// A detection frame is the ONLY frame on which a resident tracker has to know
+/// something the device knows -- how many corners there are -- and that read is
+/// inside the timed region on both arms because both arms pay it.
+uint32_t deviceDetect(DeviceTracker& t, double minDistance, float* dstXY,
+                      cudaStream_t s) {
+    bincv::GoodFeaturesParams gf;
+    gf.maxCorners = static_cast<int>(kTrackCapacity);
+    gf.minDistance = minDistance;
+    t.counter.reset(s);
+    cudaMemsetAsync(t.maxBits.data(), 0, sizeof(uint32_t), s);
+
+    bc::DeviceGoodFeaturesWorkspace work;
+    work.candidates = bc::appendBuffer(t.candidates, t.counter);
+    work.maxBits = t.maxBits.data();
+    work.scratch = t.gfScratch.data();
+    work.scratchBytes = t.gfScratch.size();
+
+    bc::DevicePlaneBlockView dx = t.deriv.dxAt(0);
+    bc::DevicePlaneBlockView dy = t.deriv.dyAt(0);
+    bc::goodFeaturesToTrackAsync(dx.plane(0), dy.plane(0), dx.plane(1), dy.plane(1), gf,
+                                 work, t.corners.data(), kRankCapacity, t.result.data(), s);
+    bc::keypointsFromCorners(t.corners.data(), &t.result.data()->count, dstXY,
+                             kTrackCapacity, s);
+    bc::DeviceCornerResult hr{};
+    cudaMemcpyAsync(&hr, t.result.data(), sizeof(hr), cudaMemcpyDeviceToHost, s);
+    cudaStreamSynchronize(s);
+    return hr.count;
+}
+
+// ---- the host tracker, the same ladder and the same policy ----------------
+
+using HW = uint32_t;
+
+/// The host arm's whole state, allocated once. This mirrors
+/// benchmark/frontend_sequence.cpp's `BincvFrontend` -- the same 1/2/2/2
+/// ladder, the same swap scheme, the same streaming response ring -- so the
+/// host number here is the host frontend's number and not a second spelling
+/// of it that might have drifted.
+struct HostTracker {
+    bincv::Pyramid<HW, 1, 2, 2, 2> prev, next;
+    bincv::SignedQuantMat<1, HW> dx0, dy0;
+    bincv::SignedQuantMat<2, HW> dx1, dy1, dx2, dy2, dx3, dy3;
+    bincv::LKLevels<HW, 1, 2, 2, 2> levels;
+    std::vector<float> ring;
+    std::vector<uint8_t> medianScratch;
+    int w, h;
+
+    HostTracker(int width, int height)
+        : prev(width, height), next(width, height), dx0(width, height), dy0(width, height),
+          dx1(width / 2 + (width & 1), height / 2 + (height & 1)),
+          dy1(width / 2 + (width & 1), height / 2 + (height & 1)),
+          dx2((width + 3) / 4, (height + 3) / 4), dy2((width + 3) / 4, (height + 3) / 4),
+          dx3((width + 7) / 8, (height + 7) / 8), dy3((width + 7) / 8, (height + 7) / 8),
+          ring(bincv::kResponseRingRows * static_cast<size_t>(width)),
+          medianScratch(static_cast<size_t>(width) * static_cast<size_t>(height)), w(width),
+          h(height) {}
+
+    void sensorStage(const uint8_t* gray) {
+        const size_t ww = static_cast<size_t>(w), hh = static_cast<size_t>(h);
+        bincv::medianWide<3, uint8_t>(gray, ww, hh, ww, medianScratch.data(), ww,
+                                      bincv::kMedianReferenceL);
+        bincv::edgeThreshold<bincv::EdgeCombine::Or, bincv::EdgeRelation::Ge,
+                             bincv::EdgeSpatial::Wide, uint8_t, HW>(
+            medianScratch.data(), ww, hh, ww, next.level<0>().plane(0),
+            static_cast<uint8_t>(kEdgeThr));
+    }
+    void seed(const uint8_t* gray) {
+        sensorStage(gray);
+        next.build<bincv::PyrDownFilter::Box2x2,
+                            bincv::PyrDownBorder::Replicate>();
+    }
+    void loadFrame(const uint8_t* gray) {
+        std::swap(prev, next);
+        sensorStage(gray);
+        next.build<bincv::PyrDownFilter::Box2x2,
+                            bincv::PyrDownBorder::Replicate>();
+    }
+    void derivatives() {
+        bincv::derivativeX(prev.level<0>(), dx0);
+        bincv::derivativeY(prev.level<0>(), dy0);
+        bincv::derivativeX(prev.level<1>(), dx1);
+        bincv::derivativeY(prev.level<1>(), dy1);
+        bincv::derivativeX(prev.level<2>(), dx2);
+        bincv::derivativeY(prev.level<2>(), dy2);
+        bincv::derivativeX(prev.level<3>(), dx3);
+        bincv::derivativeY(prev.level<3>(), dy3);
+        levels.get<0>() = bincv::lkLevel<1>(prev.level<0>(),
+                                                    next.level<0>(), dx0, dy0);
+        levels.get<1>() = bincv::lkLevel<2>(prev.level<1>(),
+                                                    next.level<1>(), dx1, dy1);
+        levels.get<2>() = bincv::lkLevel<2>(prev.level<2>(),
+                                                    next.level<2>(), dx2, dy2);
+        levels.get<3>() = bincv::lkLevel<2>(prev.level<3>(),
+                                                    next.level<3>(), dx3, dy3);
+    }
+    /// METER 3 (HOST bytes), and it is NEVER divided into a device figure.
+    size_t bytes() const {
+        const size_t pyr = prev.sizeInBytes() + next.sizeInBytes();
+        const size_t der = (dx0.sizeInWords() + dy0.sizeInWords() + dx1.sizeInWords() +
+                            dy1.sizeInWords() + dx2.sizeInWords() + dy2.sizeInWords() +
+                            dx3.sizeInWords() + dy3.sizeInWords()) * sizeof(HW);
+        return pyr + der + ring.size() * sizeof(float) + medianScratch.size();
+    }
+};
+
+/// Wall-clock median over `reps` passes of a whole-sequence loop.
+struct SeqResult {
+    double msPerFrame = 0.0;
+    double msMin = 0.0;
+    double msMax = 0.0;
+    size_t frames = 0;
+    size_t detections = 0;
+    size_t tracked = 0;   ///< points tracked, summed over frames
+};
 
 } // namespace
 
@@ -2222,38 +2487,883 @@ int main(int argc, char** argv) {
     // ======================================================================
     if (want("matcher")) {
         std::printf("\n=====================================================================\n"
-                    " 13. DESCRIPTOR MATCHING -- cv::cuda::DescriptorMatcher\n"
+                    " 13. DESCRIPTOR MATCHING -- binCV cuda::matchDescriptors vs\n"
+                    "     cv::cuda::DescriptorMatcher::createBFMatcher(NORM_HAMMING)\n"
                     "=====================================================================\n"
-                    " NO binCV DEVICE ARM EXISTS. This backend ships no device matcher:\n"
-                    " `matchDescriptors` appears in backends/cuda/include/bincv/cuda/\n"
-                    " features.hpp only as the shared vocabulary's named consumer, and no\n"
-                    " kernel implements it.\n"
+                    " ROLE: 'nearest neighbour over binary descriptors with Lowe's ratio\n"
+                    " test, for a whole query set, on device'. A binCV device matcher\n"
+                    " EXISTS as of this round (cuda/sparseMatch.hpp), so the row this\n"
+                    " file used to print -- 'no binCV device counterpart' -- is retired.\n"
                     "\n"
-                    " THIS IS NOT AN 'OUTSTANDING' ROW AND MUST NOT BE FILED AS ONE.\n"
-                    " OUTSTANDING (ruling R2) is for a binCV op with no OpenCV\n"
-                    " counterpart. This is the reverse: an OpenCV counterpart with no\n"
-                    " binCV op. There is nothing to time and nothing to ship, so timing\n"
-                    " cv::cuda::BFMatcher alone would produce a number with no second\n"
-                    " arm -- which is not a comparison, and printing it beside this\n"
-                    " backend's op list would invite exactly the misreading the file is\n"
-                    " built to prevent.\n"
+                    " WHAT THE TIMED REGION IS, AND WHY IT FAVOURS OpenCV. binCV's arm\n"
+                    " is ONE launch that produces the ratio-tested result. OpenCV's arm\n"
+                    " is knnMatchAsync(k=2) ALONE -- the ratio test that would turn its\n"
+                    " two distances into the same answer is NOT in the bracket, and\n"
+                    " neither is knnMatchConvert. So the OpenCV arm is timed doing\n"
+                    " strictly LESS work than binCV's, and every ratio below is an\n"
+                    " UPPER BOUND on OpenCV's standing. That is deliberate: a bar the\n"
+                    " challenger cannot be accused of shaving is worth more than a bar\n"
+                    " that is exactly fair, when the challenger wins anyway.\n"
                     "\n"
-                    " WHAT IS TRUE AND WORTH RECORDING. binCV's descriptors come out as\n"
-                    " uint32_t words, so a matcher reading them issues 8 __popc per\n"
-                    " 256-bit descriptor where cv::cuda's HammingDist::reduceIter, which\n"
-                    " is instantiated at uchar, issues 32. That 4x is real, it sits on\n"
-                    " the MATCHING side, and it is UNSPENT until someone writes the\n"
-                    " kernel. It is a reason to write one, not a result.\n");
-        std::printf("NOARM,matcher,752x480,cv::cuda::DescriptorMatcher has no binCV"
-                    " device counterpart\n");
+                    " TWO OpenCV ARMS, because the bar is the BEST existing option.\n"
+                    " cv::cuda instantiates matchHamming_gpu at <unsigned char> and at\n"
+                    " <int>, and cv::cuda::ORB emits CV_8U. Both are run over the SAME\n"
+                    " descriptor bytes, reinterpreted, so the two arms differ only in\n"
+                    " the type the kernel was instantiated at.\n"
+                    "\n"
+                    " CONTENT. Pseudorandom descriptor words. Neither kernel has a\n"
+                    " data-dependent early-out -- both evaluate every (query, train)\n"
+                    " pair -- so the cost is content-independent and a real descriptor\n"
+                    " set would move neither arm. What content DOES decide is accuracy,\n"
+                    " which this row does not measure and does not claim.\n");
+
+        constexpr size_t kDescWords = 8;   // 256 bits, the ORB/BRIEF width
+        const size_t mq[] = {470, 5000};
+        const size_t mt[] = {470, 5000};
+        const char* mName[] = {"470x470 (frontend scale -- DOES NOT DECIDE)",
+                               "5000x5000 (map scale -- the deciding row)"};
+        for (int g = 0; g < 2; ++g) {
+            const size_t qn = mq[g], tn = mt[g];
+            std::vector<uint32_t> qw(qn * kDescWords), tw(tn * kDescWords);
+            for (auto& v : qw) v = static_cast<uint32_t>(nextByte()) |
+                                   (static_cast<uint32_t>(nextByte()) << 8) |
+                                   (static_cast<uint32_t>(nextByte()) << 16) |
+                                   (static_cast<uint32_t>(nextByte()) << 24);
+            for (auto& v : tw) v = static_cast<uint32_t>(nextByte()) |
+                                   (static_cast<uint32_t>(nextByte()) << 8) |
+                                   (static_cast<uint32_t>(nextByte()) << 16) |
+                                   (static_cast<uint32_t>(nextByte()) << 24);
+
+            bc::DeviceArray<uint32_t> dq(qw.size()), dt(tw.size());
+            bc::DeviceArray<bc::DeviceDescriptorMatch> dm(qn);
+            cudaMemcpyAsync(dq.data(), qw.data(), qw.size() * sizeof(uint32_t),
+                            cudaMemcpyHostToDevice, gStream);
+            cudaMemcpyAsync(dt.data(), tw.data(), tw.size() * sizeof(uint32_t),
+                            cudaMemcpyHostToDevice, gStream);
+            cudaStreamSynchronize(gStream);
+
+            const auto qv = bc::descriptorSet(static_cast<const uint32_t*>(dq.data()), qn,
+                                              kDescWords);
+            const auto tv = bc::descriptorSet(static_cast<const uint32_t*>(dt.data()), tn,
+                                              kDescWords);
+
+            // The SAME BYTES on OpenCV's side, twice: as the CV_8U rows
+            // cv::cuda::ORB emits, and as the CV_32S rows matchHamming_gpu<int>
+            // is instantiated for.
+            cv::Mat qm8(static_cast<int>(qn), static_cast<int>(kDescWords * 4), CV_8UC1,
+                        qw.data());
+            cv::Mat tm8(static_cast<int>(tn), static_cast<int>(kDescWords * 4), CV_8UC1,
+                        tw.data());
+            cv::Mat qm32(static_cast<int>(qn), static_cast<int>(kDescWords), CV_32SC1,
+                         qw.data());
+            cv::Mat tm32(static_cast<int>(tn), static_cast<int>(kDescWords), CV_32SC1,
+                         tw.data());
+            cv::cuda::GpuMat gq8, gt8, gq32, gt32, gRes;
+            gq8.upload(qm8, gCvStream);
+            gt8.upload(tm8, gCvStream);
+            gq32.upload(qm32, gCvStream);
+            gt32.upload(tm32, gCvStream);
+            gCvStream.waitForCompletion();
+
+            cv::Ptr<cv::cuda::DescriptorMatcher> bf =
+                cv::cuda::DescriptorMatcher::createBFMatcher(cv::NORM_HAMMING);
+
+            const auto binArm = [&] {
+                bc::matchDescriptors(qv, tv, dm.data(), 80, gStream);
+            };
+            const auto ocv8 = [&] {
+                bf->knnMatchAsync(gq8, gt8, gRes, 2, cv::noArray(), gCvStream);
+            };
+            bool has32 = true;
+            try {
+                bf->knnMatchAsync(gq32, gt32, gRes, 2, cv::noArray(), gCvStream);
+                gCvStream.waitForCompletion();
+            } catch (const cv::Exception&) {
+                has32 = false;
+            }
+
+            const int it = g == 0 ? 20 : 5;
+            const PairedTiming p8 = timeKernelPaired(ocv8, binArm, it, it, kRounds, gStream);
+            printRole("descriptor match, 256-bit, ratio 0.8 -- OpenCV arm is CV_8U",
+                      "cv::cuda BFMatcher knnMatchAsync(k=2), CV_8U",
+                      "bincv::cuda::matchDescriptors (ratio test INCLUDED)", p8, floor,
+                      mName[g]);
+            emitRow("matcher_u8", mName[g], p8);
+            if (has32) {
+                const auto ocv32 = [&] {
+                    bf->knnMatchAsync(gq32, gt32, gRes, 2, cv::noArray(), gCvStream);
+                };
+                const PairedTiming p32 =
+                    timeKernelPaired(ocv32, binArm, it, it, kRounds, gStream);
+                printRole("the same, OpenCV arm instantiated at CV_32S",
+                          "cv::cuda BFMatcher knnMatchAsync(k=2), CV_32S",
+                          "bincv::cuda::matchDescriptors (ratio test INCLUDED)", p32, floor,
+                          mName[g]);
+                emitRow("matcher_s32", mName[g], p32);
+            } else {
+                std::printf("\n   cv::cuda BFMatcher refused CV_32S in this build -- the\n"
+                            "   CV_8U arm is the only bar here, and it is the one\n"
+                            "   cv::cuda::ORB emits anyway.\n");
+                std::printf("NOARM,matcher_s32,%s,BFMatcher refused CV_32S\n", mName[g]);
+            }
+
+            if (g == 1) {
+                // MEMORY, meter 2 on both sides. A 256-bit descriptor is a 32-byte
+                // row and GpuMat pitches; that is the whole of this reading and it
+                // is printed rather than argued.
+                std::vector<std::unique_ptr<bc::DeviceArray<uint32_t>>> bq, bt;
+                std::vector<std::unique_ptr<bc::DeviceArray<bc::DeviceDescriptorMatch>>> bo;
+                // TWO REPLICA COUNTS, for the reason printMemPair documents: at
+                // 5000 descriptors binCV's whole set is ~400 KB and needs many
+                // replicas to clear the driver's 2 MB unit eight times, while
+                // OpenCV's is ~8 MB and 128 of those would not fit on this card.
+                // Each side is divided by its own count.
+                const int reps = 128;
+                const int ocvReps = 48;
+                const size_t binMem = meterScope(
+                    [&](int) {
+                        bq.push_back(std::make_unique<bc::DeviceArray<uint32_t>>(qn * kDescWords));
+                        bt.push_back(std::make_unique<bc::DeviceArray<uint32_t>>(tn * kDescWords));
+                        bo.push_back(std::make_unique<bc::DeviceArray<bc::DeviceDescriptorMatch>>(qn));
+                        bc::matchDescriptors(
+                            bc::descriptorSet(static_cast<const uint32_t*>(bq.back()->data()),
+                                              qn, kDescWords),
+                            bc::descriptorSet(static_cast<const uint32_t*>(bt.back()->data()),
+                                              tn, kDescWords),
+                            bo.back()->data(), 80, gStream);
+                    },
+                    reps);
+                cudaStreamSynchronize(gStream);
+                bq.clear(); bt.clear(); bo.clear();
+                cudaDeviceSynchronize();
+
+                std::vector<cv::cuda::GpuMat> oq, ot, orr;
+                const size_t ocvMem = meterScope(
+                    [&](int) {
+                        oq.emplace_back();
+                        ot.emplace_back();
+                        orr.emplace_back();
+                        oq.back().upload(qm8);
+                        ot.back().upload(tm8);
+                        bf->knnMatchAsync(oq.back(), ot.back(), orr.back(), 2);
+                        cudaDeviceSynchronize();
+                    },
+                    ocvReps);
+                oq.clear(); ot.clear(); orr.clear();
+                printMemPair("descriptor matching working set (query + train + result)",
+                             "5000x5000", binMem, ocvMem, step, reps, ocvReps);
+                emitMem("matcher", "5000x5000", binMem, ocvMem, step, reps, ocvReps);
+                std::printf("   A 256-bit descriptor is a 32-BYTE ROW and GpuMat pitches a\n"
+                            "   row to a 512-byte multiple. That pitch is most of this\n"
+                            "   reading, and it is a property of the container rather than\n"
+                            "   of the matcher -- said here so the number is not read as a\n"
+                            "   claim about the kernel.\n");
+            }
+        }
     }
 
     // ======================================================================
-    // 14. OUTSTANDING -- every round-2 op with no cv::cuda bar at any level
+    // 14, 15, 16 -- ROUND 3'S BARS. Every one of them needs the real sequence,
+    // so they share one parse of it and one device tracker state.
+    // ======================================================================
+    const bool wantR3 = want("lk") || want("sequence");
+    if (want("censusstereo")) {
+        std::printf("\n=====================================================================\n"
+                    " 15. CENSUS DENSE DISPARITY -- binCV's census entry vs\n"
+                    "     cv::cuda::StereoBM, RE-TAKEN after the matcher changed\n"
+                    "=====================================================================\n"
+                    " ROLE: 'a dense disparity map from a rectified wide-input pair,\n"
+                    " resident on device'. Section 7 runs the BINARY path, which is\n"
+                    " where this library's structural claim lives. This section runs the\n"
+                    " CENSUS path, which is the entry a wide-input caller meets first and\n"
+                    " where binCV has NO structural advantage -- census EXPANDS data,\n"
+                    " 8 bits per pixel in and 24 out, and the layout that makes it fast\n"
+                    " is the conventional one-word-per-pixel descriptor.\n"
+                    "\n"
+                    " WHY RE-TAKEN. The packed census matcher was replaced this round by\n"
+                    " a warp-cooperative separable box arm, and the shipped report's\n"
+                    " census rows predate it. Three rows are printed: the matcher alone,\n"
+                    " the whole entry (two transforms plus the match, which is what a\n"
+                    " caller pays), and the arm's own off-switch ratio inside THIS\n"
+                    " protocol so the family's 2.4-2.5x is reproduced or contradicted\n"
+                    " here rather than quoted from another process.\n"
+                    " Both sides on one explicit stream: StereoBM calls\n"
+                    " cudaDeviceSynchronize() on the null stream in each of its three\n"
+                    " kernels.\n");
+
+        constexpr size_t kCensusK = 24;   // kCensus5x5
+        std::vector<uint8_t> clw = makeFrame(kW, kH);
+        std::vector<uint8_t> crw(kW * kH, 0);
+        for (size_t y = 0; y < kH; ++y)
+            for (size_t x = 0; x + 21 < kW; ++x) crw[y * kW + x] = clw[y * kW + x + 21];
+
+        bincv::DenseDisparityParams cp;
+        cp.maxDisparity = 64;
+        cp.winWidth = 9;
+        cp.winHeight = 9;
+
+        bc::DeviceImage<uint8_t> cdL(static_cast<int>(kW), static_cast<int>(kH));
+        bc::DeviceImage<uint8_t> cdR(static_cast<int>(kW), static_cast<int>(kH));
+        bc::DeviceImage<uint32_t> cDescL(static_cast<int>(kW), static_cast<int>(kH));
+        bc::DeviceImage<uint32_t> cDescR(static_cast<int>(kW), static_cast<int>(kH));
+        bc::DeviceImage<uint8_t> cDisp(static_cast<int>(kW), static_cast<int>(kH));
+        bc::uploadImage<uint8_t>(clw.data(), kW, kH, kW, cdL.view(), gStream);
+        bc::uploadImage<uint8_t>(crw.data(), kW, kH, kW, cdR.view(), gStream);
+        bc::censusTransformPacked<kCensusK>(cdL.constView(), bincv::kCensus5x5,
+                                            cDescL.view(), gStream);
+        bc::censusTransformPacked<kCensusK>(cdR.constView(), bincv::kCensus5x5,
+                                            cDescR.view(), gStream);
+        cudaStreamSynchronize(gStream);
+
+        cv::cuda::GpuMat cgl, cgr, cgd;
+        cgl.upload(cv::Mat(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1, clw.data()));
+        cgr.upload(cv::Mat(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1, crw.data()));
+        auto cbm = cv::cuda::createStereoBM(64, 9);
+        cbm->compute(cgl, cgr, cgd, gCvStream);
+        cudaStreamSynchronize(gStream);
+
+        const auto ocvArm = [&] { cbm->compute(cgl, cgr, cgd, gCvStream); };
+        const auto matchArm = [&] {
+            bc::denseDisparityCensusPacked(cDescL.constView(), cDescR.constView(), cp,
+                                           cDisp.view(), gStream);
+        };
+        const auto entryArm = [&] {
+            bc::censusTransformPacked<kCensusK>(cdL.constView(), bincv::kCensus5x5,
+                                                cDescL.view(), gStream);
+            bc::censusTransformPacked<kCensusK>(cdR.constView(), bincv::kCensus5x5,
+                                                cDescR.view(), gStream);
+            bc::denseDisparityCensusPacked(cDescL.constView(), cDescR.constView(), cp,
+                                           cDisp.view(), gStream);
+        };
+
+        bc::impl::densePackedBoxEnabled() = true;
+        const PairedTiming pm = timeKernelPaired(ocvArm, matchArm, 10, 10, kRounds, gStream);
+        printRole("census MATCHER only, 64 disparities, 9x9, K=24",
+                  "cv::cuda::StereoBM(64, 9)",
+                  "bincv denseDisparityCensusPacked (warp-box arm)", pm, floor, "752x480");
+        emitRow("census_match", "752x480", pm);
+
+        const PairedTiming pe = timeKernelPaired(ocvArm, entryArm, 10, 10, kRounds, gStream);
+        printRole("census ENTRY: two transforms + the match -- what a caller pays",
+                  "cv::cuda::StereoBM(64, 9)",
+                  "bincv censusTransformPacked x2 + denseDisparityCensusPacked", pe, floor,
+                  "752x480");
+        emitRow("census_entry", "752x480", pe);
+
+        // The arm's own off-switch, binCV to binCV, inside THIS protocol.
+        const auto refArm = [&] {
+            bc::impl::densePackedBoxEnabled() = false;
+            bc::denseDisparityCensusPacked(cDescL.constView(), cDescR.constView(), cp,
+                                           cDisp.view(), gStream);
+            bc::impl::densePackedBoxEnabled() = true;
+        };
+        const PairedTiming po = timeKernelPaired(refArm, matchArm, 10, 10, kRounds, gStream);
+        std::printf("\n OFF-SWITCH, binCV to binCV: the shipped packed matcher against\n"
+                    " the warp-box arm that replaced it.\n");
+        printArmVsFloor("reference arm (densePackedBoxEnabled = false)", po.a, floor,
+                        "kernel");
+        printArmVsFloor("warp-box arm (densePackedBoxEnabled = true)", po.b, floor,
+                        "kernel");
+        std::printf("   ratio box/reference: %5.3fx  (box %5.2fx faster)  range %5.3f-%5.3fx"
+                    "  %s\n",
+                    po.ratioMedian, po.ratioMedian > 0.0 ? 1.0 / po.ratioMedian : 0.0,
+                    po.ratioMin, po.ratioMax,
+                    po.separated() ? "DISJOINT -- a result"
+                                   : "OVERLAP -- not a result in this run");
+        emitRow("census_offswitch", "752x480", po);
+        bc::impl::densePackedBoxEnabled() = true;
+
+        // Memory, meter 2 on both sides.
+        std::vector<std::unique_ptr<bc::DeviceImage<uint8_t>>> ci;
+        std::vector<std::unique_ptr<bc::DeviceImage<uint32_t>>> cd;
+        std::vector<std::unique_ptr<bc::DeviceImage<uint8_t>>> cm;
+        const int cReps = 64;
+        const size_t cBinMem = meterScope(
+            [&](int) {
+                ci.push_back(std::make_unique<bc::DeviceImage<uint8_t>>(
+                    static_cast<int>(kW), static_cast<int>(kH)));
+                ci.push_back(std::make_unique<bc::DeviceImage<uint8_t>>(
+                    static_cast<int>(kW), static_cast<int>(kH)));
+                cd.push_back(std::make_unique<bc::DeviceImage<uint32_t>>(
+                    static_cast<int>(kW), static_cast<int>(kH)));
+                cd.push_back(std::make_unique<bc::DeviceImage<uint32_t>>(
+                    static_cast<int>(kW), static_cast<int>(kH)));
+                cm.push_back(std::make_unique<bc::DeviceImage<uint8_t>>(
+                    static_cast<int>(kW), static_cast<int>(kH)));
+                bc::censusTransformPacked<kCensusK>(ci[ci.size() - 2]->constView(),
+                                                    bincv::kCensus5x5, cd[cd.size() - 2]->view(),
+                                                    gStream);
+                bc::denseDisparityCensusPacked(cd[cd.size() - 2]->constView(),
+                                               cd.back()->constView(), cp, cm.back()->view(),
+                                               gStream);
+            },
+            cReps);
+        cudaStreamSynchronize(gStream);
+        ci.clear(); cd.clear(); cm.clear();
+        cudaDeviceSynchronize();
+
+        std::vector<cv::cuda::GpuMat> sl, sr, sd;
+        std::vector<cv::Ptr<cv::cuda::StereoBM>> sbm;
+        const size_t cOcvMem = meterScope(
+            [&](int) {
+                sl.emplace_back(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1);
+                sr.emplace_back(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1);
+                sd.emplace_back();
+                sbm.push_back(cv::cuda::createStereoBM(64, 9));
+                sbm.back()->compute(sl.back(), sr.back(), sd.back());
+                cudaDeviceSynchronize();
+            },
+            cReps);
+        sl.clear(); sr.clear(); sd.clear(); sbm.clear();
+        printMemPair("census entry working set (two wide frames + two descriptor"
+                     " images + map) vs StereoBM's",
+                     "752x480", cBinMem, cOcvMem, step, cReps, cReps);
+        emitMem("census_entry", "752x480", cBinMem, cOcvMem, step, cReps, cReps);
+        std::printf("   SCOPE, and it is not a footnote: the census path is where binCV\n"
+                    "   has no structural advantage. Whatever this row says, the\n"
+                    "   library's claim lives in section 7's binary path.\n");
+    }
+
+    if (wantR3) {
+        bincv::SequenceHeader seqH{};
+        bool seqOk = false;
+        if (!blob.empty()) {
+            seqH = bincv::readSequenceHeader(blob.data(), blob.size());
+            seqOk = seqH.valid && seqH.mode == bincv::kSequenceMode8Bit &&
+                    seqH.width == kW && seqH.height == kH && seqH.frameCount >= 2;
+        }
+        const auto frameAt = [&](size_t i) -> const uint8_t* {
+            const bincv::SequenceFrameRange r =
+                bincv::sequenceFrame(seqH, blob.data(), blob.size(), i);
+            return r.valid ? r.data : nullptr;
+        };
+
+        if (!seqOk) {
+            std::printf("\n=====================================================================\n"
+                        " 14 and 16 -- SKIPPED: NO REAL SEQUENCE\n"
+                        "=====================================================================\n"
+                        " Both the Lucas-Kanade role row and the sequence-level number are\n"
+                        " decided by corner density, and a synthetic frame is a different\n"
+                        " workload -- measured elsewhere in this project as a verdict that\n"
+                        " INVERTED between synthetic and real content. So neither is run\n"
+                        " on makeFrame's smoothed noise and neither is substituted.\n"
+                        " Point BINCV_CUDA_ROLE_FRAMES at a %zux%zu 8-bit BSQ1 blob with\n"
+                        " at least two frames (scripts/make_sequence_blob.py --mode 8bit).\n",
+                        kW, kH);
+            std::printf("SKIP,lk,no real sequence blob\nSKIP,sequence,no real sequence blob\n");
+        } else {
+        DeviceTracker dev;
+        bincv::LKParams lkp;
+        lkp.winWidth = kLkWin;
+        lkp.winHeight = kLkWin;
+        lkp.maxIterations = kLkIterCap;
+
+        deviceLoadFrame(dev, frameAt(0), dev.prev, gStream);
+        deviceLoadFrame(dev, frameAt(1), dev.next, gStream);
+        deviceDerivatives(dev, dev.prev, gStream);
+        cudaStreamSynchronize(gStream);
+
+        bc::DeviceLKLevel lkLevels[kLkLevels];
+        deviceBuildLevels(dev, lkLevels);
+
+        // TWO real keypoint sets from the detector's own output, at the
+        // reference frontend's spacing and at a denser one. Corner density is
+        // what decides this comparison, so the row prints the count it got
+        // rather than a round number reached by tuning the detector.
+        const uint32_t sparseN = deviceDetect(dev, 33.33333333333, dev.prevXY.data(), gStream);
+        bc::DeviceArray<float> denseXY(2 * kTrackCapacity);
+        const uint32_t denseN = deviceDetect(dev, 6.0, denseXY.data(), gStream);
+
+        // =================================================================
+        // 14. LUCAS-KANADE
+        // =================================================================
+        if (want("lk")) {
+            std::printf("\n=====================================================================\n"
+                        " 14. SPARSE LUCAS-KANADE -- binCV cuda::calcOpticalFlowPyrLKAsync\n"
+                        "     vs cv::cuda::SparsePyrLKOpticalFlow (cudaoptflow)\n"
+                        "=====================================================================\n"
+                        " ROLE: 'track a keypoint set from one frame to the next over a\n"
+                        " pyramid, on device'. BOTH SIDES' PYRAMIDS ARE RESIDENT AT ENTRY\n"
+                        " and neither arm builds one inside the bracket -- cv::cuda's\n"
+                        " calc() overload that takes std::vector<GpuMat> pyramids is used\n"
+                        " for exactly that reason, so the row is a like-for-like rather\n"
+                        " than a subtraction estimate.\n"
+                        " SAME WINDOW BOTH SIDES: 31x31, %d levels, iteration cap %d,\n"
+                        " err off on both, both free-running (cv::cuda breaks on its own\n"
+                        " 0.01-pixel convergence test; binCV on its own epsilon rule --\n"
+                        " forcing equal iteration counts would be forcing a DIFFERENT\n"
+                        " algorithm on one of them).\n"
+                        " keypoints: %u at the reference minDistance of 33.33 px, %u at\n"
+                        " 6 px, both from goodFeaturesToTrack on frame 0 of the REAL\n"
+                        " sequence.\n",
+                        kLkLevels, kLkIterCap, sparseN, denseN);
+
+            cv::Mat hp(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
+                       const_cast<uint8_t*>(frameAt(0)));
+            cv::Mat hn(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
+                       const_cast<uint8_t*>(frameAt(1)));
+            std::vector<cv::cuda::GpuMat> prevPyr(static_cast<size_t>(kLkLevels)),
+                nextPyr(static_cast<size_t>(kLkLevels));
+            prevPyr[0].upload(hp, gCvStream);
+            nextPyr[0].upload(hn, gCvStream);
+            for (size_t l = 1; l < static_cast<size_t>(kLkLevels); ++l) {
+                cv::cuda::pyrDown(prevPyr[l - 1], prevPyr[l], gCvStream);
+                cv::cuda::pyrDown(nextPyr[l - 1], nextPyr[l], gCvStream);
+            }
+            cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> cvlk =
+                cv::cuda::SparsePyrLKOpticalFlow::create(cv::Size(kLkWin, kLkWin),
+                                                         kLkLevels - 1, kLkIterCap, false);
+
+            const auto lkRow = [&](const char* geom, const float* dXY, uint32_t count) {
+                std::vector<float> hostPts(2 * count);
+                cudaMemcpy(hostPts.data(), dXY, 2 * count * sizeof(float),
+                           cudaMemcpyDeviceToHost);
+                cv::Mat ptsMat(1, static_cast<int>(count), CV_32FC2, hostPts.data());
+                cv::cuda::GpuMat gPts, gNextPts, gStatus;
+                gPts.upload(ptsMat, gCvStream);
+                gCvStream.waitForCompletion();
+
+                bc::DeviceLKTracks tr;
+                tr.dPrevXY = dXY;
+                tr.dNextXY = dev.nextXY.data();
+                tr.dStatus = dev.status.data();
+                tr.dErr = nullptr;
+                tr.count = count;
+
+                const auto cvArm = [&] {
+                    cvlk->calc(prevPyr, nextPyr, gPts, gNextPts, gStatus, cv::noArray(),
+                               gCvStream);
+                };
+                const auto binArm = [&] {
+                    bc::calcOpticalFlowPyrLKAsync(lkLevels, kLkLevels, tr, lkp, gStream);
+                };
+                const PairedTiming pl = timeKernelPaired(cvArm, binArm, 50, 50, kRounds,
+                                                         gStream);
+                char lbl[128];
+                std::snprintf(lbl, sizeof(lbl), "sparse LK, 31x31, %d levels, %u keypoints",
+                              kLkLevels, count);
+                printRole(lbl, "cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)",
+                          "bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)", pl,
+                          floor, geom);
+                emitRow("lk", geom, pl);
+                printEnqueue("lk", geom, "cv::cuda SparsePyrLK", "bincv LK",
+                             timeHostEnqueue(cvArm, 20), timeHostEnqueue(binArm, 20), pl);
+                std::printf("   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV\n"
+                            "   issues ONE launch for all four levels; cv::cuda issues one\n"
+                            "   per level plus multiply and setTo. The optical-flow family\n"
+                            "   profiled both kernels in one ncu run and found binCV's\n"
+                            "   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall\n"
+                            "   clock advantage is the launch shape, and on a host whose\n"
+                            "   launch is cheap it would shrink.\n");
+                return pl;
+            };
+            // A KEYPOINT-COUNT SWEEP, not two points. binCV issues one launch
+            // with one warp per keypoint; cv::cuda issues one launch per level
+            // with 256 threads per keypoint. Those two shapes cross somewhere,
+            // and a bar quoted at one count on either side of that crossing is
+            // a bar quoted at the count that flattered it. The sweep runs on the
+            // PREFIX of one detected set, so every row is the same corners with
+            // more of them and nothing else changes.
+            std::printf("\n THE SWEEP, and why it is a sweep: binCV = one launch, one warp\n"
+                        " per keypoint; cv::cuda = one launch per level, 256 threads per\n"
+                        " keypoint. Those shapes cross. Rows below are PREFIXES of the\n"
+                        " minDistance-6 set, so only the count moves.\n");
+            lkRow("752x480, minDistance 33.33 (the reference frontend's spacing)",
+                  dev.prevXY.data(), sparseN);
+            const uint32_t sweep[] = {64, 128, 256, 512, 1024};
+            for (uint32_t n : sweep) {
+                if (n > denseN) continue;
+                char g[64];
+                std::snprintf(g, sizeof(g), "752x480, %u pts (prefix of minDistance 6)", n);
+                lkRow(g, denseXY.data(), n);
+            }
+            lkRow("752x480, minDistance 6, the whole set", denseXY.data(), denseN);
+
+            // Memory, meter 2 on both sides: the tracker's resident state.
+            // binCV's side is the two binary ladders, the previous frame's
+            // derivative planes and the keypoint arrays. cv::cuda's is the two
+            // CV_8U pyramids and its keypoint GpuMats. The SENSOR STAGE's wide
+            // frames are excluded on binCV's side because cv::cuda has no
+            // counterpart to them in this row; section 16 puts them back,
+            // because a SEQUENCE pays for them.
+            // Separate counts again: binCV's tracker state is ~384 KB and
+            // OpenCV's ~1.3 MB, so eight of the meter's units cost very
+            // different replica counts. Each side is divided by its own.
+            const int lkReps = 96;
+            const int lkOcvReps = 32;
+            std::vector<std::unique_ptr<Ladder>> bp, bn;
+            std::vector<std::unique_ptr<DerivLadder>> bd;
+            std::vector<std::unique_ptr<bc::DeviceArray<float>>> bxy;
+            std::vector<std::unique_ptr<bc::DeviceArray<uint8_t>>> bst;
+            const size_t lkBin = meterScope(
+                [&](int) {
+                    bp.push_back(std::make_unique<Ladder>(static_cast<int>(kW),
+                                                          static_cast<int>(kH)));
+                    bn.push_back(std::make_unique<Ladder>(static_cast<int>(kW),
+                                                          static_cast<int>(kH)));
+                    bd.push_back(std::make_unique<DerivLadder>());
+                    bxy.push_back(std::make_unique<bc::DeviceArray<float>>(4 * denseN));
+                    bst.push_back(std::make_unique<bc::DeviceArray<uint8_t>>(denseN));
+                },
+                lkReps);
+            bp.clear(); bn.clear(); bd.clear(); bxy.clear(); bst.clear();
+            cudaDeviceSynchronize();
+
+            std::vector<std::vector<cv::cuda::GpuMat>> op, on;
+            std::vector<cv::cuda::GpuMat> opts, onext, ostat;
+            std::vector<cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow>> olk;
+            const size_t lkOcv = meterScope(
+                [&](int) {
+                    op.emplace_back(static_cast<size_t>(kLkLevels));
+                    on.emplace_back(static_cast<size_t>(kLkLevels));
+                    op.back()[0].upload(hp);
+                    on.back()[0].upload(hn);
+                    for (size_t l = 1; l < static_cast<size_t>(kLkLevels); ++l) {
+                        cv::cuda::pyrDown(op.back()[l - 1], op.back()[l]);
+                        cv::cuda::pyrDown(on.back()[l - 1], on.back()[l]);
+                    }
+                    opts.emplace_back();
+                    onext.emplace_back();
+                    ostat.emplace_back();
+                    std::vector<float> pts(2 * denseN, 100.0f);
+                    opts.back().upload(cv::Mat(1, static_cast<int>(denseN), CV_32FC2,
+                                               pts.data()));
+                    olk.push_back(cv::cuda::SparsePyrLKOpticalFlow::create(
+                        cv::Size(kLkWin, kLkWin), kLkLevels - 1, kLkIterCap, false));
+                    olk.back()->calc(op.back(), on.back(), opts.back(), onext.back(),
+                                     ostat.back(), cv::noArray());
+                    cudaDeviceSynchronize();
+                },
+                lkOcvReps);
+            op.clear(); on.clear(); opts.clear(); onext.clear(); ostat.clear(); olk.clear();
+            printMemPair("sparse LK tracker resident state (both frames at every"
+                         " level + keypoint arrays)",
+                         "752x480", lkBin, lkOcv, step, lkReps, lkOcvReps);
+            emitMem("lk", "752x480", lkBin, lkOcv, step, lkReps, lkOcvReps);
+            std::printf("   HONEST WEAKNESS, printed at the number: binCV STORES the\n"
+                        "   ternary derivative planes where cv::cuda recomputes them\n"
+                        "   in-kernel, which is most of binCV's side of this reading.\n"
+                        "   A fused-derivative variant would take it further and is not\n"
+                        "   in this measurement.\n");
+        }
+
+        // =================================================================
+        // 16. THE SEQUENCE-LEVEL NUMBER
+        // =================================================================
+        if (want("sequence")) {
+            size_t nFrames = 400;
+            if (const char* e = std::getenv("BINCV_CUDA_ROLE_SEQ_FRAMES")) {
+                const long v = std::atol(e);
+                if (v > 1) nFrames = static_cast<size_t>(v);
+            }
+            if (nFrames > seqH.frameCount) nFrames = seqH.frameCount;
+            int passes = 3;
+            if (const char* e = std::getenv("BINCV_CUDA_ROLE_SEQ_PASSES")) {
+                const long v = std::atol(e);
+                if (v > 0) passes = static_cast<int>(v);
+            }
+            const size_t redetect = 10;
+
+            std::printf("\n=====================================================================\n"
+                        " 16. THE SEQUENCE-LEVEL NUMBER -- a resident device tracker\n"
+                        "     against the host tracker, over %zu real frames\n"
+                        "=====================================================================\n"
+                        " THE RULE, WRITTEN HERE BEFORE THE LOOP RUNS. This row is not a\n"
+                        " kernel ratio and must not be read as one. It is the whole\n"
+                        " per-frame cost a caller pays, wall clock, on both arms:\n"
+                        "   sensor stage (median + edge threshold) -> pyramid ladder ->\n"
+                        "   the previous frame's derivative planes -> LK track,\n"
+                        " with a detection every %zu frames on BOTH arms. The device arm\n"
+                        " additionally pays the host-to-device upload of every frame,\n"
+                        " inside its timing, because the frame has to arrive.\n"
+                        "\n"
+                        " ONE SYNCHRONIZE PER FRAME on the device arm, and it is in the\n"
+                        " clock. A tracker whose output nobody waits for is not a tracker;\n"
+                        " removing that synchronize would measure enqueue.\n"
+                        "\n"
+                        " WHAT DECIDES IT: speed AND peak device memory, together. Faster\n"
+                        " but larger does not settle it, and neither does smaller but\n"
+                        " slower -- the two are printed side by side and the verdict names\n"
+                        " both. There is no project-wide ratio that ships this and none is\n"
+                        " invented here.\n"
+                        "\n"
+                        " A DECLARED SIMPLIFICATION, stated before measuring: the fixed\n"
+                        " re-detection cadence replaces the frontend's adaptive\n"
+                        " 'detect when live tracks fall below 60' policy. The adaptive\n"
+                        " policy needs the surviving count on the host every frame, which\n"
+                        " would put a device-to-host round trip in the device arm's loop\n"
+                        " and make the two arms do different work. The cadence is run at\n"
+                        " TWO values so it can be seen not to decide the answer.\n"
+                        "\n"
+                        " THE HOST ARM IS NOT TIMING-GRADE ON THIS MACHINE (30-130%%\n"
+                        " spread under WSL2, per this project's own record). The device\n"
+                        " arm's wall clock is taken on the same host and the same loop,\n"
+                        " so the RATIO carries that noise too. It is reported with both\n"
+                        " arms' full ranges over %d passes and the reader is told when\n"
+                        " they overlap.\n",
+                        nFrames, redetect, passes);
+
+            HostTracker host(static_cast<int>(kW), static_cast<int>(kH));
+
+            std::vector<bincv::Corner> hostCorners(kRankCapacity);
+            std::vector<bincv::Point2f> hPrevPts(kTrackCapacity), hNextPts(kTrackCapacity);
+            std::vector<uint8_t> hStatus(kTrackCapacity);
+            bincv::GoodFeaturesParams hgf;
+            hgf.maxCorners = static_cast<int>(kTrackCapacity);
+            hgf.minDistance = 33.33333333333;
+
+            // ============================================================
+            // WHAT IS COMPARED MUST AGREE BEFORE IT IS TIMED.
+            // Two arms that track different keypoint sets are not two
+            // measurements of one operation, they are two operations. This
+            // block runs ONE frame through each arm and compares, stage by
+            // stage, WHOLE WORDS -- so padding bits, which word-wise
+            // reductions count, are compared too and not only pixels. It
+            // prints a mismatch rather than asserting one away.
+            // ============================================================
+            {
+                deviceLoadFrame(dev, frameAt(0), dev.prev, gStream);
+                deviceLoadFrame(dev, frameAt(1), dev.next, gStream);
+                deviceDerivatives(dev, dev.prev, gStream);
+                cudaStreamSynchronize(gStream);
+                host.seed(frameAt(0));
+                host.loadFrame(frameAt(1));
+                host.derivatives();
+
+                bincv::BinMat<HW> dBits(static_cast<int>(kW), static_cast<int>(kH));
+                bc::download(dev.prev.levelAt(0).block(), dBits.view(), gStream);
+                cudaStreamSynchronize(gStream);
+                size_t bitWords = 0, bitDiff = 0;
+                {
+                    const HW* a = dBits.data();
+                    const HW* b = host.prev.level<0>().data();
+                    const size_t n = dBits.sizeInWords();
+                    bitWords = n;
+                    for (size_t i = 0; i < n; ++i)
+                        if (a[i] != b[i]) ++bitDiff;
+                }
+
+                bincv::SignedQuantMat<1, HW> dDx(static_cast<int>(kW), static_cast<int>(kH));
+                bincv::SignedQuantMat<1, HW> dDy(static_cast<int>(kW), static_cast<int>(kH));
+                bc::download(dev.deriv.dx[0].constView(),
+                             bincv::BinMatView<HW>(dDx.data(), kW, 2 * kH,
+                                                   dDx.getAlignedWidth()), gStream);
+                bc::download(dev.deriv.dy[0].constView(),
+                             bincv::BinMatView<HW>(dDy.data(), kW, 2 * kH,
+                                                   dDy.getAlignedWidth()), gStream);
+                cudaStreamSynchronize(gStream);
+                size_t derWords = 0, derDiff = 0;
+                {
+                    const size_t n = dDx.sizeInWords();
+                    derWords = 2 * n;
+                    for (size_t i = 0; i < n; ++i) {
+                        if (dDx.data()[i] != host.dx0.data()[i]) ++derDiff;
+                        if (dDy.data()[i] != host.dy0.data()[i]) ++derDiff;
+                    }
+                }
+
+                const uint32_t dN = deviceDetect(dev, hgf.minDistance, dev.prevXY.data(),
+                                                 gStream);
+                std::vector<float> dPts(2 * dN);
+                cudaMemcpy(dPts.data(), dev.prevXY.data(), 2 * dN * sizeof(float),
+                           cudaMemcpyDeviceToHost);
+                bincv::ResponseMap ring0{host.ring.data(), kW, bincv::kResponseRingRows, kW};
+                const bincv::CornerResult hr = bincv::goodFeaturesToTrackStreaming<HW>(
+                    host.dx0, host.dy0, hgf, ring0, hostCorners.data(), hostCorners.size());
+                size_t posDiff = 0;
+                const size_t common = dN < hr.count ? dN : hr.count;
+                for (size_t i = 0; i < common; ++i) {
+                    if (static_cast<double>(dPts[2 * i]) !=
+                            static_cast<double>(hostCorners[i].x) ||
+                        static_cast<double>(dPts[2 * i + 1]) !=
+                            static_cast<double>(hostCorners[i].y))
+                        ++posDiff;
+                }
+
+                std::printf("\n AGREEMENT CHECK, frame 0/1 of the real sequence, before a\n"
+                            " single timing number is taken:\n");
+                std::printf("   level-0 binary frame        %8zu words compared, %zu differ\n",
+                            bitWords, bitDiff);
+                std::printf("   dx0 / dy0 ternary planes    %8zu words compared, %zu differ\n",
+                            derWords, derDiff);
+                std::printf("   detector, minDistance %.2f: device %u corners, host %zu"
+                            " corners%s\n",
+                            hgf.minDistance, dN, hr.count,
+                            hr.candidatesTruncated ? "  (host reports its candidate pool"
+                                                     " TRUNCATED)" : "");
+                std::printf("   positions over the %zu ranks both produced: %zu differ\n",
+                            common, posDiff);
+                std::printf("AGREE,%zu,%zu,%zu,%zu,%u,%zu,%zu,%d\n", bitWords, bitDiff,
+                            derWords, derDiff, dN, hr.count, posDiff,
+                            hr.candidatesTruncated ? 1 : 0);
+                if (bitDiff != 0 || derDiff != 0 || static_cast<size_t>(dN) != hr.count ||
+                    posDiff != 0) {
+                    std::printf("   *** THE TWO ARMS DO NOT SEE THE SAME THING. Every ratio\n"
+                                "   *** below is reported anyway, and is reported as NOT\n"
+                                "   *** like-for-like. This is a finding, not a nuisance:\n"
+                                "   *** the device corner op is documented bit-exact\n"
+                                "   *** against the host's, and here it is not.\n");
+                }
+            }
+
+
+            const auto runCadence = [&](size_t cadence) {
+                std::vector<double> devSamples, hostSamples;
+                size_t devTracked = 0, hostTracked = 0, dets = 0;
+                uint32_t devCount = 0;
+                size_t hostCount = 0;
+
+                for (int pass = 0; pass < passes; ++pass) {
+                    // ---- the device arm -------------------------------------
+                    deviceLoadFrame(dev, frameAt(0), dev.next, gStream);
+                    cudaStreamSynchronize(gStream);
+                    devCount = 0;
+                    devTracked = 0;
+                    dets = 0;
+                    const auto d0 = std::chrono::steady_clock::now();
+                    for (size_t f = 1; f < nFrames; ++f) {
+                        std::swap(dev.prev, dev.next);
+                        deviceLoadFrame(dev, frameAt(f), dev.next, gStream);
+                        deviceDerivatives(dev, dev.prev, gStream);
+                        if ((f - 1) % cadence == 0) {
+                            devCount = deviceDetect(dev, hgf.minDistance,
+                                                    dev.prevXY.data(), gStream);
+                            ++dets;
+                        }
+                        bc::DeviceLKLevel lv[kLkLevels];
+                        deviceBuildLevels(dev, lv);
+                        bc::DeviceLKTracks tr;
+                        tr.dPrevXY = dev.prevXY.data();
+                        tr.dNextXY = dev.nextXY.data();
+                        tr.dStatus = dev.status.data();
+                        tr.dErr = nullptr;
+                        tr.count = devCount;
+                        bc::calcOpticalFlowPyrLKAsync(lv, kLkLevels, tr, lkp, gStream);
+                        cudaStreamSynchronize(gStream);
+                        devTracked += devCount;
+                    }
+                    const auto d1 = std::chrono::steady_clock::now();
+                    devSamples.push_back(
+                        std::chrono::duration<double, std::milli>(d1 - d0).count() /
+                        static_cast<double>(nFrames - 1));
+
+                    // ---- the host arm ---------------------------------------
+                    host.seed(frameAt(0));
+                    hostCount = 0;
+                    hostTracked = 0;
+                    const auto h0 = std::chrono::steady_clock::now();
+                    for (size_t f = 1; f < nFrames; ++f) {
+                        host.loadFrame(frameAt(f));
+                        host.derivatives();
+                        if ((f - 1) % cadence == 0) {
+                            bincv::ResponseMap ringMap{host.ring.data(), kW,
+                                                       bincv::kResponseRingRows, kW};
+                            const bincv::CornerResult r =
+                                bincv::goodFeaturesToTrackStreaming<HW>(
+                                    host.dx0, host.dy0, hgf, ringMap, hostCorners.data(),
+                                    hostCorners.size());
+                            hostCount = r.count < kTrackCapacity ? r.count : kTrackCapacity;
+                            for (size_t i = 0; i < hostCount; ++i)
+                                hPrevPts[i] = bincv::Point2f{
+                                    static_cast<float>(hostCorners[i].x),
+                                    static_cast<float>(hostCorners[i].y)};
+                        }
+                        if (hostCount > 0) {
+                            bincv::calcOpticalFlowPyrLK(host.levels, hPrevPts.data(),
+                                                        hNextPts.data(), hStatus.data(),
+                                                        nullptr, hostCount, lkp);
+                        }
+                        hostTracked += hostCount;
+                    }
+                    const auto h1 = std::chrono::steady_clock::now();
+                    hostSamples.push_back(
+                        std::chrono::duration<double, std::milli>(h1 - h0).count() /
+                        static_cast<double>(nFrames - 1));
+                }
+
+                const Timing dt = summarize(devSamples);
+                const Timing ht = summarize(hostSamples);
+                const bool disjoint = dt.maxMs < ht.minMs || ht.maxMs < dt.minMs;
+                std::printf("\n cadence %zu -- detection every %zu frames, %zu detections\n",
+                            cadence, cadence, dets);
+                std::printf("   %-46s %9.3f ms/frame  range %8.3f-%8.3f\n",
+                            "HOST binCV tracker (x86, wall clock)", ht.medianMs, ht.minMs,
+                            ht.maxMs);
+                std::printf("   %-46s %9.3f ms/frame  range %8.3f-%8.3f\n",
+                            "DEVICE binCV tracker (wall clock, 1 sync/frame)", dt.medianMs,
+                            dt.minMs, dt.maxMs);
+                std::printf("   ratio device/host: %6.4fx  (device %5.2fx %s)"
+                            "   ranges %s\n",
+                            dt.medianMs > 0.0 && ht.medianMs > 0.0
+                                ? dt.medianMs / ht.medianMs : 0.0,
+                            dt.medianMs > 0.0 ? ht.medianMs / dt.medianMs : 0.0,
+                            dt.medianMs < ht.medianMs ? "FASTER" : "SLOWER",
+                            disjoint ? "DISJOINT -- a result"
+                                     : "OVERLAP -- NOT a result at this sample size");
+                std::printf("   keypoints tracked: device %u/frame, host %zu/frame%s\n",
+                            devCount, hostCount,
+                            static_cast<size_t>(devCount) == hostCount
+                                ? "  (the two detectors agree, as bit-exactness requires)"
+                                : "  <-- THE TWO ARMS ARE NOT TRACKING THE SAME COUNT;"
+                                  " the ratio above is NOT like-for-like");
+                std::printf("SEQ,%zu,%zu,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%u,%zu\n",
+                            cadence, nFrames, passes, ht.minMs, ht.medianMs, ht.maxMs,
+                            dt.minMs, dt.medianMs, dt.maxMs, disjoint ? 1 : 0, devCount,
+                            hostCount);
+                (void)devTracked;
+                (void)hostTracked;
+            };
+
+            runCadence(redetect);
+            runCadence(1);
+
+            // ---- MEMORY, reported WITH the speed, never after it -----------
+            std::printf("\n MEMORY, and it is half the verdict.\n");
+            std::printf("   [meter 1, allocation sum, binCV to binCV] device tracker whole\n"
+                        "   resident state, including the detector's ranking pool and the\n"
+                        "   sensor stage's two wide frames: %8.1f KB\n",
+                        static_cast<double>(dev.bytes()) / 1024.0);
+            std::printf("   [meter 1] ...of which the TRACKER alone (two ladders, the\n"
+                        "   previous frame's derivatives, the keypoint arrays): %8.1f KB\n",
+                        static_cast<double>(dev.trackerOnlyBytes()) / 1024.0);
+            std::printf("   [meter 3, HOST bytes -- a DIFFERENT METER, printed beside the\n"
+                        "   device figure and NEVER divided into it] host tracker's own\n"
+                        "   working set: %8.1f KB\n",
+                        static_cast<double>(host.bytes()) / 1024.0);
+
+            const int sReps = 32;
+            std::vector<std::unique_ptr<DeviceTracker>> reps;
+            const size_t seqBin = meterScope(
+                [&](int) { reps.push_back(std::make_unique<DeviceTracker>()); }, sReps);
+            reps.clear();
+            cudaDeviceSynchronize();
+            std::printf("   [meter 2, cudaMemGetInfo delta over %d independent tracker\n"
+                        "   states] %8.2f MB total = %8.1f KB per tracker (%.0f of the\n"
+                        "   driver's own %.2f MB units -- %s)\n",
+                        sReps, static_cast<double>(seqBin) / (1024.0 * 1024.0),
+                        static_cast<double>(seqBin) / sReps / 1024.0,
+                        static_cast<double>(seqBin) / static_cast<double>(step),
+                        static_cast<double>(step) / (1024.0 * 1024.0),
+                        static_cast<double>(seqBin) / static_cast<double>(step) >= 8.0
+                            ? "resolves"
+                            : "DOES NOT RESOLVE -- do not quote this one");
+            std::printf("MEMSEQ,%zu,%zu,%zu,%zu,%d,%zu\n", dev.bytes(),
+                        dev.trackerOnlyBytes(), host.bytes(), seqBin, sReps, step);
+            std::printf("\n   PEAK is what is printed: every allocation above is made once\n"
+                        "   at construction and held for the whole sequence -- no kernel\n"
+                        "   here allocates, and the per-frame loop calls no cudaMalloc. So\n"
+                        "   the resident state IS the peak, and that is a property of the\n"
+                        "   design rather than a reading that happened to come out flat.\n");
+        }
+        }
+    }
+
+    // ======================================================================
+    // 17. OUTSTANDING -- every round-2 op with no cv::cuda bar at any level
     // ======================================================================
     if (want("outstanding")) {
         std::printf("\n=====================================================================\n"
-                    " 14. OUTSTANDING (ruling R2) -- round 2's ops with NO cv::cuda\n"
+                    " 17. OUTSTANDING (ruling R2) -- round 2's ops with NO cv::cuda\n"
                     "     counterpart at any API level\n"
                     "=====================================================================\n"
                     " Each of these ships on correctness, memory and the HOST comparison,\n"
@@ -2292,9 +3402,49 @@ int main(int argc, char** argv) {
                     "     denominator and the derivcov family times it; both arms sit ON\n"
                     "     the launch floor there, so that ratio is a lower bound on the\n"
                     "     gap and says nothing about binCV's kernel.\n");
+        std::printf("\n ROUND 3'S ADDITIONS TO THIS LIST.\n"
+                    "\n"
+                    " stereoDescriptorMatch / stereoRefineDisparity /\n"
+                    " stereoMatchRectified\n"
+                    "     Sparse rectified stereo by descriptor match and a one-bit\n"
+                    "     window refinement. cv::cuda ships dense block matchers\n"
+                    "     (StereoBM, StereoBeliefPropagation, StereoConstantSpaceBP)\n"
+                    "     and no SPARSE stereo at any API level -- a dense map for\n"
+                    "     500 keypoints is a different operation, not a slower\n"
+                    "     spelling of this one. Priced instead against binCV's OWN\n"
+                    "     device dense path, which is a binCV-to-binCV bar and lives\n"
+                    "     in cuda_sparse_benchmark. SPEED VERDICT: OUTSTANDING.\n"
+                    "\n"
+                    " calcOpticalFlowBlockMatch\n"
+                    "     Pyramidal tracking by integer Hamming block matching. The\n"
+                    "     nearest cv::cuda call is SparsePyrLKOpticalFlow, which solves\n"
+                    "     a different equation -- and it is already section 14's bar\n"
+                    "     for the op that DOES solve the same one. Quoting it twice\n"
+                    "     would make one denominator answer two questions. SPEED\n"
+                    "     VERDICT: OUTSTANDING; the role row that exists is the\n"
+                    "     sparse family's own, stated as a role comparison there.\n"
+                    "\n"
+                    " matchDescriptorsGated\n"
+                    "     Section 13 prices the UNGATED matcher, which is the one with\n"
+                    "     a counterpart. The gate changes the ADMITTED SET, and\n"
+                    "     cv::cuda::DescriptorMatcher has no mask that reproduces it,\n"
+                    "     so the gated form has no bar. SPEED VERDICT: OUTSTANDING.\n"
+                    "\n"
+                    " the RANSAC geometry stage\n"
+                    "     NOT an outstanding row and must not be filed as one. OpenCV\n"
+                    "     has no cv::cuda essential-matrix estimator, but it DOES ship\n"
+                    "     a GPU RANSAC (cv::cuda::solvePnPRansac, cudalegacy) whose\n"
+                    "     shape is the finding: it keeps the solver on the host and\n"
+                    "     moves only scoring. binCV's own measurement came out the\n"
+                    "     same way and the stage stays on the host. There is nothing\n"
+                    "     here to ship and therefore nothing to leave outstanding.\n");
         std::printf("OUTSTANDING,covariance\nOUTSTANDING,cornerSubPixAsync\n"
                     "OUTSTANDING,gftt_device_spacing\nOUTSTANDING,keypointsFromCorners\n"
-                    "OUTSTANDING,keypointOrientation\n");
+                    "OUTSTANDING,keypointOrientation\n"
+                    "OUTSTANDING,stereoDescriptorMatch\nOUTSTANDING,stereoRefineDisparity\n"
+                    "OUTSTANDING,stereoMatchRectified\n"
+                    "OUTSTANDING,calcOpticalFlowBlockMatch\n"
+                    "OUTSTANDING,matchDescriptorsGated\n");
     }
 
     cudaStreamSynchronize(gStream);

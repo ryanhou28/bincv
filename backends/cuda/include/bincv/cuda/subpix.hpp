@@ -184,6 +184,28 @@ namespace impl {
 /// control is a window in which every bit of both magnitude planes is set.
 bool& subPixSkipEnabled();
 
+/// @brief Spreads the corners over SMs (default) or packs them into 256-thread
+/// blocks. **INTERNAL**, and it changes only the launch geometry -- one corner
+/// per thread, the host's serial accumulation order, identical output.
+/// @note This is the operation's cost, not a tuning detail. The refinement is
+/// `double` arithmetic and `sm_86` issues FP64 at 1/64 of FP32 -- two pipes per
+/// SM -- so a 200-corner call in one 256-thread block has two FP64 pipes for the
+/// whole frame. Seven one-warp blocks have fourteen.
+/// @note **And it does not collect all seven times**, which is worth stating so
+/// nobody re-runs the experiment. One warp per SM has nothing to hide the FP64
+/// pipe's latency with: the profiler reads `sm__inst_executed_pipe_fp64` at 45.7%
+/// of peak on the SMs the spread arm occupies, so the arm collects
+/// `7 x 0.457 = 3.20x` and measures 3.18x. Two warps per SM would collect the
+/// rest, and that needs about 450 corners; below that the part cannot be filled
+/// and no launch geometry changes it.
+bool& subPixSpreadEnabled();
+
+/// @brief Whether the spread launch would differ from the packed one for this
+/// count. **INTERNAL** -- the gate-excluded case the benchmark must report at
+/// ~1.00x is `count <= 32`, where both geometries are a single block on a single
+/// SM and there is nothing to spread.
+bool subPixSpreadApplies(uint32_t count);
+
 } // namespace impl
 
 // The host's Point2f is two floats and nothing else, which is what lets a device

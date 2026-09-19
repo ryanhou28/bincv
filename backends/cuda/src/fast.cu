@@ -406,6 +406,316 @@ __global__ void fastSortKernel(DeviceFastCorner* out, const uint32_t* counter,
     for (uint32_t i = threadIdx.x; i < n; i += blockDim.x) out[i] = scratch[i];
 }
 
+// ---------------------------------------------------------------------------
+// The ordered arm: raster order by prefix sum, no comparison at all
+// ---------------------------------------------------------------------------
+//
+// The sort above is the whole call. Measured on the reference frame at the
+// reference threshold -- 19,898 corners -- detection alone is 0.0328 ms and the
+// call is 2.236 ms, so 98.5% of a FAST detection was a single-block bitonic
+// network on a 48-SM part. The cost tracks nextPow2(found), not the frame and
+// not the capacity.
+//
+// The fix is not a faster sort. It is that THERE IS NOTHING TO SORT. A word's
+// corners are the set bits of one mask, and `__ffs`-peeling them low bit first
+// emits them in ascending x already; the units (row, word) are themselves in
+// raster order under the index `(y - 3) * words + w`. So the host's order is
+// what an ordered COMPACTION produces, and an ordered compaction over per-unit
+// popcounts is a prefix sum:
+//
+//   1. count  -- every unit's corner mask, `__popc`, one block total per block
+//   2. emit   -- the same masks again, each block adding the block totals below
+//                it and scanning its own 128 counts, writing at the exact index
+//
+// Two passes over the detector, no comparisons, and the second pass writes each
+// corner at the index the host would have put it at. The prefix sum is over
+// WORDS rather than pixels -- 11,376 units for a 752x480 frame, not 360,960 --
+// which is the representation paying for the ordering the same way it pays for
+// the detection.
+//
+// A consequence worth stating: on this arm a TRUNCATED run IS the host's
+// prefix, because an index below `capacity` is exactly a raster rank below
+// `capacity`. That is a property of the arm, not a promise of the operation --
+// the reference arm's atomic cannot make it -- so fast.hpp's contract is
+// unchanged and the suite compares truncated runs by `found()`.
+//
+// WHY THIS ARM DOES NOT TILE BY DEFAULT ON WIDE FRAMES: it does tile, with the
+// same shared staging, but the block shape is forced by the ordering. A block
+// must own a CONTIGUOUS range of the raster unit index or the block totals
+// below it are not the corners before it. So a block is either whole rows (when
+// a row's words fit in a block) or one row's word range, and the tile follows.
+
+constexpr int kOrderThreads = 128;  // one (row, word) UNIT per thread, always
+// (wordsPerBlock + 2) * (rowsPerBlock + 6), maximised over every geometry this
+// shape can produce at kOrderThreads = 128. Both branches peak at 910.
+constexpr int kOrderTileWords = 910;
+
+/// @brief How the raster unit index is cut into blocks.
+/// @note The cut is the correctness requirement, not a tuning knob: block
+/// indices must ascend with the unit index or the prefix sum below a block is
+/// not the count of corners before it.
+struct OrderGeometry {
+    size_t words = 0;
+    size_t rows = 0;  ///< detectable rows, `height - 6`
+    size_t rowsPerBlock = 1;
+    size_t wordsPerBlock = 0;
+    size_t blocksPerRow = 1;
+    unsigned blocks = 0;
+};
+
+OrderGeometry orderGeometry(size_t words, size_t rows) {
+    OrderGeometry g;
+    g.words = words;
+    g.rows = rows;
+    if (words == 0 || rows == 0) return g;
+    if (words <= static_cast<size_t>(kOrderThreads)) {
+        // Whole rows per block. The block's units are rows x ALL words, which is
+        // a contiguous run of the raster index.
+        g.rowsPerBlock = static_cast<size_t>(kOrderThreads) / words;
+        g.wordsPerBlock = words;
+        g.blocksPerRow = 1;
+        g.blocks = static_cast<unsigned>((rows + g.rowsPerBlock - 1) / g.rowsPerBlock);
+    } else {
+        // One row's word range per block; block index is row * blocksPerRow + wg,
+        // which again ascends with the raster index.
+        g.rowsPerBlock = 1;
+        g.wordsPerBlock = static_cast<size_t>(kOrderThreads);
+        g.blocksPerRow = (words + static_cast<size_t>(kOrderThreads) - 1) /
+                         static_cast<size_t>(kOrderThreads);
+        g.blocks = static_cast<unsigned>(rows * g.blocksPerRow);
+    }
+    return g;
+}
+
+__device__ inline void orderBlockRange(const OrderGeometry& g, unsigned b, size_t& rowStart,
+                                       size_t& rowCount, size_t& wordStart, size_t& wordCount) {
+    if (g.blocksPerRow == 1) {
+        rowStart = static_cast<size_t>(b) * g.rowsPerBlock;
+        const size_t left = g.rows - rowStart;
+        rowCount = left < g.rowsPerBlock ? left : g.rowsPerBlock;
+        wordStart = 0;
+        wordCount = g.words;
+    } else {
+        rowStart = static_cast<size_t>(b) / g.blocksPerRow;
+        const size_t wg = static_cast<size_t>(b) - rowStart * g.blocksPerRow;
+        rowCount = 1;
+        wordStart = wg * g.wordsPerBlock;
+        const size_t left = g.words - wordStart;
+        wordCount = left < g.wordsPerBlock ? left : g.wordsPerBlock;
+    }
+}
+
+/// @brief Stages the block's ring rows, halo included, with the host's rule for
+/// a word outside the row: it reads as ZERO.
+__device__ inline void stageOrderTile(const DeviceBinMatConstView& img, size_t words,
+                                      size_t rowStart, size_t rowCount, size_t wordStart,
+                                      size_t wordCount, uint32_t* tile) {
+    const int tileRows = static_cast<int>(rowCount) + 6;
+    const int tileCols = static_cast<int>(wordCount) + 2;
+    for (int i = static_cast<int>(threadIdx.x); i < tileRows * tileCols; i += kOrderThreads) {
+        const int r = i / tileCols;
+        const int c = i - r * tileCols;
+        // Unit row r sits at y = 3 + rowStart + r, so tile row R holds image row
+        // rowStart + R and a ring offset dy lands at R = r + dy + 3.
+        const long long gy = static_cast<long long>(rowStart) + r;
+        const long long gw = static_cast<long long>(wordStart) + c - 1;
+        const bool ok = gy >= 0 && gy < static_cast<long long>(img.height) && gw >= 0 &&
+                        gw < static_cast<long long>(words);
+        tile[static_cast<size_t>(i)] =
+            ok ? img.row(static_cast<size_t>(gy))[static_cast<size_t>(gw)] : 0u;
+    }
+}
+
+/// @brief The sixteen ring differences of one unit, from the tile or from global.
+__device__ inline void loadUnitRing(bool tiled, const DeviceBinMatConstView& img, size_t words,
+                                    const uint32_t* tile, int tileCols, int r, int c, size_t y,
+                                    size_t w, uint32_t (&d)[16]) {
+    const Ring16 ring = fastRing();
+    const uint32_t center =
+        tiled ? tile[static_cast<size_t>(r + 3) * static_cast<size_t>(tileCols) +
+                     static_cast<size_t>(c + 1)]
+              : img.row(y)[w];
+#pragma unroll
+    for (int k = 0; k < 16; ++k) {
+        uint32_t rv;
+        if (tiled) {
+            const uint32_t* row = tile + static_cast<size_t>(r + ring.y[k] + 3) *
+                                             static_cast<size_t>(tileCols);
+            rv = shiftedTileWord(row, c + 1, ring.x[k]);
+        } else {
+            const uint32_t* row =
+                img.row(static_cast<size_t>(static_cast<long long>(y) + ring.y[k]));
+            rv = bincv::impl::fastShiftedWord<uint32_t>(row, words, w, ring.x[k]);
+        }
+        d[k] = rv ^ center;
+    }
+}
+
+/// @brief The corner mask of one unit. `ArcLength` 9 and 12 use the constant
+/// doubling schedule; 0 is the runtime schedule, which is the host's own
+/// `fastArcAny` and the case the benchmark reports at ~1.00x between arms.
+template <int ArcLength>
+__device__ inline uint32_t orderArcAny(const uint32_t (&d)[16], int arcLength) {
+    if (ArcLength == 9 || ArcLength == 12) {
+        uint32_t v[16];
+#pragma unroll
+        for (int k = 0; k < 16; ++k) v[k] = d[k];
+        arcStep<1>(v);
+        arcStep<2>(v);
+        arcStep<4>(v);
+        if (ArcLength == 9) return arcMask<9>(v);
+        arcStep<4>(v);
+        uint32_t any = v[0];
+#pragma unroll
+        for (int k = 1; k < 16; ++k) any |= v[k];
+        return any;
+    }
+    return bincv::impl::fastArcAny<uint32_t>(d, arcLength);
+}
+
+/// @brief The eight nested arc-length masks, at arcLength 9 only.
+__device__ inline void arcMasks9(const uint32_t (&d)[16], uint32_t (&masks)[8]) {
+    uint32_t v[16];
+#pragma unroll
+    for (int k = 0; k < 16; ++k) v[k] = d[k];
+    arcStep<1>(v);
+    arcStep<2>(v);
+    arcStep<4>(v);
+    masks[0] = arcMask<9>(v);
+    masks[1] = arcMask<10>(v);
+    masks[2] = arcMask<11>(v);
+    masks[3] = arcMask<12>(v);
+    masks[4] = arcMask<13>(v);
+    masks[5] = arcMask<14>(v);
+    masks[6] = arcMask<15>(v);
+    masks[7] = arcMask<16>(v);
+}
+
+template <int ArcLength>
+__global__ void fastCountKernel(DeviceBinMatConstView img, size_t words, OrderGeometry g,
+                                int arcLength, bool tiled, uint32_t* blockSums) {
+    __shared__ uint32_t tile[kOrderTileWords];
+    __shared__ uint32_t red[kOrderThreads];
+
+    size_t rowStart = 0, rowCount = 0, wordStart = 0, wordCount = 0;
+    orderBlockRange(g, blockIdx.x, rowStart, rowCount, wordStart, wordCount);
+    const int tileCols = static_cast<int>(wordCount) + 2;
+    if (tiled) {
+        stageOrderTile(img, words, rowStart, rowCount, wordStart, wordCount, tile);
+        __syncthreads();
+    }
+
+    const int units = static_cast<int>(rowCount * wordCount);
+    const int t = static_cast<int>(threadIdx.x);
+    uint32_t n = 0u;
+    if (t < units) {
+        const int r = t / static_cast<int>(wordCount);
+        const int c = t - r * static_cast<int>(wordCount);
+        const size_t y = 3 + rowStart + static_cast<size_t>(r);
+        const size_t w = wordStart + static_cast<size_t>(c);
+        uint32_t d[16];
+        loadUnitRing(tiled, img, words, tile, tileCols, r, c, y, w, d);
+        const uint32_t mask = orderArcAny<ArcLength>(d, arcLength) & fastBorderMask(w, img.width);
+        n = static_cast<uint32_t>(__popc(static_cast<int>(mask)));
+    }
+
+    red[t] = n;
+    __syncthreads();
+    for (int s = kOrderThreads / 2; s > 0; s >>= 1) {
+        if (t < s) red[t] += red[t + s];
+        __syncthreads();
+    }
+    if (t == 0) blockSums[blockIdx.x] = red[0];
+}
+
+template <int ArcLength, bool MaskScore>
+__global__ void fastEmitKernel(DeviceBinMatConstView img, size_t words, OrderGeometry g,
+                               int arcLength, bool tiled, const uint32_t* blockSums,
+                               DeviceFastCornerBuffer buf) {
+    __shared__ uint32_t tile[kOrderTileWords];
+    __shared__ unsigned long long red[kOrderThreads];
+    __shared__ uint32_t scan[kOrderThreads];
+    __shared__ uint32_t sBase;
+
+    const int t = static_cast<int>(threadIdx.x);
+
+    // The corners BELOW this block, and the frame's total, in one reduction: the
+    // block's own base in the low half, the whole count in the high half. Both
+    // are sums of the same numbers, so neither can disagree with the other.
+    {
+        unsigned long long acc = 0ull;
+        for (unsigned i = static_cast<unsigned>(t); i < g.blocks; i += kOrderThreads) {
+            const unsigned long long s = blockSums[i];
+            acc += (s << 32);
+            if (i < blockIdx.x) acc += s;
+        }
+        red[t] = acc;
+        __syncthreads();
+        for (int s = kOrderThreads / 2; s > 0; s >>= 1) {
+            if (t < s) red[t] += red[t + s];
+            __syncthreads();
+        }
+        if (t == 0) {
+            sBase = static_cast<uint32_t>(red[0] & 0xFFFFFFFFull);
+            // The counter is WRITTEN, not accumulated: this arm knows the exact
+            // total, overflow included, so `found()` is exact without an atomic.
+            if (blockIdx.x == 0u && buf.counter != nullptr) {
+                *buf.counter = static_cast<uint32_t>(red[0] >> 32);
+            }
+        }
+        __syncthreads();
+    }
+
+    size_t rowStart = 0, rowCount = 0, wordStart = 0, wordCount = 0;
+    orderBlockRange(g, blockIdx.x, rowStart, rowCount, wordStart, wordCount);
+    const int tileCols = static_cast<int>(wordCount) + 2;
+    if (tiled) {
+        stageOrderTile(img, words, rowStart, rowCount, wordStart, wordCount, tile);
+    }
+    __syncthreads();
+
+    const int units = static_cast<int>(rowCount * wordCount);
+    uint32_t mask = 0u;
+    uint32_t d[16];
+    uint32_t masks[8];
+    size_t y = 0, w = 0;
+    if (t < units) {
+        const int r = t / static_cast<int>(wordCount);
+        const int c = t - r * static_cast<int>(wordCount);
+        y = 3 + rowStart + static_cast<size_t>(r);
+        w = wordStart + static_cast<size_t>(c);
+        loadUnitRing(tiled, img, words, tile, tileCols, r, c, y, w, d);
+        const uint32_t border = fastBorderMask(w, img.width);
+        if (MaskScore) {
+            arcMasks9(d, masks);
+            mask = masks[0] & border;
+        } else {
+            mask = orderArcAny<ArcLength>(d, arcLength) & border;
+        }
+    }
+    const uint32_t n = static_cast<uint32_t>(__popc(static_cast<int>(mask)));
+
+    // Exclusive scan of the 128 unit counts: the block's units are consecutive
+    // in the raster index, so this is the offset of unit `t` inside the block.
+    scan[t] = n;
+    __syncthreads();
+    for (int off = 1; off < kOrderThreads; off <<= 1) {
+        const uint32_t v = (t >= off) ? scan[t - off] : 0u;
+        __syncthreads();
+        scan[t] += v;
+        __syncthreads();
+    }
+    const uint32_t slot = sBase + scan[t] - n;
+
+    if (mask != 0u) {
+        if (MaskScore) {
+            emitScored(buf, masks, mask, w * 32, y, slot);
+        } else {
+            emitPeeled(buf, d, mask, w * 32, y, arcLength, slot);
+        }
+    }
+}
+
 uint32_t nextPow2(uint32_t v) {
     uint32_t p = 1u;
     while (p < v) p <<= 1;
@@ -427,6 +737,18 @@ bool& fastMaskScoreEnabled() {
 }
 
 bool fastTiledApplies(int arcLength) { return arcLength == 9 || arcLength == 12; }
+
+bool& fastOrderedEnabled() {
+    static bool on = true;
+    return on;
+}
+
+bool fastOrderedApplies(size_t width, size_t height, size_t capacity) {
+    if (width < 7 || height < 7 || capacity == 0) return false;
+    const OrderGeometry g = orderGeometry(rowWords(width), height - 6);
+    return g.blocks != 0u && fastScratchBytes(capacity) >=
+                                 static_cast<size_t>(g.blocks) * sizeof(uint32_t);
+}
 
 } // namespace impl
 
@@ -456,6 +778,45 @@ cudaError_t detectFastAsync(DeviceBinMatConstView img, DeviceFastCornerBuffer ou
 
     const size_t words = rowWords(img.width);
     const bool tiled = impl::fastTiledEnabled() && impl::fastTiledApplies(arcLength);
+    const bool tiledStaging = impl::fastTiledEnabled();
+
+    if (impl::fastOrderedEnabled() &&
+        impl::fastOrderedApplies(img.width, img.height, out.capacity)) {
+        // THE SHIPPED PATH. Two passes over the detector and a prefix sum over
+        // WORDS; no corner is ever compared with another.
+        const OrderGeometry g = orderGeometry(words, img.height - 6);
+        uint32_t* blockSums = static_cast<uint32_t*>(scratch);
+        const dim3 grid(g.blocks);
+        const bool maskScore = arcLength == 9 && impl::fastMaskScoreEnabled();
+        // `tiled` names the staging, exactly as it does on the arm below; the
+        // ordering is a separate switch because the two are separate claims.
+        if (arcLength == 9) {
+            fastCountKernel<9><<<grid, kOrderThreads, 0, stream>>>(img, words, g, arcLength,
+                                                                   tiledStaging, blockSums);
+        } else if (arcLength == 12) {
+            fastCountKernel<12><<<grid, kOrderThreads, 0, stream>>>(img, words, g, arcLength,
+                                                                    tiledStaging, blockSums);
+        } else {
+            fastCountKernel<0><<<grid, kOrderThreads, 0, stream>>>(img, words, g, arcLength,
+                                                                   tiledStaging, blockSums);
+        }
+        const cudaError_t countErr = cudaGetLastError();
+        if (countErr != cudaSuccess) return countErr;
+        if (arcLength == 9 && maskScore) {
+            fastEmitKernel<9, true><<<grid, kOrderThreads, 0, stream>>>(
+                img, words, g, arcLength, tiledStaging, blockSums, out);
+        } else if (arcLength == 9) {
+            fastEmitKernel<9, false><<<grid, kOrderThreads, 0, stream>>>(
+                img, words, g, arcLength, tiledStaging, blockSums, out);
+        } else if (arcLength == 12) {
+            fastEmitKernel<12, false><<<grid, kOrderThreads, 0, stream>>>(
+                img, words, g, arcLength, tiledStaging, blockSums, out);
+        } else {
+            fastEmitKernel<0, false><<<grid, kOrderThreads, 0, stream>>>(
+                img, words, g, arcLength, tiledStaging, blockSums, out);
+        }
+        return cudaGetLastError();
+    }
 
     if (tiled) {
         const dim3 block(kTileWords, kTileRows);

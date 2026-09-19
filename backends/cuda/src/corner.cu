@@ -46,6 +46,7 @@
 
 #include "bincv/cuda/corner.hpp"
 
+#include <cmath>
 #include <cstdint>
 
 namespace bincv {
@@ -202,19 +203,47 @@ __device__ float windowResponse(const CovViews& v, int blockSize, long long x, l
 // cornerMinEigenValAsync
 // ---------------------------------------------------------------------------
 
+// The map is written THROUGH SHARED MEMORY, and the reason is measured rather
+// than stylistic. One thread owns one word, so a thread's 32 responses are 128
+// consecutive bytes and consecutive threads are 128 bytes apart: every store
+// instruction of the direct spelling touched 32 different 32-byte sectors and
+// filled one float of each. The profiler read 360,960 global store sectors for a
+// 1.44 MB map -- 11.5 MB of traffic for 1.44 MB of answer -- with
+// `short_scoreboard` at 78% of the stall samples and 46,080 local-load sectors
+// beside it, because the 32-float staging array was passed by pointer and so
+// lived in local memory. Staging the block's 128 words in shared instead and
+// re-reading them one pixel per thread makes the store a plain coalesced row
+// write and removes the local array entirely. The 33-float pitch is the
+// bank-conflict pad: at 32 the whole warp would hit one bank on every write.
+constexpr int kRespThreads = 128;
+constexpr int kRespPitch = 33;
+
 __global__ void responseKernelSliced(CovViews v, DeviceImageView<float> dst, size_t words) {
+    __shared__ float stage[kRespThreads][kRespPitch];
     const size_t total = words * v.magX.height;
-    for (size_t idx = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x; idx < total;
-         idx += static_cast<size_t>(gridDim.x) * blockDim.x) {
-        const size_t y = idx / words;
-        const size_t w = idx - y * words;
-        float tmp[32];
-        slicedResponseWord(v, words, y, w, tmp);
-        float* row = dst.row(y);
-        const size_t x0 = w * 32;
-        for (int b = 0; b < 32; ++b) {
-            if (x0 + static_cast<size_t>(b) < dst.width) row[x0 + static_cast<size_t>(b)] = tmp[b];
+    const size_t stride = static_cast<size_t>(gridDim.x) * kRespThreads;
+    for (size_t base = static_cast<size_t>(blockIdx.x) * kRespThreads; base < total;
+         base += stride) {
+        const size_t idx = base + threadIdx.x;
+        if (idx < total) {
+            const size_t y = idx / words;
+            const size_t w = idx - y * words;
+            slicedResponseWord(v, words, y, w, &stage[threadIdx.x][0]);
         }
+        __syncthreads();
+        const size_t units = (total - base) < static_cast<size_t>(kRespThreads)
+                                 ? (total - base)
+                                 : static_cast<size_t>(kRespThreads);
+        for (size_t i = threadIdx.x; i < units * 32; i += kRespThreads) {
+            const size_t u = i >> 5;
+            const size_t b = i & 31u;
+            const size_t idx2 = base + u;
+            const size_t y = idx2 / words;
+            const size_t w = idx2 - y * words;
+            const size_t x = w * 32 + b;
+            if (x < dst.width) dst.row(y)[x] = stage[u][b];
+        }
+        __syncthreads();
     }
 }
 
@@ -405,45 +434,307 @@ __global__ void mapCandidateKernel(DeviceImageConstView<float> map, DeviceCorner
 // ---------------------------------------------------------------------------
 // The selection
 // ---------------------------------------------------------------------------
+//
+// WHAT USED TO BE HERE, AND WHY IT IS NOT. One block did the whole tail: a
+// bitonic network over `nextPow2(S)` corner records in global memory, then a
+// greedy spacing filter that rescanned every surviving candidate once per
+// acceptance. On the reference frame -- 25,115 candidates, 200 corners kept --
+// that was 1.29% of one SM's throughput on a 48-SM part and it was 98% of the
+// operation. Measured split, same frame, same binary: candidates 0.13 ms, sort
+// 5.6 ms, spacing 23.1 ms.
+//
+// Two changes, and both come out of the same observation -- a corner's ORDER is
+// smaller than the corner.
+//
+// 1. **THE ORDERING KEY IS THE CORNER.** `impl::CornerStronger` is response
+//    descending, then y descending, then x descending. A response is either
+//    exactly 0.0f or at least 1/(2*blockSize^2) (corner.hpp's PRECISION
+//    section), so it is never negative and never NaN and its IEEE bit pattern
+//    orders exactly as the float does. Packing
+//
+//        key = (~responseBits) << 32 | (0xFFFF - y) << 16 | (0xFFFF - x)
+//
+//    makes ASCENDING `uint64_t` order identical to CornerStronger, and the pack
+//    is LOSSLESS -- the corner is read back out of the key with three shifts.
+//    So the sort moves 8 bytes per element instead of 16, the greedy reads a
+//    position out of 4 bytes instead of a 16-byte record, and no separate
+//    payload array exists. The keys are unique (positions are), so the sorted
+//    sequence is unique and the sort's own order-dependence cannot reach the
+//    answer -- the same argument the append order already rests on.
+//
+// 2. **THE SPACING FILTER TESTS, IT DOES NOT KILL.** The two formulations are
+//    the same answer: a candidate is alive when it is reached exactly when no
+//    ACCEPTED point is within `minDistance` of it, and accepted points only
+//    accumulate. Killing costs one pass over every surviving candidate per
+//    acceptance -- 200 passes over 25,115 records through one SM. Testing costs
+//    one pass over the candidates, each tested against the accepted set, which
+//    is at most `maxCorners` points and lives in shared memory. The chunk is a
+//    block's width: 1024 candidates are tested in parallel against the accepted
+//    set, then the acceptances INSIDE that chunk are resolved serially, which
+//    is at most one round per corner kept.
+//
+// The sort is a standard bitonic network, and it is device-wide: each block
+// sorts 2048 keys in shared memory, and the stages wider than a chunk are their
+// own launches because a block barrier is not a device barrier. The ladder is
+// sized from `candidateCapacity`, which the host knows; each kernel reads the
+// actual candidate count and returns immediately when its stage is past it, so
+// a frame with few candidates pays launches rather than work.
 
-/// @brief `impl::CornerStronger`, on the device: response DESCENDING, ties broken
-/// by DESCENDING raster position. The reference's `greaterThanPtr` rule spelled
-/// on coordinates, and a TOTAL order over distinct positions -- which is what
-/// makes the sorted sequence unique and the append order unobservable.
-__device__ inline bool cornerStronger(const DeviceCorner& a, const DeviceCorner& b) {
-    if (a.response != b.response) return a.response > b.response;
-    if (a.y != b.y) return a.y > b.y;
-    return a.x > b.x;
+/// @brief `impl::CornerStronger` as an ascending `uint64_t`. LOSSLESS.
+/// @note The response is never negative and never NaN, so the bit pattern is
+/// order-isomorphic to the float, and complementing it turns "stronger first"
+/// into "smaller first". `x` and `y` are below 65536 -- the device domain
+/// corner.hpp names -- so the tie rule is the low 32 bits, complemented for the
+/// same reason.
+__device__ inline uint64_t cornerKey(const DeviceCorner& c) {
+    const uint32_t r = __float_as_uint(c.response);
+    const uint32_t lo = ((0xFFFFu - static_cast<uint32_t>(c.y)) << 16) |
+                        (0xFFFFu - static_cast<uint32_t>(c.x));
+    return (static_cast<uint64_t>(~r) << 32) | static_cast<uint64_t>(lo);
 }
 
-__global__ void selectKernel(const DeviceCorner* cand, const uint32_t* candCount,
-                             uint32_t candCapacity, const uint32_t* maxBits,
-                             double qualityLevel, double minDistanceSq, int spacing,
-                             uint32_t limit, DeviceCorner* out, uint32_t capacity,
-                             DeviceCorner* sortBuf, uint8_t* alive,
-                             DeviceCornerResult* result) {
-    __shared__ uint32_t sKept;
-    __shared__ uint32_t sCursor;
-    __shared__ uint32_t sCompact;
-    __shared__ uint32_t sN;
-    __shared__ uint32_t sOverflow;
-    __shared__ float sThr;
-    __shared__ uint32_t sMin[kSelThreads];
+__device__ inline int keyX(uint64_t k) {
+    return static_cast<int>(0xFFFFu - (static_cast<uint32_t>(k) & 0xFFFFu));
+}
+__device__ inline int keyY(uint64_t k) {
+    return static_cast<int>(0xFFFFu - ((static_cast<uint32_t>(k) >> 16) & 0xFFFFu));
+}
+__device__ inline DeviceCorner keyCorner(uint64_t k) {
+    DeviceCorner c;
+    c.x = keyX(k);
+    c.y = keyY(k);
+    c.response = __uint_as_float(~static_cast<uint32_t>(k >> 32));
+    return c;
+}
 
-    if (threadIdx.x == 0) {
-        const uint32_t found = *candCount;
-        sOverflow = found > candCapacity ? 1u : 0u;
-        sN = found < candCapacity ? found : candCapacity;
-        sCompact = 0u;
-        // The reference's arithmetic exactly: the product is formed in double
-        // (cv::threshold takes a double) and narrowed to float, and the
-        // comparison below is STRICTLY greater.
-        sThr = static_cast<float>(static_cast<double>(__uint_as_float(*maxBits)) * qualityLevel);
+/// @brief The sentinel that pads a run up to a power of two. Sorts LAST, and a
+/// real key can never equal it: it would need response -NaN at (-1, -1).
+__device__ inline uint64_t keySentinel() { return 0xFFFFFFFFFFFFFFFFull; }
+
+constexpr int kSortThreads = 512;
+// 4096 keys = 32 KB of shared memory, which is what a block may hold
+// statically. It is chosen for the LAUNCH COUNT rather than the occupancy:
+// the ladder is one launch per doubling plus one per stage wider than a
+// chunk, so doubling the chunk removes five launches from a 32,768-key
+// sort -- 15 down to 10 -- and a launch is ~5 us of a sort whose work is
+// ~20 us.
+constexpr uint32_t kSortChunk = 4096;  // keys a block sorts in shared memory
+
+__device__ inline uint32_t deviceNextPow2(uint32_t v) {
+    uint32_t p = 1u;
+    while (p < v) p <<= 1;
+    return p;
+}
+
+/// @brief The quality cut, and the keys it survives as. **Multi-block.**
+/// @note The append order does not matter: the keys are unique and everything
+/// after this sorts them.
+__global__ void keyKernel(const DeviceCorner* cand, const uint32_t* candCount,
+                          uint32_t candCapacity, const uint32_t* maxBits, double qualityLevel,
+                          uint64_t* keys, uint32_t* state) {
+    const uint32_t found = *candCount;
+    if (found > candCapacity) {
+        if (blockIdx.x == 0u && threadIdx.x == 0u) state[1] = 1u;
+        return;
+    }
+    // The reference's arithmetic exactly: the product is formed in double and
+    // narrowed to float, and the comparison below is STRICTLY greater.
+    const float thr =
+        static_cast<float>(static_cast<double>(__uint_as_float(*maxBits)) * qualityLevel);
+    const size_t stride = static_cast<size_t>(gridDim.x) * blockDim.x;
+    const unsigned lane = threadIdx.x & 31u;
+    for (size_t base = static_cast<size_t>(blockIdx.x) * blockDim.x; base < found;
+         base += stride) {
+        const size_t i = base + threadIdx.x;
+        bool hit = false;
+        uint64_t k = 0ull;
+        if (i < found) {
+            const DeviceCorner c = cand[i];
+            if (c.response > thr) {
+                hit = true;
+                k = cornerKey(c);
+            }
+        }
+        const unsigned ballot = __ballot_sync(0xFFFFFFFFu, hit);
+        uint32_t slot = 0u;
+        if (lane == 0u && ballot != 0u) {
+            slot = atomicAdd(&state[0], static_cast<uint32_t>(__popc(static_cast<int>(ballot))));
+        }
+        slot = __shfl_sync(0xFFFFFFFFu, slot, 0);
+        if (hit) {
+            const unsigned below = ballot & ((1u << lane) - 1u);
+            keys[slot + static_cast<uint32_t>(__popc(static_cast<int>(below)))] = k;
+        }
+    }
+}
+
+__device__ inline void keyExchange(uint64_t& a, uint64_t& b, bool ascending) {
+    if ((a > b) == ascending) {
+        const uint64_t t = a;
+        a = b;
+        b = t;
+    }
+}
+
+/// @brief Sorts one `kSortChunk` block of keys in shared memory, padding the run
+/// up to the power of two the network needs.
+__global__ void bitonicChunkKernel(uint64_t* keys, const uint32_t* state, uint32_t capacity) {
+    __shared__ uint64_t buf[kSortChunk];
+    const uint32_t n = state[0] < capacity ? state[0] : capacity;
+    const uint32_t n2 = deviceNextPow2(n < 1u ? 1u : n);
+    const uint32_t start = blockIdx.x * kSortChunk;
+    if (start >= n2) return;
+    const uint32_t span = (n2 - start) < kSortChunk ? (n2 - start) : kSortChunk;
+
+    for (uint32_t i = threadIdx.x; i < span; i += kSortThreads) {
+        const uint32_t g = start + i;
+        buf[i] = g < n ? keys[g] : keySentinel();
     }
     __syncthreads();
+    for (uint32_t k = 2u; k <= span; k <<= 1) {
+        for (uint32_t j = k >> 1; j > 0u; j >>= 1) {
+            for (uint32_t i = threadIdx.x; i < span; i += kSortThreads) {
+                const uint32_t l = i ^ j;
+                if (l > i) {
+                    // The direction is the GLOBAL index's k bit, not the local
+                    // one's: at k == kSortChunk the two differ, and every other
+                    // chunk would then be sorted the wrong way round.
+                    keyExchange(buf[i], buf[l], ((start + i) & k) == 0u);
+                }
+            }
+            __syncthreads();
+        }
+    }
+    for (uint32_t i = threadIdx.x; i < span; i += kSortThreads) keys[start + i] = buf[i];
+}
 
-    if (sOverflow != 0u) {
-        if (threadIdx.x == 0) {
+/// @brief One bitonic stage wider than a chunk. **One launch, because a block
+/// barrier is not a device barrier.**
+__global__ void bitonicStageKernel(uint64_t* keys, const uint32_t* state, uint32_t capacity,
+                                   uint32_t k, uint32_t j) {
+    const uint32_t n = state[0] < capacity ? state[0] : capacity;
+    const uint32_t n2 = deviceNextPow2(n < 1u ? 1u : n);
+    if (k > n2) return;
+    const uint32_t stride = gridDim.x * blockDim.x;
+    for (uint32_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n2; i += stride) {
+        const uint32_t l = i ^ j;
+        if (l > i) keyExchange(keys[i], keys[l], (i & k) == 0u);
+    }
+}
+
+/// @brief The tail of one bitonic merge -- every stage with `j < kSortChunk` --
+/// done inside shared memory, which is what keeps the launch count at one per
+/// doubling rather than one per stage.
+__global__ void bitonicMergeKernel(uint64_t* keys, const uint32_t* state, uint32_t capacity,
+                                   uint32_t k) {
+    __shared__ uint64_t buf[kSortChunk];
+    const uint32_t n = state[0] < capacity ? state[0] : capacity;
+    const uint32_t n2 = deviceNextPow2(n < 1u ? 1u : n);
+    if (k > n2) return;
+    const uint32_t start = blockIdx.x * kSortChunk;
+    if (start >= n2) return;
+    for (uint32_t i = threadIdx.x; i < kSortChunk; i += kSortThreads) buf[i] = keys[start + i];
+    __syncthreads();
+    for (uint32_t j = kSortChunk >> 1; j > 0u; j >>= 1) {
+        for (uint32_t i = threadIdx.x; i < kSortChunk; i += kSortThreads) {
+            const uint32_t l = i ^ j;
+            if (l > i) keyExchange(buf[i], buf[l], ((start + i) & k) == 0u);
+        }
+        __syncthreads();
+    }
+    for (uint32_t i = threadIdx.x; i < kSortChunk; i += kSortThreads) keys[start + i] = buf[i];
+}
+
+/// @brief The whole network in ONE block -- the reference arm the ladder above
+/// is held to. Same keys, same network, one barrier domain.
+__global__ void bitonicOneBlockKernel(uint64_t* keys, const uint32_t* state, uint32_t capacity) {
+    const uint32_t n = state[0] < capacity ? state[0] : capacity;
+    if (n < 2u) return;
+    const uint32_t n2 = deviceNextPow2(n);
+    for (uint32_t i = n + threadIdx.x; i < n2; i += kSelThreads) keys[i] = keySentinel();
+    __syncthreads();
+    for (uint32_t k = 2u; k <= n2; k <<= 1) {
+        for (uint32_t j = k >> 1; j > 0u; j >>= 1) {
+            for (uint32_t i = threadIdx.x; i < n2; i += kSelThreads) {
+                const uint32_t l = i ^ j;
+                if (l > i) keyExchange(keys[i], keys[l], (i & k) == 0u);
+            }
+            __syncthreads();
+        }
+    }
+}
+
+/// @brief Accepted points cached in shared memory; beyond the cache the output
+/// array itself is the store, and every thread reads the same element, so the
+/// read is a broadcast rather than a gather.
+constexpr uint32_t kAccShared = 1024;
+
+__device__ inline void acceptedAt(uint32_t i, const uint32_t* sAcc, const DeviceCorner* out,
+                                  int& ax, int& ay) {
+    if (i < kAccShared) {
+        const uint32_t p = sAcc[i];
+        ax = static_cast<int>(p & 0xFFFFu);
+        ay = static_cast<int>(p >> 16);
+    } else {
+        ax = out[i].x;
+        ay = out[i].y;
+    }
+}
+
+/// @brief `dx*dx + dy*dy < minDistanceSq`, the host's comparison exactly.
+/// @note dx and dy are integers well under 2^26, so both products and their sum
+/// are exact in double and no contraction can change the comparison.
+__device__ inline bool tooCloseDouble(int cx, int cy, int ax, int ay, double minDistanceSq) {
+    const double dx = static_cast<double>(cx) - static_cast<double>(ax);
+    const double dy = static_cast<double>(cy) - static_cast<double>(ay);
+    return dx * dx + dy * dy < minDistanceSq;
+}
+
+/// @brief The same comparison, in INTEGERS, and it is the same answer.
+/// @note This is the spacing filter's whole inner loop and the arithmetic in it
+/// decides the operation's cost: `sm_86` runs FP64 at 1/64 of FP32, so the two
+/// multiplies, the add and the two int-to-double conversions above are about
+/// eighty cycles of one SM's two FP64 pipes per test, and the filter performs
+/// `ranked x kept` of them. Measured on the reference frame, that was 6.8 ms of
+/// a 7.9 ms detection.
+/// @note **The equivalence is exact, not close.** `|dx|` and `|dy|` are below
+/// 65536 (the device domain corner.hpp names), so `s = dx*dx + dy*dy` is a
+/// non-negative integer below 2^33 -- exactly representable as a double, which
+/// is why the host's own double form computes the same integer. With
+/// `T = ceil(minDistanceSq)` taken once on the host, `(double)s < minDistanceSq`
+/// and `s < T` are the same predicate for every non-negative integer `s`: if
+/// `minDistanceSq` is an integer the two bounds coincide, and if it is not then
+/// `s < T` means `s <= floor(minDistanceSq) < minDistanceSq`. The reference
+/// spacing arm keeps the double form, so the suite holding the two arms to one
+/// corner array in one binary is the proof rather than this paragraph.
+__device__ inline bool tooCloseInt(int cx, int cy, int ax, int ay,
+                                   unsigned long long minDistanceSqCeil) {
+    const int dx = cx - ax;
+    const int dy = cy - ay;
+    const unsigned ux = static_cast<unsigned>(dx < 0 ? -dx : dx);
+    const unsigned uy = static_cast<unsigned>(dy < 0 ? -dy : dy);
+    const unsigned long long s = static_cast<unsigned long long>(ux) * ux +
+                                 static_cast<unsigned long long>(uy) * uy;
+    return s < minDistanceSqCeil;
+}
+
+/// @brief Threshold count, rank truncation and the greedy spacing filter.
+/// @tparam Chunked true for the tested-in-parallel arm, false for the reference
+/// arm that kills forward once per acceptance.
+template <bool Chunked>
+__global__ void spacingKernel(const uint64_t* keys, const uint32_t* state, uint32_t candCapacity,
+                              double minDistanceSq, unsigned long long minDistanceSqCeil,
+                              int spacing, uint32_t limit, DeviceCorner* out, uint32_t capacity,
+                              uint8_t* alive, DeviceCornerResult* result) {
+    __shared__ uint32_t sAcc[kAccShared];
+    __shared__ uint32_t sFree[kSelThreads / 32];
+    __shared__ uint32_t sKept;
+    __shared__ int sPick;
+    __shared__ uint32_t sCursor;
+    __shared__ uint32_t sMin[kSelThreads];
+
+    if (state[1] != 0u) {
+        if (threadIdx.x == 0u) {
             result->count = 0u;
             result->candidatesRanked = 0u;
             result->candidatesTruncated = 0u;
@@ -452,57 +743,16 @@ __global__ void selectKernel(const DeviceCorner* cand, const uint32_t* candCount
         return;
     }
 
-    // The quality cut. What survives is `S`, and CornerStronger orders on
-    // response first, so S is UPWARD CLOSED in the raw maxima -- which is what
-    // makes "the strongest `capacity` of S" the host's ranked set exactly.
-    for (uint32_t i = threadIdx.x; i < sN; i += kSelThreads) {
-        const DeviceCorner c = cand[i];
-        if (c.response > sThr) sortBuf[atomicAdd(&sCompact, 1u)] = c;
-    }
-    __syncthreads();
-    const uint32_t S = sCompact;
-
-    uint32_t p2 = 1u;
-    while (p2 < S) p2 <<= 1;
-    for (uint32_t i = S + threadIdx.x; i < p2; i += kSelThreads) {
-        DeviceCorner s;
-        s.x = -2147483647 - 1;
-        s.y = -2147483647 - 1;
-        s.response = -1.0f;  // below every response, which is never negative
-        sortBuf[i] = s;
-    }
-    __syncthreads();
-
-    // A bitonic network, ascending under CornerStronger, so index 0 is the
-    // strongest. One block, so __syncthreads() is a full barrier over it.
-    for (uint32_t k = 2u; k <= p2; k <<= 1) {
-        for (uint32_t j = k >> 1; j > 0u; j >>= 1) {
-            for (uint32_t i = threadIdx.x; i < p2; i += kSelThreads) {
-                const uint32_t l = i ^ j;
-                if (l > i) {
-                    const bool ascending = (i & k) == 0u;
-                    const bool swapNeeded = ascending ? cornerStronger(sortBuf[l], sortBuf[i])
-                                                      : cornerStronger(sortBuf[i], sortBuf[l]);
-                    if (swapNeeded) {
-                        const DeviceCorner t = sortBuf[i];
-                        sortBuf[i] = sortBuf[l];
-                        sortBuf[l] = t;
-                    }
-                }
-            }
-            __syncthreads();
-        }
-    }
-
+    const uint32_t S = state[0] < candCapacity ? state[0] : candCapacity;
     const uint32_t ranked = S < capacity ? S : capacity;
     const uint32_t truncated = S > capacity ? 1u : 0u;
 
     if (spacing == 0) {
         // gftt.cpp's `else` branch: no spacing at all, just the strongest.
         const uint32_t kept = ranked < limit ? ranked : limit;
-        for (uint32_t i = threadIdx.x; i < kept; i += kSelThreads) out[i] = sortBuf[i];
+        for (uint32_t i = threadIdx.x; i < kept; i += kSelThreads) out[i] = keyCorner(keys[i]);
         __syncthreads();
-        if (threadIdx.x == 0) {
+        if (threadIdx.x == 0u) {
             result->count = kept;
             result->candidatesRanked = ranked;
             result->candidatesTruncated = truncated;
@@ -511,58 +761,124 @@ __global__ void selectKernel(const DeviceCorner* cand, const uint32_t* candCount
         return;
     }
 
-    for (uint32_t i = threadIdx.x; i < ranked; i += kSelThreads) alive[i] = 1u;
-    if (threadIdx.x == 0) {
+    if (threadIdx.x == 0u) {
         sKept = 0u;
         sCursor = 0u;
     }
     __syncthreads();
 
-    // THE GREEDY FILTER. Accepted points only ever accumulate, so a candidate
-    // killed by one stays killed and the FIRST surviving candidate is always the
-    // next one the host's sequential loop accepts. That is the whole answer with
-    // one barrier per ACCEPTANCE instead of one per candidate.
-    for (;;) {
-        if (sKept >= limit) break;
-        uint32_t best = 0xFFFFFFFFu;
-        for (uint32_t i = sCursor + threadIdx.x; i < ranked; i += kSelThreads) {
-            if (alive[i] != 0u) {
-                best = i;
-                break;
+    if (Chunked) {
+        const unsigned lane = threadIdx.x & 31u;
+        const unsigned warp = threadIdx.x >> 5;
+        for (uint32_t base = 0u; base < ranked; base += kSelThreads) {
+            if (sKept >= limit) break;
+            const uint32_t j = base + threadIdx.x;
+            const bool valid = j < ranked;
+            const uint64_t key = valid ? keys[j] : 0ull;
+            const int cx = valid ? keyX(key) : 0;
+            const int cy = valid ? keyY(key) : 0;
+
+            // Every candidate of the chunk, against the accepted set as it stands.
+            bool freeFlag = valid;
+            const uint32_t keptNow = sKept;
+            for (uint32_t a = 0u; a < keptNow && freeFlag; ++a) {
+                int ax, ay;
+                acceptedAt(a, sAcc, out, ax, ay);
+                if (tooCloseInt(cx, cy, ax, ay, minDistanceSqCeil)) freeFlag = false;
             }
-        }
-        sMin[threadIdx.x] = best;
-        __syncthreads();
-        for (int s = kSelThreads / 2; s > 0; s >>= 1) {
-            if (static_cast<int>(threadIdx.x) < s) {
-                const uint32_t o = sMin[threadIdx.x + s];
-                if (o < sMin[threadIdx.x]) sMin[threadIdx.x] = o;
+
+            // The acceptances INSIDE the chunk, resolved in order. At most one
+            // round per corner kept over the whole call.
+            for (;;) {
+                const unsigned ballot = __ballot_sync(0xFFFFFFFFu, freeFlag);
+                if (lane == 0u) sFree[warp] = ballot;
+                __syncthreads();
+                // The lowest free lane of the chunk, found by ONE warp with a
+                // ballot rather than by thread 0 with a 32-word scan: every other
+                // warp is sitting at the barrier below while this runs, so the
+                // serial step is paid 32 times over.
+                if (threadIdx.x < 32u) {
+                    const uint32_t m = sFree[threadIdx.x];
+                    const unsigned any = __ballot_sync(0xFFFFFFFFu, m != 0u);
+                    if (threadIdx.x == 0u) {
+                        int p = -1;
+                        if (any != 0u) {
+                            const int wi = __ffs(static_cast<int>(any)) - 1;
+                            p = wi * 32 +
+                                __ffs(static_cast<int>(sFree[static_cast<size_t>(wi)])) - 1;
+                        }
+                        if (p >= 0 && sKept < limit) {
+                            const uint64_t k = keys[base + static_cast<uint32_t>(p)];
+                            out[sKept] = keyCorner(k);
+                            if (sKept < kAccShared) {
+                                sAcc[sKept] = (static_cast<uint32_t>(keyY(k)) << 16) |
+                                              static_cast<uint32_t>(keyX(k));
+                            }
+                            sKept += 1u;
+                            sPick = p;
+                        } else {
+                            sPick = -1;
+                        }
+                    }
+                }
+                __syncthreads();
+                if (sPick < 0) break;
+                const uint32_t pick = static_cast<uint32_t>(sPick);
+                int ax, ay;
+                acceptedAt(sKept - 1u, sAcc, out, ax, ay);
+                if (threadIdx.x <= pick) freeFlag = false;
+                if (freeFlag && tooCloseInt(cx, cy, ax, ay, minDistanceSqCeil)) freeFlag = false;
+                __syncthreads();
+                if (sKept >= limit) break;
             }
             __syncthreads();
         }
-        const uint32_t pick = sMin[0];
-        if (pick == 0xFFFFFFFFu) break;
-
-        const DeviceCorner accepted = sortBuf[pick];
-        if (threadIdx.x == 0) {
-            out[sKept] = accepted;
-            alive[pick] = 0u;
-            sKept += 1u;
-            sCursor = pick + 1u;
-        }
+    } else {
+        // THE REFERENCE ARM: kill forward once per acceptance. One barrier per
+        // ACCEPTANCE rather than per candidate, but one pass over every
+        // surviving candidate per acceptance -- which is the cost the arm above
+        // exists to not pay.
+        for (uint32_t i = threadIdx.x; i < ranked; i += kSelThreads) alive[i] = 1u;
         __syncthreads();
-        // dx and dy are integers well under 2^26, so both products and their sum
-        // are exact in double and no contraction can change the comparison.
-        for (uint32_t j = pick + 1u + threadIdx.x; j < ranked; j += kSelThreads) {
-            if (alive[j] == 0u) continue;
-            const double dx = static_cast<double>(sortBuf[j].x) - static_cast<double>(accepted.x);
-            const double dy = static_cast<double>(sortBuf[j].y) - static_cast<double>(accepted.y);
-            if (dx * dx + dy * dy < minDistanceSq) alive[j] = 0u;
+        for (;;) {
+            if (sKept >= limit) break;
+            uint32_t best = 0xFFFFFFFFu;
+            for (uint32_t i = sCursor + threadIdx.x; i < ranked; i += kSelThreads) {
+                if (alive[i] != 0u) {
+                    best = i;
+                    break;
+                }
+            }
+            sMin[threadIdx.x] = best;
+            __syncthreads();
+            for (int s = kSelThreads / 2; s > 0; s >>= 1) {
+                if (static_cast<int>(threadIdx.x) < s) {
+                    const uint32_t o = sMin[threadIdx.x + s];
+                    if (o < sMin[threadIdx.x]) sMin[threadIdx.x] = o;
+                }
+                __syncthreads();
+            }
+            const uint32_t pick = sMin[0];
+            if (pick == 0xFFFFFFFFu) break;
+            const uint64_t k = keys[pick];
+            const int ax = keyX(k), ay = keyY(k);
+            if (threadIdx.x == 0u) {
+                out[sKept] = keyCorner(k);
+                alive[pick] = 0u;
+                sKept += 1u;
+                sCursor = pick + 1u;
+            }
+            __syncthreads();
+            for (uint32_t j = pick + 1u + threadIdx.x; j < ranked; j += kSelThreads) {
+                if (alive[j] == 0u) continue;
+                const uint64_t kj = keys[j];
+                if (tooCloseDouble(keyX(kj), keyY(kj), ax, ay, minDistanceSq)) alive[j] = 0u;
+            }
+            __syncthreads();
         }
-        __syncthreads();
     }
 
-    if (threadIdx.x == 0) {
+    if (threadIdx.x == 0u) {
         result->count = sKept;
         result->candidatesRanked = ranked;
         result->candidatesTruncated = truncated;
@@ -605,6 +921,26 @@ bool& cornerFusedEnabled() {
     return on;
 }
 
+bool& cornerSortParallelEnabled() {
+    static bool on = true;
+    return on;
+}
+
+bool cornerSortParallelApplies(size_t candidateCapacity) {
+    return nextPow2(static_cast<uint32_t>(candidateCapacity > 0xFFFFFFFFu
+                                              ? 0xFFFFFFFFu
+                                              : candidateCapacity)) > kSortChunk;
+}
+
+bool& cornerSpacingChunkedEnabled() {
+    static bool on = true;
+    return on;
+}
+
+bool cornerSpacingChunkedApplies(const GoodFeaturesParams& params) {
+    return params.minDistance >= 1.0;
+}
+
 } // namespace impl
 
 size_t goodFeaturesScratchBytes(size_t candidateCapacity) {
@@ -612,7 +948,11 @@ size_t goodFeaturesScratchBytes(size_t candidateCapacity) {
     BINCV_ASSERT(candidateCapacity <= 0xFFFFFFFFu,
                  "goodFeaturesScratchBytes: capacity outside the device's uint32 domain");
     const size_t padded = nextPow2(static_cast<uint32_t>(candidateCapacity));
-    return alignUp16(padded * sizeof(DeviceCorner)) + alignUp16(padded);
+    // The ordering key (8 B, and it IS the corner), the reference spacing arm's
+    // alive byte, and the two state words the candidate count and the overflow
+    // flag live in. The key replaced a 16-byte record and a separate payload, so
+    // this number went DOWN when the selection was parallelised.
+    return alignUp16(padded * sizeof(uint64_t)) + alignUp16(padded) + 16;
 }
 
 cudaError_t cornerMinEigenValAsync(DeviceBinMatConstView magX, DeviceBinMatConstView magY,
@@ -635,8 +975,8 @@ cudaError_t cornerMinEigenValAsync(DeviceBinMatConstView magX, DeviceBinMatConst
 
     const size_t words = rowWords(magX.width);
     if (impl::cornerSlicedEnabled() && impl::cornerSlicedApplies(blockSize)) {
-        responseKernelSliced<<<linearGrid(words * magX.height, 128), 128, 0, stream>>>(v, dst,
-                                                                                       words);
+        responseKernelSliced<<<linearGrid(words * magX.height, kRespThreads), kRespThreads, 0,
+                               stream>>>(v, dst, words);
     } else {
         responseKernelWindow<<<linearGrid(dst.width * dst.height, 128), 128, 0, stream>>>(
             v, dst, blockSize);
@@ -667,6 +1007,11 @@ cudaError_t goodFeaturesToTrackAsync(DeviceBinMatConstView magX, DeviceBinMatCon
         return cudaErrorInvalidValue;
     }
     if (corners == nullptr && capacity != 0u) return cudaErrorInvalidValue;
+    // R4: the selection's ordering key packs the tie rule into 16 bits per axis,
+    // so a frame wider or taller than 65536 is REFUSED rather than wrapped.
+    BINCV_ASSERT(magX.width <= 65536 && magX.height <= 65536,
+                 "cuda goodFeaturesToTrack: the frame must be at most 65536 pixels on a side");
+    if (magX.width > 65536 || magX.height > 65536) return cudaErrorInvalidValue;
     if (magX.width == 0 || magX.height == 0) {
         return cudaMemsetAsync(result, 0, sizeof(DeviceCornerResult), stream);
     }
@@ -713,9 +1058,13 @@ cudaError_t goodFeaturesToTrackAsync(DeviceBinMatConstView magX, DeviceBinMatCon
     if (launchErr != cudaSuccess) return launchErr;
 
     const uint32_t padded = nextPow2(work.candidates.capacity);
-    DeviceCorner* sortBuf = static_cast<DeviceCorner*>(work.scratch);
+    uint64_t* keys = static_cast<uint64_t*>(work.scratch);
     uint8_t* alive = reinterpret_cast<uint8_t*>(work.scratch) +
-                     alignUp16(static_cast<size_t>(padded) * sizeof(DeviceCorner));
+                     alignUp16(static_cast<size_t>(padded) * sizeof(uint64_t));
+    uint32_t* state = reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(work.scratch) +
+                                                  alignUp16(static_cast<size_t>(padded) *
+                                                            sizeof(uint64_t)) +
+                                                  alignUp16(padded));
     const uint32_t limit =
         params.maxCorners > 0
             ? (capacity < static_cast<uint32_t>(params.maxCorners)
@@ -723,10 +1072,56 @@ cudaError_t goodFeaturesToTrackAsync(DeviceBinMatConstView magX, DeviceBinMatCon
                    : static_cast<uint32_t>(params.maxCorners))
             : capacity;
 
-    selectKernel<<<1, kSelThreads, 0, stream>>>(
+    // The candidate count and the overflow flag. Zeroed here rather than by the
+    // caller: they are this call's own bookkeeping, not part of the workspace a
+    // caller reasons about.
+    const cudaError_t stateErr = cudaMemsetAsync(state, 0, 2 * sizeof(uint32_t), stream);
+    if (stateErr != cudaSuccess) return stateErr;
+
+    keyKernel<<<linearGrid(work.candidates.capacity, kSelThreads), kSelThreads, 0, stream>>>(
         work.candidates.out, work.candidates.counter, work.candidates.capacity, work.maxBits,
-        params.qualityLevel, params.minDistance * params.minDistance,
-        params.minDistance >= 1.0 ? 1 : 0, limit, corners, capacity, sortBuf, alive, result);
+        params.qualityLevel, keys, state);
+
+    const bool parallelSort = impl::cornerSortParallelEnabled();
+    if (parallelSort) {
+        const unsigned chunks = static_cast<unsigned>((padded + kSortChunk - 1u) / kSortChunk);
+        bitonicChunkKernel<<<chunks, kSortThreads, 0, stream>>>(keys, state,
+                                                                work.candidates.capacity);
+        // The ladder is sized from the CAPACITY, which the host knows; every
+        // kernel reads the actual count and returns at once when its stage is
+        // past it, so a sparse frame pays launches rather than work.
+        for (uint32_t k = 2u * kSortChunk; k <= padded && k >= 2u * kSortChunk; k <<= 1) {
+            for (uint32_t j = k >> 1; j >= kSortChunk; j >>= 1) {
+                bitonicStageKernel<<<linearGrid(padded, kSortThreads), kSortThreads, 0, stream>>>(
+                    keys, state, work.candidates.capacity, k, j);
+            }
+            bitonicMergeKernel<<<chunks, kSortThreads, 0, stream>>>(keys, state,
+                                                                    work.candidates.capacity, k);
+        }
+    } else {
+        bitonicOneBlockKernel<<<1, kSelThreads, 0, stream>>>(keys, state,
+                                                             work.candidates.capacity);
+    }
+    const cudaError_t sortErr = cudaGetLastError();
+    if (sortErr != cudaSuccess) return sortErr;
+
+    const int spacing = params.minDistance >= 1.0 ? 1 : 0;
+    const double minDistanceSq = params.minDistance * params.minDistance;
+    // ceil, once, on the host: see tooCloseInt for why this is the same
+    // predicate as the double comparison and not an approximation of it.
+    const double ceilSq = std::ceil(minDistanceSq);
+    const unsigned long long minDistanceSqCeil =
+        ceilSq >= 18446744073709549568.0 ? 0xFFFFFFFFFFFFFFFFull
+                                          : static_cast<unsigned long long>(ceilSq);
+    if (impl::cornerSpacingChunkedEnabled()) {
+        spacingKernel<true><<<1, kSelThreads, 0, stream>>>(
+            keys, state, work.candidates.capacity, minDistanceSq, minDistanceSqCeil, spacing,
+            limit, corners, capacity, alive, result);
+    } else {
+        spacingKernel<false><<<1, kSelThreads, 0, stream>>>(
+            keys, state, work.candidates.capacity, minDistanceSq, minDistanceSqCeil, spacing,
+            limit, corners, capacity, alive, result);
+    }
     return cudaGetLastError();
 }
 
