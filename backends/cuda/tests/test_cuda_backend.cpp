@@ -19,12 +19,15 @@
 
 #include "bincv/binMat.hpp"
 #include "bincv/cuda/census.hpp"
+#include "bincv/cuda/compaction.hpp"
 #include "bincv/cuda/deviceBinMat.hpp"
 #include "bincv/cuda/denseDisparity.hpp"
+#include "bincv/cuda/features.hpp"
 #include "bincv/cuda/logic.hpp"
 #include "bincv/cuda/pack.hpp"
 #include "bincv/cuda/reduce.hpp"
 #include "bincv/cuda/transfer.hpp"
+#include "bincv/quantMat.hpp"
 #include "bincv/ops/census.hpp"
 #include "bincv/ops/denseDisparity.hpp"
 #include "bincv/ops/logic.hpp"
@@ -868,6 +871,265 @@ BINCV_TEST(CudaDense, PackedCensusMatchesHostAndPlaneForm) {
             if (expect[i] != got[i]) ++bad;
         BINCV_CHECK_EQ(bad, 0u);
     }
+}
+
+// ---------------------------------------------------------------------------
+// THE N-BIT PLANE BLOCK ADDRESSES THE HOST'S WORDS AND NO OTHERS
+//
+// QuantMat<N, WordType> is one BinMat of N*height rows: plane p is rows
+// [p*height, (p+1)*height), and plane(p) hands back data() + p * planeWords()
+// with planeWords() == height * alignedWidth. A device plane block over the
+// same geometry must name the same word offsets. This is swept rather than
+// argued because a plane offset that drifts does not crash -- it returns a
+// fully-formed view of the WRONG plane, which reads as a correct answer.
+// ---------------------------------------------------------------------------
+namespace {
+template <size_t N>
+size_t planeBlockOffsetMismatches(size_t w, size_t h, size_t rowAlignment) {
+    bincv::QuantMat<N, uint32_t> host(static_cast<int>(w), static_cast<int>(h),
+                                      rowAlignment);
+    // The device view is built over the HOST pointer on purpose: this case is
+    // about address arithmetic, and pointing it at a device allocation would
+    // only add a transfer to a comparison of offsets.
+    bincv::cuda::DevicePlaneBlockView dev(host.data(), host.getWidth(), host.getHeight(),
+                                          host.getAlignedWidth(), N);
+
+    size_t bad = 0;
+    if (dev.planeWords() != host.planeWords()) ++bad;
+    if (dev.block().ptr != host.data()) ++bad;
+    if (dev.block().height != N * host.getHeight()) ++bad;
+    if (dev.block().stride != host.getAlignedWidth()) ++bad;
+    if (dev.planes != N) ++bad;
+    for (size_t p = 0; p < N; ++p) {
+        const bincv::BinMatConstView<uint32_t> hostPlane = host.constPlane(p);
+        if (dev.planeData(p) != hostPlane.ptr) ++bad;
+        if (dev.plane(p).ptr != hostPlane.ptr) ++bad;
+        if (dev.plane(p).width != hostPlane.width) ++bad;
+        if (dev.plane(p).height != hostPlane.height) ++bad;
+        if (dev.plane(p).stride != hostPlane.stride) ++bad;
+        for (size_t y = 0; y < host.getHeight(); ++y)
+            if (dev.row(p, y) != hostPlane.row(y)) ++bad;
+    }
+    // The const twin must name the same words; a read-only kernel that read a
+    // different plane than the writing one would be the worst version of this.
+    const bincv::cuda::DevicePlaneBlockConstView cdev = dev;
+    for (size_t p = 0; p < N; ++p)
+        if (cdev.planeData(p) != dev.planeData(p)) ++bad;
+    return bad;
+}
+} // namespace
+
+BINCV_TEST(CudaPlaneBlock, MirrorsHostQuantMatLayout) {
+    // Tight rows, aligned rows, a width that ends mid-word, and a single row --
+    // the stride cases that make p * height * stride disagree with anything else.
+    BINCV_CHECK_EQ(planeBlockOffsetMismatches<1>(64, 16, 4), 0u);
+    BINCV_CHECK_EQ(planeBlockOffsetMismatches<2>(65, 17, 4), 0u);
+    BINCV_CHECK_EQ(planeBlockOffsetMismatches<3>(133, 41, 4), 0u);
+    BINCV_CHECK_EQ(planeBlockOffsetMismatches<4>(1, 1, 4), 0u);
+    BINCV_CHECK_EQ(planeBlockOffsetMismatches<5>(97, 3, 32), 0u);
+    BINCV_CHECK_EQ(planeBlockOffsetMismatches<8>(640, 480, 4), 0u);
+    BINCV_CHECK_EQ(planeBlockOffsetMismatches<8>(31, 5, 128), 0u);
+}
+
+// The same claim end to end: the device packer writes the plane block, the
+// plane block view is asked for each plane, and what comes back is the host
+// container's plane. Offsets agreeing is one thing; the bytes agreeing after a
+// real kernel wrote them is the claim that matters.
+namespace {
+template <size_t N>
+void testPlaneBlockAgainstHostQuantMat(size_t w, size_t h) {
+    const auto frame = randomFrame<uint8_t>(w, h, 0xB10C + N);
+
+    bincv::QuantMat<N, uint32_t> host(static_cast<int>(w), static_cast<int>(h));
+    bincv::BinMatView<uint32_t> planes[N];
+    for (size_t p = 0; p < N; ++p) planes[p] = host.plane(p);
+    bincv::packQuant<bincv::QuantRule::Scale, N, uint8_t, uint32_t>(frame.data(), w, h, w,
+                                                                    planes);
+
+    bincv::cuda::DeviceImage<uint8_t> dImg(static_cast<int>(w), static_cast<int>(h));
+    BINCV_CHECK_EQ(bincv::cuda::uploadImage<uint8_t>(frame.data(), w, h, w, dImg.view()),
+                   cudaSuccess);
+    bincv::cuda::DeviceBinMat dBlock(static_cast<int>(w), static_cast<int>(N * h));
+    BINCV_CHECK_EQ(bincv::cuda::packQuant(dImg.constView(), dBlock.view(), N),
+                   cudaSuccess);
+
+    const bincv::cuda::DevicePlaneBlockView block =
+        bincv::cuda::planeBlock(dBlock.view(), N);
+    BINCV_CHECK_EQ(block.height, h);
+    BINCV_CHECK_EQ(block.planes, N);
+
+    size_t badPlanes = 0;
+    for (size_t p = 0; p < N; ++p) {
+        bincv::BinMat<uint32_t> got(static_cast<int>(w), static_cast<int>(h));
+        // Downloading THROUGH plane(p) is the point: a wrong plane offset lands
+        // here as the neighbouring plane's bits, not as an error.
+        BINCV_CHECK_EQ(bincv::cuda::download(block.plane(p), got.view()), cudaSuccess);
+        BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        const size_t words = bincv::impl::minRowWords<uint32_t>(w);
+        size_t bad = 0;
+        for (size_t y = 0; y < h; ++y) {
+            const uint32_t* a = host.constPlane(p).row(y);
+            const uint32_t* b = got.constView().row(y);
+            for (size_t i = 0; i < words; ++i)
+                if (a[i] != b[i]) ++bad;
+        }
+        if (bad != 0) ++badPlanes;
+    }
+    BINCV_CHECK_EQ(badPlanes, 0u);
+}
+} // namespace
+
+BINCV_TEST(CudaPlaneBlock, PlanesHoldDevicePackQuantOutput_N2) {
+    testPlaneBlockAgainstHostQuantMat<2>(133, 41);
+}
+BINCV_TEST(CudaPlaneBlock, PlanesHoldDevicePackQuantOutput_N5) {
+    testPlaneBlockAgainstHostQuantMat<5>(97, 23);
+}
+
+// ---------------------------------------------------------------------------
+// THE RESULT PODs AND THE HOST TYPES THEY CONVERT TO
+//
+// Two of them are byte-identical to the host's, which is what makes their
+// download a raw copy; the static_asserts in features.hpp hold the layout and
+// these cases hold the VALUES, including through a reinterpretation of the
+// bytes. The other two narrow their index under the documented domain, so the
+// conversion is the thing under test.
+// ---------------------------------------------------------------------------
+BINCV_TEST(CudaFeatures, CornerPodsAreTheHostBytes) {
+    bincv::cuda::DeviceFastCorner df;
+    df.x = 41;
+    df.y = -7;
+    df.score = 13;
+    const bincv::FastCorner hf = df.toHost();
+    BINCV_CHECK_EQ(hf.x, 41);
+    BINCV_CHECK_EQ(hf.y, -7);
+    BINCV_CHECK_EQ(hf.score, 13);
+    // The raw-copy claim, exercised rather than only asserted: the device bytes
+    // read as a host FastCorner give the same fields.
+    bincv::FastCorner raw{};
+    std::memcpy(static_cast<void*>(&raw), &df, sizeof(raw));
+    BINCV_CHECK_EQ(raw.x, hf.x);
+    BINCV_CHECK_EQ(raw.y, hf.y);
+    BINCV_CHECK_EQ(raw.score, hf.score);
+
+    bincv::cuda::DeviceCorner dc;
+    dc.x = 5;
+    dc.y = 600;
+    dc.response = 0.25f;
+    const bincv::Corner hc = dc.toHost();
+    BINCV_CHECK_EQ(hc.x, 5);
+    BINCV_CHECK_EQ(hc.y, 600);
+    BINCV_CHECK_EQ(hc.response, 0.25f);
+    bincv::Corner rawC{};
+    std::memcpy(static_cast<void*>(&rawC), &dc, sizeof(rawC));
+    BINCV_CHECK_EQ(rawC.x, hc.x);
+    BINCV_CHECK_EQ(rawC.y, hc.y);
+    BINCV_CHECK_EQ(rawC.response, hc.response);
+}
+
+BINCV_TEST(CudaFeatures, MatchPodsWidenTheirNarrowedIndex) {
+    bincv::cuda::DeviceDescriptorMatch dm;
+    dm.trainIndex = 4000000000u;  // a full-range uint32 index, not a small one
+    dm.distance = 31;
+    dm.secondDistance = 90;
+    dm.valid = 1;
+    const bincv::DescriptorMatch hm = dm.toHost();
+    BINCV_CHECK_EQ(hm.trainIndex, size_t{4000000000u});
+    BINCV_CHECK_EQ(hm.distance, 31u);
+    BINCV_CHECK_EQ(hm.secondDistance, 90u);
+    BINCV_CHECK(hm.valid);
+
+    bincv::cuda::DeviceStereoMatch ds;
+    ds.disparity = -3.5f;
+    ds.distance = 77;
+    ds.rightIndex = 4000000000u;
+    ds.valid = 0;
+    const bincv::StereoMatch hs = ds.toHost();
+    BINCV_CHECK_EQ(hs.disparity, -3.5f);
+    BINCV_CHECK_EQ(hs.distance, 77u);
+    BINCV_CHECK_EQ(hs.rightIndex, size_t{4000000000u});
+    BINCV_CHECK_EQ(hs.valid, uint8_t{0});
+
+    // The batched spelling, which is the only one the families produce.
+    bincv::cuda::DeviceStereoMatch batch[3];
+    for (uint32_t i = 0; i < 3; ++i) {
+        batch[i].disparity = static_cast<float>(i);
+        batch[i].distance = i;
+        batch[i].rightIndex = i * 10u;
+        batch[i].valid = 1;
+    }
+    bincv::StereoMatch hostBatch[3];
+    bincv::cuda::toHost(batch, 3, hostBatch);
+    size_t bad = 0;
+    for (size_t i = 0; i < 3; ++i) {
+        if (hostBatch[i].rightIndex != i * 10u) ++bad;
+        if (hostBatch[i].disparity != static_cast<float>(i)) ++bad;
+        if (hostBatch[i].valid != 1) ++bad;
+    }
+    BINCV_CHECK_EQ(bad, 0u);
+}
+
+// ---------------------------------------------------------------------------
+// THE SET VIEWS ADDRESS THE HOST FAMILY'S OWN ARRAYS
+//
+// computeBrief writes `out + k * words` and matchDescriptors reads
+// `query + q * words`; the keypoint arrays are interleaved (x, y). The device
+// views index the same way, so an upload is a raw copy -- and a descriptor
+// computed at ANY host word width is the same bytes, which is what lets the
+// uint32-only device accept all four.
+// ---------------------------------------------------------------------------
+BINCV_TEST(CudaFeatures, SetViewsMatchHostRawArrayLayout) {
+    constexpr size_t kBits = 256;
+    const size_t count = 37;
+    const size_t words = bincv::descriptorWords<kBits, uint32_t>();
+    BINCV_CHECK_EQ(bincv::cuda::descriptorWords<kBits>(), static_cast<uint32_t>(words));
+
+    std::vector<float> xy(2 * count);
+    std::vector<int32_t> octave(count);
+    for (size_t i = 0; i < count; ++i) {
+        xy[2 * i] = static_cast<float>(i) + 0.5f;
+        xy[2 * i + 1] = static_cast<float>(i) * 2.0f;
+        octave[i] = static_cast<int32_t>(i % 4);
+    }
+    const bincv::cuda::DeviceKeypointSetConstView kps =
+        bincv::cuda::keypointSet(xy.data(), count, octave.data());
+    size_t bad = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (kps.x(i) != xy[2 * i]) ++bad;
+        if (kps.y(i) != xy[2 * i + 1]) ++bad;
+    }
+    BINCV_CHECK_EQ(bad, 0u);
+    BINCV_CHECK_EQ(kps.count, static_cast<uint32_t>(count));
+    BINCV_CHECK(kps.hasOctave());
+    BINCV_CHECK(!bincv::cuda::keypointSet(xy.data(), count).hasOctave());
+
+    std::vector<uint32_t> desc(count * words, 0u);
+    const bincv::cuda::DeviceDescriptorSetConstView set =
+        bincv::cuda::descriptorSet(static_cast<const uint32_t*>(desc.data()), count, words);
+    size_t badPitch = 0;
+    for (uint32_t i = 0; i < count; ++i)
+        if (set.descriptor(i) != desc.data() + static_cast<size_t>(i) * words) ++badPitch;
+    BINCV_CHECK_EQ(badPitch, 0u);
+    BINCV_CHECK_EQ(set.sizeInWords(), count * words);
+
+    // The word-width claim: BRIEF at uint64 host words is byte-identical to
+    // BRIEF at uint32, so the device's uint32-only set accepts either.
+    const size_t w = 64, h = 64;
+    const auto frame = randomFrame<uint8_t>(w, h, 0xD35C);
+    bincv::BriefPattern<kBits> pattern;
+    bincv::makeBriefPattern<kBits>(pattern);
+    std::vector<float> kxy(2 * count);
+    for (size_t i = 0; i < count; ++i) {
+        kxy[2 * i] = static_cast<float>(20 + (i % 20));
+        kxy[2 * i + 1] = static_cast<float>(20 + (i % 17));
+    }
+    std::vector<uint32_t> at32(count * words);
+    std::vector<uint64_t> at64(count * (kBits / 64));
+    bincv::computeBrief<kBits, uint8_t, uint32_t>(frame.data(), w, h, w, kxy.data(), count,
+                                                  pattern, at32.data());
+    bincv::computeBrief<kBits, uint8_t, uint64_t>(frame.data(), w, h, w, kxy.data(), count,
+                                                  pattern, at64.data());
+    BINCV_CHECK_EQ(std::memcmp(at32.data(), at64.data(), count * kBits / 8), 0);
 }
 
 // ---------------------------------------------------------------------------

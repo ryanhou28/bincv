@@ -1,8 +1,8 @@
 #pragma once
 
 /// @file deviceBinMat.hpp
-/// @brief The owning device containers: a bit-packed matrix and a wide image,
-/// both in GPU memory, both value-semantic.
+/// @brief The owning device containers: a bit-packed matrix, a wide image and a
+/// flat array of results -- all in GPU memory, all value-semantic.
 ///
 /// The container is where allocation lives, exactly as on the host: kernels
 /// take the views, and no kernel in this backend allocates. Copy means deep
@@ -209,6 +209,83 @@ private:
     size_t width_ = 0;
     size_t height_ = 0;
     size_t stride_ = 0;  // elements
+};
+
+/// @brief A flat array of PODs in device memory: keypoints, descriptors,
+/// matches -- the BATCHED results the feature families produce and consume.
+/// @tparam T A trivially copyable POD. The result types in features.hpp are
+/// written to be exactly that, so a download is one `cudaMemcpy`.
+///
+/// @note Here because a kernel does not allocate (CLAUDE.md) and the caller
+/// therefore needs somewhere to put an output set. It is the third owning
+/// container, not a fourth view: `data()` is what a view is built over.
+/// @note Zero-filled on allocation, like the other two. The reason differs: an
+/// append that truncates, or one that reserves a slot it does not fill,
+/// leaves the tail unwritten, and a zeroed tail is a deterministic
+/// "nothing here" rather than whatever the previous allocation left. It is
+/// not a licence to read past the reported count -- see compaction.hpp.
+template <typename T>
+class DeviceArray {
+public:
+    /// @brief Allocates a zero-filled array of `count` elements.
+    explicit DeviceArray(size_t count) : size_(count) { allocate(); }
+
+    DeviceArray() = default;
+
+    /// @brief Deep-copies, always: device-to-device, like the other containers.
+    DeviceArray(const DeviceArray& other) : size_(other.size_) {
+        allocate();
+        if (ptr_ != nullptr) {
+            BINCV_CUDA_CHECK(cudaMemcpy(ptr_, other.ptr_, size_ * sizeof(T),
+                                        cudaMemcpyDeviceToDevice));
+        }
+    }
+
+    DeviceArray& operator=(const DeviceArray& other) {
+        if (this == &other) return *this;
+        DeviceArray fresh(other);
+        swap(fresh);
+        return *this;
+    }
+
+    DeviceArray(DeviceArray&& other) noexcept { swap(other); }
+    DeviceArray& operator=(DeviceArray&& other) noexcept {
+        if (this != &other) {
+            releaseAndClear();
+            swap(other);
+        }
+        return *this;
+    }
+
+    ~DeviceArray() { releaseAndClear(); }
+
+    size_t size() const { return size_; }
+    bool empty() const { return size_ == 0; }
+    T* data() { return ptr_; }
+    const T* data() const { return ptr_; }
+
+private:
+    void allocate() {
+        if (size_ == 0) return;
+        void* p = nullptr;
+        BINCV_CUDA_CHECK(cudaMalloc(&p, size_ * sizeof(T)));
+        ptr_ = static_cast<T*>(p);
+        BINCV_CUDA_CHECK(cudaMemset(ptr_, 0, size_ * sizeof(T)));
+    }
+
+    void releaseAndClear() {
+        if (ptr_ != nullptr) cudaFree(ptr_);  // destructor path: no throw
+        ptr_ = nullptr;
+        size_ = 0;
+    }
+
+    void swap(DeviceArray& other) noexcept {
+        T* p = ptr_; ptr_ = other.ptr_; other.ptr_ = p;
+        const size_t t = size_; size_ = other.size_; other.size_ = t;
+    }
+
+    T* ptr_ = nullptr;
+    size_t size_ = 0;
 };
 
 } // namespace cuda

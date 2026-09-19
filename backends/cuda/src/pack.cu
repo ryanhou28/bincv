@@ -33,17 +33,6 @@ __global__ void packKernel(DeviceImageConstView<SrcT> src, DeviceBinMatView dst,
     }
 }
 
-/// @brief The host's `quantScale`, restated for device code: the SAME integer
-/// expression, so the two produce the same level for every input.
-template <typename SrcT>
-__device__ __forceinline__ unsigned quantScaleDevice(SrcT v, unsigned maxValue) {
-    const unsigned long long m = (sizeof(SrcT) >= 8)
-                                     ? ~0ULL
-                                     : ((1ULL << (sizeof(SrcT) * 8)) - 1ULL);
-    return static_cast<unsigned>(
-        (static_cast<unsigned long long>(v) * maxValue + m / 2ULL) / m);
-}
-
 template <typename SrcT>
 __global__ void packQuantKernel(DeviceImageConstView<SrcT> src,
                                 DeviceBinMatView planeBlock, unsigned n,
@@ -58,8 +47,16 @@ __global__ void packQuantKernel(DeviceImageConstView<SrcT> src,
         const size_t x = i * 32 + lane;
         // A lane past the row contributes 0 to every plane, which is the
         // padding invariant holding by construction rather than by masking.
+        //
+        // THE HOST'S OWN SCALE, CALLED. This was a `quantScaleDevice` that
+        // restated the same integer expression here; impl::quantScale is
+        // BINCV_HOST_DEVICE, so there is one definition of what level a pixel
+        // maps to. It matters more than the usual amount: the `+ srcMax/2`
+        // rounding diverges from OpenCV at bytes 1..127 ON PURPOSE, so a device
+        // copy that drifted toward OpenCV would read as the divergence finally
+        // being fixed rather than as a backend disagreeing with its host.
         const unsigned value =
-            (x < src.width) ? quantScaleDevice<SrcT>(src.row(y)[x], maxValue) : 0u;
+            (x < src.width) ? impl::quantScale<SrcT>(src.row(y)[x], maxValue) : 0u;
         for (unsigned p = 0; p < n; ++p) {
             const uint32_t word = __ballot_sync(0xFFFFFFFFu, ((value >> p) & 1u) != 0u);
             if (lane == 0)

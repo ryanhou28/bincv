@@ -7,9 +7,15 @@
 // role -- "a dense disparity map from a rectified pair, resident on device" --
 // against the best existing GPU option a user could reach for instead.
 //
-// Memory is reported from cudaMemGetInfo deltas around each side's working-set
-// allocation. That is a crude meter -- an allocator may round or pool -- but it
-// is measured on both sides identically and the caveat is printed with it.
+// MEMORY is reported from cudaMemGetInfo deltas around each side's working-set
+// allocation. That meter is crude -- it rounds, and an allocator may pool --
+// but it is the ONLY one readable on both sides of a library boundary, which
+// is why every cross-library figure in docs/reports/cuda.md uses it and no
+// allocation sum appears beside one. Its own granularity is MEASURED here --
+// one-byte allocations until the reading moves -- and printed with every
+// reading, so a working set smaller than one unit cannot be read as a
+// footprint. binCV's two entries are smaller than one unit; StereoBM's is not,
+// which is the asymmetry that makes the memory lead a lower bound.
 
 #include <cstdint>
 #include <cstdio>
@@ -51,11 +57,6 @@ std::vector<uint8_t> smoothFrame(size_t w, size_t h) {
     return img;
 }
 
-size_t freeBytes() {
-    size_t freeB = 0, totalB = 0;
-    cudaMemGetInfo(&freeB, &totalB);
-    return freeB;
-}
 } // namespace
 
 int main() {
@@ -69,6 +70,10 @@ int main() {
     cudabench::printDevice();
     std::printf(" both sides: %zux%zu pair, 64 disparities, 9x9 support, resident\n\n",
                 kW, kH);
+    const auto floor = cudabench::measureLaunchFloor();
+    cudabench::printLaunchFloor(floor);
+    const size_t meterStep = cudabench::measureDriverMeterStep();
+    std::printf("\n");
 
     const auto lw = smoothFrame(kW, kH);
     std::vector<uint8_t> rw(kW * kH, 0);
@@ -81,7 +86,7 @@ int main() {
 
     // ---- binCV, binary entry (the premise-native operating point) ----
     {
-        const size_t before = freeBytes();
+        cudabench::DeviceMemMeter meter;
         bincv::BinMat<uint32_t> lb(kW, kH), rb(kW, kH);
         bincv::packBits<bincv::PackRule::GreaterThan>(lw.data(), kW, kH, kW, lb.view(),
                                                       uint8_t{127});
@@ -92,25 +97,25 @@ int main() {
         bincv::cuda::upload(lb.constView(), dl.view());
         bincv::cuda::upload(rb.constView(), dr.view());
         cudaDeviceSynchronize();
-        const size_t used = before - freeBytes();
+        const size_t used = meter.deltaBytes();
         const auto t = cudabench::timeKernel([&] {
             bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
                                               dDisp.view());
         });
-        cudabench::printArm("binCV binary entry, resident", t, "kernel");
-        std::printf("   device memory delta: %.1f MB\n", static_cast<double>(used) / 1048576.0);
+        cudabench::printArmVsFloor("binCV binary entry, resident", t, floor, "kernel");
+        cudabench::printDriverDelta("binCV binary working set", used, meterStep);
     }
 
     // ---- binCV, census entry (wide-input operating point) ----
     {
-        const size_t before = freeBytes();
+        cudabench::DeviceMemMeter meter;
         bincv::cuda::DeviceImage<uint8_t> dLw(kW, kH), dRw(kW, kH);
         bincv::cuda::uploadImage<uint8_t>(lw.data(), kW, kH, kW, dLw.view());
         bincv::cuda::uploadImage<uint8_t>(rw.data(), kW, kH, kW, dRw.view());
         bincv::cuda::DeviceImage<uint32_t> descL(kW, kH), descR(kW, kH);
         bincv::cuda::DeviceImage<uint8_t> dDisp(kW, kH);
         cudaDeviceSynchronize();
-        const size_t used = before - freeBytes();
+        const size_t used = meter.deltaBytes();
         const auto t = cudabench::timeKernel(
             [&] {
                 bincv::cuda::censusTransformPacked<kK>(dLw.constView(),
@@ -122,13 +127,14 @@ int main() {
                                                         dDisp.view());
             },
             8, 9);
-        cudabench::printArm("binCV census entry (transform + match)", t, "kernel");
-        std::printf("   device memory delta: %.1f MB\n", static_cast<double>(used) / 1048576.0);
+        cudabench::printArmVsFloor("binCV census entry (transform + match)", t, floor,
+                                   "kernel");
+        cudabench::printDriverDelta("binCV census working set", used, meterStep);
     }
 
     // ---- cv::cuda::StereoBM, same frames resident as GpuMats ----
     {
-        const size_t before = freeBytes();
+        cudabench::DeviceMemMeter meter;
         cv::Mat lm(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
                    const_cast<uint8_t*>(lw.data()));
         cv::Mat rm(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
@@ -139,11 +145,12 @@ int main() {
         auto bm = cv::cuda::createStereoBM(64, 9);
         bm->compute(gl, gr, gd);  // first call allocates its internals
         cudaDeviceSynchronize();
-        const size_t used = before - freeBytes();
+        const size_t used = meter.deltaBytes();
         const auto t = cudabench::timeKernel([&] { bm->compute(gl, gr, gd); });
-        cudabench::printArm("cv::cuda::StereoBM(64, 9), resident", t, "kernel");
-        std::printf("   device memory delta: %.1f MB (GpuMat pools may round up)\n",
-                    static_cast<double>(used) / 1048576.0);
+        cudabench::printArmVsFloor("cv::cuda::StereoBM(64, 9), resident", t, floor,
+                                   "kernel");
+        cudabench::printDriverDelta("StereoBM working set (GpuMat may pool)", used,
+                                    meterStep);
     }
 
     std::printf("\n role only: SAD-on-bytes vs Hamming-on-bits give different maps;\n"

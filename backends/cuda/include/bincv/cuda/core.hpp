@@ -38,10 +38,19 @@
 #include "bincv/core/view.hpp"
 
 // __host__ __device__ for the few functions shared verbatim by host-side setup
-// code and device kernels. cuda_runtime.h defines the annotations away when the
-// including translation unit is not compiled by nvcc, so this expands safely
-// everywhere the backend's headers are legal.
-#define BINCV_CUDA_HD __host__ __device__
+// code and device kernels.
+//
+// KEPT AS A NAME, DEFINED AS AN ALIAS. core/error.hpp now carries
+// BINCV_HOST_DEVICE for the same expansion, and two independent `#define`s of one
+// annotation are exactly the kind of copy this project refuses: the day one of
+// them grows a `__forceinline__` or a clang-CUDA branch, the other silently does
+// not. So there is one definition. The SPELLING stays, because the two names
+// record different intent and a reader can grep for either: BINCV_HOST_DEVICE
+// marks a HOST header's scalar helper that the device is allowed to share, and
+// every one of them is a decision about the host library; BINCV_CUDA_HD marks
+// the backend's OWN device-typed code, which has no host-only life to protect.
+// Deleting the local name would put those two populations under one grep.
+#define BINCV_CUDA_HD BINCV_HOST_DEVICE
 
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
@@ -115,6 +124,150 @@ static_assert(sizeof(DeviceBinMatView) == sizeof(BinMatView<uint32_t>),
               "device and host views must have identical layout");
 static_assert(sizeof(DeviceBinMatConstView) == sizeof(BinMatConstView<uint32_t>),
               "device and host views must have identical layout");
+
+/// @brief Non-owning, mutable view of an **N-bit** image in DEVICE memory: N
+/// bit-planes in ONE allocation, plane 0 the least significant bit.
+///
+/// @note THE LAYOUT IS THE HOST'S, NOT A NEW ONE. `QuantMat<N, WordType>` is a
+/// single BinMat of `N * height` rows, so plane `p` is rows
+/// `[p * height, (p + 1) * height)` of it and `plane(p)` hands back
+/// `data() + p * planeWords()` with `planeWords() == height * alignedWidth`
+/// (quantMat.hpp). That is the layout `packQuant`'s `dst` parameter names --
+/// "exactly `QuantMat<N>::plane(i)`" -- and the layout this backend's
+/// `packQuant` launcher already writes into its `planeBlock` argument. This
+/// view addresses those same words. The equality is SWEPT against a real
+/// host `QuantMat` over N, width, height and stride in the test suite
+/// rather than asserted in prose: a plane offset that drifts returns a
+/// fully-formed view of the wrong plane, which reads as a correct answer.
+/// @note `height` is ONE PLANE's height, exactly as `QuantMat::getHeight()` is
+/// -- not the block's row count. `block()` is the whole stack when a kernel
+/// or a transfer wants it as one matrix.
+/// @note Every plane shares one stride, as the host's do: the planes are one
+/// allocation, not N.
+struct DevicePlaneBlockView {
+    uint32_t* ptr = nullptr;  ///< first word of plane 0, in device memory
+    size_t width = 0;         ///< row length in PIXELS
+    size_t height = 0;        ///< rows in ONE plane
+    size_t stride = 0;        ///< distance between rows in WORDS, every plane
+    size_t planes = 0;        ///< N, the bits per pixel
+
+    DevicePlaneBlockView() = default;
+    /// @note Five arguments, none defaulted, for the reason the bit views take
+    /// four: a defaulted `planes` aliases every plane onto plane 0.
+    BINCV_CUDA_HD DevicePlaneBlockView(uint32_t* ptr_, size_t width_, size_t height_,
+                                       size_t stride_, size_t planes_)
+        : ptr(ptr_), width(width_), height(height_), stride(stride_), planes(planes_) {}
+
+    BINCV_CUDA_HD bool empty() const {
+        return ptr == nullptr || width == 0 || height == 0 || planes == 0;
+    }
+
+    /// @brief Words in ONE plane -- the host's `QuantMat::planeWords()`.
+    BINCV_CUDA_HD size_t planeWords() const { return height * stride; }
+
+    /// @brief First word of plane `p`: the host's `data() + p * planeWords()`.
+    BINCV_CUDA_HD uint32_t* planeData(size_t p) const { return ptr + p * planeWords(); }
+
+    /// @brief Plane `p` as a bit matrix -- the type every 1-bit kernel already
+    /// takes, so an N-bit caller reaches the binary kernels with no adapter.
+    BINCV_CUDA_HD DeviceBinMatView plane(size_t p) const {
+        return DeviceBinMatView{planeData(p), width, height, stride};
+    }
+
+    /// @brief Row `y` of plane `p`. Identical to `plane(p).row(y)`, spelled for
+    /// kernels that walk (plane, row) without materializing a plane view.
+    BINCV_CUDA_HD uint32_t* row(size_t p, size_t y) const {
+        return ptr + (p * height + y) * stride;
+    }
+
+    /// @brief The whole stack as ONE matrix of `planes * height` rows: the form
+    /// the packQuant launcher takes and the form a raw transfer copies.
+    BINCV_CUDA_HD DeviceBinMatView block() const {
+        return DeviceBinMatView{ptr, width, height * planes, stride};
+    }
+};
+
+/// @brief Non-owning, read-only view of an N-bit image in DEVICE memory.
+struct DevicePlaneBlockConstView {
+    const uint32_t* ptr = nullptr;
+    size_t width = 0;
+    size_t height = 0;
+    size_t stride = 0;
+    size_t planes = 0;
+
+    DevicePlaneBlockConstView() = default;
+    BINCV_CUDA_HD DevicePlaneBlockConstView(const uint32_t* ptr_, size_t width_,
+                                            size_t height_, size_t stride_, size_t planes_)
+        : ptr(ptr_), width(width_), height(height_), stride(stride_), planes(planes_) {}
+    /// @brief A mutable plane block converts, as the bit views do.
+    BINCV_CUDA_HD DevicePlaneBlockConstView(const DevicePlaneBlockView& v)
+        : ptr(v.ptr), width(v.width), height(v.height), stride(v.stride), planes(v.planes) {}
+
+    BINCV_CUDA_HD bool empty() const {
+        return ptr == nullptr || width == 0 || height == 0 || planes == 0;
+    }
+    BINCV_CUDA_HD size_t planeWords() const { return height * stride; }
+    BINCV_CUDA_HD const uint32_t* planeData(size_t p) const {
+        return ptr + p * planeWords();
+    }
+    BINCV_CUDA_HD DeviceBinMatConstView plane(size_t p) const {
+        return DeviceBinMatConstView{planeData(p), width, height, stride};
+    }
+    BINCV_CUDA_HD const uint32_t* row(size_t p, size_t y) const {
+        return ptr + (p * height + y) * stride;
+    }
+    BINCV_CUDA_HD DeviceBinMatConstView block() const {
+        return DeviceBinMatConstView{ptr, width, height * planes, stride};
+    }
+};
+
+// A plane block is ONE bit matrix plus a plane count, and `plane()` / `block()`
+// hand back the bit-matrix view whose layout is already pinned above. Asserting
+// the field placement is what keeps that true: a reordered or re-typed field
+// here would change which words `plane(p)` names while every signature in the
+// backend still compiled.
+static_assert(sizeof(DevicePlaneBlockView) == sizeof(DeviceBinMatView) + sizeof(size_t),
+              "a plane block is a bit matrix plus a plane count");
+static_assert(sizeof(DevicePlaneBlockConstView) ==
+                  sizeof(DeviceBinMatConstView) + sizeof(size_t),
+              "a plane block is a bit matrix plus a plane count");
+static_assert(offsetof(DevicePlaneBlockView, ptr) == offsetof(DeviceBinMatView, ptr),
+              "plane block and bit matrix must share their field placement");
+static_assert(offsetof(DevicePlaneBlockView, width) == offsetof(DeviceBinMatView, width),
+              "plane block and bit matrix must share their field placement");
+static_assert(offsetof(DevicePlaneBlockView, height) == offsetof(DeviceBinMatView, height),
+              "plane block and bit matrix must share their field placement");
+static_assert(offsetof(DevicePlaneBlockView, stride) == offsetof(DeviceBinMatView, stride),
+              "plane block and bit matrix must share their field placement");
+static_assert(offsetof(DevicePlaneBlockConstView, ptr) ==
+                  offsetof(DeviceBinMatConstView, ptr),
+              "plane block and bit matrix must share their field placement");
+static_assert(offsetof(DevicePlaneBlockConstView, stride) ==
+                  offsetof(DeviceBinMatConstView, stride),
+              "plane block and bit matrix must share their field placement");
+
+/// @brief Names `planes` bit-planes inside a device matrix allocated as
+/// `width x (planes * height)`.
+/// @note Host-side setup, not a kernel helper: it is where the block's row count
+/// is divided by N, and the one place that division happens.
+inline DevicePlaneBlockView planeBlock(DeviceBinMatView block, size_t planes) {
+    BINCV_ASSERT(planes >= 1 && planes <= 8,
+                 "planeBlock: N outside QuantMat's supported range");
+    BINCV_ASSERT(block.height % planes == 0,
+                 "planeBlock: the block's row count must be N * the plane height");
+    return DevicePlaneBlockView{block.ptr, block.width, block.height / planes, block.stride,
+                                planes};
+}
+
+/// @brief The read-only spelling of `planeBlock`.
+inline DevicePlaneBlockConstView planeBlock(DeviceBinMatConstView block, size_t planes) {
+    BINCV_ASSERT(planes >= 1 && planes <= 8,
+                 "planeBlock: N outside QuantMat's supported range");
+    BINCV_ASSERT(block.height % planes == 0,
+                 "planeBlock: the block's row count must be N * the plane height");
+    return DevicePlaneBlockConstView{block.ptr, block.width, block.height / planes,
+                                     block.stride, planes};
+}
 
 /// @brief Non-owning view of a WIDE (one value per pixel) image in device
 /// memory: the sensor-stage input and the disparity output live here.

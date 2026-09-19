@@ -3,6 +3,13 @@
 // the same op on this machine's CPU -- shares of a real pipeline come from the
 // dense benchmark, not from here. Transfers are priced too, because they are
 // the tax every non-resident use pays.
+//
+// THE LAUNCH FLOOR IS PRINTED FIRST AND ON EVERY GPU LINE, and this is the file
+// where that matters most. These ops are individually cheap -- a frame-sized
+// bitwise AND, a population count, a pack -- and on WSL2 an empty kernel costs
+// ~8 us. An arm only a few multiples of that is reporting the launch, and a
+// RATIO between two such arms is reporting almost none of either op. The share
+// is printed on the line so nobody has to remember to check.
 
 #include <cstdint>
 #include <cstdio>
@@ -48,6 +55,9 @@ int main() {
     std::printf("=== CUDA foundation ops, %zux%zu (microbenchmarks) ===\n", kW, kH);
     cudabench::printDevice();
     std::printf(" columns: GPU kernel-resident vs host library CPU arm, medians\n\n");
+    const auto floor = cudabench::measureLaunchFloor();
+    cudabench::printLaunchFloor(floor);
+    std::printf("\n");
 
     const auto f1 = randomFrame(1), f2 = randomFrame(2);
     bincv::BinMat<uint32_t> a(kW, kH), b(kW, kH), hostDst(kW, kH);
@@ -70,11 +80,11 @@ int main() {
     {
         const auto up = cudabench::timeKernel(
             [&] { bincv::cuda::upload(a.constView(), da.view()); }, 50, 9);
-        cudabench::printArm("upload packed frame (45 KB)", up, "kernel");
+        cudabench::printArmVsFloor("upload packed frame (45 KB)", up, floor, "kernel");
         const auto upWide = cudabench::timeKernel(
             [&] { bincv::cuda::uploadImage<uint8_t>(f1.data(), kW, kH, kW, dImg.view()); },
             50, 9);
-        cudabench::printArm("upload wide frame (361 KB)", upWide, "kernel");
+        cudabench::printArmVsFloor("upload wide frame (361 KB)", upWide, floor, "kernel");
         std::vector<uint8_t> back(kW * kH);
         const auto down = cudabench::timeKernel(
             [&] {
@@ -83,7 +93,7 @@ int main() {
                     back.data(), kW);
             },
             50, 9);
-        cudabench::printArm("download wide frame (361 KB)", down, "kernel");
+        cudabench::printArmVsFloor("download wide frame (361 KB)", down, floor, "kernel");
         measure::g_sink += back[0];
     }
     std::printf("\n");
@@ -97,7 +107,7 @@ int main() {
             bincv::bitwiseAnd<uint32_t>(a.constView(), b.constView(), hostDst.view());
             measure::g_sink += hostDst.data()[0];
         });
-        cudabench::printArm("bitwiseAnd GPU", t, "kernel");
+        cudabench::printArmVsFloor("bitwiseAnd GPU", t, floor, "kernel");
         std::printf(" %-44s %9.3f ms            [cpu]\n", "bitwiseAnd CPU", cpu);
     }
 
@@ -108,7 +118,7 @@ int main() {
         const double cpu = cpuMedianMs("count", [&](int) {
             measure::g_sink += bincv::countNonZero<uint32_t>(a.constView());
         });
-        cudabench::printArm("countNonZero GPU (async form)", t, "kernel");
+        cudabench::printArmVsFloor("countNonZero GPU (async form)", t, floor, "kernel");
         std::printf(" %-44s %9.3f ms            [cpu]\n", "countNonZero CPU", cpu);
     }
 
@@ -125,7 +135,7 @@ int main() {
                                                           hostDst.view(), uint8_t{127});
             measure::g_sink += hostDst.data()[0];
         });
-        cudabench::printArm("packBits GPU (GreaterThan)", t, "kernel");
+        cudabench::printArmVsFloor("packBits GPU (GreaterThan)", t, floor, "kernel");
         std::printf(" %-44s %9.3f ms            [cpu]\n", "packBits CPU (vector arm)", cpu);
 
         // The measured question the sensor stage exists to answer: wide frame
@@ -138,7 +148,8 @@ int main() {
                                       bincv::PackRule::GreaterThan, uint8_t{127});
             },
             20, 9);
-        cudabench::printArm("  path A: wide up + device pack", devPath, "kernel");
+        cudabench::printArmVsFloor("  path A: wide up + device pack", devPath, floor,
+                                   "kernel");
         const double cpuPath = cpuMedianMs("cpupack+up", [&](int) {
             bincv::packBits<bincv::PackRule::GreaterThan>(f1.data(), kW, kH, kW,
                                                           hostDst.view(), uint8_t{127});
@@ -167,7 +178,8 @@ int main() {
                                                           views.data());
             measure::g_sink += planes[0].data()[0];
         });
-        cudabench::printArm("censusTransform GPU (24 planes, tiled)", t, "kernel");
+        cudabench::printArmVsFloor("censusTransform GPU (24 planes, tiled)", t, floor,
+                                   "kernel");
         bincv::cuda::impl::censusTiledEnabled() = false;
         const auto tRef = cudabench::timeKernel(
             [&] {
@@ -235,7 +247,8 @@ int main() {
                                                        kKeypoints, dCov);
             },
             20, 9);
-        cudabench::printArm("  countCovariance BATCH (one launch)", tBatch, "kernel");
+        cudabench::printArmVsFloor("  countCovariance BATCH (one launch)", tBatch, floor,
+                                   "kernel");
 
         // The same work through the single-region entry: 200 launches.
         const auto tLoop = cudabench::timeKernel(
@@ -283,7 +296,7 @@ int main() {
             measure::g_sink += planes[0].data()[0];
         });
         std::printf("\n");
-        cudabench::printArm("packQuant N=2 GPU", t, "kernel");
+        cudabench::printArmVsFloor("packQuant N=2 GPU", t, floor, "kernel");
         std::printf(" %-44s %9.3f ms            [cpu]\n",
                     "packQuant N=2 CPU (vector arm)", cpu);
     }

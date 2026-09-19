@@ -610,10 +610,24 @@ cudaError_t launchBitSlicedArm(DeviceBinMatConstView left, DeviceBinMatConstView
     return cudaGetLastError();
 }
 
+/// @brief The widest window this arm accepts. A window row is ONE 32-bit
+/// extraction, so 32 bounds it, and the launcher asserts an odd width -- 31 is
+/// therefore the largest width that can reach here.
+constexpr int kBsMaxWinWidth = 31;
+
+/// The instantiation list below is exhaustive over [3, kBsMaxWinWidth], and
+/// these are what keep it so. Widen the gate and the horizontal sum needs a
+/// sixth plane, which fails HERE, at the bound, rather than falling off the end
+/// of the switch into an arm nobody measured.
+static_assert(bitSlicedSumPlanes(3) == 2, "the narrowest accepted window");
+static_assert(bitSlicedSumPlanes(static_cast<size_t>(kBsMaxWinWidth)) == 5,
+              "launchBitSliced instantiates HP = 2..5 only; a wider window needs "
+              "another arm and another sweep of kBsStrip/kBsChunks against it");
+
 /// @brief Pick the instantiation whose plane count matches this window width.
 /// The horizontal sum's plane count is what the kernel must know statically --
-/// see kBsAccPlanes -- and it takes five values over the accepted widths, so
-/// five instantiations cover them exactly.
+/// see kBsAccPlanes -- and over the accepted widths it takes four values, so
+/// four instantiations cover them exactly.
 cudaError_t launchBitSliced(DeviceBinMatConstView left, DeviceBinMatConstView right,
                             int minD, int dEnd, const DenseDisparityParams& params,
                             DeviceImageView<uint8_t> disparity, size_t outRows,
@@ -632,9 +646,15 @@ cudaError_t launchBitSliced(DeviceBinMatConstView left, DeviceBinMatConstView ri
             return launchBitSlicedArm<5>(left, right, minD, dEnd, params, disparity,
                                          outRows, words, stream);
         default:
-            return launchBitSlicedArm<6>(left, right, minD, dEnd, params, disparity,
-                                         outRows, words, stream);
+            break;
     }
+    // Out of the accepted domain -- reachable only from a caller that broke the
+    // odd-and-<= 32 precondition, which is checked but compiles out under
+    // NDEBUG. An ERROR rather than a sixth instantiation: that instantiation
+    // cost 243 registers of code nothing in the domain could call, and a kernel
+    // that ran here would give a silently wrong map (its accumulator planes are
+    // sized for the domain, not for the width it was handed).
+    return cudaErrorInvalidValue;
 }
 
 /// @brief The packed matcher's disparity tile, swept independently of the
@@ -796,6 +816,9 @@ cudaError_t launchDense(DeviceBinMatConstView left, DeviceBinMatConstView right,
         // xor. A census plane block carries K bits per pixel and has no such
         // form, so it stays on the per-pixel sliding kernel.
         if (impl::denseBitSlicedEnabled() && planes == 1) {
+            // The gate above is winWidth <= 32 and the window is odd, so the
+            // width reaching here is at most kBsMaxWinWidth -- exactly the
+            // domain launchBitSliced's instantiation list covers.
             return launchBitSliced(left, right, params.minDisparity, dEnd, params,
                                    disparity, outRows, rowWords(width), stream);
         }

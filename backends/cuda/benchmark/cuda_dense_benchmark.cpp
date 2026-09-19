@@ -13,9 +13,22 @@
 // The cv::cuda::StereoBM denominator lives in cuda_stereobm_benchmark.cpp,
 // which needs an OpenCV built with cudastereo.
 //
-// MEMORY, stated per arm: the device working set is printed from the same
-// dimensions the allocations use. The refused cost volume at this frame and
-// D=64 would be 23 MB; neither backend materializes it.
+// MEMORY, stated per arm on THREE NAMED METERS -- the allocation sum, the
+// cudaMemGetInfo delta, and the read-back row pitch. They answer different
+// questions, so each line names the meter it was read on and no ratio crosses
+// two of them (docs/reports/cuda.md, "one meter per comparison"). The refused
+// cost volume at this frame and D=64 would be 23 MB; neither backend
+// materializes it.
+//
+// THE LAUNCH FLOOR is printed first, before any arm. The binary matcher runs
+// at 0.069 ms here with a spread in the tens of percent, which is close enough
+// to the floor that the floor is part of reading the number rather than a
+// footnote under it.
+//
+// THE GATE-EXCLUDED ARM is the last section. Project rule (CLAUDE.md): a
+// benchmark must carry a case the fast path's own gate REJECTS, and that case
+// must read ~1.00x -- otherwise the switch positions above are not selecting
+// what their lines claim.
 
 #include <cstdint>
 #include <cstdio>
@@ -83,6 +96,11 @@ int main() {
     std::printf("=== dense disparity: CUDA backend vs this machine's CPU ===\n");
     cudabench::printDevice();
 
+    // The floor first, so every kernel number below can be read against it.
+    const auto floor = cudabench::measureLaunchFloor();
+    std::printf("\n");
+    cudabench::printLaunchFloor(floor);
+
     const auto lw = smoothFrame(kW, kH);
     std::vector<uint8_t> rw(kW * kH, 0);
     for (size_t y = 0; y < kH; ++y)
@@ -120,39 +138,74 @@ int main() {
         2 * kK * kH * cenL.getAlignedWidth() * 4 + 2 * kW * kH + kW * kH;
     const size_t censusPackedBytes = 2 * kW * kH * 4 + 2 * kW * kH + kW * kH;
 
+    // The driver meter's own granularity, MEASURED here rather than quoted, so
+    // that every reading below can be read against it. It is the reason a
+    // driver reading and an allocation sum never go into the same ratio.
+    const size_t meterStep = cudabench::measureDriverMeterStep();
+
     std::printf("\n--- binary entry (pair already packed): D=64, 9x9 ---\n");
-    std::printf(" device working set: %zu KB (the refused cost volume: 23 MB)\n\n",
-                binaryDeviceBytes / 1024);
+    cudabench::printMemoryHeader("binary entry");
+    cudabench::printAllocSum("two packed planes + the map", binaryDeviceBytes);
+    cudabench::printAllocSum("the cost volume this design REFUSES",
+                             kW * kH * 65 /* D=64 plus d=0 */);
+    {
+        // The driver reading for exactly these shapes: a second set of the same
+        // arrays, allocated inside the meter and freed again, so the number is
+        // this working set's reservation and nothing else's.
+        cudabench::DeviceMemMeter meter;
+        bincv::cuda::DeviceBinMat l2(kW, kH), r2(kW, kH);
+        bincv::cuda::DeviceImage<uint8_t> d2(kW, kH);
+        cudabench::printDriverDelta("the same arrays, allocated again",
+                                    meter.deltaBytes(), meterStep);
+    }
+    cudabench::printPitch("packed plane", dl.getAlignedWidth() * 4, kH, (kW + 7) / 8);
+    cudabench::printPitch("disparity map", kW, kH, kW);
+    std::printf("\n");
 
     // GPU, kernel-resident: the arm the launcher prefers.
     const auto tKernel = cudabench::timeKernel([&] {
         bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
                                           dDisp.view());
     });
-    cudabench::printArm("GPU binary, resident (word-parallel arm)", tKernel, "kernel");
+    cudabench::printArmVsFloor("GPU binary, resident (word-parallel arm)", tKernel,
+                               floor, "kernel");
 
-    // The two arms behind it, from the same binary, through the switches. If
-    // either ratio reads ~1.00x, the arm above is not the one running -- the
-    // same check every host vector arm carries.
-    bincv::cuda::impl::denseBitSlicedEnabled() = false;
-    const auto tSliding = cudabench::timeKernel([&] {
-        bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
-                                          dDisp.view());
-    });
+    // The two arms behind it, from the same binary, through the switches, each
+    // INTERLEAVED with the arm it prices: one arm to completion and then the
+    // other would put every bit of drift over the run onto the second of them,
+    // and these ratios are the backend's headline claims.
+    const auto wordVsSliding = cudabench::timeKernelPaired(
+        [&] {
+            bincv::cuda::impl::denseBitSlicedEnabled() = true;
+            bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
+                                              dDisp.view());
+        },
+        [&] {
+            bincv::cuda::impl::denseBitSlicedEnabled() = false;
+            bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
+                                              dDisp.view());
+        },
+        40, 20, 9);
     bincv::cuda::impl::denseBitSlicedEnabled() = true;
-    std::printf(" %-44s %9.3f ms  spread %4.0f%%  [kernel]  (word-parallel %.2fx)\n",
-                "GPU binary, per-pixel sliding arm", tSliding.medianMs,
-                tSliding.spreadPct(), tSliding.medianMs / tKernel.medianMs);
+    cudabench::printPaired("  A: word-parallel bit-sliced arm",
+                           "  B: per-pixel sliding arm", wordVsSliding, "kernel");
 
-    bincv::cuda::impl::denseFastArmEnabled() = false;
-    const auto tRef = cudabench::timeKernel([&] {
-        bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
-                                          dDisp.view());
-    });
+    const auto wordVsRef = cudabench::timeKernelPaired(
+        [&] {
+            bincv::cuda::impl::denseFastArmEnabled() = true;
+            bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
+                                              dDisp.view());
+        },
+        [&] {
+            bincv::cuda::impl::denseFastArmEnabled() = false;
+            bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), p,
+                                              dDisp.view());
+        },
+        40, 8, 9);
     bincv::cuda::impl::denseFastArmEnabled() = true;
-    std::printf(" %-44s %9.3f ms  spread %4.0f%%  [kernel]  (word-parallel %.2fx)\n",
-                "GPU binary, reference arm (switch off)", tRef.medianMs,
-                tRef.spreadPct(), tRef.medianMs / tKernel.medianMs);
+    cudabench::printPaired("  A: word-parallel bit-sliced arm",
+                           "  B: reference arm (both switches off)", wordVsRef,
+                           "kernel");
 
     // GPU, end-to-end: packed pair up, map down, synchronized.
     const double e2e = hostWallMs([&] {
@@ -188,8 +241,21 @@ int main() {
     }
 
     std::printf("\n--- census entry (wide 8-bit pair): D=64, 9x9, census 5x5 ---\n");
-    std::printf(" device working set: %zu KB plane layout, %zu KB packed\n\n",
-                censusPlaneBytes / 1024, censusPackedBytes / 1024);
+    cudabench::printMemoryHeader("census entry, two layouts");
+    cudabench::printAllocSum("PLANE layout working set", censusPlaneBytes);
+    cudabench::printAllocSum("PACKED layout working set", censusPackedBytes);
+    {
+        cudabench::DeviceMemMeter meter;
+        bincv::cuda::DeviceImage<uint8_t> w1(kW, kH), w2(kW, kH);
+        bincv::cuda::DeviceImage<uint32_t> d1(kW, kH), d2(kW, kH);
+        bincv::cuda::DeviceImage<uint8_t> m1(kW, kH);
+        cudabench::printDriverDelta("the PACKED arrays, allocated again",
+                                    meter.deltaBytes(), meterStep);
+    }
+    cudabench::printPitch("census plane block", cenL.getAlignedWidth() * 4, kK * kH,
+                          (kW + 7) / 8);
+    cudabench::printPitch("packed descriptor", kW * 4, kH, kW * 4);
+    std::printf("\n");
 
     // GPU census transform alone, then the matcher, kernel-resident.
     const auto tCen = cudabench::timeKernel([&] {
@@ -276,6 +342,91 @@ int main() {
         const double gpuCensusTotal = tCenPacked.medianMs + tMatchPacked.medianMs;
         std::printf("\n resident (census+match) speedup vs CPU: %.1fx   end-to-end: %.1fx\n",
                     t[0].medianNs / 1e6 / gpuCensusTotal, t[0].medianNs / 1e6 / e2eCensus);
+    }
+
+    // ----------------------------------------------------------------------
+    // THE GATE-EXCLUDED ARM: the case that MUST read ~1.00x.
+    //
+    // CLAUDE.md requires a benchmark to include a case where the fast path's
+    // own gate excludes it, because that is the only cheap check that the
+    // switch above is selecting anything at all. A mis-attached `#define` once
+    // compiled a host vector block out entirely here and three consecutive
+    // "improvements" were measured against nothing.
+    //
+    // The word-parallel arm's gate is winWidth <= 32 -- one 32-bit extraction
+    // per window row is the whole premise -- so a winWidth of 33 leaves it and
+    // BOTH switch positions run the same reference kernel. The in-gate control
+    // at 31 differs in exactly one variable and must not read 1.00x.
+    //
+    // winHeight is 7 in both, not the 9 used above: the binary entry's own
+    // contract is winWidth * winHeight <= 255, and 33 x 9 is outside it. Using
+    // one height for both lines keeps the pair a one-variable comparison.
+    // ----------------------------------------------------------------------
+    std::printf("\n--- the gate's own exclusion: winWidth 33 (outside) vs 31 (inside) ---\n");
+    {
+        bincv::DenseDisparityParams pOut = p;
+        pOut.winWidth = 33;
+        pOut.winHeight = 7;
+        bincv::DenseDisparityParams pIn = p;
+        pIn.winWidth = 31;
+        pIn.winHeight = 7;
+
+        // Hazard 4 of the project's measurement protocol: what is compared must
+        // AGREE before it is timed. At 33 the two switch positions are the same
+        // kernel and agreement is trivial. At 31 they are two DIFFERENT kernels,
+        // and the ratio below is only a comparison if their maps match.
+        const auto mapOf = [&](const bincv::DenseDisparityParams& q, bool bitSliced) {
+            bincv::cuda::impl::denseBitSlicedEnabled() = bitSliced;
+            bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), q,
+                                              dDisp.view());
+            std::vector<uint8_t> out(kW * kH);
+            bincv::cuda::downloadImage<uint8_t>(dDisp.constView(), out.data(), kW);
+            cudaDeviceSynchronize();
+            return out;
+        };
+        const bool agree31 = mapOf(pIn, true) == mapOf(pIn, false);
+        bincv::cuda::impl::denseBitSlicedEnabled() = true;
+
+        const auto outside = cudabench::timeKernelPaired(
+            [&] {
+                bincv::cuda::impl::denseBitSlicedEnabled() = true;
+                bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), pOut,
+                                                  dDisp.view());
+            },
+            [&] {
+                bincv::cuda::impl::denseBitSlicedEnabled() = false;
+                bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), pOut,
+                                                  dDisp.view());
+            },
+            3, 3, 7);
+        bincv::cuda::impl::denseBitSlicedEnabled() = true;
+        std::printf(" winWidth 33 -- OUTSIDE the word-parallel gate (winWidth <= 32):\n");
+        cudabench::printPaired("  A: switch ON  (gate rejects it anyway)",
+                               "  B: switch OFF", outside, "kernel", /*expect1x=*/true);
+
+        const auto inside = cudabench::timeKernelPaired(
+            [&] {
+                bincv::cuda::impl::denseBitSlicedEnabled() = true;
+                bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), pIn,
+                                                  dDisp.view());
+            },
+            [&] {
+                bincv::cuda::impl::denseBitSlicedEnabled() = false;
+                bincv::cuda::denseDisparityBinary(dl.constView(), dr.constView(), pIn,
+                                                  dDisp.view());
+            },
+            20, 6, 7);
+        bincv::cuda::impl::denseBitSlicedEnabled() = true;
+        std::printf(" winWidth 31 -- INSIDE it, the positive control. The two arms'"
+                    " maps are %s.\n",
+                    agree31 ? "IDENTICAL"
+                            : "DIFFERENT, so the ratio below compares nothing");
+        cudabench::printPaired("  A: switch ON  (word-parallel arm runs)",
+                               "  B: switch OFF (per-pixel sliding arm)", inside,
+                               "kernel");
+        std::printf("   Read the two together: the 33 line at ~1.00x says the switch is\n"
+                    "   real and the gate excludes what it claims; the 31 line away from\n"
+                    "   1.00x says the arm above it is the one being timed.\n");
     }
 
     std::printf("\n sink %zu\n", static_cast<size_t>(measure::g_sink));

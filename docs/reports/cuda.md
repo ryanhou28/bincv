@@ -74,10 +74,15 @@ arrays themselves ask for, the figure `cuda_dense_benchmark` prints — measures
 binCV against binCV and against the cost volume the design refuses. Crossing
 them inflates: binCV's 442 KB of arrays set beside StereoBM's 10 MB reading
 would look like 23×, and that ratio answers no question. On this driver
-`cudaMemGetInfo` moves in 2 MB steps — a one-byte allocation reads 2.00 MB — so
-the binary entry's 2.0 MB is the meter's floor rather than its footprint, which
-makes the 5× above a lower bound on the memory lead and not a measurement of
-it.
+`cudaMemGetInfo` reserves in 2 MB units, so its reading moves in 2 MB steps and
+nowhere in between. A one-byte allocation therefore reads 2.00 MB when it starts
+a fresh unit and 0.00 MB when it fits the unit the previous allocation was
+already using — the step is the stable quantity, not any single probe, which is
+why `cuda_bench_util.hpp` measures the step (allocate one byte at a time until
+the reading moves) rather than probing once. The binary entry's 2.0 MB is
+therefore the meter's resolution around a 442 KB working set rather than its
+footprint, which makes the 5× above a lower bound on the memory lead and not a
+measurement of it.
 
 ## Setup
 

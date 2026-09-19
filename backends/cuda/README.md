@@ -19,7 +19,10 @@ none allocating inside a kernel:
 
 | header | operations |
 |---|---|
-| `deviceBinMat.hpp` | `DeviceBinMat`, `DeviceImage<T>` — owning device containers, value semantics |
+| `core.hpp` | the views: `DeviceBinMatView`, `DeviceImageView<T>`, and `DevicePlaneBlockView` — N bit-planes in one allocation, plane `p` at rows `[p*H, (p+1)*H)`, which is `QuantMat<N>`'s own layout |
+| `deviceBinMat.hpp` | `DeviceBinMat`, `DeviceImage<T>`, `DeviceArray<T>` — owning device containers, value semantics |
+| `features.hpp` | `DeviceKeypointSetConstView`, `DeviceDescriptorSetView` / `ConstView`, and the result PODs `DeviceCorner`, `DeviceFastCorner`, `DeviceDescriptorMatch`, `DeviceStereoMatch`, each with `toHost` |
+| `compaction.hpp` | `DeviceAppendBufferView<T>`, `DeviceAppendCounter`, `DeviceAppendResult` — the capacity contract for kernels that emit a variable number of things |
 | `transfer.hpp` | `upload` / `download` (any host word width), `uploadImage` / `downloadImage` |
 | `logic.hpp` | `bitwiseAnd` / `Or` / `Xor` / `Not` |
 | `reduce.hpp` | `countNonZero`, `countAnd`, `countAndSplit`, `countCovariance` (both selector forms), and **`countCovarianceBatchAsync`** — N windows in one launch |
@@ -32,6 +35,19 @@ These five host operation headers have **complete** device arms. The rest of
 binCV's operation set does not yet — the remaining work is filed as issues
 #58 (frontend), #59 (tracking), #60 (per-pixel families) and #61 (sparse stereo
 and geometry).
+
+**A compaction truncates, counts the truth, and cannot pass as complete.** A
+detection kernel appends through `DeviceAppendBufferView<T>` and the counter is
+never clamped, so `DeviceAppendResult::found()` is the TRUE candidate count —
+the capacity a complete re-run needs — even when the buffer overflowed. There is
+no neutral count accessor: a caller either asks for the whole answer
+(`completeCount`, which refuses and leaves its output untouched on an overflow)
+or accepts a partial one (`acceptTruncated`, whose name is then at the call
+site), and `downloadAppended` takes the result object so no path to host memory
+skips the verdict. **Which** candidates a truncated run keeps is the atomic's
+business and is not specified — the host truncates in raster order, so a
+truncated device result is not a prefix of the host's and bit-exactness is a
+claim about complete runs.
 
 **Reductions are batched, not per-call.** `countCovarianceBatchAsync` takes the
 whole window set and issues one launch; measured, that is **467× faster** than
