@@ -329,13 +329,32 @@ between those two is the whole of the rule.** `core/error.hpp` defines
 *nothing* under every other compiler. It is not a general annotation of the core
 types, and it is not a door to a shared kernel. A function may carry it only
 when it is **scalar and traversal-free** — no loop over pixels, rows or words,
-no pointer into an image, no allocation. That covers the closed-form rules the
+no allocation, and no walk over an image. That covers the closed-form rules the
 two sides would otherwise each have to derive: `impl::borderIndex`,
 `impl::reflect101Edge`, `impl::clipRegion` (with `regionFromExtent` and
 `clipColumns` under it), `impl::minEigenValue`, `impl::quantScale`,
-`impl::thresholdCutoff`, `maj3` and `thresholdGE`. Anything that walks an image
-stays forked, because that is exactly where the host's row-major, popcount,
-cache-line shape and the device's warp shape genuinely disagree.
+`impl::thresholdCutoff`, `impl::extendedRowWord`, `maj3` and `thresholdGE`.
+Anything that walks an image stays forked, because that is exactly where the
+host's row-major, popcount, cache-line shape and the device's warp shape
+genuinely disagree.
+
+**The line is traversal, not pointer-freedom**, and two entries in that list are
+where the distinction is visible: `thresholdGE` takes a plane pointer and reads
+one word from each of `nPlanes`, and `impl::extendedRowWord` takes a row pointer
+and reads one word at a caller-computed index. Neither decides *which* pixels to
+visit or in what order — the caller's traversal does that, and the traversal is
+what stays forked. What they encode is a closed-form rule about the bits once
+read, which is exactly the thing that must not exist twice. `extendedRowWord` is
+the clearest case: it is the row-edge blend that makes padding bits past `width`
+read as the fill, and a copy of it that differs by one bit is invisible in the
+middle of a frame and makes every word-wise reduction over-count. It was briefly
+restated twice inside the CUDA backend — once in `cuda/shift.hpp` and once,
+independently, in `morphology.cu` — and the two copies had already diverged in
+spelling before either shipped, which is the failure this rule exists to
+prevent arriving exactly on schedule. Folding them back onto the host's own
+function is **instruction-neutral** (the morphology translation unit compiles
+identically either way); the reason to do it is that there is now one
+definition of the rule rather than three.
 
 The reason the line sits there is that a second derivation of one rule is this
 project's recurring failure mode: the copy that drifts does not crash, it

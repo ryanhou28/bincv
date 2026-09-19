@@ -7,15 +7,38 @@ against `cv::cuda::StereoBM` as the best existing GPU option. Design:
 
 The backend shares binCV's format and forks its kernels, so every number here
 sits on top of a bit-exactness result: `scripts/verify_cuda.sh` proves each
-device kernel gives the host library's answer byte for byte (605 checks across
-two suites), and every optimized arm is held to its own reference arm's map in
-the same binary. Speed is what follows once correctness is settled.
+device kernel gives the host library's answer byte for byte (**eight suites —
+38,901 checks in the Release configuration, 38,881 in the Debug one**), and
+every optimized arm is held to its own reference arm's map in the same binary.
+Speed is what follows once correctness is settled. The two counts differ by
+design rather than by accident: a suite exercising a narrowed domain can only
+test the half of that contract its configuration has — the assertion is live in
+Debug, the error return is reachable in Release — and each such suite prints
+which half it ran instead of silently shrinking.
 
-**Coverage, stated plainly.** Five host operation headers have complete device
-arms — `logic`, `reduce`, `pack`, `census`, `denseDisparity` — which is the
-sensor stage, the reductions, and dense stereo end to end. The rest of the
-operation set does not, and the remaining work is filed as issues #58–#61
-rather than implied here.
+**Coverage, stated plainly.** Twelve of the twenty-seven host operation headers
+have device arms: `logic`, `reduce`, `pack`, `census` and `denseDisparity` —
+the reductions and dense stereo end to end — and, from the op-expansion round,
+`threshold`, `edge`, `morphology`, `denoise`, `medianWide`, `pyramid` and
+`shift`, which is the sensor stage and the window stage a frontend runs per
+frame. Tracking, the frontend's feature path, sparse stereo and the geometry
+have none.
+
+Four of the six new ones accept a **narrower domain than their host twin**, and
+each names it in its docstring, asserts it, and returns `cudaErrorInvalidValue`
+outside it rather than computing a wrong answer: morphology takes elements up
+to 32 rows by 512 columns (32 masked), `medianWide` takes K ∈ {1,3,5,7,9} at
+compile time, `pyrDownBox` takes 1–8 planes a side, and `binarize` takes 1–32.
+A Tier 1 claim here is a claim over *that* domain, said so where the claim is
+made. The rest of the operation set has no device arm, and the remaining work
+stays filed as issues rather than implied here.
+
+**What this round does not deliver.** `cuda::threshold` is correct, is 2.46×
+lighter than `cv::cuda::threshold`, and is **slower** — it meets the fail
+condition its own written rule named, so it is reported below as a miss with
+its mechanism located, not as a result. Device occupancy was dropped on a
+measurement rather than written. Both are stated where they belong rather than
+left for a reader to notice by absence.
 
 ## The headline
 
@@ -100,6 +123,39 @@ measurement of it.
   (recorded in the memory notes); it is a same-machine reference, not a
   cross-device claim, and the Pi remains the timing-grade CPU number
   ([stereo.md](stereo.md)).
+- **Every cross-library comparison runs both sides on one explicit stream, and
+  finding that out moved three numbers in this document.** OpenCV synchronizes
+  the whole device on the default stream. The guard
+  `if (stream == 0) cudaSafeCall( cudaDeviceSynchronize() );` is not one
+  function: it is in cudev's grid transform (which backs `cudaarithm`'s
+  `threshold`), in `cudafilters`' morphology, linear and median filters, in
+  `cudawarping`'s `resize` and `pyrDown`, and three times in `cudastereo`'s
+  StereoBM. On the default stream OpenCV therefore cannot pipeline across a
+  batch while binCV can, so an event bracket around a batch times N serialized
+  round trips on one side against N pipelined launches on the other. The
+  surcharge, measured with binCV as the control because it carries no such
+  guard anywhere:
+
+  | call | default stream | explicit stream | surcharge |
+  |---|---|---|---|
+  | `cv::cuda::threshold` | 0.0704 ms | 0.0102 ms | 6.91× |
+  | `cv::cuda::resize` INTER_AREA | 0.0559 ms | 0.0091 ms | 6.17× |
+  | `cv::cuda::pyrDown` | 0.0706 ms | 0.0098 ms | 7.18× |
+  | `cv::cuda` erode 3×3 (0.15 ms kernel) | 0.2125 ms | 0.1465 ms | 1.45× |
+  | `cv::cuda` median 3×3 (6 ms kernel) | 6.4260 ms | 6.2180 ms | 1.03× |
+  | *control* — binCV `threshold` | 0.0146 ms | 0.0142 ms | 1.03× |
+  | *control* — binCV `erode` 3×3 | 0.0095 ms | 0.0089 ms | 1.07× |
+
+  Both controls read ~1.00×, and the surcharge scales inversely with kernel
+  length, which is exactly what a fixed per-call sync must do. **The bar is the
+  explicit-stream number.** The project's rule is that the bar is the best
+  existing option; a resident pipeline uses streams and OpenCV supports them on
+  every call here, so quoting the default-stream figure would be measuring
+  against a fallback nobody would use. Three figures published below were
+  inflated by it and are corrected in place — `threshold`, `edgeThreshold` and
+  the pyramid ladder. **Morphology, the medians and the StereoBM headline were
+  not affected**: their kernels are long enough that one sync is noise, and the
+  StereoBM row was re-taken under this protocol and reproduced.
 - Reproduce: `cuda_dense_benchmark`, `cuda_foundation_benchmark`, and (with a
   cudastereo-enabled OpenCV) `cuda_stereobm_benchmark`.
 
@@ -178,11 +234,14 @@ invariance, and it is why the census entry sits just behind StereoBM rather
 than ahead of it, while the binary entry — the operating point a binCV pipeline
 runs — leads on both axes.
 
-## Foundation and sensor ops
+## Foundation ops
 
 Microbenchmarks — one kernel in a loop, next to the host library's CPU arm on
 the same frame. Shares of a real pipeline come from the dense benchmark, not
-from these.
+from these. These are **CPU arms, not GPU role bars**: they price an operation
+against the host library on the same machine, which is a different question
+from how it compares to `cv::cuda`. The GPU-against-GPU comparisons are the
+three sections below.
 
 | op | GPU kernel | CPU arm | note |
 |---|---|---|---|
@@ -233,6 +292,262 @@ are the work. The sensor-stage measured question — upload wide then pack on
 device, vs pack on CPU then upload bits — is close (path A 0.10 ms vs path B
 0.06 ms at this size); device-side pack wins whenever the wide frame is already
 resident, which is the point of a resident pipeline.
+
+## The sensor stage: threshold, binarize, edgeThreshold
+
+The three ops that turn a wide frame into bits. Kernel-resident, both sides on
+one explicit stream, nine independent process runs per figure, each an
+interleaved median of fifteen rounds. The **launch floor measured in every run
+is 8.66–9.58 µs**, and it is quoted beside every figure here because two of
+these three ops sit on it at the frame size a pipeline runs. Memory is
+`cudaMemGetInfo` on **both** sides, each replicated until its own delta clears
+eight of the driver's measured 2.00 MB units and then divided by its own
+replica count — one meter, named, never crossed with an allocation sum.
+
+| op | geometry | `cv::cuda` | binCV | speed | device memory |
+|---|---|---|---|---|---|
+| `threshold` → bits | 752×480 | 0.0113 ms | 0.0130 ms | **0.86× — behind** | **2.46×** smaller |
+| `threshold` → bits | 3840×2160 | 0.0378 ms | 0.0845 ms | **0.45× — behind** | not measured |
+| `edgeThreshold` | 752×480 | 0.0821 ms | 0.0096 ms | **8.1×** | **24.6×** smaller |
+| `edgeThreshold` | 1920×1080 | 0.1886 ms | 0.0164 ms | **11.1×** | not measured |
+
+Every memory figure in this document's op-expansion tables is taken at 752×480,
+and the rows at other geometries say "not measured" rather than carrying it
+forward — the ratio is not constant in frame size, because `GpuMat`'s pitch
+padding is a per-width quantity and the driver's reservation step is not.
+
+**The speed column is an aggregate of per-round ratios, not the two medians
+divided.** Each round times both arms interleaved and forms that round's ratio;
+the column reports the range those ratios span across runs. Dividing the median
+column by hand gives a nearby but different number, and the per-round form is
+the one that cancels drift — which is the whole reason the arms are
+interleaved rather than run to completion one after the other.
+
+**`edgeThreshold` leads on both axes, and it is this family's result.** Its role
+bar is the composed `cv::cuda` spelling of the same computation —
+`createDerivFilter(CV_8UC1, CV_16SC1, ksize=1, normalize=false)`, whose kernel
+at ksize 1 is exactly `[-1,0,1]` and whose default border is already
+`BORDER_REFLECT_101`. That filter is separable, so the bar is nine launches
+against binCV's one. The rule written before measuring asked for ≥5× on memory
+and ≥3× on speed; measured 24.6× and 8.1–11.1×, with sample ranges disjoint in
+9 of 9 runs at 1080p. A previously circulated 37.8–49.9× is **withdrawn** — it
+was the default-stream artifact above — and the stated bar is still cleared with
+about 3× of margin.
+
+The speed comes from a byte-lane arm that does four pixels per lane. `__byte_perm`
+builds the shifted neighbour quads, `__vabsdiffu4` does four |a−b| in one
+instruction, `__dp4a` folds four byte flags into a nibble, and a three-step
+`__shfl_xor_sync` butterfly assembles eight lanes' nibbles into one output
+word; the quad holding the last pixel falls back to the very same `edgePixel`
+function the reference arm runs, so the arithmetic has one spelling rather than
+two. It also cuts the warp's load instructions fourfold. Against its own
+reference arm it measures **0.36× at 3840×2160** with disjoint ranges in 4 of 7
+runs, and **0.75× at 752×480 with 0 of 7 disjoint — no result there, because
+neither arm is distinguishable from the launch floor at that size**. The arm was
+kept on the 4K evidence; the two gate-excluded controls (uint16, and the forward
+difference, both outside the arm's own gate) read ~1.00× where the measurement
+can resolve them. One measured correction to the design that proposed it:
+`__vsetgeu4` is **six** instructions on sm_86, not one, and `__vminu4`/`__vmaxu4`
+are six each, so the four byte comparisons are about 12 of the ~18 instructions
+a lane spends on its quad — the arm wins by amortising loads and addressing over
+four pixels, not because the byte-lane arithmetic is cheap.
+
+**`threshold` misses its own speed bar, and is not presented as a win.** The rule
+its author wrote before measuring named the fail condition in as many words:
+*slower than OpenCV by more than both printed spreads*. At 752×480 and 1080p
+the ranges overlap and there is no result in either direction. At 3840×2160
+binCV is **2.22× slower with 7 of 9 runs disjoint** — the fail condition, met at
+the one size where this measurement can decide anything. The memory bar (≥1.77×
+on the working set) passes at 2.46×. By the project's ship rule that combination
+does not merge on the memory argument: it gets optimized first, or the gap is
+explicitly accepted with the price stated. **Neither has happened yet**, and the
+op is documented here as a miss.
+
+The mechanism was located without a profiler. `cuda::threshold` is header-only —
+the host's own `impl::thresholdCutoff` reduction composed with `cuda::packBits`,
+which is what makes its Tier 1 claim provable rather than restated — so the
+kernel under the number is `packKernel<uint8_t, GreaterEqual>`. `cuobjdump -sass`
+shows **184 instructions around one LDG and one STG**: 62 IMAD, 26 IADD3, 18
+ISETP, and **two software divides** (`I2F.U32.RP → MUFU.RCP → F2I`, and a 64-bit
+one) which are the grid-stride loop's `wordIdx / words` and `wordIdx - y*words`.
+binCV moves **1.90× less traffic and takes 1.89× longer**: at 1080p it runs at
+6.8× its own bandwidth floor where OpenCV runs at 1.9× of its. Two fixes are
+named and both are already precedent in this backend — a 2-D grid with
+`blockIdx.y` as the row deletes both divides outright, and four-pixels-per-lane
+vector loads are exactly what `edgeThreshold`'s byte-lane arm above does to win
+8–11× in this same family. Neither was attempted this round. This also settles,
+in the opposite direction to the one expected, an earlier suspicion that
+`cv::cuda::threshold` was anomalously slow: it was not: binCV was slow and the
+default stream was hiding it.
+
+`binarize` — N bit-planes in, one bit-plane out, one launch, templated on plane
+count 1…32 for register residency and with **zero spills across all 32
+instantiations** — has **no `cv::cuda` counterpart at any API level**. Its speed
+verdict is therefore recorded **OUTSTANDING** against the resident pipeline that
+will later price it, and no substitute bar is invented for it. For shape only,
+and labelled as such rather than as a role comparison: against `cuda::packBits`
+on 3.000× less traffic it measures 0.20× at 4K (5 of 7 runs disjoint) and
+0.87–0.93× at 752×480 with 0 of 7 disjoint, where it is on the launch floor. It
+is still on the launch floor at 4K — 0.008 ms for a 3.1 MB working set — and
+would need roughly an 8000×4500 frame to become visible at all.
+
+## The window family: morphology and the medians
+
+Morphology's role bar is `cv::cuda::createMorphologyFilter(op, CV_8UC1,
+kernel)->apply()`, which is NPP-backed; the medians' is
+`cv::cuda::createMedianFilter(CV_8UC1, 3)`. Same protocol as above, both sides
+on one explicit stream. These are the rows the stream correction did **not**
+move — their kernels are long enough that a per-call sync is noise, which the
+surcharge table's 1.45× and 1.03× rows show directly.
+
+| case | geometry | `cv::cuda` | binCV | speed | device memory |
+|---|---|---|---|---|---|
+| `erode` rect 3×3 | 752×480 | 0.1429 ms | 0.0118 ms | **11.6–11.9×** | **16.0×** smaller |
+| `erode` rect 3×3 | 1920×1080 | 0.2011 ms | 0.0148 ms | **13.0–13.5×** | not measured |
+| `morphologyEx` OPEN 3×3 | 1920×1080 | 0.4209 ms | 0.0238 ms | **15.1–16.1×** | not measured |
+| `erode` ellipse 5×5 | 752×480 | 0.2196 ms | 0.0154 ms | **12.8–13.9×** | (as rect 3×3) |
+| `erode` ellipse 5×5 | 1920×1080 | 0.4048 ms | 0.0176 ms | **22.9×** | not measured |
+| `medianWide` K=9 | 752×480 | 6.1888 ms | 0.0249 ms | **235–249×** | **123×** smaller |
+| `medianWide` K=9 | 1920×1080 | 34.1522 ms | 0.0538 ms | **634–740×** | not measured |
+| `denoiseMedian3` vs binCV's own byte arm | 4096×2160 | 0.0388 ms | 0.0087 ms | **4.6–5.0×** | **8.58×** at 752×480 |
+
+All three required morphology cases clear on both axes with 8–9 of 9 runs
+disjoint, which is the leads-on-both-axes disposition their pre-written rule
+named. **The case worth pointing at is `erode` with a 5×5 ellipse**, because it
+is the one the host arm *loses* — 0.32× against `cv::erode` on x86, where an
+AVX2 lane holds 32 bytes and a packed word holds 32 pixels, so the byte side
+gets its width for free. On the device that reverses, and the reason is
+measurable rather than rhetorical: `__vminu4` and `__vmaxu4` are **six
+instructions each on sm_86** (LOP3×3, SHF, IADD3, PRMT; the PTX `vmin4` is
+worse at 19), so a byte competitor's lane narrows to four pixels at six
+instructions while a packed word stays 32 pixels per instruction. The operation
+the host representation loses is the one the device representation wins by
+13–23×.
+
+**The honest caveat, printed at the number.** A single-call probe shows
+OpenCV's *kernel alone* is 69–85% of its batched time, and binCV's morphology
+sits at **1.36× the launch floor**. So this is better read as "binCV is
+essentially free and OpenCV is 16× above the floor" than as a kernel-versus-
+kernel ratio; roughly 10–17× of it is kernel-to-kernel and the remainder is
+OpenCV's per-call host cost. Earlier family figures of 17.4×/18.6×/16.3× become
+11.6×/13.3×/12.8× under the corrected protocol — same verdict, smaller
+magnitude.
+
+**The 123× on the wide median is not binCV's representation, and saying so is
+the point.** OpenCV's `filtering.cpp` sizes its histograms at
+`cols*256*partitions + cols*8*partitions` CV_32S, which is roughly **98 MB of
+device scratch for one 752×480 frame**; binCV allocates **zero** scratch,
+because no kernel in this project heap-allocates. The ratio is an artifact of
+the competitor's design, not evidence for bit-planes, and the implementer's own
+written expectation for this row was *parity*. The speed figure needs the same
+honesty: OpenCV's CUDA median runs 128 blocks of 32 threads — 4,096 threads on
+48 SMs, about 5,200× its own bandwidth floor — and is simply a poor
+implementation. **The K=9 row is the fair one**, since it compares equal sample
+counts, and at 235×/634× it is still the largest role margin in this backend.
+The bar is stream-independent (1.03×), so it is robust to the correction above.
+The 16-bit `medianWide` has no counterpart at any API level and its speed
+verdict is **OUTSTANDING**.
+
+`denoiseMedian3` — the 3-sample median over packed bits, two instructions per 32
+pixels via the host's own `maj3` — is measured against **binCV's own byte
+`medianWide` with its fast arm on**, deliberately, rather than against the
+composed `cv::cuda` spelling (7 buffers, 8 launches) that would have flattered
+it. Identical operation, identical border, one launch each, so the only variable
+is the representation. Its memory gate is the format's own formula
+`width / (rowWords(width)*4)` and it agrees exactly at 7.8333×, zero scratch
+both sides. Its **speed gate decides only at 4K**: 1.01× at 752×480 with 0 of 9
+runs disjoint, 0.63× at 1080p with 1 of 9, and 0.22× at 4096×2160 with 5–6 of 9.
+At every frame size a vision pipeline actually runs, this op is under the launch
+floor and **no standalone speed measurement can decide it** — which is a
+property of the op's cheapness, not a defect, and is why its share of a real
+resident path (8.8% of `bits → denoiseMedian3 → denseDisparityBinary`) is the
+number that matters more than its ratio.
+
+**Internal arms, and three honest nulls.** `medianWide`'s fast arm — four
+pixels per lane, one aligned 32-bit load per sample offset — is **0.41× at
+4096×2160 with 6 of 7 runs disjoint** (K=5: 0.45×, 6 of 7), and its
+gate-excluded control at 4095×2160, where a tight stride of 4095 is not a
+multiple of 4 and the alignment gate refuses the arm, reads **1.00× in 7 of 7
+runs**. That control is run at the top of the ladder on purpose: at a
+launch-bound size a control cannot detect a mis-attached switch, and the
+benchmark prints why. Morphology's three arms did *not* separate: the 3×3
+specialization reads 0.98×/0.92× with 0 of 7 disjoint at both sizes, the
+word-parallel `__brev` border 0.74×/0.59× with 0 and 1 of 7, and the `andNot`
+fusion 0.73×/0.76× with 0 of 7. Their compulsory traffic is 92 KB at 752×480 —
+**0.0002 ms against a ~0.011 ms launch floor** — so binCV's binary morphology is
+launch-bound at every frame size a vision pipeline uses and these comparisons
+have no resolution rather than a negative result. All three remain the default;
+the word-parallel border is additionally defensible on correctness surface,
+since it deletes the per-pixel border path, its divergence and its lost-update
+race together. **Two dispositions here are owner calls, not measurements**, and
+are recorded as open rather than settled.
+
+The `uint4` arm for `denoiseMedian3` was written, proven bit-exact, timed on the
+full ladder, and **dropped with its off-switch** — it never separated (0.97–1.04×
+at every rung). The reason is arithmetic rather than contention, so no re-run
+changes it: at 4096×2160 the whole operation moves 2.21 MB ≈ 3.6 µs of traffic
+against a 7–10 µs launch. The kernel is cheaper than the launch that carries it
+at every frame size, and it would take roughly 8× more pixels than 4K to change
+that. One implementation ships with no switch, on the `censusTransformPacked`
+precedent.
+
+## The pyramid, the resident ladder and shift
+
+| comparison | geometry | `cv::cuda` | binCV | speed | device memory |
+|---|---|---|---|---|---|
+| `buildPyramidBox` vs `resize` INTER_AREA ×3 | 752×480 | 0.0233 ms | 0.0240 ms | **1.02× — a tie** | **7.17×** smaller |
+| `buildPyramidBox` vs `pyrDown` ×3 | 752×480 | 0.0256 ms | 0.0239 ms | 0.95× — a tie | (same ladder) |
+| `shift` vs `cudaMemcpy2DAsync` | 752×480 | 0.0092 ms | 0.0091 ms | **a wash** | **7.8333×** (formula) |
+
+**The pyramid ladder passes as a tie, and that was written down as a pass before
+it was measured.** The disposition table its author wrote first had three rows,
+and the middle one said: ranges overlap ⇒ tie, which passes, and reads "a wash on
+time, N× on memory". Measured 1.015× and 1.039× across two independent sweeps
+with **0 of 9 runs disjoint in both** — squarely that row. Only the 752×480
+comparison is like-for-like: `cv::cuda::resize` gives `dsize = 376` at width 753
+where `pyrDownWidth(753) = 377`, so at an odd width the two sides are not doing
+the same operation and the benchmark says so at the number. **A 5.61× figure
+from the family's own pass is withdrawn** — `resize` was paying 6.17× and
+`pyrDown` 7.18× on the default stream.
+
+The memory side is where this op is actually interesting, and it is an
+**equality rather than a threshold**: the four-level ladder
+(752×480 at 1 plane, then 3, 4, 5 planes) is **93.5 KB in one `cudaMalloc`**,
+equal to the closed formula to the byte, and the suite asserts the levels are
+consecutive slices of that one allocation rather than only printing the total.
+`cudaMemGetInfo` on both sides reads 7.17×, which corroborates the 7.378×
+read back from `GpuMat::step` — the byte ladder's real pitches are
+1024/512/512/512 B per row, not the 512 B the design assumed for level 0.
+
+`shift` has **no OpenCV counterpart at any API level**, so its speed verdict is
+**OUTSTANDING**. What it is measured against instead is the thing a byte
+pipeline would actually use for an integer translation — `cudaMemcpy2DAsync`, a
+pitched DMA — and the result written down in advance was that a wash or a loss
+would be the expected and acceptable outcome. It is a wash: 0.948–0.985×, 0 of 9
+disjoint. **The "structural twice over" claim this op was designed under is
+wrong on its instruction half and is withdrawn here rather than quietly
+dropped.** A DMA spends *zero* ALU instructions per pixel, so binCV's one
+`__funnelshift` is compared against none, not against thirty-two; and at 752×480
+both 46 KB and 361 KB sit inside this part's 4 MB L2, so the traffic half is a
+footprint claim too. The op is **7.8333× smaller at width 752** — the format's
+formula `height*rowWords(width)*4` against `height*width*1`, which reaches
+8.0000× only where the width is a multiple of 32, and 752 is not — and a wash
+on time against a DMA engine. That is the whole of it. The `__funnelshift` arm still ships as the
+default against the two-shift-or arm it ties with (1.01×, 0 of 7), on the
+correctness-surface argument that it is defined at a shift count of zero and
+removes the undefined-behaviour branch entirely — a correctness argument, stated
+as one rather than smuggled in as speed.
+
+**The ladder's fast arm is an open disposition, not a result.** `pyrDownBox`'s
+bit-sliced arm B beats the ballot-based arm A by 0.555× at 3840×2160, but with
+sample ranges disjoint in only **6 of 14 pairings** — a minority, where the rule
+written before measuring required a reproduced disjoint win. At 752×480 the
+per-level ratios are 0.93/0.97/0.97 with 0 of 7 disjoint, because every level
+there is on the launch floor, which that same rule predicted in writing and so
+is not a measured negative. By the letter of the rule arm A ships; the medians
+consistently favour arm B and the runtime switch makes it a one-line change
+either way. **It is left as arm B and flagged, rather than resolved by relaxing
+the bar that was written to decide it.**
 
 ## How the numbers were earned
 
@@ -349,6 +664,59 @@ what is currently parallel.
   taken one run. **Anyone picking up #62 or #63 should get `ncu` working
   first** — `smsp__pcsamp_warps_issue_stalled_*` answers directly what those six
   experiments had to triangulate.
+
+  The op-expansion round extended this note in two directions. `cuobjdump -sass`
+  turned out to answer more than expected: it located `cuda::threshold`'s two
+  software divides and priced every byte-lane intrinsic these families were
+  designed around — several of which the designs had budgeted at one instruction
+  and which are six. A host-enqueue probe and a single-call probe together
+  separated OpenCV's kernel time from its per-call host cost without a profiler
+  at all. But **`cuda-memcheck` is also broken here, not just `ncu` and `nsys`**:
+  given a deliberate 1020-element overread of a 4-element allocation it printed
+  `ERROR SUMMARY: 0 errors`. No device out-of-bounds read in this backend is
+  observable by any tool available on this machine, which is why the pyramid's
+  source-word guard is pinned as a swept arithmetic invariant instead — see
+  below.
+- **One guard in a shipped default cannot be proven by any value test, and is
+  documented as such.** `pyrDownBox` guards a source-word read that, on
+  analysis, can only ever feed destination columns past `width`: source word
+  `2i+1` supplies columns `[32i+16, 32i+32)` and is missing exactly when
+  `srcWidth ≤ 64i+32`, which forces `dstWidth ≤ 32i+16`. Removing the guard
+  changes **not one output bit**, and that was watched: with it removed the
+  whole 1,287-check suite still passes. It is a memory-safety guard, not a
+  correctness one; `cuda-memcheck` cannot see the difference either, so what
+  pins it is a swept invariant over 4,096 widths asserting the missing word can
+  only feed padding. The header says plainly that it is there for safety rather
+  than for the answer.
+- **Device occupancy was dropped on a measurement, not left unwritten.**
+  `markOccupiedBatch` / `occupiedBatch` / `clearOccupancy` have no `cv::cuda`
+  equivalent and no CPU OpenCV equivalent, so no role bar exists for them. The
+  best existing option for the job they do is the host library's own
+  `spaceCandidates`, at **3,333 ns and zero bytes** — which is *below this
+  host's measured 11–13 µs launch floor*, so no device shape can clear it: one
+  launch costs more than the entire host arm. The only other bar on offer was
+  the host *mask* arm (88,767 ns on x86-64, 380,629 ns on aarch64), which
+  `spaceCandidates` already beats by 26.6×, and passing against that would be
+  measuring against a fallback nobody would use. Shipping a mask producer and a
+  mask reader with no device consumer between them would also add two kernels to
+  the bit-exactness budget forever. Not built; the numbers are recorded here so
+  the decision is not re-taken from scratch.
+- **Named, measured, and not built.** A fused single-kernel OPEN/CLOSE (one
+  launch saved, `BORDER_CONSTANT` only, a second hand-written morphology kernel
+  to keep bit-exact forever, and its apron arithmetic was wrong at every block
+  seam). A separable RECT/CROSS decomposition and the log-depth fold over a flat
+  span — the latter is the **best remaining unexploited win in the window
+  family**, taking a 15×15 rect's horizontal pass from ~56 ops per 32 pixels to
+  8, but it buys nothing at 3×3 and nothing measurable at any size where the op
+  is launch-bound, which on this device is every size. A vertical bit-transpose,
+  which is the only idea in reach that changes the family's asymptotics in the
+  tall-element direction, and is entirely unprobed. A shared-memory tiled
+  morphology arm, refused on the recorded 1.28× precedent above plus the fact
+  that an erosion's fold is not invertible. `pyrDownFiltered` and a Gaussian 5×5
+  device arm, which at `NIn == NOut == 8` has no footprint advantage by
+  construction and whose CPU analogue the host already records at 13.7× slower
+  than `cv::pyrDown`. A fused two-level ladder, cut before measuring because
+  CUDA graphs are the real answer to its one-launch-of-three argument.
 - **The binary matcher was chased too — six attempts, and together they locate
   the limit.** `ptxas -v` reports 116 registers and no spills for the binary
   kernel, 255 (the ceiling) for the census one. *Not memory-traffic bound:*

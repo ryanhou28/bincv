@@ -19,7 +19,13 @@ add_library(bincv_cuda STATIC
     src/reduce.cu
     src/pack.cu
     src/census.cu
-    src/denseDisparity.cu)
+    src/denseDisparity.cu
+    src/threshold.cu
+    src/edge.cu
+    src/morphology.cu
+    src/median.cu
+    src/pyramid.cu
+    src/shift.cu)
 
 set_target_properties(bincv_cuda PROPERTIES
     CUDA_STANDARD 17

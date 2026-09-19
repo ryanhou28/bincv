@@ -86,8 +86,20 @@ inline Timing summarize(std::vector<double> samples) {
 /// @note Single-arm. When the number that matters is a RATIO between two arms,
 /// use timeKernelPaired instead -- this one runs its arm to completion, so a
 /// second call to it is not drift-comparable with the first.
+/// @param stream The stream the EVENTS are recorded on. Pass the same stream
+/// the body enqueues onto. Defaulted to the legacy default stream, which is
+/// what every caller that enqueues there wants and is a no-op change for
+/// them -- but see the note, because the default is NOT safe for a body that
+/// enqueues somewhere else.
+/// @note AN EVENT RECORDED ON THE WRONG STREAM DOES NOT TIME THE WORK. Events
+/// are ordered within their own stream. Recorded on the legacy default
+/// stream while the body enqueues on stream S, the pair brackets the
+/// default stream's implicit synchronization with S rather than S's work,
+/// and the reading acquires the legacy stream's cross-blocking semantics --
+/// measured here as 32-second outliers on a 5 ms kernel. When the body
+/// takes a stream, pass it.
 inline Timing timeKernel(const std::function<void()>& body, int iters = 20,
-                         int repeats = 9) {
+                         int repeats = 9, cudaStream_t stream = nullptr) {
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -97,9 +109,9 @@ inline Timing timeKernel(const std::function<void()>& body, int iters = 20,
     for (int i = 0; i < iters; ++i) body();
     cudaDeviceSynchronize();
     for (int r = 0; r < repeats; ++r) {
-        cudaEventRecord(start);
+        cudaEventRecord(start, stream);
         for (int i = 0; i < iters; ++i) body();
-        cudaEventRecord(stop);
+        cudaEventRecord(stop, stream);
         cudaEventSynchronize(stop);
         float ms = 0.0f;
         cudaEventElapsedTime(&ms, start, stop);
@@ -145,17 +157,23 @@ struct PairedTiming {
 /// still hands whichever arm runs second half a round of drift every single
 /// round; alternating cancels that to first order, which bracketing on its
 /// own does not.
+/// @param stream The stream the EVENTS are recorded on -- see timeKernel's note.
+/// BOTH arms must enqueue onto this same stream, or the pair is not
+/// comparable: one arm on the legacy default stream and the other on an
+/// explicit stream do not merely run on different queues, they implicitly
+/// serialize against each other, and each arm's bracket then contains part
+/// of the other's work.
 inline PairedTiming timeKernelPaired(const std::function<void()>& bodyA,
                                      const std::function<void()>& bodyB,
                                      int itersA = 20, int itersB = 20,
-                                     int repeats = 9) {
+                                     int repeats = 9, cudaStream_t stream = nullptr) {
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     const auto batch = [&](const std::function<void()>& body, int iters) {
-        cudaEventRecord(start);
+        cudaEventRecord(start, stream);
         for (int i = 0; i < iters; ++i) body();
-        cudaEventRecord(stop);
+        cudaEventRecord(stop, stream);
         cudaEventSynchronize(stop);
         float ms = 0.0f;
         cudaEventElapsedTime(&ms, start, stop);
@@ -278,18 +296,23 @@ void launchNullKernel(dim3 grid = dim3(1), dim3 block = dim3(32),
 /// launches pipeline, so a floor measured over 5,000 enqueues is a different
 /// quantity from an arm measured over 100 (swept on this host: 0.0076 ms at
 /// 100, 0.0081 at 1,000, 0.0085 at 5,000).
+/// @param stream The stream the floor is measured on. A floor compared against
+/// arms timed on an explicit stream has to be measured on that same stream,
+/// for timeKernel's reason.
 inline Timing measureLaunchFloor(dim3 grid = dim3(1), dim3 block = dim3(32),
                                  int iters = 100, int repeats = 25,
-                                 double warmupMs = 250.0) {
+                                 double warmupMs = 250.0,
+                                 cudaStream_t stream = nullptr) {
     const auto t0 = std::chrono::steady_clock::now();
     for (;;) {
-        for (int i = 0; i < 500; ++i) launchNullKernel(grid, block);
+        for (int i = 0; i < 500; ++i) launchNullKernel(grid, block, stream);
         cudaDeviceSynchronize();
         const double elapsed = std::chrono::duration<double, std::milli>(
                                    std::chrono::steady_clock::now() - t0).count();
         if (elapsed >= warmupMs) break;
     }
-    return timeKernel([&] { launchNullKernel(grid, block); }, iters, repeats);
+    return timeKernel([&] { launchNullKernel(grid, block, stream); }, iters, repeats,
+                      stream);
 }
 
 inline void printLaunchFloor(const Timing& t) {

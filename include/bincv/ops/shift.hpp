@@ -247,9 +247,22 @@ BINCV_HOST_DEVICE inline ptrdiff_t borderIndex(ptrdiff_t p, size_t lenPixels,
 /// @note The second half is the one that is easy to omit and impossible to see
 /// afterwards: see the "out-of-range reads" section at the top of this file.
 /// @note `j < 0` is reachable from the shiftRight recurrence and is not an error.
+/// @note BINCV_HOST_DEVICE. One indexed word read and a masked blend, no
+/// traversal and no allocation, so the CUDA backend's shift and morphology
+/// kernels CALL THIS rather than restating it -- which is the whole point of
+/// the annotation: a row-edge blend that differs by one padding bit is
+/// invisible in the middle of a frame and makes every word-wise reduction
+/// over-count. Keep the blend spelled `(w & tailMask) | (fill & ~tailMask)`:
+/// probed on sm_86 with a runtime fill it is a pure function of three
+/// registers and fuses to ONE LOP3.LUT, where the `fill ^ ((w ^ fill) &
+/// tailMask)` re-spelling costs three. That is a reason not to "optimize"
+/// this line, not a claim about any caller -- the CUDA morphology kernel
+/// compiles instruction-identically either way, because its hot call sites
+/// pass a literal zero fill and both spellings collapse to one AND.
 template <typename WordType>
-inline WordType extendedRowWord(const WordType* row, ptrdiff_t j, size_t rowWords,
-                                WordType tailMask, WordType fill) {
+BINCV_HOST_DEVICE inline WordType extendedRowWord(const WordType* row, ptrdiff_t j,
+                                                  size_t rowWords, WordType tailMask,
+                                                  WordType fill) {
     if (j < 0 || static_cast<size_t>(j) >= rowWords) return fill;
 
     const WordType w = row[static_cast<size_t>(j)];
