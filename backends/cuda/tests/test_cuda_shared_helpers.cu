@@ -240,6 +240,31 @@ __global__ void kCutoff(const double* in, size_t n, int* out) {
 }
 
 // ---------------------------------------------------------------------------
+// impl::squareInsideImage -- impl/kernel_util.hpp, the keypoint-describability
+// rule. Shared because orientation and BRIEF must agree about which keypoints
+// they may read at all: a device copy drifting by one would not crash and would
+// not corrupt a pixel, it would silently shorten the descriptor set.
+// ---------------------------------------------------------------------------
+
+struct SquareCase {
+    long long cx;
+    long long cy;
+    int half;
+    size_t width;
+    size_t height;
+};
+
+__global__ void kSquare(const SquareCase* in, size_t n, unsigned char* out) {
+    for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
+         i += gridDim.x * blockDim.x) {
+        const SquareCase c = in[i];
+        out[i] = bincv::impl::squareInsideImage(c.cx, c.cy, c.half, c.width, c.height)
+                     ? 1u
+                     : 0u;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // impl::quantScale -- impl/kernel_util.hpp, the level map backends/cuda/src/pack.cu
 // now calls instead of restating
 //
@@ -523,6 +548,54 @@ BINCV_TEST(CudaSharedHelpers, ThresholdCutoffAgreesWithHost) {
     size_t bad = 0;
     for (size_t i = 0; i < cases.size(); ++i)
         if (got[i] != bincv::impl::thresholdCutoff(cases[i])) ++bad;
+    BINCV_CHECK_EQ(bad, 0u);
+}
+
+BINCV_TEST(CudaSharedHelpers, SquareInsideImageAgreesWithHost) {
+    // The interesting values are all at the boundary: a square is inside when
+    // `cx + half` is width-1 and outside at width, and the four edges have to
+    // be tested independently or a transposed copy passes. Radii cover BRIEF's
+    // reach and orientation's disc; the extremes check that nothing here
+    // narrows to int on one target and not the other.
+    std::vector<SquareCase> cases;
+    const long long big = (1LL << 40);
+    for (size_t width : {size_t{1}, size_t{7}, size_t{32}, size_t{33}, size_t{752}})
+        for (size_t height : {size_t{1}, size_t{5}, size_t{31}, size_t{480}})
+            for (int half : {0, 1, 3, 15, 16, 31, 64})
+                for (long long cx : {-big, -1LL, 0LL,
+                                     static_cast<long long>(half),
+                                     static_cast<long long>(width) / 2,
+                                     static_cast<long long>(width) - half - 1,
+                                     static_cast<long long>(width) - half,
+                                     static_cast<long long>(width) - 1,
+                                     static_cast<long long>(width), big})
+                    for (long long cy : {-1LL, 0LL,
+                                         static_cast<long long>(half),
+                                         static_cast<long long>(height) - half - 1,
+                                         static_cast<long long>(height) - half,
+                                         static_cast<long long>(height)})
+                        cases.push_back(SquareCase{cx, cy, half, width, height});
+
+    DevArray<SquareCase> dIn(cases);
+    DevArray<unsigned char> dOut(cases.size());
+    kSquare<<<blocksFor(cases.size()), 256>>>(dIn.get(), cases.size(), dOut.get());
+    BINCV_CHECK(launchOk());
+    const std::vector<unsigned char> got = dOut.download();
+
+    size_t bad = 0;
+    size_t inside = 0;
+    for (size_t i = 0; i < cases.size(); ++i) {
+        const SquareCase& c = cases[i];
+        const bool want =
+            bincv::impl::squareInsideImage(c.cx, c.cy, c.half, c.width, c.height);
+        if (want) ++inside;
+        if ((got[i] != 0u) != want) ++bad;
+    }
+    // A sweep that accepts everything, or nothing, would pass the equality check
+    // while testing nothing -- so both halves are required to be populated.
+    std::printf("  squareInsideImage sweep: %zu cases, %zu inside\n", cases.size(),
+                inside);
+    BINCV_CHECK(inside > 0 && inside < cases.size());
     BINCV_CHECK_EQ(bad, 0u);
 }
 

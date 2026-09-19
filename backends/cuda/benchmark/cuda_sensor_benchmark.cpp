@@ -408,45 +408,25 @@ int main() {
 
         const size_t step = cudabench::measureDriverMeterStep();
 
-        // ---- threshold: 1 launch against 1 launch, same comparison ----------
-        std::printf("\n -- threshold: cv::cuda::threshold (cudaarithm) vs cuda::threshold\n");
-        {
-            cv::cuda::GpuMat gSrc, gDst;
-            gSrc.upload(hostSrc);
-            gDst.create(static_cast<int>(h), static_cast<int>(w), CV_8UC1);
-            cv::cuda::threshold(gSrc, gDst, 127.0, 255.0, cv::THRESH_BINARY);
-            cudaDeviceSynchronize();
+        // ---- threshold: THIS COMPARISON LIVES IN cuda_role_benchmark ---------
+        //
+        // A cv::cuda::threshold role pair used to run here, and it was measured
+        // with no stream argument on either arm -- that is, on the default
+        // stream, where OpenCV's own `if (stream == 0) cudaDeviceSynchronize()`
+        // guard charges the comparison a whole-device synchronize that no
+        // caller would pay. It printed "binCV is 7.35x FASTER". On one explicit
+        // stream the same comparison reads 1.000x / 0.908x / 0.744x across
+        // 752x480, 1920x1080 and 3840x2160.
+        //
+        // It is DELETED rather than repaired, because cuda_role_benchmark
+        // already owns this pair, on one explicit stream, at three geometries,
+        // over seven process runs. Repairing it here would have left two
+        // spellings of one role comparison to drift apart, and the surviving
+        // copy should be the one with the protocol in it.
+        std::printf("\n -- threshold: see cuda_role_benchmark (one explicit stream,\n"
+                    "    three geometries). Not measured here: a default-stream pair\n"
+                    "    charges OpenCV a device-wide synchronize no caller pays.\n");
 
-            const auto p = cudabench::timeKernelPaired(
-                [&] {
-                    cv::cuda::threshold(gSrc, gDst, 127.0, 255.0, cv::THRESH_BINARY);
-                },
-                [&] { bincv::cuda::threshold(dImg.constView(), dBits.view(), 127.0); },
-                100, 100);
-            cudabench::printPaired("A: cv::cuda::threshold -> CV_8U mask",
-                                   "B: cuda::threshold    -> 1 bit/pixel", p, "kernel");
-            std::printf("   binCV is %.2fx %s. Launches: 1 vs 1.\n",
-                        p.ratioMedian > 0.0 ? 1.0 / p.ratioMedian : 0.0,
-                        p.ratioMedian < 1.0 ? "FASTER" : "SLOWER");
-            std::printf("   NO SPEED MAGNITUDE BAR IS SET HERE, and that is the rule this\n"
-                        "   case was written under: both sides are one memory-bound launch,\n"
-                        "   so the derived expectation is parity at the launch floor and at\n"
-                        "   most the traffic ratio %.4fx if the kernel is bandwidth-bound.\n"
-                        "   A bar inside that band would be a number from nowhere. What IS a\n"
-                        "   fail: slower than OpenCV by more than both printed spreads.\n",
-                        static_cast<double>(2 * h * w) /
-                            static_cast<double>(h * w + bitBytes(w, h)));
-
-            printFormula("binCV working set", "wide + bits", h * w + bitBytes(w, h));
-            printFormula("OpenCV working set", "2 * height * width (two CV_8U)",
-                         2 * h * w);
-            std::printf("   working-set ratio %.4fx   output ratio %.4fx  "
-                        "(the formulas, not round numbers)\n",
-                        static_cast<double>(2 * h * w) /
-                            static_cast<double>(h * w + bitBytes(w, h)),
-                        static_cast<double>(h * w) /
-                            static_cast<double>(bitBytes(w, h)));
-        }
 
         // ---- edgeThreshold: 1 launch against the composed spelling -----------
         std::printf("\n -- edgeThreshold: the composed cv::cuda spelling, LAUNCHES COUNTED\n");

@@ -7,8 +7,8 @@ against `cv::cuda::StereoBM` as the best existing GPU option. Design:
 
 The backend shares binCV's format and forks its kernels, so every number here
 sits on top of a bit-exactness result: `scripts/verify_cuda.sh` proves each
-device kernel gives the host library's answer byte for byte (**eight suites —
-38,901 checks in the Release configuration, 38,881 in the Debug one**), and
+device kernel gives the host library's answer byte for byte (**thirteen suites —
+57,630 checks in the Release configuration, 57,585 in the Debug one**), and
 every optimized arm is held to its own reference arm's map in the same binary.
 Speed is what follows once correctness is settled. The two counts differ by
 design rather than by accident: a suite exercising a narrowed domain can only
@@ -16,29 +16,59 @@ test the half of that contract its configuration has — the assertion is live i
 Debug, the error return is reachable in Release — and each such suite prints
 which half it ran instead of silently shrinking.
 
-**Coverage, stated plainly.** Twelve of the twenty-seven host operation headers
+**One previously published count here was too high, and the correction is worth
+stating rather than quietly applying.** The eight pre-frontend suites were
+reported at 38,901 Release checks. They now report **36,792**, and the whole
+difference is accounted for: **2,112 of those checks never existed as distinct
+assertions.** `BINCV_CHECK_EQ` evaluated its first argument twice — once for the
+comparison and once inside `std::to_string` for the failure message — and
+`test_cuda_median` passes it a helper that itself contains four checks. Each of
+that helper's 528 invocations therefore ran its four assertions on identical data
+twice and counted eight. 528 × 4 = 2,112 exactly, and adding the three checks of
+the new shared-helper sweep closes the arithmetic to the unit:
+38,901 − 2,112 + 3 = 36,792. Coverage is unchanged; the second execution tested
+nothing the first had not. The macro now binds the value once, which also stops
+`BINCV_CHECK_EQ(cudaFree(p), cudaSuccess)` being a double free — which is how a
+CUDA suite found it.
+
+**Coverage, stated plainly.** Nineteen of the twenty-seven host operation headers
 have device arms: `logic`, `reduce`, `pack`, `census` and `denseDisparity` —
-the reductions and dense stereo end to end — and, from the op-expansion round,
-`threshold`, `edge`, `morphology`, `denoise`, `medianWide`, `pyramid` and
-`shift`, which is the sensor stage and the window stage a frontend runs per
-frame. Tracking, the frontend's feature path, sparse stereo and the geometry
-have none.
+the reductions and dense stereo end to end — then `threshold`, `edge`,
+`morphology`, `denoise`, `medianWide`, `pyramid` and `shift`, which is the
+sensor stage and the window stage a frontend runs per frame, and from the
+frontend round `derivative`, `covariance`, `corner`, `fast`, `orientation`,
+`descriptor` and `subpix`. One device operation has no host header at all:
+`keypoints.hpp`, the detector-to-keypoint-set link, which exists because a
+resident pipeline needs it and a host pipeline does not. **Descriptor matching,
+tracking, sparse stereo and the geometry still have none** — and matching is the
+notable absence, because it is where the format's word utilisation would pay.
 
-Four of the six new ones accept a **narrower domain than their host twin**, and
-each names it in its docstring, asserts it, and returns `cudaErrorInvalidValue`
-outside it rather than computing a wrong answer: morphology takes elements up
-to 32 rows by 512 columns (32 masked), `medianWide` takes K ∈ {1,3,5,7,9} at
-compile time, `pyrDownBox` takes 1–8 planes a side, and `binarize` takes 1–32.
-A Tier 1 claim here is a claim over *that* domain, said so where the claim is
-made. The rest of the operation set has no device arm, and the remaining work
-stays filed as issues rather than implied here.
+Several accept a **narrower domain than their host twin**, and each names it in
+its docstring, asserts it, and returns `cudaErrorInvalidValue` outside it rather
+than computing a wrong answer: morphology takes elements up to 32 rows by 512
+columns (32 masked), `medianWide` takes K ∈ {1,3,5,7,9} at compile time,
+`pyrDownBox` takes 1–8 planes a side, `binarize` takes 1–32, the derivative
+takes N ∈ [1,4], and steered BRIEF names its angle domain [-2π, 2π]. A Tier 1
+claim here is a claim over *that* domain, said so where the claim is made. The
+Debug configuration is what proves those assertions reach nvcc's device pass,
+which is why it is a gate rather than a convenience. The rest of the operation
+set has no device arm, and the remaining work stays filed as issues rather than
+implied here.
 
-**What this round does not deliver.** `cuda::threshold` is correct, is 2.46×
-lighter than `cv::cuda::threshold`, and is **slower** — it meets the fail
-condition its own written rule named, so it is reported below as a miss with
-its mechanism located, not as a result. Device occupancy was dropped on a
-measurement rather than written. Both are stated where they belong rather than
-left for a reader to notice by absence.
+**What is not delivered, stated before anything that is.** The **resident
+frontend is slower than binCV's own CPU frontend** — 0.82×, ranges disjoint in
+all 7 runs — because one kernel is 97% of the frame and runs in a single block.
+**FAST misses its role bar by 16.8× on real content and is 1.55× larger** on the
+memory meter, so it clears neither axis. `cornerSubPixAsync` misses its own
+round-trip rule. Device occupancy was dropped on a measurement rather than
+written. Each is stated where it belongs rather than left for a reader to notice
+by absence.
+
+`cuda::threshold`'s round-1 failure, reported here previously as a miss, **is
+cleared**: it was 2.22× slower at 4K with 7 of 9 runs disjoint and is now 0.744×,
+never above 1.00× at any geometry, with its 2.46× memory result unchanged to the
+byte. The section below records what the fix was and where the previously stated
+limiter was wrong.
 
 ## The headline
 
@@ -549,6 +579,271 @@ consistently favour arm B and the runtime switch makes it a one-line change
 either way. **It is left as arm B and flagged, rather than resolved by relaxing
 the bar that was written to decide it.**
 
+## The frontend on device
+
+The feature path a visual-odometry frontend runs per frame — derivatives, the
+gradient covariance, corner response and selection, FAST, orientation, BRIEF —
+forked onto the device, each kernel bit-exact against its host twin. The
+end-to-end claim this round was judged on is **negative, and it is one kernel**:
+
+> **The resident device frontend is 1.22× SLOWER than binCV's own CPU
+> frontend** — 6.462 ms [6.419–6.509] against 5.313 ms [5.152–5.421], **ranges
+> disjoint in all 7 runs**. Detection is **97.0%** of the device frame, and the
+> kernel inside it that dominates runs in **one block at 1.29% of the SMs**.
+
+That is not a ceiling and not a format result. It is a parallelization defect
+with a measured size, and the rest of this section is mostly the evidence that
+everything *around* it already works.
+
+### The frame, stage by stage
+
+200 real EuRoC V1_02 cam0 frames through `backends/cuda/examples/cuda_vio_frontend.cpp`,
+7 process runs, one explicit stream, CUDA events on the device side and the host
+library's own clock on the host side — **two different clocks, labelled as such
+at every row**. The host column is context for locating the defect; it is not a
+role bar, and no `cv::cuda` whole-frontend counterpart exists to be one.
+
+| stage | device ms | share | host ms | device/host |
+|---|---|---|---|---|
+| upload (H2D) | 0.0505 | 0.8% | — | — |
+| sensor: `medianWide<3>` + `edgeThreshold` | 0.1333 | 2.1% | 0.0910 | 1.46× slower |
+| pyramid ×3 | 0.0196 | 0.3% | 0.0602 | 3.07× faster |
+| `derivativeXY` | 0.0133 | 0.2% | 0.0220 | 1.65× faster |
+| **detect: `goodFeaturesToTrack`** | **6.1073** | **97.0%** | 4.9639 | **1.23× slower** |
+| `keypointsFromCorners` | 0.0043 | 0.1% | — | no host twin |
+| orientation r=15 | 0.0078 | 0.1% | 0.1036 | 13.3× faster |
+| describe BRIEF-256 | 0.0078 | 0.1% | 0.0585 | 7.5× faster |
+| download (D2H) | 0.0383 | 0.6% | — | — |
+
+**The arithmetic that settles it.** If every stage other than detection went to
+*zero*, the frame would still be 6.107 + 0.089 = **6.20 ms**, against the host's
+5.31 ms. No amount of work on the other seven stages makes this pipeline beat
+the CPU. Conversely, a `selectKernel` using even a quarter of the machine puts
+the frame near 0.9 ms — roughly **5.9× faster than the host**. The whole value
+of the resident frontend rests on one kernel.
+
+**What residency itself delivers, and it is not nothing.** Exactly **1.00
+synchronize per frame** in all 7 runs; 360,960 B up against 11,536 B down, a
+**31.3×** bus asymmetry with nothing frame-sized returning. Correctness across
+the chain is a gate rather than a metric and it passes: 0 corner-count, 0
+position, 0 `keep`, 0 rotation-bin and **0 of 222,432 descriptor words** differ
+from the host, with max |Δangle| 2.384e-07 rad, identical in all 7 runs.
+
+### The one kernel, located with a profiler rather than argued
+
+`ncu` works on this machine now — as `/opt/nvidia/nsight-compute/2024.2.1/ncu`
+by full path, which supersedes the "no hardware profiler" note below for
+everything measured after it. It settles in one run what the previous round had
+to triangulate:
+
+| kernel | duration | SM % | DRAM % | grid | top stall | limiter |
+|---|---|---|---|---|---|---|
+| `selectKernel` (gftt) | 13.6 ms | **1.29%** | **0.45%** | **1 block** | tex_throttle 37% | parallelism-starved |
+| `fastSortKernel` | — | **1.1%** | **0.7%** | **1 block** | long_sb 43% | parallelism-starved |
+| `fusedCandidateKernel` | 144 µs | 65.4% | 0.6% | 180 blocks | short_sb 64% | MIO/compute |
+| `responseKernelWindow` | 64.4 µs | 78.1% | 4.1% | 9 | short_sb 46% | compute |
+| `briefBallotKernel` | 8.5 µs | 8.9% | 20.6% | 6 | long_sb 77% | memory latency |
+| `orientWideWarpKernel` | 7.9 µs | 21.8% | 7.3% | 6 | long_sb 65% | latency |
+| `derivativeXYKernel` | 2.9 µs | 9.4% | 8.4% | 6 | imc_miss 49% | launch-bound |
+| `covBatchKernel` | 4.0 µs | 10.6% | 8.5% | 16 | long_sb 34% | launch-bound |
+
+`selectKernel` and `fastSortKernel` are **the same defect twice**: both order a
+variable-length result in a single block, both use about 1% of the SMs and under
+1% of DRAM. On a 48-SM part the GPU is ~99% idle for the stage that owns the
+frame. Neither is a format problem and neither is a kernel-arithmetic problem —
+`compaction.hpp` already names the alternative (prefix-sum compaction), and it
+was not taken here.
+
+### FAST: the bar is missed, and the cost is the ordering
+
+| edge | corners | nextPow2 | `cv::cuda` FAST | binCV | ratio | disjoint | set gate |
+|---|---|---|---|---|---|---|---|
+| 10 | 23,274 | 32,768 | 0.1286 ms | 2.2726 ms | **17.9× slower** | 7/7 | agree 7/7 |
+| 17 | 19,898 | 32,768 | 0.1338 ms | 2.2563 ms | **16.8× slower** | 7/7 | agree 7/7 |
+| 30 | 12,379 | 16,384 | 0.1222 ms | 1.0643 ms | 8.8× slower | 7/7 | agree 7/7 |
+| 50 | 886 | 1,024 | 0.1063 ms | 0.0532 ms | **2.1× faster** | 6/7 | agree 7/7 |
+| 80 | 161 | 256 | 0.1004 ms | 0.0353 ms | **3.8× faster** | 7/7 | agree 7/7 |
+
+The corner **set** is identical to the host's in every row, so this is
+like-for-like. The cost tracks **`nextPow2(corners found)`** and nothing else:
+23,274 and 19,898 corners cost the same 2.26 ms because they share a
+power-of-two bucket, halving the bucket halves the time (2.12× measured against
+bitonic's predicted 2.30×), and the arm is flat at 2.22 ms from capacity 32,768
+through 262,144 — so it is not capacity either. The crossover is around
+1,000–4,000 corners; the reference frontend's own edge map sits far above it.
+
+**The locator, and why the ordering is the whole gap:** the same detector with
+its store capped at 512 runs at **0.0303 ms against OpenCV's 0.1721 ms — 5.2×
+faster**, every pixel still tested. The ring algebra clears parity roughly 5×
+over. The raster sort on top of it is **98.6% of the operation**.
+
+FAST also **loses on memory** at the capacity this content needs: 1088.0 KB
+against OpenCV's 704.0 KB, `cudaMemGetInfo` on both sides — **binCV is 1.55×
+larger**. Under the both-axes rule it does not ship as-is on either axis, and it
+is reported here as a miss rather than as a result with a price attached.
+
+### The role bars
+
+Both arms on **one explicit stream**, medians of 7 process runs. The stream is
+not a detail: OpenCV synchronizes the whole device on the default stream, a
+surcharge measured up to 7.18× here, and a default-stream pair in
+`cuda_sensor_benchmark` that printed "7.35× FASTER" for `threshold` has been
+deleted rather than repaired — `cuda_role_benchmark` owns that comparison.
+
+| operation | `cv::cuda` arm | OpenCV | binCV | ratio | disjoint | verdict |
+|---|---|---|---|---|---|---|
+| `threshold` 752×480 | `cv::cuda::threshold` | 0.0100 ms | 0.0094 ms | 1.000 | 0/7 | **PASS** |
+| `threshold` 1920×1080 | ″ | 0.0124 ms | 0.0114 ms | 0.908 | 0/7 | **PASS** |
+| `threshold` 3840×2160 | ″ | 0.0367 ms | 0.0272 ms | **0.744** | 1/7 | **PASS** |
+| describe, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 ms | 0.0107 ms | **0.108** | **7/7** | **MET, 9.3×** |
+| FAST | `FastFeatureDetector` | 0.1505 ms | 2.2343 ms | 14.84 | 7/7 | **MISSED** |
+| `goodFeaturesToTrack` (wall) | `createGoodFeaturesToTrackDetector` | 3.7514 ms | 9.8579 ms | 2.659 | 2/7 | slower |
+| min-eigenvalue response | `createMinEigenValCorner` | 0.0552 ms | 0.0671 ms | 1.292 | **0/7** | **not a result** |
+
+Memory, `cudaMemGetInfo` delta taken identically **on both sides** — the only
+meter readable across libraries, replicated until each total clears eight of
+this driver's 2 MB units, and never mixed with binCV's own allocation sums:
+
+| operation | binCV | OpenCV | ratio |
+|---|---|---|---|
+| `threshold` | 416.0 KB | 1024.0 KB | **2.46× smaller** |
+| describe, N=1000 | 48.0 KB | 2048.0 KB | **42.67× smaller** |
+| `goodFeaturesToTrack` | 2048.0 KB | 10240.0 KB | 5.00× smaller |
+| corner response | 2048.0 KB | 10240.0 KB | 5.00× smaller |
+| FAST @ capacity 32,768 | 1088.0 KB | 704.0 KB | **0.65× — binCV is 1.55× LARGER** |
+
+**`cuda::threshold` clears the bar its own round-1 rule failed.** That rule's
+fail condition — slower than `cv::cuda::threshold` by more than both printed
+spreads — was met at 2.22× slower at 4K with 7 of 9 runs disjoint. It is now
+0.744× at 4K and never above 1.00× at any geometry, with the memory result
+byte-identical at 2.46×. The mechanism was two software divides from a
+`wordIdx / words` in the flat index: a row-grid shape (`blockIdx.y` **is** the
+row) removes them, and a byte-lane shape on top of it reads four pixels per lane
+through one 32-bit load and `__vsetgeu4`. 184 SASS instructions became 104, with
+zero software divides and zero spills.
+
+**The profiler corrects this op's stated limiter, and the correction is the
+point rather than the conclusion.** The optimizing pass wrote that the residual
+gap to its derived 0.0215 ms target was "launch overhead on this host, not the
+kernel". It is not. `ncu` reads the kernel itself at 28.26 µs against a 27.2 µs
+batched median — the launch is pipelined away — at **63.8% of peak DRAM with 53%
+long-scoreboard**. The residual is **bandwidth realization, about 330 GB/s of
+this part's 608 GB/s peak**. The same profile confirms both the gain and the
+claimed mechanism independently: arm 0 sat at 67.2% SM / 19.3% DRAM
+(compute-bound on its divides) and arm 2 sits at 49.4% SM / 63.8% DRAM
+(memory-bound, where a packer belongs), 93.3 µs → 28.3 µs = 3.30× against a
+timed 3.22×. The decision does not move; the stated reason was wrong and is
+corrected here rather than left standing.
+
+### Where binCV has no structural advantage, said plainly
+
+Three of these ops have none, and the reason in each case is that the work is
+not in bits.
+
+**The corner response.** `cornerMinEigenValAsync` reads 1.292× against
+`createMinEigenValCorner` with **0 of 7 runs disjoint** — that is not a result
+in either direction, and it is reported as one that did not resolve rather than
+rounded to parity. The response is a `sqrt` and two products per *pixel* in
+`float`; the covariance feeding it is bit-work, but the response on top of it is
+float arithmetic of exactly the shape a byte pipeline already does well. The
+host library's own 4.81× for a bit-sliced blockSize-3 response **does not port**:
+on device it measures 0.74× — slower, ranges disjoint — because the host's win
+was removing per-pixel *addressing*, while the device form hands one thread 32
+pixels of `sqrt`, i.e. 32× less parallelism on the float half. That is a
+negative result and is printed as one; the default is unchanged.
+
+**Sub-pixel refinement.** `cornerSubPixAsync` **misses its own round-trip rule**:
+0.53 ms to download the derivative planes and refine on the host, against 1.91 ms
+resident. Bit-exactness forces `double` and one thread per corner, and this
+GeForce part runs FP64 at 1/64 rate. It has no `cv::cuda` counterpart at any API
+level, so it carries no speed bar — but the honest reading of its own rule is
+that a caller should refine on the host today. It ships as a resident
+convenience with that number stated, not as a win.
+
+**The derivative.** It is **launch-bound at every size tested**, including
+3840×2160 (0.0070 ms against a 0.0070–0.0083 ms floor; `ncu`: 2.9 µs, 9.4% SM,
+16.3% occupancy). It measures 0.210 against `cv::cuda::createDerivFilter` with 5
+of 7 disjoint, and its own rule's validity clause fires: that ratio is a **lower
+bound on the gap and says nothing about binCV's kernel**. The honest statement is
+that binCV's derivative costs a launch at this size and OpenCV's costs a launch
+plus its filter work. Its memory result is real and separately gated — 229,376 ..
+262,144 B against a predicted 230,400 B, inside the interval, against OpenCV's
+6,291,456 .. 6,324,224 B, which is **24.0×–27.6× smaller** and reported rather
+than gated, since no memory floor for it has been set.
+
+### Verdicts recorded OUTSTANDING
+
+Four operations have **no OpenCV counterpart at any API level**, on CPU or GPU,
+so no speed bar exists and none was invented. They ship on correctness, memory
+and the host comparison, with the speed verdict **OUTSTANDING**:
+
+- **the gradient covariance** (`gradientCovarianceAsync`, `gradientCovarianceBatchAsync`)
+  — `cornerHarris` and `createMinEigenValCorner` compute a dense float response
+  *through* a covariance; neither exposes one. Scratch is **0 B**, verified as a
+  `cudaMemGetInfo` delta of exactly 0 across 200 batch launches, at ≤24 B/window.
+- **orientation** — no `cv::cuda` entry point orients provided keypoints. No CPU
+  number was quoted in place of the missing GPU one.
+- **`keypointsFromCorners`** — the detector-to-keypoint-set link, which has no
+  counterpart because no other library needs it. It is the one op here that
+  **met both halves of its rule**: 1.00 synchronize per frame against the
+  round-trip arm's 2.00, and 0.0043 ms against 0.1547 ms — 36×, stage ranges
+  fully disjoint, and frame totals disjoint in all 7 runs.
+- **`shift`**, as recorded above.
+
+**Descriptor matching is not on this list, and must not be filed as OUTSTANDING.**
+The OUTSTANDING verdict covers a binCV operation with no OpenCV counterpart.
+Matching is the reverse: OpenCV has `BFMatcher(NORM_HAMMING)` and **binCV has no
+device arm at all**. There is nothing to time. The format's advantage there is
+real and unspent — descriptors come out as `uint32_t` words, so a matcher issues
+8 `__popc` per 256-bit descriptor where `cv::cuda`'s `HammingDist::reduceIter` at
+`uchar` issues 32 — and it sits on the side of the pipeline that would make the
+residency argument close.
+
+### Arms measured and left off
+
+Two optimized arms cleared a static case and lost the timed one, and both ship
+reachable but **off by default** with the numbers recorded rather than deleted:
+
+- **the `__dp4a` wide-orientation arm.** 3.4× fewer loads and 1.55× fewer
+  instructions in the SASS, and at the operating point it buys nothing: 0.945 at
+  N=470 and 0.812 at N=1000, **0 of 6 runs disjoint at both**, because the kernel
+  is launch-bound there. At N=100,000 it is 1.46× faster, 6 of 6 disjoint. Its
+  rule named N=470 and N=1000 as the deciding points, so it stays off.
+- **the funnel-shift covariance arm.** Re-priced where the comparison is
+  decidable (4,000 windows of 31×240): **1.13× slower, 5 of 7 disjoint**. The
+  funnel saves popcounts, not loads — a run straddling two words must still read
+  both — so the word-visit count fell and the byte count did not.
+
+Two arms were removed on measurement: a one-thread-per-window covariance (200
+windows is 200 threads on a 48-SM part; lost 14 readings of 14) and a dense-rank
+counting sort for FAST scores (1,900 codes collapsed to 380 distinct responses —
+it was wrong, not merely slow).
+
+**The packer's row-grid arm is the one disposition this round did not settle.**
+Its static case is unambiguous (184 → 48 instructions, 2 software divides → 0)
+and `ncu` reads the effect as real (75.5 µs against 93.3 µs, 1.24×), but its
+ranges do not separate — 1 of 7 at 1920×1080, **0 of 7 at 3840×2160** — and the
+rule written for it required separation at one of those two geometries. By that
+rule it goes. It is kept and flagged instead, because it is the live arm for
+uint16, `packQuant`, odd strides and cutoff 256, which the byte-lane arm's gate
+excludes; deleting it sends those cases back to the grid-stride arm that `ncu`
+shows is compute-bound at 67–74% SM. The byte-lane arm does not depend on the
+outcome: it clears its bar at **2.66× over the row grid at 4K, 7 of 7 disjoint**,
+and `packQuant` shows no regression at any geometry.
+
+### A harness limit that now decides more than it should
+
+Three real effects in this round have medians far from 1.00 with every run
+one-sided and only a minority of runs range-disjoint: the row-grid packer arm,
+the fused `derivativeXY` (2.00× at 752×480, decaying to 1.32× at 4K exactly as
+its author predicted in writing for a signature result, but 3/7, 3/7, 1/7
+disjoint) and the bit-plane orientation arm. `PairedTiming::separated()` is a
+min/max range test, and a single outlier destroys it where the per-round ratio
+distribution from the same rounds stays tight and one-sided. On an idle GPU this
+is still the wall. It is recorded here as an open question about the harness —
+whether `separated()` or a one-sided per-round test is the standard — and not
+worked around by relaxing any individual bar.
+
 ## How the numbers were earned
 
 Every arm shipped correct-first, then optimized with its reference arm kept
@@ -644,26 +939,40 @@ what is currently parallel.
   and nothing else, exactly as ARCHITECTURE §8 treats every platform. The design
   accommodates a unified-memory device without a rewrite (ops take views, the
   target SM is a build setting), but that is a design property, not a result.
-- **No hardware profiler was available, and that shaped the method.** Nsight
-  Compute (`ncu` 2024.2.1) fails with `Unknown Error on device 0` — reproduced
-  on a three-line kernel with a single basic metric, so it is device-level
-  counter access being refused rather than anything about these kernels. The
-  usual cause on a GeForce part is NVIDIA's default of restricting GPU
-  performance counters to administrators; the fix is Windows-side and needs a
-  reboot (NVIDIA Control Panel → Desktop → Enable Developer Settings →
-  Developer → *Allow access to the GPU performance counters to all users*, or
+- **No hardware profiler was available for the stereo, sensor and window
+  numbers, and that shaped the method. It is available now, and the frontend
+  numbers use it.** Nsight Compute failed with `Unknown Error on device 0` —
+  reproduced on a three-line kernel with a single basic metric, so it was
+  device-level counter access being refused rather than anything about these
+  kernels. The cause was NVIDIA's default of restricting GPU performance
+  counters to administrators, and the fix is Windows-side: set
   `RmProfilingAdminOnly = 0` under
-  `HKLM\SYSTEM\CurrentControlSet\Services\nvlddmkm\Global\NVTweak`). Nsight
-  Systems is no fallback here either: the `nsys` bundled with CUDA 11.1 crashes
-  on this glibc (`__libc_dlsym` left the private ABI in 2.35).
+  `HKLM\SYSTEM\CurrentControlSet\Services\nvlddmkm\Global\NVTweak` and
+  **reboot Windows** — a `wsl --shutdown` does not reload the driver.
 
-  So everything here is CUDA-event timing, `nvcc -Xptxas -v` for the static
-  picture (registers, spills, occupancy arithmetic), and controlled A/B against
-  the arm each change replaced. That was enough to locate the dense matchers'
-  limiter, but it took six experiments where a stall-reason profile would have
-  taken one run. **Anyone picking up #62 or #63 should get `ncu` working
-  first** — `smsp__pcsamp_warps_issue_stalled_*` answers directly what those six
-  experiments had to triangulate.
+  **`ncu` now works, as `/opt/nvidia/nsight-compute/2024.2.1/ncu` by full path.**
+  Nothing is on `PATH`, and the `ncu` shipped in `/usr/local/cuda-11.1/bin` is
+  version 2020.2.0, too old for this driver: build with the 11.1 nvcc as always,
+  profile with the 2024 tool. `compute-sanitizer` works from CUDA 11.7 or 12.1
+  (the 11.1 one does not), verified against a deliberate out-of-bounds write
+  rather than against a clean run. **`nsys` remains unusable**: it writes a
+  report containing zero CUDA kernel events at any trace setting, which is the
+  WSL2 CUDA-tracing limitation in 2022.1.3, the newest available here.
+
+  This matters for reading the rest of this document. Every limiter claim above
+  the frontend section rests on static SASS evidence and controlled A/B, because
+  that was all there was; the frontend section's claims are hardware counters.
+  Where the two have been compared, the profiler has already corrected one
+  stated limiter — see `cuda::threshold` — while leaving its decision intact.
+
+  So the stereo, sensor and window numbers are CUDA-event timing, `nvcc -Xptxas
+  -v` for the static picture (registers, spills, occupancy arithmetic), and
+  controlled A/B against the arm each change replaced. That was enough to locate
+  the dense matchers' limiter, but it took six experiments where a stall-reason
+  profile takes one run — `smsp__pcsamp_warps_issue_stalled_*` answers directly
+  what those six had to triangulate, and it is available now. The frontend round
+  used it to settle in one run what a whole round of argument could not: that two
+  kernels launch a single block each.
 
   The op-expansion round extended this note in two directions. `cuobjdump -sass`
   turned out to answer more than expected: it located `cuda::threshold`'s two

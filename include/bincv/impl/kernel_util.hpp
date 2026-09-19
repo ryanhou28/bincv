@@ -289,6 +289,35 @@ inline bool strideCoversARow(size_t width, size_t height, size_t stride) {
     return height <= 1 || stride >= minRowWords<WordType>(width);
 }
 
+/// @brief Does the axis-aligned square centred at `(cx, cy)` with half-extent
+///        `half` lie wholly inside a `width` x `height` image? **INTERNAL.**
+///
+/// The keypoint-describability rule, in one place. A patch operation reads a
+/// square window around a keypoint, and every such operation has to agree about
+/// which keypoints it may read at all: orientation's disc is inscribed in this
+/// square, and BRIEF's reach is the largest offset its pattern takes on either
+/// axis. Written out per call site it was the same inequality in seven
+/// spellings across two headers and two kernel files -- and two of those
+/// drifting by one would mean orientation accepting a keypoint the descriptor
+/// then rejects, which is not a crash but a silently short descriptor set.
+///
+/// @note BINCV_HOST_DEVICE: scalar and traversal-free, so one definition serves
+/// the host loops and the backend's kernels rather than a device twin that
+/// has to be held bit-exact by hand.
+/// @note This is the seven call sites' inequality UNCHANGED, deliberately. A
+/// half-extent below zero is not reachable from any caller -- a radius is
+/// unsigned at the API and `briefPatternReach` starts at zero and only grows
+/// -- so a guard against it would be a branch that cannot fire, and adding
+/// one here would also make this predicate answer differently from the code
+/// it replaces. Consolidating and changing behaviour are separate edits.
+BINCV_HOST_DEVICE inline bool squareInsideImage(long long cx, long long cy, int half,
+                                                size_t width, size_t height) {
+    const long long h = static_cast<long long>(half);
+    return cx - h >= 0 && cy - h >= 0 &&
+           cx + h < static_cast<long long>(width) &&
+           cy + h < static_cast<long long>(height);
+}
+
 } // namespace impl
 
 } // inline namespace BINCV_ABI_NAMESPACE

@@ -330,13 +330,22 @@ between those two is the whole of the rule.** `core/error.hpp` defines
 types, and it is not a door to a shared kernel. A function may carry it only
 when it is **scalar and traversal-free** — no loop over pixels, rows or words,
 no allocation, and no walk over an image. That covers the closed-form rules the
-two sides would otherwise each have to derive: `impl::borderIndex`,
-`impl::reflect101Edge`, `impl::clipRegion` (with `regionFromExtent` and
-`clipColumns` under it), `impl::minEigenValue`, `impl::quantScale`,
-`impl::thresholdCutoff`, `impl::extendedRowWord`, `maj3` and `thresholdGE`.
-Anything that walks an image stays forked, because that is exactly where the
-host's row-major, popcount, cache-line shape and the device's warp shape
-genuinely disagree.
+two sides would otherwise each have to derive. Geometry and addressing:
+`impl::borderIndex`, `impl::reflect101Edge`, `impl::clipRegion` (with
+`regionFromExtent` and `clipColumns` under it), `impl::wordIndex`,
+`impl::bitMask`, `impl::lowBitsMask`, `impl::extendedRowWord` and
+`impl::squareInsideImage`. Value rules: `impl::quantScale`,
+`impl::thresholdCutoff`, `impl::minEigenValue`, `maj3`, `thresholdGE` and
+`SplitCount::crossTerm`. And, from the frontend round, the per-word arithmetic
+those kernels are written in: `impl::rowBit`, `impl::ternaryDifference`,
+`impl::signedDifference` and `impl::signedDifferenceRipple`;
+`impl::combineBitSlicedPairs`; `impl::boxHorizontal3`, `impl::boxVertical3`,
+`impl::boxValueAt` and `impl::boxWordAt`; `impl::fastShiftedWord`,
+`impl::fastArcAny` and `impl::fastLongestRun`; and `briefAngleBin`. Anything
+that walks an image stays forked, because that is exactly where the host's
+row-major, popcount, cache-line shape and the device's warp shape genuinely
+disagree — the device FAST kernel *calls* `fastLongestRun` to score a ring, and
+forks entirely the question of which rings to look at.
 
 **The line is traversal, not pointer-freedom**, and two entries in that list are
 where the distinction is visible: `thresholdGE` takes a plane pointer and reads
@@ -364,6 +373,23 @@ own header comment claimed nothing was copied, and `pack.cu` carried a
 `quantScaleDevice` restating a rounding form whose divergence from OpenCV is
 deliberate — a drifted copy there would have read as that divergence finally
 being fixed. Both now call the host's own definition.
+
+The frontend round produced one more, and it is worth naming because it is the
+same failure in a different disguise. The rule "is this keypoint far enough from
+the edge to read a square patch around it" existed in **seven spellings** — twice
+in `ops/orientation.hpp`, three times in `ops/descriptor.hpp`, and once each as a
+device twin in `orientation.cu` and `descriptor.cu`. Nothing had drifted yet.
+What made it worth folding is what a drift would have *looked* like: orientation
+accepting a keypoint that the descriptor then rejects is not a crash and not a
+wrong pixel, it is a silently short descriptor set, and a caller would read it as
+the detector having found fewer corners. It is now `impl::squareInsideImage` in
+`impl/kernel_util.hpp` — the header that exists for exactly this, having been
+split out when the aliasing predicates faced the same problem. The fold is
+**behaviour-preserving by construction** (the same inequality, unchanged — a
+guard against a negative half-extent was drafted and removed, because
+consolidating and changing behaviour are separate edits) and
+**instruction-neutral**: an inline predicate expanding to the same compares at
+all seven sites. The reason to do it is one definition of the rule, not speed.
 
 Three properties are **proven rather than asserted**. The library still compiles
 under a plain C++17 compiler with no CUDA installed — `tests/test_error.cpp`

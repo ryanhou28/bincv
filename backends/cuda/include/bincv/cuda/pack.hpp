@@ -14,6 +14,36 @@
 /// and `__ballot_sync` returns the packed word -- one bit per lane, LSB =
 /// lowest x, exactly the format's bit order. Lanes past `width` contribute 0,
 /// so padding bits are zero by construction rather than by masking.
+///
+/// ---------------------------------------------------------------------------
+/// THREE ARMS BEHIND ONE ANSWER, and the two switches that select among them.
+///
+/// Every entry point here produces the same matrix; which kernel produces it is
+/// a performance decision and nothing else, and the suite holds all three to one
+/// output in one binary. The arms, fastest first:
+///
+/// * BYTE-LANE -- one lane, four pixels, one 32-bit load where the warp was
+/// issuing thirty-two one-byte loads. uint8 sources on a 4-byte-aligned base
+/// and stride, and a folded cutoff a byte can express.
+/// * ROW GRID -- one warp, one word, with the image row carried in
+/// `blockIdx.y` so the (row, word) pair costs no division. Every source type
+/// and rule; needs `height <= 65535`, the hardware's own `gridDim.y` cap.
+/// * GRID-STRIDE -- one flat index, `/` and `%` to recover the pair. No bound
+/// at all, which is why it stays: it is the arm above the `gridDim.y` cap,
+/// and it is the ORACLE the other two are proven against.
+///
+/// THE SHAPE OF THE INDEX ARITHMETIC WAS THE WHOLE COST. `cuda::threshold` is
+/// this packer with a cutoff in front of it, and it lost its role comparison --
+/// 2.22x slower than `cv::cuda::threshold` at 3840x2160 while moving 1.78x LESS
+/// traffic. `cuobjdump -sass` on `packKernel<uint8_t, GreaterEqual>` showed 184
+/// instructions around one load and one store, two of them software divides, on
+/// a machine whose integer datapath has no divide instruction. The row grid
+/// deletes both; the byte lane then cuts the load instructions fourfold.
+///
+/// The arms are SHARED, which is this file's standing hazard: `packBits`,
+/// `packRows`, `packQuant` and `cuda::threshold` all launch through them, so a
+/// change here is a change to four operations' output and to four operations'
+/// cost. All four are held to the host library in one suite.
 
 #include <cuda_runtime.h>
 
@@ -23,6 +53,39 @@
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 namespace cuda {
+
+namespace impl {
+
+/// @brief Runtime switch for the ROW-GRID arm; `true` by default.
+/// @note **INTERNAL.** Same contract as `censusTiledEnabled` and
+/// `denseFastArmEnabled`: a fast arm must be switchable off so one binary can
+/// time both and hold both to the same output. Not thread-safe and not part of
+/// the public API -- it exists for the benchmark and the tests.
+bool& packRowGridEnabled();
+
+/// @brief Runtime switch for the BYTE-LANE arm; `true` by default. One level
+/// below `packRowGridEnabled`, as `denseBitSlicedEnabled` sits below
+/// `denseFastArmEnabled`: with the row grid off, this selects nothing.
+bool& packByteLaneEnabled();
+
+/// @brief Whether the row-grid arm can express this launch at all.
+/// @note The image row is `blockIdx.y`, and that dimension is capped at 65535.
+/// Above the cap the grid-stride arm runs -- the one shape with no bound.
+bool packRowGridApplies(size_t height);
+
+/// @brief Whether the byte-lane arm admits this source.
+/// @note THE GATE IS THE CONTROL. A case this returns `false` for must read
+/// ~1.00x when `packByteLaneEnabled()` is toggled, and the benchmark prints
+/// exactly that: a source whose stride is not a multiple of 4, and a uint16
+/// source. If either moves, the switch is not selecting what it claims to.
+/// @param stride Source stride in ELEMENTS.
+/// @param base Source base pointer.
+/// @param srcElemSize `sizeof` the source element; only 1 is admitted.
+/// @param cutoff The rule folded to `v >= cutoff`; only 0..255 fits a byte lane.
+bool packByteLaneApplies(size_t stride, const void* base, size_t srcElemSize,
+                         unsigned cutoff);
+
+} // namespace impl
 
 /// @brief Packs a device wide image to one bit per pixel under `rule`.
 /// Device twin of the host packBits; bit-identical to it by test.

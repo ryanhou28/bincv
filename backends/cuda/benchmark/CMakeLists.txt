@@ -224,21 +224,203 @@ set_target_properties(cuda_role_benchmark PROPERTIES
 
 if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
     find_package(OpenCV QUIET COMPONENTS core imgproc cudaarithm cudafilters cudawarping
-                 cudastereo PATHS ${BINCV_CUDA_OPENCV_DIR} NO_DEFAULT_PATH)
+                 cudastereo cudafeatures2d cudaimgproc
+                 PATHS ${BINCV_CUDA_OPENCV_DIR} NO_DEFAULT_PATH)
     if(OpenCV_FOUND AND TARGET opencv_cudaarithm AND TARGET opencv_cudafilters
-                    AND TARGET opencv_cudawarping AND TARGET opencv_cudastereo)
+                    AND TARGET opencv_cudawarping AND TARGET opencv_cudastereo
+                    AND TARGET opencv_cudafeatures2d AND TARGET opencv_cudaimgproc)
         target_compile_definitions(cuda_role_benchmark PRIVATE BINCV_CUDA_ROLE_OPENCV=1)
         target_link_libraries(cuda_role_benchmark PRIVATE
             opencv_core opencv_imgproc opencv_cudaarithm opencv_cudafilters
-            opencv_cudawarping opencv_cudastereo)
+            opencv_cudawarping opencv_cudastereo opencv_cudafeatures2d
+            opencv_cudaimgproc)
         target_include_directories(cuda_role_benchmark SYSTEM PRIVATE
             ${OpenCV_INCLUDE_DIRS})
         message(STATUS "cuda_role_benchmark: every cv::cuda role bar in one binary "
                        "(OpenCV ${OpenCV_VERSION} from ${BINCV_CUDA_OPENCV_DIR})")
     else()
         message(WARNING "BINCV_CUDA_OPENCV_DIR set but no OpenCV with cudaarithm + "
-                        "cudafilters + cudawarping + cudastereo found there; "
+                        "cudafilters + cudawarping + cudastereo + cudafeatures2d + "
+                        "cudaimgproc found there; "
                         "cuda_role_benchmark keeps building and reports every role "
                         "bar as UNMEASURED.")
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# The packer's arms, priced against each other.
+#
+# `cuda::threshold` is `packBits` with a cutoff in front of it, and it lost its
+# role comparison against `cv::cuda::threshold` while moving 1.78x LESS traffic
+# -- the kernel was bound on its own index arithmetic, not on memory. This
+# binary prices the two fixes SEPARATELY (a 2-D grid that deletes the divides,
+# then four pixels per lane) rather than reporting one end-to-end ratio, because
+# the second one costs a hand-written kernel that must stay bit-exact forever
+# and only its own measured share can justify that.
+#
+# NO OpenCV arm and therefore NO guard: the cv::cuda role bar for this op lives
+# in cuda_role_benchmark, which makes the cross-library claim once for every op
+# in one process, on one stream and one meter. Reproducing it here would be a
+# fifth answer to the question that file exists to answer once.
+# ---------------------------------------------------------------------------
+add_executable(cuda_packfast_benchmark cuda_packfast_benchmark.cpp cuda_bench_null.cu)
+target_link_libraries(cuda_packfast_benchmark PRIVATE bincv_core bincv_cuda bincv_warnings)
+target_include_directories(cuda_packfast_benchmark PRIVATE ${BINCV_POLICY_ROOT}/benchmark)
+set_target_properties(cuda_packfast_benchmark PROPERTIES
+    CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+
+# ---------------------------------------------------------------------------
+# The derivative-covariance family: both derivative arms through their switch,
+# all three covariance batch arms through theirs, three ~1.00x gate-excluded
+# controls, the empty-launch floor those arms are read against, and the
+# cv::cuda::createDerivFilter role bar for the derivative.
+#
+# ONE executable, always built, with the OpenCV arm behind
+# BINCV_CUDA_DERIVCOV_OPENCV inside it -- the shape cuda_window_benchmark,
+# cuda_sensor_benchmark and cuda_pyramid_benchmark all use, and for the reason
+# they state: scripts/verify_cuda.sh derives its benchmark list from this
+# file's TEXT and hand-excludes exactly one name, so a target that exists only
+# when an OpenCV is pointed at is one the gate tries to build everywhere.
+# Without that OpenCV the binary keeps every binCV arm and prints CASE A as
+# BLOCKED (role bar unmeasured) rather than substituting a bar.
+#
+# The covariance has NO cv::cuda counterpart at any API level, so it has no
+# OpenCV arm here and none is invented: its speed verdict is printed
+# OUTSTANDING under ruling R2.
+#
+# Its own find_package with its own component list, appended after the others:
+# adding components to an earlier call would make OpenCV_FOUND false for every
+# target that call feeds.
+# ---------------------------------------------------------------------------
+add_executable(cuda_derivcov_benchmark cuda_derivcov_benchmark.cpp cuda_bench_null.cu)
+target_link_libraries(cuda_derivcov_benchmark PRIVATE bincv_core bincv_cuda bincv_warnings)
+target_include_directories(cuda_derivcov_benchmark PRIVATE ${BINCV_POLICY_ROOT}/benchmark)
+set_target_properties(cuda_derivcov_benchmark PROPERTIES
+    CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+
+if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
+    find_package(OpenCV QUIET COMPONENTS core cudafilters cudaarithm
+                 PATHS ${BINCV_CUDA_OPENCV_DIR} NO_DEFAULT_PATH)
+    if(OpenCV_FOUND AND TARGET opencv_cudafilters)
+        target_compile_definitions(cuda_derivcov_benchmark PRIVATE
+            BINCV_CUDA_DERIVCOV_OPENCV=1)
+        target_link_libraries(cuda_derivcov_benchmark PRIVATE
+            opencv_core opencv_cudafilters opencv_cudaarithm)
+        target_include_directories(cuda_derivcov_benchmark SYSTEM PRIVATE
+            ${OpenCV_INCLUDE_DIRS})
+        message(STATUS "cuda_derivcov_benchmark: role comparison against "
+                       "cv::cuda::createDerivFilter enabled "
+                       "(OpenCV ${OpenCV_VERSION} from ${BINCV_CUDA_OPENCV_DIR})")
+    else()
+        message(WARNING "BINCV_CUDA_OPENCV_DIR set but no cudafilters-capable OpenCV "
+                        "found there; cuda_derivcov_benchmark keeps its binCV arms and "
+                        "reports CASE A as BLOCKED on its role comparison.")
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# The orientation / descriptor family: every arm through its switch, four
+# gate-excluded controls that must read ~1.00x, and the cv::cuda::ORB role bar.
+#
+# PLAIN C++, NOT A CUDA TRANSLATION UNIT. This file times the HOST library's
+# arms next to the device's, and a host header compiled by nvcc is not the host
+# arm a caller runs -- the same reason cuda_median_benchmark gives. Only
+# cuda_bench_null.cu needs nvcc here.
+#
+# ONE EXECUTABLE, ALWAYS BUILT, with the OpenCV arms behind
+# BINCV_CUDA_ORB_OPENCV inside it -- the shape cuda_sensor_benchmark and
+# cuda_role_benchmark use, and for the reason they give: scripts/verify_cuda.sh
+# derives its benchmark list from the TEXT of this file and hand-excludes
+# exactly one name, so a target that exists only when an OpenCV is pointed at is
+# one the gate tries to build on every machine that has not built one. Without
+# that OpenCV the binary keeps all of its binCV arms and reports the role bar
+# as BLOCKED rather than substituting a CPU number for it.
+#
+# ITS OWN find_package WITH ITS OWN COMPONENT LIST, deliberately not an
+# extension of any call above: adding cudafeatures2d to one of those would make
+# OpenCV_FOUND false on every prefix carrying cudastereo but not
+# cudafeatures2d, and the targets those calls feed -- including the one that
+# reproduces the binary-vs-StereoBM headline -- would vanish behind a warning.
+# ---------------------------------------------------------------------------
+add_executable(cuda_orientation_descriptor_benchmark
+               cuda_orientation_descriptor_benchmark.cpp cuda_bench_null.cu)
+target_link_libraries(cuda_orientation_descriptor_benchmark PRIVATE
+    bincv_core bincv_cuda bincv_warnings)
+target_include_directories(cuda_orientation_descriptor_benchmark PRIVATE
+    ${BINCV_POLICY_ROOT}/benchmark)
+set_target_properties(cuda_orientation_descriptor_benchmark PROPERTIES
+    CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+
+if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
+    find_package(OpenCV QUIET COMPONENTS core features2d cudafeatures2d
+                 PATHS ${BINCV_CUDA_OPENCV_DIR} NO_DEFAULT_PATH)
+    if(OpenCV_FOUND AND TARGET opencv_cudafeatures2d)
+        target_compile_definitions(cuda_orientation_descriptor_benchmark PRIVATE
+            BINCV_CUDA_ORB_OPENCV=1)
+        target_link_libraries(cuda_orientation_descriptor_benchmark PRIVATE
+            opencv_core opencv_features2d opencv_cudafeatures2d)
+        target_include_directories(cuda_orientation_descriptor_benchmark SYSTEM PRIVATE
+            ${OpenCV_INCLUDE_DIRS})
+        message(STATUS "cuda_orientation_descriptor_benchmark: role comparison against "
+                       "cv::cuda::ORB enabled "
+                       "(OpenCV ${OpenCV_VERSION} from ${BINCV_CUDA_OPENCV_DIR})")
+    else()
+        message(WARNING "BINCV_CUDA_OPENCV_DIR set but no cudafeatures2d-capable OpenCV "
+                        "found there; cuda_orientation_descriptor_benchmark keeps its "
+                        "binCV arms and reports the cv::cuda::ORB role bar as BLOCKED.")
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# The frontend's entry point: detectFast, cornerMinEigenVal,
+# goodFeaturesToTrack and cornerSubPix -- every arm through its runtime switch,
+# three gate-excluded controls that must read ~1.00x, and the decision rule
+# printed before the first number.
+#
+# ONE executable, ALWAYS BUILT, with the cv::cuda role arms behind
+# BINCV_CUDA_FRONTEND_OPENCV inside it -- the shape cuda_window_benchmark and
+# cuda_sensor_benchmark use, and for the reason their blocks give:
+# scripts/verify_cuda.sh derives its benchmark list from the TEXT of this file
+# and hand-excludes exactly one name, so a target that exists only when an
+# OpenCV is pointed at is one the gate tries to build on every machine that has
+# not built one.
+#
+# PLAIN C++ apart from cuda_bench_null.cu, and that is load-bearing here for
+# the reason cuda_median_benchmark gives: this file times the HOST library's
+# cornerSubPix next to the device's, and ops/fast.hpp gates its AVX2 kernels off
+# under __CUDACC__. Compiled by nvcc the host rows would become the portable arm
+# and the round-trip rule would be priced against a kernel nobody runs.
+#
+# Without that OpenCV the binary still runs and still says something true: it
+# reports both role bars as UNMEASURED and the verdicts that depend on them as
+# BLOCKED, which is what the both-axes ship rule requires. It does not
+# substitute a bar and it does not fall silent.
+# ---------------------------------------------------------------------------
+add_executable(cuda_frontend_benchmark cuda_frontend_benchmark.cpp cuda_bench_null.cu)
+target_link_libraries(cuda_frontend_benchmark PRIVATE bincv_core bincv_cuda bincv_warnings)
+target_include_directories(cuda_frontend_benchmark PRIVATE ${BINCV_POLICY_ROOT}/benchmark)
+set_target_properties(cuda_frontend_benchmark PROPERTIES
+    CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+
+if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
+    find_package(OpenCV QUIET COMPONENTS core imgproc cudafeatures2d cudaimgproc
+                 cudafilters cudaarithm
+                 PATHS ${BINCV_CUDA_OPENCV_DIR} NO_DEFAULT_PATH)
+    if(OpenCV_FOUND AND TARGET opencv_cudafeatures2d AND TARGET opencv_cudaimgproc)
+        target_compile_definitions(cuda_frontend_benchmark PRIVATE
+            BINCV_CUDA_FRONTEND_OPENCV=1)
+        target_link_libraries(cuda_frontend_benchmark PRIVATE
+            opencv_core opencv_imgproc opencv_cudafeatures2d opencv_cudaimgproc
+            opencv_cudafilters opencv_cudaarithm)
+        target_include_directories(cuda_frontend_benchmark SYSTEM PRIVATE
+            ${OpenCV_INCLUDE_DIRS})
+        message(STATUS "cuda_frontend_benchmark: role comparison against "
+                       "cv::cuda::FastFeatureDetector and "
+                       "cv::cuda::createGoodFeaturesToTrackDetector enabled "
+                       "(OpenCV ${OpenCV_VERSION} from ${BINCV_CUDA_OPENCV_DIR})")
+    else()
+        message(WARNING "BINCV_CUDA_OPENCV_DIR set but no OpenCV with cudafeatures2d + "
+                        "cudaimgproc found there; cuda_frontend_benchmark keeps its binCV "
+                        "arms and reports both role bars as BLOCKED.")
     endif()
 endif()

@@ -1230,16 +1230,23 @@ namespace impl {
 // ===========================================================================
 
 /// @brief `h = L + C + R` for one bit-plane: one full adder, two output planes.
+/// @note BINCV_HOST_DEVICE. Five words in registers and no memory traversal, so
+/// the CUDA backend's blockSize-3 kernel calls this rather than carrying a
+/// device twin. The full adder is where the box sum is EXACT; a transcription
+/// that dropped one of the three majority terms would still produce a
+/// plausible response map.
 template <typename WordType>
-inline void boxHorizontal3(WordType l, WordType c, WordType r, WordType& h0, WordType& h1) {
+BINCV_HOST_DEVICE inline void boxHorizontal3(WordType l, WordType c, WordType r, WordType& h0,
+                                             WordType& h1) {
     h0 = static_cast<WordType>(l ^ c ^ r);
     h1 = static_cast<WordType>((l & c) | (c & r) | (l & r));
 }
 
 /// @brief Sum three 2-bit numbers into four planes (0..9).
+/// @note BINCV_HOST_DEVICE, for `boxHorizontal3`'s reason.
 template <typename WordType>
-inline void boxVertical3(const WordType (&a)[2], const WordType (&b)[2], const WordType (&c)[2],
-                         WordType (&out)[4]) {
+BINCV_HOST_DEVICE inline void boxVertical3(const WordType (&a)[2], const WordType (&b)[2],
+                                           const WordType (&c)[2], WordType (&out)[4]) {
     const WordType s0 = static_cast<WordType>(a[0] ^ b[0]);
     const WordType k0 = static_cast<WordType>(a[0] & b[0]);
     const WordType s1 = static_cast<WordType>(a[1] ^ b[1] ^ k0);
@@ -1253,16 +1260,25 @@ inline void boxVertical3(const WordType (&a)[2], const WordType (&b)[2], const W
 }
 
 /// @brief The 0..9 value carried by four bit-planes at bit `bit`.
+/// @note BINCV_HOST_DEVICE, for `boxHorizontal3`'s reason. The device kernel
+/// extracts per bit rather than through the host's 8x8 transpose -- a CPU
+/// device for turning per-bit gathers into byte moves, with nothing to
+/// transpose on a machine whose shift is one instruction -- but the VALUE it
+/// extracts comes from here.
 template <typename WordType>
-inline long long boxValueAt(const WordType (&p)[4], size_t bit) {
+BINCV_HOST_DEVICE inline long long boxValueAt(const WordType (&p)[4], size_t bit) {
     const WordType m = static_cast<WordType>(static_cast<WordType>(1) << bit);
     return static_cast<long long>(((p[0] & m) != 0 ? 1 : 0) + ((p[1] & m) != 0 ? 2 : 0) +
                                   ((p[2] & m) != 0 ? 4 : 0) + ((p[3] & m) != 0 ? 8 : 0));
 }
 
 /// @brief A word of `row`, or 0 when the row or the index does not exist.
+/// @note BINCV_HOST_DEVICE. A pointer and two indices, no traversal -- and the
+/// "does not exist reads as zero" rule is where a CLIPPED window becomes exact
+/// rather than approximate, so the device kernel calls this rather than
+/// restating the guard.
 template <typename WordType>
-inline WordType boxWordAt(const WordType* row, size_t words, long long w) {
+BINCV_HOST_DEVICE inline WordType boxWordAt(const WordType* row, size_t words, long long w) {
     if (row == nullptr || w < 0 || static_cast<size_t>(w) >= words) return 0;
     return row[static_cast<size_t>(w)];
 }

@@ -148,9 +148,8 @@ inline void keypointOrientation(const SrcT* img, size_t width, size_t height,
     for (size_t k = 0; k < count; ++k) {
         const long long cx = static_cast<long long>(keypointsXY[2 * k]);
         const long long cy = static_cast<long long>(keypointsXY[2 * k + 1]);
-        const bool inside = cx - radius >= 0 && cy - radius >= 0 &&
-                            cx + radius < static_cast<long long>(width) &&
-                            cy + radius < static_cast<long long>(height);
+        const bool inside = impl::squareInsideImage(cx, cy, static_cast<int>(radius),
+                                                    width, height);
         if (!inside) {
             angle[k] = 0.0f;
             if (keep != nullptr) keep[k] = uint8_t{0};
@@ -207,9 +206,8 @@ inline void keypointOrientation(const BinMatConstView<WordType>* planes, size_t 
     for (size_t k = 0; k < count; ++k) {
         const long long cx = static_cast<long long>(keypointsXY[2 * k]);
         const long long cy = static_cast<long long>(keypointsXY[2 * k + 1]);
-        const bool inside = cx - radius >= 0 && cy - radius >= 0 &&
-                            cx + radius < static_cast<long long>(width) &&
-                            cy + radius < static_cast<long long>(height);
+        const bool inside = impl::squareInsideImage(cx, cy, static_cast<int>(radius),
+                                                    width, height);
         if (!inside) {
             angle[k] = 0.0f;
             if (keep != nullptr) keep[k] = uint8_t{0};

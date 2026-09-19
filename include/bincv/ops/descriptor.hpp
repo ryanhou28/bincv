@@ -86,6 +86,26 @@ constexpr size_t descriptorWords() {
 
 namespace impl {
 
+/// @brief Largest absolute offset any of `Bits` pairs reaches. **INTERNAL.**
+/// @note Split out of `briefFlattenPattern` because the reach is needed WITHOUT
+/// the flat offsets: a kernel that computes each sample's address inline --
+/// the GPU arm does, one integer multiply-add per sample being free there --
+/// still needs the per-keypoint bounds test, and that test decides `keep`.
+/// Two spellings of this loop would be two answers to "is this keypoint
+/// describable", which is a correctness difference, not a style one.
+template <size_t Bits>
+inline int briefPatternReach(const BriefPair* pairs) {
+    int reach = 0;
+    for (size_t i = 0; i < Bits; ++i) {
+        const BriefPair& q = pairs[i];
+        const int e[4] = {q.ax < 0 ? -q.ax : q.ax, q.ay < 0 ? -q.ay : q.ay,
+                          q.bx < 0 ? -q.bx : q.bx, q.by < 0 ? -q.by : q.by};
+        for (int j = 0; j < 4; ++j)
+            if (e[j] > reach) reach = e[j];
+    }
+    return reach;
+}
+
 /// @brief The pattern as flat offsets, once per call; returns its reach. **INTERNAL.**
 /// @note `q.ay * stride + q.ax` was two MULTIPLIES per pair inside a
 /// 256-iteration loop -- half a million of them for a thousand keypoints, all
@@ -95,17 +115,12 @@ namespace impl {
 template <size_t Bits>
 inline int briefFlattenPattern(const BriefPair* pairs, size_t stride, long long* offA,
                                long long* offB) {
-    int reach = 0;
     for (size_t i = 0; i < Bits; ++i) {
         const BriefPair& q = pairs[i];
         offA[i] = static_cast<long long>(q.ay) * static_cast<long long>(stride) + q.ax;
         offB[i] = static_cast<long long>(q.by) * static_cast<long long>(stride) + q.bx;
-        const int e[4] = {q.ax < 0 ? -q.ax : q.ax, q.ay < 0 ? -q.ay : q.ay,
-                          q.bx < 0 ? -q.bx : q.bx, q.by < 0 ? -q.by : q.by};
-        for (int j = 0; j < 4; ++j)
-            if (e[j] > reach) reach = e[j];
     }
-    return reach;
+    return briefPatternReach<Bits>(pairs);
 }
 
 /// @brief One keypoint's descriptor from prebuilt flat offsets. **INTERNAL.**
@@ -195,9 +210,7 @@ inline void computeBrief(const SrcT* img, size_t width, size_t height, size_t st
         for (size_t w = 0; w < kWords; ++w) d[w] = 0;
         const long long cx = static_cast<long long>(keypointsXY[2 * k]);
         const long long cy = static_cast<long long>(keypointsXY[2 * k + 1]);
-        const bool inside = cx - reach >= 0 && cy - reach >= 0 &&
-                            cx + reach < static_cast<long long>(width) &&
-                            cy + reach < static_cast<long long>(height);
+        const bool inside = impl::squareInsideImage(cx, cy, reach, width, height);
         if (inside) {
             const SrcT* center = img + static_cast<size_t>(cy) * stride +
                                  static_cast<size_t>(cx);
@@ -228,7 +241,21 @@ inline constexpr size_t kBriefAngleBins = 30;
 /// @note Integer arithmetic after one multiply, no <cmath>: the +30 shift makes
 /// the value positive over the asserted domain, so truncation IS floor,
 /// and the +0.5 makes floor round-to-nearest.
-inline unsigned briefAngleBin(float angleRadians) {
+/// @note **BINCV_HOST_DEVICE**, so a GPU kernel selects the bin by calling THIS
+/// function rather than a transcription of it. One ULP of difference here
+/// does not change an angle slightly, it changes a whole 256-bit descriptor,
+/// and a second copy of this expression is the last place that should be
+/// allowed to drift. It is scalar and traversal-free, which is the line.
+/// @note `angleRadians * kBinsPerRadian + kBriefAngleBins` is a CONTRACTIBLE
+/// multiply-add. Nothing in this project's CMake sets `-ffp-contract`, so
+/// GCC's default `fast` applies: an FMA-capable target fuses it and a
+/// baseline x86-64 one does not, which means two HOSTS can already disagree
+/// about the bin of an angle sitting on a boundary. The CUDA backend pins
+/// its own side by compiling the translation unit that calls this with
+/// `-fmad=false`, so the device reproduces the unfused evaluation. That
+/// makes the device agree with a baseline x86-64 host exactly; it does not
+/// remove the host-to-host hole, which is reported rather than patched.
+BINCV_HOST_DEVICE inline unsigned briefAngleBin(float angleRadians) {
     constexpr float kTwoPi = 6.28318530717958647692f;
     BINCV_ASSERT(angleRadians >= -kTwoPi && angleRadians <= kTwoPi,
                  "briefAngleBin: angle outside [-2*pi, 2*pi] -- wrap it first");
@@ -348,9 +375,7 @@ inline void computeBriefSteered(const SrcT* img, size_t width, size_t height, si
             for (size_t w = 0; w < kWords; ++w) d[w] = 0;
             const long long cx = static_cast<long long>(keypointsXY[2 * k]);
             const long long cy = static_cast<long long>(keypointsXY[2 * k + 1]);
-            const bool inside = cx - reach >= 0 && cy - reach >= 0 &&
-                                cx + reach < static_cast<long long>(width) &&
-                                cy + reach < static_cast<long long>(height);
+            const bool inside = impl::squareInsideImage(cx, cy, reach, width, height);
             if (inside) {
                 const SrcT* center = img + static_cast<size_t>(cy) * stride +
                                      static_cast<size_t>(cx);

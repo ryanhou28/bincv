@@ -52,6 +52,8 @@
 // counterpart at any API level; each is listed in the OUTSTANDING section with
 // what it would take to price it. A CPU number is never quoted as a GPU bar.
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -82,22 +84,32 @@
 #include <opencv2/core/cuda.hpp>
 #include <opencv2/core/cuda_stream_accessor.hpp>
 #include <opencv2/cudaarithm.hpp>
+#include <opencv2/cudafeatures2d.hpp>
 #include <opencv2/cudafilters.hpp>
+#include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudastereo.hpp>
 #include <opencv2/cudawarping.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include "bincv/binMat.hpp"
+#include "bincv/io/sequence.hpp"
+#include "bincv/cuda/corner.hpp"
 #include "bincv/cuda/denseDisparity.hpp"
+#include "bincv/cuda/derivative.hpp"
+#include "bincv/cuda/descriptor.hpp"
 #include "bincv/cuda/deviceBinMat.hpp"
 #include "bincv/cuda/edge.hpp"
+#include "bincv/cuda/fast.hpp"
+#include "bincv/cuda/keypoints.hpp"
 #include "bincv/cuda/median.hpp"
 #include "bincv/cuda/morphology.hpp"
+#include "bincv/cuda/orientation.hpp"
 #include "bincv/cuda/pyramid.hpp"
 #include "bincv/cuda/shift.hpp"
 #include "bincv/cuda/threshold.hpp"
 #include "bincv/cuda/transfer.hpp"
 #include "bincv/ops/morphology.hpp"
+#include "bincv/ops/orbPattern.hpp"
 #include "bincv/ops/pack.hpp"
 #include "cuda_bench_util.hpp"
 
@@ -1462,6 +1474,827 @@ int main(int argc, char** argv) {
                     " an op that runs for a millisecond. Expect threshold, resize and\n"
                     " median to move a lot and StereoBM to barely move at all -- and\n"
                     " check that against the rows above rather than taking it on trust.\n");
+    }
+
+
+    // ======================================================================
+    // ROUND 2 -- the frontend families' role bars, brought into this process
+    //
+    // WHY THEY ARE HERE AND NOT LEFT IN THEIR FAMILY BENCHMARKS. Each family
+    // wrote its own OpenCV arm against its own find_package, in its own
+    // process, and two of them read memory on a meter the other side does not
+    // share. That is four answers to one question. The rule this file was
+    // built on applies unchanged to the frontend set: one process, one
+    // explicit stream on both sides, interleaved rounds, and meter 2 on both
+    // sides of anything that crosses the library boundary.
+    //
+    // THE INPUT, AND WHY IT IS THE PIPELINE'S OWN. Every arm below reads a
+    // binary frame produced by binCV's OWN sensor stage -- medianWide<3> then
+    // edgeThreshold at the reference frontend's threshold of 17 -- rather than
+    // a synthetic bit pattern. A detector's cost is a function of how many
+    // corners its input has, so a frame with the wrong density prices the
+    // wrong operation. OpenCV's side reads the SAME bits, expanded to the
+    // CV_8U {0,255} picture its detectors require, which is the construction
+    // ops/fast.hpp proves accepts the identical corner set.
+    // ======================================================================
+    const bool wantFrontend = want("fast") || want("gftt") || want("cornerresp") ||
+                              want("describe") || want("matcher");
+
+    // Declared out here so every frontend family shares one set of device
+    // buffers and one upload: a per-family upload would put a 361 KB transfer
+    // inside a process that is timing launches.
+    bc::DeviceImage<uint8_t> fWide(static_cast<int>(kW), static_cast<int>(kH));
+    bc::DeviceImage<uint8_t> fDenoised(static_cast<int>(kW), static_cast<int>(kH));
+    bc::DeviceBinMat fBits(static_cast<int>(kW), static_cast<int>(kH));
+    bc::DeviceBinMat fdxBlock(static_cast<int>(kW), static_cast<int>(2 * kH));
+    bc::DeviceBinMat fdyBlock(static_cast<int>(kW), static_cast<int>(2 * kH));
+    cv::cuda::GpuMat gPicture;
+    std::vector<uint8_t> picture(kW * kH);
+
+    // THE FRONTEND FRAME, and why it is not the synthetic one the rest of this
+    // file uses. A detector's cost is a function of how many corners its input
+    // has, and edgeThreshold on SMOOTHED NOISE sets ~83% of pixels -- a frame
+    // on which both FAST implementations overflow any sane capacity, so the
+    // corner-set gate cannot even run. The real content this project measures
+    // on is a EuRoC sequence blob; point BINCV_CUDA_ROLE_FRAMES at one
+    // (scripts/make_sequence_blob.py, --mode 8bit) and frame 0 of it is used.
+    // Without one the synthetic frame is used and every frontend row below
+    // says so, because a role bar taken on saturating content is not the role
+    // bar anyone means.
+    std::vector<uint8_t> frontFrame = frame;
+    const char* frontSource = "synthetic smoothed noise (NOT representative content)";
+    std::vector<uint8_t> blob;
+    if (const char* path = std::getenv("BINCV_CUDA_ROLE_FRAMES")) {
+        std::FILE* fh = std::fopen(path, "rb");
+        if (fh != nullptr) {
+            std::fseek(fh, 0, SEEK_END);
+            const long len = std::ftell(fh);
+            std::fseek(fh, 0, SEEK_SET);
+            if (len > 0) {
+                blob.resize(static_cast<size_t>(len));
+                if (std::fread(blob.data(), 1, blob.size(), fh) != blob.size()) blob.clear();
+            }
+            std::fclose(fh);
+        }
+        if (!blob.empty()) {
+            const bincv::SequenceHeader h = bincv::readSequenceHeader(blob.data(), blob.size());
+            const bincv::SequenceFrameRange f0 =
+                bincv::sequenceFrame(h, blob.data(), blob.size(), 0);
+            if (h.valid && h.mode == bincv::kSequenceMode8Bit && h.width == kW &&
+                h.height == kH && f0.valid) {
+                frontFrame.assign(f0.data, f0.data + kW * kH);
+                frontSource = "REAL SEQUENCE FRAME 0 from BINCV_CUDA_ROLE_FRAMES";
+            }
+        }
+    }
+
+    if (wantFrontend) {
+        bc::uploadImage(frontFrame.data(), kW, kH, kW, fWide.view(), gStream);
+        bc::medianWide<3>(fWide.constView(), fDenoised.view(), bincv::kMedianReferenceL,
+                          gStream);
+        // The reference frontend's threshold, overridable so the frontend rows
+        // can be read against a SWEEP of corner density rather than at one
+        // point. FAST's cost on this backend turns out to track the corner
+        // COUNT rather than the capacity, and that is only checkable by moving
+        // the count.
+        uint8_t edgeT = 17;
+        if (const char* e = std::getenv("BINCV_CUDA_ROLE_EDGE")) {
+            const long n = std::atol(e);
+            if (n > 0 && n < 256) edgeT = static_cast<uint8_t>(n);
+        }
+        bc::edgeThreshold(fDenoised.constView(), fBits.view(), edgeT,
+                          bincv::EdgeCombine::Or, bincv::EdgeRelation::Ge,
+                          bincv::EdgeSpatial::Wide, gStream);
+        bc::derivativeXY(fBits.constView(), bc::planeBlock(fdxBlock.view(), 2),
+                         bc::planeBlock(fdyBlock.view(), 2), bincv::BORDER_REFLECT_101,
+                         false, gStream);
+        cudaStreamSynchronize(gStream);
+
+        // The SAME bits as the CV_8U picture OpenCV's detectors take. Downloaded
+        // from the device rather than recomputed on the host, so the two sides
+        // are provably the same frame and not two frames that ought to agree.
+        bincv::BinMat<uint32_t> hostBits(static_cast<int>(kW), static_cast<int>(kH));
+        bc::download(fBits.constView(), hostBits.view(), gStream);
+        cudaStreamSynchronize(gStream);
+        for (size_t y = 0; y < kH; ++y) {
+            const uint32_t* row = hostBits.constView().row(y);
+            for (size_t x = 0; x < kW; ++x)
+                picture[y * kW + x] =
+                    static_cast<uint8_t>(((row[x / 32] >> (x % 32)) & 1u) ? 255 : 0);
+        }
+        cv::Mat hostPicture(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
+                            picture.data());
+        gPicture.upload(hostPicture);
+
+        size_t setBits = 0;
+        for (size_t i = 0; i < kW * kH; ++i) setBits += picture[i] != 0 ? 1u : 0u;
+        std::printf("\n=====================================================================\n"
+                    " ROUND 2 -- the frontend role bars. INPUT, stated once for all of\n"
+                    " them: binCV's own sensor stage output at %zux%zu -- medianWide<3>\n"
+                    " then edgeThreshold(17) -- %.2f%% of pixels set. OpenCV reads the\n"
+                    " identical bits as a CV_8U {0,255} picture.\n"
+                    " FRAME SOURCE: %s\n"
+                    "=====================================================================\n",
+                    kW, kH, 100.0 * static_cast<double>(setBits) /
+                                static_cast<double>(kW * kH), frontSource);
+        std::printf("FRAMESRC,%s,%.4f\n", frontSource,
+                    100.0 * static_cast<double>(setBits) / static_cast<double>(kW * kH));
+    }
+
+    // ======================================================================
+    // 9. FAST -- cv::cuda::FastFeatureDetector (cudafeatures2d)
+    // ======================================================================
+    if (want("fast")) {
+        std::printf("\n=====================================================================\n"
+                    " 9. FAST -- binCV cuda::detectFastAsync vs cv::cuda::FastFeatureDetector\n"
+                    "=====================================================================\n"
+                    " THE AUTHOR'S OWN RULE, not restated more kindly: required >= 1.00x\n"
+                    " kernel-resident, both sides one explicit stream, with the corner-set\n"
+                    " agreement gate passing first. The '>= 2.00x target' the design\n"
+                    " carried was deleted by its own author as underived; what ratio ships\n"
+                    " the claim UNQUALIFIED remains an open owner question, and nothing\n"
+                    " here fills it in.\n"
+                    " The capped arm is carried beside the shipped one because the family\n"
+                    " located its shortfall in the single-block raster sort rather than in\n"
+                    " the ring algebra, and a serial pass has to be able to check that.\n");
+
+        // Sized so NOTHING TRUNCATES on this frame. A truncated run cannot be
+        // compared against OpenCV's corner set at all -- the atomic decided
+        // which corners were stored -- so a capacity below the true count turns
+        // the agreement gate into a coin toss. A real EuRoC edge map at the
+        // reference threshold carries far more FAST corners than the synthetic
+        // frame the family benchmark used, and the first run of this section at
+        // 16384 truncated BOTH sides; the true count is printed below so the
+        // choice can be checked rather than trusted.
+        // 32768 is the SMALLEST POWER OF TWO that holds this frame's 19,898
+        // corners, and the capacity a caller sizing for this content would
+        // pick. The choice is load-bearing rather than incidental: the single-
+        // block bitonic sort orders nextPow2(capacity) SLOTS, not the corners
+        // found, so capacity -- not corner count -- sets this op's cost. At
+        // 262144 the same frame measures 3.53x against OpenCV where 32768
+        // measures what the row below reports. A role bar must be taken at the
+        // capacity a caller would use, and it is named here so a reader can
+        // check the choice instead of trusting it.
+        uint32_t cap = 32768;
+        if (const char* cv2 = std::getenv("BINCV_CUDA_ROLE_FASTCAP")) {
+            const long n = std::atol(cv2);
+            if (n > 0) cap = static_cast<uint32_t>(n);
+        }
+        bc::DeviceArray<bc::DeviceFastCorner> dfast(cap);
+        bc::DeviceAppendCounter fastCounter;
+        const bc::DeviceFastCornerBuffer fastBuf(dfast.data(), fastCounter.devicePtr(), cap);
+        const size_t fastScratchBytes = bc::fastScratchBytes(cap);
+        bc::DeviceArray<uint8_t> dfastScratch(fastScratchBytes);
+
+        const uint32_t capped = 512;
+        bc::DeviceArray<bc::DeviceFastCorner> dfastCapped(capped);
+        bc::DeviceAppendCounter cappedCounter;
+        const bc::DeviceFastCornerBuffer cappedBuf(dfastCapped.data(),
+                                                   cappedCounter.devicePtr(), capped);
+        const size_t cappedScratchBytes = bc::fastScratchBytes(capped);
+        bc::DeviceArray<uint8_t> dcappedScratch(cappedScratchBytes);
+
+        const auto runFast = [&] {
+            fastCounter.reset(gStream);
+            bc::detectFastAsync(fBits.constView(), fastBuf, dfastScratch.data(),
+                                fastScratchBytes, 9, gStream);
+        };
+        const auto runCapped = [&] {
+            cappedCounter.reset(gStream);
+            bc::detectFastAsync(fBits.constView(), cappedBuf, dcappedScratch.data(),
+                                cappedScratchBytes, 9, gStream);
+        };
+
+        cv::Ptr<cv::cuda::FastFeatureDetector> cvFast = cv::cuda::FastFeatureDetector::create(
+            128, false, cv::FastFeatureDetector::TYPE_9_16, static_cast<int>(cap));
+        cv::cuda::GpuMat cvKp;
+
+        // THE GATE FIRST. A speed ratio between two arms that found different
+        // corners is not a comparison, so this runs before anything is timed
+        // and its failure would stop the section rather than qualify it.
+        runFast();
+        cudaStreamSynchronize(gStream);
+        bc::DeviceAppendResult fres;
+        bc::readAppendResult(fastBuf, fres, gStream);
+        std::vector<bc::DeviceFastCorner> mine(fres.acceptTruncated());
+        if (!mine.empty()) {
+            bc::downloadAppended(fastBuf, fres, mine.data(), gStream);
+            cudaStreamSynchronize(gStream);
+        }
+        cvFast->detectAsync(gPicture, cvKp, cv::noArray(), gCvStream);
+        gCvStream.waitForCompletion();
+        cv::Mat kp;
+        cvKp.download(kp);
+        std::vector<uint64_t> theirs, ours;
+        if (kp.rows > 0) {
+            const short* loc = kp.ptr<short>(cv::cuda::FastFeatureDetector::LOCATION_ROW);
+            for (int i = 0; i < kp.cols; ++i)
+                theirs.push_back(
+                    (static_cast<uint64_t>(static_cast<uint16_t>(loc[2 * i + 1])) << 32) |
+                    static_cast<uint32_t>(static_cast<uint16_t>(loc[2 * i])));
+        }
+        for (const bc::DeviceFastCorner& c : mine)
+            ours.push_back((static_cast<uint64_t>(static_cast<uint32_t>(c.y)) << 32) |
+                           static_cast<uint32_t>(c.x));
+        std::sort(theirs.begin(), theirs.end());
+        std::sort(ours.begin(), ours.end());
+        const bool setsAgree = theirs == ours;
+        std::printf("\n CORNER-SET AGREEMENT GATE (runs before any timing): binCV %zu"
+                    " (found %u, capacity %u%s), OpenCV %zu keypoints -- %s\n",
+                    ours.size(), fres.found(), cap,
+                    fres.truncated() ? ", *** TRUNCATED ***" : "", theirs.size(),
+                    setsAgree ? "SETS AGREE" : "*** SETS DIFFER -- ratios below are NOT"
+                                               " like-for-like ***");
+        std::printf("GATE,fast_corner_sets,752x480,%zu,%zu,%d\n", ours.size(),
+                    theirs.size(), setsAgree ? 1 : 0);
+
+        const PairedTiming p = timeKernelPaired(
+            [&] { cvFast->detectAsync(gPicture, cvKp, cv::noArray(), gCvStream); },
+            [&] { runFast(); }, 10, 10, kRounds, gStream);
+        printRole("FAST corners, binary frame vs CV_8U picture",
+                  "cv::cuda::FastFeatureDetector (nms off)",
+                  "bincv::cuda::detectFastAsync", p, floor, "752x480");
+        std::printf("   RULE: required <= 1.000x (binCV at or faster than parity) -> %s\n",
+                    p.ratioMedian <= 1.0 ? "MET" : "MISSED");
+        emitRow("fast", "752x480", p);
+        printEnqueue("fast", "752x480", "cv::cuda::FastFeatureDetector",
+                     "bincv::cuda::detectFastAsync",
+                     timeHostEnqueue(
+                         [&] { cvFast->detectAsync(gPicture, cvKp, cv::noArray(), gCvStream); }),
+                     timeHostEnqueue([&] { runFast(); }), p);
+
+        const PairedTiming pc = timeKernelPaired(
+            [&] { cvFast->detectAsync(gPicture, cvKp, cv::noArray(), gCvStream); },
+            [&] { runCapped(); }, 10, 10, kRounds, gStream);
+        printRole("FAST, binCV CAPPED at 512 stored -- the DETECTOR without most of\n"
+                  " the sort. An UPPER BOUND on detection alone, so the conclusion is\n"
+                  " safe in the direction it is used",
+                  "cv::cuda::FastFeatureDetector (nms off)",
+                  "bincv::cuda::detectFastAsync, capacity 512", pc, floor, "752x480");
+        emitRow("fast_capped512", "752x480", pc);
+
+        // Memory, meter 2, both sides, each over enough sets to resolve.
+        {
+            const int reps = 32;
+            size_t binD = 0, ocvD = 0;
+            {
+                DeviceMemMeter m;
+                m.reset();
+                std::vector<std::unique_ptr<bc::DeviceBinMat>> planes;
+                std::vector<std::unique_ptr<bc::DeviceArray<bc::DeviceFastCorner>>> outs;
+                std::vector<std::unique_ptr<bc::DeviceArray<uint8_t>>> scr;
+                for (int i = 0; i < reps; ++i) {
+                    planes.push_back(std::make_unique<bc::DeviceBinMat>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    outs.push_back(
+                        std::make_unique<bc::DeviceArray<bc::DeviceFastCorner>>(cap));
+                    scr.push_back(std::make_unique<bc::DeviceArray<uint8_t>>(
+                        bc::fastScratchBytes(cap)));
+                }
+                cudaDeviceSynchronize();
+                binD = m.deltaBytes();
+            }
+            {
+                DeviceMemMeter m;
+                m.reset();
+                // RESERVED, and it is not a micro-optimization. Each arm below
+                // is ENQUEUED asynchronously and keeps reading its GpuMat until
+                // the stream drains; a vector that reallocates DESTROYS the old
+                // elements, and ~GpuMat frees device memory a launch in flight
+                // is still reading. Reserving is what makes the loop safe.
+                std::vector<cv::cuda::GpuMat> srcs, kps;
+                std::vector<cv::Ptr<cv::cuda::FastFeatureDetector>> dets;
+                srcs.reserve(static_cast<size_t>(reps));
+                kps.reserve(static_cast<size_t>(reps));
+                dets.reserve(static_cast<size_t>(reps));
+                cv::Mat hp(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
+                           picture.data());
+                for (int i = 0; i < reps; ++i) {
+                    srcs.emplace_back(hp);
+                    dets.push_back(cv::cuda::FastFeatureDetector::create(
+                        128, false, cv::FastFeatureDetector::TYPE_9_16,
+                        static_cast<int>(cap)));
+                    kps.emplace_back();
+                    dets.back()->detectAsync(srcs.back(), kps.back(), cv::noArray(),
+                                             gCvStream);
+                }
+                gCvStream.waitForCompletion();
+                ocvD = m.deltaBytes();
+            }
+            printMemPair("FAST working set, capacity 16384", "752x480", binD, ocvD, step,
+                         reps, reps);
+            emitMem("fast", "752x480", binD, ocvD, step, reps, reps);
+        }
+    }
+
+    // ======================================================================
+    // 10. goodFeaturesToTrack -- cv::cuda::createGoodFeaturesToTrackDetector
+    // ======================================================================
+    if (want("gftt")) {
+        std::printf("\n=====================================================================\n"
+                    " 10. goodFeaturesToTrack -- binCV device-resident selection vs\n"
+                    "     cv::cuda::createGoodFeaturesToTrackDetector (cudaimgproc)\n"
+                    "=====================================================================\n"
+                    " WALL CLOCK ON BOTH SIDES, and the reason is on OpenCV's side: at\n"
+                    " minDistance >= 1 its detect() DOWNLOADS the sorted candidate list,\n"
+                    " runs the spacing filter on the HOST and uploads the survivors\n"
+                    " (cudaimgproc/src/gftt.cpp). A CUDA-event clock would exclude that\n"
+                    " pass and flatter OpenCV. binCV's selection never leaves the device.\n"
+                    " THE SPEED BAR FOR THIS OP WAS NOT WRITABLE -- its author escalated\n"
+                    " it rather than deriving a number from a host CPU ratio, and this\n"
+                    " binary does not invent one either. The ratio is reported; the\n"
+                    " verdict is the owner's.\n");
+
+        const bincv::GoodFeaturesParams gp{};
+        const uint32_t poolCap = 65536;
+        const uint32_t rankCap = 32768;
+        bc::DeviceArray<bc::DeviceCorner> cands(poolCap);
+        bc::DeviceAppendCounter candCounter;
+        bc::DeviceArray<uint32_t> maxBits(1);
+        bc::DeviceArray<uint8_t> selScratch(bc::goodFeaturesScratchBytes(poolCap));
+        bc::DeviceArray<bc::DeviceCorner> outCorners(rankCap);
+        bc::DeviceArray<uint8_t> resultBlock(sizeof(bc::DeviceCornerResult));
+
+        const auto runGftt = [&] {
+            candCounter.reset(gStream);
+            cudaMemsetAsync(maxBits.data(), 0, sizeof(uint32_t), gStream);
+            bc::DeviceGoodFeaturesWorkspace work;
+            work.candidates = bc::appendBuffer(cands, candCounter);
+            work.maxBits = maxBits.data();
+            work.scratch = selScratch.data();
+            work.scratchBytes = selScratch.size();
+            bc::goodFeaturesToTrackAsync(
+                bc::planeBlock(fdxBlock.constView(), 2).plane(0),
+                bc::planeBlock(fdyBlock.constView(), 2).plane(0),
+                bc::planeBlock(fdxBlock.constView(), 2).plane(1),
+                bc::planeBlock(fdyBlock.constView(), 2).plane(1), gp, work,
+                outCorners.data(), rankCap,
+                reinterpret_cast<bc::DeviceCornerResult*>(resultBlock.data()), gStream);
+        };
+
+        cv::Ptr<cv::cuda::CornersDetector> cvGftt =
+            cv::cuda::createGoodFeaturesToTrackDetector(CV_8UC1, gp.maxCorners,
+                                                        gp.qualityLevel, gp.minDistance,
+                                                        gp.blockSize, false);
+        cv::cuda::GpuMat cvCorners;
+
+        // WALL CLOCK, both arms, interleaved and order-alternated exactly as
+        // timeKernelPaired does it -- but with a synchronize inside each arm,
+        // because OpenCV's arm contains a host pass that a CUDA event cannot
+        // see. Hand-rolled here rather than reaching for the event timer,
+        // which would be the wrong instrument by construction.
+        std::vector<double> sa, sb, ratios;
+        const auto wallOne = [&](const std::function<void()>& body, int iters) {
+            cudaStreamSynchronize(gStream);
+            const auto t0 = std::chrono::steady_clock::now();
+            for (int i = 0; i < iters; ++i) body();
+            cudaStreamSynchronize(gStream);
+            const auto t1 = std::chrono::steady_clock::now();
+            return std::chrono::duration<double, std::milli>(t1 - t0).count() / iters;
+        };
+        for (int i = 0; i < 3; ++i) {
+            cvGftt->detect(gPicture, cvCorners, cv::noArray(), gCvStream);
+            runGftt();
+        }
+        cudaStreamSynchronize(gStream);
+        for (int r = 0; r < kRounds; ++r) {
+            double ta = 0.0, tb = 0.0;
+            if (r % 2 == 0) {
+                ta = wallOne([&] { cvGftt->detect(gPicture, cvCorners, cv::noArray(), gCvStream); }, 5);
+                tb = wallOne([&] { runGftt(); }, 5);
+            } else {
+                tb = wallOne([&] { runGftt(); }, 5);
+                ta = wallOne([&] { cvGftt->detect(gPicture, cvCorners, cv::noArray(), gCvStream); }, 5);
+            }
+            sa.push_back(ta);
+            sb.push_back(tb);
+            ratios.push_back(ta > 0.0 ? tb / ta : 0.0);
+        }
+        PairedTiming pg;
+        pg.a = summarize(sa);
+        pg.b = summarize(sb);
+        const Timing rg = summarize(ratios);
+        pg.ratioMin = rg.minMs;
+        pg.ratioMedian = rg.medianMs;
+        pg.ratioMax = rg.maxMs;
+        pg.rounds = kRounds;
+        printRole("goodFeaturesToTrack -- WALL CLOCK both sides, OpenCV's host\n"
+                  " round trip INSIDE its arm because a caller pays it",
+                  "cv::cuda gftt (downloads, spaces on host, uploads)",
+                  "bincv::cuda::goodFeaturesToTrackAsync (never leaves device)", pg, floor,
+                  "752x480 WALL");
+        emitRow("gftt_wall", "752x480", pg);
+
+        // How many corners each side found, so the ratio is read against a
+        // known workload rather than an assumed one.
+        cudaStreamSynchronize(gStream);
+        bc::DeviceCornerResult hres{};
+        cudaMemcpy(&hres, resultBlock.data(), sizeof(hres), cudaMemcpyDeviceToHost);
+        cvGftt->detect(gPicture, cvCorners, cv::noArray(), gCvStream);
+        gCvStream.waitForCompletion();
+        std::printf("   corners: binCV %u (ranked %u, truncated %u, pool overflow %u)"
+                    " vs OpenCV %d.\n"
+                    "   NOT A GATE and not an equality: the two run different spacing\n"
+                    "   rules over different responses. It is here so the ratio above is\n"
+                    "   read against a known workload.\n",
+                    hres.count, hres.candidatesRanked, hres.candidatesTruncated,
+                    hres.candidateOverflow, cvCorners.cols);
+        std::printf("GATE,gftt_counts,752x480,%u,%d,0\n", hres.count, cvCorners.cols);
+
+        {
+            const int reps = 16;
+            size_t binD = 0, ocvD = 0;
+            {
+                DeviceMemMeter m;
+                m.reset();
+                std::vector<std::unique_ptr<bc::DeviceBinMat>> planes;
+                std::vector<std::unique_ptr<bc::DeviceArray<bc::DeviceCorner>>> cs, os;
+                std::vector<std::unique_ptr<bc::DeviceArray<uint8_t>>> sc;
+                for (int i = 0; i < reps; ++i) {
+                    for (int q = 0; q < 4; ++q)
+                        planes.push_back(std::make_unique<bc::DeviceBinMat>(
+                            static_cast<int>(kW), static_cast<int>(kH)));
+                    cs.push_back(std::make_unique<bc::DeviceArray<bc::DeviceCorner>>(poolCap));
+                    os.push_back(std::make_unique<bc::DeviceArray<bc::DeviceCorner>>(rankCap));
+                    sc.push_back(std::make_unique<bc::DeviceArray<uint8_t>>(
+                        bc::goodFeaturesScratchBytes(poolCap)));
+                }
+                cudaDeviceSynchronize();
+                binD = m.deltaBytes();
+            }
+            {
+                DeviceMemMeter m;
+                m.reset();
+                std::vector<cv::cuda::GpuMat> srcs, outs;
+                std::vector<cv::Ptr<cv::cuda::CornersDetector>> dets;
+                srcs.reserve(static_cast<size_t>(reps));
+                outs.reserve(static_cast<size_t>(reps));
+                dets.reserve(static_cast<size_t>(reps));
+                cv::Mat hp(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
+                           picture.data());
+                for (int i = 0; i < reps; ++i) {
+                    srcs.emplace_back(hp);
+                    dets.push_back(cv::cuda::createGoodFeaturesToTrackDetector(
+                        CV_8UC1, gp.maxCorners, gp.qualityLevel, gp.minDistance,
+                        gp.blockSize, false));
+                    outs.emplace_back();
+                    dets.back()->detect(srcs.back(), outs.back(), cv::noArray(), gCvStream);
+                }
+                gCvStream.waitForCompletion();
+                ocvD = m.deltaBytes();
+            }
+            printMemPair("goodFeaturesToTrack working set (FUSED arm: no frame-sized\n"
+                         " float map exists at all on binCV's side)",
+                         "752x480", binD, ocvD, step, reps, reps);
+            emitMem("gftt", "752x480", binD, ocvD, step, reps, reps);
+        }
+    }
+
+    // ======================================================================
+    // 11. The corner response -- cv::cuda::createMinEigenValCorner and
+    //     cv::cuda::createHarrisCorner (cudaimgproc)
+    // ======================================================================
+    if (want("cornerresp")) {
+        std::printf("\n=====================================================================\n"
+                    " 11. CORNER RESPONSE -- binCV cuda::cornerMinEigenValAsync vs\n"
+                    "     cv::cuda::createMinEigenValCorner AND createHarrisCorner\n"
+                    "=====================================================================\n"
+                    " TWO DENOMINATORS, AND THEY ARE NOT INTERCHANGEABLE. binCV's op\n"
+                    " computes the MINIMUM EIGENVALUE of the gradient covariance, so\n"
+                    " createMinEigenValCorner is the like-for-like counterpart and is the\n"
+                    " bar. createHarrisCorner computes a DIFFERENT response (det - k*tr^2)\n"
+                    " over the same covariance and is timed beside it as context -- the\n"
+                    " task named it, and the honest thing is to run it and say plainly\n"
+                    " that it answers a different question, not to quietly substitute it\n"
+                    " for the one that matches.\n"
+                    " BOTH OpenCV arms read the CV_8U picture and internally run a Sobel;\n"
+                    " binCV reads four TERNARY BIT PLANES that already exist in the\n"
+                    " pipeline. That is a role comparison, not an equality, and the\n"
+                    " asymmetry is stated rather than folded into the ratio.\n");
+
+        bc::DeviceImage<float> resp(static_cast<int>(kW), static_cast<int>(kH));
+        const auto runResp = [&] {
+            bc::cornerMinEigenValAsync(bc::planeBlock(fdxBlock.constView(), 2).plane(0),
+                                       bc::planeBlock(fdyBlock.constView(), 2).plane(0),
+                                       bc::planeBlock(fdxBlock.constView(), 2).plane(1),
+                                       bc::planeBlock(fdyBlock.constView(), 2).plane(1), 3,
+                                       resp.view(), gStream);
+        };
+        cv::Ptr<cv::cuda::CornernessCriteria> cvMin =
+            cv::cuda::createMinEigenValCorner(CV_8UC1, 3, 3);
+        cv::Ptr<cv::cuda::CornernessCriteria> cvHarris =
+            cv::cuda::createHarrisCorner(CV_8UC1, 3, 3, 0.04);
+        cv::cuda::GpuMat cvResp;
+
+        const PairedTiming pm = timeKernelPaired(
+            [&] { cvMin->compute(gPicture, cvResp, gCvStream); }, [&] { runResp(); }, 20, 20,
+            kRounds, gStream);
+        printRole("min-eigenvalue response map, blockSize 3 -- THE BAR",
+                  "cv::cuda::createMinEigenValCorner", "bincv::cuda::cornerMinEigenValAsync",
+                  pm, floor, "752x480");
+        emitRow("cornerresp_mineigen", "752x480", pm);
+        printEnqueue("cornerresp_mineigen", "752x480", "cv::cuda minEigenVal",
+                     "bincv::cuda::cornerMinEigenValAsync",
+                     timeHostEnqueue([&] { cvMin->compute(gPicture, cvResp, gCvStream); }),
+                     timeHostEnqueue([&] { runResp(); }), pm);
+
+        const PairedTiming ph = timeKernelPaired(
+            [&] { cvHarris->compute(gPicture, cvResp, gCvStream); }, [&] { runResp(); }, 20,
+            20, kRounds, gStream);
+        printRole("createHarrisCorner beside it -- CONTEXT, a DIFFERENT response\n"
+                  " function over the same covariance, not binCV's counterpart",
+                  "cv::cuda::createHarrisCorner (k = 0.04)",
+                  "bincv::cuda::cornerMinEigenValAsync", ph, floor, "752x480");
+        emitRow("cornerresp_harris_context", "752x480", ph);
+
+        {
+            const int reps = 16;
+            size_t binD = 0, ocvD = 0;
+            {
+                DeviceMemMeter m;
+                m.reset();
+                std::vector<std::unique_ptr<bc::DeviceBinMat>> planes;
+                std::vector<std::unique_ptr<bc::DeviceImage<float>>> maps;
+                for (int i = 0; i < reps; ++i) {
+                    for (int q = 0; q < 4; ++q)
+                        planes.push_back(std::make_unique<bc::DeviceBinMat>(
+                            static_cast<int>(kW), static_cast<int>(kH)));
+                    maps.push_back(std::make_unique<bc::DeviceImage<float>>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                }
+                cudaDeviceSynchronize();
+                binD = m.deltaBytes();
+            }
+            {
+                DeviceMemMeter m;
+                m.reset();
+                std::vector<cv::cuda::GpuMat> srcs, outs;
+                std::vector<cv::Ptr<cv::cuda::CornernessCriteria>> crit;
+                srcs.reserve(static_cast<size_t>(reps));
+                outs.reserve(static_cast<size_t>(reps));
+                crit.reserve(static_cast<size_t>(reps));
+                cv::Mat hp(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
+                           picture.data());
+                for (int i = 0; i < reps; ++i) {
+                    srcs.emplace_back(hp);
+                    crit.push_back(cv::cuda::createMinEigenValCorner(CV_8UC1, 3, 3));
+                    outs.emplace_back();
+                    crit.back()->compute(srcs.back(), outs.back(), gCvStream);
+                }
+                gCvStream.waitForCompletion();
+                ocvD = m.deltaBytes();
+            }
+            printMemPair("corner response working set (four bit planes + one float map\n"
+                         " vs one byte picture + OpenCV's Sobel intermediates + one map)",
+                         "752x480", binD, ocvD, step, reps, reps);
+            emitMem("cornerresp", "752x480", binD, ocvD, step, reps, reps);
+        }
+    }
+
+    // ======================================================================
+    // 12. DESCRIBE -- cv::cuda::ORB::computeAsync (cudafeatures2d)
+    // ======================================================================
+    if (want("describe")) {
+        std::printf("\n=====================================================================\n"
+                    " 12. DESCRIBE -- binCV cuda::computeBriefSteered vs\n"
+                    "     cv::cuda::ORB::computeAsync on PROVIDED keypoints\n"
+                    "=====================================================================\n"
+                    " computeAsync IS accepted in OpenCV 4.5.4 on provided keypoints, so a\n"
+                    " stage-isolated GPU denominator exists and no differential is needed.\n"
+                    " SUPERSET vs SUBSET, stated at the number: computeAsync also builds\n"
+                    " ORB's level-0 pyramid entry and can blur. nlevels = 1 and\n"
+                    " blurForDescriptor = false pin that superset as small as the API\n"
+                    " allows; it is not zero, and the ratio is an upper bound on binCV's\n"
+                    " advantage for that reason.\n"
+                    " Both sides sample the SAME 256 pairs -- cv::ORB's learned table,\n"
+                    " which binCV reaches by pointer out of ops/orbPattern.hpp.\n");
+
+        constexpr size_t kBits = 256;
+        constexpr size_t kWords = kBits / 32;
+        const size_t n = 1000;
+        std::vector<float> xy(2 * n);
+        for (size_t i = 0; i < n; ++i) {
+            xy[2 * i] = static_cast<float>(40 + (i * 37) % (kW - 80));
+            xy[2 * i + 1] = static_cast<float>(40 + (i * 53) % (kH - 80));
+        }
+        bc::DeviceArray<float> dxy(2 * n);
+        bc::DeviceArray<float> dang(n);
+        bc::DeviceArray<uint8_t> dkeep(n);
+        bc::DeviceArray<uint32_t> ddesc(n * kWords);
+        bc::DeviceArray<bincv::BriefPair> dpairs(bc::steeredBriefPatternPairs<kBits>());
+        static bincv::SteeredBriefPattern<kBits> orbSteered{};
+        bincv::makeSteeredBriefPattern<kBits>(orbSteered, bincv::kOrbBriefPattern);
+        bc::DeviceBriefPattern pat{};
+        bc::uploadBriefPattern<kBits>(orbSteered, dpairs.data(), pat, gStream);
+        cudaMemcpyAsync(dxy.data(), xy.data(), 2 * n * sizeof(float),
+                        cudaMemcpyHostToDevice, gStream);
+        cudaStreamSynchronize(gStream);
+        const bc::DeviceKeypointSetConstView kps = bc::keypointSet(dxy.data(), n);
+        const bc::DeviceDescriptorSetView dset =
+            bc::descriptorSet(ddesc.data(), n, kWords, dkeep.data());
+        bc::keypointOrientation(fDenoised.constView(), kps, dang.data(), dkeep.data(), 15,
+                                nullptr, gStream);
+        cudaStreamSynchronize(gStream);
+
+        cv::Ptr<cv::cuda::ORB> orb = cv::cuda::ORB::create(
+            static_cast<int>(n), 1.2f, 1, 31, 0, 2, cv::ORB::HARRIS_SCORE, 31, 20, false);
+        cv::cuda::GpuMat gWide;
+        {
+            cv::Mat hostWide(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
+                             frontFrame.data());
+            gWide.upload(hostWide);
+        }
+        cv::cuda::GpuMat kpMat, descMat;
+        orb->detectAndComputeAsync(gWide, cv::noArray(), kpMat, descMat, false, gCvStream);
+        gCvStream.waitForCompletion();
+        bool computeAsyncWorks = false;
+        std::string refusal;
+        cv::cuda::GpuMat kpProvided = kpMat.clone();
+        try {
+            orb->computeAsync(gWide, kpProvided, descMat, gCvStream);
+            gCvStream.waitForCompletion();
+            computeAsyncWorks = !descMat.empty();
+        } catch (const cv::Exception& e) {
+            refusal = e.what();
+        }
+        std::printf("\n cv::cuda::Feature2DAsync::computeAsync on provided keypoints: %s\n",
+                    computeAsyncWorks ? "ACCEPTED" : "REFUSED");
+        if (!computeAsyncWorks) {
+            std::printf("   %s\n   ROLE BAR UNMEASURED -> verdict BLOCKED. No substitute.\n",
+                        refusal.substr(0, 200).c_str());
+        } else {
+            std::printf("   %d keypoints in, %dx%d CV_8U descriptors out.\n", kpProvided.cols,
+                        descMat.rows, descMat.cols);
+            cv::cuda::GpuMat descOut;
+            const PairedTiming pd = timeKernelPaired(
+                [&] { orb->computeAsync(gWide, kpProvided, descOut, gCvStream); },
+                [&] {
+                    bc::computeBriefSteered(fDenoised.constView(), kps, dang.data(), pat,
+                                            dset, gStream);
+                },
+                20, 60, kRounds, gStream);
+            printRole("256-bit steered BRIEF on provided keypoints",
+                      "cv::cuda::ORB::computeAsync (nlevels 1, blur off)",
+                      "bincv::cuda::computeBriefSteered", pd, floor, "752x480, N=1000");
+            emitRow("describe", "752x480_n1000", pd);
+            printEnqueue("describe", "752x480_n1000", "cv::cuda::ORB::computeAsync",
+                         "bincv::cuda::computeBriefSteered",
+                         timeHostEnqueue(
+                             [&] { orb->computeAsync(gWide, kpProvided, descOut, gCvStream); }),
+                         timeHostEnqueue([&] {
+                             bc::computeBriefSteered(fDenoised.constView(), kps, dang.data(),
+                                                     pat, dset, gStream);
+                         }),
+                         pd);
+        }
+
+        std::printf("\n ORIENTATION: **OUTSTANDING** (ruling R2). cv::cuda::ORB runs\n"
+                    " IC_Angle inside its own keypoint pass and exposes no entry point\n"
+                    " that orients PROVIDED keypoints, so no cv::cuda denominator exists\n"
+                    " at any API level. No CPU number is put in its place.\n");
+
+        {
+            // THE TWO SIDES USE DIFFERENT REPLICA COUNTS, which printMemPair is
+            // built for: each is divided by its OWN count. They have to differ
+            // here. binCV's describe working set is ~45 KB, so sixteen of them
+            // is under ONE of the driver's 2 MB units and the meter refuses to
+            // quote it -- correctly. A cv::cuda::ORB instance is ~2 MB, so 512
+            // of those would not fit on an 8 GB card. Each side is replicated
+            // until its OWN total clears eight units, and no further.
+            const int reps = 16;
+            const int binReps = 512;
+            size_t binD = 0, ocvD = 0;
+            {
+                DeviceMemMeter m;
+                m.reset();
+                std::vector<std::unique_ptr<bc::DeviceArray<float>>> xys, angs;
+                std::vector<std::unique_ptr<bc::DeviceArray<uint8_t>>> keeps;
+                std::vector<std::unique_ptr<bc::DeviceArray<uint32_t>>> descs;
+                for (int i = 0; i < binReps; ++i) {
+                    xys.push_back(std::make_unique<bc::DeviceArray<float>>(2 * n));
+                    angs.push_back(std::make_unique<bc::DeviceArray<float>>(n));
+                    keeps.push_back(std::make_unique<bc::DeviceArray<uint8_t>>(n));
+                    descs.push_back(std::make_unique<bc::DeviceArray<uint32_t>>(n * kWords));
+                }
+                cudaDeviceSynchronize();
+                binD = m.deltaBytes();
+            }
+            {
+                DeviceMemMeter m;
+                m.reset();
+                std::vector<cv::Ptr<cv::cuda::ORB>> orbs;
+                std::vector<cv::cuda::GpuMat> kpsv, descsv;
+                orbs.reserve(static_cast<size_t>(reps));
+                kpsv.reserve(static_cast<size_t>(reps));
+                descsv.reserve(static_cast<size_t>(reps));
+                // EACH REPLICA IS DETECTED ON FIRST, and that is not padding
+                // the reading. cv::cuda::ORB::computeAsync on an instance that
+                // has never detected faults -- its internal per-level buffers
+                // are sized by the first detect -- so `detect then compute` is
+                // the only sequence a caller can actually perform, and it is
+                // what a caller therefore pays. The reading stays labelled an
+                // UPPER BOUND on the describe stage alone, because the
+                // detector's state is inside it.
+                for (int i = 0; i < reps; ++i) {
+                    orbs.push_back(cv::cuda::ORB::create(static_cast<int>(n), 1.2f, 1, 31, 0,
+                                                         2, cv::ORB::HARRIS_SCORE, 31, 20,
+                                                         false));
+                    kpsv.emplace_back();
+                    descsv.emplace_back();
+                    orbs.back()->detectAndComputeAsync(gWide, cv::noArray(), kpsv.back(),
+                                                       descsv.back(), false, gCvStream);
+                    gCvStream.waitForCompletion();
+                    orbs.back()->computeAsync(gWide, kpsv.back(), descsv.back(), gCvStream);
+                }
+                gCvStream.waitForCompletion();
+                ocvD = m.deltaBytes();
+            }
+            printMemPair("describe working set, N = 1000 -- keypoints, angles, keep\n"
+                         " bytes and descriptors on binCV's side; a cv::cuda::ORB\n"
+                         " DETECTOR's whole state on OpenCV's, which is a superset",
+                         "752x480, N=1000", binD, ocvD, step, binReps, reps);
+            emitMem("describe", "752x480_n1000", binD, ocvD, step, binReps, reps);
+        }
+    }
+
+    // ======================================================================
+    // 13. DESCRIPTOR MATCHING -- the one row that runs the other way
+    // ======================================================================
+    if (want("matcher")) {
+        std::printf("\n=====================================================================\n"
+                    " 13. DESCRIPTOR MATCHING -- cv::cuda::DescriptorMatcher\n"
+                    "=====================================================================\n"
+                    " NO binCV DEVICE ARM EXISTS. This backend ships no device matcher:\n"
+                    " `matchDescriptors` appears in backends/cuda/include/bincv/cuda/\n"
+                    " features.hpp only as the shared vocabulary's named consumer, and no\n"
+                    " kernel implements it.\n"
+                    "\n"
+                    " THIS IS NOT AN 'OUTSTANDING' ROW AND MUST NOT BE FILED AS ONE.\n"
+                    " OUTSTANDING (ruling R2) is for a binCV op with no OpenCV\n"
+                    " counterpart. This is the reverse: an OpenCV counterpart with no\n"
+                    " binCV op. There is nothing to time and nothing to ship, so timing\n"
+                    " cv::cuda::BFMatcher alone would produce a number with no second\n"
+                    " arm -- which is not a comparison, and printing it beside this\n"
+                    " backend's op list would invite exactly the misreading the file is\n"
+                    " built to prevent.\n"
+                    "\n"
+                    " WHAT IS TRUE AND WORTH RECORDING. binCV's descriptors come out as\n"
+                    " uint32_t words, so a matcher reading them issues 8 __popc per\n"
+                    " 256-bit descriptor where cv::cuda's HammingDist::reduceIter, which\n"
+                    " is instantiated at uchar, issues 32. That 4x is real, it sits on\n"
+                    " the MATCHING side, and it is UNSPENT until someone writes the\n"
+                    " kernel. It is a reason to write one, not a result.\n");
+        std::printf("NOARM,matcher,752x480,cv::cuda::DescriptorMatcher has no binCV"
+                    " device counterpart\n");
+    }
+
+    // ======================================================================
+    // 14. OUTSTANDING -- every round-2 op with no cv::cuda bar at any level
+    // ======================================================================
+    if (want("outstanding")) {
+        std::printf("\n=====================================================================\n"
+                    " 14. OUTSTANDING (ruling R2) -- round 2's ops with NO cv::cuda\n"
+                    "     counterpart at any API level\n"
+                    "=====================================================================\n"
+                    " Each of these ships on correctness, memory and the HOST comparison,\n"
+                    " with its SPEED verdict recorded OUTSTANDING. No substitute bar is\n"
+                    " invented and no CPU number is quoted as a GPU one.\n"
+                    "\n"
+                    " gradientCovarianceAsync / gradientCovarianceBatchAsync\n"
+                    "     Neither cv::cuda nor cv:: computes a 2x2 gradient covariance at\n"
+                    "     any API level. cornerHarris and createMinEigenValCorner compute\n"
+                    "     a dense float RESPONSE THROUGH one -- that is the bar for a\n"
+                    "     composed corner op, which section 11 runs, and it is not a bar\n"
+                    "     for the covariance itself.\n"
+                    "\n"
+                    " cornerSubPixAsync\n"
+                    "     No cv::cuda counterpart in any module. Decided instead by its\n"
+                    "     own round-trip inequality, which its author reports it MISSES.\n"
+                    "\n"
+                    " goodFeaturesToTrack's DEVICE-RESIDENT SPACING\n"
+                    "     Section 10 times the whole op against OpenCV's. The residency\n"
+                    "     itself -- a greedy min-distance filter that never leaves the\n"
+                    "     device -- has no counterpart to be timed against, because\n"
+                    "     OpenCV's runs on the host by construction.\n"
+                    "\n"
+                    " keypointsFromCorners\n"
+                    "     Tier 3. OpenCV does not have the problem: its detectors already\n"
+                    "     hand back float2, so there is nothing to convert and nothing to\n"
+                    "     compare.\n"
+                    "\n"
+                    " keypointOrientation (all three arms)\n"
+                    "     cv::cuda::ORB runs IC_Angle inside its keypoint pass and exposes\n"
+                    "     no entry point that orients provided keypoints. Section 12 says\n"
+                    "     so at the number.\n"
+                    "\n"
+                    " derivativeX / derivativeY / derivativeXY over TERNARY planes\n"
+                    "     Section 11's inputs. cv::cuda::createDerivFilter is the nearest\n"
+                    "     denominator and the derivcov family times it; both arms sit ON\n"
+                    "     the launch floor there, so that ratio is a lower bound on the\n"
+                    "     gap and says nothing about binCV's kernel.\n");
+        std::printf("OUTSTANDING,covariance\nOUTSTANDING,cornerSubPixAsync\n"
+                    "OUTSTANDING,gftt_device_spacing\nOUTSTANDING,keypointsFromCorners\n"
+                    "OUTSTANDING,keypointOrientation\n");
     }
 
     cudaStreamSynchronize(gStream);

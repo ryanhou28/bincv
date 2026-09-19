@@ -35,6 +35,7 @@
 /// not drop" is something a script can read rather than something to take on
 /// trust. scripts/verify.sh reads exactly that line.
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -182,10 +183,22 @@ inline int runAll(const char* suiteName, int argc, char** argv) {
 #define BINCV_CHECK(expr) \
     ::bincv::test::reportCheck((expr), #expr, __FILE__, __LINE__, "")
 
+/// @brief Passes if `actual == expected`, reporting both values when it does not.
+/// @note **`actual` is evaluated EXACTLY ONCE.** It used to appear twice -- once
+/// for the comparison and once inside `std::to_string` for the message --
+/// which is invisible for a plain value and a defect for a call. The two
+/// evaluations made `BINCV_CHECK_EQ(cudaFree(p), cudaSuccess)` a double
+/// free and `BINCV_CHECK_EQ(cudaMalloc(...), cudaSuccess)` a leak, and a
+/// CUDA suite found it the expensive way. Binding the value first is what
+/// makes the obvious spelling safe, so nobody has to know this.
 #define BINCV_CHECK_EQ(actual, expected)                                        \
-    ::bincv::test::reportCheck((actual) == (expected), #actual " == " #expected, \
-        __FILE__, __LINE__,                                                      \
-        "got " + std::to_string(actual) + ", expected " + std::to_string(expected))
+    do {                                                                        \
+        const auto bincvCheckActual = (actual);                                 \
+        ::bincv::test::reportCheck(bincvCheckActual == (expected),              \
+            #actual " == " #expected, __FILE__, __LINE__,                       \
+            "got " + std::to_string(bincvCheckActual) +                         \
+                ", expected " + std::to_string(expected));                      \
+    } while (0)
 
 /// @brief Passes if evaluating `expr` throws an exception of type `exc`.
 ///
@@ -219,6 +232,33 @@ inline int runAll(const char* suiteName, int argc, char** argv) {
 #else
 #define BINCV_CHECK_THROWS(expr, exc)                                            \
     ::bincv::test::reportSkipped(#expr " throws " #exc, __FILE__, __LINE__)
+#endif
+
+/// @def BINCV_CHECK_EQ_UNLESS_CHECKED(call, expected)
+/// @brief Passes if `call` returns `expected`, in the configurations where the
+///        call can return at all.
+///
+/// A DELIBERATE DOMAIN VIOLATION cannot be executed in a build where
+/// BINCV_ASSERT is live. An op that names a narrower domain asserts it and
+/// THEN returns its error code, so a checked build aborts inside the assert
+/// before there is a code to compare -- which is the contract rather than a
+/// defect. The negative case therefore runs in the unchecked configuration and
+/// says so in the checked one, where the gate has still COMPILED the assertion,
+/// which is what the checked configuration exists to prove.
+///
+/// @note The expected value is a parameter rather than baked in, so this stays
+/// in the shared harness without dragging any one backend's error
+/// enumeration into every host suite.
+/// @note A checked build reports one FEWER check per call site. That is the
+/// reason a Debug configuration legitimately counts below its Release
+/// twin, and it is why the two are compared against separate floors.
+#if BINCV_DEBUG_CHECKS
+#  define BINCV_CHECK_EQ_UNLESS_CHECKED(call, expected)                          \
+      std::printf("  [not run in a checked build] %s\n"                          \
+                  "    BINCV_ASSERT aborts before the error code is returned\n", \
+                  #call)
+#else
+#  define BINCV_CHECK_EQ_UNLESS_CHECKED(call, expected) BINCV_CHECK_EQ((call), (expected))
 #endif
 
 // ---------------------------------------------------------------------------

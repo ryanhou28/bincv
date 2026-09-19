@@ -36,29 +36,52 @@ none allocating inside a kernel:
 | `median.hpp` | `denoiseMedian3` over packed bits, and `medianWide<K, T>` over a wide image for K ∈ {1,3,5,7,9} at uint8 and uint16, with a fast arm behind `impl::medianWideFastArmEnabled()` |
 | `pyramid.hpp` | `pyrDownBox`, `DevicePyramid<LevelBits...>` (the whole ladder in **one** allocation), `buildPyramidBox`, `pyrFastArmCovers`, and a bit-sliced arm behind `impl::pyrBitSlicedEnabled()` |
 | `shift.hpp` | `shift` plus `shiftLeft`/`Right`/`Up`/`Down`, with a `__funnelshift` arm behind `impl::shiftFunnelEnabled()` |
+| `derivative.hpp` | `derivativeX`, `derivativeY`, and a fused `derivativeXY` behind its own switch — ternary derivatives over N ∈ [1,4] plane blocks |
+| `covariance.hpp` | `gradientCovarianceAsync` and `gradientCovarianceBatchAsync` (one block per window, N windows in one launch), `DeviceGradientCovariance` with `toHost` |
+| `corner.hpp` | `cornerMinEigenValAsync` (window and bit-sliced arms), `goodFeaturesToTrackAsync` (fused-tile and frame-map arms), `DeviceCornerResult`, `goodFeaturesScratchBytes` |
+| `fast.hpp` | `detectFastAsync` (reference and tiled arms, two scoring arms, warp-aggregated append), `fastScratchBytes` |
+| `orientation.hpp` | intensity-centroid orientation over a wide image (three arms) and over a bit plane (two arms), `DiscPod` |
+| `descriptor.hpp` | `computeBrief` / `computeBriefSteered` (uint8 and uint16), `DeviceBriefPattern`, `uploadBriefPattern`, with a `__ballot_sync` arm |
+| `subpix.hpp` | `cornerSubPixAsync`, `DeviceSubPixMask`, `DeviceSubPixResult` — skip and dense arms |
+| `keypoints.hpp` | `keypointsFromCorners` — the detector-to-keypoint-set link. **No host twin**: it exists so a resident pipeline needs no mid-frame synchronize |
 
-Twelve of binCV's twenty-seven host operation headers have device arms. The
-rest do not yet — tracking, the frontend's feature path, sparse stereo and the
-geometry — and the remaining work stays filed as issues.
+Nineteen of binCV's twenty-seven host operation headers have device arms, plus
+`keypoints.hpp`, which has no host twin. The rest do not yet — **descriptor
+matching**, tracking, sparse stereo and the geometry — and the remaining work
+stays filed as issues. Matching is the notable absence: it is where the format's
+word utilisation would pay, since these descriptors come out as `uint32_t` words
+and a matcher issues 8 `__popc` per 256-bit descriptor where `cv::cuda`'s
+`uchar` path issues 32.
 
-**Four device ops accept a narrower domain than their host twin**, by the rule
-that a device op may do so provided the docstring names the domain, the op
+**Several device ops accept a narrower domain than their host twin**, by the
+rule that a device op may do so provided the docstring names the domain, the op
 asserts it, and it returns an error outside it. Morphology takes elements up to
 32 rows × 512 columns (32 columns masked); `medianWide` takes K ∈ {1,3,5,7,9}
 as a compile-time parameter; `pyrDownBox` takes 1–8 planes a side; `binarize`
-takes 1–32. Outside its domain each returns `cudaErrorInvalidValue` **without
+takes 1–32; the derivative takes N ∈ [1,4]; steered BRIEF names its angle domain
+[-2π, 2π]. Outside its domain each returns `cudaErrorInvalidValue` **without
 launching**, and a Tier 1 claim on one of them is a claim over that domain,
 which the docstring says where it makes the claim. The Debug gate configuration
 compiles those assertions, so they are built as well as written.
 
-**`cuda::threshold` is correct and lighter but currently SLOWER than
-`cv::cuda::threshold`** — 2.22× slower at 3840×2160, against 2.46× less device
-memory. It is the one operation here that does not lead on both axes, its
-mechanism is located (two software divides in `packKernel`'s grid-stride
-addressing), and it is documented as a miss in
-[docs/reports/cuda.md](../../docs/reports/cuda.md) rather than presented as a
-result. A caller who wants bits from a wide frame still gets them correctly;
-a caller who wants them *faster than OpenCV* does not have that yet.
+**`cuda::threshold` now leads on both axes** — 0.744× the time of
+`cv::cuda::threshold` at 3840×2160 and never above 1.00× at any geometry, at
+2.46× less device memory. The earlier miss (2.22× slower) was two software
+divides in `packKernel`'s grid-stride addressing; a row-grid shape removes them
+and a byte-lane shape reads four pixels per lane through `__vsetgeu4`.
+
+**Two operations do NOT lead on both axes, and they are the ones to read the
+report about before using.** `detectFastAsync` misses its role bar by 16.8× on
+real frontend content and is 1.55× larger on the memory meter — its corner set is
+provably the host's, but 98.6% of its time is a single-block raster sort.
+`cornerSubPixAsync` misses its own round-trip rule: downloading the derivative
+planes and refining on the host is 0.53 ms against 1.91 ms resident, because
+bit-exactness forces `double` on a part that runs FP64 at 1/64 rate. And the
+**resident frontend as a whole is 1.22× slower than binCV's own CPU frontend**,
+for one reason: `selectKernel` runs in one block at 1.29% of the SMs. All three
+are documented as misses in
+[docs/reports/cuda.md](../../docs/reports/cuda.md) rather than presented as
+results.
 
 **A compaction truncates, counts the truth, and cannot pass as complete.** A
 detection kernel appends through `DeviceAppendBufferView<T>` and the counter is

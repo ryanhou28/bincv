@@ -178,6 +178,21 @@ run_configuration() {
     fi
 
     local targets=(bincv_cuda "${SUITES[@]}")
+    # The worked examples, in BOTH configurations. An example is the one thing a
+    # reader can run to check a claim, and an example no gate compiles rots at
+    # the speed the headers under it change -- the same argument that made the
+    # benchmarks a gate target. They are built, not run: the resident frontend
+    # needs a frame blob and an idle GPU, neither of which this gate may assume.
+    #
+    # DERIVED FROM THE FILENAMES rather than listed here, because that directory
+    # declares its targets with a file(GLOB) -- so there is no add_executable()
+    # name to match, and a list written here would go stale the moment an
+    # example is added the intended way. Same reason the suites and the
+    # benchmarks are derived.
+    while IFS= read -r example; do
+        [ -n "${example}" ] && targets+=("${example}")
+    done < <(find "${REPO_ROOT}/backends/cuda/examples" -maxdepth 1 -name '*.cpp' \
+                 -exec basename {} .cpp \; 2>/dev/null | sort)
     if [ "${benchmarks}" = "ON" ]; then
         # Derived, not listed, for the same reason the suites are: a benchmark
         # added the intended way must not be one this gate silently skips.

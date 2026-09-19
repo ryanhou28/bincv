@@ -512,18 +512,11 @@ BINCV_TEST(CudaPyramid, TheFastArmCoversExactlyTheDocumentedSet) {
     BINCV_CHECK_EQ(bad, 0u);
 }
 
-// A DELIBERATE DOMAIN VIOLATION cannot be executed in a build where
-// BINCV_ASSERT is live: the assert aborts before the error code can be
-// returned, which is the contract, not a defect. So the negative cases below
-// run in the unchecked configuration and say so in the checked one -- the
-// Debug gate still COMPILES the assertion, which is what it exists to prove.
-#if BINCV_DEBUG_CHECKS
-#  define BINCV_PYR_EXPECT_REJECTED(call)                                             \
-      std::printf("  [not run in a checked build] %s\n"                               \
-                  "    BINCV_ASSERT aborts before the error code is returned\n", #call)
-#else
-#  define BINCV_PYR_EXPECT_REJECTED(call) BINCV_CHECK_EQ((call), cudaErrorInvalidValue)
-#endif
+// The negative cases below are deliberate domain violations, which the shared
+// harness's BINCV_CHECK_EQ_UNLESS_CHECKED runs in the unchecked configuration
+// and reports in the checked one. See its docstring for why.
+#define BINCV_PYR_EXPECT_REJECTED(call) \
+    BINCV_CHECK_EQ_UNLESS_CHECKED(call, cudaErrorInvalidValue)
 
 BINCV_TEST(CudaPyramid, BoxReportsAnErrorOutsideItsNamedDomain) {
     bincv::cuda::DeviceBinMat src(64, 16);

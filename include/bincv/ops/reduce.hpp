@@ -378,7 +378,12 @@ struct SplitCount {
     /// per pixel.
     /// @note Not an operator- on the struct: a reader who sees `crossTerm` looks
     /// it up, whereas `a - b` on two size_t fields reads as obviously fine.
-    long long crossTerm() const {
+    /// @note BINCV_HOST_DEVICE. Two integers in, one out, no memory and no
+    /// traversal -- so the CUDA backend's covariance epilogue reaches the ONE
+    /// implementation of this signed subtraction instead of open-coding
+    /// `whenClear - whenSet` in a kernel, which is the spelling this member
+    /// exists to keep out of the codebase.
+    BINCV_HOST_DEVICE long long crossTerm() const {
         return static_cast<long long>(whenClear) - static_cast<long long>(whenSet);
     }
 };
