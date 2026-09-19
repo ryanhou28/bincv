@@ -509,8 +509,8 @@ replica count — one meter, named, never crossed with an allocation sum.
 
 | op | geometry | `cv::cuda` | binCV | speed | device memory |
 |---|---|---|---|---|---|
-| `threshold` → bits | 752×480 | 0.0113 ms | 0.0130 ms | **0.86× — behind** | **2.46×** smaller |
-| `threshold` → bits | 3840×2160 | 0.0378 ms | 0.0845 ms | **0.45× — behind** | not measured |
+| `threshold` → bits | 752×480 | 0.0100 ms | 0.0094 ms | **1.00× — parity** | **2.46×** smaller |
+| `threshold` → bits | 3840×2160 | 0.0367 ms | 0.0272 ms | **1.34×** | not measured |
 | `edgeThreshold` | 752×480 | 0.0821 ms | 0.0096 ms | **8.1×** | **24.6×** smaller |
 | `edgeThreshold` | 1920×1080 | 0.1886 ms | 0.0164 ms | **11.1×** | not measured |
 
@@ -555,33 +555,35 @@ are six each, so the four byte comparisons are about 12 of the ~18 instructions
 a lane spends on its quad — the arm wins by amortising loads and addressing over
 four pixels, not because the byte-lane arithmetic is cheap.
 
-**`threshold` misses its own speed bar, and is not presented as a win.** The rule
-its author wrote before measuring named the fail condition in as many words:
-*slower than OpenCV by more than both printed spreads*. At 752×480 and 1080p
-the ranges overlap and there is no result in either direction. At 3840×2160
-binCV is **2.22× slower with 7 of 9 runs disjoint** — the fail condition, met at
-the one size where this measurement can decide anything. The memory bar (≥1.77×
-on the working set) passes at 2.46×. By the project's ship rule that combination
-does not merge on the memory argument: it gets optimized first, or the gap is
-explicitly accepted with the price stated. **Neither has happened yet**, and the
-op is documented here as a miss.
+**`threshold` missed its own speed bar, and was optimized rather than excused.**
+The rule its author wrote before measuring named the fail condition in as many
+words: *slower than OpenCV by more than both printed spreads*. It was met — at
+3840×2160 binCV measured **2.22× slower with 7 of 9 runs disjoint**, while the
+memory bar passed at 2.46×. The project's ship rule says that combination does
+not merge on the memory argument, so the op was optimized in the following
+round. It now reads **1.00× / 0.91× / 0.74× across the ladder**, never above
+1.00× at any geometry, with memory byte-identical at 2.46×. The row above is the
+post-fix reading; the *The role bars* table carries the same numbers from the
+same protocol.
 
-The mechanism was located without a profiler. `cuda::threshold` is header-only —
-the host's own `impl::thresholdCutoff` reduction composed with `cuda::packBits`,
-which is what makes its Tier 1 claim provable rather than restated — so the
-kernel under the number is `packKernel<uint8_t, GreaterEqual>`. `cuobjdump -sass`
-shows **184 instructions around one LDG and one STG**: 62 IMAD, 26 IADD3, 18
-ISETP, and **two software divides** (`I2F.U32.RP → MUFU.RCP → F2I`, and a 64-bit
-one) which are the grid-stride loop's `wordIdx / words` and `wordIdx - y*words`.
-binCV moves **1.90× less traffic and takes 1.89× longer**: at 1080p it runs at
-6.8× its own bandwidth floor where OpenCV runs at 1.9× of its. Two fixes are
-named and both are already precedent in this backend — a 2-D grid with
-`blockIdx.y` as the row deletes both divides outright, and four-pixels-per-lane
-vector loads are exactly what `edgeThreshold`'s byte-lane arm above does to win
-8–11× in this same family. Neither was attempted this round. This also settles,
-in the opposite direction to the one expected, an earlier suspicion that
-`cv::cuda::threshold` was anomalously slow: it was not: binCV was slow and the
-default stream was hiding it.
+The mechanism was located without a profiler, and later confirmed with one.
+`cuda::threshold` is header-only — the host's own `impl::thresholdCutoff`
+reduction composed with `cuda::packBits`, which is what makes its Tier 1 claim
+provable rather than restated — so the kernel under the number is
+`packKernel<uint8_t, GreaterEqual>`. `cuobjdump -sass` showed **184 instructions
+around one LDG and one STG**: 62 IMAD, 26 IADD3, 18 ISETP, and **two software
+divides** (`I2F.U32.RP → MUFU.RCP → F2I`, and a 64-bit one) which are the
+grid-stride loop's `wordIdx / words` and `wordIdx - y*words`. A 2-D grid with
+`blockIdx.y` as the row deletes both outright; a byte-lane arm on top reads four
+pixels per lane through one 32-bit load and `__vsetgeu4`, which is what
+`edgeThreshold`'s arm above already does to win 8–11× in this same family. 184
+instructions became 104, with zero software divides and zero spills, and the
+profiler reads the kernel moving from 67.2% SM / 19.3% DRAM — compute-bound on
+its divides — to 49.4% SM / 63.8% DRAM, which is where a packer belongs.
+
+This also settled, in the opposite direction to the one expected, a suspicion
+that `cv::cuda::threshold` was anomalously slow. It was not: binCV was slow, and
+the default stream was hiding it.
 
 `binarize` — N bit-planes in, one bit-plane out, one launch, templated on plane
 count 1…32 for register residency and with **zero spills across all 32
