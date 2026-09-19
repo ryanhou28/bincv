@@ -18,6 +18,11 @@
 #     for both the host and device halves (via -Xcompiler), so a warning in a
 #     .cu file is as fatal as one in a .cpp file is under verify.sh.
 #
+# The suites are not listed in this file. They are read out of
+# backends/cuda/tests/CMakeLists.txt, which is where a suite is declared -- see
+# the block that does it for why naming them here, twice, was a silent skip
+# waiting on the next op family.
+#
 #   ./scripts/verify_cuda.sh
 #
 # The toolkit is found through CMake, or pointed at explicitly:
@@ -72,6 +77,60 @@ if [ -z "${NVCC}" ]; then
 fi
 echo "  nvcc: ${NVCC}"
 
+# ---------------------------------------------------------------------------
+# The suites, named once
+#
+# They used to be named twice -- once in the `cmake --build --target` list and
+# once in the loop that runs them -- and the two lists could disagree in
+# silence. A suite missing from the first is run by nobody; a suite missing from
+# the second is built by nobody; either way this gate stays green over a suite
+# that never executed, which is the one failure a verification script must not
+# have. Every op family added to the backend adds a suite, so the two lists had
+# a drift scheduled for the next one.
+#
+# Derived from the tests' own CMakeLists.txt rather than written here, for the
+# reason scripts/verify_cross.sh gives for deriving its manifest: a list kept in
+# the script goes stale the moment a suite is added the intended way, and
+# nothing notices. `bincv_add_test_target(<name> ...)` is that declaration.
+# ---------------------------------------------------------------------------
+CUDA_TESTS_CMAKE="${REPO_ROOT}/backends/cuda/tests/CMakeLists.txt"
+SUITES=()
+while IFS= read -r line; do
+    [ -n "${line}" ] && SUITES+=("${line}")
+done < <(sed -n 's/^[[:space:]]*bincv_add_test_target([[:space:]]*\([A-Za-z0-9_][A-Za-z0-9_]*\).*/\1/p' \
+             "${CUDA_TESTS_CMAKE}" 2>/dev/null)
+
+if [ ${#SUITES[@]} -eq 0 ]; then
+    echo "  NO SUITES DERIVED from ${CUDA_TESTS_CMAKE}"
+    echo "  This is a broken gate, not a skip: it would build the backend, run"
+    echo "  nothing, and report a pass. Check that the suites are still declared"
+    echo "  with bincv_add_test_target()."
+    exit 1
+fi
+
+# The derivation is a text match, so it is only as good as the spelling it
+# expects. That file names its binaries a SECOND time, independently, in the
+# add_test(NAME ... COMMAND <binary>) calls -- so requiring every binary ctest is
+# told to run to be one this gate builds turns "the sed missed a suite" from a
+# silent skip into a failure. A name behind a variable, or a call split across
+# lines, lands here rather than nowhere.
+while IFS= read -r bin; do
+    [ -n "${bin}" ] || continue
+    case " ${SUITES[*]} " in
+        *" ${bin} "*) ;;
+        *)  echo "  add_test() in ${CUDA_TESTS_CMAKE} runs '${bin}', which is not in"
+            echo "  the suite list derived from bincv_add_test_target(). This gate would"
+            echo "  build it with nobody and run it with nobody. Declare the target that"
+            echo "  way, or fix the derivation above -- do not leave it unrun."
+            exit 1 ;;
+    esac
+done < <(sed -n 's/^[[:space:]]*add_test([[:space:]]*NAME[[:space:]][^)]*COMMAND[[:space:]]\{1,\}\([A-Za-z0-9_][A-Za-z0-9_]*\).*/\1/p' \
+             "${CUDA_TESTS_CMAKE}" 2>/dev/null)
+
+echo "  suites: ${SUITES[*]}"
+echo "          (derived from backends/cuda/tests/CMakeLists.txt -- built and run"
+echo "           from one list, so neither half can quietly lose one)"
+
 CMAKE_ARGS=(
     -S "${REPO_ROOT}" -B "${BUILD_DIR}"
     -DBINCV_CUDA=ON
@@ -93,8 +152,7 @@ if ! cmake "${CMAKE_ARGS[@]}" >"${BUILD_DIR}.configure.log" 2>&1; then
 fi
 
 echo "  building..."
-if ! cmake --build "${BUILD_DIR}" --target bincv_cuda test_cuda_backend \
-        test_cuda_custom -j"$(nproc)" \
+if ! cmake --build "${BUILD_DIR}" --target bincv_cuda "${SUITES[@]}" -j"$(nproc)" \
         >"${BUILD_DIR}.build.log" 2>&1; then
     cat "${BUILD_DIR}".build.log
     echo "  BUILD FAILED"
@@ -109,7 +167,7 @@ if grep -q "warning:" "${BUILD_DIR}".build.log; then
 fi
 
 echo "  running device-vs-host suites..."
-for suite in test_cuda_backend test_cuda_custom; do
+for suite in "${SUITES[@]}"; do
     "${BUILD_DIR}/backends/cuda/tests/${suite}"
     RC=$?
     if [ ${RC} -eq 77 ]; then
