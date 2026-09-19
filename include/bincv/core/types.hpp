@@ -60,14 +60,24 @@ struct Rect {
     int width;   ///< Extent in columns; <= 0 means an empty rectangle
     int height;  ///< Extent in rows; <= 0 means an empty rectangle
 
-    Rect() : x(0), y(0), width(0), height(0) {}
-    Rect(int x_, int y_, int width_, int height_) : x(x_), y(y_), width(width_), height(height_) {}
+    /// @note The three BINCV_HOST_DEVICE annotations below are the whole of this
+    /// type's device story, and they are here because a Rect is an ARGUMENT a
+    /// kernel already receives: the CUDA backend's batch reductions take a
+    /// device array of them and clip each one with the host's own
+    /// impl::clipRegion. Only what that path calls is annotated -- the
+    /// constructors, so a kernel can build one, and the emptiness test the
+    /// clip begins with. Everything else stays host-only until something
+    /// needs it, since an annotation nobody calls is untested on the side
+    /// that motivated it.
+    BINCV_HOST_DEVICE Rect() : x(0), y(0), width(0), height(0) {}
+    BINCV_HOST_DEVICE Rect(int x_, int y_, int width_, int height_)
+        : x(x_), y(y_), width(width_), height(height_) {}
 
     /// @brief True when the rectangle covers no pixel at all, before any clipping.
     /// @note A rectangle that lies wholly outside an image is NOT empty by this
     /// test -- it is empty after clipping, which is the operation's business
     /// and not the rectangle's.
-    bool empty() const { return width <= 0 || height <= 0; }
+    BINCV_HOST_DEVICE bool empty() const { return width <= 0 || height <= 0; }
 
     /// @brief Equality, field for field.
     bool operator==(const Rect& other) const {

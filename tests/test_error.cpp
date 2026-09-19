@@ -2,11 +2,12 @@
 // point of the policy is the configuration that has no OpenCV and no exceptions,
 // so this suite has to build and run there.
 //
-// Covers the four claims the policy makes:
+// Covers the five claims the policy makes:
 // 1. BINCV_THROW throws the named type, with the message, where exceptions exist
 // 2. BINCV_ASSERT compiles away ENTIRELY under NDEBUG
 // 3. Validation still rejects bad arguments
 // 4. at / set are unchecked in a release build
+// 5. BINCV_HOST_DEVICE expands to NOTHING when the compiler is not nvcc
 //
 // This suite covers the configuration it is COMPILED in, which is never the
 // checked one in practice: all three verified builds are Release. Two companion
@@ -31,6 +32,37 @@
 #if BINCV_EXCEPTIONS_ENABLED
 #include <stdexcept>
 #include <string>
+#endif
+
+// ---------------------------------------------------------------------------
+// 5. BINCV_HOST_DEVICE EXPANDS TO NOTHING HERE
+//
+// The library is header-only with zero dependencies and must stay compilable by
+// a plain C++17 compiler with no CUDA installed. That this file compiles at all
+// is most of the proof -- but it is the weak half: a macro that expanded to a
+// stray token would usually still compile somewhere, and "it built" would not
+// say which.
+//
+// So the expansion is inspected directly. Stringizing an empty macro yields the
+// empty string, and indexing a string literal is a constant expression, so this
+// is decided by the compiler with nothing to run and no check to count. It fires
+// in every configuration this suite is built in -- including the Cortex-M gate,
+// where the compiler is arm-none-eabi-g++ and there is no CUDA on the machine's
+// path at all.
+//
+// The mirror image lives in the CUDA suite (backends/cuda/tests), which asserts
+// the expansion is NON-empty under nvcc. Either assertion alone would be passed
+// by a macro that is always empty.
+// ---------------------------------------------------------------------------
+#define BINCV_TEST_STRINGIZE_(x) #x
+#define BINCV_TEST_STRINGIZE(x) BINCV_TEST_STRINGIZE_(x)
+#if defined(__CUDACC__)
+static_assert(BINCV_TEST_STRINGIZE(BINCV_HOST_DEVICE)[0] != '\0',
+              "under nvcc BINCV_HOST_DEVICE must carry the annotations");
+#else
+static_assert(BINCV_TEST_STRINGIZE(BINCV_HOST_DEVICE)[0] == '\0',
+              "BINCV_HOST_DEVICE must expand to nothing off nvcc -- the "
+              "no-CUDA-compiler property is what it exists to preserve");
 #endif
 
 namespace {

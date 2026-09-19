@@ -323,13 +323,48 @@ plane on the host. No caller is restricted by the choice: on little-endian a
 plane at any host word width is byte-identical to a `uint32_t` plane (section 3,
 `narrowPlane`), so upload accepts all four host word types as a byte copy.
 
-Because the views are forked rather than the core types annotated, `core/`
-compiles unchanged off-CUDA — there is no `__host__ __device__` macro threaded
-through it, and the Cortex-M gate is unaffected because nothing changed for it
-to be affected by. The shared layer is the byte layout, the contracts, and the
-equality tests; the two device copies of the row-geometry helpers
-(`rowWords`, `rowTailMask`) are asserted equal to the host originals across
-widths rather than trusted to stay in step.
+**The views are forked; a handful of scalar helpers are shared, and the line
+between those two is the whole of the rule.** `core/error.hpp` defines
+`BINCV_HOST_DEVICE`, which expands to `__host__ __device__` under nvcc and to
+*nothing* under every other compiler. It is not a general annotation of the core
+types, and it is not a door to a shared kernel. A function may carry it only
+when it is **scalar and traversal-free** — no loop over pixels, rows or words,
+no pointer into an image, no allocation. That covers the closed-form rules the
+two sides would otherwise each have to derive: `impl::borderIndex`,
+`impl::reflect101Edge`, `impl::clipRegion` (with `regionFromExtent` and
+`clipColumns` under it), `impl::minEigenValue`, `impl::quantScale`,
+`impl::thresholdCutoff`, `maj3` and `thresholdGE`. Anything that walks an image
+stays forked, because that is exactly where the host's row-major, popcount,
+cache-line shape and the device's warp shape genuinely disagree.
+
+The reason the line sits there is that a second derivation of one rule is this
+project's recurring failure mode: the copy that drifts does not crash, it
+answers a plausible question nobody asked. `backends/cuda/src/reduce.cu` carried
+a hand-written restatement of the clip geometry for its batch kernel while its
+own header comment claimed nothing was copied, and `pack.cu` carried a
+`quantScaleDevice` restating a rounding form whose divergence from OpenCV is
+deliberate — a drifted copy there would have read as that divergence finally
+being fixed. Both now call the host's own definition.
+
+Three properties are **proven rather than asserted**. The library still compiles
+under a plain C++17 compiler with no CUDA installed — `tests/test_error.cpp`
+inspects the macro's expansion and fails the build if it is not empty, in every
+configuration including the Cortex-M gate, where the compiler is
+`arm-none-eabi-g++`. Its mirror in the CUDA suite fails if the expansion is
+empty *there*, since either assertion alone would be satisfied by a macro that
+is always empty. And `backends/cuda/tests/test_cuda_shared_helpers.cu` sweeps
+every shared helper on both targets and compares the answers exactly —
+`minEigenValue` by float bit pattern, because "close enough" is not the claim.
+`BINCV_ASSERT` works inside a shared helper (`detail::assertFailed` has a
+`printf`/`__trap()` device branch), so preconditions do not vanish on one of the
+two targets; `BINCV_THROW` deliberately does not, since it reports a host-side
+setup failure.
+
+The shared layer is therefore the byte layout, the contracts, those scalar
+rules, and the equality tests. The two device copies of the row-geometry helpers
+(`rowWords`, `rowTailMask`) remain copies — they are `uint32_t`-specific device
+forms of templated host originals — and are asserted equal to those originals
+across widths rather than trusted to stay in step.
 
 **What runs, and what is measured.** The backend provides bitwise logic, bulk
 population-count reductions, the sensor stage (`packBits`), the census

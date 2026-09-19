@@ -198,8 +198,12 @@ constexpr size_t bitSlicedSumPlanes(size_t k) {
 /// adder network below uses -- which is the other way to see why "at least
 /// two of three" is a majority.
 /// @note No branches, no memory, 64 pixels per word at uint64_t.
+/// @note BINCV_HOST_DEVICE, and still constexpr -- the annotation is added to the
+/// declaration, it does not replace anything. Three words in, one word out:
+/// a device kernel that needs a bitwise median calls this rather than
+/// re-deriving which three ANDs to OR together.
 template <typename WordType>
-constexpr WordType maj3(WordType a, WordType b, WordType c) {
+BINCV_HOST_DEVICE constexpr WordType maj3(WordType a, WordType b, WordType c) {
     // The casts are the -Wconversion tax on integer promotion: `a & b` is an int
     // for uint8_t and uint16_t, and storing it back is a narrowing conversion
     // (see the same note in ops/logic.hpp).
@@ -306,8 +310,14 @@ inline void bitSlicedSum(const WordType* inputs, size_t k, WordType* outPlanes) 
 /// over-counts. majority3 below masks internally because it owns
 /// its destination -- this function returns a word and cannot.
 /// @note Never throws and never allocates.
+/// @note BINCV_HOST_DEVICE. The loop is over PLANES -- at most 8 for a QuantMat,
+/// 32 for the widest plane-view caller -- not over pixels, and `planes`
+/// points at a caller-held array of that many words rather than into an
+/// image. That is what makes it shareable: the traversal of the image stays
+/// with the caller, on whichever side of the bus it lives.
 template <typename WordType>
-inline WordType thresholdGE(const WordType* planes, size_t nPlanes, unsigned threshold) {
+BINCV_HOST_DEVICE inline WordType thresholdGE(const WordType* planes, size_t nPlanes,
+                                              unsigned threshold) {
     BINCV_ASSERT(nPlanes == 0 || planes != nullptr,
                  "thresholdGE: a non-zero plane count needs a non-null planes pointer");
 

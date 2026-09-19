@@ -28,6 +28,15 @@
 /// answer, but it is a defined one, and it keeps the validation checks in
 /// the code rather than compiled out of the configuration that can least
 /// afford to skip them.
+///
+/// @note This header is also where the project's COMPILATION-MODE macros live --
+/// the ones every other header has to agree about, each detected from the
+/// compiler rather than asserted by a build system: BINCV_EXCEPTIONS_ENABLED,
+/// BINCV_DEBUG_CHECKS, BINCV_ABI_NAMESPACE and BINCV_HOST_DEVICE. They are
+/// here because this is the one header every binCV header already includes
+/// -- opening BINCV_ABI_NAMESPACE requires it -- so a macro defined here is
+/// visible everywhere by construction rather than by an include somebody
+/// has to remember.
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -118,6 +127,59 @@
 #  endif
 #endif
 
+// ---------------------------------------------------------------------------
+// BINCV_HOST_DEVICE -- one scalar helper, compiled for two targets
+// ---------------------------------------------------------------------------
+
+/// @def BINCV_HOST_DEVICE
+/// @brief Marks a SCALAR helper as compilable for a GPU as well as a CPU:
+/// `__host__ __device__` when nvcc is the compiler, and NOTHING otherwise.
+///
+/// @note WHAT IT IS FOR. backends/cuda/ shares the REPRESENTATION and forks the
+/// KERNELS, because a device traversal has nothing in common with a row
+/// loop. A scalar helper is not a traversal: `impl::clipRegion`,
+/// `impl::borderIndex`, `maj3`, `thresholdGE` and `impl::minEigenValue` are
+/// closed-form arithmetic over a handful of integers, with no loop over
+/// pixels and no memory of their own. Before this macro the backend had to
+/// re-derive such a rule in device code by hand, and a second derivation of
+/// one rule is the failure this project keeps finding: the copy that drifts
+/// does not crash, it answers a plausible question that nobody asked, and
+/// the map comes back subtly wrong. This lets the rule be ONE definition
+/// compiled twice, so there is nothing to keep in agreement.
+///
+/// @note WHAT IT DOES NOT LICENSE. It is not a door to a shared kernel, and it
+/// is not a device-side spelling of the host API. A function is a candidate
+/// only when it is scalar and traversal-free -- no loop over pixels, rows or
+/// words, no pointer into an image, no allocation. Anything that walks an
+/// image stays forked, because that is where the host's row-major, popcount,
+/// cache-line shape and the device's warp shape genuinely disagree, and
+/// pretending otherwise costs the performance the backend exists for.
+/// Annotating a traversal would also quietly make a host view type usable
+/// from a kernel, which is the one thing the device-typed views exist to
+/// prevent.
+///
+/// @note IT PULLS NOTHING IN. The expansion is decided by `__CUDACC__`, which
+/// only nvcc (and clang in CUDA mode) defines, and the annotations it
+/// expands to are that compiler's own keywords. No CUDA header is included
+/// here, none is required, and on every other compiler the macro expands to
+/// an empty token sequence -- so an annotated helper is byte-for-byte the
+/// function it was before. binCV remains header-only, dependency-free and
+/// buildable by a plain C++17 compiler with no CUDA installed; that property
+/// is checked rather than assumed, by a static_assert in tests/test_error.cpp
+/// that the expansion here really is empty (and its mirror in the CUDA suite
+/// that it really is not, under nvcc).
+///
+/// @note BINCV_ASSERT WORKS INSIDE ONE. `detail::assertFailed` below has a device
+/// branch for exactly this reason: a helper whose preconditions vanish when
+/// it is compiled for the device would be a *different* helper, which is the
+/// drift this macro exists to remove. BINCV_THROW does NOT work inside one,
+/// deliberately -- see the note on `throwFailed`.
+#if defined(__CUDACC__)
+#  define BINCV_HOST_DEVICE __host__ __device__
+#else
+#  define BINCV_HOST_DEVICE
+#endif
+
 // The default BINCV_THROW expansion constructs the exception type the caller
 // names, so that type has to be complete at every call site. Every one in the
 // library names a <stdexcept> type, and a caller that reports through its own
@@ -143,6 +205,14 @@ namespace detail {
 /// @note stdio rather than iostream: this has to work in a configuration that
 /// has already given up exceptions, where pulling in the iostream static
 /// initializers to print one line is the wrong trade.
+/// @note HOST ONLY, unlike assertFailed below, and that is the split BINCV_THROW
+/// already draws: it reports a SETUP-time validation failure -- a bad
+/// dimension, a null buffer, a CUDA call that failed -- and setup happens on
+/// the host. A device helper that has to refuse an input returns an error
+/// instead of reporting one, which is the shape the backend's launchers
+/// already use. So there is no device branch here, and a BINCV_THROW inside
+/// a BINCV_HOST_DEVICE function is a compile error naming this function --
+/// which is the right answer, not a gap.
 [[noreturn]] inline void throwFailed(const char* message, const char* file, int line) {
     std::fprintf(stderr, "bincv: fatal error: %s\n at %s:%d\n", message, file, line);
     std::fflush(stderr);
@@ -153,12 +223,32 @@ namespace detail {
 /// @note Internal. The condition text and the written message are passed
 /// separately so that neither has to be a literal the other is
 /// concatenated onto.
-[[noreturn]] inline void assertFailed(const char* expr, const char* message,
-                                      const char* file, int line) {
+/// @note THE DEVICE BRANCH IS WHAT MAKES BINCV_ASSERT LEGAL IN A
+/// BINCV_HOST_DEVICE HELPER. `std::fprintf` and `std::abort` are host
+/// functions, and nvcc rejects a call to one from code it is compiling for
+/// the device -- so without this branch every shared scalar helper would
+/// have to drop its preconditions to cross over, and a helper whose checks
+/// vanish on one of its two targets is two helpers again. `printf` is the
+/// device's own (it reaches the host through the printf buffer) and
+/// `__trap()` is the device's abort: it kills the kernel and leaves the
+/// context in an error state, so the failure is not survivable and not
+/// silent, which is what the host branch's abort() buys too.
+/// @note `__CUDA_ARCH__` rather than `__CUDACC__`: nvcc compiles a .cu file at
+/// least twice, and only the DEVICE passes define this. The host pass of a
+/// .cu file takes the fprintf branch, exactly like every .cpp.
+[[noreturn]] BINCV_HOST_DEVICE inline void assertFailed(const char* expr,
+                                                        const char* message,
+                                                        const char* file, int line) {
+#if defined(__CUDA_ARCH__)
+    std::printf("bincv: assertion failed: %s\n condition: %s\n at %s:%d\n", message, expr,
+                file, line);
+    __trap();
+#else
     std::fprintf(stderr, "bincv: assertion failed: %s\n condition: %s\n at %s:%d\n",
                  message, expr, file, line);
     std::fflush(stderr);
     std::abort();
+#endif
 }
 
 } // namespace detail

@@ -69,7 +69,9 @@
 #include "../binMat.hpp"
 #include "../impl/kernel_util.hpp"
 
-#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+// !__CUDACC__: a CUDA translation unit takes the portable arm, matching every
+// other x86 arm's gate (impl/binMat_impl.hpp has the full note).
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(__CUDACC__)
 #define BINCV_EDGE_AVX2 1
 #include <immintrin.h>
 #elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
@@ -98,7 +100,13 @@ namespace impl {
 /// @brief `BORDER_REFLECT_101`: index -1 reads 1, index n reads n-2. **INTERNAL.**
 /// @note OpenCV's `filter2D` default, and therefore the reference's. A one-pixel
 /// extent reflects to itself.
-inline size_t reflect101Edge(long long i, size_t n) {
+/// @note BINCV_HOST_DEVICE. One index in, one index out, no memory: the loop
+/// folds the coordinate, it does not traverse an image. It is iterative
+/// rather than closed-form (ops/shift.hpp's borderIndex is the closed form,
+/// and is the one to reach for if an index far outside the extent ever
+/// becomes reachable) -- every caller here is a single tap, so `i` is at most
+/// one pixel outside and the fold runs once.
+BINCV_HOST_DEVICE inline size_t reflect101Edge(long long i, size_t n) {
     if (n <= 1) return 0;
     const long long last = static_cast<long long>(n) - 1;
     while (i < 0 || i > last) {

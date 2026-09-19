@@ -41,8 +41,10 @@ inline namespace BINCV_ABI_NAMESPACE {
 namespace impl {
 
 /// @brief The largest value an `SrcT` can hold, as the scale's denominator.
+/// @note BINCV_HOST_DEVICE, and still constexpr, because `quantScale` below is
+/// shared with device code and this is the only arithmetic it reaches.
 template <typename SrcT>
-constexpr unsigned long long srcMax() {
+BINCV_HOST_DEVICE constexpr unsigned long long srcMax() {
     return (sizeof(SrcT) >= 8) ? ~0ULL
                                : ((1ULL << (sizeof(SrcT) * 8)) - 1ULL);
 }
@@ -52,8 +54,17 @@ constexpr unsigned long long srcMax() {
 /// / 255` generalized; at `SrcT = uint8_t` it is that expression exactly, which
 /// is what keeps the design rule’s recorded divergence from
 /// OpenCV at bytes 1..127 intact rather than quietly repaired.
+/// @note BINCV_HOST_DEVICE, and still constexpr -- the annotation is added to the
+/// declaration, it does not replace anything. One value in, one level out, no
+/// memory and no loop, so it is shareable by the rule in core/error.hpp. The
+/// CUDA backend's N-bit packer calls THIS: it used to carry a
+/// `quantScaleDevice` that restated the same integer expression, and a
+/// divergence this library deliberately preserves is the worst possible thing
+/// to keep in two places -- a drifted copy would look like the bug being
+/// fixed. `quantThresholds` below stays host-only on purpose: it loops over
+/// the whole source range to build a table, which is a traversal.
 template <typename SrcT>
-constexpr unsigned quantScale(SrcT v, unsigned maxValue) {
+BINCV_HOST_DEVICE constexpr unsigned quantScale(SrcT v, unsigned maxValue) {
     const unsigned long long m = srcMax<SrcT>();
     return static_cast<unsigned>(
         (static_cast<unsigned long long>(v) * maxValue + m / 2ULL) / m);

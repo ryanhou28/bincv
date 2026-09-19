@@ -97,6 +97,30 @@ static_assert(bitSlicedSumPlanes(9) == 4, "the 3x3 median");
 static_assert(bitSlicedSumPlanes(16) == 5, "");
 static_assert(bitSlicedSumPlanes(MAX_INPUTS) == MAX_PLANES, "MAX_PLANES sizes the arrays below");
 
+// maj3 IS STILL A CONSTANT EXPRESSION, pinned at every word width.
+//
+// It carries BINCV_HOST_DEVICE so a kernel can call it, and `__host__ __device__`
+// sits alongside `constexpr` rather than replacing it -- but the two keywords are
+// adjacent in the declaration, and the obvious way to silence a future compiler
+// complaint about either is to drop the other. That loss would be invisible: the
+// runtime cases below would all still pass, and the only thing broken would be a
+// caller that wanted a mask folded at compile time. Asserting it here makes the
+// change a build failure instead, in every configuration, with nothing to run.
+//
+// The three inputs are the 3-bit truth table -- eight lanes covering all eight
+// (a, b, c) patterns -- so each of these is the whole rule at that width, not a
+// spot check. Widths matter: `a & b` promotes to `int` at uint8_t and uint16_t,
+// and a constant expression is where an unintended promotion shows up as a
+// narrowing error rather than a wrong bit.
+static_assert(maj3<uint8_t>(0xF0u, 0xCCu, 0xAAu) == 0xE8u, "maj3 must stay constexpr");
+static_assert(maj3<uint16_t>(0xF0F0u, 0xCCCCu, 0xAAAAu) == 0xE8E8u,
+              "maj3 must stay constexpr");
+static_assert(maj3<uint32_t>(0xF0F0F0F0u, 0xCCCCCCCCu, 0xAAAAAAAAu) == 0xE8E8E8E8u,
+              "maj3 must stay constexpr");
+static_assert(maj3<uint64_t>(0xF0F0F0F0F0F0F0F0ULL, 0xCCCCCCCCCCCCCCCCULL,
+                             0xAAAAAAAAAAAAAAAAULL) == 0xE8E8E8E8E8E8E8E8ULL,
+              "maj3 must stay constexpr");
+
 // ---------------------------------------------------------------------------
 // One check, whose message costs nothing unless it fails
 // ---------------------------------------------------------------------------

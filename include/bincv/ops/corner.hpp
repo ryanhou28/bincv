@@ -508,7 +508,15 @@ namespace impl {
 /// @note Exactly 0.0f iff `xx*yy - xy*xy == 0`; otherwise at least
 /// `1/(2*blockSize^2)`. See PRECISION at the top of the file -- the `!= 0`
 /// test in the selection depends on it and needs no epsilon.
-inline float minEigenValue(long long xx, long long yy, long long xy) {
+/// @note BINCV_HOST_DEVICE. Three integers in, one float out. The claim this
+/// carries is not "it compiles on the device" but "it gives the same float":
+/// the operands under the root are exact integers and the expression is
+/// IEEE-754 double arithmetic with one correctly-rounded square root, which
+/// both targets have, so the two agree bit for bit and the CUDA suite sweeps
+/// that rather than assuming it. Do not let this become `sqrtf`, `--use_fast_math`
+/// or a reassociated form on either side: a corner response that differs in
+/// the last bit changes which corners survive a quality-level cut.
+BINCV_HOST_DEVICE inline float minEigenValue(long long xx, long long yy, long long xy) {
     const double s = static_cast<double>(xx) + static_cast<double>(yy);
     const double d = static_cast<double>(xx) - static_cast<double>(yy);
     const double c = static_cast<double>(xy);

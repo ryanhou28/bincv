@@ -42,7 +42,9 @@
 #include "../core/view.hpp"
 #include "../impl/kernel_util.hpp"
 
-#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+// !__CUDACC__: a CUDA translation unit takes the portable arm, matching every
+// other x86 arm's gate (impl/binMat_impl.hpp has the full note).
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(__CUDACC__)
 #define BINCV_FAST_RUNTIME_AVX2 1
 #include <immintrin.h>
 #elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)

@@ -48,8 +48,13 @@ namespace impl {
 // need to reach back into BinMat to recover it.
 
 /// @brief Number of pixels packed into one word of the given type.
+/// @note BINCV_HOST_DEVICE, and it stays constexpr: `constexpr size_t wordBits =
+/// bitsPerWord<WordType>()` and the array bounds built from it must still fold
+/// at compile time. The annotation is here, and on lowBitsMask below, because
+/// impl::clipRegion is shared with device code and these two are the only
+/// word arithmetic it reaches.
 template <typename WordType>
-constexpr size_t bitsPerWord() {
+BINCV_HOST_DEVICE constexpr size_t bitsPerWord() {
     return sizeof(WordType) * 8;
 }
 
@@ -75,7 +80,7 @@ inline WordType bitMask(size_t x) {
 
 /// @brief Mask covering bits [0, n) of a word; n == bitsPerWord yields all ones.
 template <typename WordType>
-inline WordType lowBitsMask(size_t n) {
+BINCV_HOST_DEVICE inline WordType lowBitsMask(size_t n) {
     if (n == 0) return static_cast<WordType>(0);
     if (n >= bitsPerWord<WordType>()) return static_cast<WordType>(~static_cast<WordType>(0));
     return static_cast<WordType>((static_cast<WordType>(1) << n) - 1);

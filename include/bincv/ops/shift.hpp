@@ -208,7 +208,11 @@ inline bool isKnownBorderType(BorderType type) {
 /// REFLECT_101 period is 2*len-2 == 0 there, so the closed form would divide
 /// by zero; OpenCV's loop would spin. Neither is reachable, because the case
 /// is answered first.
-inline ptrdiff_t borderIndex(ptrdiff_t p, size_t lenPixels, BorderType type) {
+/// @note BINCV_HOST_DEVICE. One coordinate in, one coordinate out, no memory and
+/// no loop -- the closed form above is what makes that true, and it is why a
+/// device kernel can call the Tier 1 promise itself instead of restating it.
+BINCV_HOST_DEVICE inline ptrdiff_t borderIndex(ptrdiff_t p, size_t lenPixels,
+                                               BorderType type) {
     const ptrdiff_t len = static_cast<ptrdiff_t>(lenPixels);
     if (p >= 0 && p < len) return p;
 

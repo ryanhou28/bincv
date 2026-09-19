@@ -7,7 +7,9 @@
 // ISA is unchanged and no `-mavx2` build is required of a consumer. Guarded on the
 // compiler supporting both the target attribute and the cpu probe, exactly as
 // impl/binMat_impl.hpp's row packer is.
-#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+// !__CUDACC__: a CUDA translation unit takes the portable arm, matching every
+// other x86 arm's gate (impl/binMat_impl.hpp has the full note).
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(__CUDACC__)
 #define BINCV_X86_LK_BATCH 1
 #include <immintrin.h>
 #endif

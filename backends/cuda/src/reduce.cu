@@ -1,6 +1,15 @@
 // The device arm of the bulk reductions. The clip geometry is the HOST's own
-// impl::clipRegion -- included, not copied -- so the two backends cannot drift
-// on what a Rect means; only the traversal is forked.
+// impl::clipRegion -- included, not copied, on BOTH paths -- so the two backends
+// cannot drift on what a Rect means; only the traversal is forked.
+//
+// "Both paths" is the part that was not true until impl::clipRegion became
+// BINCV_HOST_DEVICE (core/error.hpp). The single-region launchers clip on the
+// host and always called it; the BATCH kernel is handed a device array of Rects
+// and has to clip inside the kernel, so it carried a hand-written restatement of
+// the same rules -- under a header comment claiming nothing was copied. The
+// restatement is gone: the kernel calls impl::clipRegion itself, and the head and
+// tail masks, the half-open convention and the negative-origin clamp now have one
+// definition for the whole project.
 //
 // Two traversals, each right for its shape (see reduce.hpp):
 //   * grid-stride + one atomic per warp, for a SINGLE region that may be a
@@ -24,7 +33,10 @@ struct RegionArg {
     uint32_t headMask, tailMask;
 };
 
-RegionArg toArg(const impl::RegionWords<uint32_t>& r) {
+/// @note BINCV_CUDA_HD: the host launchers flatten a region they clipped on the
+/// host, and the batch kernel flattens one it clipped on the device. Same
+/// flattening, one definition.
+BINCV_CUDA_HD RegionArg toArg(const impl::RegionWords<uint32_t>& r) {
     RegionArg a{};
     a.y0 = r.y0;
     a.y1 = r.y1;
@@ -149,36 +161,22 @@ __global__ void batchKernel(DeviceBinMatConstView a, DeviceBinMatConstView b,
                             size_t height, DeviceCovarianceCount* out) {
     const size_t idx = blockIdx.x;
     if (idx >= count) return;
-    // The clip restated for device code, from the host's own rules: half-open,
-    // clamped to the view, negative origins legal, empty yields zeros.
-    const Rect rect = regions[idx];
+    // THE HOST'S OWN CLIP, CALLED -- not a device restatement of it. Half-open,
+    // clamped to the view, negative origins legal, empty yields zeros, all
+    // decided in ops/reduce.hpp for both backends at once.
+    const impl::RegionWords<uint32_t> clipped =
+        impl::clipRegion<uint32_t>(width, height, regions[idx]);
     Quad q{0, 0, 0, 0};
-    long long x0 = rect.x, x1 = rect.x + static_cast<long long>(rect.width);
-    long long y0 = rect.y, y1 = rect.y + static_cast<long long>(rect.height);
-    if (rect.width > 0 && rect.height > 0 && x1 > 0 && y1 > 0 &&
-        x0 < static_cast<long long>(width) && y0 < static_cast<long long>(height)) {
-        if (x0 < 0) x0 = 0;
-        if (y0 < 0) y0 = 0;
-        if (x1 > static_cast<long long>(width)) x1 = static_cast<long long>(width);
-        if (y1 > static_cast<long long>(height)) y1 = static_cast<long long>(height);
-        if (x0 < x1 && y0 < y1) {
-            RegionArg r{};
-            r.y0 = static_cast<size_t>(y0);
-            r.y1 = static_cast<size_t>(y1);
-            r.firstWord = static_cast<size_t>(x0) >> 5;
-            r.lastWord = static_cast<size_t>(x1 - 1) >> 5;
-            r.headMask = 0xFFFFFFFFu << (static_cast<size_t>(x0) & 31u);
-            const unsigned hiBit = static_cast<unsigned>((x1 - 1) & 31);
-            r.tailMask = (hiBit == 31u) ? 0xFFFFFFFFu : ((1u << (hiBit + 1)) - 1u);
-            const size_t rowSpan = r.lastWord - r.firstWord + 1;
-            const size_t total = (r.y1 - r.y0) * rowSpan;
-            for (size_t i = threadIdx.x; i < total; i += blockDim.x) {
-                const size_t ry = i / rowSpan;
-                const size_t w = r.firstWord + (i - ry * rowSpan);
-                const size_t y = r.y0 + ry;
-                accumulateWord<M>(q, a.row(y), b.row(y), c0.row(y), c1.row(y), w,
-                                  wordMask(r, w));
-            }
+    if (!clipped.isEmpty) {
+        const RegionArg r = toArg(clipped);
+        const size_t rowSpan = r.lastWord - r.firstWord + 1;
+        const size_t total = (r.y1 - r.y0) * rowSpan;
+        for (size_t i = threadIdx.x; i < total; i += blockDim.x) {
+            const size_t ry = i / rowSpan;
+            const size_t w = r.firstWord + (i - ry * rowSpan);
+            const size_t y = r.y0 + ry;
+            accumulateWord<M>(q, a.row(y), b.row(y), c0.row(y), c1.row(y), w,
+                              wordMask(r, w));
         }
     }
     warpReduce(q);

@@ -235,7 +235,10 @@ inline unsigned briefAngleBin(float angleRadians) {
     constexpr float kBinsPerRadian = static_cast<float>(kBriefAngleBins) / kTwoPi;
     const float t = angleRadians * kBinsPerRadian + static_cast<float>(kBriefAngleBins);
     const unsigned r = static_cast<unsigned>(t + 0.5f);
-    return r % kBriefAngleBins;
+    // `kBriefAngleBins` is a size_t, so the remainder is one too; the cast says
+    // the narrowing is intended, and it is exact -- a remainder modulo 30 fits
+    // an unsigned at every width this library compiles at.
+    return static_cast<unsigned>(r % kBriefAngleBins);
 }
 
 /// @brief `Bits` comparisons at each of the 30 rotations: ~30 KB at 256 bits,
