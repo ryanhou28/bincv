@@ -131,56 +131,105 @@ echo "  suites: ${SUITES[*]}"
 echo "          (derived from backends/cuda/tests/CMakeLists.txt -- built and run"
 echo "           from one list, so neither half can quietly lose one)"
 
-CMAKE_ARGS=(
-    -S "${REPO_ROOT}" -B "${BUILD_DIR}"
-    -DBINCV_CUDA=ON
-    -DBINCV_WERROR=ON
-    -DBINCV_USE_OPENCV=OFF
-    -DBINCV_BUILD_BENCHMARKS=OFF
-    -DCMAKE_CUDA_COMPILER="${NVCC}"
-)
-if [ -n "${BINCV_CUDA_HOST_COMPILER:-}" ]; then
-    CMAKE_ARGS+=(-DCMAKE_CUDA_HOST_COMPILER="${BINCV_CUDA_HOST_COMPILER}")
-fi
+# ---------------------------------------------------------------------------
+# Two configurations, for the reason verify.sh runs four
+#
+#   Release  the shipped build, and the one that prices anything. It also
+#            builds the BENCHMARKS, compile-only: every operation here gets a
+#            benchmark arm the day it is written, and an arm no gate compiles
+#            rots at the speed the harness underneath it changes. They are not
+#            RUN -- a timing run needs an idle GPU it has no right to assume.
+#
+#   Debug    the only configuration where BINCV_ASSERT survives to nvcc's
+#            device pass. Every other CUDA build in this project carries
+#            -DNDEBUG, so a device op's domain assertions -- the ones a
+#            narrowed device domain is required to make -- were compiled out
+#            before anything could check they even build, let alone fire. This
+#            is the CUDA analogue of verify.sh's fourth configuration and it
+#            exists for the same reason: an assertion nobody has compiled is
+#            not known to work.
+# ---------------------------------------------------------------------------
+run_configuration() {
+    local name="$1" build_type="$2" benchmarks="$3"
+    local dir="${BUILD_DIR}-${name}"
 
-rm -rf "${BUILD_DIR}"
-echo "  configuring (warnings fatal)..."
-if ! cmake "${CMAKE_ARGS[@]}" >"${BUILD_DIR}.configure.log" 2>&1; then
-    cat "${BUILD_DIR}".configure.log
-    echo "  CONFIGURE FAILED"
-    exit 1
-fi
+    echo
+    echo "  --- ${name} (CMAKE_BUILD_TYPE=${build_type}, benchmarks=${benchmarks}) ---"
 
-echo "  building..."
-if ! cmake --build "${BUILD_DIR}" --target bincv_cuda "${SUITES[@]}" -j"$(nproc)" \
-        >"${BUILD_DIR}.build.log" 2>&1; then
-    cat "${BUILD_DIR}".build.log
-    echo "  BUILD FAILED"
-    exit 1
-fi
-# A warning nvcc emitted but did not turn into an error (it forwards only the
-# host half to -Werror): the same belt-and-braces log scan verify.sh runs.
-if grep -q "warning:" "${BUILD_DIR}".build.log; then
-    grep "warning:" "${BUILD_DIR}".build.log
-    echo "  BUILD EMITTED WARNINGS"
-    exit 1
-fi
+    local args=(
+        -S "${REPO_ROOT}" -B "${dir}"
+        -DBINCV_CUDA=ON
+        -DBINCV_WERROR=ON
+        -DBINCV_USE_OPENCV=OFF
+        -DCMAKE_BUILD_TYPE="${build_type}"
+        -DBINCV_BUILD_BENCHMARKS="${benchmarks}"
+        -DCMAKE_CUDA_COMPILER="${NVCC}"
+    )
+    if [ -n "${BINCV_CUDA_HOST_COMPILER:-}" ]; then
+        args+=(-DCMAKE_CUDA_HOST_COMPILER="${BINCV_CUDA_HOST_COMPILER}")
+    fi
 
-echo "  running device-vs-host suites..."
-for suite in "${SUITES[@]}"; do
-    "${BUILD_DIR}/backends/cuda/tests/${suite}"
-    RC=$?
-    if [ ${RC} -eq 77 ]; then
-        skip "built cleanly, but no CUDA device is available to run ${suite}"
-    elif [ ${RC} -ne 0 ]; then
-        echo "  DEVICE-VS-HOST SUITE FAILED: ${suite}"
+    rm -rf "${dir}"
+    echo "  configuring (warnings fatal)..."
+    if ! cmake "${args[@]}" >"${dir}.configure.log" 2>&1; then
+        cat "${dir}.configure.log"
+        echo "  CONFIGURE FAILED (${name})"
         exit 1
     fi
-done
+
+    local targets=(bincv_cuda "${SUITES[@]}")
+    if [ "${benchmarks}" = "ON" ]; then
+        # Derived, not listed, for the same reason the suites are: a benchmark
+        # added the intended way must not be one this gate silently skips.
+        while IFS= read -r bench; do
+            [ -n "${bench}" ] && targets+=("${bench}")
+        done < <(sed -n 's/^[[:space:]]*add_executable([[:space:]]*\([A-Za-z0-9_][A-Za-z0-9_]*\).*/\1/p' \
+                     "${REPO_ROOT}/backends/cuda/benchmark/CMakeLists.txt" 2>/dev/null \
+                 | grep -v cuda_stereobm_benchmark)
+        echo "  benchmark targets: ${targets[*]:$((1 + ${#SUITES[@]}))}"
+    fi
+
+    echo "  building..."
+    if ! cmake --build "${dir}" --target "${targets[@]}" -j"$(nproc)" \
+            >"${dir}.build.log" 2>&1; then
+        cat "${dir}.build.log"
+        echo "  BUILD FAILED (${name})"
+        exit 1
+    fi
+    # A warning nvcc emitted but did not turn into an error (it forwards only
+    # the host half to -Werror): the same belt-and-braces log scan verify.sh
+    # runs.
+    if grep -q "warning:" "${dir}.build.log"; then
+        grep "warning:" "${dir}.build.log"
+        echo "  BUILD EMITTED WARNINGS (${name})"
+        exit 1
+    fi
+
+    echo "  running device-vs-host suites..."
+    for suite in "${SUITES[@]}"; do
+        "${dir}/backends/cuda/tests/${suite}"
+        RC=$?
+        if [ ${RC} -eq 77 ]; then
+            skip "built cleanly, but no CUDA device is available to run ${suite}"
+        elif [ ${RC} -ne 0 ]; then
+            echo "  DEVICE-VS-HOST SUITE FAILED: ${suite} (${name})"
+            exit 1
+        fi
+    done
+}
+
+# cuda_stereobm_benchmark is excluded from the derived benchmark list above: it
+# exists only when BINCV_CUDA_OPENCV_DIR points at a cudastereo-capable OpenCV,
+# so naming it as a target would fail this gate on every machine that has not
+# built one. Its own CMake guard already decides whether it exists.
+
+run_configuration release Release ON
+run_configuration debug   Debug   OFF
 
 echo
 echo "  CUDA BACKEND VERIFIED"
-echo "  Built with -Werror on both host and device halves; every device kernel"
-echo "  matched the host library byte for byte."
+echo "  Built with -Werror on both host and device halves, Release and Debug;"
+echo "  every device kernel matched the host library byte for byte, and the"
+echo "  benchmark arms compile."
 echo
 exit 0
