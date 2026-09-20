@@ -100,8 +100,8 @@
 // ===========================================================================
 // THE FOOTPRINT CASE
 // ===========================================================================
-// `Flow.FrontendFootprint_640x480` is the number Phase 4 needs and the project's
-// memory claim rests on: peak working set of denoise -> pyramid -> derivative ->
+// `Flow.PipelineFootprint_640x480` is the number the project's memory claim
+// rests on: peak working set of denoise -> pyramid -> derivative ->
 // corner -> track, at 640x480, broken down by stage, with every allocation
 // counted rather than estimated. predicts the float response map dominates.
 // The case prints the table and pins the dominant term, so a future change that
@@ -144,7 +144,7 @@
 namespace {
 std::size_t g_newCount = 0;
 // LIVE BYTES AND THEIR HIGH-WATER MARK, not just a call count. A counter of
-// `operator new` CALLS cannot say what a stage's peak is; that measurement’s frontend table
+// `operator new` CALLS cannot say what a stage's peak is; that measurement’s pipeline table
 // used to add up the buffers its author had listed, so a buffer nobody listed --
 // including one acquired inside a kernel -- could not move the number. These two
 // make the total a READING: every allocation adds its REQUESTED size, every free
@@ -319,12 +319,12 @@ void renderWarped(BinMat<WordType>& dst, const Warp& warp) {
 // (ops/opticalFlow.hpp, deviation (v)).
 // ---------------------------------------------------------------------------
 template <typename WordType>
-struct Frontend {
+struct Pipeline {
     std::vector<BinMat<WordType>> prev, next;
     std::vector<TernaryMat<WordType>> dx, dy;
     std::vector<LKLevel<WordType>> levels;
 
-    Frontend(int width, int height, int levelCount) {
+    Pipeline(int width, int height, int levelCount) {
         int w = width, h = height;
         for (int i = 0; i < levelCount; ++i) {
             prev.emplace_back(w, h);
@@ -463,7 +463,7 @@ double refMeanAbsDiff(const BinMat<WordType>& prev, const BinMat<WordType>& next
 /// pyramid (ops/opticalFlow.hpp, deviation (vi)). Computed here from the
 /// level DIMENSIONS, independently of the kernel's own loop.
 template <typename WordType>
-size_t usableLevelCount(const Frontend<WordType>& fe, int winW, int winH) {
+size_t usableLevelCount(const Pipeline<WordType>& fe, int winW, int winH) {
     size_t n = 1;
     while (n < fe.prev.size() && fe.prev[n].cols() > winW && fe.prev[n].rows() > winH) ++n;
     return n;
@@ -471,7 +471,7 @@ size_t usableLevelCount(const Frontend<WordType>& fe, int winW, int winH) {
 
 /// @brief The whole tracker, per pixel, in double.
 template <typename WordType>
-void refTrack(const Frontend<WordType>& fe, const std::vector<Point2f>& prevPts,
+void refTrack(const Pipeline<WordType>& fe, const std::vector<Point2f>& prevPts,
               std::vector<Point2f>& nextPts, std::vector<uint8_t>& status,
               const LKParams& params) {
     const size_t n = prevPts.size();
@@ -596,7 +596,7 @@ std::vector<Point2f> eligiblePoints(const TernaryMat<WordType>& dx,
     ResponseMap map{mapStorage.data(), static_cast<size_t>(width), static_cast<size_t>(height),
                     static_cast<size_t>(width)};
     std::vector<Corner> found(static_cast<size_t>(width) * static_cast<size_t>(height));
-    GoodFeaturesParams params;  // the reference frontend's parameters verbatim
+    GoodFeaturesParams params;  // the reference pipeline's parameters verbatim
     const CornerResult r =
         bincv::goodFeaturesToTrack(dx, dy, params, map, found.data(), found.size());
 
@@ -624,7 +624,7 @@ std::vector<Point2f> eligiblePoints(const TernaryMat<WordType>& dx,
 /// coverage of the loss rules, and the only honest place to put it is next
 /// to the numbers it explains.
 template <typename WordType>
-double smallestReferenceMinEig(const Frontend<WordType>& fe, const std::vector<Point2f>& pts,
+double smallestReferenceMinEig(const Pipeline<WordType>& fe, const std::vector<Point2f>& pts,
                                const LKParams& params) {
     const double halfX = 0.5 * static_cast<double>(params.winWidth - 1);
     const double halfY = 0.5 * static_cast<double>(params.winHeight - 1);
@@ -653,7 +653,7 @@ double smallestReferenceMinEig(const Frontend<WordType>& fe, const std::vector<P
 /// separates that cost from the cost of the level's BIT DEPTH, which is the
 /// distinction turns on.
 template <typename WordType>
-std::vector<Point2f> unclippedAtEveryLevel(const Frontend<WordType>& fe,
+std::vector<Point2f> unclippedAtEveryLevel(const Pipeline<WordType>& fe,
                                            const std::vector<Point2f>& pts, int winW, int winH) {
     std::vector<Point2f> out;
     const double halfX = 0.5 * static_cast<double>(winW - 1);
@@ -725,9 +725,9 @@ FlowStats measure(const std::vector<Point2f>& prevPts, const std::vector<Point2f
 /// @param modelError The a-priori allowance for a non-translational warp:
 /// `halfWin * theta` or `halfWin * |s-1|`, and exactly 0 for a translation.
 template <typename WordType>
-FlowStats runPoints(const char* label, Frontend<WordType>& fe, const Warp& warp,
+FlowStats runPoints(const char* label, Pipeline<WordType>& fe, const Warp& warp,
                     const std::vector<Point2f>& pts, double modelError, bool enforce) {
-    LKParams params;  // the reference frontend's parameters verbatim
+    LKParams params;  // the reference pipeline's parameters verbatim
     std::vector<Point2f> out(pts.size());
     std::vector<uint8_t> status(pts.size());
     std::vector<float> err(pts.size());
@@ -761,7 +761,7 @@ FlowStats runPoints(const char* label, Frontend<WordType>& fe, const Warp& warp,
 
 /// @brief Selects the eligible points and runs them.
 template <typename WordType>
-FlowStats runOnFrames(const char* label, Frontend<WordType>& fe, const Warp& warp,
+FlowStats runOnFrames(const char* label, Pipeline<WordType>& fe, const Warp& warp,
                       double modelError, bool enforce = true) {
     LKParams params;
     const std::vector<Point2f> pts = eligiblePoints(fe.dx[0], fe.dy[0], fe.prev[0].cols(),
@@ -774,8 +774,8 @@ FlowStats runOnFrames(const char* label, Frontend<WordType>& fe, const Warp& war
 /// field and run.
 template <typename WordType>
 FlowStats runCase(const char* label, int width, int height, const Warp& warp, double modelError) {
-    const int levelCount = 4;  // the reference frontend's parameters: lk_max_level 3
-    Frontend<WordType> fe(width, height, levelCount);
+    const int levelCount = 4;  // the reference pipeline's parameters: lk_max_level 3
+    Pipeline<WordType> fe(width, height, levelCount);
     renderWarped(fe.prev[0], Warp{});
     renderWarped(fe.next[0], warp);
     fe.build();
@@ -784,9 +784,9 @@ FlowStats runCase(const char* label, int width, int height, const Warp& warp, do
 
 
 // ---------------------------------------------------------------------------
-// earlier work: THE SAME FRONTEND AT A CHOSEN BIT DEPTH PER LEVEL
+// earlier work: THE SAME PIPELINE AT A CHOSEN BIT DEPTH PER LEVEL
 //
-// `Frontend` above is the shipped 1-bit ladder and stays exactly as it is -- it
+// `Pipeline` above is the shipped 1-bit ladder and stays exactly as it is -- it
 // is what every the number was measured on. This is its generic-N counterpart,
 // and it exists so that that work’s question can be asked without disturbing the
 // baseline it has to be compared against.
@@ -835,7 +835,7 @@ struct DerivLadder<WordType, N0, N1, Rest...> {
 };
 
 template <typename WordType, size_t... LevelBits>
-struct LadderFrontend {
+struct LadderPipeline {
     static constexpr size_t Levels = sizeof...(LevelBits);
     using Pyr = bincv::Pyramid<WordType, LevelBits...>;
 
@@ -843,7 +843,7 @@ struct LadderFrontend {
     DerivLadder<WordType, LevelBits...> dx, dy;
     bincv::LKLevels<WordType, LevelBits...> levels;
 
-    LadderFrontend(int w, int h) : prev(w, h), next(w, h), dx(w, h), dy(w, h) {}
+    LadderPipeline(int w, int h) : prev(w, h), next(w, h), dx(w, h), dy(w, h) {}
 
     /// @brief pyrDown down both ladders, then the derivative of every previous
     /// level, then bind the views. Level 0 of both pyramids is the caller's.
@@ -882,7 +882,7 @@ struct LadderFrontend {
 
 /// @brief Copies a rendered 1-bit frame into a ladder's level 0.
 template <typename WordType, size_t... LevelBits>
-void seedLevelZero(LadderFrontend<WordType, LevelBits...>& fe, const BinMat<WordType>& prevSrc,
+void seedLevelZero(LadderPipeline<WordType, LevelBits...>& fe, const BinMat<WordType>& prevSrc,
                    const BinMat<WordType>& nextSrc) {
     for (int y = 0; y < prevSrc.rows(); ++y) {
         for (int x = 0; x < prevSrc.cols(); ++x) {
@@ -900,12 +900,12 @@ template <typename WordType, size_t... LevelBits>
 FlowStats runLadder(const char* label, const BinMat<WordType>& prevSrc,
                     const BinMat<WordType>& nextSrc, const Warp& warp,
                     const std::vector<Point2f>& pts, double modelError, size_t* bytesOut) {
-    LadderFrontend<WordType, LevelBits...> fe(prevSrc.cols(), prevSrc.rows());
+    LadderPipeline<WordType, LevelBits...> fe(prevSrc.cols(), prevSrc.rows());
     seedLevelZero(fe, prevSrc, nextSrc);
     fe.build();
     if (bytesOut != nullptr) *bytesOut = fe.bytes();
 
-    LKParams params;  // the reference frontend's parameters verbatim
+    LKParams params;  // the reference pipeline's parameters verbatim
     std::vector<Point2f> out(pts.size());
     std::vector<uint8_t> status(pts.size());
     bincv::calcOpticalFlowPyrLK(fe.levels, pts.data(), out.data(), status.data(), nullptr,
@@ -936,14 +936,14 @@ constexpr int kH = 240;
 // the synthetic cases. Two copies of a tolerance is how two tolerances happen.
 //
 // THE BINARIZATION IS THE REFERENCE PIPELINE'S OWN, NOT A THRESHOLD CHOSEN HERE.
-// `rl_fast_edge_filter_wide` (the reference frontend's edge filter) with
-// `edge_threshold: 17` is what produces the frames the reference frontend actually
+// `rl_fast_edge_filter_wide` (the reference pipeline's edge filter) with
+// `edge_threshold: 17` is what produces the frames the reference pipeline actually
 // tracks: `|[-1,0,1] * I| >= 17` horizontally OR vertically. Ported below, it
 // reproduces the repo's shipped `_bin_normalized.png` to within 0.024% of pixels,
 // which is how it is known to be the right function rather than a plausible one.
 // An earlier version of this case used a global Otsu threshold instead and
 // produced content -- 19% set, 2.7% edge pixels, large smooth regions -- that the
-// frontend never sees; it is worth saying so, because the two binarizations give
+// pipeline never sees; it is worth saying so, because the two binarizations give
 // materially different tracking numbers and only one of them is the reference's.
 //
 // THE GROUND TRUTH IS CONSTRUCTED THE SAME WAY IT IS FOR SYNTHETIC TEXTURE: the
@@ -958,7 +958,7 @@ constexpr int kH = 240;
 
 /// @brief `rl_fast_edge_filter_wide`, ported call for call.
 /// @brief `three_pix_median_filter`, ported line for line from
-/// the reference frontend's denoiser. **STAGE ONE of the reference
+/// the reference pipeline's denoiser. **STAGE ONE of the reference
 /// preprocessing, and it was missing from this file until 2026-08-21.**
 /// @note p1 is the pixel ABOVE, p2 the center, p3 the pixel to the RIGHT:
 /// `median = max(min(p1,p2), min(max(p1,p2), p3))`. Borders are ZERO-filled,
@@ -994,23 +994,23 @@ cv::Mat referenceEdgeFilter(const cv::Mat& gray, int edgeThreshold) {
 }
 
 /// @brief THE REFERENCE PREPROCESSING, BOTH STAGES, in the order
-/// the reference frontend's temporal stage runs them.
+/// the reference pipeline's temporal stage runs them.
 ///
 /// ```
 /// if (cfg.denoiser_on) median_filter(img, cfg.denoiser_type);
 /// if (cfg.edge_filter_on) rl_fast_edge_filter_wide(img, cfg.edge_threshold);
 /// ```
 ///
-/// the reference frontend's parameters enables the denoiser, `denoiser_type:
+/// the reference pipeline's parameters enables the denoiser, `denoiser_type:
 /// "THREE_PIX_MEDIAN"`, `edge_threshold: 17` -- so both stages run and this is the
-/// content the reference frontend actually sees.
+/// content the reference pipeline actually sees.
 ///
-/// **THIS FILE RAN ONLY STAGE TWO UNTIL 2026-08-21**, which means
-/// and a measurement measured the right filter applied to an un-denoised frame. Measured
+/// **THIS FILE RAN ONLY STAGE TWO UNTIL 2026-08-21**, which means every
+/// measurement before then applied the right filter to an un-denoised frame. Measured
 /// over 1710 EuRoC V1_02_medium frames the stage is real but small: **14.14% set
 /// without it against 13.04% with it**. Every one of those entries compared its
 /// arms WITHIN one content set, so their rankings were expected to survive the
-/// correction -- and that was re-run rather than assumed; see OVERNIGHT_LOG.md.
+/// correction -- and that was re-run rather than assumed.
 cv::Mat referencePreprocess(const cv::Mat& gray, int edgeThreshold) {
     return referenceEdgeFilter(referenceDenoise(gray), edgeThreshold);
 }
@@ -1037,8 +1037,8 @@ cv::Mat loadRealFrame() {
 
 /// @brief Builds the two binarized frames for one warp of the real image.
 template <typename WordType>
-void buildRealFrontend(const cv::Mat& gray, const Warp& warp, int levelCount,
-                       Frontend<WordType>& fe) {
+void buildRealPipeline(const cv::Mat& gray, const Warp& warp, int levelCount,
+                       Pipeline<WordType>& fe) {
     cv::Mat warped;
     cv::warpAffine(gray, warped, affineOf(warp), gray.size(), cv::INTER_CUBIC,
                    cv::BORDER_REFLECT_101);
@@ -1053,8 +1053,8 @@ void buildRealFrontend(const cv::Mat& gray, const Warp& warp, int levelCount,
 template <typename WordType>
 FlowStats runRealFrameCase(const cv::Mat& gray, const char* label, const Warp& warp,
                            double modelError, int levelCount, bool enforce) {
-    Frontend<WordType> fe(gray.cols, gray.rows, levelCount);
-    buildRealFrontend(gray, warp, levelCount, fe);
+    Pipeline<WordType> fe(gray.cols, gray.rows, levelCount);
+    buildRealPipeline(gray, warp, levelCount, fe);
     return runOnFrames<WordType>(label, fe, warp, modelError, enforce);
 }
 #endif // BINCV_WITH_OPENCV
@@ -1133,7 +1133,7 @@ namespace {
 
 template <typename WordType>
 void residualIdentity(const char* typeName) {
-    Frontend<WordType> fe(96, 72, 1);
+    Pipeline<WordType> fe(96, 72, 1);
     renderWarped(fe.prev[0], Warp{});
     renderWarped(fe.next[0], translation(1.37, -0.62));
     fe.build();
@@ -1353,7 +1353,7 @@ BINCV_TEST(Flow, ResidualIdentity_uint64_t) { residualIdentity<uint64_t>("uint64
 // ===========================================================================
 
 BINCV_TEST(Flow, MatchesPerPixelFloatImplementation_uint32_t) {
-    Frontend<uint32_t> fe(160, 128, 3);
+    Pipeline<uint32_t> fe(160, 128, 3);
     renderWarped(fe.prev[0], Warp{});
     renderWarped(fe.next[0], translation(1.6, -0.85));
     fe.build();
@@ -1405,10 +1405,10 @@ BINCV_TEST(Flow, WordTypeInvariance) {
     // trailing partial word and a different set of cross-word boundaries.
     const int w = 149, h = 101;
 
-    Frontend<uint8_t>  f8(w, h, 3);
-    Frontend<uint16_t> f16(w, h, 3);
-    Frontend<uint32_t> f32(w, h, 3);
-    Frontend<uint64_t> f64(w, h, 3);
+    Pipeline<uint8_t>  f8(w, h, 3);
+    Pipeline<uint16_t> f16(w, h, 3);
+    Pipeline<uint32_t> f32(w, h, 3);
+    Pipeline<uint64_t> f64(w, h, 3);
     renderWarped(f8.prev[0], Warp{});  renderWarped(f8.next[0], warp);  f8.build();
     renderWarped(f16.prev[0], Warp{}); renderWarped(f16.next[0], warp); f16.build();
     renderWarped(f32.prev[0], Warp{}); renderWarped(f32.next[0], warp); f32.build();
@@ -1468,7 +1468,7 @@ BINCV_TEST(Flow, ErrorIsMeasuredAtTheReturnedPosition_uint32_t) {
     const Warp warp = translation(1.37, -0.62);
     const int iterationBudgets[4] = {1, 2, 3, 20};
     for (int k = 0; k < 4; ++k) {
-        Frontend<uint32_t> fe(160, 128, 1);
+        Pipeline<uint32_t> fe(160, 128, 1);
         renderWarped(fe.prev[0], Warp{});
         renderWarped(fe.next[0], warp);
         fe.build();
@@ -1536,7 +1536,7 @@ BINCV_TEST(Flow, LevelsAtOrBelowTheWindowAreIgnored_uint32_t) {
     const Warp warp = translation(1.4, -0.7);
     const int w = 149, h = 101;
 
-    Frontend<uint32_t> fe(w, h, 4);
+    Pipeline<uint32_t> fe(w, h, 4);
     renderWarped(fe.prev[0], Warp{});
     renderWarped(fe.next[0], warp);
     fe.build();
@@ -1602,7 +1602,7 @@ BINCV_TEST(Flow, LossRules_uint32_t) {
     // Rule 2 -- a blank frame has no gradient anywhere, so every window is
     // singular and every point must be lost.
     {
-        Frontend<uint32_t> fe(96, 72, 2);
+        Pipeline<uint32_t> fe(96, 72, 2);
         fe.prev[0].fill(false);
         fe.next[0].fill(false);
         fe.build();
@@ -1620,7 +1620,7 @@ BINCV_TEST(Flow, LossRules_uint32_t) {
     // Rule 1 -- the window's origin out of range. At level 0 with a 31x31 window
     // the anchor is `p - 15`, so a point at -20 is a full window off the frame.
     {
-        Frontend<uint32_t> fe(96, 72, 1);
+        Pipeline<uint32_t> fe(96, 72, 1);
         renderWarped(fe.prev[0], Warp{});
         renderWarped(fe.next[0], translation(1.0, 0.0));
         fe.build();
@@ -1647,7 +1647,7 @@ BINCV_TEST(Flow, LossRules_uint32_t) {
     // `err` was requested; here it is unconditional (deviation (vii)), so the
     // case is run BOTH ways and must agree.
     {
-        Frontend<uint32_t> fe(48, 48, 1);
+        Pipeline<uint32_t> fe(48, 48, 1);
         renderWarped(fe.prev[0], Warp{});
         renderWarped(fe.next[0], translation(3.0, 0.0));
         fe.build();
@@ -1694,7 +1694,7 @@ BINCV_TEST(Flow, LossRules_uint32_t) {
             BINCV_CHECK_EQ(out[i].y, pts[i].y);
         }
 
-        Frontend<uint32_t> fe(64, 64, 1);
+        Pipeline<uint32_t> fe(64, 64, 1);
         fe.build();
         bincv::calcOpticalFlowPyrLK<uint32_t>(fe.levels.data(), fe.levels.size(), pts.data(),
                                               out.data(), st.data(), nullptr, 0, params);
@@ -1707,7 +1707,7 @@ BINCV_TEST(Flow, LossRules_uint32_t) {
 // ===========================================================================
 
 BINCV_TEST(Flow, NoHeapInTheTracker_uint32_t) {
-    Frontend<uint32_t> fe(128, 96, 3);
+    Pipeline<uint32_t> fe(128, 96, 3);
     renderWarped(fe.prev[0], Warp{});
     renderWarped(fe.next[0], translation(1.25, 0.5));
     fe.build();
@@ -1747,7 +1747,7 @@ BINCV_TEST(Flow, NoHeapInTheTracker_uint32_t) {
 }
 
 // ===========================================================================
-// THE FOOTPRINT OF THE FULL FRONTEND -- the number Phase 4 needs
+// THE FOOTPRINT OF THE FULL PIPELINE -- the number the memory claim rests on
 // ===========================================================================
 
 namespace {
@@ -1779,20 +1779,20 @@ std::uint64_t cornerDigest(const Corner* c, std::size_t n) {
 } // namespace
 
 
-BINCV_TEST(Flow, FrontendFootprint_640x480) {
+BINCV_TEST(Flow, PipelineFootprint_640x480) {
     constexpr int W = 640;
     constexpr int H = 480;
-    constexpr int LEVELS = 4;   // the reference frontend's parameters: lk_max_level 3
-    constexpr int POINTS = 200; // the reference frontend's parameters: gftt_max_corners 200
+    constexpr int LEVELS = 4;   // the reference pipeline's parameters: lk_max_level 3
+    constexpr int POINTS = 200; // the reference pipeline's parameters: gftt_max_corners 200
     using Word = uint32_t;      //
 
-    std::printf("\n PEAK FOOTPRINT OF THE FULL FRONTEND, %dx%d, %d pyramid levels,\n"
+    std::printf("\n PEAK FOOTPRINT OF THE FULL PIPELINE, %dx%d, %d pyramid levels,\n"
                 " 1 bit per level, uint32_t words. THE TWO TOTALS ARE READ OFF A LIVE-BYTE\n"
                 " HIGH-WATER MARK, not summed from a list of buffers, and the per-stage rows\n"
                 " are then required to ACCOUNT for that reading exactly.\n", W, H, LEVELS);
 
     // THE BASELINE. Everything the test harness itself has on the heap before the
-    // frontend exists. Every peak below is reported as `high-water - baseline`, so
+    // pipeline exists. Every peak below is reported as `high-water - baseline`, so
     // gtest's own allocations are outside the number rather than inside it.
     const std::size_t baseline = g_liveBytes;
 
@@ -1804,7 +1804,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     renderWarped(incoming, translation(0.0, 0.0));
     renderWarped(incomingNext, translation(1.4, -0.7));
 
-    Frontend<Word> fe(W, H, LEVELS);
+    Pipeline<Word> fe(W, H, LEVELS);
 
     const std::size_t beforeDenoise = g_newCount;
     bincv::denoiseMedian3<Word>(incoming.constView(), fe.prev[0].view());
@@ -1819,7 +1819,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
 
     // ---- stage 5's buffers, allocated NOW ---------------------------------
     // The track stage owns four fixed-size arrays. They are allocated before either
-    // peak window so that both windows contain the WHOLE frontend and the two
+    // peak window so that both windows contain the WHOLE pipeline and the two
     // readings differ by exactly one thing: the corner stage's response storage.
     std::vector<Point2f> prevPts(POINTS);
     std::vector<Point2f> nextPts(POINTS);
@@ -1851,7 +1851,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
         refCount = probeResult.count;
         refDigest = cornerDigest(probe.data(), probeResult.candidatesRanked);
 
-        // The ring, against the map, on that measurement’s own frontend content -- the whole
+        // The ring, against the map, on that measurement’s own pipeline content -- the whole
         // ranked prefix, coordinates and exact float bits.
         std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<std::size_t>(W),
                                        0.0f);
@@ -1873,7 +1873,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
         BINCV_CHECK_EQ(differing, std::size_t{0});
     }
 
-    // ---- READING 1: the frame-map frontend's peak -------------------------
+    // ---- READING 1: the frame-map pipeline's peak -------------------------
     // Sized to the MEASURED NMS survivor count, which is what / this did:
     // the array is also the candidate buffer, so an over-sized one would inflate
     // the footprint and an under-sized one would truncate.
@@ -1932,7 +1932,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     BINCV_CHECK_EQ(frameRanked, candidateCount);
     BINCV_CHECK_EQ(frameDigest, refDigest);
 
-    // ---- READING 2: the streaming frontend's peak -------------------------
+    // ---- READING 2: the streaming pipeline's peak -------------------------
     // THE FRAME MAP IS GONE. It was destroyed when the scope above closed, which is
     // the point: a table that prints a streaming peak while a 1 228 800 B float map
     // is still live is not measuring the streaming shape.
@@ -1995,7 +1995,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     const std::size_t total = denoiseBytes + pyramidBytes + derivativeBytes + cornerBytes +
                               trackBytes;
     // THE CONTAINER BOOKKEEPING NO STAGE OWNS: the vectors of BinMat/TernaryMat
-    // objects inside `Frontend` and its `levels` bundle. Named and printed rather
+    // objects inside `Pipeline` and its `levels` bundle. Named and printed rather
     // than folded into a stage, because the two readings must differ by the
     // response storage ALONE, and that is only checkable if the residual is stated.
     const std::size_t bookkeeping = framePeak - total;
@@ -2050,7 +2050,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     const std::size_t streamCornerBytes = ringBytes + candidateBytes + streamCarryBytes;
     const std::size_t streamTotal = denoiseBytes + pyramidBytes + derivativeBytes +
                                     streamCornerBytes + trackBytes;
-    std::printf("\n THE SAME FRONTEND WITH the STREAMING CORNER STAGE (identical corners,\n"
+    std::printf("\n THE SAME PIPELINE WITH the STREAMING CORNER STAGE (identical corners,\n"
                 " asserted above -- count, coordinates, order and CornerResult):\n");
     std::printf(" %-12s %-46s %9s %6s\n", "STAGE", "BUFFERS IT OWNS", "BYTES", "SHARE");
     auto srow = [&](const char* name, const char* what, std::size_t bytes) {
@@ -2066,7 +2066,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     std::printf(" MEASURED PEAK (same high-water mark, frame map DESTROYED first):"
                 " %zu B\n = the rows above - %zu B of stack carry + %zu B of the same"
                 " container bookkeeping\n", streamPeak, streamCarryBytes, bookkeeping);
-    std::printf(" corner stage %zu B -> %zu B (%.2fx); frontend %zu B -> %zu B (%.2fx)\n",
+    std::printf(" corner stage %zu B -> %zu B (%.2fx); pipeline %zu B -> %zu B (%.2fx)\n",
                 cornerBytes, streamCornerBytes,
                 static_cast<double>(cornerBytes) / static_cast<double>(streamCornerBytes), total,
                 streamTotal, static_cast<double>(total) / static_cast<double>(streamTotal));
@@ -2078,7 +2078,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     //
     // This is what makes the two totals measurements rather than sums over a list
     // of buffers someone remembered to write down. `framePeak` and `streamPeak` are
-    // high-water marks over LIVE BYTES: any heap buffer anywhere in the frontend --
+    // high-water marks over LIVE BYTES: any heap buffer anywhere in the pipeline --
     // including one acquired inside a kernel, which no enumeration can see -- lands
     // in them. Requiring the stage rows to reproduce them to the byte means a
     // buffer that appears without a row fails here.
@@ -2104,7 +2104,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     BINCV_CHECK_EQ(framePeak - streamPeak, responseBytes - ringBytes);
 
     // that measurement’s saving gate, evaluated in the place that can actually fail: if a
-    // later change puts the streaming frontend back above 750 000 B, the design rule’s
+    // later change puts the streaming pipeline back above 750 000 B, the design rule’s
     // footprint claim has gone and this says so rather than a report nobody re-ran.
     BINCV_CHECK(streamTotal <= 750000);
     BINCV_CHECK(streamAllocs == 0);
@@ -2112,7 +2112,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     // `ring < everything else` is near-vacuous at 7 680 B against 492 784 B and
     // tests nothing. These two do: the response storage must be smaller than every
     // other stage in the table, and the corner stage must no longer be the largest
-    // stage in the frontend at all. Either is false the moment the ring grows with
+    // stage in the pipeline at all. Either is false the moment the ring grows with
     // the frame again.
     BINCV_CHECK(ringBytes < denoiseBytes && ringBytes < pyramidBytes &&
                 ringBytes < derivativeBytes);
@@ -2127,7 +2127,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     BINCV_CHECK_EQ(streamTrackAllocs, std::size_t{0});
 
     // that work’s prediction, pinned. that work’s float response map is 4 B/pixel where
-    // every other plane in the frontend is 1 or 2 BITS per pixel, so it is
+    // every other plane in the pipeline is 1 or 2 BITS per pixel, so it is
     // expected to dominate. If a future change moves the dominant term, this
     // fails here rather than in a report nobody re-ran.
     // The assertion is the expression the line below PRINTS, candidate array
@@ -2136,21 +2136,21 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
     // content -- so it compared 1 228 800 B against a constant and could not fail
     // at this frame size for any content, while the printed sentence could flip.
     BINCV_CHECK(responseBytes > total - responseBytes);
-    std::printf(" the response map %s the rest of the frontend combined.\n",
+    std::printf(" the response map %s the rest of the pipeline combined.\n",
                 (responseBytes > total - responseBytes) ? "EXCEEDS" : "does not exceed");
 
     // A SCALE REFERENCE, AND EXPLICITLY NOT CLAUDE.md's DENOMINATOR. CLAUDE.md
     // requires the comparison to be "OpenCV doing the same semantic operation on
-    // the same binary content stored as CV_8U" -- for this frontend that is two
+    // the same binary content stored as CV_8U" -- for this pipeline that is two
     // CV_8U frames, two winSize-padded CV_8U pyramids, CV_16S derivatives and the
     // same float response map, and none of it is computed here. Building and
     // measuring that pipeline is. What the ratio below says is only
-    // how the binCV frontend's peak compares with a single raw 640x480 frame, so
+    // how the binCV pipeline's peak compares with a single raw 640x480 frame, so
     // that the table has a familiar unit; it is not a memory win and must not be
     // quoted as one.
     const std::size_t oneByteFrame = static_cast<std::size_t>(W) * static_cast<std::size_t>(H);
     std::printf(" SCALE REFERENCE (not the CV_8U denominator, which is):"
-                " whole frontend = %.2f x ONE raw CV_8U 640x480 frame (%zu B)\n",
+                " whole pipeline = %.2f x ONE raw CV_8U 640x480 frame (%zu B)\n",
                 static_cast<double>(total) / static_cast<double>(oneByteFrame), oneByteFrame);
 }
 
@@ -2160,7 +2160,7 @@ BINCV_TEST(Flow, FrontendFootprint_640x480) {
 // READ THE VERDICT COLUMN. The tolerance stated at the top of this file is MET on
 // synthetic texture and is NOT MET here, and this case is written to say so rather
 // than to be widened until it passes. What it asserts is what it can assert
-// without taking a decision this task is not authorised to take: that a stationary
+// without taking a decision this file is not entitled to take: that a stationary
 // frame tracks EXACTLY, that the bit-parallel implementation agrees with the
 // per-pixel float one on this content too -- and the direction and the SPLIT of
 // the effects that explain the miss.
@@ -2330,7 +2330,7 @@ BINCV_TEST(Flow, GenericNAtOneBitIsTheHandWrittenPath_uint32_t) {
     // ill-formed and removes it from the set. That is what makes this comparison
     // possible at all, and it is checked here so a future change to either
     // signature fails loudly rather than silently comparing a path with itself.
-    Frontend<uint32_t> fe(160, 120, 3);
+    Pipeline<uint32_t> fe(160, 120, 3);
     renderWarped(fe.prev[0], Warp{});
     renderWarped(fe.next[0], translation(1.3, -0.7));
     fe.build();
@@ -2435,7 +2435,7 @@ BINCV_TEST(Flow, X79_KeypointBatchIsBitExact_uint32_t) {
     renderWarped(prevSrc, Warp{});
     renderWarped(nextSrc, warp);
 
-    LadderFrontend<uint32_t, 1, 2, 2, 2> fe(width, height);
+    LadderPipeline<uint32_t, 1, 2, 2, 2> fe(width, height);
     seedLevelZero(fe, prevSrc, nextSrc);
     fe.build();
 
@@ -2495,7 +2495,7 @@ BINCV_TEST(Flow, X24_LadderSweep_Synthetic_uint32_t) {
     // The point set is IDENTICAL across ladders by construction: eligiblePoints
     // reads level 0's derivative, and level 0 is 1 bit in every ladder. That is
     // what makes the rows below comparable at all (band D of the rule).
-    Frontend<uint32_t> base(width, height, 4);
+    Pipeline<uint32_t> base(width, height, 4);
     renderWarped(base.prev[0], Warp{});
     renderWarped(base.next[0], warp);
     base.build();
@@ -2669,7 +2669,7 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
     BINCV_CHECK(oneDiag2.stuck > 0);
 
     // ---- failure mode (2): the pyramid, and the clipping control ---------
-    std::printf("\n FOUR 1-bit levels -- the reference frontend's lk_max_level 3:\n");
+    std::printf("\n FOUR 1-bit levels -- the reference pipeline's lk_max_level 3:\n");
     const FlowStats four025 = runRealFrameCase<uint32_t>(gray, "real: shift (0.25, 0.25)",
                                                          translation(0.25, 0.25), 0.0, 4, false);
     runRealFrameCase<uint32_t>(gray, "real: shift (0.50, 0.50)", translation(0.50, 0.50), 0.0, 4,
@@ -2705,10 +2705,10 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
                 " is inside EVERY level, so no window clips at any level:\n");
     double subsetOne = 0.0, subsetFour = 0.0;
     for (int levels = 1; levels <= 4; ++levels) {
-        Frontend<uint32_t> fe(gray.cols, gray.rows, levels);
-        buildRealFrontend(gray, translation(1.0, 0.0), levels, fe);
-        Frontend<uint32_t> deepest(gray.cols, gray.rows, 4);
-        buildRealFrontend(gray, translation(1.0, 0.0), 4, deepest);
+        Pipeline<uint32_t> fe(gray.cols, gray.rows, levels);
+        buildRealPipeline(gray, translation(1.0, 0.0), levels, fe);
+        Pipeline<uint32_t> deepest(gray.cols, gray.rows, 4);
+        buildRealPipeline(gray, translation(1.0, 0.0), 4, deepest);
         const std::vector<Point2f> all =
             eligiblePoints(fe.dx[0], fe.dy[0], gray.cols, gray.rows, translation(1.0, 0.0),
                            params.winWidth, params.winHeight);
@@ -2741,8 +2741,8 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
 
     // ---- what the loss rules and the footprint table need said out loud ---
     {
-        Frontend<uint32_t> fe(gray.cols, gray.rows, 1);
-        buildRealFrontend(gray, translation(0.5, 0.5), 1, fe);
+        Pipeline<uint32_t> fe(gray.cols, gray.rows, 1);
+        buildRealPipeline(gray, translation(0.5, 0.5), 1, fe);
         const std::vector<Point2f> pts =
             eligiblePoints(fe.dx[0], fe.dy[0], gray.cols, gray.rows, translation(0.5, 0.5),
                            params.winWidth, params.winHeight);
@@ -2755,7 +2755,7 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
         BINCV_CHECK(smallest > static_cast<double>(params.minEigThreshold));
 
         // The content-dependent term of the footprint table, on decoded content,
-        // so that Flow.FrontendFootprint_640x480's per-frame candidate count has a
+        // so that Flow.PipelineFootprint_640x480's per-frame candidate count has a
         // measured range rather than a single reading.
         std::vector<float> mapStorage(static_cast<std::size_t>(gray.cols) *
                                           static_cast<std::size_t>(gray.rows), 0.0f);
@@ -2776,8 +2776,8 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
     // AND THE BIT-PARALLEL IMPLEMENTATION IS NOT WHAT IS LOSING THE ACCURACY. The
     // per-pixel float implementation, on this same content, must agree with it.
     {
-        Frontend<uint32_t> fe(gray.cols, gray.rows, 1);
-        buildRealFrontend(gray, translation(0.5, 0.5), 1, fe);
+        Pipeline<uint32_t> fe(gray.cols, gray.rows, 1);
+        buildRealPipeline(gray, translation(0.5, 0.5), 1, fe);
         std::vector<Point2f> pts = eligiblePoints(fe.dx[0], fe.dy[0], gray.cols, gray.rows,
                                                   translation(0.5, 0.5), params.winWidth,
                                                   params.winHeight);
@@ -2852,7 +2852,7 @@ void x24RealCase(const cv::Mat& gray, const char* label, const Warp& warp, doubl
     // The point set comes from LEVEL 0, which is 1 bit in every ladder, so every
     // row below is measured over the SAME points. Band D of that measurement’s rule exists
     // because a curve over different point sets is not a curve.
-    Frontend<WordType> base(gray.cols, gray.rows, 4);
+    Pipeline<WordType> base(gray.cols, gray.rows, 4);
     base.prev[0].fromCVMat(bin0);
     base.next[0].fromCVMat(bin1);
     base.build();
@@ -2938,7 +2938,7 @@ BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
     // read the natural alphabet as 1/3/4/5 from one 256^2 frame;
     // corrected it to 1/3/5/7 from the representation. This measures what the
     // uncapped ladder ACTUALLY holds on the reference pipeline's own edge map,
-    // which is the content the frontend sees, and closes that measurement’s caveat.
+    // which is the content the pipeline sees, and closes that measurement’s caveat.
     {
         bincv::Pyramid<uint32_t, 1, 3, 5, 7> deep(gray.cols, gray.rows);
         const cv::Mat bin0 = referencePreprocess(gray, 17);
@@ -2988,11 +2988,11 @@ template <typename WordType, size_t... LevelBits>
 Yield runArm(const char* label, const BinMat<WordType>& prevSrc, const BinMat<WordType>& nextSrc,
              const Warp& warp, const std::vector<Point2f>& pts, size_t eligibleTotal,
              bincv::LKEntryLevel policy, double modelError) {
-    LadderFrontend<WordType, LevelBits...> fe(prevSrc.cols(), prevSrc.rows());
+    LadderPipeline<WordType, LevelBits...> fe(prevSrc.cols(), prevSrc.rows());
     seedLevelZero(fe, prevSrc, nextSrc);
     fe.build();
 
-    LKParams params;  // the reference frontend's parameters verbatim, except the policy under test
+    LKParams params;  // the reference pipeline's parameters verbatim, except the policy under test
     params.entryLevel = policy;
     std::vector<Point2f> out(pts.size());
     std::vector<uint8_t> status(pts.size());
@@ -3085,7 +3085,7 @@ Yield runArmB(const cv::Mat& gray, const Warp& warp, const std::vector<Point2f>&
     prevSrc.fromCVMat(bin0);
     nextSrc.fromCVMat(bin1);
 
-    LadderFrontend<WordType, LevelBits...> fe(gp.cols, gp.rows);
+    LadderPipeline<WordType, LevelBits...> fe(gp.cols, gp.rows);
     seedLevelZero(fe, prevSrc, nextSrc);
     fe.build();
 
@@ -3149,7 +3149,7 @@ void x25Case(const cv::Mat& gray, const char* ladderName, const char* caseName, 
     prevSrc.fromCVMat(bin0);
     nextSrc.fromCVMat(bin1);
 
-    Frontend<WordType> base(gray.cols, gray.rows, 4);
+    Pipeline<WordType> base(gray.cols, gray.rows, 4);
     base.prev[0].fromCVMat(bin0);
     base.next[0].fromCVMat(bin1);
     base.build();
@@ -3241,8 +3241,8 @@ BINCV_TEST(Flow, X25_CoarseLevelBorder_uint32_t) {
 // ---------------------------------------------------------------------------
 namespace {
 
-/// @brief Route (a) over a 1-bit ladder built by the existing Frontend.
-Yield runBlockMatch(const char* label, Frontend<uint32_t>& fe, const Warp& warp,
+/// @brief Route (a) over a 1-bit ladder built by the existing Pipeline.
+Yield runBlockMatch(const char* label, Pipeline<uint32_t>& fe, const Warp& warp,
                     const std::vector<Point2f>& pts, size_t eligibleTotal, double modelError,
                     int radius, bool subPixel) {
     std::vector<bincv::BlockMatchLevel<uint32_t>> levels;
@@ -3304,7 +3304,7 @@ void x26Case(const cv::Mat& gray, const char* caseName, const Warp& warp, double
     const cv::Mat bin0 = referencePreprocess(gray, 17);
     const cv::Mat bin1 = referencePreprocess(warped, 17);
 
-    Frontend<uint32_t> fe(gray.cols, gray.rows, 4);
+    Pipeline<uint32_t> fe(gray.cols, gray.rows, 4);
     fe.prev[0].fromCVMat(bin0);
     fe.next[0].fromCVMat(bin1);
     fe.build();
@@ -3410,7 +3410,7 @@ const char* filterName(PyrFilter f) {
 
 namespace {
 
-/// Builds a LadderFrontend's levels 1.. with **binCV's own `pyrDownFiltered`
+/// Builds a LadderPipeline's levels 1.. with **binCV's own `pyrDownFiltered`
 /// cascade** -- the pipeline that ships. Level 0 is the binary frame in every arm;
 /// it is the input, not a choice.
 ///
@@ -3427,7 +3427,7 @@ namespace {
 /// quantization of a quantization.
 ///
 /// Measured consequence: it priced level 3's second bit at **-0.69 yield
-/// points** where the frontend measures **-4.6** -- a 6.7x understatement that
+/// points** where the pipeline measures **-4.6** -- a 6.7x understatement that
 /// inverted a three-axis dominance claim and nearly shipped a worse default. Every
 /// accuracy number from earlier measurements came through that seed.
 ///
@@ -3438,7 +3438,7 @@ namespace {
 /// entry exists to remove.
 /// ===========================================================================
 template <bincv::PyrDownFilter F, typename WordType, size_t... LevelBits>
-void seedPyramid(LadderFrontend<WordType, LevelBits...>& fe, const cv::Mat& binPrev,
+void seedPyramid(LadderPipeline<WordType, LevelBits...>& fe, const cv::Mat& binPrev,
                  const cv::Mat& binNext) {
     for (int y = 0; y < binPrev.rows; ++y) {
         for (int x = 0; x < binPrev.cols; ++x) {
@@ -3455,7 +3455,7 @@ void seedPyramid(LadderFrontend<WordType, LevelBits...>& fe, const cv::Mat& binP
 
 /// Runtime filter -> compile-time dispatch, so a sweep can loop over filters.
 template <typename WordType, size_t... LevelBits>
-void seedFiltered(LadderFrontend<WordType, LevelBits...>& fe, const cv::Mat& binPrev,
+void seedFiltered(LadderPipeline<WordType, LevelBits...>& fe, const cv::Mat& binPrev,
                   const cv::Mat& binNext, PyrFilter f) {
     using B = bincv::PyrDownFilter;
     switch (f) {
@@ -3478,7 +3478,7 @@ void seedFiltered(LadderFrontend<WordType, LevelBits...>& fe, const cv::Mat& bin
 template <typename WordType, size_t... LevelBits>
 Yield runFilterArm(const cv::Mat& binPrev, const cv::Mat& binNext, const Warp& warp,
                    const std::vector<Point2f>& pts, double modelError, PyrFilter f) {
-    LadderFrontend<WordType, LevelBits...> fe(binPrev.cols, binPrev.rows);
+    LadderPipeline<WordType, LevelBits...> fe(binPrev.cols, binPrev.rows);
     seedFiltered(fe, binPrev, binNext, f);
     LKParams params;
     std::vector<Point2f> out(pts.size());
@@ -3545,7 +3545,7 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpace_uint32_t) {
                        cv::BORDER_REFLECT_101);
         const cv::Mat b0 = referencePreprocess(gray, 17);
         const cv::Mat b1 = referencePreprocess(warped, 17);
-        Frontend<uint32_t> base(gray.cols, gray.rows, 4);
+        Pipeline<uint32_t> base(gray.cols, gray.rows, 4);
         base.prev[0].fromCVMat(b0); base.next[0].fromCVMat(b1); base.build();
         const std::vector<Point2f> pts = eligiblePoints(base.dx[0], base.dy[0], gray.cols,
                                                         gray.rows, c.warp, lkp.winWidth,
@@ -3670,7 +3670,7 @@ BINCV_TEST(Flow, X50_LadderFilterSequence_uint32_t) {
             cv::warpAffine(gray, warped, affineOf(c.warp), gray.size(), cv::INTER_CUBIC,
                            cv::BORDER_REFLECT_101);
             const cv::Mat b1 = referencePreprocess(warped, 17);
-            Frontend<uint32_t> base(gray.cols, gray.rows, 4);
+            Pipeline<uint32_t> base(gray.cols, gray.rows, 4);
             base.prev[0].fromCVMat(b0); base.next[0].fromCVMat(b1); base.build();
             const std::vector<Point2f> pts =
                 eligiblePoints(base.dx[0], base.dy[0], gray.cols, gray.rows, c.warp,
@@ -3793,7 +3793,7 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
             cv::warpAffine(gray, warped, affineOf(c.warp), gray.size(), cv::INTER_CUBIC,
                            cv::BORDER_REFLECT_101);
             const cv::Mat b1 = referencePreprocess(warped, 17);
-            Frontend<uint32_t> base(gray.cols, gray.rows, 4);
+            Pipeline<uint32_t> base(gray.cols, gray.rows, 4);
             base.prev[0].fromCVMat(b0); base.next[0].fromCVMat(b1); base.build();
             const std::vector<Point2f> pts =
                 eligiblePoints(base.dx[0], base.dy[0], gray.cols, gray.rows, c.warp,
@@ -3884,7 +3884,7 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
 
 BINCV_TEST(Flow, InitialFlowWithPrevPtsIsExactlyTheDefault_uint32_t) {
     using W = uint32_t;
-    Frontend<W> fe(320, 240, 4);
+    Pipeline<W> fe(320, 240, 4);
     const Warp warp = translation(3.0, -2.0);
     renderWarped(fe.prev[0], Warp{});
     renderWarped(fe.next[0], warp);
@@ -3923,7 +3923,7 @@ BINCV_TEST(Flow, InitialFlowWithPrevPtsIsExactlyTheDefault_uint32_t) {
 
 BINCV_TEST(Flow, InitialFlowSeedIsReadAndUsed_uint32_t) {
     using W = uint32_t;
-    Frontend<W> fe(320, 240, 4);
+    Pipeline<W> fe(320, 240, 4);
     // A translation far enough that the coarsest level's estimate matters, so a WRONG
     // guess cannot be silently corrected back to the right answer by the fine levels.
     const Warp warp = translation(5.0, 4.0);
@@ -4007,12 +4007,12 @@ BINCV_TEST(Flow, InitialFlowSurvivesTheZeroLevelExit_uint32_t) {
 // exceeds a threshold.
 //
 // THE DEFAULT IS OFF AND THIS FILE PINS THAT FIRST, because the parameter changes which
-// points a caller keeps and every recorded frontend number was taken without it.
+// points a caller keeps and every recorded pipeline number was taken without it.
 // ---------------------------------------------------------------------------
 
 BINCV_TEST(Flow, ResidualRejectDefaultsOffAndChangesNothing_uint32_t) {
     using W = uint32_t;
-    Frontend<W> fe(320, 240, 4);
+    Pipeline<W> fe(320, 240, 4);
     const Warp warp = translation(3.0, -2.0);
     renderWarped(fe.prev[0], Warp{});
     renderWarped(fe.next[0], warp);
@@ -4042,7 +4042,7 @@ BINCV_TEST(Flow, ResidualRejectRemovesTheSilentLargeMotionFailure_uint32_t) {
     using W = uint32_t;
     // 28 px, which a measurement measured as past the cliff: at 19 px every point is good and at
     // 28 px every point is wrong, so this is the case this is about.
-    Frontend<W> fe(640, 480, 4);
+    Pipeline<W> fe(640, 480, 4);
     const Warp warp = translation(24.0, 16.0);
     renderWarped(fe.prev[0], Warp{});
     renderWarped(fe.next[0], warp);

@@ -464,7 +464,7 @@ BINCV_TEST(PairedStats, TheRunToRunScatterIsNotDefaultedToANumber) {
 // ---------------------------------------------------------------------------
 
 BINCV_TEST(PairedStats, TheCaseThatForcedTheRuling) {
-    // DEVICE LUCAS-KANADE AT THE FRONTEND'S OWN SPACING, to the figures the
+    // DEVICE LUCAS-KANADE AT THE PIPELINE'S OWN SPACING, to the figures the
     // aggregation printed: binCV faster in every round, median 2.18x, and a
     // per-round swing of 3.05x that comes ENTIRELY from rounds where it won by
     // more. Five rounds standing in for the 105, with the real min, median and

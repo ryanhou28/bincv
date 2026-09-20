@@ -82,10 +82,10 @@ int main() {
     const bincv::BinMatConstView<W> magX = dx.constMagnitude(0), magY = dy.constMagnitude(0);
     const bincv::BinMatConstView<W> signX = dx.constSign(), signY = dy.constSign();
 
-    bincv::GoodFeaturesParams params;   // the reference frontend's values, verbatim
+    bincv::GoodFeaturesParams params;   // the reference pipeline's values, verbatim
     std::vector<float> ring(bincv::kResponseRingRows * w);
     const bincv::ResponseMap ringMap{ring.data(), w, bincv::kResponseRingRows, w};
-    const size_t capacity = 20000;      // frontend_sequence.cpp's own pool size
+    const size_t capacity = 20000;      // feature_tracking_sequence.cpp's own pool size
     std::vector<bincv::Corner> corners(capacity);
 
     // The shipped call once, for the counts every arm is checked against.

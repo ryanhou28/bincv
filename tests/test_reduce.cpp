@@ -840,7 +840,7 @@ void testDegenerate(const char* wordTypeName) {
                             label);
     }
 
-    // Rect's own three predicates. They are public API on a type this task added,
+    // Rect's own three predicates. They are public API on a type these reductions added,
     // and impl::clipRegion calls empty -- but a member whose body is wrong and
     // whose only caller is a fast path can still leave every count right, so they
     // are checked directly rather than inferred from the counts above. (This is

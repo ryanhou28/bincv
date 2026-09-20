@@ -159,7 +159,7 @@
 /// alternatives for a reason each:
 ///
 /// * **Zero fill** would divide a real edge pixel by four and darken the last
-/// column and row of every level. On a frontend whose keypoints live near
+/// column and row of every level. On a pipeline whose keypoints live near
 /// edges that is a systematic bias, not a rounding difference.
 /// * **Dropping the odd column** would make the destination floor(w/2), break
 /// the ceil(w/2) size relation OpenCV and the reference both use, and lose a
@@ -187,7 +187,7 @@
 /// file's multi-bit one.
 /// 3. **The reference pipeline's own BOX_2x2 path** for the 1-bit level-0 case
 /// -- cv::blur(2x2) then subsample, with the Gaussian disabled, which is what
-/// the reference frontend's pyramid does.
+/// the reference pipeline's pyramid does.
 ///
 /// **Three documented deviations from that reference. The first is a rounding
 /// difference and the other two are not:**
@@ -667,7 +667,7 @@ inline void gatherPhases(WordType w0, WordType w1, WordType& evenPhase,
 // THE DOWNSAMPLING FILTER AXIS (earlier work)
 //
 // The reference defines SIX `LKPyrDownFilterType` variants and binCV implemented
-// exactly one, `BOX_2x2`, because that is what the reference frontend selects. Every
+// exactly one, `BOX_2x2`, because that is what the reference pipeline selects. Every
 // accuracy result in this project was therefore measured at one point of a
 // two-dimensional design space -- and a measurement showed the
 // two axes are NOT independent: a 2x2 box sum of four values has five possible
@@ -687,7 +687,7 @@ inline void gatherPhases(WordType w0, WordType w1, WordType& evenPhase,
 // (`MEDIAN_3x3` is an order statistic, not a weighted sum, and is not here.
 // a measurement measured it 7.53 points BELOW the box anyway: a median of a mostly-zero
 // neighbourhood returns zero, so it erodes a sparse edge map rather than blurring
-// it. It belongs in the temporal denoiser, which is where the reference frontend uses it.)
+// it. It belongs in the temporal denoiser, which is where the reference pipeline uses it.)
 //
 // WHY THE TAPS ARE CHEAP. Output column x reads source column 2x + dx, and
 // `gatherPhases` already separates a source row into its even and odd column

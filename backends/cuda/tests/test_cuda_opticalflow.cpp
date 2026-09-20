@@ -30,7 +30,7 @@
 //     answer, and the FMA GUARD, so the build flags the equality claim rests on
 //     cannot be lost in silence.
 //
-// A .cpp rather than a .cu, for test_cuda_frontend_corner's reason: the oracle
+// A .cpp rather than a .cu, for test_cuda_feature_tracking_corner's reason: the oracle
 // here is the HOST tracker, ops/opticalFlow.hpp gates its AVX2 keypoint batch off
 // under __CUDACC__, and a host arm compiled by nvcc is not the host arm a caller
 // runs. This translation unit is also compiled -ffp-contract=off, which is half

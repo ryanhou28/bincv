@@ -21,7 +21,7 @@
 ///
 /// binCV had no second half, so `examples/vio_frontend.cpp` grew a private copy of
 /// one. That is the evidence this file is missing rather than an argument that it is:
-/// the library's own example could not do a normal frontend's normal thing with the
+/// the library's own example could not do a normal pipeline's normal thing with the
 /// library's own operations.
 ///
 /// ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@
 ///
 /// **CALL `spaceCandidates`. THE BIT-PLANE ARM LOST, AND IT LOST BY AN ORDER OF
 /// MAGNITUDE.** fixed the rule before either arm existed and then measured both at
-/// the frontend's own operating point -- 640x480, radius 32, 120 live tracks, 300
+/// the pipeline's own operating point -- 640x480, radius 32, 120 live tracks, 300
 /// candidates, 80 free slots:
 ///
 /// | | exhaustive | mask |
@@ -48,7 +48,7 @@
 ///
 /// 26.6x and 7.7x, against a memory rule that would have needed the mask merely to
 /// TIE. The mask does not overtake until roughly **2 000 candidates on aarch64 and
-/// 5 000 on x86** -- seven to seventeen times more than a frontend ever detects.
+/// 5 000 on x86** -- seven to seventeen times more than a pipeline ever detects.
 ///
 /// **The reason is structural, not an unoptimized inner loop.** Stamping a disc touches
 /// pi*r^2 = 3 217 pixels to encode what the exhaustive arm consumes in ONE distance
@@ -420,7 +420,7 @@ inline bool occupied(BinMatConstView<WordType> mask, long long x, long long y) {
 /// @note **Identical output to `spaceCandidates` for integer candidates**, pinned by
 /// `Occupancy.ArmsAgreeExactly`. A candidate is rounded to the pixel it sits in;
 /// for the integer positions a detector produces that is the point itself.
-/// @note **THIS IS NOT THE ARM TO CALL FOR A VIO TOP-UP.** At the frontend's operating
+/// @note **THIS IS NOT THE ARM TO CALL FOR A VIO TOP-UP.** At the pipeline's operating
 /// point `spaceCandidates` is 26.6x faster on x86 and 7.7x on the reference
 /// device, and costs no memory against this arm's 38 400 B. The crossover is
 /// around 2 000 candidates on aarch64 and 5 000 on x86, so this arm is

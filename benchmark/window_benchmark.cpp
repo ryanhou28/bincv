@@ -51,7 +51,7 @@
 // Heavy LOCAL overlap; a block-matching / search-region pattern.
 // DENSE every window position in the frame. the design notes's corner
 // response is computed from the same covariance machinery over the
-// whole image, so this is the frontend's real maximum-overlap case
+// whole image, so this is the pipeline's real maximum-overlap case
 // rather than a synthetic upper bound.
 //
 // TWO incremental forms are measured, because "a sliding accumulator" over

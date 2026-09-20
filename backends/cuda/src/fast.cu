@@ -367,7 +367,7 @@ __global__ void fastSortKernel(DeviceFastCorner* out, const uint32_t* counter,
     const uint32_t n = found < capacity ? found : capacity;
     if (n < 2u) return;
     // Padded to the next power of two above what was actually STORED, not above
-    // the capacity the caller sized for. A frontend that sizes generously and
+    // the capacity the caller sized for. A pipeline that sizes generously and
     // detects two hundred corners sorts 256 slots, not its capacity's worth --
     // the network is O(n log^2 n) and that difference is most of this kernel.
     uint32_t padded = 1u;

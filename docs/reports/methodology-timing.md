@@ -120,8 +120,8 @@ whole of this against hand-computed values, in 280 checks, and needs no GPU.
 
 ## The case that forced the ruling, and where it landed
 
-**The row was Lucas-Kanade at the frontend's own keypoint spacing.** Every one of its paired
-rounds favours binCV, all seven runs are range-disjoint, and the two arms were **never once
+**The row was Lucas-Kanade at the tracking pipeline's own keypoint spacing.** Every one
+of its paired rounds favours binCV, all seven runs are range-disjoint, and the two arms were **never once
 seen closer than 1.35× apart**. Yet the per-round ratio swings 2.49× across those rounds —
 because the rounds where binCV wins by 4.4× sit further from 1.00× than the rounds where it
 wins by 1.35× — and a difference of 1.84× does not exceed 2.49×. So the rule, read literally,
@@ -141,7 +141,7 @@ medians move by 1.007× and `cv::cuda`'s by 1.29×.
 
 | row | `cv::cuda` vs binCV, per-run medians | rounds won by binCV | now |
 |---|---|---|---|
-| **LK at the frontend's spacing (204 pts)** | 0.1475 ms vs **0.0792 ms** | **105 of 105** | **direction established, 1.35×–4.36×**; magnitude a null |
+| **LK at the pipeline's spacing (204 pts)** | 0.1475 ms vs **0.0792 ms** | **105 of 105** | **direction established, 1.35×–4.36×**; magnitude a null |
 | LK @256 | 0.1467 ms vs **0.0728 ms** | **105 of 105** | direction established, 1.43×–5.65×, **and** a result at 2.00× |
 | LK @512 | 0.1634 ms vs **0.1056 ms** | **105 of 105** | direction established, 1.13×–3.80×; magnitude a null |
 | `threshold` 3840×2160 | 0.0362 ms vs **0.0268 ms** | 97 of 105 | still a null on both halves |
@@ -184,7 +184,7 @@ see the caveat at the end.)
 
 | effect | both arms, per-run medians | old verdict | now |
 |---|---|---|---|
-| **LK at the frontend's own spacing, 204 pts** | `cv::cuda` **0.1475 ms** [0.1314–0.1700] · binCV **0.0792 ms** [0.0787–0.0794] | null (1.84× apart against a 2.49× swing) | **DIRECTION ESTABLISHED** — **105 of 105**, by **1.35× to 4.36×**, p = 4.9×10⁻³² |
+| **LK at the pipeline's own spacing, 204 pts** | `cv::cuda` **0.1475 ms** [0.1314–0.1700] · binCV **0.0792 ms** [0.0787–0.0794] | null (1.84× apart against a 2.49× swing) | **DIRECTION ESTABLISHED** — **105 of 105**, by **1.35× to 4.36×**, p = 4.9×10⁻³² |
 | LK @256 pts | `cv::cuda` **0.1467 ms** [0.1370–0.1782] · binCV **0.0728 ms** [0.0718–0.0764] | null | **DIRECTION + RESULT** — 105 of 105, **1.43× to 5.65×**, median 2.00× |
 | LK @512 pts | `cv::cuda` **0.1634 ms** [0.1347–0.1844] · binCV **0.1056 ms** [0.1046–0.1059] | null | **DIRECTION ESTABLISHED** — 105 of 105, **1.13× to 3.80×** |
 | LK @64 / @128 pts | `cv::cuda` 0.1396 / 0.1412 ms · binCV **0.0523 / 0.0548 ms** | RESULT | DIRECTION + RESULT — 105 of 105, 1.77×–10.95× / 1.78×–4.89× |
@@ -212,7 +212,7 @@ way out of a hundred — a distinction the two-valued table could not draw at al
 
 **Two harness defects surfaced while re-judging, and both were producing published numbers.**
 
-- `gftt_wall` and the frontend's wall-clock pair assembled their paired summary **by hand**
+- `gftt_wall` and the pipeline's wall-clock pair assembled their paired summary **by hand**
   instead of through `summarizePaired`, so `roundsFavouringA/B` were left at zero. Two published
   role bars printed a **0–0 sign split and p = 1 over rounds that are in fact 105–0**, and took
   the ratio's median from the *arithmetic* even-count midpoint the factor spelling exists to

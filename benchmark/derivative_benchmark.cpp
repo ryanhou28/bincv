@@ -3,7 +3,7 @@
 // THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that is not a judgement call either -- it is
-// the reference frontend's gradient stage, calcBinarizedDeriv, which is two
+// the reference pipeline's gradient stage, calcBinarizedDeriv, which is two
 // cv::filter2D calls with [-1, 0, 1] as a 1x3 and a 3x1. That IS what the
 // pipeline runs today without binCV.
 //
@@ -722,7 +722,7 @@ int main() {
     std::printf("================================================================================\n\n");
     std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n\n",
                 CV_VERSION, cv::getNumThreads());
-    std::printf("DENOMINATOR (ARCHITECTURE 10.3): the reference frontend's calcBinarizedDeriv on the SAME binary\n");
+    std::printf("DENOMINATOR (ARCHITECTURE 10.3): the reference pipeline's calcBinarizedDeriv on the SAME binary\n");
     std::printf("content stored as CV_8U -- two cv::filter2D calls with [-1, 0, 1] as a 1x3 and\n");
     std::printf("a 3x1, ported. That is what the pipeline runs today without binCV.\n\n");
     std::printf("The DENOMINATOR row is 'OpenCV filter2D x2' -- the derivative and nothing else.\n");

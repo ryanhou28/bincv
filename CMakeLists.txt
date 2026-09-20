@@ -115,12 +115,13 @@ else()
     # Baseline x86-64 does NOT include POPCNT (it arrived with SSE4.2 / Nehalem
     # 2008, Barcelona 2007), so `__builtin_popcountll` compiles to a SOFTWARE
     # fallback in the portable build -- measured: zero `popcnt` instructions in
-    # the shipped binary. X-57 priced that at **3.75x on the whole frontend**:
+    # the shipped binary. A measurement on the assembled feature tracking pipeline
+    # priced that at **3.75x on the whole pipeline**:
     # binCV goes 12.9 -> 3.4 ms and from 3.8x SLOWER than OpenCV to 0.91x, near
     # parity, at 6.23x less memory.
     #
-    # Why one flag moves a whole frontend: the bit-plane representation turns
-    # several of the operations ON that frontend INTO population counts -- the
+    # Why one flag moves a whole pipeline: the bit-plane representation turns
+    # several of the operations ON that pipeline INTO population counts -- the
     # reductions, and the tracker's gradient covariance, which is three popcounts
     # over masks instead of a multiply (ARCHITECTURE 1 and 4). So a software
     # popcount lands squarely on the hot path. That is a CONSEQUENCE of the

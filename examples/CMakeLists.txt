@@ -1,6 +1,5 @@
 # Worked examples. Not tests and not benchmarks: they exist to be READ, and to
-# prove the kernel set composes into something a real pipeline shape can use
-# (T4.3b).
+# prove the kernel set composes into something a real pipeline shape can use.
 #
 # NOT gated on OpenCV. The core-only build is the configuration the whole memory
 # argument rests on, and this directory used to be skipped there -- so the one

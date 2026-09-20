@@ -1,8 +1,12 @@
 // ===========================================================================
 // A BINARY-FRAME VIO VISION FRONTEND, END TO END, ON binCV KERNELS.
 //
-// T4.3b asked whether binCV's kernel set is SUFFICIENT for a real VIO frontend.
-// Every prior end-to-end measurement in this project runs a
+// A VIO *frontend* is the image-processing half of a visual-inertial odometry
+// system -- sensor stage, pyramid, detection, tracking, track lifecycle -- the
+// part that turns camera frames into feature tracks for the estimator behind it.
+//
+// This example asks whether binCV's kernel set is SUFFICIENT for a real VIO
+// frontend. Every prior end-to-end measurement in this project runs a
 // benchmark loop: detect wholesale every N frames, track, compare. A real
 // frontend does something structurally different, and this is that loop --
 // modelled on HybVIO's, which is what the reference pipeline drives:
@@ -87,7 +91,7 @@ namespace {
 // `medianWide` with the reference's L neighbourhood, then `edgeThreshold`,
 // whose no-argument defaults ARE the reference's operation (ops/edge.hpp) --
 // straight from the gray buffer into bit-planes, no 8-bit edge image at any
-// point. benchmark/frontend_sequence.cpp holds this spelling bit-identical to
+// point. benchmark/feature_tracking_sequence.cpp holds this spelling bit-identical to
 // the reference pipeline every frame, so this example adds no new claim. It is
 // what the CORE-ONLY build runs, because it is what an embedded caller runs:
 // nothing upstream of it but the sensor buffer.

@@ -89,7 +89,7 @@ namespace cuda {
 /// float pairs -- so an upload is a raw copy of the array
 /// `goodFeaturesToTrack` or `computeBrief` already works on, and a device
 /// run can be compared against a host run over the same bytes.
-/// @note Positions are `float` and stay `float`: the frontend's keypoints are
+/// @note Positions are `float` and stay `float`: the pipeline's keypoints are
 /// sub-pixel once optical flow has touched them, and an integer device
 /// twin would silently re-quantize what the host refined.
 /// @note `octave` is optional, exactly as `matchDescriptorsGated`'s octave

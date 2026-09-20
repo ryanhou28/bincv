@@ -123,7 +123,7 @@
 // paired rounds answers, and reading it as though it were produced a verdict
 // the owner ruled wrong (2026-09-19).
 //
-// THE CASE THAT FORCED IT. Device Lucas-Kanade at the frontend's own keypoint
+// THE CASE THAT FORCED IT. Device Lucas-Kanade at the pipeline's own keypoint
 // spacing. binCV was faster in 105 of 105 paired rounds and never by less than
 // 1.6x, median 2.18x. The per-round ratio nonetheless swung 3.05x across those
 // rounds -- entirely because the rounds where binCV won by 6.7x sit so much

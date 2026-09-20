@@ -224,7 +224,7 @@ size_t goodFeaturesScratchBytes(size_t candidateCapacity);
 /// `BinMatConstView<uint32_t>` planes, pixel for pixel.
 /// @param magX,magY Magnitude planes of the x- and y-derivatives.
 /// @param signX,signY Sign planes; a SET bit is NEGATIVE.
-/// @param blockSize Side of the square covariance window, >= 1. The frontend
+/// @param blockSize Side of the square covariance window, >= 1. The pipeline
 /// runs 3, which is the size the bit-sliced arm covers.
 /// @param dst Caller-owned `float` map with the planes' dimensions. Every pixel
 /// is written; nothing is read from it.
@@ -246,7 +246,7 @@ cudaError_t cornerMinEigenValAsync(DeviceBinMatConstView magX, DeviceBinMatConst
 /// `goodFeaturesToTrackStreaming` whenever `work.candidates` held every raw
 /// maximum.
 /// @param magX,magY,signX,signY The four derivative planes, in device memory.
-/// @param params The host's four values; defaults are the frontend's.
+/// @param params The host's four values; defaults are the pipeline's.
 /// @param work Caller-owned candidate buffer, frame-maximum word, scratch and
 /// (reference arm only) response map. See DeviceGoodFeaturesWorkspace.
 /// @param corners Caller-owned device output array.
@@ -281,7 +281,7 @@ bool& cornerSlicedEnabled();
 /// restating the gate.
 /// @note The gate is `blockSize == 3`: the full-adder tree that sums three
 /// 2-bit numbers into four planes is a 3x3 identity, and 3 is the size the
-/// host's own fast path covers and every frontend here runs. `blockSize = 7`
+/// host's own fast path covers and every pipeline here runs. `blockSize = 7`
 /// is therefore the control case that must read ~1.00x between switch
 /// positions.
 bool cornerSlicedApplies(int blockSize);

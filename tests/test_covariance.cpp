@@ -978,7 +978,7 @@ void testColumnSweepAgreement(const char* wordTypeName) {
 /// @brief Case 9: WHICH SPELLING ACCEPTS WHAT, checked rather than asserted.
 /// @note shipped with `SignedQuantMat<N, W>` for N > 1 matching NO overload,
 /// and this case pinned that. ** reverses it deliberately**: a measurement found
-/// the tracker's accuracy failure IS the 1-bit pyramid, so the frontend needs
+/// the tracker's accuracy failure IS the 1-bit pyramid, so the pipeline needs
 /// N-bit levels and the covariance has to form at N > 1. The container
 /// spelling now dispatches on the plane count -- ternary to the
 /// single-popcount kernel, N-bit to the bit-sliced one -- and what this case
@@ -1933,7 +1933,7 @@ void testBitSlicedWordType(const char* wordTypeName) {
     testBitSlicedContracts<3, WordType>(wordTypeName);
     testBitSlicedWeightsByHand<WordType>(wordTypeName);
     // **Every depth, not only the deep ones.** The no-heap rule is the library's
-    // central one and N = 1 and N = 2 are the depths the frontend's lowest levels
+    // central one and N = 1 and N = 2 are the depths the pipeline's lowest levels
     // run at, so leaving them out left the promise unmeasured exactly where a
     // per-plane-pair temporary would be cheapest to introduce unnoticed.
     noScratchAtEveryBitDepth<WordType>(wordTypeName, std::make_index_sequence<MAX_BIT_DEPTH>{});

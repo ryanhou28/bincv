@@ -1,4 +1,4 @@
-// Device-versus-host bit-exactness for the frontend's entry point: FAST, the
+// Device-versus-host bit-exactness for the pipeline's entry point: FAST, the
 // minimum-eigenvalue response, good-features selection and sub-pixel refinement.
 //
 // The host library is the truth and the format is shared, so every case here is
@@ -1124,12 +1124,12 @@ int main(int argc, char** argv) {
     if (!cudaDevicePresent()) return 77;
     ::testing::InitGoogleTest(&argc, argv);
     const int rc = RUN_ALL_TESTS();
-    const int summaryRc = ::bincv::test::summarize("CUDA frontend corner tests");
+    const int summaryRc = ::bincv::test::summarize("CUDA pipeline corner tests");
     return (rc != 0 || summaryRc != 0) ? 1 : 0;
 }
 #else
 int main(int argc, char** argv) {
     if (!cudaDevicePresent()) return 77;
-    return ::bincv::test::runAll("CUDA frontend corner tests", argc, argv);
+    return ::bincv::test::runAll("CUDA pipeline corner tests", argc, argv);
 }
 #endif

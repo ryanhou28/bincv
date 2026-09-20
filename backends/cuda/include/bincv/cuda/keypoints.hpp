@@ -47,8 +47,8 @@
 /// alignment precondition on `xy` -- which would stop a caller slicing one
 /// keypoint array into per-octave ranges. The op moves `16 * capacity` bytes
 /// (4,096 B at capacity 256) in one launch, so it sits on this platform's
-/// launch floor at every capacity a frontend uses and the store count cannot
-/// move the number. The measurement is in the resident frontend example, which
+/// launch floor at every capacity a pipeline uses and the store count cannot
+/// move the number. The measurement is in the resident pipeline example, which
 /// prints this stage against the cheapest launch the library can make.
 ///
 /// ---------------------------------------------------------------------------

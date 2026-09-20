@@ -2,11 +2,11 @@
 // THE REAL-FRAME ACCURACY HARNESS -- the candidate resolution to the synthetic
 // harness's known failure, priced before anyone adopts it.
 //
-// The synthetic-warp harness and the frontend disagree by ~4.2 yield points on
+// The synthetic-warp harness and the pipeline disagree by ~4.2 yield points on
 // the same configuration, and the float-cascade hypothesis is dead: correcting
 // the cascade moved the number 0.12 where the gap is 4.2. What remains is
 // structural -- the warp harness tracks binarizations of ONE image, so `prev`
-// and `next` have near-identical edge maps, while the frontend tracks real
+// and `next` have near-identical edge maps, while the pipeline tracks real
 // consecutive frames whose binarizations differ wherever a pixel sits near the
 // threshold. The standing rule is therefore that no synthetic-harness accuracy
 // conclusion may be promoted to a shipped default.
@@ -14,12 +14,12 @@
 // THIS FILE IS THE OTHER BARGAIN: real consecutive frame pairs, with OpenCV's
 // LK on the SAME binary content as the reference instead of a known warp. It
 // trades exact ground truth for representativeness. The question that decided
-// whether the trade was worth taking: does this harness reproduce the FRONTEND's
+// whether the trade was worth taking: does this harness reproduce the PIPELINE's
 // configuration deltas (which the synthetic harness does not), while staying
 // cheap enough to sweep with? Measured: it does -- on the axis where the
-// synthetic harness said -0.42 and the frontend said -4.60, this said -7.24 --
+// synthetic harness said -0.42 and the pipeline said -4.60, this said -7.24 --
 // and the owner ADOPTED it (2026-09-11): this harness may guide ladder/filter
-// accuracy decisions, with a full frontend run remaining the final gate before
+// accuracy decisions, with a full pipeline run remaining the final gate before
 // any shipped default changes. The synthetic harness stays restricted to
 // sensitivity questions.
 //
@@ -27,7 +27,7 @@
 // whose flows agree within 1 px. It is agreement with a reference
 // implementation, not truth -- where OpenCV's own flow is wrong, agreement
 // rewards being wrong the same way. That is the priced imperfection, and it is
-// the same one every recorded frontend comparison already carries.
+// the same one every recorded pipeline comparison already carries.
 //
 // Usage: accuracy_realframes <frame-dir> [pair-stride] [max-pairs]
 //   pair-stride N takes every Nth consecutive pair (default 5), so the sweep
@@ -59,7 +59,7 @@ using bincv::Point2f;
 
 namespace {
 
-// The reference sensor stage -- ONE definition shared with frontend_sequence.cpp,
+// The reference sensor stage -- ONE definition shared with feature_tracking_sequence.cpp,
 // which checks binCV's own sensor stage bit-exact against it every frame. Both
 // trackers here see identical binary content, so the only variable is the
 // tracking configuration under test.
@@ -71,7 +71,7 @@ struct PairResult {
 };
 
 /// One configuration, over one frame pair. Templated on the ladder and filter,
-/// because that is the axis the synthetic harness and the frontend disagree on.
+/// because that is the axis the synthetic harness and the pipeline disagree on.
 template <size_t N1, size_t N2, size_t N3, bincv::PyrDownFilter F>
 PairResult runPair(const cv::Mat& binPrev, const cv::Mat& binNext,
                    const std::vector<cv::Point2f>& pts) {
@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
     };
     // The axis the disagreement lives on: the synthetic harness said the ladder
     // barely matters (-0.42 for dropping level 3's second bit at BOX_3x3) and the
-    // frontend said it matters a lot (-4.60). These six cells reproduce that
+    // pipeline said it matters a lot (-4.60). These six cells reproduce that
     // recorded sweep on real pairs.
     Config configs[] = {
         {"1/1/1/1 BOX_2x2", &runPair<1, 1, 1, bincv::PyrDownFilter::Box2x2>, {}},
@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
         const cv::Mat binA = preprocess(a, 17);
         const cv::Mat binB = preprocess(b, 17);
 
-        // The frontend's own detector picks the points, so the harness scores the
+        // The pipeline's own detector picks the points, so the harness scores the
         // pixels a real caller would actually track, not a synthetic grid.
         std::vector<cv::Point2f> pts;
         cv::goodFeaturesToTrack(binA, pts, 200, 0.01, 33.0, cv::noArray(), 3, false);
@@ -221,7 +221,7 @@ int main(int argc, char** argv) {
     }
     std::printf("\n whole sweep: %.1f s for six configurations -- the price of a harness\n"
                 " that tracks real pairs. Adopted for ladder/filter DIRECTION decisions\n"
-                " (owner, 2026-09-11); a full frontend run remains the final gate before\n"
+                " (owner, 2026-09-11); a full pipeline run remains the final gate before\n"
                 " a shipped default changes, and the synthetic harness answers only\n"
                 " sensitivity questions.\n",
                 secs);

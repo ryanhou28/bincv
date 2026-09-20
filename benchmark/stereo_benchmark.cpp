@@ -2,7 +2,7 @@
 //
 // Core-only: no OpenCV denominator exists -- cv::StereoBM is dense and prices a
 // different operation entirely -- so these arms compare binCV's stages against
-// each other and against the keypoint count, which is what a frontend budget
+// each other and against the keypoint count, which is what a pipeline budget
 // needs. The synthetic pair is a shifted frame: every keypoint has a true
 // disparity, so the arms are running the code path that matters (candidates
 // exist and survive the gates) rather than an early-out storm.

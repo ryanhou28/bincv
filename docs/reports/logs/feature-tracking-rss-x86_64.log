@@ -1,4 +1,4 @@
-# frontend-rss -- x86-64  (peak RSS against thread count)
+# feature-tracking-rss -- x86-64  (peak RSS against thread count)
 # commit:   25065d7
 # method:   /usr/bin/time -v, Maximum resident set size, whole process
 # date:     2026-09-01T12:35:00-07:00

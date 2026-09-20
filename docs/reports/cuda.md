@@ -400,8 +400,8 @@ recorded in full on the issue it belongs to.
   SM (worse at every setting). All six attacked *memory* pressure on a kernel that was never
   memory-bound; reading them as a set is what pointed at arithmetic density —
   [#63](https://github.com/ryanhou28/bincv/issues/63).
-- **The frontend's dropped arms** — a `__dp4a` wide-orientation arm (0 of 6 runs disjoint at
-  the operating point, 1.46× only at N=100,000), a funnel-shift covariance arm (1.13×
+- **The feature tracking arms that were dropped** — a `__dp4a` wide-orientation arm
+  (0 of 6 runs disjoint at the operating point, 1.46× only at N=100,000), a funnel-shift covariance arm (1.13×
   slower where the comparison is decidable), a one-thread-per-window covariance and a
   dense-rank counting sort for FAST scores, plus the packer's row-grid arm left flagged
   rather than settled — [#58](https://github.com/ryanhou28/bincv/issues/58).
@@ -459,7 +459,8 @@ battery against the box matcher fires 58–140 failures on each of seven mutatio
 the three that are benign with the structural reason rather than papering over them
 ([#62](https://github.com/ryanhou28/bincv/issues/62)).
 
-**One previously published count was too high.** The eight pre-frontend suites were
+**One previously published count was too high.** The eight suites that predate the feature
+tracking work were
 reported at 38,901 Release checks; **2,112 of those never existed as distinct assertions**,
 because `BINCV_CHECK_EQ` evaluated its first argument twice and `test_cuda_median` passes
 it a helper containing four checks — 528 invocations × 4 = 2,112 exactly, and
@@ -470,7 +471,7 @@ stopped `BINCV_CHECK_EQ(cudaFree(p), cudaSuccess)` being a double free.
 **Twenty-two of the twenty-seven host operation headers have device arms** — the
 reductions and dense stereo end to end (`logic`, `reduce`, `pack`, `census`,
 `denseDisparity`); the sensor and window stages (`threshold`, `edge`, `morphology`,
-`denoise`, `medianWide`, `pyramid`, `shift`); the frontend (`derivative`, `covariance`,
+`denoise`, `medianWide`, `pyramid`, `shift`); feature tracking (`derivative`, `covariance`,
 `corner`, `fast`, `orientation`, `descriptor`, `subpix`); and `opticalFlow`, `blockMatch`
 and the sparse-stereo half of `stereo`. Two device operations have no host header at all:
 `keypoints.hpp` and `sparseMatch.hpp`'s descriptor matcher, both of which a resident

@@ -20,7 +20,7 @@
 // a claim -- the same reason ops/resample.hpp keeps that work’s losing arms.
 // 3. THE REFERENCE PIPELINE'S BOX_2x2 PATH, behind BINCV_WITH_OPENCV:
 // cv::blur(2x2) then subsample with the Gaussian disabled, which is what
-// the reference frontend's pyramid does. Two things are checked
+// the reference pipeline's pyramid does. Two things are checked
 // there and neither is a tier promise: that binCV at NOut = 8 reproduces
 // the reference's value set exactly on the aligned block, and that
 // cv::blur's DEFAULT anchor really does shift its window half a pixel up
@@ -201,7 +201,7 @@ void dirtyThePadding(QuantMat<N, WordType>& m) {
 std::vector<size_t> sweepWidths(size_t wordBits) {
     std::vector<size_t> widths;
     for (size_t w = 0; w <= 2 * wordBits + 3; ++w) widths.push_back(w);
-    // The pyramid ladder a 640x480 frontend actually walks.
+    // The pyramid ladder a 640x480 pipeline actually walks.
     for (size_t w : {size_t{94}, size_t{160}, size_t{320}}) widths.push_back(w);
     return widths;
 }
@@ -837,9 +837,9 @@ void testPyramidLadder(const char* wordName) {
 
 #ifdef BINCV_WITH_OPENCV
 
-/// the reference frontend's BOX_2x2 pyrDown, transcribed.
+/// the reference pipeline's BOX_2x2 pyrDown, transcribed.
 ///
-/// @note This is a PORT of what the reference frontend's pyramid does, not
+/// @note This is a PORT of what the reference pipeline's pyramid does, not
 /// a paraphrase: `cv::blur(_src, _src_new, cv::Size(2, 2))` with OpenCV's
 /// DEFAULT anchor and border, then -- because `disableGaussian` is true for
 /// every filter type except GAUSSIAN_5x5 -- PyrDownInvoker's early-out,

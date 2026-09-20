@@ -47,8 +47,9 @@ The itemization is in [footprint.md](footprint.md).
 | `cornerSubPix` | `cv::cornerSubPix` | — | refines in place, no allocation | — |
 
 **Lucas–Kanade has no footprint row because the tracking benchmark times only.** The 6.23×
-memory result is a whole-frontend figure and belongs to [frontend.md](frontend.md); it is
-not a per-call property of `calcOpticalFlowPyrLK`.
+memory result is a whole-pipeline figure and belongs to
+[feature-tracking.md](feature-tracking.md); it is not a per-call property of
+`calcOpticalFlowPyrLK`.
 
 † `cv::ORB::compute` also computes orientation and rotates its pattern per keypoint. It is
 not a like-for-like comparison and is printed for scale rather than claimed.
@@ -61,7 +62,7 @@ each side's own natural input.
 
 ## Optical flow
 
-The single largest component of a tracking frontend, and binCV's strongest result. 140
+The single largest component of a feature tracking pipeline, and binCV's strongest result. 140
 points · 31×31 window · four levels · 20 iterations maximum · synthetic content · one thread
 on each side.
 
@@ -88,7 +89,7 @@ less accurate; the shipped ladder is the operating point that keeps keypoint yie
 
 **This is Lucas–Kanade against Lucas–Kanade.** Wired into a whole pipeline the end-to-end
 figure is 3.30×, and the gap between the two is the honest part of the result — the stages
-around tracking do not have this ratio. See [frontend.md](frontend.md).
+around tracking do not have this ratio. See [feature-tracking.md](feature-tracking.md).
 
 ## Descriptors and matching
 
@@ -109,12 +110,12 @@ designing around the desktop number.
 ## FAST
 
 Two entry points, and they give different answers. 752×480 for the wide-image row, the
-frontend's own frame for the others.
+tracking pipeline's own frame for the others.
 
 | input | corners | `cv::FAST`, x86-64 | binCV, x86-64 | x86-64 ratio | `cv::FAST`, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
 | `CV_8U`, wide image | 4144 | 0.363 ms | 0.344 ms | 1.05× | 2.906 ms | 3.024 ms | 0.96× |
-| `CV_8U`, the frontend's own frame | 6724 | 266.2 µs | 262.5 µs | 1.01× | 2054.5 µs | 2051.0 µs | 1.00× |
+| `CV_8U`, the pipeline's own frame | 6724 | 266.2 µs | 262.5 µs | 1.01× | 2054.5 µs | 2051.0 µs | 1.00× |
 | **bit-plane**, same frame | 6724 | 266.2 µs | **177.0 µs** | **1.50×** | 2054.5 µs | **865.3 µs** | **2.37×** |
 
 **Parity on the wide-image entry point is the honest outcome and it ships that way.**
@@ -165,12 +166,12 @@ hypervisor carrying other work.
 
 **An earlier version of this report published 0.53× here, and that was wrong**: it measured the
 frame-map spelling while it was on an older response kernel than the streaming spelling every
-frontend calls. Sharing one kernel took the frame-map form from 26.06 to about 14.9 ns/pixel.
+pipeline calls. Sharing one kernel took the frame-map form from 26.06 to about 14.9 ns/pixel.
 [limits.md](limits.md) carries the full correction. What is left is a genuine split — 0.92× on
 x86 because OpenCV's x86 detector is AVX2-dispatched, 1.45× on the device from identical code
 — against a footprint that was never in question: 28 bytes per pixel against binCV's 5.14 at
-the measured survivor count. Detection is 11.5–14.6% of an assembled frontend at
-[that benchmark's](frontend.md) duty cycle, so the end-to-end cost either way is small.
+the measured survivor count. Detection is 11.5–14.6% of the assembled pipeline at
+[that benchmark's](feature-tracking.md) duty cycle, so the end-to-end cost either way is small.
 
 ## Reproduce
 

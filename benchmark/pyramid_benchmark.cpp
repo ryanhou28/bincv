@@ -1,11 +1,11 @@
 // -- the pyramid's bit growth, its footprint, and the cost of the box sum.
 //
-// THIS IS NOT AN EXPERIMENT AND HAS NO DECISION RULE. that work’s done-when clauses
-// ask for two numbers that feed -- bit growth and peak footprint of a
-// four-level pyramid at several NOut caps -- plus evidence for the cost claim the
-// task's second blocking gap turns on. this is the entry that will WEIGH these
-// against tracking accuracy, and it is deliberately deferred: parameterizing the
-// cap is what buys the right to defer measuring it (the design notes).
+// THIS IS NOT AN EXPERIMENT AND HAS NO DECISION RULE. What it produces is two
+// numbers -- bit growth and peak footprint of a four-level pyramid at several
+// NOut caps -- plus evidence for the cost claim the remaining blocking gap turns
+// on. Weighing those against tracking accuracy is deliberately deferred:
+// parameterizing the cap is what buys the right to defer measuring it (the
+// design notes).
 //
 // NO OPENCV, so this builds and runs in the reference device's DEFAULT core-only
 // configuration. Three things are measured here and all three are binCV against

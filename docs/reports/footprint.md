@@ -38,7 +38,7 @@ resolve 5.8 KB. Counting it puts the row at 620,184 B and 5.38×, so the headlin
 **`goodFeaturesToTrack` has two footprints, because it has two spellings.** At worst-case
 provisioning the frame-map form holds 16.54 bytes per pixel and the streaming form 12.56 — a
 1,228,800-byte response map against a 7,680-byte three-row ring. Both return the same corners;
-the streaming form is what every frontend here calls.
+the streaming form is what every pipeline here calls.
 
 **Against the OpenCV denominator it is 5.71× smaller at the measured survivor count and 2.23×
 when both sides are provisioned for their worst case** ([the log](logs/goodfeatures-x86_64.log)
@@ -72,10 +72,11 @@ touches it, so the entire range from uncapped to re-binarized spans 1.65× — a
 to 7.98× already won over a byte-per-pixel pyramid. Choosing a ladder is a tracking-accuracy
 decision with a small footprint side effect, not a footprint lever.
 
-## Assembled: the whole frontend
+## Assembled: the whole feature tracking pipeline
 
 The figure below is not a per-operation result — it is the pipeline
-[frontend.md](frontend.md) describes, held up as evidence that the per-call savings compose:
+[feature-tracking.md](feature-tracking.md) describes, held up as evidence that the
+per-call savings compose:
 
 |  | OpenCV | binCV | ratio |
 |---|---|---|---|
@@ -91,9 +92,9 @@ worth more than the eight-to-one storage ratio is:
   equal on keypoint yield in five of seven cases and better by at most 1.4 points in the
   other two, for 1.38× the bytes.
 - A corner detector that materialises a `float` response map for the whole frame spends
-  1,228,800 bytes at 640×480 — on its own more than everything else in the frontend
+  1,228,800 bytes at 640×480 — on its own more than everything else in the pipeline
   combined. binCV sweeps a **three-row ring** instead: 7,680 bytes, and it is *also* faster.
-  That single change took the corner stage from 1,333,848 bytes to 112,744, and the frontend
+  That single change took the corner stage from 1,333,848 bytes to 112,744, and the pipeline
   from 1,721,568 to 500,464 at 640×480.
 
 ## What footprint costs, and what it does not buy
@@ -122,7 +123,7 @@ so.
 | `uint64_t` as the default word type | 1.95× faster on `countNonZero` at 640×480, aarch64 — **ratio only** | 2,880 B against `uint32_t`'s 2,400 at 160×120 and 960 against 720 at 94×60 — 20% and 33% more | **declined** |
 | an occupancy mask for spacing detections | 76,940 ns against the direct test's 3,240 on x86-64 — **the mask is 23.7× slower** | 38,400 B against the direct test's 0 | **declined twice over** |
 | fused morphology kernel | 0.70415 ns/pixel against `cv::erode`'s 0.22759 on a 5×5 ellipse, x86-64 — binCV at 0.32× | 76,800 B against `cv::erode`'s 614,400 — 8× smaller | **accepted, and it costs** |
-| interleaved bit-plane layout † | +8% on the frontend — **not reproducible** | +92,160 B on a 436,704-byte peak, +21% — **not reproducible** | **declined** |
+| interleaved bit-plane layout † | +8% on the pipeline — **not reproducible** | +92,160 B on a 436,704-byte peak, +21% — **not reproducible** | **declined** |
 
 The word-type row is the canonical one. `uint64_t` is genuinely 1.95× faster on
 `countNonZero` at 640×480 on the reference device, and it was turned down, because a wider
@@ -161,12 +162,12 @@ was not close.
 **† The interleaved-layout row cannot be re-run from a committed benchmark.** It was measured
 with a one-off probe that is not in the repository, so it is development history rather than a
 reproducible claim. The decision is the point: the layout was 1.445× on the extraction it was
-built for and would have taken the frontend from about 1.52× to 1.65× against OpenCV — for
+built for and would have taken the pipeline from about 1.52× to 1.65× against OpenCV — for
 92,160 additional bytes on a 436,704-byte peak, taking the footprint result from 6.23× to
 5.15×. Twenty-one percent of the footprint advantage for eight percent of the speed is not a
-trade this library makes. (The 1.52× baseline is an older frontend figure, superseded by the
-3.30× and 4.73× in [frontend.md](frontend.md); the proportions are what the decision turned
-on.)
+trade this library makes. (The 1.52× baseline is an older pipeline figure, superseded by the
+3.30× and 4.73× in [feature-tracking.md](feature-tracking.md); the proportions are what
+the decision turned on.)
 
 Two other figures here come from that same record rather than a committed benchmark: the
 pyramid border's keypoint-yield comparison, and the corner-stage restructuring from 1,721,568
@@ -180,25 +181,25 @@ same measurement written the other way up, published as binCV at 0.32× in
 ## Reproduce
 
 ```bash
-./build/benchmark/frontend_sequence <euroc-cam0-dir>   # frontend peak, both sides
+./build/benchmark/feature_tracking_sequence <euroc-cam0-dir>   # pipeline peak, both sides
 ./build/benchmark/morphology_benchmark                 # working set per call
 ./build/benchmark/derivative_benchmark
 ./build/benchmark/denoise_benchmark
 ./build/benchmark/corner_opencv_benchmark              # itemized, both sides
 ./build/benchmark/pyramid_benchmark                    # ladder bytes; computed denominator
 ./build/benchmark/wordwidth_benchmark                  # word type against footprint
-BINCV_LK_THREADS=4 /usr/bin/time -v ./build/benchmark/frontend_sequence <dir> 600
+BINCV_LK_THREADS=4 /usr/bin/time -v ./build/benchmark/feature_tracking_sequence <dir> 600
 ./build/benchmark/spacing_benchmark                    # the occupancy mask that lost
 ./build/benchmark/wordtype_narrow                      # 64-bit callers: narrow, do not convert
 ```
 
-Logs: [frontend](logs/frontend-x86_64.log) ·
+Logs: [feature tracking](logs/feature-tracking-x86_64.log) ·
 [morphology](logs/morphology-x86_64.log), [aarch64](logs/morphology-aarch64.log) ·
 [derivative](logs/derivative-x86_64.log), [aarch64](logs/derivative-aarch64.log) ·
 [denoise](logs/denoise-x86_64.log), [aarch64](logs/denoise-aarch64.log) ·
 [goodFeaturesToTrack](logs/goodfeatures-x86_64.log), [aarch64](logs/goodfeatures-aarch64.log) ·
 [pyramid](logs/pyramid-x86_64.log), [aarch64](logs/pyramid-aarch64.log) ·
 [word width](logs/wordwidth-x86_64.log), [aarch64](logs/wordwidth-aarch64.log) ·
-[peak RSS against threads](logs/frontend-rss-x86_64.log) ·
+[peak RSS against threads](logs/feature-tracking-rss-x86_64.log) ·
 [spacing](logs/spacing-x86_64.log) ·
 [64-bit narrowing](logs/wordtype_narrow-x86_64.log), [aarch64](logs/wordtype_narrow-aarch64.log)

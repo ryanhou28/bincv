@@ -55,7 +55,7 @@ BINCV_TEST(Parallel, TrackerIsBitExactWithAPoolInstalled) {
     // The claim that matters. Same frames, same points, same parameters; the only
     // difference is whether a backend is installed.
     //
-    // Self-contained on purpose -- test_opticalflow.cpp's frontend helpers live in its
+    // Self-contained on purpose -- test_opticalflow.cpp's pipeline helpers live in its
     // anonymous namespace, and a copy of them here would drift. What this needs is a
     // level with real structure and points inside it, which is a dozen lines.
     constexpr int kW = 200, kH = 160;

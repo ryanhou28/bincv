@@ -177,10 +177,10 @@
 #   test_bitslice  351620 under opencv, 350540 everywhere else. The 1080
 #             difference is majority3 against the reference pipeline's own median
 #             -- max(min(a,b), min(max(a,b),c)) as cv::min/cv::max over CV_8U,
-#             which is the reference frontend's three-pixel median unchanged. That is a SECOND
+#             which is the reference pipeline's three-pixel median unchanged. That is a SECOND
 #             REFERENCE and not a tier promise: bit-sliced arithmetic is Tier 3
 #             (ARCHITECTURE 5.1) and OpenCV has no pointwise median of three
-#             images. It is worth its 1080 checks because T3.1 has to reproduce
+#             images. It is worth its 1080 checks because denoise has to reproduce
 #             that formula exactly.
 #             The other 350540 are dominated by EXHAUSTIVE ENUMERATION, which is
 #             what this suite has instead of a sampled sweep. Each primitive is
@@ -255,10 +255,10 @@
 #             bitslice-short-stride and bitslice-sum-overlap alongside it. The
 #             ctest count rises by those four.
 #   test_denoise  9744 under opencv, 7584 everywhere else. The 2160 difference is
-#             the reference implementation itself: the reference frontend's three-pixel median
+#             the reference implementation itself: the reference pipeline's three-pixel median
 #             PORTED CALL FOR CALL -- two cv::Mat::zeros neighbour matrices, the
 #             two range-limited copyTo calls, then cv::min/cv::max in its order --
-#             over the full T2.1 size, height and fill matrix at all four word
+#             over the full harness size, height and fill matrix at all four word
 #             widths. It is a port and not a paraphrase for one reason: the BORDER
 #             is specified by which sub-ranges those copyTo calls DO NOT write
 #             (colRange(0, cols - 1) and rowRange(1, rows)), so re-deriving it by
@@ -488,14 +488,14 @@
 #             pixel per variant across the width sweep (0 .. 3*WordBits+3 plus the
 #             pyramid ladder) at four word widths, times three implementations,
 #             plus the padding, stride, degenerate, row-view and plan-size cases.
-#             Three implementations because X-14 compares three routes and the
+#             Three implementations because that round compares three routes and the
 #             protocol requires each to be correct BEFORE any is timed; a
 #             two-thirds drop here means a losing arm was deleted, which is
 #             exactly what the floor is for.
 #   test_pyramid  262008 under opencv, 236122 everywhere else. The 25886
-#             difference is the reference pipeline's own BOX_2x2 path (T3.4,
-#             X-15): cv::blur(2x2) then PyrDownInvoker's disableGaussian
-#             early-out, which is what the reference frontend's pyramid
+#             difference is the reference pipeline's own BOX_2x2 path:
+#             cv::blur(2x2) then PyrDownInvoker's disableGaussian
+#             early-out, which is what the reference pipeline's pyramid
 #             runs. It is a SECOND REFERENCE and not a tier promise -- pyrDown is
 #             Tier 2 (ARCHITECTURE 5.1), so there is no bit-exactness to check --
 #             and it carries three separate claims: that cv::blur on CV_8U is
@@ -535,12 +535,12 @@
 #               destination trailing word unmasked    235348
 #               odd width stops replicating its edge  232991
 #             The last two are small and are the two that matter most: the
-#             padding-bit invariant (D-13) and the edge rule are each visible to
+#             padding-bit invariant and the edge rule are each visible to
 #             one family of cases and invisible to every other, so without
 #             Pyramid.EdgeReplication_* and the per-case padding check a wrong
 #             border rule ships green in all four configurations.
 #   test_derivative  48526 under opencv, 47675 everywhere else. The 851
-#             difference is T3.5's OpenCV half: the reference pipeline's own
+#             difference is test_derivative's OpenCV half: the reference pipeline's own
 #             calcBinarizedDeriv PORTED (its two cv::filter2D calls, its CV_16S
 #             ddepth and its *= 16) compared at every pixel after the scale is
 #             divided out, the same comparison for N-bit sources where
@@ -784,21 +784,21 @@
 #             at risk.
 #             test_opticalflow rose 241 -> 255 (opencv) and 155 -> 169 (core,
 #             noexcept, debug) for the other half of the same task:
-#             Flow.FrontendFootprint_640x480 now measures the frontend through BOTH
+#             Flow.PipelineFootprint_640x480 now measures the pipeline through BOTH
 #             corner shapes, asserts they agree, and -- since triage -- READS each
 #             shape's peak off a live-byte high-water mark taken in its own scope
 #             with the other shape's buffers destroyed, then requires the per-stage
 #             rows to account for that reading to the byte. The added checks are the
 #             two accounting identities, the equal-bookkeeping identity, the
 #             read saving (framePeak - streamPeak == responseBytes - ringBytes), the
-#             two E-10-negation checks that replaced a near-vacuous one, and the
-#             per-shape corner-equality digests.
+#             two ring-size-claim negations that replaced a near-vacuous check,
+#             and the per-shape corner-equality digests.
 #
 #             THE POSITION COUNT IS ITSELF CHECKED against the arithmetic that
 #             defines it, and the interior and clipped counts are separately
 #             required to be non-zero -- a sweep that stopped clipping, or stopped
 #             evaluating a full window, would otherwise stay green while proving
-#             less. That is T3.6's SWEEP_HEIGHT lesson applied before it could
+#             less. That is the covariance's SWEEP_HEIGHT lesson applied before it could
 #             happen again; two static_asserts pin both frames taller and wider
 #             than the largest block size.
 #             The floor has teeth, measured by mutating ops/corner.hpp (checks

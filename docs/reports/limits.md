@@ -89,7 +89,7 @@ applies, and it is 1.50× on x86 and 2.37× on the device.
 the point above it.** An earlier version of these reports published 0.53× on *both*
 architectures and concluded that this was "a property of the operation rather than of one
 machine's dispatch". Both halves were wrong: the figure measured the frame-map spelling while
-it was still on an older response kernel than the streaming spelling every frontend here
+it was still on an older response kernel than the streaming spelling every pipeline here
 calls. Once the two share one kernel the operation is 0.92× on x86 and **1.45× on the
 reference device** — a loss on the desktop and a win on the deployment part, from identical
 code over identical buffers returning identical corners.
@@ -150,14 +150,14 @@ path it claims. On x86-64 the eight-keypoint AVX2 batch in the tracker, toggled 
 in the same binary over 400 frames. **The two runs are two repeats of the same measurement on
 the same machine, not two architectures**:
 
-| arm | run | binCV tracking, ms/frame | binCV frontend, ms/frame | OpenCV frontend, ms/frame | ratio |
+| arm | run | binCV tracking, ms/frame | binCV pipeline, ms/frame | OpenCV pipeline, ms/frame | ratio |
 |---|---|---|---|---|---|
 | `BINCV_LK_BATCH=0` | 1 | 1.363 | 1.782 | 4.090 | 2.30× |
 | `BINCV_LK_BATCH=0` | 2 | 1.407 | 1.804 | 4.222 | 2.34× |
 | **`BINCV_LK_BATCH=1`** | 1 | **0.820** | **1.201** | 4.221 | **3.51×** |
 | **`BINCV_LK_BATCH=1`** | 2 | **0.747** | **1.120** | 3.991 | **3.56×** |
 
-The batch is worth 1.66–1.88× on tracking and takes the whole frontend from about 2.3× to
+The batch is worth 1.66–1.88× on tracking and takes the whole pipeline from about 2.3× to
 about 3.5×. It is bit-exact with the scalar path.
 
 This machinery exists because it has caught real errors. A vector block was once compiled out
@@ -165,8 +165,8 @@ entirely by a mis-attached `#define`, and three consecutive "improvements" were 
 against it. A build that reaches binCV's headers without linking the `bincv_core` CMake target
 loses its ISA flags silently — the kernels are still correct, still pass every test, and run
 substantially slower with nothing to indicate why. That is why `simdStatusString()` exists:
-`frontend_sequence` prints it, and the frontend logs in [logs/](logs/) open with it, showing
-`NEON=yes` on the device and `AVX2=yes popcount=hardware` on x86. Read that line before
+`feature_tracking_sequence` prints it, and the feature tracking logs in [logs/](logs/)
+open with it, showing `NEON=yes` on the device and `AVX2=yes popcount=hardware` on x86. Read that line before
 trusting any number you take from these benchmarks on your own machine.
 
 ## What is not measured at all
@@ -179,7 +179,7 @@ runs on an STM32H753ZI (Cortex-M7): the reductions are bit-exact against the lib
 entry point, a 752×480 frame occupies 46,080 bytes where a `CV_8U` one would occupy 360,960,
 and the tracker's staging buffers measure 4,120 bytes at N = 2 against that board's 16 KB
 stack — so the constraint this section expected to bite did not. What does **not** exist for
-that part is any OpenCV comparison, any frontend or tracker timing, and any figure at the
+that part is any OpenCV comparison, any pipeline or tracker timing, and any figure at the
 part's full clock; the one operation timed there ran at the reset default of 64 MHz.
 `stagingStackBytes<N, W>()` gives the exact stack figure for a configuration, and the
 build-time budget fails compilation rather than overflowing at run time.
@@ -200,8 +200,8 @@ for i in $(seq 0 15); do ./build/benchmark/bitwidth_crossover $i; done
 ./build/benchmark/corner_opencv_benchmark
 ./build/benchmark/feature_benchmark
 ./build/benchmark/lk_memorybound                 # compute-bound, not memory-bound
-BINCV_LK_BATCH=0 ./build/benchmark/frontend_sequence <dir> 400
-BINCV_LK_BATCH=1 ./build/benchmark/frontend_sequence <dir> 400
+BINCV_LK_BATCH=0 ./build/benchmark/feature_tracking_sequence <dir> 400
+BINCV_LK_BATCH=1 ./build/benchmark/feature_tracking_sequence <dir> 400
 ```
 
 Logs: [pyrDown](logs/pyrfilter-x86_64.log), [aarch64](logs/pyrfilter-aarch64.log) ·

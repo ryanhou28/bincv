@@ -15,7 +15,7 @@
 /// ---------------------------------------------------------------------------
 /// THE OPERATION, READ OUT OF THE REFERENCE RATHER THAN INFERRED
 ///
-/// the reference frontend's gradient stage, `calcBinarizedDeriv`:
+/// the reference pipeline's gradient stage, `calcBinarizedDeriv`:
 ///
 /// cv::Mat kernelX = (cv::Mat_<int>(1, 3) << -1, 0, 1);
 /// cv::Mat kernelY = (cv::Mat_<int>(3, 1) << -1, 0, 1);

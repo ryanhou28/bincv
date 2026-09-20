@@ -465,7 +465,7 @@ bool& orientationWideQuadEnabled() {
     // DEFAULT OFF, and it is a measured decision rather than a doubt about the
     // code. The rule written before the measurement said the quad arm becomes
     // the default only if it beats the lane-per-column arm by more than both
-    // printed spreads at 470 and 1000 keypoints -- the rate the named frontend
+    // printed spreads at 470 and 1000 keypoints -- the rate the named pipeline
     // runs at. Median of nine independent process runs: 1.05x at 470 (slower)
     // and 0.89x at 1000, with the two arms' sample ranges overlapping in every
     // run. At those counts the whole kernel sits on a ~0.009 ms launch floor,

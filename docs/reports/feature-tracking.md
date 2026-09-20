@@ -1,11 +1,11 @@
-# The assembled frontend
+# The assembled feature tracking pipeline
 
 **This page is not a headline result.** binCV is an operation library; what a caller adopts
 is a call at a time, and those comparisons are in [primitives.md](primitives.md),
 [features.md](features.md) and [stereo.md](stereo.md). This page exists to show that the
 per-operation wins survive being **wired together** — measured on a pipeline this project
 assembled for that purpose, which is not a standard benchmark and is not anyone else's
-frontend.
+pipeline.
 
 **What the pipeline is.** Six stages over 8-bit grayscale frames:
 
@@ -24,7 +24,7 @@ its own schedule.
 
 **Each side builds its own binary frame, and the two are bit-identical** — 0 pixels differ
 over 1709 frames, checked every frame. That control is what makes this a comparison of the
-frontends rather than of two different inputs.
+two pipelines rather than of two different inputs.
 
 ## Setup
 
@@ -41,11 +41,11 @@ measurements against different OpenCV builds on different machines, and are neve
 **Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
 
 Milliseconds per frame over the whole sequence, so the smaller number is the faster
-frontend.
+pipeline.
 
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|
-| the assembled frontend, ms/frame | 3.841–4.485 | **1.134–1.283** | **3.30×** | 23.249–23.451 | **4.906–4.949** | **4.73×** |
+| the assembled pipeline, ms/frame | 3.841–4.485 | **1.134–1.283** | **3.30×** | 23.249–23.451 | **4.906–4.949** | **4.73×** |
 
 Each ratio is the conservative one of its repeats: five x86 runs span 3.30× to 3.50×, three
 device runs 4.73× to 4.74×. Almost all of the x86 spread is OpenCV's — binCV's own time
@@ -58,7 +58,7 @@ Re-verified on aarch64 after the corner-sweep and census optimizations landed: b
 ms/frame against OpenCV's 29.3 at 120 frames — **4.76×**, unchanged within spread. (Absolute
 ms/frame differ from the table because frame count and warm-up differ; the ratio is the
 claim.) The detect stage itself runs 12% faster (0.336 → 0.295 ms/frame), but at this
-sequence's 1.7% re-detection duty cycle that amortizes to under 1% of the frontend — the
+sequence's 1.7% re-detection duty cycle that amortizes to under 1% of the whole pipeline — the
 duty-cycle dependence issue #7 records.
 
 ## Memory
@@ -78,7 +78,7 @@ binCV against itself at the duty cycle the benchmark runs (82 re-detections in 1
 4.8%), so there is no OpenCV column and no ratio — the shares are of each machine's own
 total:
 
-| stage | time, x86-64 (ms/frame) | share of the x86-64 frontend | time, aarch64 (ms/frame) | share of the aarch64 frontend |
+| stage | time, x86-64 (ms/frame) | share of the x86-64 pipeline | time, aarch64 (ms/frame) | share of the aarch64 pipeline |
 |---|---|---|---|---|
 | track (Lucas–Kanade) | 0.799 | 62.3% | 3.307 | 66.8% |
 | build (pyramid + derivatives) | 0.297 | 23.2% | 1.072 | 21.7% |
@@ -89,7 +89,7 @@ total:
 
 Tracking dominates on both, so the operations that move this number are the ones inside the
 Lucas–Kanade loop rather than the ones with the largest per-operation ratios: `pyrDown` is
-10.6% of the x86 frontend, and an infinite speedup on it would be worth about 1.12×. The two
+10.6% of the x86 pipeline, and an infinite speedup on it would be worth about 1.12×. The two
 architectures spend their time within five points of each other on every stage, so nothing
 here is bottlenecked on anything architecture-specific.
 
@@ -132,7 +132,7 @@ about pose error.
 
 **The detection duty cycle belongs to the benchmark.** This harness re-detects only when it
 runs out of tracks — 4.8% of frames here, so detection is 11.5–14.5% of the total. A
-frontend that tops up whenever its track count falls below a target detects far more often,
+tracker that tops up whenever its track count falls below a target detects far more often,
 and the detect stage then dominates in a way none of these numbers show.
 
 **It is one thread on each side, and that is binCV's best case.** binCV is serial unless a
@@ -152,14 +152,14 @@ single-threaded OpenCV would roughly double these ratios and would be measuring 
 count.
 
 **It is one sequence.** `V1_02_medium` is the harder of the two EuRoC sequences measured
-here. On the easier `MH_01_easy` the whole-frontend ratio comes out on the other side of the
-comparison — a difference larger than most of the effects these reports measure. A frontend
-figure quoted without its sequence is not a figure.
+here. On the easier `MH_01_easy` the whole-pipeline ratio comes out on the other side of the
+comparison — a difference larger than most of the effects these reports measure. A
+pipeline figure quoted without its sequence is not a figure.
 
 ## Addendum, 2026-09-06: one pyramid build per frame
 
 The redundant pyramid rebuild was removed after this report's numbers were taken: the
-frontend now swaps the previous frame's pyramid in and builds only the incoming one, **proven
+pipeline now swaps the previous frame's pyramid in and builds only the incoming one, **proven
 bit-identical to a rebuild** (`BINCV_PYR_CHECK=1`; 0 of 12,920,040 words differ over the full
 sequence on both architectures). The removed `hold` buffer also drops a full binary frame the
 footprint table never counted. OpenCV's `calcOpticalFlowPyrLK` still rebuilds both of its
@@ -177,16 +177,18 @@ re-measurement replaces it whole rather than row by row.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-./build/benchmark/frontend_sequence <euroc-V1_02-cam0-dir>
+./build/benchmark/feature_tracking_sequence <euroc-V1_02-cam0-dir>
 
 # equal thread counts on both sides
-BINCV_LK_THREADS=4 BINCV_OPENCV_THREADS=4 ./build/benchmark/frontend_sequence <dir>
+BINCV_LK_THREADS=4 BINCV_OPENCV_THREADS=4 ./build/benchmark/feature_tracking_sequence <dir>
 ```
 
 The frame directory is any set of `.png` files in name order. The benchmark prints a warning
 block if OpenCV is left at a thread count other than one, because that is the single easiest
 way to produce a wrong ratio here.
 
-Logs: [x86-64](logs/frontend-x86_64.log), [x86 repeats](logs/frontend-repeats-x86_64.log) ·
-[aarch64](logs/frontend-aarch64.log), [device repeats](logs/frontend-repeats-aarch64.log) ·
-[threading](logs/frontend-threads-x86_64.log)
+Logs: [x86-64](logs/feature-tracking-x86_64.log) ·
+[x86 repeats](logs/feature-tracking-repeats-x86_64.log) ·
+[aarch64](logs/feature-tracking-aarch64.log) ·
+[device repeats](logs/feature-tracking-repeats-aarch64.log) ·
+[threading](logs/feature-tracking-threads-x86_64.log)

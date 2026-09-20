@@ -10,7 +10,7 @@
 //
 // ONE EXECUTABLE, ALWAYS BUILT, with the cv::cuda arms behind
 // BINCV_CUDA_SPARSE_OPENCV inside it -- the shape cuda_sensor_benchmark and
-// cuda_frontend_benchmark use, and for the reason their CMake blocks give:
+// cuda_feature_tracking_benchmark use, and for the reason their CMake blocks give:
 // scripts/verify_cuda.sh derives its benchmark list from the TEXT of
 // benchmark/CMakeLists.txt and hand-excludes exactly one name, so a target that
 // exists only when an OpenCV is pointed at is one the gate tries to build on
@@ -90,7 +90,7 @@ namespace {
 constexpr size_t kW = 752, kH = 480;      ///< the reference frame geometry
 constexpr size_t kBits = 256;             ///< descriptor length
 constexpr size_t kWords = kBits / 32;
-constexpr size_t kFrontendCount = 470;    ///< the frontend's measured operating point
+constexpr size_t kPipelineCount = 470;    ///< the pipeline's measured operating point
 constexpr size_t kMapCount = 5000;        ///< the relocalisation / loop-closure regime
 constexpr size_t kStereoKeypoints = 500;
 constexpr int kStereoShift = 21;          ///< the known disparity of the synthetic pair
@@ -171,7 +171,7 @@ Frames loadFrames(const char* dir) {
 /// fraction of candidates a 48-pixel window admits, and that is a property
 /// of where features actually sit. A uniform scatter answers a different
 /// question. The threshold is lowered until at least `count` corners exist,
-/// and the strongest `count` are kept -- which is the set a frontend's
+/// and the strongest `count` are kept -- which is the set a pipeline's
 /// selection stage would hand a matcher.
 std::vector<float> strongestCorners(const std::vector<uint8_t>& img, size_t w, size_t h,
                                     size_t count, long long& thresholdUsed,
@@ -310,7 +310,7 @@ void printDecisionRule() {
 "   the same stream. knnMatchConvert is a HOST download and is OUTSIDE the\n"
 "   event window on every arm -- timing it would compare binCV's resident\n"
 "   kernel against an OpenCV round trip.\n"
-"   DECIDES AT %zu x %zu. The frontend point %zu x %zu is reported and does\n"
+"   DECIDES AT %zu x %zu. The pipeline point %zu x %zu is reported and does\n"
 "   NOT decide, because both arms are predicted to sit on the launch floor\n"
 "   there -- which is why the floor is printed next to every arm.\n"
 "   SHIPS as the recommended device arm if, at map scale, binCV is not slower\n"
@@ -326,7 +326,7 @@ void printDecisionRule() {
 " host brute force, host gated. TWO-SIDED:\n"
 "   * SPEED: the gate's speed rationale survives only if the device gated arm\n"
 "     beats the device brute-force arm by more than both printed ranges at the\n"
-"     frontend point. PREDICTION: it does not -- the whole match there is a\n"
+"     pipeline point. PREDICTION: it does not -- the whole match there is a\n"
 "     launch's worth of work.\n"
 "   * MEMORY: arithmetic, not a measurement. The gated arm carries two\n"
 "     position arrays (and two octave arrays) the ungated one does not. Under\n"
@@ -338,8 +338,8 @@ void printDecisionRule() {
 "   feature and not a speed feature. If the measurement contradicts this it is\n"
 "   reported as a finding, not smoothed.\n"
 "   WHAT IT COVERS: a kernel-resident microbenchmark. The number that would\n"
-"   decide ADOPTION is the match stage's share of an end-to-end frontend; no\n"
-"   committed report records it and no resident device frontend calls these\n"
+"   decide ADOPTION is the match stage's share of an end-to-end pipeline; no\n"
+"   committed report records it and no resident device pipeline calls these\n"
 "   kernels. That is a deferral, not a number to invent.\n"
 "\n"
 " CASE C -- sparse stereo. cv::cuda has NO sparse stereo API (cudastereo's\n"
@@ -392,7 +392,7 @@ void printDecisionRule() {
 "      honest answer? The census entry was rescued by a memory argument; this\n"
 "      one has none.\n"
 "===========================================================================\n\n",
-        kReplicas, kMapCount, kMapCount, kFrontendCount, kFrontendCount);
+        kReplicas, kMapCount, kMapCount, kPipelineCount, kPipelineCount);
 }
 
 void printHostArm(const char* name, const measure::Timing& t) {
@@ -460,21 +460,21 @@ int main(int argc, char** argv) {
 
     long long thrA = 0, thrB = 0, thrMapA = 0, thrMapB = 0;
     const std::vector<float> qxy =
-        strongestCorners(frames.a, kW, kH, kFrontendCount, thrA);
+        strongestCorners(frames.a, kW, kH, kPipelineCount, thrA);
     const std::vector<float> txy =
-        strongestCorners(frames.b, kW, kH, kFrontendCount, thrB);
+        strongestCorners(frames.b, kW, kH, kPipelineCount, thrB);
     const std::vector<float> qxyMap = strongestCorners(frames.a, kW, kH, kMapCount, thrMapA);
     const std::vector<float> txyMap = strongestCorners(frames.b, kW, kH, kMapCount, thrMapB);
     std::printf(" FAST thresholds used to reach the two counts: %lld / %lld at %zu, "
                 "%lld / %lld at %zu\n\n",
-                thrA, thrB, kFrontendCount, thrMapA, thrMapB, kMapCount);
+                thrA, thrB, kPipelineCount, thrMapA, thrMapB, kMapCount);
 
     const std::vector<uint32_t> qd = briefFor(frames.a, kW, kH, qxy, pattern);
     const std::vector<uint32_t> td = briefFor(frames.b, kW, kH, txy, pattern);
     const std::vector<uint32_t> qdMap = briefFor(frames.a, kW, kH, qxyMap, pattern);
     const std::vector<uint32_t> tdMap = briefFor(frames.b, kW, kH, txyMap, pattern);
-    const std::vector<int32_t> qo = octavesFor(kFrontendCount);
-    const std::vector<int32_t> to = octavesFor(kFrontendCount);
+    const std::vector<int32_t> qo = octavesFor(kPipelineCount);
+    const std::vector<int32_t> to = octavesFor(kPipelineCount);
 
     // Device copies.
     using bincv::cuda::DeviceArray;
@@ -483,7 +483,7 @@ int main(int argc, char** argv) {
     DeviceArray<float> dQxy(qxy.size()), dTxy(txy.size());
     DeviceArray<float> dQxyMap(qxyMap.size()), dTxyMap(txyMap.size());
     DeviceArray<int32_t> dQo(qo.size()), dTo(to.size());
-    DeviceArray<bincv::cuda::DeviceDescriptorMatch> dMatch(kFrontendCount);
+    DeviceArray<bincv::cuda::DeviceDescriptorMatch> dMatch(kPipelineCount);
     DeviceArray<bincv::cuda::DeviceDescriptorMatch> dMatchMap(kMapCount);
     const auto up = [](auto& dst, const auto& src) {
         cudaMemcpy(dst.data(), src.data(), src.size() * sizeof(src[0]),
@@ -496,18 +496,18 @@ int main(int argc, char** argv) {
 
     const auto qSet = [&](bool map) {
         return bincv::cuda::descriptorSet(map ? dQdMap.data() : dQd.data(),
-                                          map ? kMapCount : kFrontendCount, kWords);
+                                          map ? kMapCount : kPipelineCount, kWords);
     };
     const auto tSet = [&](bool map) {
         return bincv::cuda::descriptorSet(map ? dTdMap.data() : dTd.data(),
-                                          map ? kMapCount : kFrontendCount, kWords);
+                                          map ? kMapCount : kPipelineCount, kWords);
     };
     const auto qPts = [&](bool withOctave) {
-        return bincv::cuda::keypointSet(dQxy.data(), kFrontendCount,
+        return bincv::cuda::keypointSet(dQxy.data(), kPipelineCount,
                                         withOctave ? dQo.data() : nullptr);
     };
     const auto tPts = [&](bool withOctave) {
-        return bincv::cuda::keypointSet(dTxy.data(), kFrontendCount,
+        return bincv::cuda::keypointSet(dTxy.data(), kPipelineCount,
                                         withOctave ? dTo.data() : nullptr);
     };
 
@@ -530,7 +530,7 @@ int main(int argc, char** argv) {
                 " points can disagree about which way that goes.\n");
     for (int map = 0; map < 2; ++map) {
         const bool m = map == 1;
-        const size_t n = m ? kMapCount : kFrontendCount;
+        const size_t n = m ? kMapCount : kPipelineCount;
         auto* out = m ? dMatchMap.data() : dMatch.data();
         std::printf("   at %zu x %zu:\n", n, n);
         for (unsigned tile : {1u, 4u, 8u}) {
@@ -553,7 +553,7 @@ int main(int argc, char** argv) {
     std::printf("\n THE OFF-SWITCH RATIO, both arms in this binary on the same inputs.\n");
     for (int map = 0; map < 2; ++map) {
         const bool m = map == 1;
-        const size_t n = m ? kMapCount : kFrontendCount;
+        const size_t n = m ? kMapCount : kPipelineCount;
         auto* out = m ? dMatchMap.data() : dMatch.data();
         const PairedTiming p = cudabench::timeKernelPaired(
             [&] {
@@ -611,7 +611,7 @@ int main(int argc, char** argv) {
         auto bf = cv::cuda::DescriptorMatcher::createBFMatcher(cv::NORM_HAMMING);
         for (int map = 0; map < 2; ++map) {
             const bool m = map == 1;
-            const int n = static_cast<int>(m ? kMapCount : kFrontendCount);
+            const int n = static_cast<int>(m ? kMapCount : kPipelineCount);
             const std::vector<uint32_t>& hq = m ? qdMap : qd;
             const std::vector<uint32_t>& ht = m ? tdMap : td;
 
@@ -673,16 +673,16 @@ int main(int argc, char** argv) {
         std::printf("\n MEMORY, CASE A, meter 2 on BOTH sides, %d replicas of the %zu x %zu\n"
                     " working set -- an order more than elsewhere, because one set is ~37 KB\n"
                     " and 32 of them would not clear one 2 MB driver unit.\n",
-                    kMatchReplicas, kFrontendCount, kFrontendCount);
-        const size_t descBytes = kFrontendCount * kWords * 4;
+                    kMatchReplicas, kPipelineCount, kPipelineCount);
+        const size_t descBytes = kPipelineCount * kWords * 4;
         {
             cudabench::DeviceMemMeter meter;
             std::vector<DeviceArray<uint32_t>> qs, ts;
             std::vector<DeviceArray<bincv::cuda::DeviceDescriptorMatch>> os;
             for (int i = 0; i < kMatchReplicas; ++i) {
-                qs.emplace_back(kFrontendCount * kWords);
-                ts.emplace_back(kFrontendCount * kWords);
-                os.emplace_back(kFrontendCount);
+                qs.emplace_back(kPipelineCount * kWords);
+                ts.emplace_back(kPipelineCount * kWords);
+                os.emplace_back(kPipelineCount);
             }
             const size_t used = meter.deltaBytes();
             cudabench::printDriverDelta("binCV ungated, per working set",
@@ -693,9 +693,9 @@ int main(int argc, char** argv) {
             std::vector<cv::cuda::GpuMat> qs, ts, ms;
             auto bf2 = cv::cuda::DescriptorMatcher::createBFMatcher(cv::NORM_HAMMING);
             for (int i = 0; i < kMatchReplicas; ++i) {
-                qs.emplace_back(static_cast<int>(kFrontendCount),
+                qs.emplace_back(static_cast<int>(kPipelineCount),
                                 static_cast<int>(kBits / 8), CV_8UC1);
-                ts.emplace_back(static_cast<int>(kFrontendCount),
+                ts.emplace_back(static_cast<int>(kPipelineCount),
                                 static_cast<int>(kBits / 8), CV_8UC1);
                 ms.emplace_back();
                 bf2->knnMatchAsync(qs.back(), ts.back(), ms.back(), 2, cv::noArray(),
@@ -718,7 +718,7 @@ int main(int argc, char** argv) {
                         kBits, kBits / 8);
         }
         cudabench::printAllocSum("binCV descriptors + records (meter 1)",
-                                 2 * descBytes + kFrontendCount * 16);
+                                 2 * descBytes + kPipelineCount * 16);
     }
 #else
     std::printf("\n CASE A ROLE BAR: BLOCKED -- no cv::cuda::DescriptorMatcher compiled in.\n"
@@ -735,8 +735,8 @@ int main(int argc, char** argv) {
         // The admitted fraction, computed rather than guessed, because it is
         // what the gate's whole claim rests on.
         size_t admitted = 0;
-        for (size_t q = 0; q < kFrontendCount; ++q)
-            for (size_t t = 0; t < kFrontendCount; ++t) {
+        for (size_t q = 0; q < kPipelineCount; ++q)
+            for (size_t t = 0; t < kPipelineCount; ++t) {
                 const float dx = txy[2 * t] - qxy[2 * q];
                 const float dy = txy[2 * t + 1] - qxy[2 * q + 1];
                 if (dx > 48.0f || dx < -48.0f || dy > 48.0f || dy < -48.0f) continue;
@@ -749,8 +749,8 @@ int main(int argc, char** argv) {
                     " gate can save, and it is the number the speed side of this case is\n"
                     " a test of.\n",
                     100.0 * static_cast<double>(admitted) /
-                        static_cast<double>(kFrontendCount * kFrontendCount),
-                    kFrontendCount * kFrontendCount);
+                        static_cast<double>(kPipelineCount * kPipelineCount),
+                    kPipelineCount * kPipelineCount);
 
         const PairedTiming p = cudabench::timeKernelPaired(
             [&] {
@@ -769,17 +769,17 @@ int main(int argc, char** argv) {
         // The host arms, on the same inputs. INDICATIVE: this host is not
         // timing-grade under WSL2, and the spread printed beside each number is
         // what says so.
-        std::vector<bincv::DescriptorMatch> hostOut(kFrontendCount);
+        std::vector<bincv::DescriptorMatch> hostOut(kPipelineCount);
         std::vector<measure::Bench> hb;
         hb.push_back({"host brute force", [&](int) {
-                          bincv::matchDescriptors<uint32_t>(qd.data(), kFrontendCount,
-                                                            td.data(), kFrontendCount, kWords,
+                          bincv::matchDescriptors<uint32_t>(qd.data(), kPipelineCount,
+                                                            td.data(), kPipelineCount, kWords,
                                                             hostOut.data(), 75);
                       }});
         hb.push_back({"host GATED (48 px, octave band 1)", [&](int) {
                           bincv::matchDescriptorsGated<uint32_t>(
-                              qd.data(), qxy.data(), kFrontendCount, td.data(), txy.data(),
-                              kFrontendCount, kWords, 48.0f, 48.0f, hostOut.data(), 75,
+                              qd.data(), qxy.data(), kPipelineCount, td.data(), txy.data(),
+                              kPipelineCount, kWords, 48.0f, 48.0f, hostOut.data(), 75,
                               qo.data(), to.data(), 1);
                       }});
         const std::vector<measure::Timing> ht =
@@ -796,7 +796,7 @@ int main(int argc, char** argv) {
                     "   queryXY + trainXY = %zu B and the two octave arrays = %zu B that the\n"
                     "   ungated arm does not. Under 'memory wins' that counts against the\n"
                     "   gate on device.\n",
-                    2 * kFrontendCount * 8, 2 * kFrontendCount * 4);
+                    2 * kPipelineCount * 8, 2 * kPipelineCount * 4);
     }
 
     // =======================================================================
@@ -1195,7 +1195,7 @@ int main(int argc, char** argv) {
     std::printf(" READ THE SPREADS. Every number here is KERNEL-RESIDENT and covers ONE\n"
                 " launch (block matching: one launch per level). A microbenchmark ratio is\n"
                 " not an end-to-end result, and no arm here is a share of any pipeline,\n"
-                " because no resident device frontend calls these kernels yet.\n");
+                " because no resident device pipeline calls these kernels yet.\n");
     rule();
 
     cudaStreamDestroy(gStream);

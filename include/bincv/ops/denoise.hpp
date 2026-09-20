@@ -5,14 +5,14 @@
 /// **API TIER 3** -- see the tier note below.
 ///
 /// The first VIO frontend operation in the project. Everything under ops/ before
-/// this file is a primitive; this is the first kernel a real frontend calls by
+/// this file is a primitive; this is the first kernel a real pipeline calls by
 /// name, and it is defined by what the reference implementation does rather than
 /// by what OpenCV offers.
 ///
 /// ---------------------------------------------------------------------------
 /// THE NEIGHBOURHOOD, READ OUT OF THE REFERENCE RATHER THAN INFERRED
 ///
-/// the reference frontend's denoiser, three_pix_median_filter:
+/// the reference pipeline's denoiser, three_pix_median_filter:
 ///
 /// cv::Mat right_pixels = cv::Mat::zeros(img.size, img.type);
 /// cv::Mat above_pixels = cv::Mat::zeros(img.size, img.type);

@@ -239,7 +239,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `hammingDistance` | 3 | `popcount(a ^ b)` over `words` |
 | `DescriptorMatch` *(struct)* | — | One query's best and second-best match |
 | `matchDescriptors` | 3 | Brute-force nearest neighbour with Lowe's ratio test |
-| `matchDescriptorsGated` | 3 | `matchDescriptors` restricted to candidates a frontend's priors admit: a position window, and optionally an octave band |
+| `matchDescriptorsGated` | 3 | `matchDescriptors` restricted to candidates a pipeline's priors admit: a position window, and optionally an octave band |
 
 ## `ops/edge.hpp`
 

@@ -7,7 +7,7 @@
 // pricing are GAUSSIAN_5x5 @ N=3 (0.65 below the anchor) and BOX_3x3 @ N=3.
 //
 // This is the cost side. It matters because a measurement measured pyrDown at 25.8% of the
-// frontend -- up from 4.5%, because LK got 3.44x faster and the build did not.
+// pipeline -- up from 4.5%, because LK got 3.44x faster and the build did not.
 //
 // The shipped `pyrDown` (hand-written BOX_2x2 route) is included as a control: the
 // generic framework has to be compared against what it would replace, not only
@@ -107,7 +107,7 @@ int main() {
                     t[i].medianNs / t[1].medianNs);
     }
     std::printf("\n 'vs shipped' is against the hand-written BOX_2x2 route at N=3.\n"
-                " pyrDown is 25.8%% of the frontend, and a level-0 pass is the\n"
+                " pyrDown is 25.8%% of the pipeline, and a level-0 pass is the\n"
                 " largest of the three the ladder runs.\n");
     return 0;
 }

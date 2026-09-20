@@ -16,7 +16,7 @@ row whose binCV cell is the larger number is a row binCV lost, and it needs no m
 | [cuda.md](cuda.md) | the CUDA backend, GPU against GPU |
 | [footprint.md](footprint.md) | the memory result itemized, and the speed declined to protect it |
 | [limits.md](limits.md) | where binCV ties, loses, or stops paying at all |
-| [frontend.md](frontend.md) | the assembled tracking frontend — not an operation; see [Assembled pipelines](#assembled-pipelines) |
+| [feature-tracking.md](feature-tracking.md) | the assembled feature tracking pipeline — not an operation; see [Assembled pipelines](#assembled-pipelines) |
 | [methodology-memory.md](methodology-memory.md) | how memory is measured, and the errors that shaped it — read before quoting a memory number |
 | [methodology-timing.md](methodology-timing.md) | how a difference between two timings is judged real — read before quoting a speed ratio |
 
@@ -27,8 +27,9 @@ committed logs; those two reports name the binary that produces each number inst
 
 **One row per operation, and the two host machines are columns.** x86-64 and aarch64 are
 different measurements against different OpenCV builds on different hardware; they are never
-averaged, and neither stands in for the other. The assembled frontend is not in these tables
-— it is not an operation — and is [further down](#assembled-pipelines).
+averaged, and neither stands in for the other. The assembled feature tracking pipeline
+is not in these tables — it is not an operation — and is
+[further down](#assembled-pipelines).
 
 ### Speed, CPU
 
@@ -171,13 +172,14 @@ them, and each is owed a re-measurement.
 ## Assembled pipelines
 
 **These are programs this project wrote, not operations binCV offers**, and they are down
-here for that reason. A *frontend* is the front half of a visual-odometry system: sensor
-stage, pyramid, derivatives, corner detection, tracking, keypoint lifecycle. Two of them are
+here for that reason. The *feature tracking pipeline* is sensor stage, pyramid, derivatives,
+corner detection, tracking and keypoint lifecycle — what a visual-odometry system runs ahead
+of its optimizer, and what that field calls a VIO frontend. Two of them are
 built for this measurement — one calling only binCV, one calling only OpenCV
 (`cv::filter2D`, `cv::buildOpticalFlowPyramid`, `cv::goodFeaturesToTrack`,
 `cv::calcOpticalFlowPyrLK`) — and run over 1709 consecutive frame pairs of EuRoC
 `V1_02_medium`. Each side builds its own binary frame and the two are bit-identical, so this
-compares the frontends rather than two different inputs.
+compares the two pipelines rather than two different inputs.
 
 What it is evidence for is that the operations **compose**: the per-call results above do
 not cancel out when a real pipeline runs them. It is not a claim about anyone else's
@@ -186,7 +188,7 @@ pipeline, and it is not the number to compare against a library call.
 <!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64 ratio|OpenCV, aarch64|binCV, aarch64|aarch64 ratio" source="source" -->
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | source |
 |---|---|---|---|---|---|---|---|
-| time, ms/frame | 3.841–4.485 | 1.134–1.283 | 3.30× | 23.249–23.451 | 4.906–4.949 | 4.73× | [frontend.md](frontend.md) |
+| time, ms/frame | 3.841–4.485 | 1.134–1.283 | 3.30× | 23.249–23.451 | 4.906–4.949 | 4.73× | [feature-tracking.md](feature-tracking.md) |
 
 Peak working set is computed from buffer geometry and is identical on both architectures, so
 it is one pair rather than two:
@@ -196,10 +198,11 @@ it is one pair rather than two:
 |---|---|---|---|---|
 | peak working set, bytes | 2,719,832 | 436,704 | 6.23× | [footprint.md](footprint.md) |
 
-Flow agrees with OpenCV's to 0.0437 px at the median; [frontend.md](frontend.md) carries the
-stage breakdown, the agreement figures and the spreads. The **CUDA resident frontend** is the
+Flow agrees with OpenCV's to 0.0437 px at the median;
+[feature-tracking.md](feature-tracking.md) carries the stage breakdown, the agreement
+figures and the spreads. The **CUDA resident pipeline** is the
 same idea on the device and is down here for the same reason — it is measured against binCV's
-own CPU frontend rather than against OpenCV, at 5.62× faster ([cuda.md](cuda.md)).
+own CPU pipeline rather than against OpenCV, at 5.62× faster ([cuda.md](cuda.md)).
 
 ## What these are not
 
@@ -291,7 +294,7 @@ block each run prints is at the top of every aarch64 log in [logs/](logs/).
 Sequence-level results use **EuRoC MAV `V1_02_medium`, camera `cam0`** — 1710 frames of
 752×480 8-bit grayscale, 1709 consecutive pairs, used whole. Which sequence is not a detail:
 `V1_02` gives the tracker materially more work per frame than the easier `MH_01_easy`, and a
-whole-frontend ratio measured on the two comes out differently enough to change the
+whole-pipeline ratio measured on the two comes out differently enough to change the
 conclusion.
 
 Operation-level results need no dataset. They run on synthetic content across a ladder of
@@ -305,7 +308,7 @@ that holds.
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/benchmark/logic_benchmark                     # one operation, against OpenCV
-./build/benchmark/frontend_sequence <euroc-cam0-dir>  # the assembled frontend
+./build/benchmark/feature_tracking_sequence <euroc-cam0-dir>  # the assembled pipeline
 ```
 
 Each report's **Reproduce** section names the exact binary for its tables. The sequence

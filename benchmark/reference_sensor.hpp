@@ -3,11 +3,11 @@
 // The REFERENCE sensor stage, in one place, because two harnesses stake claims
 // on running the identical spelling:
 //
-//   * frontend_sequence.cpp checks binCV's own sensor stage bit-exact against
+//   * feature_tracking_sequence.cpp checks binCV's own sensor stage bit-exact against
 //     this, every frame -- the control that makes its comparison one of
 //     implementations rather than of inputs.
 //   * accuracy_realframes.cpp binarizes its pairs with it so its yield deltas
-//     are comparable to the frontend's -- the one comparison that file exists
+//     are comparable to the pipeline's -- the one comparison that file exists
 //     to make.
 //
 // A copy in each file is how the two silently diverge while both keep printing

@@ -89,7 +89,7 @@ namespace cuda {
 /// @return The launch's `cudaError_t`. Asynchronous.
 ///
 /// **THE DEFAULTS ARE THE REFERENCE**, as they are on the host: `edgeThreshold(src,
-/// dst, 17)` is the tracking frontend's sensor-stage edge filter.
+/// dst, 17)` is the tracking pipeline's sensor-stage edge filter.
 ///
 /// @note 8- or 16-bit in, 1 bit out, and **the wide intermediate never exists**,
 /// not even inside the kernel: the per-pixel predicate becomes a bit of a

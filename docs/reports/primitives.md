@@ -120,7 +120,7 @@ alternative. It is not a claim against OpenCV and is not quoted as one.
 ## Denoise
 
 A three-pixel median, against a byte-per-pixel implementation of the same filter ported call
-for call from the frontend binCV was written to replace.
+for call from the tracking pipeline binCV was written to replace.
 
 | implementation | x86-64 (ns/px) | x86-64 ratio | aarch64 (ns/px) | aarch64 ratio | working set (bytes) |
 |---|---|---|---|---|---|

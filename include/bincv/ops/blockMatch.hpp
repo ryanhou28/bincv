@@ -10,8 +10,8 @@
 ///
 /// **SCOPE, BECAUSE [CLAUDE.md](../../../CLAUDE.md) PUTS TEMPLATE MATCHING OUT OF
 /// SCOPE.** It does, as an *operation*: `cv::matchTemplate` is deliberately absent
-/// and stays absent. This is not that. It is an internal tracker search named in
-/// 7.9 and scheduled as since the roadmap was written, and it exposes no
+/// and stays absent. This is not that. It is an internal tracker search the design
+/// notes name in section 7.9, and it exposes no
 /// template-matching API -- the entry point takes keypoints and returns tracked
 /// keypoints, exactly as `calcOpticalFlowPyrLK` does.
 ///

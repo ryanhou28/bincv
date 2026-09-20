@@ -1,7 +1,7 @@
 // medianWide and edgeThreshold, each against its OWN scalar arm (issue #55).
 //
 // These are the two ops whose unmeasured state prompted the benchmark-at-birth
-// rule -- 78% of the frontend the day something called them -- and they still
+// rule -- 78% of the pipeline the day something called them -- and they still
 // had no benchmark of their own: timed only as line items inside pipelines,
 // with vector arms that were hard-wired on and therefore never proven against
 // the scalar paths they replaced.

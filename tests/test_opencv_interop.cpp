@@ -278,7 +278,7 @@ void testRealFrameCorners() {
     bin.fromCVMat(input);
     BINCV_CHECK_EQ(bin.countNonZero(), cv::countNonZero(input));
 
-    bincv::GoodFeaturesParams params;  // the reference frontend's parameters verbatim
+    bincv::GoodFeaturesParams params;  // the reference pipeline's parameters verbatim
     bincv::TernaryMat<uint32_t> dx(static_cast<size_t>(w), static_cast<size_t>(h));
     bincv::TernaryMat<uint32_t> dy(static_cast<size_t>(w), static_cast<size_t>(h));
     bincv::derivativeX(bin, dx);

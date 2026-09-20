@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file cuda_ransac_kernels.hpp
-/// @brief The device apparatus for one question: can the frontend's RANSAC
+/// @brief The device apparatus for one question: can the pipeline's RANSAC
 /// geometry stage move to the GPU?
 ///
 /// **THIS IS NOT AN OPERATION AND MUST NOT BECOME ONE BY ACCIDENT.** Nothing

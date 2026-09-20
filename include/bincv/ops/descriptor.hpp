@@ -443,7 +443,7 @@ inline void matchDescriptors(const WordType* query, size_t queryCount, const Wor
     }
 }
 
-/// @brief `matchDescriptors` restricted to candidates a frontend's priors admit:
+/// @brief `matchDescriptors` restricted to candidates a pipeline's priors admit:
 /// a position window, and optionally an octave band. **API TIER 3.**
 /// @param queryXY / trainXY (x, y) per keypoint, interleaved -- the descriptor
 /// family's raw-array contract. Positions are whatever frame the caller
@@ -452,7 +452,7 @@ inline void matchDescriptors(const WordType* query, size_t queryCount, const Wor
 /// @param maxDx,maxDy Half-extents of the admission window, in the positions'
 /// own units. The gate is two float compares per candidate, against the
 /// `words` XORs and popcounts it saves -- which is the whole point: a
-/// frontend measured brute force at the cost of a full detection level,
+/// pipeline measured brute force at the cost of a full detection level,
 /// while knowing priors the matcher ignored.
 /// @param queryOctave / trainOctave Optional (both or neither): admit only
 /// candidates within `maxOctaveDelta` pyramid levels -- a keypoint rarely

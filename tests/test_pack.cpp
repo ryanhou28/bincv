@@ -21,7 +21,7 @@
 // * THE SIGNED-COMPARE BIAS. SSE/AVX integer compares are SIGNED and binCV's
 // pixels are not: `cmpgt_epi8` on 0xFF against 0x01 asks "is -1 > 1" and answers
 // no. Thresholds above 127 (and above 32767) are chosen deliberately so a
-// missing bias fails here rather than in a frontend.
+// missing bias fails here rather than in a pipeline.
 //
 // * PADDING BITS. Every row's trailing partial word is checked to be zero past
 // `width` -- CLAUDE.md's hard rule, and word-wise reductions over-count without
@@ -371,7 +371,7 @@ BINCV_TEST(Pnm, PbmRoundTripsAtEveryWordType) {
 }
 
 BINCV_TEST(Pnm, PbmCostsTheMatrixAndPgmCostsTheImage) {
-    // The measured claim the format choice rests on, at the frame size the frontend
+    // The measured claim the format choice rests on, at the frame size the pipeline
     // reports are run on. If this ever stops holding, the reason to prefer P4 is gone.
     constexpr size_t kW = 752, kH = 480;
     BinMat<uint32_t> m(kW, kH);

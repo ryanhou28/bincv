@@ -9,7 +9,7 @@
 // implementations against the truth and therefore against each other -- the
 // same left-reference convention and the same d = xL - xR sign, which is
 // exactly what that test would catch being wrong. The real-pair arm belongs to
-// the stereo frontend example and waits on a rectified pair sequence.
+// the stereo pipeline example and waits on a rectified pair sequence.
 #include <cmath>
 #include <cstdint>
 #include <cstdio>

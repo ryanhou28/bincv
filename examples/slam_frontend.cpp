@@ -1,6 +1,10 @@
 // ===========================================================================
 // A BINARY-FRAME SLAM VISION FRONTEND, END TO END, ON binCV KERNELS.
 //
+// A SLAM *frontend* is the image-processing half of a SLAM system -- the part
+// that turns camera frames into features and frame-to-frame associations for
+// the map and the optimiser behind it.
+//
 // vio_frontend.cpp answers "can binCV's kernels carry a VIO tracking loop"; this
 // file asks the same of the SLAM-shaped loop, which is structurally different:
 // association is by DESCRIPTOR, not by optical flow, because a SLAM system needs

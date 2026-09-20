@@ -94,7 +94,7 @@ using Word = uint32_t;  // the design rule’s default, and what a VIO frontend 
 constexpr int kWidth = 640;
 constexpr int kHeight = 480;
 constexpr int kInputs = 4;
-constexpr int kBlockSize = 3;              // gftt_block_size in the reference frontend
+constexpr int kBlockSize = 3;              // gftt_block_size in the reference pipeline
 constexpr int kMaxCorners = 200;           // gftt_max_corners
 constexpr double kQualityLevel = 0.01;     // gftt_quality_level
 constexpr double kMinDistance = 33.33333333333;  // gftt_min_distance
@@ -243,7 +243,7 @@ int main() {
                 CV_VERSION, cv::getNumThreads());
     std::printf("frame %dx%d, blockSize %d, maxCorners %d, qualityLevel %.2f, minDistance %.5f\n",
                 kWidth, kHeight, kBlockSize, kMaxCorners, kQualityLevel, kMinDistance);
-    std::printf("(the reference frontend's parameters verbatim; word uint32_t)\n\n");
+    std::printf("(the reference pipeline's parameters verbatim; word uint32_t)\n\n");
 
     std::vector<bincv::BinMat<Word>> bins;
     std::vector<cv::Mat> bytes;

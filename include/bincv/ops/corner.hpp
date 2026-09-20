@@ -24,7 +24,7 @@
 /// {-1, 0, +1}. `cv::cornerMinEigenVal` runs a 3x3 Sobel over a byte image.
 /// Those are different numbers before any window is summed. That is the
 /// reference pipeline's own choice -- `gftt_corner_derivative_type: BINARIZED`
-/// in the reference frontend's parameters -- and this file reproduces THAT, not OpenCV's
+/// in the reference pipeline's parameters -- and this file reproduces THAT, not OpenCV's
 /// default path.
 /// * **`cv::cornerMinEigenVal` works in float and cannot be compared exactly.**
 /// Its `eig` map is `CV_32F` produced by a float box filter over float
@@ -40,8 +40,8 @@
 /// ---------------------------------------------------------------------------
 /// THE OPERATION, READ OUT OF THE REFERENCE RATHER THAN INFERRED
 ///
-/// the reference frontend's detector and corner stages,
-/// with the reference frontend's values (`gftt_max_corners: 200`,
+/// the reference pipeline's detector and corner stages,
+/// with the reference pipeline's values (`gftt_max_corners: 200`,
 /// `gftt_quality_level: 0.01`, `gftt_min_distance: 33.33333333333`,
 /// `gftt_block_size: 3`, `gftt_use_harris_detector: 0` -- so MINIMUM EIGENVALUE,
 /// not Harris; GoodFeaturesParams' defaults are those four values and say so).
@@ -132,7 +132,7 @@
 /// between 3 and 7, the net between 7 and 15 -- because the traversal penalty is
 /// still 7% where the incremental win is only 4%. Their sum is **20% SLOWER than
 /// the obvious row-major recomputation at `blockSize = 3`, which is exactly what
-/// the reference frontend runs.**
+/// the reference pipeline runs.**
 ///
 /// The spreads above are WITHIN-run. RUN-TO-RUN scatter was measured separately
 /// over four device runs of the same binary (`results/corner_benchmark_pi4_scatter.log`):
@@ -467,7 +467,7 @@ struct Corner {
 
 /// @brief The four parameters `goodFeaturesToTrack` takes, defaulted to the values
 /// the reference pipeline actually runs.
-/// @note The defaults are the reference frontend's parameters verbatim: `gftt_max_corners: 200`,
+/// @note The defaults are the reference pipeline's parameters verbatim: `gftt_max_corners: 200`,
 /// `gftt_quality_level: 0.01`, `gftt_min_distance: 33.33333333333`,
 /// `gftt_block_size: 3`. `gftt_use_harris_detector: 0` is why there is no
 /// Harris option here at all -- the reference selects the minimum
@@ -622,7 +622,7 @@ inline void cornerMinEigenVal(BinMatConstView<WordType> magX, BinMatConstView<Wo
     // 640x480, over 307 200 response pixels of which none differ. Above 3 the sweep
     // wins: 5 through 9 measure as a tie and 11 upward favour it, so the dispatch
     // sits at the one size where the difference is not inside the noise. It is also
-    // the size every frontend here runs.
+    // the size every pipeline here runs.
     if (blockSize == 3) {
         for (size_t y = 0; y < magX.height; ++y) {
             cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize,
@@ -982,7 +982,7 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
 /// @tparam WordType The containers' word type.
 /// @param dx Horizontal ternary derivative (ops/derivative.hpp, level 0).
 /// @param dy Vertical ternary derivative, with `dx`'s dimensions.
-/// @param params Defaults are the reference frontend's four values.
+/// @param params Defaults are the reference pipeline's four values.
 /// @param scratch Caller-owned response map with the derivatives' dimensions. It
 /// is written, then read. **This is the operation's whole memory cost**:
 /// 4 bytes per pixel, 1 228 800 B at 640x480 -- eight times the four
@@ -1010,7 +1010,7 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
 /// frame's tracks are not among its inputs and cannot be, because they are not
 /// a property of the response map. `bincv::spaceCandidates(corners, count,
 /// live, liveCount, radius, freeSlots)` is the second half, and every VIO
-/// frontend needs both. exists because this library's own example had
+/// frontend needs both. It exists because this library's own example had
 /// written that loop by hand.
 /// @note Never throws; allocates nothing.
 template <typename WordType>
@@ -1033,7 +1033,7 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 // a measurement measured the whole VIO frontend's peak working set at 640x480 as
 // 1 721 568 B, of which the `float` response map above is 1 228 800 B -- 71.4%,
 // more than every other stage combined, at 4 BYTES per pixel where every image
-// plane in the frontend is one or two BITS. The streaming form keeps only the
+// plane in the pipeline is one or two BITS. The streaming form keeps only the
 // three rows the 3x3 NMS reads and never materializes the frame-sized map.
 //
 // It is NOT a replacement. `cornerMinEigenVal` + `selectGoodFeatures` stay,
@@ -1103,12 +1103,12 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 //
 // WHAT IT COSTS AND WHAT IT SAVES -- MEASURED, ON THE REFERENCE DEVICE
 //
-// See in the design notes and in EXPERIMENTS.md for the full table and
-// for the pre-registered rule the numbers were judged against. 640x480,
-// `uint32_t`, `blockSize` 3 (the reference frontend's own value), medians of 11 interleaved
+// The design notes carry the full table and the pre-registered rule the
+// numbers were judged against. 640x480,
+// `uint32_t`, `blockSize` 3 (the reference pipeline's own value), medians of 11 interleaved
 // batches, within-run spreads 0.15-0.27%, arm order swapped and re-run:
 //
-// form whole detector response stage corner peak frontend peak
+// form whole detector response stage corner peak pipeline peak
 // frame map 132.8 ns/px 107.1 ns/px 1 333 848 B 1 721 568 B
 // streaming 102.8 ns/px 77.1 ns/px 112 744 B 500 464 B
 // T = 0.77x 11.8x 3.44x
@@ -1120,15 +1120,14 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 // -- so quote the ratio, not the third digit of a nanosecond. Both runs give the
 // same verdict at every block size, both word types and both frame sizes.
 //
-// **THE STREAMING FORM IS 1.29x FASTER, NOT 2x SLOWER AS THIS TASK WAS SCHEDULED
-// ON**, and 3.44x smaller across the whole frontend., the design notes's
-// row, that measurement’s decision 3 and (found at triage, after the rule's list of three)
-// 's write-up all said "roughly 2x the response compute"; all four
-// are corrected by name in earlier work rather than quietly. The reason is the
-// traversal: a ring FORCES a row-major sweep, and already measured the
-// shipped column-major sliding sweep 1.19x slower than row-major recomputation at
-// `blockSize` 3 -- the streaming form collects that discount before paying for
-// anything.
+// **THE STREAMING FORM IS 1.29x FASTER, NOT 2x SLOWER AS THE ESTIMATE HAD IT**,
+// and 3.44x smaller across the whole pipeline. Four separate write-ups -- the
+// design notes' row, the decision that measurement recorded, the triage finding
+// and the summary -- all said "roughly 2x the response compute"; all four are
+// corrected by name rather than quietly. The reason is the traversal: a ring
+// FORCES a row-major sweep, and the shipped column-major sliding sweep was
+// already measured 1.19x slower than row-major recomputation at `blockSize` 3 --
+// the streaming form collects that discount before paying for anything.
 //
 // It costs where the sliding accumulator earns its keep, which is LARGE blocks --
 // and NOT at the same block size in the two benchmarked word types:
@@ -1212,7 +1211,7 @@ namespace impl {
 // planes (0..9, and 3+3+3 = 9 fits exactly). So a whole word of pixels is summed
 // at once. This is the design rule’s technique and the same shape
 // `pyrDown`'s `boxSum4` already uses; it was simply never applied here, to the
-// largest kernel in the frontend.
+// largest kernel in the pipeline.
 //
 // **EXACT, NOT APPROXIMATE, AND THE BORDER IS WHERE THAT IS EARNED.** A clipped
 // window counts only pixels inside the frame. Here a row outside the frame is a
@@ -1426,7 +1425,7 @@ inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView
     BINCV_ASSERT(y >= 0 && y < static_cast<int>(magX.height),
                  "corner: the row index must be inside the frame");
 
-    // blockSize 3 is the reference frontend's value and the whole frontend's, and it
+    // blockSize 3 is the reference pipeline's value and the assembled tracker's, and it
     // is the case the bit-sliced box sums above cover. Other block sizes keep the
     // per-pixel form -- the same shape uses, where the fast path serves the
     // shipped configuration and the general one stays for the rest.
@@ -1457,7 +1456,7 @@ inline void cornerMinEigenValRow(BinMatConstView<WordType> magX, BinMatConstView
 /// @param magY Magnitude plane of the y-derivative -- `dy.constMagnitude(0)`.
 /// @param signX Sign plane of the x-derivative -- `dx.constSign`.
 /// @param signY Sign plane of the y-derivative -- `dy.constSign`.
-/// @param params Defaults are the reference frontend's four values.
+/// @param params Defaults are the reference pipeline's four values.
 /// @param ring Caller-owned scratch: `magX.width` wide, **at least
 /// `kResponseRingRows` rows**, any stride covering a row. 7 680 B at
 /// 640 px against the frame map's 1 228 800 B. Written, then read; nothing

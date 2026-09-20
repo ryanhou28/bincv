@@ -277,7 +277,7 @@ BINCV_TEST(SubPix, AgreesWithOpenCVOnTheSameCorner) {
     // TIER 2, AND THIS IS THE HALF THAT SAYS SO. The refinement rule, the Gaussian
     // window and the termination are cv::cornerSubPix's; the GRADIENT is not -- OpenCV
     // derives its own from the 8-bit image, binCV takes the ternary derivatives the
-    // frontend already has. So the two agree in ROLE and land close, and this pins how
+    // pipeline already has. So the two agree in ROLE and land close, and this pins how
     // close rather than leaving "close" as an adjective.
     constexpr int W = 70, H = 60;
     const int cxTrue = 32, cyTrue = 27;

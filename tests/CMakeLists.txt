@@ -217,8 +217,8 @@ endfunction()
 # `operator new` -- the tracker takes no scratch buffer AT ALL, where the
 # reference copies the warped patch and its derivative into a winSize.area()*3
 # AutoBuffer, so an implementation that allocated would pass every value check in
-# the file. And it carries the frontend FOOTPRINT table, which is the number
-# Phase 4 needs; it is a test rather than a benchmark because the thing it pins --
+# the file. And it carries the tracking pipeline's FOOTPRINT table, which the
+# memory claim rests on; it is a test rather than a benchmark because the thing it pins --
 # which stage dominates -- is a structural property that must fail loudly when it
 # changes, not a timing that is allowed to drift.
 # test_sequence is core for the most literal version of the pack/pnm reason: the

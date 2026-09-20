@@ -8,9 +8,9 @@
 // temporary, then cv::countNonZero -- and the temporary is part of the cost,
 // which is the point of having a masked reduction at all.
 //
-// A THIRD ROW, because asks for it: BinMat::countNonZero, the per-pixel
-// loop the container has carried since before this task. It is the "before" this
-// work is supposed to improve on, and it is measured rather than assumed.
+// A THIRD ROW, and the reason it is here: BinMat::countNonZero, the per-pixel
+// loop the container has carried from the start. It is the "before" the bulk
+// reductions are supposed to improve on, and it is measured rather than assumed.
 //
 // ---------------------------------------------------------------------------
 // MEASUREMENT VALIDITY -- the same four hazards benchmark/logic_benchmark.cpp

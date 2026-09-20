@@ -92,7 +92,7 @@
 /// popcount: only two of the three numbers slide, and the accumulator forces a
 /// column-major traversal. On the reference device at 640x480 the sliding corner
 /// sweep is 1.22x faster at a 31x31 window and **1.20x SLOWER at 3x3** -- the block
-/// size the reference frontend runs -- over four runs whose ranking never changes.
+/// size the reference pipeline runs -- over four runs whose ranking never changes.
 /// The advice above stands
 /// for large windows and is wrong for small ones; ops/corner.hpp carries the table.
 ///
@@ -277,7 +277,7 @@
 /// assembly of the five-argument form is for a ternary level only.
 /// 2. **Windows are CLIPPED, not rejected** (, and ops/reduce.hpp's region
 /// contract). A 31x31 window centerd on a keypoint within 15 pixels of an edge
-/// is out of range, and every LK frontend has such keypoints. The window is
+/// is out of range, and every LK pipeline has such keypoints. The window is
 /// intersected with the image; the pixels that exist contribute and the rest
 /// do not. A window wholly outside gives `{0, 0, 0}`, which is a value and not
 /// an error. **A bit at or past `width` is never counted**, whatever it holds

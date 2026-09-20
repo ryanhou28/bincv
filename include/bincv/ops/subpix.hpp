@@ -41,7 +41,7 @@
 /// `cv::cornerSubPix`'s. **The gradient is not**: OpenCV computes its own from the
 /// 8-bit image with a Sobel-like scheme, and this takes binCV's already-computed
 /// `SignedQuantMat` derivatives -- which is (a kernel binds to views, and the
-/// frontend has these already) and also the only shape that avoids materializing an
+/// pipeline has these already) and also the only shape that avoids materializing an
 /// 8-bit image the library exists to avoid.
 
 #include <cmath>

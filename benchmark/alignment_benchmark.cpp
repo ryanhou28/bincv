@@ -12,7 +12,7 @@
 // profile system
 // * 5-20% -> stands as default; larger alignment stays opt-in and is
 // documented as worth it for specific kernels
-// * > 20% on a kernel the frontend calls per frame -> reopen, report
+// * > 20% on a kernel the pipeline calls per frame -> reopen, report
 // before changing anything
 //
 // "Speedup" is read the way the rule is written: variant faster than the word

@@ -525,7 +525,7 @@ inline size_t writePbm(BinMatConstView<WordType> src, uint8_t* out, size_t cap) 
 /// @return Bytes written, or the bytes REQUIRED if `cap` is too small (and nothing is
 /// written). Call once with `cap == 0` to size the buffer.
 /// @note **Looking at what binCV produced on a target with no OpenCV**, and debugging
-/// a frontend you cannot see is not debugging. PNM is chosen because it is the only
+/// a pipeline you cannot see is not debugging. PNM is chosen because it is the only
 /// image format whose encoder is a header and a copy -- binCV carries no real codec,
 /// on any target, because nothing on a caller's path decodes anything (the design
 /// notes).

@@ -2,6 +2,10 @@
 // A DEVICE-RESIDENT BINARY-FRAME VIO FRONTEND, END TO END, ON binCV'S CUDA
 // KERNELS -- the GPU twin of examples/vio_frontend.cpp.
 //
+// A VIO *frontend* is the image-processing half of a visual-inertial odometry
+// system -- sensor stage, pyramid, detection, tracking, track lifecycle -- the
+// part that turns camera frames into feature tracks for the estimator behind it.
+//
 // WHAT "RESIDENT" MEANS HERE, BECAUSE IT IS THE ENTIRE ARGUMENT
 //
 // A GPU kernel that is 3x faster than its CPU twin is worth nothing to a caller
@@ -72,7 +76,7 @@
 //   absent from BOTH arms here, so the two totals stay comparable to each
 //   other and to nothing else. The tracking pipeline is timed end to end by
 //   `cuda_role_benchmark sequence`. Comparing this program's total against
-//   docs/reports/frontend.md's would be comparing two different pipelines.
+//   docs/reports/feature-tracking.md's would be comparing two different pipelines.
 //
 // FRAMES
 //

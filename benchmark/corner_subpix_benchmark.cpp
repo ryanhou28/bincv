@@ -13,7 +13,7 @@
 // shipping-rule finding to put in front of the owner, not a number to bury.
 //
 // WHAT THE COMPARISON COVERS: refinement only. binCV's input premise is that
-// the frontend already holds ternary derivatives (that is the operation's
+// the pipeline already holds ternary derivatives (that is the operation's
 // documented shape); OpenCV's premise is the 8-bit image it computes gradients
 // from per call. Each side is timed doing its own whole job from its own
 // natural input -- neither pays the other's preprocessing.
@@ -84,7 +84,7 @@ int main() {
         return 1;
     }
 
-    // binCV's natural input: the ternary derivatives the frontend already holds.
+    // binCV's natural input: the ternary derivatives the pipeline already holds.
     bincv::BinMat<W> bin(gw, gh);
     bincv::packBits<bincv::PackRule::NonZero>(frame.data(), w, h, w, bin.view());
     bincv::SignedQuantMat<1, W> dx(gw, gh), dy(gw, gh);
@@ -139,7 +139,7 @@ int main() {
                     t[i].medianNs / 1e6, t[i].spreadPct());
     std::printf("\n ratio %.2fx  (>1 means binCV is faster)\n",
                 t[1].medianNs / t[0].medianNs);
-    std::printf(" working sets: binCV reads the frontend's existing ternary planes, no\n"
+    std::printf(" working sets: binCV reads the pipeline's existing ternary planes, no\n"
                 " allocation in the kernel; cv reweights from the 8-bit frame per call.\n");
     std::printf(" sink %zu\n", static_cast<size_t>(measure::g_sink));
     return 0;

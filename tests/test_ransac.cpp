@@ -301,7 +301,7 @@ BINCV_TEST(Ransac, RefitIsSkippedWhenTheConsensusSetIsDegenerate) {
 }
 
 BINCV_TEST(Ransac, AdversarialInputs) {
-    // Inputs a frontend will eventually hand this, none of which the happy-path
+    // Inputs a pipeline will eventually hand this, none of which the happy-path
     // scenes produce. The bar throughout is: never NaN, never a model claimed on
     // evidence that cannot support one, never a refit reported that did not happen.
     RansacParams p;

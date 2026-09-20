@@ -166,7 +166,7 @@ set_target_properties(test_cuda_orientation_descriptor PROPERTIES
 add_test(NAME cuda_orientation_descriptor COMMAND test_cuda_orientation_descriptor)
 set_tests_properties(cuda_orientation_descriptor PROPERTIES SKIP_RETURN_CODE 77)
 
-# The frontend's entry point: FAST, the minimum-eigenvalue response,
+# The pipeline's entry point: FAST, the minimum-eigenvalue response,
 # good-features selection and sub-pixel refinement, each against its host twin.
 #
 # HOST C++ RATHER THAN A CUDA TRANSLATION UNIT, and for this family that is
@@ -179,15 +179,15 @@ set_tests_properties(cuda_orientation_descriptor PROPERTIES SKIP_RETURN_CODE 77)
 # fastArcAny, fastLongestRun, boxHorizontal3, boxVertical3 -- are SHARED rather
 # than forked, with test_cuda_shared_helpers.cu already pinning nvcc's device
 # compilation of the response against the host's.
-bincv_add_test_target(test_cuda_frontend_corner test_cuda_frontend_corner.cpp)
-target_link_libraries(test_cuda_frontend_corner PRIVATE bincv_cuda)
-target_include_directories(test_cuda_frontend_corner PRIVATE ${BINCV_POLICY_ROOT}/tests)
+bincv_add_test_target(test_cuda_feature_tracking_corner test_cuda_feature_tracking_corner.cpp)
+target_link_libraries(test_cuda_feature_tracking_corner PRIVATE bincv_cuda)
+target_include_directories(test_cuda_feature_tracking_corner PRIVATE ${BINCV_POLICY_ROOT}/tests)
 
-add_test(NAME cuda_frontend_corner COMMAND test_cuda_frontend_corner)
-set_tests_properties(cuda_frontend_corner PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME cuda_feature_tracking_corner COMMAND test_cuda_feature_tracking_corner)
+set_tests_properties(cuda_feature_tracking_corner PROPERTIES SKIP_RETURN_CODE 77)
 
 # The detector-to-keypoint-set link, and the padding contract the RESIDENT
-# pipeline rests on. A .cpp for the reason the frontend-corner suite gives:
+# pipeline rests on. A .cpp for the reason the pipeline-corner suite gives:
 # everything here is a host-callable launcher, and a host header compiled by
 # nvcc is not the host arm a caller runs.
 #
@@ -212,7 +212,7 @@ set_tests_properties(cuda_keypoints PROPERTIES SKIP_RETURN_CODE 77)
 # compiled by nvcc the host arm of the comparison would silently become the
 # scalar one, and the suite would be holding the device to an arm no x86 caller
 # runs. It runs both host arms deliberately instead. Same reason
-# test_cuda_frontend_corner.cpp and test_cuda_keypoints.cpp give.
+# test_cuda_feature_tracking_corner.cpp and test_cuda_keypoints.cpp give.
 #
 # -ffp-contract=off IS HALF OF WHAT THIS SUITE PINS, not a tuning flag. The
 # device tracker's equality claim is "device equals host when the host header is

@@ -1,7 +1,7 @@
 // ===========================================================================
 // THE AUDIT CLAUDE.md's NEW RULE CAME FROM.
 //
-// a measurement found `medianWide` and `edgeThreshold` at 78% of the frontend the day something
+// a measurement found `medianWide` and `edgeThreshold` at 78% of the pipeline the day something
 // first called them: written bit-exact against the reference, benchmarked by nobody, and
 // therefore unoptimized. That prompted a sweep of every operation for the same state --
 // correct, tested, and never timed.

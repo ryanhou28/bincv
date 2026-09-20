@@ -1682,7 +1682,7 @@ struct SelectionParams {
 };
 
 const SelectionParams kStreamParams[] = {
-    // the reference frontend's parameters verbatim -- the configuration the decision is taken at.
+    // the reference pipeline's parameters verbatim -- the configuration the decision is taken at.
     {"reference-defaults", 200, 0.01, 33.33333333333},
     // The spacing filter DISABLED (gftt.cpp's `else` branch), so the answer is a
     // pure top-`maxCorners` and every tie in the sort is visible in the output.
@@ -1847,7 +1847,7 @@ BINCV_TEST(Corner, Streaming_IdenticalCorners_uint64_t) { streamingSuite<uint64_
 // word types. A frame that size has tens of survivors and a `minDistance` of 33
 // selects two or three corners, so the greedy filter barely runs. These frames
 // are large enough that the spacing filter does real work and the survivor count
-// is in the hundreds -- which is the regime measures and the frontend runs.
+// is in the hundreds -- which is the regime measures and the pipeline runs.
 // ---------------------------------------------------------------------------
 
 BINCV_TEST(Corner, Streaming_IdenticalCorners_LargeFrames) {

@@ -433,7 +433,7 @@ size_t fixtureAgainstSensorStage(const std::string& dir, size_t& padBitsSet) {
         if (!ph.valid || ph.width != sh.width || ph.height != sh.height)
             return ~size_t{0};
 
-        // The exact sensor-stage spelling benchmark/frontend_sequence.cpp runs:
+        // The exact sensor-stage spelling benchmark/feature_tracking_sequence.cpp runs:
         // the reference L median, then the wide edge threshold at 17 -- the
         // same two stages the python tool ran to make this fixture.
         std::vector<uint8_t> med(ph.width * ph.height);

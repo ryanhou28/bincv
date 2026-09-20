@@ -1,23 +1,23 @@
 // ===========================================================================
-// earlier work -- WHERE THE FRONTEND'S TIME ACTUALLY GOES, and therefore what
-// Phase 5.1 should vectorize.
+// WHERE THE FEATURE TRACKING PIPELINE'S TIME ACTUALLY GOES, and therefore what a
+// vectorization round should attack first.
 //
-// asks how much of an `ops/` kernel's PER-ROW cost is genericity that is not
-// in N. It was registered against that work’s derivative -- and against "every ops/
-// kernel with a per-row prologue", which is the half that still matters, because
-// then measured the frontend end to end and the derivative turned out to be
-// worth almost nothing:
+// An earlier round asked how much of an `ops/` kernel's PER-ROW cost is
+// genericity that is not in N. It was registered against the derivative -- and
+// against "every ops/ kernel with a per-row prologue", which is the half that
+// still matters, because measuring the pipeline end to end showed the derivative
+// is worth almost nothing:
 //
 // corner detection 31.590 ms/frame 68.83% (640x480)
 // LK track 14.020 ms/frame 30.55% (140 keypoints)
 // build 0.285 ms/frame 0.62% (pyrDown x2 + BOTH
 // derivative ladders)
 //
-// ELIMINATING THE ENTIRE BUILD STAGE CAPS THE FRONTEND GAIN AT 1.0062x. So
+// ELIMINATING THE ENTIRE BUILD STAGE CAPS THE PIPELINE GAIN AT 1.0062x. So
 // answering precisely on the derivative would be optimizing 0.6%, and the
 // question worth the measurement is the same question asked of the 99%.
 //
-// This file splits the two hot stages, on the reference device, at the frontend's
+// This file splits the two hot stages, on the reference device, at the pipeline's
 // real operating point. The splits are made by DIFFERENCE rather than by
 // instrumentation, so nothing is perturbed by a timer inside a loop:
 //
@@ -57,7 +57,7 @@ int main() {
         }
     }
     // Box2x2/Replicate, NOT the default Gaussian: pyramid.hpp says it plainly -- the
-    // default exists so the container's meaning matches OpenCV's, and the frontend
+    // default exists so the container's meaning matches OpenCV's, and the pipeline
     // this file profiles never runs it. This file did, for every build it timed.
     prev.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
     next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
@@ -86,7 +86,7 @@ int main() {
     std::vector<bincv::Corner> corners(20000);
     bincv::GoodFeaturesParams gftt;
 
-    std::printf("=== where the frontend's time goes ===\n");
+    std::printf("=== where the pipeline's time goes ===\n");
     std::printf("640x480, ladder 1/2/2/2, %zu keypoints, 31x31 window, 4 levels\n\n", pts.size());
 
     auto lkAt = [&](int iters) {
@@ -115,7 +115,7 @@ int main() {
                                                                      corners.size());
              measure::g_sink += res.count;
          }},
-        // ONE pyrDown pass, not two: the redundant rebuild is gone -- the frontend
+        // ONE pyrDown pass, not two: the redundant rebuild is gone -- the pipeline
         // swaps the previous frame's pyramid in and builds only the incoming one, so
         // pricing two builds here would restore the waste in the denominator that
         // decides what to optimise next.
