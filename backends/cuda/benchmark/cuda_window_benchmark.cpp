@@ -540,28 +540,31 @@ void roleComparison(const Frame& f) {
         std::snprintf(nameB, sizeof(nameB), "binCV     %s", c.name);
         printPaired(nameA, nameB, p, "kernel");
         const double gain = p.b.medianMs > 0.0 ? p.a.medianMs / p.b.medianMs : 0.0;
-        // "More than the sum of the two printed spreads", in the units that
-        // make the comparison mean anything: MILLISECONDS. A spread expressed
-        // as a percentage of its OWN median cannot be compared with a
-        // difference expressed as a percentage of the OTHER arm's -- that
-        // arithmetic asymptotes at 100% however far ahead the faster arm is,
-        // so a 17x lead would read as a tie whenever the baseline's own
-        // scatter exceeded 100%. That is a property of the instrument, not of
-        // the result.
+        // THE THREE DISPOSITIONS ARE THE SHIP RULE'S AND THEY ARE UNCHANGED;
+        // what picks between them is now measure_util.hpp's rule on the
+        // PER-ROUND RATIO rather than a margin against the two arms' summed
+        // spreads. The old spelling charged the difference twice for the drift
+        // the pairing had already divided out -- both arms are slow together in
+        // a bad round, so both spreads grow while the ratio does not move --
+        // and it read disjoint ranges as a second, independent veto.
         const double marginMs = p.a.medianMs - p.b.medianMs;
         const double summedSpreadMs = (p.a.maxMs - p.a.minMs) + (p.b.maxMs - p.b.minMs);
+        const bool real = p.differenceClearsNoise(cudabench::runToRunScatterFactor());
         std::printf("   binCV runs in %.3f ms against cv::cuda's %.3f ms -- %.2fx.\n"
-                    "   Margin %.4f ms against the two arms' summed spread of %.4f ms.\n",
+                    "   Margin %.4f ms; the two arms' summed spread is %.4f ms, printed\n"
+                    "   as context and no longer as the bar.\n",
                     p.b.medianMs, p.a.medianMs, gain, marginMs, summedSpreadMs);
-        if (marginMs > summedSpreadMs && p.separated())
-            std::printf("   VERDICT (a): ahead beyond the summed spread, ranges disjoint "
+        if (real && p.ratioMedian < 1.0)
+            std::printf("   VERDICT (a): ahead, and the difference clears the noise "
                         "-- leads on BOTH axes.\n");
-        else if (-marginMs > summedSpreadMs && p.separated())
-            std::printf("   VERDICT (c): BEHIND beyond the summed spread. The ship rule "
-                        "allows two dispositions and neither is silent merging.\n");
+        else if (real)
+            std::printf("   VERDICT (c): BEHIND, and the difference clears the noise. The "
+                        "ship rule\n   allows two dispositions and neither is silent "
+                        "merging.\n");
         else
-            std::printf("   VERDICT (b): inside the summed spread -- a TIE on time, so "
-                        "it stands on the memory axis, which memory wins.\n");
+            std::printf("   VERDICT (b): NULL RESULT on time -- the two arms are the same "
+                        "speed as far\n   as this run can tell, so it stands on the "
+                        "memory axis, which memory wins.\n");
     }
 }
 #endif
@@ -609,6 +612,10 @@ int main() {
     printLaunchFloor(floor);
 
     for (const Frame& f : kFrames) {
+        // Every pair emitted below is tagged with this frame, so a seven-run
+        // aggregation does not pool two geometries under one arm-name key and
+        // read the difference between them as run-to-run scatter.
+        cudabench::pairedScope() = f.name;
         std::printf("\n------------------------------------------------------------\n");
         std::printf("  %s\n", f.name);
         std::printf("------------------------------------------------------------\n");

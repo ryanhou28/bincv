@@ -30,6 +30,14 @@
 // Both are pinned below, so neither rule can be swapped back in without a
 // failure saying which one is running.
 //
+// THE THIRD CASE, TheVerdictDoesNotDependOnWhichArmIsTheDenominator, pins the
+// units the rule decides in. Spelled as percentages -- |median - 1| against
+// (max - min) / median -- the same fifteen rounds are a result read one way
+// round and a null read the other, because the numerator of the first is
+// capped at 100% for a faster arm and the second is not capped at all. The
+// deciding quantities are therefore FACTORS, which survive inverting the
+// ratio; the percentages are still computed and still reported.
+//
 // NO GPU IS NEEDED and none is asked for -- this is arithmetic over two vectors
 // of samples, which is exactly why it lives in its own header away from the
 // CUDA timing code. The suite therefore does NOT exit 77 on a device-less
@@ -110,12 +118,19 @@ BINCV_TEST(PairedStats, RangeTestAndProjectRuleDisagree) {
     // and still reported -- as a fact.
     BINCV_CHECK(!p.separated());
 
-    // THE PROJECT'S RULE: the difference is |1.375 - 1| = 37.5%. The within-run
-    // spread is the PER-ROUND RATIO's own, (1.5 - 1.25) / 1.375 = 18.18%. 37.5
-    // clears 18.18, so this is a result -- which the range test denied.
+    // THE PROJECT'S RULE, in the units it decides in: the two arms are
+    // max(1.375, 1/1.375) = 1.375x apart, against a per-round SWING of
+    // 1.5 / 1.25 = 1.2x. 1.375 clears 1.2, so this is a result -- which the
+    // range test denied.
+    BINCV_CHECK(near(p.differenceFactor(), 1.375, 1e-12));
+    BINCV_CHECK(near(p.ratioSwingFactor(), 1.2, 1e-12));
+    BINCV_CHECK(p.differenceClearsNoise(kScatterNotMeasured));
+
+    // The percentages are still reported and still agree here, because near
+    // parity they are a linearisation of the factors: 37.5% against 18.18%.
+    // They are not what decided it -- see the order-invariance case below.
     BINCV_CHECK(near(p.differencePct(), 37.5, 1e-9));
     BINCV_CHECK(near(p.ratioSpreadPct(), 18.1818181818, 1e-8));
-    BINCV_CHECK(p.differenceClearsNoise(kScatterNotMeasured));
 
     // And the two arms' own spreads, which the range test is really reading,
     // are enormous -- 4.0/1.0 and 5.5/1.25 -- precisely because the drift is
@@ -138,9 +153,61 @@ BINCV_TEST(PairedStats, SeparatedRangesAreNotSufficientEither) {
 
     BINCV_CHECK(p.separated());
     BINCV_CHECK(near(p.ratioMedian, 1.02, 1e-12));
+    BINCV_CHECK(near(p.differenceFactor(), 1.02, 1e-12));
+    BINCV_CHECK(near(p.ratioSwingFactor(), 1.6 / 1.01, 1e-12));
+    BINCV_CHECK(!p.differenceClearsNoise(kScatterNotMeasured));
     BINCV_CHECK(near(p.differencePct(), 2.0, 1e-9));
     BINCV_CHECK(near(p.ratioSpreadPct(), 57.8431372549, 1e-8));
-    BINCV_CHECK(!p.differenceClearsNoise(kScatterNotMeasured));
+}
+
+// ---------------------------------------------------------------------------
+// THE CASE THE PERCENTAGE SPELLING OF THE RULE GOT WRONG.
+//
+// These are this backend's own dense-disparity rounds, rounded to the figures
+// the harness printed: fifteen paired rounds in which binCV beat
+// cv::cuda::StereoBM every time, ranges disjoint, sign split 15-0.
+//
+// |median - 1| as a percentage cannot exceed 100% for the FASTER arm however
+// far ahead it is, while (max - min) / median has no ceiling. So the verdict
+// flipped on nothing but which arm went in the denominator -- 91.7% against
+// 109.9% one way (a NULL), 1103% against 66.6% the other (a RESULT). In
+// factors both quantities survive the inversion and both orientations agree.
+// ---------------------------------------------------------------------------
+BINCV_TEST(PairedStats, TheVerdictDoesNotDependOnWhichArmIsTheDenominator) {
+    // Arm A (OpenCV) is flat at 0.833 ms; arm B (binCV) swings 0.0668-0.1509,
+    // which is what a kernel a few multiples above the launch floor does on
+    // this host.
+    const std::vector<double> a = {0.833, 0.833, 0.833};
+    const std::vector<double> b = {0.0668, 0.0724, 0.1509};
+
+    const PairedTiming fwd = summarizePaired(a, b);   // B / A -- binCV ahead
+    const PairedTiming rev = summarizePaired(b, a);   // A / B -- the same rounds
+
+    // The two medians are reciprocals of each other, as they must be.
+    BINCV_CHECK(near(fwd.ratioMedian * rev.ratioMedian, 1.0, 1e-12));
+    BINCV_CHECK(fwd.ratioMedian < 1.0);
+    BINCV_CHECK(rev.ratioMedian > 1.0);
+
+    // THE DECIDING QUANTITIES ARE INVARIANT. Both orientations report the same
+    // distance apart and the same swing, to the bit where the arithmetic is
+    // exact and to 1e-12 where it is not.
+    BINCV_CHECK(near(fwd.differenceFactor(), rev.differenceFactor(), 1e-9));
+    BINCV_CHECK(near(fwd.ratioSwingFactor(), rev.ratioSwingFactor(), 1e-9));
+    BINCV_CHECK(near(fwd.differenceFactor(), 0.833 / 0.0724, 1e-9));
+    BINCV_CHECK(near(fwd.ratioSwingFactor(), 0.1509 / 0.0668, 1e-9));
+
+    // ...and so is the verdict, which is the whole point. Both are a result.
+    BINCV_CHECK(fwd.differenceClearsNoise(kScatterNotMeasured));
+    BINCV_CHECK(rev.differenceClearsNoise(kScatterNotMeasured));
+
+    // THE PERCENTAGES ARE NOT INVARIANT, and this is why they do not decide.
+    // Forward reads under 100% by construction; reversed reads over 1000%.
+    BINCV_CHECK(fwd.differencePct() < 100.0);
+    BINCV_CHECK(rev.differencePct() > 1000.0);
+    // Compared as percentages the forward orientation would have been a null
+    // and the reverse a result -- the contradiction this case exists to pin.
+    BINCV_CHECK(fwd.differencePct() < fwd.ratioSpreadPct());
+    BINCV_CHECK(rev.differencePct() > rev.ratioSpreadPct());
 }
 
 BINCV_TEST(PairedStats, GeometricMeanIsOrderIndependentAndArithmeticIsNot) {
@@ -220,26 +287,30 @@ BINCV_TEST(PairedStats, TheRuleTakesTheLargerOfTheTwoNoises) {
     BINCV_CHECK(near(p.differencePct(), 50.0, 1e-9));
     BINCV_CHECK(near(p.ratioSpreadPct(), 13.3333333333, 1e-8));
 
+    // In the deciding units: 1.5x apart, against a swing of 1.6 / 1.4.
+    BINCV_CHECK(near(p.differenceFactor(), 1.5, 1e-12));
+    BINCV_CHECK(near(p.ratioSwingFactor(), 1.6 / 1.4, 1e-12));
+
     // Nobody has measured the run-to-run scatter: the within-run half is all
-    // there is to clear, and 50% clears 13.33%.
-    BINCV_CHECK(near(p.noiseToClearPct(kScatterNotMeasured), 13.3333333333, 1e-8));
+    // there is to clear, and 1.5x clears 1.143x.
+    BINCV_CHECK(near(p.noiseToClearFactor(kScatterNotMeasured), 1.6 / 1.4, 1e-12));
     BINCV_CHECK(p.differenceClearsNoise(kScatterNotMeasured));
 
-    // A measured scatter SMALLER than the within-run spread does not lower the
+    // A measured scatter SMALLER than the within-run swing does not lower the
     // bar -- the rule takes the larger.
-    BINCV_CHECK(near(p.noiseToClearPct(5.0), 13.3333333333, 1e-8));
-    BINCV_CHECK(p.differenceClearsNoise(5.0));
+    BINCV_CHECK(near(p.noiseToClearFactor(1.05), 1.6 / 1.4, 1e-12));
+    BINCV_CHECK(p.differenceClearsNoise(1.05));
 
-    // A measured scatter LARGER than the within-run spread raises it, and
-    // 50% against 60% does not clear. This is the half of the rule that a
+    // A measured scatter LARGER than the within-run swing raises it, and
+    // 1.5x against 1.6x does not clear. This is the half of the rule that a
     // single process cannot see, and the half a benchmark with the figure for
     // its host would supply.
-    BINCV_CHECK(near(p.noiseToClearPct(60.0), 60.0, 1e-12));
-    BINCV_CHECK(!p.differenceClearsNoise(60.0));
+    BINCV_CHECK(near(p.noiseToClearFactor(1.6), 1.6, 1e-12));
+    BINCV_CHECK(!p.differenceClearsNoise(1.6));
 
     // At exactly the bar it does not clear: "smaller than the spread is a null
     // result" reads a tie as a null, which is the conservative direction.
-    BINCV_CHECK(!p.differenceClearsNoise(50.0));
+    BINCV_CHECK(!p.differenceClearsNoise(1.5));
 }
 
 BINCV_TEST(PairedStats, NoDifferenceIsANullResultAndSaysSo) {
@@ -248,6 +319,8 @@ BINCV_TEST(PairedStats, NoDifferenceIsANullResultAndSaysSo) {
     BINCV_CHECK(near(p.ratioMedian, 1.0, 1e-12));
     BINCV_CHECK(near(p.differencePct(), 0.0, 1e-9));
     BINCV_CHECK(near(p.ratioSpreadPct(), 20.0, 1e-8));
+    BINCV_CHECK(near(p.differenceFactor(), 1.0, 1e-12));
+    BINCV_CHECK(near(p.ratioSwingFactor(), 1.1 / 0.9, 1e-12));
     BINCV_CHECK(!p.differenceClearsNoise(kScatterNotMeasured));
 
     // One round each way plus one exact tie -- the sign test has nothing to
@@ -323,12 +396,12 @@ BINCV_TEST(PairedStats, TheRunToRunScatterIsNotDefaultedToANumber) {
     // A figure invented here would make the stronger half of the project's rule
     // look applied when nobody had measured it. The slot starts empty and says
     // so, and an empty slot leaves the within-run spread as the bar.
-    BINCV_CHECK(cudabench::runToRunScatterPct() == kScatterNotMeasured);
+    BINCV_CHECK(cudabench::runToRunScatterFactor() == kScatterNotMeasured);
     BINCV_CHECK(kScatterNotMeasured < 0.0);
 
     const PairedTiming p = summarizePaired({1.0, 1.0, 1.0}, {1.4, 1.5, 1.6});
-    BINCV_CHECK(near(p.noiseToClearPct(cudabench::runToRunScatterPct()),
-                     p.ratioSpreadPct(), 1e-12));
+    BINCV_CHECK(near(p.noiseToClearFactor(cudabench::runToRunScatterFactor()),
+                     p.ratioSwingFactor(), 1e-12));
 }
 
 #if BINCV_TEST_WITH_GTEST

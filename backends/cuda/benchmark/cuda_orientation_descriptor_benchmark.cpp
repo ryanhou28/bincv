@@ -121,8 +121,13 @@ void emit(const char* tag, const Timing& t) {
     std::printf("ROW|%s|%.6f|%.6f|%.6f\n", tag, t.medianMs, t.minMs, t.maxMs);
 }
 void emitPair(const char* tag, const PairedTiming& p) {
-    std::printf("PAIR|%s|%.4f|%.4f|%.4f|%d|%s\n", tag, p.ratioMedian, p.ratioMin,
-                p.ratioMax, p.rounds, p.separated() ? "disjoint" : "overlap");
+    // Separation stays in the row as a FACT; the fields after it are what the
+    // cross-process aggregation decides on -- see paired_stats.hpp.
+    std::printf("PAIR|%s|%.4f|%.4f|%.4f|%d|%s|%.4f|%d|%d|%.4f|%.4f|%.4g\n", tag,
+                p.ratioMedian, p.ratioMin, p.ratioMax, p.rounds,
+                p.separated() ? "disjoint" : "overlap", p.ratioGeoMean,
+                p.roundsFavouringA, p.roundsFavouringB, p.differenceFactor(),
+                p.ratioSwingFactor(), p.signTestP());
 }
 
 // ---------------------------------------------------------------------------

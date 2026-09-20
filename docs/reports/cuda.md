@@ -130,17 +130,19 @@ runs: it already holds packed bits, and on bits the dense cost is one XOR per
 
 752×480, 64 disparities, 9×9 support, resident on the device, kernel-resident
 time (CUDA events), **both sides on one explicit stream**, medians of 7
-independent process runs with the range beside each:
+independent process runs with the range beside each. The ratio column is the
+median **per-round paired** ratio, not a ratio of the two medians, and the
+verdict column is the rule in [How a difference is decided](#how-a-difference-is-decided):
 
-| | time | vs StereoBM | disjoint |
-|---|---|---|---|
-| **binCV binary entry** (pair already packed) | **0.0648 ms** | **11.0× faster** | 7/7 |
-| binCV census entry (wide frames in, transform + match) | 0.5076 ms [0.464–0.560] | **1.38× faster** | 7/7 |
-| binCV census matcher alone | 0.3692 ms [0.358–0.426] | **1.87× faster** | 7/7 |
-| `cv::cuda::StereoBM(64, 9)` | 0.6996 ms [0.629–0.818] | — | — |
+| | time | vs StereoBM | verdict | disjoint |
+|---|---|---|---|---|
+| **binCV binary entry** (pair already packed) | **0.0679 ms** [0.0678–0.0703] | **11.7× faster** | RESULT | 7/7 |
+| binCV census entry (wide frames in, transform + match) | 0.5418 ms [0.527–0.547] | **1.42× faster** | RESULT | 7/7 |
+| binCV census matcher alone | 0.4223 ms [0.398–0.436] | **1.95× faster** | RESULT | 7/7 |
+| `cv::cuda::StereoBM(64, 9)` | 0.7438 ms [0.718–0.842] | — | — | — |
 
 **The census entry has crossed.** It was 1.29× behind StereoBM in the previous
-round and is now 1.38× ahead, and the whole move is one kernel — a
+round and is now 1.42× ahead, and the whole move is one kernel — a
 warp-cooperative box matcher that is **2.49× [2.40–2.50]** over the packed
 matcher it replaces, disjoint in all 7 runs, at **0 bytes** of added scratch and
 0 bytes of shared memory. It is described below.
@@ -149,22 +151,50 @@ matcher it replaces, disjoint in all 7 runs, at **0 bytes** of added scratch and
 document previously published.** Round 3 is the first run that metered *both*
 sides of the census path in one region, and it reads **4,512.0 KB for binCV
 against 3,072.0 KB for StereoBM — OpenCV smaller by 1.47×** (`cudaMemGetInfo`,
-64 replicas a side, 141 against 96 of the meter's 2 MB units). The figure it
+64 replicas a side, 141 against 96 of the meter's 2 MB units). Re-read at 256
+replicas in the one-region block below it is 4,504.0 KB against the same
+3,072.0 KB — 1.466×, the 8 KB difference being one meter unit of rounding at
+the lower count. The figure it
 replaces — 6.0 MB against 10.0 MB, "1.7× smaller" — was not a both-sides
 reading on one region, and it should not be quoted again.
 
-**One consequence has to be said rather than left implied: the binary entry's
-5× memory lead rests on the same superseded StereoBM figure.** Round 3's
-StereoBM reading on the census region is 3.0 MB where the earlier reading was
-10.0 MB — the same library, the same meter, 3.3× apart, because the regions and
-replica counts were not the same. Until StereoBM is metered once, on one
-region, beside both binCV entries, the binary path's memory lead is **stated as
-unretaken** rather than quoted at 5×. Its *speed* lead is unaffected and was
-re-measured this round.
+**The binary entry's memory lead has now been retaken, and it is 6.857×.**
+It was previously stated as *unretaken* rather than quoted at 5×, because the
+StereoBM figure under it came from a different region at a different replica
+count than the one the census path was read on — 10.0 MB in one round against
+3.0 MB in another, the same library on the same meter, 3.3× apart. All three
+working sets are now metered **in one process, on one region, at one replica
+count**, by `cuda_role_benchmark stereo` (section 7b):
 
-So the **binary entry leads on speed by 11.0×** and its memory lead is real in
-kind but not currently quotable in size; the **census entry leads on speed by
-1.38× and trails on memory by 1.47×**, which is a split verdict on the axis
+| working set, 752×480, 64 disparities, 9×9 | `cudaMemGetInfo`, 256 replicas | vs StereoBM |
+|---|---|---|
+| **binCV binary entry** (2 bit planes + map) | **448.0 KB/frame** | **6.857× smaller** |
+| binCV census entry (2 wide + 2 descriptors + map) | 4,504.0 KB/frame | 1.466× larger |
+| `cv::cuda::StereoBM(64, 9)` | 3,072.0 KB/frame | — |
+
+The discipline, because the previous disagreement was entirely a discipline
+problem. One meter unit is 2.00 MB, so at 256 replicas **one unit is 8.0
+KB/frame**: 1.79% of the binary entry, 0.18% of the census entry, 0.26% of
+StereoBM. That the rounding is small is a bound and not a proof of convergence,
+so the smallest of the three is also read at 64 replicas, where a unit is 32.0
+KB/frame — it reads **448.0 KB/frame at both counts, 1.0000×**. Every figure
+above is identical to the byte in all seven runs.
+
+**StereoBM's footprint is not content-dependent**, which had to be checked
+rather than assumed: OpenCV's FAST sizes its output by corners *found*, so its
+working set moves with the picture. StereoBM was therefore metered twice, on
+the synthetic pair and on the real EuRoC pair, and reads **3,072.0 KB/frame
+both times, 1.000×** — it sizes by geometry and disparity count, not by what it
+finds.
+
+binCV's two readings are `cudaMalloc` with nothing between the op and the
+driver. StereoBM's is an **upper reading**: `GpuMat` pads its pitch, it may be
+backed by a `BufferPool`, and anything `compute()` holds past the call is
+inside the delta. So 6.857× is a **lower bound** on the binary entry's lead.
+
+So the **binary entry leads on speed by 11.7× and on memory by 6.857×** — both
+axes, one region, one meter; the **census entry leads on speed by 1.42× and
+trails on memory by 1.466×**, which is a split verdict on the axis
 this project breaks ties with. That is an unmade judgement and it is recorded as
 one, not rounded into a headline — but the memory side of it is **not a defect
 to be fixed**. Two packed descriptor images are 2,820 KB before a disparity map
@@ -176,8 +206,9 @@ the number is.
 
 **Which of these is binCV's claim, and which is the on-ramp.** Only the binary
 entry rests on the representation: its caller already holds one bit per pixel,
-its cost is an XOR and a population count, and its device memory is 2.0 MB
-where StereoBM's is 10 MB on the same meter. The census entry is a **standard
+its cost is an XOR and a population count, and its device memory is 448.0
+KB/frame where StereoBM's is 3,072.0 KB/frame on the same meter, in the same
+region, at the same replica count. The census entry is a **standard
 stereo technique implemented in the standard way** — census *expands* data
 rather than compressing it (8 bits per pixel in, 24 out), and the layout that
 finally made it fast is the conventional one-word-per-pixel descriptor, not
@@ -2137,6 +2168,113 @@ registers' 7 → 41.7% theoretical, **16.0%** achieved, because the grid is only
 90 blocks on 48 SMs. `short_scoreboard` 69–71%, and **zero** bank conflicts (the
 33-float pad works). This is the `cornerMinEigenVal` row that did not resolve.
 
+
+## How a difference is decided
+
+Every ratio in this report is a **per-round paired** ratio: each round times
+both arms back to back, alternating their order, so a drift that moved both
+arms divides out instead of landing on whichever ran second. What is quoted is
+the **median** of those per-round ratios, and what decides whether it is real
+is `benchmark/measure_util.hpp`'s own rule, carried across to the paired design
+in `backends/cuda/benchmark/paired_stats.hpp`:
+
+> A difference smaller than the spread is a null result, and a null result is a
+> result. The spread bounds WITHIN-run noise only; run-to-run scatter is a
+> separate and sometimes larger number, and an entry that calls a difference
+> real should clear the larger of the two.
+
+So a difference must beat **the larger of two noises**, and both are measured
+as factors:
+
+- **within-run** — how many times the per-round ratio itself swung inside one
+  process, `max / min`. The *ratio's* swing, not the arms': charging it for the
+  arms' spreads would charge it for the drift the pairing already removed.
+- **run-to-run** — `max / min` of the per-run medians across seven independent
+  processes. One process cannot see this, so
+  `scripts/aggregate_cuda_runs.py` computes it from a directory of runs.
+
+**Two things this is not.** It is not a test for disjoint sample ranges. A
+range test is vetoed by a single round that is slow in *both* arms — which is
+drift, the exact thing pairing exists to cancel — and it passes cleanly
+separated arms whose ratio scatters from 1.01× to 1.60×. Separation is still
+computed and still printed, as a fact beside the verdict. It is also not a
+p-value threshold: the sign test over the paired rounds is reported at every
+row and gated on at none, because a project-wide significance bar is exactly
+the kind of number `CLAUDE.md` says not to invent.
+
+**Why the deciding quantities are factors and not percentages.** The obvious
+spelling — `|median − 1|` against `(max − min) / median`, both as percentages —
+is not a comparison at all, because it depends on which arm is the denominator.
+`|median − 1|` cannot exceed 100% for the arm that is *faster*, however far
+ahead it is, while the spread has no ceiling. Measured on this report's own
+headline row, the same fifteen paired rounds:
+
+| orientation | difference | spread | verdict |
+|---|---|---|---|
+| binCV / OpenCV | 91.7% | 109.9% | NULL |
+| OpenCV / binCV | 1103.4% | 66.6% | RESULT |
+
+Same rounds, same arms, opposite answers, decided by argument order — a 12×
+lead with a 15–0 sign split reported as "the same speed as far as this run can
+tell". In factors both quantities survive the inversion (12.03× against 2.30×,
+either way round), which is the property the geometric mean is already used
+for here. `PairedStats.TheVerdictDoesNotDependOnWhichArmIsTheDenominator` pins
+it.
+
+### What changed when the rule was applied
+
+Every effect the old rule had blocked was re-measured over seven runs and
+re-judged, and the rows that already cleared it were re-taken beside them. The point
+of the revision was to use the project's rule, not to manufacture wins, and it
+does not only produce wins:
+
+| effect | old reading | new reading (7 runs) | verdict |
+|---|---|---|---|
+| binary dense vs StereoBM | 11.0×, 7/7 disjoint | **11.7×**, within 1.59×, r2r 1.14×, 105–0 | RESULT — **unchanged**, but under the *percentage* spelling it would have read NULL |
+| census entry vs StereoBM | 1.38×, 7/7 disjoint | **1.42×**, within 1.40×, r2r 1.13×, 105–0 | RESULT — unchanged |
+| census warp-box off-switch | 2.49×, disjoint | **2.41×**, within 1.26×, r2r 1.05× | RESULT — unchanged |
+| packer, row grid vs grid-stride @1920×1080 | ~1.24×, ranges overlapped → "not a result" | 1.418×, within **2.16×**, r2r 1.41×, 91–14 | **still NULL** |
+| packer, row grid @752×480 / @3840×2160 | not a result | 1.118× / 1.206×, within 3.20× / 1.97× | **still NULL** |
+| `packQuant` row grid, all three geometries | not a result | 1.134× / 1.336× / 1.208× | **still NULL** |
+| morphology 3×3 specialization | under the launch floor at every size | 1.031× @752×480, 1.104× @1920×1080 | **still NULL** |
+| morphology word-parallel border | under the launch floor at every size | **1.800× @1920×1080**, within 1.598×, r2r 1.205×, 75–2 | **NULL → RESULT** |
+| morphology word-parallel border @752×480 | under the launch floor | 1.359×, within 2.46× | still NULL |
+| `cornerSubPixAsync` round-trip rule | met in 6/7 runs, medians 1.07× | **1.02×**, within 1.55×, 50–27 *against* the device arm | **still NULL — and the median changed sides** |
+| `cornerMinEigenValAsync` vs `cv::cuda` | 1.131×, no run disjoint | **1.003×**, within 2.28×, r2r 1.45×, 57–47 | still NULL — now at parity |
+| LK @1024 keypoints | crossover "not a result" | 1.033×, within 2.27×, r2r 1.11×, 61–44 | **still NULL** |
+| LK @2048 keypoints | crossover "not a result" | 1.074×, within **1.43×**, r2r **1.04×**, 80–25 | **still NULL**, and narrowly: the run-to-run half alone would clear it |
+
+Three of these deserve a sentence rather than a row.
+
+**The headline was the case that exposed the defect.** Under the percentage
+spelling the 11.7× binary dense result read NULL, because its faster arm sits a
+few multiples above the launch floor and swings while StereoBM's does not. It
+is a result under the rule as written; it was a null under a spelling of it
+that could not survive inverting the ratio.
+
+**`cornerSubPixAsync`'s round-trip rule is not met.** Its written ship
+condition is that the device arm be *strictly cheaper* than the round trip it
+replaces, priced against the tighter of two baselines. Measured as **one paired
+thing** rather than three separately-timed medians added together — and against
+the whole-plane download, which is the tighter baseline on this machine by
+50× — the median reads **0.98×**, i.e. the round trip is marginally *cheaper*,
+with 50 of 77 rounds favouring it. It is a **null result at parity**, not a
+miss and not a pass. The previous "met in 6/7 runs" came from comparing three
+independently-drifting medians, where the host term alone swings 0.280–0.437
+ms across these seven runs. **This is a stop-and-ask**: a measurement contradicting a documented claim,
+reported rather than fixed.
+
+**The launch floor, not the rule, is what blocks the internal packer and
+morphology arms.** Their per-round ratio swings 2–3× inside a single process
+while their per-run medians agree to about 1%: at 1920×1080 the row-grid arm's
+seven medians are 0.7028, 0.7050, 0.7100, 0.7040, 0.7068, 0.9910, 0.7031. Six
+of seven land within 1.01× of each other and 91 of 105 paired rounds favour the
+arm, yet the rule takes the *larger* of the two noises and the larger is the
+within-run one. That is the rule behaving correctly on a host whose individual
+0.4 ms batches are at the mercy of WSL2 scheduling, and it is the measurable
+reason these arms stay unquotable here — not an argument about the kernels.
+Shrinking it means more enqueues per round, which would move every number in
+this report and is therefore a change of its own.
 
 ## How the numbers were earned
 

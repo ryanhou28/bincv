@@ -669,14 +669,24 @@ int main(int argc, char** argv) {
             std::snprintf(b, sizeof(b), "C cv::cuda SparsePyrLK, pyramids resident, %u pts",
                           count);
             printPaired(a, b, c, "CUDA events, ONE explicit stream, both sides");
+            // GATE 2 asks two things and they are separate: is binCV ahead,
+            // and is the difference real. The first is the gate's own written
+            // requirement and is unchanged. The second is no longer "are the
+            // ranges disjoint" -- that test is vetoed by a single round slow
+            // in BOTH arms, which is drift and is what the pairing removed --
+            // but measure_util.hpp's difference-against-spread rule, printed
+            // in full by printPaired above.
+            const bool ahead = c.ratioMedian < 1.0;
+            const bool real = c.differenceClearsNoise(cudabench::runToRunScatterFactor());
             std::printf("   %s\n   GATE 2 VERDICT: %s\n", label,
-                        (c.b.medianMs > c.a.medianMs && c.separated())
-                            ? "binCV is strictly faster and the ranges are DISJOINT --"
-                              " PASSED"
-                            : (c.separated()
-                                   ? "binCV is NOT faster on disjoint ranges -- NOT PASSED"
-                                   : "the ranges OVERLAP -- NOT A RESULT at this sample"
-                                     " size, so Gate 2 is NOT cleared"));
+                        (ahead && real)
+                            ? "binCV is faster and the difference clears the noise"
+                              " -- PASSED"
+                            : (real ? "the difference is real and it goes the WRONG WAY"
+                                      " -- NOT PASSED"
+                                    : "NULL RESULT -- the two arms are the same speed as"
+                                      " far as this run can tell, so Gate 2 is NOT"
+                                      " cleared"));
             return c;
         };
         roleRow("at the reference frontend's own corner spacing (minDistance 33.33)",

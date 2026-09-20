@@ -60,20 +60,59 @@
 //
 // AND THE DECISION. differenceClearsNoise() is measure_util.hpp's rule and
 // nothing else: the difference must exceed the LARGER of the within-run spread
-// and the run-to-run scatter.
+// and the run-to-run scatter. Both sides of that comparison are measured AS
+// FACTORS, and that is not a presentation choice -- see below.
 //
-//   * The DIFFERENCE is |median per-round ratio - 1|, as a percentage.
-//   * The WITHIN-RUN SPREAD is the PER-ROUND RATIO's own spread,
-//     (max - min) / median, the same definition measure::Timing uses. The
-//     ratio's, not the arms': the ratio is the quantity being decided and the
-//     paired round is what measures it, so charging the difference for the
-//     arms' spreads would charge it for the drift the pairing already removed.
-//     That double count is what the range test does.
+//   * The DIFFERENCE is differenceFactor(): how many times apart the two arms
+//     are, max(median, 1 / median), which is 1.00x at parity and rises in
+//     either direction.
+//   * The WITHIN-RUN SPREAD is ratioSwingFactor(): how many times the PER-ROUND
+//     RATIO itself swung across the rounds, max / min. The ratio's swing, not
+//     the arms': the ratio is the quantity being decided and the paired round
+//     is what measures it, so charging the difference for the arms' spreads
+//     would charge it for the drift the pairing already removed. That double
+//     count is what the range test does.
 //   * The RUN-TO-RUN SCATTER cannot be observed from inside one process -- it
-//     takes several. It is therefore a parameter here, and while nobody has
-//     measured it for a host the predicate can test only the within-run half.
-//     The printer says so at the verdict rather than letting a reader take half
-//     the rule for the whole of it.
+//     takes several. It is therefore a parameter here, in the same units: the
+//     largest median this benchmark produced across processes over the
+//     smallest. While nobody has measured it for a host the predicate can test
+//     only the within-run half, and the printer says so at the verdict rather
+//     than letting a reader take half the rule for the whole of it.
+//
+// WHY FACTORS AND NOT PERCENTAGES, which is the same argument the geometric
+// mean is here for, applied to the predicate instead of to the centre.
+//
+// The obvious spelling is |median - 1| as a percentage against
+// (max - min) / median as a percentage. It does not work, and the way it fails
+// is not subtle: IT DEPENDS ON WHICH ARM IS THE DENOMINATOR. |median - 1| can
+// never exceed 100% for an arm that is FASTER, however much faster it is --
+// 0.083x reads 91.7% and 0.0083x still reads 99.2% -- while (max - min) /
+// median has no ceiling at all. So a fast arm's claim is capped at 100 while
+// the bar it must clear is not, and the two swap places the moment the ratio
+// is inverted. Measured on this backend's own headline row, fifteen paired
+// rounds of dense disparity:
+//
+//   as binCV/OpenCV : difference   91.7%  against spread 109.9%  -> NULL
+//   as OpenCV/binCV : difference 1103.4%  against spread  66.6%  -> RESULT
+//
+// Same rounds, same arms, opposite verdicts, decided by nothing but argument
+// order -- a 12x lead with a 15-0 sign split reported as "the two arms are the
+// same speed as far as this run can tell". A predicate that does that is not
+// measuring the arms.
+//
+// In factors both quantities are invariant under the swap: inverting the ratio
+// replaces median by 1 / median, which leaves max(median, 1/median) alone, and
+// replaces (min, max) by (1/max, 1/min), which leaves max / min alone. Both
+// rows above then read 12.03x against 2.30x and the answer is A RESULT either
+// way. This is exactly the property the geometric mean was chosen for at the
+// top of this file -- centre(B/A) = 1 / centre(A/B) -- and a predicate that
+// lacks it is no more a comparison than an arithmetic mean of ratios is a
+// centre.
+//
+// differencePct() and ratioSpreadPct() are KEPT and still printed, because near
+// parity a percentage is the readable form and it is what measure_util.hpp's
+// own tables show. They are reported, not decisive, and they are labelled that
+// way at the number.
 //
 // SEPARATION IS STILL REPORTED. PairedTiming::separated() stays, because
 // disjoint ranges are a strong fact and several claims read better for it. It
@@ -123,14 +162,18 @@ inline Timing summarize(std::vector<double> samples) {
 // ---------------------------------------------------------------------------
 
 /// @brief The value that means "nobody has measured the run-to-run scatter on
-/// this host". Negative on purpose, so that taking the larger of it and the
-/// within-run spread yields the within-run spread without a special case --
-/// and so that a printer can detect it and say which half of the rule was
+/// this host". Negative on purpose: a scatter FACTOR is at least 1.00x, so a
+/// negative can never be mistaken for one, and taking the larger of it and
+/// the within-run swing yields the within-run swing with no special case --
+/// which lets a printer detect it and say which half of the rule was
 /// actually applied.
 inline constexpr double kScatterNotMeasured = -1.0;
 
-/// @brief The host's run-to-run scatter, as a percentage, or
+/// @brief The host's run-to-run scatter as a FACTOR -- the largest median this
+/// benchmark produced across independent processes over the smallest -- or
 /// kScatterNotMeasured.
+/// @note THE SAME UNITS AS ratioSwingFactor, which is the point: the rule takes
+/// the larger of the two, and a percentage cannot be compared with a factor.
 /// @note NOT DEFAULTED TO A NUMBER. A figure invented here would make the
 /// stronger half of measure_util.hpp's rule look applied when it was not,
 /// and this project does not fill in a bar nobody has measured. Measuring
@@ -138,9 +181,9 @@ inline constexpr double kScatterNotMeasured = -1.0;
 /// its medians ACROSS processes; a benchmark that has that figure for its
 /// own host sets this once at startup and every verdict it prints then
 /// clears the whole rule instead of half of it.
-inline double& runToRunScatterPct() {
-    static double pct = kScatterNotMeasured;
-    return pct;
+inline double& runToRunScatterFactor() {
+    static double factor = kScatterNotMeasured;
+    return factor;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,22 +247,42 @@ struct PairedTiming {
     /// @brief The per-round ratio's own spread, (max - min) / median as a
     /// percentage: the WITHIN-RUN noise on the difference, measured on the
     /// paired observation rather than on either arm.
+    /// @note REPORTED, NOT DECISIVE. Readable near parity, and not comparable
+    /// with differencePct() away from it -- see the file header. What
+    /// decides is ratioSwingFactor().
     double ratioSpreadPct() const {
         return ratioMedian > 0.0 ? (ratioMax - ratioMin) / ratioMedian * 100.0 : 0.0;
     }
 
     /// @brief How far the median per-round ratio sits from 1.00x, in percent.
-    /// This is "the difference" in measure_util.hpp's sentence.
+    /// @note REPORTED, NOT DECISIVE, and it is the one that fails: an arm that
+    /// is faster can never read above 100% here however far ahead it is.
+    /// differenceFactor() is what the rule uses.
     double differencePct() const { return std::fabs(ratioMedian - 1.0) * 100.0; }
 
+    /// @brief How many times the PER-ROUND RATIO swung across the rounds,
+    /// max / min: the within-run noise on the difference, in the units the
+    /// rule compares in. 1.00x is a ratio that read the same every round.
+    double ratioSwingFactor() const {
+        return ratioMin > 0.0 && ratioMax > 0.0 ? ratioMax / ratioMin : 0.0;
+    }
+
+    /// @brief How many times apart the two arms are: max(median, 1 / median),
+    /// so 1.00x is parity and the value rises whichever arm is ahead.
+    /// This is "the difference" in measure_util.hpp's sentence.
+    double differenceFactor() const {
+        if (!(ratioMedian > 0.0)) return 0.0;
+        return ratioMedian >= 1.0 ? ratioMedian : 1.0 / ratioMedian;
+    }
+
     /// @brief What the difference has to beat: the LARGER of the within-run
-    /// spread and the run-to-run scatter.
-    /// @param runToRunPct The host's run-to-run scatter, or kScatterNotMeasured
-    /// -- which is negative, so an unmeasured scatter simply leaves the
-    /// within-run spread as the bar.
-    double noiseToClearPct(double runToRunPct) const {
-        const double within = ratioSpreadPct();
-        return runToRunPct > within ? runToRunPct : within;
+    /// swing and the run-to-run scatter, both as factors.
+    /// @param runToRunFactor The host's run-to-run scatter as a factor, or
+    /// kScatterNotMeasured -- which is negative, so an unmeasured scatter
+    /// simply leaves the within-run swing as the bar.
+    double noiseToClearFactor(double runToRunFactor) const {
+        const double within = ratioSwingFactor();
+        return runToRunFactor > within ? runToRunFactor : within;
     }
 
     /// @brief measure_util.hpp's rule, and nothing else: is the difference
@@ -227,9 +290,13 @@ struct PairedTiming {
     /// @note A false here is a NULL RESULT, which that header is explicit is
     /// itself a result -- the two arms are the same speed as far as this run
     /// can tell. It is not "no data".
-    bool differenceClearsNoise(double runToRunPct) const {
+    /// @note INVARIANT UNDER SWAPPING THE ARMS, which the percentage spelling
+    /// of this predicate was not. Both quantities it compares are unchanged
+    /// when the ratio is inverted, so the same rounds cannot be a result one
+    /// way round and a null the other.
+    bool differenceClearsNoise(double runToRunFactor) const {
         return rounds > 0 && ratioMedian > 0.0 &&
-               differencePct() > noiseToClearPct(runToRunPct);
+               differenceFactor() > noiseToClearFactor(runToRunFactor);
     }
 
     /// @brief Two-sided sign-test p over the rounds that were not ties.

@@ -128,21 +128,27 @@ std::function<void()> withArm(bool rowGrid, bool byteLane,
 }
 
 void emitRow(const char* key, const char* geom, const PairedTiming& p) {
-    std::printf("ROW,%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d\n", key,
-                geom, p.a.minMs, p.a.medianMs, p.a.maxMs, p.b.minMs, p.b.medianMs,
+    std::printf("ROW,%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d"
+                ",%.6f,%d,%d,%d,%.6f,%.6f,%.4g\n",
+                key, geom, p.a.minMs, p.a.medianMs, p.a.maxMs, p.b.minMs, p.b.medianMs,
                 p.b.maxMs, p.ratioMin, p.ratioMedian, p.ratioMax, p.separated() ? 1 : 0,
-                p.rounds);
+                p.rounds, p.ratioGeoMean, p.roundsFavouringA, p.roundsFavouringB,
+                p.roundsTied, p.differenceFactor(), p.ratioSwingFactor(), p.signTestP());
 }
 
 /// @brief A pair whose ratio is a CLAIM: B is meant to beat A, and the printer
 /// says whether this run can tell them apart at all.
 void printGain(const char* key, const char* geom, const char* nameA, const char* nameB,
                const PairedTiming& p) {
+    cudabench::pairedScope() = geom;
     printPaired(nameA, nameB, p, "kernel");
     const double faster = p.ratioMedian > 0.0 ? 1.0 / p.ratioMedian : 0.0;
-    std::printf("   B is %.2fx %s than A this run%s\n", faster >= 1.0 ? faster : 1.0 / faster,
-                faster >= 1.0 ? "FASTER" : "SLOWER",
-                p.separated() ? "." : " -- but the ranges overlap, so not a result.");
+    // The verdict is printPaired's, which is measure_util.hpp's rule. This line
+    // reads the SAME number the other way up for a human, and says nothing
+    // about whether it is real -- the line above it has already said that.
+    std::printf("   B is %.2fx %s than A this run.\n",
+                faster >= 1.0 ? faster : 1.0 / faster,
+                faster >= 1.0 ? "FASTER" : "SLOWER");
     emitRow(key, geom, p);
 }
 
@@ -150,6 +156,7 @@ void printGain(const char* key, const char* geom, const char* nameA, const char*
 /// flipping the switch must select nothing and the ratio must read ~1.00x.
 void printControl(const char* key, const char* geom, const char* nameA, const char* nameB,
                   const PairedTiming& p, const Timing& floor, bool gateSaysApplies) {
+    cudabench::pairedScope() = geom;
     std::printf("   the gate itself says: applies = %s\n",
                 gateSaysApplies ? "TRUE  <-- WRONG, this control is not excluded"
                                 : "FALSE (excluded, as required)");

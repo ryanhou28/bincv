@@ -951,6 +951,92 @@ const uint32_t kFastCapacity = 16384;
                         ? "The band download is the tighter one and is what decides."
                         : "The whole-plane download is the tighter one, which is itself a "
                           "finding: 200 pitched copies cost more than one big one.");
+
+        // THE SAME INEQUALITY, MEASURED AS ONE THING INSTEAD OF THREE.
+        //
+        // The three medians above were taken in three separate timed passes and
+        // then added, so the comparison carries all three passes' drift and
+        // offers nothing to decide with: "0.0387 < 0.0414" is a statement about
+        // two numbers, not about two alternatives. It has been reported as met
+        // in six runs out of seven for exactly that reason -- the seventh is
+        // not a different machine, it is the same three passes landing
+        // differently.
+        //
+        // So the inequality is also run as ONE PAIRED COMPARISON. Each round
+        // times the device arm and the whole round trip back to back, in
+        // alternating order, and yields one observation of the ratio with the
+        // drift divided out. It is on the WALL CLOCK on both sides because the
+        // round trip is mostly not device work -- a CUDA-event bracket around
+        // it would time the copies and silently drop the host refinement,
+        // which is the largest term in it.
+        {
+            // BOTH ARMS ARE THE INEQUALITY AS WRITTEN, down to the 1.6 KB
+            // transfers. The rule is
+            //   kernel + up(200x8 B) + down(200x8 B)
+            //     < down(the derivative data) + host cornerSubPix + up(200x8 B)
+            // and the two small transfers sit on OPPOSITE sides, so leaving
+            // both out very nearly cancels and leaving out one does not. They
+            // are ~1.6 KB each and cost microseconds; they are here because a
+            // rule measured is not a rule approximated.
+            std::vector<bincv::Point2f> refined(kSubPixCorners);
+            const auto leftArm = [&] {
+                runSubPix(false);
+                cudaMemcpyAsync(refined.data(), dseeds.data(),
+                                kSubPixCorners * sizeof(bincv::Point2f),
+                                cudaMemcpyDeviceToHost, gStream);
+                cudaStreamSynchronize(gStream);
+            };
+            // THE BASELINE IS THE TIGHTER OF THE TWO, which on this machine is
+            // the WHOLE-PLANE download and not the bands: 200 pitched copies of
+            // 11 rows cost about fifty times one copy of four planes, so
+            // pairing against the bands would be measuring against a spelling
+            // nobody would keep. Which one is tighter is READ OFF the two
+            // single-arm timings above rather than assumed, because the answer
+            // is a property of this machine's copy engine.
+            const bool bandsAreTighter = bandDownload.medianMs < wholeDownload.medianMs;
+            const auto rightArm = [&] {
+                const size_t rowBytes = bc::rowWords(kWidth) * sizeof(uint32_t);
+                if (bandsAreTighter) {
+                    for (uint32_t i = 0; i < kSubPixCorners; ++i) {
+                        const size_t y0 = static_cast<size_t>(seeds[i].y) > 5
+                                              ? static_cast<size_t>(seeds[i].y) - 5
+                                              : 0;
+                        cudaMemcpyAsync(
+                            host.data(),
+                            dmagX.constView().ptr + y0 * dmagX.constView().stride,
+                            11 * rowBytes, cudaMemcpyDeviceToHost, gStream);
+                    }
+                } else {
+                    const size_t planeWords = bc::rowWords(kWidth) * kHeight;
+                    cudaMemcpyAsync(host.data(), dmagX.constView().ptr, planeBytes,
+                                    cudaMemcpyDeviceToHost, gStream);
+                    cudaMemcpyAsync(host.data() + planeWords, dmagY.constView().ptr,
+                                    planeBytes, cudaMemcpyDeviceToHost, gStream);
+                    cudaMemcpyAsync(host.data() + 2 * planeWords, dsignX.constView().ptr,
+                                    planeBytes, cudaMemcpyDeviceToHost, gStream);
+                    cudaMemcpyAsync(host.data() + 3 * planeWords, dsignY.constView().ptr,
+                                    planeBytes, cudaMemcpyDeviceToHost, gStream);
+                }
+                cudaStreamSynchronize(gStream);
+                std::vector<bincv::Point2f> pts = seeds;
+                bincv::cornerSubPix<1, Word>(hdx, hdy, pts.data(), pts.size(), sp);
+                cudaMemcpyAsync(dseeds.data(), pts.data(),
+                                kSubPixCorners * sizeof(bincv::Point2f),
+                                cudaMemcpyHostToDevice, gStream);
+                cudaStreamSynchronize(gStream);
+            };
+            const PairedTiming rt = timeHostPaired(leftArm, rightArm, 20, 10, kRounds);
+            std::printf("\n   THE INEQUALITY AS ONE PAIRED MEASUREMENT (wall clock both\n"
+                        "   sides, against the %s -- the tighter baseline):\n",
+                        bandsAreTighter ? "band download" : "whole-plane download");
+            printPaired("LEFT  device arm, enqueue + sync",
+                        bandsAreTighter ? "RIGHT band download + host cornerSubPix"
+                                        : "RIGHT whole-plane download + host cornerSubPix",
+                        rt, "WALL");
+            std::printf("   Arm A is the device arm, so a ratio ABOVE 1.00x is the round\n"
+                        "   trip costing more, which is the rule being MET. The verdict\n"
+                        "   line above says whether this run can tell them apart at all.\n");
+        }
         std::printf("   THE LEFT SIDE IS AT ITS CEILING AT THIS CORNER COUNT, and the number\n"
                     "   comes from the profiler rather than from an A/B. One corner per\n"
                     "   thread is the bit-exactness requirement, so 200 corners are 7 warps\n"
@@ -1022,9 +1108,14 @@ const uint32_t kFastCapacity = 16384;
                     "   the corner SET the contract -- is therefore WITHDRAWN rather than\n"
                     "   answered: the order is returned and it no longer costs anything.\n",
                     sortShare, sortOnlyMs, fastRole.b.medianMs);
+        // Whether this is a result is printPaired's verdict above -- the
+        // project's difference-against-spread rule. Overlapping ranges are a
+        // fact worth flagging next to a headline number, not a second veto.
         if (!fastRole.separated()) {
-            std::printf("   *** THE TWO SAMPLE RANGES OVERLAP. This is NOT a result at this\n"
-                        "   sample size and must not be quoted as one. ***\n");
+            std::printf("   (the two arms' sample RANGES overlap, which is a fact and not"
+                        " the verdict:\n"
+                        "   the verdict above is measure_util.hpp's rule on the per-round"
+                        " ratio.)\n");
         }
         std::printf("\n");
 
@@ -1155,8 +1246,8 @@ const uint32_t kFastCapacity = 16384;
                         "   the speed bar for this op was NOT WRITABLE (see the rule above).\n",
                         params.minDistance, gfttRole.ratioMedian);
             if (!gfttRole.separated()) {
-                std::printf("   *** THE TWO SAMPLE RANGES OVERLAP -- not a result at this\n"
-                            "   sample size. ***\n");
+                std::printf("   (the two arms' sample RANGES overlap -- a fact, not the"
+                            " verdict; see the\n   rule printed above.)\n");
             }
             std::printf("\n");
 

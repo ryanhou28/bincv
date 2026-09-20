@@ -472,9 +472,20 @@ int main() {
             cudabench::printPaired("A: cv::cuda deriv+abs+threshold+or -> CV_16S",
                                    "B: cuda::edgeThreshold -> 1 bit/pixel", p, "kernel");
             const double speedup = p.ratioMedian > 0.0 ? 1.0 / p.ratioMedian : 0.0;
+            // THE 3x IS THE AUTHOR'S OWN BAR AND IT IS UNCHANGED. What changed
+            // is only how "is this difference real" is answered: the range
+            // test has been replaced by measure_util.hpp's own rule, which
+            // printPaired prints in full above. The magnitude still has to be
+            // cleared as well as the noise.
+            const bool real = p.differenceClearsNoise(cudabench::runToRunScatterFactor());
             std::printf("   binCV is %.2fx %s.   BAR: >= 3x.  %s\n", speedup,
                         p.ratioMedian < 1.0 ? "FASTER" : "SLOWER",
-                        (speedup >= 3.0 && p.separated()) ? "MET" : "NOT MET");
+                        (speedup >= 3.0 && real) ? "MET"
+                                                 : (speedup >= 3.0 ? "NOT MET: the"
+                                                                     " magnitude is there"
+                                                                     " but the difference"
+                                                                     " is a null result"
+                                                                   : "NOT MET"));
             std::printf("   LAUNCH COUNT, and it is derived from the API rather than\n"
                         "   profiled (no profiler runs on this machine): createDerivFilter\n"
                         "   is SEPARABLE, so each apply is a row pass and a column pass.\n"

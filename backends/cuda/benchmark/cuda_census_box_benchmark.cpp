@@ -227,13 +227,12 @@ int main() {
                                "kernel");
     cudabench::printArmVsFloor("  B: per-pixel sliding arm (switch OFF)", paired.b,
                                floor, "kernel");
-    std::printf("   ratio B/A, interleaved rounds: %5.2fx   per-round range"
-                " %5.2f-%5.2fx (%d rounds)\n",
-                paired.ratioMedian, paired.ratioMin, paired.ratioMax, paired.rounds);
-    std::printf("   verdict: %s\n",
-                paired.separated()
-                    ? "sample ranges are DISJOINT -- the ratio is a result"
-                    : "sample ranges OVERLAP -- not a result at this sample size");
+    std::printf("   ratio B/A, interleaved rounds: median %5.2fx <- QUOTE THIS"
+                "   geomean %5.2fx   per-round range %5.2f-%5.2fx (%d rounds)\n",
+                paired.ratioMedian, paired.ratioGeoMean, paired.ratioMin, paired.ratioMax,
+                paired.rounds);
+    cudabench::printPairedSignAndSeparation(paired);
+    cudabench::printPairedVerdict(paired);
     std::printf("   the bar (the owner's, written before any measurement of this arm)"
                 " is 1.50x.\n"
                 "   ONE RUN IS NOT A NUMBER: the figure that ships is the median of at\n"

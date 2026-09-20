@@ -176,6 +176,51 @@ inline PairedTiming timeKernelPaired(const std::function<void()>& bodyA,
     return summarizePaired(sa, sb);
 }
 
+/// @brief The same paired protocol on the HOST'S WALL CLOCK, for a pair where
+/// one arm is not all device work.
+/// @note CUDA events cannot time a round trip. An arm that downloads, refines
+/// on the CPU and uploads again spends most of itself outside any stream, so
+/// an event bracket around it measures the copies and nothing else. The
+/// inequality such an arm exists to settle -- "is doing it on the device
+/// cheaper than shipping it home and back" -- is a wall-clock question on
+/// both sides, and this times it as one.
+/// @param bodyA,bodyB The arms. Each must be SELF-CONTAINED: whatever it
+/// enqueues, it also waits for, because the wall clock stops when the
+/// calling thread returns and not when the device is finished.
+/// @note Order alternates round to round, exactly as timeKernelPaired does and
+/// for the same reason: bracketing alone still hands the arm that runs
+/// second half a round of drift every round.
+inline PairedTiming timeHostPaired(const std::function<void()>& bodyA,
+                                   const std::function<void()>& bodyB, int itersA = 20,
+                                   int itersB = 20, int repeats = 9) {
+    const auto batch = [](const std::function<void()>& body, int iters) {
+        const auto t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < iters; ++i) body();
+        const auto t1 = std::chrono::steady_clock::now();
+        return std::chrono::duration<double, std::milli>(t1 - t0).count() / iters;
+    };
+    for (int i = 0; i < itersA; ++i) bodyA();
+    for (int i = 0; i < itersB; ++i) bodyB();
+    cudaDeviceSynchronize();
+
+    std::vector<double> sa, sb;
+    sa.reserve(static_cast<size_t>(repeats));
+    sb.reserve(static_cast<size_t>(repeats));
+    for (int r = 0; r < repeats; ++r) {
+        double ta = 0.0, tb = 0.0;
+        if (r % 2 == 0) {
+            ta = batch(bodyA, itersA);
+            tb = batch(bodyB, itersB);
+        } else {
+            tb = batch(bodyB, itersB);
+            ta = batch(bodyA, itersA);
+        }
+        sa.push_back(ta);
+        sb.push_back(tb);
+    }
+    return summarizePaired(sa, sb);
+}
+
 inline void printArm(const char* name, const Timing& t, const char* clock) {
     std::printf(" %-44s %9.3f ms  spread %4.0f%%  [%s]\n", name, t.medianMs,
                 t.spreadPct(), clock);
@@ -206,16 +251,20 @@ inline void printArmVsFloor(const char* name, const Timing& t, const Timing& flo
 /// for another has been misled by the printer rather than by the data -- so
 /// each says what it is, and the separation fact says that it is a fact
 /// rather than the verdict.
-inline void printPairedStats(const PairedTiming& p) {
-    std::printf("   ratio B/A, per-round paired:  median %5.2fx <- QUOTE THIS"
-                "   geomean %5.2fx   range %.2f-%.2fx  (%d rounds)\n",
-                p.ratioMedian, p.ratioGeoMean, p.ratioMin, p.ratioMax, p.rounds);
+inline void printPairedSignAndSeparation(const PairedTiming& p) {
     std::printf("   sign test over those paired rounds: %d favour A, %d favour B,"
                 " %d tied -- two-sided p = %.3g\n",
                 p.roundsFavouringA, p.roundsFavouringB, p.roundsTied, p.signTestP());
     std::printf("   separation (a FACT, not the verdict): the two arms' sample ranges"
                 " %s\n",
                 p.separated() ? "are DISJOINT" : "OVERLAP");
+}
+
+inline void printPairedStats(const PairedTiming& p) {
+    std::printf("   ratio B/A, per-round paired:  median %5.2fx <- QUOTE THIS"
+                "   geomean %5.2fx   range %.2f-%.2fx  (%d rounds)\n",
+                p.ratioMedian, p.ratioGeoMean, p.ratioMin, p.ratioMax, p.rounds);
+    printPairedSignAndSeparation(p);
 }
 
 /// @brief The verdict, under benchmark/measure_util.hpp's rule and no other:
@@ -228,25 +277,27 @@ inline void printPairedStats(const PairedTiming& p) {
 /// @note The line states what decided it, so that neither the separation fact
 /// above nor the sign test beside it can be read as having done so.
 inline void printPairedVerdict(const PairedTiming& p) {
-    const double scatter = runToRunScatterPct();
-    const bool measured = scatter >= 0.0;
+    const double scatter = runToRunScatterFactor();
+    const bool measured = scatter >= 1.0;
     const bool result = p.differenceClearsNoise(scatter);
     char scatterText[48];
     if (measured) {
-        std::snprintf(scatterText, sizeof(scatterText), "%.0f%%", scatter);
+        std::snprintf(scatterText, sizeof(scatterText), "%.2fx", scatter);
     } else {
         std::snprintf(scatterText, sizeof(scatterText), "NOT MEASURED on this host");
     }
-    std::printf("   verdict: %s -- the MEDIAN per-round ratio is %.0f%% from 1.00x,\n"
-                "            %s the %.0f%% it has to beat (the larger of: per-round"
-                " spread %.0f%%,\n"
-                "            run-to-run scatter %s). Decided by"
-                " measure_util.hpp's\n"
-                "            difference-against-spread rule; range separation is not"
-                " what decided it.\n",
+    std::printf("   verdict: %s -- the two arms are %.2fx apart on the\n"
+                "            MEDIAN per-round ratio, %s the %.2fx it has to beat (the"
+                " larger of:\n"
+                "            per-round swing %.2fx, run-to-run scatter %s).\n"
+                "            Decided by measure_util.hpp's difference-against-spread"
+                " rule, in FACTORS\n"
+                "            because a percentage of it depends on which arm is the"
+                " denominator;\n"
+                "            range separation is not what decided it.\n",
                 result ? "A RESULT" : "NULL RESULT, which is a result",
-                p.differencePct(), result ? "clearing" : "short of",
-                p.noiseToClearPct(scatter), p.ratioSpreadPct(), scatterText);
+                p.differenceFactor(), result ? "clearing" : "short of",
+                p.noiseToClearFactor(scatter), p.ratioSwingFactor(), scatterText);
     if (result && !measured) {
         std::printf("            That clears the WITHIN-RUN half of the rule only --"
                     " nobody has measured\n"
@@ -264,11 +315,52 @@ inline void printPairedVerdict(const PairedTiming& p) {
 /// scatters both ways, so fifteen rounds falling the same way is a finding
 /// about the control even when its median reads 1.00x -- which is a check
 /// the range test could not express at all.
+/// @brief One machine-readable line per paired comparison, keyed by the two arm
+/// names, carrying everything the rule needs.
+/// @note WHY IT IS HERE AND NOT AT THE CALL SITES. The run-to-run half of
+/// measure_util.hpp's rule cannot be seen from inside one process: it is the
+/// scatter of a benchmark's MEDIANS across several. Reading it means
+/// aggregating many runs, and aggregating means parsing -- which until now
+/// only the two benchmarks that hand-rolled a ROW line could support, while
+/// the other families printed prose that nothing could total. Emitting from
+/// printPaired gives every pair that goes through it the same row for free,
+/// so the stronger half of the rule is reachable for all of them rather than
+/// for two.
+/// @note The FACTORS are emitted, not the percentages, because they are what
+/// decides -- see paired_stats.hpp on why a percentage of a ratio depends on
+/// which arm is the denominator.
+/// @brief A label the emitted rows carry, naming what the CURRENT pairs are
+/// being measured on -- normally the frame geometry.
+/// @note IT IS NOT DECORATION. A benchmark that sweeps two frame sizes prints
+/// the same two arm names at each of them, so without this the aggregation
+/// pools 752x480 with 3840x2160 under one key and reads the difference
+/// between the geometries as run-to-run scatter. Measured: pooling the
+/// packer's three geometries put the run-to-run factor at 3.18x where each
+/// geometry on its own is between 1.16x and 1.34x, which turned every row
+/// in that family into a null. A sweep sets this at the top of each pass;
+/// a benchmark with one geometry can leave it empty.
+inline const char*& pairedScope() {
+    static const char* scope = "";
+    return scope;
+}
+
+inline void emitPairedRow(const char* nameA, const char* nameB, const PairedTiming& p) {
+    std::printf("PAIRED|%s|%s|%s|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f"
+                "|%d|%d|%d|%d|%.6f|%.6f|%.4g|%d\n",
+                pairedScope(), nameA, nameB, p.a.minMs, p.a.medianMs, p.a.maxMs,
+                p.b.minMs, p.b.medianMs, p.b.maxMs, p.ratioMin, p.ratioMedian,
+                p.ratioMax, p.ratioGeoMean,
+                p.rounds, p.roundsFavouringA, p.roundsFavouringB, p.roundsTied,
+                p.differenceFactor(), p.ratioSwingFactor(), p.signTestP(),
+                p.separated() ? 1 : 0);
+}
+
 inline void printPaired(const char* nameA, const char* nameB, const PairedTiming& p,
                         const char* clock, bool expect1x = false) {
     printArm(nameA, p.a, clock);
     printArm(nameB, p.b, clock);
     printPairedStats(p);
+    emitPairedRow(nameA, nameB, p);
     if (expect1x) {
         const bool ok = p.ratioMedian > 0.95 && p.ratioMedian < 1.05;
         std::printf("   verdict: %s\n",

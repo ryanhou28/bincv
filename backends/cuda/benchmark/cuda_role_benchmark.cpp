@@ -229,11 +229,33 @@ std::vector<uint8_t> makeFrame(size_t w, size_t h) {
 // the ROW lines are what the cross-run aggregation reads.
 // ---------------------------------------------------------------------------
 
+/// @brief Makes a free-text label safe to put in a COMMA-SEPARATED field.
+/// @note NOT COSMETIC. The LK sweep passes its geometry as prose --
+/// "752x480, 1024 pts (prefix of minDistance 6)" -- which put two extra
+/// commas inside one field and shifted every column after it. Seven runs of
+/// that row were therefore unaggregatable, and a parser that did not notice
+/// read the keypoint count as the first timing. The label is the only field
+/// here a caller composes, so it is the only one that needs this.
+const char* csvSafe(const char* text, char* buf, size_t n) {
+    size_t i = 0;
+    for (; text[i] != '\0' && i + 1 < n; ++i) buf[i] = text[i] == ',' ? ';' : text[i];
+    buf[i] = '\0';
+    return buf;
+}
+
 void emitRow(const char* key, const char* geom, const PairedTiming& p) {
-    std::printf("ROW,%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d\n", key,
-                geom, p.a.minMs, p.a.medianMs, p.a.maxMs, p.b.minMs, p.b.medianMs,
+    char safeGeom[256];
+    geom = csvSafe(geom, safeGeom, sizeof(safeGeom));
+    // The trailing fields are what the cross-process aggregation now decides
+    // on: the geometric mean, the sign split and the per-round ratio's own
+    // spread. The separation bit stays in the row because it is a fact worth
+    // carrying, but it is no longer the verdict -- see paired_stats.hpp.
+    std::printf("ROW,%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d"
+                ",%.6f,%d,%d,%d,%.6f,%.6f,%.4g\n",
+                key, geom, p.a.minMs, p.a.medianMs, p.a.maxMs, p.b.minMs, p.b.medianMs,
                 p.b.maxMs, p.ratioMin, p.ratioMedian, p.ratioMax, p.separated() ? 1 : 0,
-                p.rounds);
+                p.rounds, p.ratioGeoMean, p.roundsFavouringA, p.roundsFavouringB,
+                p.roundsTied, p.differenceFactor(), p.ratioSwingFactor(), p.signTestP());
 }
 
 void emitFloor(const Timing& t) {
@@ -370,14 +392,15 @@ void printRole(const char* what, const char* ocvName, const char* binName,
     std::printf("\n %s  [%s]\n", what, geom);
     printArmVsFloor(ocvName, p.a, floor, "kernel");
     printArmVsFloor(binName, p.b, floor, "kernel");
-    std::printf("   ratio binCV/OpenCV, interleaved rounds: %5.3fx  (binCV %5.2fx %s)"
+    std::printf("   ratio binCV/OpenCV, interleaved rounds: median %5.3fx <- QUOTE THIS"
+                "  (binCV %5.2fx %s)\n"
+                "                                           geomean %5.3fx"
                 "   per-round range %5.3f-%5.3fx (%d rounds)\n",
                 p.ratioMedian, p.ratioMedian > 0.0 ? 1.0 / p.ratioMedian : 0.0,
-                p.ratioMedian < 1.0 ? "FASTER" : "SLOWER", p.ratioMin, p.ratioMax,
-                p.rounds);
-    std::printf("   verdict THIS RUN: %s\n",
-                p.separated() ? "sample ranges DISJOINT -- a result"
-                              : "sample ranges OVERLAP -- not a result in this run");
+                p.ratioMedian < 1.0 ? "FASTER" : "SLOWER", p.ratioGeoMean, p.ratioMin,
+                p.ratioMax, p.rounds);
+    printPairedSignAndSeparation(p);
+    printPairedVerdict(p);
 }
 
 // ---------------------------------------------------------------------------
@@ -422,6 +445,19 @@ void printMemPair(const char* what, const char* geom, size_t binBytes, size_t oc
     std::printf("   [meter 2] binCV     %10.2f MB over %4d sets = %9.1f KB/frame  (%.0f units)\n",
                 static_cast<double>(binBytes) / (1024.0 * 1024.0), binReplicas,
                 binPer / 1024.0, binU);
+    // WHAT ONE UNIT IS WORTH PER FRAME, which is the rounding each per-frame
+    // figure above carries. It is the number that decides whether a replica
+    // count was high enough, and it is printed rather than left to be derived:
+    // at 64 replicas one unit is 32 KB/frame, which on a 430 KB reading was
+    // enough for two harnesses to disagree by 6%.
+    std::printf("   [meter 2] ROUNDING: one %.2f MB unit is %.1f KB/frame at %d sets"
+                " (%.2f%% of binCV's\n"
+                "             figure) and %.1f KB/frame at %d sets (%.2f%% of"
+                " OpenCV's).\n",
+                unit / (1024.0 * 1024.0), unit / binReplicas / 1024.0, binReplicas,
+                binPer > 0.0 ? unit / binReplicas / binPer * 100.0 : 0.0,
+                unit / ocvReplicas / 1024.0, ocvReplicas,
+                ocvPer > 0.0 ? unit / ocvReplicas / ocvPer * 100.0 : 0.0);
     if (binBytes == 0 || binU < 8.0 || ocvU < 8.0) {
         std::printf("   RATIO NOT QUOTED: a side read under eight of the meter's own units,\n"
                     "   so its rounding is a large fraction of the reading. Raise that\n"
@@ -732,6 +768,54 @@ int main(int argc, char** argv) {
 
     const std::vector<uint8_t> frame = makeFrame(kW, kH);
     const std::vector<uint8_t> frame2 = makeFrame(kW2, kH2);
+
+    // THE REAL FRAME, LOADED ONCE AT THE TOP, and why it is not the synthetic
+    // one the rest of this file uses where content matters.
+    //
+    // HOISTED HERE rather than declared beside the frontend families because
+    // two sections need it and both need it for the same reason: a figure that
+    // depends on what is IN the picture cannot be taken on smoothed noise.
+    // Section 7b meters cv::cuda::StereoBM on it, to answer whether StereoBM's
+    // footprint moves with content the way OpenCV's FAST turned out to.
+    // The frontend families detect on it, because a detector's cost is a
+    // function of how many corners its input has, and edgeThreshold on
+    // SMOOTHED NOISE sets ~83% of pixels -- a frame
+    // on which both FAST implementations overflow any sane capacity, so the
+    // corner-set gate cannot even run. The real content this project measures
+    // on is a EuRoC sequence blob; point BINCV_CUDA_ROLE_FRAMES at one
+    // (scripts/make_sequence_blob.py, --mode 8bit) and frame 0 of it is used.
+    // Without one the synthetic frame is used and every frontend row below
+    // says so, because a role bar taken on saturating content is not the role
+    // bar anyone means.
+    std::vector<uint8_t> frontFrame = frame;
+    bool haveRealFrame = false;
+    const char* frontSource = "synthetic smoothed noise (NOT representative content)";
+    std::vector<uint8_t> blob;
+    if (const char* path = std::getenv("BINCV_CUDA_ROLE_FRAMES")) {
+        std::FILE* fh = std::fopen(path, "rb");
+        if (fh != nullptr) {
+            std::fseek(fh, 0, SEEK_END);
+            const long len = std::ftell(fh);
+            std::fseek(fh, 0, SEEK_SET);
+            if (len > 0) {
+                blob.resize(static_cast<size_t>(len));
+                if (std::fread(blob.data(), 1, blob.size(), fh) != blob.size()) blob.clear();
+            }
+            std::fclose(fh);
+        }
+        if (!blob.empty()) {
+            const bincv::SequenceHeader h = bincv::readSequenceHeader(blob.data(), blob.size());
+            const bincv::SequenceFrameRange f0 =
+                bincv::sequenceFrame(h, blob.data(), blob.size(), 0);
+            if (h.valid && h.mode == bincv::kSequenceMode8Bit && h.width == kW &&
+                h.height == kH && f0.valid) {
+                frontFrame.assign(f0.data, f0.data + kW * kH);
+                frontSource = "REAL SEQUENCE FRAME 0 from BINCV_CUDA_ROLE_FRAMES";
+                haveRealFrame = true;
+            }
+        }
+    }
+
 
     // ======================================================================
     // 1. threshold -- cv::cuda::threshold (cudaarithm). One launch vs one.
@@ -1620,6 +1704,282 @@ int main(int argc, char** argv) {
                     p.a.medianMs > 0.0 ? dfltOcv.medianMs / p.a.medianMs : 0.0);
         std::printf("SYNC,stereobm_default_stream,752x480,%.6f,%.6f\n", dfltOcv.medianMs,
                     p.a.medianMs);
+
+        // ------------------------------------------------------------------
+        // MEMORY: all three working sets, ONE region, ONE meter, ONE count
+        // ------------------------------------------------------------------
+        //
+        // WHY THIS BLOCK EXISTS. StereoBM's footprint has been read twice in
+        // this project at 3.3x apart -- 10.0 MB in one round and 3.0 MB in
+        // another -- and nothing was wrong with either reading. They were
+        // taken on different regions, at different replica counts, in
+        // different processes. Two readings of one library that far apart
+        // are not two measurements of a footprint; they are one measurement
+        // of how much a protocol matters. So the three working sets that this
+        // report compares are metered HERE, in this scope, against this
+        // process's own meter step, at one replica count:
+        //
+        //   * binCV binary entry -- two DeviceBinMat bit planes and the
+        //     disparity map. This is what a caller who already holds bits has
+        //     resident.
+        //   * binCV census entry -- two wide uint8 frames, two packed
+        //     uint32 descriptor images and the disparity map. This is what a
+        //     caller arriving with ordinary camera frames has resident.
+        //   * cv::cuda::StereoBM(64, 9) -- two CV_8UC1 GpuMats, the output
+        //     GpuMat and whatever compute() allocates internally, which is
+        //     why the first compute() is INSIDE the metered scope.
+        //
+        // THE REPLICA COUNT IS CHOSEN BY THE ROUNDING, not by habit. This
+        // driver reserves in 2 MB units, so a reading carries up to one unit
+        // of rounding however large it is, and what matters is that unit
+        // divided by the count against the per-frame figure. The smallest of
+        // the three sets is the binary entry at roughly 450 KB. At 64
+        // replicas one unit is 32 KB/frame, which is 7% of it -- and 32
+        // KB/frame on a 430 KB reading is exactly what let two FAST harnesses
+        // disagree 1.615x against 1.714x while both cleared the eight-unit
+        // rule. At kReplicas = 256 one unit is 8.0 KB/frame: 1.8% of the
+        // binary entry, 0.2% of the census entry, 0.3% of StereoBM. Every
+        // per-frame figure below states its own rounding.
+        //
+        // WHAT IS AND IS NOT INSIDE EACH SET. binCV's two sets are cudaMalloc
+        // with nothing between the op and the driver, so their readings are
+        // the arrays plus the driver's rounding. StereoBM's is an UPPER
+        // READING: GpuMat pads its pitch, it may be backed by a BufferPool,
+        // and anything compute() holds past the call lands inside the delta.
+        // The direction of that asymmetry is stated at the number rather than
+        // folded into it.
+        {
+            std::printf("\n---------------------------------------------------------------\n"
+                        " 7b. MEMORY -- THE THREE WORKING SETS, ONE REGION, ONE METER,\n"
+                        "     ONE REPLICA COUNT, THIS PROCESS\n"
+                        "---------------------------------------------------------------\n"
+                        " Meter 2 (cudaMemGetInfo delta) on all three, %d replicas each,\n"
+                        " every set held until its delta is read. Region: %zux%zu, 64\n"
+                        " disparities, 9x9 support -- the same region section 7 timed.\n",
+                        kReplicas, kW, kH);
+
+            constexpr size_t kCensusK2 = 24;  // kCensus5x5
+
+            // --- binCV binary entry ---
+            std::vector<std::unique_ptr<bc::DeviceBinMat>> bl, br;
+            std::vector<std::unique_ptr<bc::DeviceImage<uint8_t>>> bm2;
+            const size_t binaryMem = meterScope(
+                [&](int) {
+                    bl.push_back(std::make_unique<bc::DeviceBinMat>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    br.push_back(std::make_unique<bc::DeviceBinMat>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    bm2.push_back(std::make_unique<bc::DeviceImage<uint8_t>>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    bc::denseDisparityBinary(bl.back()->constView(), br.back()->constView(),
+                                             dp, bm2.back()->view(), gStream);
+                },
+                kReplicas);
+            cudaStreamSynchronize(gStream);
+            const size_t binaryAllocSum =
+                (2 * kH * bl.front()->getAlignedWidth() * sizeof(uint32_t)) + kW * kH;
+            bl.clear(); br.clear(); bm2.clear();
+            cudaDeviceSynchronize();
+
+            // THE COUNT IS CHECKED, NOT ASSERTED. The arithmetic above says 256
+            // replicas put one meter unit at 8 KB/frame, but the arithmetic is
+            // only a bound on the rounding -- it does not prove the reading has
+            // converged, and the FAST re-meter is the reason that distinction
+            // is in this file. There, two harnesses at 64 replicas BOTH cleared
+            // the eight-unit rule and still disagreed 1.615x against 1.714x.
+            // So the smallest of the three sets -- the one where a unit is the
+            // largest fraction -- is also read at a quarter of the count, and
+            // the two per-frame figures are printed together. If they differ,
+            // the count is too low and neither is quotable.
+            std::vector<std::unique_ptr<bc::DeviceBinMat>> ql, qr;
+            std::vector<std::unique_ptr<bc::DeviceImage<uint8_t>>> qm;
+            const int kQuarter = kReplicas / 4;
+            const size_t binaryMemQuarter = meterScope(
+                [&](int) {
+                    ql.push_back(std::make_unique<bc::DeviceBinMat>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    qr.push_back(std::make_unique<bc::DeviceBinMat>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    qm.push_back(std::make_unique<bc::DeviceImage<uint8_t>>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    bc::denseDisparityBinary(ql.back()->constView(), qr.back()->constView(),
+                                             dp, qm.back()->view(), gStream);
+                },
+                kQuarter);
+            cudaStreamSynchronize(gStream);
+            ql.clear(); qr.clear(); qm.clear();
+            cudaDeviceSynchronize();
+
+            // --- binCV census entry ---
+            std::vector<std::unique_ptr<bc::DeviceImage<uint8_t>>> cw;
+            std::vector<std::unique_ptr<bc::DeviceImage<uint32_t>>> cdsc;
+            std::vector<std::unique_ptr<bc::DeviceImage<uint8_t>>> cmap;
+            const size_t censusMem = meterScope(
+                [&](int) {
+                    cw.push_back(std::make_unique<bc::DeviceImage<uint8_t>>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    cw.push_back(std::make_unique<bc::DeviceImage<uint8_t>>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    cdsc.push_back(std::make_unique<bc::DeviceImage<uint32_t>>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    cdsc.push_back(std::make_unique<bc::DeviceImage<uint32_t>>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    cmap.push_back(std::make_unique<bc::DeviceImage<uint8_t>>(
+                        static_cast<int>(kW), static_cast<int>(kH)));
+                    bc::censusTransformPacked<kCensusK2>(cw[cw.size() - 2]->constView(),
+                                                         bincv::kCensus5x5,
+                                                         cdsc[cdsc.size() - 2]->view(),
+                                                         gStream);
+                    bc::censusTransformPacked<kCensusK2>(cw.back()->constView(),
+                                                         bincv::kCensus5x5,
+                                                         cdsc.back()->view(), gStream);
+                    bc::denseDisparityCensusPacked(cdsc[cdsc.size() - 2]->constView(),
+                                                   cdsc.back()->constView(), dp,
+                                                   cmap.back()->view(), gStream);
+                },
+                kReplicas);
+            cudaStreamSynchronize(gStream);
+            cw.clear(); cdsc.clear(); cmap.clear();
+            cudaDeviceSynchronize();
+
+            // --- cv::cuda::StereoBM(64, 9), on the SAME frames ---
+            // CONTENT DEPENDENCE IS CHECKED, NOT ASSUMED. OpenCV's FAST sizes
+            // its output by corners FOUND, so its footprint moves with the
+            // picture; that was found the hard way in this project. StereoBM
+            // is metered twice here, once on the synthetic pair and once on a
+            // real EuRoC frame pair, and the two readings are printed beside
+            // each other. If they differ, the real one is the number.
+            const auto meterStereoBM = [&](const uint8_t* lp, const uint8_t* rp) {
+                std::vector<cv::cuda::GpuMat> ml, mr, md;
+                std::vector<cv::Ptr<cv::cuda::StereoBM>> mbm;
+                cv::Mat hl(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
+                           const_cast<uint8_t*>(lp));
+                cv::Mat hr(static_cast<int>(kH), static_cast<int>(kW), CV_8UC1,
+                           const_cast<uint8_t*>(rp));
+                const size_t got = meterScope(
+                    [&](int) {
+                        ml.emplace_back(hl);
+                        mr.emplace_back(hr);
+                        md.emplace_back();
+                        mbm.push_back(cv::cuda::createStereoBM(64, 9));
+                        mbm.back()->compute(ml.back(), mr.back(), md.back(), gCvStream);
+                        cudaStreamSynchronize(gStream);
+                    },
+                    kReplicas);
+                ml.clear(); mr.clear(); md.clear(); mbm.clear();
+                cudaDeviceSynchronize();
+                return got;
+            };
+            const size_t bmSynthetic = meterStereoBM(lw.data(), rw.data());
+
+            // The real pair: EuRoC frame 0 as the left image and the same
+            // frame shifted as the right, so only the CONTENT differs from
+            // the synthetic run and the geometry does not.
+            size_t bmReal = 0;
+            bool haveReal = false;
+            if (haveRealFrame) {
+                std::vector<uint8_t> rl(frontFrame.begin(), frontFrame.end());
+                std::vector<uint8_t> rr(kW * kH, 0);
+                for (size_t y = 0; y < kH; ++y)
+                    for (size_t x = 0; x + 21 < kW; ++x)
+                        rr[y * kW + x] = rl[y * kW + x + 21];
+                bmReal = meterStereoBM(rl.data(), rr.data());
+                haveReal = true;
+            }
+
+            const double unit = static_cast<double>(step);
+            const double perUnitKB = unit / kReplicas / 1024.0;
+            const auto row = [&](const char* name, size_t total, const char* note) {
+                const double per = static_cast<double>(total) / kReplicas;
+                std::printf("   %-38s %8.2f MB / %d = %8.1f KB/frame  (%4.0f units,"
+                            " rounding %.2f%%)  %s\n",
+                            name, static_cast<double>(total) / (1024.0 * 1024.0),
+                            kReplicas, per / 1024.0,
+                            unit > 0.0 ? static_cast<double>(total) / unit : 0.0,
+                            per > 0.0 ? perUnitKB * 1024.0 / per * 100.0 : 0.0, note);
+            };
+            std::printf("\n   one meter unit = %.2f MB = %.1f KB/frame at %d replicas\n",
+                        unit / (1024.0 * 1024.0), perUnitKB, kReplicas);
+            row("binCV BINARY entry", binaryMem, "2 bit planes + map");
+            {
+                const double per256 = static_cast<double>(binaryMem) / kReplicas;
+                const double per64 = static_cast<double>(binaryMemQuarter) / kQuarter;
+                const double drift = per256 > 0.0 ? per64 / per256 : 0.0;
+                std::printf("     CONVERGENCE, on the smallest of the three: the same set"
+                            " reads %.1f KB/frame\n"
+                            "     at %d replicas against %.1f KB/frame at %d -- %.4fx."
+                            " %s\n",
+                            per64 / 1024.0, kQuarter, per256 / 1024.0, kReplicas, drift,
+                            (drift > 1.005 || drift < 0.995)
+                                ? "THE READING HAS NOT CONVERGED; raise the count before"
+                                  " quoting it."
+                                : "It has stopped moving, so the count is high enough.");
+            }
+            row("binCV CENSUS entry", censusMem, "2 wide + 2 descriptors + map");
+            row("cv::cuda::StereoBM(64,9) synthetic", bmSynthetic, "UPPER reading");
+            if (haveReal) row("cv::cuda::StereoBM(64,9) REAL frame", bmReal, "UPPER reading");
+
+            std::printf("   [meter 1, binCV context only, never a cross-library"
+                        " numerator] binary\n"
+                        "   entry allocation sum = %.1f KB. Meter 1 and meter 2 do not"
+                        " divide.\n",
+                        static_cast<double>(binaryAllocSum) / 1024.0);
+
+            const size_t bmQuote = haveReal ? bmReal : bmSynthetic;
+            if (haveReal) {
+                const double drift =
+                    bmSynthetic > 0
+                        ? static_cast<double>(bmReal) / static_cast<double>(bmSynthetic)
+                        : 0.0;
+                std::printf("   CONTENT DEPENDENCE: StereoBM reads %.3fx on the real frame"
+                            " against the\n"
+                            "   synthetic one. %s\n",
+                            drift,
+                            (drift > 1.02 || drift < 0.98)
+                                ? "IT IS CONTENT-DEPENDENT -- the real reading is the"
+                                  " number quoted."
+                                : "It is NOT content-dependent: StereoBM sizes its output"
+                                  " and its\n   internals by the image geometry and the"
+                                  " disparity count, not by what\n   it finds. The real"
+                                  " reading is still the one quoted.");
+            } else {
+                std::printf("   CONTENT DEPENDENCE: NOT CHECKED -- no real sequence blob"
+                            " was pointed at\n"
+                            "   BINCV_CUDA_ROLE_FRAMES, so only the synthetic reading"
+                            " exists and it is\n   quoted as such.\n");
+            }
+
+            const auto verdict = [&](const char* name, size_t mine) {
+                const double per = static_cast<double>(mine) / kReplicas;
+                const double theirs = static_cast<double>(bmQuote) / kReplicas;
+                const double u = unit > 0.0 ? static_cast<double>(mine) / unit : 0.0;
+                const double tu = unit > 0.0 ? static_cast<double>(bmQuote) / unit : 0.0;
+                if (u < 8.0 || tu < 8.0 || per <= 0.0) {
+                    std::printf("   %s vs StereoBM: RATIO NOT QUOTED -- a side read under"
+                                " eight of the\n   meter's own units.\n", name);
+                    return;
+                }
+                std::printf("   %s vs StereoBM: %.3fx -- %s by %.3fx"
+                            " (%.1f KB against %.1f KB).\n",
+                            name, theirs / per,
+                            theirs >= per ? "binCV SMALLER" : "StereoBM SMALLER",
+                            theirs >= per ? theirs / per : per / theirs, per / 1024.0,
+                            theirs / 1024.0);
+            };
+            verdict("BINARY entry", binaryMem);
+            verdict("CENSUS entry", censusMem);
+            std::printf("   Both ratios are LOWER BOUNDS on binCV's side and UPPER"
+                        " readings on\n"
+                        "   StereoBM's, for the reason stated above: GpuMat may pool and"
+                        " pads its\n   pitch; binCV has nothing between the op and"
+                        " cudaMalloc.\n");
+            emitMem("stereo_binary_vs_stereobm", "752x480", binaryMem, bmQuote, step,
+                    kReplicas, kReplicas);
+            emitMem("stereo_census_vs_stereobm", "752x480", censusMem, bmQuote, step,
+                    kReplicas, kReplicas);
+            std::printf("MEM3,stereo_one_region,752x480,%zu,%zu,%zu,%zu,%zu,%d\n",
+                        binaryMem, censusMem, bmSynthetic, bmReal, step, kReplicas);
+        }
     }
 
     // ======================================================================
@@ -1776,42 +2136,6 @@ int main(int argc, char** argv) {
     cv::cuda::GpuMat gPicture;
     std::vector<uint8_t> picture(kW * kH);
 
-    // THE FRONTEND FRAME, and why it is not the synthetic one the rest of this
-    // file uses. A detector's cost is a function of how many corners its input
-    // has, and edgeThreshold on SMOOTHED NOISE sets ~83% of pixels -- a frame
-    // on which both FAST implementations overflow any sane capacity, so the
-    // corner-set gate cannot even run. The real content this project measures
-    // on is a EuRoC sequence blob; point BINCV_CUDA_ROLE_FRAMES at one
-    // (scripts/make_sequence_blob.py, --mode 8bit) and frame 0 of it is used.
-    // Without one the synthetic frame is used and every frontend row below
-    // says so, because a role bar taken on saturating content is not the role
-    // bar anyone means.
-    std::vector<uint8_t> frontFrame = frame;
-    const char* frontSource = "synthetic smoothed noise (NOT representative content)";
-    std::vector<uint8_t> blob;
-    if (const char* path = std::getenv("BINCV_CUDA_ROLE_FRAMES")) {
-        std::FILE* fh = std::fopen(path, "rb");
-        if (fh != nullptr) {
-            std::fseek(fh, 0, SEEK_END);
-            const long len = std::ftell(fh);
-            std::fseek(fh, 0, SEEK_SET);
-            if (len > 0) {
-                blob.resize(static_cast<size_t>(len));
-                if (std::fread(blob.data(), 1, blob.size(), fh) != blob.size()) blob.clear();
-            }
-            std::fclose(fh);
-        }
-        if (!blob.empty()) {
-            const bincv::SequenceHeader h = bincv::readSequenceHeader(blob.data(), blob.size());
-            const bincv::SequenceFrameRange f0 =
-                bincv::sequenceFrame(h, blob.data(), blob.size(), 0);
-            if (h.valid && h.mode == bincv::kSequenceMode8Bit && h.width == kW &&
-                h.height == kH && f0.valid) {
-                frontFrame.assign(f0.data, f0.data + kW * kH);
-                frontSource = "REAL SEQUENCE FRAME 0 from BINCV_CUDA_ROLE_FRAMES";
-            }
-        }
-    }
 
     if (wantFrontend) {
         bc::uploadImage(frontFrame.data(), kW, kH, kW, fWide.view(), gStream);
@@ -2788,12 +3112,12 @@ int main(int argc, char** argv) {
                         "kernel");
         printArmVsFloor("warp-box arm (densePackedBoxEnabled = true)", po.b, floor,
                         "kernel");
-        std::printf("   ratio box/reference: %5.3fx  (box %5.2fx faster)  range %5.3f-%5.3fx"
-                    "  %s\n",
+        std::printf("   ratio box/reference: median %5.3fx <- QUOTE THIS  (box %5.2fx"
+                    " faster)  geomean %5.3fx  range %5.3f-%5.3fx\n",
                     po.ratioMedian, po.ratioMedian > 0.0 ? 1.0 / po.ratioMedian : 0.0,
-                    po.ratioMin, po.ratioMax,
-                    po.separated() ? "DISJOINT -- a result"
-                                   : "OVERLAP -- not a result in this run");
+                    po.ratioGeoMean, po.ratioMin, po.ratioMax);
+        printPairedSignAndSeparation(po);
+        printPairedVerdict(po);
         emitRow("census_offswitch", "752x480", po);
         bc::impl::densePackedBoxEnabled() = true;
 
