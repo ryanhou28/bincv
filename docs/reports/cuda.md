@@ -1209,7 +1209,7 @@ on a seven-run re-take of every one of them, in the three values the owner's
 | census matcher | `cv::cuda::StereoBM(64,9)` | 0.6864 ms | **0.3692 ms** | **0.536** | **7/7** | **MET, 1.87×** | 1.94× vs 1.37× — **a result** |
 | census entry (2 transforms + match) | ″ | 0.6996 ms | **0.5076 ms** | **0.723** | **7/7** | **MET on speed, LOSES on memory** | 1.47× vs 1.25× — **a result** |
 | binary entry | ″ | 0.7152 ms | **0.0648 ms** | **0.091** | **7/7** | **MET, 11.0×** | 10.95× vs 1.78× — **a result** |
-| block matching | `SparsePyrLKOpticalFlow` | 0.2320 ms | **0.0540 ms** | **0.230** | **7/7** | speed MET; **accuracy floor unset** |
+| block matching | `SparsePyrLKOpticalFlow` | 0.2320 ms | **0.0540 ms** | **0.230** | **7/7** | speed MET; **accuracy floor unset** | not re-taken this round |
 
 **Three rows changed direction since the previous round, and one row is new
 information rather than a better number.** FAST went from 14.84× behind to 6.01×
