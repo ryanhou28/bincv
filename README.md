@@ -37,12 +37,14 @@ work the same way, one plane per bit, so arithmetic stays word-wide.
 
 ## Performance
 
+**Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
+
 binCV replaces individual OpenCV calls, so these are single operations against the single
 call each replaces. No one number is the answer, and binCV loses some of these. Each row
 names its own unit, and on all of them the smaller number is the faster side:
 
-<!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64, OpenCV ÷ binCV (>1× = binCV faster)|OpenCV, aarch64|binCV, aarch64|aarch64, OpenCV ÷ binCV (>1× = binCV faster)" source="source" -->
-| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | OpenCV, aarch64 | binCV, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) | source |
+<!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64 ratio|OpenCV, aarch64|binCV, aarch64|aarch64 ratio" source="source" -->
+| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | source |
 |---|---|---|---|---|---|---|---|---|
 | `bitwiseAnd`, ns/pixel | `cv::bitwise_and` | 0.02734 | 0.00273 | 10.01× | 0.64783 | 0.02266 | 28.59× | [primitives.md](docs/reports/primitives.md) |
 | optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.871 | 0.543 | 7.13× | 23.476 | 2.843 | 8.26× | [features.md](docs/reports/features.md) |
@@ -60,8 +62,8 @@ sides store a byte. [limits.md](docs/reports/limits.md) is the page about that.
 Memory is the other half, and usually the half that decides whether something fits. Peak
 working set of one call, from buffer geometry, identical on both architectures:
 
-<!-- figure-check values="OpenCV|binCV|OpenCV ÷ binCV (>1× = binCV smaller)" source="source" -->
-| operation | measured against | OpenCV | binCV | OpenCV ÷ binCV (>1× = binCV smaller) | source |
+<!-- figure-check values="OpenCV|binCV|ratio" source="source" -->
+| operation | measured against | OpenCV | binCV | ratio | source |
 |---|---|---|---|---|---|
 | denoise, 3-pixel median, bytes | composed `cv::min` / `cv::max` | 2,150,400 | 76,800 | 28.0× | [footprint.md](docs/reports/footprint.md) |
 | FAST input plane, bytes | `cv::FAST` on `CV_8U` | 360,960 | 46,080 | 7.83× | [footprint.md](docs/reports/footprint.md) |
@@ -70,8 +72,8 @@ working set of one call, from buffer geometry, identical on both architectures:
 
 There is a CUDA backend too, measured against `cv::cuda` on the same GPU:
 
-<!-- figure-check values="cv::cuda, ms|binCV, ms|speed, cv::cuda ÷ binCV (>1× = binCV faster)|cv::cuda, KB|binCV, KB|memory, cv::cuda ÷ binCV (>1× = binCV smaller)" source="source" -->
-| on an RTX 3070 Ti | measured against | cv::cuda, ms | binCV, ms | speed, cv::cuda ÷ binCV (>1× = binCV faster) | cv::cuda, KB | binCV, KB | memory, cv::cuda ÷ binCV (>1× = binCV smaller) | source |
+<!-- figure-check values="cv::cuda, ms|binCV, ms|speed ratio|cv::cuda, KB|binCV, KB|memory ratio" source="source" -->
+| on an RTX 3070 Ti | measured against | cv::cuda, ms | binCV, ms | speed ratio | cv::cuda, KB | binCV, KB | memory ratio | source |
 |---|---|---|---|---|---|---|---|---|
 | dense disparity, binary entry, per frame | `cv::cuda::StereoBM(64, 9)` | 0.7152 | 0.0648 | 11.0× | 3072.0 | 448.0 | 6.857× | [cuda.md](docs/reports/cuda.md) |
 | BRIEF descriptors, per call at N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 | 0.0107 | 9.3× | 2048.0 | 48.0 | 42.67× | [cuda.md](docs/reports/cuda.md) |

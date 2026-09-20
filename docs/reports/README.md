@@ -32,11 +32,13 @@ averaged, and neither stands in for the other. The assembled frontend is not in 
 
 ### Speed, CPU
 
+**Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
+
 640×480 and `uint32_t` words unless the row names otherwise, one thread on both sides. Each
 row names its own unit, and on all of them the smaller number is the faster side.
 
-<!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64, OpenCV ÷ binCV (>1× = binCV faster)|OpenCV, aarch64|binCV, aarch64|aarch64, OpenCV ÷ binCV (>1× = binCV faster)" source="source" -->
-| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | OpenCV, aarch64 | binCV, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) | source |
+<!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64 ratio|OpenCV, aarch64|binCV, aarch64|aarch64 ratio" source="source" -->
+| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | source |
 |---|---|---|---|---|---|---|---|---|
 | `bitwiseAnd`, ns/pixel | `cv::bitwise_and` | 0.02734 | 0.00273 | 10.01× | 0.64783 | 0.02266 | 28.59× | [primitives.md](primitives.md) |
 | `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01548 | 0.00956 | 1.62× | 0.17116 | 0.06366 | 2.69× | [primitives.md](primitives.md) |
@@ -74,8 +76,8 @@ RTX 3070 Ti · 752×480 unless the row names a geometry · both arms on **one ex
 · kernel-resident clock · medians of 7 independent process runs. Milliseconds, so the
 smaller number is the faster side.
 
-<!-- figure-check values="cv::cuda, ms|binCV, ms|cv::cuda ÷ binCV (>1× = binCV faster)" source="source" -->
-| operation | `cv::cuda` arm | cv::cuda, ms | binCV, ms | cv::cuda ÷ binCV (>1× = binCV faster) | source |
+<!-- figure-check values="cv::cuda, ms|binCV, ms|ratio" source="source" -->
+| operation | `cv::cuda` arm | cv::cuda, ms | binCV, ms | ratio | source |
 |---|---|---|---|---|---|
 | dense disparity, binary entry | `cv::cuda::StereoBM(64, 9)` | 0.7152 | 0.0648 | 11.0× | [cuda.md](cuda.md) |
 | dense disparity, census entry | ″ | 0.6996 | 0.5076 | 1.47× | [cuda.md](cuda.md) |
@@ -107,8 +109,8 @@ Peak working set of one call, computed from buffer geometry, so it is exact and 
 on both architectures** — one column pair, not two. Read
 [methodology-memory.md](methodology-memory.md) before quoting any of it.
 
-<!-- figure-check values="OpenCV|binCV|OpenCV ÷ binCV (>1× = binCV smaller)" source="source" -->
-| operation | measured against | OpenCV | binCV | OpenCV ÷ binCV (>1× = binCV smaller) | source |
+<!-- figure-check values="OpenCV|binCV|ratio" source="source" -->
+| operation | measured against | OpenCV | binCV | ratio | source |
 |---|---|---|---|---|---|
 | `bitwiseAnd` / `Or` / `Xor` / `Not`, bytes | `cv::bitwise_*` | 921,600 | 115,200 | 8.0× | [primitives.md](primitives.md) |
 | `countNonZero`, per input plane, bytes | `cv::countNonZero` | 307,200 | 38,400 | 8.0× | [primitives.md](primitives.md) |
@@ -131,8 +133,8 @@ none.
 `cudaMemGetInfo` delta taken identically on both sides — the only meter readable across
 libraries — never mixed with binCV's own allocation sums.
 
-<!-- figure-check values="cv::cuda, KB|binCV, KB|cv::cuda ÷ binCV (>1× = binCV smaller)" source="source" -->
-| operation | `cv::cuda` arm | cv::cuda, KB | binCV, KB | cv::cuda ÷ binCV (>1× = binCV smaller) | source |
+<!-- figure-check values="cv::cuda, KB|binCV, KB|ratio" source="source" -->
+| operation | `cv::cuda` arm | cv::cuda, KB | binCV, KB | ratio | source |
 |---|---|---|---|---|---|
 | describe, N=1000 | `cv::cuda::ORB::computeAsync` | 2048.0 | 48.0 | 42.67× | [cuda.md](cuda.md) |
 | descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 8277.3 | 400.0 | 20.7× | [cuda.md](cuda.md) |
@@ -181,16 +183,16 @@ What it is evidence for is that the operations **compose**: the per-call results
 not cancel out when a real pipeline runs them. It is not a claim about anyone else's
 pipeline, and it is not the number to compare against a library call.
 
-<!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64, OpenCV ÷ binCV (>1× = binCV faster)|OpenCV, aarch64|binCV, aarch64|aarch64, OpenCV ÷ binCV (>1× = binCV faster)" source="source" -->
-| | OpenCV, x86-64 | binCV, x86-64 | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | OpenCV, aarch64 | binCV, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) | source |
+<!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64 ratio|OpenCV, aarch64|binCV, aarch64|aarch64 ratio" source="source" -->
+|  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | source |
 |---|---|---|---|---|---|---|---|
 | time, ms/frame | 3.841–4.485 | 1.134–1.283 | 3.30× | 23.249–23.451 | 4.906–4.949 | 4.73× | [frontend.md](frontend.md) |
 
 Peak working set is computed from buffer geometry and is identical on both architectures, so
 it is one pair rather than two:
 
-<!-- figure-check values="OpenCV|binCV|OpenCV ÷ binCV (>1× = binCV smaller)" source="source" -->
-| | OpenCV | binCV | OpenCV ÷ binCV (>1× = binCV smaller) | source |
+<!-- figure-check values="OpenCV|binCV|ratio" source="source" -->
+|  | OpenCV | binCV | ratio | source |
 |---|---|---|---|---|
 | peak working set, bytes | 2,719,832 | 436,704 | 6.23× | [footprint.md](footprint.md) |
 

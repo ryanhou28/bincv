@@ -55,14 +55,17 @@ wrote to exercise the operations, not an operation binCV offers — see
 
 The status column is what has actually been done, not what is supported in principle.
 
-| target | what it gets | status |
+| target | vector path | status |
 |---|---|---|
-| **x86-64** — desktops, servers | `POPCNT` required; AVX2 selected at run time | **built and measured.** A Ryzen 5 5600X is one of the two machines in the reports |
-| **aarch64 — 64-bit Arm Cortex-A** — phones, SBCs, embedded Linux | NEON | **built and measured.** A Raspberry Pi 4 at a pinned clock is the reference device, and the one that closes a question |
-| **Arm Cortex-M, bare metal** — microcontrollers, no OS | scalar only: no NEON, no popcount instruction | **built and run on real hardware.** On an STM32H753ZI (Cortex-M7) the results are bit-exact against the host, a 752×480 frame is 46,080 bytes, and a 320×240 dense-disparity map runs in 6.5 KB of scratch — 825 ms at the 64 MHz reset clock. There is no OpenCV comparison on that part, and no figure at its full clock |
-| **armv7-a — 32-bit Arm Cortex-A** — older phones and SBCs | 32-bit NEON | **not built.** A supported target with no toolchain in this repository and no measurement of any kind. It is a *different* target from the Cortex-M row above, which is M-profile and was built and run |
-| **RISC-V** | scalar | **not built.** Supported target, no measurement |
-| **CUDA** — NVIDIA GPUs | a separate backend in [../backends/cuda/](../backends/cuda/), sharing the format and forking the kernels; device-typed, never a drop-in dispatch target | **built and measured** on an RTX 3070 Ti against `cv::cuda` ([reports/cuda.md](reports/cuda.md)) |
+| **x86-64** — desktops, servers | AVX2, selected at run time; `POPCNT` required | measured — Ryzen 5 5600X |
+| **aarch64** (64-bit Arm Cortex-A) — phones, SBCs, embedded Linux | NEON | measured — Raspberry Pi 4 at a pinned clock, the reference device |
+| **Arm Cortex-M**, bare metal — microcontrollers, no OS | none: no NEON, no popcount instruction | built and run on an STM32H753ZI (Cortex-M7); bit-exact against the host. No OpenCV on that part, so no comparison — see below |
+| **armv7-a** (32-bit Arm Cortex-A) — older phones, SBCs | 32-bit NEON | **not built.** No toolchain here and no measurement. A different target from Cortex-M above |
+| **RISC-V** | none | **not built.** No measurement |
+| **CUDA** — NVIDIA GPUs | [a separate backend](../backends/cuda/), device-typed, never a drop-in dispatch target | measured — RTX 3070 Ti, against `cv::cuda` ([reports/cuda.md](reports/cuda.md)) |
+
+On the Cortex-M7: a 752×480 frame is 46,080 bytes, and a 320×240 dense-disparity map runs
+in 6.5 KB of scratch — 825 ms at the 64 MHz reset clock, with no figure at its full clock.
 
 A 64-bit OS is a requirement for the measured Cortex-A results rather than a preference: on
 32-bit Arm every `uint64_t` operation is synthesised from 32-bit pairs, which would measure

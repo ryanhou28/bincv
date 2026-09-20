@@ -12,10 +12,12 @@ OpenCV builds on different machines, never averaged.
 
 ### Speed
 
+**Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
+
 Each pair is one measurement against the other, in the unit the row names, so the smaller
 number is the faster side.
 
-| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | OpenCV, aarch64 | binCV, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
 | Lucas–Kanade, `1/2/2/2` | `cv::calcOpticalFlowPyrLK` | 3.871 ms | **0.543 ms** | **7.13×** | 23.476 ms | **2.843 ms** | **8.26×** |
 | Lucas–Kanade, `1/1/1/1` | `cv::calcOpticalFlowPyrLK` | 3.871 ms | **0.136 ms** | **28.53×** | 23.476 ms | **0.609 ms** | **38.54×** |
@@ -37,8 +39,8 @@ trust where every other row on this page can be checked.
 Peak working set, computed from buffer geometry, so it is identical on both architectures.
 The itemization is in [footprint.md](footprint.md).
 
-<!-- figure-check values="OpenCV|binCV|OpenCV ÷ binCV (>1× = binCV smaller)" source="@docs/reports/footprint.md" -->
-| operation | measured against | OpenCV | binCV | OpenCV ÷ binCV (>1× = binCV smaller) |
+<!-- figure-check values="OpenCV|binCV|ratio" source="@docs/reports/footprint.md" -->
+| operation | measured against | OpenCV | binCV | ratio |
 |---|---|---|---|---|
 | FAST input plane | `cv::FAST` on `CV_8U` | 360,960 B | **46,080 B** | 7.83× |
 | `goodFeaturesToTrack` | `cv::goodFeaturesToTrack`, binarized | 9,014,976 B | **1,580,064 B** | 5.71× |
@@ -63,7 +65,7 @@ The single largest component of a tracking frontend, and binCV's strongest resul
 points · 31×31 window · four levels · 20 iterations maximum · synthetic content · one thread
 on each side.
 
-| arm | x86-64 (ms) | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | aarch64 (ms) | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| arm | x86-64 (ms) | x86-64 ratio | aarch64 (ms) | aarch64 ratio |
 |---|---|---|---|---|
 | `cv::calcOpticalFlowPyrLK` on the same bits as `CV_8U` | 3.871 | — | 23.476 | — |
 | **binCV, `1/2/2/2` ladder (shipped)** | **0.543** | **7.13×** | **2.843** | **8.26×** |
@@ -92,7 +94,7 @@ around tracking do not have this ratio. See [frontend.md](frontend.md).
 
 752×480 · 256-bit descriptors · 1000 keypoints · OpenCV pinned to one thread.
 
-| arm | OpenCV, x86-64 (ms) | binCV, x86-64 (ms) | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | OpenCV, aarch64 (ms) | binCV, aarch64 (ms) | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| arm | OpenCV, x86-64 (ms) | binCV, x86-64 (ms) | x86-64 ratio | OpenCV, aarch64 (ms) | binCV, aarch64 (ms) | aarch64 ratio |
 |---|---|---|---|---|---|---|
 | describe, against `cv::ORB` † | 0.660 | **0.141** | 4.69× | 6.816 | **0.648** | 10.51× |
 | match, kNN=2 over 1000×1000, against `cv::BFMatcher` | 9.184 | **1.947** | **4.72×** | 38.269 | **19.391** | 1.97× |
@@ -109,7 +111,7 @@ designing around the desktop number.
 Two entry points, and they give different answers. 752×480 for the wide-image row, the
 frontend's own frame for the others.
 
-| input | corners | `cv::FAST`, x86-64 | binCV, x86-64 | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | `cv::FAST`, aarch64 | binCV, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| input | corners | `cv::FAST`, x86-64 | binCV, x86-64 | x86-64 ratio | `cv::FAST`, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
 | `CV_8U`, wide image | 4144 | 0.363 ms | 0.344 ms | 1.05× | 2.906 ms | 3.024 ms | 0.96× |
 | `CV_8U`, the frontend's own frame | 6724 | 266.2 µs | 262.5 µs | 1.01× | 2054.5 µs | 2051.0 µs | 1.00× |
@@ -146,7 +148,7 @@ Time is nanoseconds per pixel and working set is bytes per pixel, so the smaller
 the better one. Both ratio columns are against the binarized denominator in the first row —
 including on the last row, where both sides are OpenCV:
 
-| variant | x86-64 (ns/px) | x86-64, denominator ÷ this arm (>1× = this arm faster) | aarch64 (ns/px) | aarch64, denominator ÷ this arm (>1× = this arm faster) | working set (B/px) |
+| variant | x86-64 (ns/px) | x86-64, denominator ÷ this arm | aarch64 (ns/px) | aarch64, denominator ÷ this arm | working set (B/px) |
 |---|---|---|---|---|---|
 | OpenCV, binarized (the denominator) | 13.63–14.24 | — | 75.02–75.82 | — | 36.94 |
 | binCV, frame map | 14.72–15.96 | 0.85–0.97× | 51.64–51.67 | **1.45–1.47×** | 16.54 |

@@ -73,12 +73,14 @@ questions.
 
 ### Speed
 
+**Every `ratio` column below is `cv::cuda` ÷ binCV: above 1× means binCV is ahead, below 1× means `cv::cuda` is.** Where a table divides something else, its header says so.
+
 Kernel-resident clock (CUDA events), both arms on **one explicit stream**, medians of 7
 independent process runs, 752×480 unless the row names a geometry. Time in milliseconds,
 so the smaller cell is the faster side, and the faster side is bold.
 
-<!-- figure-check values="cv::cuda (ms)|binCV (ms)|cv::cuda ÷ binCV (>1× = binCV faster)" source="@docs/reports/cuda.md" -->
-| operation | `cv::cuda` arm | cv::cuda (ms) | binCV (ms) | cv::cuda ÷ binCV (>1× = binCV faster) |
+<!-- figure-check values="cv::cuda (ms)|binCV (ms)|ratio" source="@docs/reports/cuda.md" -->
+| operation | `cv::cuda` arm | cv::cuda (ms) | binCV (ms) | ratio |
 |---|---|---|---|---|
 | `denseDisparityBinary` | `cv::cuda::StereoBM(64, 9)` | 0.7152 | **0.0648** | **11.0×** |
 | census entry (transform ×2 + match) | ″ | 0.6996 | **0.5076** | **1.47×** |
@@ -104,8 +106,8 @@ no factor is quoted for it.
 Peak working set at 752×480, `cudaMemGetInfo` delta taken identically on both sides — the
 only meter readable across libraries. Kilobytes, so the smaller cell is the lighter side.
 
-<!-- figure-check values="cv::cuda (KB)|binCV (KB)|cv::cuda ÷ binCV (>1× = binCV smaller)" source="@docs/reports/cuda.md" -->
-| operation | `cv::cuda` arm | cv::cuda (KB) | binCV (KB) | cv::cuda ÷ binCV (>1× = binCV smaller) |
+<!-- figure-check values="cv::cuda (KB)|binCV (KB)|ratio" source="@docs/reports/cuda.md" -->
+| operation | `cv::cuda` arm | cv::cuda (KB) | binCV (KB) | ratio |
 |---|---|---|---|---|
 | `denseDisparityBinary`, per frame | `cv::cuda::StereoBM(64, 9)` | 3072.0 | **448.0** | **6.857×** |
 | census entry working set, per frame | ″ | **3072.0** | 4512.0 | `cv::cuda` smaller, by **1.47×** |

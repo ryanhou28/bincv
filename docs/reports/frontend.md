@@ -38,10 +38,12 @@ measurements against different OpenCV builds on different machines, and are neve
 
 ## Speed
 
+**Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
+
 Milliseconds per frame over the whole sequence, so the smaller number is the faster
 frontend.
 
-| | OpenCV, x86-64 | binCV, x86-64 | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | OpenCV, aarch64 | binCV, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+|  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|
 | the assembled frontend, ms/frame | 3.841–4.485 | **1.134–1.283** | **3.30×** | 23.249–23.451 | **4.906–4.949** | **4.73×** |
 
@@ -64,7 +66,7 @@ duty-cycle dependence issue #7 records.
 Peak working set in bytes, computed from buffer geometry, so it is exact and **identical on
 both architectures**.
 
-| | OpenCV | binCV | OpenCV ÷ binCV (>1× = binCV smaller) |
+|  | OpenCV | binCV | ratio |
 |---|---|---|---|
 | peak working set, bytes | 2,719,832 | **436,704** | **6.23× smaller** |
 
@@ -137,7 +139,7 @@ and the detect stage then dominates in a way none of these numbers show.
 caller installs a threading backend; OpenCV is not. Both scale, OpenCV scales better, so the
 lead narrows (x86-64, unpinned — a threading arm cannot be measured under `taskset`):
 
-| threads, each side | OpenCV, ms/frame | binCV, ms/frame | OpenCV ÷ binCV (>1× = binCV faster) |
+| threads, each side | OpenCV, ms/frame | binCV, ms/frame | ratio |
 |---|---|---|---|
 | 1 | 3.944 | **1.172** | **3.36×** |
 | 2 | 2.832 | **0.942** | **3.01×** |

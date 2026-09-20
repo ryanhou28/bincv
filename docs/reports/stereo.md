@@ -11,13 +11,15 @@ twenty-second of its working set.
 
 ## Summary
 
+**Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
+
 752×480 · 64 disparities · 9×9 aggregation · one thread on both sides · `cv::StereoBM` at
 its default `blockSize 21`, the strongest configuration measured for it here. Time is
 milliseconds per frame and working set is bytes held live, so the smaller number is the
 better one. **x86-64 and aarch64 are separate columns** — different OpenCV builds on
 different machines, never averaged.
 
-| arm | x86-64 (ms) | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | aarch64 (ms) | aarch64, OpenCV ÷ binCV (>1× = binCV faster) | working set | memory, OpenCV ÷ binCV (>1× = binCV smaller) |
+| arm | x86-64 (ms) | x86-64 ratio | aarch64 (ms) | aarch64 ratio | working set | memory ratio |
 |---|---|---|---|---|---|---|
 | `cv::StereoBM` | ~14.7 | — | 79.8 | — | ≥ 722 KB, its output alone (2 B/px) | — |
 | **`denseDisparityBinary`** (packed frames in) | **~12.0** | **~1.2×** | **60.4** | **1.32×** | **32.4 KB scratch** + 1 B/px out | **~22×**, a lower bound |
@@ -69,7 +71,7 @@ width-qualified guidance. Details and the pre-registered rule:
 The refused allocation is the point: a dense cost volume at this configuration is 23 MB. The
 kernel streams instead — a band of rows and one accumulator ring per disparity:
 
-| | working set | what it is | OpenCV ÷ binCV (>1× = binCV smaller) |
+|  | working set | what it is | ratio |
 |---|---|---|---|
 | `cv::StereoBM` | ≥ 722 KB | its output buffer alone, before its internal buffers | — |
 | **`denseDisparityBinary`** | **32.4 KB** | streaming scratch — a row band and one accumulator ring per disparity | **~22×** |

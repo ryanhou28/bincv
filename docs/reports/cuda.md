@@ -30,7 +30,7 @@ stream — `if (stream == 0) cudaSafeCall( cudaDeviceSynchronize() );` sits in c
 transform, `cudafilters`, `cudawarping` and three times in `cudastereo`. binCV carries no
 such guard, so it is the control:
 
-| call | default stream (ms) | explicit stream (ms) | default ÷ explicit (>1× = the default stream costs more) |
+| call | default stream (ms) | explicit stream (ms) | default ÷ explicit |
 |---|---|---|---|
 | `cv::cuda::threshold` | 0.0704 | 0.0102 | 6.91× |
 | `cv::cuda::resize` INTER_AREA | 0.0559 | 0.0091 | 6.17× |
@@ -70,11 +70,13 @@ figure rather than a kernel one.
 faster *and* lighter. That is the operating point a binCV pipeline runs: it already holds
 one bit per pixel, and on bits the dense cost is one XOR per 32-pixel word.
 
+**Every `ratio` column below is `cv::cuda` ÷ binCV: above 1× means binCV is ahead, below 1× means `cv::cuda` is.** Where a table divides something else, its header says so.
+
 Kernel-resident clock, both arms on one explicit stream, 752×480 unless the row names a
 geometry, medians of 7 independent process runs, from `cuda_role_benchmark`. Time in
 milliseconds, so the smaller cell is the faster side and the faster side is bold.
 
-| operation | `cv::cuda` arm | cv::cuda (ms) | binCV (ms) | cv::cuda ÷ binCV (>1× = binCV faster) | what the rounds say |
+| operation | `cv::cuda` arm | cv::cuda (ms) | binCV (ms) | ratio | what the rounds say |
 |---|---|---|---|---|---|
 | `denseDisparityBinary` — the binary entry | `cv::cuda::StereoBM(64, 9)` | 0.7152 | **0.0648** | **11.0×** | 7/7 disjoint; a result (10.95× against a 1.78× bar) |
 | census entry (2 transforms + match) | ″ | 0.6996 | **0.5076** | **1.47×** | 7/7; a result (1.47× vs 1.25×) — but it **loses on memory** |
@@ -120,7 +122,7 @@ the census entry at **0.5418 against 0.7584 — 1.43×** and the census matcher 
 `cudaMemGetInfo` delta taken identically on both sides, 752×480, peak working set per
 frame. Kilobytes, so the smaller cell is the lighter side.
 
-| operation | `cv::cuda` arm | cv::cuda (KB) | binCV (KB) | cv::cuda ÷ binCV (>1× = binCV smaller) |
+| operation | `cv::cuda` arm | cv::cuda (KB) | binCV (KB) | ratio |
 |---|---|---|---|---|
 | `denseDisparityBinary` (2 bit planes + map) | `cv::cuda::StereoBM(64, 9)` | 3,072.0 | **448.0** | **6.857×** |
 | census entry (2 wide + 2 descriptors + map) | ″ | **3,072.0** | 4,512.0 | `cv::cuda` smaller, by **1.47×** |
@@ -165,7 +167,7 @@ family benchmarks rather than on `cuda_role_benchmark`: nine independent process
 an interleaved median of fifteen rounds, both arms on one explicit stream. Memory is taken
 at 752×480 only, because the ratio is not constant in frame size.
 
-| operation | denominator | geometry | denominator (ms) | binCV (ms) | denominator ÷ binCV (>1× = binCV faster) | memory, denominator ÷ binCV (>1× = binCV smaller) |
+| operation | denominator | geometry | denominator (ms) | binCV (ms) | ratio | memory ratio |
 |---|---|---|---|---|---|---|
 | `edgeThreshold` | composed `createDerivFilter` + abs + threshold | 752×480 | 0.0821 | **0.0096** | **8.1×** | **24.6×** |
 | `edgeThreshold` | ″ | 1920×1080 | 0.1886 | **0.0164** | **11.1×** | not measured |
@@ -372,7 +374,7 @@ the device arm's clock. Agreement is checked before any timing in every run — 
 frame 11,520 words compared, 0 differ; the ternary derivative planes 46,080 words, 0
 differ; 204 = 204 corners with 0 position differences.
 
-| cadence | host binCV (ms/frame) | device binCV (ms/frame) | host ÷ device (>1× = the device faster) |
+| cadence | host binCV (ms/frame) | device binCV (ms/frame) | host ÷ device |
 |---|---|---|---|
 | re-detect every 10 frames | 1.932 [1.779–1.992] | **0.424** [0.383–0.471] | **4.56×** |
 | re-detect every frame | 6.455 [6.388–6.652] | **1.056** [0.974–1.159] | **6.11×** |

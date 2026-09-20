@@ -17,11 +17,13 @@ measurements against different OpenCV builds on different machines, and are neve
 
 ### Speed
 
+**Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
+
 Every measurement cell is **nanoseconds per pixel**, so the smaller number of each pair is
 the faster implementation. Two rows have no aarch64 measurements to show and say `ratio
 only` instead.
 
-| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | OpenCV, aarch64 | binCV, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
 | `bitwiseAnd` | `cv::bitwise_and` | 0.02734 | **0.00273** | **10.01×** | 0.64783 | **0.02266** | **28.59×** |
 | `bitwiseNot` | `cv::bitwise_not` | 0.08591 | **0.00343** | **25.04×** | 0.31658 | **0.01943** | **16.30×** |
@@ -36,7 +38,7 @@ only` instead.
 `pyrDown` is timed per call rather than per pixel — 640×480 → 320×240, **microseconds per
 call**:
 
-| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | OpenCV, aarch64 | binCV, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
 | `pyrDown`, 1 bit in | `cv::pyrDown` on `CV_8U` | 48.3 | **31.0** | 1.56× | 521.4 | **93.8** | **5.56×** |
 
@@ -51,7 +53,7 @@ re-measurement.
 Peak working set of one call — the live buffers, not a per-buffer ratio. Computed from
 buffer geometry, so it is exact and **identical on both architectures**.
 
-| operation | measured against | OpenCV | binCV | OpenCV ÷ binCV (>1× = binCV smaller) |
+| operation | measured against | OpenCV | binCV | ratio |
 |---|---|---|---|---|
 | `bitwiseAnd` / `Or` / `Xor` / `Not` | `cv::bitwise_*` | 921,600 B | **115,200 B** | 8.0× |
 | `countNonZero`, per input plane | `cv::countNonZero` | 307,200 B | **38,400 B** | 8.0× |
@@ -70,7 +72,7 @@ can count it. binCV allocates nothing, so that temporary never appears in its co
 An AND over two images becomes an AND over their words, 32 pixels per instruction. 640×480,
 **nanoseconds per pixel**:
 
-| operation | OpenCV, x86-64 | binCV `u32`, x86-64 | binCV `u64`, x86-64 | x86-64, OpenCV ÷ binCV, u32 / u64 (>1× = binCV faster) | OpenCV, aarch64 | binCV `u32`, aarch64 | binCV `u64`, aarch64 | aarch64, OpenCV ÷ binCV, u32 / u64 (>1× = binCV faster) |
+| operation | OpenCV, x86-64 | binCV `u32`, x86-64 | binCV `u64`, x86-64 | x86-64 ratio, u32 / u64 | OpenCV, aarch64 | binCV `u32`, aarch64 | binCV `u64`, aarch64 | aarch64 ratio, u32 / u64 |
 |---|---|---|---|---|---|---|---|---|
 | `bitwiseAnd` | 0.02734 | **0.00273** | 0.00399 | 10.01× / 6.85× | 0.64783 | **0.02266** | 0.02327 | 28.59× / 27.85× |
 | `bitwiseOr` | 0.02820 | 0.00365 | **0.00274** | 7.74× / 10.28× | 0.64992 | 0.02393 | **0.02212** | 27.16× / 29.38× |
@@ -96,7 +98,7 @@ appear in the log and the benchmark exits non-zero if they disagree.
 
 640×480, **nanoseconds per pixel**:
 
-| operation | measured against | OpenCV, x86-64 | binCV `u32`, x86-64 | binCV `u64`, x86-64 | x86-64, OpenCV ÷ binCV, u32 / u64 (>1× = binCV faster) | OpenCV, aarch64 | binCV `u32`, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| operation | measured against | OpenCV, x86-64 | binCV `u32`, x86-64 | binCV `u64`, x86-64 | x86-64 ratio, u32 / u64 | OpenCV, aarch64 | binCV `u32`, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|---|
 | `countNonZero` | `cv::countNonZero` | 0.01548 | **0.00956** | **0.00598** | 1.62× / 2.59× | 0.17116 | **0.06366** | 2.69× |
 | `countAnd` | `cv::bitwise_and` then `cv::countNonZero` | 0.04164 | **0.01199** | — | 3.47× / — | 0.57602 | **0.08792** | 6.55× |
@@ -120,7 +122,7 @@ alternative. It is not a claim against OpenCV and is not quoted as one.
 A three-pixel median, against a byte-per-pixel implementation of the same filter ported call
 for call from the frontend binCV was written to replace.
 
-| implementation | x86-64 (ns/px) | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | aarch64 (ns/px) | aarch64, OpenCV ÷ binCV (>1× = binCV faster) | working set (bytes) |
+| implementation | x86-64 (ns/px) | x86-64 ratio | aarch64 (ns/px) | aarch64 ratio | working set (bytes) |
 |---|---|---|---|---|---|
 | OpenCV `CV_8U`, composed (the denominator) | 0.18609 | — | ratio only | — | 2,150,400 |
 | **binCV fused, `uint32_t`** | **0.01059** | **17.58×** | ratio only | **57.66×** | **76,800** |
@@ -144,7 +146,7 @@ device *and* halved the memory, so nothing was traded for it.
 
 Both axes, which is what a tracker needs before it can form a gradient covariance.
 
-| implementation | x86-64 (ns/px) | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | aarch64 (ns/px) | aarch64, OpenCV ÷ binCV (>1× = binCV faster) | working set (bytes) | passes |
+| implementation | x86-64 (ns/px) | x86-64 ratio | aarch64 (ns/px) | aarch64 ratio | working set (bytes) | passes |
 |---|---|---|---|---|---|---|
 | `cv::filter2D` ×2 (the denominator) | 0.54843 | — | ratio only | — | 1,536,000 | 2 |
 | **binCV, `uint32_t`** | **0.04793** | **11.44×** | ratio only | **24.28×** | **192,000** | 2 |
@@ -170,7 +172,7 @@ The most mixed result in this report. 640×480, **nanoseconds per pixel**, same 
 anchor and border on both sides. **Bold marks a binCV cell that beats the OpenCV cell for
 its architecture**:
 
-| case | OpenCV, x86-64 | binCV `u32`, x86-64 | binCV `u64`, x86-64 | x86-64, OpenCV ÷ binCV, u32 / u64 (>1× = binCV faster) | OpenCV, aarch64 | binCV `u32`, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| case | OpenCV, x86-64 | binCV `u32`, x86-64 | binCV `u64`, x86-64 | x86-64 ratio, u32 / u64 | OpenCV, aarch64 | binCV `u32`, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
 | `erode` 3×3 rect, `BORDER_CONSTANT` | 0.10013 | **0.09605** | **0.06127** | 1.04× / 1.63× | 0.71993 | 0.72012 | 1.00× |
 | `dilate` 3×3 rect, `BORDER_CONSTANT` | 0.10407 | 0.13037 | **0.06185** | 0.80× / 1.68× | 0.72416 | **0.48424** | 1.50× |
@@ -204,7 +206,7 @@ unchanged.
 640×480 → 320×240, **microseconds per call**, against `cv::pyrDown` on `CV_8U` at one
 thread:
 
-| arm | x86-64 (µs) | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | aarch64 (µs) | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| arm | x86-64 (µs) | x86-64 ratio | aarch64 (µs) | aarch64 ratio |
 |---|---|---|---|---|
 | `cv::pyrDown`, `CV_8U` (the denominator) | 48.3 | — | 521.4 | — |
 | **binCV `BOX_2x2`, 1 → 3 (shipped)** | **31.0** | 1.56× | **93.8** | **5.56×** |

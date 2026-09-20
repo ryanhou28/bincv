@@ -7,10 +7,12 @@ works: [README.md](README.md#how-the-numbers-are-taken).
 
 ## Per operation
 
+**Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
+
 Working set of one call — the live buffers, not a per-buffer ratio — at 640×480, `uint32_t`
 words, against the same binary content stored as `CV_8U`:
 
-| operation | measured against | OpenCV, bytes | binCV, bytes | OpenCV ÷ binCV (>1× = binCV smaller) |
+| operation | measured against | OpenCV, bytes | binCV, bytes | ratio |
 |---|---|---|---|---|
 | `erode` / `dilate`, 3×3 | `cv::erode` / `cv::dilate` | 614,400 | **76,800** | **8.00×** |
 | `morphologyEx(MORPH_OPEN)` | `cv::morphologyEx` | 614,400 | **115,200** | **5.33×** |
@@ -57,7 +59,7 @@ A four-level pyramid at 640×480, each level capped at the bit depth its arithme
 reach. The `CV_8U` column is a **computed** byte-per-pixel-per-level denominator, not a timed
 OpenCV run:
 
-| ladder | bits per level | `CV_8U` pyramid, bytes | binCV, bytes | `CV_8U` ÷ binCV (>1× = binCV smaller) |
+| ladder | bits per level | `CV_8U` pyramid, bytes | binCV, bytes | `CV_8U` ÷ binCV |
 |---|---|---|---|---|
 | uncapped | 1/3/5/7 | 408,000 | 84,240 | 4.84× |
 | reference-shaped | 1/3/4/5 | 408,000 | 80,400 | 5.07× |
@@ -75,7 +77,7 @@ decision with a small footprint side effect, not a footprint lever.
 The figure below is not a per-operation result — it is the pipeline
 [frontend.md](frontend.md) describes, held up as evidence that the per-call savings compose:
 
-| | OpenCV | binCV | OpenCV ÷ binCV (>1× = binCV smaller) |
+|  | OpenCV | binCV | ratio |
 |---|---|---|---|
 | peak working set, bytes | 2,719,832 | **436,704** | **6.23×** |
 | what it holds | `CV_8U` pyramid ×2 with a 31-pixel border per level, `CV_32F` eigen map | `1/2/2/2` pyramid ×2, derivative ladders, 3-row response ring | — |
@@ -135,7 +137,7 @@ the row is owed a re-measurement.
 copy, no allocation. Measured on `edgeThreshold` at 640×480 against a native 32-bit buffer as
 the baseline, with 0 of 307,200 pixels differing:
 
-| arm | x86-64 (ns) | x86-64, native ÷ this arm (>1× = this arm faster) | aarch64 (ns) | aarch64, native ÷ this arm (>1× = this arm faster) |
+| arm | x86-64 (ns) | x86-64, native ÷ this arm | aarch64 (ns) | aarch64, native ÷ this arm |
 |---|---|---|---|---|
 | native `uint32_t` buffer | 21,310 | — | 259,108 | — |
 | `uint64_t` buffer, narrowed view | 22,070 | 0.97× | 259,182 | 1.00× |
@@ -147,7 +149,7 @@ scalar fallback instead is what the narrowing exists to avoid.
 The occupancy-mask row lost on both axes at once. At the benchmark's stated operating point —
 120 live tracks, 300 candidates, 80 free slots, on x86-64:
 
-| | direct test against the live set | a 1-bit occupancy frame | mask ÷ direct (>1× = the direct test wins) |
+|  | direct test against the live set | a 1-bit occupancy frame | mask ÷ direct |
 |---|---|---|---|
 | time (ns) | **3,240** | 76,940 | **23.7×** |
 | memory (bytes) | **0** | 38,400 | — |

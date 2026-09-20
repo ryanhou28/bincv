@@ -14,9 +14,11 @@ separate columns** and are never averaged.
 binCV wins by not paying for bits it does not use. At eight bits per pixel there are none to
 skip, and both sides store a byte.
 
+**Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
+
 `pyrDown`, 640×480 → 320×240, against `cv::pyrDown` on `CV_8U` at one thread:
 
-| arm | x86-64 (µs) | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | aarch64 (µs) | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| arm | x86-64 (µs) | x86-64 ratio | aarch64 (µs) | aarch64 ratio |
 |---|---|---|---|---|
 | `cv::pyrDown`, `CV_8U` (the denominator) | 48.3 | — | 521.4 | — |
 | **binCV `BOX_2x2`, 1 bit in → 3 bits out (shipped)** | **31.0** | 1.56× | **93.8** | **5.56×** |
@@ -37,7 +39,7 @@ The same geometry across input and output bit widths, one process per arm becaus
 is cache-invalid in a single one. Each machine has its own `cv::pyrDown` denominator in the
 first row:
 
-| arm | x86-64 (µs) | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | aarch64 (µs) | aarch64, OpenCV ÷ binCV (>1× = binCV faster) |
+| arm | x86-64 (µs) | x86-64 ratio | aarch64 (µs) | aarch64 ratio |
 |---|---|---|---|---|
 | `cv::pyrDown`, `CV_8U` (the denominator) | 48.5 | — | 514.7 | — |
 | **box filter, 1 → 3 (shipped shape)** | **32.6** | **1.49×** | **275.6** | **1.87×** |
@@ -68,7 +70,7 @@ and where it has done less the same binCV code wins.
 
 640×480 except the `cv::FAST` row (752×480, the wide-image entry point's own frame):
 
-| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64, OpenCV ÷ binCV (>1× = binCV faster) | OpenCV, aarch64 | binCV, aarch64 | aarch64, OpenCV ÷ binCV (>1× = binCV faster) | why |
+| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | why |
 |---|---|---|---|---|---|---|---|---|
 | FAST, wide-image entry point | `cv::FAST` | 0.363 ms | **0.344 ms** | 1.05× | 2.906 ms | 3.024 ms | 0.96× | parity with a mature vectorised kernel |
 | `erode`, 5×5 ellipse | `cv::erode` | 0.22759 ns/px | 0.70415 ns/px | 0.32× | 1.81575 ns/px | 3.58631 ns/px | 0.51× | a non-separable element costs one shifted-OR per set element |
@@ -148,7 +150,7 @@ path it claims. On x86-64 the eight-keypoint AVX2 batch in the tracker, toggled 
 in the same binary over 400 frames. **The two runs are two repeats of the same measurement on
 the same machine, not two architectures**:
 
-| arm | run | binCV tracking, ms/frame | binCV frontend, ms/frame | OpenCV frontend, ms/frame | OpenCV ÷ binCV (>1× = binCV faster) |
+| arm | run | binCV tracking, ms/frame | binCV frontend, ms/frame | OpenCV frontend, ms/frame | ratio |
 |---|---|---|---|---|---|
 | `BINCV_LK_BATCH=0` | 1 | 1.363 | 1.782 | 4.090 | 2.30× |
 | `BINCV_LK_BATCH=0` | 2 | 1.407 | 1.804 | 4.222 | 2.34× |

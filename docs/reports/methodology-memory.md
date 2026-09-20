@@ -34,7 +34,7 @@ by an amount that has nothing to do with how much memory it uses.
 Two implementations of identical work, each using 256 KiB of scratch, differing *only* in
 storage class:
 
-| instrument | scratch from `malloc`, bytes | scratch on the stack, bytes | `malloc` ÷ stack (>1× = the stack version looks leaner) |
+| instrument | scratch from `malloc`, bytes | scratch on the stack, bytes | `malloc` ÷ stack |
 |---|---|---|---|
 | heap-only | 262,144 | 4,096 | **64×** |
 | stack | 7,784 | 262,456 | not published |
@@ -70,7 +70,7 @@ the compiled frame was 6,240 B. A caller sizing a thread from it would have been
 the matrix data — the largest blocks in the call. Measured both ways in one process on
 `cv::findEssentialMat` at 1,000 correspondences:
 
-| instrument | OpenCV peak live heap, bytes | interposed ÷ `operator new` (>1× = `operator new` under-counts) |
+| instrument | OpenCV peak live heap, bytes | interposed ÷ `operator new` |
 |---|---|---|
 | replaced `operator new` | 2,744 | — |
 | interposed `malloc` | 46,968 | **17×** |
