@@ -1309,12 +1309,13 @@ invented on the spot, which `CLAUDE.md` forbids.
 
 **Where the ruling landed, over a seven-process re-take of every role bar:**
 
-| row | both arms, per-run medians | sign | now |
+| row | `cv::cuda` vs binCV, per-run medians | rounds won by binCV | now |
 |---|---|---|---|
-| **LK at the frontend's spacing (204 pts)** | 0.1475 ms vs **0.0792 ms** | **105–0** | **direction established, 1.35×–4.36×**; magnitude a null |
-| LK @256 / @512 | 0.1467 / 0.1634 ms vs **0.0728 / 0.1056 ms** | **105–0** each | direction established, 1.43×–5.65× and 1.13×–3.80× |
-| `threshold` 3840×2160 | 0.0362 ms vs **0.0268 ms** | 8–97 | still a null on both halves |
-| `threshold` 1920×1080 / 752×480 | 0.0116 / 0.0091 ms vs 0.0100 / 0.0084 ms | 17–88 / 44–60 (1 tied) | still a null on both halves |
+| **LK at the frontend's spacing (204 pts)** | 0.1475 ms vs **0.0792 ms** | **105 of 105** | **direction established, 1.35×–4.36×**; magnitude a null |
+| LK @256 | 0.1467 ms vs **0.0728 ms** | **105 of 105** | direction established, 1.43×–5.65×, **and** a result at 2.00× |
+| LK @512 | 0.1634 ms vs **0.1056 ms** | **105 of 105** | direction established, 1.13×–3.80×; magnitude a null |
+| `threshold` 3840×2160 | 0.0362 ms vs **0.0268 ms** | 97 of 105 | still a null on both halves |
+| `threshold` 1920×1080 / 752×480 | 0.0116 / 0.0091 ms vs 0.0100 / 0.0084 ms | 88 / 60 of 105 (one tied at 752) | still a null on both halves |
 
 The `threshold` rows cost nothing to restate: that op's written rule was a
 *fail* condition — slower than `cv::cuda::threshold` by more than both spreads —
@@ -1653,8 +1654,10 @@ construction and the per-frame loop calls no `cudaMalloc`:
 takes `std::vector<GpuMat>` and skips `buildImagePyramid`, so this is a
 like-for-like row and not a subtraction estimate — one explicit stream, 752×480,
 4 levels, **the same 31×31 window on both sides**, iteration cap 20, `err` off
-both sides, both free-running. Ship rule: **strictly faster AND sample ranges
-disjoint**.
+both sides, both free-running. The ship rule as written asked for **strictly
+faster AND sample ranges disjoint**; separation is no longer the verdict
+anywhere in this document, so the rows below are judged by the project's rule
+and the disjointness is reported as the fact it is.
 
 Both sides are laid out as measured, over seven independent processes (15 paired
 rounds each, 105 in all per row). The per-round comparison is beside them, not
