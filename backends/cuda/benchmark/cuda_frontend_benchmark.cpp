@@ -23,8 +23,9 @@
 //     distribution of per-round ratios rather than a ratio of two medians taken
 //     minutes apart.
 //   * RANGES, NOT JUST MEDIANS. Every pair prints whether the two arms' sample
-//     ranges are DISJOINT. If they overlap the ratio is not a result and the line
-//     says so.
+//     ranges are DISJOINT, as a fact beside the verdict. It is not the verdict:
+//     that is measure_util.hpp's difference-against-spread rule on the per-round
+//     ratio, which a single round slow in BOTH arms cannot veto.
 //   * ONE METER PER COMPARISON, NAMED AT THE NUMBER. Allocation sums compare
 //     binCV to binCV; a cudaMemGetInfo delta is the only meter readable on both
 //     sides of the library boundary and is the only one used there. They are

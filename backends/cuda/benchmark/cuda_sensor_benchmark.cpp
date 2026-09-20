@@ -10,10 +10,12 @@
 //     says so in words rather than leaving it to the reader.
 //   * Every ratio between two device arms comes from timeKernelPaired, which
 //     brackets both arms inside every round and alternates their order, and which
-//     reports whether the two sample RANGES are disjoint. A ratio whose ranges
-//     overlap is not a result, however far from 1.00x its median sits. That is
-//     also this family's stated rule for the vector arm: it must beat the arm it
-//     replaces by more than both arms' printed spreads.
+//     reports whether the two sample RANGES are disjoint. That separation is a
+//     REPORTED FACT; what decides whether a difference is real is
+//     measure_util.hpp's rule, the difference against the larger of the
+//     within-run spread and the run-to-run scatter, taken on the per-round
+//     ratio. This family's own bar for the vector arm is a MAGNITUDE and is
+//     unchanged: it must beat the arm it replaces by the stated factor.
 //   * Every host time is a CPU arm on this machine and is NEVER quoted as a GPU
 //     bar. It is here because binarize has no OpenCV counterpart at any API level
 //     and the host arm is one of the three references that stand in for one.

@@ -85,11 +85,13 @@ the whole attainable score range is swept exhaustively by the suite.
 
 **Two things still do NOT lead on both axes, and they are the ones to read the
 report about before using.** `cornerSubPixAsync` has **no verdict** against its
-own round-trip rule: refining resident is 0.488 ms against 0.523 ms for
-downloading the derivative planes and refining on the host, which is met by
-medians and in 6 of 7 runs but with the two ranges **overlapping**, so it is not
-a result in either direction — bit-exactness forces `double` on a part that runs
-FP64 at 1/64 rate. The **census entry** is faster than `cv::cuda::StereoBM`
+own round-trip rule. That rule asks the device arm to be strictly cheaper than
+the round trip it replaces; re-measured as **one paired comparison** on the wall
+clock — rather than as three separately-timed medians added together, which
+carries all three passes' drift — it sits at **parity**, with the median
+marginally favouring the round trip. It is a null result in either direction,
+not a miss and not a pass. Bit-exactness forces `double` on a part that runs
+FP64 at 1/64 rate, which is why. The **census entry** is faster than `cv::cuda::StereoBM`
 (1.38×) and larger on memory (1.47×), and that loss is the algorithm's rather
 than this implementation's: census expands 8 bits a pixel into a 32-bit
 descriptor word, so two transformed images are 2,820 KB before a disparity map

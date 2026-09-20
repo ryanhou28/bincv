@@ -30,8 +30,9 @@
 //     substituted with a CPU number.
 //
 //   * EVERY ARM RATIO IS AN INTERLEAVED PER-ROUND RATIO, and the printer says
-//     whether the two sample ranges are disjoint. A ratio whose ranges overlap
-//     is not a result however far from 1.00x it sits.
+//     whether the two sample ranges are disjoint -- a fact, not the verdict.
+//     What decides is measure_util.hpp's rule: the difference must exceed the
+//     larger of the within-run spread and the run-to-run scatter.
 
 #include <cstdint>
 #include <cstdio>

@@ -75,7 +75,10 @@
 // three times gives geometry-stage times that differ by 2.2x -- so every ratio
 // here is measured INTERLEAVED, arm A then arm B then arm B then arm A, with
 // the ratio formed WITHIN each round. Ranges are printed beside every median,
-// and a ratio whose two arms' ranges overlap is not a result and says so.
+// as a fact about the samples rather than as the verdict: whether a difference
+// is real is measure_util.hpp's difference-against-spread rule on the per-round
+// ratio, and overlapping ranges are what one round slow in BOTH arms produces
+// without moving that ratio at all.
 //
 // Nothing here is a shipping operation. The device kernels live in
 // cuda_ransac_kernels.cu, are not compiled into bincv_cuda, and are reachable
@@ -449,7 +452,7 @@ int main() {
                     H, p.b.median, p.b.lo, p.b.hi, p.a.median, p.a.lo, p.a.hi,
                     R < 1u ? 1u : R, deviceTotal / p.a.median,
                     static_cast<double>(H) / p.b.median,
-                    p.overlap ? "OVERLAP -- not a result" : "disjoint");
+                    p.overlap ? "ranges OVERLAP" : "ranges disjoint");
     }
 
     const double hostPerHyp = hostSearchMs / static_cast<double>(I);

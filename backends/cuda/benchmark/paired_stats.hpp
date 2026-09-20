@@ -101,8 +101,10 @@
 // measuring the arms.
 //
 // In factors both quantities are invariant under the swap: inverting the ratio
-// replaces median by 1 / median, which leaves max(median, 1/median) alone, and
-// replaces (min, max) by (1/max, 1/min), which leaves max / min alone. Both
+// replaces the median by 1 / median -- which is what medianOfRatios is for, and
+// is NOT true of an arithmetic midpoint at an even round count -- and that
+// leaves max(median, 1/median) alone; it replaces (min, max) by (1/max, 1/min),
+// which leaves max / min alone. Both
 // rows above then read 12.03x against 2.30x and the answer is A RESULT either
 // way. This is exactly the property the geometric mean was chosen for at the
 // top of this file -- centre(B/A) = 1 / centre(A/B) -- and a predicate that
@@ -141,10 +143,10 @@ struct Timing {
 /// @brief min / median / max of a sample set, sorted in place.
 /// @note The median of an even count is the arithmetic midpoint of the two
 /// central samples, which is what measure::Timing does -- so "median" means
-/// the same thing in both harnesses. For a RATIO the multiplicative
-/// midpoint would be marginally more principled, and it is not worth a
-/// second definition of the word: two adjacent samples 10% apart differ by
-/// 0.1% between the two midpoints.
+/// the same thing in both harnesses for a set of TIMES. A set of RATIOS
+/// needs the multiplicative midpoint instead, and that is not a refinement:
+/// see medianOfRatios, which exists because the arithmetic midpoint breaks
+/// the invariance this file's predicate is built on.
 inline Timing summarize(std::vector<double> samples) {
     std::sort(samples.begin(), samples.end());
     Timing t;
@@ -155,6 +157,30 @@ inline Timing summarize(std::vector<double> samples) {
     t.medianMs = (m % 2 == 1) ? samples[m / 2]
                               : 0.5 * (samples[m / 2 - 1] + samples[m / 2]);
     return t;
+}
+
+/// @brief The median of a set of RATIOS, which is not quite summarize()'s.
+/// @note For an odd count it is the same number -- the middle sample -- because
+/// inverting every ratio reverses the sorted order and leaves the middle
+/// element where it was. For an EVEN count summarize() takes the arithmetic
+/// midpoint of the two central samples, and that does NOT commute with
+/// inverting the ratio: (x + y) / 2 is not 1 / ((1/x + 1/y) / 2). So at even
+/// round counts the whole swap-invariance this file's predicate rests on
+/// quietly fails. Measured before it was fixed: two rounds whose ratios are
+/// 1.0 and 1.5127 read 1.2563x apart one way round and 1.2040x the other,
+/// and over a sweep of random pairs EVERY even-count pair disagreed with its
+/// own mirror image -- four of them all the way to opposite verdicts, which
+/// is the exact failure the factor spelling was adopted to remove.
+/// @note The GEOMETRIC midpoint sqrt(x * y) commutes exactly, and for two
+/// adjacent samples it sits a fraction of a percent from the arithmetic one,
+/// so it costs nothing where the rounds are tight. It is the same argument
+/// the geometric mean is here for, applied to the midpoint.
+inline double medianOfRatios(std::vector<double> ratios) {
+    if (ratios.empty()) return 0.0;
+    std::sort(ratios.begin(), ratios.end());
+    const size_t m = ratios.size();
+    if (m % 2 == 1) return ratios[m / 2];
+    return std::sqrt(ratios[m / 2 - 1] * ratios[m / 2]);
 }
 
 // ---------------------------------------------------------------------------
@@ -352,8 +378,10 @@ inline PairedTiming summarizePaired(const std::vector<double>& sa,
     p.b = summarize(std::vector<double>(sb.begin(), sb.begin() + cut));
     const Timing rt = summarize(ratios);
     p.ratioMin = rt.minMs;
-    p.ratioMedian = rt.medianMs;
     p.ratioMax = rt.maxMs;
+    // NOT rt.medianMs: a ratio's midpoint has to be the multiplicative one, or
+    // the verdict depends on which arm is the denominator at even round counts.
+    p.ratioMedian = medianOfRatios(ratios);
     p.ratioGeoMean = logCount > 0 ? std::exp(logSum / static_cast<double>(logCount)) : 0.0;
     p.rounds = static_cast<int>(n);
     return p;

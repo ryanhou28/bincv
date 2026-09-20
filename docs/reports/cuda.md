@@ -104,10 +104,20 @@ implied here.
 - **Lucas-Kanade leads only up to about 512–1024 keypoints**, and the win is the
   launch shape rather than the kernel — profiled, the kernel work is a 1.56×
   loss. Whether that ships with the density named in the header, or the
-  traversal is redesigned first, is the ship-rule escape and it is unmade.
+  traversal is redesigned first, is the ship-rule escape and it is unmade. A
+  **second** question now rides with it: re-taken under the project's own rule
+  rather than the range test, the lead at the frontend's own spacing is a *null
+  result* — 2.18× apart against a 3.05× within-run swing — even though all 105
+  paired rounds favour binCV and the ratio never rises above 0.61. See
+  [the judgement the corrected rule needs](#the-judgement-the-corrected-rule-needs).
 - **The gated matcher's device speed rationale is not established** — gated
-  against brute force reads 1.11× with the ranges overlapping, which is not a
-  result. It ships for the caller who already has the gate, not on that number.
+  against brute force reads 1.11×, and a difference that small is not one this
+  host's noise can resolve. It ships for the caller who already has the gate,
+  not on that number. (That row was originally called "not a result" because the
+  two arms' *ranges overlapped*; that test has since been corrected to the
+  project's own rule, and this row has **not** been re-taken under it. 1.11× is
+  well inside the noise either way, so the disposition stands and the evidence
+  for it is weaker than the corrected rule could make it.)
 - **Device occupancy was dropped on a measurement** rather than written.
 
 Three entries left this list. The **resident frontend** was 1.22× slower than
@@ -195,7 +205,12 @@ KB/frame**: 1.79% of the binary entry, 0.18% of the census entry, 0.26% of
 StereoBM. That the rounding is small is a bound and not a proof of convergence,
 so the smallest of the three is also read at 64 replicas, where a unit is 32.0
 KB/frame — it reads **448.0 KB/frame at both counts, 1.0000×**. Every figure
-above is identical to the byte in all seven runs.
+above is identical **to the byte** in every run of it — seven independent
+processes in the verification pass read 117,440,512 / 1,180,696,576 /
+805,306,368 / 805,306,368 raw bytes, seven times out of seven.
+The format's own arithmetic agrees from the other direction — two bit planes at
+24 words of 32 bits per row plus a 752×480 byte map is 442.5 KB, against 448.0
+KB metered, the 5.5 KB being the driver's rounding across three allocations.
 
 **StereoBM's footprint is not content-dependent**, which had to be checked
 rather than assumed: OpenCV's FAST sizes its output by corners *found*, so its
@@ -323,6 +338,18 @@ measurement of it.
   the pyramid ladder. **Morphology, the medians and the StereoBM headline were
   not affected**: their kernels are long enough that one sync is noise, and the
   StereoBM row was re-taken under this protocol and reproduced.
+- **How a difference is decided, and it is not a range test.** Every ratio here
+  is a per-round **paired** ratio, the quoted value is its **median**, and what
+  decides whether it is real is `benchmark/measure_util.hpp`'s own rule: the
+  difference must exceed **the larger of** the within-run spread and the
+  run-to-run scatter. Earlier rounds of this document instead used
+  `PairedTiming::separated()` — arm A's *worst* sample beating arm B's *best* —
+  which appears nowhere in `measure_util.hpp` or `CLAUDE.md`, is strictly
+  stronger, and is vetoed by a single round slow in **both** arms, which is the
+  drift the paired design exists to cancel. Separation is still computed and
+  printed at every row, as a fact beside the verdict rather than as the verdict.
+  The full account, including why the deciding quantities are factors and not
+  percentages, is in [How a difference is decided](#how-a-difference-is-decided).
 - Reproduce: `cuda_dense_benchmark`, `cuda_foundation_benchmark`, and (with a
   cudastereo-enabled OpenCV) `cuda_stereobm_benchmark`.
 
@@ -753,17 +780,26 @@ gate-excluded control at 4095×2160, where a tight stride of 4095 is not a
 multiple of 4 and the alignment gate refuses the arm, reads **1.00× in 7 of 7
 runs**. That control is run at the top of the ladder on purpose: at a
 launch-bound size a control cannot detect a mis-attached switch, and the
-benchmark prints why. Morphology's three arms did *not* separate: the 3×3
-specialization reads 0.98×/0.92× with 0 of 7 disjoint at both sizes, the
-word-parallel `__brev` border 0.74×/0.59× with 0 and 1 of 7, and the `andNot`
-fusion 0.73×/0.76× with 0 of 7. Their compulsory traffic is 92 KB at 752×480 —
-**0.0002 ms against a ~0.011 ms launch floor** — so binCV's binary morphology is
-launch-bound at every frame size a vision pipeline uses and these comparisons
-have no resolution rather than a negative result. All three remain the default;
-the word-parallel border is additionally defensible on correctness surface,
-since it deletes the per-pixel border path, its divergence and its lost-update
-race together. **Two dispositions here are owner calls, not measurements**, and
-are recorded as open rather than settled.
+benchmark prints why. **Morphology's three arms, re-judged under the project's
+own rule over seven processes each** (medians quoted 752×480 / 1920×1080, and
+the bar each must clear is the larger of the within-run swing and the
+run-to-run scatter):
+
+| arm | 752×480 | 1920×1080 |
+|---|---|---|
+| 3×3 specialization | 0.995×, bar 2.31× — **null** | 0.894×, bar 2.74× — **null** |
+| word-parallel `__brev` border | 0.735×, bar 1.95× — **null** | **0.539× (1.86× apart), bar 1.66× — a result**, 77 of 77 rounds, 6 of 7 runs disjoint |
+| `andNot` fusion (GRADIENT) | 0.787×, bar 2.49× — **null** | 0.770×, bar 2.54× — **null** |
+
+The compulsory traffic behind these is 92 KB at 752×480 — **0.0002 ms against a
+~0.011 ms launch floor** — so binCV's binary morphology is launch-bound at every
+frame size a vision pipeline uses, and the four nulls are a lack of resolution
+rather than a negative result. What changed with the rule is one row: the
+word-parallel border's 1.86× at 1080p now clears its noise, so it has a measured
+speed argument on top of the correctness-surface one that already justified it
+(it deletes the per-pixel border path, its divergence and its lost-update race
+together). The other two remain defaults on grounds other than a measured win,
+which is **an owner call and is recorded as open rather than settled**.
 
 The `uint4` arm for `denoiseMedian3` was written, proven bit-exact, timed on the
 full ladder, and **dropped with its off-switch** — it never separated (0.97–1.04×
@@ -1134,21 +1170,28 @@ surcharge measured up to 7.18× here, and a default-stream pair in
 `cuda_sensor_benchmark` that printed "7.35× FASTER" for `threshold` has been
 deleted rather than repaired — `cuda_role_benchmark` owns that comparison.
 
-| operation | `cv::cuda` arm | OpenCV | binCV | ratio | disjoint | verdict |
-|---|---|---|---|---|---|---|
-| `threshold` 752×480 | `cv::cuda::threshold` | 0.0100 ms | 0.0094 ms | 1.000 | 0/7 | **PASS** |
-| `threshold` 1920×1080 | ″ | 0.0124 ms | 0.0114 ms | 0.908 | 0/7 | **PASS** |
-| `threshold` 3840×2160 | ″ | 0.0367 ms | 0.0272 ms | **0.744** | 1/7 | **PASS** |
-| describe, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 ms | 0.0107 ms | **0.108** | **7/7** | **MET, 9.3×** |
-| FAST | `FastFeatureDetector` | 0.1459 ms | **0.0247 ms** | **0.166** | **7/7** | **MET, 6.01× — was 14.84** |
-| `goodFeaturesToTrack` (wall) | `createGoodFeaturesToTrackDetector` | 4.6629 ms | **0.8983 ms** | **0.189** | **7/7** | **SHIPS, 5.3×** |
-| min-eigenvalue response | `createMinEigenValCorner` | 0.0557 ms | 0.0626 ms | 1.131 | **0/7** | **still not a result** |
-| Lucas-Kanade, 204 pts | `SparsePyrLKOpticalFlow` | 0.1647 ms | **0.0812 ms** | **0.505** | **7/7** | **MET at frontend density** |
-| Lucas-Kanade, 2048 pts | ″ | 0.3252 ms | 0.3563 ms | 1.091 | **0/7** | **not a result — the crossover** |
-| descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 ms | **0.2189 ms** | **0.109** | **7/7** | **MET, 9.1×** |
-| census matcher | `cv::cuda::StereoBM(64,9)` | 0.6864 ms | **0.3692 ms** | **0.536** | **7/7** | **MET, 1.87×** |
-| census entry (2 transforms + match) | ″ | 0.6996 ms | **0.5076 ms** | **0.723** | **7/7** | **MET on speed, LOSES on memory** |
-| binary entry | ″ | 0.7152 ms | **0.0648 ms** | **0.091** | **7/7** | **MET, 11.0×** |
+The **verdict** column below is the *published* one, set when these rows were
+taken under the range test. The rightmost column is what
+`measure_util.hpp`'s own rule says on a seven-run re-take of every one of them
+(see [the judgement the corrected rule needs](#the-judgement-the-corrected-rule-needs)
+— three rows move, and not in the direction a rule change is usually suspected
+of).
+
+| operation | `cv::cuda` arm | OpenCV | binCV | ratio | disjoint | verdict | re-taken: apart vs bar |
+|---|---|---|---|---|---|---|---|
+| `threshold` 752×480 | `cv::cuda::threshold` | 0.0100 ms | 0.0094 ms | 1.000 | 0/7 | **PASS** | 1.004× vs **6.19×** — null |
+| `threshold` 1920×1080 | ″ | 0.0124 ms | 0.0114 ms | 0.908 | 0/7 | **PASS** | 1.105× vs **2.73×** — null |
+| `threshold` 3840×2160 | ″ | 0.0367 ms | 0.0272 ms | **0.744** | 1/7 | **PASS** | 1.352× vs **1.93×** — null |
+| describe, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 ms | 0.0107 ms | **0.108** | **7/7** | **MET, 9.3×** | 9.25× vs 2.10× — **a result** |
+| FAST | `FastFeatureDetector` | 0.1459 ms | **0.0247 ms** | **0.166** | **7/7** | **MET, 6.01× — was 14.84** | 6.01× vs 3.39× — **a result** |
+| `goodFeaturesToTrack` (wall) | `createGoodFeaturesToTrackDetector` | 4.6629 ms | **0.8983 ms** | **0.189** | **7/7** | **SHIPS, 5.3×** | 4.59× vs 1.76× — **a result** |
+| min-eigenvalue response | `createMinEigenValCorner` | 0.0557 ms | 0.0626 ms | 1.131 | **0/7** | **still not a result** | 1.066× vs 2.10× — null |
+| Lucas-Kanade, 204 pts | `SparsePyrLKOpticalFlow` | 0.1647 ms | **0.0812 ms** | **0.505** | **7/7** | **MET at frontend density** | 2.18× vs **3.05×** — **null → needs a ruling** |
+| Lucas-Kanade, 2048 pts | ″ | 0.3252 ms | 0.3563 ms | 1.091 | **0/7** | **not a result — the crossover** | 1.091× vs 1.44× — null |
+| descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 ms | **0.2189 ms** | **0.109** | **7/7** | **MET, 9.1×** | 9.11× vs 1.29× — **a result** |
+| census matcher | `cv::cuda::StereoBM(64,9)` | 0.6864 ms | **0.3692 ms** | **0.536** | **7/7** | **MET, 1.87×** | 1.94× vs 1.37× — **a result** |
+| census entry (2 transforms + match) | ″ | 0.6996 ms | **0.5076 ms** | **0.723** | **7/7** | **MET on speed, LOSES on memory** | 1.47× vs 1.25× — **a result** |
+| binary entry | ″ | 0.7152 ms | **0.0648 ms** | **0.091** | **7/7** | **MET, 11.0×** | 10.95× vs 1.78× — **a result** |
 | block matching | `SparsePyrLKOpticalFlow` | 0.2320 ms | **0.0540 ms** | **0.230** | **7/7** | speed MET; **accuracy floor unset** |
 
 **Three rows changed direction since the previous round, and one row is new
@@ -1192,6 +1235,53 @@ first time both sides of that path were metered in one region.
 `kReplicas` — where it was the outlier at 32.** That is not a different meter,
 only a finer one, and the change is stated because the row moved by 6% between
 two harnesses that both satisfied the eight-unit rule at 64.
+
+### The judgement the corrected rule needs
+
+Replacing the range test with `measure_util.hpp`'s own rule was expected to
+*unblock* effects the range test had vetoed, and it did — one, the word-parallel
+morphology border. Re-taking **every** published role bar under the same rule
+turned up the other direction too, which the first pass did not check because it
+only re-judged rows the old rule had blocked:
+
+| row | median | apart | within-run swing | run-to-run | sign | published | corrected rule |
+|---|---|---|---|---|---|---|---|
+| **LK at the frontend's own spacing (204 pts)** | 0.459 | 2.18× | **3.05×** | 1.43× | **105–0** | **MET at frontend density**, 7/7 disjoint | **null result** |
+| `threshold` 3840×2160 | 0.740 | 1.35× | 1.93× | 1.04× | 97–8 | PASS | null result |
+| `threshold` 1920×1080 / 752×480 | 0.905 / 1.004 | 1.11× / 1.00× | 2.73× / 6.19× | 1.20× / 1.16× | 76–29 / 53–52 | PASS | null result |
+
+The `threshold` rows cost nothing to restate: that op's written rule was a
+*fail* condition — slower than `cv::cuda::threshold` by more than both spreads —
+and a null result is not slower. **`PASS` there means "no longer fails", and it
+still does.** What should stop being quoted is the *magnitude*: 1.34× at 4K is a
+median this host's noise does not resolve.
+
+**The LK row is a real conflict and it is not mine to settle.** Every one of its
+105 paired rounds favours binCV, all seven runs are range-disjoint, the per-round
+ratio never once rises above 0.61 — the two arms are never closer than 1.6×
+apart in any round measured — and the run-to-run half of the rule would clear it
+at 2.18× against 1.43×. It fails on the *within-run* half, whose 3.05× comes
+from the ratio occasionally dipping to 0.15, which is noise **in binCV's
+favour**. So the rule, read literally, calls "the two arms are the same speed as
+far as this run can tell" on a pair that this run never once saw closer than
+1.6× apart.
+
+That is a property of the rule's spelling, not of the data: `max / min` of the
+per-round ratio is a *full range*, and asking a difference to exceed the full
+range of fifteen samples is a much stronger demand than asking it to exceed the
+uncertainty in their centre. It is the same conservatism everywhere in this
+document — it is why so many rows read null — and on a row whose sign test is
+2⁻¹⁰⁴ it produces an answer that is hard to defend in words.
+
+**Three things are true at once and none of them is a measurement**: the project's
+written rule says null; the sign test says the direction is certain; and
+`CLAUDE.md` forbids inventing a spread statistic that nobody has chosen. So the
+row is reported with all three numbers and **no verdict is issued**, and what
+needs an owner ruling is narrow: *when the per-round ratio never crosses 1.00×
+in any round, is the deciding spread still the ratio's full range, or the
+uncertainty in its median?* Until that is answered the published "MET at
+frontend density" rests on the range test, which this document has just stopped
+using — so it is marked as needing a ruling rather than either kept or withdrawn.
 
 **`cuda::threshold` clears the bar its own round-1 rule failed.** That rule's
 fail condition — slower than `cv::cuda::threshold` by more than both printed
@@ -1384,18 +1474,54 @@ shows is compute-bound at 67–74% SM. The byte-lane arm does not depend on the
 outcome: it clears its bar at **2.66× over the row grid at 4K, 7 of 7 disjoint**,
 and `packQuant` shows no regression at any geometry.
 
-### A harness limit that now decides more than it should
+### The harness limit that decided more than it should — resolved, and what it did not change
 
-Three real effects in this round have medians far from 1.00 with every run
-one-sided and only a minority of runs range-disjoint: the row-grid packer arm,
-the fused `derivativeXY` (2.00× at 752×480, decaying to 1.32× at 4K exactly as
-its author predicted in writing for a signature result, but 3/7, 3/7, 1/7
-disjoint) and the bit-plane orientation arm. `PairedTiming::separated()` is a
-min/max range test, and a single outlier destroys it where the per-round ratio
-distribution from the same rounds stays tight and one-sided. On an idle GPU this
-is still the wall. It is recorded here as an open question about the harness —
-whether `separated()` or a one-sided per-round test is the standard — and not
-worked around by relaxing any individual bar.
+Earlier rounds of this document recorded an open question: three effects had
+medians far from 1.00 with every run one-sided and only a minority of runs
+range-disjoint — the row-grid packer arm, the fused `derivativeXY` and the
+bit-plane orientation arm — and `PairedTiming::separated()`, a min/max range
+test, called all three "not a result".
+
+**The question is answered, and not in the direction that would have been
+convenient.** The range test was never this project's rule: `measure_util.hpp`
+asks for a difference-against-spread test on medians, against the larger of the
+within-run spread and the run-to-run scatter, and `max(A) < min(B)` appears
+nowhere in it or in `CLAUDE.md`. It is strictly stronger, and it is vetoed by a
+single round that is slow in **both** arms — which is drift, the exact thing the
+paired design cancels. The harness now applies the project's rule (see
+[Setup](#setup)), and separation is printed beside every verdict as a fact.
+
+**Adopting the correct rule did not turn those effects into wins.** Re-measured
+over seven independent processes each, with both halves of the rule applied:
+
+| effect | geometry | median | apart | within-run swing | run-to-run | sign | verdict |
+|---|---|---|---|---|---|---|---|
+| packer row grid | 1920×1080 | 0.706 | 1.416× | 1.912× | 1.106× | 100–5 | **null result** |
+| packer row grid | 752×480 | 0.880 | 1.136× | 3.121× | 1.210× | 80–24 | null result |
+| packer row grid | 3840×2160 | 0.827 | 1.210× | 1.688× | 1.010× | 89–15 | null result |
+| `packQuant` row grid | 752×480 / 1080p / 4K | 0.843 / 0.751 / 0.840 | 1.186 / 1.332 / 1.191× | 2.360 / 1.777 / 1.616× | ≤1.10× | — | null result |
+| morphology 3×3 specialization | 752×480 | 0.995 | 1.005× | 2.308× | 1.108× | 44–33 | null result |
+| morphology 3×3 specialization | 1920×1080 | 0.894 | 1.119× | 2.743× | 1.131× | 59–18 | null result |
+| **morphology word-parallel border** | **1920×1080** | **0.539** | **1.857×** | **1.663×** | **1.141×** | **77–0** | ***a result*** |
+| morphology word-parallel border | 752×480 | 0.735 | 1.360× | 1.948× | 1.409× | 63–14 | null result |
+
+**One verdict changed and the rest did not**, which is the useful thing to be
+able to say about a rule change: it did not act as a way to manufacture wins.
+
+**Why the internal arms stay null is measurable rather than arguable.** The
+row-grid arm's seven per-run medians at 1920×1080 are 0.708, 0.708, 0.640,
+0.693, 0.708, 0.694, 0.706 — six of them within 1.01× of each other, and 100 of
+105 paired rounds fall the same way. Yet the *within-run* swing of the per-round
+ratio is 1.91×, and the rule takes the larger of the two noises. That larger one
+is within-run: it is this WSL2 host's scheduling on batches of a few hundred
+microseconds, not the kernels. Shrinking it means more enqueues per round, which
+would move every number in this document — a change of its own, not a correction
+to this one.
+
+So the arms remain as they were: the row-grid packer and the 3×3 morphology
+specialization are defaults on grounds other than a measured speed win, and the
+word-parallel border now has one at 1080p on top of the correctness-surface
+argument that already justified it.
 
 ## Tracking on device
 
@@ -2241,43 +2367,67 @@ the kind of number `CLAUDE.md` says not to invent.
 spelling — `|median − 1|` against `(max − min) / median`, both as percentages —
 is not a comparison at all, because it depends on which arm is the denominator.
 `|median − 1|` cannot exceed 100% for the arm that is *faster*, however far
-ahead it is, while the spread has no ceiling. Measured on this report's own
-headline row, the same fifteen paired rounds:
+ahead it is, while the spread has no ceiling. Measured on a row from this
+round — binCV's `erode` on a 5×5 ellipse against `cv::cuda`'s, fifteen paired
+rounds at 752×480:
 
 | orientation | difference | spread | verdict |
 |---|---|---|---|
-| binCV / OpenCV | 91.7% | 109.9% | NULL |
-| OpenCV / binCV | 1103.4% | 66.6% | RESULT |
+| binCV / OpenCV | 96.6% | 225.7% | NULL |
+| OpenCV / binCV | 2864.3% | 84.6% | RESULT |
 
-Same rounds, same arms, opposite answers, decided by argument order — a 12×
-lead with a 15–0 sign split reported as "the same speed as far as this run can
-tell". In factors both quantities survive the inversion (12.03× against 2.30×,
-either way round), which is the property the geometric mean is already used
-for here. `PairedStats.TheVerdictDoesNotDependOnWhichArmIsTheDenominator` pins
-it.
+Same rounds, same arms, opposite answers, decided by argument order — one arm
+is **thirty times** the other and one spelling reports "the same speed as far
+as this run can tell". In factors both quantities survive the inversion
+(**29.6× apart against a 3.63× swing**, either way round), which is the property
+the geometric mean is already used for here.
+`PairedStats.TheVerdictDoesNotDependOnWhichArmIsTheDenominator` pins it.
+
+The pathology needs a wide swing to bite, so it does not show on every row: the
+binary dense headline, re-taken for this pass, read 0.0914 (10.95× apart) with a
+swing of only 1.46×, which is a result under either spelling. That is exactly
+why it cannot be left to chance — whether the wrong spelling changes a verdict
+depends on how noisy the run happened to be.
+
+**The median of an even number of ratios is their multiplicative midpoint**, for
+the same reason. An arithmetic midpoint does not commute with inverting the
+ratio — `(x + y)/2` is not `1/((1/x + 1/y)/2)` — so at even round counts the
+verdict depended on argument order even in factors: two rounds whose ratios are
+1.0 and 1.5127 read **1.2563× apart one way and 1.2040× the other**. Over a
+sweep of random pairs every even-count pair disagreed with its own mirror image,
+four of them all the way to opposite verdicts; odd counts were already exact,
+because inverting reverses the sorted order and leaves the middle sample where
+it was. `backends/cuda/tests/test_cuda_bench_stats` pins the whole of this
+against hand-computed values, in 118 checks, and needs no GPU.
 
 ### What changed when the rule was applied
 
 Every effect the old rule had blocked was re-measured over seven runs and
-re-judged, and the rows that already cleared it were re-taken beside them. The point
-of the revision was to use the project's rule, not to manufacture wins, and it
-does not only produce wins:
+re-judged, **and so was every row the old rule had passed** — the second half
+matters, because a rule that is merely *different* moves rows in both
+directions, and re-judging only what it might unblock would have found only
+wins. It does not only produce wins: one blocked effect clears, two published
+rows stop clearing, and everything else stays where it was.
 
 | effect | old reading | new reading (7 runs) | verdict |
 |---|---|---|---|
-| binary dense vs StereoBM | 11.0×, 7/7 disjoint | **10.8×**, within 1.80×, r2r 1.18×, 105–0 | RESULT — **unchanged**, but under the *percentage* spelling it would have read NULL |
-| census entry vs StereoBM | 1.38×, 7/7 disjoint | **1.43×**, within 1.33×, r2r 1.11×, 105–0 | RESULT — unchanged |
-| census warp-box off-switch | 2.49×, disjoint | **2.40×**, within 1.31×, r2r 1.06× | RESULT — unchanged |
-| packer, row grid vs grid-stride @1920×1080 | ~1.24×, ranges overlapped → "not a result" | 1.418×, within **2.16×**, r2r 1.41×, 91–14 | **still NULL** |
-| packer, row grid @752×480 / @3840×2160 | not a result | 1.118× / 1.206×, within 3.20× / 1.97× | **still NULL** |
-| `packQuant` row grid, all three geometries | not a result | 1.134× / 1.336× / 1.208× | **still NULL** |
-| morphology 3×3 specialization | under the launch floor at every size | 1.031× @752×480, 1.104× @1920×1080 | **still NULL** |
-| morphology word-parallel border | under the launch floor at every size | **1.800× @1920×1080**, within 1.598×, r2r 1.205×, 75–2 | **NULL → RESULT** |
-| morphology word-parallel border @752×480 | under the launch floor | 1.359×, within 2.46× | still NULL |
+| binary dense vs StereoBM | 11.0×, 7/7 disjoint | **10.95×**, within 1.78×, r2r 1.18×, 105–0 | RESULT — unchanged |
+| census entry vs StereoBM | 1.38×, 7/7 disjoint | **1.47×**, within 1.25×, r2r 1.14×, 105–0 | RESULT — unchanged |
+| census matcher vs StereoBM | 1.87×, 7/7 disjoint | **1.94×**, within 1.37×, r2r 1.07×, 105–0 | RESULT — unchanged |
+| census warp-box off-switch | 2.49×, disjoint | **2.51×**, within 1.24×, r2r 1.08×, 105–0 | RESULT — unchanged |
+| packer, row grid vs grid-stride @1920×1080 | ~1.24×, ranges overlapped → "not a result" | **1.416×**, within **1.91×**, r2r 1.11×, 100–5 | **still NULL** |
+| packer, row grid @752×480 / @3840×2160 | not a result | **1.136× / 1.210×**, within 3.12× / 1.69× | **still NULL** |
+| `packQuant` row grid, all three geometries | not a result | **1.186× / 1.332× / 1.191×**, within 2.36× / 1.78× / 1.62× | **still NULL** |
+| morphology 3×3 specialization | under the launch floor at every size | **1.005× @752×480, 1.119× @1920×1080**, within 2.31× / 2.74× | **still NULL** |
+| morphology word-parallel border | under the launch floor at every size | **1.857× @1920×1080**, within 1.66×, r2r 1.14×, 77–0, 6/7 disjoint | **NULL → RESULT** |
+| morphology word-parallel border @752×480 | under the launch floor | **1.360×**, within 1.95×, r2r 1.41× | still NULL |
+| `andNot` GRADIENT fusion | under the launch floor at every size | **1.272× @752×480, 1.299× @1920×1080**, within 2.49× / 2.54× | **still NULL** |
 | `cornerSubPixAsync` round-trip rule | met in 6/7 runs, medians 1.07× | **1.02×**, within 1.55×, 50–27 *against* the device arm | **still NULL — and the median changed sides** |
-| `cornerMinEigenValAsync` vs `cv::cuda` | 1.131×, no run disjoint | **1.050×**, within 2.12×, r2r 1.19×, 61–44 | still NULL |
-| LK @1024 keypoints | crossover "not a result" | 1.033×, within 2.27×, r2r 1.11×, 61–44 | **still NULL** |
-| LK @2048 keypoints | crossover "not a result" | 1.074×, within **1.43×**, r2r **1.04×**, 80–25 | **still NULL**, and narrowly: the run-to-run half alone would clear it |
+| `cornerMinEigenValAsync` vs `cv::cuda` | 1.131×, no run disjoint | **1.066×**, within 2.10×, r2r 1.18×, 66–39 | still NULL |
+| LK @1024 keypoints | crossover "not a result" | **1.067×**, within 2.39×, r2r 1.05×, 81–24 | **still NULL** |
+| LK @2048 keypoints | crossover "not a result" | **1.091×**, within **1.44×**, r2r **1.03×**, 80–25 | **still NULL**, and narrowly: the run-to-run half alone would clear it |
+| **LK at the frontend's own spacing** | **MET**, 7/7 disjoint | **2.18× apart**, within **3.05×**, r2r 1.43×, **105–0** | **RESULT → null.** The rule moves rows *both* ways; this one needs a ruling — see [above](#the-judgement-the-corrected-rule-needs) |
+| `threshold`, all three geometries | PASS, 0–1/7 disjoint | 1.00× / 1.11× / 1.35×, within 6.19× / 2.73× / 1.93× | **PASS → null on magnitude.** The op's written rule is a *fail* condition and a null is not a failure; the 1.34× at 4K should stop being quoted |
 
 Three of these deserve a sentence rather than a row.
 

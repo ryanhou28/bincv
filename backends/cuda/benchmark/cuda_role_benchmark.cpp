@@ -2077,8 +2077,8 @@ int main(int argc, char** argv) {
             const double ratio = e.medianMs > 0.0 ? d.medianMs / e.medianMs : 0.0;
             const bool overlap = !(d.maxMs < e.minMs || e.maxMs < d.minMs);
             std::printf(" %-46s %8.4f ms %8.4f ms %7.2fx  %s\n", pr.name, d.medianMs,
-                        e.medianMs, ratio, overlap ? "(ranges OVERLAP -- not a result)"
-                                                   : "(ranges disjoint)");
+                        e.medianMs, ratio, overlap ? "(ranges OVERLAP)"
+                                                   : "(ranges DISJOINT)");
             std::printf("STREAMCOST,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d\n", pr.name,
                         d.minMs, d.medianMs, d.maxMs, e.minMs, e.medianMs, e.maxMs,
                         overlap ? 0 : 1);
@@ -3646,8 +3646,7 @@ int main(int argc, char** argv) {
                                 ? dt.medianMs / ht.medianMs : 0.0,
                             dt.medianMs > 0.0 ? ht.medianMs / dt.medianMs : 0.0,
                             dt.medianMs < ht.medianMs ? "FASTER" : "SLOWER",
-                            disjoint ? "DISJOINT -- a result"
-                                     : "OVERLAP -- NOT a result at this sample size");
+                            disjoint ? "DISJOINT" : "OVERLAP");
                 std::printf("   keypoints tracked: device %u/frame, host %zu/frame%s\n",
                             devCount, hostCount,
                             static_cast<size_t>(devCount) == hostCount

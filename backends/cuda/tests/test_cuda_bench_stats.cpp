@@ -210,6 +210,48 @@ BINCV_TEST(PairedStats, TheVerdictDoesNotDependOnWhichArmIsTheDenominator) {
     BINCV_CHECK(rev.differencePct() > rev.ratioSpreadPct());
 }
 
+BINCV_TEST(PairedStats, TheVerdictIsArmOrderIndependentAtAnEvenRoundCount) {
+    // THE CASE THE ODD-COUNT VERSION ABOVE CANNOT SEE. Inverting every ratio
+    // reverses the sorted order, so for an ODD count the middle sample stays
+    // the middle sample and the median commutes with the inversion for free.
+    // At an EVEN count the two central samples get averaged, and an arithmetic
+    // average does not commute: (x + y) / 2 is not 1 / ((1/x + 1/y) / 2).
+    // Two rounds, ratios 1.0 and 1.5127, are enough to show it.
+    const std::vector<double> a = {1.0, 1.0};
+    const std::vector<double> b = {1.0, 1.5127};
+
+    const PairedTiming fwd = summarizePaired(a, b);
+    const PairedTiming rev = summarizePaired(b, a);
+
+    // The multiplicative midpoint, sqrt(1.0 * 1.5127). The arithmetic midpoint
+    // would be 1.25635, and reading the same two rounds the other way round
+    // would then have reported 1.20404 -- a different number of times apart
+    // for one pair of rounds, decided by argument order alone.
+    BINCV_CHECK(near(fwd.ratioMedian, std::sqrt(1.5127), 1e-12));
+    BINCV_CHECK(!near(fwd.ratioMedian, 0.5 * (1.0 + 1.5127), 1e-6));
+
+    // Reciprocal to the bit's worth of tolerance, which is the property the
+    // whole factor spelling rests on.
+    BINCV_CHECK(near(fwd.ratioMedian * rev.ratioMedian, 1.0, 1e-12));
+    BINCV_CHECK(near(fwd.differenceFactor(), rev.differenceFactor(), 1e-12));
+    BINCV_CHECK(near(fwd.ratioSwingFactor(), rev.ratioSwingFactor(), 1e-12));
+    BINCV_CHECK(fwd.differenceClearsNoise(kScatterNotMeasured) ==
+                rev.differenceClearsNoise(kScatterNotMeasured));
+
+    // A four-round set, to show it is not a property of pairs of two: ratios
+    // 0.5, 0.8, 1.25, 2.0 -- central pair 0.8 and 1.25, whose geometric
+    // midpoint is exactly 1.0 and whose arithmetic midpoint is 1.025.
+    const std::vector<double> c = {1.0, 1.0, 1.0, 1.0};
+    const std::vector<double> d = {0.5, 0.8, 1.25, 2.0};
+    const PairedTiming q = summarizePaired(c, d);
+    const PairedTiming qr = summarizePaired(d, c);
+    BINCV_CHECK(near(q.ratioMedian, 1.0, 1e-12));
+    BINCV_CHECK(near(q.ratioMedian * qr.ratioMedian, 1.0, 1e-12));
+    // Parity on the median, so a null result whichever way it is read.
+    BINCV_CHECK(!q.differenceClearsNoise(kScatterNotMeasured));
+    BINCV_CHECK(!qr.differenceClearsNoise(kScatterNotMeasured));
+}
+
 BINCV_TEST(PairedStats, GeometricMeanIsOrderIndependentAndArithmeticIsNot) {
     // Three rounds with ratios 0.5, 2.0 and 4.0 -- A = 1.0 throughout.
     const PairedTiming fwd = summarizePaired({1.0, 1.0, 1.0}, {0.5, 2.0, 4.0});

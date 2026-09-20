@@ -32,9 +32,13 @@
 //     recorded on the legacy default stream while the body enqueues elsewhere
 //     bracket the wrong work.
 //   * INTERLEAVED pairs. `timeKernelPaired` brackets both arms inside every
-//     round and alternates their order, and prints whether the two arms'
-//     sample RANGES are disjoint. A ratio whose ranges overlap is NOT a result
-//     and is printed as one.
+//     round and alternates their order, so each round yields one observation of
+//     the ratio with the drift divided out. Whether a difference is real is
+//     decided by measure_util.hpp's rule -- the difference must exceed the
+//     larger of the within-run spread and the run-to-run scatter -- and the
+//     two arms' RANGE separation is printed beside it as a fact, not as a
+//     second veto. See paired_stats.hpp: one round slow in BOTH arms overlaps
+//     the ranges while leaving every per-round ratio untouched.
 //   * THE LAUNCH FLOOR is measured, not quoted. At 752x480 this op is a single
 //     launch over 400 KB and sits ON the floor; the 4K geometry is where the
 //     kernel is visible at all, and every arm prints its floor share.
