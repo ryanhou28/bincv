@@ -1324,14 +1324,21 @@ still does.** What should stop being quoted is the *magnitude*: 1.35× at 4K is 
 median this host's noise does not resolve, and the ruling does not rescue it
 because eight of its 105 rounds fell the other way.
 
-**What the ruling settles is how a row is reported, and a narrower question is
-left where it was.** `CLAUDE.md`'s ship rule asks whether an operation "holds up
-on both axes", which is worded as a pass/fail. A direction-established row is
-neither a pass nor a null — it is a range — so whether the label **MET** attaches
-to LK's role bar is an owner's call and not a measurement's. What is *not* in
-doubt is that the row does not fail: binCV is ahead in every round measured, in
-two independent sweeps, and it is **3.14× smaller** on resident state. The row is
-therefore published as the comparison, and the label is left as it stands.
+**A follow-on question was raised here and answered by reading the rule it was
+raised against.** The worry was that the ship rule asks whether an operation
+"holds up on both axes", worded as a pass/fail, while a direction-established row
+is a range. But that rule is about a kernel that *"loses its role comparison
+badly"*, and its remedy is that such a kernel "gets optimized first, or the owner
+explicitly accepts the gap". It has nothing to say about a kernel that wins: LK
+is ahead in every round of two independent sweeps and **3.14× smaller** on
+resident state. The question came from a verdict vocabulary that had grown a
+label the ship rule does not use, not from anything about the operation. LK
+ships, and its role bar reads as the comparison above.
+
+The rule still bites, and on this backend it currently bites one operation.
+`cornerSubPixAsync` is measured below losing to the whole-plane round trip it
+exists to avoid — which is a loss, in the sense the rule means — so it is
+optimized or the gap is accepted explicitly, not excused by a range.
 
 **`cuda::threshold` clears the bar its own round-1 rule failed.** That rule's
 fail condition — slower than `cv::cuda::threshold` by more than both printed
