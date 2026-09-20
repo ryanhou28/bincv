@@ -357,8 +357,10 @@ namespace impl {
 /// @note Only ever called on the at most two border columns per row, never in
 /// the word loop -- the design rule’s lesson is that an edge fixup must cost the
 /// boundary and not the row.
+/// @note BINCV_HOST_DEVICE. One indexed word read and a mask, no traversal, so
+/// the CUDA backend's derivative kernels call it for their own border columns.
 template <typename WordType>
-inline bool rowBit(const WordType* row, size_t x) {
+BINCV_HOST_DEVICE inline bool rowBit(const WordType* row, size_t x) {
     return (row[wordIndex<WordType>(x)] & bitMask<WordType>(x)) != 0;
 }
 
@@ -372,8 +374,15 @@ inline bool rowBit(const WordType* row, size_t x) {
 /// @note It is the N = 1 instance of signedDifferenceRipple below and not a
 /// different operation; `Derivative.RoutesAgree_*` requires the two to
 /// agree image for image.
+/// @note BINCV_HOST_DEVICE, with signedDifferenceRipple and signedDifference
+/// below it. All three are words in, words out -- no memory, no traversal,
+/// a loop over PLANES bounded by the template N -- so the CUDA backend's
+/// derivative kernels compute the SAME arithmetic rather than a device
+/// restatement of it. The canonical-zero rule is a property of these
+/// expressions, and a second copy of them is a second place it can be lost.
 template <typename WordType>
-inline void ternaryDifference(WordType a, WordType b, WordType& mag, WordType& negative) {
+BINCV_HOST_DEVICE inline void ternaryDifference(WordType a, WordType b, WordType& mag,
+                                                WordType& negative) {
     const WordType pos = static_cast<WordType>(a & static_cast<WordType>(~b));
     const WordType neg = static_cast<WordType>(b & static_cast<WordType>(~a));
     mag = static_cast<WordType>(pos | neg);
@@ -412,8 +421,9 @@ inline void ternaryDifference(WordType a, WordType b, WordType& mag, WordType& n
 /// is set only where the operands differ, so no lane can ever leave this
 /// function with a set sign over a zero magnitude. See the file header.
 template <size_t N, typename WordType>
-inline void signedDifferenceRipple(const WordType (&a)[N], const WordType (&b)[N],
-                                   WordType (&mag)[N], WordType& negative) {
+BINCV_HOST_DEVICE inline void signedDifferenceRipple(const WordType (&a)[N],
+                                                     const WordType (&b)[N],
+                                                     WordType (&mag)[N], WordType& negative) {
     WordType borrow = static_cast<WordType>(0);
     for (size_t p = 0; p < N; ++p) {
         const WordType x = a[p];
@@ -437,8 +447,8 @@ inline void signedDifferenceRipple(const WordType (&a)[N], const WordType (&b)[N
 /// "ternary is the N = 1 instance" a testable claim rather than an
 /// algebraic one.
 template <size_t N, typename WordType, bool ForceGeneric>
-inline void signedDifference(const WordType (&a)[N], const WordType (&b)[N],
-                             WordType (&mag)[N], WordType& negative) {
+BINCV_HOST_DEVICE inline void signedDifference(const WordType (&a)[N], const WordType (&b)[N],
+                                               WordType (&mag)[N], WordType& negative) {
     if constexpr (N == 1 && !ForceGeneric) {
         ternaryDifference<WordType>(a[0], b[0], mag[0], negative);
     } else {

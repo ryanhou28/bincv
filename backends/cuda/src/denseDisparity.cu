@@ -13,6 +13,7 @@
 // Binary and census are ONE kernel: the binary path is the census path at
 // planes = 1. Plane k of a block sits at rows [k * H, (k + 1) * H).
 
+#include "bincv/cuda/denseCensusBox.hpp"
 #include "bincv/cuda/denseDisparity.hpp"
 
 namespace bincv {
@@ -223,6 +224,440 @@ __global__ void denseKernelSliding(DeviceBinMatConstView left,
     }
 }
 
+// ---------------------------------------------------------------------------
+// The WORD-PARALLEL BIT-SLICED arm, and why it exists.
+//
+// Every arm above maps one thread to one output PIXEL: per candidate and
+// window row it extracts a winWidth-bit run from each image and popcounts the
+// XOR -- a 32-bit instruction doing nine bits of useful work, making no use at
+// all of the fact that 32 pixels already live in one word. That is where the
+// binary path's advantage was going: against the same frame's census matcher
+// the device gained 2.3x where the host's own bit-sliced kernel gains 7.6x on
+// aarch64 and ~17x on x86-64.
+//
+// Here one thread owns one WORD of output anchors -- 32 pixels -- and the
+// arithmetic is the host kernel's, ported rather than reinvented:
+//
+//   * The raw cost of 32 pixels at a candidate is ONE xor of the left word
+//     against the right word shifted by d.
+//   * The horizontal winWidth-window sum is a bit-sliced count of winWidth
+//     shifted copies of that word into bitSlicedSumPlanes(winWidth) planes.
+//   * The vertical accumulation slides down a strip of output rows, bit-sliced.
+//   * The winner-take-all is a bit-sliced compare -- a borrow chain -- and a
+//     masked select: the host's planesLess and planesSelect.
+//
+// HORIZONTAL BEFORE VERTICAL, which reverses the host's order and is the one
+// decision the port does not inherit. The host sums vertically first and then
+// runs a doubling tree over the lane-shifted ACCUMULATOR planes; on the device
+// a lane shift crosses the word boundary into the neighbouring THREAD's
+// registers, so that tree would cost a warp shuffle per plane per stage.
+// Summing horizontally first shifts only the raw cost word, whose neighbour a
+// thread rebuilds from two more loads -- no cross-thread traffic at all.
+// Integer addition commutes, so the map is identical either way.
+// ---------------------------------------------------------------------------
+
+/// @brief Output rows one thread walks, sliding its vertical accumulator.
+/// @note Swept on the reference frame: 4 gave 0.078 ms and 16 gave 0.148 --
+/// sixteen strip rows hold 256 words of running best, which spills (1,768 bytes
+/// of spill stores at the 255-register ceiling) -- against this value's 0.067.
+constexpr int kBsStrip = 8;
+
+/// @brief Threads that split one output word's disparity range between them.
+/// Word-parallel work is 32x denser per thread, and the reference frame's rows
+/// are only 24 words wide: without this split the whole frame is 1,416 threads
+/// -- under one warp per SM -- and the kernel starves whatever its arithmetic
+/// costs.
+/// @note Swept with the strip: 4 gave 0.083 ms and 16 gave 0.080 against this
+/// value's 0.067. Four leaves too few threads; sixteen pays a fourth fold step
+/// over chunks only four disparities long.
+constexpr int kBsChunks = 8;
+
+/// @brief Output words per block. `blockDim` is (kBsChunks, kBsWords) and the
+/// product is exactly one warp, so a word's chunk threads always share a warp
+/// and the fold between them is a shuffle rather than shared memory.
+constexpr int kBsWords = 32 / kBsChunks;
+
+/// @brief Planes the vertical accumulator and the disparity carry. The binary
+/// path asserts winWidth * winHeight <= 255, so eight always suffice -- and
+/// fixing the count at compile time is what keeps every plane array in
+/// registers: a runtime bound makes the indexing dynamic and puts the arrays in
+/// local memory, which costs far more than the one plane it would save.
+constexpr int kBsAccPlanes = 8;
+constexpr int kBsDispPlanes = 8;
+
+/// @brief Word `j` of a packed row, or zero outside it -- the device spelling
+/// of the host's `extendedRowWord` with a zero fill.
+__device__ __forceinline__ uint32_t bsRowWord(const uint32_t* row, long long j,
+                                              long long words) {
+    return (j < 0 || j >= words) ? 0u : __ldg(row + j);
+}
+
+/// @brief `planes += v << W0`, bit-sliced ripple. The plane budget bounds the
+/// value, so the carry out of the last plane is zero by construction.
+template <int HP, int W0>
+__device__ __forceinline__ void bsAddPlane(uint32_t* planes, uint32_t v) {
+#pragma unroll
+    for (int p = W0; p < HP; ++p) {
+        const uint32_t t = planes[p] ^ v;
+        v &= planes[p];
+        planes[p] = t;
+    }
+}
+
+/// @brief The horizontal window sum of one output word at one image row and
+/// disparity: lane b holds the sum over j in [0, winW) of the raw cost at lane
+/// b + j, as `HP` bit-planes. `winW <= 32`, which the launcher's gate enforces.
+template <int HP>
+__device__ __forceinline__ void bsWindowRow(const uint32_t* rowL, const uint32_t* rowR,
+                                            long long words, long long i, int d,
+                                            int winW, uint32_t* h) {
+    const long long s = d >> 5;
+    const unsigned r = static_cast<unsigned>(d) & 31u;
+    const long long j = i - s;
+    const uint32_t r0 = bsRowWord(rowR, j - 1, words);
+    const uint32_t r1 = bsRowWord(rowR, j, words);
+    const uint32_t r2 = bsRowWord(rowR, j + 1, words);
+    // cost lane x = L[x] ^ R[x - d]: the right row shifted right by d pixels is
+    // one funnel shift of the two words it spans.
+    const uint32_t c0 = __ldg(rowL + i) ^ __funnelshift_l(r0, r1, r);
+    // The neighbouring word, which the lane shifts below read into. Past the
+    // row it reads zero, exactly as the host's laneShiftDown does.
+    const uint32_t c1 = (i + 1 < words)
+                            ? (__ldg(rowL + i + 1) ^ __funnelshift_l(r1, r2, r))
+                            : 0u;
+
+    // Three shifted copies at a time: one full adder collapses them into a
+    // weight-1 and a weight-2 word, so the plane ripple runs twice per three
+    // inputs instead of three times. Measured as instructions rather than
+    // argued: nine inputs cost 28 logic ops this way against 42 one at a time.
+    uint32_t a = c0;
+    uint32_t b = __funnelshift_r(c0, c1, 1u);
+    uint32_t c = __funnelshift_r(c0, c1, 2u);
+    h[0] = a ^ b ^ c;
+    h[1] = (a & b) | (a & c) | (b & c);
+#pragma unroll
+    for (int p = 2; p < HP; ++p) h[p] = 0u;
+    int k = 3;
+    for (; k + 3 <= winW; k += 3) {
+        a = __funnelshift_r(c0, c1, static_cast<unsigned>(k));
+        b = __funnelshift_r(c0, c1, static_cast<unsigned>(k + 1));
+        c = __funnelshift_r(c0, c1, static_cast<unsigned>(k + 2));
+        bsAddPlane<HP, 0>(h, a ^ b ^ c);
+        bsAddPlane<HP, 1>(h, (a & b) | (a & c) | (b & c));
+    }
+    for (; k < winW; ++k)
+        bsAddPlane<HP, 0>(h, __funnelshift_r(c0, c1, static_cast<unsigned>(k)));
+}
+
+/// @brief `acc += h`, bit-sliced carry ripple; the host's accAddWord.
+template <int HP>
+__device__ __forceinline__ void bsAccAdd(uint32_t* acc, const uint32_t* h) {
+    uint32_t carry = 0u;
+#pragma unroll
+    for (int p = 0; p < HP; ++p) {
+        const uint32_t v = h[p];
+        const uint32_t sum = acc[p] ^ v ^ carry;
+        carry = (acc[p] & v) | (acc[p] & carry) | (v & carry);
+        acc[p] = sum;
+    }
+    // Planes above the addend's are known zero there, so the ripple continues
+    // in the two-op carry-only form.
+#pragma unroll
+    for (int p = HP; p < kBsAccPlanes; ++p) {
+        const uint32_t sum = acc[p] ^ carry;
+        carry &= acc[p];
+        acc[p] = sum;
+    }
+}
+
+/// @brief `acc -= h`, bit-sliced borrow ripple; the host's accSubWord. The
+/// accumulator always holds at least the row being removed -- the same
+/// arithmetic added it -- so the final borrow is zero by construction.
+template <int HP>
+__device__ __forceinline__ void bsAccSub(uint32_t* acc, const uint32_t* h) {
+    uint32_t borrow = 0u;
+#pragma unroll
+    for (int p = 0; p < HP; ++p) {
+        const uint32_t v = h[p];
+        const uint32_t diff = acc[p] ^ v ^ borrow;
+        borrow = (~acc[p] & (v | borrow)) | (v & borrow);
+        acc[p] = diff;
+    }
+#pragma unroll
+    for (int p = HP; p < kBsAccPlanes; ++p) {
+        const uint32_t diff = acc[p] ^ borrow;
+        borrow = ~acc[p] & borrow;
+        acc[p] = diff;
+    }
+}
+
+/// @brief The lanes where `v < best`, as a mask word: the borrow out of the
+/// lane-wise subtraction. The host's planesLess.
+__device__ __forceinline__ uint32_t bsLess(const uint32_t* v, const uint32_t* best) {
+    uint32_t borrow = 0u;
+#pragma unroll
+    for (int p = 0; p < kBsAccPlanes; ++p)
+        borrow = (~v[p] & (best[p] | borrow)) | (best[p] & borrow);
+    return borrow;
+}
+
+/// @brief The lanes where `(costA, dispA)` beats `(costB, dispB)`: lower cost,
+/// or the same cost at a lower disparity. One borrow chain over the disparity
+/// planes and the cost planes in that order, which IS the comparison of the
+/// concatenated value.
+/// @note Lexicographic rather than cost-only because the chunk fold below is a
+/// TREE: its second step already holds partial winners from non-adjacent
+/// chunks, so "keep it only if strictly less" no longer means "keep the
+/// smallest disparity on a tie". Comparing the disparity too makes the fold
+/// order irrelevant, which is what the host's sequential sweep gets for free.
+__device__ __forceinline__ uint32_t bsBeats(const uint32_t* costA, const uint32_t* dispA,
+                                            const uint32_t* costB,
+                                            const uint32_t* dispB) {
+    uint32_t borrow = 0u;
+#pragma unroll
+    for (int p = 0; p < kBsDispPlanes; ++p)
+        borrow = (~dispA[p] & (dispB[p] | borrow)) | (dispB[p] & borrow);
+#pragma unroll
+    for (int p = 0; p < kBsAccPlanes; ++p)
+        borrow = (~costA[p] & (costB[p] | borrow)) | (costB[p] & borrow);
+    return borrow;
+}
+
+/// @brief `best = mask ? v : best`, per plane. The host's planesSelect.
+template <int N>
+__device__ __forceinline__ void bsSelect(uint32_t* best, const uint32_t* v, uint32_t m) {
+#pragma unroll
+    for (int p = 0; p < N; ++p) best[p] = (best[p] & ~m) | (v[p] & m);
+}
+
+/// @brief `bestD = mask ? d : bestD`, with `d` broadcast into bit-planes.
+__device__ __forceinline__ void bsSelectDisp(uint32_t* bestD, int d, uint32_t m) {
+#pragma unroll
+    for (int p = 0; p < kBsDispPlanes; ++p) {
+        const uint32_t bit =
+            ((static_cast<unsigned>(d) >> p) & 1u) != 0u ? 0xFFFFFFFFu : 0u;
+        bestD[p] = (bestD[p] & ~m) | (bit & m);
+    }
+}
+
+/// @brief The lanes of output word `i` whose anchor lies in [lo, hi] -- the
+/// anchors a disparity may claim. The host's laneRangeMask.
+__device__ __forceinline__ uint32_t bsLaneRange(long long i, long long lo, long long hi) {
+    const long long base = i * 32;
+    long long a = lo - base;
+    long long b = hi - base;
+    if (b < 0 || a >= 32) return 0u;
+    if (a < 0) a = 0;
+    if (b >= 32) b = 31;
+    const uint32_t upTo =
+        (b == 31) ? 0xFFFFFFFFu : ((1u << static_cast<unsigned>(b + 1)) - 1u);
+    return upTo & (0xFFFFFFFFu << static_cast<unsigned>(a));
+}
+
+template <int HP>
+__global__ void denseKernelBitSliced(DeviceBinMatConstView left,
+                                     DeviceBinMatConstView right, int minD, int dEnd,
+                                     int winW, int winH,
+                                     DeviceImageView<uint8_t> disparity, size_t outRows,
+                                     size_t rowWordCount) {
+    const long long words = static_cast<long long>(rowWordCount);
+    const long long iRaw = static_cast<long long>(blockIdx.x) * kBsWords +
+                           static_cast<long long>(threadIdx.y);
+    // A thread past the row's last word still runs the fold below -- that is a
+    // warp shuffle, so every lane has to reach it. It just never writes.
+    const bool active = iRaw < words;
+    const long long i = active ? iRaw : 0;
+
+    const size_t sFirst = static_cast<size_t>(blockIdx.y) * kBsStrip;
+    if (sFirst >= outRows) return;   // block-uniform: the whole warp leaves
+    const int hh = winH / 2;
+    const int hw = winW / 2;
+    const size_t yFirst = static_cast<size_t>(hh) + sFirst;
+    const int rowsHere = (outRows - sFirst < static_cast<size_t>(kBsStrip))
+                             ? static_cast<int>(outRows - sFirst)
+                             : kBsStrip;
+
+    // The running best per output row of the strip, bit-sliced. All-ones is the
+    // host's initial cost (nothing can be strictly less than a saturated
+    // accumulator) and all-ones in the disparity planes is 255, the invalid
+    // marker, so a lane no candidate claims reads out correct with no branch.
+    uint32_t bestC[kBsStrip][kBsAccPlanes];
+    uint32_t bestD[kBsStrip][kBsDispPlanes];
+#pragma unroll
+    for (int s = 0; s < kBsStrip; ++s) {
+#pragma unroll
+        for (int p = 0; p < kBsAccPlanes; ++p) bestC[s][p] = 0xFFFFFFFFu;
+#pragma unroll
+        for (int p = 0; p < kBsDispPlanes; ++p) bestD[s][p] = 0xFFFFFFFFu;
+    }
+
+    // BLOCKED, never strided: the fold below keeps a candidate only when it is
+    // strictly less, which reproduces the host's tie rule -- smallest disparity
+    // wins -- only if a lower chunk really does hold the lower disparities.
+    const int chunk = static_cast<int>(threadIdx.x);
+    const int span = (dEnd - minD + kBsChunks) / kBsChunks;
+    const int dLo = minD + chunk * span;
+    const int dHi = (dLo + span - 1 < dEnd) ? (dLo + span - 1) : dEnd;
+
+    const long long anchorHi = static_cast<long long>(disparity.width) - winW;
+    const size_t stL = left.stride;
+    const size_t stR = right.stride;
+
+    for (int d = dLo; d <= dHi; ++d) {
+        uint32_t acc[kBsAccPlanes];
+#pragma unroll
+        for (int p = 0; p < kBsAccPlanes; ++p) acc[p] = 0u;
+        uint32_t h[HP];
+        // The first output row's window in full: rows [yFirst - hh, yFirst + hh],
+        // counted up from the top so the index never goes negative.
+        const uint32_t* lRow = left.ptr + sFirst * stL;
+        const uint32_t* rRow = right.ptr + sFirst * stR;
+        for (int r = 0; r < winH; ++r) {
+            bsWindowRow<HP>(lRow, rRow, words, i, d, winW, h);
+            bsAccAdd<HP>(acc, h);
+            lRow += stL;
+            rRow += stR;
+        }
+        const uint32_t rng = bsLaneRange(i, d, anchorHi);
+
+#pragma unroll
+        for (int s = 0; s < kBsStrip; ++s) {
+            if (s >= rowsHere) break;
+            const uint32_t m = bsLess(acc, bestC[s]) & rng;
+            bsSelect<kBsAccPlanes>(bestC[s], acc, m);
+            bsSelectDisp(bestD[s], d, m);
+            if (s + 1 < rowsHere) {
+                const size_t y = yFirst + static_cast<size_t>(s);
+                const size_t yLeave = y - static_cast<size_t>(hh);
+                const size_t yEnter = y + static_cast<size_t>(hh) + 1;
+                bsWindowRow<HP>(left.ptr + yLeave * stL, right.ptr + yLeave * stR, words,
+                                i, d, winW, h);
+                bsAccSub<HP>(acc, h);
+                bsWindowRow<HP>(left.ptr + yEnter * stL, right.ptr + yEnter * stR, words,
+                                i, d, winW, h);
+                bsAccAdd<HP>(acc, h);
+            }
+        }
+    }
+
+    if (kBsChunks > 1) {
+        // Fold the chunks pairwise.
+#pragma unroll
+        for (int off = kBsChunks / 2; off > 0; off >>= 1) {
+#pragma unroll
+            for (int s = 0; s < kBsStrip; ++s) {
+                if (s >= rowsHere) break;
+                uint32_t oC[kBsAccPlanes];
+                uint32_t oD[kBsDispPlanes];
+#pragma unroll
+                for (int p = 0; p < kBsAccPlanes; ++p)
+                    oC[p] = __shfl_down_sync(0xFFFFFFFFu, bestC[s][p],
+                                             static_cast<unsigned>(off));
+#pragma unroll
+                for (int p = 0; p < kBsDispPlanes; ++p)
+                    oD[p] = __shfl_down_sync(0xFFFFFFFFu, bestD[s][p],
+                                             static_cast<unsigned>(off));
+                const uint32_t m = bsBeats(oC, oD, bestC[s], bestD[s]);
+                bsSelect<kBsAccPlanes>(bestC[s], oC, m);
+                bsSelect<kBsDispPlanes>(bestD[s], oD, m);
+            }
+        }
+        // Back to every chunk thread, so the byte extraction below is split
+        // kBsChunks ways and neighbouring threads write neighbouring bytes.
+        const unsigned base = static_cast<unsigned>(kBsChunks) * threadIdx.y;
+#pragma unroll
+        for (int s = 0; s < kBsStrip; ++s) {
+            if (s >= rowsHere) break;
+#pragma unroll
+            for (int p = 0; p < kBsDispPlanes; ++p)
+                bestD[s][p] = __shfl_sync(0xFFFFFFFFu, bestD[s][p],
+                                          static_cast<int>(base));
+        }
+    }
+
+    if (!active) return;
+    constexpr int kLanesPerThread = 32 / kBsChunks;
+    const int laneLo = chunk * kLanesPerThread;
+#pragma unroll
+    for (int s = 0; s < kBsStrip; ++s) {
+        if (s >= rowsHere) break;
+        uint8_t* out = disparity.row(yFirst + static_cast<size_t>(s));
+#pragma unroll
+        for (int b = 0; b < kLanesPerThread; ++b) {
+            const long long a = i * 32 + laneLo + b;
+            // Anchors ascend, so past the last one the rest of the word is rim:
+            // the launcher's fill already wrote the invalid marker there.
+            if (a > anchorHi) break;
+            unsigned v = 0;
+#pragma unroll
+            for (int p = 0; p < kBsDispPlanes; ++p)
+                v |= ((bestD[s][p] >> (laneLo + b)) & 1u) << p;
+            out[a + hw] = static_cast<uint8_t>(v);
+        }
+    }
+}
+
+template <int HP>
+cudaError_t launchBitSlicedArm(DeviceBinMatConstView left, DeviceBinMatConstView right,
+                               int minD, int dEnd, const DenseDisparityParams& params,
+                               DeviceImageView<uint8_t> disparity, size_t outRows,
+                               size_t words, cudaStream_t stream) {
+    const dim3 block(kBsChunks, kBsWords);
+    const dim3 grid(static_cast<unsigned>((words + kBsWords - 1) / kBsWords),
+                    static_cast<unsigned>((outRows + kBsStrip - 1) / kBsStrip));
+    denseKernelBitSliced<HP><<<grid, block, 0, stream>>>(
+        left, right, minD, dEnd, params.winWidth, params.winHeight, disparity, outRows,
+        words);
+    return cudaGetLastError();
+}
+
+/// @brief The widest window this arm accepts. A window row is ONE 32-bit
+/// extraction, so 32 bounds it, and the launcher asserts an odd width -- 31 is
+/// therefore the largest width that can reach here.
+constexpr int kBsMaxWinWidth = 31;
+
+/// The instantiation list below is exhaustive over [3, kBsMaxWinWidth], and
+/// these are what keep it so. Widen the gate and the horizontal sum needs a
+/// sixth plane, which fails HERE, at the bound, rather than falling off the end
+/// of the switch into an arm nobody measured.
+static_assert(bitSlicedSumPlanes(3) == 2, "the narrowest accepted window");
+static_assert(bitSlicedSumPlanes(static_cast<size_t>(kBsMaxWinWidth)) == 5,
+              "launchBitSliced instantiates HP = 2..5 only; a wider window needs "
+              "another arm and another sweep of kBsStrip/kBsChunks against it");
+
+/// @brief Pick the instantiation whose plane count matches this window width.
+/// The horizontal sum's plane count is what the kernel must know statically --
+/// see kBsAccPlanes -- and over the accepted widths it takes four values, so
+/// four instantiations cover them exactly.
+cudaError_t launchBitSliced(DeviceBinMatConstView left, DeviceBinMatConstView right,
+                            int minD, int dEnd, const DenseDisparityParams& params,
+                            DeviceImageView<uint8_t> disparity, size_t outRows,
+                            size_t words, cudaStream_t stream) {
+    switch (bitSlicedSumPlanes(static_cast<size_t>(params.winWidth))) {
+        case 2:
+            return launchBitSlicedArm<2>(left, right, minD, dEnd, params, disparity,
+                                         outRows, words, stream);
+        case 3:
+            return launchBitSlicedArm<3>(left, right, minD, dEnd, params, disparity,
+                                         outRows, words, stream);
+        case 4:
+            return launchBitSlicedArm<4>(left, right, minD, dEnd, params, disparity,
+                                         outRows, words, stream);
+        case 5:
+            return launchBitSlicedArm<5>(left, right, minD, dEnd, params, disparity,
+                                         outRows, words, stream);
+        default:
+            break;
+    }
+    // Out of the accepted domain -- reachable only from a caller that broke the
+    // odd-and-<= 32 precondition, which is checked but compiles out under
+    // NDEBUG. An ERROR rather than a sixth instantiation: that instantiation
+    // cost 243 registers of code nothing in the domain could call, and a kernel
+    // that ran here would give a silently wrong map (its accumulator planes are
+    // sized for the domain, not for the width it was handed).
+    return cudaErrorInvalidValue;
+}
+
 /// @brief The packed matcher's disparity tile, swept independently of the
 /// plane kernel's because its register pressure differs (no plane loop).
 /// Measured on the reference frame: 4 gave 1.97 ms and 16 gave 1.11 ms
@@ -365,11 +800,11 @@ cudaError_t launchDense(DeviceBinMatConstView left, DeviceBinMatConstView right,
                                  disparity.width, disparity.height, stream);
     }
 
-    // The sliding arm carries one static bound: a window no wider than a single
+    // Both fast arms carry one static bound: a window no wider than a single
     // extraction (winW <= 32). A wider window -- and the reference arm the
     // switch forces -- goes through the straightforward kernel.
     if (impl::denseFastArmEnabled() && params.winWidth <= 32) {
-        // Borders first: the sliding kernel writes only pixels a candidate can
+        // Borders first: neither fast kernel writes a pixel no candidate can
         // serve, so the rim's invalid marker comes from one cheap fill rather
         // than from per-thread branches in the hot kernel.
         cudaError_t err =
@@ -377,6 +812,17 @@ cudaError_t launchDense(DeviceBinMatConstView left, DeviceBinMatConstView right,
                               disparity.width, disparity.height, stream);
         if (err != cudaSuccess) return err;
         const size_t outRows = imgHeight - 2 * static_cast<size_t>(params.winHeight / 2);
+        // The word-parallel arm is the BINARY path's: at one plane a candidate's
+        // raw cost is one bit per pixel, which is what makes 32 pixels fit one
+        // xor. A census plane block carries K bits per pixel and has no such
+        // form, so it stays on the per-pixel sliding kernel.
+        if (impl::denseBitSlicedEnabled() && planes == 1) {
+            // The gate above is winWidth <= 32 and the window is odd, so the
+            // width reaching here is at most kBsMaxWinWidth -- exactly the
+            // domain launchBitSliced's instantiation list covers.
+            return launchBitSliced(left, right, params.minDisparity, dEnd, params,
+                                   disparity, outRows, rowWords(width), stream);
+        }
         constexpr unsigned kColBlock = 128;
         const dim3 grid(static_cast<unsigned>((width + kColBlock - 1) / kColBlock),
                         static_cast<unsigned>((outRows + kStrip - 1) / kStrip));
@@ -399,6 +845,10 @@ cudaError_t launchDense(DeviceBinMatConstView left, DeviceBinMatConstView right,
 
 namespace impl {
 bool& denseFastArmEnabled() {
+    static bool on = true;
+    return on;
+}
+bool& denseBitSlicedEnabled() {
     static bool on = true;
     return on;
 }
@@ -454,6 +904,16 @@ cudaError_t denseDisparityCensusPacked(DeviceImageConstView<uint32_t> leftDesc,
                           disparity.width, disparity.height, stream);
     if (err != cudaSuccess) return err;
     const size_t outRows = height - 2 * static_cast<size_t>(params.winHeight / 2);
+    // The warp-cooperative separable-box arm, when its gate accepts the shape:
+    // the horizontal half of the window sum is shared across lanes instead of
+    // recomputed per column, which is what the shipped kernel's profile asks
+    // for (its stall histogram is dominated by dependency wait at 15% occupancy
+    // and by the load-store instruction queue, not by memory). Switchable off,
+    // held byte-equal to the kernel below in one binary.
+    if (impl::densePackedBoxEnabled() && impl::densePackedBoxAccepts(params)) {
+        return impl::launchDensePackedWarpBox(leftDesc, rightDesc, params.minDisparity,
+                                              dEnd, params, disparity, outRows, stream);
+    }
     const dim3 grid(static_cast<unsigned>((width + kPackBlock - 1) / kPackBlock),
                     static_cast<unsigned>((outRows + kStrip - 1) / kStrip));
     // MEASURED NEGATIVE, do not retry on this shape: staging each pixel pair's

@@ -35,6 +35,40 @@
 #include "bincv/ops/pack.hpp"
 #include "test_util.hpp"
 
+// impl::quantScale AND impl::srcMax ARE STILL CONSTANT EXPRESSIONS.
+//
+// Both carry BINCV_HOST_DEVICE so the CUDA packer can call the host's own scale
+// instead of restating it, and `__host__ __device__` sits alongside `constexpr`
+// rather than replacing it. Nothing else pins that: every caller in the library
+// and in this file uses them at runtime, so dropping `constexpr` -- the obvious
+// way to silence some future complaint about the pair -- would compile clean
+// everywhere and pass every case below.
+//
+// impl::bitsPerWord needs no such pin: `constexpr size_t wordBits =
+// bitsPerWord<WordType>()` appears throughout ops/, so losing it there is
+// already a build failure. These two have no such caller, which is exactly why
+// they get one here.
+//
+// The values are the rule itself at the two ends that matter -- 0 maps to 0 and
+// srcMax maps to maxValue for any N -- plus the exact step the `+ srcMax/2`
+// rounding puts between them: at N=3, 18 is the last byte that maps to 0 and 19
+// the first that maps to 1. Straddling the boundary rather than sampling near it
+// is what makes these pin the ROUNDING and not just the scale, since that
+// rounding is the deliberate divergence from OpenCV at bytes 1..127 which
+// Pack.QuantScaleReproducesFromCVMatsRule below exercises at runtime.
+static_assert(bincv::impl::srcMax<uint8_t>() == 255ULL, "srcMax must stay constexpr");
+static_assert(bincv::impl::srcMax<uint16_t>() == 65535ULL, "srcMax must stay constexpr");
+static_assert(bincv::impl::quantScale<uint8_t>(0, 7u) == 0u,
+              "quantScale must stay constexpr");
+static_assert(bincv::impl::quantScale<uint8_t>(255, 7u) == 7u,
+              "quantScale must stay constexpr");
+static_assert(bincv::impl::quantScale<uint8_t>(18, 7u) == 0u,
+              "quantScale must stay constexpr -- and round the way it does");
+static_assert(bincv::impl::quantScale<uint8_t>(19, 7u) == 1u,
+              "quantScale must stay constexpr -- and round the way it does");
+static_assert(bincv::impl::quantScale<uint16_t>(65535, 3u) == 3u,
+              "quantScale must stay constexpr");
+
 namespace {
 
 using namespace bincv;

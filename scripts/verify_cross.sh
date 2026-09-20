@@ -19,6 +19,17 @@
 #
 #   ./scripts/verify_cross.sh
 #
+# The emulated build lands in the container's own writable layer, which is
+# Docker's storage on the HOST's root filesystem -- two configurations' worth of
+# binaries, on the one filesystem a machine is most likely to be out of room on.
+# A host directory can be mounted at that path instead:
+#
+#   BINCV_CROSS_BUILD_DIR=/scratch/bincv-cross ./scripts/verify_cross.sh
+#
+# The repo mount stays read-only either way; only that scratch directory is
+# writable, and the container then runs as the invoking user so what it leaves
+# behind is not a root-owned tree the user cannot delete.
+#
 # CORRECTNESS ONLY. Nothing measured in this environment is a timing result --
 # see the banner the script prints.
 #
@@ -164,24 +175,52 @@ echo "  ok -- ${IMAGE} reports ${TARGET_ARCH}"
 
 STAMP="$(source_stamp "${REPO_ROOT}")"
 echo "  sources: ${STAMP}"
+
+# --- where the emulated build tree goes --------------------------------------
+#
+# By default nowhere on a path this script names: the container builds in its own
+# /tmp, which is Docker's storage. BINCV_CROSS_BUILD_DIR swaps that for a host
+# directory, for a machine whose root filesystem cannot hold it.
+#
+# A container writing as root into a bind mount is how a build tree ends up
+# undeletable, which is why the repo is mounted read-only and why nothing was
+# ever mounted writable before. --user keeps that property: the container runs as
+# the invoking uid/gid, so the scratch tree belongs to whoever ran the gate. The
+# repo mount stays read-only regardless -- this gate must not be able to write
+# into the working tree.
+EXTRA_DOCKER=()
+CONTAINER_OUT_ROOT=/tmp
+if [[ -n "${BINCV_CROSS_BUILD_DIR:-}" ]]; then
+    if ! mkdir -p "${BINCV_CROSS_BUILD_DIR}" 2>/dev/null || [[ ! -w "${BINCV_CROSS_BUILD_DIR}" ]]; then
+        echo "verify_cross.sh: BINCV_CROSS_BUILD_DIR='${BINCV_CROSS_BUILD_DIR}' is not a writable directory" >&2
+        exit 2
+    fi
+    CROSS_BUILD_DIR="$(cd "${BINCV_CROSS_BUILD_DIR}" && pwd)"
+    CONTAINER_OUT_ROOT=/out
+    EXTRA_DOCKER+=(-v "${CROSS_BUILD_DIR}:/out" --user "$(id -u):$(id -g)")
+    echo "  builds:  ${CROSS_BUILD_DIR} (host, mounted read-write at /out)"
+fi
 echo
 
-# Read-only mount: this gate must not be able to write into the working tree, and
-# a container writing as root into a bind mount is how a build tree ends up
-# undeletable. Everything is built in the container's own /tmp.
 docker run --rm -i \
     --platform "${PLATFORM}" \
     -v "${REPO_ROOT}":/src:ro \
+    ${EXTRA_DOCKER[@]+"${EXTRA_DOCKER[@]}"} \
     -w /src \
     -e "BINCV_EXPECT_STAMP=${STAMP}" \
     -e "BINCV_REQUIRE_REFERENCE=${REQUIRE_REFERENCE}" \
     -e "BINCV_NATIVE_ARCH=${HOST_ARCH}" \
+    -e "BINCV_OUT_ROOT=${CONTAINER_OUT_ROOT}" \
     "${IMAGE}" bash -s <<'CONTAINER_SCRIPT'
 set -euo pipefail
 
 SRC=/src
-OUT=/tmp/bincv-cross
-LOGS=/tmp/bincv-cross-logs
+# /tmp unless the host mounted a scratch directory at /out -- see
+# BINCV_CROSS_BUILD_DIR in this script's header. Nothing else changes.
+OUT_ROOT="${BINCV_OUT_ROOT:-/tmp}"
+OUT="$OUT_ROOT/bincv-cross"
+LOGS="$OUT_ROOT/bincv-cross-logs"
+rm -rf "$OUT" "$LOGS"
 mkdir -p "$OUT" "$LOGS"
 
 WARN="-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Werror"

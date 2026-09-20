@@ -571,7 +571,13 @@ constexpr double kReferenceMinEigScale = (16.0 * 255.0) * (16.0 * 255.0) / 10485
 /// AT HIGHER N. The accuracy curve would then be measured over a different (and
 /// progressively better-conditioned) subset at every depth, which would make deeper
 /// levels look better for a reason that has nothing to do with their depth.
-constexpr double referenceMinEigScale(size_t bits) {
+/// @note BINCV_HOST_DEVICE, and still constexpr: two divisions and two multiplies
+/// over one integer, no memory and no traversal. The CUDA tracker scales its
+/// `minEigThreshold` with THIS function rather than a device restatement of
+/// it, so the depth conversion has one definition -- a second copy that
+/// drifted would reject a different set of keypoints on each backend and
+/// still look like a correct answer.
+BINCV_HOST_DEVICE constexpr double referenceMinEigScale(size_t bits) {
     return (16.0 * 255.0 / static_cast<double>((size_t{1} << bits) - 1)) *
            (16.0 * 255.0 / static_cast<double>((size_t{1} << bits) - 1)) / 1048576.0;
 }
@@ -587,7 +593,11 @@ static_assert(referenceMinEigScale(1) == kReferenceMinEigScale,
 /// numerator is one word off in the tap extraction below -- and off by one
 /// WORD, i.e. up to 64 pixels, not off by one pixel. Spelled out rather than
 /// written inline for that reason.
-inline long long floorDiv(long long a, long long b) {
+/// @note BINCV_HOST_DEVICE, with ReplicatedShiftedRow below it. Two integers in,
+/// one out, no memory and no traversal -- and it is the arithmetic a device
+/// tap extraction is most able to get subtly wrong, which is the argument for
+/// sharing it rather than restating it.
+BINCV_HOST_DEVICE inline long long floorDiv(long long a, long long b) {
     const long long q = a / b;
     return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q;
 }
@@ -610,6 +620,13 @@ inline long long floorDiv(long long a, long long b) {
 /// shift, so a source plane with dirty padding gives the clean plane's
 /// answer -- the design rule’s rule, applied one level down from the reductions that
 /// state it.
+/// @note `word` and `sourceWord` carry BINCV_HOST_DEVICE. They are SCALAR and
+/// TRAVERSAL-FREE -- at most two indexed word reads, a funnel shift and two
+/// mask-selects, with no loop over anything -- and the CUDA tracker builds
+/// this aggregate over a DEVICE row pointer and calls them. The fields are
+/// filled by a device-side builder rather than by `displacedRow`, which
+/// takes a host view; what must not be forked is the bit arithmetic, and
+/// that is what is shared here.
 template <typename WordType>
 struct ReplicatedShiftedRow {
     const WordType* row = nullptr;  ///< the source row, or null for an empty plane
@@ -622,7 +639,7 @@ struct ReplicatedShiftedRow {
 
     /// @brief The source word `k`, with the trailing partial word masked and any
     /// index outside the row reading as zero (the replicate fill covers it).
-    WordType sourceWord(long long k) const {
+    BINCV_HOST_DEVICE WordType sourceWord(long long k) const {
         if (k < 0 || static_cast<unsigned long long>(k) >= words) return 0;
         const size_t ku = static_cast<size_t>(k);
         const WordType allOnes = static_cast<WordType>(~static_cast<WordType>(0));
@@ -630,7 +647,7 @@ struct ReplicatedShiftedRow {
     }
 
     /// @brief Bits of the displaced row lying under word `i` of the window grid.
-    WordType word(size_t i) const {
+    BINCV_HOST_DEVICE WordType word(size_t i) const {
         constexpr long long bits = static_cast<long long>(bitsPerWord<WordType>());
         const long long start = static_cast<long long>(i) * bits + off;
         const long long q = floorDiv(start, bits);
@@ -671,8 +688,10 @@ struct ReplicatedShiftedRow {
 
 /// @brief Reads one pixel of a plane, for the two edge values a replicate fill
 /// needs. **INTERNAL**, and called twice per row, never per pixel.
+/// @note BINCV_HOST_DEVICE, for ReplicatedShiftedRow's reason: one indexed word
+/// read and a mask, no traversal.
 template <typename WordType>
-inline WordType edgeFill(const WordType* row, size_t column) {
+BINCV_HOST_DEVICE inline WordType edgeFill(const WordType* row, size_t column) {
     const bool set = (row[wordIndex<WordType>(column)] & bitMask<WordType>(column)) != 0;
     return set ? static_cast<WordType>(~static_cast<WordType>(0)) : static_cast<WordType>(0);
 }
@@ -834,7 +853,13 @@ struct TapSums {
     long long self = 0;
 
     /// @brief `w00*t00 + w01*t01 + w10*t10 + w11*t11 - self`.
-    double combine(double w00, double w01, double w10, double w11) const {
+    /// @note BINCV_HOST_DEVICE. Five integers and four weights in, one double out.
+    /// It is shared rather than restated because this is where the residual
+    /// identity's four multiplies and four adds happen IN A FIXED ORDER, and
+    /// the device tracker's bit-exactness against the host rests on that order
+    /// being the same expression rather than the same intent. (Both sides are
+    /// compiled without FMA contraction; see the CUDA backend's header.)
+    BINCV_HOST_DEVICE double combine(double w00, double w01, double w10, double w11) const {
         return w00 * static_cast<double>(t00) + w01 * static_cast<double>(t01) +
                w10 * static_cast<double>(t10) + w11 * static_cast<double>(t11) -
                static_cast<double>(self);
@@ -908,8 +933,11 @@ inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType
 /// @brief Bits `[x0, x0 + bitsPerWord)` of a row, aligned to bit 0. **INTERNAL.**
 /// @note The `s == 0` guard is not decoration: shifting a word by its own width is
 /// undefined, and that case is 1 in 32 rather than exotic.
+/// @note BINCV_HOST_DEVICE. Two indexed word reads and a shift, no traversal --
+/// and the CUDA tracker stages its window with this, so the `s == 0` guard
+/// and the past-the-end reads are decided once for both backends.
 template <typename WordType>
-inline WordType alignedWord(const WordType* row, size_t words, size_t x0) {
+BINCV_HOST_DEVICE inline WordType alignedWord(const WordType* row, size_t words, size_t x0) {
     constexpr size_t bits = bitsPerWord<WordType>();
     const size_t w0 = x0 / bits;
     const size_t s = x0 % bits;
@@ -1893,7 +1921,15 @@ inline float windowMeanAbsDiff(const LKLevelN<N, WordType>& lv, const RegionWord
 
 /// @brief `floor(v)` as a `long long`, for a value already known to be finite and
 /// within the frame's range.
-inline long long floorToLL(float v) { return static_cast<long long>(std::floor(v)); }
+/// @note BINCV_HOST_DEVICE. One float in, one integer out, no memory and no
+/// traversal -- and it is what turns a keypoint's sub-pixel position into a
+/// window ANCHOR, so a second copy would not round differently, it would
+/// select a different window and therefore a different cost for every
+/// candidate in the search. The CUDA sparse-stereo and block-matching
+/// kernels call this one.
+BINCV_HOST_DEVICE inline long long floorToLL(float v) {
+    return static_cast<long long>(std::floor(v));
+}
 
 } // namespace impl
 

@@ -42,7 +42,9 @@
 #include "../core/view.hpp"
 #include "../impl/kernel_util.hpp"
 
-#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__))
+// !__CUDACC__: a CUDA translation unit takes the portable arm, matching every
+// other x86 arm's gate (impl/binMat_impl.hpp has the full note).
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && !defined(__CUDACC__)
 #define BINCV_FAST_RUNTIME_AVX2 1
 #include <immintrin.h>
 #elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
@@ -475,8 +477,15 @@ namespace impl {
 /// @note `dx` is a PIXEL offset in `[-(B-1), B-1]`; FAST needs `|dx| <= 3`. Words
 /// outside the row read as zero, which is correct here because every pixel whose
 /// ring reaches outside the image is a border pixel and is masked off anyway.
+/// @note BINCV_HOST_DEVICE. Scalar and traversal-free -- it reads three words of
+/// one row and returns one. The CUDA backend's reference FAST kernel calls
+/// THIS, rather than a device transcription of it, because the `w + 1 < words`
+/// guard is the whole correctness of the last word of a row: unguarded with a
+/// tight stride it reads the next row's first word and invents plausible
+/// corners at the right edge. One definition cannot drift from itself.
 template <typename WordType>
-inline WordType fastShiftedWord(const WordType* row, size_t words, size_t w, int dx) {
+BINCV_HOST_DEVICE inline WordType fastShiftedWord(const WordType* row, size_t words, size_t w,
+                                                  int dx) {
     constexpr size_t kBits = bitsPerWord<WordType>();
     if (dx == 0) return row[w];
     if (dx > 0) {
@@ -506,8 +515,14 @@ inline WordType fastShiftedWord(const WordType* row, size_t words, size_t w, int
 ///
 /// The schedule is derived from `arcLength` rather than tabulated, so an unusual
 /// `arcLength` is composed exactly rather than getting a rule that belongs to another.
+/// @note BINCV_HOST_DEVICE. Sixteen words in, one out; the loops are over the ring,
+/// not over the image, so this is scalar in the sense that matters. The CUDA
+/// backend's reference kernel calls it for EVERY arc length, and its fast arm
+/// unrolls the same schedule at compile time for 9 and 12 -- which is what makes
+/// "the fast arm agrees with the reference" a statement about two spellings of
+/// one definition rather than about two implementations.
 template <typename WordType>
-inline WordType fastArcAny(const WordType src[16], int arcLength) {
+BINCV_HOST_DEVICE inline WordType fastArcAny(const WordType src[16], int arcLength) {
     WordType v[16];
     for (int k = 0; k < 16; ++k) v[k] = src[k];
     int have = 1;
@@ -528,7 +543,11 @@ inline WordType fastArcAny(const WordType src[16], int arcLength) {
 
 /// @brief The longest run of set bits at ONE pixel, around the cyclic ring.
 /// **INTERNAL** -- the Tier 2 score, computed only for detected corners.
-inline int fastLongestRun(unsigned ring, int arcLength) {
+/// @note BINCV_HOST_DEVICE. One unsigned in, one int out, no memory at all. The
+/// device arm calls it so the score is the host's by construction; the
+/// alternative device spelling -- reading the count off the eight arc-length
+/// masks -- is held to THIS in one binary rather than to a second transcription.
+BINCV_HOST_DEVICE inline int fastLongestRun(unsigned ring, int arcLength) {
     // The ring doubled end to end, so a run that wraps is a run in the middle. Each
     // `x &= x >> 1` shortens every run by one, so the number of passes before nothing
     // survives IS the longest run.

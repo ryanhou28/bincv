@@ -684,8 +684,15 @@ inline void bitSlicedPairRegionNeon(const BinMatConstView<WordType> (&magX)[N],
 /// @note MULTIPLICATION, not a shift, for the cross term: `crossTerm` is signed
 /// and negative for half the windows in any real frame, and shifting a
 /// negative value left is undefined before C++20.
+/// @note BINCV_HOST_DEVICE. Counts in, three integers out -- O(N^2) over a
+/// compile-time N, no memory and no traversal. The CUDA backend's covariance
+/// kernels count in their own forked traversal and then call THIS for the
+/// epilogue, so the weighting, the doubled off-diagonal and the one signed
+/// subtraction have a single implementation across both backends. A kernel
+/// that weighted its own counts would be the copy that looks correct.
 template <size_t N>
-inline GradientCovariance combineBitSlicedPairs(const BitSlicedPairCounts<N>& c) {
+BINCV_HOST_DEVICE inline GradientCovariance combineBitSlicedPairs(
+    const BitSlicedPairCounts<N>& c) {
     GradientCovariance out;
     for (size_t i = 0; i < N; ++i) {
         for (size_t j = i; j < N; ++j) {

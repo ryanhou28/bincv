@@ -150,11 +150,12 @@
 // impl::minRowWords, impl::bitMask, and QuantMat<N> for the container wrapper.
 #include "../quantMat.hpp"
 
-#ifdef BINCV_WITH_OPENCV
-// <cmath> only where it is used: the CV_8U entry point's threshold reduction.
-// The core-only, no-exceptions and Debug configurations compile neither.
+// std::floor, for impl::thresholdCutoff below. UNCONDITIONAL, where it used to
+// be inside the BINCV_WITH_OPENCV block with the reduction that uses it. The
+// reduction moved out; see the note on thresholdCutoff for why it had to.
 #include <cmath>
 
+#ifdef BINCV_WITH_OPENCV
 #include <opencv2/core.hpp>
 #endif
 
@@ -281,6 +282,56 @@ inline void binarize(const QuantMat<N, WordType>& src, BinMatView<WordType> dst,
     binarize<N, WordType>(planes, dst, thresh);
 }
 
+namespace impl {
+
+/// @brief The `double` threshold reduced to ONE INTEGER CUTOFF: the smallest
+/// integer pixel value that passes `p > thresh`. **INTERNAL.**
+/// @return 0 when every pixel passes, 256 when none does, else
+/// `floor(thresh) + 1` in [1, 255].
+///
+/// @note WHY IT IS HERE AND NOT IN THE CV_8U ENTRY POINT BELOW, WHICH IS ITS ONLY
+/// CALLER TODAY. It used to be four lines inside that function, and that put
+/// it inside `#ifdef BINCV_WITH_OPENCV` -- while the gate that verifies
+/// device kernels against the host (scripts/verify_cuda.sh) configures with
+/// `-DBINCV_USE_OPENCV=OFF` and therefore could not see it at all. A device
+/// threshold could then only ever have been proven equal to a TEST-LOCAL
+/// COPY of this reduction, which is the two-definitions failure the backend
+/// exists to prevent: the copy agrees on 127.5 and disagrees on NaN, and
+/// nothing says so. Core-visible, it is one definition that both arms and
+/// both gates can reach.
+/// @note For an integer pixel `p > thresh` is `p >= floor(thresh) + 1`, and the
+/// two ends are exact rather than approximated: no CV_8U pixel exceeds 255,
+/// and every one exceeds a negative threshold.
+/// @note Inside `|thresh| < 2^31` this is also the reduction cv::threshold
+/// performs for CV_8U -- it floors `thresh` to an int and handles `< 0` and
+/// `>= 255` as whole-image answers before dispatching -- which is why a
+/// fractional threshold such as 127.5 produces the same image on both sides,
+/// and why the Tier 1 claim survives a `double` parameter. OUTSIDE that range
+/// cv::threshold is undefined (its cvFloor converts an out-of-range double to
+/// int) and binCV deliberately does not reproduce its answer; see "THE DOMAIN
+/// OF THE TIER 1 PROMISE" at the top of this file.
+/// @note THE THREE BRANCHES ARE ORDERED SO THAT THE CAST NEVER SEES A VALUE IT
+/// CANNOT REPRESENT. `std::floor` is reached only for thresh in [0, 255), so
+/// the `int` conversion is exact and this function has no undefined behavior
+/// of its own for ANY double -- including the infinities and NaN, which reach
+/// it through the second branch. The second test is written
+/// `!(thresh < 255.0)` rather than `thresh >= 255.0` for exactly one input:
+/// NaN, which is less than nothing and not greater than anything, and must
+/// land on "nothing passes" (`p > NaN` is false for every p) rather than
+/// falling through to a cast of NaN.
+/// @note 256 is "nothing passes": no uint8 reaches it. 0 is "everything passes".
+/// Both are outside `uint8_t` on purpose -- an `int` is what lets the two
+/// degenerate ends survive the reduction instead of wrapping into a pixel
+/// value that means something else.
+/// @note BINCV_HOST_DEVICE: a rule over one double, no memory and no loop.
+BINCV_HOST_DEVICE inline int thresholdCutoff(double thresh) {
+    if (thresh < 0.0) return 0;
+    if (!(thresh < 255.0)) return 256;
+    return static_cast<int>(std::floor(thresh)) + 1;
+}
+
+} // namespace impl
+
 #ifdef BINCV_WITH_OPENCV
 
 // ---------------------------------------------------------------------------
@@ -343,39 +394,12 @@ inline void threshold(const cv::Mat& src, BinMatView<WordType> dst, double thres
 
     const size_t words = impl::minRowWords<WordType>(dst.width);
 
-    // The comparison, reduced to ONE INTEGER CUTOFF before the loops. For an
-    // integer pixel `p > thresh` is `p >= floor(thresh) + 1`, and the two ends
-    // are exact rather than approximated: no CV_8U pixel exceeds 255, and every
-    // one exceeds a negative threshold.
-    //
-    // Inside `|thresh| < 2^31` this is also the reduction cv::threshold performs
-    // for CV_8U -- it floors `thresh` to an int and handles `< 0` and `>= 255` as
-    // whole-image answers before dispatching -- which is why a fractional
-    // threshold such as 127.5 produces the same image on both sides, and why the
-    // tier claim survives a `double` parameter. OUTSIDE that range cv::threshold
-    // is undefined (its cvFloor converts an out-of-range double to int) and binCV
-    // deliberately does not reproduce its answer; see "THE DOMAIN OF THE TIER 1
-    // PROMISE" at the top of this file.
-    //
-    // THE THREE BRANCHES ARE ORDERED SO THAT THE CAST NEVER SEES A VALUE IT
-    // CANNOT REPRESENT. `std::floor` is reached only for thresh in [0, 255), so
-    // the `int` conversion is exact and this kernel has no undefined behavior of
-    // its own for ANY double -- including the infinities and NaN, which reach it
-    // through the second branch. The second test is written `!(thresh < 255.0)`
-    // rather than `thresh >= 255.0` for exactly one input: NaN, which is less
-    // than nothing and not greater than anything, and must land on "nothing
-    // passes" (`p > NaN` is false for every p) rather than falling through to a
-    // cast of NaN.
-    //
-    // 256 is "nothing passes": no uint8 reaches it. 0 is "everything passes".
-    int cutoff;
-    if (thresh < 0.0) {
-        cutoff = 0;
-    } else if (!(thresh < 255.0)) {
-        cutoff = 256;
-    } else {
-        cutoff = static_cast<int>(std::floor(thresh)) + 1;
-    }
+    // The comparison, reduced to ONE INTEGER CUTOFF before the loops -- every
+    // double, including the infinities and NaN, and why, in impl::thresholdCutoff
+    // above. It is a separate function rather than four lines here so that it is
+    // reachable from a build with no OpenCV, which is the only kind the device
+    // gate makes; see the note there.
+    const int cutoff = impl::thresholdCutoff(thresh);
 
     // ONE IMPLEMENTATION. The packing, the vector paths and the padding invariant
     // all live in ops/pack.hpp, which is in CORE -- this function's only job is to

@@ -41,8 +41,10 @@ inline namespace BINCV_ABI_NAMESPACE {
 namespace impl {
 
 /// @brief The largest value an `SrcT` can hold, as the scale's denominator.
+/// @note BINCV_HOST_DEVICE, and still constexpr, because `quantScale` below is
+/// shared with device code and this is the only arithmetic it reaches.
 template <typename SrcT>
-constexpr unsigned long long srcMax() {
+BINCV_HOST_DEVICE constexpr unsigned long long srcMax() {
     return (sizeof(SrcT) >= 8) ? ~0ULL
                                : ((1ULL << (sizeof(SrcT) * 8)) - 1ULL);
 }
@@ -52,8 +54,17 @@ constexpr unsigned long long srcMax() {
 /// / 255` generalized; at `SrcT = uint8_t` it is that expression exactly, which
 /// is what keeps the design rule’s recorded divergence from
 /// OpenCV at bytes 1..127 intact rather than quietly repaired.
+/// @note BINCV_HOST_DEVICE, and still constexpr -- the annotation is added to the
+/// declaration, it does not replace anything. One value in, one level out, no
+/// memory and no loop, so it is shareable by the rule in core/error.hpp. The
+/// CUDA backend's N-bit packer calls THIS: it used to carry a
+/// `quantScaleDevice` that restated the same integer expression, and a
+/// divergence this library deliberately preserves is the worst possible thing
+/// to keep in two places -- a drifted copy would look like the bug being
+/// fixed. `quantThresholds` below stays host-only on purpose: it loops over
+/// the whole source range to build a table, which is a traversal.
 template <typename SrcT>
-constexpr unsigned quantScale(SrcT v, unsigned maxValue) {
+BINCV_HOST_DEVICE constexpr unsigned quantScale(SrcT v, unsigned maxValue) {
     const unsigned long long m = srcMax<SrcT>();
     return static_cast<unsigned>(
         (static_cast<unsigned long long>(v) * maxValue + m / 2ULL) / m);
@@ -276,6 +287,35 @@ inline bool destinationAliasIsSafe(const BinMatConstView<WordType>& src,
 template <typename WordType>
 inline bool strideCoversARow(size_t width, size_t height, size_t stride) {
     return height <= 1 || stride >= minRowWords<WordType>(width);
+}
+
+/// @brief Does the axis-aligned square centred at `(cx, cy)` with half-extent
+///        `half` lie wholly inside a `width` x `height` image? **INTERNAL.**
+///
+/// The keypoint-describability rule, in one place. A patch operation reads a
+/// square window around a keypoint, and every such operation has to agree about
+/// which keypoints it may read at all: orientation's disc is inscribed in this
+/// square, and BRIEF's reach is the largest offset its pattern takes on either
+/// axis. Written out per call site it was the same inequality in seven
+/// spellings across two headers and two kernel files -- and two of those
+/// drifting by one would mean orientation accepting a keypoint the descriptor
+/// then rejects, which is not a crash but a silently short descriptor set.
+///
+/// @note BINCV_HOST_DEVICE: scalar and traversal-free, so one definition serves
+/// the host loops and the backend's kernels rather than a device twin that
+/// has to be held bit-exact by hand.
+/// @note This is the seven call sites' inequality UNCHANGED, deliberately. A
+/// half-extent below zero is not reachable from any caller -- a radius is
+/// unsigned at the API and `briefPatternReach` starts at zero and only grows
+/// -- so a guard against it would be a branch that cannot fire, and adding
+/// one here would also make this predicate answer differently from the code
+/// it replaces. Consolidating and changing behaviour are separate edits.
+BINCV_HOST_DEVICE inline bool squareInsideImage(long long cx, long long cy, int half,
+                                                size_t width, size_t height) {
+    const long long h = static_cast<long long>(half);
+    return cx - h >= 0 && cy - h >= 0 &&
+           cx + h < static_cast<long long>(width) &&
+           cy + h < static_cast<long long>(height);
 }
 
 } // namespace impl

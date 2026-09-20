@@ -27,9 +27,16 @@
 #
 #   BINCV_ARM_TOOLCHAIN_DIR=~/toolchains/arm-gnu-.../bin ./scripts/verify_cortex_m.sh
 #
+# The suites compile to /dev/null, but the firmware link step is a real CMake
+# build tree, created under $TMPDIR and deleted on exit. On a machine whose root
+# filesystem is nearly full, put it somewhere else:
+#
+#   BINCV_CORTEX_M_BUILD_DIR=/scratch/bincv-cortex-m ./scripts/verify_cortex_m.sh
+#
 # EXIT CODES
 #   0   Cortex-M compilation verified
 #   1   verification FAILED
+#   2   bad invocation -- the build directory it was given is unusable
 #   77  could not run at all (no arm-none-eabi toolchain) -- NOT a pass, the same
 #       contract scripts/verify_cross.sh uses so that a caller can tell a skipped
 #       run from a verified one.
@@ -76,10 +83,37 @@ echo "             $("${CXX}" --version | head -1)"
 # The compiler must actually be an M-profile one. A host g++ symlinked into place,
 # or an aarch64 cross-compiler, would compile most of this and prove nothing about
 # the target -- and __ARM_ARCH_PROFILE is the same macro core/simd.hpp gates on.
-if ! echo 'int main(){return 0;}' | \
-     "${CXX}" ${MCPU} -x c++ -dM -E - 2>/dev/null | grep -q "__ARM_ARCH_PROFILE 77"; then
-    skip "${CXX} does not report an M-profile target for ${MCPU}"
-fi
+# (GCC spells the profile as the character constant 'M', which -dM prints as 77.)
+#
+# This probe decides whether the gate runs at all, and it used to be
+# `... | grep -q` with the compiler's stderr sent to /dev/null. It skipped once,
+# here, on an arm-none-eabi-g++ 14.2 that reports __ARM_ARCH_PROFILE 77 when
+# asked directly -- while scripts/verify.sh was building on 12 cores. It has not
+# been reproduced since, including 120 attempts under synthetic load, and the old
+# spelling is why: it threw away both things that would have said which failure
+# it was. Two holes, closed rather than diagnosed:
+#
+#   * grep -q exits at its first match and closes the pipe. The compiler is
+#     still writing -- the dump is ~16 KB over several writes and the match lands
+#     at byte ~9000 -- so it can take SIGPIPE and exit 141, which `set -o
+#     pipefail` makes the PIPELINE's status even though the match succeeded. The
+#     same SIGPIPE-under-pipefail failure scripts/verify.sh's print_first()
+#     documents. Capturing first cannot lose that race: nothing closes the read
+#     end early.
+#   * Discarding stderr made every other way the probe can fail -- the compiler
+#     not starting, a missing shared library, a killed process -- indistinguishable
+#     from "this is not an M-profile compiler". A gate that skips must say WHY,
+#     or the next person re-runs it and believes whichever answer they get. If
+#     this ever skips again, the compiler's own words are now in the output.
+PROBE_OUT="$(echo 'int main(){return 0;}' | "${CXX}" ${MCPU} -x c++ -dM -E - 2>&1)"
+case "${PROBE_OUT}" in
+    *"__ARM_ARCH_PROFILE 77"*) ;;
+    *)
+        echo "  the target-profile probe did not find __ARM_ARCH_PROFILE. The compiler said:"
+        printf '%s\n' "${PROBE_OUT:-<no output at all>}" | sed -n '1,10{s/^/      /;p}'
+        skip "${CXX} did not report an M-profile target for ${MCPU}"
+        ;;
+esac
 echo "  ok -- reports __ARM_ARCH_PROFILE 'M'"
 echo
 
@@ -101,8 +135,33 @@ done | sort
 echo
 
 # --- compile ------------------------------------------------------------------
-TMP_DIR="$(mktemp -d)"
+#
+# The firmware tree below is a real CMake build; BINCV_CORTEX_M_BUILD_DIR moves
+# it off the default $TMPDIR, the same escape hatch scripts/verify.sh gives with
+# BINCV_BUILD_DIR. Still removed on exit either way.
+if [[ -n "${BINCV_CORTEX_M_BUILD_DIR:-}" ]]; then
+    TMP_PARENT="${BINCV_CORTEX_M_BUILD_DIR}"
+    TMP_SOURCE="BINCV_CORTEX_M_BUILD_DIR"
+else
+    TMP_PARENT="${TMPDIR:-/tmp}"
+    TMP_SOURCE="TMPDIR"
+fi
+# Name which setting produced the path. Reporting the variable this gate reads
+# for a path that came from the default tells a reader to go fix something they
+# never set.
+if ! mkdir -p "${TMP_PARENT}" 2>/dev/null || [[ ! -w "${TMP_PARENT}" ]]; then
+    echo "  ${TMP_SOURCE}='${TMP_PARENT}' is not a writable directory" >&2
+    exit 2
+fi
+TMP_DIR="$(mktemp -d "${TMP_PARENT%/}/bincv-cortex-m.XXXXXX")" || TMP_DIR=""
+if [[ -z "${TMP_DIR}" ]]; then
+    echo "  could not create a build tree under ${TMP_SOURCE}='${TMP_PARENT}'" >&2
+    exit 2
+fi
 trap 'rm -rf "${TMP_DIR}"' EXIT
+if [[ "${TMP_SOURCE}" == "BINCV_CORTEX_M_BUILD_DIR" ]]; then
+    echo "  build tree: ${TMP_DIR}"
+fi
 
 INCLUDES="-I${SRC_DIR}/include -I${SRC_DIR}/tests"
 compiled=0
@@ -165,15 +224,27 @@ if cmake -S "${SRC_DIR}" -B "${FW_DIR}" \
         fw_ok=1
         # The SIMD line the firmware would print is the one GETTING_STARTED tells a
         # reader to trust, and on this target it must not claim a fast path.
-        if grep -q 'scalar only' "${FW_DIR}/targets/stm32h753/bincv_m7.elf" 2>/dev/null || \
-           strings "${FW_DIR}/targets/stm32h753/bincv_m7.elf" 2>/dev/null | grep -q 'scalar only'; then
+        #
+        # `strings | grep -q` is spelled as a capture for the reason the profile
+        # check above is: grep -q closes the pipe on its first match, strings takes
+        # SIGPIPE on a multi-megabyte ELF, and pipefail turns that into a failure --
+        # here a FALSE red, reporting a correct image as claiming a fast path.
+        ELF="${FW_DIR}/targets/stm32h753/bincv_m7.elf"
+        simd_ok=0
+        if grep -q 'scalar only' "${ELF}" 2>/dev/null; then
+            simd_ok=1
+        else
+            elf_strings="$(strings "${ELF}" 2>/dev/null || true)"
+            case "${elf_strings}" in *'scalar only'*) simd_ok=1 ;; esac
+        fi
+        if [[ ${simd_ok} -eq 1 ]]; then
             echo "    ok -- image links, and its SIMD status reports 'scalar only'"
         else
             echo "    FAILED: the image links but does not carry the 'scalar only' status"
             echo "            string, so simdStatusString may be claiming a fast path here."
             failed=$((failed + 1))
         fi
-        size_line="$("${CXX%g++}size" "${FW_DIR}/targets/stm32h753/bincv_m7.elf" 2>/dev/null | tail -1)"
+        size_line="$("${CXX%g++}size" "${ELF}" 2>/dev/null | tail -1)"
         [[ -n "${size_line}" ]] && echo "    size (text/data/bss): ${size_line}"
     else
         echo "    FAILED to build:"

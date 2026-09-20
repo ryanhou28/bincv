@@ -48,14 +48,24 @@ namespace impl {
 // need to reach back into BinMat to recover it.
 
 /// @brief Number of pixels packed into one word of the given type.
+/// @note BINCV_HOST_DEVICE, and it stays constexpr: `constexpr size_t wordBits =
+/// bitsPerWord<WordType>()` and the array bounds built from it must still fold
+/// at compile time. The annotation is here, and on lowBitsMask below, because
+/// impl::clipRegion is shared with device code and these two are the only
+/// word arithmetic it reaches.
 template <typename WordType>
-constexpr size_t bitsPerWord() {
+BINCV_HOST_DEVICE constexpr size_t bitsPerWord() {
     return sizeof(WordType) * 8;
 }
 
 /// @brief Index of the word within a row that holds the pixel at column x.
+/// @note BINCV_HOST_DEVICE, with bitMask below it. One integer in, one integer
+/// out. Together they ARE the format's bit-addressing rule, and a device
+/// kernel that reads a single border pixel needs exactly that rule -- so it
+/// calls this pair rather than spelling `x / 32` and `1u << (x % 32)` into a
+/// third copy nothing compares against the first two.
 template <typename WordType>
-inline size_t wordIndex(size_t x) {
+BINCV_HOST_DEVICE inline size_t wordIndex(size_t x) {
     return x / bitsPerWord<WordType>();
 }
 
@@ -69,13 +79,13 @@ inline size_t wordIndex(size_t x) {
 /// decision rather than a side effect (clang's -Wimplicit-int-conversion
 /// reports the implicit form; GCC's -Wconversion does not).
 template <typename WordType>
-inline WordType bitMask(size_t x) {
+BINCV_HOST_DEVICE inline WordType bitMask(size_t x) {
     return static_cast<WordType>(static_cast<WordType>(1) << (x % bitsPerWord<WordType>()));
 }
 
 /// @brief Mask covering bits [0, n) of a word; n == bitsPerWord yields all ones.
 template <typename WordType>
-inline WordType lowBitsMask(size_t n) {
+BINCV_HOST_DEVICE inline WordType lowBitsMask(size_t n) {
     if (n == 0) return static_cast<WordType>(0);
     if (n >= bitsPerWord<WordType>()) return static_cast<WordType>(~static_cast<WordType>(0));
     return static_cast<WordType>((static_cast<WordType>(1) << n) - 1);

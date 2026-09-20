@@ -323,13 +323,93 @@ plane on the host. No caller is restricted by the choice: on little-endian a
 plane at any host word width is byte-identical to a `uint32_t` plane (section 3,
 `narrowPlane`), so upload accepts all four host word types as a byte copy.
 
-Because the views are forked rather than the core types annotated, `core/`
-compiles unchanged off-CUDA — there is no `__host__ __device__` macro threaded
-through it, and the Cortex-M gate is unaffected because nothing changed for it
-to be affected by. The shared layer is the byte layout, the contracts, and the
-equality tests; the two device copies of the row-geometry helpers
-(`rowWords`, `rowTailMask`) are asserted equal to the host originals across
-widths rather than trusted to stay in step.
+**The views are forked; a handful of scalar helpers are shared, and the line
+between those two is the whole of the rule.** `core/error.hpp` defines
+`BINCV_HOST_DEVICE`, which expands to `__host__ __device__` under nvcc and to
+*nothing* under every other compiler. It is not a general annotation of the core
+types, and it is not a door to a shared kernel. A function may carry it only
+when it is **scalar and traversal-free** — no loop over pixels, rows or words,
+no allocation, and no walk over an image. That covers the closed-form rules the
+two sides would otherwise each have to derive. Geometry and addressing:
+`impl::borderIndex`, `impl::reflect101Edge`, `impl::clipRegion` (with
+`regionFromExtent` and `clipColumns` under it), `impl::wordIndex`,
+`impl::bitMask`, `impl::lowBitsMask`, `impl::extendedRowWord` and
+`impl::squareInsideImage`. Value rules: `impl::quantScale`,
+`impl::thresholdCutoff`, `impl::minEigenValue`, `maj3`, `thresholdGE` and
+`SplitCount::crossTerm`. And, from the frontend round, the per-word arithmetic
+those kernels are written in: `impl::rowBit`, `impl::ternaryDifference`,
+`impl::signedDifference` and `impl::signedDifferenceRipple`;
+`impl::combineBitSlicedPairs`; `impl::boxHorizontal3`, `impl::boxVertical3`,
+`impl::boxValueAt` and `impl::boxWordAt`; `impl::fastShiftedWord`,
+`impl::fastArcAny` and `impl::fastLongestRun`; and `briefAngleBin`. Anything
+that walks an image stays forked, because that is exactly where the host's
+row-major, popcount, cache-line shape and the device's warp shape genuinely
+disagree — the device FAST kernel *calls* `fastLongestRun` to score a ring, and
+forks entirely the question of which rings to look at.
+
+**The line is traversal, not pointer-freedom**, and two entries in that list are
+where the distinction is visible: `thresholdGE` takes a plane pointer and reads
+one word from each of `nPlanes`, and `impl::extendedRowWord` takes a row pointer
+and reads one word at a caller-computed index. Neither decides *which* pixels to
+visit or in what order — the caller's traversal does that, and the traversal is
+what stays forked. What they encode is a closed-form rule about the bits once
+read, which is exactly the thing that must not exist twice. `extendedRowWord` is
+the clearest case: it is the row-edge blend that makes padding bits past `width`
+read as the fill, and a copy of it that differs by one bit is invisible in the
+middle of a frame and makes every word-wise reduction over-count. It was briefly
+restated twice inside the CUDA backend — once in `cuda/shift.hpp` and once,
+independently, in `morphology.cu` — and the two copies had already diverged in
+spelling before either shipped, which is the failure this rule exists to
+prevent arriving exactly on schedule. Folding them back onto the host's own
+function is **instruction-neutral** (the morphology translation unit compiles
+identically either way); the reason to do it is that there is now one
+definition of the rule rather than three.
+
+The reason the line sits there is that a second derivation of one rule is this
+project's recurring failure mode: the copy that drifts does not crash, it
+answers a plausible question nobody asked. `backends/cuda/src/reduce.cu` carried
+a hand-written restatement of the clip geometry for its batch kernel while its
+own header comment claimed nothing was copied, and `pack.cu` carried a
+`quantScaleDevice` restating a rounding form whose divergence from OpenCV is
+deliberate — a drifted copy there would have read as that divergence finally
+being fixed. Both now call the host's own definition.
+
+The frontend round produced one more, and it is worth naming because it is the
+same failure in a different disguise. The rule "is this keypoint far enough from
+the edge to read a square patch around it" existed in **seven spellings** — twice
+in `ops/orientation.hpp`, three times in `ops/descriptor.hpp`, and once each as a
+device twin in `orientation.cu` and `descriptor.cu`. Nothing had drifted yet.
+What made it worth folding is what a drift would have *looked* like: orientation
+accepting a keypoint that the descriptor then rejects is not a crash and not a
+wrong pixel, it is a silently short descriptor set, and a caller would read it as
+the detector having found fewer corners. It is now `impl::squareInsideImage` in
+`impl/kernel_util.hpp` — the header that exists for exactly this, having been
+split out when the aliasing predicates faced the same problem. The fold is
+**behaviour-preserving by construction** (the same inequality, unchanged — a
+guard against a negative half-extent was drafted and removed, because
+consolidating and changing behaviour are separate edits) and
+**instruction-neutral**: an inline predicate expanding to the same compares at
+all seven sites. The reason to do it is one definition of the rule, not speed.
+
+Three properties are **proven rather than asserted**. The library still compiles
+under a plain C++17 compiler with no CUDA installed — `tests/test_error.cpp`
+inspects the macro's expansion and fails the build if it is not empty, in every
+configuration including the Cortex-M gate, where the compiler is
+`arm-none-eabi-g++`. Its mirror in the CUDA suite fails if the expansion is
+empty *there*, since either assertion alone would be satisfied by a macro that
+is always empty. And `backends/cuda/tests/test_cuda_shared_helpers.cu` sweeps
+every shared helper on both targets and compares the answers exactly —
+`minEigenValue` by float bit pattern, because "close enough" is not the claim.
+`BINCV_ASSERT` works inside a shared helper (`detail::assertFailed` has a
+`printf`/`__trap()` device branch), so preconditions do not vanish on one of the
+two targets; `BINCV_THROW` deliberately does not, since it reports a host-side
+setup failure.
+
+The shared layer is therefore the byte layout, the contracts, those scalar
+rules, and the equality tests. The two device copies of the row-geometry helpers
+(`rowWords`, `rowTailMask`) remain copies — they are `uint32_t`-specific device
+forms of templated host originals — and are asserted equal to those originals
+across widths rather than trusted to stay in step.
 
 **What runs, and what is measured.** The backend provides bitwise logic, bulk
 population-count reductions, the sensor stage (`packBits`), the census

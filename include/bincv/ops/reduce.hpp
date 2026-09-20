@@ -378,7 +378,12 @@ struct SplitCount {
     /// per pixel.
     /// @note Not an operator- on the struct: a reader who sees `crossTerm` looks
     /// it up, whereas `a - b` on two size_t fields reads as obviously fine.
-    long long crossTerm() const {
+    /// @note BINCV_HOST_DEVICE. Two integers in, one out, no memory and no
+    /// traversal -- so the CUDA backend's covariance epilogue reaches the ONE
+    /// implementation of this signed subtraction instead of open-coding
+    /// `whenClear - whenSet` in a kernel, which is the spelling this member
+    /// exists to keep out of the codebase.
+    BINCV_HOST_DEVICE long long crossTerm() const {
         return static_cast<long long>(whenClear) - static_cast<long long>(whenSet);
     }
 };
@@ -516,8 +521,15 @@ struct RegionWords {
 /// buffer. Both callers in this file guard it already (wholeViewWords
 /// returns early on width == 0, clipRegion on x0 >= x1), so this costs
 /// nothing in release and catches the next caller instead of the next user.
+/// @note BINCV_HOST_DEVICE, with clipColumns and clipRegion below it: the three
+/// are scalar arithmetic over six integers, and the CUDA backend's batch
+/// reduction clips a device array of Rects with THIS code rather than a
+/// restatement of it. The head/tail masks are named in this file as the
+/// arithmetic most able to be subtly wrong, which is exactly why the device
+/// must not own a second copy of them.
 template <typename WordType>
-inline RegionWords<WordType> regionFromExtent(size_t x0, size_t x1, size_t y0, size_t y1) {
+BINCV_HOST_DEVICE inline RegionWords<WordType> regionFromExtent(size_t x0, size_t x1,
+                                                                size_t y0, size_t y1) {
     BINCV_ASSERT(x0 < x1 && y0 < y1, "reduce: regionFromExtent needs a non-empty extent");
     constexpr size_t wordBits = bitsPerWord<WordType>();
     RegionWords<WordType> out;
@@ -561,7 +573,8 @@ inline RegionWords<WordType> wholeViewWords(size_t width, size_t height) {
 /// 2^64 - k -- both would turn a clipping contract into an out-of-bounds
 /// read.
 template <typename WordType>
-inline RegionWords<WordType> clipColumns(size_t width, size_t height, int x, int bandWidth) {
+BINCV_HOST_DEVICE inline RegionWords<WordType> clipColumns(size_t width, size_t height, int x,
+                                                           int bandWidth) {
     if (width == 0 || height == 0 || bandWidth <= 0) return RegionWords<WordType>();
 
     const long long rx0 = static_cast<long long>(x);
@@ -584,7 +597,8 @@ inline RegionWords<WordType> clipColumns(size_t width, size_t height, int x, int
 /// @note Returns isEmpty for every rectangle that survives clipping as nothing:
 /// non-positive extents, wholly left/above the image, wholly right/below it.
 template <typename WordType>
-inline RegionWords<WordType> clipRegion(size_t width, size_t height, const Rect& region) {
+BINCV_HOST_DEVICE inline RegionWords<WordType> clipRegion(size_t width, size_t height,
+                                                          const Rect& region) {
     // Rect::empty rather than a re-spelling of `width <= 0 || height <= 0`.
     // One predicate, one definition: a second copy here is a second thing to keep
     // in agreement with core/types.hpp, and the copy is the one nothing tests.

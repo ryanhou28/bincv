@@ -12,6 +12,16 @@
 #   ./scripts/verify.sh --cortex-m             # also run scripts/verify_cortex_m.sh
 #   ./scripts/verify.sh --update-checks-baseline   # raise tests/expected-checks.txt
 #
+# Four build trees is a lot of disk and a machine's root filesystem may not be
+# where they belong, so the directory they are created in is overridable:
+#
+#   BINCV_BUILD_DIR=/scratch/bincv-gate ./scripts/verify.sh
+#
+# Only the trees move. The logs and the check-count references stay in
+# build-logs/ inside the repo -- scripts/verify_cross.sh mounts the repo
+# read-only and reads its native reference from there, and a few kilobytes of
+# text is not what fills a disk.
+#
 # ---------------------------------------------------------------------------
 # Why a fourth configuration
 #
@@ -86,6 +96,23 @@ if [[ ! -f "${SRC_DIR}/CMakeLists.txt" ]]; then
     exit 2
 fi
 
+# Where the build trees go. The repo by default; BINCV_BUILD_DIR moves all of
+# them -- the four configurations and the two throwaway trees the gate
+# self-check builds -- for a machine that cannot hold six build trees on the
+# filesystem the repo happens to sit on. Same escape hatch and same spelling as
+# scripts/verify_cuda.sh's BINCV_CUDA_BUILD_DIR.
+#
+# LOG_DIR is deliberately NOT moved with them: build-logs/checks-<cfg>.txt is
+# the reference scripts/verify_cross.sh diffs its emulated run against, and it
+# reads it through the read-only /src mount of this repo. Moving it would break
+# that comparison to save a few kilobytes.
+BUILD_ROOT="${BINCV_BUILD_DIR:-${SRC_DIR}}"
+if ! mkdir -p "${BUILD_ROOT}" 2>/dev/null || [[ ! -w "${BUILD_ROOT}" ]]; then
+    echo "verify.sh: BINCV_BUILD_DIR='${BUILD_ROOT}' is not a writable directory" >&2
+    exit 2
+fi
+BUILD_ROOT="$(cd "${BUILD_ROOT}" && pwd)"
+
 JOBS="$( (command -v nproc >/dev/null && nproc) || echo 4)"
 INCREMENTAL=0
 RUN_CROSS=0
@@ -132,7 +159,10 @@ while [[ $# -gt 0 ]]; do
         --only)           need_value "$1" "${2:-}"; ONLY="$2"; shift ;;
         -j)               need_value "$1" "${2:-}"; JOBS="$2"; shift ;;
         -h|--help)
-            sed -n '3,15p' "${SELF}" | sed 's/^# \{0,1\}//'
+            # Everything from the title down to the first section rule. A fixed
+            # line range was the previous spelling, and it silently truncated
+            # the usage block the first time a line was added above it.
+            sed -n '3,/^# ---/p' "${SELF}" | sed '$d' | sed 's/^# \{0,1\}//'
             echo
             echo "Configurations: ${CONFIG_NAMES[*]}"
             exit 0 ;;
@@ -143,10 +173,10 @@ done
 
 config_dir() {
     case "$1" in
-        opencv)   echo "${SRC_DIR}/build" ;;
-        core)     echo "${SRC_DIR}/build-core" ;;
-        noexcept) echo "${SRC_DIR}/build-noexcept" ;;
-        debug)    echo "${SRC_DIR}/build-debug" ;;
+        opencv)   echo "${BUILD_ROOT}/build" ;;
+        core)     echo "${BUILD_ROOT}/build-core" ;;
+        noexcept) echo "${BUILD_ROOT}/build-noexcept" ;;
+        debug)    echo "${BUILD_ROOT}/build-debug" ;;
     esac
 }
 
@@ -333,6 +363,11 @@ STAMP="$(source_stamp "${SRC_DIR}")"
 echo
 echo "binCV verification -- $(date '+%Y-%m-%d %H:%M:%S')"
 echo "  repo      : ${REPO_ROOT}"
+if [[ "${BUILD_ROOT}" != "${SRC_DIR}" ]]; then
+    echo "  builds    : ${BUILD_ROOT}  (BINCV_BUILD_DIR)"
+else
+    echo "  builds    : ${BUILD_ROOT}"
+fi
 echo "  arch      : ${HOST_ARCH} (native -- this run covers no other architecture)"
 echo "  compiler  : $(${CXX:-c++} --version 2>/dev/null | head -1)"
 echo "  jobs      : ${JOBS}"
@@ -362,8 +397,10 @@ run_gate_selfcheck() {
     local base=("-DBINCV_USE_OPENCV=OFF" "-DBINCV_BUILD_TESTS=OFF"
                 "-DBINCV_BUILD_BENCHMARKS=OFF" "-DBINCV_WERROR=ON"
                 "-DCMAKE_BUILD_TYPE=Release")
-    local dir_w="${LOG_DIR}/selfcheck-werror"
-    local dir_u="${LOG_DIR}/selfcheck-unwired"
+    # Two real build trees, so they go where the build trees go; the log stays
+    # with the other logs.
+    local dir_w="${BUILD_ROOT}/build-selfcheck-werror"
+    local dir_u="${BUILD_ROOT}/build-selfcheck-unwired"
     local log="${LOG_DIR}/selfcheck.log"
     rm -rf "${dir_w}" "${dir_u}"
     : > "${log}"
