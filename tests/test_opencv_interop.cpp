@@ -225,8 +225,8 @@ void testSampleImage() {
 // ON A REAL FRAME -- the "Done when" bullet tests/test_corner.cpp cannot reach
 //
 // test_corner.cpp is a CORE suite: it must build without OpenCV, so it cannot
-// decode a PNG and every frame in it is synthesised. that work’s first Done-when bullet
-// asks for detected corners matched against the reference on real content, and
+// decode a PNG and every frame in it is synthesised. The claim needs detected
+// corners matched against the reference on real content, and
 // that check has to live where an image decoder does. It lives here.
 //
 // THE REFERENCE, EXPRESSED IN STOCK OPENCV. gftt.cpp with
@@ -239,9 +239,9 @@ void testSampleImage() {
 //
 // TWO DELIBERATE ALIGNMENTS, so that a disagreement means something:
 // * the box filter uses BORDER_CONSTANT, because a SUM with a zero fill is
-// exactly that work’s clipped window. The reference's BORDER_REPLICATE is a
+// exactly binCV's clipped window. The reference's BORDER_REPLICATE is a
 // separate, documented deviation (ops/corner.hpp, "THE BORDER").
-// * the derivative uses BORDER_REFLECT_101, which is the design rule’s choice and
+// * the derivative uses BORDER_REFLECT_101, which is binCV's choice and
 // filter2D's default.
 // Everything else is the reference's own arithmetic in the reference's own order.
 // ---------------------------------------------------------------------------
@@ -390,12 +390,12 @@ void testRealFrameCorners() {
 // ===========================================================================
 // QuantMat<N> conversions -- the wide-intermediate bridge
 //
-// Above the (filter-dependent) bit-width crossover a measurement measured, the fast
+// Above the (filter-dependent) bit-width crossover that was measured, the fast
 // implementation of an 8-bit operation is OpenCV's, and these conversions are
 // the way there. Three properties, each load-bearing:
 // 1. The transpose-based loops equal a per-pixel reference -- any bit-order
 // slip in transpose8x8's wiring shows here.
-// 2. fromCVMat(toCVMatNormalized(m)) == m, exactly, at every N. that measurement’s rule
+// 2. fromCVMat(toCVMatNormalized(m)) == m, exactly, at every N. The scale rule
 // derives this (255 and MaxValue odd, so no rounding ties); the test is
 // what makes the derivation checkable rather than trusted.
 // 3. Padding bits are zero after fromCVMat -- a conversion that set

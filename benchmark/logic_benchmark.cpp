@@ -1,6 +1,6 @@
 // logic kernels versus OpenCV, on the same binary content.
 //
-// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
 // semantic operation on the SAME binary content stored as CV_8U -- because that
 // is exactly what a user does today without binCV. Not grayscale (different
 // information content), not a hand-written per-pixel strawman. cv::bitwise_and on
@@ -454,7 +454,7 @@ bool runSize(int width, int height, int repeats, double targetMs) {
         runOpenCv(op, a8, b8, dst8, pixels, repeats, targetMs);
     }
 
-    // --- the summary table, and the ratio the task is actually about ---------
+    // --- the summary table, and the ratio this file is actually about --------
     bool plausible = true;
     std::printf("\n %-12s %-16s %12s %10s %12s\n", "OP", "IMPLEMENTATION", "ns/pixel", "GB/s",
                 "vs OpenCV");

@@ -4,8 +4,7 @@
 // numbers -- bit growth and peak footprint of a four-level pyramid at several
 // NOut caps -- plus evidence for the cost claim the remaining blocking gap turns
 // on. Weighing those against tracking accuracy is deliberately deferred:
-// parameterizing the cap is what buys the right to defer measuring it (the
-// design notes).
+// parameterizing the cap is what buys the right to defer measuring it.
 //
 // NO OPENCV, so this builds and runs in the reference device's DEFAULT core-only
 // configuration. Three things are measured here and all three are binCV against
@@ -89,8 +88,8 @@ size_t distinctValues(const QuantMat<N, Word>& m) {
 ///
 /// This is the number that says how many bits a level NEEDS; the distinct count
 /// of an actual frame says how many it happened to CONTAIN, which is a sample
-/// statistic and falls with the frame size. the design notes's 1/3/4/5 is the
-/// second kind of number (a measurement counted a 256x256 frame), and the two disagree --
+/// statistic and falls with the frame size. The recorded 1/3/4/5 is the
+/// second kind of number (counted on a 256x256 frame), and the two disagree --
 /// see the note under the table.
 ///
 /// The requantized value depends on the SUM alone, so the reachable set at the
@@ -196,9 +195,9 @@ void reportGrowthAndFootprint() {
     // ever thrown away. This row is the answer to "how much precision does a 2x2
     // box actually create", and every other row is a refusal of some of it.
     reportLadder<3, 5, 7>("1-3-5-7 uncapped");
-    // The ladder the design notes measured on the reference pipeline.
+    // The ladder measured on the reference pipeline.
     reportLadder<3, 4, 5>("1-3-4-5 reference");
-    // Progressively harder caps -- that work’s candidates.
+    // Progressively harder caps -- the candidates.
     reportLadder<3, 3, 3>("1-3-3-3");
     reportLadder<2, 2, 2>("1-2-2-2");
     reportLadder<1, 1, 1>("1-1-1-1 re-binarized");

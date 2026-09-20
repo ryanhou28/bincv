@@ -1,12 +1,11 @@
 // -- does row alignment beyond word granularity earn its memory?
 //
-// This is the BENEFIT side of earlier work, which measured only the cost. (word
-// granularity by default) is the project's only PROVISIONAL decision, and it is
-// provisional precisely because nobody had measured whether a wider row stride
-// buys any kernel anything.
+// This is the BENEFIT side of a measurement that took only the cost. Row
+// alignment at word granularity by default is the project's only PROVISIONAL
+// decision, and it is provisional precisely because nobody had measured whether a
+// wider row stride buys any kernel anything.
 //
-// DECISION RULE -- copied verbatim from, and recorded in
-// before this file was written:
+// DECISION RULE -- written before this file was:
 //
 // * Speedup < 5% on all kernels -> confirmed, close, do not build a
 // profile system
@@ -22,9 +21,9 @@
 //
 // VARIANTS rowAlignment in {sizeof(WordType) == 4, 16, 32, 64} bytes
 // WORKLOAD bitwiseAnd and countNonZero, whole image,
-// 640x480 and 94x60 -- the two extremes a measurement measured
+// 640x480 and 94x60 -- the two extremes measured
 // METRIC ns/pixel AND allocated bytes, both, per the protocol
-// WORD TYPE uint32_t, the shipped default. The word-width axis is that work’s, and
+// WORD TYPE uint32_t, the shipped default. Word width is a separate axis, and
 // mixing them would leave neither answerable.
 //
 // WHAT ALIGNMENT ACTUALLY CHANGES HERE, so the result can be read honestly:
@@ -83,8 +82,8 @@ constexpr int kInputs = 4;
 constexpr int kRepeats = 9;
 constexpr double kTargetMs = 40.0;
 
-// The two extremes from earlier work: a full VIO frame, and pyramid level 3, where
-// measured 172% overhead for 32-byte alignment.
+// The two extremes: a full VIO frame, and pyramid level 3, where 32-byte
+// alignment measured 172% overhead.
 struct Case {
     const char* name;
     int width;

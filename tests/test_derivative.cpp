@@ -8,7 +8,7 @@
 //
 // * filter2D CORRELATES. dst(x) = src(x+1) - src(x-1). A convolution would
 // negate every gradient -- and NOTHING DOWNSTREAM WOULD NOTICE. It is
-// tempting to say that work’s cross term would catch it, since sumXX and sumYY are
+// tempting to say the covariance's cross term would catch it, since sumXX and sumYY are
 // magnitude popcounts and sumXY is the only entry that reads the sign planes;
 // but the inversion negates BOTH derivatives and (-Ix)(-Iy) = IxIy, so the
 // whole 2x2 covariance is invariant under it (pinned in
@@ -101,8 +101,8 @@ uint64_t nextRandom(uint64_t& state) {
 /// @brief The pixel VALUES of a frame, row-major -- the reference's whole state.
 /// @note Deliberately a plain vector rather than a view onto the container under
 /// test: a reference that read its input back out of the object it is
-/// judging could cancel a packing fault through both sides (that work’s
-/// argument for the equivalence harness's second generator).
+/// judging could cancel a packing fault through both sides (the same
+/// argument the equivalence harness's second generator rests on).
 struct Frame {
     int width = 0;
     int height = 0;
@@ -311,7 +311,7 @@ uint64_t caseSeed(int width, int height, size_t n, size_t index) {
 /// @note Checks the VALUE, the MAGNITUDE and the SIGN BIT separately rather than
 /// only at: at applies the canonical-zero reading, so a kernel that
 /// wrote a set sign over a zero magnitude would agree on every value and be
-/// wrong in the plane that work’s cross term reads.
+/// wrong in the plane the covariance's cross term reads.
 template <size_t N, typename WordType>
 int runCase(const Frame& f, bool horizontal, BorderType type, bool borderValue, int& signViolations,
             int& padding) {
@@ -384,8 +384,8 @@ void sweepReference(const char* wordName) {
 // ---------------------------------------------------------------------------
 
 /// @brief The ternary route against the generic ripple, at N == 1.
-/// @note the design notes says ternary is the N = 1 instance of the general
-/// signed form "and not a separate code path". This is that sentence as a
+/// @note Ternary is the N = 1 instance of the general
+/// signed form, not a separate code path. This is that claim as a
 /// test: impl::derivativeXGeneric takes the ripple even at N = 1, and the
 /// two must produce identical images -- every plane, every word.
 template <typename WordType>
@@ -571,7 +571,7 @@ void sweepDirtyPadding(const char* wordName) {
     }
 }
 
-/// @brief Over-aligned rows (the design rule’s opt-in), so the strides differ from the width.
+/// @brief Over-aligned rows (an opt-in), so the strides differ from the width.
 template <size_t N, typename WordType>
 void sweepStrides(const char* wordName) {
     const size_t alignments[] = {sizeof(WordType), 8 * sizeof(WordType)};
@@ -619,7 +619,7 @@ template <typename WordType>
 void checkBorderIdentities(const char* wordName) {
     // Reflect-101 makes both taps read the same source pixel at the first and last
     // column, so the derivative is EXACTLY ZERO there whatever the image holds.
-    // That is the property that work’s corner response depends on -- a zero fill would
+    // That is the property the corner response depends on -- a zero fill would
     // put a full-strength edge all the way around the frame.
     {
         const int width = 65;
@@ -939,7 +939,7 @@ BINCV_TEST(Derivative, OpenCvFilter2D_Direction) {
     // filter2D CORRELATES. A 1x8 row stepping 0 -> 255 between columns 3 and 4
     // gives dx(3) = src(4) - src(2) = +255; a convolution predicts -255. This
     // check is the ONLY guard on the direction: the inversion negates both
-    // derivatives, and that work’s covariance -- cross term included -- is invariant
+    // derivatives, and the covariance -- cross term included -- is invariant
     // under that, so no downstream test can see it (test_covariance.cpp pins the
     // invariance).
     cv::Mat src = cv::Mat::zeros(1, 8, CV_8U);

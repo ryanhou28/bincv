@@ -1,5 +1,5 @@
 // ===========================================================================
-// earlier work -- FAST ON A BIT-PLANE, WHICH IS THE OPERATION binCV IS FOR.
+// FAST ON A BIT-PLANE, WHICH IS THE OPERATION binCV IS FOR.
 //
 // concluded that FAST could only match `cv::FAST`
 // because "FAST's input is 8-bit". That is true of `detectFast(const SrcT*,...)`,
@@ -12,7 +12,7 @@
 // This measures the three arms on identical content:
 //
 // (a) `cv::FAST` on the binary frame stored as CV_8U -- CLAUDE.md's denominator
-// (b) binCV's WIDE detectFast on the same CV_8U buffer -- what a measurement measured
+// (b) binCV's WIDE detectFast on the same CV_8U buffer -- what has been measured so far
 // (c) binCV's BIT-PLANE detectFast on the same content -- the question
 //
 // MEMORY IS REPORTED WITH SPEED because they trade off and (c)'s input is eight times

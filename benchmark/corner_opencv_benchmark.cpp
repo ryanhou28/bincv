@@ -39,7 +39,7 @@
 //
 // Its box filter uses BORDER_CONSTANT, not the reference's
 // BORDER_REPLICATE, because a SUM with a zero fill is exactly
-// that work’s clipped window -- the two sides then compute the
+// binCV's clipped window -- the two sides then compute the
 // same numbers and the agreement column below means something.
 // ops/corner.hpp records the REPLICATE deviation separately.
 //
@@ -89,7 +89,7 @@
 
 namespace {
 
-using Word = uint32_t;  // the design rule’s default, and what a VIO frontend would run
+using Word = uint32_t;  // the library's default word, and what a VIO frontend would run
 
 constexpr int kWidth = 640;
 constexpr int kHeight = 480;
@@ -163,7 +163,7 @@ struct CvBuffers {
 void openCvBinarized(const cv::Mat& src, CvBuffers& b, std::vector<cv::Point>& out) {
     static const cv::Mat kx = (cv::Mat_<float>(1, 3) << -1.0f, 0.0f, 1.0f);
     static const cv::Mat ky = (cv::Mat_<float>(3, 1) << -1.0f, 0.0f, 1.0f);
-    // BORDER_REFLECT_101 is the design rule’s choice and filter2D's default.
+    // BORDER_REFLECT_101 is binCV's choice for the derivative and filter2D's default.
     cv::filter2D(src, b.dx, CV_32F, kx, cv::Point(-1, -1), 0.0, cv::BORDER_REFLECT_101);
     cv::filter2D(src, b.dy, CV_32F, ky, cv::Point(-1, -1), 0.0, cv::BORDER_REFLECT_101);
 
@@ -172,7 +172,7 @@ void openCvBinarized(const cv::Mat& src, CvBuffers& b, std::vector<cv::Point>& o
     cv::multiply(b.dx, b.dy, b.xy);
 
     // normalize = false, so a SUM over the block. BORDER_CONSTANT (zero fill) is
-    // that work’s clipped window exactly, for a sum.
+    // binCV's clipped window exactly, for a sum.
     const cv::Size k(kBlockSize, kBlockSize);
     const int border = cv::BORDER_CONSTANT | cv::BORDER_ISOLATED;
     cv::boxFilter(b.xx, b.xx, CV_32F, k, cv::Point(-1, -1), false, border);

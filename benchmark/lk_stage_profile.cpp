@@ -9,7 +9,7 @@
 //
 // Nothing in this project has ever measured WHICH of the per-point stages that is --
 // staging, the covariance, the clip. Two guesses had already been made and measured at
-// 1.9% and 0.0%, which is what this benchmark is for. earlier work is the same lesson from
+// 1.9% and 0.0%, which is what this benchmark is for. The same lesson turned up on
 // the pipeline's side: `build` looked like one thing and decomposed into three, one of
 // which was 3.6%.
 //
@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
     const int kMinTracks = 60;
     // (the ladder depth; the stage counters are per point-level, not per level)
 
-    // THE SCALAR PATH ON BOTH ARCHITECTURES, DELIBERATELY. x86 takes the design rule’s keypoint
+    // THE SCALAR PATH ON BOTH ARCHITECTURES, DELIBERATELY. x86 takes the keypoint
     // batch, which does not go through `trackOnePoint` and so records nothing -- and
     // the reference device has no batch at all. Profiling the same code both places is
     // what makes the two columns comparable, and the device column is the one this is
@@ -192,7 +192,7 @@ int main(int argc, char** argv) {
     std::printf(" %-38s %10.3f ms\n", "TOTAL (instrumented)", total / 1e6);
     // How much of the iteration loop is TAP EXTRACTION rather than arithmetic. A window
     // is 31 rows, so `tapRows / iterations / 31` is the fraction of iterations that had
-    // to refresh their taps -- that measurement’s cache absorbing the rest.
+    // to refresh their taps -- the tap cache absorbing the rest.
     std::printf("\n residualSums calls per point-level %8.3f\n",
                 s.points ? static_cast<double>(s.iterations) / static_cast<double>(s.points) : 0.0);
     std::printf(" tap ROWS extracted per point-level %8.1f\n",

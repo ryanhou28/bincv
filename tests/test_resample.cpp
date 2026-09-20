@@ -5,7 +5,7 @@
 // byte image, and its column mapping for an odd width is a rounding rule rather
 // than "keep the even columns" -- so there is no Tier 1 denominator to compare
 // against and nothing here sits behind BINCV_WITH_OPENCV. ops/resample.hpp is
-// Tier 3 (the design notes), and this file is the whole of what stands behind it.
+// Tier 3, and this file is the whole of what stands behind it.
 //
 // THREE IMPLEMENTATIONS, ONE REFERENCE
 //
@@ -113,8 +113,8 @@ bool viewBit(const BinMatConstView<WordType>& v, size_t y, size_t x) {
     return ((v.row(y)[x / B] >> (x % B)) & 1u) != 0;
 }
 
-/// Every bit at or above `width` in every row's words, which the design rule requires to be
-/// zero. Returns the first offending (row, bit) as a string, or "" if clean.
+/// Every bit at or above `width` in every row's words, which the padding invariant
+/// requires to be zero. Returns the first offending (row, bit) as a string, or "" if clean.
 template <typename WordType>
 std::string paddingDirt(const BinMatConstView<WordType>& v) {
     constexpr size_t B = sizeof(WordType) * 8;
@@ -269,7 +269,7 @@ void testDirtySource(const char* wordName, Variant variant) {
 }
 
 /// Strides that differ between source and destination, which is the layout a
-/// pyramid produces (the design rule says a kernel may not care) -- here by over-allocating
+/// pyramid produces (a kernel may not care) -- here by over-allocating
 /// the source's row alignment so its stride is longer than its rows need.
 template <typename WordType>
 void testDifferingStrides(const char* wordName, Variant variant) {

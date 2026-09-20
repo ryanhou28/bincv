@@ -1,5 +1,5 @@
 // ===========================================================================
-// earlier work -- SPACING NEW DETECTIONS AGAINST LIVE TRACKS: WHICH ARM?
+// SPACING NEW DETECTIONS AGAINST LIVE TRACKS: WHICH ARM?
 //
 // A VIO frontend detects to top up, so every fresh corner must be rejected if it lands
 // on a track already being followed. Two shapes, and the DECISION RULE WAS FIXED BEFORE

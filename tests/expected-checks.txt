@@ -3,7 +3,7 @@
 # WHY THIS FILE EXISTS
 #
 # CLAUDE.md says "a drop in the CHECKS column is a regression even when every
-# ctest case still passes", and the brief requires that the test count not
+# ctest case still passes", and the test count must not
 # fall below what it was before the Google Test migration. Until this file
 # existed both sentences were enforced by a human remembering four numbers:
 # verify.sh printed CHECKS and compared it against nothing. Measured -- deleting
@@ -162,7 +162,7 @@
 #             entry point can reach and which underflows into a ~5.8e17-word row
 #             range if it is ever removed.
 #             AND FOUR MORE FROM THE SLIDING-WINDOW REVIEW, for the same reason and
-#             with the same evidence: that round added a fourth view argument (c1) and two
+#             with the same evidence: that review added a fourth view argument (c1) and two
 #             new entry points, each carrying its OWN copy of a precondition, and
 #             an assert has no in-process test. Measured -- deleting c1's half of
 #             the dimension check from BOTH four-argument overloads and the stride
@@ -490,7 +490,7 @@
 #             pixel per variant across the width sweep (0 .. 3*WordBits+3 plus the
 #             pyramid ladder) at four word widths, times three implementations,
 #             plus the padding, stride, degenerate, row-view and plan-size cases.
-#             Three implementations because that round compares three routes and the
+#             Three implementations because the suite compares three routes and the
 #             protocol requires each to be correct BEFORE any is timed; a
 #             two-thirds drop here means a losing arm was deleted, which is
 #             exactly what the floor is for.

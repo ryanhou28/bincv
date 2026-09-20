@@ -1,5 +1,5 @@
 // ===========================================================================
-// earlier work -- WHAT DOES AN INITIAL-FLOW GUESS ACTUALLY BUY, AND WHERE DOES IT
+// WHAT DOES AN INITIAL-FLOW GUESS ACTUALLY BUY, AND WHERE DOES IT
 // STOP BUYING IT?
 //
 // `LKParams::useInitialFlow` seeds each point's search from `nextPts` instead of

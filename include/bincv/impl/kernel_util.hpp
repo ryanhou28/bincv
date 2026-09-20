@@ -4,7 +4,7 @@
 /// @brief The vocabulary every kernel under ops/ is written in: the row tail
 /// mask, the stride sanity check, and the overlap predicates.
 ///
-/// Extracted from ops/logic.hpp during earlier work, unchanged, because the second kernel
+/// Extracted from ops/logic.hpp unchanged, because the second kernel
 /// header needed the same helpers and a copy would have been a second place for
 /// the aliasing rule to drift from the first. binds every kernel added under
 /// ops/, so the predicate that enforces it belongs where every kernel can reach
@@ -14,7 +14,7 @@
 /// carries no stability promise.
 ///
 /// @note The two ALIAS predicates are deliberately separate, because the two
-/// kernel families need different halves of earlier work:
+/// kernel families need different halves of the aliasing rule:
 ///
 /// viewsShareNoWord -- no shared word at all.
 /// destinationAliasIsSafe-- the above, OR exactly the same words.
@@ -23,7 +23,7 @@
 /// index, so `m &= other` reads each word immediately before overwriting it.
 /// ops/shift.hpp uses the first: a shift is NOT pointwise -- word i of the
 /// destination is built from words i +/- wordShift of the source -- so the
-/// in-place half of this does not extend to it. See the aliasing section at
+/// in-place half of the aliasing rule does not extend to it. See the aliasing section at
 /// the top of ops/shift.hpp for the case that makes it unrecoverable.
 
 #include <cstddef>
@@ -52,7 +52,7 @@ BINCV_HOST_DEVICE constexpr unsigned long long srcMax() {
 /// @brief `round(v * maxValue / srcMax)` in integers. **INTERNAL.**
 /// @note The `+ srcMax/2` rounding is `QuantMat<N>::fromCVMat`'s `(v * MaxValue + 127)
 /// / 255` generalized; at `SrcT = uint8_t` it is that expression exactly, which
-/// is what keeps the design rule’s recorded divergence from
+/// is what keeps the recorded divergence from
 /// OpenCV at bytes 1..127 intact rather than quietly repaired.
 /// @note BINCV_HOST_DEVICE, and still constexpr -- the annotation is added to the
 /// declaration, it does not replace anything. One value in, one level out, no
@@ -219,11 +219,12 @@ inline bool everyRowPairIsDisjoint(const BinMatConstView<WordType>& src,
     return true;
 }
 
-/// @brief True when `src` and `dst` share no word at all -- half of earlier work.
+/// @brief True when `src` and `dst` share no word at all -- half of the aliasing rule.
 /// @note Three steps, cheapest first, and every one of them can only ACCEPT: the
 /// verdict "they share a word" is reached exactly once, by the exhaustive
 /// per-row test. A bounding-box test alone rejected interleaved row bands
-/// and column tiles that share no byte -- legal views under earlier work, correct in
+/// and column tiles that share no byte -- legal views for a kernel that takes
+/// any {ptr, width, height, stride}, correct in
 /// release, and an abort in debug.
 template <typename WordType>
 inline bool viewsShareNoWord(const BinMatConstView<WordType>& src,
@@ -247,7 +248,8 @@ inline bool viewsShareNoWord(const BinMatConstView<WordType>& src,
     return everyRowPairIsDisjoint(src, dst);
 }
 
-/// @brief as a predicate, for a kernel that is POINTWISE in the word index.
+/// @brief The aliasing rule as a predicate, for a kernel that is POINTWISE in the
+/// word index.
 /// @return true if `dst` is exactly `src` (same first word, same stride -- so
 /// word i of one is word i of the other), or shares no memory with it.
 /// @note Called only from BINCV_ASSERT, so it is compiled into debug builds and
@@ -280,8 +282,8 @@ inline bool destinationAliasIsSafe(const BinMatConstView<WordType>& src,
 /// bitwiseNot over a 64x3 view at stride 1 produced three rows of
 /// `ffff0000` from a source of `0000ffff`, in every build, silently.
 /// @note BinMat's wrap constructor rejects the same numbers by name, so this only
-/// ever fires for a hand-built view -- which is exactly what a kernel takes
-///, and therefore where the check has to live.
+/// ever fires for a hand-built view -- which is exactly what a kernel takes,
+/// and therefore where the check has to live.
 /// @note `height <= 1` is exempt because stride addresses nothing there, matching
 /// BinMatView::row's own precondition.
 template <typename WordType>

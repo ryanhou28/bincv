@@ -175,7 +175,7 @@ inline void medianWide(const SrcT* src, size_t width, size_t height, size_t srcS
                  "medianWide: a non-empty image needs non-null pointers");
 
     // ==================================================================
-    // earlier work: THE THREE-SAMPLE MEDIAN IS MIN AND MAX, AND NOTHING ELSE.
+    // THE THREE-SAMPLE MEDIAN IS MIN AND MAX, AND NOTHING ELSE.
     //
     // med3(a, b, c) = max(min(a, b), min(max(a, b), c))
     //

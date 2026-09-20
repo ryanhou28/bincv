@@ -11,7 +11,7 @@
 // * Within 10%, or footprint increases at small pyramid levels -> keep uint32_t
 // (memory wins ties)
 //
-// And the trap the task states explicitly, which this file exists to not fall
+// And the trap stated explicitly up front, which this file exists to not fall
 // into: "wider words round row strides up more coarsely, so the footprint effect
 // is worst exactly at upper pyramid levels. Measure footprint at 94x60, not only
 // at 640x480, or this experiment will reach the wrong conclusion." Both sizes are
@@ -20,7 +20,7 @@
 // anywhere. The SPEED half closes only on the reference device.
 //
 // VARIANTS uint8_t, uint16_t, uint32_t, uint64_t, each at its own word
-// granularity (the design rule’s default alignment -- the alignment axis is that work’s)
+// granularity (the default alignment -- alignment is a separate axis)
 // WORKLOAD bitwiseAnd and countNonZero, whole image,
 // 640x480 and 94x60
 // METRIC ns/pixel and allocated bytes at both resolutions
@@ -261,8 +261,8 @@ bool runCase(const Case& c) {
     return true;
 }
 
-/// @brief The footprint half of earlier work, as exact arithmetic over a pyramid ladder.
-/// @note This is the half the task warns about. It needs no device and no timing:
+/// @brief The footprint half, as exact arithmetic over a pyramid ladder.
+/// @note This is the half to be careful with. It needs no device and no timing:
 /// a row stride is ceil(width / wordBits) words, so a wider word rounds up
 /// more coarsely, and the penalty grows as the level shrinks.
 void printPyramidFootprint() {

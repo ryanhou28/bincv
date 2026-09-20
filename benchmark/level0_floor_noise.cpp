@@ -1,11 +1,11 @@
 // ===========================================================================
-// earlier work -- THE 1-BIT LEVEL-0 LOCALISATION FLOOR.
+// THE 1-BIT LEVEL-0 LOCALISATION FLOOR.
 //
-// Three pyramid parameters had been measured and none explained that work’s standing
+// Three pyramid parameters had been measured and none explained the standing
 // accuracy MISS, so the question became whether the REPRESENTATION was the limit.
 // This file answers it, and the answer is no.
 //
-// ARM 1 -- THE PARTITION METHOD, and it replaces the oracle that measurement’s rule first
+// ARM 1 -- THE PARTITION METHOD, and it replaces the oracle the rule first
 // sketched. That sketch was DEGENERATE: it formed candidates the same way as the
 // observation, so the Hamming-nearest candidate was the observation itself and the
 // "floor" would have been exactly zero by construction. The flaw was found and the

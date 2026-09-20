@@ -12,24 +12,24 @@
 // loads to popcounts than the plane form a measurement timed, and the redundancy a
 // composition pays is a different fraction of a bigger number.
 //
-// So that work’s Done-when asks for the ratio to be CONFIRMED at this level rather than
+// So the ratio has to be CONFIRMED at this level rather than
 // inherited from a measurement of something adjacent. That is the whole content of
 // this file.
 //
 // THE RULE, WRITTEN BEFORE MEASURING (CLAUDE.md: "write the decision rule before
 // measuring"):
 //
-// * Fused beats composed at W=31 -> the axis 2 holds at the level;
+// * Fused beats composed at W=31 -> the earlier axis holds at this level;
 // ops/covariance.hpp's "reach for the fused entry point" note is confirmed and
 // nothing moves.
 // * Fused within noise of composed, or SLOWER -> that CONTRADICTS a documented
-// claim (the axis 2, the design notes, ops/reduce.hpp). CLAUDE.md's rule for
+// claim (that axis, and ops/reduce.hpp). CLAUDE.md's rule for
 // that case is explicit: report it, do not adjust the code to fit the doc.
-// that work’s implementation would then be resting on a ratio that does not exist
-// at its own level, and the spec's "built on the fused entry point" would need
+// The implementation would then be resting on a ratio that does not exist
+// at its own level, and "built on the fused entry point" would need
 // re-deciding rather than re-measuring.
 //
-// No threshold is attached to that rule, deliberately. The 15% line in earlier work
+// No threshold is attached to that rule, deliberately. The earlier 15% line
 // selected an interface that did not exist yet; this file is checking that an
 // interface already selected behaves as recorded where it is actually called, so
 // the question is direction and magnitude against the measured spread, not a gate.
@@ -50,7 +50,7 @@
 // The same two, with a caller-held `sign_x ^ sign_y` plane. They are
 // here because CLAUDE.md requires memory and speed to be reported
 // TOGETHER: the plane forms are faster and cost a frame-sized plane
-// per pyramid level, and a reader weighing that work’s choice needs both
+// per pyramid level, and a reader weighing the choice needs both
 // numbers on one page. The plane's formation cost is reported
 // separately and is NOT charged to the timed loop, which flatters the
 // plane forms on purpose -- the conclusion survives being generous to
@@ -168,9 +168,9 @@ const int kWindows[] = {7, 15, 31};
 // agreement check is on the shipped type and not on an intermediate.
 // ---------------------------------------------------------------------------
 
-/// @brief the design notes through the primitives, with no plane: three
+/// @brief The LK covariance through the primitives, with no plane: three
 /// calls, therefore three traversals of one window. This is what a caller
-/// who has not read writes, and it is the denominator.
+/// who has not read the guidance writes, and it is the denominator.
 template <typename Word>
 GradientCovariance covarianceComposed(const BinMatConstView<Word>& magX,
                                       const BinMatConstView<Word>& magY,

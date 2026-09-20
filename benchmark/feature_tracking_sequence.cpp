@@ -53,7 +53,7 @@
 #include "bincv/ops/pyramid.hpp"
 
 // The word type is a build-time choice so the SAME binary shape can be measured
-// at 32 and 64 bits. a measurement measured uint64_t on aarch64 and it LOST on track --
+// at 32 and 64 bits. uint64_t was measured on aarch64 and it LOST on track --
 // but only because every NEON path is guarded on sizeof(WordType) == 4 and
 // compiled out. ON x86 THERE ARE NO SUCH GUARDS, so the 2x packing is not paid
 // for with a lost fast path, and that case had never been measured.
@@ -72,10 +72,10 @@ using refsensor::preprocess;
 
 // ---- THE SAME TWO STAGES, IN binCV --------------------------------
 //
-// the design notes puts the edge filter inside the MVP set,
+// The edge filter is inside the MVP set,
 // and this benchmark used to run BOTH pipelines on an OpenCV-preprocessed frame with a
 // comment calling that stage "deliberately NOT binCV's claim". Those disagreed. binCV
-// has had `medianWide` and `edgeThreshold` since earlier work -- bit-exact against the
+// has `medianWide` and `edgeThreshold` -- bit-exact against the
 // reference, 0 of 1219 and 0 of 3367 pixels differing -- and they were tested but never
 // USED.
 //
@@ -225,11 +225,11 @@ struct Stats {
     size_t bTried = 0, bSurvived = 0, oTried = 0, oSurvived = 0;
     double flowRmsPx = 0.0, flowMaxPx = 0.0;
     size_t compared = 0, agreeWithin1px = 0;
-    std::vector<double> flowErrs;   // that measurement’s lesson: this distribution has a tail
+    std::vector<double> flowErrs;   // this distribution has a tail
     double bincvMs = 0.0, opencvMs = 0.0;
-    // PER-STAGE, INSIDE THE REAL LOOP. profiled one detection and one track
-    // per frame; the real pipeline re-detects on a few percent of frames, and that
-    // over-weighted detection ~33x and sent the design rule’s target list to the wrong kernel.
+    // PER-STAGE, INSIDE THE REAL LOOP. An earlier profile took one detection and one
+    // track per frame; the real pipeline re-detects on a few percent of frames, and that
+    // over-weighted detection ~33x and sent the optimization effort to the wrong kernel.
     // These timers are taken at the ACTUAL duty cycle.
     double msBuild = 0.0, msDetect = 0.0, msTrack = 0.0;
     size_t preprocMismatch = 0;   ///< binCV's sensor stage vs OpenCV's
@@ -244,10 +244,10 @@ double median(std::vector<int> v) {
 
 } // namespace
 
-// earlier work ->. The benchmark's own thread pool and point-array splitter are
+// The benchmark's own thread pool and point-array splitter are
 // GONE: binCV ships `bincv::ThreadPool` and `bincv::parallelFor`, and
 // `calcOpticalFlowPyrLK` splits over keypoints internally. What used to be thirty
-// lines here is now one `install` -- which is the whole point of earlier work, since the
+// lines here is now one `install` -- which is the whole point, since the
 // speedup was never missing, only the way to ask for it.
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
@@ -285,7 +285,7 @@ int main(int argc, char** argv) {
     bincv::ThreadPool pool(lkThreads);
     if (lkThreads > 1) pool.install();
 
-    // earlier work: the keypoint batch's WHOLE-PIPELINE arm. a measurement measured 1.75x in a
+    // The keypoint batch's WHOLE-PIPELINE arm. A measurement put it at 1.75x in a
     // kernel and 0.31x on the pipeline, so a kernel number is not a result here --
     // and lockstep batching changes the very quantity that did that, how many
     // iterations run. BINCV_LK_BATCH=0 takes the scalar path in the same binary.
@@ -317,7 +317,7 @@ int main(int argc, char** argv) {
     // measured how many iterations the tracker actually NEEDS, and at 94.7% of
     // pipeline time an unnecessary iteration is the most expensive thing there is.
     if (const char* it = std::getenv("BINCV_LK_ITERS")) lk.maxIterations = std::atoi(it);
-    // earlier work. The residual reject, so the rule can be measured against TRACK
+    // The residual reject, so the rule can be measured against TRACK
     // LIFETIME on a real sequence rather than against the synthetic gap that made it
     // look free. a rule that removes the failures by also removing the tracks is
     // not a fix.

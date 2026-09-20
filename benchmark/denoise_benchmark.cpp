@@ -1,7 +1,7 @@
 // denoise -- the reference pipeline's three-pixel median -- against OpenCV,
 // and against binCV's own composed spelling.
 //
-// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that denominator is not a judgement call -- it is
 // the reference pipeline's denoiser, `three_pix_median_filter`, ported
@@ -114,7 +114,7 @@ uint64_t nextRandom(uint64_t& state) {
 /// @brief One image in every representation under test, from ONE draw per pixel.
 /// @note The packed matrices and the CV_8U mask are not merely statistically
 /// similar -- they are the same picture, which is what makes the comparison
-/// like for like (the design notes: the same binary content).
+/// like for like: the same binary content.
 struct Image {
     bincv::BinMat<uint32_t> packed32;
     bincv::BinMat<uint64_t> packed64;

@@ -1,6 +1,6 @@
 // -- INTEROP OR SPECIALIZATION above the bit-width crossover?
 //
-// a measurement measured binCV 2.5-14x slower than OpenCV above the (filter-dependent)
+// binCV was measured 2.5-14x slower than OpenCV above the (filter-dependent)
 // crossover. The candidate answers: specialize wide-N cases internally to a byte
 // representation -- a second storage layout and a second implementation of every
 // kernel -- or make QuantMat<N> <-> cv::Mat conversion first-class and hand wide
@@ -14,7 +14,7 @@
 // interop decision is (native_binCV - native_OpenCV) against that tax, so the
 // tax is timed at N = 8 and N = 3 rather than tabulating every operation.
 //
-// ONE ARM PER PROCESS, selected by argv[1] -- that measurement’s method note: its first
+// ONE ARM PER PROCESS, selected by argv[1], and here is why: an earlier
 // version held every arm's working set resident at once, pumped ~1.4 MB through
 // a 1 MB L2 between samples, and inflated the cheap arms threefold. The caller
 // loops:./scripts/run_on_pi.sh pi4 'bash../benchmark/interop_sweep.sh'
@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
             report(arm, b[0].name.c_str(), measure::measureInterleaved(b, 9, 60.0)[0]);
             break;
         }
-        case 2: {  // R: the whole round trip that measurement’s bands are written on
+        case 2: {  // R: the whole round trip the decision bands are written on
             bincv::QuantMat<8, W> src(kW, kH), dst;
             fillQuant<8>(src);
             cv::Mat wide, down;
@@ -194,7 +194,7 @@ int main(int argc, char** argv) {
         }
         case 9: {
             // PEAK WORKING SET, both paths, computed exactly. An earlier version of
-            // this experiment reported speed only -- the same defect that measurement’s rule
+            // this experiment reported speed only -- the same defect the rule
             // carried -- while settling a trade whose whole point is that the interop
             // path MATERIALISES A BYTE-PER-PIXEL FRAME, which is what binCV exists
             // to avoid.

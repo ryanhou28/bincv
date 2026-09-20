@@ -13,7 +13,7 @@
 //
 // 2. The OPENCV half covers `threshold`, the CV_8U -> 1 bit kernel, and it is
 // the tier promise: bit-exact against
-// cv::threshold(src, dst, thresh, 255, THRESH_BINARY) through that work’s
+// cv::threshold(src, dst, thresh, 255, THRESH_BINARY) through the equivalence
 // harness, across its full size matrix.
 //
 // THE COMPARISON IS STRICTLY GREATER THAN, AND THAT IS WHAT THIS FILE IS FOR.
@@ -40,7 +40,7 @@
 // WHY THE INPUT IS NOT PACKED CONTENT ON THE TIER 1 SIDE: both sides of that
 // comparison read ONE cv::Mat. cv::threshold reads it and bincv::threshold reads
 // it, so there is no packing on the input path at all and no shared conversion
-// that could cancel a fault (that work’s argument). Only the binCV OUTPUT is unpacked,
+// that could cancel a fault. Only the binCV OUTPUT is unpacked,
 // by the harness, and that path is anchored by tests/test_equivalence.cpp.
 //
 // WHY THE CHECK COUNT IS NOT ONE PER PIXEL: each swept case reports its
@@ -820,7 +820,7 @@ void testThresholdOutOfDomain(const char* wordTypeName) {
 // ---------------------------------------------------------------------------
 //
 // N = 1, 2, 3 and 5 rather than every N up to 8: 1 is BinMat (core/types.hpp),
-// and 3 and 5 are the pyramid levels the design notes actually reaches. 2 is the
+// and 3 and 5 are the pyramid levels actually reached. 2 is the
 // smallest N where a plane loop can be wrong about plane order.
 
 BINCV_TEST(Threshold, BinarizeSweep_uint8_t) {

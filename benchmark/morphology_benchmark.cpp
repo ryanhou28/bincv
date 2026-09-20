@@ -1,6 +1,6 @@
 // morphology -- erode / dilate / morphologyEx against OpenCV.
 //
-// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U -- cv::erode,
 // cv::dilate and cv::morphologyEx with the SAME structuring element, the same
 // anchor and the same border. That is what a user does today without binCV, and
@@ -25,8 +25,8 @@
 // THE BORDER TYPE IS A CASE AXIS, NOT A CONSTANT. binCV handles BORDER_CONSTANT
 // entirely in the word path and the other four in a per-pixel fixup over the
 // 2 * reach edge columns, so the two have genuinely different cost structures and
-// a ratio measured at one says nothing about the other. Measured during that work’s
-// review, at a point when that fixup walked the whole row instead of its two
+// a ratio measured at one says nothing about the other. Measured at a point when
+// that fixup walked the whole row instead of its two
 // bands: erode 3x3 at 640x480 cost 19.5 us under BORDER_CONSTANT and 241-260 us
 // under the other four -- a published 1.11x that was really 0.21x for four of the
 // five values a caller may pass. Every row below names its border type, and two
@@ -54,7 +54,7 @@
 // two. Probed with VmHWM around a single 4096x4096 call, one op per process:
 // OPEN, CLOSE, TOPHAT and BLACKHAT each moved the high-water mark by 0 kB and
 // only MORPH_GRADIENT by ~one frame (17188 kB of a 16384 kB frame). The
-// openCvBuffers field below carries that measurement, and an earlier value of 3
+// openCvBuffers field below carries those measurements, and an earlier value of 3
 // for OPEN overstated binCV's footprint advantage on the compound case by 1.5x.
 //
 // ---------------------------------------------------------------------------
@@ -388,9 +388,9 @@ int composedTraversals(const bincv::StructuringElement& se) {
 /// operation and its element: measured here, cv::erode 3x3 and
 /// cv::morphologyEx OPEN 3x3 differ by more than 2x, because OPEN issues
 /// two filter calls. Printing one case's floor beside another case's row
-/// -- which this benchmark did until that work’s review -- understates it most
+/// -- which this benchmark used to do -- understates it most
 /// for exactly the compound row where the ladder argument matters, and the
-/// floor is what that measurement’s "not cache residency" conclusion rests on.
+/// floor is what the "not cache residency" conclusion rests on.
 void measureCallFloors(const Case& c, double& openCvUs, double& binCvUs) {
     Image tiny;
     makeImage(tiny, 2, 2, UINT64_C(0xF100));

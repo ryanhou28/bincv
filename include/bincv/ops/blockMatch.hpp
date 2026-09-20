@@ -5,7 +5,7 @@
 /// matching over bit-packed frames. **API TIER 3** -- no
 /// OpenCV equivalent, so it borrows no OpenCV name.
 ///
-/// the design notes names TWO routes for tracking on
+/// There are TWO routes for tracking on
 /// binary frames and only route (b) had ever been built. This is route (a).
 ///
 /// **SCOPE, BECAUSE [CLAUDE.md](../../../CLAUDE.md) PUTS TEMPLATE MATCHING OUT OF
@@ -28,17 +28,17 @@
 /// Route (b) carries two `SignedQuantMat` ladders -- `2(N+1)` planes per level
 /// on top of the two frames. Route (a) carries the two frames and nothing else.
 /// * **Its cost is `O(R²)` per level where route (b)'s is `O(iterations)`.** The
-/// search radius is the whole cost story and is swept in earlier work.
-/// * **Its accuracy floor is derivable and is stated before any measurement**
-///: a whole-pixel matcher returns `round(d)`, so on a translation with
+/// search radius is the whole cost story, and the benchmark sweeps it.
+/// * **Its accuracy floor is derivable and is stated before any measurement**:
+/// a whole-pixel matcher returns `round(d)`, so on a translation with
 /// fractional part `q` its per-axis error is exactly `min(q, 1-q)`, which over
 /// `q` uniform is **0.2887 px per axis and 0.408 px over two**. `subPixel`
 /// below is what addresses that, and it is the only part of this file that is
 /// not integer arithmetic.
 /// * **It is a ONE-BIT algorithm.** Hamming distance is defined on bits. Route
-/// (b) does better on a `1/2/2/2` ladder than on `1/1/1/1`
-///, and route (a) cannot enter that
-/// comparison without an N-bit cost function. a measurement reports both the same-ladder
+/// (b) does better on a `1/2/2/2` ladder than on `1/1/1/1`, and route (a)
+/// cannot enter that
+/// comparison without an N-bit cost function. The benchmark reports both the same-ladder
 /// comparison (the algorithm question) and the best-ladder one (the practical
 /// question) rather than picking whichever flatters route (a).
 ///

@@ -111,7 +111,7 @@ BINCV_TEST(Edge, AllTwelveCombinations_uint8) {
 }
 
 BINCV_TEST(Edge, WideSource_uint16) {
-    // the design notes: the wide-source path exists BECAUSE of this operation, so
+    // The wide-source path exists BECAUSE of this operation, so
     // a 12-bit-shaped threshold is checked rather than only an 8-bit one.
     using EC = EdgeCombine; using ER = EdgeRelation; using ES = EdgeSpatial;
     checkCombination<EC::Or,  ER::Ge, ES::Wide, uint16_t>("Or Ge Wide u16 t=15", 15);
@@ -119,7 +119,7 @@ BINCV_TEST(Edge, WideSource_uint16) {
 }
 
 BINCV_TEST(Edge, TruncatingTo8BitLosesEdges) {
-    // The measured form of the design notes's argument, so it is a CHECKED claim
+    // The measured form of that argument, so it is a CHECKED claim
     // rather than a paragraph: a 12-bit image whose gradients are all smaller than
     // 16 counts has real edges at 12-bit precision and NONE after `v >> 4`.
     constexpr size_t kW = 64, kH = 16;

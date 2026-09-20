@@ -1,7 +1,7 @@
 // ===========================================================================
 // THE AUDIT CLAUDE.md's NEW RULE CAME FROM.
 //
-// a measurement found `medianWide` and `edgeThreshold` at 78% of the pipeline the day something
+// A measurement found `medianWide` and `edgeThreshold` at 78% of the pipeline the day something
 // first called them: written bit-exact against the reference, benchmarked by nobody, and
 // therefore unoptimized. That prompted a sweep of every operation for the same state --
 // correct, tested, and never timed.
@@ -14,7 +14,7 @@
 // * `unpackTo8Bit` -- the output path in ops/pack.hpp, and the only way to look at what
 // binCV produced on a target with no OpenCV.
 //
-// `packBits` is here too. It has had a vector path since earlier work, but a measurement measured it as
+// `packBits` is here too. It has a vector path, but it was only ever measured as
 // part of `fromCVMat`, and the core-only entry point had never been timed on its own.
 //
 // Everything else already had an arm. `readPgm` is deliberately absent: it parses a

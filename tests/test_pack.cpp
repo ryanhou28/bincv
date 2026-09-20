@@ -9,12 +9,12 @@
 // WHAT IS ACTUALLY CHECKED, AND WHY IT IS A CROSS-PRODUCT.
 //
 // * THREE RULES x TWO SOURCE TYPES x FOUR WORD TYPES. The rules are compile-time
-// (that measurement’s 46x needs one visible predicate), so each combination is a separate
+// (the measured 46x needs one visible predicate), so each combination is a separate
 // instantiation and testing one of them tests one of them. A rule set with a
 // single tested member is a one-rule op with untested branches.
 //
 // * uint16_t IS NOT DECORATION. 10-, 12- and 16-bit sensors are ordinary
-// (the design notes), and the x86 path narrows two 16-lane compares with
+// and the x86 path narrows two 16-lane compares with
 // `packs_epi16` + `permute4x64` before the move-mask -- lane order that a
 // uint8-only test cannot exercise.
 //
@@ -169,8 +169,8 @@ BINCV_TEST(Pack, RoundTripThroughUnpack) {
 }
 
 BINCV_TEST(Pack, StridedSourceIsTheYPlaneCase) {
-    // A YUV420 Y plane is a strided 8-bit array and nothing more -- the design notes
-    // says binCV takes it as-is rather than converting. This is that claim: a source
+    // A YUV420 Y plane is a strided 8-bit array and nothing more, and binCV
+    // takes it as-is rather than converting. This is that claim: a source
     // whose stride exceeds its width must pack identically to the tight one.
     constexpr size_t kW = 61, kH = 9, kStride = 96;
     std::vector<uint8_t> padded(kStride * kH, 0xAB), tight(kW * kH);
@@ -257,7 +257,7 @@ BINCV_TEST(Pnm, RoundTripsThroughAFileFormat) {
     // writePgm -> readPgm with no OpenCV anywhere. This is the `none` backend of
     // bincv_io: enough to LOOK at what binCV produced on a target that has no image
     // library, and enough to feed it a test image. A PNG decoder would be eight times
-    // the size of everything binCV does (the design notes, measured).
+    // the size of everything binCV does, measured.
     constexpr size_t kW = 67, kH = 11;
     std::vector<uint8_t> img(kW * kH);
     uint64_t st = 20260827;
@@ -475,7 +475,7 @@ BINCV_TEST(Pnm, PgmHeaderParsesFromAPrefixSoP5CanStream) {
 //
 // `QuantMat<N>::fromCVMat` is the only N-bit ingestion binCV had, it needs OpenCV, and
 // its rule -- `round(v * MaxValue / 255)` -- is load-bearing: it is
-// `toCVMatNormalized`'s EXACT inverse, and the design rule records a deliberate divergence from
+// `toCVMatNormalized`'s EXACT inverse, with a deliberate, recorded divergence from
 // OpenCV at bytes 1..127. `packQuant` replaces it in core, so "reproduces it bit for
 // bit" is the whole contract and this is where it is pinned.
 // ---------------------------------------------------------------------------
@@ -561,7 +561,7 @@ BINCV_TEST(Pack, QuantWithMatchesQuantWhenGivenTheSameRule) {
 }
 
 BINCV_TEST(Pack, QuantAcceptsSixteenBitSources) {
-    // that work’s point: a 10-, 12- or 16-bit sensor hands you `uint16_t`, and the scale is
+    // The point: a 10-, 12- or 16-bit sensor hands you `uint16_t`, and the scale is
     // against THAT type's range, not 255.
     constexpr size_t N = 4, w = 40, h = 3;
     std::vector<uint16_t> src(w * h);

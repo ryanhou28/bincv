@@ -1,7 +1,7 @@
 // -- what is the 3x3 SPECIAL CASE worth? binCV against binCV.
 //
-// says "Special-case 3x3 -- it is the common case in practice", and
-// ops/morphology.hpp does: morphRow3x3 is a second row kernel that runs when the
+// Special-casing 3x3 is worth doing because it is the common case in practice, and
+// ops/morphology.hpp does it: morphRow3x3 is a second row kernel that runs when the
 // element is 3x3 and centerd. A second implementation of one function is a
 // maintenance cost forever, and this file is what says what it buys, so that a
 // reader deciding whether to vectorize one path or both has a number
@@ -23,7 +23,7 @@
 // that gets published against OpenCV must not depend on what else is in the file
 // that measures it, so the two comparisons live in two binaries.
 //
-// NO OPENCV. Both sides are binCV, so the design notes's denominator does not
+// NO OPENCV. Both sides are binCV, so an OpenCV denominator does not
 // apply and this builds in the reference device's DEFAULT core-only build.
 //
 // VARIANTS impl::morphApply with MorphPath::Auto (what erode/dilate call) and
@@ -31,9 +31,9 @@
 // They are required to compute the SAME image before either is timed
 // -- the same property tests/test_morphology.cpp's
 // Morphology.FastPathEqualsGeneric_* asserts across the whole sweep.
-// WORKLOAD erode and dilate, rect3x3 / cross3x3 (== ellipse 3x3, the design rule’s note),
+// WORKLOAD erode and dilate, rect3x3 / cross3x3 (== ellipse 3x3),
 // 640x480 and the pyramid ladder below it, ~50% fill, four rotated
-// inputs, at uint32_t (the design rule’s default) and uint64_t.
+// inputs, at uint32_t (the default) and uint64_t.
 // METRIC ns/pixel for both paths and the ratio, with the batch spread beside
 // it so a difference smaller than the noise reads as one.
 //

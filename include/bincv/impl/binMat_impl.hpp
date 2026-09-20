@@ -194,7 +194,7 @@ QuantMat<1, WordType_>::QuantMat(const QuantMat& other)
       rowAlignment(other.rowAlignment),
       alignedWidth(other.alignedWidth),
       storage() {
-    // The copy owns its memory whether or not the source did -- the design rule applies to the
+    // The copy owns its memory whether or not the source did -- deep copy applies to the
     // source's *contents*, not to how the source happened to be constructed.
     if (other.storage.ownsMemory()) {
         // Storage's own copy deep-copies an owning source, allocating and filling
@@ -654,7 +654,7 @@ void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
     // dimensions, the same commit-last shape resize uses. Committing first would
     // leave a failed allocation behind a matrix that describes a buffer it does not
     // have, and every later read would trust those dimensions -- at cannot catch
-    // it, since earlier work made the bounds check debug-only.
+    // it, since the bounds check is debug-only.
     Storage<WordType> newData(newHeight * newAlignedWidth);
 
     for (size_t y = 0; y < newHeight; ++y) {
@@ -675,7 +675,7 @@ void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
 /// @note ONE IMPLEMENTATION. The unpacking lives in ops/pack.hpp, in CORE, so the
 /// `cv::Mat` wrapper is a shape adapter and nothing more. Before this split it
 /// was a per-pixel loop recomputing `wordIndex` and `bitMask` for every pixel --
-/// the exact shape `fromCVMat` had before earlier work, and
+/// the exact shape `fromCVMat` had before it was split the same way, and
 /// the slowest thing in the library.
 template <typename WordType, typename PixelTransform>
 inline void toCVMatHelper(const BinMat<WordType>& binmat, cv::Mat& output,
@@ -726,8 +726,8 @@ void QuantMat<1, WordType_>::clearTrailingBits() {
 
 // at and set
 //
-// Debug-checked, unchecked in release (the design notes, and the behavior
-// change sanctions). These are the two functions on the per-pixel path, and
+// Debug-checked, unchecked in release, which is a deliberate change from
+// throwing. These are the two functions on the per-pixel path, and
 // a throw here would sit inside every loop that reads an image. In a release
 // build the checks are gone entirely -- what remains is the row offset, a shift
 // and a mask -- and an out-of-range index is undefined behavior, exactly as it
@@ -986,7 +986,7 @@ void QuantMat<1, WordType_>::fill(bool value) {
 
 // countNonZero
 //
-// STILL A PER-PIXEL LOOP, and deliberately so since earlier work. The bulk reduction is
+// STILL A PER-PIXEL LOOP, and deliberately so. The bulk reduction is
 // `bincv::countNonZero(m.constView)` in ops/reduce.hpp, which is 6x faster here
 // and 35x faster where the popcount lowers to an instruction
 // (results/reduce_benchmark.log). This member cannot simply forward to

@@ -7,8 +7,8 @@
 # tests/test_util.hpp stays the backend. Both run the same case bodies through
 # the same check macros -- see the header for the full argument.
 #
-# NOT because GTest cannot compile there. The brief said "GTest needs
-# exceptions"; measured, that is wrong -- googletest v1.14.0 builds from source
+# NOT because GTest cannot compile there. The assumption going in was that GTest
+# needs exceptions; measured, that is wrong -- googletest v1.14.0 builds from source
 # under -fno-exceptions, runs, and reports failures correctly, EXPECT_DEATH
 # included. `-DBINCV_USE_GTEST=ON` therefore works in that configuration too and
 # is supported. The default declines it for a different reason: the embedded gate

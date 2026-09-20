@@ -72,7 +72,7 @@
 /// = (p1 & p2) | (p1 & p3) | (p2 & p3)
 /// = maj3(p1, p2, p3)
 ///
-/// which is the design notes's expression and ops/bitslice.hpp's `maj3`. The
+/// which is ops/bitslice.hpp's `maj3`. The
 /// algebra is why the kernel is one instruction per 64 pixels; it is NOT why the
 /// kernel is believed correct. tests/test_denoise.cpp runs the reference's own
 /// cv::min / cv::max calls -- ported, not paraphrased, so the border comes from
@@ -85,7 +85,7 @@
 /// OpenCV has no equivalent. `cv::medianBlur` is a median over a SQUARE window
 /// (3x3 at ksize 3), not this asymmetric three-pixel L, and its border is
 /// BORDER_REPLICATE rather than zero. Borrowing the name would make a Tier 1
-/// drop-in promise that this operation cannot keep (the design notes), so the
+/// drop-in promise that this operation cannot keep, so the
 /// name says what it is: `denoiseMedian3`.
 ///
 /// ---------------------------------------------------------------------------
@@ -100,8 +100,8 @@
 /// that is 2 x 38400 B added to a 38400 B frame: 3x the footprint
 /// of the operation.
 /// fused 1 pass, NO scratch at all. The above-neighbour is a row index
-/// (row y - 1, or zeros at y == 0 -- a vertical shift moves no bits,
-///), and the right-neighbour is the current row's words shifted
+/// (row y - 1, or zeros at y == 0 -- a vertical shift moves no bits),
+/// and the right-neighbour is the current row's words shifted
 /// one bit down, computed inline into a register.
 ///
 /// Memory and speed do not conflict here -- the fused form is smaller AND makes
@@ -134,12 +134,12 @@
 /// is a change to the padding invariant here.
 /// 4. **Never throws.** Mismatched dimensions, a stride too short for a row and
 /// an overlapping destination are programming errors reported by
-/// BINCV_ASSERT in debug builds and undefined in release (the design notes).
+/// BINCV_ASSERT in debug builds and undefined in release.
 ///
 /// ---------------------------------------------------------------------------
 /// ALIASING: `dst` MUST SHARE NO WORD WITH `src` -- IN PLACE IS NOT SUPPORTED
 ///
-/// This is the half of earlier work ops/shift.hpp takes, and for the same reason: the
+/// This is the half of the aliasing rule ops/shift.hpp takes, and for the same reason: the
 /// operation is NOT pointwise in the word index. Destination row y reads source
 /// row y - 1, so an in-place call would read a row it has already overwritten and
 /// the filter would feed on its own output from the second row onwards. The
@@ -169,7 +169,7 @@
 // row-geometry and aliasing vocabulary every kernel under ops/ is written
 // in. One copy is the only way the aliasing rule cannot drift.
 #include "../impl/kernel_util.hpp"
-// impl::maj3, the word primitive exists to provide. the design notes's
+// impl::maj3, the word primitive this file exists to use. The majority
 // expression lives there and is enumerated exhaustively by tests/test_bitslice.cpp
 // -- this file supplies the neighbourhood, not the arithmetic.
 #include "bitslice.hpp"
@@ -230,7 +230,7 @@ inline void medianRow3(const WordType* above, const WordType* cur, WordType* dst
     // `c` above fails 1215 of the same 9744.
     //
     // The coupling that creates is stated so it cannot be broken silently: in
-    // this kernel the padding invariant (CLAUDE.md;) is carried by the mask
+    // this kernel the padding invariant (CLAUDE.md) is carried by the mask
     // on `c`, which is there for a BORDER reason -- the last column's right
     // neighbour must read 0. Anything that changes this filter's border must
     // re-establish the invariant explicitly rather than assume it survived.
@@ -243,14 +243,14 @@ inline void medianRow3(const WordType* above, const WordType* cur, WordType* dst
 } // namespace impl
 
 // ---------------------------------------------------------------------------
-// The kernel ( views, never containers)
+// The kernel (views, never containers)
 // ---------------------------------------------------------------------------
 
 /// @brief dst[y][x] = median(src[y-1][x], src[y][x], src[y][x+1]), with the
 /// out-of-image neighbours reading 0. **API TIER 3.**
 ///
 /// The reference pipeline's `three_pix_median_filter`, bit-parallel: for binary
-/// pixels the median of three IS their majority (the design notes), so each word
+/// pixels the median of three IS their majority, so each word
 /// of the destination costs one `maj3` over 8..64 pixels.
 ///
 /// @param src Source view.
@@ -278,7 +278,7 @@ inline void medianRow3(const WordType* above, const WordType* cur, WordType* dst
 /// @note PRECONDITION ON `dst`: it must span its image's full width, or end on a
 /// word boundary. See the top of this file.
 /// @note Empty views (width or height 0) are a no-op, not an error.
-/// @note Never throws and never allocates (the design notes). Mismatched
+/// @note Never throws and never allocates. Mismatched
 /// dimensions, a stride shorter than a row, and any overlap between src and
 /// dst are programming errors: BINCV_ASSERT reports them in debug builds
 /// and they are undefined in release, exactly as an out-of-range at is.

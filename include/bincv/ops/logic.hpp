@@ -6,10 +6,10 @@
 /// The first kernels in the project, and the first test of the thesis: a binary
 /// image stored one bit per pixel means an AND over a 640x480 frame is 9600
 /// 32-bit words rather than 307200 bytes, so the same answer moves an eighth of
-/// the memory (the design notes, 6.1).
+/// the memory.
 ///
 /// Four operations, each bit-exact against its OpenCV counterpart on equivalent
-/// content (the design notes, Tier 1) -- proven across the size and fill
+/// content (Tier 1) -- proven across the size and fill
 /// matrix by tests/test_logic.cpp, not asserted here.
 ///
 /// ---------------------------------------------------------------------------
@@ -25,21 +25,21 @@
 /// ceil(width / WordBits) -- i.e. when the rows really are dense and adjacent
 /// -- and every other case walks row by row through view.row(y). A kernel
 /// that assumed one dense run would be correct on matrices built the same way
-/// and silently wrong the moment one argument is over-aligned (the design rule makes that
-/// a per-object choice) or wraps a caller's buffer with its own stride.
+/// and silently wrong the moment one argument is over-aligned (alignment is a
+/// per-object choice) or wraps a caller's buffer with its own stride.
 ///
 /// 3. **PADDING BITS STAY ZERO** (CLAUDE.md, hard rules). Every kernel here
 /// writes whole words, so the trailing partial word of each row carries bits
 /// past `width` that no pixel comparison can see -- and bitwiseNot SETS every
 /// one of them. They are masked off before the word is stored. Measured
-/// during earlier work: a word-wise NOT without the mask was bit-exact against
+/// when it was measured: a word-wise NOT without the mask was bit-exact against
 /// cv::bitwise_not on all 240 swept cases at uint64_t and left 826,200
 /// phantom set bits behind, which the next word-wise reduction counts as
 /// pixels. The mask is applied by all four operations, not only by NOT, so a
 /// destination is clean even when an input's padding was dirty (a wrapped
 /// buffer's padding belongs to its caller -- see BinMat's wrap constructor).
 ///
-/// 4. **No allocation, and no throw** (the design notes). Mismatched dimensions,
+/// 4. **No allocation, and no throw.** Mismatched dimensions,
 /// a stride too short to hold a row, and unsafe aliasing are programming
 /// errors, reported by BINCV_ASSERT in debug builds and undefined in release,
 /// exactly as at is.
@@ -88,13 +88,13 @@
 /// "No shared word at all" is checked EXACTLY, per row, and not by comparing the
 /// two views' bounding spans. Two views over one buffer can interleave without
 /// sharing a byte -- alternate row bands (the shape a pyramid downsample takes,
-/// the design notes) and left/right column tiles both do -- and a bounding-box
-/// test rejects every one of them. the design rule says a kernel takes any
+/// takes) and left/right column tiles both do -- and a bounding-box
+/// test rejects every one of them. A kernel takes any
 /// {ptr, width, height, stride}; rejecting a legal view in debug and accepting it
 /// in release is the worst of both.
 ///
 /// The predicate itself lives in impl/kernel_util.hpp, shared with ops/shift.hpp
-/// ( binds every kernel under ops/, so one copy is the only way the rule
+/// (it binds every kernel under ops/, so one copy is the only way the rule
 /// cannot drift). Note that shift uses the OTHER half of it: the exact-alias case
 /// below is legal only because these operations are pointwise in the word index,
 /// which a shift is not.
@@ -257,7 +257,7 @@ inline void applyUnary(BinMatConstView<WordType> src, BinMatView<WordType> dst) 
 } // namespace impl
 
 // ---------------------------------------------------------------------------
-// The kernels ( views, never containers)
+// The kernels (views, never containers)
 // ---------------------------------------------------------------------------
 
 /// @brief dst = a & b, pixel for pixel. **API TIER 1** -- bit-exact against
@@ -275,7 +275,7 @@ inline void applyUnary(BinMatConstView<WordType> src, BinMatView<WordType> dst) 
 /// in a sub-width window onto a wider image those bits are that image's next
 /// pixels and are destroyed. Nothing diagnoses it -- see the precondition
 /// section at the top of this file. Sources are unaffected.
-/// @note Never throws and never allocates (the design notes). Mismatched
+/// @note Never throws and never allocates. Mismatched
 /// dimensions, a stride shorter than a row, and overlapping-but-not-
 /// identical views are programming errors: BINCV_ASSERT reports them in
 /// debug builds, and they are undefined in release, exactly as an
@@ -325,8 +325,8 @@ inline void bitwiseNot(BinMatConstView<WordType> src, BinMatView<WordType> dst) 
 // QuantMat overloads: the same four operations, applied per plane
 // ---------------------------------------------------------------------------
 //
-// Bit-plane logic is plane-wise by construction (the design notes: "logic
-// operations apply per plane and are free"), so these are a loop over plane
+// Bit-plane logic is plane-wise by construction -- logic
+// operations apply per plane and are free -- so these are a loop over plane
 // and nothing else. They are convenience wrappers over the kernels above, NOT
 // kernels themselves -- which is why taking a container here does not contradict
 // the compiled inner loop is still the view kernel, and a caller who holds

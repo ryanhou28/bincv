@@ -4,33 +4,33 @@
 //
 // This file compares binCV against BINCV -- alternative implementations of the
 // same reduction -- so unlike benchmark/reduce_benchmark.cpp it has no OpenCV
-// denominator and needs none. the design notes's denominator answers "is binCV
+// denominator and needs none. An OpenCV denominator answers "is binCV
 // worth using"; these two questions are "is this file's interface buying what it
 // claims" and "does composing the covariance out of it cost anything", and OpenCV
 // is not a party to either.
 //
 // ===========================================================================
-// Q1 -- the design rule’s claim, on the target this was derived from
+// Q1 -- the bulk-only claim, on the target it was derived from
 // ===========================================================================
 //
-// the design notes says reductions are bulk-only "so the implementation keeps
+// The design notes say reductions are bulk-only "so the implementation keeps
 // data in vector registers and accumulates with cnt + uaddlv without crossing
-// back". also says the implementation is scalar __builtin_popcountll for
+// back". The implementation is scalar __builtin_popcountll for
 // now. Both cannot describe the same code, and on aarch64 the difference is the
-// entire argument for earlier work. So: measure the shipped bulk entry point against the
-// per-word popcount loop the design rule forbids exposing, at the same load width, on the
+// entire argument for the rule. So: measure the shipped bulk entry point against the
+// per-word popcount loop the rule forbids exposing, at the same load width, on the
 // same data.
 //
 // DECISION RULE (written first):
-// * bulk >= 1.15x the per-word loop -> 6.2's present tense is defensible; fix
-// only the instruction sequence it quotes.
+// * bulk >= 1.15x the per-word loop -> the notes' present tense is defensible;
+// fix only the instruction sequence they quote.
 // * bulk within +/-15% of the per-word loop -> the INTERFACE decision
-// stands, but 6.2's IMPLEMENTATION claim is false today. Separate the two in
-// 6.2 and in ops/reduce.hpp, record the numbers in, and
+// stands, but the IMPLEMENTATION claim is false today. Separate the two in
+// the notes and in ops/reduce.hpp, record the numbers, and
 // change no kernel: vectorization is a later round, and this is a documentation
 // defect, not a kernel defect.
 // * Either way, no -march flag and no intrinsics enter the LIBRARY -- the same
-// standing decision that measurement’s x86_64 half already recorded.
+// standing decision the x86_64 half already recorded.
 //
 // A third row runs on aarch64 only and is a HEADROOM PROBE, not a candidate
 // implementation: the identical 64-bit loads with a VECTOR accumulator (cnt into
@@ -43,24 +43,24 @@
 // Q2 -- what composing the 2x2 covariance out of these primitives costs
 // ===========================================================================
 //
-// the design notes's covariance needs four numbers over one window. Through the
+// The LK covariance needs four numbers over one window. Through the
 // primitives that is THREE calls -- countNonZero(mag_x), countNonZero(mag_y),
 // countAndSplit(mag_x, mag_y, sign_x^sign_y) -- and therefore three traversals of
 // the same window, issuing the same popcounts a single fused traversal would.
-// countAndSplit is single-pass, as requires; the COMPOSITION is not, and no
-// experiment has looked at that axis. is scoped to
-// incremental-versus-recompute and would not measure it.
+// countAndSplit is single-pass, as the interface requires; the COMPOSITION is
+// not, and no experiment has looked at that axis. The incremental-versus-
+// recompute sweep would not measure it.
 //
 // DECISION RULE (written first):
 // * composition within 15% of a fused traversal -> the composition is free
 // enough; record it and close the question.
-// * composition costs > 15% more -> widen that work’s brief to measure a
-// covariance-shaped entry point against the composition BEFORE this is
-// written against either, and register that in the design notes.
-// Do NOT add the entry point here: choosing that work’s interface on the strength
-// of one measurement with no decision rule is the thing forbids for
+// * composition costs > 15% more -> measure a
+// covariance-shaped entry point against the composition BEFORE anything is
+// written against either, and record that decision.
+// Do NOT add the entry point here: choosing an interface on the strength
+// of one measurement with no decision rule is exactly what is forbidden for
 // incremental state, and the same reasoning binds this.
-// * 15% is that work’s own existing threshold, adopted rather than invented, so
+// * 15% is the existing threshold, adopted rather than invented, so
 // that two questions about the same interface are not judged on two scales.
 //
 // The fused traversal below is MEASUREMENT CODE. It reaches into impl:: -- which
@@ -159,7 +159,7 @@ double measureNs(Body body, int repeats, double targetMs) {
 // about the masking around it. The shipped kernel still applies its one AND per
 // row; that is part of what it costs and is not subtracted out.
 
-/// @brief The per-word popcount loop the design rule forbids the PUBLIC API from making
+/// @brief The per-word popcount loop the bulk-only rule forbids the PUBLIC API from making
 /// possible. Written here as the thing being measured against, and
 /// nowhere else in the project.
 size_t countPerWordLoop(const BinMatConstView<uint64_t>& v, size_t wordsPerRow) {
@@ -283,7 +283,7 @@ struct Covariance {
     }
 };
 
-/// @brief the design notes through the primitives -- three calls, and
+/// @brief The LK covariance through the primitives -- three calls, and
 /// therefore three traversals of the same window.
 Covariance covarianceComposed(const BinMatConstView<uint64_t>& magX,
                               const BinMatConstView<uint64_t>& magY,
@@ -325,9 +325,8 @@ Covariance covarianceFused(const BinMatConstView<uint64_t>& magX,
 }
 
 bool runQ2() {
-    // 640x480 and 200 keypoints: the frame size and the keypoint count the brief
-    // names (the reference gftt_max_corners), with the 31x31 window
-    // the design notes specifies.
+    // 640x480 and 200 keypoints: the frame size and the keypoint count the
+    // reference pipeline runs (its gftt_max_corners), with its 31x31 window.
     const int width = 640;
     const int height = 480;
     const int windowSize = 31;
@@ -357,7 +356,7 @@ bool runQ2() {
     }
 
     // Keypoints, including ones near enough to an edge that the window clips --
-    // which is the realistic case (the design notes) and not a corner case.
+    // which is the realistic case and not a corner case.
     std::vector<Rect> windows;
     windows.reserve(static_cast<size_t>(keypoints));
     {

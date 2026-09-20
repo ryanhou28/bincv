@@ -1,4 +1,4 @@
-// Shift kernels ( horizontal, vertical and borders).
+// Shift kernels (horizontal, vertical and borders).
 //
 // TWO HALVES, exactly as tests/test_logic.cpp has:
 //
@@ -12,7 +12,7 @@
 //
 // 2. The OPENCV half asserts what the border semantics actually promise:
 // the same mapping cv::borderInterpolate computes, and the same images
-// cv::copyMakeBorder produces, over that work’s size matrix at all four word
+// cv::copyMakeBorder produces, over the size matrix at all four word
 // widths. That is what makes morphology bit-exact later.
 //
 // THE ORACLE IS THE PER-PIXEL REFERENCE, AND IT SHARES NO CODE WITH THE KERNEL.
@@ -288,7 +288,7 @@ void checkOneCase(const char* wordTypeName, const bincv::BinMat<WordType>& src,
 const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (the design rule makes alignment a per-object choice): 32 bytes
+// An over-aligned row stride (alignment is a per-object choice): 32 bytes
 // is a whole number of 1-, 2-, 4- and 8-byte words, so every word type gets a
 // stride strictly larger than the ceil(width / WordBits) words its rows need.
 constexpr size_t PADDED_ALIGNMENT = 32;
@@ -743,8 +743,8 @@ void testGuardWords(const char* wordTypeName) {
 // shift.hpp refuses an overlapping destination, and "overlapping" has to mean per
 // row rather than per bounding box. Two views over one buffer can interleave
 // without sharing a byte -- alternate row bands are what a pyramid downsample
-// takes (the design notes), left/right column tiles are how a frame is split
-// across a loop -- and the design rule says a kernel takes any {ptr, width, height, stride}.
+// takes, left/right column tiles are how a frame is split
+// across a loop -- and a kernel takes any {ptr, width, height, stride}.
 // The equivalent predicate in ops/logic.hpp got this wrong once and aborted every
 // Debug build on a call that was correct in release; this case is what would say
 // so if the shared predicate regressed.
@@ -966,9 +966,9 @@ std::string fillText(float fill) {
 /// or short-circuited kernel stops being exercised and where the border
 /// stands at maximum contrast against the image.
 /// @note **The last six offsets are relative to the EXTENTS, and that is the point
-/// of declaring the table inside the size loops.** that work’s second done-when
-/// clause is "vertical shifts correct for offsets exceeding the image
-/// height", and the fixed table this replaces reached |dy| = 3 against
+/// of declaring the table inside the size loops.** Vertical shifts must be
+/// correct for offsets exceeding the image
+/// height, and the fixed table this replaces reached |dy| = 3 against
 /// heights of 1, 3 and 17 -- so `dy > height` at a height greater than 1 was
 /// never asked of cv::copyMakeBorder at all. Measured, with a clamp injected
 /// into ops/shift.hpp's row loop that is wrong ONLY past the height
@@ -1048,8 +1048,8 @@ void testOpenCvBorders(const char* wordTypeName) {
 /// border must NOT produce a black frame around the edge, and dilating an
 /// all-black one must NOT produce a white one.
 /// @note If this case ever fails, the paragraph in ops/shift.hpp is wrong and
-/// that work’s border defaults follow it -- which is exactly why it is here rather
-/// than in the morphology task that will consume it.
+/// the morphology border defaults that follow it are wrong too -- which is
+/// exactly why it is here rather than in the code that consumes it.
 #if BINCV_TEST_HAVE_IMGPROC
 void testMorphologyFillPremise() {
     std::cout << "\n--- the erode/dilate fill asymmetry, as OpenCV implements it ---\n";

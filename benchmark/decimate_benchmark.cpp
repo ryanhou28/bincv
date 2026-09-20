@@ -11,15 +11,15 @@
 // difference inside the larger spread is a null result that takes the
 // simpler one -- the gather loop.
 //
-// NO OPENCV. All three variants are binCV, so the design notes's denominator
+// NO OPENCV. All three variants are binCV, so an OpenCV denominator
 // does not apply and this builds in the reference device's DEFAULT core-only
 // build. (cv::resize would not be that denominator anyway: it resamples both axes
 // on a byte image and rounds, rather than keeping the even columns.)
 //
 // VARIANTS impl::decimateColumnsBy2Gather per-pixel gather loop, 0 B aux
 // decimateColumnsBy2 word-local Morton deinterleave,
-// 0 B aux -- and after earlier work chose
-// it this is the SHIPPED
+// 0 B aux -- and since it was
+// chosen this is the SHIPPED
 // entry point, so re-running this
 // benchmark measures the library
 // rather than a copy of one arm

@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// earlier work: the keypoint batch is selected at RUN TIME, so the library's baseline
+// The keypoint batch is selected at RUN TIME, so the library's baseline
 // ISA is unchanged and no `-mavx2` build is required of a consumer. Guarded on the
 // compiler supporting both the target attribute and the cpu probe, exactly as
 // impl/binMat_impl.hpp's row packer is.
@@ -34,7 +34,7 @@
 ///
 /// **AND THE MEASURED REASON THE ENTRY POINT IS COARSE.** `target("avx2")` on a leaf
 /// helper blocks inlining — GCC and Clang refuse to inline a callee whose target
-/// features are not a subset of the caller's — and a measurement measured that costing **1.9×**
+/// features are not a subset of the caller's — and that was measured costing **1.9×**
 /// by turning `slicedSignedSum` into 310 real calls per window. One function carries
 /// the attribute and covers the whole window; the helpers it calls carry the same
 /// attribute plus `always_inline`, so they fold into it.

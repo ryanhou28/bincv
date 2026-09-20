@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // tests/test_covariance_n_bound.cpp -- a translation unit that MUST NOT COMPILE.
 //
-// that work’s plane-ARRAY overload of gradientCovariance is templated on the plane
+// The plane-ARRAY overload of gradientCovariance is templated on the plane
 // count N and, unlike every sibling N-templated entry point in the library
 // (QuantMat 1..8, SignedQuantMat 1..7, pyrDownRoute, derivativeX/derivativeY), it
 // shipped without a bound on it. Nothing in the library can reach an out-of-range

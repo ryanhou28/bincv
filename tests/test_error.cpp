@@ -1,4 +1,4 @@
-// Error-policy tests (the design notes). Core-only on purpose: the whole
+// Error-policy tests. Core-only on purpose: the whole
 // point of the policy is the configuration that has no OpenCV and no exceptions,
 // so this suite has to build and run there.
 //

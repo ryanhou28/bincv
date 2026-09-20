@@ -9,7 +9,7 @@
 // whether or not it ever prints. That is the cost core/error.hpp avoids by
 // reporting through <cstdio>, and a header-only container has no business
 // reimposing it on a Tier 2 target where code size is often the binding
-// constraint (the design notes). The printing helpers use std::fprintf; only
+// constraint. The printing helpers use std::fprintf; only
 // operator<<, which cannot be written without a stream type, pulls <ostream> --
 // and <ostream> alone carries no static initializer.
 // <stdexcept> likewise: core/error.hpp includes it when, and only when, the
@@ -33,7 +33,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// Supported: uint8_t, uint16_t, uint32_t (default), uint64_t.
 /// @note Spelled QuantMat<1, WordType> here and BinMat<WordType> everywhere else:
 /// this IS the N=1 specialization of the N-bit container, and BinMat is an
-/// alias for it (core/types.hpp, the design notes). The two names are one
+/// alias for it (core/types.hpp). The two names are one
 /// type. The specialization exists so the 1-bit case keeps the hand-written
 /// single-plane paths below -- at, set, fill, countNonZero and the
 /// rest address the one plane directly, with no loop over planes and no
@@ -46,13 +46,13 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// derived as WordBits, so the type never has to be recovered from a number.
 /// @note Backed by Storage (core/storage.hpp), which is what lets the same
 /// container hold either an owning heap allocation or a caller-provided
-/// buffer -- the no-heap / DMA path (the design notes). Storage is also why
+/// buffer -- the no-heap / DMA path. Storage is also why
 /// nothing here uses std::vector: owning allocation has to work with
 /// exceptions disabled.
 /// @note Kernels never take this type. They take the views returned by view and
 /// constView, so a kernel compiles once per WordType regardless of
 /// how its arguments were allocated or how their rows are aligned.
-/// @note Error policy (core/error.hpp, the design notes): every constructor and
+/// @note Error policy (core/error.hpp): every constructor and
 /// every argument check below reports through BINCV_THROW, which throws by
 /// default and prints-and-aborts where exceptions are disabled. The two
 /// per-pixel accessors, at and set, are the exception -- they are
@@ -95,8 +95,8 @@ public:
     /// upper pyramid levels, which LK touches every frame. Memory wins ties
     /// (ARCHITECTURE principle 2), so larger alignment is opt-in per object
     /// via the constructor's rowAlignment argument, not the default.
-    /// @note CLOSED and this is confirmed, not provisional (,
-    ///, reference device). The benefit side was measured across four
+    /// @note The default is confirmed rather than provisional: it was measured on
+    /// the reference device. The benefit side was measured across four
     /// alignments x two kernels x two sizes and the best of the twelve
     /// combinations was 1.015x -- inside its own batch spread. countNonZero,
     /// which walks rows unconditionally and so isolates alignment alone, was
@@ -158,12 +158,12 @@ public:
     // Special members
 
     /// @brief Deep-copies `other`, always. The copy owns its storage.
-    /// @note copy means deep copy, with no reference counting; sharing is
+    /// @note Value semantics: copy means deep copy, with no reference counting; sharing is
     /// expressed by taking a view instead. This holds even when `other`
     /// wraps an external buffer -- copying a non-owning BinMat allocates and
     /// copies rather than producing a second wrapper. A user-facing rule
     /// that silently changed with how the source happened to be constructed
-    /// would reintroduce exactly the aliasing surprises exists to avoid.
+    /// would reintroduce exactly the aliasing surprises value semantics exist to avoid.
     /// (Storage's own copy does alias a non-owning source; that stays an
     /// internal detail of the storage layer.)
     /// @note Because the copy owns its storage, it also re-establishes the
@@ -251,7 +251,7 @@ public:
     /// is the whole point of the specialization: generic code can address
     /// the binary case by plane without the binary case paying for it.
     /// @throws std::out_of_range if `i != 0`, in EVERY build -- NOT debug-only.
-    /// This is a view factory, not element access (the design notes), and
+    /// This is a view factory, not element access, and
     /// it is checked here for the same reason it is checked on QuantMat<N>:
     /// so that one wrong plane index has one defined behavior across the
     /// family. Discarding the index in release, as this did, meant generic
@@ -310,7 +310,7 @@ public:
     /// @note DEBUG-CHECKED, UNCHECKED IN RELEASE, as cv::Mat::at is. An index
     /// outside [0, height) x [0, width) trips a BINCV_ASSERT in a debug
     /// build and is undefined behavior in a release one -- it does not
-    /// throw, and did until ( sanctions the change). This is what
+    /// throw, and did until the policy deliberately changed. This is what
     /// keeps the bounds test out of every per-pixel loop and lets a release
     /// build inline the access down to a row offset, a shift and a mask.
     /// @note Reading a column in [width, alignedWidth * WordBits) therefore

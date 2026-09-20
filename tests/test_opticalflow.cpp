@@ -144,7 +144,7 @@
 namespace {
 std::size_t g_newCount = 0;
 // LIVE BYTES AND THEIR HIGH-WATER MARK, not just a call count. A counter of
-// `operator new` CALLS cannot say what a stage's peak is; that measurement’s pipeline table
+// `operator new` CALLS cannot say what a stage's peak is; an earlier pipeline table
 // used to add up the buffers its author had listed, so a buffer nobody listed --
 // including one acquired inside a kernel -- could not move the number. These two
 // make the total a READING: every allocation adds its REQUESTED size, every free
@@ -784,15 +784,15 @@ FlowStats runCase(const char* label, int width, int height, const Warp& warp, do
 
 
 // ---------------------------------------------------------------------------
-// earlier work: THE SAME PIPELINE AT A CHOSEN BIT DEPTH PER LEVEL
+// THE SAME PIPELINE AT A CHOSEN BIT DEPTH PER LEVEL
 //
 // `Pipeline` above is the shipped 1-bit ladder and stays exactly as it is -- it
-// is what every the number was measured on. This is its generic-N counterpart,
-// and it exists so that that work’s question can be asked without disturbing the
+// is what every number so far was measured on. This is its generic-N counterpart,
+// and it exists so that the bit-depth question can be asked without disturbing the
 // baseline it has to be compared against.
 //
 // **LEVEL 0 IS ONE BIT IN EVERY LADDER AND IS NOT A VARIABLE.** It is the binary
-// frame -- the project's premise (the design notes). Only the levels pyrDown
+// frame -- the project's premise. Only the levels pyrDown
 // PRODUCES have a depth to choose, which is why every ladder below starts `1,...`.
 // ---------------------------------------------------------------------------
 namespace {
@@ -892,8 +892,8 @@ void seedLevelZero(LadderPipeline<WordType, LevelBits...>& fe, const BinMat<Word
     }
 }
 
-/// @brief Runs one ladder over one warp and returns that measurement’s own FlowStats.
-/// @note Uses `measure` -- the SAME function every the number came out of --
+/// @brief Runs one ladder over one warp and returns its own FlowStats.
+/// @note Uses `measure` -- the SAME function every number came out of --
 /// so the tolerance and the stuck rule cannot drift between the baseline
 /// and the sweep. Two copies of a tolerance is how two tolerances happen.
 template <typename WordType, size_t... LevelBits>
@@ -928,8 +928,8 @@ constexpr int kH = 240;
 // ---------------------------------------------------------------------------
 // THE SAME MEASUREMENT ON THE REPO'S REAL TEST IMAGE
 //
-// Everything above runs on synthetic texture; that work’s first Done-when bullet asks
-// for real content as well, and real content needs a PNG decoder. This half is
+// Everything above runs on synthetic texture; the claim needs real content
+// as well, and real content needs a PNG decoder. This half is
 // therefore behind BINCV_WITH_OPENCV -- the pattern tests/test_denoise.cpp and
 // tests/test_derivative.cpp already use -- rather than in a separate suite, so
 // that it shares ONE harness, ONE tolerance and ONE set of eligibility rules with
@@ -1851,7 +1851,7 @@ BINCV_TEST(Flow, PipelineFootprint_640x480) {
         refCount = probeResult.count;
         refDigest = cornerDigest(probe.data(), probeResult.candidatesRanked);
 
-        // The ring, against the map, on that measurement’s own pipeline content -- the whole
+        // The ring, against the map, on the pipeline's own content -- the whole
         // ranked prefix, coordinates and exact float bits.
         std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<std::size_t>(W),
                                        0.0f);
@@ -2036,7 +2036,7 @@ BINCV_TEST(Flow, PipelineFootprint_640x480) {
                 " corner %zu, corner-streaming %zu, track %zu/%zu\n", denoiseAllocs, buildAllocs,
                 cornerAllocs, streamAllocs, trackAllocs, streamTrackAllocs);
 
-    // ---- THE SAME TABLE WITH that work’s STREAMING CORNER STAGE ---------------
+    // ---- THE SAME TABLE WITH THE STREAMING CORNER STAGE ---------------
     // Same five stages, same accounting, one row replaced -- so the 71.4% row can
     // be read directly against its replacement rather than against a projection.
     //
@@ -2103,12 +2103,12 @@ BINCV_TEST(Flow, PipelineFootprint_640x480) {
     // The saving, read: the two windows differ by the response storage alone.
     BINCV_CHECK_EQ(framePeak - streamPeak, responseBytes - ringBytes);
 
-    // that measurement’s saving gate, evaluated in the place that can actually fail: if a
-    // later change puts the streaming pipeline back above 750 000 B, the design rule’s
+    // The saving gate, evaluated in the place that can actually fail: if a
+    // later change puts the streaming pipeline back above 750 000 B, the
     // footprint claim has gone and this says so rather than a report nobody re-ran.
     BINCV_CHECK(streamTotal <= 750000);
     BINCV_CHECK(streamAllocs == 0);
-    // that work’s sentence, NEGATED -- and negated in a form that can actually fail.
+    // The claim, NEGATED -- and negated in a form that can actually fail.
     // `ring < everything else` is near-vacuous at 7 680 B against 492 784 B and
     // tests nothing. These two do: the response storage must be smaller than every
     // other stage in the table, and the corner stage must no longer be the largest
@@ -2126,7 +2126,7 @@ BINCV_TEST(Flow, PipelineFootprint_640x480) {
     BINCV_CHECK_EQ(trackAllocs, std::size_t{0});
     BINCV_CHECK_EQ(streamTrackAllocs, std::size_t{0});
 
-    // that work’s prediction, pinned. that work’s float response map is 4 B/pixel where
+    // The prediction, pinned. The float response map is 4 B/pixel where
     // every other plane in the pipeline is 1 or 2 BITS per pixel, so it is
     // expected to dominate. If a future change moves the dominant term, this
     // fails here rather than in a report nobody re-ran.
@@ -2409,9 +2409,9 @@ BINCV_TEST(Flow, NBitResidualIsExactAgainstPerPixel_uint32_t) {
 }
 
 // ---------------------------------------------------------------------------
-// earlier work: THE AVX2 KEYPOINT BATCH IS THE SAME ARITHMETIC OR IT IS A BUG.
+// THE AVX2 KEYPOINT BATCH IS THE SAME ARITHMETIC OR IT IS A BUG.
 //
-// says bit-exactness against the serial path is a PRECONDITION, not a band:
+// Bit-exactness against the serial path is a PRECONDITION, not a band:
 // the batch computes the same integers from the same words, so any difference is a
 // defect and not a trade-off. `impl::lkBatchEnabled` exists so that both spellings
 // can be run on identical input in one process -- the pattern `slicedSignedSum`'s
@@ -2481,7 +2481,7 @@ BINCV_TEST(Flow, X79_KeypointBatchIsBitExact_uint32_t) {
 }
 
 BINCV_TEST(Flow, X24_LadderSweep_Synthetic_uint32_t) {
-    // that measurement’s synthetic half. PASSED its synthetic cases at four 1-bit levels;
+    // The synthetic half. It PASSED at four 1-bit levels;
     // the miss was on the reference pipeline's own edge maps. So this half is not
     // where the rule is decided -- it is the control that stops a ladder from
     // passing on real content by wrecking synthetic content, which the decision
@@ -2516,7 +2516,7 @@ BINCV_TEST(Flow, X24_LadderSweep_Synthetic_uint32_t) {
     const FlowStats l1355 = runLadder<uint32_t, 1, 3, 5, 5>   ("1/3/5/5",     prevSrc, nextSrc, warp, pts, 0.0, &b);
     const FlowStats l1357 = runLadder<uint32_t, 1, 3, 5, 7>   ("1/3/5/7",     prevSrc, nextSrc, warp, pts, 0.0, &b);
 
-    // No tolerance is asserted here: this is a sweep, and that measurement’s rule is evaluated
+    // No tolerance is asserted here: this is a sweep, and the rule is evaluated
     // on the real-frame half. What IS asserted is the precondition that makes the
     // sweep readable -- every ladder saw the same points and tracked enough of them.
     const FlowStats* all[] = {&one, &l1111, &l1222, &l1333, &l1344, &l1355, &l1357};
@@ -2528,10 +2528,10 @@ BINCV_TEST(Flow, X24_LadderSweep_Synthetic_uint32_t) {
 }
 
 BINCV_TEST(Flow, MixedDepthLadderTracksAndIsNotTheUniformOne_uint32_t) {
-    // The mixed-depth ladder is the form that work’s question needs, so it has to run
-    // before this can be measured. This checks the PLUMBING -- that every level is
+    // The mixed-depth ladder is the form the bit-depth question needs, so it has to
+    // run before this can be measured. This checks the PLUMBING -- that every level is
     // visited coarse-to-fine at its own depth and that points come back tracked --
-    // not the accuracy, which is that measurement’s to measure.
+    // not the accuracy, which a measurement decides.
     const int width = 160, height = 120;
     bincv::QuantMat<1, uint32_t> p0(width, height), n0(width, height);
     bincv::QuantMat<3, uint32_t> p1(80, 60), n1(80, 60);
@@ -2689,8 +2689,8 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
 
     // THE FINDING, PINNED. Adding 1-bit pyramid levels makes this content WORSE,
     // by a margin far outside any run-to-run variation -- there is none, the whole
-    // computation is deterministic. If a future change (an N-bit level, that work’s
-    // answer) reverses it, this fails and the banner above has to be rewritten,
+    // computation is deterministic. If a future change (an N-bit level, the
+    // expected answer) reverses it, this fails and the banner above has to be rewritten,
     // which is the point.
     std::printf("\n 1 level -> 4 levels: q=0.25 rms %.4f -> %.4f, 1 px rms %.4f -> %.4f\n",
                 one025.rms, four025.rms, oneAxis.rms, four100.rms);
@@ -2807,16 +2807,16 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
 }
 
 // ---------------------------------------------------------------------------
-// earlier work -- THE MEASUREMENT THE RULE IS DECIDED ON.
+// THE MEASUREMENT THE RULE IS DECIDED ON.
 //
-// These are that measurement’s own failing rows, re-run at every ladder. The tolerance,
+// These are the failing rows, re-run at every ladder. The tolerance,
 // the binarization, the warps, the eligibility rule and the stuck rule are all
-// that measurement’s, reached through the same functions -- nothing here is re-derived.
+// the originals, reached through the same functions -- nothing here is re-derived.
 // ---------------------------------------------------------------------------
 namespace {
 
 /// @brief How many DISTINCT values a level actually holds, against how many its
-/// declared depth could hold. that measurement’s question, asked of the real path.
+/// declared depth could hold. The question, asked of the real path.
 template <size_t N, typename WordType>
 void printLevelAlphabet(const bincv::QuantMat<N, WordType>& level, int index) {
     std::vector<size_t> counts(size_t{1} << N, 0);
@@ -2850,7 +2850,7 @@ void x24RealCase(const cv::Mat& gray, const char* label, const Warp& warp, doubl
     nextSrc.fromCVMat(bin1);
 
     // The point set comes from LEVEL 0, which is 1 bit in every ladder, so every
-    // row below is measured over the SAME points. Band D of that measurement’s rule exists
+    // row below is measured over the SAME points. Band D of the rule exists
     // because a curve over different point sets is not a curve.
     Pipeline<WordType> base(gray.cols, gray.rows, 4);
     base.prev[0].fromCVMat(bin0);
@@ -2859,7 +2859,7 @@ void x24RealCase(const cv::Mat& gray, const char* label, const Warp& warp, doubl
     LKParams params;
     std::vector<Point2f> pts = eligiblePoints(base.dx[0], base.dy[0], gray.cols, gray.rows,
                                               warp, params.winWidth, params.winHeight);
-    // that measurement’s own control for deviation (ii), applied HERE because it is the one
+    // The control for deviation (ii), applied HERE because it is the one
     // thing that could hide a depth effect: it attributed about half the
     // four-level error to the clipped coarse-level window, and a window that is
     // half outside the level is not measuring that level's ALPHABET.
@@ -2934,11 +2934,11 @@ BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
     x24RealCase<uint32_t>(gray, "unclipped: shift (6, 4)", translation(6.0, 4.0), 0.0, true);
     x24RealCase<uint32_t>(gray, "unclipped: shift (12, -8)", translation(12.0, -8.0), 0.0, true);
 
-    // that work’s other deliverable: RE-RUN AGAINST THE REAL PYRAMID PATH.
-    // read the natural alphabet as 1/3/4/5 from one 256^2 frame;
-    // corrected it to 1/3/5/7 from the representation. This measures what the
+    // THE SAME READING, RE-RUN AGAINST THE REAL PYRAMID PATH.
+    // An earlier reading put the natural alphabet at 1/3/4/5 from one 256^2 frame;
+    // the representation corrects it to 1/3/5/7. This measures what the
     // uncapped ladder ACTUALLY holds on the reference pipeline's own edge map,
-    // which is the content the pipeline sees, and closes that measurement’s caveat.
+    // which is the content the pipeline sees, and closes that caveat.
     {
         bincv::Pyramid<uint32_t, 1, 3, 5, 7> deep(gray.cols, gray.rows);
         const cv::Mat bin0 = referencePreprocess(gray, 17);
@@ -2959,9 +2959,9 @@ BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
 
 
 // ---------------------------------------------------------------------------
-// earlier work -- THE COARSE-LEVEL WINDOW BORDER.
+// THE COARSE-LEVEL WINDOW BORDER.
 //
-// left blocked here: 1/2/2/2 is 0.8356 px over all 141 real-frame
+// The bit-depth question is blocked here: 1/2/2/2 is 0.8356 px over all 141 real-frame
 // keypoints and 0.0010 px over the 58 that never clip. The metric below is
 // YIELD, pre-registered, because three of the four arms trade points for
 // accuracy and a per-point error alone would reward throwing points away.
@@ -2971,7 +2971,7 @@ namespace {
 struct Yield {
     size_t eligible = 0;   ///< the denominator: ALL eligible keypoints, always
     size_t attempted = 0;  ///< how many the arm even tried (arm D tries fewer)
-    size_t usable = 0;     ///< tracked AND within that measurement’s 1.0 px
+    size_t usable = 0;     ///< tracked AND within the 1.0 px tolerance
     double rmsUsable = 0.0;
     double rmsAll = 0.0;
     size_t bytes = 0;
@@ -3168,7 +3168,7 @@ void x25Case(const cv::Mat& gray, const char* ladderName, const char* caseName, 
     runArm<WordType, LevelBits...>("D reject anything clipping", prevSrc, nextSrc, warp,
                                    unclipped, all.size(), bincv::LKEntryLevel::Coarsest,
                                    modelError);
-    // Band B of that measurement’s rule: arms C and D did not both clear the gate, so B is
+    // Band B of the rule: arms C and D did not both clear the gate, so B is
     // built. `pad` gives the DEEPEST level exactly a winSize margin.
     runArmB<WordType, LevelBits...>(gray, warp, all, all.size(), modelError,
                                     params.winWidth * (1 << 3));
@@ -3233,7 +3233,7 @@ BINCV_TEST(Flow, X25_CoarseLevelBorder_uint32_t) {
 
 
 // ---------------------------------------------------------------------------
-// earlier work -- ROUTE (a) AGAINST ROUTE (b).
+// ROUTE (a) AGAINST ROUTE (b).
 //
 // Same frame, same keypoints, same window, same ladder, same yield metric. The
 // two differ in the SEARCH and in nothing else, which is what makes this a
@@ -3364,7 +3364,7 @@ BINCV_TEST(Flow, X26_BlockMatchVersusLK_uint32_t) {
 
 
 // ---------------------------------------------------------------------------
-// earlier work: DOES THE DOWNSAMPLING FILTER CHANGE THE ACCURACY STORY?
+// DOES THE DOWNSAMPLING FILTER CHANGE THE ACCURACY STORY?
 //
 // Every accuracy number in this project was measured on a BOX-DOWNSAMPLED
 // pyramid, because BOX_2x2 is the only one of the reference's six
@@ -3376,7 +3376,7 @@ BINCV_TEST(Flow, X26_BlockMatchVersusLK_uint32_t) {
 // KERNEL, AND DELIBERATELY SO. The question is whether the filter matters at all.
 // If it does not, no fast kernel needs writing; if it does, the kernel is worth the
 // work and this arm is the accuracy target it must reproduce. Same discipline as
-// that measurement’s and that measurement’s ceilings.
+// the ceilings measured elsewhere.
 //
 // Each level is built by filtering the PREVIOUS level and subsampling by 2, then
 // quantizing to N bits -- which is what the paper's Fig. 12 describes and what
@@ -3432,7 +3432,7 @@ namespace {
 /// accuracy number from earlier measurements came through that seed.
 ///
 /// `MEDIAN_3x3` is gone from this path rather than kept on the float reference:
-/// binCV has no median kernel ( declined to write one on that measurement’s evidence), so
+/// binCV has no median kernel (one was declined on the evidence), so
 /// there is nothing to measure the shipped pipeline against. Comparing four real
 /// filters against one idealised one in the same table is exactly the mixing this
 /// entry exists to remove.
@@ -3571,10 +3571,10 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpace_uint32_t) {
 }
 
 // ---------------------------------------------------------------------------
-//, SEQUENCE ARM: the same design space over MANY frames.
+// SEQUENCE ARM: the same design space over MANY frames.
 //
-// The table above is ONE image and ~102 eligible keypoints per case. the design rule chose
-// between BOX_2x2 and BOX_3x3 on a 1.47-point yield difference measured at that
+// The table above is ONE image and ~102 eligible keypoints per case. The choice
+// between BOX_2x2 and BOX_3x3 rested on a 1.47-point yield difference measured at that
 // sample size, which is not obviously larger than the frame-to-frame spread --
 // so the ranking is worth re-reading over a sequence before anyone leans on it.
 //
@@ -3591,12 +3591,12 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpace_uint32_t) {
 // different eligible counts.
 // ---------------------------------------------------------------------------
 // ===========================================================================
-// earlier work: THE LADDER x FILTER SWEEP, over a sequence.
+// THE LADDER x FILTER SWEEP, over a sequence.
 //
-// asked whether 1/2/2/2 is still the operating point. already closed
-// the DEEPENING direction -- BOX_2x2 is flat from N=2 to N=7 -- so what is left
+// Is 1/2/2/2 still the operating point? The DEEPENING direction is already closed
+// -- BOX_2x2 is flat from N=2 to N=7 -- so what is left
 // is the opposite one: 1/2/2/2 asserts that EVERY coarse level needs two bits,
-// and 1/2/1/1 and 1/2/2/1 have never been run. then made BOX_3x3 cheap
+// and 1/2/1/1 and 1/2/2/1 have never been run. BOX_3x3 then became cheap
 // enough that a shallower ladder with a better filter might beat a deeper ladder
 // with a cheap one, so the two axes are swept together rather than separately.
 //
@@ -3837,7 +3837,7 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
         }
         std::printf("\n");
     }
-    // Frame-to-frame spread of the two arms the design rule chose between: if the 10th-90th
+    // Frame-to-frame spread of the two arms the choice was made between: if the 10th-90th
     // bands overlap heavily, the ranking is a claim about the mean, not about
     // any individual frame, and the entry has to say so.
     std::printf("\n per-frame spread (p10 / median / p90), N=3:\n");
@@ -3966,7 +3966,7 @@ BINCV_TEST(Flow, InitialFlowSeedIsReadAndUsed_uint32_t) {
     std::printf(" seed at truth: rms %.4f (%zu tracked) | seed 17 px off: rms %.4f (%zu tracked)"
                 " | %zu of %zu points differ\n",
                 sg.rms, sg.tracked, sb.rms, sb.tracked, differ, pts.size());
-    // THE SEED IS READ. Not "the good one is better" -- that is that measurement’s question and is
+    // THE SEED IS READ. Not "the good one is better" -- that is a separate question and is
     // measured there, on both architectures, against a range of guess errors.
     BINCV_CHECK(differ > 0);
     BINCV_CHECK(sg.rms <= kRmsTolerance);
@@ -4040,7 +4040,7 @@ BINCV_TEST(Flow, ResidualRejectDefaultsOffAndChangesNothing_uint32_t) {
 
 BINCV_TEST(Flow, ResidualRejectRemovesTheSilentLargeMotionFailure_uint32_t) {
     using W = uint32_t;
-    // 28 px, which a measurement measured as past the cliff: at 19 px every point is good and at
+    // 28 px, which measured as past the cliff: at 19 px every point is good and at
     // 28 px every point is wrong, so this is the case this is about.
     Pipeline<W> fe(640, 480, 4);
     const Warp warp = translation(24.0, 16.0);

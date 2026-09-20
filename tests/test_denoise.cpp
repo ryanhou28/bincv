@@ -70,7 +70,7 @@ using bincv::denoiseMedian3;
 // Content: the same generator as tests/equivalence.hpp, minus OpenCV
 // ---------------------------------------------------------------------------
 //
-// Duplicated rather than shared, for that work’s reason: a harness that shared a
+// Duplicated rather than shared, for the usual reason: a harness that shared a
 // generator with the suite judging it could cancel a fault through both sides.
 
 uint64_t nextRandom(uint64_t& state) {
@@ -185,7 +185,7 @@ const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70, 128, 640};
 const int HEIGHTS[] = {1, 2, 3, 17, 37};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (the design rule makes alignment a per-object choice).
+// An over-aligned row stride (alignment is a per-object choice).
 constexpr size_t PADDED_ALIGNMENT = 32;
 
 // ===========================================================================
@@ -480,7 +480,7 @@ void testDegenerateViews(const char* wordTypeName) {
 }
 
 /// @brief Two views over ONE buffer that share no word must be ACCEPTED.
-/// @note the aliasing predicate is exact and per row, not a bounding-box
+/// @note The aliasing predicate is exact and per row, not a bounding-box
 /// test, so interleaved row bands over a single allocation are legal
 /// arguments. Rejecting them would abort the Debug build on a view a caller
 /// is entitled to build. Nothing here checks a pixel that the
@@ -590,7 +590,7 @@ void testAgainstReference(const char* wordTypeName) {
 
                 // The harness's SECOND generator, which never touches the packing
                 // or the unpacking path -- so the two sides of the comparison do
-                // not share a conversion that could cancel (that work’s anchor).
+                // not share a conversion that could cancel (the packing anchor).
                 const cv::Mat cvSrc = bincv::test::randomCvMask(width, height, fill, seed);
 
                 bincv::BinMat<WordType> dst(width, height);

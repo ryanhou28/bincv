@@ -1,6 +1,6 @@
 // bulk reductions versus OpenCV, and versus the per-pixel loop.
 //
-// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
 // semantic operation on the SAME binary content stored as CV_8U -- what a user
 // does today without binCV. For countNonZero that denominator is exact: OpenCV
 // has the identical function, and this is a Tier 1 operation. For countAnd it is
@@ -264,7 +264,7 @@ bool runSize(int width, int height) {
 
     // --- countAndSplit over LK-sized windows ---------------------------------
     //
-    // Context for earlier work, not an answer to it: the MVP recomputes per
+    // Context for the incremental question, not an answer to it: the MVP recomputes per
     // window, windows overlap heavily, and this is what recomputation costs. The
     // incremental alternative is deliberately not implemented here -- measuring
     // one option is not an experiment.

@@ -1,4 +1,4 @@
-// The debug half of the error policy (the design notes), compiled in every
+// The debug half of the error policy, compiled in every
 // configuration.
 //
 // THIS FILE FORCES THE CHECKED CONFIGURATION, exactly as tests/test_assert_abort.cpp

@@ -37,7 +37,7 @@
 // Everywhere, and deliberately not only through whole images. cv::erode and
 // cv::dilate default to BORDER_CONSTANT with morphologyDefaultBorderValue,
 // which is NOT the same constant for the two -- ones outside for an
-// erosion, zeros for a dilation. The sweeps below run every size in that work’s
+// erosion, zeros for a dilation. The sweeps below run every size in the
 // matrix including width 1 and height 1, where EVERY pixel is a border pixel, and
 // the non-constant types are swept separately because they are the only path
 // through the per-pixel fixup.
@@ -90,7 +90,7 @@ using bincv::StructuringElement;
 // Content: the same generator as tests/equivalence.hpp, minus OpenCV
 // ---------------------------------------------------------------------------
 //
-// Duplicated rather than shared, for that work’s reason: a harness that shared a
+// Duplicated rather than shared, for the usual reason: a harness that shared a
 // generator with the suite judging it could cancel a fault through both sides.
 
 uint64_t nextRandom(uint64_t& state) {
@@ -550,8 +550,8 @@ void testAgainstReference(const char* wordTypeName) {
 
                 for (const NamedElement& elements : symmetricElements()) {
                     for (BorderType borderType : allBorderTypes()) {
-                        // BOTH fills, but only where a fill is read. the design rule makes
-                        // the fill the caller's, so both values are part of the
+                        // BOTH fills, but only where a fill is read. The fill is
+                        // the caller's, so both values are part of the
                         // contract -- and the four non-constant types ignore it
                         // entirely, so sweeping it there doubles the cost of this
                         // case for no case.
@@ -888,7 +888,7 @@ void testCompound(const char* wordTypeName) {
 template <typename WordType>
 void testPaddingAndDegenerate(const char* wordTypeName) {
     // A source whose padding bits are all ones is a SUPPORTED construction
-    // (BinMat's wrap constructor, the design rule’s neighbours). It must not change a pixel.
+    // (BinMat's wrap constructor and its neighbours). It must not change a pixel.
     size_t index = 0;
     for (int width : reducedWidths()) {
         for (int height : reducedHeights()) {
@@ -1150,11 +1150,10 @@ void expectMatchesOpenCv(const BinMat<WordType>& src, const cv::Mat& cvSrc,
     BINCV_EXPECT_BIT_EXACT(dst.constView(), expected, context);
 }
 
-/// @brief The full the matrix: the three 3x3 shapes, erode and dilate.
+/// @brief The full matrix: the three 3x3 shapes, erode and dilate.
 /// @note Through cv::erode / cv::dilate DIRECTLY rather than through
-/// cv::morphologyEx, because those are the two functions the design notes
-/// names as Tier 1 and their default borderValue is the premise rests
-/// on. Content is generated ONCE per (size, fill) and reused across the six
+/// cv::morphologyEx, because those are the two functions named as Tier 1 and
+/// their default borderValue is the premise this rests on. Content is generated ONCE per (size, fill) and reused across the six
 /// (shape, op) combinations -- the generator and the comparison are both
 /// per-pixel loops, and at 640x480 they, not OpenCV, are the cost.
 template <typename WordType>

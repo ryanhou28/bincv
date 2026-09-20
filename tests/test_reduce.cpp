@@ -23,7 +23,7 @@
 //
 // 2. The OPENCV half asserts what Tier 1 promises for countNonZero: equality
 // with cv::countNonZero on the same binary content stored as CV_8U
-// (the design notes, 10.3), across that work’s full size and fill matrix, at all
+// across the full size and fill matrix, at all
 // four word widths, whole-image and by region.
 //
 // WHERE THE EXHAUSTIVE SWEEP IS, AND WHY IT IS NOT IN THE VALUE TESTS
@@ -99,7 +99,7 @@ const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70, 128, 640};
 const int HEIGHTS[] = {1, 2, 3, 17};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (the design rule makes alignment a per-object choice): 32 bytes
+// An over-aligned row stride (alignment is a per-object choice): 32 bytes
 // is a whole number of 1-, 2-, 4- and 8-byte words, so every word type gets a
 // stride strictly greater than ceil(width / WordBits) at most widths -- which is
 // the one thing a reduction must not assume.
@@ -499,7 +499,7 @@ void testMaskedReference(const char* wordTypeName) {
 // two properties it pins are invisible in a value comparison:
 //
 // - impl::visitRowWords visits each word index of a region-row EXACTLY ONCE, in
-// ascending order. That is what that work’s "single pass" means, and a skeleton
+// ascending order. That is what "single pass" means, and a skeleton
 // that visited the head word twice would still produce the right count for
 // every region whose head word happens to be empty.
 // - the masks select EXACTLY the region's columns and nothing else -- in
@@ -600,7 +600,7 @@ void testGeometry(const char* wordTypeName) {
 // `width` are not padding at all but a neighbour's live pixels.
 //
 // (c) is the one that reasoning about padding alone would miss, and it is the
-// construction the design notes needs: an LK window is a view onto a frame.
+// construction the LK covariance needs: an LK window is a view onto a frame.
 
 template <typename WordType>
 void testDirtyPadding(const char* wordTypeName) {
@@ -721,7 +721,7 @@ void testStrides(const char* wordTypeName) {
             const uint64_t seed = caseSeed(width, height, 900);
             const std::string label = sizeLabel(wordTypeName, width, height);
 
-            // Three sources, three different strides: word granularity (the design rule’s
+            // Three sources, three different strides: word granularity (the
             // default), 32-byte aligned, and a hand-built view with two spare
             // words per row. A reduction must read each one's own stride.
             bincv::BinMat<WordType> dense(width, height);
@@ -924,7 +924,7 @@ void testPortablePopcount(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. The LK gradient covariance identity (the design notes)
+// 8. The LK gradient covariance identity
 // ---------------------------------------------------------------------------
 //
 // This is the reason exists, so it is tested as the thing it is for: build a
@@ -949,10 +949,10 @@ void testPortablePopcount(const char* wordTypeName) {
 // approximate comparison would accept an off-by-one in the split, which is
 // precisely the bug this operation can have.
 //
-// The sign planes are deliberately DIRTIED where the magnitude is zero. that work’s
+// The sign planes are deliberately DIRTIED where the magnitude is zero. The
 // canonical-zero rule says the sign bit carries no information there and set
 // will not write one, but a caller that writes the sign plane directly -- which
-// that work’s derivative does, `sign = neg` being a whole-plane assignment -- can leave
+// the derivative does, `sign = neg` being a whole-plane assignment -- can leave
 // sign bits standing over zero magnitudes. The identity survives only because the
 // `a & b` factor removes them, and that is what the dirty-sign variant checks.
 
@@ -1038,7 +1038,7 @@ void testCovarianceIdentity(const char* wordTypeName) {
                             }
                         }
 
-                        // THE SHAPE CALLS ( items 2 and 3): all four
+                        // THE SHAPE THE COVARIANCE CALLS (items 2 and 3): all four
                         // numbers from one pass, and the selector formed in the
                         // word loop rather than in a plane. Checked against the
                         // SAME float reference as the composition above, in the
@@ -1137,7 +1137,7 @@ void testCovarianceIdentity(const char* wordTypeName) {
                                std::to_string(-static_cast<long long>(width) * height),
                            label);
         //... and the unsigned spelling on the same two fields is the enormous
-        // positive number this accessor exists to keep out of earlier work. Asserted, not
+        // positive number this accessor exists to keep out of a caller's arithmetic. Asserted, not
         // narrated, so the hazard is a checked fact rather than a comment that
         // could quietly stop being true.
         REDUCE_EXPECT_TRUE((split.whenClear - split.whenSet) > (~size_t{0} / 2),
@@ -1183,7 +1183,7 @@ void testCovarianceIdentity(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// 9. SlidingWindowCount agrees with recompute WINDOW FOR WINDOW ( item 1)
+// 9. SlidingWindowCount agrees with recompute WINDOW FOR WINDOW (item 1)
 // ---------------------------------------------------------------------------
 //
 // The whole risk of an incremental accumulator is that it is right for a while.
@@ -1412,7 +1412,7 @@ void testSlidingWindow(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// 10. countCovariance and the four-argument split ( items 2 and 3)
+// 10. countCovariance and the four-argument split (items 2 and 3)
 // ---------------------------------------------------------------------------
 //
 // Two properties, and they are different claims:

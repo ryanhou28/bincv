@@ -143,7 +143,7 @@ struct Track {
 /// detection's corners against EACH OTHER, which is `cv::goodFeaturesToTrack`'s job and
 /// all of it, and the previous frame's tracks are not among its inputs. Every user of
 /// this library wrote this loop. `bincv::spaceCandidates` is now that operation, and
-/// a measurement measured it against a bit-plane alternative before choosing this shape.
+/// it was measured against a bit-plane alternative before choosing this shape.
 size_t spaceAgainstLive(std::vector<Point2f>& fresh, const std::vector<Track>& live, float r) {
     // The tracks' positions, contiguous -- the kernel takes a Point2f array, and a
     // vector of Track is not one. Kept across frames so the top-up allocates nothing.

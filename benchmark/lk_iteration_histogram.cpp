@@ -2,8 +2,8 @@
 // -- HOW MANY ITERATIONS DOES A POINT ACTUALLY RUN, AND WHAT DOES THE
 // MAXIMUM OVER EIGHT COST?
 //
-// that work’s AVX2 keypoint batch puts eight keypoints in lanes and iterates them IN
-// LOCKSTEP, so a batch runs until its LAST lane converges. a measurement measured the MEAN
+// The AVX2 keypoint batch puts eight keypoints in lanes and iterates them IN
+// LOCKSTEP, so a batch runs until its LAST lane converges. A measurement put the MEAN
 // at 4.29 iterations per point per level; the batch pays the MAXIMUM OVER EIGHT,
 // and that number decides whether the batch is worth writing.
 //
@@ -11,7 +11,7 @@
 // with lane refill = kernel x mean(iters) / (mean(iters) + refill)
 //
 // THE POINT OF MEASURING THIS FIRST is that it is decisive and nearly free.
-// exists because a measurement measured 1.75x in a kernel and 0.31x on the pipeline, and
+// exists because a kernel gain of 1.75x came out as 0.31x on the pipeline, and
 // lockstep batching changes exactly the quantity that did that -- how many
 // iterations run.
 //
@@ -239,7 +239,7 @@ int main(int argc, char** argv) {
                 gSlots, gUsed, (1.0 - gUsed / gSlots) * 100.0);
 
     // The projection the decision rule is written against. The kernel factor is
-    // that measurement’s arm D, measured; everything else here is this run's distribution.
+    // measured in arm D; everything else here is this run's distribution.
     constexpr double kKernel = 2.1;
     std::printf("\n projected `track` speedup, naive lockstep %5.2fx\n", kKernel * ratio);
     std::printf(" projected `track` speedup, with lane refill %5.2fx (refill excluded)\n",

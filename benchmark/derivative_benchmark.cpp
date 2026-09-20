@@ -1,6 +1,6 @@
 // binarized spatial derivative -- against cv::filter2D with the same kernel.
 //
-// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that is not a judgement call either -- it is
 // the reference pipeline's gradient stage, calcBinarizedDeriv, which is two
