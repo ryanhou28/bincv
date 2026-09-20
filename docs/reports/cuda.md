@@ -2525,8 +2525,11 @@ swap-invariance and the noise predicate itself are exactly as they were.
 DIRECTION ESTABLISHED is an **additional** statement about the same rounds, not
 a second way to pass the old one — pinned by
 `PairedStats.TheOldPredicateIsUntouchedByTheRuling`, and confirmed by outcome:
-re-judging 146 published rows moved **zero** of them across the RESULT/NULL
-line in either direction.
+re-judging 146 published rows **on the same rounds** moved zero of them across
+the RESULT/NULL line in either direction. (Re-*measuring* them does move a few:
+five of 137 rows common to two sweeps flip, all of them sitting within a few
+percent of their own bar. That is the host, not the rule — see the caveat at
+the end of the next section.)
 
 **Two things this is not.** It is not a test for disjoint sample ranges. A
 range test is vetoed by a single round that is slow in *both* arms — which is
@@ -2584,9 +2587,10 @@ the owner's 2026-09-19 ruling **added** the direction verdict without touching
 that rule, and the table below is a fresh seven-process sweep (105 paired rounds
 a row) judged under all three values.
 
-**The re-judging moved nothing across the RESULT/NULL line.** Over 146 rows,
-zero went RESULT→NULL or NULL→RESULT. What it added is a verdict for rows that
-were unanimous and had nowhere to say so.
+**Re-judging the same rounds moved nothing across the RESULT/NULL line.** Over
+146 rows, zero went RESULT→NULL or NULL→RESULT — which is what it means for the
+ruling to *add* a verdict rather than relax one. What it added is a verdict for
+rows that were unanimous and had nowhere to say so.
 
 | effect | both arms, per-run medians | old verdict | now |
 |---|---|---|---|
@@ -2684,12 +2688,16 @@ number in this report and is therefore a change of its own.
 
 **One caveat that belongs with every number above: on this host the magnitude
 half of the verdict is not stable between sweeps, and the direction half is.**
-LK at 204 points read DIRECTION over these seven runs and DIRECTION over a
-different fourteen; LK at 256 read DIRECTION+RESULT here (2.00× against a 1.99×
-bar) and DIRECTION alone there. Every row whose direction was established in one
-sweep had it established in the other. That asymmetry is itself an argument for
-the ruling: the sign of these differences is reproducible on this machine and
-their exact size is not.
+Measured directly — 137 rows are common to two independent sweeps of this branch,
+and **five of them flip RESULT↔NULL**, every one sitting within a few percent of
+its own bar: LK @256 (2.00× against 1.99× here, 2.25× against 2.80× there), the
+byte-lane packer at 1920×1080, the frontend's spacing pair, and the
+`cornerSubPix` round trip. **No row's direction verdict flipped.** LK at 204
+points is direction-established in both; every row unanimous in one sweep is
+unanimous in the other. That asymmetry is itself the argument for the ruling: on
+this machine the *sign* of these differences reproduces and their *exact size*
+does not, so a row quoted as a range says something that survives a re-run and a
+row quoted as a single factor sometimes does not.
 
 ## How the numbers were earned
 
