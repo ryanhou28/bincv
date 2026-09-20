@@ -76,14 +76,17 @@ implied here.
 - **`cornerMinEigenValAsync` did not resolve, for the second round running.**
   1.131× [0.554–1.613] with **0 of 7 runs disjoint** — the same non-answer as
   before, now with the limiter named (occupancy, not either roof).
-- **`goodFeaturesToTrackAsync` has no ship bar.** It is 5.3× faster and 5.33×
-  smaller than its `cv::cuda` counterpart, which crosses parity against every
-  available denominator — but what ratio *ships* it was escalated twice and
-  never ruled on, and no number was invented in its place.
-- **The census entry is now LARGER than `cv::cuda::StereoBM`** on a meter run
-  on both sides, which reverses a figure previously published here. It is
-  faster on the same run. Under the project's memory-wins tiebreak that is an
-  unmade judgement, and it is reported as one.
+- **The census entry is LARGER than `cv::cuda::StereoBM`** on a meter run on both
+  sides, which reverses a figure previously published here. It is faster on the
+  same run. **That loss is inherent to census, not a defect in this
+  implementation:** the transform expands 8 bits a pixel into a 32-bit descriptor
+  word, so the two transformed images alone are 2 × 1,410.0 KB = **2,820 KB before
+  anything else is allocated**, against StereoBM working on the 8-bit frames
+  directly. No implementation of census in the standard layout can be smaller than
+  its own descriptors. A caller who wants the memory back can have it — the
+  **plane-layout** intermediate is 3,217.5 KB against the packed one's 3,877.5 KB
+  — at **21.7× the matcher time**. That is a documented choice, not a defect and
+  not a single path.
 - **Block matching's accuracy floor and sparse stereo's residual floor are
   unset.** Both clear their speed and memory bars; neither has a stated accuracy
   magnitude, and inventing one is forbidden. Block matching is **ship-blocked**
@@ -97,11 +100,19 @@ implied here.
   result. It ships for the caller who already has the gate, not on that number.
 - **Device occupancy was dropped on a measurement** rather than written.
 
-Two entries left this list. The **resident frontend** was 1.22× slower than
+Three entries left this list. The **resident frontend** was 1.22× slower than
 binCV's own CPU frontend and is now **5.62× faster**, ranges globally disjoint.
-**FAST** missed its role bar by 16.8× and now clears it by 5.8× — though it is
-still **1.55× larger** on the memory meter, so it leads one axis and trails the
-other.
+**FAST** missed its role bar by 16.8×, then cleared it on speed while still
+trailing on memory, and now **leads both axes**: 6.01× faster with 7 of 7 runs
+disjoint, and **1.574× smaller** on `cudaMemGetInfo` where it was 1.545× larger.
+**`goodFeaturesToTrackAsync` ships**: it is 5.3× faster and 5.33× smaller than
+its `cv::cuda` counterpart with 7 of 7 runs disjoint, and although its bar was
+escalated twice and never set — and no number was invented in its place — the
+owner has now ruled that this clears. The caveat rides with it rather than being
+dropped: **OpenCV's arm swings 3.24–13.61 ms across runs** because its
+min-distance spacing filter runs on the CPU, so the denominator is not one
+number, and binCV crosses parity against **every version of it**, including
+round 2's own quieter 3.55–4.28 ms.
 
 `cuda::threshold`'s round-1 failure, reported here previously as a miss, **is
 cleared**: it was 2.22× slower at 4K with 7 of 9 runs disjoint and is now 0.744×,
@@ -155,7 +166,13 @@ So the **binary entry leads on speed by 11.0×** and its memory lead is real in
 kind but not currently quotable in size; the **census entry leads on speed by
 1.38× and trails on memory by 1.47×**, which is a split verdict on the axis
 this project breaks ties with. That is an unmade judgement and it is recorded as
-one, not rounded into a headline.
+one, not rounded into a headline — but the memory side of it is **not a defect
+to be fixed**. Two packed descriptor images are 2,820 KB before a disparity map
+exists; census expands and StereoBM does not, and no implementation of this
+algorithm in this layout can undercut its own descriptors. The plane layout is
+the smaller intermediate (3,217.5 KB against 3,877.5 KB) and ships, at 21.7× the
+matcher time. What is unmade is whether an op may ship on those terms, not what
+the number is.
 
 **Which of these is binCV's claim, and which is the on-ramp.** Only the binary
 entry rests on the representation: its caller already holds one bit per pixel,
@@ -326,11 +343,17 @@ output map is held byte-equal to the host's wide path by test — Hamming
 distance is invariant under a permutation of a descriptor's bits, so the bit
 order carries no meaning beyond "both images use one".
 
-**The trade, stated:** packed costs 32 bits per pixel against the plane block's
-24, so the census working set goes from ~3.3 MB to ~4.0 MB — a 21% increase for
-8.55× on the matcher. Both paths ship and both are bit-exact;
-`denseDisparityCensus` (plane block) remains for a caller who wants the smaller
-intermediate and can pay the time.
+**The trade, stated, and it is the caller's to make rather than ours.** Packed
+costs 32 bits per pixel against the plane block's 24, so the census working set
+goes from **3,217.5 KB to 3,877.5 KB** on the allocation sum — 20.5% — for a
+matcher that is **21.7× faster** (plane 7.82–7.94 ms against packed 0.361–0.369
+ms, three runs). The 8.55× this document previously quoted for that gap was the
+plane-to-packed step *before* the warp-cooperative box arm landed; that arm made
+the packed matcher 2.49× faster again, so the layout choice now costs more than
+it did. Both paths ship and both are bit-exact; `denseDisparityCensus` (plane
+block) remains for a caller who wants the smaller intermediate and can pay the
+time, and it is documented here as a choice rather than left as a path nobody
+mentions.
 
 What remains fundamental is unchanged: census compares 24 bits per pixel pair
 where SAD compares one byte. That is the descriptor's price for illumination
@@ -431,9 +454,16 @@ same way is cheap and is filed.
 binCV has **no structural advantage**. Census *expands* data — 8 bits per pixel
 in, 24–32 out — and the layout that made it fast is the conventional
 one-word-per-pixel descriptor, not binCV's bit-planes, which appear nowhere in
-this kernel. What landed is a standard separable-box technique implemented in
-the standard way, optimized for **completeness** on the entry a wide-input
-caller meets first. A recorded negative would have been an acceptable outcome
+this kernel. **That is also why this path loses on memory, and the loss is
+inherent rather than a defect:** two packed descriptor images are 2 × 1,410.0 KB
+= 2,820 KB before a disparity map exists, against `cv::cuda::StereoBM` matching
+the 8-bit frames directly. An implementation cannot be smaller than the
+descriptors the algorithm requires. The plane layout is the smaller intermediate
+and is kept for exactly that caller, at 21.7× the matcher time.
+
+What landed is a standard separable-box technique implemented in the standard
+way, optimized for **completeness** on the entry a wide-input caller meets
+first. A recorded negative would have been an acceptable outcome
 here; it simply is not the outcome. Nothing about the library's thesis changes
 either way — the claim lives in the binary entry.
 
@@ -896,24 +926,134 @@ been split into `keyKernel`, the bitonic ladder (multi-block by default) and
 `spacingKernel`, at 0.9–1.0% of the SMs, which the profiling section prices at
 **37% of `goodFeaturesToTrack`** and carries as R2.
 
-### FAST: the bar was missed, and the ordering is why — now closed
+### FAST: the bar was missed, and the ordering is why — now closed on both axes
 
 The table below is the **previous round's** measurement, kept because it is what
 the fix was aimed at and because the mechanism it isolates is the whole story.
-The current reading, under the serial role protocol, is
-**binCV 0.0237 ms against `cv::cuda::FastFeatureDetector`'s 0.1381 — 0.171×,
-5.8× faster**, disjoint in 6 of 7 runs, corner-set gate 19,898 = 19,898 in all
-7. Two arithmetic gates written with it also hold: the replacement runs
+The current reading, under the serial role protocol and re-taken after the
+memory round below, is **binCV 0.0247 ms against
+`cv::cuda::FastFeatureDetector`'s 0.1459 — 0.166×, 6.01× faster**, disjoint in
+**all 7** runs (per-process ratio medians 0.1476–0.1784), corner-set gate
+19,898 = 19,898 in all 7. The memory round did not touch the ring algebra and
+this is not read as a speed improvement over the 0.171× it replaces; it is read
+as no regression.
+
+Two arithmetic gates written with it also hold: the replacement runs
 detection twice and performs no comparison, so its predicted cost was ≤ 0.10 ms
 (measured 0.024), and the **complexity gate** — cost must stop tracking
-`nextPow2(found)` — reads **1.01×** between capacity 512 and the full pool over
-identical detection work. It used to be 2.12×.
+`nextPow2(found)` — read **1.01×** between capacity 512 and the full pool over
+identical detection work when it was taken as a paired in-process measurement.
+It used to be 2.12×. The memory round did not touch that mechanism, and the
+seven role runs above agree from the other side: binCV is **0.0247 ms at
+capacity 32,768 against 0.0254 ms at 512**, so the full pool is if anything the
+cheaper of the two.
 
-**The memory half did not move and does not pass.** FAST is still 1,088.0 KB
-against OpenCV's 704.0 KB on `cudaMemGetInfo`, both sides — **1.55× larger** —
-reported with no pass/fail number attached, because the bar it would be judged
-against has not been set. `fastScratchBytes` is unchanged by this round's arm,
-which uses about 380 B of it at 752×480.
+**The memory half has now moved, and it flips the row.** It used to read 1,088.0
+KB against OpenCV's 704.0 KB — 1.545× larger — and the reason was two allocations
+that the shipped arm never touched. `fastScratchBytes` returned the *reference*
+arm's number to every caller, so a frame that used 380 B of block sums was handed
+`nextPow2(capacity)` corner records: **512 KB of scratch to use 380 bytes of it**.
+And `DeviceFastCorner` carried the host's `long long` score, which cost the
+record 8 bytes for the field plus **4 bytes of padding** to align it after `y` —
+12 of the 16 bytes spent on a value that is an arc length around a 16-pixel ring
+and cannot leave [1, 16].
+
+Both are fixed. The sizing function takes the **arm** as an argument, and
+`detectFastAsync` validates against the arm it is *about to run* rather than the
+one the caller sized for, so a buffer sized for one arm and met with the other is
+`cudaErrorInvalidValue` and not a device-side write past its end. The record is
+12 bytes: positions stay `int`, the score narrows to `int32_t`, and
+`DeviceFastCorner::toHost` widens it, so what a caller reads back is unchanged.
+
+**A narrowing is a correctness claim, so it is proved rather than argued.** The
+score's attainable set is swept **exhaustively** in the suite — all 65,536 ring
+patterns at all sixteen arc lengths, round-tripped through `toHost` — and the
+observed range is pinned at exactly [1, 16]. Verification added a second check
+the suite does not make, on **real frames**: two EuRoC frames through the sensor
+stage at two thresholds, seven arc lengths and all eight arm combinations, 224
+complete runs, **13,469,376 corner records `memcmp`'d against the host
+detector's own array** on the host type — positions, raster order and the widened
+score — with zero differences, and with the score's *whole* range [1, 16]
+actually occurring in the data rather than assumed to. The sizing refusal was
+checked the same way, since `compute-sanitizer` does not run on this host: a
+buffer sized for the ordered arm, met with the reference arm, inside a poisoned
+1 MB guard region either side. The call returns `cudaErrorInvalidValue`,
+**disturbs zero poisoned bytes** in either guard or in the scratch window, leaves
+the output buffer bit-identical to its own poison and the counter at 0 — and the
+ordered arm then runs against that same 380-byte buffer, touches neither guard,
+and finds the same 19,898 corners.
+
+| per working set, capacity 32,768 | before | after |
+|---|---|---|
+| bit plane, 24 words × 480 rows × 4 B | 46,080 B | 46,080 B |
+| corner array | 32,768 × 16 = 524,288 B | 32,768 × **12** = 393,216 B |
+| scratch | nextPow2(32,768) × 16 = 524,288 B | 95 blocks × 4 = **380 B** |
+| allocation sum (meter 1) | 1,069.0 KB | **429.4 KB** |
+| **`cudaMemGetInfo`, 256 sets (meter 2)** | **1,072.0 KB** | **440.0 KB** |
+
+**Both cells of that meter row are one harness at one replica count**, which is
+the only way a before and an after are comparable. HEAD's own benchmark reads its
+side over 32 sets and this branch's over 256, so neither could supply both; the
+row is a verification probe that allocates each shape 256 times, and it
+reproduces HEAD's benchmark exactly (1,088.0 KB) when told to use 32. The two
+meters are kept apart and never divided into each other: they agree to 3.0 KB on
+the before and 10.6 KB on the after, inside one and two of the driver meter's own
+units at this count.
+
+**Against OpenCV, on that same meter, both sides taken identically** — this is
+the cross-library figure and it comes from the committed `cuda_role_benchmark`:
+**binCV 432.0 KB against `cv::cuda::FastFeatureDetector`'s 680.0 KB — 1.574×
+smaller**, identical in five consecutive processes (54 and 85 of the meter's
+2 MB units).
+
+**The two harnesses do not read the same absolute numbers, and that is worth
+knowing.** The same probe run against *both* sides in a fresh process reads
+**440.0 KB against 704.0 KB — 1.600×**, identical in seven processes: one unit
+high on binCV's side and three on OpenCV's compared with the benchmark. The
+reason is that a delta taken late in a long benchmark reads low — `cudaFree`
+returns memory to the driver in whole units, so allocations that land inside a
+unit the process already holds cost this meter nothing. **The quoted
+cross-library figure is the benchmark's**, because it is the committed,
+reproducible one and also the more conservative of the two. The probe is a
+verification cross-check rather than a committed benchmark, and its numbers are
+recorded here as corroboration, not as the claim. Both readings give the same
+sign, the same magnitude and a ratio within 1.7% of each other.
+
+**The replica count is part of that reading, and saying so is not a footnote.**
+This row was previously taken over 32 working sets and then 64. Both clear the
+eight-unit rule this document quotes — but clearing it is not the same as
+resolving. At 64 sets binCV's side reads 13 units, so one unit of rounding is
+32 KB a frame on a 430 KB reading, and two harnesses that both cleared the rule
+quoted **1.615× and 1.714× for the same pair**. At 256 sets the unit is 8 KB a
+frame and the reading stops moving in either harness. The benchmark now takes it
+there.
+
+**One behaviour moved that nobody asked to move.** `fastOrderedApplies` compares
+the two arms' working areas, and its left side carries `sizeof(DeviceFastCorner)`
+— so narrowing the record shifted that comparison by a quarter. At 752×480 the
+crossing is capacity 17 either way and nothing moved at the reference geometry;
+over a sweep of widths 32..2016 and heights 7..1199, **about 4.5% of (frame,
+capacity) points now take the reference arm where they took the ordered one**,
+always in that direction and never above a capacity of 128. No answer changes —
+both arms are bit-exact and both are cheap at those counts — but the crossover is
+a **heuristic rather than a derived number**, and the proof of that is that it
+moved when a record size did. Reading a byte count as a work unit is what is
+wrong here; a measured crossover is filed rather than invented.
+
+**What the narrowing did NOT buy, stated because the profile says so.** A 12-byte
+record at 4-byte alignment is three scattered 32-bit stores where a 16-byte record
+at 8-byte alignment packed into wider ones, and `ncu` reads `fastEmitKernel<9,1>`
+at **53,949 global store sectors against the old record's 37,931 — 42% more L1
+store traffic for 25% fewer bytes actually reaching DRAM** (1.73 MB through L1,
+DRAM throughput 6.8% against 8.4%). It costs nothing today: the kernel's duration
+is unchanged (7.74–7.84 µs on the profiler's clock, which is not a timing number),
+SM throughput 19.6–19.9% either way, achieved occupancy **15.50% against 15.51%**
+with registers and shared memory both capping the launch at 10 blocks an SM, and
+the stall histogram moves by less than its own sampling noise at ~429 samples
+(`wait` 18.9% → 23.5%, `imc_miss` 16.1% → 14.7%, `barrier` 12.9% → 16.1%). **The
+limiter did not move: it is occupancy in both, which is what issue #64 is about.**
+The store scatter is invisible at 15% occupancy and would stop being invisible if
+#64 succeeded, so it is recorded here rather than discovered then.
 
 | edge | corners | nextPow2 | `cv::cuda` FAST | binCV | ratio | disjoint | set gate |
 |---|---|---|---|---|---|---|---|
@@ -952,8 +1092,8 @@ deleted rather than repaired — `cuda_role_benchmark` owns that comparison.
 | `threshold` 1920×1080 | ″ | 0.0124 ms | 0.0114 ms | 0.908 | 0/7 | **PASS** |
 | `threshold` 3840×2160 | ″ | 0.0367 ms | 0.0272 ms | **0.744** | 1/7 | **PASS** |
 | describe, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 ms | 0.0107 ms | **0.108** | **7/7** | **MET, 9.3×** |
-| FAST | `FastFeatureDetector` | 0.1381 ms | **0.0237 ms** | **0.171** | 6/7 | **MET, 5.8× — was 14.84** |
-| `goodFeaturesToTrack` (wall) | `createGoodFeaturesToTrackDetector` | 4.6629 ms | **0.8983 ms** | **0.189** | **7/7** | 5.3× faster; **ship bar unset** |
+| FAST | `FastFeatureDetector` | 0.1459 ms | **0.0247 ms** | **0.166** | **7/7** | **MET, 6.01× — was 14.84** |
+| `goodFeaturesToTrack` (wall) | `createGoodFeaturesToTrackDetector` | 4.6629 ms | **0.8983 ms** | **0.189** | **7/7** | **SHIPS, 5.3×** |
 | min-eigenvalue response | `createMinEigenValCorner` | 0.0557 ms | 0.0626 ms | 1.131 | **0/7** | **still not a result** |
 | Lucas-Kanade, 204 pts | `SparsePyrLKOpticalFlow` | 0.1647 ms | **0.0812 ms** | **0.505** | **7/7** | **MET at frontend density** |
 | Lucas-Kanade, 2048 pts | ″ | 0.3252 ms | 0.3563 ms | 1.091 | **0/7** | **not a result — the crossover** |
@@ -964,11 +1104,13 @@ deleted rather than repaired — `cuda_role_benchmark` owns that comparison.
 | block matching | `SparsePyrLKOpticalFlow` | 0.2320 ms | **0.0540 ms** | **0.230** | **7/7** | speed MET; **accuracy floor unset** |
 
 **Three rows changed direction since the previous round, and one row is new
-information rather than a better number.** FAST went from 14.84× behind to 5.8×
+information rather than a better number.** FAST went from 14.84× behind to 6.01×
 ahead and `goodFeaturesToTrack` from 2.659× behind to 5.3× ahead, both on the
 ordering rewrites described above. The LK row is the first tracking measurement
 in this backend. And the census entry's row is a **split verdict** — ahead on
 speed, behind on memory — which is stated in the headline and not resolved here.
+FAST was the other split verdict and is no longer one: the memory round below
+takes it to 1.574× smaller, so it leads both axes.
 
 **`goodFeaturesToTrack`'s OpenCV arm remains noisy** (3.24–13.61 ms across runs)
 because its spacing filter runs on the CPU; that is stated rather than hidden,
@@ -987,15 +1129,21 @@ this driver's 2 MB units, and never mixed with binCV's own allocation sums:
 | LK tracker resident state | **448.0 KB** | 1408.0 KB | **3.14× smaller** |
 | `goodFeaturesToTrack` | 1920.0 KB | 10240.0 KB | 5.33× smaller |
 | corner response | 2048.0 KB | 10240.0 KB | 5.00× smaller |
-| FAST @ capacity 32,768 | 1088.0 KB | 704.0 KB | **0.65× — binCV is 1.55× LARGER** |
+| FAST @ capacity 32,768 | **432.0 KB** | 680.0 KB | **1.574× smaller** — was 1.545× LARGER |
 | census entry working set | 4512.0 KB | 3072.0 KB | **0.68× — binCV is 1.47× LARGER** |
 
-**Two of these rows go the other way, and both are printed as they read.** The
+**One of these rows goes the other way, and it is printed as it reads.** The
 helper that prints them used to say "binCV smaller by that factor" whatever the
 ratio was — which is a claim rather than a reading on any row where OpenCV is
-smaller, and this round produced a second such row. It now follows the number.
-The census-entry row is the first time both sides of that path were metered in
-one region.
+smaller. It now follows the number. FAST was the second such row and no longer
+is; the census entry remains one, and its loss is **inherent to census rather
+than a defect in this implementation** — see below. The census-entry row is the
+first time both sides of that path were metered in one region.
+
+**FAST's row is now read over 256 working sets a side — this file's own default
+`kReplicas` — where it was the outlier at 32.** That is not a different meter,
+only a finer one, and the change is stated because the row moved by 6% between
+two harnesses that both satisfied the eight-unit rule at 64.
 
 **`cuda::threshold` clears the bar its own round-1 rule failed.** That rule's
 fail condition — slower than `cv::cuda::threshold` by more than both printed
@@ -1023,7 +1171,13 @@ corrected here rather than left standing.
 ### Where binCV has no structural advantage, said plainly
 
 Three of these ops have none, and the reason in each case is that the work is
-not in bits.
+not in bits. The **census entry** is a fourth and is covered in its own section
+above: it is ahead on speed and behind on memory, and the memory side of that is
+the algorithm's, not the implementation's — census expands 8 bits a pixel into a
+32-bit descriptor word, so its two transformed images are 2,820 KB before
+anything else, where `cv::cuda::StereoBM` matches the 8-bit frames directly.
+**FAST is not on this list and used to be**: it leads both axes as of the memory
+round recorded above.
 
 **The corner response.** `cornerMinEigenValAsync` reads **1.131×
 [0.554–1.613]** against `createMinEigenValCorner` with **0 of 7 runs disjoint** —
@@ -1686,7 +1840,7 @@ reference oracle arms that nothing ships.
 | `stereoRefineFastKernel` | 10.2 | 24.8 | 2.1 | **20.6**/100 | 125×128 | 38 | short_sb 38, wait 20 |
 | `packQuantKernelRowGrid<uint8>` | 8.0 | 47.1 | 9.8 | 82.3/100 | 1440×256 | 20 | long_sb 29, wait 23 |
 | `briefBallotKernel<uint8>` | 9.6 | 18.6 | 34.1 | 41.2/100 | 125×256 | 30 | long_sb 66 |
-| `fastEmitKernel<9,1>` | 8.9 | 18.2 | 11.0 | 15.6/83.3 | 95×128 | 48 | imc_miss 20, wait 19 |
+| `fastEmitKernel<9,1>` | 7.9 | 19.5 | 6.8 | 15.5/83.3 | 95×128 | 48 | wait 24, barrier 16, imc_miss 15 |
 | `edgeKernelVec<0>` | 7.4 | 39.4 | 10.1 | 62.5/100 | 360×256 | 32 | wait 22, long_sb 19 |
 | `fastCountKernel<9>` | 4.4 | 13.5 | 2.5 | 15.8/100 | 95×128 | 40 | imc_miss 26, wait 18 |
 | `packKernelByteLane` | 3.8 | 18.9 | 18.4 | 64.1/100 | 480×256 | 16 | long_sb 32, wait 20 |

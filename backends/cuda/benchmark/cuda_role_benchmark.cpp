@@ -1908,7 +1908,12 @@ int main(int argc, char** argv) {
         bc::DeviceArray<bc::DeviceFastCorner> dfast(cap);
         bc::DeviceAppendCounter fastCounter;
         const bc::DeviceFastCornerBuffer fastBuf(dfast.data(), fastCounter.devicePtr(), cap);
-        const size_t fastScratchBytes = bc::fastScratchBytes(cap);
+        // THE SHIPPED ARM'S NUMBER. This binary runs only the arm production runs,
+        // so it sizes for that arm: 380 bytes at 752x480 rather than the reference
+        // arm's nextPow2(capacity) records. The frontend benchmark, which times
+        // both arms against one buffer, asks for FastArm::Reference instead.
+        const size_t fastScratchBytes =
+            bc::fastScratchBytes(kW, kH, cap, bc::FastArm::Ordered);
         bc::DeviceArray<uint8_t> dfastScratch(fastScratchBytes);
 
         const uint32_t capped = 512;
@@ -1916,7 +1921,8 @@ int main(int argc, char** argv) {
         bc::DeviceAppendCounter cappedCounter;
         const bc::DeviceFastCornerBuffer cappedBuf(dfastCapped.data(),
                                                    cappedCounter.devicePtr(), capped);
-        const size_t cappedScratchBytes = bc::fastScratchBytes(capped);
+        const size_t cappedScratchBytes =
+            bc::fastScratchBytes(kW, kH, capped, bc::FastArm::Ordered);
         bc::DeviceArray<uint8_t> dcappedScratch(cappedScratchBytes);
 
         const auto runFast = [&] {
@@ -2000,7 +2006,19 @@ int main(int argc, char** argv) {
 
         // Memory, meter 2, both sides, each over enough sets to resolve.
         {
-            const int reps = 32;
+            // 256, not 32 and not 64. The footprint this row measures fell by ~2.5x
+            // when the shipped arm stopped allocating the reference arm's scratch and
+            // the corner record went from 16 bytes to 12, and at 32 sets binCV's side
+            // no longer cleared the eight meter units printMemPair requires before it
+            // will quote a ratio. But clearing eight units is not the same as
+            // resolving: at 64 sets this side reads 13 units, so one unit of rounding
+            // is 32 KB a frame on a 430 KB reading, and two harnesses that BOTH
+            // cleared the rule quoted 1.615x and 1.714x for the same pair. At 256 the
+            // unit is 8 KB a frame, this binary reads 54 and 85 units, the reading is
+            // identical across five processes, and binCV's side lands within 3 KB of
+            // its own allocation sum. The replica count follows the reading; the
+            // reading does not follow the replica count.
+            const int reps = 256;
             size_t binD = 0, ocvD = 0;
             {
                 DeviceMemMeter m;
@@ -2014,7 +2032,7 @@ int main(int argc, char** argv) {
                     outs.push_back(
                         std::make_unique<bc::DeviceArray<bc::DeviceFastCorner>>(cap));
                     scr.push_back(std::make_unique<bc::DeviceArray<uint8_t>>(
-                        bc::fastScratchBytes(cap)));
+                        bc::fastScratchBytes(kW, kH, cap, bc::FastArm::Ordered)));
                 }
                 cudaDeviceSynchronize();
                 binD = m.deltaBytes();
@@ -2046,8 +2064,14 @@ int main(int argc, char** argv) {
                 gCvStream.waitForCompletion();
                 ocvD = m.deltaBytes();
             }
-            printMemPair("FAST working set, capacity 16384", "752x480", binD, ocvD, step,
-                         reps, reps);
+            // The capacity is PRINTED from the variable rather than restated: the
+            // label read "16384" for a run that used 32768, which is exactly the
+            // kind of drift a hand-written label produces.
+            char fastMemLabel[96];
+            std::snprintf(fastMemLabel, sizeof(fastMemLabel),
+                          "FAST working set, capacity %u (record %zu B, scratch %zu B)", cap,
+                          sizeof(bc::DeviceFastCorner), fastScratchBytes);
+            printMemPair(fastMemLabel, "752x480", binD, ocvD, step, reps, reps);
             emitMem("fast", "752x480", binD, ocvD, step, reps, reps);
         }
     }

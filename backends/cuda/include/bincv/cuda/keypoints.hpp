@@ -10,7 +10,7 @@
 ///
 /// `goodFeaturesToTrackAsync` and `detectFastAsync` write records --
 /// `DeviceCorner{int x; int y; float response;}` and
-/// `DeviceFastCorner{int x; int y; long long score;}`. `keypointOrientation`,
+/// `DeviceFastCorner{int x; int y; int score;}`. `keypointOrientation`,
 /// `computeBrief` and `cornerSubPixAsync` read the host family's own keypoint
 /// contract: `count` interleaved `(x, y)` FLOAT pairs (features.hpp). Those are
 /// different bytes, and nothing converted one to the other -- so the chain

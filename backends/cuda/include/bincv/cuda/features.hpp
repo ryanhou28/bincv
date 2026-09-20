@@ -31,10 +31,24 @@
 /// ---------------------------------------------------------------------------
 /// WHERE THE RESULT PODs NARROW, AND WHY
 ///
-/// `DeviceFastCorner` and `DeviceCorner` are byte-identical to the host
-/// `FastCorner` and `Corner`: no field wants narrowing, so identity is free and
-/// the download is a `cudaMemcpy` with no per-element pass. `static_assert`
-/// holds them to it.
+/// `DeviceCorner` is byte-identical to the host `Corner`: no field wants
+/// narrowing, so identity is free and the download is a `cudaMemcpy` with no
+/// per-element pass. `static_assert` holds it to that.
+///
+/// `DeviceFastCorner` narrows the SCORE from the host's `long long` to `int32_t`
+/// and is 12 bytes where the host type is 16. The detector that fills it is the
+/// BIT-PLANE one -- the only FAST overload this backend ports (fast.hpp says so)
+/// -- and its score is `impl::fastLongestRun`, the longest qualifying arc around
+/// a 16-pixel ring. Its attainable set is therefore `[arcLength, 16]`, a domain
+/// the CUDA suite sweeps EXHAUSTIVELY rather than samples: every one of the
+/// 65,536 ring patterns at every one of the sixteen arc lengths, round-tripped
+/// through `toHost`. The 64-bit field was inherited from the host type, which
+/// shares it with the WIDE-image overload whose score is a sum of ring
+/// differences and can genuinely need the width; that overload is not here. The
+/// host promise is untouched -- `toHost` widens on the way out, so the value a
+/// caller reads back is the same number it always was -- and the 4 bytes that
+/// were pure alignment padding behind a 64-bit field stop being allocated
+/// `capacity` times. At the reference capacity of 32,768 that is 128 KB a frame.
 ///
 /// `DeviceDescriptorMatch` and `DeviceStereoMatch` narrow their keypoint INDEX
 /// from the host's `size_t` to `uint32_t` -- a device op accepting a narrower
@@ -192,17 +206,23 @@ struct DeviceDescriptorSetConstView {
 // Results: what a kernel writes
 // ---------------------------------------------------------------------------
 
-/// @brief One FAST corner on the device. Byte-identical to `bincv::FastCorner`.
-/// @note The score is the host's -- the longest qualifying arc, 9 to 16, not
-/// `cv::FAST`'s. Keeping the field's type identical is what makes a device
-/// result comparable to a host one without a conversion step that could
-/// itself be the bug.
+/// @brief One FAST corner on the device. **12 bytes**, the host `FastCorner`'s
+/// positions with its score narrowed to `int32_t`.
+/// @note The score is the host's number -- the longest qualifying arc, 9 to 16 at
+/// `arcLength` 9, not `cv::FAST`'s -- in a field that can hold every value it
+/// takes and no more. See "WHERE THE RESULT PODs NARROW" at the top of this
+/// file for the domain and for what proves it. `toHost` widens, so a caller
+/// reads back exactly what the host detector would have written.
+/// @note The POSITIONS do NOT narrow. `cv::cuda::FastFeatureDetector` reaches the
+/// same 12 bytes by storing a `short2`, which caps a frame at 32,767 pixels a
+/// side; keeping `int` here is the same footprint over a wider domain, and a
+/// position is the answer.
 struct DeviceFastCorner {
     int x;
     int y;
-    long long score;
+    int score;   ///< narrowed from the host's `long long`; `toHost` widens it back
 
-    /// @brief The host library's corner. Field-for-field, no reinterpretation.
+    /// @brief The host library's corner. Field for field; the score widens.
     FastCorner toHost() const {
         FastCorner c;
         c.x = x;
@@ -268,22 +288,28 @@ struct alignas(16) DeviceStereoMatch {
     }
 };
 
-// The byte-identity claims, asserted rather than trusted: these two types are
-// downloaded as raw copies, so a field that moved or changed width would hand
-// back a fully-formed corner list with the wrong numbers in it.
-static_assert(sizeof(DeviceFastCorner) == sizeof(FastCorner),
-              "DeviceFastCorner must be byte-identical to the host FastCorner");
-static_assert(alignof(DeviceFastCorner) == alignof(FastCorner),
-              "DeviceFastCorner must be byte-identical to the host FastCorner");
+// The layout claims, asserted rather than trusted: a field that moved or changed
+// width would hand back a fully-formed corner list with the wrong numbers in it.
+//
+// DeviceFastCorner narrows its score, so what is pinned here is the narrowing
+// itself: the positions are the host's own types, the score is the widest thing
+// it may be, and the host field must be able to take every value of it without
+// changing one. The VALUES are held to that by an exhaustive sweep in the suite,
+// because a compile-time check cannot see what a detector can actually emit.
+static_assert(sizeof(DeviceFastCorner) == 12,
+              "DeviceFastCorner is 12 bytes: three 32-bit fields and no padding");
+static_assert(std::is_same<decltype(DeviceFastCorner::x), decltype(FastCorner::x)>::value,
+              "a FAST corner's x is the host's; the positions do not narrow");
+static_assert(std::is_same<decltype(DeviceFastCorner::y), decltype(FastCorner::y)>::value,
+              "a FAST corner's y is the host's; the positions do not narrow");
 static_assert(offsetof(DeviceFastCorner, x) == offsetof(FastCorner, x),
-              "DeviceFastCorner must be byte-identical to the host FastCorner");
+              "a FAST corner's x sits where the host puts it");
 static_assert(offsetof(DeviceFastCorner, y) == offsetof(FastCorner, y),
-              "DeviceFastCorner must be byte-identical to the host FastCorner");
-static_assert(offsetof(DeviceFastCorner, score) == offsetof(FastCorner, score),
-              "DeviceFastCorner must be byte-identical to the host FastCorner");
-static_assert(std::is_same<decltype(DeviceFastCorner::score),
-                           decltype(FastCorner::score)>::value,
-              "the FAST score's type is the host's; a narrower one loses arcs");
+              "a FAST corner's y sits where the host puts it");
+static_assert(std::is_signed<decltype(DeviceFastCorner::score)>::value &&
+                  std::is_signed<decltype(FastCorner::score)>::value &&
+                  sizeof(DeviceFastCorner::score) <= sizeof(FastCorner::score),
+              "the device score must widen into the host's without changing value");
 
 static_assert(sizeof(DeviceCorner) == sizeof(Corner),
               "DeviceCorner must be byte-identical to the host Corner");
@@ -341,9 +367,11 @@ inline constexpr size_t kDeviceMaxKeypoints = 0xFFFFFFFFu;
 /// @note The batched spelling, because that is the only spelling the families
 /// produce. Both halves are HOST memory: the device-to-host move is
 /// `downloadAppended` (compaction.hpp), and this is the type change after
-/// it. For the byte-identical corners the loop is a copy the compiler
-/// collapses; it is written the same way for all four so a caller does not
-/// have to remember which is which.
+/// it. For the byte-identical `DeviceCorner` the loop is a copy the compiler
+/// collapses; for the three that narrow a field it is the widening. It is
+/// written the same way for all four so a caller does not have to remember
+/// which is which -- and the widening runs over the corners FOUND, on the
+/// host, after a download that is 12 bytes a corner instead of 16.
 inline void toHost(const DeviceFastCorner* src, size_t count, FastCorner* dst) {
     for (size_t i = 0; i < count; ++i) dst[i] = src[i].toHost();
 }

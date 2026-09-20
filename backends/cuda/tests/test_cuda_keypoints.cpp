@@ -175,7 +175,7 @@ BINCV_TEST(CudaKeypointsFromCorners, TheFastCornerSpellingAgreesWithTheHostConve
     for (uint32_t i = 0; i < capacity; ++i) {
         fast[i].x = static_cast<int>(splitmix(seed) % 752u);
         fast[i].y = static_cast<int>(splitmix(seed) % 480u);
-        fast[i].score = static_cast<long long>(splitmix(seed) % 16u);
+        fast[i].score = static_cast<int>(splitmix(seed) % 16u);
         mirror[i].x = fast[i].x;
         mirror[i].y = fast[i].y;
         mirror[i].response = 0.0f;

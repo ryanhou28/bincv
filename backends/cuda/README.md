@@ -70,16 +70,30 @@ compiles those assertions, so they are built as well as written.
 divides in `packKernel`'s grid-stride addressing; a row-grid shape removes them
 and a byte-lane shape reads four pixels per lane through `__vsetgeu4`.
 
-**Two operations do NOT lead on both axes, and they are the ones to read the
-report about before using.** `detectFastAsync` misses its role bar by 16.8× on
-real frontend content and is 1.55× larger on the memory meter — its corner set is
-provably the host's, but 98.6% of its time is a single-block raster sort.
-`cornerSubPixAsync` misses its own round-trip rule: downloading the derivative
-planes and refining on the host is 0.53 ms against 1.91 ms resident, because
-bit-exactness forces `double` on a part that runs FP64 at 1/64 rate. And the
-**resident frontend as a whole is 1.22× slower than binCV's own CPU frontend**,
-for one reason: `selectKernel` runs in one block at 1.29% of the SMs. All three
-are documented as misses in
+**`detectFastAsync` now leads on both axes too.** It is 6.01× faster than
+`cv::cuda::FastFeatureDetector` on real frontend content with 7 of 7 runs
+disjoint, and **1.574× smaller** on `cudaMemGetInfo` taken identically on both
+sides — 432.0 KB against 680.0 KB at capacity 32,768. It was 1.545× *larger* one
+round ago, for two reasons that were both accidents rather than costs: the sizing
+function handed every caller the reference arm's scratch, so the shipped arm was
+given 512 KB to use 380 bytes of, and the corner record carried the host's 64-bit
+score where the value is an arc length that cannot leave [1, 16]. The arm is now
+an argument to `fastScratchBytes`, the op refuses rather than writes when the arm
+it is about to run needs more than it was handed, and the record is 12 bytes with
+`toHost` widening the score back — so what a caller reads back is unchanged, and
+the whole attainable score range is swept exhaustively by the suite.
+
+**Two things still do NOT lead on both axes, and they are the ones to read the
+report about before using.** `cornerSubPixAsync` has **no verdict** against its
+own round-trip rule: refining resident is 0.488 ms against 0.523 ms for
+downloading the derivative planes and refining on the host, which is met by
+medians and in 6 of 7 runs but with the two ranges **overlapping**, so it is not
+a result in either direction — bit-exactness forces `double` on a part that runs
+FP64 at 1/64 rate. The **census entry** is faster than `cv::cuda::StereoBM`
+(1.38×) and larger on memory (1.47×), and that loss is the algorithm's rather
+than this implementation's: census expands 8 bits a pixel into a 32-bit
+descriptor word, so two transformed images are 2,820 KB before a disparity map
+exists. Both are documented as they read in
 [docs/reports/cuda.md](../../docs/reports/cuda.md) rather than presented as
 results.
 

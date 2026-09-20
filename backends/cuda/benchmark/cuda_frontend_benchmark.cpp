@@ -189,10 +189,14 @@ void rule() {
 "          that are actually checkable: (a) the INPUT-IMAGE component must measure\n"
 "          8x smaller, which is true by construction and whose failure means the\n"
 "          upload path is materialising bytes it should not; (b) the whole\n"
-"          working set is REPORTED at capacities 200 / 2048 / 8192 with NO\n"
-"          pass/fail number, because the per-corner record ratio is fixed by the\n"
-"          host FastCorner struct (16 B against OpenCV's keypoint column) and is\n"
-"          not this family's to hit. A ship gate on (b) is the owner's to set.\n"
+"          working set is REPORTED at each capacity with NO pass/fail number.\n"
+"          The sentence that used to stand here -- that the per-corner record\n"
+"          ratio is fixed by the host FastCorner struct at 16 B -- was WRONG and\n"
+"          was costing 4 bytes a corner: the device record carries the bit-plane\n"
+"          score, whose whole attainable range is an arc length in [1, 16], so it\n"
+"          is 12 B and the host type widens it back on the way out. What is left\n"
+"          fixed is the CAPACITY the caller chooses, which is the caller's.\n"
+"          A ship gate on (b) is the owner's to set.\n"
 "\n"
 " OP2  goodFeaturesToTrackAsync.  Role bar: cv::cuda::createGoodFeaturesToTrack\n"
 "      Detector(CV_8UC1, 200, 0.01, 33.333, 3, useHarris=false) over\n"
@@ -343,7 +347,13 @@ const uint32_t kFastCapacity = 16384;
     bc::DeviceAppendCounter fastCounter;
     const bc::DeviceFastCornerBuffer fastBuf(dfast.data(), fastCounter.devicePtr(),
                                              kFastCapacity);
-    const size_t fastScratch = bc::fastScratchBytes(kFastCapacity);
+    // REFERENCE, because this binary times BOTH arms against one buffer: the
+    // ordered arm's own number is one uint32 per block and the sort arm would be
+    // refused against it. A caller that runs only the shipped arm asks for
+    // FastArm::Ordered and pays 380 bytes here instead of 256 KB -- which is what
+    // the footprint table below prints, separately, for both.
+    const size_t fastScratch =
+        bc::fastScratchBytes(kWidth, kHeight, kFastCapacity, bc::FastArm::Reference);
     bc::DeviceArray<uint8_t> dfastScratch(fastScratch);
 
     // Carried out of the capacity pair so the role-bar verdict below can say WHERE
@@ -393,11 +403,13 @@ const uint32_t kFastCapacity = 16384;
         bc::DeviceArray<bc::DeviceFastCorner> tiny(8);
         bc::DeviceAppendCounter tinyCounter;
         const bc::DeviceFastCornerBuffer tinyBuf(tiny.data(), tinyCounter.devicePtr(), 8u);
-        bc::DeviceArray<uint8_t> tinyScratch(bc::fastScratchBytes(8) + 16);
+        const size_t tinyBytes =
+            bc::fastScratchBytes(kWidth, kHeight, 8, bc::FastArm::Reference);
+        bc::DeviceArray<uint8_t> tinyScratch(tinyBytes + 16);
         const auto runTiny = [&] {
             tinyCounter.reset(gStream);
-            bc::detectFastAsync(dframe.constView(), tinyBuf, tinyScratch.data(),
-                                bc::fastScratchBytes(8), 9, gStream);
+            bc::detectFastAsync(dframe.constView(), tinyBuf, tinyScratch.data(), tinyBytes, 9,
+                                gStream);
         };
         const PairedTiming orderControl = timeKernelPaired(
             [&] { bincv::cuda::impl::fastOrderedEnabled() = true; runTiny(); },
@@ -457,12 +469,14 @@ const uint32_t kFastCapacity = 16384;
         bc::DeviceArray<bc::DeviceFastCorner> small(512);
         bc::DeviceAppendCounter smallCounter;
         const bc::DeviceFastCornerBuffer smallBuf(small.data(), smallCounter.devicePtr(), 512u);
-        bc::DeviceArray<uint8_t> smallScratch(bc::fastScratchBytes(512));
+        const size_t smallBytes =
+            bc::fastScratchBytes(kWidth, kHeight, 512, bc::FastArm::Reference);
+        bc::DeviceArray<uint8_t> smallScratch(smallBytes);
         const PairedTiming bySort = timeKernelPaired(
             [&] {
                 smallCounter.reset(gStream);
                 bc::detectFastAsync(dframe.constView(), smallBuf, smallScratch.data(),
-                                    bc::fastScratchBytes(512), 9, gStream);
+                                    smallBytes, 9, gStream);
             },
             [&] { runFast(9); }, 10, 10, kRounds, gStream);
         printPaired("detectFast, capacity 512  (orders 512 corners)",
@@ -479,15 +493,26 @@ const uint32_t kFastCapacity = 16384;
     printMemoryHeader("detectFastAsync, binCV against binCV");
     {
         const size_t plane = bc::rowWords(kWidth) * kHeight * sizeof(uint32_t);
-        for (uint32_t cap : {200u, 2048u, 8192u}) {
+        // BOTH ARMS' SCRATCH, side by side, because they are now different numbers
+        // and the gap is the whole of what a caller of the shipped arm stopped
+        // paying. The ordered column is what production allocates; the reference
+        // column is what a binary that flips the switch has to.
+        std::printf("   record: %zu bytes (int x, int y, int score)\n",
+                    sizeof(bc::DeviceFastCorner));
+        for (uint32_t cap : {200u, 2048u, 8192u, 32768u}) {
+            const size_t ordered =
+                bc::fastScratchBytes(kWidth, kHeight, cap, bc::FastArm::Ordered);
+            const size_t reference =
+                bc::fastScratchBytes(kWidth, kHeight, cap, bc::FastArm::Reference);
             const size_t total = plane + static_cast<size_t>(cap) * sizeof(bc::DeviceFastCorner) +
-                                 bc::fastScratchBytes(cap) + sizeof(uint32_t);
-            std::printf("   capacity %5u: plane %.1f KB + corners %.1f KB + scratch %.1f KB"
-                        " = %.1f KB\n",
+                                 ordered + sizeof(uint32_t);
+            std::printf("   capacity %5u: plane %.1f KB + corners %.1f KB + scratch %.2f KB"
+                        " = %.1f KB   (reference arm would want %.1f KB of scratch)\n",
                         cap, static_cast<double>(plane) / 1024.0,
                         static_cast<double>(cap * sizeof(bc::DeviceFastCorner)) / 1024.0,
-                        static_cast<double>(bc::fastScratchBytes(cap)) / 1024.0,
-                        static_cast<double>(total) / 1024.0);
+                        static_cast<double>(ordered) / 1024.0,
+                        static_cast<double>(total) / 1024.0,
+                        static_cast<double>(reference) / 1024.0);
         }
         printAllocSum("input bit plane (1 bit/px)", plane);
         std::printf("   The same picture as CV_8U is %.1f KB unpitched -- an 8.00x ratio on\n"
@@ -1063,7 +1088,11 @@ const uint32_t kFastCapacity = 16384;
                 for (int i = 0; i < replicas; ++i) {
                     planes.emplace_back(static_cast<int>(kWidth), static_cast<int>(kHeight));
                     outs.emplace_back(kFastCapacity);
-                    scratches.emplace_back(bc::fastScratchBytes(kFastCapacity));
+                    // The SHIPPED arm's number: this probe is what a production
+                    // caller allocates, and production never flips the switch.
+                    scratches.emplace_back(bc::fastScratchBytes(kWidth, kHeight,
+                                                                kFastCapacity,
+                                                                bc::FastArm::Ordered));
                 }
                 mineDelta = meter.deltaBytes() / replicas;
             }
@@ -1087,14 +1116,18 @@ const uint32_t kFastCapacity = 16384;
             printDriverDelta("binCV, per working set", mineDelta, step);
             printDriverDelta("OpenCV, per working set", theirsDelta, step);
             std::printf("   ratio OpenCV/binCV at capacity %u: %.2fx.  REPORTED, NOT GATED:\n"
-                        "   the per-corner record ratio is fixed by the host FastCorner\n"
-                        "   struct (16 B) and is not this family's to change.\n"
+                        "   binCV's side is %zu B a corner of output plus %zu B of scratch for\n"
+                        "   the whole frame; OpenCV's is a short2 column at capacity plus a\n"
+                        "   two-row float output at the count it found.\n"
                         "   OpenCV's reading is an UPPER BOUND: GpuMat can pool, and anything\n"
                         "   held rather than freed lands inside the delta.\n\n",
                         kFastCapacity,
                         mineDelta > 0 ? static_cast<double>(theirsDelta) /
                                             static_cast<double>(mineDelta)
-                                      : 0.0);
+                                      : 0.0,
+                        sizeof(bc::DeviceFastCorner),
+                        bc::fastScratchBytes(kWidth, kHeight, kFastCapacity,
+                                             bc::FastArm::Ordered));
         }
 
         // ---- OP2: cv::cuda::createGoodFeaturesToTrackDetector ----------------

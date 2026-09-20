@@ -722,6 +722,27 @@ uint32_t nextPow2(uint32_t v) {
     return p;
 }
 
+/// @brief The reference arm's scratch: the bitonic network's padded working area.
+/// @note A function of the CAPACITY and nothing else. The network pads to
+/// `nextPow2(stored)`, and `stored` can be the whole capacity.
+size_t fastSortScratchBytes(size_t capacity) {
+    if (capacity < 2) return 0;
+    BINCV_ASSERT(capacity <= 0xFFFFFFFFu,
+                 "fastScratchBytes: capacity outside the device's uint32 count domain");
+    return static_cast<size_t>(nextPow2(static_cast<uint32_t>(capacity))) *
+           sizeof(DeviceFastCorner);
+}
+
+/// @brief The ordered arm's scratch: one `uint32_t` of block total per block.
+/// @note A function of the FRAME and nothing else -- 380 bytes at 752x480. The
+/// geometry is `orderGeometry`'s own answer rather than a second derivation of
+/// it, so the count kernel's grid and this number cannot disagree.
+size_t fastOrderScratchBytes(size_t width, size_t height) {
+    if (width < 7 || height < 7) return 0;
+    const OrderGeometry g = orderGeometry(rowWords(width), height - 6);
+    return static_cast<size_t>(g.blocks) * sizeof(uint32_t);
+}
+
 } // namespace
 
 namespace impl {
@@ -745,19 +766,26 @@ bool& fastOrderedEnabled() {
 
 bool fastOrderedApplies(size_t width, size_t height, size_t capacity) {
     if (width < 7 || height < 7 || capacity == 0) return false;
-    const OrderGeometry g = orderGeometry(rowWords(width), height - 6);
-    return g.blocks != 0u && fastScratchBytes(capacity) >=
-                                 static_cast<size_t>(g.blocks) * sizeof(uint32_t);
+    const size_t order = fastOrderScratchBytes(width, height);
+    // The crossover: the network's working area against the prefix sum's. It is a
+    // heuristic and it MOVED when the record narrowed -- the left side carries
+    // sizeof(DeviceFastCorner), so 16 to 12 bytes shifted it by a quarter. At
+    // 752x480 the crossing is capacity 17 either way; elsewhere about 4% of
+    // (frame, capacity) points now take the reference arm where they took the
+    // ordered one, never above capacity 128, where both arms are bit-exact and
+    // both are cheap. fast.hpp carries the full note.
+    return order != 0 && fastSortScratchBytes(capacity) >= order;
 }
 
 } // namespace impl
 
-size_t fastScratchBytes(size_t capacity) {
-    if (capacity < 2) return 0;
-    BINCV_ASSERT(capacity <= 0xFFFFFFFFu,
-                 "fastScratchBytes: capacity outside the device's uint32 count domain");
-    return static_cast<size_t>(nextPow2(static_cast<uint32_t>(capacity))) *
-           sizeof(DeviceFastCorner);
+size_t fastScratchBytes(size_t width, size_t height, size_t capacity, FastArm arm) {
+    if (arm == FastArm::Ordered && impl::fastOrderedApplies(width, height, capacity))
+        return fastOrderScratchBytes(width, height);
+    // Either the caller named the reference arm, or the ordered one does not apply
+    // here and the reference arm is what will actually run. Both want the network's
+    // working area, so both get the same number.
+    return fastSortScratchBytes(capacity);
 }
 
 cudaError_t detectFastAsync(DeviceBinMatConstView img, DeviceFastCornerBuffer out,
@@ -774,7 +802,14 @@ cudaError_t detectFastAsync(DeviceBinMatConstView img, DeviceFastCornerBuffer ou
     BINCV_ASSERT(img.ptr != nullptr, "cuda detectFast: a non-empty frame needs a non-null pointer");
     BINCV_ASSERT(img.stride >= rowWords(img.width),
                  "cuda detectFast: the frame's stride must cover a whole row");
-    if (scratchBytes < fastScratchBytes(out.capacity)) return cudaErrorInvalidValue;
+    // THE ENFORCEMENT, and it is the reason the arm may be a parameter at all: the
+    // op asks for the arm it is ABOUT TO RUN, not the one the caller sized for. A
+    // buffer sized for the ordered arm and then met with a flipped switch is a
+    // refusal here rather than a device-side write past its end.
+    const FastArm runningArm =
+        impl::fastOrderedEnabled() ? FastArm::Ordered : FastArm::Reference;
+    if (scratchBytes < fastScratchBytes(img.width, img.height, out.capacity, runningArm))
+        return cudaErrorInvalidValue;
 
     const size_t words = rowWords(img.width);
     const bool tiled = impl::fastTiledEnabled() && impl::fastTiledApplies(arcLength);

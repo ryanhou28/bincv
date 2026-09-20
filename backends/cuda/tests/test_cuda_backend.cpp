@@ -1040,13 +1040,20 @@ BINCV_TEST(CudaPlaneBlock, PlanesHoldDevicePackQuantOutput_N5) {
 // ---------------------------------------------------------------------------
 // THE RESULT PODs AND THE HOST TYPES THEY CONVERT TO
 //
-// Two of them are byte-identical to the host's, which is what makes their
-// download a raw copy; the static_asserts in features.hpp hold the layout and
-// these cases hold the VALUES, including through a reinterpretation of the
-// bytes. The other two narrow their index under the documented domain, so the
-// conversion is the thing under test.
+// ONE of them is byte-identical to the host's, which is what makes its download
+// a raw copy; the static_asserts in features.hpp hold the layout and this case
+// holds the VALUES, including through a reinterpretation of the bytes. The other
+// three narrow a field under the documented domain, so the conversion is the
+// thing under test.
 // ---------------------------------------------------------------------------
 BINCV_TEST(CudaFeatures, CornerPodsAreTheHostBytes) {
+    // DeviceFastCorner is 12 bytes where the host type is 16: the score narrows to
+    // int32 and `toHost` widens it. What is checked here is the whole width of the
+    // narrowed field, because a record that is right for a score of 13 and wrong at
+    // the field's edge is a record that fails on the one frame nobody tested.
+    // The values a DETECTOR can actually emit are swept exhaustively in the FAST
+    // suite; this is the type's own range.
+    BINCV_CHECK_EQ(sizeof(bincv::cuda::DeviceFastCorner), size_t{12});
     bincv::cuda::DeviceFastCorner df;
     df.x = 41;
     df.y = -7;
@@ -1055,13 +1062,18 @@ BINCV_TEST(CudaFeatures, CornerPodsAreTheHostBytes) {
     BINCV_CHECK_EQ(hf.x, 41);
     BINCV_CHECK_EQ(hf.y, -7);
     BINCV_CHECK_EQ(hf.score, 13);
-    // The raw-copy claim, exercised rather than only asserted: the device bytes
-    // read as a host FastCorner give the same fields.
-    bincv::FastCorner raw{};
-    std::memcpy(static_cast<void*>(&raw), &df, sizeof(raw));
-    BINCV_CHECK_EQ(raw.x, hf.x);
-    BINCV_CHECK_EQ(raw.y, hf.y);
-    BINCV_CHECK_EQ(raw.score, hf.score);
+    const int edges[] = {0, 1, -1, 16, 2147483647, -2147483647 - 1};
+    size_t badScores = 0;
+    for (int e : edges) {
+        bincv::cuda::DeviceFastCorner d;
+        d.x = e;
+        d.y = e;
+        d.score = e;
+        const bincv::FastCorner h = d.toHost();
+        if (h.score != static_cast<long long>(e)) ++badScores;
+        if (h.x != e || h.y != e) ++badScores;
+    }
+    BINCV_CHECK_EQ(badScores, size_t{0});
 
     bincv::cuda::DeviceCorner dc;
     dc.x = 5;

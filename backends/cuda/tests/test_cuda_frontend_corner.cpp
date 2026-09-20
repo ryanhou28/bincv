@@ -14,9 +14,12 @@
 //
 // WHAT IS COMPARED, AND WHERE THE COMPARISON STOPS.
 //   * FAST: memcmp of the whole FastCorner array -- positions AND the long long
-//     score -- plus the count. ORDER IS PART OF THE COMPARISON; the sort inside
-//     detectFastAsync is what makes that possible. A TRUNCATED run is compared
-//     only on `found()`, because compaction.hpp refuses to promise which
+//     score -- plus the count. The comparison is on the HOST type, after
+//     `cuda::toHost`: the device record is 12 bytes and widens its score on the
+//     way out, so what a caller actually reads back is what gets memcmp'd against
+//     the host detector's own array. ORDER IS PART OF THE COMPARISON; the sort
+//     inside detectFastAsync is what makes that possible. A TRUNCATED run is
+//     compared only on `found()`, because compaction.hpp refuses to promise which
 //     elements an atomic kept and a suite that forgets this fails intermittently.
 //   * Response map: memcmp over every pixel, bit for bit, no tolerance.
 //   * Corners: memcmp of the Corner array plus the whole result triple against
@@ -137,7 +140,11 @@ DeviceFastRun runDeviceFast(const BinMat<Word>& img, size_t capacity, int arcLen
     const bc::DeviceFastCornerBuffer buf =
         bc::DeviceFastCornerBuffer(dout.data(), counter.devicePtr(),
                                    static_cast<uint32_t>(capacity));
-    const size_t scratchBytes = bc::fastScratchBytes(capacity);
+    // REFERENCE, not the default: this harness is called from `checkFastAllArms`,
+    // which flips `fastOrderedEnabled()` under one buffer. A caller that runs both
+    // arms sizes for the larger, and the ordered arm reads only the front of it.
+    const size_t scratchBytes = bc::fastScratchBytes(img.getWidth(), img.getHeight(),
+                                                     capacity, bc::FastArm::Reference);
     bc::DeviceArray<uint8_t> scratch(scratchBytes);
 
     out.err = bc::detectFastAsync(dimg.constView(), buf, scratch.data(), scratchBytes, arcLength);
@@ -385,20 +392,107 @@ BINCV_TEST(CudaFast, RefusesAnArcLengthOutsideTheRing) {
     bc::DeviceAppendCounter counter;
     counter.reset();
     const bc::DeviceFastCornerBuffer buf(dout.data(), counter.devicePtr(), 16u);
-    bc::DeviceArray<uint8_t> scratch(bc::fastScratchBytes(16));
+    const size_t want = bc::fastScratchBytes(64, 16, 16);
+    bc::DeviceArray<uint8_t> scratch(want);
     BINCV_CHECK_EQ(static_cast<int>(bc::detectFastAsync(dimg.constView(), buf, scratch.data(),
-                                                        bc::fastScratchBytes(16), 17)),
+                                                        want, 17)),
                    static_cast<int>(cudaErrorInvalidValue));
     BINCV_CHECK_EQ(static_cast<int>(bc::detectFastAsync(dimg.constView(), buf, scratch.data(),
-                                                        bc::fastScratchBytes(16), 0)),
+                                                        want, 0)),
                    static_cast<int>(cudaErrorInvalidValue));
     // A scratch buffer shorter than the sizing function says is a refusal, not a
     // device-side out-of-bounds write.
     BINCV_CHECK_EQ(static_cast<int>(bc::detectFastAsync(dimg.constView(), buf, scratch.data(),
-                                                        bc::fastScratchBytes(16) - 1, 9)),
+                                                        want - 1, 9)),
                    static_cast<int>(cudaErrorInvalidValue));
     BINCV_CHECK_EQ(static_cast<int>(cudaGetLastError()), static_cast<int>(cudaSuccess));
 #endif
+}
+
+BINCV_TEST(CudaFast, AnOrderedSizedBufferMeetingTheReferenceArmIsRefused) {
+    // THE PROPERTY THE ARM PARAMETER EXISTS FOR, exercised rather than documented.
+    // `fastScratchBytes` is allowed to answer differently per arm only because the
+    // op checks the arm it is ABOUT TO RUN against the bytes it was handed. So:
+    // size for the ordered arm, flip the switch, and the call must come back
+    // cudaErrorInvalidValue -- not truncate, not write past the buffer, not run.
+    //
+    // No build gate on this one: the short-buffer path is a plain comparison and a
+    // return, not an assertion, so it is the same code in a checked build.
+    const BinMat<Word> img = structuredBits(752, 37, 0x51ED);
+    bc::DeviceBinMat dimg(752, 37);
+    bc::upload(img.constView(), dimg.view());
+    const uint32_t capacity = 4096;
+    bc::DeviceArray<bc::DeviceFastCorner> dout(capacity);
+    bc::DeviceAppendCounter counter;
+    counter.reset();
+    const bc::DeviceFastCornerBuffer buf(dout.data(), counter.devicePtr(), capacity);
+
+    const size_t ordered = bc::fastScratchBytes(752, 37, capacity, bc::FastArm::Ordered);
+    const size_t reference = bc::fastScratchBytes(752, 37, capacity, bc::FastArm::Reference);
+    // The whole reason this round happened: the two numbers are far apart, and the
+    // shipped arm wants the small one.
+    BINCV_CHECK(ordered < reference);
+    BINCV_CHECK(bc::impl::fastOrderedApplies(752, 37, capacity));
+
+    bc::DeviceArray<uint8_t> small(ordered);
+    bc::impl::fastOrderedEnabled() = true;
+    BINCV_CHECK_EQ(static_cast<int>(bc::detectFastAsync(dimg.constView(), buf, small.data(),
+                                                        ordered, 9)),
+                   static_cast<int>(cudaSuccess));
+    BINCV_CHECK_EQ(static_cast<int>(cudaDeviceSynchronize()), static_cast<int>(cudaSuccess));
+
+    // Same buffer, other arm. This is the case that used to be impossible to reach
+    // because every caller was handed the larger number whether it wanted it or not.
+    bc::impl::fastOrderedEnabled() = false;
+    counter.reset();
+    BINCV_CHECK_EQ(static_cast<int>(bc::detectFastAsync(dimg.constView(), buf, small.data(),
+                                                        ordered, 9)),
+                   static_cast<int>(cudaErrorInvalidValue));
+    bc::impl::fastOrderedEnabled() = true;
+    BINCV_CHECK_EQ(static_cast<int>(cudaGetLastError()), static_cast<int>(cudaSuccess));
+
+    // And the reference arm against a buffer sized for it still runs, so the
+    // refusal above is the size and not the switch.
+    bc::DeviceArray<uint8_t> big(reference);
+    bc::impl::fastOrderedEnabled() = false;
+    counter.reset();
+    BINCV_CHECK_EQ(static_cast<int>(bc::detectFastAsync(dimg.constView(), buf, big.data(),
+                                                        reference, 9)),
+                   static_cast<int>(cudaSuccess));
+    BINCV_CHECK_EQ(static_cast<int>(cudaDeviceSynchronize()), static_cast<int>(cudaSuccess));
+    bc::impl::fastOrderedEnabled() = true;
+}
+
+BINCV_TEST(CudaFast, TheScoreNarrowingIsLosslessOverEveryValueItCanTake) {
+    // THE DEVICE RECORD IS 12 BYTES AND THE HOST TYPE IS 16, so the score crosses a
+    // narrowing on its way into device memory. This is the proof that the crossing
+    // is lossless, and it is EXHAUSTIVE rather than a sample: the bit-plane score
+    // is `impl::fastLongestRun(ring, arcLength)`, one 16-bit ring in and one int
+    // out, so its attainable set is every value that function can return -- all
+    // 65,536 rings at all sixteen arc lengths, 1,048,576 cases with nothing left
+    // over. Each is stored in the device record's field and read back through the
+    // public conversion, and must be the same number.
+    BINCV_CHECK_EQ(sizeof(bc::DeviceFastCorner), size_t{12});
+    size_t bad = 0;
+    int lo = 1 << 30, hi = -(1 << 30);
+    for (int arcLength = 1; arcLength <= 16; ++arcLength) {
+        for (unsigned ring = 0; ring < 65536u; ++ring) {
+            const int s = bincv::impl::fastLongestRun(ring, arcLength);
+            if (s < lo) lo = s;
+            if (s > hi) hi = s;
+            bc::DeviceFastCorner d;
+            d.x = 0;
+            d.y = 0;
+            d.score = s;
+            if (d.toHost().score != static_cast<long long>(s)) ++bad;
+        }
+    }
+    BINCV_CHECK_EQ(bad, size_t{0});
+    // The range itself, printed as a claim rather than left implicit: a score is an
+    // arc length around a 16-pixel ring, so it cannot leave [1, 16] and the 32-bit
+    // field has 31 bits of headroom over the worst case.
+    BINCV_CHECK_EQ(lo, 1);
+    BINCV_CHECK_EQ(hi, 16);
 }
 
 // ---------------------------------------------------------------------------

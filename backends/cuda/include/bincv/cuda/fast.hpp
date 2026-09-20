@@ -86,6 +86,12 @@
 /// other length runs the reference arm, which is the gate-excluded case the
 /// benchmark reports at ~1.00x.
 /// * Corner counts and capacities are `uint32_t` (compaction.hpp's domain).
+/// * The SCORE is held in an `int32_t` on the device where the host type is a
+/// `long long`, so a corner record is 12 bytes rather than 16. The bit-plane
+/// score is an arc length around a 16-pixel ring and cannot leave [1, 16]; the
+/// suite sweeps every value it can take rather than sampling, and
+/// `DeviceFastCorner::toHost` widens it, so what a caller reads back is
+/// unchanged. features.hpp carries the full note.
 
 #include <cstddef>
 #include <cstdint>
@@ -101,32 +107,61 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 namespace cuda {
 
-/// @brief Scratch bytes `detectFastAsync` needs for a given output capacity.
+/// @brief Which detection arm a caller is sizing scratch for.
 ///
-/// @note **TOTAL, over every arm and every internal path.** It does not depend on
-/// which switch is set, on `arcLength`, or on the shared-memory budget: a
-/// sizing function whose answer changes when an implementation detail moves
-/// turns a correct caller into a device-side out-of-bounds write with no
-/// signal. The answer is the sort arm's padded working area --
-/// `nextPow2(capacity)` corner records -- and it is the same number whichever
-/// detection arm ran. The ordered arm needs far less of it (one `uint32_t` per
-/// block, 380 bytes for a 752x480 frame), which is why the number did not move
-/// when that arm was added.
-/// @note Returns 0 for a capacity of 0 or 1, where there is nothing to order.
-size_t fastScratchBytes(size_t capacity);
+/// @note **THE TWO ARMS WANT DIFFERENT AMOUNTS OF DIFFERENT THINGS, so one number
+/// could only ever be the larger one.** The ordered arm's scratch is one
+/// `uint32_t` per block of the FRAME -- 380 bytes at 752x480, whatever the
+/// capacity. The reference arm's is the bitonic network's padded working area,
+/// `nextPow2(capacity)` corner records -- 384 KB at a capacity of 32,768,
+/// whatever the frame. Naming the arm is what lets a caller of the shipped one
+/// stop paying for the other.
+enum class FastArm {
+    Ordered,   ///< the shipped arm: prefix sum over words, raster order by construction
+    Reference  ///< the append-and-sort arm, `impl::fastOrderedEnabled(false)`
+};
+
+/// @brief Scratch bytes `detectFastAsync` needs for this frame, this capacity and
+/// this arm.
+///
+/// @note **THE ANSWER IS A PURE FUNCTION OF THE ARGUMENTS AT THE CALL SITE.** It
+/// does not depend on a global switch, on `arcLength`, or on the shared-memory
+/// budget: a sizing function whose answer changes when an implementation detail
+/// moves turns a correct caller into a device-side out-of-bounds write with no
+/// signal. What used to keep that property was handing every caller the larger
+/// arm's number. What keeps it now is stronger: the arm is an ARGUMENT, and
+/// `detectFastAsync` REFUSES rather than writes when the arm it is about to run
+/// needs more than the caller passed. Size for `Ordered`, flip
+/// `impl::fastOrderedEnabled()` to `false`, and the next call returns
+/// `cudaErrorInvalidValue` -- there is no buffer-shaped hole to fall through.
+/// @note `Ordered` answers for the arm that switch position actually SELECTS.
+/// Where the ordered arm does not apply to this frame and capacity the reference
+/// arm runs, and this returns the reference arm's number -- so a caller who names
+/// the default always gets a buffer the call can use.
+/// @note A caller that intends to run BOTH arms against one buffer -- the suite and
+/// the benchmark do, because a switchable arm has to be switchable -- sizes for
+/// `Reference`, which covers either.
+/// @note Returns 0 where the arm that will run has nothing to keep: a capacity of
+/// 0 or 1 on the reference arm, a frame with no detectable row on the ordered one.
+size_t fastScratchBytes(size_t width, size_t height, size_t capacity,
+                        FastArm arm = FastArm::Ordered);
 
 /// @brief Detects FAST corners on a device bit-plane. **API TIER 2.**
 /// Bit-exact against `bincv::detectFast(BinMatConstView<uint32_t>, ...)` --
-/// positions, order AND the `long long` score -- for every COMPLETE run.
+/// positions, order AND the `long long` score, as `DeviceFastCorner::toHost`
+/// hands them back -- for every COMPLETE run.
 ///
 /// @param img The frame, one bit per pixel, in device memory.
 /// @param out Append target and its counter (compaction.hpp). The counter must be
 /// zeroed before every launch; `DeviceAppendCounter::reset` is that call.
-/// @param scratch Device scratch of at least `fastScratchBytes(out.capacity)`
-/// bytes, 8-byte aligned. May be null when that is 0. **Caller-provided:
+/// @param scratch Device scratch of at least
+/// `fastScratchBytes(img.width, img.height, out.capacity, arm)` bytes for the arm
+/// that will run, 4-byte aligned. May be null when that is 0. **Caller-provided:
 /// no kernel here allocates.**
 /// @param scratchBytes What `scratch` actually holds, so a short buffer is a
-/// refusal rather than a corruption.
+/// refusal rather than a corruption. The arm is not an argument here -- it is
+/// whichever one `impl::fastOrderedEnabled()` and the frame select -- so this is
+/// where a buffer sized for the OTHER arm is caught, before a kernel reads it.
 /// @param arcLength Contiguous ring pixels required; 9 is `cv::FAST`'s default.
 /// @return `cudaErrorInvalidValue` when a documented domain is violated, else the
 /// launches' error code. Asynchronous.
@@ -186,13 +221,21 @@ bool& fastOrderedEnabled();
 /// @brief Whether the ordered arm would run for this frame and capacity.
 /// **INTERNAL** -- the benchmark and the suite need to name the gate-excluded
 /// case without restating the gate.
-/// @note The gate is the caller's own scratch: the arm needs one `uint32_t` per
-/// block, and `fastScratchBytes(capacity)` is what supplies them. A capacity too
-/// small to hold them -- below 48 corners on a 752x480 frame -- is also a
-/// capacity at which the network this arm replaces runs over at most `capacity`
-/// elements and costs less than the prefix sum would, so the crossover is where
-/// it belongs rather than where it was convenient. That is the case the
-/// benchmark must report at ~1.00x between switch positions.
+/// @note The gate compares the two arms' working areas: the network this arm
+/// replaces runs over `nextPow2(capacity)` corner records, the prefix sum over one
+/// `uint32_t` per block of the frame. Below the crossing -- a capacity under 17 on
+/// a 752x480 frame -- the network is the smaller job and it runs. That is the case
+/// the benchmark must report at ~1.00x between switch positions.
+/// @note **THIS IS A HEURISTIC, NOT A DERIVED CROSSOVER, and the honest evidence
+/// for that is that it MOVES.** Its left side is `nextPow2(capacity)` times the
+/// size of a corner record, so narrowing the record from 16 bytes to 12 changed
+/// it by a quarter. At 752x480 nothing moved -- the crossing is capacity 17 at
+/// either record size -- but over a sweep of widths 32..2016 and heights 7..1199
+/// about 4.5% of (frame, capacity) points now select the reference arm where they
+/// used to select the ordered one, always in that direction and never above a
+/// capacity of 128. Neither arm is wrong there, because both are bit-exact and
+/// both are cheap at those counts; what is wrong is reading a byte count as a
+/// work unit. A crossover measured rather than inferred is filed work.
 bool fastOrderedApplies(size_t width, size_t height, size_t capacity);
 
 } // namespace impl
