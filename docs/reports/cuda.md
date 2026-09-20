@@ -388,10 +388,13 @@ cost volume the design refuses — an allocation sum on both sides, not the
 ### The census entry, and the layout that closed its gap
 
 The **census entry** is the wide-input story: upload two 8-bit frames, census
-on device, match, download. Resident-to-resident it is **0.5076 ms against
-`cv::cuda::StereoBM`'s 0.6996 — 1.38× ahead**, ranges disjoint in all 7 runs,
-having started this work 15× behind and having been 1.29× behind as recently as
-the previous round. It is **larger** than StereoBM on the memory meter; that is
+on device, match, download. Resident-to-resident it is **1.47× ahead** of
+`cv::cuda::StereoBM` — re-taken over seven processes, 1.47× apart against a
+1.25× bar, all 105 paired rounds one way, ranges disjoint in all 7 runs — having
+started this work 15× behind and having been 1.29× behind as recently as the
+previous round. (The 1.38× and 1.43× this document has carried at different
+points are the same row on earlier sweeps; its run-to-run scatter is 1.14×, so
+the three readings are one number, not three.) It is **larger** than StereoBM on the memory meter; that is
 in the headline above and is not softened here.
 
 It started 15× behind. The last and largest step was not a kernel trick but a
@@ -2662,9 +2665,10 @@ what is currently parallel.
   landed is **the first and second combined and neither as described**: a
   warp-cooperative separable box that slides *vertically* in a register per lane
   and decomposes horizontally over shuffles, with **no cost buffer at all** —
-  the ~360 KB the separable idea was priced at is 0 B. It measures **2.49×**,
-  and the census entry is now 1.38× ahead of `cv::cuda::StereoBM` rather than
-  1.25× behind. `uint4` remains unspent and the profile now says why it would
+  the ~360 KB the separable idea was priced at is 0 B. It measures **2.49×**
+  (re-taken over seven processes it reads 2.51× against a 1.24× bar, 105–0 —
+  the same number inside this row's 1.08× run-to-run scatter), and the census
+  entry is now **1.47× ahead** of `cv::cuda::StereoBM` rather than 1.25× behind. `uint4` remains unspent and the profile now says why it would
   not pay here (`long_scoreboard` 13.9%, `mio_throttle` 0.05% — the load path is
   no longer the throttle).
 
