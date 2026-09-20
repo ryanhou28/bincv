@@ -88,9 +88,10 @@ report about before using.** `cornerSubPixAsync` has **no verdict** against its
 own round-trip rule. That rule asks the device arm to be strictly cheaper than
 the round trip it replaces; re-measured as **one paired comparison** on the wall
 clock — rather than as three separately-timed medians added together, which
-carries all three passes' drift — it sits at **parity**, with the median
-marginally favouring the round trip. It is a null result in either direction,
-not a miss and not a pass. Bit-exactness forces `double` on a part that runs
+carries all three passes' drift — it sits at **parity or worse**, with the
+median favouring the round trip: 0.3911 ms against the device arm's 0.5656 ms in
+the latest seven-process sweep, 72 of 77 rounds the round trip's way. It is not
+a miss by a stated margin and it is certainly not a pass. Bit-exactness forces `double` on a part that runs
 FP64 at 1/64 rate, which is why. The **census entry** is faster than `cv::cuda::StereoBM`
 (1.38×) and larger on memory (1.47×), and that loss is the algorithm's rather
 than this implementation's: census expands 8 bits a pixel into a 32-bit

@@ -173,6 +173,14 @@ int main() {
 
     for (const auto& geo : kGeometries) {
         const size_t w = geo.w, h = geo.h;
+        // The emitted rows are keyed by the two arm names, and this file prints
+        // the SAME two names at both geometries. Without the scope the
+        // cross-run aggregation pools 752x480 with 3840x2160 under one key and
+        // reads the difference between the geometries as run-to-run scatter:
+        // measured on this host, that put the scatter at 3.24x on the byte-lane
+        // pair, where each geometry on its own is 1.2x -- enough to turn a real
+        // effect into a null. See cudabench::pairedScope.
+        cudabench::pairedScope() = geo.label;
         std::printf("===========================================================\n");
         std::printf(" %s\n", geo.label);
         if (!geo.carriesBars) {

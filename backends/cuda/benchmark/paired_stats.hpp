@@ -116,6 +116,86 @@
 // own tables show. They are reported, not decisive, and they are labelled that
 // way at the number.
 //
+// THE THREE-VALUED VERDICT, AND WHAT THE SPREAD IS EVIDENCE *ABOUT*.
+//
+// differenceClearsNoise() answers one question: is the difference bigger than
+// the noise it was measured against. It is not the only question a set of
+// paired rounds answers, and reading it as though it were produced a verdict
+// the owner ruled wrong (2026-09-19).
+//
+// THE CASE THAT FORCED IT. Device Lucas-Kanade at the frontend's own keypoint
+// spacing. binCV was faster in 105 of 105 paired rounds and never by less than
+// 1.6x, median 2.18x. The per-round ratio nonetheless swung 3.05x across those
+// rounds -- entirely because the rounds where binCV won by 6.7x sit so much
+// further from 1.00x than the rounds where it won by 1.6x. 2.18x against 3.05x
+// fails the predicate, so the rule as literally written called 105-0 a NULL.
+//
+// That is the wrong reading of what the swing measures. A spread lying wholly
+// on one side of 1.00x is uncertainty about HOW BIG the difference is, not
+// about WHETHER there is one. Charging it against the difference treats "we do
+// not know whether this is 1.6x or 6.7x" as if it were "we do not know whether
+// these arms differ at all". Those are not the same doubt.
+//
+// SO THE SPREAD BOUNDS THE MAGNITUDE, NOT THE DIRECTION, and there are THREE
+// verdicts rather than two:
+//
+//   DIRECTION ESTABLISHED -- no round crossed 1.00x. The sign of the
+//   difference is settled by the observations themselves, and its size is then
+//   reported as a RANGE, smallest to largest per-round factor, beside the
+//   median. "Faster in 105 of 105 rounds, by 1.62x to 6.71x, median 2.18x" is
+//   what such a row says, and it says more than any single number would.
+//
+//   A RESULT -- differenceClearsNoise(), unchanged in every particular: the
+//   difference exceeds the larger of the within-run swing and the run-to-run
+//   scatter.
+//
+//   NULL RESULT -- neither of those. Still a result, in measure_util.hpp's
+//   sense: the two arms are the same speed as far as this run can tell.
+//
+// A ROW CAN BE BOTH OF THE FIRST TWO, AND THE STRONG ONES ARE. They are
+// different statements -- "which arm is ahead is not in doubt" and "the
+// distance between them exceeds the noise" -- and both get printed, because
+// the stronger does not contain the weaker. A unanimous row whose magnitude
+// swings an order of magnitude is direction-established and NOT a result; a
+// row that clears the noise on a 9-6 sign split is a result whose direction is
+// unsettled. Collapsing either into the other loses the half that was true.
+//
+// NO ROUND-COUNT THRESHOLD, WHICH IS WHY THE p IS PRINTED. Two unanimous
+// rounds and a hundred unanimous rounds both satisfy "no round crossed", and
+// they are not equally strong evidence. The tempting fix is a minimum round
+// count -- which would be a project-wide "X is enough" bar invented right
+// here, the one thing CLAUDE.md says not to do. What is printed instead is the
+// exact two-sided sign-test p: 1.0 at one round, 0.5 at two and 6.1e-05 at
+// fifteen. The
+// reader then judges strength from a number that is on the page, and the
+// verdict gates on nothing.
+//
+// A TIE BREAKS THE DIRECTION VERDICT. A round whose two arms time identically
+// favours neither, and DIRECTION ESTABLISHED is a claim about the observations
+// -- "every round fell the same way" -- so it must not be satisfiable by
+// discarding the rounds that did not. Three reasons that is the defensible
+// choice rather than the convenient one:
+//
+//   * The sentence the verdict licenses is "faster in N of N rounds". With a
+//     tie quietly dropped from N, that sentence is false as printed.
+//   * Ties get MORE common as the clock gets coarser. Excluding them would
+//     make the verdict easier to earn the worse the measurement is, and a
+//     criterion that rewards a worse instrument is not a criterion.
+//   * The tie bucket also holds rounds that were not measurements at all -- a
+//     reading of zero, counted again in roundsUnusable. A verdict blind to
+//     ties would let rounds that never happened be the ones it ignored.
+//
+// The sign TEST still excludes ties from n, which is what a sign test does.
+// That is a statement about a probability model with no third outcome, not
+// about which observations a verdict may look at; the two coexist because they
+// answer different questions. A row held back from DIRECTION ESTABLISHED by
+// ties says so at the verdict, rather than reading as a plain null.
+//
+// WHAT DID NOT CHANGE. The medians, the geometric mean, the factors, the
+// swap-invariance and differenceClearsNoise() itself are all exactly as they
+// were. DIRECTION ESTABLISHED is an ADDITIONAL statement about the same
+// rounds, not a second way to pass the old one.
+//
 // SEPARATION IS STILL REPORTED. PairedTiming::separated() stays, because
 // disjoint ranges are a strong fact and several claims read better for it. It
 // is a FACT printed beside the verdict; it is not the verdict.
@@ -244,6 +324,27 @@ inline double signTestTwoSidedP(int winsA, int winsB) {
 // The paired summary
 // ---------------------------------------------------------------------------
 
+/// @brief Which arm every usable round fell towards, when they all fell the
+/// same way.
+/// @note `A` means arm A was FASTER in every usable round -- the per-round
+/// ratio B/A was above 1.00x each time. `B` is the mirror image. `None`
+/// means the rounds split, or that there were no usable rounds at all.
+enum class Direction { None, A, B };
+
+/// @brief The three verdicts a set of paired rounds can carry, and the fourth
+/// name for a row that carries two of them at once.
+/// @note THEY ARE NOT ORDERED, which is why this is not a severity scale.
+/// `DirectionEstablished` says the SIGN of the difference is settled;
+/// `Result` says its SIZE exceeds the noise. Neither implies the other --
+/// see the file header for a row of each kind -- so the combined value
+/// exists rather than a rule for which one wins.
+enum class Verdict {
+    NullResult,               ///< neither statement holds. Still a result.
+    DirectionEstablished,     ///< no round crossed 1.00x; the size is a range
+    Result,                   ///< the difference clears the larger noise
+    DirectionEstablishedAndResult,  ///< both, and both are worth saying
+};
+
 /// @brief Two arms measured against each other round by round, summarized.
 /// @note `ratio*` are the distribution of B/A computed WITHIN each round, not a
 /// ratio of the two medians. The distinction is the whole point: a per-round
@@ -258,7 +359,8 @@ struct PairedTiming {
     double ratioGeoMean = 0.0;  ///< geometric mean of the per-round B/A
     int roundsFavouringA = 0;   ///< rounds where B was SLOWER (ratio above 1)
     int roundsFavouringB = 0;   ///< rounds where B was FASTER (ratio below 1)
-    int roundsTied = 0;         ///< rounds that were exactly equal or unusable
+    int roundsTied = 0;         ///< rounds that favoured neither: equal, or unusable
+    int roundsUnusable = 0;     ///< the subset of those that were not measurements
     int rounds = 0;             ///< paired rounds measured (ties included)
 
     /// @brief Whether the two arms' sample RANGES are disjoint.
@@ -326,16 +428,134 @@ struct PairedTiming {
     }
 
     /// @brief Two-sided sign-test p over the rounds that were not ties.
+    /// @note PRINTED BESIDE EVERY VERDICT AND GATED ON BY NONE. It is what
+    /// keeps two unanimous rounds from reading like a hundred of them
+    /// without a minimum round count being invented to separate them.
     double signTestP() const { return signTestTwoSidedP(roundsFavouringA, roundsFavouringB); }
 
-    /// @brief True when every usable round fell the same way. For a pair that is
-    /// supposed to be the SAME code (a gate-excluded control), this is a red
-    /// flag no median can raise: identical arms scatter both ways.
+    /// @brief True when every USABLE round fell the same way, ties ignored.
+    /// @note THIS IS THE CONTROL'S QUESTION, not the verdict's. For a pair that
+    /// is supposed to be the SAME code (a gate-excluded control) it is a red
+    /// flag no median can raise: identical arms scatter both ways, so a
+    /// one-sided sign count is a finding about the control even when its
+    /// median reads 1.00x. Ties are ignored here because two runs of
+    /// identical code timing identically is the control BEHAVING, not
+    /// evidence against it -- the opposite of what a tie means to
+    /// directionEstablished(), which is a claim about every round.
+    /// @note NO MINIMUM ROUND COUNT. One round falling one way is unanimity
+    /// over one round, and how little that is worth is read off signTestP(),
+    /// which returns 1.0 for it. A round-count floor here would be a
+    /// project-wide "X is enough" bar invented in a header, which is what
+    /// CLAUDE.md forbids; a printed p is the same information without one.
     bool unanimous() const {
         const int n = roundsFavouringA + roundsFavouringB;
-        return n > 1 && (roundsFavouringA == 0 || roundsFavouringB == 0);
+        return n > 0 && (roundsFavouringA == 0 || roundsFavouringB == 0);
+    }
+
+    /// @brief Which arm the usable rounds all favoured, or None if they split.
+    Direction unanimousDirection() const {
+        if (!unanimous()) return Direction::None;
+        return roundsFavouringB == 0 ? Direction::A : Direction::B;
+    }
+
+    /// @brief NO ROUND CROSSED 1.00x: every round was a measurement and every
+    /// one of them fell on the same side. The owner's 2026-09-19 ruling:
+    /// the direction is then established by the observations, and the spread
+    /// bounds only how much the MAGNITUDE varies.
+    /// @note Stricter than unanimous() by exactly the ties, and the file header
+    /// says why a tie has to break this one: the sentence it licenses is
+    /// "faster in N of N rounds", which a dropped tie makes false, and ties
+    /// multiply as the clock coarsens, so ignoring them would make the
+    /// verdict easier to earn the worse the instrument is.
+    /// @note NOT A SUBSTITUTE FOR differenceClearsNoise(). This says the sign
+    /// is settled; that says the size clears the noise. A row can be either,
+    /// both, or neither.
+    bool directionEstablished() const {
+        return rounds > 0 && roundsTied == 0 && unanimous();
+    }
+
+    /// @brief The direction when it is ESTABLISHED, None otherwise.
+    /// @note The magnitude range is a statement about EVERY round, so it is
+    /// reported only through this rather than through unanimousDirection().
+    /// A tie's ratio is exactly 1.0 and does enter ratioMin/ratioMax, so a
+    /// mostly-tied pair asked for its range through the looser predicate
+    /// would print "won by 1.00x to 3.2x" -- quoting as a win a round in
+    /// which nobody won.
+    Direction establishedDirection() const {
+        return directionEstablished() ? unanimousDirection() : Direction::None;
+    }
+
+    /// @brief The SMALLEST per-round factor in the established direction -- the
+    /// least the winning arm won by in any round.
+    /// @note Oriented so it reads at or above 1.00x whichever arm is ahead,
+    /// for the reason the whole file is in factors: a range quoted as B/A
+    /// inverts when the arms are swapped and a reader has to invert it back.
+    /// @note 0.0 WHEN NO DIRECTION IS ESTABLISHED, because a set of rounds
+    /// straddling 1.00x has no consistent orientation to report a magnitude
+    /// range in -- the range would have to run from "0.8x behind" to "1.4x
+    /// ahead", which is two quantities, not one.
+    double magnitudeLoFactor() const {
+        switch (establishedDirection()) {
+            case Direction::A: return ratioMin;
+            case Direction::B: return ratioMax > 0.0 ? 1.0 / ratioMax : 0.0;
+            case Direction::None: break;
+        }
+        return 0.0;
+    }
+
+    /// @brief The LARGEST per-round factor in the established direction -- the
+    /// most the winning arm won by in any round. Same orientation as
+    /// magnitudeLoFactor().
+    double magnitudeHiFactor() const {
+        switch (establishedDirection()) {
+            case Direction::A: return ratioMax;
+            case Direction::B: return ratioMin > 0.0 ? 1.0 / ratioMin : 0.0;
+            case Direction::None: break;
+        }
+        return 0.0;
+    }
+
+    /// @brief How many times the magnitude range itself spans, hi / lo. 1.00x
+    /// is a win that was the same size in every round.
+    /// @note It equals ratioSwingFactor() whenever a direction is established,
+    /// and is printed as the magnitude's own span rather than as the noise
+    /// because under the ruling that is what it is evidence about.
+    double magnitudeSpanFactor() const {
+        const double lo = magnitudeLoFactor();
+        const double hi = magnitudeHiFactor();
+        return lo > 0.0 && hi > 0.0 ? hi / lo : 0.0;
     }
 };
+
+/// @brief The three-valued verdict for one paired comparison.
+/// @param runToRunFactor The host's run-to-run scatter as a factor, or
+/// kScatterNotMeasured -- the same argument differenceClearsNoise() takes.
+/// @note BOTH STATEMENTS ARE EVALUATED AND NEITHER SUPPRESSES THE OTHER. The
+/// combined value is returned when both hold, because "the direction is not
+/// in doubt" and "the distance exceeds the noise" are different claims and a
+/// reader given only the stronger-sounding one has lost the other.
+inline Verdict judgePaired(const PairedTiming& p, double runToRunFactor) {
+    const bool direction = p.directionEstablished();
+    const bool result = p.differenceClearsNoise(runToRunFactor);
+    if (direction && result) return Verdict::DirectionEstablishedAndResult;
+    if (direction) return Verdict::DirectionEstablished;
+    if (result) return Verdict::Result;
+    return Verdict::NullResult;
+}
+
+/// @brief The verdict's name, as printed and as written in a report.
+/// @note "NULL RESULT, which is a result" keeps measure_util.hpp's own words,
+/// because the one thing a null must not read as is a missing measurement.
+inline const char* verdictName(Verdict v) {
+    switch (v) {
+        case Verdict::DirectionEstablishedAndResult:
+            return "DIRECTION ESTABLISHED, and A RESULT";
+        case Verdict::DirectionEstablished: return "DIRECTION ESTABLISHED";
+        case Verdict::Result:               return "A RESULT";
+        case Verdict::NullResult:           break;
+    }
+    return "NULL RESULT, which is a result";
+}
 
 /// @brief Builds the paired summary from two ALIGNED sample vectors: `sa[r]`
 /// and `sb[r]` are arm A's and arm B's readings from the SAME round.
@@ -365,7 +585,15 @@ inline PairedTiming summarizePaired(const std::vector<double>& sa,
             logSum += std::log(ratio);
             ++logCount;
         }
-        if (!(ta > 0.0) || !(tb > 0.0) || ta == tb) {
+        if (!(ta > 0.0) || !(tb > 0.0)) {
+            // NOT A MEASUREMENT, as opposed to a measurement that came out
+            // even. Both favour neither arm, so both are ties for the sign
+            // test -- but a reader looking at a row that failed to establish
+            // a direction needs to know which kind it tripped over, and only
+            // one of the two is a fact about the arms.
+            ++p.roundsUnusable;
+            ++p.roundsTied;
+        } else if (ta == tb) {
             ++p.roundsTied;
         } else if (tb > ta) {
             ++p.roundsFavouringA;

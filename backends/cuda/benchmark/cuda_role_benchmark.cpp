@@ -2456,7 +2456,7 @@ int main(int argc, char** argv) {
         // because OpenCV's arm contains a host pass that a CUDA event cannot
         // see. Hand-rolled here rather than reaching for the event timer,
         // which would be the wrong instrument by construction.
-        std::vector<double> sa, sb, ratios;
+        std::vector<double> sa, sb;
         const auto wallOne = [&](const std::function<void()>& body, int iters) {
             cudaStreamSynchronize(gStream);
             const auto t0 = std::chrono::steady_clock::now();
@@ -2481,16 +2481,14 @@ int main(int argc, char** argv) {
             }
             sa.push_back(ta);
             sb.push_back(tb);
-            ratios.push_back(ta > 0.0 ? tb / ta : 0.0);
         }
-        PairedTiming pg;
-        pg.a = summarize(sa);
-        pg.b = summarize(sb);
-        const Timing rg = summarize(ratios);
-        pg.ratioMin = rg.minMs;
-        pg.ratioMedian = rg.medianMs;
-        pg.ratioMax = rg.maxMs;
-        pg.rounds = kRounds;
+        // THROUGH summarizePaired, not assembled here. A hand-built summary
+        // leaves roundsFavouringA/B at zero, so this row reported a 0-0 sign
+        // split and a sign-test p of 1 while every one of its rounds favoured
+        // the same arm -- and it took the ratio's median from summarize(),
+        // whose even-count midpoint is the arithmetic one the ratio statistics
+        // must not use.
+        const PairedTiming pg = summarizePaired(sa, sb);
         printRole("goodFeaturesToTrack -- WALL CLOCK both sides, OpenCV's host\n"
                   " round trip INSIDE its arm because a caller pays it",
                   "cv::cuda gftt (downloads, spaces on host, uploads)",

@@ -46,6 +46,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 #include "paired_stats.hpp"
@@ -313,9 +314,13 @@ BINCV_TEST(PairedStats, SignTestValuesAreTheBinomialTail) {
     BINCV_CHECK(signTestTwoSidedP(1, 0) == 1.0);
 }
 
-BINCV_TEST(PairedStats, UnanimityNeedsMoreThanOneUsableRound) {
+BINCV_TEST(PairedStats, UnanimityHasNoMinimumRoundCount) {
     BINCV_CHECK(summarizePaired({1.0, 1.0, 1.0}, {2.0, 2.0, 2.0}).unanimous());
-    BINCV_CHECK(!summarizePaired({1.0}, {2.0}).unanimous());
+    // ONE ROUND IS UNANIMITY OVER ONE ROUND, and how little that is worth is
+    // read off the p rather than refused by a round-count floor -- a floor
+    // here would be the project-wide "X is enough" bar CLAUDE.md forbids.
+    BINCV_CHECK(summarizePaired({1.0}, {2.0}).unanimous());
+    BINCV_CHECK(summarizePaired({1.0}, {2.0}).signTestP() == 1.0);
     // Split rounds are not unanimous whatever the medians say.
     BINCV_CHECK(!summarizePaired({1.0, 2.0}, {2.0, 1.0}).unanimous());
     // No usable rounds at all is not unanimity.
@@ -444,6 +449,367 @@ BINCV_TEST(PairedStats, TheRunToRunScatterIsNotDefaultedToANumber) {
     const PairedTiming p = summarizePaired({1.0, 1.0, 1.0}, {1.4, 1.5, 1.6});
     BINCV_CHECK(near(p.noiseToClearFactor(cudabench::runToRunScatterFactor()),
                      p.ratioSwingFactor(), 1e-12));
+}
+
+
+// ---------------------------------------------------------------------------
+// THE THREE-VALUED VERDICT (owner's ruling, 2026-09-19).
+//
+// The two-valued predicate asks one question -- is the difference bigger than
+// the noise -- and a set of rounds that never crossed 1.00x answers a second
+// one the predicate cannot express. These cases pin that the two are computed
+// separately, that neither suppresses the other, and that the strength of a
+// unanimity is carried by a PRINTED p rather than by a round-count threshold
+// nobody has measured.
+// ---------------------------------------------------------------------------
+
+BINCV_TEST(PairedStats, TheCaseThatForcedTheRuling) {
+    // DEVICE LUCAS-KANADE AT THE FRONTEND'S OWN SPACING, to the figures the
+    // aggregation printed: binCV faster in every round, median 2.18x, and a
+    // per-round swing of 3.05x that comes ENTIRELY from rounds where it won by
+    // more. Five rounds standing in for the 105, with the real min, median and
+    // max: factors 1.631, 2.178 and 6.625, so the swing is 6.625 / 1.631 =
+    // 4.06x here. Arm A is binCV, arm B is OpenCV, so the ratios are above 1.
+    const std::vector<double> a = {1.0, 1.0, 1.0, 1.0, 1.0};
+    const std::vector<double> b = {1.631, 2.0, 2.178, 3.0, 6.625};
+    const PairedTiming p = summarizePaired(a, b);
+
+    BINCV_CHECK_EQ(p.rounds, 5);
+    BINCV_CHECK_EQ(p.roundsFavouringA, 5);
+    BINCV_CHECK_EQ(p.roundsFavouringB, 0);
+    BINCV_CHECK_EQ(p.roundsTied, 0);
+    BINCV_CHECK(near(p.ratioMedian, 2.178, 1e-12));
+    BINCV_CHECK(near(p.differenceFactor(), 2.178, 1e-12));
+    BINCV_CHECK(near(p.ratioSwingFactor(), 6.625 / 1.631, 1e-12));
+
+    // THE OLD RULE, UNCHANGED, STILL SAYS NULL: 2.178x does not clear 4.06x.
+    // That predicate is not being weakened -- it is being joined.
+    BINCV_CHECK(!p.differenceClearsNoise(kScatterNotMeasured));
+
+    // THE RULING'S READING: no round crossed 1.00x, so the direction is
+    // established and the swing bounds only the size of the win.
+    BINCV_CHECK(p.directionEstablished());
+    BINCV_CHECK(p.establishedDirection() == cudabench::Direction::A);
+    BINCV_CHECK(near(p.magnitudeLoFactor(), 1.631, 1e-12));
+    BINCV_CHECK(near(p.magnitudeHiFactor(), 6.625, 1e-12));
+    BINCV_CHECK(near(p.magnitudeSpanFactor(), 6.625 / 1.631, 1e-12));
+
+    // And the verdict carries exactly that: direction yes, magnitude no.
+    BINCV_CHECK(cudabench::judgePaired(p, kScatterNotMeasured) ==
+                cudabench::Verdict::DirectionEstablished);
+}
+
+BINCV_TEST(PairedStats, UnanimousButTinyPrintsAWeakP) {
+    // TWO ROUNDS, both favouring the same arm. "No round crossed 1.00x" is
+    // satisfied, and it has to be -- refusing it would mean inventing a
+    // minimum round count, which is the one bar CLAUDE.md says not to invent.
+    // What stops it reading like a hundred rounds is the p: two coin flips
+    // landing the same way has a two-sided probability of 2 * C(2,0) / 2^2 =
+    // 0.5, exact in binary and compared exactly. One round reads 1.0 and
+    // fifteen read 6.1e-05, so the scale is on the page at every size.
+    const PairedTiming p = summarizePaired({1.0, 1.0}, {1.30, 1.31});
+    BINCV_CHECK_EQ(p.rounds, 2);
+    BINCV_CHECK(p.directionEstablished());
+    BINCV_CHECK(p.signTestP() == 0.5);
+    BINCV_CHECK(summarizePaired({1.0}, {1.3}).signTestP() == 1.0);
+    // The median of an even count of ratios is the multiplicative midpoint.
+    BINCV_CHECK(near(p.ratioMedian, std::sqrt(1.30 * 1.31), 1e-12));
+    BINCV_CHECK(near(p.magnitudeLoFactor(), 1.30, 1e-12));
+    BINCV_CHECK(near(p.magnitudeHiFactor(), 1.31, 1e-12));
+    // It is a result too, on a swing of only 1.31/1.30 -- so the verdict is
+    // the combined one, and the p is what tells a reader how thin it is.
+    BINCV_CHECK(p.differenceClearsNoise(kScatterNotMeasured));
+    BINCV_CHECK(cudabench::judgePaired(p, kScatterNotMeasured) ==
+                cudabench::Verdict::DirectionEstablishedAndResult);
+}
+
+BINCV_TEST(PairedStats, UnanimousAndLargePrintsAStrongP) {
+    // Fifteen rounds, every one favouring arm A: 2 * C(15,0) / 2^15 = 2^-14,
+    // exact in binary and compared exactly. Same verdict as the two-round case
+    // above, four orders of magnitude of difference in what it is worth -- and
+    // the only thing carrying that difference is the printed p.
+    std::vector<double> a(15, 1.0);
+    std::vector<double> b(15, 1.4);
+    const PairedTiming p = summarizePaired(a, b);
+    BINCV_CHECK_EQ(p.rounds, 15);
+    BINCV_CHECK(p.directionEstablished());
+    BINCV_CHECK(p.signTestP() == 6.103515625e-05);
+    BINCV_CHECK(p.signTestP() < summarizePaired({1.0, 1.0}, {1.3, 1.31}).signTestP());
+    // Every round the same size of win, so the magnitude range is a point.
+    BINCV_CHECK(near(p.magnitudeLoFactor(), 1.4, 1e-12));
+    BINCV_CHECK(near(p.magnitudeHiFactor(), 1.4, 1e-12));
+    BINCV_CHECK(near(p.magnitudeSpanFactor(), 1.0, 1e-12));
+    BINCV_CHECK(cudabench::judgePaired(p, kScatterNotMeasured) ==
+                cudabench::Verdict::DirectionEstablishedAndResult);
+}
+
+BINCV_TEST(PairedStats, ACrossingRoundCannotBeABareResult) {
+    // WITHIN ONE PROCESS THE TWO HALVES ARE NOT INDEPENDENT IN BOTH
+    // DIRECTIONS, and that is arithmetic rather than a choice. Let M be the
+    // median ratio, above 1.00x, and suppose some round crossed, so the
+    // smallest ratio is at most 1. Then
+    //
+    //     swing = max / min >= M / min >= M = differenceFactor
+    //
+    // because the maximum is at least the median and the minimum is at most 1.
+    // The predicate is strict, so a crossing round can never be a bare RESULT.
+    // A measured run-to-run scatter cannot rescue it either: that bar only
+    // ever rises.
+    //
+    // Swept over crossing rounds from a near-tie to a 2x reversal, so the
+    // claim is exercised rather than argued.
+    const double crossings[] = {0.5, 0.9, 0.99, 0.999, 0.9999};
+    for (double crossing : crossings) {
+        std::vector<double> a(10, 1.0);
+        std::vector<double> b(10, 2.0);
+        b[9] = crossing;
+        const PairedTiming p = summarizePaired(a, b);
+        BINCV_CHECK_EQ(p.roundsFavouringB, 1);
+        BINCV_CHECK(!p.unanimous());
+        BINCV_CHECK(!p.directionEstablished());
+        BINCV_CHECK(p.establishedDirection() == cudabench::Direction::None);
+        // No direction, so no magnitude range: a set straddling 1.00x has no
+        // orientation to report one in.
+        BINCV_CHECK(near(p.magnitudeLoFactor(), 0.0, 0.0));
+        BINCV_CHECK(near(p.magnitudeHiFactor(), 0.0, 0.0));
+        BINCV_CHECK(p.ratioSwingFactor() >= p.differenceFactor());
+        BINCV_CHECK(!p.differenceClearsNoise(kScatterNotMeasured));
+        BINCV_CHECK(!p.differenceClearsNoise(4.0));
+        BINCV_CHECK(cudabench::judgePaired(p, kScatterNotMeasured) ==
+                    cudabench::Verdict::NullResult);
+    }
+}
+
+BINCV_TEST(PairedStats, AResultWithoutADirectionNeedsARoundThatWasNoMeasurement) {
+    // The one shape in which a single process reports A RESULT and not a
+    // direction, and it follows from the case above: the rounds that produce a
+    // ratio must all lie on one side, or the difference cannot clear the
+    // swing. What can still break the direction verdict is a round that
+    // produced NO ratio -- it never enters ratioMin or ratioMax, so it widens
+    // nothing, and it is still a round in which neither arm won.
+    //
+    // Three rounds at 1.4x, 1.5x and 1.6x -- median 1.5 against a swing of
+    // 1.143, a clear result -- plus a fourth whose arm-A clock read zero.
+    const PairedTiming p =
+        summarizePaired({1.0, 1.0, 1.0, 0.0}, {1.4, 1.5, 1.6, 1.5});
+    BINCV_CHECK_EQ(p.rounds, 4);
+    BINCV_CHECK_EQ(p.roundsTied, 1);
+    BINCV_CHECK_EQ(p.roundsUnusable, 1);
+    BINCV_CHECK(near(p.ratioMedian, 1.5, 1e-12));
+    BINCV_CHECK(near(p.ratioSwingFactor(), 1.6 / 1.4, 1e-12));
+    BINCV_CHECK(p.differenceClearsNoise(kScatterNotMeasured));
+    BINCV_CHECK(p.unanimous());              // over the rounds that were measurements
+    BINCV_CHECK(!p.directionEstablished());  // but one round was not one
+    BINCV_CHECK(cudabench::judgePaired(p, kScatterNotMeasured) ==
+                cudabench::Verdict::Result);
+
+    // ACROSS PROCESSES THE TWO HALVES DO COME APART FREELY, which is where the
+    // published rows are judged: scripts/aggregate_cuda_runs.py pools every
+    // round of every run, so one reversed round in one run of seven leaves a
+    // comfortably clearing median with the direction broken. The argument
+    // above binds one process's own numbers, not the aggregate's.
+}
+
+BINCV_TEST(PairedStats, ATieBreaksTheDirectionVerdict) {
+    // THE TIE DECISION, pinned. Nine rounds at 1.50x and one exact tie. Every
+    // USABLE round fell the same way, so unanimous() is true -- that is the
+    // control's question, and identical code timing identically is the control
+    // behaving. The VERDICT's question is different: it licenses the sentence
+    // "faster in N of N rounds", which a dropped tie makes false.
+    std::vector<double> a(10, 1.0);
+    std::vector<double> b(10, 1.5);
+    b[9] = 1.0;  // the tie
+    const PairedTiming p = summarizePaired(a, b);
+
+    BINCV_CHECK_EQ(p.rounds, 10);
+    BINCV_CHECK_EQ(p.roundsFavouringA, 9);
+    BINCV_CHECK_EQ(p.roundsFavouringB, 0);
+    BINCV_CHECK_EQ(p.roundsTied, 1);
+    BINCV_CHECK_EQ(p.roundsUnusable, 0);   // a tie is a MEASUREMENT that came out even
+
+    BINCV_CHECK(p.unanimous());             // over the usable rounds
+    BINCV_CHECK(!p.directionEstablished()); // but not over every round
+    BINCV_CHECK(p.establishedDirection() == cudabench::Direction::None);
+
+    // AND THE REASON THE RANGE IS WITHHELD RATHER THAN QUOTED: the tie's own
+    // ratio is exactly 1.0 and does enter ratioMin, so a range taken without
+    // this guard would read "won by 1.00x to 1.50x" -- quoting as a win a
+    // round in which nobody won.
+    BINCV_CHECK(near(p.ratioMin, 1.0, 1e-12));
+    BINCV_CHECK(near(p.magnitudeLoFactor(), 0.0, 0.0));
+
+    // The MAGNITUDE half is untouched by the tie decision: median 1.5 against
+    // a swing of 1.5, which does not clear -- "smaller than the spread" reads
+    // a tie at the bar as a null.
+    BINCV_CHECK(near(p.ratioMedian, 1.5, 1e-12));
+    BINCV_CHECK(near(p.ratioSwingFactor(), 1.5, 1e-12));
+    BINCV_CHECK(!p.differenceClearsNoise(kScatterNotMeasured));
+
+    // Remove the tie and the same nine rounds establish a direction, which is
+    // the whole content of the decision.
+    const PairedTiming noTie = summarizePaired(std::vector<double>(9, 1.0),
+                                               std::vector<double>(9, 1.5));
+    BINCV_CHECK(noTie.directionEstablished());
+    BINCV_CHECK(near(noTie.magnitudeLoFactor(), 1.5, 1e-12));
+}
+
+BINCV_TEST(PairedStats, ARoundThatWasNotAMeasurementIsCountedApartFromATie) {
+    // Both favour neither arm and both break the direction verdict, but only
+    // one of them is a fact about the arms. A reader looking at a row that
+    // failed to establish a direction needs to know which kind it tripped on.
+    const PairedTiming p = summarizePaired({1.0, 0.0, 1.0}, {1.5, 1.5, 1.5});
+    BINCV_CHECK_EQ(p.rounds, 3);
+    BINCV_CHECK_EQ(p.roundsTied, 1);
+    BINCV_CHECK_EQ(p.roundsUnusable, 1);
+    BINCV_CHECK(p.unanimous());
+    BINCV_CHECK(!p.directionEstablished());
+
+    // An exact tie is NOT unusable, and the two counters say so separately.
+    const PairedTiming tie = summarizePaired({1.0, 1.0}, {1.0, 1.5});
+    BINCV_CHECK_EQ(tie.roundsTied, 1);
+    BINCV_CHECK_EQ(tie.roundsUnusable, 0);
+}
+
+BINCV_TEST(PairedStats, AUnanimousRowWhoseMagnitudeSpansAnOrderOfMagnitude) {
+    // Seven rounds, every one favouring arm B, by between 1.2x and 15x. The
+    // direction is not in the least doubt -- p = 2^-6 -- and the SIZE of the
+    // win is barely known at all. That is exactly the row the ruling exists
+    // for, and exactly the row that must not be quoted as a single number.
+    const std::vector<double> a = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+    const std::vector<double> b = {1.0 / 1.2, 1.0 / 2.0, 1.0 / 3.0, 1.0 / 4.0,
+                                   1.0 / 8.0, 1.0 / 12.0, 1.0 / 15.0};
+    const PairedTiming p = summarizePaired(a, b);
+
+    BINCV_CHECK_EQ(p.roundsFavouringB, 7);
+    BINCV_CHECK_EQ(p.roundsFavouringA, 0);
+    BINCV_CHECK(p.directionEstablished());
+    BINCV_CHECK(p.establishedDirection() == cudabench::Direction::B);
+    BINCV_CHECK(p.signTestP() == 0.015625);  // 2 * C(7,0) / 2^7 = 2^-6
+
+    // THE MAGNITUDE IS ORIENTED SO IT READS ABOVE 1.00x whichever arm won:
+    // B's smallest win was 1.2x and its largest 15x, and the median round was
+    // 4x. A single number here would be a misreport whichever one was picked.
+    BINCV_CHECK(near(p.magnitudeLoFactor(), 1.2, 1e-12));
+    BINCV_CHECK(near(p.magnitudeHiFactor(), 15.0, 1e-12));
+    BINCV_CHECK(near(p.magnitudeSpanFactor(), 12.5, 1e-12));
+    BINCV_CHECK(near(p.differenceFactor(), 4.0, 1e-12));
+
+    // Over an order of magnitude of span, so the difference does not clear the
+    // swing and it is NOT a result. Direction established, magnitude a null:
+    // the two halves disagreeing is what makes them two halves.
+    BINCV_CHECK(p.magnitudeSpanFactor() > 10.0);
+    BINCV_CHECK(!p.differenceClearsNoise(kScatterNotMeasured));
+    BINCV_CHECK(cudabench::judgePaired(p, kScatterNotMeasured) ==
+                cudabench::Verdict::DirectionEstablished);
+}
+
+BINCV_TEST(PairedStats, TheMagnitudeRangeSurvivesSwappingTheArms) {
+    // The property the whole factor spelling rests on, applied to the new
+    // numbers: reading the same rounds from the other arm must not change how
+    // much the winner won by, only which arm is named.
+    const std::vector<double> a = {1.0, 1.0, 1.0};
+    const std::vector<double> b = {2.0, 3.0, 5.0};
+    const PairedTiming fwd = summarizePaired(a, b);
+    const PairedTiming rev = summarizePaired(b, a);
+
+    BINCV_CHECK(fwd.directionEstablished());
+    BINCV_CHECK(rev.directionEstablished());
+    BINCV_CHECK(fwd.establishedDirection() == cudabench::Direction::A);
+    BINCV_CHECK(rev.establishedDirection() == cudabench::Direction::B);
+    BINCV_CHECK(near(fwd.magnitudeLoFactor(), rev.magnitudeLoFactor(), 1e-12));
+    BINCV_CHECK(near(fwd.magnitudeHiFactor(), rev.magnitudeHiFactor(), 1e-12));
+    BINCV_CHECK(near(fwd.magnitudeLoFactor(), 2.0, 1e-12));
+    BINCV_CHECK(near(fwd.magnitudeHiFactor(), 5.0, 1e-12));
+    BINCV_CHECK(fwd.signTestP() == rev.signTestP());
+    BINCV_CHECK(cudabench::judgePaired(fwd, kScatterNotMeasured) ==
+                cudabench::judgePaired(rev, kScatterNotMeasured));
+}
+
+BINCV_TEST(PairedStats, TheTwoHalvesAreIndependentAndBothAreNamed) {
+    // All four verdicts, each from rounds built to produce it, so that no two
+    // of them can quietly collapse into one.
+    //
+    //   DIR+RESULT : three rounds, all 1.50x, swing 1.00x.
+    //   DIRECTION  : three rounds, 1.2x / 2.0x / 6.0x -- median 2.0 against a
+    //                swing of 5.0, unanimous.
+    //   NULL       : three rounds straddling 1.00x.
+    //   RESULT     : the one shape that produces it in a single process -- a
+    //                round that was not a measurement, which breaks the
+    //                direction without entering the ratio range. See
+    //                AResultWithoutADirectionNeedsARoundThatWasNoMeasurement.
+    const PairedTiming both = summarizePaired({1.0, 1.0, 1.0}, {1.5, 1.5, 1.5});
+    BINCV_CHECK(cudabench::judgePaired(both, kScatterNotMeasured) ==
+                cudabench::Verdict::DirectionEstablishedAndResult);
+
+    const PairedTiming dirOnly = summarizePaired({1.0, 1.0, 1.0}, {1.2, 2.0, 6.0});
+    BINCV_CHECK(cudabench::judgePaired(dirOnly, kScatterNotMeasured) ==
+                cudabench::Verdict::DirectionEstablished);
+
+    const PairedTiming null = summarizePaired({1.0, 1.0, 1.0}, {0.9, 1.0, 1.1});
+    BINCV_CHECK(cudabench::judgePaired(null, kScatterNotMeasured) ==
+                cudabench::Verdict::NullResult);
+
+    const PairedTiming resultOnly =
+        summarizePaired({1.0, 1.0, 1.0, 0.0}, {1.4, 1.5, 1.6, 1.5});
+    BINCV_CHECK_EQ(resultOnly.roundsTied, 1);
+    BINCV_CHECK_EQ(resultOnly.roundsUnusable, 1);
+    BINCV_CHECK(!resultOnly.directionEstablished());
+    BINCV_CHECK(resultOnly.differenceClearsNoise(kScatterNotMeasured));
+    BINCV_CHECK(cudabench::judgePaired(resultOnly, kScatterNotMeasured) ==
+                cudabench::Verdict::Result);
+
+    // THE NAMES, because a verdict a reader cannot tell from its neighbour is
+    // not three-valued in the only place it matters. All four differ, and the
+    // null still says in words that it is a result.
+    BINCV_CHECK(std::string(cudabench::verdictName(cudabench::Verdict::NullResult)) ==
+                "NULL RESULT, which is a result");
+    BINCV_CHECK(std::string(cudabench::verdictName(cudabench::Verdict::Result)) ==
+                "A RESULT");
+    BINCV_CHECK(std::string(cudabench::verdictName(
+                    cudabench::Verdict::DirectionEstablished)) ==
+                "DIRECTION ESTABLISHED");
+    BINCV_CHECK(std::string(cudabench::verdictName(
+                    cudabench::Verdict::DirectionEstablishedAndResult)) ==
+                "DIRECTION ESTABLISHED, and A RESULT");
+}
+
+BINCV_TEST(PairedStats, TheOldPredicateIsUntouchedByTheRuling) {
+    // The ruling ADDS a statement; it must not have moved the one that was
+    // there. Every case above that exercises differenceClearsNoise re-checks
+    // it, and this one re-checks the two the older cases pinned -- the outlier
+    // fifteen and the separated-but-scattered three -- so a change to the new
+    // code that leaked into the old one fails here by name.
+    const PairedTiming outlier = oneOutlierFifteenRounds();
+    BINCV_CHECK(outlier.differenceClearsNoise(kScatterNotMeasured));
+    BINCV_CHECK(near(outlier.differenceFactor(), 1.375, 1e-12));
+    BINCV_CHECK(near(outlier.ratioSwingFactor(), 1.2, 1e-12));
+    // It is also direction-established, and both statements get printed.
+    BINCV_CHECK(outlier.directionEstablished());
+    BINCV_CHECK(cudabench::judgePaired(outlier, kScatterNotMeasured) ==
+                cudabench::Verdict::DirectionEstablishedAndResult);
+
+    const PairedTiming scattered = summarizePaired({1.0, 1.0, 1.0}, {1.01, 1.60, 1.02});
+    BINCV_CHECK(!scattered.differenceClearsNoise(kScatterNotMeasured));
+    // ...but every round favoured the same arm, so under the ruling it is not
+    // the bare null the old rule called it. This is a REAL re-judging, on the
+    // rounds an existing case in this file already carries.
+    BINCV_CHECK(scattered.directionEstablished());
+    BINCV_CHECK(near(scattered.magnitudeLoFactor(), 1.01, 1e-12));
+    BINCV_CHECK(near(scattered.magnitudeHiFactor(), 1.60, 1e-12));
+    BINCV_CHECK(cudabench::judgePaired(scattered, kScatterNotMeasured) ==
+                cudabench::Verdict::DirectionEstablished);
+
+    // A MEASURED run-to-run scatter still raises the bar for the magnitude
+    // half and still cannot touch the direction half -- the two take different
+    // arguments because they answer different questions.
+    const PairedTiming p = summarizePaired({1.0, 1.0, 1.0}, {1.4, 1.5, 1.6});
+    BINCV_CHECK(p.differenceClearsNoise(1.05));
+    BINCV_CHECK(!p.differenceClearsNoise(1.6));
+    BINCV_CHECK(p.directionEstablished());
+    BINCV_CHECK(cudabench::judgePaired(p, 1.6) ==
+                cudabench::Verdict::DirectionEstablished);
+    BINCV_CHECK(cudabench::judgePaired(p, 1.05) ==
+                cudabench::Verdict::DirectionEstablishedAndResult);
 }
 
 #if BINCV_TEST_WITH_GTEST

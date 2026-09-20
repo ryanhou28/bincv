@@ -130,7 +130,7 @@ PairedTiming timeWallPaired(const std::function<void()>& bodyA,
     for (int i = 0; i < itersB; ++i) bodyB();
     cudaStreamSynchronize(gStream);
 
-    std::vector<double> sa, sb, ratios;
+    std::vector<double> sa, sb;
     for (int r = 0; r < repeats; ++r) {
         double ta = 0.0, tb = 0.0;
         if (r % 2 == 0) {
@@ -142,17 +142,13 @@ PairedTiming timeWallPaired(const std::function<void()>& bodyA,
         }
         sa.push_back(ta);
         sb.push_back(tb);
-        ratios.push_back(ta > 0.0 ? tb / ta : 0.0);
     }
-    PairedTiming p;
-    p.a = summarize(std::move(sa));
-    p.b = summarize(std::move(sb));
-    const Timing rt = summarize(std::move(ratios));
-    p.ratioMin = rt.minMs;
-    p.ratioMedian = rt.medianMs;
-    p.ratioMax = rt.maxMs;
-    p.rounds = repeats;
-    return p;
+    // THE SUMMARY IS summarizePaired'S, not this function's. Assembled here it
+    // left roundsFavouringA/B at zero, so the row printed a 0-0 sign split and
+    // a sign-test p of 1 over rounds that were in fact unanimous -- and it took
+    // the ratio's median from summarize(), whose even-count midpoint is the
+    // arithmetic one that makes a ratio depend on which arm is the denominator.
+    return summarizePaired(sa, sb);
 }
 #endif  // BINCV_CUDA_FRONTEND_OPENCV
 

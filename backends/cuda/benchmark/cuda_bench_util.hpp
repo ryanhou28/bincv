@@ -267,37 +267,85 @@ inline void printPairedStats(const PairedTiming& p) {
     printPairedSignAndSeparation(p);
 }
 
-/// @brief The verdict, under benchmark/measure_util.hpp's rule and no other:
-/// the difference must exceed the larger of the within-run spread and the
-/// run-to-run scatter.
-/// @note A NULL RESULT IS PRINTED AS A RESULT, in those words, because that
-/// header says so: "A difference smaller than the spread is a null result,
-/// and a null result is a result." Two arms this run cannot tell apart is a
-/// finding about them, not a missing measurement.
-/// @note The line states what decided it, so that neither the separation fact
-/// above nor the sign test beside it can be read as having done so.
+/// @brief The verdict, in the three values paired_stats.hpp defines: whether
+/// the DIRECTION is established by the rounds, whether the MAGNITUDE clears
+/// the larger of the within-run spread and the run-to-run scatter, or
+/// neither.
+/// @note BOTH STATEMENTS ARE PRINTED WHENEVER BOTH HOLD, on their own lines.
+/// They answer different questions -- "is it in doubt which arm is ahead"
+/// and "is the distance bigger than the noise" -- and a row given only the
+/// louder one has lost the other. The owner's 2026-09-19 ruling is the
+/// reason the first exists: a spread that lies wholly on one side of 1.00x
+/// bounds how much an arm wins by, not whether it wins.
+/// @note A NULL RESULT IS PRINTED AS A RESULT, in those words, because
+/// measure_util.hpp says so: "A difference smaller than the spread is a
+/// null result, and a null result is a result." Two arms this run cannot
+/// tell apart is a finding about them, not a missing measurement.
+/// @note The lines state what decided each half, so that neither the
+/// separation fact above nor the sign test beside it can be read as having
+/// done so -- the p is printed precisely BECAUSE nothing gates on it, and a
+/// reader needs it to tell two unanimous rounds from a hundred.
 inline void printPairedVerdict(const PairedTiming& p) {
     const double scatter = runToRunScatterFactor();
     const bool measured = scatter >= 1.0;
     const bool result = p.differenceClearsNoise(scatter);
+    const Verdict v = judgePaired(p, scatter);
     char scatterText[48];
     if (measured) {
         std::snprintf(scatterText, sizeof(scatterText), "%.2fx", scatter);
     } else {
         std::snprintf(scatterText, sizeof(scatterText), "NOT MEASURED on this host");
     }
-    std::printf("   verdict: %s -- the two arms are %.2fx apart on the\n"
-                "            MEDIAN per-round ratio, %s the %.2fx it has to beat (the"
-                " larger of:\n"
-                "            per-round swing %.2fx, run-to-run scatter %s).\n"
-                "            Decided by measure_util.hpp's difference-against-spread"
-                " rule, in FACTORS\n"
-                "            because a percentage of it depends on which arm is the"
-                " denominator;\n"
-                "            range separation is not what decided it.\n",
-                result ? "A RESULT" : "NULL RESULT, which is a result",
-                p.differenceFactor(), result ? "clearing" : "short of",
-                p.noiseToClearFactor(scatter), p.ratioSwingFactor(), scatterText);
+    std::printf("   verdict: %s\n", verdictName(v));
+
+    // THE DIRECTION HALF FIRST, because when it holds it is what the row is
+    // quoted as: a range with a sign count, not one number.
+    if (p.directionEstablished()) {
+        const int wins = p.roundsFavouringA + p.roundsFavouringB;
+        std::printf("            %s faster in %d of %d paired rounds -- NO ROUND CROSSED"
+                    " 1.00x, so the\n"
+                    "            direction is established by the rounds themselves"
+                    " (two-sided sign-test\n"
+                    "            p = %.3g). Magnitude %.2fx to %.2fx, median %.2fx: the"
+                    " spread bounds\n"
+                    "            HOW MUCH it wins by, not WHETHER it does (owner's"
+                    " ruling, 2026-09-19).\n",
+                    p.establishedDirection() == Direction::A ? "ARM A is" : "ARM B is",
+                    wins, p.rounds, p.signTestP(), p.magnitudeLoFactor(),
+                    p.magnitudeHiFactor(), p.differenceFactor());
+    } else if (p.unanimous() && p.roundsTied > 0) {
+        // Worth saying explicitly: this row is NOT a plain null, it is a row
+        // that would have established a direction but for rounds in which
+        // neither arm won. A reader who is not told that reads "null" as
+        // "the arms split", which these rounds did not do.
+        std::printf("            every USABLE round fell the same way (%d-%d, p = %.3g),"
+                    " but %d of %d rounds\n"
+                    "            favoured neither%s -- so NOT every round fell that way,"
+                    " and the direction\n"
+                    "            is not established. A tie is a round the winning arm did"
+                    " not win.\n",
+                    p.roundsFavouringA, p.roundsFavouringB, p.signTestP(), p.roundsTied,
+                    p.rounds,
+                    p.roundsUnusable > 0 ? " (some were not measurements at all)" : "");
+    }
+
+    // THE NOISE HALF, unchanged in every particular -- same predicate, same
+    // quantities, same words. It is printed for every row, including the ones
+    // the direction verdict already carried, because the two say different
+    // things and the stronger-sounding one does not contain the other.
+    std::printf("            %s the two arms are %.2fx apart on the MEDIAN per-round"
+                " ratio,\n"
+                "            %s the %.2fx it has to beat (the larger of: per-round swing"
+                " %.2fx,\n"
+                "            run-to-run scatter %s). Decided by measure_util.hpp's\n"
+                "            difference-against-spread rule, in FACTORS because a"
+                " percentage of it\n"
+                "            depends on which arm is the denominator; range separation is"
+                " not what\n"
+                "            decided it.\n",
+                result ? "A RESULT:" : "NULL on the magnitude:", p.differenceFactor(),
+                result ? "clearing" : "short of", p.noiseToClearFactor(scatter),
+                p.ratioSwingFactor(), scatterText);
     if (result && !measured) {
         std::printf("            That clears the WITHIN-RUN half of the rule only --"
                     " nobody has measured\n"
@@ -345,14 +393,23 @@ inline const char*& pairedScope() {
 }
 
 inline void emitPairedRow(const char* nameA, const char* nameB, const PairedTiming& p) {
+    // FIELDS ARE APPENDED, NEVER REORDERED. scripts/aggregate_cuda_runs.py
+    // indexes this line positionally and reads run files older than the
+    // column it is looking for, so a row that grew is readable by both the
+    // old parser and the new one while a row that moved is readable by
+    // neither. The four at the end carry the direction verdict across
+    // processes: unanimity over a whole sweep is 105 rounds from seven runs,
+    // and no single process can see it.
     std::printf("PAIRED|%s|%s|%s|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f"
-                "|%d|%d|%d|%d|%.6f|%.6f|%.4g|%d\n",
+                "|%d|%d|%d|%d|%.6f|%.6f|%.4g|%d|%d|%d|%.6f|%.6f\n",
                 pairedScope(), nameA, nameB, p.a.minMs, p.a.medianMs, p.a.maxMs,
                 p.b.minMs, p.b.medianMs, p.b.maxMs, p.ratioMin, p.ratioMedian,
                 p.ratioMax, p.ratioGeoMean,
                 p.rounds, p.roundsFavouringA, p.roundsFavouringB, p.roundsTied,
                 p.differenceFactor(), p.ratioSwingFactor(), p.signTestP(),
-                p.separated() ? 1 : 0);
+                p.separated() ? 1 : 0,
+                p.roundsUnusable, p.directionEstablished() ? 1 : 0,
+                p.magnitudeLoFactor(), p.magnitudeHiFactor());
 }
 
 inline void printPaired(const char* nameA, const char* nameB, const PairedTiming& p,
