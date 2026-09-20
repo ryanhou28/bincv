@@ -2350,7 +2350,7 @@ what is currently parallel.
   23.8% `short_scoreboard`; `__shfl_up_sync` sharing of the right-image words;
   and exploiting K ≤ 16 to settle two pixels per `__popc`, which is a change to
   `censusTransformPacked`'s public layout rather than a matcher change.
-- **The plane-layout matcher is kept but is 8.55× slower** than the packed one.
+- **The plane-layout matcher is kept but is 21.7× slower** than the packed one.
   It ships because it consumes the host's own layout and costs less memory, not
   because it is the fast path; a caller with wide frames should use
   `censusTransformPacked` + `denseDisparityCensusPacked`.
