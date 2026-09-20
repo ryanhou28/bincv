@@ -1,9 +1,9 @@
-# Project warning policy (T1.8).
+# Project warning policy.
 #
-# Until T1.8 nothing in this project enabled a single warning flag, so the
-# "all three configurations must build warning-free" gate in CLAUDE.md,
-# TASKS.md (V-ALL) and GETTING_STARTED.md passed vacuously -- see
-# OVERNIGHT_LOG.md finding 5. This file is what gives that sentence teeth.
+# Nothing in this project used to enable a single warning flag, so the
+# "all three configurations must build warning-free" gate in CLAUDE.md and
+# GETTING_STARTED.md passed vacuously. This file is what gives that sentence
+# teeth.
 #
 # Usage: link `bincv_warnings` PRIVATE into every FIRST-PARTY target. It is
 # deliberately NOT attached to the bincv_core INTERFACE target: a downstream
@@ -33,7 +33,7 @@ set(BINCV_POLICY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "first-party 
 #                              loop reads correct and is not.
 #
 #   -Wconversion               this is the load-bearing one for binCV. The
-#   -Wsign-conversion          library is templated on the word TYPE (D-1), so
+#   -Wsign-conversion          library is templated on the word TYPE, so
 #                              every mask and shift is written once and compiled
 #                              at 8, 16, 32 and 64 bits. An expression that is
 #                              exact at uint64_t can truncate at uint8_t, and
@@ -48,8 +48,8 @@ set(BINCV_POLICY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "first-party 
 #                              be told the truncation is intended.
 #
 # Not enabled, deliberately:
-#   -Wpadded                   fires on every view struct by design (D-9 pins
-#                              their layout; the test asserts the size).
+#   -Wpadded                   fires on every view struct by design (their layout
+#                              is pinned; the test asserts the size).
 #   -Wold-style-cast           would fire inside OpenCV-adjacent code far more
 #                              than it would find anything here.
 #   -Wuseless-cast             conflicts head-on with -Wconversion: the casts the

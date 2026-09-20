@@ -47,7 +47,7 @@
 // It is NOT or. It reports word types side by side and windows at
 // three sizes because those are the workloads- need, but a number
 // measured here is x86_64 and therefore NON-AUTHORITATIVE for every one of those
-// questions (EXPERIMENTS.md, "Measurement platforms"). They close on the
+// questions -- a desktop host's spread decides nothing. They close on the
 // reference device through scripts/run_on_pi.sh, and this file is the code they
 // run, not the answer they produce.
 

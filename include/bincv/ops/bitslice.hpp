@@ -136,7 +136,7 @@
 /// bitSlicedSumPlanes(i+1)); a per-k tree is a different shape per k, and the
 /// shapes that matter -- 4 and 9 -- are exactly the ones the MVP depends on.
 ///
-/// Phase 5 may replace the body with a compressor tree. The interface does not
+/// A vectorized rewrite may replace the body with a compressor tree. The interface does not
 /// change when it does, and tests/test_bitslice.cpp enumerates every one of the
 /// 2^k input patterns for each k it tests, so a replacement is proven rather than
 /// argued.

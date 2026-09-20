@@ -160,7 +160,7 @@
 /// different things, and only the first is settled here.
 ///
 /// The point of the interface is that it never made a caller write that loop, so
-/// replacing the loop body with NEON in Phase 5 touches this file and nothing else.
+/// replacing the loop body with NEON touches this file and nothing else.
 /// impl::popcountWord is internal (`impl::`, no stability promise) and is
 /// deliberately NOT in impl/kernel_util.hpp, which is the vocabulary every kernel
 /// header reaches for: a per-word popcount that is one include away from every
@@ -227,8 +227,8 @@
 ///
 /// Word alignment is irrelevant to a caller: a region may begin and end at any
 /// column. The first and last words of each row are masked, and only the words
-/// strictly between them are accumulated whole -- which is the loop Phase 5
-/// vectorizes, and the reason the masks are hoisted out of it rather than applied
+/// strictly between them are accumulated whole -- which is the loop a vector
+/// rewrite targets, and the reason the masks are hoisted out of it rather than applied
 /// per word.
 ///
 /// ---------------------------------------------------------------------------
@@ -253,7 +253,7 @@
 /// source's padding is trustworthy would be worse than either rule.
 /// - The cost is one AND per ROW, not per word. The trailing word is masked
 /// outside the interior loop exactly as in ops/logic.hpp, so the loop that
-/// matters carries no mask and Phase 5's vectorization is unaffected.
+/// matters carries no mask and a vectorized rewrite is unaffected.
 ///
 /// The invariant is still load-bearing for everything else: a region's INTERIOR
 /// words are accumulated unmasked, which is correct only because every bit of a
@@ -465,7 +465,7 @@ inline size_t popcountWordPortable(WordType w) {
 /// cv::countNonZero, against 2.0x faster once the instruction is available
 ///. A third target tier whose per-word cost dwarfs the
 /// count itself, which is the design rule’s argument rather than an exception to it.
-/// @note Phase 5 replaces the LOOPS below, not this function. A vectorized
+/// @note A vector rewrite replaces the LOOPS below, not this function. A vectorized
 /// reduction keeps whole vectors in NEON registers and never forms a
 /// per-word count at all.
 template <typename WordType>
@@ -634,7 +634,7 @@ BINCV_HOST_DEVICE inline RegionWords<WordType> clipRegion(size_t width, size_t h
 /// loop -- the one that runs for all but two words of a row -- folds to an
 /// unmasked accumulation. Applying the head/tail masks per word instead
 /// would be simpler to write and would put a loop-carried select in the only
-/// loop Phase 5 cares about.
+/// loop a vector rewrite cares about.
 template <typename WordType, typename Visit>
 inline void visitRowWords(const RegionWords<WordType>& r, Visit visit) {
     if (r.firstWord == r.lastWord) {

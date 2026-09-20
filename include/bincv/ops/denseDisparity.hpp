@@ -75,7 +75,7 @@
 #include <chrono>
 #endif
 
-// The winner-take-all's vector arm. F-5: BEFORE THE GATE, NOT AFTER -- simd.hpp
+// The winner-take-all's vector arm. BEFORE THE GATE, NOT AFTER -- simd.hpp
 // defines BINCV_HAVE_NEON from the compiler's own macros on aarch64, so an
 // include-only integration still gets the NEON kernels, and BINCV_NO_NEON
 // remains the deliberate off-switch a benchmark times the scalar arm through.

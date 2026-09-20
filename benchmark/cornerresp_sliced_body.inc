@@ -1,4 +1,4 @@
-// X-31 arms B1 and B2 share this body VERBATIM by inclusion, differing only in the
+// Arms B1 and B2 share this body VERBATIM by inclusion, differing only in the
 // `Skip` template argument, so the sparsity skip is the ONLY difference between
 // them and their separation measures exactly that.
 //
@@ -25,7 +25,8 @@
 //     nothing -- identical to clipping it away;
 //   * the bit shifted in from a word that does not exist is 0, so at x = 0 the
 //     x-1 term vanishes and at the right edge the x+1 term does;
-//   * bits past `width` in the trailing word are zero by D-13, so they cannot
+//   * bits past `width` in the trailing word are zero by the padding invariant,
+//     so they cannot
 //     contribute either.
 // The three counts are therefore the same EXACT INTEGERS the per-pixel form
 // produces, and `minEigenValue` turns the same integers into the same float.

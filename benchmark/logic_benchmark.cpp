@@ -13,8 +13,8 @@
 // they are unflattering.
 //
 // ---------------------------------------------------------------------------
-// MEASUREMENT VALIDITY (EXPERIMENTS.md, "Verify the benchmark measures
-// something") -- four hazards, each answered here rather than assumed away:
+// MEASUREMENT VALIDITY -- four hazards, each answered here rather than assumed
+// away:
 //
 // 1. DEAD CODE. A loop whose result is unused is deleted, and the number looks
 // spectacular -- the first platform comparison in this repo was eliminated on
@@ -479,7 +479,7 @@ bool runSize(int width, int height, int repeats, double targetMs) {
                     row.nsPerPixel, row.gbPerSecond,
                     row.nsPerPixel > 0.0 ? reference / row.nsPerPixel : 0.0);
 
-        // The physical-bound check (EXPERIMENTS.md). A memory-bound kernel that
+        // The physical-bound check. A memory-bound kernel that
         // reports more than the machine can move is a broken measurement, not a
         // fast kernel. 1.5x, not 4x: see hazard 3 for why 4x could not fire.
         const double bound = (row.impl == "OpenCV CV_8U") ? boundBytes.bestGbPerSecond
@@ -501,7 +501,7 @@ bool runSize(int width, int height, int repeats, double targetMs) {
 int main(int argc, char* argv[]) {
     bench::Config cfg = bench::parseArgs(argc, argv);
 
-    std::printf("\nT2.2 logic kernels vs OpenCV on the same binary content as CV_8U\n");
+    std::printf("\nlogic kernels vs OpenCV on the same binary content as CV_8U\n");
     std::printf("(ARCHITECTURE 10.3: the denominator is what a user runs today without binCV)\n");
     // Reported rather than pinned: a user gets whatever OpenCV does by default, so
     // that is what the denominator should be -- but a reader cannot interpret the

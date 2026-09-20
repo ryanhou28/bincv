@@ -28,7 +28,7 @@
 // steps. The point is the SHAPE of the two curves, not the ratio at any one
 // NIn -- at NIn = 1 they are the same four inputs and should be close.
 //
-// VALIDITY (EXPERIMENTS.md "Verify the benchmark measures something"):
+// VALIDITY -- what makes this benchmark measure something:
 // * measure::g_sink consumes a destination word from every timed call;
 // * four distinct random sources rotate, so nothing constant-folds;
 // * the two routes are checked to agree pixel for pixel on every case BEFORE
@@ -37,8 +37,8 @@
 // * the reported spread bounds within-run noise; a difference smaller than it
 // is a null result.
 //
-// On x86_64 the TIMING half is indicative only (EXPERIMENTS.md, "Measurement
-// platforms"); the growth and footprint halves are architecture-independent and
+// On x86_64 the TIMING half is indicative only -- a desktop host's spread decides
+// nothing; the growth and footprint halves are architecture-independent and
 // close anywhere. The authoritative timing run is
 //
 //./scripts/run_on_pi.sh pi4 './benchmark/pyramid_benchmark'
@@ -207,7 +207,7 @@ void reportGrowthAndFootprint() {
     std::printf("\n \"in the frame\" counts DISTINCT VALUES PRESENT in one %dx%d-derived\n"
                 " level; \"reachable\" is the alphabet the arithmetic can produce at all, and\n"
                 " \"bits needed\" follows the reachable column. The two differ, and the\n"
-                " difference matters: EXPERIMENTS.md reported 2/5/15/26 for the CV_8U\n"
+                " difference matters: an earlier run reported 2/5/15/26 for the CV_8U\n"
                 " ladder, which is what a 256x256 frame CONTAINED -- its level 3 is 32x32,\n"
                 " i.e. 1024 pixels drawn from an alphabet of 65. A frame statistic falls\n"
                 " with the frame size; the reachable alphabet does not.\n",

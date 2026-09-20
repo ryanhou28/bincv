@@ -1,7 +1,7 @@
 // -- horizontal decimation by two: which route, and at what footprint?
 //
-// The decision rule this benchmark feeds was committed BEFORE it ran; it is in
-// EXPERIMENTS.md as, and the short form is:
+// The decision rule this benchmark feeds was committed BEFORE it ran, and the
+// short form is:
 //
 // 1. The frame-masked route (C) ships only if it beats the better word-local
 // route by >= 1.5x with non-overlapping spreads at both word types on
@@ -32,7 +32,7 @@
 // beside the auxiliary bytes each route needs. Speed and memory in one
 // table, because rule 1 weighs the pair.
 //
-// VALIDITY (EXPERIMENTS.md "Verify the benchmark measures something"):
+// VALIDITY -- what makes this benchmark measure something:
 // * measure::g_sink consumes a destination word from every timed call;
 // * four distinct random sources rotate, so nothing constant-folds;
 // * all three variants are compared against a per-pixel reference AND against
@@ -47,7 +47,7 @@
 // all three variants read the same rowsDecimatedBy2 view, so the difference
 // between them is the horizontal half alone.
 //
-// On x86_64 this is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms").
+// On x86_64 this is INDICATIVE ONLY -- a desktop host's spread decides nothing.
 // The authoritative run is
 //
 //./scripts/run_on_pi.sh pi4 './benchmark/decimate_benchmark'

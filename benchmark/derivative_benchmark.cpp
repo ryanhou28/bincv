@@ -86,7 +86,7 @@
 // ---------------------------------------------------------------------------
 // WHERE THIS IS AUTHORITATIVE
 //
-// On x86_64 it is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms"). The
+// On x86_64 it is INDICATIVE ONLY -- a desktop host's spread decides nothing. The
 // numbers that belong in a claim come from the reference device:
 //
 // BINCV_PI_OPENCV=1./scripts/run_on_pi.sh <target>

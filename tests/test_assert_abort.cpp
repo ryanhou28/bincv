@@ -364,7 +364,7 @@ int caseReduceShortStride() {
 // caller, not a live bug: x1 == 0 underflows `x1 - 1` and yields lastWord =
 // SIZE_MAX / WordBits with isEmpty == false, which visitRowWords would walk
 // straight off the end of the buffer. The assertion is what stops that being
-// discovered by a segfault in Phase 3; this case is what stops the assertion from
+// discovered by a segfault; this case is what stops the assertion from
 // being deleted as unreachable.
 int caseReduceEmptyExtent() {
     const bincv::impl::RegionWords<uint32_t> r = bincv::impl::regionFromExtent<uint32_t>(0, 0, 0, 1);

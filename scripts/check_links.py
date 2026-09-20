@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """check_links.py -- every relative link in the repository resolves to a real file.
 
-WHY THIS EXISTS. docs/ARCHITECTURE.md, EXPERIMENTS.md, TASKS.md and ROADMAP.md moved
-into docs/ on 2026-08-31, which was going to break the cross-links the D-E-X record
-system is made of. Running this before and after turned that from a hope into a check.
+WHY THIS EXISTS. The top-level design documents moved into docs/ on 2026-08-31, which
+was going to break every cross-link between them. Running this before and after turned
+that from a hope into a check.
 
 IT ALSO FOUND A BUG THAT PREDATED THE MOVE. Doc links inside the ops headers read
 `../../../ARCHITECTURE.md`, which from their depth resolved to a file that never

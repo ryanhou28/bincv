@@ -1,6 +1,6 @@
 #pragma once
 
-// Timing harness shared by the three Phase 2 experiment benchmarks
+// Timing harness shared by the binCV-versus-binCV experiment benchmarks
 // (alignment_benchmark.cpp /, wordwidth_benchmark.cpp /,
 // window_benchmark.cpp /).
 //
@@ -10,7 +10,7 @@
 // applies to "which of our own alternatives is faster", and dragging the
 // dependency into these binaries would only make them harder to reason about.
 //
-// WHAT THE PROTOCOL REQUIRES OF A NUMBER PRINTED HERE (EXPERIMENTS.md "Rules"):
+// WHAT THE MEASUREMENT PROTOCOL REQUIRES OF A NUMBER PRINTED HERE:
 //
 // 1. A volatile sink consumes every result, so no measured loop is dead code.
 // 2. Inputs rotate through several distinct random images, so nothing constant

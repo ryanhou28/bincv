@@ -37,8 +37,8 @@
 // good on x86 (a uint8_t image pays 8x the calls of a uint64_t one but each call
 // is the same price, so the ranking can inverts against the target), while on
 // aarch64 it is fmov/cnt/uaddlv/fmov. x86 numbers from this file cannot rank these
-// variants at all. No -march flag is added: that is a dispatch decision
-// (ROADMAP 2.3) that no experiment has settled.
+// variants at all. No -march flag is added: that is a dispatch decision that no
+// experiment has settled.
 //
 // VALIDITY: measure::g_sink consumes every result; four distinct random images
 // rotate through each timed body, on a call counter that runs on across batches so
@@ -305,8 +305,8 @@ int main() {
     std::printf("sizeof(void*) = %zu; a 32-bit host would synthesise every uint64_t "
                 "operation and answer a different question.\n",
                 sizeof(void*));
-    std::printf("The decision rule is in this file's header, written before measuring "
-                "(EXPERIMENTS.md).\n");
+    std::printf("The decision rule is in this file's header, written before "
+                "measuring.\n");
 
     printPyramidFootprint();
 

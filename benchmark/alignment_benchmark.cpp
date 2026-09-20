@@ -51,8 +51,8 @@
 // to `call __popcountdi2@PLT` on x86_64 and to fmov/cnt/uaddlv/fmov on aarch64.
 // The countNonZero rows below therefore measure that lowering as much as they
 // measure alignment, and x86 numbers from this file are signal only. No -march
-// flag is added: that is a dispatch decision (ROADMAP 2.3) no experiment has
-// settled, and changing it mid-experiment would confound this comparison.
+// flag is added: that is a dispatch decision no experiment has settled, and
+// changing it mid-experiment would confound this comparison.
 // This experiment closes on the reference device (scripts/run_on_pi.sh).
 //
 // VALIDITY: measure::g_sink consumes every result; four distinct random images
@@ -309,8 +309,8 @@ int main() {
     std::printf("target: not aarch64 -- INDICATIVE ONLY; closes on the reference "
                 "device\n");
 #endif
-    std::printf("The decision rule is in this file's header, written before measuring "
-                "(EXPERIMENTS.md).\n");
+    std::printf("The decision rule is in this file's header, written before "
+                "measuring.\n");
     std::printf("new[] guarantees %zu-byte alignment here, so rowAlignment aligns the "
                 "STRIDE, not the base pointer.\n",
                 static_cast<size_t>(__STDCPP_DEFAULT_NEW_ALIGNMENT__));

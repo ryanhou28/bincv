@@ -28,7 +28,7 @@
 /// **Both order corners sensibly and they do not agree**, so non-maximum suppression
 /// over them can keep different points. Tier 2 says exactly that: same role, same call
 /// shape, different numerics.
-// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
 // compiler's own macros on aarch64, so an include-only integration still gets the
 // NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
 // its gate before its first core include.

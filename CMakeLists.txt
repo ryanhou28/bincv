@@ -22,7 +22,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(BincvWarnings)
 
 # ---------------------------------------------------------------------------
-# Gate self-checks (T1.8 follow-up)
+# Gate self-checks
 #
 # Both are OFF in every ordinary build and both make the build FAIL when on.
 # That is the point: scripts/verify.sh turns each on in a throwaway build tree
@@ -136,10 +136,9 @@ else()
     # worse default than a 2008 minimum. Turn it OFF for pre-SSE4.2 targets
     # (some Bonnell-era Atom); the build still works, 3.75x slower.
     #
-    # This does not pre-empt runtime dispatch (ROADMAP 2.3, E-31), which would
-    # remove the minimum entirely.
+    # This does not pre-empt runtime dispatch, which would remove the minimum entirely.
     # -------------------------------------------------------------------------
-    option(BINCV_X86_POPCNT "Build with -mpopcnt (needs SSE4.2-era x86; worth 3.75x, X-57)" ON)
+    option(BINCV_X86_POPCNT "Build with -mpopcnt (needs SSE4.2-era x86; worth 3.75x)" ON)
     if(BINCV_X86_POPCNT)
         check_cxx_compiler_flag("-mpopcnt" HAVE_MPOPCNT)
         if(HAVE_MPOPCNT)
@@ -149,13 +148,13 @@ else()
             set(BINCV_POPCNT_STATUS "requested but the compiler refused -mpopcnt")
         endif()
     else()
-        set(BINCV_POPCNT_STATUS "OFF by request -- software fallback, ~3.75x slower (X-57)")
+        set(BINCV_POPCNT_STATUS "OFF by request -- software fallback, ~3.75x slower")
     endif()
 
     check_cxx_compiler_flag("-mavx512f" HAVE_AVX512)
     check_cxx_compiler_flag("-mavx2" HAVE_AVX2)
-    # Detection only: the flags are applied per-kernel once runtime dispatch lands
-    # (ROADMAP 2.3), so the default build stays portable across machines.
+    # Detection only: the flags are applied per-kernel once runtime dispatch lands,
+    # so the default build stays portable across machines.
     if(HAVE_AVX512)
         target_compile_definitions(bincv_core INTERFACE BINCV_HAVE_AVX512)
         set(BINCV_SIMD "AVX-512 (compiler-capable)")
@@ -182,14 +181,14 @@ endif()
 
 # NOT gated on OpenCV. benchmark/CMakeLists.txt partitions its sources: the
 # binCV-versus-OpenCV comparisons need OpenCV and are skipped without it, while
-# the Phase 2 experiment benchmarks (E-1/E-2/E-3) compare binCV against binCV and
+# the binCV-versus-binCV experiment benchmarks compare our own alternatives and
 # must build in the core-only configuration -- which is the reference device's
 # default build, and therefore the one a reproduction attempt uses.
 if(BINCV_BUILD_BENCHMARKS)
     add_subdirectory(benchmark)
 endif()
 
-# Worked examples (T4.3b). They exist to be READ as much as run, and they are the
+# Worked examples. They exist to be READ as much as run, and they are the
 # only place the kernel set is shown composing into a pipeline shape rather than
 # a benchmark loop.
 add_subdirectory(examples)
@@ -245,7 +244,7 @@ if(BINCV_OPENCV_FOUND)
 else()
     message(STATUS "OpenCV:     NO - core-only mode (embedded)")
     if(BINCV_BUILD_BENCHMARKS)
-        message(STATUS "            OpenCV-comparison benchmarks skipped; the E-1/E-2/E-3")
+        message(STATUS "            OpenCV-comparison benchmarks skipped; the")
         message(STATUS "            experiment benchmarks build (binCV vs binCV, no OpenCV)")
     endif()
 endif()

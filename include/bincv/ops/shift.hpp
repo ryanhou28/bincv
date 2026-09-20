@@ -291,7 +291,7 @@ inline void fillRowWords(WordType* dstRow, size_t rowWords, WordType value, Word
 /// word operation, and the source's own bit alignment never has to match the
 /// destination's.
 /// @note Deliberately NOT split into a bounds-check-free interior loop and two
-/// edge loops. That is the obvious optimization and it is Phase 5's business
+/// edge loops. That is the obvious optimization and it is a vector rewrite's business
 /// (: "correct scalar first"); the branch inside
 /// extendedRowWord is perfectly predictable and the alternative doubles the
 /// number of index expressions that can be off by one.

@@ -3,7 +3,7 @@
 # WHY THIS FILE EXISTS
 #
 # CLAUDE.md says "a drop in the CHECKS column is a regression even when every
-# ctest case still passes", and TASKS.md T1.7 requires that the test count not
+# ctest case still passes", and the brief requires that the test count not
 # fall below what it was before the Google Test migration. Until this file
 # existed both sentences were enforced by a human remembering four numbers:
 # verify.sh printed CHECKS and compared it against nothing. Measured -- deleting
@@ -40,18 +40,18 @@
 #             the Debug build can make. Totals: core 1892, debug 1882.
 #   noexcept  44 + 16 validation checks move from in-process to death tests, and
 #             test_error drops the 17 exception-shaped ones. Total 1815 + 60s.
-#   opencv    adds test_opencv_interop and test_equivalence (T2.1, which needs
+#   opencv    adds test_opencv_interop and test_equivalence (which needs
 #             cv::Mat); otherwise identical to core.
 #   test_logic  65768 under opencv, 53672 everywhere else. The 12096 difference is
-#             the Tier 1 half of T2.2 -- bit-exactness against cv::bitwise_and /
-#             _or / _xor / _not over the full T2.1 size and fill matrix -- which
+#             the Tier 1 half of test_logic -- bit-exactness against cv::bitwise_and /
+#             _or / _xor / _not over the full harness size and fill matrix -- which
 #             only compiles where OpenCV does. The other 53672 are the per-pixel
 #             reference, the differing-stride sweep, in-place aliasing, the
 #             degenerate shapes, the padding-bit invariant, the dirty-source
 #             sweep, the alias-acceptance cases and the trailing-word contract,
 #             and they run in all four configurations because the kernels are
 #             core code.
-#             It was 56044 / 43948 when T2.2 was first written. The 9724 added to
+#             It was 56044 / 43948 when the suite was first written. The 9724 added to
 #             each are three review findings turned into cases: sources whose
 #             padding was already dirty (without them, deleting the trailing-word
 #             mask from applyBinary left the whole suite green), views over one
@@ -59,18 +59,18 @@
 #             and aborted Debug builds), and the destination's trailing word at
 #             BIT granularity.
 #   test_shift  307133 under opencv, 99695 everywhere else. The 207438 difference
-#             is the Tier 1 half of T2.3/T2.4: impl::borderIndex against
+#             is the Tier 1 half of test_shift: impl::borderIndex against
 #             cv::borderInterpolate coordinate by coordinate, and the shifted
-#             images against cv::copyMakeBorder over the T2.1 size matrix for all
+#             images against cv::copyMakeBorder over the harness size matrix for all
 #             five BorderTypes, plus the three cases that pin cv::erode's and
-#             cv::dilate's default border VALUES -- the premise D-12's fill
-#             decision rests on.
-#             It was 112733 when T2.3/T2.4 were first written, and the 194400
+#             cv::dilate's default border VALUES -- the premise the morphology
+#             fill decision rests on.
+#             It was 112733 when the suite was first written, and the 194400
 #             added are one review finding turned into cases: that sweep read
 #             equivalenceWidths() x {1, 3, 17} at a single fill of 0.5 while the
-#             surrounding prose claimed the T2.1 matrix, and its offsets never
-#             reached past the HEIGHT at a height above 1 -- the regime T2.4's
-#             done-when clause names. Measured: a clamp injected into shift()'s
+#             surrounding prose claimed the harness matrix, and its offsets never
+#             reached past the HEIGHT at a height above 1 -- the regime the border
+#             sweep's done-when clause names. Measured: a clamp injected into shift()'s
 #             row loop that is wrong only past the height failed 144 checks, all
 #             of them in Shift.Borders_*, and left every Shift.OpenCv_* green.
 #             The sweep now runs equivalenceHeights() and equivalenceFillRatios()
@@ -87,8 +87,8 @@
 #             configurations because the kernels are core code -- and the Debug
 #             one is the only place their BINCV_ASSERT preconditions are live.
 #   test_reduce  759424 under opencv, 594184 everywhere else. The 165240
-#             difference is the Tier 1 half of T2.5 -- countNonZero against
-#             cv::countNonZero over the full T2.1 size and fill matrix, whole
+#             difference is the Tier 1 half of test_reduce -- countNonZero against
+#             cv::countNonZero over the full harness size and fill matrix, whole
 #             image and by region -- plus the Tier 3 masked reductions against an
 #             OpenCV composite (cv::bitwise_and into a temporary, then
 #             cv::countNonZero), which is a second reference and not a tier
@@ -100,8 +100,9 @@
 #             GCC/clang configuration would otherwise execute one instruction of
 #             -- from being untested source. They run in all four configurations
 #             because the kernels are core code.
-#             It was 711812 / 546572 before T2.11. The 47612 added to each are the
-#             three entry points and one accumulator T2.11 landed, and they are
+#             It was 711812 / 546572 before the sliding-window round. The 47612
+#             added to each are the three entry points and one accumulator it
+#             landed, and they are
 #             AGREEMENT sweeps rather than new value checks: Reduce.Sliding_*
 #             sweeps whole frames comparing SlidingWindowCount against recompute
 #             at every window position of every column, and Reduce.Fused_* does
@@ -135,13 +136,13 @@
 #               whenClear = total (split lost)   470980 -- 5 families
 #               region not clipped to the width  SEGFAULT after 19 failing cases
 #               whole-image count trusts the
-#               padding invariant (T2.5's
+#               padding invariant (spec's
 #               literal reading)                 545919 -- Reduce.DirtyPadding ONLY
 #             The last row is the one worth reading: the padding decision in
 #             ops/reduce.hpp is invisible to every other case in the suite, and
 #             Reduce.DirtyPadding_* is the only thing standing between it and a
 #             silent over-count on a wrapped buffer.
-#             THE +88 FROM THE T2.5/T2.6 REVIEW (546484 -> 546572) are three
+#             THE +88 FROM THE REDUCTION REVIEW (546484 -> 546572) are three
 #             things a value sweep could not see, so each was mutation-checked
 #             rather than assumed (baseline 711812 under opencv):
 #               SplitCount::crossTerm() sign flipped     709356 -- Covariance
@@ -152,7 +153,7 @@
 #             The Rect rows are small on purpose: those three members had zero
 #             call sites and zero coverage anywhere in the repo, so a wrong body
 #             shipped green in all four configurations. Two checks are cheap; a
-#             silently wrong region predicate under T3.6 is not. Reduce.Covariance
+#             silently wrong region predicate under covariance is not. Reduce.Covariance
 #             also now compiles the constMagnitude()/constSign() spelling from a
 #             deliberately NON-const container, which is a compile-time check that
 #             costs one runtime check and pins the advice ops/reduce.hpp gives.
@@ -160,8 +161,8 @@
 #             for impl::regionFromExtent's non-empty precondition, which no public
 #             entry point can reach and which underflows into a ~5.8e17-word row
 #             range if it is ever removed.
-#             AND FOUR MORE FROM THE T2.11 REVIEW, for the same reason and with
-#             the same evidence: T2.11 added a fourth view argument (c1) and two
+#             AND FOUR MORE FROM THE SLIDING-WINDOW REVIEW, for the same reason and
+#             with the same evidence: that round added a fourth view argument (c1) and two
 #             new entry points, each carrying its OWN copy of a precondition, and
 #             an assert has no in-process test. Measured -- deleting c1's half of
 #             the dimension check from BOTH four-argument overloads and the stride
@@ -195,7 +196,7 @@
 #               composed      sum-then-threshold at every threshold from 0 to k+1
 #             at all four word widths, with the patterns packed into the LANES of
 #             the words under test so the enumeration also proves the lanes stay
-#             independent. The rest is majority3's plumbing: the T2.1 size and
+#             independent. The rest is majority3's plumbing: the harness size and
 #             fill matrix, sixteen stride combinations, in-place aliasing on each
 #             of the three sources, degenerate shapes, and sources whose padding
 #             bits are already dirty.
@@ -204,7 +205,8 @@
 #             notion of `width` -- at threshold 0 every lane is answered yes
 #             whatever the planes hold -- so a caller storing one into a row's
 #             trailing word without impl::rowTailMask leaves padding bits set past
-#             `width`, which is D-13's over-count with nothing to diagnose it.
+#             `width`, which is the padding invariant's over-count with nothing
+#             to diagnose it.
 #             That family asserts BOTH halves: that the raw word really does carry
 #             bits past `width` (so a later "fix" that masks inside thresholdGE
 #             fails here on purpose, and the docstring is what has to change), and
@@ -234,7 +236,7 @@
 #               dense path ignores one argument's
 #               stride (each of the four)   349945/349909 -- Strides only
 #             Two rows are the ones worth reading. The trailing-word row is this
-#             suite's D-13 moment: the padding mask is invisible to every other
+#             suite's padding-invariant moment: the mask is invisible to every other
 #             case, and BitSlice.DirtySources_* is the only thing between it and
 #             a destination that hands phantom pixels to the next reduction.
 #             The dense-path row is a review finding turned into cases: the
@@ -283,7 +285,7 @@
 #               the neighbour stops at each word
 #               boundary                            7401 -- 5 families
 #             ONE MUTATION SURVIVED AND WAS ACTED ON RATHER THAN LOGGED, the same
-#             way T2.7's dead `equal` narrowing was. The kernel originally masked
+#             way the bit-slice suite's dead `equal` narrowing was. The kernel originally masked
 #             its DESTINATION's trailing word as well; re-adding that mask leaves
 #             all 9744 checks passing, byte for byte, in every configuration,
 #             because masking the SOURCE word already puts zeros past `width` in
@@ -291,7 +293,7 @@
 #             store-mask was removed and the coupling it hid was written down in
 #             medianRow3: in this kernel the padding invariant is carried by a
 #             mask that is there for a BORDER reason, so a change to the border is
-#             a change to D-13 compliance. The first row of the table above is
+#             a change to the padding invariant. The first row of the table above is
 #             what now stands behind both.
 #   test_threshold  33112 under opencv, 21304 everywhere else. The 11808
 #             difference is the TIER 1 half -- `threshold`, CV_8U to one bit,
@@ -309,7 +311,7 @@
 #                                  FLOORS its double for a CV_8U source.
 #               BinarizeSweep_*    every threshold from 0 to MaxValue + 1 at
 #                                  N = 1, 2, 3 and 5.
-#             The rest is the T2.1 size matrix at the end thresholds, the
+#             The rest is the harness size matrix at the end thresholds, the
 #             saturated and all-zero images (where `>` and `>=` differ on EVERY
 #             pixel rather than one in 2^N), stride combinations, source planes
 #             whose padding is already dirty, the plane-view entry point against
@@ -356,8 +358,8 @@
 #               * Every Tier 1 destination was a BinMat at DefaultRowAlignment,
 #                 where alignedWidth == minRowWords and the stride is invisible.
 #                 Threshold.Sizes_* and Threshold.RampWidths_* now sweep an
-#                 over-aligned destination beside the tight one (D-4 is
-#                 provisional, so both are supported shapes), and
+#                 over-aligned destination beside the tight one (the row-alignment
+#                 rule is provisional, so both are supported shapes), and
 #                 Threshold.Roi_* is new.
 #               * Every cv::Mat handed to the Tier 1 kernel was freshly allocated,
 #                 hence continuous, so src.step was never exercised -- and a
@@ -390,8 +392,8 @@
 #             `>=` boundary is the cheap answer, not the correct one; the wrap
 #             guard above is what makes the branch load-bearing.
 #   test_morphology  299181 under opencv, 172632 everywhere else. The 126549
-#             difference is the TIER 1 half of T3.3: erode and dilate against
-#             cv::erode / cv::dilate over the full T2.1 size and fill matrix at the
+#             difference is the TIER 1 half of test_morphology: erode and dilate
+#             against cv::erode / cv::dilate over the full harness size and fill matrix at the
 #             three 3x3 shapes, all seven MorphOps against cv::morphologyEx over
 #             all fourteen structuring elements, the four border types
 #             cv::morphologyEx ACCEPTS (it refuses BORDER_WRAP by assertion) and
@@ -426,7 +428,7 @@
 #                 morphRowGeneric's window `d` only  245343  (53838)
 #                 morphRowGeneric's fallback dx only 299139  (    42)
 #                 morphRow3x3's left/right cells     286421  (12760)
-#               D-12: erode's default border fill
+#               erode's default border fill
 #               changed from ones to zeros           270319  (28862)
 #               the non-constant border fixup
 #               skipped entirely                     268477  (30704)
@@ -470,7 +472,7 @@
 #                 and those read the border either way. The sparse wide mask -- two
 #                 cells at the extremes of a wide span -- is what sees it.
 #               * Its offset SIGN then survived too, 298541/298541, and that was
-#                 found in T3.3's review rather than by its author. Both families
+#                 found in the morphology review rather than by its author. Both families
 #                 reaching the fallback were point-symmetric about their anchor:
 #                 the rects were centerd, and the sparse mask's cells sat at
 #                 {0, half, cols-1} around an anchor at half. Anchoring the wide
@@ -480,7 +482,7 @@
 #                 each word width reach that branch at all; it is not zero, which
 #                 is the property the row asserts.
 #   test_resample  245312 in ALL FOUR, which is the point rather than an
-#             omission: horizontal decimation (E-8 / X-14) has no OpenCV
+#             omission: horizontal decimation has no OpenCV
 #             counterpart to compare against -- cv::resize resamples both axes on
 #             a byte image and rounds rather than keeping the even columns -- so
 #             the suite has no Tier 1 half to gain under `opencv` and nothing to
@@ -512,17 +514,17 @@
 #             words under test so lane independence comes out of the same
 #             enumeration; the four bit-sliced primitives underneath it
 #             (addPlanes, multiplyByAllOnes, addConstant, divideByConstant,
-#             quotient AND remainder); agreement with THE FORMULATION T3.4
+#             quotient AND remainder); agreement with THE FORMULATION pyrDown
 #             REJECTED, both at the word level (boxSum4 vs boxSum4Replicated) and
 #             for the whole kernel (pyrDown vs impl::pyrDownReplicated); the
 #             edge-replication rule checked a second way, against a source whose
 #             last column and row were duplicated by hand; dirty-source padding;
 #             differing strides; degenerate shapes; and the four-level ladder.
 #             THE ROUTE-AGREEMENT CASES ARE THE ONES TO PROTECT. impl::
-#             boxSum4Replicated is the exponential k = 4*(2^NIn - 1) route T3.4
+#             boxSum4Replicated is the exponential k = 4*(2^NIn - 1) route pyrDown
 #             replaced, kept under test precisely so the replacement is a
 #             comparison rather than a claim -- the same argument test_resample
-#             makes for E-8's losing arms. Deleting it would take ~15000 checks
+#             makes for decimation's losing arms. Deleting it would take ~15000 checks
 #             with it and leave the suite green-looking.
 #             The floor has teeth, measured by mutating ops/pyramid.hpp (checks
 #             passed out of 236122 core):
@@ -549,13 +551,13 @@
 #             (dst(x) = src(x+1) - src(x-1)) and that its default border is
 #             BORDER_REFLECT_101 rather than zero. Those two probes are the ones
 #             to protect. Both properties would differ SILENTLY -- a reversed
-#             correlation leaves every magnitude correct and negates only T3.6's
+#             correlation leaves every magnitude correct and negates only the covariance's
 #             cross term, and a zero border differs on exactly one column and one
 #             row -- and both are claims about OpenCV, so they belong in a check
 #             that fails if OpenCV ever disagrees rather than in a comment.
 #             The scale division is required to be EXACT, which is what turns
 #             "the scale factor is representational, not semantic"
-#             (ops/derivative.hpp, D-19) into a checked claim: if any value other
+#             (ops/derivative.hpp) into a checked claim: if any value other
 #             than a multiple of 4080 ever appeared, that check fails.
 #             The other 47675 are the per-pixel reference sweep -- 6 border cases
 #             (all five BorderTypes, plus BORDER_CONSTANT at both fill values) x
@@ -616,14 +618,14 @@
 #             different reason: only the cases that take the default can see it,
 #             and most of the sweep passes a border explicitly.
 #   test_covariance  17704 in ALL FOUR configurations, and the equality is itself
-#             informative: T3.6 and T3.10 are API TIER 3 -- cv:: has no operation
+#             informative: both covariance kernels are API TIER 3 -- cv:: has no operation
 #             with these semantics -- so the suite has no OpenCV half to add rows in
 #             the `opencv` column. What stands behind ARCHITECTURE 7.5's identity is
 #             a per-pixel oracle, and it has to run in the three
 #             configurations that have no OpenCV, including Debug where the
 #             reduction's BINCV_ASSERT preconditions are live.
 #
-#             14100 OF THE 17704 ARE T3.10's N-BIT COVARIANCE, and they are a
+#             14100 OF THE 17704 ARE THE N-BIT COVARIANCE, and they are a
 #             SECOND oracle rather than the first one widened. The float oracle
 #             reads a TERNARY pixel; an N-bit pixel is +/- SUM 2^i m[i], so
 #             widening would have made the ternary and N-bit sweeps share a
@@ -636,31 +638,31 @@
 #             its OWN N, so a depth added without touching the constant cannot
 #             silently turn that half into a tolerance.
 #             They are: 4 word types x (SEVEN bit depths x 2 full-frame sweeps -- a
-#             generated N-bit pair and a pair from T3.5's real N-bit derivative)
+#             generated N-bit pair and a pair from the real N-bit derivative)
 #             plus the N = 3 contract sweeps (dirty signs, dirty padding, a narrow
 #             view onto a wider dense frame), the hand-worked weight cases, the
 #             degenerate windows, the dispatch traits and the allocation counter at
 #             EVERY depth 1..7 -- 383200 oracle positions per word type, 1532800 in
 #             all, up from 958000 when the sweep stopped at 4.
 #             THE DEPTHS ARE DRIVEN BY MAX_BIT_DEPTH, not hand-unrolled, and the
-#             constant is 7 rather than 4 because X-15 superseded X-2's "1/3/4/5
-#             bits" frame statistic with the alphabet the arithmetic can REACH --
-#             1/3/5/7 -- which is what T4.1 will run. At 4 the suite never
+#             constant is 7 rather than 4 because a later measurement superseded
+#             the "1/3/4/5 bits" frame statistic with the alphabet the arithmetic
+#             can REACH -- 1/3/5/7 -- which is what the ladder runs. At 4 the suite never
 #             instantiated N = 5 or N = 7 at all. 7 is also SignedQuantMat's own
 #             limit.
 #             THE SINGLE MOST IMPORTANT ROW IS THE N = 1 IDENTITY: 61232 positions
-#             per word type at which T3.10's bit-sliced kernel and T3.6's ternary
+#             per word type at which the bit-sliced kernel and the ternary
 #             kernel are required to return the SAME THREE INTEGERS. Ternary is the
 #             N = 1 instance, so if they can differ anywhere one of them is wrong.
 #             The two calls are spelled so that neither can BE the other -- five
-#             loose views with one explicit template argument reaches only the T3.6
-#             overload, plane ARRAYS with <1, WordType> only the T3.10 one -- so
+#             loose views with one explicit template argument reaches only the ternary
+#             overload, plane ARRAYS with <1, WordType> only the bit-sliced one -- so
 #             deleting the ternary overload breaks the build instead of quietly
 #             turning the check into one kernel compared against itself. A second
 #             check requires the agreed matrices to be non-zero at most positions,
 #             since two functions returning {0,0,0} everywhere would also agree.
 #             The 3604 that came before are: 4 word types x 4 full-frame sweeps (a generated
-#             ternary pair, a pair produced by T3.5's real derivative, the same
+#             ternary pair, a pair produced by the real derivative, the same
 #             pair with every zero-magnitude sign bit dirtied, and a narrow VIEW
 #             onto a wider dense frame) x one check per (window size, row of
 #             positions) from a full window OUTSIDE each edge to a full window past
@@ -697,27 +699,27 @@
 #             container overload rejects SignedQuantMat<N> for N > 1 while the view
 #             overload cannot; and the allocation counter registers a plain AND an
 #             over-aligned new.
-#             **THAT LAST ONE IS DELIBERATELY REVERSED BY T3.10.** The container
+#             **THAT LAST ONE IS DELIBERATELY REVERSED BY THE N-BIT KERNEL.** The container
 #             spelling now ACCEPTS SignedQuantMat<N> for N > 1 and dispatches to the
-#             bit-sliced kernel, because X-20 made an N-bit level a precondition
+#             bit-sliced kernel, because an N-bit level became a precondition
 #             rather than a future generalization. What replaced the rejection check
 #             is a dispatch check: both container overloads exist, and the N-bit
 #             VIEW form takes plane ARRAYS so that a loose view and a
 #             wrong-length array both fail to compile -- the promise the
 #             five-argument view form still cannot make.
 #             The floor has teeth, measured by mutating ops/covariance.hpp. The
-#             T3.10 rows are checks passed out of 12428, and the two ternary rows
+#             N-bit rows are checks passed out of 12428, and the two ternary rows
 #             re-measured against the same suite:
 #               off-diagonal plane pair not doubled     7444
 #               cross-term weight 2^i instead of 2^(i+j) 7516
 #               selector forced to zero (signs ignored)  6284
-#               magnitude words not masked (D-13)        6192
+#               magnitude words not masked              6192
 #               ternary cross term negated               9936
 #               ternary sumXX and sumYY swapped         10544
 #             The last two moved (they were 1136 and 1740 out of 3604) because the
 #             N = 1 identity now fails alongside the oracle rows: a ternary kernel
 #             mutated on its own stops agreeing with the bit-sliced one.
-#             Two older rows are quoted against the PRE-T3.10 suite and were not
+#             Two older rows are quoted against the earlier suite and were not
 #             re-measured, because reproducing them needs the exact mutant text and
 #             a guessed mutant is worse than a dated number (checks passed out of
 #             3604):
@@ -727,14 +729,14 @@
 #             C++17's over-aligned operator new: `new` of an alignas(64) type does
 #             not go through the plain replacement, so the form of scratch a
 #             vectorized kernel would allocate was invisible to the check that is
-#             the sole evidence for D-15 axis 3's trade.
+#             the sole evidence for the no-scratch trade.
 #             A further mutation -- dropping the sign-plane XOR by calling the
 #             three-argument countCovariance with signX alone -- never reaches a
 #             test: it leaves `signY` unused and the project's warning policy
 #             fails the build (-Werror=unused-parameter). Recorded because it is
 #             the mutation a reader expects to see a number for.
 #   test_corner  3655 in ALL FOUR configurations, and the equality says the same
-#             thing test_covariance's does: T3.7 is API TIER 2 -- the role of
+#             thing test_covariance's does: the corner detector is API TIER 2 -- the role of
 #             cv::goodFeaturesToTrack with the reference pipeline's BINARIZED
 #             derivatives -- so it is NOT bit-exact against OpenCV and has no
 #             OpenCV half to add rows in the `opencv` column. What stands behind it
@@ -745,7 +747,7 @@
 #             response sweeps, reported as one check per (frame, block size) with
 #             SIX independent mismatch counters -- the map against the eigenvalue of
 #             a per-pixel float oracle's triple, the map against a DOUBLE evaluation
-#             of that triple, the oracle's triple against T3.6's gradientCovariance,
+#             of that triple, the oracle's triple against gradientCovariance,
 #             the exact half-integer wherever the discriminant is a perfect square,
 #             `response == 0 iff det == 0`, and the 1/(2*blockSize^2) gap -- plus
 #             the word-type invariance sweep, the float-storage margin measurement,
@@ -757,7 +759,7 @@
 #             positions per word type go through the oracle, which would be 198160
 #             checks for what is one property. Each counter reports its own total,
 #             so a failure still says WHICH property broke.
-#             RAISED 2749 -> 3655 BY T3.11 (the streaming corner response). The 906
+#             RAISED 2749 -> 3655 BY the streaming corner response. The 906
 #             new checks are the STREAMING EQUALITY suite -- Corner.Streaming_* --
 #             and they are core-suite rather than benchmark-only on purpose: the
 #             claim being defended is that goodFeaturesToTrackStreaming returns
@@ -846,10 +848,10 @@
 #             passed 2040/2040 before check (a2) existed. `maxVal over the interior
 #             only` is the reason Corner.SelectionOnSyntheticMaps exists: no map
 #             built from a real frame has its maximum on the border, because
-#             reflect-101 zeroes the outermost derivative row and column (D-19), so
+#             reflect-101 zeroes the outermost derivative row and column, so
 #             that mutant passed every real-frame case in the file.
 #   test_opencv_interop  32 -> 40. The added 8 are OpenCVInterop.RealFrameCorners,
-#             which is T3.7's "detected corners match the reference ... on real
+#             which is the corner suite's "detected corners match the reference ... on real
 #             sequences" bullet -- the one thing tests/test_corner.cpp cannot check,
 #             because it is a CORE suite and has no image decoder. It runs
 #             ops/corner.hpp over tests/images/1403715887284058112_bin_normalized.png
@@ -862,7 +864,7 @@
 #             positions. It has teeth on the tie order specifically -- inverting
 #             impl::CornerStronger's tie direction takes it to 39/40.
 #   test_equivalence  9923 -> 16403. The added 6480 are the packing anchor's new
-#             QuantMat plane row: T2.2's per-plane Tier 1 checks read binCV back
+#             QuantMat plane row: test_logic's per-plane Tier 1 checks read binCV back
 #             through constPlane() -> unpackTo8U, and that conversion was the one
 #             the anchor did not pin.
 #

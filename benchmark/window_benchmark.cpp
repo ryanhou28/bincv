@@ -8,10 +8,11 @@
 // WHAT CHANGED WHEN LANDED, AND WHY THIS FILE HAD TO BE RE-RUN
 // ===========================================================================
 //
-// closed against measurement copies: the winning variants lived in this file,
-// because writing them into ops/reduce.hpp in the same commit as the measurement
-// that gated them is the inversion EXPERIMENTS.md exists to prevent. then
-// landed them for real, so this file now times the SHIPPED entry points --
+// The axes below closed against measurement copies: the winning variants lived in
+// this file, because writing them into ops/reduce.hpp in the same commit as the
+// measurement that gated them is the inversion the measurement protocol exists to
+// prevent. A later round landed them for real, so this file now times the SHIPPED
+// entry points --
 // bincv::SlidingWindowCount, bincv::countCovariance and the four-argument
 // bincv::countAndSplit -- and a copy survives here only where nothing shipped
 // (INC-COL, which axis 1 explicitly declines to expose).
@@ -116,7 +117,7 @@
 // plane at all. Both are now shipped overloads of bincv::countAndSplit, so this
 // axis times the library rather than a copy.
 //
-// TASKS.md states NO numeric threshold for this axis -- it requires that both
+// The brief states NO numeric threshold for this axis -- it requires that both
 // memory and speed be reported, "since this is precisely a case where the two
 // goals may disagree". No threshold is invented here. Both numbers are printed,
 // including the plane's formation cost amortized over the keypoints that use it,
@@ -131,9 +132,9 @@
 // on x86_64 and fmov/cnt/uaddlv/fmov on aarch64. The ratio between a popcounting
 // variant and a bit-reading one IS the thing that lowering changes, so x86 cannot
 // rank these at all and this experiment closes only on the reference device. No
-// -march flag is added: that is a dispatch decision (ROADMAP 2.3) that no
-// experiment has settled, and changing it mid-experiment would confound exactly
-// these comparisons.
+// -march flag is added: that is a dispatch decision that no experiment has
+// settled, and changing it mid-experiment would confound exactly these
+// comparisons.
 //
 // VALIDITY: measure::g_sink consumes every result; four distinct random images
 // rotate through each timed body, on a call counter that runs on across batches --
@@ -737,8 +738,8 @@ int main() {
                 " which issues none, so the x86 popcount lowering can "
                 "invert the ranking outright.\n");
 #endif
-    std::printf("Decision rules are in this file's header, written before measuring "
-                "(EXPERIMENTS.md).\n");
+    std::printf("Decision rules are in this file's header, written before "
+                "measuring.\n");
 
     bool ok = runAxis1();
 

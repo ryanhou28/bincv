@@ -238,7 +238,7 @@
 /// * `nextPts` is written for every point at every level and holds LEVEL
 /// coordinates while the level loop runs; on return it holds level-0
 /// coordinates. This is the reference's own use of the same array.
-// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
 // compiler's own macros on aarch64, so an include-only integration still gets the
 // NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
 // its gate before its first core include.
@@ -778,7 +778,7 @@ inline long long slicedSignedSum(const WordType* maskedMag, WordType sign,
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     if constexpr (UseNeon) {
     // ===================================================================
-    // NEON: THE PLANE-PAIR POPCOUNTS BATCHED INTO LANES (Phase 5.1).
+    // NEON: THE PLANE-PAIR POPCOUNTS BATCHED INTO LANES.
     //
     // This is the design rule’s reservation being cashed in.
     // aarch64 has NO SCALAR POPCOUNT: `CNT` lives in the vector registers, so

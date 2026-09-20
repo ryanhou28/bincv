@@ -2733,7 +2733,7 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
     // what is left still degrades by orders of magnitude with level count and is
     // still nowhere near the tolerance -- so the 1-bit level is a real cause and
     // this is still a precondition. Both halves have to hold or the diagnosis in
-    // TASKS.md / is wrong and has to be rewritten.
+    // the level-count precondition is wrong and has to be rewritten.
     BINCV_CHECK(subsetFour < four100.rms);          // clipping contributes
     BINCV_CHECK(subsetFour > kRmsTolerance);        // and is not the whole cause
     BINCV_CHECK(subsetFour > subsetOne);            // depth degrades unclipped windows too
@@ -2951,9 +2951,9 @@ BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
         printLevelAlphabet(deep.level<3>(), 3);
     }
 
-    // No pass/fail asserted here: that measurement’s rule is evaluated in EXPERIMENTS.md from
-    // the whole curve, and asserting a band inside the sweep that produces it
-    // would be deciding the experiment from inside the measurement.
+    // No pass/fail asserted here: the rule is evaluated from the whole curve, and
+    // asserting a band inside the sweep that produces it would be deciding the
+    // experiment from inside the measurement.
     BINCV_CHECK(true);
 }
 
@@ -3226,8 +3226,8 @@ BINCV_TEST(Flow, X25_CoarseLevelBorder_uint32_t) {
     x25Case<uint32_t, 1, 2, 2, 2>(gray, kL2, "scale 1.02",
                                   scaling(1.02, gray.cols * 0.5, gray.rows * 0.5), scaleModel);
 
-    // that measurement’s bands are evaluated in EXPERIMENTS.md from the whole table; deciding
-    // one inside the measurement that produces it would be circular.
+    // The bands are evaluated from the whole table; deciding one inside the
+    // measurement that produces it would be circular.
     BINCV_CHECK(true);
 }
 

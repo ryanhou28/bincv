@@ -9,8 +9,8 @@
 //
 // THREE IMPLEMENTATIONS, ONE REFERENCE
 //
-// compares three routes to the same destination, and the protocol
-// (EXPERIMENTS.md) requires every one of them to be correct BEFORE any of them is
+// This suite compares three routes to the same destination, and the measurement
+// protocol requires every one of them to be correct BEFORE any of them is
 // timed -- a benchmark between a right answer and a wrong one is not a
 // measurement. So each variant is checked against refDecimate, which is a
 // per-pixel loop over at: `expected(y, j) = src.at(y, 2j)`, sharing no

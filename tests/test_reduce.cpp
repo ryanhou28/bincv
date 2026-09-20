@@ -1159,8 +1159,8 @@ void testCovarianceIdentity(const char* wordTypeName) {
                            "an agreeing pair gives the positive cross term",
                            std::to_string(agree.crossTerm()), label);
 
-        // THE SPELLING the design notes AND TASKS PRINT, compiled from a
-        // NON-const container -- which is what this will hold. This is a
+        // THE SPELLING THE HEADER DOCUMENTS, compiled from a NON-const container
+        // -- which is what this will hold. This is a
         // compile-time regression as much as a value one: reduce.hpp's entry
         // points take BinMatConstView and template argument deduction does not
         // consider BinMatView's conversion to it, so `dx.magnitude(0)` is a

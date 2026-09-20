@@ -27,7 +27,7 @@
 // * bulk within +/-15% of the per-word loop -> the INTERFACE decision
 // stands, but 6.2's IMPLEMENTATION claim is false today. Separate the two in
 // 6.2 and in ops/reduce.hpp, record the numbers in, and
-// change no kernel: vectorization is Phase 5, and this is a documentation
+// change no kernel: vectorization is a later round, and this is a documentation
 // defect, not a kernel defect.
 // * Either way, no -march flag and no intrinsics enter the LIBRARY -- the same
 // standing decision that measurement’s x86_64 half already recorded.
@@ -35,7 +35,7 @@
 // A third row runs on aarch64 only and is a HEADROOM PROBE, not a candidate
 // implementation: the identical 64-bit loads with a VECTOR accumulator (cnt into
 // a running total via vpadal_u8), so exactly one register-domain crossing per
-// ROW instead of one per word. It exists so the Phase 5 task starts from a
+// ROW instead of one per word. It exists so a vectorization round starts from a
 // measured number on this device instead of from an argument. Nothing in
 // include/ is changed by this file, and nothing here is included by include/.
 //
@@ -56,7 +56,7 @@
 // enough; record it and close the question.
 // * composition costs > 15% more -> widen that work’s brief to measure a
 // covariance-shaped entry point against the composition BEFORE this is
-// written against either, and register that in TASKS.md and the design notes.
+// written against either, and register that in the design notes.
 // Do NOT add the entry point here: choosing that work’s interface on the strength
 // of one measurement with no decision rule is the thing forbids for
 // incremental state, and the same reasoning binds this.
@@ -260,8 +260,8 @@ bool runQ1() {
         },
         kRepeats, kTargetMs);
     std::printf("[BENCH] %-34s %10.5f ns/px <- HEADROOM PROBE, not shipped\n",
-                "vector accumulator (Phase 5)", nsVec / pixels);
-    std::printf(" headroom available to Phase 5 at the same load width: %.2fx\n", nsBulk / nsVec);
+                "vector accumulator", nsVec / pixels);
+    std::printf(" headroom available to vectorization at the same load width: %.2fx\n", nsBulk / nsVec);
 #else
     std::printf(" (the vector-accumulator headroom probe is aarch64-only)\n");
 #endif
@@ -325,7 +325,7 @@ Covariance covarianceFused(const BinMatConstView<uint64_t>& magX,
 }
 
 bool runQ2() {
-    // 640x480 and 200 keypoints: the frame size and the keypoint count TASKS.md
+    // 640x480 and 200 keypoints: the frame size and the keypoint count the brief
     // names (the reference gftt_max_corners), with the 31x31 window
     // the design notes specifies.
     const int width = 640;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# verify.sh -- everything a session should check before committing (T1.8).
+# verify.sh -- everything a session should check before committing.
 #
 # Builds and tests every supported configuration, fails on any compiler warning,
 # prints a summary table, and exits non-zero if anything at all went wrong.
@@ -25,7 +25,7 @@
 # ---------------------------------------------------------------------------
 # Why a fourth configuration
 #
-# Until T1.8 the verification set was three RELEASE builds, so NDEBUG was defined
+# The verification set used to be three RELEASE builds, so NDEBUG was defined
 # in every one of them and BINCV_DEBUG_CHECKS was 0 everywhere. Half of the error
 # policy -- every BINCV_ASSERT, which is to say the bounds checks in at() and
 # set() and every kernel precondition -- was therefore never compiled by anything
@@ -48,9 +48,9 @@
 # ---------------------------------------------------------------------------
 # Why warnings are fatal here and not by default
 #
-# Before T1.8 nothing in this project enabled a single warning flag, so the
-# "must build warning-free" requirement in CLAUDE.md, TASKS.md and
-# GETTING_STARTED.md passed vacuously (OVERNIGHT_LOG finding 5). The flags now
+# Nothing in this project used to enable a single warning flag, so the
+# "must build warning-free" requirement in CLAUDE.md and GETTING_STARTED.md
+# passed vacuously. The flags now
 # live in cmake/BincvWarnings.cmake and this script configures every
 # build with -DBINCV_WERROR=ON, so a warning stops the build here even though a
 # plain `cmake --build` still only prints it.
@@ -205,7 +205,7 @@ config_label() {
 # The error-policy macros each configuration exists to exercise. Read back out of
 # the built binary rather than inferred from the CMake arguments -- an exported
 # CXXFLAGS=-DNDEBUG turned the Debug configuration into a second copy of `core`
-# and nothing noticed, which is the same vacuity T1.8 was written to remove.
+# and nothing noticed, which is the same vacuity this gate was written to remove.
 config_expect_macros() {
     case "$1" in
         opencv|core) echo "BINCV_EXCEPTIONS_ENABLED=1 BINCV_DEBUG_CHECKS=0" ;;
@@ -387,7 +387,7 @@ echo
 # Gate self-check: prove the warning gate can still fail
 #
 # Both halves of the warning policy are supposed to reject something, and neither
-# had ever been observed rejecting anything -- which is how the pre-T1.8 gate
+# had ever been observed rejecting anything -- which is how an earlier gate
 # passed for months while enabling no warning flags at all. These two builds are
 # supposed to FAIL; the run is red if either one succeeds.
 # ---------------------------------------------------------------------------

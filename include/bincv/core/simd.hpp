@@ -5,7 +5,7 @@
 /// stops one of them from going missing. **API TIER 3.**
 ///
 /// ---------------------------------------------------------------------------
-/// F-5: THE FAST PATH USED TO RIDE ON A CMAKE TARGET, AND MISSING IT WAS SILENT
+/// THE FAST PATH USED TO RIDE ON A CMAKE TARGET, AND MISSING IT WAS SILENT
 ///
 /// `BINCV_HAVE_NEON` and `-mpopcnt` are INTERFACE properties of the `bincv_core` CMake
 /// target. binCV is header-only, so an integrator can do the natural thing --
@@ -54,7 +54,7 @@
 // THE AUTO-DETECTION. Must come before any `#if defined(BINCV_HAVE_NEON)`, which is
 // why this header is included explicitly at the top of every file that has one --
 // three of them gate BEFORE their first core include, so relying on transitive
-// inclusion would have re-created F-5 in a new place.
+// inclusion would have re-created that silent loss in a new place.
 // -------------------------------------------------------------------------------
 // `BINCV_NO_NEON` forces the scalar arm, and it is not a convenience: CLAUDE.md
 // requires that a vector arm be switchable off so a benchmark can time both and show
@@ -74,10 +74,10 @@
 // `arm-none-eabi-g++ -mcpu=cortex-m7 -mfpu=neon` exits 0, emits no diagnostic, and
 // defines `__ARM_NEON`. So a build system that concludes "this target has NEON"
 // from a `-mfpu=neon` compile check concludes it on a Cortex-M7, and `simdStatus`
-// then reports NEON=yes on a part that has no vector unit at all. That is F-5 with
-// the sign reversed: not a fast path silently missing, but a fast path silently
-// claimed -- and it is worse, because the number it would corrupt is the population
-// count measurement that the M-profile port exists to make.
+// then reports NEON=yes on a part that has no vector unit at all. That is the same
+// failure with the sign reversed: not a fast path silently missing, but a fast path
+// silently claimed -- and it is worse, because the number it would corrupt is the
+// population count measurement that the M-profile port exists to make.
 //
 // `__ARM_ARCH_PROFILE` is the macro that does know: 'M' on Cortex-M, 'A' on
 // Cortex-A. Consulting it keeps the gate on the compiler's own macros, which is

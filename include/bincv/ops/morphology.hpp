@@ -487,7 +487,7 @@ inline void morphFixupPixel(BinMatConstView<WordType> src, WordType* dstRow, siz
 /// -- 2 of 640 for a 3x3 element -- and an `if (interior) continue;` inside
 /// a `for (c = 0; c < width; ++c)` still pays `width` iterations to do it.
 /// Measured on x86 at 640x480, `uint64_t`, `rect3x3`, best of 5 x 200
-/// calls (indicative only -- see EXPERIMENTS.md on measurement platforms):
+/// calls (indicative only -- a desktop host does not decide a ratio here):
 /// the skipping form ran 19.5 us under BORDER_CONSTANT, which never calls
 /// this, against 241-260 us under the other four. The fixup cost 12x the
 /// entire word path to rewrite 960 of 307200 pixels, and made binCV 6-10x
@@ -652,7 +652,7 @@ inline void morphRowGeneric(BinMatConstView<WordType> src, WordType* dstRow, siz
 /// At 640x480 the general path costs 2.12x (rect3x3 erode, `uint32_t`),
 /// 3.17x (rect3x3 dilate), 2.47x / 3.69x at `uint64_t`, and 2.78x-3.67x for
 /// cross3x3; across the whole pyramid ladder the range is 2.1x-3.7x, at
-/// batch spreads under 4%. That is the number a Phase 5 reader deciding
+/// batch spreads under 4%. That is the number a reader deciding
 /// whether to vectorize one path or both should start from, and it is why
 /// the duplicated code stays.
 /// @note Driven by the element's own cells, so it serves rect, cross, ellipse and

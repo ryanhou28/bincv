@@ -110,8 +110,8 @@ struct GreaterThanPtr {
 };
 
 /// @brief A frame with real corner structure rather than salt-and-pepper noise --
-/// the same generator corner_benchmark.cpp uses, so the two entries in
-/// EXPERIMENTS.md describe the same content.
+/// the same generator corner_benchmark.cpp uses, so the two measurement entries
+/// describe the same content.
 void makeFrame(uint64_t seed, bincv::BinMat<Word>& bin, cv::Mat& bytes) {
     uint64_t state = seed;
     for (int y = 0; y < kHeight; ++y) {

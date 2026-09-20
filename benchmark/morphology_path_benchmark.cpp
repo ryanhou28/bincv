@@ -4,7 +4,7 @@
 // ops/morphology.hpp does: morphRow3x3 is a second row kernel that runs when the
 // element is 3x3 and centerd. A second implementation of one function is a
 // maintenance cost forever, and this file is what says what it buys, so that a
-// Phase 5 reader deciding whether to vectorize one path or both has a number
+// reader deciding whether to vectorize one path or both has a number
 // rather than an assertion.
 //
 // IT IS ALSO A CORRECTION. The special case's docstring used to justify itself by
@@ -37,7 +37,7 @@
 // METRIC ns/pixel for both paths and the ratio, with the batch spread beside
 // it so a difference smaller than the noise reads as one.
 //
-// On x86_64 this is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms").
+// On x86_64 this is INDICATIVE ONLY -- a desktop host's spread decides nothing.
 // The authoritative run is
 //
 //./scripts/run_on_pi.sh pi4 './benchmark/morphology_path_benchmark'

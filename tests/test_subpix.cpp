@@ -123,7 +123,7 @@ void toDense(const bincv::SignedQuantMat<N, uint32_t>& d, std::vector<int>& out,
 /// An ASYMMETRIC corner: the quadrant with a short notch cut from one edge.
 ///
 /// **WHY THIS EXISTS, AND IT IS NOT THE REASON IT FIRST LOOKED LIKE.** The obvious story
-/// for F-4 is that a symmetric corner cannot see a radially symmetric mask. Measured,
+/// for the gap is that a symmetric corner cannot see a radially symmetric mask. Measured,
 /// that is FALSE: the symmetric case reports 0.0325 px with the wrong mask and 0.0035 px
 /// with the right one -- sensitive by a factor of nine. It passed because its BOUND was
 /// 0.1, fitted to the value the code produced instead of to the value a correct
@@ -328,7 +328,7 @@ BINCV_TEST(SubPix, AgreesWithOpenCVOnTheSameCorner) {
     // BOUNDS SET FROM WHAT A CORRECT IMPLEMENTATION REACHES (0.0035), NOT FROM WHAT THIS
     // CODE HAPPENS TO PRODUCE. The old bounds were 0.1 and 0.15 against a measured
     // 0.0325 -- and 0.0325 was the WRONG MASK's number. A tolerance fitted to the
-    // observation cannot fail, which is how F-4 shipped past this file.
+    // observation cannot fail, which is how the wrong mask shipped past this file.
     BINCV_CHECK(mean < 0.01);
     BINCV_CHECK(worst < 0.01);
 }
@@ -336,7 +336,7 @@ BINCV_TEST(SubPix, AgreesWithOpenCVOnTheSameCorner) {
 
 
 // ---------------------------------------------------------------------------
-// F-4 -- THE TIER 2 GAP, STATED HONESTLY
+// THE TIER 2 GAP, STATED HONESTLY
 //
 // Reported from outside: binCV's cornerSubPix disagreed with OpenCV's by 4.53 px mean on
 // real frames, while the test above reported 0.0325 px. Two causes, both now fixed -- a
