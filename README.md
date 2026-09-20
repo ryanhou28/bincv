@@ -50,8 +50,34 @@ show up in practice, and the memory one is usually the one that decides whether 
 fits on a small device.
 
 How much you gain depends on the operation, the image size, the word type, the compiler
-and the machine — so rather than quote a number here, the benchmarks are in the
-repository and report on your hardware:
+and the machine, so no single number is the answer. A few measured ones, both sides of
+each comparison, with the machine and the report they come from. Each row names its own
+unit — milliseconds, microseconds, bytes — and on every one of them the smaller number is
+the better side, so a row where binCV's cell is the larger one is a row binCV lost:
+
+<!-- figure-check values="OpenCV|binCV" source="source" -->
+| what | measured against | machine | OpenCV | binCV | source |
+|---|---|---|---|---|---|
+| whole tracking frontend, ms/frame | the OpenCV frontend | aarch64 | 23.249–23.451 | 4.906–4.949 | [frontend.md](docs/reports/frontend.md) |
+| whole tracking frontend, peak, bytes | the OpenCV frontend | x86-64 and aarch64 | 2,719,832 | 436,704 | [footprint.md](docs/reports/footprint.md) |
+| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | aarch64 | 23.476 | 2.843 | [features.md](docs/reports/features.md) |
+| dense disparity, ms/frame | `cv::StereoBM` | aarch64 | 79.8 | 60.4 | [stereo.md](docs/reports/stereo.md) |
+| dense disparity, working set | `cv::StereoBM` | x86-64 and aarch64 | ≥ 722 KB, output alone | 32.4 KB scratch, 1 B/px out | [stereo.md](docs/reports/stereo.md) |
+| dense disparity, ms/frame | `cv::cuda::StereoBM(64, 9)` | RTX 3070 Ti | 0.7152 | 0.0648 | [cuda.md](docs/reports/cuda.md) |
+| FAST, wide image, ms/call | `cv::FAST` | aarch64 | 2.906 | 3.024 | [features.md](docs/reports/features.md) |
+| `pyrDown`, 8 bits in, µs/call | `cv::pyrDown` on `CV_8U` | x86-64 | 48.3 | 2034.4 | [limits.md](docs/reports/limits.md) |
+
+aarch64 there is a Raspberry Pi 4 at a pinned clock, x86-64 a Ryzen 5 5600X desktop, and
+the GPU row an RTX 3070 Ti against OpenCV's own CUDA module. **The last two rows are
+losses**, and they are in the table for the same reason as the rest: binCV ties `cv::FAST`
+on a byte image rather than beating it, and at eight bits per pixel there is nothing left
+for bit-slicing to skip. [docs/reports/](docs/reports/README.md) has the whole set — every
+operation measured, on both architectures and the GPU, wins and losses in the same tables,
+with what each one was measured against and how.
+
+Those are one build of binCV against one build of OpenCV on one machine each. Your
+operation, image size, word type, compiler and machine will move them, so the benchmarks
+are in the repository and report on your hardware:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -100,6 +126,7 @@ names, the same role with different numerics, or no OpenCV equivalent. See
 | **Cortex-M** — microcontrollers | built and run on an STM32H753ZI (Cortex-M7): correct, and a 752×480 frame is 46 KB. Scalar only — no NEON, no popcount instruction. Only the reductions are timed so far |
 | **32-bit ARM Cortex-A** | supported target; not yet built or measured |
 | **RISC-V** | supported target; not yet built or measured |
+| **CUDA** — NVIDIA GPUs | a separate backend in [backends/cuda/](backends/cuda/), sharing the format and forking the kernels. Device-typed, never a drop-in dispatch target |
 
 Log `bincv::simdStatusString()` once at start-up — it names every vector path and says
 whether it is active.
