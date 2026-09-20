@@ -2491,6 +2491,13 @@ the exact two-sided sign-test p: 1.0 at one round, 0.5 at two, 6.1×10⁻⁵ at
 fifteen, 4.9×10⁻³² at the 105 behind these rows. The reader judges strength from
 a number on the page, and the verdict gates on nothing.
 
+That p answers *how many rounds*, and it is the only question it answers. It
+does **not** tell you whether a row scraped the direction verdict by one round —
+0–105 and 1–104 differ by two orders on a scale where both read "overwhelmingly
+one-sided" — so the **sign count** is printed beside every verdict too, and the
+measured cost of ignoring it is at the
+[end of the next section](#what-changed-when-the-rule-was-applied).
+
 **A tie breaks the direction verdict, and that is the inconvenient choice.** A
 round whose two arms time identically favours neither. Three reasons it has to
 count against a verdict that claims *every* round fell one way:
@@ -2686,18 +2693,43 @@ measurable reason these arms stay unquotable here — not an argument about the
 kernels. Shrinking it means more enqueues per round, which would move every
 number in this report and is therefore a change of its own.
 
-**One caveat that belongs with every number above: on this host the magnitude
-half of the verdict is not stable between sweeps, and the direction half is.**
-Measured directly — 137 rows are common to two independent sweeps of this branch,
-and **five of them flip RESULT↔NULL**, every one sitting within a few percent of
-its own bar: LK @256 (2.00× against 1.99× here, 2.25× against 2.80× there), the
-byte-lane packer at 1920×1080, the frontend's spacing pair, and the
-`cornerSubPix` round trip. **No row's direction verdict flipped.** LK at 204
-points is direction-established in both; every row unanimous in one sweep is
-unanimous in the other. That asymmetry is itself the argument for the ruling: on
-this machine the *sign* of these differences reproduces and their *exact size*
-does not, so a row quoted as a range says something that survives a re-run and a
-row quoted as a single factor sometimes does not.
+**One caveat belongs with every number above, and it cuts against the
+comfortable reading: on this host NEITHER half of the verdict is stable at the
+margin.** Two independent sweeps of this branch — the seven processes behind
+this section and a separate fourteen — share 146 rows. Between them **3 rows
+flip RESULT↔NULL and 7 flip direction**:
+
+| row | 14-run sweep | 7-run sweep |
+|---|---|---|
+| `goodFeaturesToTrack`, device-wide sort ladder | 151–3 | **77–0** |
+| packer byte lane vs grid-stride @1920×1080 *(two keys, one comparison)* | 2–208 | **0–105** |
+| `matcher_u8` @470×470 (does not decide) | 2–208 | **0–105** |
+| `packBits` vs `binarize` n=2 @3840×2160 (no bar) | 2–124 | **0–63** |
+| `denoise3` vs byte bar @4096×2160 | **0–210** | 1–104 |
+| `matcher_s32` @470×470 (does not decide) | **0–210** | 1–104 |
+
+**Every one of them sits within three rounds of the boundary**, which is what an
+all-or-nothing criterion must do there: one round in a hundred decides it, so a
+row at 1–104 and a row at 0–105 are the same measurement on either side of a
+knife edge. Reading a direction verdict as robust *because* it is unanimous is
+exactly the mistake this table blocks.
+
+**And the printed p does not warn you about it, which is worth saying plainly.**
+0–105 is p = 4.9×10⁻³² and 1–104 is p = 5.2×10⁻³⁰ — two orders apart on a scale
+where both mean "overwhelmingly one-sided". The p separates fifteen rounds from a
+hundred, which is what it is there for; it does **not** separate a row that just
+cleared the verdict from one that just missed it, because on that question the
+verdict is discrete and the evidence is not. A reader wanting to know whether a
+direction row is near its edge has to read the **sign count**, which is why the
+sign count is printed beside every verdict and never summarized away.
+
+**What is stable is the rows that are not near the edge.** Fifty rows are
+direction-established in both sweeps, and not one of them has a single minority
+round in either. All five LK densities the ruling moved are 0–210 in one sweep
+and 0–105 in the other: **no round has crossed in 315 paired rounds across 21
+processes.** That is the difference between unanimous-by-one-round and
+unanimous-by-three-hundred, and it is the distinction to make when quoting a
+direction row.
 
 ## How the numbers were earned
 
