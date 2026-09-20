@@ -7,6 +7,11 @@ was not measured.
 This exists because the useful question about a library like this one is not "how fast can
 it be" but "when does the idea stop working". It has four answers.
 
+Every table below reads the same way as every table in the other reports: **both sides'
+measured times, in the unit the column names, with the OpenCV arm first.** A row where
+binCV's number is the larger one is a row binCV lost, and that needs no marker — it is most
+of this page. **x86-64 and aarch64 get separate columns** and are never averaged.
+
 ## 1. At eight bits per pixel, the idea is gone
 
 binCV wins by not paying for bits it does not use. At eight bits per pixel there are none to
@@ -14,13 +19,13 @@ skip, and both sides store a byte.
 
 `pyrDown`, 640×480 → 320×240, against `cv::pyrDown` on `CV_8U` at one thread:
 
-| arm | x86 µs | vs `cv::pyrDown` | aarch64 µs | vs `cv::pyrDown` |
-|---|---|---|---|---|
-| binCV `BOX_2x2`, 1 bit in → 3 bits out (shipped) | 31.0 | **1.56×** | 93.8 | **5.56×** |
-| `cv::pyrDown`, `CV_8U` (the denominator) | 48.3 | 1.00× | 521.4 | 1.00× |
-| binCV `GAUSSIAN_5x5`, 1 → 3 | 195.4 | 0.25× | 599.0 | 0.87× |
-| binCV `BOX_2x2`, 8 → 8 | 707.6 | 0.07× | 2574.2 | 0.20× |
-| binCV `GAUSSIAN_5x5`, 8 → 8 (`cv::pyrDown`'s shape) | 2034.4 | **0.02×** | 7358.6 | **0.07×** |
+| arm | time, x86-64 (µs) | time, aarch64 (µs) | binCV against `cv::pyrDown` |
+|---|---|---|---|
+| `cv::pyrDown`, `CV_8U` (the denominator) | 48.3 | 521.4 | — |
+| **binCV `BOX_2x2`, 1 bit in → 3 bits out (shipped)** | **31.0** | **93.8** | 1.56× faster on x86-64, **5.56×** on aarch64 |
+| binCV `GAUSSIAN_5x5`, 1 → 3 | 195.4 | 599.0 | 0.25× on x86-64, `cv::pyrDown` ahead; 0.87× on aarch64, roughly a tie |
+| binCV `BOX_2x2`, 8 → 8 | 707.6 | 2574.2 | 0.07× and 0.20× — `cv::pyrDown` well ahead on both |
+| binCV `GAUSSIAN_5x5`, 8 → 8 (`cv::pyrDown`'s shape) | 2034.4 | 7358.6 | **0.02×** and **0.07×** — `cv::pyrDown` far ahead on both |
 
 An `8 → 8` call is **correct, not fast**, and it is documented that way rather than hidden.
 The structural reason is the accumulator width: a bit-sliced filter needs enough accumulator
@@ -32,29 +37,32 @@ does in one instruction. Past a certain depth that is simply the better machine.
 ## 2. The crossover is real, and it moves with the architecture
 
 The same geometry across input and output bit widths, one process per arm because the sweep
-is cache-invalid in a single one. Denominator: `cv::pyrDown` at 48.5 µs.
+is cache-invalid in a single one. `cv::pyrDown` on `CV_8U` is the first row of each table
+rather than a column of `1.00×`.
 
-| bits in → out | box filter, x86-64 | vs `cv::pyrDown` |
+| arm, x86-64 | time (µs) | binCV against `cv::pyrDown` |
 |---|---|---|
-| 1 → 3 (shipped shape) | 32.6 µs | **1.49×** |
-| 1 → 1 | 86.8 | 0.56× |
-| 2 → 2 | 63.7 | 0.76× |
-| 3 → 3 | 97.2 | 0.50× |
-| 4 → 4 | 136.0 | 0.36× |
-| 5 → 5 | 176.1 | 0.28× |
-| 8 → 8 | 701.8 | 0.07× |
+| `cv::pyrDown`, `CV_8U` (the denominator) | 48.5 | — |
+| **box filter, 1 → 3 (shipped shape)** | **32.6** | **1.49× faster** |
+| box filter, 1 → 1 | 86.8 | 0.56× — `cv::pyrDown` ahead |
+| box filter, 2 → 2 | 63.7 | 0.76× — `cv::pyrDown` ahead |
+| box filter, 3 → 3 | 97.2 | 0.50× — `cv::pyrDown` ahead |
+| box filter, 4 → 4 | 136.0 | 0.36× — `cv::pyrDown` ahead |
+| box filter, 5 → 5 | 176.1 | 0.28× — `cv::pyrDown` ahead |
+| box filter, 8 → 8 | 701.8 | 0.07× — `cv::pyrDown` far ahead |
 
-The same sweep on the reference device, against `cv::pyrDown` at 514.7 µs:
+The same sweep on the reference device:
 
-| bits in → out | box filter, aarch64 | vs `cv::pyrDown` |
+| arm, aarch64 | time (µs) | binCV against `cv::pyrDown` |
 |---|---|---|
-| 1 → 3 (shipped shape) | 275.6 µs | **1.87×** |
-| 1 → 1 | 319.8 | **1.61×** |
-| 2 → 2 | 205.1 | **2.51×** |
-| 3 → 3 | 306.5 | **1.68×** |
-| 4 → 4 | 444.2 | **1.16×** |
-| 5 → 5 | 648.1 | 0.79× |
-| 8 → 8 | 2604.4 | 0.20× |
+| `cv::pyrDown`, `CV_8U` (the denominator) | 514.7 | — |
+| **box filter, 1 → 3 (shipped shape)** | **275.6** | **1.87× faster** |
+| box filter, 1 → 1 | 319.8 | **1.61× faster** |
+| box filter, 2 → 2 | 205.1 | **2.51× faster** |
+| box filter, 3 → 3 | 306.5 | **1.68× faster** |
+| box filter, 4 → 4 | 444.2 | **1.16× faster** |
+| box filter, 5 → 5 | 648.1 | 0.79× — `cv::pyrDown` ahead |
+| box filter, 8 → 8 | 2604.4 | 0.20× — `cv::pyrDown` well ahead |
 
 **The crossover is not a property of the algorithm — it moves by several bits between the two
 machines.** On the reference device the bit-sliced box filter stays ahead of `cv::pyrDown`
@@ -73,17 +81,29 @@ Bit packing gives a `uint32_t` thirty-two pixels. An AVX2 register of bytes hold
 thirty-two pixels too. Against a mature vectorised byte kernel, packing alone buys nothing
 until the boolean algebra also moves into a vector register — and where OpenCV has already
 done that work, binCV ties or loses. Where OpenCV has done less of it, the same binCV code
-wins, which is why the two columns below disagree as often as they agree.
+wins, which is why the rows below disagree as often as they agree.
 
-| operation | x86-64 | aarch64 | what happened |
-|---|---|---|---|
-| `cv::FAST`, wide-image entry point | 1.05× | 0.96× | parity; `cv::FAST` is a mature vectorised kernel |
-| `erode`, 5×5 ellipse | **0.32×** | **0.51×** | non-separable element costs one shifted-OR per set element |
-| `erode`, `BORDER_REPLICATE` | 0.64× | 0.72× | a rim pass `BORDER_CONSTANT` does not need |
-| `erode`, `BORDER_REFLECT_101` | 0.62× | 0.71× | the same |
-| `erode`, 3×3 rect | 1.04× | 1.00× | dead heat with a vectorised byte kernel |
-| `goodFeaturesToTrack` | 0.92× | *1.45× — ahead* | seven float planes of locality binCV declines to buy |
-| `countNonZero` | 1.62× | 2.69× | both sides are bandwidth-bound; binCV moves less data, that is all |
+Both sides' times, each in the unit its row names, at 640×480 except the `cv::FAST` row
+(752×480, the wide-image entry point's own frame). The second column names the OpenCV call
+each row is measured against. Where binCV's cell is the larger number, binCV is the slower
+side:
+
+| operation | measured against | OpenCV, x86-64 | binCV, x86-64 | OpenCV, aarch64 | binCV, aarch64 | what happened |
+|---|---|---|---|---|---|---|
+| FAST, wide-image entry point | `cv::FAST` | 0.363 ms | **0.344 ms** | 2.906 ms | 3.024 ms | parity — 1.05× and 0.96×; `cv::FAST` is a mature vectorised kernel |
+| `erode`, 5×5 ellipse | `cv::erode` | 0.22759 ns/px | 0.70415 ns/px | 1.81575 ns/px | 3.58631 ns/px | binCV at 0.32× and 0.51× — a non-separable element costs one shifted-OR per set element |
+| `erode`, `BORDER_REPLICATE` | `cv::erode` | 0.09669 ns/px | 0.15217 ns/px | 0.67176 ns/px | 0.93004 ns/px | binCV at 0.64× and 0.72× — a rim pass `BORDER_CONSTANT` does not need |
+| `erode`, `BORDER_REFLECT_101` | `cv::erode` | 0.09789 ns/px | 0.15761 ns/px | 0.67158 ns/px | 0.94380 ns/px | binCV at 0.62× and 0.71× — the same |
+| `erode`, 3×3 rect | `cv::erode` | 0.10013 ns/px | **0.09605 ns/px** | 0.71993 ns/px | 0.72012 ns/px | 1.04× and 1.00× — a dead heat with a vectorised byte kernel |
+| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack`, binarized | 13.63–14.24 ns/px | 14.46–15.01 ns/px | 75.02–75.82 ns/px | **51.25–51.31 ns/px** | 0.92× on x86-64 but 1.45× ahead on aarch64 — seven float planes of locality binCV declines to buy |
+| `countNonZero` | `cv::countNonZero` | 0.01548 ns/px | **0.00956 ns/px** | 0.17116 ns/px | **0.06366 ns/px** | 1.62× and 2.69× ahead — both sides are bandwidth-bound; binCV moves less data, that is all |
+
+**Bold marks a binCV cell that beats the OpenCV cell for its architecture**; an unbolded
+binCV cell is one where OpenCV is level or ahead, and most of this table is unbolded. binCV
+is behind on the 5×5 ellipse and both non-constant borders on **both** machines, behind on
+`cv::FAST` on aarch64 and on `goodFeaturesToTrack` on x86-64, level on `erode` 3×3, and
+ahead on `countNonZero` on both. Those losses are what this page exists to show, in the same
+shape as every win in the other reports.
 
 Parity on FAST ships as parity. A caller who is holding bytes should not be told to pack
 them first, and for that caller the honest answer is that binCV costs nothing to adopt and
@@ -102,31 +122,43 @@ from identical code over identical buffers returning identical corners.
 ## 4. A footprint win is not a speed win
 
 Eight times less data does not make a compute-bound kernel faster, and Lucas–Kanade is
-compute-bound. At one level with a 31×31 window:
+compute-bound. Two sweeps at one level with a 31×31 window, binCV against itself — no
+OpenCV arm, so no ratio.
 
-| points | x86 µs/point | aarch64 µs/point | | frame | KB at 1 bit | x86 | aarch64 |
-|---|---|---|---|---|---|---|---|
-| 35 | 5.75 | 24.22 | | 320×240 | 9.4 | 4.82 | 25.67 |
-| 140 | 4.18 | 23.30 | | 640×480 | 37.5 | 4.41 | 23.31 |
-| 560 | 4.61 | 24.62 | | 1280×960 | 150.0 | 4.76 | 27.24 |
-| 1160 | 4.85 | 25.55 | | 1920×1440 | 337.5 | 5.42 | 26.99 |
+**The frame-size sweep is the one that isolates the question.** The point count is fixed at
+140, so the compute is identical and only the data grows:
 
-The right column is the one that isolates the question: the point count is fixed at 140, so
-the compute is identical and only the frame grows. Thirty-six times more data moves the
-per-point cost by 12% on x86 and 5% on the device — and the device has a 1 MiB shared L2,
-which is where a residency effect would show most clearly if there were one. A 31×31 window
-is 120 bytes at one bit per pixel, two to four cache lines, and it would be two to four cache
-lines as bytes too.
+| frame | input, KB at 1 bit | time, x86-64 (µs/point) | time, aarch64 (µs/point) |
+|---|---|---|---|
+| 320×240 | 9.4 | 4.82 | 25.67 |
+| 640×480 | 37.5 | 4.41 | 23.31 |
+| 1280×960 | 150.0 | 4.76 | 27.24 |
+| 1920×1440 | 337.5 | 5.42 | 26.99 |
 
-The left column varies the compute as well as the data, so it is not evidence either way; it
-is here because a per-point cost that stayed flat across a 33-fold change in point count is
-worth seeing.
+Thirty-six times more data moves the per-point cost by 12% on x86 and 5% on the device — and
+the device has a 1 MiB shared L2, which is where a residency effect would show most clearly
+if there were one. A 31×31 window is 120 bytes at one bit per pixel, two to four cache
+lines, and it would be two to four cache lines as bytes too.
+
+**The point-count sweep varies the compute as well as the data**, so it is not evidence
+either way. It is here because a per-point cost that stayed flat across a 33-fold change in
+point count is worth seeing:
+
+| points | time, x86-64 (µs/point) | time, aarch64 (µs/point) |
+|---|---|---|
+| 35 | 5.75 | 24.22 |
+| 140 | 4.18 | 23.30 |
+| 560 | 4.61 | 24.62 |
+| 1160 | 4.85 | 25.55 |
 
 **The memory result and the speed result are independent here.** The footprint decides what
 fits on a device; it does not make this kernel fast, and further speed has to come from doing
 less work rather than from touching less data.
 
 ## The algorithm caps the packing advantage
+
+This section is instruction density rather than a timing: the figures come from the word and
+lane widths the two sides actually use, not from a benchmark.
 
 binCV's real rate inside Lucas–Kanade is 31 pixels per operation, because a 31-pixel window
 occupies one `uint32_t` word and the thirty-second bit is wasted — 97% utilisation, which is
@@ -140,13 +172,16 @@ matching the word to the window, and there is no more of it to have at this wind
 ## The vector arms, and proving they are on
 
 Every vector arm is switchable off, which is the only way to know a measurement is of the
-path it claims. On x86 the eight-keypoint AVX2 batch in the tracker, toggled at run time in
-the same binary over 400 frames:
+path it claims. On x86-64 the eight-keypoint AVX2 batch in the tracker, toggled at run time
+in the same binary over 400 frames. **The two runs are two repeats of the same measurement
+on the same machine, not two architectures**, so they get a column each:
 
-| | tracking, ms/frame | frontend, ms/frame | vs OpenCV |
-|---|---|---|---|
-| `BINCV_LK_BATCH=0` | 1.363 / 1.407 | 1.782 / 1.804 | 2.30× / 2.34× |
-| `BINCV_LK_BATCH=1` | 0.820 / 0.747 | 1.201 / 1.120 | **3.51× / 3.56×** |
+| arm | run | binCV tracking, ms/frame | binCV frontend, ms/frame | OpenCV frontend, ms/frame | binCV against OpenCV |
+|---|---|---|---|---|---|
+| `BINCV_LK_BATCH=0` | 1 | 1.363 | 1.782 | 4.090 | 2.30× faster |
+| `BINCV_LK_BATCH=0` | 2 | 1.407 | 1.804 | 4.222 | 2.34× faster |
+| **`BINCV_LK_BATCH=1`** | 1 | **0.820** | **1.201** | 4.221 | **3.51× faster** |
+| **`BINCV_LK_BATCH=1`** | 2 | **0.747** | **1.120** | 3.991 | **3.56× faster** |
 
 The batch is worth 1.66–1.88× on tracking and takes the whole frontend from about 2.3× to
 about 3.5×. It is bit-exact with the scalar path.
@@ -168,10 +203,11 @@ Nothing in these reports says anything about them.
 
 **Cortex-M has now been built and partly measured, and none of it is in these reports.**
 binCV runs on an STM32H753ZI (Cortex-M7): the reductions are bit-exact against the
-library's own entry point, a 752×480 frame occupies 46,080 bytes, and the tracker's staging
-buffers measure 4,120 bytes at N = 2 against that board's 16 KB stack — so the constraint
-this section expected to bite did not. What does **not** exist for that part is any
-OpenCV comparison, any frontend or tracker timing, and any figure at the part's full clock;
+library's own entry point, a 752×480 frame occupies 46,080 bytes where a `CV_8U` one would
+occupy 360,960, and the tracker's staging buffers measure 4,120 bytes at N = 2 against that
+board's 16 KB stack — so the constraint this section expected to bite did not. What does
+**not** exist for that part is any OpenCV comparison, any frontend or tracker timing, and
+any figure at the part's full clock;
 the one operation timed there ran at the reset default of 64 MHz. `stagingStackBytes<N, W>()`
 gives the exact stack figure for a configuration, and the build-time budget fails
 compilation rather than overflowing at run time.

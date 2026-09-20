@@ -36,10 +36,10 @@ automatically, by an amount that has nothing to do with how much memory it uses.
 Two implementations of identical work, each using 256 KiB of scratch, differing *only* in
 storage class, measured here:
 
-| implementation | heap-only instrument | stack instrument |
+| implementation | heap-only instrument, bytes | stack instrument, bytes |
 |---|---|---|
-| scratch from `malloc` | 262,144 B | 7,784 B |
-| scratch on the stack | **4,096 B** | **262,456 B** |
+| scratch from `malloc` | 262,144 | 7,784 |
+| scratch on the stack | 4,096 | 262,456 |
 
 A heap-only instrument reports the stack version as **64× leaner while it uses exactly the
 same memory**. This is not a subtle bias; it is the entire result.
@@ -79,13 +79,26 @@ short.
 **4. A replaced `operator new` cannot see OpenCV.** `cv::Mat` allocates through
 `cv::fastMalloc`, which calls `malloc` directly, so a replaced `operator new` never
 observes the matrix data — the largest blocks in the call. Measured both ways in one
-process, `cv::findEssentialMat` on 1,000 correspondences reports **2,744 B through
-`operator new` and 46,968 B through `malloc`**: an under-count of 17×.
+process on `cv::findEssentialMat` at 1,000 correspondences:
+
+| instrument | OpenCV peak live heap, bytes |
+|---|---|
+| replaced `operator new` | 2,744 |
+| interposed `malloc` | 46,968 |
+
+An under-count of 17×, entirely on OpenCV's side of the comparison.
 
 The tell was visible in the published table and went unread: the `operator new` figure was
 a flat 2,744 B at 200, 500 and 1,000 correspondences. A solver's working set does not stay
-constant as its input quadruples. Measured at the allocator it grows 16,568 → 28,024 →
-46,968 → 84,952 B across 200 → 2,000 points, about 38 B per correspondence.
+constant as its input quadruples. Measured at the allocator it moves with the input, at
+about 38 B per correspondence:
+
+| correspondences | OpenCV peak live heap, bytes |
+|---|---|
+| 200 | 16,568 |
+| 500 | 28,024 |
+| 1,000 | 46,968 |
+| 2,000 | 84,952 |
 
 Errors 1 and 2 ran in opposite directions; 4 ran against binCV. Being wrong in your own
 favour is the one that gets published, but the discipline is the same either way.
@@ -125,9 +138,16 @@ partly written must still be reserved. Stack painting and watermarking — the u
 embedded techniques — scan for bytes that changed and so report the smaller quantity;
 they would understate this one.
 
-The probe recovers two known answers first, workloads consuming 4,096 B and 16,384 B. It
-reads them as 4,112 B and 16,400 B — one bisection quantum high, which is the expected
-bias. If it misses them the run fails and prints nothing.
+The probe recovers two known answers first, and the point of a calibration is that both
+sides of it are visible:
+
+| workload | stack it actually uses, bytes | what the probe reads, bytes |
+|---|---|---|
+| known small frame | 4,096 | 4,112 |
+| known large frame | 16,384 | 16,400 |
+
+One bisection quantum high in both cases, which is the expected bias. If the probe misses
+them the run fails and prints nothing.
 
 `PTHREAD_STACK_MIN` is 16 KiB and binCV's whole call fits under it, so bisecting the stack
 *size* cannot resolve binCV at all. The probe fixes a generous stack and bisects the
@@ -137,9 +157,9 @@ the difference in what they used. Every figure is net of an empty-workload basel
 
 ### Rejected for stack: Valgrind Massif `--stacks=yes`
 
-Tried, and it fails the calibration above. It reported binCV's whole call using **less**
-stack than an empty workload — 8,216 B against 10,088 B — which is impossible, and it
-still did so with snapshot counts between 766 and 980.
+Tried, and it fails the calibration above. It reported binCV's whole call at **8,216 B**
+against an empty workload's **10,088 B** — the call using less stack than doing nothing,
+which is impossible, and it still did so with snapshot counts between 766 and 980.
 
 The mechanism is worth stating precisely, because it is not that Massif's tracking is
 imprecise. Massif hooks Valgrind's `new_mem_stack` / `die_mem_stack`, which fire on every
@@ -199,9 +219,9 @@ margin.
 **A guard page catches a stack pointer that walks into it, not one that steps over it.**
 A large frame that is reserved and left mostly unwritten is where this technique can
 under-read, so the benchmark measures that case directly — and **the two architectures
-differ**. A 65,536 B frame with only its shallow end written reads as 65,536 B on x86-64
-and as **16 B on aarch64**, where the stack pointer clears the guard page in one step and
-nothing faults. The diagnostic row prints `UNDER-READ` when that happens, which is how
+differ**. A 65,536 B frame with only its shallow end written reads back as **65,536 B on x86-64 and
+16 B on aarch64**, where the stack pointer clears the guard page in one step and nothing
+faults. The diagnostic row prints `UNDER-READ` when that happens, which is how
 this was found.
 
 It does not affect the figures reported here, and that is checked rather than assumed:
@@ -213,8 +233,8 @@ It does not affect the figures reported here, and that is checked rather than as
 - Cross-checked against the compiler on the device. Every frame in the five-point call
   graph is `static`, so `-fstack-usage` gives a real bound rather than an estimate:
   `fivePointEssential` is 5,120 B and the deepest call path sums to about 6,432 B. The
-  probe reads 6,928 B — *above* the static bound, which is the safe direction and is what
-  rules out a skipped frame.
+  probe reads 6,928 B against that 6,432 B bound — *above* it, which is the safe direction
+  and is what rules out a skipped frame.
 
 ```bash
 # on the device, from the repository root

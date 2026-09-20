@@ -12,15 +12,22 @@ operation in these reports to lead its role bar on speed and memory at once.
 
 ## Summary
 
-752×480, 64 disparities, 9×9 aggregation, one thread. StereoBM at its default
-`blockSize 21`, the strongest configuration measured for it here.
+752×480 · 64 disparities · 9×9 aggregation · one thread on both sides · `cv::StereoBM` at
+its default `blockSize 21`, the strongest configuration measured for it here.
 
-| | x86-64 | aarch64 | working set |
+Time is milliseconds per frame and working set is bytes held live, so the smaller number is
+the better one in every column. **x86-64 and aarch64 are separate columns and are never
+averaged** — different OpenCV builds on different machines.
+
+| arm | time, x86-64 (ms) | time, aarch64 (ms) | working set |
 |---|---|---|---|
-| `denseDisparityBinary` (packed frames in) | **~12.0 ms** | **60.4 ms** | **32.4 KB scratch** + 1 B/px out |
-| `denseDisparity` (census 5×5, wide frames in) | ~200 ms | 462 ms | 95.9 KB scratch + 1 B/px out |
-| `cv::StereoBM` | ~14.7 ms | 79.8 ms | ≥ 722 KB output alone (2 B/px) |
-| binary path vs StereoBM | **~1.2×** | **1.32×** | **~22× smaller** |
+| `cv::StereoBM` | ~14.7 | 79.8 | ≥ 722 KB, its output alone (2 B/px) |
+| **`denseDisparityBinary`** (packed frames in) | **~12.0** | **60.4** | **32.4 KB scratch** + 1 B/px out |
+| `denseDisparity` (census 5×5, wide frames in) | ~200 | 462 | 95.9 KB scratch + 1 B/px out |
+
+The binary path is **~1.2× faster than `cv::StereoBM` on x86-64 and 1.32× on aarch64**, in
+**~22× less working set**. The census row loses on speed and is in the table for that
+reason rather than in spite of it.
 
 x86-64 figures are floors of interleaved runs on a host with 20–100% spreads and are
 claimed only at this granularity; aarch64 figures are pinned-clock, 0–1% spread. The
@@ -31,9 +38,10 @@ rather than averaged away. The binary path is the operating point a binCV pipeli
 ## What the number is made of
 
 The path was built and priced in stages, each committed with its measurement
-(reference device, pinned clock):
+(reference device, pinned clock). This is binCV against its own earlier arms, so there is
+no OpenCV column — the column is one number per stage and the smaller it gets, the better:
 
-| stage | ms/frame |
+| stage | time, aarch64 (ms/frame) |
 |---|---|
 | census v1 (per-pixel, the shape that prompted the rebuild) | 1842 |
 | census v2, sliding vertical accumulator | 489 |
@@ -62,10 +70,18 @@ pre-registered rule: [targets/stm32h753/README.md](../../targets/stm32h753/READM
 ## Memory
 
 The refused allocation is the point: a dense cost volume at this configuration is
-23 MB. The kernel streams — a band of rows and one accumulator ring per disparity —
-so peak scratch is 32.4 KB (binary path) against StereoBM's ≥ 722 KB for its output
-alone, before its internal buffers, which `methodology-memory.md`'s tooling cannot
-observe from outside. Both paths write 1 byte per pixel out.
+23 MB. The kernel streams — a band of rows and one accumulator ring per disparity — so
+the two sides read:
+
+| | working set | what it is |
+|---|---|---|
+| `cv::StereoBM` | ≥ 722 KB | its output buffer alone, before its internal buffers |
+| **`denseDisparityBinary`** | **32.4 KB** | streaming scratch — a row band and one accumulator ring per disparity |
+
+Both paths write 1 byte per pixel out on top of that. StereoBM's figure is a **lower
+bound**: its internal buffers are not observable from outside with the tooling
+[methodology-memory.md](methodology-memory.md) describes, so binCV's ~22× lead is a lower
+bound too.
 
 ## Reproduce
 

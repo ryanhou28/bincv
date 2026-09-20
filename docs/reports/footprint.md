@@ -15,11 +15,12 @@ For how the counting works and why it is arithmetic rather than a sampled RSS, s
 Peak working set over the whole frontend operation set — two pyramids, the derivative
 ladders, and whatever the corner stage holds:
 
-| | bytes | what it is |
+| | peak working set, bytes | what it is holding |
 |---|---|---|
-| binCV | **436,704** | `1/2/2/2` pyramid ×2, derivative ladders, 3-row response ring |
-| OpenCV | **2,719,832** | `CV_8U` pyramid ×2 with a 31-pixel border per level, `CV_32F` eigen map |
-| | **6.23× smaller** | |
+| OpenCV | 2,719,832 | `CV_8U` pyramid ×2 with a 31-pixel border per level, `CV_32F` eigen map |
+| **binCV** | **436,704** | `1/2/2/2` pyramid ×2, derivative ladders, 3-row response ring |
+
+binCV holds **6.23× less**, on both architectures, for the same work.
 
 Most of that is structural rather than won by packing. binCV carries **no `winSize` border**
 on any pyramid level, and **no frame-sized float response map**. Those two decisions are
@@ -41,14 +42,14 @@ worth more than the eight-to-one storage ratio is:
 Working set of one call — the live buffers, not a per-buffer ratio — at 640×480, `uint32_t`
 words, against the same binary content stored as `CV_8U`:
 
-| operation | binCV | OpenCV | smaller by |
-|---|---|---|---|
-| `erode` / `dilate`, 3×3 | 76,800 B | 614,400 B | **8.00×** |
-| `morphologyEx(MORPH_OPEN)` | 115,200 B | 614,400 B | **5.33×** |
-| denoise, three-pixel median | 76,800 B | 2,150,400 B | **28.0×** |
-| spatial derivative, both axes | 192,000 B | 1,536,000 B | **8.00×** |
-| `goodFeaturesToTrack` | 1,580,064 B | 9,014,976 B | **5.71×** |
-| FAST input plane | 46,080 B | 360,960 B | **7.83×** |
+| operation | measured against | OpenCV, bytes | binCV, bytes | binCV against OpenCV |
+|---|---|---|---|---|
+| `erode` / `dilate`, 3×3 | `cv::erode` / `cv::dilate` | 614,400 | **76,800** | **8.00× smaller** |
+| `morphologyEx(MORPH_OPEN)` | `cv::morphologyEx` | 614,400 | **115,200** | **5.33× smaller** |
+| denoise, three-pixel median | composed `cv::min` / `cv::max` | 2,150,400 | **76,800** | **28.0× smaller** |
+| spatial derivative, both axes | `cv::filter2D` ×2 | 1,536,000 | **192,000** | **8.00× smaller** |
+| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack`, binarized | 9,014,976 | **1,580,064** | **5.71× smaller** |
+| FAST input plane | `cv::FAST` on `CV_8U` | 360,960 | **46,080** | **7.83× smaller** |
 
 Four of those deserve the qualification they carry.
 
@@ -90,16 +91,16 @@ composition, not the bit width.
 ## The pyramid
 
 A four-level pyramid at 640×480, with each level capped at the bit depth its arithmetic can
-actually reach. The `vs 8U` column is a **computed** byte-per-pixel-per-level denominator,
-not a timed OpenCV run:
+actually reach. The `CV_8U` column is a **computed** byte-per-pixel-per-level denominator —
+408,000 bytes for four levels at this geometry — and not a timed OpenCV run:
 
-| ladder | bits per level | bytes | vs `CV_8U` |
-|---|---|---|---|
-| uncapped | 1/3/5/7 | 84,240 | 4.84× |
-| reference-shaped | 1/3/4/5 | 80,400 | 5.07× |
-| | 1/3/3/3 | 76,560 | 5.33× |
-| **shipped** | **1/2/2/2** | **63,840** | **6.39×** |
-| re-binarized | 1/1/1/1 | 51,120 | 7.98× |
+| ladder | bits per level | `CV_8U` pyramid, bytes | binCV, bytes | binCV against `CV_8U` |
+|---|---|---|---|---|
+| uncapped | 1/3/5/7 | 408,000 | 84,240 | 4.84× smaller |
+| reference-shaped | 1/3/4/5 | 408,000 | 80,400 | 5.07× smaller |
+| | 1/3/3/3 | 408,000 | 76,560 | 5.33× smaller |
+| **shipped** | **1/2/2/2** | 408,000 | **63,840** | **6.39× smaller** |
+| re-binarized | 1/1/1/1 | 408,000 | 51,120 | 7.98× smaller |
 
 The useful finding here is how *little* room there is. Level 0 is 38,400 of those bytes and
 no cap touches it, so the entire range from uncapped to re-binarized spans 1.65× — against
@@ -119,8 +120,8 @@ so the footprint advantage decides what fits on a device and not how fast it run
 speed there has to come from doing less work, not from touching less data.
 
 **Threading is free in memory.** Peak resident set size across one, four and twelve tracking
-threads is 29,180 / 29,164 / 29,156 KB — a 0.08% spread, and it moves *downward*, so the
-whole range is noise. Tracking splits over keypoints, each thread writes only its own
+threads is 29,180 KB, 29,164 KB and 29,156 KB — a 0.08% spread, and it moves *downward*, so
+the whole range is noise. Tracking splits over keypoints, each thread writes only its own
 outputs, and the only per-thread cost is stack.
 
 This row is a sampled RSS rather than a computed working set, because thread stacks are
@@ -133,33 +134,57 @@ own peak. As a bound it is enough: nothing grows.
 The project's rule is that when speed and footprint conflict and nothing else settles it,
 footprint wins. That rule has fired, and these are the bills:
 
-| decision | speed offered | footprint cost | outcome |
+Speed and memory are separate columns, each carrying what was actually measured. A cell
+holding one number is a figure whose other side did not survive, and it says so.
+
+| decision | speed | memory | outcome |
 |---|---|---|---|
-| `uint64_t` as the default word type | **1.95×** on `countNonZero` | +20% at 160×120, +33% at 94×60 | **declined** |
-| an occupancy mask for spacing detections | *slower* — 23.7× at the operating point | 38,400 B | **declined twice over** |
-| fused morphology kernel | costs up to 3.1× on a 5×5 ellipse | 8× smaller | **accepted, and it costs** |
-| interleaved bit-plane layout † | +8% on the frontend | +21% of the frontend peak | **declined** |
+| `uint64_t` as the default word type | 1.95× faster on `countNonZero` at 640×480, aarch64 — **ratio only** | 2,880 B against `uint32_t`'s 2,400 at 160×120 and 960 against 720 at 94×60 — 20% and 33% more | **declined** |
+| an occupancy mask for spacing detections | 76,940 ns against the direct test's 3,240 on x86-64 — **the mask is 23.7× slower** | 38,400 B against the direct test's 0 | **declined twice over** |
+| fused morphology kernel | 0.70415 ns/pixel against `cv::erode`'s 0.22759 on a 5×5 ellipse, x86-64 — binCV at 0.32× | 76,800 B against `cv::erode`'s 614,400 — 8× smaller | **accepted, and it costs** |
+| interleaved bit-plane layout † | +8% on the frontend — **not reproducible** | +92,160 B on a 436,704-byte peak, +21% — **not reproducible** | **declined** |
+
+The morphology row's speed cost has also been quoted on this page as "up to 3.1× on a 5×5
+ellipse". That is the same measurement written the other way up:
+[primitives.md](primitives.md#morphology) publishes it as binCV at 0.32×, against the pair
+of times in the cell above.
 
 The word-type row is the canonical one. `uint64_t` is genuinely 1.95× faster on
 `countNonZero` at 640×480 on the reference device, and it was turned down, because a wider
 word rounds each row's stride up more coarsely and the upper pyramid levels are exactly where
 a small target is tightest. The wider word costs +20% at 160×120 and +33% at 94×60, measured
-by exact stride arithmetic.
+by exact stride arithmetic. **The 1.95× is the one figure in this table with no measured
+pair behind it in the repository**: the linked word-width log times the same comparison at
+1.914×, so restating the row from it would move a published figure. The ratio stands as
+published and the row is owed a re-measurement.
 
 **A 64-bit caller loses nothing for that choice.** On little-endian a 64-bit bit-plane already
 *is* a 32-bit bit-plane at twice the stride, so it is reinterpreted rather than converted — no
-copy, no allocation. Measured on `edgeThreshold` at 640×480, a narrowed view runs at 1.00× of
-a native 32-bit buffer on the reference device and 0.97× on x86, with 0 of 307,200 pixels
-differing. The same buffer taken down the scalar fallback instead runs at 0.12× and 0.02×,
-which is what the narrowing exists to avoid.
+copy, no allocation. Measured on `edgeThreshold` at 640×480, against a native 32-bit buffer
+as the baseline, with 0 of 307,200 pixels differing:
+
+| arm | time, x86-64 (ns) | time, aarch64 (ns) |
+|---|---|---|
+| native `uint32_t` buffer | 21,310 | 259,108 |
+| `uint64_t` buffer, narrowed view | 22,070 | 259,182 |
+| `uint64_t` buffer, scalar fallback | 958,683 | 2,162,550 |
+
+The narrowed view is within a per cent of the native buffer — 0.97× on x86-64 and 1.00× on
+the reference device. The same buffer taken down the scalar fallback instead runs at 0.02×
+and 0.12×, which is what the narrowing exists to avoid.
 
 The occupancy-mask row is the easiest of them, because the mask lost on both axes at once.
-Spacing new detections against live tracks by marking a 1-bit occupancy frame costs 38,400
-bytes, and at the benchmark's stated operating point — 120 live tracks, 300 candidates, 80
-free slots — testing each candidate against the live set directly is **23.7× faster**. The
-mask only catches up past about 5,000 candidates, an order of magnitude more than a detection
-top-up produces. The rule required the mask to be faster to justify its bytes; it was not
-close.
+At the benchmark's stated operating point — 120 live tracks, 300 candidates, 80 free slots,
+on x86-64 — the two arms read:
+
+| arm | time (ns) | memory (bytes) |
+|---|---|---|
+| **testing each candidate against the live set directly** | **3,240** | **0** |
+| marking a 1-bit occupancy frame | 76,940 | 38,400 |
+
+The direct test is **23.7× faster and allocates nothing**. The mask only catches up past
+about 5,000 candidates, an order of magnitude more than a detection top-up produces. The
+rule required the mask to be faster to justify its bytes; it was not close.
 
 **† The interleaved-layout row is the one figure on this page that cannot be re-run from a
 committed benchmark.** It was measured with a one-off probe that is not part of the

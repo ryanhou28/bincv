@@ -39,26 +39,29 @@ iterations maximum · `uint32_t` words · **one thread on each side** · Release
 binCV's vector paths are live on both architectures and OpenCV's are too — AVX2 against
 AVX2 on x86, NEON against NEON on the device. The run prints both.
 
-## Speed and memory
+**x86-64 and aarch64 are kept apart everywhere on this page**, in separate rows or separate
+columns. They are different measurements against different OpenCV builds on different
+machines, and they are never averaged or quoted as one another.
 
-| | binCV | OpenCV | ratio |
-|---|---|---|---|
-| **x86-64**, ms/frame | 1.134–1.283 | 3.841–4.485 | **3.30×** (conservative of five runs) |
-| **aarch64**, ms/frame | 4.906–4.949 | 23.249–23.451 | **4.73×** (conservative of three runs) |
+## Speed
 
-Re-verified after the corner-sweep and census optimizations landed: 6.17 vs 29.3 ms/frame
-on the same device and sequence at 120 frames — **4.76×**, unchanged within spread. The
-detect stage itself runs 12% faster (0.336 → 0.295 ms/frame), but at this sequence's 1.7%
-re-detection duty cycle that amortizes to under 1% of the whole frontend — the duty-cycle
-dependence issue #7 records. A re-detect-heavy configuration sees the full detect win.
-(The absolute ms/frame differ from the table's because the runs differ in frame count and
-warm-up; the ratio is the claim, and it held.)
-| **peak working set**, bytes | 436,704 | 2,719,832 | **6.23× smaller** |
-
-The footprint figure is computed from buffer geometry and is identical on both
-architectures. The speed figures are not comparable across the two rows: they are different
-OpenCV builds on different machines, and the reference device is the one that carries a
+Milliseconds per frame over the whole sequence, so the smaller number is the faster
+frontend. The two machines are separate rows and are never averaged: they are different
+OpenCV builds on different hardware, and the reference device is the one that carries a
 deployment claim.
+
+| machine | OpenCV, ms/frame | binCV, ms/frame | binCV against OpenCV |
+|---|---|---|---|
+| **x86-64** | 3.841–4.485 | **1.134–1.283** | **3.30× faster** (conservative of five runs) |
+| **aarch64** | 23.249–23.451 | **4.906–4.949** | **4.73× faster** (conservative of three runs) |
+
+Re-verified on aarch64 after the corner-sweep and census optimizations landed: binCV 6.17
+ms/frame against OpenCV's 29.3 on the same device and sequence at 120 frames — **4.76×**,
+unchanged within spread. The detect stage itself runs 12% faster (0.336 → 0.295 ms/frame),
+but at this sequence's 1.7% re-detection duty cycle that amortizes to under 1% of the whole
+frontend — the duty-cycle dependence issue #7 records. A re-detect-heavy configuration sees
+the full detect win. (The absolute ms/frame differ from the table's because the runs differ
+in frame count and warm-up; the ratio is the claim, and it held.)
 
 Five x86 runs span 3.30× to 3.50×, and almost all of that spread is OpenCV's: binCV's own
 time moves 1.134 to 1.283 ms while OpenCV's moves 3.841 to 4.485. Three device runs span
@@ -69,12 +72,26 @@ conservative figure is quoted on both.
 **The reference device is where binCV does better, and that is the point.** It is the
 deployment-class part, and the gap is larger there than on the desktop.
 
+## Memory
+
+Peak working set in bytes, so the smaller number is the lighter frontend. It is computed
+from buffer geometry and is **identical on both architectures**, which is why it is one row
+rather than two.
+
+| | OpenCV | binCV | binCV against OpenCV |
+|---|---|---|---|
+| peak working set, bytes | 2,719,832 | **436,704** | **6.23× smaller** |
+
+The itemization — what each side is holding live and why — is in
+[footprint.md](footprint.md).
+
 ## Where the time goes
 
 binCV's own stages, at the duty cycle the benchmark actually runs (82 re-detections in 1709
-frames, 4.8%):
+frames, 4.8%). This is binCV against itself, so there is no OpenCV column and no ratio —
+the shares are of each machine's own frontend total:
 
-| stage | x86 ms/frame | share | aarch64 ms/frame | share |
+| stage | time, x86-64 (ms/frame) | share of the x86-64 frontend | time, aarch64 (ms/frame) | share of the aarch64 frontend |
 |---|---|---|---|---|
 | track (Lucas–Kanade) | 0.799 | 62.3% | 3.307 | 66.8% |
 | build (pyramid + derivatives) | 0.297 | 23.2% | 1.072 | 21.7% |
@@ -98,14 +115,24 @@ architecture-specific.
 The claim is that the tracking is *equivalent*, not that it is identical — the numerics
 differ, so this is a Tier 2 comparison.
 
+How far binCV's flow vectors sit from OpenCV's on the same frames — one distribution, not
+two sides, so the smaller number is the closer agreement:
+
 | | x86-64 | aarch64 |
 |---|---|---|
-| flow difference, median | **0.0437 px** | **0.0434 px** |
-| p90 / p99 / max | 0.1614 / 22.49 / 213.8 px | 0.1614 / 22.49 / 213.8 px |
-| agreeing within 1 px | **95.6%** | **95.4%** |
-| median track lifetime, binCV vs OpenCV | 11 vs 12 frames | 11 vs 12 frames |
-| per-frame survival, binCV vs OpenCV | 96.4% vs 96.6% | 96.4% vs 96.6% |
-| tracks observed, binCV vs OpenCV | 10,279 vs 10,108 | 10,279 vs 10,129 |
+| flow difference, median (px) | **0.0437** | **0.0434** |
+| flow difference, p90 (px) | 0.1614 | 0.1614 |
+| flow difference, p99 (px) | 22.49 | 22.49 |
+| flow difference, max (px) | 213.8 | 213.8 |
+| flow vectors agreeing within 1 px | **95.6%** | **95.4%** |
+
+What each tracker did with those vectors over the sequence, side by side:
+
+| | binCV, x86-64 | OpenCV, x86-64 | binCV, aarch64 | OpenCV, aarch64 |
+|---|---|---|---|---|
+| median track lifetime, frames | 11 | 12 | 11 | 12 |
+| per-frame survival | 96.4% | 96.6% | 96.4% | 96.6% |
+| tracks observed | 10,279 | 10,108 | 10,279 | 10,129 |
 
 The two architectures agree to within 0.2 points on every accuracy figure, which is the
 expected result — the kernels are bit-exact across them, and the small residual differences
@@ -139,11 +166,11 @@ caller installs a threading backend; OpenCV is not. Both scale, and OpenCV scale
 the lead narrows as threads are added (x86-64, unpinned — a threading arm cannot be measured
 under `taskset`):
 
-| threads, each side | binCV ms/frame | OpenCV ms/frame | ratio |
+| threads, each side | OpenCV, ms/frame | binCV, ms/frame | binCV against OpenCV |
 |---|---|---|---|
-| 1 | 1.172 | 3.944 | **3.36×** |
-| 2 | 0.942 | 2.832 | **3.01×** |
-| 4 | 0.940 | 2.407 | **2.56×** |
+| 1 | 3.944 | **1.172** | **3.36× faster** |
+| 2 | 2.832 | **0.942** | **3.01× faster** |
+| 4 | 2.407 | **0.940** | **2.56× faster** |
 
 binCV barely improves past two threads because only tracking splits over keypoints; the
 sensor stage, pyramid build and derivatives stay serial and are an increasing share of what
