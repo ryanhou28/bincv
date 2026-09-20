@@ -31,9 +31,11 @@
 //     documents for the host, and a GPU under WSL2 has more of it, not less.
 //     timeKernelPaired brackets BOTH arms inside every round and alternates
 //     their order round to round, so a drift moves both arms' samples together.
-//     It reports each arm's own median AND the per-round RATIO distribution,
-//     because a ratio whose two sample ranges overlap is not a result -- the
-//     printer says which it is rather than leaving it to the reader.
+//     Each round then yields one PAIRED observation of the ratio, which is a
+//     better dataset than a pair of separately-measured medians. What is done
+//     with those observations -- median, geometric mean, range, sign count,
+//     and the difference-against-spread rule that decides -- lives in
+//     paired_stats.hpp, next to the argument for each.
 //
 //   * THE NAMED MEMORY REPORTER -- DeviceMemMeter and the printMemory* family.
 //     Three meters answer three different questions and they do not mix
@@ -57,29 +59,12 @@
 
 #include <cuda_runtime.h>
 
+// Timing, summarize, PairedTiming and the rule that decides a paired ratio.
+// They are next door rather than here because they need no CUDA, which is what
+// lets a test check them against hand-computed values on any machine.
+#include "paired_stats.hpp"
+
 namespace cudabench {
-
-struct Timing {
-    double minMs = 0.0;
-    double medianMs = 0.0;
-    double maxMs = 0.0;
-    double spreadPct() const {
-        return medianMs > 0.0 ? (maxMs - minMs) / medianMs * 100.0 : 0.0;
-    }
-};
-
-/// @brief min / median / max of a sample set, sorted in place.
-inline Timing summarize(std::vector<double> samples) {
-    std::sort(samples.begin(), samples.end());
-    Timing t;
-    if (samples.empty()) return t;
-    t.minMs = samples.front();
-    t.maxMs = samples.back();
-    const size_t m = samples.size();
-    t.medianMs = (m % 2 == 1) ? samples[m / 2]
-                              : 0.5 * (samples[m / 2 - 1] + samples[m / 2]);
-    return t;
-}
 
 /// @brief Times `body` (which ENQUEUES device work on the default stream) with
 /// CUDA events: per batch, one event pair brackets `iters` enqueues.
@@ -126,25 +111,6 @@ inline Timing timeKernel(const std::function<void()>& body, int iters = 20,
 // The interleaved two-arm timer
 // ---------------------------------------------------------------------------
 
-/// @brief Two arms measured against each other, plus the ratio's own scatter.
-/// @note `ratio*` are the distribution of B/A computed WITHIN each round, not
-/// a ratio of the two medians. The distinction is the whole point: a
-/// per-round ratio cancels drift that moved both arms, whereas a ratio of
-/// separately-measured medians carries the drift between them.
-struct PairedTiming {
-    Timing a;                  ///< arm A, its own min/median/max
-    Timing b;                  ///< arm B, same
-    double ratioMin = 0.0;     ///< smallest per-round B/A
-    double ratioMedian = 0.0;  ///< median per-round B/A -- the value to quote
-    double ratioMax = 0.0;     ///< largest per-round B/A
-    int rounds = 0;
-
-    /// @brief Whether the two arms' sample RANGES are disjoint. When they are
-    /// not, the arms are not distinguishable at this sample size and the
-    /// ratio is not a result, however far from 1.00x its median sits.
-    bool separated() const { return a.maxMs < b.minMs || b.maxMs < a.minMs; }
-};
-
 /// @brief Times two enqueueing arms with both bracketed inside every round.
 /// @param bodyA,bodyB The arms. Each ENQUEUES on the default stream.
 /// @param itersA,itersB Enqueues per batch, per arm. They are separate because
@@ -186,10 +152,12 @@ inline PairedTiming timeKernelPaired(const std::function<void()>& bodyA,
     for (int i = 0; i < itersB; ++i) bodyB();
     cudaDeviceSynchronize();
 
-    std::vector<double> sa, sb, ratios;
+    // The two vectors stay ALIGNED BY ROUND -- sa[r] and sb[r] are the same
+    // round's readings -- because that alignment is what makes the ratio a
+    // paired observation. summarizePaired forms the ratios from it.
+    std::vector<double> sa, sb;
     sa.reserve(static_cast<size_t>(repeats));
     sb.reserve(static_cast<size_t>(repeats));
-    ratios.reserve(static_cast<size_t>(repeats));
     for (int r = 0; r < repeats; ++r) {
         double ta = 0.0, tb = 0.0;
         if (r % 2 == 0) {
@@ -201,20 +169,11 @@ inline PairedTiming timeKernelPaired(const std::function<void()>& bodyA,
         }
         sa.push_back(ta);
         sb.push_back(tb);
-        ratios.push_back(ta > 0.0 ? tb / ta : 0.0);
     }
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
 
-    PairedTiming p;
-    p.a = summarize(std::move(sa));
-    p.b = summarize(std::move(sb));
-    const Timing rt = summarize(std::move(ratios));
-    p.ratioMin = rt.minMs;
-    p.ratioMedian = rt.medianMs;
-    p.ratioMax = rt.maxMs;
-    p.rounds = repeats;
-    return p;
+    return summarizePaired(sa, sb);
 }
 
 inline void printArm(const char* name, const Timing& t, const char* clock) {
@@ -240,33 +199,95 @@ inline void printArmVsFloor(const char* name, const Timing& t, const Timing& flo
     }
 }
 
-/// @brief Both arms, then the per-round ratio with its range and its verdict.
+/// @brief The three statistic lines a paired ratio is reported by, each one
+/// labelled at its own value.
+/// @note THE LABELS ARE THE POINT. A median, a geometric mean and a range are
+/// three different numbers about the same rounds, and a reader who takes one
+/// for another has been misled by the printer rather than by the data -- so
+/// each says what it is, and the separation fact says that it is a fact
+/// rather than the verdict.
+inline void printPairedStats(const PairedTiming& p) {
+    std::printf("   ratio B/A, per-round paired:  median %5.2fx <- QUOTE THIS"
+                "   geomean %5.2fx   range %.2f-%.2fx  (%d rounds)\n",
+                p.ratioMedian, p.ratioGeoMean, p.ratioMin, p.ratioMax, p.rounds);
+    std::printf("   sign test over those paired rounds: %d favour A, %d favour B,"
+                " %d tied -- two-sided p = %.3g\n",
+                p.roundsFavouringA, p.roundsFavouringB, p.roundsTied, p.signTestP());
+    std::printf("   separation (a FACT, not the verdict): the two arms' sample ranges"
+                " %s\n",
+                p.separated() ? "are DISJOINT" : "OVERLAP");
+}
+
+/// @brief The verdict, under benchmark/measure_util.hpp's rule and no other:
+/// the difference must exceed the larger of the within-run spread and the
+/// run-to-run scatter.
+/// @note A NULL RESULT IS PRINTED AS A RESULT, in those words, because that
+/// header says so: "A difference smaller than the spread is a null result,
+/// and a null result is a result." Two arms this run cannot tell apart is a
+/// finding about them, not a missing measurement.
+/// @note The line states what decided it, so that neither the separation fact
+/// above nor the sign test beside it can be read as having done so.
+inline void printPairedVerdict(const PairedTiming& p) {
+    const double scatter = runToRunScatterPct();
+    const bool measured = scatter >= 0.0;
+    const bool result = p.differenceClearsNoise(scatter);
+    char scatterText[48];
+    if (measured) {
+        std::snprintf(scatterText, sizeof(scatterText), "%.0f%%", scatter);
+    } else {
+        std::snprintf(scatterText, sizeof(scatterText), "NOT MEASURED on this host");
+    }
+    std::printf("   verdict: %s -- the MEDIAN per-round ratio is %.0f%% from 1.00x,\n"
+                "            %s the %.0f%% it has to beat (the larger of: per-round"
+                " spread %.0f%%,\n"
+                "            run-to-run scatter %s). Decided by"
+                " measure_util.hpp's\n"
+                "            difference-against-spread rule; range separation is not"
+                " what decided it.\n",
+                result ? "A RESULT" : "NULL RESULT, which is a result",
+                p.differencePct(), result ? "clearing" : "short of",
+                p.noiseToClearPct(scatter), p.ratioSpreadPct(), scatterText);
+    if (result && !measured) {
+        std::printf("            That clears the WITHIN-RUN half of the rule only --"
+                    " nobody has measured\n"
+                    "            this host's run-to-run scatter, and the rule wants the"
+                    " larger of the two.\n");
+    }
+}
+
+/// @brief Both arms, then the per-round ratio's statistics and the verdict.
 /// @param expect1x Set when this pair is a GATE-EXCLUDED control -- a case the
 /// fast path's own gate rejects, which must therefore read ~1.00x. The
-/// verdict then checks for 1.00x instead of for separation, because here
-/// overlapping ranges are the PASS.
+/// verdict then checks for 1.00x instead, because here "the two arms are
+/// indistinguishable" is the PASS. Two things that would contradict it get
+/// flagged: disjoint ranges, and a unanimous sign count. Identical code
+/// scatters both ways, so fifteen rounds falling the same way is a finding
+/// about the control even when its median reads 1.00x -- which is a check
+/// the range test could not express at all.
 inline void printPaired(const char* nameA, const char* nameB, const PairedTiming& p,
                         const char* clock, bool expect1x = false) {
     printArm(nameA, p.a, clock);
     printArm(nameB, p.b, clock);
-    std::printf("   ratio B/A, interleaved rounds: %5.2fx   per-round range %5.2f-%5.2fx"
-                " (%d rounds)\n",
-                p.ratioMedian, p.ratioMin, p.ratioMax, p.rounds);
+    printPairedStats(p);
     if (expect1x) {
         const bool ok = p.ratioMedian > 0.95 && p.ratioMedian < 1.05;
-        std::printf("   verdict: %s%s\n",
+        std::printf("   verdict: %s\n",
                     ok ? "~1.00x as required -- the switch selects nothing here, which is"
                          " what the gate promises"
-                       : "NOT ~1.00x -- the gate is not excluding what it claims to",
-                    p.separated()
-                        ? "\n            (but the two ranges are DISJOINT, which identical"
-                          " code should not be -- look again)"
-                        : "");
+                       : "NOT ~1.00x -- the gate is not excluding what it claims to");
+        if (p.separated()) {
+            std::printf("            (but the two ranges are DISJOINT, which identical code"
+                        " should not be -- look again)\n");
+        }
+        if (p.unanimous()) {
+            std::printf("            (and every usable round fell the same way, p = %.3g."
+                        " Identical code\n"
+                        "             scatters both ways, so look again even though the"
+                        " median reads 1.00x)\n",
+                        p.signTestP());
+        }
     } else {
-        std::printf("   verdict: %s\n",
-                    p.separated()
-                        ? "sample ranges are DISJOINT -- the ratio is a result"
-                        : "sample ranges OVERLAP -- not a result at this sample size");
+        printPairedVerdict(p);
     }
 }
 

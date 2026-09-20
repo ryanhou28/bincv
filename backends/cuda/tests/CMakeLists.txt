@@ -295,3 +295,27 @@ target_include_directories(test_cuda_census_box PRIVATE ${BINCV_POLICY_ROOT}/tes
 
 add_test(NAME cuda_census_box COMMAND test_cuda_census_box)
 set_tests_properties(cuda_census_box PROPERTIES SKIP_RETURN_CODE 77)
+
+# The BENCHMARK HARNESS'S statistics -- the median, geometric mean, sign test
+# and difference-against-spread rule every paired ratio in this backend is
+# summarized and decided by.
+#
+# NOT A DEVICE TEST, and it does not link bincv_cuda. paired_stats.hpp is
+# deliberately CUDA-free: producing two vectors of samples needs a GPU, deciding
+# what they mean does not, and separating the two is what makes the deciding
+# part checkable against hand-computed values anywhere. It is the only suite
+# here that does not exit 77 without a device, because there is nothing in it a
+# missing device could leave unanswered.
+#
+# WHY IT IS A TEST AT ALL. A benchmark is checked by nobody, so a summary
+# statistic that is quietly wrong does not fail a build or a map comparison --
+# it publishes a number. The harness had a rule in it that was not this
+# project's ("a ratio whose two sample ranges overlap is not a result"), it
+# reached every claim written after it, and nothing could have caught it.
+bincv_add_test_target(test_cuda_bench_stats test_cuda_bench_stats.cpp)
+target_include_directories(test_cuda_bench_stats PRIVATE
+    ${BINCV_POLICY_ROOT}/tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/../benchmark)
+
+add_test(NAME cuda_bench_stats COMMAND test_cuda_bench_stats)
+set_tests_properties(cuda_bench_stats PROPERTIES SKIP_RETURN_CODE 77)
