@@ -66,16 +66,26 @@ implied here.
 
 **What is not delivered, stated before anything that is.**
 
-- **`cornerSubPixAsync` still has no verdict.** Its round-trip rule is met by
-  medians (1.07×) and in 6 of 7 runs, but the two ranges overlap, so by the
-  project's own standard it is **not a result** in either direction. The
-  profiler says why and the answer is a ceiling, not a defect: at 200 corners
-  the kernel is 6.25 warps of work on a part that holds 2,304, and the one
-  decomposition that would add parallelism is the one its bit-exactness
-  argument forbids.
-- **`cornerMinEigenValAsync` did not resolve, for the second round running.**
-  1.131× [0.554–1.613] with **0 of 7 runs disjoint** — the same non-answer as
-  before, now with the limiter named (occupancy, not either roof).
+- **`cornerSubPixAsync` still has no verdict, and the median has changed
+  sides.** Measured as ONE paired comparison rather than three separately-timed
+  medians added together, and against the whole-plane download — the tighter of
+  the two baselines on this machine, by 50× — its round-trip rule reads
+  **0.98×**, with 50 of 77 paired rounds favouring the round trip. That is a
+  **null result at parity**: not a miss, not a pass, and no longer 1.07× in the
+  device arm's favour. The earlier reading added three medians that drift
+  independently, and the host term alone swings 0.280–0.437 ms across seven
+  runs. The profiler says why the device arm cannot pull ahead and the answer
+  is a ceiling, not a defect: at 200 corners the kernel is 6.25 warps of work
+  on a part that holds 2,304, and the one decomposition that would add
+  parallelism is the one its bit-exactness argument forbids. **This one is a
+  stop-and-ask**, not a number to fill in.
+- **`cornerMinEigenValAsync` did not resolve, for the third round running.**
+  Re-taken under the project's rule it reads **1.050×** over seven runs, with a
+  within-run swing of 2.12× and run-to-run scatter of 1.19× — a **null result**,
+  and closer to parity than the 1.131× it read before. 61 of 105 paired rounds
+  favour `cv::cuda`, which is what noise looks like. The limiter is named
+  (occupancy, not either roof); what is missing is resolution, not an
+  explanation.
 - **The census entry is LARGER than `cv::cuda::StereoBM`** on a meter run on both
   sides, which reverses a figure previously published here. It is faster on the
   same run. **That loss is inherent to census, not a defect in this
@@ -136,13 +146,20 @@ verdict column is the rule in [How a difference is decided](#how-a-difference-is
 
 | | time | vs StereoBM | verdict | disjoint |
 |---|---|---|---|---|
-| **binCV binary entry** (pair already packed) | **0.0679 ms** [0.0678–0.0703] | **11.7× faster** | RESULT | 7/7 |
-| binCV census entry (wide frames in, transform + match) | 0.5418 ms [0.527–0.547] | **1.42× faster** | RESULT | 7/7 |
-| binCV census matcher alone | 0.4223 ms [0.398–0.436] | **1.95× faster** | RESULT | 7/7 |
+| **binCV binary entry** (pair already packed) | **0.0679 ms** [0.0678–0.0703] | **10.8× faster** | RESULT | 7/7 |
+| binCV census entry (wide frames in, transform + match) | 0.5418 ms [0.527–0.547] | **1.43× faster** | RESULT | 7/7 |
+| binCV census matcher alone | 0.4223 ms [0.398–0.436] | **1.88× faster** | RESULT | 7/7 |
 | `cv::cuda::StereoBM(64, 9)` | 0.7438 ms [0.718–0.842] | — | — | — |
 
+The two census rows are taken in their own section against their own StereoBM
+arm, which read 0.7584 ms [0.730–0.816] there; their ratio column is that
+section's paired ratio and not this table's StereoBM median divided into
+theirs. Every ratio here cleared the rule on both halves: within-run 1.80× /
+1.33× / 1.43× against run-to-run 1.18× / 1.11× / 1.11×, with all 105 paired
+rounds falling the same way in each.
+
 **The census entry has crossed.** It was 1.29× behind StereoBM in the previous
-round and is now 1.42× ahead, and the whole move is one kernel — a
+round and is now 1.43× ahead, and the whole move is one kernel — a
 warp-cooperative box matcher that is **2.49× [2.40–2.50]** over the packed
 matcher it replaces, disjoint in all 7 runs, at **0 bytes** of added scratch and
 0 bytes of shared memory. It is described below.
@@ -192,8 +209,8 @@ driver. StereoBM's is an **upper reading**: `GpuMat` pads its pitch, it may be
 backed by a `BufferPool`, and anything `compute()` holds past the call is
 inside the delta. So 6.857× is a **lower bound** on the binary entry's lead.
 
-So the **binary entry leads on speed by 11.7× and on memory by 6.857×** — both
-axes, one region, one meter; the **census entry leads on speed by 1.42× and
+So the **binary entry leads on speed by 10.8× and on memory by 6.857×** — both
+axes, one region, one meter; the **census entry leads on speed by 1.43× and
 trails on memory by 1.466×**, which is a split verdict on the axis
 this project breaks ties with. That is an unmade judgement and it is recorded as
 one, not rounded into a headline — but the memory side of it is **not a defect
@@ -1241,13 +1258,31 @@ negative result and is printed as one; the default is unchanged.
 **Sub-pixel refinement.** `cornerSubPixAsync` **still has no verdict against its
 own round-trip rule**, and that is the honest outcome rather than a placeholder.
 The rule asks whether refining resident beats downloading the derivative planes
-and refining on the host. Serially: LEFT 0.488 ms [0.481–0.492] against RIGHT
-0.523 ms [0.431–0.550] — **met in 6 of 7 runs and by medians at 1.07×, but the
-two ranges OVERLAP**, so by this project's own standard it is not a result in
-either direction. Against the band form of the round trip (10.224 ms) it is met
-by 21× with ranges disjoint. It was 3.6× adrift two rounds ago and missed by
-1.08× one round ago; the serial pass moved it from "missed" to "met but not
-separable", which is progress and is not a verdict.
+and refining on the host, against the tighter of two baselines.
+
+It is now measured as **one paired comparison** instead of three separately
+timed medians added together, because adding three medians carries all three
+passes' drift and offers nothing to decide with — which is why it has been
+reported as "met in 6 of 7 runs", where the seventh is not a different machine
+but the same three passes landing differently. The host term alone swings
+**0.280–0.437 ms** across seven runs. Both arms are now on the wall clock, since
+a CUDA-event bracket around a round trip times the copies and silently drops
+the host refinement, which is its largest term; both are spelled exactly as the
+inequality is written, down to the 1.6 KB transfer that sits on each side.
+
+**The tighter baseline is the whole-plane download, and that is itself a
+finding**: 200 pitched 11-row copies cost 10.7 ms against 0.21 ms for one copy
+of four planes, so the narrow form of the round trip is 50× the wide one on
+this machine and pairing against it would be measuring against a spelling
+nobody would keep.
+
+Against the right baseline the paired ratio is **0.98× [0.856–1.002] over seven
+runs, with 50 of 77 rounds favouring the ROUND TRIP** — within-run swing 1.55×,
+run-to-run 1.17×, so the 1.02× separation is a **NULL RESULT at parity**. The
+op's written ship condition is *strictly cheaper*; it is not met, and it is not
+missed either. It was 3.6× adrift two rounds ago and missed by 1.08× one round
+ago. **This contradicts the previous round's "met by medians at 1.07×" and is
+reported rather than adjusted**, per the stop-and-ask rule.
 
 **The profiler names the limiter and it is a ceiling of the signature.** The
 kernel runs 7 blocks × 32 threads at **2.1% achieved occupancy** against a 33.3%
@@ -2230,9 +2265,9 @@ does not only produce wins:
 
 | effect | old reading | new reading (7 runs) | verdict |
 |---|---|---|---|
-| binary dense vs StereoBM | 11.0×, 7/7 disjoint | **11.7×**, within 1.59×, r2r 1.14×, 105–0 | RESULT — **unchanged**, but under the *percentage* spelling it would have read NULL |
-| census entry vs StereoBM | 1.38×, 7/7 disjoint | **1.42×**, within 1.40×, r2r 1.13×, 105–0 | RESULT — unchanged |
-| census warp-box off-switch | 2.49×, disjoint | **2.41×**, within 1.26×, r2r 1.05× | RESULT — unchanged |
+| binary dense vs StereoBM | 11.0×, 7/7 disjoint | **10.8×**, within 1.80×, r2r 1.18×, 105–0 | RESULT — **unchanged**, but under the *percentage* spelling it would have read NULL |
+| census entry vs StereoBM | 1.38×, 7/7 disjoint | **1.43×**, within 1.33×, r2r 1.11×, 105–0 | RESULT — unchanged |
+| census warp-box off-switch | 2.49×, disjoint | **2.40×**, within 1.31×, r2r 1.06× | RESULT — unchanged |
 | packer, row grid vs grid-stride @1920×1080 | ~1.24×, ranges overlapped → "not a result" | 1.418×, within **2.16×**, r2r 1.41×, 91–14 | **still NULL** |
 | packer, row grid @752×480 / @3840×2160 | not a result | 1.118× / 1.206×, within 3.20× / 1.97× | **still NULL** |
 | `packQuant` row grid, all three geometries | not a result | 1.134× / 1.336× / 1.208× | **still NULL** |
@@ -2240,14 +2275,14 @@ does not only produce wins:
 | morphology word-parallel border | under the launch floor at every size | **1.800× @1920×1080**, within 1.598×, r2r 1.205×, 75–2 | **NULL → RESULT** |
 | morphology word-parallel border @752×480 | under the launch floor | 1.359×, within 2.46× | still NULL |
 | `cornerSubPixAsync` round-trip rule | met in 6/7 runs, medians 1.07× | **1.02×**, within 1.55×, 50–27 *against* the device arm | **still NULL — and the median changed sides** |
-| `cornerMinEigenValAsync` vs `cv::cuda` | 1.131×, no run disjoint | **1.003×**, within 2.28×, r2r 1.45×, 57–47 | still NULL — now at parity |
+| `cornerMinEigenValAsync` vs `cv::cuda` | 1.131×, no run disjoint | **1.050×**, within 2.12×, r2r 1.19×, 61–44 | still NULL |
 | LK @1024 keypoints | crossover "not a result" | 1.033×, within 2.27×, r2r 1.11×, 61–44 | **still NULL** |
 | LK @2048 keypoints | crossover "not a result" | 1.074×, within **1.43×**, r2r **1.04×**, 80–25 | **still NULL**, and narrowly: the run-to-run half alone would clear it |
 
 Three of these deserve a sentence rather than a row.
 
 **The headline was the case that exposed the defect.** Under the percentage
-spelling the 11.7× binary dense result read NULL, because its faster arm sits a
+spelling the binary dense result read NULL, because its faster arm sits a
 few multiples above the launch floor and swings while StereoBM's does not. It
 is a result under the rule as written; it was a null under a spelling of it
 that could not survive inverting the ratio.
