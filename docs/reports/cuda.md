@@ -1,575 +1,490 @@
 # CUDA backend
 
-The GPU backend, measured against `cv::cuda` as the best existing GPU option and against
-the host library on the same machine. Design:
-[ARCHITECTURE §8.5](../ARCHITECTURE.md). What the backend is and how to build it:
+The GPU backend, measured operation by operation against the `cv::cuda` call a caller
+would otherwise make. Design: [ARCHITECTURE §8.5](../ARCHITECTURE.md). API and build:
 [backends/cuda/README.md](../../backends/cuda/README.md).
 
-The backend shares binCV's format and forks its kernels, so every number here sits on top
-of a bit-exactness result: `scripts/verify_cuda.sh` proves each device kernel gives the
-host library's answer byte for byte, and every optimized arm is held to its own reference
-arm's map in the same binary. Speed is what follows once correctness is settled.
-[Coverage](#coverage) has the counts.
+Every number here sits on a bit-exactness result: `scripts/verify_cuda.sh` proves each
+device kernel gives the host library's answer byte for byte, and every optimized arm is
+held to its own reference arm's map in the same binary ([Coverage](#coverage)).
 
-**This report is three files, and none of them is optional.**
+**Both sides' measured values are published, with the ratio beside them** — the
+measurements are what make the ratio checkable, the ratio is there so nobody has to
+divide in their head. How a speed difference is judged real is
+[methodology-timing.md](methodology-timing.md); how a memory figure is measured is
+[methodology-memory.md](methodology-memory.md). Read the first before quoting a ratio.
 
-| file | what it holds | when you want it |
-|---|---|---|
-| **cuda.md** — this one | the headline, what is not delivered, the role bars on both axes, the operations that have no bar at all | you want to know what the backend costs and what it saves |
-| [cuda-evidence.md](cuda-evidence.md) | how every figure here was earned: the per-operation narratives, the profiler pass entire, every recorded negative, every withdrawn claim, every "not a result" row | you are about to quote one of these numbers, or you want to know why it should be believed |
-| [methodology-timing.md](methodology-timing.md) | how a speed difference is decided here — the paired design, the three verdicts, the worked examples | you are about to read a ratio, a verdict or a sign count |
+## Conditions
 
-Every role-bar row below links into the section of [cuda-evidence.md](cuda-evidence.md)
-that earned it. A number quoted out of this file without the row behind it is a number
-quoted out of its conditions.
+**Device.** NVIDIA GeForce RTX 3070 Ti (SM 8.6, 48 SMs, ~608 GB/s) under WSL2. CUDA 11.1
+nvcc, g++-9 host compiler. Every figure is the median of 7 independent process runs
+unless the row says otherwise.
 
-## How to read a table here
+**Two clocks.** *Kernel-resident* is CUDA events around the enqueued work — the per-frame
+cost once data lives on device, and what the tables below use. *End-to-end* is the host
+clock around upload + kernels + download + synchronize. WSL2 inflates launch overhead
+specifically, so kernel-resident numbers travel better.
 
-Set once, and applied in all three files.
+**One explicit stream on both sides.** OpenCV synchronizes the whole device on the default
+stream — `if (stream == 0) cudaSafeCall( cudaDeviceSynchronize() );` sits in cudev's grid
+transform, `cudafilters`, `cudawarping` and three times in `cudastereo`. binCV carries no
+such guard, so it is the control:
 
-- **Both sides' measured values appear, with the unit in the column header.** `0.1459`
-  beside `0.0247` in a column headed milliseconds needs no legend: the smaller one is
-  faster. A loss needs no marker either, because you can see it.
-- **The baseline comes first** — the row or the column a reader needs as the denominator
-  before the numerator means anything.
-- **Speed and memory never share a column**, and where they share a table the column
-  group names its axis and its unit.
-- **A ratio is secondary and adjacent, never a replacement.** Where one appears, either
-  the column header names the division (`binCV ÷ cv::cuda`) or the cell names the winner
-  in words. A bare `Nx` on its own appears nowhere.
-- **A condition strip sits above every table** — geometry, clock, stream, run count —
-  rather than being buried in the prose under it.
+| call | default stream (ms) | explicit stream (ms) | default ÷ explicit (>1× = the default stream costs more) |
+|---|---|---|---|
+| `cv::cuda::threshold` | 0.0704 | 0.0102 | 6.91× |
+| `cv::cuda::resize` INTER_AREA | 0.0559 | 0.0091 | 6.17× |
+| `cv::cuda::pyrDown` | 0.0706 | 0.0098 | 7.18× |
+| `cv::cuda` erode 3×3 (0.15 ms kernel) | 0.2125 | 0.1465 | 1.45× |
+| `cv::cuda` median 3×3 (6 ms kernel) | 6.4260 | 6.2180 | 1.03× |
+| *control* — binCV `threshold` | 0.0146 | 0.0142 | 1.03× |
+| *control* — binCV `erode` 3×3 | 0.0095 | 0.0089 | 1.07× |
 
-## Conditions you cannot read a number without
+Both controls read ~1.00× and the surcharge scales inversely with kernel length, which is
+what a fixed per-call sync must do. **The bar is the explicit-stream number**, because a
+resident pipeline uses streams and OpenCV supports them on every call here. Three figures
+were inflated by it and are corrected below — `threshold`, `edgeThreshold` and the pyramid
+ladder. Morphology, the medians and the StereoBM rows were unaffected. The default-stream
+pair in `cuda_sensor_benchmark` that printed **"7.35× FASTER"** for `threshold` was deleted
+rather than repaired; `cuda_role_benchmark` owns that comparison, and it reads a null.
 
-### The device, the two clocks, and the CPU arm
+**One memory meter per comparison.** An earlier **"1.7× smaller"** for the census working
+set — 6.0 MB against 10.0 MB — was not a both-sides reading on one region and **should not
+be quoted again**. A `cudaMemGetInfo` delta is the only meter readable
+on both sides, so it is the meter for every cross-library figure, and it is never mixed
+with binCV's own allocation sums. This driver reserves in 2 MB units, so each side is
+replicated until its own total clears eight units; at 256 replicas one unit is 8.0
+KB/frame. `GpuMat` pads its pitch and may be backed by a `BufferPool`, so OpenCV's side is
+an **upper** reading: each binCV lead below is a lower bound, and so is the one loss.
 
-- **Device:** NVIDIA GeForce RTX 3070 Ti (SM 8.6, 48 SMs, ~608 GB/s), under
-  WSL2. CUDA 11.1 nvcc, g++-9 host compiler.
-- **Two clocks, each labelled at its number.** *Kernel-resident* is CUDA events
-  around the enqueued work — the per-frame cost once data lives on device, the
-  number a resident pipeline pays. *End-to-end* is the host clock around
-  upload + kernels + download + synchronize — the cost when the GPU does only
-  this for the frame. WSL2 inflates launch overhead specifically, so
-  kernel-resident numbers travel better; both are honest here and the spread is
-  printed beside each.
-- **CPU arm** is the host library's own best on this same machine, measured by
-  the project's interleaved protocol. WSL2 CPU timing carries large spread
-  (recorded in the memory notes); it is a same-machine reference, not a
-  cross-device claim, and the Pi remains the timing-grade CPU number
-  ([stereo.md](stereo.md)).
+**The launch floor** on this host was measured at **8.66–9.58 µs** in every run of the
+sensor-stage benchmark, and at **11–13 µs** for the shape the device-occupancy probe
+measured. Neither is derived from the other.
+Two sensor-stage ops and all of binCV's binary morphology sit on it at the frame sizes a
+vision pipeline runs, so a figure within a small multiple of either is a launch-cost
+figure rather than a kernel one.
 
-### One explicit stream on both sides
+## Speed, operation by operation
 
-- **Every cross-library comparison runs both sides on one explicit stream, and
-  finding that out moved three numbers in these reports.** OpenCV synchronizes
-  the whole device on the default stream. The guard
-  `if (stream == 0) cudaSafeCall( cudaDeviceSynchronize() );` is not one
-  function: it is in cudev's grid transform (which backs `cudaarithm`'s
-  `threshold`), in `cudafilters`' morphology, linear and median filters, in
-  `cudawarping`'s `resize` and `pyrDown`, and three times in `cudastereo`'s
-  StereoBM. On the default stream OpenCV therefore cannot pipeline across a
-  batch while binCV can, so an event bracket around a batch times N serialized
-  round trips on one side against N pipelined launches on the other. The
-  surcharge, measured with binCV as the control because it carries no such
-  guard anywhere:
+**The binary dense-disparity path leads `cv::cuda::StereoBM` on both axes at once** —
+faster *and* lighter. That is the operating point a binCV pipeline runs: it already holds
+one bit per pixel, and on bits the dense cost is one XOR per 32-pixel word.
 
-  | call | default stream (ms) | explicit stream (ms) | surcharge — default ÷ explicit |
-  |---|---|---|---|
-  | `cv::cuda::threshold` | 0.0704 | 0.0102 | 6.91× |
-  | `cv::cuda::resize` INTER_AREA | 0.0559 | 0.0091 | 6.17× |
-  | `cv::cuda::pyrDown` | 0.0706 | 0.0098 | 7.18× |
-  | `cv::cuda` erode 3×3 (0.15 ms kernel) | 0.2125 | 0.1465 | 1.45× |
-  | `cv::cuda` median 3×3 (6 ms kernel) | 6.4260 | 6.2180 | 1.03× |
-  | *control* — binCV `threshold` | 0.0146 | 0.0142 | 1.03× |
-  | *control* — binCV `erode` 3×3 | 0.0095 | 0.0089 | 1.07× |
+Kernel-resident clock, both arms on one explicit stream, 752×480 unless the row names a
+geometry, medians of 7 independent process runs, from `cuda_role_benchmark`. Time in
+milliseconds, so the smaller cell is the faster side and the faster side is bold.
 
-  Both controls read ~1.00×, and the surcharge scales inversely with kernel
-  length, which is exactly what a fixed per-call sync must do. **The bar is the
-  explicit-stream number.** The project's rule is that the bar is the best
-  existing option; a resident pipeline uses streams and OpenCV supports them on
-  every call here, so quoting the default-stream figure would be measuring
-  against a fallback nobody would use. Three figures published below were
-  inflated by it and are corrected in place — `threshold`, `edgeThreshold` and
-  the pyramid ladder. **Morphology, the medians and the StereoBM headline were
-  not affected**: their kernels are long enough that one sync is noise, and the
-  StereoBM row was re-taken under this protocol and reproduced.
+| operation | `cv::cuda` arm | cv::cuda (ms) | binCV (ms) | cv::cuda ÷ binCV (>1× = binCV faster) | what the rounds say |
+|---|---|---|---|---|---|
+| `denseDisparityBinary` — the binary entry | `cv::cuda::StereoBM(64, 9)` | 0.7152 | **0.0648** | **11.0×** | 7/7 disjoint; a result (10.95× against a 1.78× bar) |
+| census entry (2 transforms + match) | ″ | 0.6996 | **0.5076** | **1.47×** | 7/7; a result (1.47× vs 1.25×) — but it **loses on memory** |
+| census matcher alone | ″ | 0.6864 | **0.3692** | **1.87×** | 7/7; a result (1.94× vs 1.37×) |
+| `calcOpticalFlowBlockMatch` | `SparsePyrLKOpticalFlow` | 0.2320 | **0.0540** | not published | 7/7; speed met, **accuracy floor unset** |
+| `detectFastAsync` | `FastFeatureDetector` | 0.1459 | **0.0247** | **6.01×** | 7/7; a result (6.01× vs 3.39×), from **14.84× behind** |
+| `computeBrief`, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 | **0.0107** | **9.3×** | 7/7; a result (9.25× vs 2.10×) |
+| `matchDescriptors`, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 | **0.2189** | **9.1×** | 7/7; a result (9.11× vs 1.29×) |
+| `goodFeaturesToTrackAsync`, wall clock | `createGoodFeaturesToTrackDetector` | 3.7282 | **0.8405** | **5.3×** | 105 of 105 rounds, 3.53× to 15.52×; a result (4.42× vs 3.16×) |
+| `cornerMinEigenValAsync` | `createMinEigenValCorner` | **0.0515** | 0.0590 | null result | 23 of 105 rounds binCV's way; 1.15× against a 1.76× bar |
+| `calcOpticalFlowPyrLKAsync`, 204 pts | `SparsePyrLKOpticalFlow` | 0.1475 | **0.0792** | **1.35× to 4.36×** | 105 of 105 rounds; direction established, magnitude a null |
+| `calcOpticalFlowPyrLKAsync`, 2048 pts | ″ | **0.3287** | 0.3558 | null result | 98–7, seven rounds crossed — the crossover |
+| `threshold` → bits, 752×480 | `cv::cuda::threshold` | 0.0091 | **0.0084** | null result | 44–60 with one round tied |
+| `threshold` → bits, 1920×1080 | ″ | 0.0116 | **0.0100** | null result | 17–88 |
+| `threshold` → bits, 3840×2160 | ″ | 0.0362 | **0.0268** | null result | 8–97; the 1.35× median is unquotable on this host |
 
-### Two memory meters, and one meter per comparison
+**A null result is not a loss.** It means neither the direction nor the size cleared this
+host's noise, and it is itself a result. `threshold`'s own written rule was a *fail*
+condition — slower than `cv::cuda::threshold` by more than both spreads — and a null is
+not slower; it was 2.22× slower at 4K one round ago and is now never above 1.00× at any
+geometry.
 
-**One meter per comparison, named at the number.** Two memory meters appear in
-these reports and they do not mix. A `cudaMemGetInfo` delta measures what the
-driver reserves; it is the meter for every figure that crosses libraries,
-because it is the only one readable on both sides. An allocation sum — what the
-arrays themselves ask for, the figure `cuda_dense_benchmark` prints — measures
-binCV against binCV and against the cost volume the design refuses. Crossing
-them inflates: binCV's 442 KB of arrays set beside StereoBM's 10 MB reading
-would look like 23×, and that ratio answers no question. On this driver
-`cudaMemGetInfo` reserves in 2 MB units, so its reading moves in 2 MB steps and
-nowhere in between. A one-byte allocation therefore reads 2.00 MB when it starts
-a fresh unit and 0.00 MB when it fits the unit the previous allocation was
-already using — the step is the stable quantity, not any single probe, which is
-why `cuda_bench_util.hpp` measures the step (allocate one byte at a time until
-the reading moves) rather than probing once. The binary entry's 2.0 MB is
-therefore the meter's resolution around a 442 KB working set rather than its
-footprint, which makes the 6.857× in [the headline](#the-headline) a lower bound on
-the memory lead and not a measurement of it.
+**Block matching is the one row these reports never published as a factor.** The ratio is
+published only as 0.230 (binCV ÷ cv::cuda), so the cell names the side and not a number
+rather than inventing one.
 
-### The launch floor
+**Two rows carry a denominator that moves.** `goodFeaturesToTrack`'s `cv::cuda` arm swings
+**3.24–13.61 ms** across runs because its min-distance spacing filter runs on the CPU;
+binCV crosses parity against every version of it, including round 2's quieter 3.55–4.28 ms.
+And **FAST's direction is certain while its size is not**: over 21 independent processes
+the per-run median ratio moves between **3.44× and 6.26×** because binCV's arm is bimodal
+(≈0.0205 or ≈0.0310 ms by process) against a steady `cv::cuda` arm, and every one of those
+21 runs is 15–0 binCV's way.
 
-Two of the sensor-stage ops and all of binCV's binary morphology sit on this host's launch
-floor at the frame sizes a vision pipeline runs, so the floor is quoted beside them rather
-than left implicit. It was measured in every run of the sensor-stage benchmark at
-**8.66–9.58 µs**, and the occupancy note records it as **11–13 µs** for the shape it was
-measuring there. Those are two measurements of the same host and neither is derived from
-the other; a figure within a small multiple of either is a launch-cost figure, not a
-kernel one.
+**The three dense rows come from one of two sweeps of the same machine, and both are
+defensible.** The other reads the binary entry at **0.0679 ms against 0.7438 — 10.8×**,
+the census entry at **0.5418 against 0.7584 — 1.43×** and the census matcher at **0.4223
+— 1.88×**. Which to quote is **not settled here**; the census row's run-to-run scatter is
+1.14×, so its 1.38×, 1.43× and 1.47× readings are one number rather than three.
 
-### How a difference is decided, in four sentences
+## Memory, operation by operation
 
-Every ratio here is a **per-round paired** ratio and the quoted value is its **median**.
-Two questions are then asked of the same rounds and both answers printed: **is the
-direction settled** — did no paired round cross 1.00× — and **does the size clear the
-noise**, which means exceeding the larger of the within-run spread and the run-to-run
-scatter. A row can satisfy both, either or neither, and "neither" is a **null result**,
-which is itself a result rather than a missing one. The full account — the owner's
-2026-09-19 ruling that gave the direction its own verdict, why a tie breaks it, why the
-deciding quantities are factors rather than percentages, and the inversion demonstration
-that shows what the percentage spelling does — is in
-[methodology-timing.md](methodology-timing.md).
+`cudaMemGetInfo` delta taken identically on both sides, 752×480, peak working set per
+frame. Kilobytes, so the smaller cell is the lighter side.
 
-## The headline
-
-**The binary dense-disparity path leads `cv::cuda::StereoBM` on both axes at
-once** — faster *and* lighter, GPU against GPU, the same result the host binary
-path earned against CPU StereoBM. This is the operating point a binCV pipeline
-runs: it already holds packed bits, and on bits the dense cost is one XOR per
-32-pixel word.
-
-752×480 · 64 disparities · 9×9 support · resident on the device · **kernel-resident**
-clock (CUDA events) · **both sides on one explicit stream** · medians of 7 independent
-process runs, range in brackets. The ratio is the median **per-round paired** ratio, not a
-ratio of the two medians; the verdict is the rule in
-[methodology-timing.md](methodology-timing.md).
-
-| arm | time (ms) | binCV against StereoBM | verdict | disjoint |
+| operation | `cv::cuda` arm | cv::cuda (KB) | binCV (KB) | cv::cuda ÷ binCV (>1× = binCV smaller) |
 |---|---|---|---|---|
-| `cv::cuda::StereoBM(64, 9)` — the baseline | 0.7438 [0.718–0.842] | — | — | — |
-| **binCV binary entry** (pair already packed) | **0.0679** [0.0678–0.0703] | binCV **10.8× faster** | RESULT | 7/7 |
-| binCV census entry (wide frames in, transform + match) | 0.5418 [0.527–0.547] | binCV **1.43× faster** | RESULT | 7/7 |
-| binCV census matcher alone | 0.4223 [0.398–0.436] | binCV **1.88× faster** | RESULT | 7/7 |
+| `denseDisparityBinary` (2 bit planes + map) | `cv::cuda::StereoBM(64, 9)` | 3,072.0 | **448.0** | **6.857×** |
+| census entry (2 wide + 2 descriptors + map) | ″ | **3,072.0** | 4,512.0 | `cv::cuda` smaller, by **1.47×** |
+| `computeBrief`, N=1000 | `cv::cuda::ORB::computeAsync` | 2,048.0 | **48.0** | **42.67×** |
+| `matchDescriptors`, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 8,277.3 | **400.0** | **20.7×** |
+| `detectFastAsync` @ capacity 32,768 | `FastFeatureDetector` | 680.0 | **432.0** | **1.574×** |
+| `goodFeaturesToTrackAsync` | `createGoodFeaturesToTrackDetector` | 10,240.0 | **1,920.0** | **5.33×** |
+| `cornerMinEigenValAsync` response map | `createMinEigenValCorner` | 10,240.0 | **2,048.0** | **5.00×** |
+| LK tracker resident state | `SparsePyrLKOpticalFlow` | 1,408.0 | **448.0** | **3.14×** |
+| `threshold` | `cv::cuda::threshold` | 1,024.0 | **416.0** | **2.46×** |
 
-**These are not the role-bars table's figures for the same three rows, and the difference
-is reported rather than reconciled.** [The role bars](#the-role-bars) read the binary entry
-at **0.0648 ms against StereoBM's 0.7152 — 11.0×**, the census entry at **0.5076 against
-0.6996 — 1.47×**, and the census matcher at **0.3692 against 0.6864 — 1.87×**; the census
-section in [cuda-evidence.md](cuda-evidence.md#the-census-entry-and-the-layout-that-closed-its-gap)
-carries 1.47× too and states that the 1.38× and 1.43× carried at different points are the
-same row on earlier sweeps, its run-to-run scatter being 1.14×. Two sweeps on one machine,
-both defensible; **which of the two a reader should quote is not settled here.**
+**The binary entry's 448.0 KB is the format's own arithmetic.** Two bit planes at 24 words
+of 32 bits per row plus a 752×480 byte map is 442.5 KB against 448.0 metered, the
+difference being the driver's rounding across three allocations. It reads 448.0 KB/frame
+at both 64 and 256 replicas — 1.0000× — and identically to the byte in every one of seven
+independent processes. StereoBM's footprint is **not content-dependent**, which had to be
+checked rather than assumed: metered on a synthetic pair and on a real EuRoC pair it reads
+3,072.0 KB both times.
 
-The two census rows are taken in their own section against their own StereoBM
-arm, which read 0.7584 ms [0.730–0.816] there; their ratio column is that
-section's paired ratio and not this table's StereoBM median divided into
-theirs. Every ratio here cleared the rule on both halves: within-run 1.80× /
-1.33× / 1.43× against run-to-run 1.18× / 1.11× / 1.11×, with all 105 paired
-rounds falling the same way in each.
+**The census entry is the one row where binCV is larger, and that loss is the algorithm's
+rather than this implementation's.** Census expands 8 bits a pixel into a 32-bit
+descriptor word, so two transformed images are 2 × 1,410.0 KB = **2,820 KB before a
+disparity map exists**, where StereoBM matches the 8-bit frames directly. No
+implementation of census in this layout can undercut its own descriptors. This report
+publishes that row both ways — **0.68×** as cv::cuda ÷ binCV, **1.47×** as binCV ÷
+cv::cuda — and the table quotes the second because it names the winner. Re-read at 256
+replicas the row is 4,504.0 KB against the same 3,072.0 — 1.466×, the 8 KB being one meter
+unit. A caller who wants the memory back can have it: the plane-layout intermediate is
+3,217.5 KB against the packed one's 3,877.5 KB, at 21.7× the matcher time.
 
-**The census entry has crossed.** It was 1.29× behind StereoBM in the previous
-round and is now 1.43× ahead, and the whole move is one kernel — a
-warp-cooperative box matcher that is **2.49× [2.40–2.50]** over the packed
-matcher it replaces, disjoint in all 7 runs, at **0 bytes** of added scratch and
-0 bytes of shared memory. It is described in
-[cuda-evidence.md](cuda-evidence.md#the-warp-cooperative-box-matcher-and-the-model-it-refuted).
+**So the census entry is a split verdict — ahead on speed, behind on memory — on the axis
+this project breaks ties with.** Whether an operation may ship on those terms is a
+judgement nobody has made, and it is recorded as one rather than rounded into a headline.
+It is also the path where binCV has **no structural advantage**: the layout that made it
+fast is the conventional one-word-per-pixel descriptor, not bit-planes. The claim lives in
+the binary entry, whose caller already holds bits.
 
-**And the census entry now loses on memory, which reverses a figure this
-document previously published.** Round 3 is the first run that metered *both*
-sides of the census path in one region, and it reads **4,512.0 KB for binCV
-against 3,072.0 KB for StereoBM — OpenCV smaller by 1.47×** (`cudaMemGetInfo`,
-64 replicas a side, 141 against 96 of the meter's 2 MB units). Re-read at 256
-replicas in the one-region block below it is 4,504.0 KB against the same
-3,072.0 KB — 1.466×, the 8 KB difference being one meter unit of rounding at
-the lower count. The figure it
-replaces — 6.0 MB against 10.0 MB, "1.7× smaller" — was not a both-sides
-reading on one region, and it should not be quoted again.
+## The families measured by their own benchmarks
 
-**The binary entry's memory lead has now been retaken, and it is 6.857×.**
-It was previously stated as *unretaken* rather than quoted at 5×, because the
-StereoBM figure under it came from a different region at a different replica
-count than the one the census path was read on — 10.0 MB in one round against
-3.0 MB in another, the same library on the same meter, 3.3× apart. All three
-working sets are now metered **in one process, on one region, at one replica
-count**, by `cuda_role_benchmark stereo` (section 7b):
+The sensor, window and pyramid ops are compared against the same `cv::cuda` calls, on the
+family benchmarks rather than on `cuda_role_benchmark`: nine independent process runs, each
+an interleaved median of fifteen rounds, both arms on one explicit stream. Memory is taken
+at 752×480 only, because the ratio is not constant in frame size.
 
-| arm | peak working set (KB/frame) | binCV against StereoBM |
-|---|---|---|
-| `cv::cuda::StereoBM(64, 9)` — the baseline | 3,072.0 | — |
-| **binCV binary entry** (2 bit planes + map) | **448.0** | binCV **6.857× smaller** |
-| binCV census entry (2 wide + 2 descriptors + map) | 4,504.0 | binCV **1.466× larger** |
+| operation | denominator | geometry | denominator (ms) | binCV (ms) | denominator ÷ binCV (>1× = binCV faster) | memory, denominator ÷ binCV (>1× = binCV smaller) |
+|---|---|---|---|---|---|---|
+| `edgeThreshold` | composed `createDerivFilter` + abs + threshold | 752×480 | 0.0821 | **0.0096** | **8.1×** | **24.6×** |
+| `edgeThreshold` | ″ | 1920×1080 | 0.1886 | **0.0164** | **11.1×** | not measured |
+| `erode` rect 3×3 | `createMorphologyFilter` | 752×480 | 0.1429 | **0.0118** | **11.6–11.9×** | **16.0×** |
+| `erode` rect 3×3 | ″ | 1920×1080 | 0.2011 | **0.0148** | **13.0–13.5×** | not measured |
+| `erode` ellipse 5×5 | ″ | 752×480 | 0.2196 | **0.0154** | **12.8–13.9×** | (as rect 3×3) |
+| `erode` ellipse 5×5 | ″ | 1920×1080 | 0.4048 | **0.0176** | **22.9×** | not measured |
+| `morphologyEx` OPEN 3×3 | ″ | 1920×1080 | 0.4209 | **0.0238** | **15.1–16.1×** | not measured |
+| `medianWide` K=9 | `createMedianFilter` | 752×480 | 6.1888 | **0.0249** | **235–249×** | **123×** |
+| `medianWide` K=9 | ″ | 1920×1080 | 34.1522 | **0.0538** | **634–740×** | not measured |
+| `denoiseMedian3` | binCV's own byte `medianWide`, fast arm on | 4096×2160 | 0.0388 | **0.0087** | **4.6–5.0×** | **8.58×** |
+| `buildPyramidBox` ×3 | `cv::cuda::resize` INTER_AREA ×3 | 752×480 | **0.0233** | 0.0240 | a tie — published as 1.02×, binCV ÷ denominator | **7.17×** |
+| `buildPyramidBox` ×3 | `cv::cuda::pyrDown` ×3 | 752×480 | 0.0256 | **0.0239** | a tie — published as 0.95×, binCV ÷ denominator | (same ladder) |
+| `shift` | `cudaMemcpy2DAsync` (a pitched DMA) | 752×480 | 0.0092 | **0.0091** | a wash — published as 0.948–0.985×, binCV ÷ denominator | **7.8333×** |
 
-The discipline, because the previous disagreement was entirely a discipline
-problem. One meter unit is 2.00 MB, so at 256 replicas **one unit is 8.0
-KB/frame**: 1.79% of the binary entry, 0.18% of the census entry, 0.26% of
-StereoBM. That the rounding is small is a bound and not a proof of convergence,
-so the smallest of the three is also read at 64 replicas, where a unit is 32.0
-KB/frame — it reads **448.0 KB/frame at both counts, 1.0000×**. Every figure
-above is identical **to the byte** in every run of it — seven independent
-processes in the verification pass read 117,440,512 / 1,180,696,576 /
-805,306,368 / 805,306,368 raw bytes, seven times out of seven.
-The format's own arithmetic agrees from the other direction — two bit planes at
-24 words of 32 bits per row plus a 752×480 byte map is 442.5 KB, against 448.0
-KB metered, the 5.5 KB being the driver's rounding across three allocations.
+Four caveats, each of which changes how a row reads.
 
-**StereoBM's footprint is not content-dependent**, which had to be checked
-rather than assumed: OpenCV's FAST sizes its output by corners *found*, so its
-working set moves with the picture. StereoBM was therefore metered twice, on
-the synthetic pair and on the real EuRoC pair, and reads **3,072.0 KB/frame
-both times, 1.000×** — it sizes by geometry and disparity count, not by what it
-finds.
+- **`edgeThreshold`'s bar is the composed `cv::cuda` spelling** of the same computation
+  (`createDerivFilter(CV_8UC1, CV_16SC1, ksize=1, normalize=false)`, whose kernel at ksize
+  1 is exactly `[-1,0,1]` and whose default border already matches), which is separable —
+  nine launches against binCV's one. The rule written first asked for ≥5× on memory and
+  ≥3× on speed; measured 24.6× and 8.1–11.1×, ranges disjoint in 9 of 9 runs at 1080p. A
+  previously circulated **37.8–49.9× is withdrawn** as the default-stream artifact it was.
+- **Morphology's margin is mostly OpenCV's per-call cost.** A single-call probe shows
+  OpenCV's kernel alone is 69–85% of its batched time while binCV's morphology sits at
+  **1.36× the launch floor**, so roughly 10–17× of the ratio is kernel-to-kernel and the
+  rest is OpenCV's host overhead. Earlier family figures of 17.4×/18.6×/16.3× became
+  11.6×/13.3×/12.8× under the corrected protocol — same verdict, smaller magnitude.
+- **The 123× on the wide median is the competitor's design, not binCV's representation.**
+  OpenCV's `filtering.cpp` sizes its histograms at roughly **98 MB of device scratch for
+  one 752×480 frame**; binCV allocates zero, because no kernel here heap-allocates. The
+  implementer's own written expectation for that row was parity. **The K=9 row is the fair
+  one**, since it compares equal sample counts.
+- **The pyramid row was written down as a pass before it was measured.** Its disposition
+  table's middle row said *ranges overlap ⇒ tie, which passes*; measured 1.015× and 1.039×
+  across two sweeps with 0 of 9 runs disjoint. A **5.61× figure is withdrawn** — `resize`
+  was paying 6.17× and `pyrDown` 7.18× on the default stream. The ladder itself is 93.5 KB
+  in one `cudaMalloc`, equal to the closed formula to the byte.
 
-binCV's two readings are `cudaMalloc` with nothing between the op and the
-driver. StereoBM's is an **upper reading**: `GpuMat` pads its pitch, it may be
-backed by a `BufferPool`, and anything `compute()` holds past the call is
-inside the delta. So 6.857× is a **lower bound** on the binary entry's lead.
+## Where the leads come from
 
-So the **binary entry leads on speed by 10.8× and on memory by 6.857×** — both
-axes, one region, one meter; the **census entry leads on speed by 1.43× and
-trails on memory by 1.466×**, which is a split verdict on the axis
-this project breaks ties with. That is an unmade judgement and it is recorded as
-one, not rounded into a headline — but the memory side of it is **not a defect
-to be fixed**. Two packed descriptor images are 2,820 KB before a disparity map
-exists; census expands and StereoBM does not, and no implementation of this
-algorithm in this layout can undercut its own descriptors. The plane layout is
-the smaller intermediate (3,217.5 KB against 3,877.5 KB) and ships, at 21.7× the
-matcher time. What is unmade is whether an op may ship on those terms, not what
-the number is.
+One mechanism per published number, and nothing here is a second claim.
 
-**Which of these is binCV's claim, and which is the on-ramp.** Only the binary
-entry rests on the representation: its caller already holds one bit per pixel,
-its cost is an XOR and a population count, and its device memory is 448.0
-KB/frame where StereoBM's is 3,072.0 KB/frame on the same meter, in the same
-region, at the same replica count. The census entry is a **standard
-stereo technique implemented in the standard way** — census *expands* data
-rather than compressing it (8 bits per pixel in, 24 out), and the layout that
-finally made it fast is the conventional one-word-per-pixel descriptor, not
-binCV's bit-planes. It exists so a caller arriving with ordinary camera frames
-has a way in, and it is competitive; it is not where the thesis pays, and
-nothing here should be read as claiming otherwise.
-
-One number makes the distinction concrete, and it has to be quoted carefully
-because it is a ratio between two things that both moved. Binary does a
-twenty-fourth of census's work, and the host captures that: **17× on x86-64,
-7.6× on aarch64** ([stereo.md](stereo.md)). The device's binary matcher captured
-**2.3×** when it spent a 32-bit `__popc` on a 9-bit window, and **13.7×** once it
-started treating a word as a word — inside the host's band, and the result that
-closed the issue asking for it.
-
-**It now reads 5.4×, and nothing about the binary matcher got worse.** The
-census matcher got 2.49× faster underneath it (0.94 → 0.369 ms) while the binary
-matcher stayed at 0.069. Both numbers are improvements and the ratio between
-them is not a measure of either. What the ratio does still say is that binCV's
-structural advantage on this device is real and partly uncollected: the binary
-kernel does a twenty-fourth of the work for a fifth of the time, and the
-profiling section's [R7](cuda-evidence.md#ranked-opportunities) names where the rest of it
-is (13.7% achieved occupancy,
-registers binding, `wait` the top stall at 36% with DRAM at 1.2%).
-
-Role only: the two match different costs and produce different maps;
-correctness is settled against the host library, not against StereoBM. The
-memory figures are `cudaMemGetInfo` deltas around each side's working-set
-allocation, measured identically on both sides (GpuMat may pool, so StereoBM's
-is an upper reading).
+- **The binary entry: one thread owns one 32-pixel *word*.** The raw cost is one XOR, the
+  nine-wide horizontal sum is a carry-save tree into four bit-planes, and the
+  winner-take-all is the host library's own `planesLess`/`planesSelect` ported rather than
+  reinvented — **6.0× over the arm it replaced and 25× over the reference**, at an unchanged
+  442 KB and zero shared memory. Every earlier arm handed `__popc` a 9-bit run in a 32-bit
+  register ([#63](https://github.com/ryanhou28/bincv/issues/63)).
+- **The census entry: a warp-cooperative separable box matcher.** One lane owns one
+  descriptor column and slides its vertical sum in a register; the horizontal aggregation is
+  a compile-time decomposition over `__shfl_down_sync`, 4 shuffles at winW = 9. **2.49×
+  [2.40–2.50]** over the packed matcher, 7 of 7 disjoint, at **0 bytes** of added scratch and
+  0 shared memory, with its gate-excluded control at winW = 19 reading 1.00× [0.99–1.03].
+  The packed layout under it was worth 8.55× over the plane block
+  ([#62](https://github.com/ryanhou28/bincv/issues/62)).
+- **FAST: the ordering, then the record.** A single-block bitonic raster sort became
+  count → prefix-sum → emit, off-switch ratio **35.19×**, and no two corners are ever
+  compared. The memory half was two accidents: `fastScratchBytes` handed every caller the
+  *reference* arm's scratch — 512 KB to use 380 bytes of — and the corner record carried the
+  host's 64-bit score for a value that is an arc length and cannot leave [1, 16]. The record
+  is 12 bytes, and the narrowing is proved by sweeping all 65,536 ring patterns at all
+  sixteen arc lengths rather than argued.
+- **`goodFeaturesToTrack`: the selection was 98% of the operation** and ran in one block.
+  The ordering key is now the corner itself — `key = (~responseBits)<<32 | (0xFFFF−y)<<16 |
+  (0xFFFF−x)`, whose ascending `uint64_t` order *is* the host's `CornerStronger` — so eight
+  bytes replace sixteen with no payload array, and `goodFeaturesScratchBytes(65536)` fell
+  **1,088 KB → 576 KB, 1.89×**.
+- **`threshold`: two software divides.** It is header-only over the host's own cutoff
+  composed with `cuda::packBits`, so the kernel under the number is `packKernel`, and
+  `cuobjdump -sass` showed 184 instructions around one LDG and one STG — including
+  `wordIdx / words` and a 64-bit divide. A row-grid shape deletes both and a byte-lane shape
+  reads four pixels per lane: **184 instructions became 104**, and the profile moves from
+  67.2% SM / 19.3% DRAM to 49.4% / 63.8%, where a packer belongs.
+- **Descriptor matching: kernel shape, not popcount width.** `cuda/descriptor.hpp` claimed
+  word emission gave a matcher "a real ~4× instruction advantage" over `cv::cuda`'s `uchar`
+  popcounts. The instruction count is right and **it buys 1.02×**, measured on OpenCV's own
+  side over identical bytes, because the kernel is `__syncthreads()`-bound. The prediction is
+  recorded as made and falsified; the header has been corrected. The lead is two
+  `__syncthreads()` per launch against one per descriptor chunk per train block.
+- **Lucas-Kanade: the launch shape, and the kernel is a loss.** Profiled with both sides in
+  one run at 61 keypoints, binCV is 65.4 µs in one launch against `cv::cuda`'s
+  9.3 + 12.2 + 10.2 + 10.2 = **41.9 µs** — **a 1.56× kernel loss inside a wall-clock win**,
+  which is also why the lead stops above 512–1024 keypoints. The counter-fact is in the same
+  profile: `cv::cuda`'s `pyrlk::sparseKernel` does 146 MiB of local-memory loads per launch
+  and binCV's does zero.
+- **The batched covariance is a signature, not a kernel.** 200 windows of 31×31 in one
+  launch is **467× faster** than 200 launches of the single-region form, which pays ~5–10 µs
+  of launch overhead against nanoseconds of work. Both forms compute identical counts, so
+  the 467× is purely what the signature costs.
 
 ## What is not delivered
 
-Stated before anything that is.
-
-- **`cornerSubPixAsync` misses its own round-trip rule, and the median has
-  changed sides.** Measured as ONE paired comparison rather than three
-  separately-timed medians added together, and against the whole-plane download —
-  the tighter of the two baselines on this machine, by 50× — the device arm reads
-  **0.5656 ms** against the round trip's **0.3911 ms**, with **72 of 77** paired
-  rounds favouring the round trip. That is 1.44× apart against a 1.39× bar, so a
-  result *against* the device arm in this sweep, where fourteen earlier runs read
-  a null at parity; either reading is a miss, not the 1.07× in the device arm's
-  favour that was published before. The earlier reading added three medians that
-  drift independently, and the host term alone swings 0.280–0.437 ms across seven
-  runs. The profiler says why the device arm cannot pull ahead and the answer
-  is a ceiling, not a defect: at 200 corners the kernel is 6.25 warps of work
-  on a part that holds 2,304, and the one decomposition that would add
-  parallelism is the one its bit-exactness argument forbids. **This one is a
-  stop-and-ask**, not a number to fill in.
-- **`cornerMinEigenValAsync` did not resolve, for the third round running.**
-  Re-taken over seven fresh processes it reads **0.0515 ms for `cv::cuda`
-  against 0.0590 ms for binCV** — 1.15× apart against a 1.76× bar, so a **null
-  result** on the magnitude; and 23 of its 105 paired rounds fall binCV's way, so
-  the direction is not established either. Both halves of the verdict decline it,
-  which is what noise looks like. The limiter is named
-  (occupancy, not either roof); what is missing is resolution, not an
+- **`cornerSubPixAsync` misses its own round-trip rule, and the median has changed sides.**
+  Measured as ONE paired comparison rather than three separately-timed medians added
+  together, against the whole-plane download — the tighter of the two baselines by 50× —
+  the device arm reads **0.5656 ms** against the round trip's **0.3911 ms**, with **72 of
+  77** rounds favouring the round trip: 1.44× apart against a 1.39× bar, where fourteen
+  earlier runs read a null at parity. Either reading is a miss, not the 1.07× in the device
+  arm's favour published before. The limiter is a ceiling of the signature: at 200 corners
+  the kernel is 6.25 warps of work on a part that holds 2,304 (2.1% achieved occupancy),
+  and the one decomposition that would add parallelism — a warp per corner — is what
+  `subpix.hpp`'s bit-exactness argument forbids, since double addition is not associative.
+  About 450 corners are needed before a second warp per SM exists, so **below roughly 450
+  corners a caller should refine on the host**. **This one is a stop-and-ask.**
+- **`cornerMinEigenValAsync` did not resolve, for the third round running.** 1.15× apart
+  against a 1.76× bar and 23 of its 105 rounds fall binCV's way, so both halves of the
+  verdict decline it. The limiter is named — neither arm is at 80% of either roof, so the
+  stall histogram decided and it says **occupancy**: OpenCV's kernel runs the same shape at
+  **87.5% achieved occupancy** against binCV's 16.0%. What is missing is resolution, not an
   explanation.
-- **The census entry is LARGER than `cv::cuda::StereoBM`** on a meter run on both
-  sides, which reverses a figure previously published here. It is faster on the
-  same run. **That loss is inherent to census, not a defect in this
-  implementation:** the transform expands 8 bits a pixel into a 32-bit descriptor
-  word, so the two transformed images alone are 2 × 1,410.0 KB = **2,820 KB before
-  anything else is allocated**, against StereoBM working on the 8-bit frames
-  directly. No implementation of census in the standard layout can be smaller than
-  its own descriptors. A caller who wants the memory back can have it — the
-  **plane-layout** intermediate is 3,217.5 KB against the packed one's 3,877.5 KB
-  — at **21.7× the matcher time**. That is a documented choice, not a defect and
-  not a single path.
-- **Block matching's accuracy floor and sparse stereo's residual floor are
-  unset.** Both clear their speed and memory bars; neither has a stated accuracy
-  magnitude, and inventing one is forbidden. Block matching is **ship-blocked**
-  on that; sparse stereo ships on its stated bar with its accuracy published.
-- **Lucas-Kanade leads only up to about 512–1024 keypoints**, and the win is the
-  launch shape rather than the kernel — profiled, the kernel work is a 1.56×
-  loss. Whether that ships with the density named in the header, or the
-  traversal is redesigned first, is the ship-rule escape and it is unmade. The
-  *second* question that rode with it — whether a lead this host cannot size is a
-  lead at all — **is ruled and closed**: at the frontend's own spacing binCV is
-  faster in **105 of 105** paired rounds, by **1.35× to 4.36×** (0.0792 ms against
-  `cv::cuda`'s 0.1475 ms). The direction is established by the rounds; the
-  magnitude is not, and is published as that range rather than as one number. See
-  [methodology-timing.md](methodology-timing.md#the-case-that-forced-the-ruling-and-where-it-landed).
-- **The gated matcher's device speed rationale is not established** — gated
-  against brute force reads 1.11×, and a difference that small is not one this
-  host's noise can resolve. It ships for the caller who already has the gate,
-  not on that number. (That row was originally called "not a result" because the
-  two arms' *ranges overlapped*; that test has since been corrected to the
-  project's own rule, and this row has **not** been re-taken under it. 1.11× is
-  well inside the noise either way, so the disposition stands and the evidence
-  for it is weaker than the corrected rule could make it.)
-- **Device occupancy was dropped on a measurement** rather than written.
+- **The census entry is LARGER than `cv::cuda::StereoBM`**, and faster on the same run. A
+  split verdict, above.
+- **Block matching's accuracy floor and sparse stereo's residual floor are unset.** Both
+  clear their speed and memory bars; neither has a stated accuracy magnitude, and inventing
+  one is forbidden. Block matching is **ship-blocked** on that. Sparse stereo ships on its
+  stated bar — 0.019 ms against a 0.39 ms bar at 135.6 KB against 442 KB, no scratch — with
+  its accuracy in plain sight: against a pair with exact ground-truth disparity 21, **236 of
+  500 within half a pixel and 261 pinned at the scan's low edge**, mean 2.11 px. That
+  behaviour is bimodal on a globally thresholded frame and it is the *host* algorithm's; the
+  fix is a richer packing, not this kernel.
+- **Lucas-Kanade leads only up to about 512–1024 keypoints**, and the win is the launch
+  shape rather than the kernel. Whether it ships with the density named in the header, or
+  the traversal is redesigned first, is the ship-rule escape and it is unmade. The *second*
+  question that rode with it — whether a lead this host cannot size is a lead at all — is
+  **ruled and closed**: the direction is established by the rounds and the magnitude is
+  published as a range rather than as one number
+  ([methodology-timing.md](methodology-timing.md#the-case-that-forced-the-ruling-and-where-it-landed)).
+- **The gated matcher's device speed rationale is not established.** Gated against brute
+  force reads 1.11× at an admitted fraction of 4.73%, which this host's noise cannot
+  resolve. It ships for the caller who already has the gate, not on that number.
+- **Device occupancy was dropped on a measurement.** `markOccupiedBatch` / `occupiedBatch`
+  / `clearOccupancy` have no equivalent anywhere in OpenCV, and the best existing option
+  for the job is the host library's own `spaceCandidates` at **3,333 ns and zero bytes** —
+  *below* this host's 11–13 µs launch floor, so no device shape can clear it: one launch
+  costs more than the whole host arm.
+- **The geometry stays on the host.** Five-point RANSAC was measured on device and **lost
+  by at least 15.9×** — median 18.58× over seven runs, range 15.88–19.54, ranges disjoint
+  — so nothing shipped. The binding constraint is not FP64 rate but the solver's
+  6,800-byte per-thread local frame, which is why a faster-FP64 part would not obviously
+  change the answer.
 
-Three entries left this list. The **resident frontend** was 1.22× slower than
-binCV's own CPU frontend and is now **5.62× faster**, ranges globally disjoint.
-**FAST** missed its role bar by 16.8×, then cleared it on speed while still
-trailing on memory, and now **leads both axes**: 6.01× faster with 7 of 7 runs
-disjoint, and **1.574× smaller** on `cudaMemGetInfo` where it was 1.545× larger.
-**`goodFeaturesToTrackAsync` ships**: it is 5.3× faster and 5.33× smaller than
-its `cv::cuda` counterpart with 7 of 7 runs disjoint, and although its bar was
-escalated twice and never set — and no number was invented in its place — the
-owner has now ruled that this clears. The caveat rides with it rather than being
-dropped: **OpenCV's arm swings 3.24–13.61 ms across runs** because its
-min-distance spacing filter runs on the CPU, so the denominator is not one
-number, and binCV crosses parity against **every version of it**, including
-round 2's own quieter 3.55–4.28 ms.
+## Operations with no `cv::cuda` counterpart
 
-`cuda::threshold`'s round-1 failure, reported here previously as a miss, **is
-cleared**: it was 2.22× slower at 4K with 7 of 9 runs disjoint and is now 0.744×,
-never above 1.00× at any geometry, with its 2.46× memory result unchanged to the
-byte. [cuda-evidence.md](cuda-evidence.md#the-sensor-stage-threshold-binarize-edgethreshold)
-records what the fix was and where the previously stated limiter was wrong.
+These operations have no OpenCV counterpart at any API level, on CPU or GPU, so no speed
+bar exists and none was invented. They ship on correctness, memory and the host comparison,
+with the speed verdict **OUTSTANDING**, and **no CPU number is quoted in place of a missing
+GPU one anywhere on this list**:
 
-## The role bars
+- **the gradient covariance** (`gradientCovarianceAsync`, `gradientCovarianceBatchAsync`) —
+  `cornerHarris` and `createMinEigenValCorner` compute a dense float response *through* a
+  covariance; neither exposes one. Scratch is **0 B**, verified as a `cudaMemGetInfo` delta
+  of exactly 0 across 200 batch launches, at ≤24 B/window.
+- **orientation** — no `cv::cuda` entry point orients provided keypoints.
+- **`keypointsFromCorners`** — the detector-to-keypoint-set link, which exists because a
+  resident pipeline needs no mid-frame synchronize and a host pipeline does not need the op
+  at all. It is the one op here that met both halves of its rule: 1.00 synchronize per
+  frame against the round-trip arm's 2.00, and **0.0043 ms against 0.1547 ms — 36×**, with
+  frame totals disjoint in all 7 runs.
+- **`shift`**, **`binarize`** and the 16-bit **`medianWide`**, each measured above or
+  against binCV's own arm rather than against an invented bar.
+- **`stereoDescriptorMatch`, `stereoRefineDisparity`, `stereoMatchRectified`** — OpenCV's
+  sparse stereo is `StereoBM`'s dense map plus a host lookup, not an operation.
+- **`matchDescriptorsGated`** — no library exposes a gated matcher.
 
-Both arms on **one explicit stream**, medians of 7 process runs. The stream is
-not a detail: OpenCV synchronizes the whole device on the default stream, a
-surcharge measured up to 7.18× here, and a default-stream pair in
-`cuda_sensor_benchmark` that printed "7.35× FASTER" for `threshold` has been
-deleted rather than repaired — `cuda_role_benchmark` owns that comparison.
+`calcOpticalFlowBlockMatch` is measured against `cv::cuda`'s LK above because that is the
+best existing option for the job, not because it is the same operation
+(`cv::cuda::FastOpticalFlowBM` is a dense field, not a sparse tracker).
 
-### Speed
+**Descriptor matching left this list**, because it now has a device arm and therefore a
+real bar; it is timed above.
 
-RTX 3070 Ti · 752×480 unless the row names a geometry · both arms on **one explicit
-stream** · kernel-resident clock (CUDA events) · medians of 7 independent process runs ·
-from `cuda_role_benchmark`.
+## The assembled pipelines
 
-**Reading the table.** Both sides' medians are in milliseconds, so the smaller cell is the
-faster side and the faster side is bold — a row where binCV's cell is the larger one is a
-row binCV lost, and it needs no marker to say so. The ratio column is stated as a division
-in its header, `binCV ÷ cv::cuda`, so a value below 1.000 means binCV is faster; the
-verdict column states the same comparison the other way up, in words, and those two are
-the same fact rather than two. The **verdict** column is the *published* one, set when
-these rows were taken under the range test; the rightmost column is what the project's
-rule says on a seven-run re-take of every one of them, in the three values the owner's
-2026-09-19 ruling defines — *direction established* (no round crossed 1.00×), *a result*
-(the size clears the larger noise), or neither (see
-[methodology-timing.md](methodology-timing.md#the-case-that-forced-the-ruling-and-where-it-landed)).
+These are **not operations and they have no `cv::cuda` counterpart.** They are binCV's own
+example pipelines, built out of the operations above and measured against binCV's own host
+library on the same machine. They exist to show that the ops compose bit-exactly and that
+residency is where launch cost gets amortized — not to make a claim against OpenCV. Issues [#58](https://github.com/ryanhou28/bincv/issues/58) and
+[#59](https://github.com/ryanhou28/bincv/issues/59) were judged on them. A reader choosing an operation should use the tables
+above.
 
-| operation | `cv::cuda` arm | cv::cuda (ms) | binCV (ms) | binCV ÷ cv::cuda — below 1.000 is binCV faster | disjoint | verdict | re-taken: apart vs bar |
-|---|---|---|---|---|---|---|---|
-| [`threshold` 752×480](cuda-evidence.md#the-sensor-stage-threshold-binarize-edgethreshold) | `cv::cuda::threshold` | 0.0091 | **0.0084** | 0.992 | 0/7 | **PASS** — "no longer fails"; magnitude a null | 44–60 with one round tied — null |
-| [`threshold` 1920×1080](cuda-evidence.md#the-sensor-stage-threshold-binarize-edgethreshold) | ″ | 0.0116 | **0.0100** | 0.889 | 0/7 | **PASS** — magnitude a null | 17–88 — null |
-| [`threshold` 3840×2160](cuda-evidence.md#the-sensor-stage-threshold-binarize-edgethreshold) | ″ | 0.0362 | **0.0268** | **0.743** | 1/7 | **PASS** — magnitude a null | 8–97 — null; the 1.35× stays unquotable |
-| [describe, N=1000](cuda-evidence.md#descriptor-matching-which-is-where-the-format-was-supposed-to-pay) | `cv::cuda::ORB::computeAsync` | 0.1070 | **0.0107** | **0.108** | **7/7** | **MET** — binCV **9.3×** faster | 9.25× vs 2.10× — **a result** |
-| [FAST](cuda-evidence.md#fast-the-bar-was-missed-and-the-ordering-is-why--now-closed-on-both-axes) | `FastFeatureDetector` | 0.1459 | **0.0247** | **0.166** | **7/7** | **MET** — binCV **6.01×** faster, where it was **14.84× behind** | 6.01× vs 3.39× — **a result** |
-| [`goodFeaturesToTrack` (wall)](cuda-evidence.md#the-frontend-on-device) | `createGoodFeaturesToTrackDetector` | 3.7282 | **0.8405** | **0.226** | **7/7** | **SHIPS** — binCV **5.3×** faster | **105 of 105, by 3.53× to 15.52×** — direction established **and** a result (4.42× vs 3.16×) |
-| [min-eigenvalue response](cuda-evidence.md#where-bincv-has-no-structural-advantage-said-plainly) | `createMinEigenValCorner` | **0.0515** | 0.0590 | 1.146 | **0/7** | **still not a result** — `cv::cuda` ahead on the median, neither direction established | 82–23, 23 rounds crossed — null on both halves |
-| [Lucas-Kanade, 204 pts](cuda-evidence.md#the-role-bar-and-the-density-at-which-it-stops-holding) | `SparsePyrLKOpticalFlow` | 0.1475 | **0.0792** | **0.537** | **7/7** | **MET at frontend density** — binCV ahead in 105 of 105 rounds | **faster in 105 of 105 rounds, by 1.35× to 4.36×** — direction established; magnitude a null (1.84× vs 2.49×) |
-| [Lucas-Kanade, 2048 pts](cuda-evidence.md#the-role-bar-and-the-density-at-which-it-stops-holding) | ″ | **0.3287** | 0.3558 | 1.080 | **0/7** | **not a result — the crossover** | 98–7, seven rounds crossed — null on both halves |
-| [descriptor matching, 5000²](cuda-evidence.md#descriptor-matching-which-is-where-the-format-was-supposed-to-pay) | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 | **0.2189** | **0.109** | **7/7** | **MET** — binCV **9.1×** faster | 9.11× vs 1.29× — **a result** |
-| [census matcher](cuda-evidence.md#the-census-entry-and-the-layout-that-closed-its-gap) | `cv::cuda::StereoBM(64,9)` | 0.6864 | **0.3692** | **0.536** | **7/7** | **MET** — binCV **1.87×** faster | 1.94× vs 1.37× — **a result** |
-| [census entry (2 transforms + match)](cuda-evidence.md#the-census-entry-and-the-layout-that-closed-its-gap) | ″ | 0.6996 | **0.5076** | **0.723** | **7/7** | **MET on speed, LOSES on memory** — a split verdict, stated as one | 1.47× vs 1.25× — **a result** |
-| [binary entry](cuda-evidence.md#dense-disparity-both-entries) | ″ | 0.7152 | **0.0648** | **0.091** | **7/7** | **MET** — binCV **11.0×** faster | 10.95× vs 1.78× — **a result** |
-| [block matching](cuda-evidence.md#block-matching) | `SparsePyrLKOpticalFlow` | 0.2320 | **0.0540** | **0.230** | **7/7** | speed MET; **accuracy floor unset** — ship-blocked | not re-taken this round |
+**The resident VIO frontend** (`backends/cuda/examples/cuda_vio_frontend.cpp`): sensor
+stage → pyramid → derivatives → `goodFeaturesToTrack` → `keypointsFromCorners` →
+orientation → BRIEF, over **400 real EuRoC V1_02 cam0 frames**, 7 process runs, one
+explicit stream, CUDA events on the device side and the host library's own clock on the
+host side.
 
-**Three rows changed direction since the previous round, and one row is new
-information rather than a better number.** FAST went from 14.84× behind to 6.01×
-ahead and `goodFeaturesToTrack` from 2.659× behind to 5.3× ahead, both on the
-ordering rewrites in
-[cuda-evidence.md](cuda-evidence.md#the-frontend-on-device). The LK row is the first tracking measurement
-in this backend. And the census entry's row is a **split verdict** — ahead on
-speed, behind on memory — which is stated in the headline and not resolved here.
-FAST was the other split verdict and is no longer one: [the memory table](#memory)
-takes it to 1.574× smaller, so it leads both axes.
+- **0.945 ms/frame [0.918–1.065] against the host arm's 5.313 ms [5.198–5.422] — 5.62×**,
+  ranges disjoint in all 7 runs *and globally* (device maximum below host minimum).
+- It was **1.22× slower** one round ago, at 6.462 ms. The host arm reads 5.313 identically
+  in both rounds, which is what makes the move like-for-like: the device side went
+  6.462 → 0.945 and nothing else changed. Detection fell from **97.0% to 75.2%** of the
+  device frame while everything else moved 0.194 → 0.209 ms, which is the Amdahl check.
+- Residency itself: exactly **1.00 synchronize per frame** in all 7 runs, and 360,960 B up
+  against 11,536 B down — a 31.3× bus asymmetry with nothing frame-sized returning.
+- Correctness over 400 frames × 7 runs: **0** corner-count, **0** position, **0** keep-byte,
+  **0** rotation-bin and **0** descriptor-word differences. Peak device memory 2,106,180 B
+  (allocation sum).
 
-**Two rows measured again for the re-judging pass came back differently enough to
-record, and both are reported rather than folded into the numbers above.**
+**The tracking sequence**: the same 400 frames through the sensor stage, the shipped
+1/2/2/2 ladder, the previous frame's derivatives and LK, at a fixed re-detection cadence.
+Wall clock on both arms, with the H2D upload and one stream synchronize per frame **inside**
+the device arm's clock. Agreement is checked before any timing in every run — level-0
+frame 11,520 words compared, 0 differ; the ternary derivative planes 46,080 words, 0
+differ; 204 = 204 corners with 0 position differences.
 
-- **`goodFeaturesToTrack`'s wall-clock row was never being judged at all.** Its
-  paired summary was assembled by hand rather than through `summarizePaired`, so
-  its sign counters stayed at zero and the row printed a 0–0 split with p = 1
-  over rounds that are in fact unanimous. Judged properly over seven fresh
-  processes it is **3.7282 ms against 0.8405 ms, 105 of 105 rounds, 3.53× to
-  15.52×** — direction established and a result. The bug is fixed; the row above
-  keeps its published verdict and this is the first honest sign count for it.
-- **FAST's 6.01× is not a stable figure on this host, and the direction is.**
-  Over 21 independent processes (seven here, fourteen in the re-judging sweep)
-  the per-run median ratio moves between **3.44× and 6.26×**, because binCV's own
-  arm is bimodal: it lands at either ≈0.0205 ms or ≈0.0310 ms depending on the
-  process, with `cv::cuda`'s arm steady at 0.10–0.14 ms. **Every one of those 21
-  runs is 15–0 in binCV's favour**, so the lead is not in question and its size
-  is quoted more precisely above than this machine supports. Flagged rather than
-  silently re-numbered: fixing it is a re-take round of its own.
+| cadence | host binCV (ms/frame) | device binCV (ms/frame) | host ÷ device (>1× = the device faster) |
+|---|---|---|---|
+| re-detect every 10 frames | 1.932 [1.779–1.992] | **0.424** [0.383–0.471] | **4.56×** |
+| re-detect every frame | 6.455 [6.388–6.652] | **1.056** [0.974–1.159] | **6.11×** |
 
-**`goodFeaturesToTrack`'s OpenCV arm remains noisy** (3.24–13.61 ms across runs)
-because its spacing filter runs on the CPU; that is stated rather than hidden,
-and it is why the row is reported against round 2's own quieter 3.55–4.28 ms
-denominator as well. binCV crosses parity against either.
+Ranges disjoint 7/7 and globally on both rows. Peak device memory, identical in all 7 runs
+because every allocation is made at construction: **2,212.7 KB** for the whole resident
+state and **451.7 KB** for the tracker alone. The host x86 arm is not timing-grade here, so
+these rows locate a magnitude rather than a decimal.
 
-### Memory
+## Recorded negatives
 
-RTX 3070 Ti · 752×480 · `cudaMemGetInfo` delta taken identically **on both sides** — the
-only meter readable across libraries — each side replicated until its own total clears eight of this
-driver's measured 2 MB units, and never mixed with binCV's own allocation sums. The
-lighter side is bold.
+Shapes that were measured, lost, and should not be retried without new information. Each is
+recorded in full on the issue it belongs to.
 
-| operation | `cv::cuda` arm | cv::cuda (KB) | binCV (KB) | which is smaller |
-|---|---|---|---|---|
-| `threshold` | `cv::cuda::threshold` | 1024.0 | **416.0** | binCV, by **2.46×** |
-| describe, N=1000 | `cv::cuda::ORB::computeAsync` | 2048.0 | **48.0** | binCV, by **42.67×** |
-| descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 8277.3 | **400.0** | binCV, by **20.7×** |
-| LK tracker resident state | `SparsePyrLKOpticalFlow` | 1408.0 | **448.0** | binCV, by **3.14×** |
-| `goodFeaturesToTrack` | `createGoodFeaturesToTrackDetector` | 10240.0 | **1920.0** | binCV, by 5.33× |
-| corner response | `createMinEigenValCorner` | 10240.0 | **2048.0** | binCV, by 5.00× |
-| FAST @ capacity 32,768 | `FastFeatureDetector` | 680.0 | **432.0** | binCV, by **1.574×** — it was 1.545× **larger** one round ago |
-| census entry working set | `cv::cuda::StereoBM(64,9)` | **3072.0** | 4512.0 | **`cv::cuda`**, by **1.47×** — the published ratio for this row is 0.68× |
+- **The census matcher** — shared-memory staging of raw per-pixel costs (1.28× slower;
+  the redundant loads were already L1 hits), the disparity-tile sweep (4 → 1.97 ms,
+  16 → 1.11, 8 → 0.91), and `__launch_bounds__` forcing the register budget instead of
+  shrinking the state (0.98× / 1.70× / 1.59× against 2.53× unbound) — [#62](https://github.com/ryanhou28/bincv/issues/62).
+- **The binary matcher** — six attempts that together located the limit: a `planes == 1`
+  specialization (1.23× slower), hoisting the disparity tile's right-image loads (null),
+  strip length 8 → 0.421 ms and 32 → 0.649 against 16's 0.395, packing cost and disparity
+  into one register (84 registers, no movement) and `__launch_bounds__` at 4/6/8 blocks per
+  SM (worse at every setting). All six attacked *memory* pressure on a kernel that was never
+  memory-bound; reading them as a set is what pointed at arithmetic density —
+  [#63](https://github.com/ryanhou28/bincv/issues/63).
+- **The frontend's dropped arms** — a `__dp4a` wide-orientation arm (0 of 6 runs disjoint at
+  the operating point, 1.46× only at N=100,000), a funnel-shift covariance arm (1.13×
+  slower where the comparison is decidable), a one-thread-per-window covariance and a
+  dense-rank counting sort for FAST scores, plus the packer's row-grid arm left flagged
+  rather than settled — [#58](https://github.com/ryanhou28/bincv/issues/58).
+- **The tracker's unbuilt arms** — the lane-0 broadcast and the thread-per-keypoint shape,
+  both predicted to lose from one profile rather than six experiments, and `pyrDownBox`'s
+  bit-sliced arm left as an open disposition — [#59](https://github.com/ryanhou28/bincv/issues/59).
+- **The window family** — a fused single-kernel OPEN/CLOSE, a shared-memory tiled
+  morphology arm refused on the 1.28× precedent, and the log-depth fold that is the best
+  remaining unexploited win in the family but buys nothing while the ops are launch-bound —
+  [#60](https://github.com/ryanhou28/bincv/issues/60).
+- **Everything the profiler found and nothing implemented** — the ranked opportunity list
+  R1–R10, the profiler-enablement recipe, and the readings that **contradicted** four
+  documented limiters while leaving every decision standing, are on
+  [#64](https://github.com/ryanhou28/bincv/issues/64). Only the profile readings that explain a published number
+  above are repeated here. `nsys` and `compute-sanitizer` do not work on this machine, so
+  no device out-of-bounds read in this backend is observable by any tool here; two guards
+  are pinned by swept arithmetic invariants instead.
 
-**One of these rows goes the other way, and it is printed as it reads.** The
-helper that prints them used to say "binCV smaller by that factor" whatever the
-ratio was — which is a claim rather than a reading on any row where OpenCV is
-smaller. It now follows the number. FAST was the second such row and no longer
-is; the census entry remains one, and its loss is **inherent to census rather
-than a defect in this implementation** — see [the headline](#the-headline). The census-entry row is the
-first time both sides of that path were metered in one region.
+- **Five negatives have no issue home and are recorded here so they are not lost.** A
+  `uint4` arm for `denoiseMedian3` shipped bit-exact, timed on the full ladder and was
+  **dropped with its off-switch**: it never separated (0.97–1.04× at every rung), because
+  at 4096×2160 the whole operation moves 2.21 MB ≈ 3.6 µs of traffic against a 7–10 µs
+  launch. The host library's 4.81× for a bit-sliced blockSize-3 corner response **does not
+  port** — on device it is 0.74×, slower with ranges disjoint, because the host's win was
+  removing per-pixel addressing where the device form hands one thread 32 pixels of `sqrt`.
+  `cornerSubPixAsync`'s set-bit-skip control, in which both arms are the same kernel doing
+  the same work, reads **skip-ON 4% slower in 77 of 77 rounds and 154 of 154 across a
+  second sweep** — inside the ±5% band it asserts, so nothing fails, but a one-sided sign
+  count on identical code is a finding about that control. Narrowing the FAST record moved
+  `fastOrderedApplies`' arm crossover, so over widths 32..2016 and heights 7..1199 **about
+  4.5% of (frame, capacity) points now take the reference arm**, never above capacity 128
+  — no answer changes, and the point is that a crossover that moves when a record size
+  changes is a heuristic rather than a derived number. That narrowing also costs store
+  traffic: `fastEmitKernel<9,1>` reads **53,949 global store sectors against the old
+  record's 37,931**, invisible at 15% occupancy today and not invisible if
+  [#64](https://github.com/ryanhou28/bincv/issues/64) succeeds.
 
-**FAST's row is now read over 256 working sets a side — this file's own default
-`kReplicas` — where it was the outlier at 32.** That is not a different meter,
-only a finer one, and the change is stated because the row moved by 6% between
-two harnesses that both satisfied the eight-unit rule at 64.
-
-## Verdicts recorded OUTSTANDING
-
-Four operations have **no OpenCV counterpart at any API level**, on CPU or GPU,
-so no speed bar exists and none was invented. They ship on correctness, memory
-and the host comparison, with the speed verdict **OUTSTANDING**:
-
-- **the gradient covariance** (`gradientCovarianceAsync`, `gradientCovarianceBatchAsync`)
-  — `cornerHarris` and `createMinEigenValCorner` compute a dense float response
-  *through* a covariance; neither exposes one. Scratch is **0 B**, verified as a
-  `cudaMemGetInfo` delta of exactly 0 across 200 batch launches, at ≤24 B/window.
-- **orientation** — no `cv::cuda` entry point orients provided keypoints. No CPU
-  number was quoted in place of the missing GPU one.
-- **`keypointsFromCorners`** — the detector-to-keypoint-set link, which has no
-  counterpart because no other library needs it. It is the one op here that
-  **met both halves of its rule**: 1.00 synchronize per frame against the
-  round-trip arm's 2.00, and 0.0043 ms against 0.1547 ms — 36×, stage ranges
-  fully disjoint, and frame totals disjoint in all 7 runs.
-- **`shift`**, as recorded in
-  [cuda-evidence.md](cuda-evidence.md#the-pyramid-the-resident-ladder-and-shift).
-
-Five more joined the list, each with the reason it has no `cv::cuda` bar:
-`stereoDescriptorMatch`, `stereoRefineDisparity` and `stereoMatchRectified`
-(OpenCV's sparse stereo is `StereoBM`'s dense map plus a host lookup, not an
-operation), `calcOpticalFlowBlockMatch` (`cv::cuda::FastOpticalFlowBM` is a
-dense field, not a sparse tracker) and `matchDescriptorsGated` (no library
-exposes a gated matcher). **No CPU number is quoted in place of a missing GPU
-one anywhere on this list.** Two of them carry a further condition that is not a
-speed verdict and is not treated as one: their accuracy floors are unset, so
-they are reported with their accuracy in plain sight rather than claimed.
-
-**Descriptor matching has left this list, because it now has a device arm and
-therefore a real bar.** It was recorded here as the reverse of an OUTSTANDING —
-OpenCV had `BFMatcher(NORM_HAMMING)` and binCV had nothing to time. It is timed
-above at **0.109× against `knnMatchAsync(k=2)` on `CV_32S`, 20.7× smaller**. The
-note that used to sit here predicted the win would come from word emission —
-8 `__popc` per 256-bit descriptor against `cv::cuda`'s 32 at `uchar`. **That
-prediction was measured and is wrong**: the instruction ratio is real and worth
-1.02×. The lead is kernel shape. The prediction is recorded here as made and
-falsified rather than quietly replaced by the result.
+**Timing and profiling never mix.** `ncu` serializes and replays kernels and locks clocks
+to base, so no timing number in this report comes from a profiled run and no profile
+reading is quoted as a duration.
 
 ## Coverage
 
-`scripts/verify_cuda.sh` proves each device kernel gives the host library's answer byte
-for byte — **seventeen suites, 194,975 checks in the Release configuration and 194,922 in
-the Debug one** — and every optimized arm is held to its own reference arm's map in the
-same binary. The two counts differ by design rather than by accident: a suite exercising
-a narrowed domain can only test the half of that contract its configuration has — the
-assertion is live in Debug, the error return is reachable in Release — and each such
-suite prints which half it ran instead of silently shrinking.
+`scripts/verify_cuda.sh` proves each device kernel gives the host library's answer byte for
+byte — **seventeen suites, 194,975 checks in the Release configuration and 194,922 in the
+Debug one**. The counts differ by design: a suite exercising a narrowed domain can only
+test the half of that contract its configuration has — the assertion is live in Debug, the
+error return reachable in Release — and each such suite prints which half it ran.
 
-**One previously published count here was too high, and the correction is worth
-stating rather than quietly applying.** The eight pre-frontend suites were
-reported at 38,901 Release checks. The round that found it brought them to
-**36,792** (they read **36,844** today, the 52 being the dense cases added
-since), and the whole difference was accounted for: **2,112 of those checks never existed as distinct
-assertions.** `BINCV_CHECK_EQ` evaluated its first argument twice — once for the
-comparison and once inside `std::to_string` for the failure message — and
-`test_cuda_median` passes it a helper that itself contains four checks. Each of
-that helper's 528 invocations therefore ran its four assertions on identical data
-twice and counted eight. 528 × 4 = 2,112 exactly, and adding the three checks of
-the new shared-helper sweep closes the arithmetic to the unit:
-38,901 − 2,112 + 3 = 36,792. Coverage is unchanged; the second execution tested
-nothing the first had not. The macro now binds the value once, which also stops
-`BINCV_CHECK_EQ(cudaFree(p), cudaSuccess)` being a double free — which is how a
-CUDA suite found it.
+**One test-method finding qualifies that evidence.** Every dense-disparity case built its
+right image as an *exact shift* of the left, where the correct disparity's window cost is 0
+and every rival's is hundreds — so a deliberately broken halo passed 508 checks
+byte-identically. Those cases now run on two contents each and all pass, and a mutation
+battery against the box matcher fires 58–140 failures on each of seven mutations, naming
+the three that are benign with the structural reason rather than papering over them
+([#62](https://github.com/ryanhou28/bincv/issues/62)).
 
-**Which operations have device arms.** Twenty-two of the twenty-seven host operation
-headers have device arms: `logic`, `reduce`, `pack`, `census` and
-`denseDisparity` — the reductions and dense stereo end to end — then
-`threshold`, `edge`, `morphology`, `denoise`, `medianWide`, `pyramid` and
-`shift`, which is the sensor stage and the window stage a frontend runs per
-frame; from the frontend round `derivative`, `covariance`, `corner`, `fast`,
-`orientation`, `descriptor` and `subpix`; and from the round below
-`opticalFlow` (Lucas-Kanade), `blockMatch` and the sparse-stereo half of
-`stereo`. Two device operations have no host header at all: `keypoints.hpp`,
-the detector-to-keypoint-set link, and `sparseMatch.hpp`'s descriptor matcher —
-both exist because a resident pipeline needs them and a host pipeline does not.
+**One previously published count was too high.** The eight pre-frontend suites were
+reported at 38,901 Release checks; **2,112 of those never existed as distinct assertions**,
+because `BINCV_CHECK_EQ` evaluated its first argument twice and `test_cuda_median` passes
+it a helper containing four checks — 528 invocations × 4 = 2,112 exactly, and
+38,901 − 2,112 + 3 = 36,792 (they read 36,844 today). Coverage is unchanged; the second
+execution tested nothing the first had not. The macro now binds the value once, which also
+stopped `BINCV_CHECK_EQ(cudaFree(p), cudaSuccess)` being a double free.
 
-**What still has no device arm, and one of them is a decision rather than a
-gap.** The geometry does not, and that is the round's answer rather than its
-backlog: five-point RANSAC was measured on device and **lost by at least 15.9×** — the
-median of its seven runs is 18.58×, range 15.88–19.54 — so
-nothing shipped (see
-[the geometry section](cuda-evidence.md#the-geometry-and-the-measurement-that-says-it-stays-on-the-host)). `denseCensusBox` adds a second packed matcher beside the first. The
-rest of the operation set has no device arm, and the remaining work stays filed
-as issues rather than implied here.
+**Twenty-two of the twenty-seven host operation headers have device arms** — the
+reductions and dense stereo end to end (`logic`, `reduce`, `pack`, `census`,
+`denseDisparity`); the sensor and window stages (`threshold`, `edge`, `morphology`,
+`denoise`, `medianWide`, `pyramid`, `shift`); the frontend (`derivative`, `covariance`,
+`corner`, `fast`, `orientation`, `descriptor`, `subpix`); and `opticalFlow`, `blockMatch`
+and the sparse-stereo half of `stereo`. Two device operations have no host header at all:
+`keypoints.hpp` and `sparseMatch.hpp`'s descriptor matcher, both of which a resident
+pipeline needs and a host pipeline does not. The geometry has no device arm, and that is
+the round's answer rather than its backlog.
 
-Several accept a **narrower domain than their host twin**, and each names it in
-its docstring, asserts it, and returns `cudaErrorInvalidValue` outside it rather
-than computing a wrong answer: morphology takes elements up to 32 rows by 512
-columns (32 masked), `medianWide` takes K ∈ {1,3,5,7,9} at compile time,
-`pyrDownBox` takes 1–8 planes a side, `binarize` takes 1–32, the derivative
-takes N ∈ [1,4], and steered BRIEF names its angle domain [-2π, 2π]. A Tier 1
-claim here is a claim over *that* domain, said so where the claim is made. The
-Debug configuration is what proves those assertions reach nvcc's device pass,
-which is why it is a gate rather than a convenience.
+Several device ops accept a **narrower domain than their host twin**, and each names it in
+its docstring, asserts it, and returns `cudaErrorInvalidValue` outside it rather than
+computing a wrong answer: morphology takes elements up to 32 rows by 512 columns (32
+masked), `medianWide` takes K ∈ {1,3,5,7,9} at compile time, `pyrDownBox` takes 1–8 planes
+a side, `binarize` takes 1–32, the derivative takes N ∈ [1,4], and steered BRIEF names its
+angle domain [-2π, 2π]. A Tier 1 claim here is a claim over *that* domain, said so where
+the claim is made. The Debug configuration is what proves those assertions reach nvcc's
+device pass, which is why it is a gate rather than a convenience.
 
 ## Reproduce
-
-From the repository root:
 
 ```bash
 cmake -S . -B build -DBINCV_CUDA=ON -DBINCV_BUILD_BENCHMARKS=ON \
@@ -580,8 +495,8 @@ cmake --build build -j
 
 | table | binary |
 |---|---|
-| [the role bars](#the-role-bars), both axes | `cuda_role_benchmark` — one process, one launch floor, every pair interleaved on one explicit stream, `cudaMemGetInfo` on *both* sides of every memory figure |
-| the headline's memory table | `cuda_role_benchmark stereo`, section 7b |
+| [speed](#speed-operation-by-operation) and [memory](#memory-operation-by-operation), operation by operation | `cuda_role_benchmark` — one process, one launch floor, every pair interleaved on one explicit stream, `cudaMemGetInfo` on *both* sides of every memory figure |
+| the dense memory rows | `cuda_role_benchmark stereo`, section 7b |
 | dense disparity, the optimization ladder | `cuda_dense_benchmark` |
 | the foundation ops | `cuda_foundation_benchmark` |
 | the sensor stage | `cuda_sensor_benchmark` |
