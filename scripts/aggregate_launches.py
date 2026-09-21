@@ -18,12 +18,13 @@ invisible to the spread it prints.  It moves between processes.
 That gap is not a rounding correction on this hardware.  On the x86-64 desktop
 under WSL2 goodFeaturesToTrack prints a ~5% within-run spread, and the same
 ratio scatters 57% over thirty launches: the honest bound is eleven times the
-printed one.  The Pi 4 with the governor locked is the other end -- 0.05-0.14%
-within-run, 0.41% across launches -- which is what makes it the reference
-device.  Until this script, every x86 figure under docs/reports/logs/ was one
-draw from a distribution nobody had characterised, because all 24 of those logs
-are single launches.  Not wrong; unexamined, which CLAUDE.md's "commit the
-benchmark" rule does not allow to stand.
+printed one.  The Pi 4 with the governor locked is the other end -- 0.05-1.18%
+within-run and 0.1-0.8% across seven launches of the same benchmark -- which
+is what makes it the reference device.  Until this script, every x86 figure
+under docs/reports/logs/ was one draw from a distribution nobody had
+characterised, because all 24 of those logs were single launches.  Not wrong;
+unexamined, which CLAUDE.md's "commit the benchmark" rule does not allow to
+stand.
 
 scripts/run_launches.sh produces the input.  This reads it.
 

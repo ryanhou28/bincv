@@ -20,8 +20,8 @@
 # goodFeaturesToTrack reports a 5% within-run spread and the same figure scatters
 # 57% across thirty launches: the honest bound is eleven times the one the
 # harness can print. The Pi 4 with the governor locked is the other extreme --
-# 0.05-0.14% within-run, 0.41% across launches -- which is why the reference
-# device is the reference device.
+# 0.05-1.18% within-run and 0.1-0.8% across seven launches of the same
+# benchmark -- which is why the reference device is the reference device.
 #
 # The companion is scripts/aggregate_launches.py, which reads what this writes.
 #
