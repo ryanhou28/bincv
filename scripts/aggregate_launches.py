@@ -156,6 +156,26 @@ def _number(cell):
         return None
 
 
+def _fixed(v, width=10):
+    """A value at four significant figures, in a fixed-width field.
+
+    A flat `%.4f` printed `bitwiseAnd binCV uint32` as 0.0027 -- three digits,
+    a 3.7% quantum on a figure the reports publish as 0.00273, so a
+    re-measurement could not be compared with the number it was re-measuring.
+    Four significant figures below 1 and four decimals above keep every row in
+    these logs, which span 0.0027 ns/pixel to 9,071,249 ns/frame, readable in
+    one column.
+    """
+    a = abs(v)
+    if a >= 1000.0:
+        return f"{v:>{width}.1f}"
+    if a >= 1.0 or a == 0.0:
+        return f"{v:>{width}.4f}"
+    import math
+    d = 3 - int(math.floor(math.log10(a)))
+    return f"{v:>{width}.{min(d, 9)}f}"
+
+
 def _cells(line):
     """Split a fixed-width row. Two or more spaces separate columns, so a label
     like `binCV streaming` or a header like `vs OpenCV` stays one cell."""
@@ -478,10 +498,10 @@ def main(argv=None):
         if s['lo'] is None:
             tail = f"  {'ONE LAUNCH -- no interval':>22} {'--':>7} {'--':>8}"
         else:
-            tail = (f"  [{s['lo']:>8.4f}, {s['hi']:>8.4f}] {s['half']:>6.2f}% "
+            tail = (f"  [{_fixed(s['lo'], 8)}, {_fixed(s['hi'], 8)}] {s['half']:>6.2f}% "
                     f"{s['minres']:>7.3f}x")
-        print(f"{name[:w]:<{w}} {s['n']:>3} {s['median']:>10.4f} {s['min']:>10.4f} "
-              f"{s['max']:>10.4f} {s['r2r']:>6.3f} {s['scatter']:>7.1f}% {within}"
+        print(f"{name[:w]:<{w}} {s['n']:>3} {_fixed(s['median'])} {_fixed(s['min'])} "
+              f"{_fixed(s['max'])} {s['r2r']:>6.3f} {s['scatter']:>7.1f}% {within}"
               f"{tail}")
     if any(s['n'] < 2 for _, _, s in rows):
         print("\n  A ROW SEEN IN ONE LAUNCH HAS NO INTERVAL. The columns are blank"
