@@ -263,6 +263,17 @@ beside it. Arms run round-robin so drift moves all of them together; results are
 through a `volatile` sink and inputs are varied, because a loop whose result is unused is
 deleted by the optimizer.
 
+**That spread is within one process, and a process cannot see past itself.** Whatever a
+launch pays once — where the allocator landed, which neighbour the scheduler put on the
+sibling core, what the clock was doing when the batch size was calibrated — is constant
+inside the process, so it moves none of the batches it times. It moves between them.
+`scripts/run_launches.sh` runs a benchmark as N separate pinned processes and
+`scripts/aggregate_launches.py` reports both halves side by side: the within-run spread the
+harness printed, the run-to-run scatter it could not, a bootstrap interval on the median
+across launches, and **the smallest difference that many launches can resolve on that row**.
+A row seen in one launch gets no interval at all — blank because a single process carries no
+run-to-run information, not because it has none to carry.
+
 **Memory is the peak working set of a call, computed from buffer geometry** — which is why it
 is exact and identical on both architectures, and it works because no binCV kernel allocates.
 **Where the OpenCV side allocates internally, buffer arithmetic cannot see it**:
@@ -287,6 +298,24 @@ with `taskset`; and throttle state is read before and after, a change during a r
 invalidating it. Two runs in this project's history were discarded that way. The environment
 block each run prints is at the top of every aarch64 log in [logs/](logs/).
 
+### On the x86-64 host
+
+The desktop under WSL2 is not timing-grade and the launch sweep is how much it is not.
+goodFeaturesToTrack there prints a ~5–9% within-run spread and the **same ratio scatters 57%
+across thirty launches** — eleven times the figure one process can report — and one launch
+has returned anything from 0.86× to 1.61×. Thirty launches put a 95% interval of
+[1.1120, 1.1537] around a median of 1.1346, which is ±1.8%: enough to settle a 5% question
+and not a 2% one. A second independent sweep with the committed runner landed at 1.1297,
+[1.1147, 1.1684] — the reproduction is in
+[goodfeatures-x86_64-launches.log](logs/goodfeatures-x86_64-launches.log).
+
+**The other x86 logs in [logs/](logs/) are single launches**, which is what every log in the
+directory was until this one. That does not make them wrong — the one error found on that row
+came from a superseded kernel, not from noise — but it does mean nothing in them distinguishes
+a settled figure from a lucky draw, and a number quoted off one of them should be re-taken as
+a sweep before it carries weight. aarch64 is unaffected: on the Pi with the governor locked
+the same benchmark holds 0.05–0.14% within a run and 0.41% across launches.
+
 ## The workload
 
 Sequence-level results use **EuRoC MAV `V1_02_medium`, camera `cam0`** — 1710 frames of
@@ -308,6 +337,19 @@ cmake --build build -j
 ./build/benchmark/logic_benchmark                     # one operation, against OpenCV
 ./build/benchmark/feature_tracking_sequence <euroc-cam0-dir>  # the assembled pipeline
 ```
+
+Any of those can be taken as a launch sweep instead of a single run, which is what an x86
+figure needs:
+
+```bash
+./scripts/run_launches.sh -n 30 ./build/benchmark/corner_opencv_benchmark   # -g on the Pi
+./scripts/aggregate_launches.py corner_opencv_benchmark-x86_64-launches.log \
+    --column ns/pixel --ratio 'OpenCV binarized/binCV streaming' --ladder
+```
+
+`--ladder` answers how many launches a row needs by resampling the ones already taken;
+`--resolve 5%` asks whether a difference of a size **you** state is resolvable here, because
+how much is worth having is a per-case judgement and not something either script decides.
 
 Each report's **Reproduce** section names the exact binary for its tables. The sequence
 benchmarks need a directory of `.png` frames; everything else is self-contained.
