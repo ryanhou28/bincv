@@ -322,8 +322,8 @@ not a 2% one. Those sixty are two independent thirties taken a fortnight apart, 
 1.1297, each interval containing the other's median — the protocol reproduces, not just the
 row.
 
-**Eighteen sweeps carry the x86-64 tables**, one per benchmark, in the `*-x86_64-launches.log`
-files beside the single launches they replaced. **aarch64 is unaffected and was not re-run:**
+**Nineteen sweeps carry the x86-64 tables**, one per benchmark, in the
+`*-x86_64-launches.log` files beside the single launches they replaced. **aarch64 is unaffected and was not re-run:**
 seven launches of the same benchmark on the governor-locked Pi hold 0.05–1.18% within a run
 and scatter 0.1–0.8% across the seven.
 
@@ -332,12 +332,20 @@ inside the new interval unchanged — `bitwiseAnd` 10.01× against 9.97×, `coun
 against 1.62×, `countAnd` 3.47× against 3.49×, optical flow 7.13× against 7.19× and its
 `1/1/1/1` ladder 28.53× against 29.2×, Hamming matching 4.72× against 4.70×, `pyrDown` 1.56×
 against 1.556×, the crossover's shipped shape 1.49× against 1.474×, `erode` 3×3 1.04× against
-1.053× and on a 5×5 ellipse 0.32× against 0.319×. The cells behind them moved much more:
-**28 of the 40 measured times re-taken read slower in their single launch than in the median
-of thirty**, on both sides at once. A ratio survives what its two cells do not, because a
-launch that lands slow lands slow on both arms — which is also why the sweep cannot rescue a
-figure that was quoted as a time. `wordtype_narrow` is the clean demonstration: all three of
-its arms read about 20% high in the single launch and the ratios between them did not move.
+1.053× and on a 5×5 ellipse 0.32× against 0.319×. The cells behind them moved much more.
+
+**Launch noise here is one-sided, and that is the finding underneath all of this.** Of the 85
+x86-64 time cells this round re-took whose kernel has not changed, **61 read slower in their
+single launch than in the median of thirty**, and the asymmetry is in the size as well as the
+count: the worst overstatement is **49%** and the worst understatement **3.3%**. A launch can
+go badly wrong and cannot go much right. The median cell reads 1.6% slow.
+
+So the single-launch protocol biased the published *times* slow while the *ratios* largely
+survived, because a launch that lands slow lands slow on both arms at once.
+`wordtype_narrow` is the clean demonstration: all three of its arms read about 20% high in
+one launch and the ratios between them did not move. It also means the sweep cannot rescue a
+figure that was quoted as a time — those had to be replaced, which is what these tables now
+carry.
 
 **Four rows moved enough to change what a reader would conclude**, and they are different in
 kind:

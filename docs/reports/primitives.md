@@ -205,7 +205,7 @@ its architecture**:
 | `erode` 3×3, `BORDER_REFLECT_101` | 0.09931 | 0.1553 | 0.1214 | 0.635× [0.628, 0.645] / 0.812× [0.805, 0.827] | 0.67158 | 0.94380 | 0.71× |
 
 At the default `uint32_t` word binCV leads on three of the six cases on x86-64 and two on
-aarch64; the wider word leads on the same three. Eight of the eighteen ratio figures are under
+aarch64; the wider word leads on the same three. Nine of the eighteen ratio figures are under
 1.00×, and every one of those is `cv::erode` or `cv::dilate` ahead of binCV. The three x86-64
 wins at `uint32_t` are narrow — 1.022× to 1.057× — and two of them have four of their thirty
 launches on the other side of 1.00×; the `uint64_t` column is where the margin is.
