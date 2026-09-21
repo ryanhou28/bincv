@@ -1,7 +1,7 @@
 # binCV measurement reports
 
-What binCV's **operations** cost and what they save, each measured against the OpenCV call
-it replaces, on two CPUs and one GPU.
+What binCV's **operations** cost and what they save, each measured against its OpenCV
+equivalent, on two CPUs and one GPU.
 
 Every report names its denominator, publishes **both sides' measured values with the ratio
 beside them**, gives speed and memory together, and names the command that reproduces it.

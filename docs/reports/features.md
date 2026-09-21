@@ -1,7 +1,7 @@
 # Features and tracking
 
-Corner detection, FAST, descriptors, matching and optical flow, against the OpenCV call each
-replaces. One thread on both sides. Setup and denominator rule: [README.md](README.md).
+Corner detection, FAST, descriptors, matching and optical flow, against each one's OpenCV
+equivalent. One thread on both sides. Setup and denominator rule: [README.md](README.md).
 
 The results here are the least uniform in these reports: optical flow is seven to eight times
 faster, FAST on a wide image is at parity, and corner detection is behind on the desktop and

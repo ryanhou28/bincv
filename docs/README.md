@@ -6,7 +6,7 @@
 | [../GETTING_STARTED.md](../GETTING_STARTED.md) | a user | build it, use it, conventions |
 | [API.md](API.md) | a user | **the API reference** — every public entry point, its brief and its tier |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | a contributor | how the library is put together, and why |
-| [reports/](reports/README.md) | anyone weighing it up | **what it costs and what it saves** — every operation measured against the OpenCV call it replaces, on x86-64, aarch64 and a GPU, wins and losses in the same tables |
+| [reports/](reports/README.md) | anyone weighing it up | **what it costs and what it saves** — every operation measured against its OpenCV equivalent, on x86-64, aarch64 and a GPU, wins and losses in the same tables |
 
 Deciding whether to adopt binCV: start at [reports/README.md](reports/README.md) — its *At a
 glance* is one row per operation, both sides' measured figures with the ratio beside them.

@@ -1,6 +1,6 @@
 # Primitives
 
-Per-operation results against the OpenCV call each one replaces, on the same binary content
+Per-operation results against each one's OpenCV equivalent, on the same binary content
 stored as `CV_8U`. 640×480, `uint32_t` words, one thread on both sides unless a row says
 otherwise. Setup and denominator rule: [README.md](README.md).
 
