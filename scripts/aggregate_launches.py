@@ -281,9 +281,21 @@ def parse_launch(lines, column):
         if RULE.match(line):
             continue
         if len(cs) != len(header):
-            header = None
-            caption = re.sub(r'\s+', ' ', line.strip())[:58]
-            continue
+            # A FIXED-WIDTH TABLE MAY LEAVE A TRAILING CELL EMPTY. The features
+            # table prints `vs OpenCV` on the binCV side of each pair and leaves
+            # it blank on the OpenCV side, so three of its six rows arrive with
+            # two cells against the header's three -- and treating that as the
+            # end of the table kept `FAST binCV` and dropped `FAST cv::FAST`,
+            # `describe cv::ORB` and `match kNN=2 cv::BFMatcher`, which is every
+            # denominator the table exists to state. A short row is still a row
+            # when the timing column is there and holds a number. Anything else
+            # ends the table, as before.
+            short = (len(cs) < len(header) and vcol is not None
+                     and vcol < len(cs) and _number(cs[vcol]) is not None)
+            if not short:
+                header = None
+                caption = re.sub(r'\s+', ' ', line.strip())[:58]
+                continue
         if vcol is None:
             continue
         v = _number(cs[vcol])
