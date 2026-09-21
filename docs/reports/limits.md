@@ -133,6 +133,13 @@ point count is worth seeing:
 fits on a device; it does not make this kernel fast, and further speed has to come from doing
 less work rather than from touching less data.
 
+**Re-taken at thirty launches, the x86-64 frame sweep is flatter still.** 320×240 costs 4.66
+µs/point and 1920×1440 costs 4.64 — thirty-six times the data for no change at all, against
+the 12% in the table, whose 5.42 at the largest frame was one slow launch
+([logs/lk_memorybound-x86_64-launches.log](logs/lk_memorybound-x86_64-launches.log)). The
+crossover table in §2 came back unchanged: its shipped shape is 1.49× against `cv::pyrDown`
+on both readings, and `1 → 1` is still behind at 0.60×.
+
 ## The algorithm caps the packing advantage
 
 Instruction density rather than a timing: these figures come from the word and lane widths

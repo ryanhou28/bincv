@@ -309,12 +309,46 @@ and not a 2% one. A second independent sweep with the committed runner landed at
 [1.1147, 1.1684] — the reproduction is in
 [goodfeatures-x86_64-launches.log](logs/goodfeatures-x86_64-launches.log).
 
-**The other x86 logs in [logs/](logs/) are single launches**, which is what every log in the
-directory was until this one. That does not make them wrong — the one error found on that row
-came from a superseded kernel, not from noise — but it does mean nothing in them distinguishes
-a settled figure from a lucky draw, and a number quoted off one of them should be re-taken as
-a sweep before it carries weight. aarch64 is unaffected: on the Pi with the governor locked
-the same benchmark holds 0.05–0.14% within a run and 0.41% across launches.
+Every x86 log in [logs/](logs/) was a single launch until that one. **Sixteen sweeps have
+since re-taken every x86 figure a reader acts on** — the root README's speed table, the
+at-a-glance tables above, and each report's own summary — at thirty pinned launches each,
+in the `*-x86_64-launches.log` files beside the originals. aarch64 is unaffected and was not
+re-run: on the Pi with the governor locked the same benchmark holds 0.05–0.14% within a run
+and 0.41% across launches.
+
+**The ratios came back; the individual times largely did not.** Ten of the published x86
+ratios land inside the new interval or inside the launches' own spread — `bitwiseAnd` 10.01×
+against 9.97×, `countNonZero` 1.62× against 1.62×, `countAnd` 3.47× against 3.49×, optical
+flow 7.13× against 7.19×, Hamming matching 4.72× against 4.70×, `pyrDown` 1.56× against
+1.56×, the crossover's shipped shape 1.49× against 1.49×, `erode` on a 5×5 ellipse 0.32×
+against 0.32×, the spacing mask 23.7× against 23.2×, dense disparity ~1.2× against 1.22×.
+The cells behind them moved much more: **28 of the 40 measured times re-taken read slower in
+their single launch than in the median of thirty**, on both sides at once. A ratio survives
+what its two cells do not, because a launch that lands slow lands slow on both arms — which
+is also why the sweep cannot rescue a figure that was quoted as a time.
+
+**Three published readings the sweep does not support**, and they are different in kind:
+
+- **`dilate` 3×3 is published as a 0.80× loss on x86-64 and is not one.** Thirty launches put
+  it at **1.06×**, ahead in 30 of 30, on a kernel whose source has not changed since the
+  single launch that produced 0.80×. That launch timed binCV's arm at 0.13037 ns/pixel where
+  thirty launches span 0.09260 to 0.09680 — one slow draw, on the row where it changed the
+  answer's sign.
+- **`FAST, bit-plane` is 1.47×, not 1.50×, and that one is real.** The runtime switch that
+  makes the vector arm provably off-switchable is read once per image row, and reverting only
+  that read measures 12.8% faster with the intervals disjoint. Hoisting it out of the row loop
+  keeps the switch and recovers all of it — [issue #73](https://github.com/ryanhou28/bincv/issues/73).
+- **The assembled pipeline is 3.66× on x86-64, not 3.30×**, because the 2026-09-06 change to
+  one pyramid build per frame landed after the table was taken. `pyrDown` falls from 0.137 to
+  0.057 ms/frame and the build stage from 0.297 to 0.181, which is the halving that change
+  predicted. [feature-tracking.md](feature-tracking.md#addendum-2026-09-06-one-pyramid-build-per-frame)
+  asks to be replaced whole rather than row by row, and the aarch64 half has not been re-taken,
+  so the table stands.
+
+**What this host can resolve at thirty launches is a property of the row**, between 1.002×
+and 1.09×. `FAST, bit-plane` resolves 1.002× and Lucas–Kanade's `1/1/1/1` ladder resolves
+1.090× — that row cannot tell 28.5× from 31×, and its figure should not be read to three
+digits. Each sweep's log carries its own number in the `minres` column.
 
 ## The workload
 
