@@ -29,6 +29,16 @@ So a difference must beat **the larger of two noises**, both measured as factors
   process cannot see this, so `scripts/aggregate_cuda_runs.py` computes it from a directory of
   runs.
 
+**Seven is a convention, not a sufficiency, and the shared x86-64 box has already broken it.**
+Re-measuring `goodFeaturesToTrack` there took thirty pinned launches of one interleaved
+benchmark: the per-launch ratio ran from 0.95× to 1.60×, a scatter of 57% of its own median,
+and it scattered *wider than either arm did on its own* — so the pairing that is supposed to
+divide out drift did not, because the drift is not common to the two arms on a machine with
+other work on it. Seven launches there can return almost any answer; thirty put a bootstrap
+95% interval of 1.11–1.15× around the median. The rule that follows is not a bigger number
+for every row, it is that **a host's resolution has to be measured before the row is quoted,
+and quoted with it** — see [features.md](features.md#corner-detection), where that is done.
+
 That test decides whether the *size* of a difference clears the noise. It does not decide
 whether the *sign* is settled, and on one row the two came apart.
 

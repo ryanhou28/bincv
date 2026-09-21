@@ -27,8 +27,8 @@ side of that line. Header-only C++, zero dependencies.
 | `pyrDown`, 1 bit in → 3 bits out, µs/call | `cv::pyrDown` on `CV_8U` | 48.3 | 31.0 | 1.56× | 521.4 | 93.8 | 5.56× | [primitives.md](docs/reports/primitives.md) |
 | Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.184 | 1.947 | 4.72× | 38.269 | 19.391 | 1.97× | [features.md](docs/reports/features.md) |
 | `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01548 | 0.00956 | 1.62× | 0.17116 | 0.06366 | 2.69× | [primitives.md](docs/reports/primitives.md) |
+| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack`, binarized | 13.67 | 12.06 | 1.13× | 74.99 | 43.49 | 1.72× | [features.md](docs/reports/features.md) |
 | dense disparity, ms/frame | `cv::StereoBM` | ~14.7 | ~12.0 | ~1.2× | 79.8 | 60.4 | 1.32× | [stereo.md](docs/reports/stereo.md) |
-| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack`, binarized | 13.63–14.24 | 14.46–15.01 | 0.92× | 75.02–75.82 | 51.25–51.31 | 1.45× | [features.md](docs/reports/features.md) |
 | `erode`, 5×5 ellipse, ns/pixel | `cv::erode` | 0.22759 | 0.70415 | 0.32× | 1.81575 | 3.58631 | 0.51× | [primitives.md](docs/reports/primitives.md) |
 
 x86-64 is a desktop Ryzen 5 5600X, aarch64 a Raspberry Pi 4 at a pinned clock. Both columns
@@ -127,10 +127,6 @@ there is nothing to accumulate; at eight, a byte kernel's vector unit wins outri
 `pyrDown` fed eight bits runs at 0.02× on x86-64 and 0.07× on aarch64. That is the library
 outside its premise: it ships as 1 bit in, 3 bits out, and the crossover sits at a different
 depth on each machine. ([limits.md](docs/reports/limits.md))
-
-**A faster OpenCV on the other side.** `goodFeaturesToTrack` is the same binCV code in both
-columns above: 0.92× against the desktop's OpenCV build and 1.45× against the Pi's. What
-moved is the denominator. ([features.md](docs/reports/features.md))
 
 **On the GPU, one path is faster and bigger.** The census dense entry beats
 `cv::cuda::StereoBM` at 1.47× but holds 4,512.0 KB against its 3,072.0, because the census

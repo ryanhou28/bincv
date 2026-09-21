@@ -77,7 +77,6 @@ and where it has done less the same binCV code wins.
 | `erode`, `BORDER_REPLICATE` | `cv::erode` | 0.09669 ns/px | 0.15217 ns/px | 0.64× | 0.67176 ns/px | 0.93004 ns/px | 0.72× | a rim pass `BORDER_CONSTANT` does not need |
 | `erode`, `BORDER_REFLECT_101` | `cv::erode` | 0.09789 ns/px | 0.15761 ns/px | 0.62× | 0.67158 ns/px | 0.94380 ns/px | 0.71× | the same |
 | `erode`, 3×3 rect | `cv::erode` | 0.10013 ns/px | **0.09605 ns/px** | 1.04× | 0.71993 ns/px | 0.72012 ns/px | 1.00× | a dead heat |
-| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack`, binarized | 13.63–14.24 ns/px | 14.46–15.01 ns/px | 0.92× | 75.02–75.82 ns/px | **51.25–51.31 ns/px** | **1.45×** | seven float planes of locality binCV declines to buy |
 | `countNonZero` | `cv::countNonZero` | 0.01548 ns/px | **0.00956 ns/px** | 1.62× | 0.17116 ns/px | **0.06366 ns/px** | 2.69× | both sides bandwidth-bound; binCV moves less data |
 
 Parity on FAST ships as parity. A caller who is holding bytes should not be told to pack them
@@ -85,14 +84,18 @@ first, and for that caller the honest answer is that binCV costs nothing to adop
 nothing either. The [bit-plane overload](features.md#fast) is where the thesis actually
 applies, and it is 1.50× on x86 and 2.37× on the device.
 
-**`goodFeaturesToTrack` is on this list for x86 only, and it is the sharpest illustration of
-the point above it.** An earlier version of these reports published 0.53× on *both*
+**`goodFeaturesToTrack` has left this list, and the way it left is worth keeping.** It was
+published here twice and was wrong both times. The first version read 0.53× on *both*
 architectures and concluded that this was "a property of the operation rather than of one
-machine's dispatch". Both halves were wrong: the figure measured the frame-map spelling while
-it was still on an older response kernel than the streaming spelling every pipeline here
-calls. Once the two share one kernel the operation is 0.92× on x86 and **1.45× on the
-reference device** — a loss on the desktop and a win on the deployment part, from identical
-code over identical buffers returning identical corners.
+machine's dispatch"; in fact it had timed the frame-map spelling while that spelling was
+still on an older response kernel than the streaming form every pipeline here calls. The
+second version read 0.92× on x86 and 1.45× on the device and called that a genuine split.
+It was not: those numbers were taken before the response sweep's tail was rewritten, and the
+shipped kernel measures **1.13× on x86 and 1.72× on the device** — ahead on both, so the row
+belongs in [features.md](features.md#corner-detection) and not on a page about where binCV
+stops paying. What survives of the original point is the second half of this section's
+thesis rather than the first: 1.72× against the denominator doing less vector work and
+1.13× against the one doing more.
 
 ## 4. A footprint win is not a speed win
 

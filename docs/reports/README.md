@@ -52,20 +52,18 @@ row names its own unit, and on all of them the smaller number is the faster side
 | optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.871 | 0.543 | 7.13× | 23.476 | 2.843 | 8.26× | [features.md](features.md) |
 | BRIEF descriptors, 1000 kpts, ms | `cv::ORB::compute` | 0.660 | 0.141 | 4.69× | 6.816 | 0.648 | 10.51× | [features.md](features.md) |
 | Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.184 | 1.947 | 4.72× | 38.269 | 19.391 | 1.97× | [features.md](features.md) |
-| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack`, binarized | 13.63–14.24 | 14.46–15.01 | 0.92× | 75.02–75.82 | 51.25–51.31 | 1.45× | [features.md](features.md) |
+| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack`, binarized | 13.67 | 12.06 | 1.13× | 74.99 | 43.49 | 1.72× | [features.md](features.md) |
 | FAST, wide image, ms/call | `cv::FAST` | 0.363 | 0.344 | 1.05× | 2.906 | 3.024 | 0.96× | [features.md](features.md) |
 | FAST, bit-plane, µs/call | `cv::FAST` | 266.2 | 177.0 | 1.50× | 2054.5 | 865.3 | 2.37× | [features.md](features.md) |
 | dense disparity, ms/frame | `cv::StereoBM` | ~14.7 | ~12.0 | ~1.2× | 79.8 | 60.4 | 1.32× | [stereo.md](stereo.md) |
 
-Five rows carry a qualification their report states and a table cell cannot:
+Four rows carry a qualification their report states and a table cell cannot:
 
 - **`pyrDown` at 8 bits in is the boundary of the whole idea, not a regression.** Both sides
   store a byte there, so there is nothing for bit-slicing to skip.
 - **`erode` on a 5×5 ellipse is a deliberate trade**, not an unfinished kernel: a
   non-separable element costs one shifted-OR per set element, and the fused kernel was kept
   because it holds 8× less. [footprint.md](footprint.md) prices it.
-- **`goodFeaturesToTrack` loses on x86 and wins on the device from identical code** — the
-  denominator, not binCV, is what differs between the two machines.
 - **The denoise and derivative rows have no aarch64 measurements**, only the published
   ratio; see [Published as a ratio only](#published-as-a-ratio-only).
 - **The x86-64 dense-disparity figures are floors of interleaved runs** on a host with

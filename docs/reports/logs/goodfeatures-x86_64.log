@@ -1,15 +1,17 @@
-# goodfeatures -- x86-64
+# verify-phase x86-64 re-derivation
 # host:     AMD Ryzen 5 5600X 6-Core Processor
 # kernel:   5.15.167.4-microsoft-standard-WSL2
-# compiler: c++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
-# commit:   05ce58f
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   592bce4
 # pinning:  taskset -c 2
-# date:     2026-09-02T14:08:58-07:00
+# date:     2026-09-21T13:29:53-07:00
+# loadavg at start: 1.15 2.17 2.67 1/1309 10394
 
+### vfy x86 run 1 (FULL)
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.8.0-dev, cv::getNumThreads() = 1; binCV is single-threaded
 frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33333
-(the reference frontend's parameters verbatim; word uint32_t)
+(the reference pipeline's parameters verbatim; word uint32_t)
 
  AGREEMENT with the OpenCV binarized pipeline over 4 frames:
  binCV corners 723, OpenCV corners 723, EXACT position matches 723
@@ -48,27 +50,379 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   4491045     14.619   12.40%        0.97x      16.54
- binCV streaming         4661797     15.175   14.38%        0.94x      12.56
- OpenCV binarized        4376407     14.246   34.40%        1.00x      36.94
- OpenCV Sobel            2549576      8.299   18.50%        1.72x      29.00
+ binCV                   3603457     11.730    8.62%        1.21x      16.54
+ binCV streaming         3628900     11.813    8.54%        1.20x      12.56
+ OpenCV binarized        4356018     14.180   29.95%        1.00x      36.94
+ OpenCV Sobel            2504051      8.151   22.11%        1.74x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 359484
-
-### repeat 2 (timing table only)
+ sink 403168
+### vfy x86 run 2
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   4654663     15.152   15.83%        0.88x      16.54
- binCV streaming         4807347     15.649   40.77%        0.86x      12.56
- OpenCV binarized        4118558     13.407   16.88%        1.00x      36.94
- OpenCV Sobel            2595704      8.450   11.35%        1.59x      29.00
-
-
-### repeat 3 (timing table only)
+ binCV                   3706248     12.065   16.61%        1.13x      16.54
+ binCV streaming         3691328     12.016    6.82%        1.14x      12.56
+ OpenCV binarized        4194038     13.652   40.53%        1.00x      36.94
+ OpenCV Sobel            2579073      8.395   25.39%        1.63x      29.00
+### vfy x86 run 3
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                   4778480     15.555   11.46%        0.91x      16.54
- binCV streaming         4484252     14.597    7.67%        0.97x      12.56
- OpenCV binarized        4355623     14.178    9.96%        1.00x      36.94
- OpenCV Sobel            2517621      8.195   18.69%        1.73x      29.00
+ binCV                   4900983     15.954   31.68%        0.84x      16.54
+ binCV streaming         3657038     11.904    8.51%        1.12x      12.56
+ OpenCV binarized        4092511     13.322    5.85%        1.00x      36.94
+ OpenCV Sobel            2508089      8.164    7.42%        1.63x      29.00
+### vfy x86 run 4
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3781539     12.310   21.75%        1.09x      16.54
+ binCV streaming         3612968     11.761    9.09%        1.15x      12.56
+ OpenCV binarized        4138196     13.471    9.61%        1.00x      36.94
+ OpenCV Sobel            2590835      8.434   34.87%        1.60x      29.00
+### vfy x86 run 5
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3686757     12.001    8.37%        1.21x      16.54
+ binCV streaming         3614765     11.767    8.74%        1.23x      12.56
+ OpenCV binarized        4447193     14.477   36.38%        1.00x      36.94
+ OpenCV Sobel            2612464      8.504   63.50%        1.70x      29.00
+### vfy x86 run 6
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3609405     11.749    6.05%        1.12x      16.54
+ binCV streaming         3606937     11.741    5.80%        1.12x      12.56
+ OpenCV binarized        4032795     13.128   41.31%        1.00x      36.94
+ OpenCV Sobel            2778942      9.046   45.16%        1.45x      29.00
+### vfy x86 run 7
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3604416     11.733    2.35%        1.17x      16.54
+ binCV streaming         3931460     12.798   13.88%        1.07x      12.56
+ OpenCV binarized        4203566     13.683   43.71%        1.00x      36.94
+ OpenCV Sobel            2514966      8.187    5.61%        1.67x      29.00
+### vfy x86 run 8
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3906087     12.715   29.47%        1.09x      16.54
+ binCV streaming         4000093     13.021   41.08%        1.06x      12.56
+ OpenCV binarized        4246945     13.825   12.35%        1.00x      36.94
+ OpenCV Sobel            2408099      7.839    5.46%        1.76x      29.00
+### vfy x86 run 9
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3786501     12.326   25.63%        1.10x      16.54
+ binCV streaming         3586551     11.675   11.10%        1.16x      12.56
+ OpenCV binarized        4168720     13.570    8.83%        1.00x      36.94
+ OpenCV Sobel            3125603     10.174   30.89%        1.33x      29.00
+### vfy x86 run 10
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3603225     11.729    5.31%        1.18x      16.54
+ binCV streaming         3758504     12.235    5.50%        1.13x      12.56
+ OpenCV binarized        4258691     13.863   22.67%        1.00x      36.94
+ OpenCV Sobel            2469682      8.039   51.31%        1.72x      29.00
+### vfy x86 run 11
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3702726     12.053    6.58%        1.59x      16.54
+ binCV streaming         3678202     11.973    7.23%        1.60x      12.56
+ OpenCV binarized        5869339     19.106   33.01%        1.00x      36.94
+ OpenCV Sobel            2482192      8.080    8.45%        2.36x      29.00
+### vfy x86 run 12
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3655137     11.898   14.07%        1.16x      16.54
+ binCV streaming         3701053     12.048   51.61%        1.14x      12.56
+ OpenCV binarized        4228867     13.766   15.64%        1.00x      36.94
+ OpenCV Sobel            2492095      8.112    5.31%        1.70x      29.00
+### vfy x86 run 13
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3601406     11.723    3.02%        1.20x      16.54
+ binCV streaming         3695354     12.029   16.33%        1.17x      12.56
+ OpenCV binarized        4326800     14.085   23.47%        1.00x      36.94
+ OpenCV Sobel            2520357      8.204   46.51%        1.72x      29.00
+### vfy x86 run 14
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3752566     12.215   10.72%        1.16x      16.54
+ binCV streaming         4611596     15.012   42.58%        0.95x      12.56
+ OpenCV binarized        4367320     14.217   11.46%        1.00x      36.94
+ OpenCV Sobel            2483509      8.084    6.54%        1.76x      29.00
+### vfy x86 run 15
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3723184     12.120   38.62%        1.10x      16.54
+ binCV streaming         3573519     11.633   11.92%        1.15x      12.56
+ OpenCV binarized        4098608     13.342    8.08%        1.00x      36.94
+ OpenCV Sobel            2492877      8.115    9.90%        1.64x      29.00
+### vfy x86 run 16
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3733396     12.153    7.40%        1.17x      16.54
+ binCV streaming         3656715     11.903    6.29%        1.19x      12.56
+ OpenCV binarized        4356276     14.181   56.64%        1.00x      36.94
+ OpenCV Sobel            2520440      8.205    6.34%        1.73x      29.00
+### vfy x86 run 17
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3650088     11.882   35.90%        1.17x      16.54
+ binCV streaming         3686481     12.000    6.80%        1.16x      12.56
+ OpenCV binarized        4277939     13.926    8.53%        1.00x      36.94
+ OpenCV Sobel            2824585      9.195   39.44%        1.51x      29.00
+### vfy x86 run 18
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3795805     12.356   31.05%        1.08x      16.54
+ binCV streaming         4157728     13.534   25.92%        0.99x      12.56
+ OpenCV binarized        4110988     13.382   24.59%        1.00x      36.94
+ OpenCV Sobel            2478685      8.069    1.60%        1.66x      29.00
+### vfy x86 run 19
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3665607     11.932   14.99%        1.12x      16.54
+ binCV streaming         3847468     12.524   46.71%        1.07x      12.56
+ OpenCV binarized        4112758     13.388   11.91%        1.00x      36.94
+ OpenCV Sobel            2484045      8.086    4.36%        1.66x      29.00
+### vfy x86 run 20
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4042763     13.160   20.19%        1.02x      16.54
+ binCV streaming         4058234     13.210   32.60%        1.01x      12.56
+ OpenCV binarized        4104987     13.363   16.87%        1.00x      36.94
+ OpenCV Sobel            2494632      8.121    2.48%        1.65x      29.00
+### vfy x86 run 21
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3919648     12.759   34.00%        1.03x      16.54
+ binCV streaming         3617950     11.777    4.68%        1.11x      12.56
+ OpenCV binarized        4031445     13.123    5.47%        1.00x      36.94
+ OpenCV Sobel            2570661      8.368   33.73%        1.57x      29.00
+### vfy x86 run 22
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3650029     11.882    5.57%        1.13x      16.54
+ binCV streaming         3720021     12.109    7.44%        1.11x      12.56
+ OpenCV binarized        4127119     13.435    6.12%        1.00x      36.94
+ OpenCV Sobel            2622480      8.537   43.33%        1.57x      29.00
+### vfy x86 run 23
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3707166     12.068    5.14%        1.56x      16.54
+ binCV streaming         3735658     12.160    4.86%        1.55x      12.56
+ OpenCV binarized        5798346     18.875   44.91%        1.00x      36.94
+ OpenCV Sobel            2473933      8.053    5.27%        2.34x      29.00
+### vfy x86 run 24
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3638553     11.844    3.91%        1.15x      16.54
+ binCV streaming         3737101     12.165    3.62%        1.12x      12.56
+ OpenCV binarized        4179920     13.607   36.20%        1.00x      36.94
+ OpenCV Sobel            2467265      8.031   46.72%        1.69x      29.00
+### vfy x86 run 25
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3741964     12.181    5.52%        1.19x      16.54
+ binCV streaming         3706627     12.066    7.25%        1.20x      12.56
+ OpenCV binarized        4464698     14.534   41.11%        1.00x      36.94
+ OpenCV Sobel            2475509      8.058   39.35%        1.80x      29.00
+### vfy x86 run 26
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3682667     11.988   13.81%        1.17x      16.54
+ binCV streaming         3625526     11.802   25.14%        1.19x      12.56
+ OpenCV binarized        4309875     14.030   24.93%        1.00x      36.94
+ OpenCV Sobel            2451107      7.979   15.21%        1.76x      29.00
+### vfy x86 run 27
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3566776     11.611    5.71%        1.16x      16.54
+ binCV streaming         3836123     12.487   48.93%        1.08x      12.56
+ OpenCV binarized        4124627     13.427   41.62%        1.00x      36.94
+ OpenCV Sobel            2513654      8.182   39.90%        1.64x      29.00
+### vfy x86 run 28
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3563950     11.601   13.56%        1.20x      16.54
+ binCV streaming         3729762     12.141   21.13%        1.14x      12.56
+ OpenCV binarized        4266379     13.888   31.57%        1.00x      36.94
+ OpenCV Sobel            2428989      7.907    3.05%        1.76x      29.00
+### vfy x86 run 29
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4679331     15.232   24.89%        0.90x      16.54
+ binCV streaming         3834927     12.483    5.91%        1.09x      12.56
+ OpenCV binarized        4191551     13.644   11.11%        1.00x      36.94
+ OpenCV Sobel            2451713      7.981    6.60%        1.71x      29.00
+### vfy x86 run 30
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3654578     11.896   37.80%        1.15x      16.54
+ binCV streaming         3778314     12.299    7.89%        1.11x      12.56
+ OpenCV binarized        4193063     13.649    5.67%        1.00x      36.94
+ OpenCV Sobel            2527642      8.228   36.71%        1.66x      29.00
+# loadavg at end: 1.76 1.98 2.48 6/1333 14493
 
+### AGGREGATE over 30 launches -- the figures docs/reports/features.md publishes
+# Each arm below is the median of the per-launch medians above.
+# binCV              median  12.027   min  11.601   max  15.954
+# binCV streaming    median  12.057   min  11.633   max  15.012
+# OpenCV binarized   median  13.668   min  13.123   max  19.106
+# OpenCV Sobel       median   8.136   min   7.839   max  10.174
+# ratio OpenCV binarized / binCV streaming (the SHIPPED arm):
+#   median 1.1346   min 0.9470   max 1.5958
+#   bootstrap 95% CI of the median (10000 resamples, seed 12345): [1.1120, 1.1537]
+#   single-launch scatter (max-min)/median = 57.2%
+#   launches with the ratio above 1.00: 28 of 30
+
+### THE PUBLISHED-COMMIT KERNEL, REBUILT AND RUN BESIDE THE SHIPPED ONE
+# Why: the rows this file used to hold were recorded at commit 05ce58f, before the
+# response sweep's tail was rewritten. This benchmark source, compiled unchanged
+# against that commit's headers, is the control -- same OpenCV, same compiler, same
+# pinning, same machine, on 12 ALTERNATING launch pairs so drift divides out.
+# SELECTION IDENTITY, checked before anything was timed. A speed comparison across a
+# kernel change is meaningless if the answer moved. A probe built against BOTH header
+# trees dumped, for each of the benchmark's four frames: an FNV-1a hash over the RAW BIT
+# PATTERNS of the whole float response map, then every corner's index, x, y and response
+# bits, for both spellings. 1454 lines each, byte-identical:
+#   05ce58f md5 885940f0cef10ee6b30ac8189f2f87d8
+#   shipped md5 885940f0cef10ee6b30ac8189f2f87d8
+#   response-map bits per frame: 2d5619e775295694 c48fdabe99d226ae 8351d53b9a245547 5d6bb3ef693bd7a6
+#   corners per frame: 184 174 184 181 (723 total), frame map and streaming ring alike
+# The same probe on aarch64 produced the same md5, so the answer is identical across both
+# kernels AND both architectures.
+# 05ce58f kernel: binCV streaming median  14.561 ( 13.984- 16.016)   OpenCV binarized median  14.891   ratio 1.023
+# shipped kernel: binCV streaming median  11.993 ( 11.757- 14.051)   OpenCV binarized median  13.727   ratio 1.145
+# per-pair 05ce58f/shipped on binCV streaming: median 1.2090   min 0.9952   max 1.3470
+# pairs in which the 05ce58f kernel was the slower: 11 of 12
+
+# paired old(05ce58f kernel) vs new(HEAD kernel), same benchmark source, same OpenCV
+# date: 2026-09-21T13:34:44-07:00
+### pair 1 first=old
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4380351     14.259    9.04%        1.15x      16.54
+ binCV streaming         4364842     14.208    5.27%        1.15x      12.56
+ OpenCV binarized        5038553     16.402   31.21%        1.00x      36.94
+ OpenCV Sobel            3017542      9.823   36.29%        1.67x      29.00
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3751800     12.213    6.40%        1.18x      16.54
+ binCV streaming         3699127     12.041    7.06%        1.20x      12.56
+ OpenCV binarized        4442147     14.460   53.79%        1.00x      36.94
+ OpenCV Sobel            2513508      8.182   34.37%        1.77x      29.00
+### pair 2 first=new
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3710507     12.078    8.17%        1.52x      16.54
+ binCV streaming         3665961     11.933    1.46%        1.54x      12.56
+ OpenCV binarized        5647054     18.382   39.36%        1.00x      36.94
+ OpenCV Sobel            2539089      8.265   13.23%        2.22x      29.00
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4357562     14.185   31.40%        1.01x      16.54
+ binCV streaming         4587953     14.935   40.86%        0.96x      12.56
+ OpenCV binarized        4403138     14.333    5.97%        1.00x      36.94
+ OpenCV Sobel            2827824      9.205   13.48%        1.56x      29.00
+### pair 3 first=old
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   5158382     16.792   27.02%        0.92x      16.54
+ binCV streaming         4295977     13.984    8.26%        1.11x      12.56
+ OpenCV binarized        4762180     15.502   12.69%        1.00x      36.94
+ OpenCV Sobel            2919931      9.505   24.10%        1.63x      29.00
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3688797     12.008    7.65%        1.13x      16.54
+ binCV streaming         4316318     14.051   17.14%        0.97x      12.56
+ OpenCV binarized        4169435     13.572   27.22%        1.00x      36.94
+ OpenCV Sobel            2419984      7.878    7.32%        1.72x      29.00
+### pair 4 first=new
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3907370     12.719   15.13%        1.05x      16.54
+ binCV streaming         3611721     11.757   36.59%        1.14x      12.56
+ OpenCV binarized        4111985     13.385   12.32%        1.00x      36.94
+ OpenCV Sobel            2565953      8.353    6.97%        1.60x      29.00
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4741580     15.435    8.56%        0.95x      16.54
+ binCV streaming         4789256     15.590   57.45%        0.94x      12.56
+ OpenCV binarized        4492185     14.623   37.04%        1.00x      36.94
+ OpenCV Sobel            2928345      9.532   12.50%        1.53x      29.00
+### pair 5 first=old
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4532328     14.754   37.62%        1.06x      16.54
+ binCV streaming         4441864     14.459    6.30%        1.09x      12.56
+ OpenCV binarized        4824195     15.704   14.99%        1.00x      36.94
+ OpenCV Sobel            2953492      9.614    7.03%        1.63x      29.00
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3829707     12.466    6.52%        1.07x      16.54
+ binCV streaming         3631024     11.820    7.04%        1.13x      12.56
+ OpenCV binarized        4099889     13.346    3.33%        1.00x      36.94
+ OpenCV Sobel            2851758      9.283   30.01%        1.44x      29.00
+### pair 6 first=new
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3654637     11.897   14.49%        1.37x      16.54
+ binCV streaming         3652530     11.890    8.22%        1.37x      12.56
+ OpenCV binarized        5003576     16.288   21.85%        1.00x      36.94
+ OpenCV Sobel            2536149      8.256   13.73%        1.97x      29.00
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4282193     13.939    4.12%        1.04x      16.54
+ binCV streaming         4920265     16.016   22.74%        0.91x      12.56
+ OpenCV binarized        4454027     14.499    7.64%        1.00x      36.94
+ OpenCV Sobel            2898637      9.436   13.45%        1.54x      29.00
+### pair 7 first=old
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4444113     14.467    9.51%        0.97x      16.54
+ binCV streaming         4912696     15.992   46.07%        0.88x      12.56
+ OpenCV binarized        4303309     14.008   39.07%        1.00x      36.94
+ OpenCV Sobel            2845029      9.261   12.44%        1.51x      29.00
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3784950     12.321   41.01%        1.07x      16.54
+ binCV streaming         3656555     11.903    5.83%        1.11x      12.56
+ OpenCV binarized        4055257     13.201    7.42%        1.00x      36.94
+ OpenCV Sobel            2621833      8.535    7.94%        1.55x      29.00
+### pair 8 first=new
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3950464     12.860    8.77%        1.09x      16.54
+ binCV streaming         3669627     11.945   12.60%        1.17x      12.56
+ OpenCV binarized        4286563     13.954    6.47%        1.00x      36.94
+ OpenCV Sobel            2483133      8.083   22.80%        1.73x      29.00
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4294063     13.978    7.62%        1.42x      16.54
+ binCV streaming         4511988     14.687   14.31%        1.36x      12.56
+ OpenCV binarized        6114226     19.903   31.83%        1.00x      36.94
+ OpenCV Sobel            3143633     10.233   11.10%        1.94x      29.00
+### pair 9 first=old
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   5005797     16.295   21.44%        0.88x      16.54
+ binCV streaming         4504503     14.663   30.67%        0.98x      12.56
+ OpenCV binarized        4428315     14.415   14.49%        1.00x      36.94
+ OpenCV Sobel            2858947      9.306    8.53%        1.55x      29.00
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4398513     14.318   35.16%        0.93x      16.54
+ binCV streaming         3770209     12.273   48.73%        1.09x      12.56
+ OpenCV binarized        4104500     13.361    5.79%        1.00x      36.94
+ OpenCV Sobel            2450944      7.978   13.61%        1.67x      29.00
+### pair 10 first=new
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3748385     12.202    4.68%        1.14x      16.54
+ binCV streaming         3836578     12.489   15.41%        1.11x      12.56
+ OpenCV binarized        4264694     13.882    8.11%        1.00x      36.94
+ OpenCV Sobel            3427237     11.156   35.45%        1.24x      29.00
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4400850     14.326    8.52%        1.03x      16.54
+ binCV streaming         4400112     14.323    4.93%        1.03x      12.56
+ OpenCV binarized        4514485     14.696   20.24%        1.00x      36.94
+ OpenCV Sobel            3318136     10.801   38.65%        1.36x      29.00
+### pair 11 first=old
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4441413     14.458    4.99%        1.07x      16.54
+ binCV streaming         4362151     14.200   10.02%        1.09x      12.56
+ OpenCV binarized        4760309     15.496   21.89%        1.00x      36.94
+ OpenCV Sobel            2944282      9.584   34.46%        1.62x      29.00
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   3672856     11.956    4.15%        1.20x      16.54
+ binCV streaming         3709126     12.074    7.38%        1.18x      12.56
+ OpenCV binarized        4390639     14.292   56.58%        1.00x      36.94
+ OpenCV Sobel            2518032      8.197   10.10%        1.74x      29.00
+### pair 12 first=new
+--- new
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4177303     13.598   25.83%        0.98x      16.54
+ binCV streaming         3759490     12.238   41.15%        1.09x      12.56
+ OpenCV binarized        4084025     13.294   10.48%        1.00x      36.94
+ OpenCV Sobel            2586761      8.420    7.04%        1.58x      29.00
+--- old
+ variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
+ binCV                   4422031     14.395   44.79%        1.05x      16.54
+ binCV streaming         4384906     14.274    8.00%        1.06x      12.56
+ OpenCV binarized        4634370     15.086   18.41%        1.00x      36.94
+ OpenCV Sobel            3708823     12.073   31.97%        1.25x      29.00
+# done
