@@ -17,3 +17,6 @@ tests/output/
 # notes and one person's hardware; a reader of this library needs none of them.
 .local/
 experiments/
+
+# Python bytecode from the measurement scripts.
+__pycache__/
