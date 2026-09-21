@@ -1,0 +1,311 @@
+# launch sweep -- 30 separate processes of one benchmark
+# benchmark: ./build/benchmark/dense_opencv_benchmark 
+# launches: 30
+# arch:     x86_64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   80ff0a8
+# governor: none (this host exposes no cpufreq)
+# pinning:  taskset -c 2
+# sleep between launches: 0s
+# date:     2026-09-21T16:03:55-07:00
+# loadavg at start: 2.18 1.81 1.91 1/1310 26347
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         176.35 ms  spread 69%
+ cv::StereoBM (SAD, blockSize 21)                12.75 ms  spread 16%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 2
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         165.48 ms  spread 29%
+ cv::StereoBM (SAD, blockSize 21)                12.66 ms  spread 117%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 3
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         171.00 ms  spread 66%
+ cv::StereoBM (SAD, blockSize 21)                13.03 ms  spread 27%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 4
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         167.04 ms  spread 16%
+ cv::StereoBM (SAD, blockSize 21)                13.16 ms  spread 70%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 5
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         162.42 ms  spread 11%
+ cv::StereoBM (SAD, blockSize 21)                12.35 ms  spread 14%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 12279
+### run 6
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         161.51 ms  spread 11%
+ cv::StereoBM (SAD, blockSize 21)                12.60 ms  spread 14%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 7
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         167.55 ms  spread 67%
+ cv::StereoBM (SAD, blockSize 21)                12.97 ms  spread 27%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 12279
+### run 8
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         175.41 ms  spread 78%
+ cv::StereoBM (SAD, blockSize 21)                12.32 ms  spread 3%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 9
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         160.68 ms  spread 10%
+ cv::StereoBM (SAD, blockSize 21)                12.47 ms  spread 83%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 10
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         161.25 ms  spread 12%
+ cv::StereoBM (SAD, blockSize 21)                13.32 ms  spread 16%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 11
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         165.75 ms  spread 19%
+ cv::StereoBM (SAD, blockSize 21)                12.79 ms  spread 7%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 12
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         168.64 ms  spread 59%
+ cv::StereoBM (SAD, blockSize 21)                12.63 ms  spread 36%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 13
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         159.24 ms  spread 20%
+ cv::StereoBM (SAD, blockSize 21)                12.55 ms  spread 94%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 14
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         163.63 ms  spread 81%
+ cv::StereoBM (SAD, blockSize 21)                13.50 ms  spread 15%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 15
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         161.37 ms  spread 3%
+ cv::StereoBM (SAD, blockSize 21)                12.66 ms  spread 7%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 16
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         159.24 ms  spread 10%
+ cv::StereoBM (SAD, blockSize 21)                12.34 ms  spread 6%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 17
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         173.01 ms  spread 46%
+ cv::StereoBM (SAD, blockSize 21)                14.28 ms  spread 53%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 18
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         162.05 ms  spread 74%
+ cv::StereoBM (SAD, blockSize 21)                12.76 ms  spread 16%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 19
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         179.01 ms  spread 45%
+ cv::StereoBM (SAD, blockSize 21)                12.87 ms  spread 92%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 20
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         161.21 ms  spread 3%
+ cv::StereoBM (SAD, blockSize 21)                12.63 ms  spread 11%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 21
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         169.57 ms  spread 5%
+ cv::StereoBM (SAD, blockSize 21)                12.54 ms  spread 15%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 9920
+### run 22
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         166.64 ms  spread 29%
+ cv::StereoBM (SAD, blockSize 21)                13.49 ms  spread 87%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 12279
+### run 23
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         172.64 ms  spread 35%
+ cv::StereoBM (SAD, blockSize 21)                12.95 ms  spread 84%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 24
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         161.62 ms  spread 75%
+ cv::StereoBM (SAD, blockSize 21)                12.33 ms  spread 11%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 25
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         165.04 ms  spread 23%
+ cv::StereoBM (SAD, blockSize 21)                12.41 ms  spread 6%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 26
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         171.81 ms  spread 16%
+ cv::StereoBM (SAD, blockSize 21)                12.78 ms  spread 6%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 12279
+### run 27
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         167.70 ms  spread 21%
+ cv::StereoBM (SAD, blockSize 21)                12.64 ms  spread 83%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 28
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         167.52 ms  spread 57%
+ cv::StereoBM (SAD, blockSize 21)                14.19 ms  spread 27%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 12279
+### run 29
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         163.99 ms  spread 85%
+ cv::StereoBM (SAD, blockSize 21)                12.69 ms  spread 17%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+### run 30
+=== dense disparity vs cv::StereoBM (role, not numerics) ===
+ 752x480, 64 disparities, one thread each
+
+ binCV denseDisparity (census 5x5, 9x9)         167.50 ms  spread 13%
+ cv::StereoBM (SAD, blockSize 21)                12.22 ms  spread 26%
+
+ working sets: binCV scratch 95904 B + 1 B/px output; StereoBM >= 721920 B output alone (2 B/px, internal buffers unobserved)
+ sink 14638
+
+# loadavg at end: 2.05 1.85 1.92 3/1315 27098
+# date:     2026-09-21T16:04:49-07:00
+# done
+
+# ---- aggregate (scripts/aggregate_launches.py ) ----
+# 30 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                           n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# i1 / binCV denseDisparity (census 5x5, 9x9)  30   166.1950   159.2400   179.0100  1.124    11.9%      --  [163.0250, 167.6250]   1.38%   1.019x
+# i1 / cv::StereoBM (SAD, blockSize 21)        30    12.6750    12.2200    14.2800  1.169    16.3%      --  [ 12.6150,  12.8300]   0.85%   1.012x
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     i1       752x480, 64 disparities, one thread each

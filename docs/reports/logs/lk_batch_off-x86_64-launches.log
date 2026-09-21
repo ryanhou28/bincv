@@ -1,0 +1,200 @@
+# launch sweep -- 30 separate processes of one benchmark
+# benchmark: ./build/benchmark/feature_tracking_sequence /home/ryanhou28/bincv-data/euroc-v1_02-cam0
+# launches: 30
+# arch:     x86_64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   80ff0a8
+# governor: none (this host exposes no cpufreq)
+# pinning:  taskset -c 2
+# sleep between launches: 0s
+# date:     2026-09-21T16:22:23-07:00
+# loadavg at start: 1.39 1.72 1.84 1/1319 11987
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+LK residual kernel: AVX2, eight keypoints per batch
+LK keypoint batch: off
+
+=== a / pipeline over 1710 frames, 752x480 ===
+both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_wide(17)
+
+ ... 200 frames
+ ... 400 frames
+ ... 600 frames
+ ... 800 frames
+ ... 1000 frames
+ ... 1200 frames
+ ... 1400 frames
+ ... 1600 frames
+
+--- CRITERION 2: agreement with the reference pipeline ---
+ flow vectors compared : 2029 over 1709 frames (82 re-detections)
+ flow difference : median 0.0437 px p90 0.1614 p99 22.4941 max 213.8032
+ (RMS over all : 7.0313 px -- reported for completeness; the
+ comparisons) percentiles above are the honest summary, see
+ agreeing within 1 px : 95.6%
+ track lifetime median : binCV 11 frames OpenCV 12 frames
+ tracks observed : binCV 10279 OpenCV 10108
+ per-frame survival : binCV 96.4% OpenCV 96.6%
+ detections truncated : 1 of 82 (capacity 20000)
+
+--- CRITERION 3: peak footprint over the pipeline operation set ---
+ binCV :   436704 B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)
+ OpenCV :  2719832 B (CV_8U pyramid x2 with 31-px border/level, CV_32F eigen map)
+ RATIO : 6.23x smaller
+
+--- binCV per-stage, AT THE REAL DUTY CYCLE ---
+ detect                          0.137 ms/frame   8.5% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      1.300 ms/frame  80.3%
+ build (pyrDown + derivatives)    0.182 ms/frame  11.2%
+  ... sensor stage               0.087 ms/frame   5.4%
+  ... median                     0.053 ms/frame   3.3%
+  ... edge                       0.034 ms/frame   2.1%
+  ... pyrDown                    0.057 ms/frame   3.5%
+  ... derivatives                0.037 ms/frame   2.3%
+
+ sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
+
+--- CRITERION 4: speed against the byte-per-pixel denominator ---
+ binCV :    1.619 ms/frame
+ OpenCV :    3.754 ms/frame
+ RATIO : 2.32x
+ NOTE: binCV builds ONE pyramid per frame (the previous frame's is
+ swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
+ calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
+ redundancy was symmetric, and removing it on binCV's side only is the
+ owner's recorded decision, not an oversight in the comparison.
+ NOTE: OpenCV threads = 1 (binCV is single-threaded, always), and its
+ LK and gftt are SIMD-vectorized.
+ binCV has its AVX2 paths here -- the eight-keypoint LK batch,
+ the sensor stage's median and edge kernels, and packing --
+ so this is SIMD against SIMD, as the aarch64 arm is. What
+ measured remains the point: at equal threads binCV LEADS, and the
+ x86 deficit reported before it was THREADS, not vector width.
+### run 2
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+LK residual kernel: AVX2, eight keypoints per batch
+LK keypoint batch: off
+
+=== a / pipeline over 1710 frames, 752x480 ===
+both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_wide(17)
+
+ ... 200 frames
+ ... 400 frames
+ ... 600 frames
+ ... 800 frames
+ ... 1000 frames
+ ... 1200 frames
+ ... 1400 frames
+ ... 1600 frames
+
+--- CRITERION 2: agreement with the reference pipeline ---
+ flow vectors compared : 2029 over 1709 frames (82 re-detections)
+ flow difference : median 0.0437 px p90 0.1614 p99 22.4941 max 213.8032
+ (RMS over all : 7.0313 px -- reported for completeness; the
+ comparisons) percentiles above are the honest summary, see
+ agreeing within 1 px : 95.6%
+ track lifetime median : binCV 11 frames OpenCV 12 frames
+ tracks observed : binCV 10279 OpenCV 10108
+ per-frame survival : binCV 96.4% OpenCV 96.6%
+ detections truncated : 1 of 82 (capacity 20000)
+
+--- CRITERION 3: peak footprint over the pipeline operation set ---
+ binCV :   436704 B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)
+ OpenCV :  2719832 B (CV_8U pyramid x2 with 31-px border/level, CV_32F eigen map)
+ RATIO : 6.23x smaller
+
+--- binCV per-stage, AT THE REAL DUTY CYCLE ---
+ detect                          0.139 ms/frame   8.4% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      1.329 ms/frame  80.4%
+ build (pyrDown + derivatives)    0.186 ms/frame  11.2%
+  ... sensor stage               0.087 ms/frame   5.3%
+  ... median                     0.054 ms/frame   3.2%
+  ... edge                       0.033 ms/frame   2.0%
+  ... pyrDown                    0.059 ms/frame   3.5%
+  ... derivatives                0.040 ms/frame   2.4%
+
+ sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
+
+--- CRITERION 4: speed against the byte-per-pixel denominator ---
+ binCV :    1.654 ms/frame
+ OpenCV :    3.828 ms/frame
+ RATIO : 2.31x
+ NOTE: binCV builds ONE pyramid per frame (the previous frame's is
+ swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
+ calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
+ redundancy was symmetric, and removing it on binCV's side only is the
+ owner's recorded decision, not an oversight in the comparison.
+ NOTE: OpenCV threads = 1 (binCV is single-threaded, always), and its
+ LK and gftt are SIMD-vectorized.
+ binCV has its AVX2 paths here -- the eight-keypoint LK batch,
+ the sensor stage's median and edge kernels, and packing --
+ so this is SIMD against SIMD, as the aarch64 arm is. What
+ measured remains the point: at equal threads binCV LEADS, and the
+ x86 deficit reported before it was THREADS, not vector width.
+### run 3
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+LK residual kernel: AVX2, eight keypoints per batch
+LK keypoint batch: off
+
+=== a / pipeline over 1710 frames, 752x480 ===
+both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_wide(17)
+
+ ... 200 frames
+ ... 400 frames
+ ... 600 frames
+ ... 800 frames
+ ... 1000 frames
+ ... 1200 frames
+ ... 1400 frames
+ ... 1600 frames
+
+--- CRITERION 2: agreement with the reference pipeline ---
+ flow vectors compared : 2029 over 1709 frames (82 re-detections)
+ flow difference : median 0.0437 px p90 0.1614 p99 22.4941 max 213.8032
+ (RMS over all : 7.0313 px -- reported for completeness; the
+ comparisons) percentiles above are the honest summary, see
+ agreeing within 1 px : 95.6%
+ track lifetime median : binCV 11 frames OpenCV 12 frames
+ tracks observed : binCV 10279 OpenCV 10108
+ per-frame survival : binCV 96.4% OpenCV 96.6%
+ detections truncated : 1 of 82 (capacity 20000)
+
+--- CRITERION 3: peak footprint over the pipeline operation set ---
+ binCV :   436704 B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)
+ OpenCV :  2719832 B (CV_8U pyramid x2 with 31-px border/level, CV_32F eigen map)
+ RATIO : 6.23x smaller
+
+--- binCV per-stage, AT THE REAL DUTY CYCLE ---
+ detect                          0.153 ms/frame   8.9% (82 detections in 1709 frames = 4.8%)
+ track (LK)                      1.363 ms/frame  79.6%
+ build (pyrDown + derivatives)    0.196 ms/frame  11.4%
+  ... sensor stage               0.092 ms/frame   5.4%
+  ... median                     0.058 ms/frame   3.4%
+  ... edge                       0.033 ms/frame   1.9%
+  ... pyrDown                    0.059 ms/frame   3.5%
+  ... derivatives                0.044 ms/frame   2.6%
+
+ sensor stage vs OpenCV's: BIT-EXACT (0 pixels differ over 1709 frames)
+
+--- CRITERION 4: speed against the byte-per-pixel denominator ---
+ binCV :    1.711 ms/frame
+ OpenCV :    3.964 ms/frame
+ RATIO : 2.32x
+ NOTE: binCV builds ONE pyramid per frame (the previous frame's is
+ swapped in, proven bit-identical under BINCV_PYR_CHECK=1). OpenCV's
+ calcOpticalFlowPyrLK rebuilds both of its pyramids per call; the
+ redundancy was symmetric, and removing it on binCV's side only is the
+ owner's recorded decision, not an oversight in the comparison.
+ NOTE: OpenCV threads = 1 (binCV is single-threaded, always), and its
+ LK and gftt are SIMD-vectorized.
+ binCV has its AVX2 paths here -- the eight-keypoint LK batch,
+ the sensor stage's median and edge kernels, and packing --
+ so this is SIMD against SIMD, as the aarch64 arm is. What
+ measured remains the point: at equal threads binCV LEADS, and the
+ x86 deficit reported before it was THREADS, not vector width.
+### run 4

@@ -1,0 +1,517 @@
+# launch sweep -- 30 separate processes of one benchmark
+# benchmark: ./build/benchmark/lk_headtohead 
+# launches: 30
+# arch:     x86_64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   05ab53c
+# governor: none (this host exposes no cpufreq)
+# pinning:  taskset -c 2
+# sleep between launches: 0s
+# date:     2026-09-21T14:56:31-07:00
+# loadavg at start: 3.29 6.27 5.22 2/1319 30821
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.591 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.151 ms
+ OpenCV LK on the same bits as CV_8U           4.565 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.72x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 30.21x (FASTER)
+ cost of the N=2 ladder : 3.91x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 2
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.553 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.130 ms
+ OpenCV LK on the same bits as CV_8U           3.797 ms
+
+ binCV 1/2/2/2 vs OpenCV : 6.87x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 29.30x (FASTER)
+ cost of the N=2 ladder : 4.27x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 3
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.552 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.132 ms
+ OpenCV LK on the same bits as CV_8U           3.877 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.02x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 29.41x (FASTER)
+ cost of the N=2 ladder : 4.19x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 4
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.639 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.155 ms
+ OpenCV LK on the same bits as CV_8U           3.919 ms
+
+ binCV 1/2/2/2 vs OpenCV : 6.14x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 25.34x (FASTER)
+ cost of the N=2 ladder : 4.13x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 5
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.580 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.138 ms
+ OpenCV LK on the same bits as CV_8U           4.299 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.42x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 31.20x (FASTER)
+ cost of the N=2 ladder : 4.21x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 6
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.556 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.136 ms
+ OpenCV LK on the same bits as CV_8U           4.057 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.29x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 29.77x (FASTER)
+ cost of the N=2 ladder : 4.08x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 7
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.544 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.130 ms
+ OpenCV LK on the same bits as CV_8U           4.076 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.50x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 31.31x (FASTER)
+ cost of the N=2 ladder : 4.18x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 8
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.562 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.132 ms
+ OpenCV LK on the same bits as CV_8U           4.112 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.31x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 31.11x (FASTER)
+ cost of the N=2 ladder : 4.26x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 9
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.545 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.141 ms
+ OpenCV LK on the same bits as CV_8U           4.391 ms
+
+ binCV 1/2/2/2 vs OpenCV : 8.06x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 31.21x (FASTER)
+ cost of the N=2 ladder : 3.87x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 10
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.709 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.198 ms
+ OpenCV LK on the same bits as CV_8U           8.215 ms
+
+ binCV 1/2/2/2 vs OpenCV : 11.58x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 41.39x (FASTER)
+ cost of the N=2 ladder : 3.57x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 11
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            1.032 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.201 ms
+ OpenCV LK on the same bits as CV_8U           5.022 ms
+
+ binCV 1/2/2/2 vs OpenCV : 4.87x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 25.00x (FASTER)
+ cost of the N=2 ladder : 5.14x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 12
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.568 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.133 ms
+ OpenCV LK on the same bits as CV_8U           3.967 ms
+
+ binCV 1/2/2/2 vs OpenCV : 6.99x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 29.84x (FASTER)
+ cost of the N=2 ladder : 4.27x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 13
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.538 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.133 ms
+ OpenCV LK on the same bits as CV_8U           3.999 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.44x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 30.05x (FASTER)
+ cost of the N=2 ladder : 4.04x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 14
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.538 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.133 ms
+ OpenCV LK on the same bits as CV_8U           3.989 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.41x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 30.10x (FASTER)
+ cost of the N=2 ladder : 4.06x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 15
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.547 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.130 ms
+ OpenCV LK on the same bits as CV_8U           4.484 ms
+
+ binCV 1/2/2/2 vs OpenCV : 8.20x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 34.40x (FASTER)
+ cost of the N=2 ladder : 4.19x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 16
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.581 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.134 ms
+ OpenCV LK on the same bits as CV_8U           3.936 ms
+
+ binCV 1/2/2/2 vs OpenCV : 6.78x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 29.46x (FASTER)
+ cost of the N=2 ladder : 4.35x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 17
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.552 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.144 ms
+ OpenCV LK on the same bits as CV_8U           3.813 ms
+
+ binCV 1/2/2/2 vs OpenCV : 6.91x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 26.52x (FASTER)
+ cost of the N=2 ladder : 3.84x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 18
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.563 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.148 ms
+ OpenCV LK on the same bits as CV_8U           3.816 ms
+
+ binCV 1/2/2/2 vs OpenCV : 6.78x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 25.79x (FASTER)
+ cost of the N=2 ladder : 3.80x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 19
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.629 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.187 ms
+ OpenCV LK on the same bits as CV_8U           3.863 ms
+
+ binCV 1/2/2/2 vs OpenCV : 6.14x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 20.70x (FASTER)
+ cost of the N=2 ladder : 3.37x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 20
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.617 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.138 ms
+ OpenCV LK on the same bits as CV_8U           3.864 ms
+
+ binCV 1/2/2/2 vs OpenCV : 6.26x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 28.08x (FASTER)
+ cost of the N=2 ladder : 4.48x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 21
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.534 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.160 ms
+ OpenCV LK on the same bits as CV_8U           3.948 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.39x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 24.62x (FASTER)
+ cost of the N=2 ladder : 3.33x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 22
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.534 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.145 ms
+ OpenCV LK on the same bits as CV_8U           3.845 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.21x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 26.45x (FASTER)
+ cost of the N=2 ladder : 3.67x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 23
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.594 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.133 ms
+ OpenCV LK on the same bits as CV_8U           3.724 ms
+
+ binCV 1/2/2/2 vs OpenCV : 6.27x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 27.92x (FASTER)
+ cost of the N=2 ladder : 4.46x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 24
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.551 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.213 ms
+ OpenCV LK on the same bits as CV_8U           4.098 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.44x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 19.26x (FASTER)
+ cost of the N=2 ladder : 2.59x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 25
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.561 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.132 ms
+ OpenCV LK on the same bits as CV_8U           3.851 ms
+
+ binCV 1/2/2/2 vs OpenCV : 6.86x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 29.22x (FASTER)
+ cost of the N=2 ladder : 4.26x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 26
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.542 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.132 ms
+ OpenCV LK on the same bits as CV_8U           3.794 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.00x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 28.85x (FASTER)
+ cost of the N=2 ladder : 4.12x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 27
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.546 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.130 ms
+ OpenCV LK on the same bits as CV_8U           3.943 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.22x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 30.28x (FASTER)
+ cost of the N=2 ladder : 4.20x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 28
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.540 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.151 ms
+ OpenCV LK on the same bits as CV_8U           4.087 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.57x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 27.08x (FASTER)
+ cost of the N=2 ladder : 3.58x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 29
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            0.724 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.208 ms
+ OpenCV LK on the same bits as CV_8U           5.194 ms
+
+ binCV 1/2/2/2 vs OpenCV : 7.17x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 25.01x (FASTER)
+ cost of the N=2 ladder : 3.49x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+### run 30
+=== LK vs LK: 140 points, 31x31 window, 4 levels, 20 iterations, OpenCV 1 thread ===
+
+ binCV LK, ladder 1/2/2/2 (shipped)            1.221 ms
+ binCV LK, ladder 1/1/1/1 (N=1 everywhere)     0.307 ms
+ OpenCV LK on the same bits as CV_8U           7.099 ms
+
+ binCV 1/2/2/2 vs OpenCV : 5.82x (FASTER)
+ binCV 1/1/1/1 vs OpenCV : 23.15x (FASTER)
+ cost of the N=2 ladder : 3.98x
+
+ OP-COUNT MODEL, per pixel per iteration per level:
+ binCV N=1 :   1240 popcounts per window = 1.29 per pixel
+ binCV N=2 :   4960 popcounts per window = 5.16 per pixel
+ OpenCV : ~7 ops per pixel, SIMD 8-16 wide = ~0.4-0.9 per pixel
+
+# loadavg at end: 3.29 6.27 5.22 2/1316 30918
+# date:     2026-09-21T14:56:34-07:00
+# done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio OpenCV LK on the same bits as CV_8U/binCV LK, ladder 1/2/2/2 (shipped) --ladder) ----
+# 30 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                              n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# i1 / OpenCV LK on the same bits as CV_8U        30     3.9780     3.7240     8.2150  2.206   112.9%      --  [  3.8980,   4.0925]   2.44%   1.029x
+# i1 / binCV LK, ladder 1/1/1/1 (N=1 everywhere)  30     0.1380     0.1300     0.3070  2.362   128.3%      --  [  0.1330,   0.1495]   5.98%   1.083x
+# i1 / binCV LK, ladder 1/2/2/2 (shipped)         30     0.5585     0.5340     1.2210  2.287   123.0%      --  [  0.5490,   0.5805]   2.82%   1.039x
+# 
+# RATIO  OpenCV LK on the same bits as CV_8U  /  binCV LK, ladder 1/2/2/2 (shipped)   over 30 launches
+#   paired per launch (the published estimator)
+#     median 7.1872   min 4.8663   max 11.5867   scatter 93.5%
+#     bootstrap 95% CI of the median: [6.8869, 7.4027]   +/- 3.59%
+#     launches with the ratio above 1.00: 30 of 30
+#     smallest resolvable difference at 30 launches: 1.044x
+#   ratio of the two medians, same launches
+#     point 7.1226   bootstrap 95% CI: [6.8338, 7.3841]
+#     the two intervals differ by 0.74% and 0.26% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   launch ladder for OpenCV LK on the same bits as CV_8U / binCV LK, ladder 1/2/2/2 (shipped)  (median of the 30 observed launches = 7.1872)
+#     launches      2.5%     97.5%      +/-   resolves
+#            1    4.8663   11.5867   46.75%     1.612x
+#            2    5.8869    9.4517   24.80%     1.315x
+#            3    6.1330    8.0569   13.38%     1.172x
+#            5    6.2626    7.5685    9.09%     1.148x
+#           10    6.6234    7.4430    5.70%     1.085x
+#           15    6.7780    7.4331    4.56%     1.060x
+#           20    6.8654    7.4133    3.81%     1.047x
+#           30    6.8869    7.4027    3.59%     1.044x
+#     k=1 is the state of every committed x86 log: the band is the whole
+#     observed spread, and a single launch cannot report it.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     i1       === LK vs LK: 140 points, 31x31 window, 4 levels, 20 itera
