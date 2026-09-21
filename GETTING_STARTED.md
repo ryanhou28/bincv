@@ -56,7 +56,10 @@ as a sweep of launches instead, and let the tool say how far the host can actual
 ```
 
 On the reference device the two agree closely and this is a formality. On a desktop it is
-not: the same ratio has scattered 57% across launches while every launch reported ~5%.
+not: the same ratio has scattered 66% across sixty launches while every launch reported ~5%.
+**Every x86-64 figure in [docs/reports/](docs/reports/README.md) is taken this way** — a
+median of thirty launches with a bootstrap interval — and a single-launch x86 number is not
+published there.
 
 ## Use it in your project
 
