@@ -38,24 +38,29 @@ is not in these tables — it is not an operation — and is
 640×480 and `uint32_t` words unless the row names otherwise, one thread on both sides. Each
 row names its own unit, and on all of them the smaller number is the faster side.
 
+**Each x86-64 ratio carries the bootstrap 95% interval of thirty pinned launches**, and each
+x86-64 time cell is those launches' median. The ratio is formed inside each launch, so it is
+not the quotient of the two cells beside it. aarch64 is a single pinned launch, which is
+enough on that host — [methodology-timing.md](methodology-timing.md#the-protocol-each-host-needs).
+
 <!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64 ratio|OpenCV, aarch64|binCV, aarch64|aarch64 ratio" source="source" -->
 | operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | source |
 |---|---|---|---|---|---|---|---|---|
-| `bitwiseAnd`, ns/pixel | `cv::bitwise_and` | 0.02734 | 0.00273 | 10.01× | 0.64783 | 0.02266 | 28.59× | [primitives.md](primitives.md) |
-| `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01548 | 0.00956 | 1.62× | 0.17116 | 0.06366 | 2.69× | [primitives.md](primitives.md) |
-| denoise, 3-pixel median, ns/pixel | composed `cv::min` / `cv::max` | 0.18609 | 0.01059 | 17.58× | ratio only | ratio only | 57.66× | [primitives.md](primitives.md) |
-| spatial derivative, both axes, ns/pixel | `cv::filter2D` ×2 | 0.54843 | 0.04793 | 11.44× | ratio only | ratio only | 24.28× | [primitives.md](primitives.md) |
-| `erode` 3×3 rect, ns/pixel | `cv::erode` | 0.10013 | 0.09605 | 1.04× | 0.71993 | 0.72012 | 1.00× | [primitives.md](primitives.md) |
-| `erode` 5×5 ellipse, ns/pixel | `cv::erode` | 0.22759 | 0.70415 | 0.32× | 1.81575 | 3.58631 | 0.51× | [primitives.md](primitives.md) |
-| `pyrDown`, 1 bit in, µs/call | `cv::pyrDown` on `CV_8U` | 48.3 | 31.0 | 1.56× | 521.4 | 93.8 | 5.56× | [primitives.md](primitives.md) |
-| `pyrDown`, 8 bits in, µs/call | `cv::pyrDown` on `CV_8U` | 48.3 | 2034.4 | 0.02× | 521.4 | 7358.6 | 0.07× | [limits.md](limits.md) |
-| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.871 | 0.543 | 7.13× | 23.476 | 2.843 | 8.26× | [features.md](features.md) |
-| BRIEF descriptors, 1000 kpts, ms | `cv::ORB::compute` | 0.660 | 0.141 | 4.69× | 6.816 | 0.648 | 10.51× | [features.md](features.md) |
-| Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.184 | 1.947 | 4.72× | 38.269 | 19.391 | 1.97× | [features.md](features.md) |
-| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack`, binarized | 13.67 | 12.06 | 1.13× | 74.99 | 43.49 | 1.72× | [features.md](features.md) |
-| FAST, wide image, ms/call | `cv::FAST` | 0.363 | 0.344 | 1.05× | 2.906 | 3.024 | 0.96× | [features.md](features.md) |
-| FAST, bit-plane, µs/call | `cv::FAST` | 266.2 | 177.0 | 1.50× | 2054.5 | 865.3 | 2.37× | [features.md](features.md) |
-| dense disparity, ms/frame | `cv::StereoBM` | ~14.7 | ~12.0 | ~1.2× | 79.8 | 60.4 | 1.32× | [stereo.md](stereo.md) |
+| `bitwiseAnd`, ns/pixel | `cv::bitwise_and` | 0.02823 | 0.002810 | 9.97× [9.82, 10.28] | 0.64783 | 0.02266 | 28.59× | [primitives.md](primitives.md) |
+| `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01501 | 0.009270 | 1.62× [1.61, 1.63] | 0.17116 | 0.06366 | 2.69× | [primitives.md](primitives.md) |
+| denoise, 3-pixel median, ns/pixel | composed `cv::min` / `cv::max` | 0.1887 | 0.009865 | 19.09× [18.94, 19.38] | ratio only | ratio only | 57.66× | [primitives.md](primitives.md) |
+| spatial derivative, both axes, ns/pixel | `cv::filter2D` ×2 | 0.5156 | 0.04645 | 11.12× [11.07, 11.28] | ratio only | ratio only | 24.28× | [primitives.md](primitives.md) |
+| `erode` 3×3 rect, ns/pixel | `cv::erode` | 0.1013 | 0.09595 | 1.053× [1.035, 1.066] | 0.71993 | 0.72012 | 1.00× | [primitives.md](primitives.md) |
+| `erode` 5×5 ellipse, ns/pixel | `cv::erode` | 0.2238 | 0.6985 | 0.319× [0.318, 0.323] | 1.81575 | 3.58631 | 0.51× | [primitives.md](primitives.md) |
+| `pyrDown`, 1 bit in, µs/call | `cv::pyrDown` on `CV_8U` | 47.70 | 30.70 | 1.556× [1.536, 1.597] | 521.4 | 93.8 | 5.56× | [primitives.md](primitives.md) |
+| `pyrDown`, 8 bits in, µs/call | `cv::pyrDown` on `CV_8U` | 47.70 | 2040.0 | 0.0235× [0.0233, 0.0242] | 521.4 | 7358.6 | 0.07× | [limits.md](limits.md) |
+| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.978 | 0.5585 | 7.19× [6.89, 7.40] | 23.476 | 2.843 | 8.26× | [features.md](features.md) |
+| BRIEF descriptors, 1000 kpts, ms | `cv::ORB::compute` | 0.639 | 0.123 | 5.18× [5.15, 5.22] | 6.816 | 0.648 | 10.51× | [features.md](features.md) |
+| Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.071 | 1.916 | 4.70× [4.65, 4.79] | 38.269 | 19.391 | 1.97× | [features.md](features.md) |
+| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack`, binarized | 13.65 | 12.09 | 1.132× [1.118, 1.145] | 74.99 | 43.49 | 1.72× | [features.md](features.md) |
+| FAST, wide image, ms/call | `cv::FAST` | 0.359 | 0.345 | 1.039× [1.033, 1.048] | 2.906 | 3.024 | 0.96× | [features.md](features.md) |
+| FAST, bit-plane, µs/call | `cv::FAST` | 265.2 | 180.2 | 1.472× [1.470, 1.474] | 2054.5 | 865.3 | 2.37× | [features.md](features.md) |
+| dense disparity, ms/frame | `cv::StereoBM` | 12.675 | 10.405 | 1.218× [1.199, 1.240] | 79.8 | 60.4 | 1.32× | [stereo.md](stereo.md) |
 
 Four rows carry a qualification their report states and a table cell cannot:
 
@@ -66,8 +71,9 @@ Four rows carry a qualification their report states and a table cell cannot:
   because it holds 8× less. [footprint.md](footprint.md) prices it.
 - **The denoise and derivative rows have no aarch64 measurements**, only the published
   ratio; see [Published as a ratio only](#published-as-a-ratio-only).
-- **The x86-64 dense-disparity figures are floors of interleaved runs** on a host with
-  20–100% spreads and are claimed only at that granularity.
+- **The dense-disparity interval is the one that cannot be paired.** Its two arms are
+  separate binaries, so the launches cannot be matched up and the interval comes from
+  resampling two sweeps independently — wider, and the weakest interval in the table.
 
 ### Speed, GPU
 
@@ -186,7 +192,7 @@ pipeline, and it is not the number to compare against a library call.
 <!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64 ratio|OpenCV, aarch64|binCV, aarch64|aarch64 ratio" source="source" -->
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | source |
 |---|---|---|---|---|---|---|---|
-| time, ms/frame | 3.841–4.485 | 1.134–1.283 | 3.30× | 23.249–23.451 | 4.906–4.949 | 4.73× | [feature-tracking.md](feature-tracking.md) |
+| time, ms/frame | 3.7275 | 1.0215 | 3.658× [3.633, 3.681] | 23.249–23.451 | 4.906–4.949 | 4.73× | [feature-tracking.md](feature-tracking.md) |
 
 Peak working set is computed from buffer geometry and is identical on both architectures, so
 it is one pair rather than two:
@@ -216,7 +222,7 @@ says what that covers — but it produced no OpenCV comparison, so it is not her
 
 Neither CPU stands in for the other: results move a long way between them, and always
 because of what OpenCV's two builds do rather than what binCV's code does. Hamming matching
-is 4.72× on x86 and 1.97× on the device; bit-plane FAST goes the other way, 1.50× against
+is 4.70× on x86 and 1.97× on the device; bit-plane FAST goes the other way, 1.47× against
 2.37×; and the bit width at which a bit-sliced pyramid stops beating `cv::pyrDown` differs by
 several bits between them.
 
@@ -300,56 +306,87 @@ block each run prints is at the top of every aarch64 log in [logs/](logs/).
 
 ### On the x86-64 host
 
-The desktop under WSL2 is not timing-grade and the launch sweep is how much it is not.
-goodFeaturesToTrack there prints a ~5–9% within-run spread and the **same ratio scatters 57%
-across thirty launches** — eleven times the figure one process can report — and one launch
-has returned anything from 0.86× to 1.61×. Thirty launches put a 95% interval of
-[1.1120, 1.1537] around a median of 1.1346, which is ±1.8%: enough to settle a 5% question
-and not a 2% one. A second independent sweep with the committed runner landed at 1.1297,
-[1.1147, 1.1684] — the reproduction is in
-[goodfeatures-x86_64-launches.log](logs/goodfeatures-x86_64-launches.log).
+**Every x86-64 figure in these reports is now the median of thirty pinned launches with a
+bootstrap 95% interval**, and until this round none of them was. All 24 committed x86 logs
+were single process launches, and `benchmark/measure_util.hpp` reports *within-run* spread by
+construction — a process cannot see what it paid once. So every x86 figure was one draw from a
+distribution nobody had characterised. Not wrong; unexamined, which is not a state the
+"commit the benchmark" rule leaves room for.
 
-Every x86 log in [logs/](logs/) was a single launch until that one. **Sixteen sweeps have
-since re-taken every x86 figure a reader acts on** — the root README's speed table, the
-at-a-glance tables above, and each report's own summary — at thirty pinned launches each,
-in the `*-x86_64-launches.log` files beside the originals. aarch64 is unaffected and was not
-re-run: on the Pi with the governor locked the same benchmark holds 0.05–0.14% within a run
-and 0.41% across launches.
+The desktop under WSL2 is not timing-grade and the launch sweep is how much it is not.
+goodFeaturesToTrack there prints a ~5–9% within-run spread and the **same ratio scatters 66%
+across sixty launches** — seven to thirteen times the figure one process can report — and one
+launch has returned anything from 0.86× to 1.61×. Sixty launches put a 95% interval of
+[1.118, 1.145] around a median of 1.132×, which is ±1.2%: enough to settle a 5% question and
+not a 2% one. Those sixty are two independent thirties taken a fortnight apart, 1.1346 and
+1.1297, each interval containing the other's median — the protocol reproduces, not just the
+row.
+
+**Eighteen sweeps carry the x86-64 tables**, one per benchmark, in the `*-x86_64-launches.log`
+files beside the single launches they replaced. **aarch64 is unaffected and was not re-run:**
+seven launches of the same benchmark on the governor-locked Pi hold 0.05–1.18% within a run
+and scatter 0.1–0.8% across the seven.
 
 **The ratios came back; the individual times largely did not.** Ten published x86 ratios sit
-inside the new 95% interval — `bitwiseAnd` 10.01× against a median of 9.97×, `countNonZero`
-1.62× against 1.62×, `countAnd` 3.47× against 3.49×, optical flow 7.13× against 7.19× and its
-`1/1/1/1` ladder 28.53× against 29.19×, Hamming matching 4.72× against 4.70×, `pyrDown` 1.56×
-against 1.56×, the crossover's shipped shape 1.49× against 1.47×, `erode` 3×3 1.04× against
-1.05× and on a 5×5 ellipse 0.32× against 0.32×. Dense disparity, whose two arms are separate
-binaries and so cannot be paired, comes out at 1.22× against the published ~1.2×.
-The cells behind them moved much more: **28 of the 40 measured times re-taken read slower in
-their single launch than in the median of thirty**, on both sides at once. A ratio survives
-what its two cells do not, because a launch that lands slow lands slow on both arms — which
-is also why the sweep cannot rescue a figure that was quoted as a time.
+inside the new interval unchanged — `bitwiseAnd` 10.01× against 9.97×, `countNonZero` 1.62×
+against 1.62×, `countAnd` 3.47× against 3.49×, optical flow 7.13× against 7.19× and its
+`1/1/1/1` ladder 28.53× against 29.2×, Hamming matching 4.72× against 4.70×, `pyrDown` 1.56×
+against 1.556×, the crossover's shipped shape 1.49× against 1.474×, `erode` 3×3 1.04× against
+1.053× and on a 5×5 ellipse 0.32× against 0.319×. The cells behind them moved much more:
+**28 of the 40 measured times re-taken read slower in their single launch than in the median
+of thirty**, on both sides at once. A ratio survives what its two cells do not, because a
+launch that lands slow lands slow on both arms — which is also why the sweep cannot rescue a
+figure that was quoted as a time. `wordtype_narrow` is the clean demonstration: all three of
+its arms read about 20% high in the single launch and the ratios between them did not move.
 
-**Three published readings the sweep does not support**, and they are different in kind:
+**Four rows moved enough to change what a reader would conclude**, and they are different in
+kind:
 
-- **`dilate` 3×3 is published as a 0.80× loss on x86-64 and is not one.** Thirty launches put
-  it at **1.06×**, ahead in 30 of 30, on a kernel whose source has not changed since the
-  single launch that produced 0.80×. That launch timed binCV's arm at 0.13037 ns/pixel where
-  thirty launches span 0.09260 to 0.09680 — one slow draw, on the row where it changed the
-  answer's sign.
-- **`FAST, bit-plane` is 1.47×, not 1.50×, and that one is real.** The runtime switch that
+- **`bitwiseNot` is 17.99×, not 25.04× — the largest loss in this round.** The move is
+  entirely in the denominator: `cv::bitwise_not` read 0.08591 ns/pixel in the single launch,
+  where thirty launches span 0.06156 to 0.07519. The old figure flattered binCV by timing a
+  slow OpenCV.
+- **`morphologyEx(OPEN)` is 1.022×, not 1.15×**, and four of its thirty launches fall below
+  1.00×. It is a near-parity row published as a clear win.
+- **`FAST, bit-plane` is 1.472×, not 1.50×, and that one is real.** The runtime switch that
   makes the vector arm provably off-switchable is read once per image row, and reverting only
   that read measures 12.8% faster with the intervals disjoint. Hoisting it out of the row loop
-  keeps the switch and recovers all of it — [issue #73](https://github.com/ryanhou28/bincv/issues/73).
-- **The assembled pipeline is 3.66× on x86-64, not 3.30×**, because the 2026-09-06 change to
-  one pyramid build per frame landed after the table was taken. `pyrDown` falls from 0.137 to
-  0.057 ms/frame and the build stage from 0.297 to 0.181, which is the halving that change
-  predicted. [feature-tracking.md](feature-tracking.md#addendum-2026-09-06-one-pyramid-build-per-frame)
-  asks to be replaced whole rather than row by row, and the aarch64 half has not been re-taken,
-  so the table stands.
+  keeps the switch and recovers all of it —
+  [issue #73](https://github.com/ryanhou28/bincv/issues/73), which would take the row to about
+  1.66×.
+- **`dilate` 3×3 was published as a 0.80× loss and is not one.** Thirty launches put it at
+  1.057×, ahead in 30 of 30, on a kernel whose source has not changed. That launch timed
+  binCV's arm at 0.13037 ns/pixel where thirty span 0.09260 to 0.09680 — one slow draw, on the
+  row where it changed the answer's sign.
+
+**Two rows moved because the code did.** The assembled pipeline is 3.658× rather than 3.30×
+because the 2026-09-06 change to one pyramid build per frame landed after that table was
+taken — `pyrDown` falls from 0.137 to 0.057 ms/frame, the halving that change predicted. And
+`BRIEF` gains 4.69× → 5.18×; a refactor that looked like the cause was A/B'd at thirty
+launches an arm and is not one (122,596 ns against 123,834, intervals overlapping), so that
+row is a slow draw rather than a code change.
+
+**Two rows now have a committed source for the first time.** The published x86 denoise and
+derivative figures appear in no log in this repository — the committed single launches read
+different numbers — so those cells were unsourced rather than merely uncertain. They are now
+thirty launches each.
 
 **What this host can resolve at thirty launches is a property of the row**, between 1.002×
-and 1.09×. `FAST, bit-plane` resolves 1.002× and Lucas–Kanade's `1/1/1/1` ladder resolves
-1.090× — that row cannot tell 28.5× from 31×, and its figure should not be read to three
-digits. Each sweep's log carries its own number in the `minres` column.
+and 1.090×. `FAST, bit-plane` resolves 1.002×; Lucas–Kanade's `1/1/1/1` ladder resolves
+1.090×, so that row cannot tell 29× from 31× and its figure is not quoted to three digits.
+`countAndSplit` at a 31×31 window on the largest geometry resolves only 1.32×, and carries
+no published claim. Each
+sweep's log prints its own number in the `minres` column.
+
+**Seven x86 logs were not re-taken, and are named here rather than left to look current.**
+`essential-x86_64.log` and `ransac-x86_64.log` back no published timing — checked
+structurally, by which report links to which log, not by matching numbers. `pyramid` and
+`wordwidth` publish computed byte counts plus one aarch64 ratio, and `essential_stack`,
+`feature-tracking-rss` and `feature-tracking-threads` publish stack bytes, resident set and
+thread counts. [logs/README.md](logs/README.md) lists them with their reasons. The three
+threading rows in [feature-tracking.md](feature-tracking.md#what-this-does-not-claim) are the
+one place an un-swept x86 *timing* is still published, because a threading arm cannot be
+pinned; that table says so.
 
 ## The workload
 
@@ -379,8 +416,11 @@ figure needs:
 ```bash
 ./scripts/run_launches.sh -n 30 ./build/benchmark/corner_opencv_benchmark   # -g on the Pi
 ./scripts/aggregate_launches.py corner_opencv_benchmark-x86_64-launches.log \
-    --column ns/pixel --ratio 'OpenCV binarized/binCV streaming' --ladder
+    --column ns/pixel --ratio 't1:OpenCV binarized/t1:binCV streaming' --ladder
 ```
+
+On x86-64 that pair **is** how every figure in these reports was taken, not an option beside
+it.
 
 `--ladder` answers how many launches a row needs by resampling the ones already taken;
 `--resolve 5%` asks whether a difference of a size **you** state is resolvable here, because

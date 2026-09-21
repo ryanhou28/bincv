@@ -22,17 +22,20 @@ side of that line. Header-only C++, zero dependencies.
 <!-- figure-check values="OpenCV, x86-64|binCV, x86-64|speedup, x86-64|OpenCV, aarch64|binCV, aarch64|speedup, aarch64" source="source" -->
 | operation | OpenCV equivalent | OpenCV, x86-64 | binCV, x86-64 | speedup, x86-64 | OpenCV, aarch64 | binCV, aarch64 | speedup, aarch64 | source |
 |---|---|---|---|---|---|---|---|---|
-| `bitwiseAnd`, ns/pixel | `cv::bitwise_and` | 0.02734 | 0.00273 | 10.01× | 0.64783 | 0.02266 | 28.59× | [primitives.md](docs/reports/primitives.md) |
-| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.871 | 0.543 | 7.13× | 23.476 | 2.843 | 8.26× | [features.md](docs/reports/features.md) |
-| `pyrDown`, 1 bit in → 3 bits out, µs/call | `cv::pyrDown` on `CV_8U` | 48.3 | 31.0 | 1.56× | 521.4 | 93.8 | 5.56× | [primitives.md](docs/reports/primitives.md) |
-| Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.184 | 1.947 | 4.72× | 38.269 | 19.391 | 1.97× | [features.md](docs/reports/features.md) |
-| `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01548 | 0.00956 | 1.62× | 0.17116 | 0.06366 | 2.69× | [primitives.md](docs/reports/primitives.md) |
-| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack`, binarized | 13.67 | 12.06 | 1.13× | 74.99 | 43.49 | 1.72× | [features.md](docs/reports/features.md) |
-| dense disparity, ms/frame | `cv::StereoBM` | ~14.7 | ~12.0 | ~1.2× | 79.8 | 60.4 | 1.32× | [stereo.md](docs/reports/stereo.md) |
-| `erode`, 5×5 ellipse, ns/pixel | `cv::erode` | 0.22759 | 0.70415 | 0.32× | 1.81575 | 3.58631 | 0.51× | [primitives.md](docs/reports/primitives.md) |
+| `bitwiseAnd`, ns/pixel | `cv::bitwise_and` | 0.02823 | 0.002810 | 9.97× [9.82, 10.28] | 0.64783 | 0.02266 | 28.59× | [primitives.md](docs/reports/primitives.md) |
+| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.978 | 0.5585 | 7.19× [6.89, 7.40] | 23.476 | 2.843 | 8.26× | [features.md](docs/reports/features.md) |
+| `pyrDown`, 1 bit in → 3 bits out, µs/call | `cv::pyrDown` on `CV_8U` | 47.70 | 30.70 | 1.556× [1.536, 1.597] | 521.4 | 93.8 | 5.56× | [primitives.md](docs/reports/primitives.md) |
+| Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.071 | 1.916 | 4.70× [4.65, 4.79] | 38.269 | 19.391 | 1.97× | [features.md](docs/reports/features.md) |
+| `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01501 | 0.009270 | 1.62× [1.61, 1.63] | 0.17116 | 0.06366 | 2.69× | [primitives.md](docs/reports/primitives.md) |
+| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack`, binarized | 13.65 | 12.09 | 1.132× [1.118, 1.145] | 74.99 | 43.49 | 1.72× | [features.md](docs/reports/features.md) |
+| dense disparity, ms/frame | `cv::StereoBM` | 12.675 | 10.405 | 1.218× [1.199, 1.240] | 79.8 | 60.4 | 1.32× | [stereo.md](docs/reports/stereo.md) |
+| `erode`, 5×5 ellipse, ns/pixel | `cv::erode` | 0.2238 | 0.6985 | 0.319× [0.318, 0.323] | 1.81575 | 3.58631 | 0.51× | [primitives.md](docs/reports/primitives.md) |
 
 x86-64 is a desktop Ryzen 5 5600X, aarch64 a Raspberry Pi 4 at a pinned clock. Both columns
-are one thread — compare at equal thread counts, or a ratio means nothing.
+are one thread — compare at equal thread counts, or a ratio means nothing. Each x86-64
+speedup is the median of **thirty pinned launches** with the bootstrap 95% interval those
+thirty put around it; aarch64 is one pinned launch, which that machine's 0.1–0.8% run-to-run
+scatter earns.
 [Where it does not pay](#where-it-does-not-pay) covers the rows where a packed representation
 costs more than it saves.
 
@@ -116,15 +119,15 @@ have been measured, and what each one gets.**
 ## Where it does not pay
 
 **A non-separable structuring element.** A 5×5 ellipse costs one shifted-OR per set element,
-and binCV runs it at 0.32× of `cv::erode` on x86-64. The fused kernel shipped at that price
+and binCV runs it at 0.319× of `cv::erode` on x86-64. The fused kernel shipped at that price
 because it holds 76,800 bytes against `cv::erode`'s 614,400 — when speed and footprint
-conflict here, footprint wins. A 3×3 element is 1.04× on x86-64 and 1.00× on the Pi, and
+conflict here, footprint wins. A 3×3 element is 1.053× on x86-64 and 1.00× on the Pi, and
 holds the same 76,800 bytes. ([primitives.md](docs/reports/primitives.md))
 
 **Wide inputs into a bit-sliced filter.** binCV's filters carry one plane per bit, so an
 accumulator has to hold the weighted sum and the work grows with input depth. At one bit
 there is nothing to accumulate; at eight, a byte kernel's vector unit wins outright —
-`pyrDown` fed eight bits runs at 0.02× on x86-64 and 0.07× on aarch64. That is the library
+`pyrDown` fed eight bits runs at 0.0235× on x86-64 and 0.07× on aarch64. That is the library
 outside its premise: it ships as 1 bit in, 3 bits out, and the crossover sits at a different
 depth on each machine. ([limits.md](docs/reports/limits.md))
 
