@@ -28,6 +28,14 @@ number is the faster side.
 | `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` | 13.67 ns/px | **12.06 ns/px** | 1.13× | 74.99 ns/px | **43.49 ns/px** | **1.72×** |
 | `cornerSubPix` | `cv::cornerSubPix` | not published | not published | ~13× | not published | not published | 13.70× |
 
+**`FAST, bit-plane` measures 1.47× over thirty x86-64 launches, not the 1.50× above, and
+the difference is a real one.** The runtime switch that makes the vector arm provably
+off-switchable is read once per image row; reverting only that read measures 12.8% faster
+with the two intervals disjoint, and hoisting it out of the row loop keeps the switch and
+recovers all of it — [issue #73](https://github.com/ryanhou28/bincv/issues/73). The other
+x86-64 cells on this page were re-taken at thirty launches too and their ratios held; see
+[the index](README.md#on-the-x86-64-host).
+
 **`cornerSubPix` is the one row here whose measurements did not survive into the
 repository.** The two times were taken and the ratio recorded; the values behind it were
 not, so the cells say so rather than being filled in. `corner_subpix_benchmark` exists and is

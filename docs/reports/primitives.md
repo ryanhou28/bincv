@@ -42,6 +42,16 @@ call**:
 |---|---|---|---|---|---|---|---|
 | `pyrDown`, 1 bit in | `cv::pyrDown` on `CV_8U` | 48.3 | **31.0** | 1.56× | 521.4 | **93.8** | **5.56×** |
 
+**Every x86-64 column on this page was taken in one process launch, and that is now known
+not to be enough.** The same benchmarks re-run as thirty pinned launches each are in
+[logs/](logs/) as `*-x86_64-launches.log`; the ratios hold, the individual times mostly read
+slower in the single launch than in the median of thirty, and **one row's answer changes
+sign**: `dilate` 3×3 measures **1.06×** over thirty launches, ahead in 30 of 30, against the
+0.80× loss in the table below — the kernel has not changed, and the single launch that
+produced 0.80× timed binCV's arm at 0.13037 ns/pixel where thirty span 0.09260 to 0.09680.
+The table is left as published rather than edited row by row on one architecture;
+[the index](README.md#on-the-x86-64-host) carries what the sweep found.
+
 **The denoise and derivative rows are ratio-only on aarch64.** The device times behind those
 ratios were not carried into this report, and the committed denoise and derivative logs do
 not reproduce the x86-64 values printed beside them either, so neither side can be restated

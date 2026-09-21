@@ -173,6 +173,15 @@ soft-temperature-limit flag had tripped at some point in the session). The struc
 and the build-stage saving are what this addendum records; the table stands until a proper
 re-measurement replaces it whole rather than row by row.
 
+**The x86-64 half of that re-measurement now exists.** Thirty pinned launches
+([logs/feature-tracking-x86_64-launches.log](logs/feature-tracking-x86_64-launches.log)):
+OpenCV 3.7275 ms/frame, binCV 1.0215, **3.66×** with a bootstrap 95% interval of
+[3.633, 3.681] and above 1.00 in 30 of 30. The stage shares move the way the change predicts
+— `pyrDown` 0.137 → 0.057 ms/frame, build 0.297 → 0.181, sensor 0.118 → 0.086, track 0.799 →
+0.704, detect 0.186 → 0.139. The tables above are still the ones from before the change,
+because replacing one architecture's column and leaving the other is the row-by-row edit this
+addendum declined; the device half is what the replacement is waiting on.
+
 ## Reproduce
 
 ```bash
