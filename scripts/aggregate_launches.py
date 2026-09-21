@@ -340,8 +340,23 @@ def parse_launch(lines, column):
     return rows, legend
 
 
+EXIT_MARK = re.compile(r'^###.*?\b(?:run|repeat|launch)\s+(\d+)\b.*?\bEXIT\s+(\d+)', re.I)
+
+
 def collect(paths, column):
-    """-> (key -> [per-launch value]), (key -> [per-launch within%]), legend, n."""
+    """-> (key -> value list), (key -> within% list), legend, n, silent, failed.
+
+    A LAUNCH THE BENCHMARK ITSELF FAILED IS STILL IN THE FILE. run_launches.sh
+    writes `### run 13 EXIT 1` after a launch that exited non-zero and keeps
+    going, which is right -- the numbers it printed before it gave up are
+    evidence about this host. But the logic benchmark exits non-zero precisely
+    when it has decided one of its own rows is a broken measurement ("23.58 GB/s
+    is more than 1.5x the copy-loop bound"), and folding that launch into the
+    median without a word would let a reading the benchmark disowned set a
+    published figure. The count is reported; nothing is dropped, because which
+    rows a failed launch spoils is a per-case question the caller answers with
+    -k after reading the log.
+    """
     files = []
     for p in paths:
         if os.path.isdir(p):
@@ -350,9 +365,14 @@ def collect(paths, column):
         else:
             files.append(p)
     vals, withins, legend, launches, silent = {}, {}, {}, 0, []
+    failed = []
     for path in files:
         with open(path, errors='replace') as fh:
             text = fh.read()
+        for line in text.split('\n'):
+            m = EXIT_MARK.match(line)
+            if m:
+                failed.append((path, m.group(1), m.group(2)))
         before = launches
         for _, lines in split_launches(text):
             rows, leg = parse_launch(lines, column)
@@ -366,7 +386,7 @@ def collect(paths, column):
                     withins.setdefault(k, []).append(w)
         if launches == before:
             silent.append(path)
-    return vals, withins, legend, launches, silent
+    return vals, withins, legend, launches, silent, failed
 
 
 def boot_band(samples, k, resamples, seed):
@@ -451,7 +471,7 @@ def main(argv=None):
     ap.add_argument('--seed', type=int, default=12345)
     args = ap.parse_args(argv)
 
-    vals, withins, legend, launches, silent = collect(args.paths, args.column)
+    vals, withins, legend, launches, silent, failed = collect(args.paths, args.column)
     # A file that yields nothing is NAMED. Silence from a parser reads as "this
     # log has no rows", and several of the committed logs print their timings in
     # shapes nothing here recognises -- a fact a reader has to be told rather
@@ -466,6 +486,18 @@ def main(argv=None):
         print('nothing to aggregate (try --column against the log header)',
               file=sys.stderr)
         return 1
+    # A LAUNCH THE BENCHMARK DISOWNED IS COUNTED AND NAMED, NOT DROPPED. The
+    # rows it printed are still in the medians below; whether that is what you
+    # want depends on which row the benchmark objected to, which is in the log.
+    if failed:
+        print(f"\n{len(failed)} of {launches} launches EXITED NON-ZERO and are"
+              f" included in every figure below:", file=sys.stderr)
+        for path, run, rc in failed:
+            print(f"    {os.path.basename(path)}  run {run}  exit {rc}",
+                  file=sys.stderr)
+        print("  The benchmark exits non-zero when it has decided one of its own"
+              "\n  rows is not a measurement. Read the log before quoting a"
+              " figure\n  these launches contribute to.", file=sys.stderr)
     want = parse_diff(args.resolve) if args.resolve else None
 
     rows = []
