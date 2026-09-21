@@ -36,6 +36,13 @@ architectures — AVX2 against AVX2, NEON against NEON — and the run prints bo
 **x86-64 and aarch64 are separate columns everywhere on this page.** They are different
 measurements against different OpenCV builds on different machines, and are never averaged.
 
+**On this page the two columns are also of different code.** The x86-64 figures are thirty
+pinned launches taken after the [2026-09-06 change to one pyramid build per
+frame](#addendum-2026-09-06-one-pyramid-build-per-frame); the aarch64 figures predate it and
+are a single pinned launch. Each column is internally consistent and neither stands in for
+the other — which was already true across the two machines and is now true across a commit
+as well.
+
 ## Speed
 
 **Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
@@ -45,12 +52,19 @@ pipeline.
 
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|
-| the assembled pipeline, ms/frame | 3.841–4.485 | **1.134–1.283** | **3.30×** | 23.249–23.451 | **4.906–4.949** | **4.73×** |
+| the assembled pipeline, ms/frame | 3.7275 | **1.0215** | **3.658× [3.633, 3.681]** | 23.249–23.451 | **4.906–4.949** | **4.73×** |
 
-Each ratio is the conservative one of its repeats: five x86 runs span 3.30× to 3.50×, three
-device runs 4.73× to 4.74×. Almost all of the x86 spread is OpenCV's — binCV's own time
-moves 1.134 to 1.283 ms while OpenCV's moves 3.841 to 4.485. The device's 0.2% spread
-against the desktop's 4% is what a pinned, governor-locked machine buys.
+The x86-64 cells are medians of thirty pinned launches and the ratio is formed inside each
+launch, above 1.00 in 30 of 30; the interval is a percentile bootstrap over the thirty.
+The aarch64 ratio is the conservative one of three device runs, 4.73× to 4.74×. Almost all
+of the x86 scatter is OpenCV's — its arm's launches run 3.622 to 4.919 ms while binCV's run
+0.991 to 1.217. The device's 0.2% spread against the desktop's 13% is what a pinned,
+governor-locked machine buys, and it is why one launch is quoted there and thirty here.
+
+**An independent sweep agrees.** The `BINCV_LK_BATCH=1` arm in
+[limits.md](limits.md#the-vector-arms-and-proving-they-are-on) is the same pipeline in a
+separate thirty-launch sweep and reads 3.632× [3.614, 3.648] — 0.7% away, intervals
+overlapping.
 
 **The reference device is where binCV does better**, and it is the deployment-class part.
 
@@ -80,17 +94,19 @@ total:
 
 | stage | time, x86-64 (ms/frame) | share of the x86-64 pipeline | time, aarch64 (ms/frame) | share of the aarch64 pipeline |
 |---|---|---|---|---|
-| track (Lucas–Kanade) | 0.799 | 62.3% | 3.307 | 66.8% |
-| build (pyramid + derivatives) | 0.297 | 23.2% | 1.072 | 21.7% |
-| — sensor stage | 0.118 | 9.2% | 0.543 | 11.0% |
-| — `pyrDown` | 0.137 | 10.6% | 0.377 | 7.6% |
-| — derivatives | 0.043 | 3.3% | 0.149 | 3.0% |
-| detect | 0.186 | 14.5% | 0.570 | 11.5% |
+| track (Lucas–Kanade) | 0.704 | 68.9% | 3.307 | 66.8% |
+| build (pyramid + derivatives) | 0.181 | 17.7% | 1.072 | 21.7% |
+| — sensor stage | 0.086 | 8.4% | 0.543 | 11.0% |
+| — `pyrDown` | 0.057 | 5.6% | 0.377 | 7.6% |
+| — derivatives | 0.038 | 3.7% | 0.149 | 3.0% |
+| detect | 0.139 | 13.6% | 0.570 | 11.5% |
 
 Tracking dominates on both, so the operations that move this number are the ones inside the
 Lucas–Kanade loop rather than the ones with the largest per-operation ratios: `pyrDown` is
-10.6% of the x86 pipeline, and an infinite speedup on it would be worth about 1.12×. The two
-architectures spend their time within five points of each other on every stage, so nothing
+5.6% of the x86 pipeline after the one-build-per-frame change, and an infinite speedup on it
+would now be worth about 1.06×. The aarch64 column still carries the double build, which is
+where most of the difference between the two `pyrDown` shares comes from; on every other
+stage the two architectures spend their time within five points of each other, so nothing
 here is bottlenecked on anything architecture-specific.
 
 ## Accuracy
@@ -131,13 +147,15 @@ library. The agreement figures are evidence that the kernels are sufficient, not
 about pose error.
 
 **The detection duty cycle belongs to the benchmark.** This harness re-detects only when it
-runs out of tracks — 4.8% of frames here, so detection is 11.5–14.5% of the total. A
+runs out of tracks — 4.8% of frames here, so detection is 11.5–13.6% of the total. A
 tracker that tops up whenever its track count falls below a target detects far more often,
 and the detect stage then dominates in a way none of these numbers show.
 
 **It is one thread on each side, and that is binCV's best case.** binCV is serial unless a
 caller installs a threading backend; OpenCV is not. Both scale, OpenCV scales better, so the
-lead narrows (x86-64, unpinned — a threading arm cannot be measured under `taskset`):
+lead narrows (x86-64, unpinned — a threading arm cannot be measured under `taskset`, so these
+three rows are **single runs without an interval**, which every other x86-64 figure on this
+page now has):
 
 | threads, each side | OpenCV, ms/frame | binCV, ms/frame | ratio |
 |---|---|---|---|
@@ -169,18 +187,20 @@ and the benchmark's output says so beside the ratio.
 One governor-locked device run after the change: build 1.072 → 0.836 ms/frame (the predicted
 pyrDown halving), detect 0.570 (identical to the table), track 3.787 against the table's
 3.307 — 14% above the recorded runs **for reasons not established** (the device's
-soft-temperature-limit flag had tripped at some point in the session). The structural change
-and the build-stage saving are what this addendum records; the table stands until a proper
-re-measurement replaces it whole rather than row by row.
+soft-temperature-limit flag had tripped at some point in the session). That run is not enough
+to replace the aarch64 column, which is why that column is still the pre-change one.
 
-**The x86-64 half of that re-measurement now exists.** Thirty pinned launches
+**The x86-64 half of the re-measurement now exists, and the tables above carry it.** Thirty
+pinned launches
 ([logs/feature-tracking-x86_64-launches.log](logs/feature-tracking-x86_64-launches.log)):
-OpenCV 3.7275 ms/frame, binCV 1.0215, **3.66×** with a bootstrap 95% interval of
-[3.633, 3.681] and above 1.00 in 30 of 30. The stage shares move the way the change predicts
-— `pyrDown` 0.137 → 0.057 ms/frame, build 0.297 → 0.181, sensor 0.118 → 0.086, track 0.799 →
-0.704, detect 0.186 → 0.139. The tables above are still the ones from before the change,
-because replacing one architecture's column and leaving the other is the row-by-row edit this
-addendum declined; the device half is what the replacement is waiting on.
+OpenCV 3.7275 ms/frame, binCV 1.0215, **3.658×** with a bootstrap 95% interval of
+[3.633, 3.681] and above 1.00 in 30 of 30, against the 3.30× the pre-change table carried.
+The stage shares moved the way the change predicts — `pyrDown` 0.137 → 0.057 ms/frame, build
+0.297 → 0.181, sensor 0.118 → 0.086, track 0.799 → 0.704, detect 0.186 → 0.139. **This is the
+row-by-row edit the paragraph above declined, and it is being made deliberately**: leaving a
+figure that the code no longer produces, in order to keep two columns of the same vintage,
+trades a true number for a tidy table. The columns say which commit each belongs to instead.
+The device half is still owed.
 
 ## Reproduce
 
@@ -196,7 +216,8 @@ The frame directory is any set of `.png` files in name order. The benchmark prin
 block if OpenCV is left at a thread count other than one, because that is the single easiest
 way to produce a wrong ratio here.
 
-Logs: [x86-64](logs/feature-tracking-x86_64.log) ·
+Logs: [x86-64, thirty launches](logs/feature-tracking-x86_64-launches.log) ·
+[x86-64, the single run it replaced](logs/feature-tracking-x86_64.log) ·
 [x86 repeats](logs/feature-tracking-repeats-x86_64.log) ·
 [aarch64](logs/feature-tracking-aarch64.log) ·
 [device repeats](logs/feature-tracking-repeats-aarch64.log) ·

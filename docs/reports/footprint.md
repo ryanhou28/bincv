@@ -100,8 +100,8 @@ worth more than the eight-to-one storage ratio is:
 ## What footprint costs, and what it does not buy
 
 **Eight times less data does not make the tracker eight times faster.** Growing the frame
-36-fold at a fixed keypoint count moves Lucas–Kanade's per-point cost by 12% on x86 and 5% on
-the device: it is compute-bound, so the footprint advantage decides what fits on a device and
+36-fold at a fixed keypoint count moves Lucas–Kanade's per-point cost by 0.4% on x86 and 5%
+on the device: it is compute-bound, so the footprint advantage decides what fits on a device and
 not how fast it runs. The sweep is in [limits.md](limits.md).
 
 **Threading is free in memory.** Peak resident set size across one, four and twelve tracking
@@ -121,8 +121,8 @@ so.
 | decision | speed | memory | outcome |
 |---|---|---|---|
 | `uint64_t` as the default word type | 1.95× faster on `countNonZero` at 640×480, aarch64 — **ratio only** | 2,880 B against `uint32_t`'s 2,400 at 160×120 and 960 against 720 at 94×60 — 20% and 33% more | **declined** |
-| an occupancy mask for spacing detections | 76,940 ns against the direct test's 3,240 on x86-64 — **the mask is 23.7× slower** | 38,400 B against the direct test's 0 | **declined twice over** |
-| fused morphology kernel | 0.70415 ns/pixel against `cv::erode`'s 0.22759 on a 5×5 ellipse, x86-64 — binCV at 0.32× | 76,800 B against `cv::erode`'s 614,400 — 8× smaller | **accepted, and it costs** |
+| an occupancy mask for spacing detections | 76,077 ns against the direct test's 3,281 on x86-64 — **the mask is 23.17× slower** [23.07, 23.33] | 38,400 B against the direct test's 0 | **declined twice over** |
+| fused morphology kernel | 0.6985 ns/pixel against `cv::erode`'s 0.2238 on a 5×5 ellipse, x86-64 — binCV at 0.319× | 76,800 B against `cv::erode`'s 614,400 — 8× smaller | **accepted, and it costs** |
 | interleaved bit-plane layout † | +8% on the pipeline — **not reproducible** | +92,160 B on a 436,704-byte peak, +21% — **not reproducible** | **declined** |
 
 The word-type row is the canonical one. `uint64_t` is genuinely 1.95× faster on
@@ -140,19 +140,25 @@ the baseline, with 0 of 307,200 pixels differing:
 
 | arm | x86-64 (ns) | x86-64, native ÷ this arm | aarch64 (ns) | aarch64, native ÷ this arm |
 |---|---|---|---|---|
-| native `uint32_t` buffer | 21,310 | — | 259,108 | — |
-| `uint64_t` buffer, narrowed view | 22,070 | 0.97× | 259,182 | 1.00× |
-| `uint64_t` buffer, scalar fallback | 958,683 | 0.02× | 2,162,550 | 0.12× |
+| native `uint32_t` buffer | 17,650 | — | 259,108 | — |
+| `uint64_t` buffer, narrowed view | 18,380 | 0.9605× [0.9597, 0.9611] | 259,182 | 1.00× |
+| `uint64_t` buffer, scalar fallback | 678,902 | 0.026× | 2,162,550 | 0.12× |
 
-The narrowed view is within a per cent of the native buffer. The same buffer taken down the
-scalar fallback instead is what the narrowing exists to avoid.
+The narrowed view is within four per cent of the native buffer, and this is the tightest
+interval in these reports: thirty launches of the row scatter 1.2% and resolve a difference
+of 1.001×, so the four per cent is a real cost and not a measurement artefact. The same
+buffer taken down the scalar fallback instead is what the narrowing exists to avoid.
+
+All three arms read about 20% slower in the single launch these numbers replace, and the
+ratios between them did not move — which is what launch noise looks like when it is only
+noise.
 
 The occupancy-mask row lost on both axes at once. At the benchmark's stated operating point —
 120 live tracks, 300 candidates, 80 free slots, on x86-64:
 
 |  | direct test against the live set | a 1-bit occupancy frame | mask ÷ direct |
 |---|---|---|---|
-| time (ns) | **3,240** | 76,940 | **23.7×** |
+| time (ns) | **3,281** | 76,077 | **23.17×** |
 | memory (bytes) | **0** | 38,400 | — |
 
 The mask only catches up past about 5,000 candidates, an order of magnitude more than a
@@ -166,7 +172,7 @@ built for and would have taken the pipeline from about 1.52× to 1.65× against 
 92,160 additional bytes on a 436,704-byte peak, taking the footprint result from 6.23× to
 5.15×. Twenty-one percent of the footprint advantage for eight percent of the speed is not a
 trade this library makes. (The 1.52× baseline is an older pipeline figure, superseded by the
-3.30× and 4.73× in [feature-tracking.md](feature-tracking.md); the proportions are what
+3.658× and 4.73× in [feature-tracking.md](feature-tracking.md); the proportions are what
 the decision turned on.)
 
 Two other figures here come from that same record rather than a committed benchmark: the
@@ -175,7 +181,7 @@ to 500,464 bytes. The buffer sizes in both are exact arithmetic; the yield and s
 comparisons around them are not reproducible here.
 
 The morphology row's speed cost has also been quoted as "up to 3.1× on a 5×5 ellipse" — the
-same measurement written the other way up, published as binCV at 0.32× in
+same measurement written the other way up, published as binCV at 0.319× in
 [primitives.md](primitives.md#morphology).
 
 ## Reproduce
@@ -193,13 +199,21 @@ BINCV_LK_THREADS=4 /usr/bin/time -v ./build/benchmark/feature_tracking_sequence 
 ./build/benchmark/wordtype_narrow                      # 64-bit callers: narrow, do not convert
 ```
 
-Logs: [feature tracking](logs/feature-tracking-x86_64.log) ·
-[morphology](logs/morphology-x86_64.log), [aarch64](logs/morphology-aarch64.log) ·
-[derivative](logs/derivative-x86_64.log), [aarch64](logs/derivative-aarch64.log) ·
-[denoise](logs/denoise-x86_64.log), [aarch64](logs/denoise-aarch64.log) ·
-[goodFeaturesToTrack](logs/goodfeatures-x86_64.log), [aarch64](logs/goodfeatures-aarch64.log) ·
+The bytes on this page are computed from buffer geometry and do not vary between launches;
+the **times** beside them do, so each x86-64 time here is the median of thirty pinned
+launches. Logs:
+[feature tracking](logs/feature-tracking-x86_64-launches.log), [single](logs/feature-tracking-x86_64.log) ·
+[morphology](logs/morphology-x86_64-launches.log), [single](logs/morphology-x86_64.log), [aarch64](logs/morphology-aarch64.log) ·
+[derivative](logs/derivative-x86_64-launches.log), [single](logs/derivative-x86_64.log), [aarch64](logs/derivative-aarch64.log) ·
+[denoise](logs/denoise-x86_64-launches.log), [single](logs/denoise-x86_64.log), [aarch64](logs/denoise-aarch64.log) ·
+[goodFeaturesToTrack](logs/goodfeatures-x86_64-launches.log), [first thirty](logs/goodfeatures-x86_64.log), [aarch64](logs/goodfeatures-aarch64.log) ·
 [pyramid](logs/pyramid-x86_64.log), [aarch64](logs/pyramid-aarch64.log) ·
 [word width](logs/wordwidth-x86_64.log), [aarch64](logs/wordwidth-aarch64.log) ·
 [peak RSS against threads](logs/feature-tracking-rss-x86_64.log) ·
-[spacing](logs/spacing-x86_64.log) ·
-[64-bit narrowing](logs/wordtype_narrow-x86_64.log), [aarch64](logs/wordtype_narrow-aarch64.log)
+[spacing](logs/spacing-x86_64-launches.log), [single](logs/spacing-x86_64.log) ·
+[64-bit narrowing](logs/wordtype_narrow-x86_64-launches.log), [single](logs/wordtype_narrow-x86_64.log), [aarch64](logs/wordtype_narrow-aarch64.log)
+
+**[pyramid](logs/pyramid-x86_64.log) and [word width](logs/wordwidth-x86_64.log) are still
+single launches**, and they are the two whose published figures are computed byte counts
+rather than timings — exact, and identical on both architectures — plus one aarch64 ratio.
+Nothing on this page reads an x86-64 time out of either.
