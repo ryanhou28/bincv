@@ -1,6 +1,9 @@
 # Getting started
 
-binCV is header-only and needs a C++17 compiler. OpenCV is optional.
+binCV is header-only and needs a C++17 compiler. **The library itself never uses
+OpenCV** — every `#include <opencv2/...>` in `include/` sits behind
+`BINCV_WITH_OPENCV`. OpenCV buys you `cv::Mat` interop, the tests that check Tier 1
+operations against it, and the benchmarks that compare against it.
 
 ## Build
 
@@ -15,7 +18,7 @@ Run the tests:
 cd build && ctest --output-on-failure
 ```
 
-Without OpenCV — this is the core-only configuration an embedded target uses:
+Building without it — the core-only configuration an embedded target uses:
 
 ```bash
 cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Release -DBINCV_USE_OPENCV=OFF
