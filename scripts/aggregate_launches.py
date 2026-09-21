@@ -484,10 +484,18 @@ def main(argv=None):
             """A row by label, or by `t2:label` when the label is in more than
             one table. Ambiguity is an error rather than a first-match, because
             picking a table silently is how a ratio ends up comparing the 640x480
-            arm against the 8192x4096 one."""
-            if ':' in spec:
-                t, lbl = spec.split(':', 1)
-                hits = [k for k in vals if k[0] == t.strip() and k[1] == lbl.strip()]
+            arm against the 8192x4096 one.
+
+            ONLY a group key -- `t2`, `b1`, `i3` -- counts as the qualifier. Any
+            colon is not enough: half the labels in these logs are OpenCV symbols
+            and `(a) cv::FAST on CV_8U` split into a table called `(a) cv` and a
+            row called `:FAST on CV_8U`, so the ratio the caller asked for came
+            back as `no row labelled`, naming the row that is plainly there.
+            """
+            m = re.match(r'^([tbi]\d+)\s*:\s*(.+)$', spec)
+            if m:
+                t, lbl = m.group(1), m.group(2)
+                hits = [k for k in vals if k[0] == t and k[1] == lbl.strip()]
             else:
                 hits = [k for k in vals if k[1] == spec]
             if not hits:
