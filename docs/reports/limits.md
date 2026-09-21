@@ -170,6 +170,13 @@ the same machine, not two architectures**:
 The batch is worth 1.66–1.88× on tracking and takes the whole pipeline from about 2.3× to
 about 3.5×. It is bit-exact with the scalar path.
 
+Both arms have since been taken at thirty pinned launches each
+([off](logs/lk_batch_off-x86_64-launches.log), [on](logs/lk_batch_on-x86_64-launches.log)):
+tracking 1.3140 ms/frame against 0.7050, **1.864×**, inside the range above; the pipeline
+2.32× against 3.63×. The batch-on sweep is also an independent repeat of the pipeline figure
+in [feature-tracking.md](feature-tracking.md) — 3.6324× [3.6137, 3.6483] against that sweep's
+3.6582× [3.6329, 3.6809], 0.7% apart with overlapping intervals.
+
 This machinery exists because it has caught real errors. A vector block was once compiled out
 entirely by a mis-attached `#define`, and three consecutive "improvements" were measured
 against it. A build that reaches binCV's headers without linking the `bincv_core` CMake target
