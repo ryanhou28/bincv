@@ -180,7 +180,7 @@
 #             -- max(min(a,b), min(max(a,b),c)) as cv::min/cv::max over CV_8U,
 #             which is the reference pipeline's three-pixel median unchanged. That is a SECOND
 #             REFERENCE and not a tier promise: bit-sliced arithmetic is Tier 3
-#             (ARCHITECTURE 5.1) and OpenCV has no pointwise median of three
+#             (ARCHITECTURE 5) and OpenCV has no pointwise median of three
 #             images. It is worth its 1080 checks because denoise has to reproduce
 #             that formula exactly.
 #             The other 350540 are dominated by EXHAUSTIVE ENUMERATION, which is
@@ -499,10 +499,10 @@
 #             cv::blur(2x2) then PyrDownInvoker's disableGaussian
 #             early-out, which is what the reference pipeline's pyramid
 #             runs. It is a SECOND REFERENCE and not a tier promise -- pyrDown is
-#             Tier 2 (ARCHITECTURE 5.1), so there is no bit-exactness to check --
+#             Tier 2 (ARCHITECTURE 5), so there is no bit-exactness to check --
 #             and it carries three separate claims: that cv::blur on CV_8U is
 #             ceil(sum/4) rather than the mean rounded to nearest (which is where
-#             ARCHITECTURE 7.2's 192 comes from), that binCV is the mean rounded
+#             the pyramid ladder's 192 comes from), that binCV is the mean rounded
 #             once half up, and that cv::blur's DEFAULT anchor puts its window
 #             half a pixel up and to the left. The last is checked OpenCV against
 #             OpenCV so that only the anchor differs between the two sides.
@@ -620,7 +620,7 @@
 #   test_covariance  17704 in ALL FOUR configurations, and the equality is itself
 #             informative: both covariance kernels are API TIER 3 -- cv:: has no operation
 #             with these semantics -- so the suite has no OpenCV half to add rows in
-#             the `opencv` column. What stands behind ARCHITECTURE 7.5's identity is
+#             the `opencv` column. What stands behind the covariance identity is
 #             a per-pixel oracle, and it has to run in the three
 #             configurations that have no OpenCV, including Debug where the
 #             reduction's BINCV_ASSERT preconditions are live.
@@ -693,7 +693,7 @@
 #             positions per window size and requires them, and the same mutant now
 #             fails 1148 checks. The rest of the addition is one case per finding:
 #             negating BOTH derivatives leaves the whole matrix unchanged (the
-#             filter2D tap-order claim ARCHITECTURE 7.4 had backwards) while
+#             filter2D tap-order claim that was backwards) while
 #             negating one negates the cross term; SlidingWindowCount reproduces
 #             sumXX and sumYY down a column and cannot deliver sumXY; the
 #             container overload rejects SignedQuantMat<N> for N > 1 while the view

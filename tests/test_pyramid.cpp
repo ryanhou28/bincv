@@ -948,7 +948,7 @@ void testAgainstReferencePipeline(const char* wordName) {
                     // 1. OpenCV's rule, measured rather than assumed.
                     PYR_EXPECT(openCv == openCvBoxRule(a, b, c, d),
                                "cv::blur's CV_8U 2x2 box is ceil(sum / 4) -- it rounds the "
-                               "mean UP, which is where ARCHITECTURE 7.2's 192 comes from",
+                               "mean UP, which is where the pyramid ladder's 192 comes from",
                                where);
                     // 2. binCV's rule: the exact mean, rounded once, half up.
                     PYR_EXPECT(got == (a + b + c + d + 2) / 4,

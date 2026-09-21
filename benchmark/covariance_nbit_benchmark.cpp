@@ -516,7 +516,7 @@ int main() {
 #endif
     std::printf("%dx%d, %d keypoints, one window each -- the LK access pattern of\n", kWidth,
                 kHeight, kKeypoints);
-    std::printf("ARCHITECTURE 7.5. The cost model and the rule are in this file's header,\n");
+    std::printf("a tracker. The cost model and the rule are in this file's header,\n");
     std::printf("written before measuring. 'predicted' is (3N^2+N)/4, the popcount count\n");
     std::printf("per word; 'vs N=1' is measured against the BIT-SLICED N=1 arm, so the\n");
     std::printf("column is one kernel's curve in N and not a change of kernel.\n");

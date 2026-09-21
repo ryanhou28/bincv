@@ -465,7 +465,7 @@ int main() {
 #endif
     std::printf("%dx%d, %d keypoints, one window each -- the LK access pattern of\n", kWidth,
                 kHeight, kKeypoints);
-    std::printf("ARCHITECTURE 7.5. The rule this is measured against is in this file's\n");
+    std::printf("a tracker. The rule this is measured against is in this file's\n");
     std::printf("header, written before measuring.\n");
     std::printf("\n\"composed/fused\" > 1.00x means the FUSED entry point this ships is faster,\n");
     std::printf("confirming axis 2 at this level. \"plane/4arg\" > 1.00x means the\n");

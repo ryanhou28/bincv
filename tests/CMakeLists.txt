@@ -113,7 +113,7 @@ endfunction()
 # preconditions are live.
 #
 # test_bitslice is core for a second reason: its word-level primitives have no
-# OpenCV counterpart at all (bit-sliced arithmetic is Tier 3, ARCHITECTURE 5.1),
+# OpenCV counterpart at all (bit-sliced arithmetic is Tier 3, ARCHITECTURE 5),
 # so the exhaustive pattern enumeration that proves them is the ONLY thing
 # standing behind maj3, bitSlicedSum and thresholdGE -- and it has to run in the
 # configuration the embedded claim rests on.
@@ -142,7 +142,7 @@ endfunction()
 # there is no Tier 1 denominator, and this suite is the ONLY thing standing behind
 # the primitive the pyramid is built on.
 # test_pyramid is core for the same reason once more, and for a fourth
-# that is specific to it: pyrDown is TIER 2 (ARCHITECTURE 5.1) -- cv::pyrDown's
+# that is specific to it: pyrDown is TIER 2 (ARCHITECTURE 5) -- cv::pyrDown's
 # name and role with deliberately different numerics -- so there is no
 # bit-exactness promise anywhere in it and no Tier 1 denominator at all. What
 # stands behind it is a per-pixel reference, an enumeration of the requantizer's
@@ -174,7 +174,7 @@ endfunction()
 # per-pixel FLOAT oracle written before the kernel, swept at every window position
 # from a full window outside each edge to a full window past it, at W = 7, 15 and
 # 31, over four independently built frames per word type. And what it is proving is
-# not one operation's arithmetic but ARCHITECTURE 7.5 -- the claim that the whole
+# not one operation's arithmetic but the covariance identity -- the claim that the whole
 # 2x2 covariance reduces to masked population counts, which is the project's
 # central technical claim. That has to be checked where the embedded claim runs:
 # core-only, -fno-exceptions, and Debug, the only configuration in which the
@@ -434,7 +434,7 @@ bincv_add_death_test(test_assert_abort view-stride
 bincv_add_death_test(test_assert_abort const-view-stride
                      "BinMatConstView: multi-row view needs a non-zero stride")
 
-# Logic kernel preconditions. A kernel never throws (ARCHITECTURE 5.3), so these
+# Logic kernel preconditions. A kernel never throws (ARCHITECTURE 6), so these
 # are the only place the logic kernels' argument checking can be observed
 # failing -- and the alias case is a defect no sanitizer can see, since every
 # address involved is valid memory and only the answer is wrong.

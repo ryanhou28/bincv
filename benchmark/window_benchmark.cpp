@@ -331,7 +331,7 @@ std::vector<Pattern> buildPatterns(int W) {
 
     Pattern sparse;
     sparse.name = "SPARSE";
-    sparse.note = "200 isolated keypoints (LK, ARCHITECTURE 7.5)";
+    sparse.note = "200 isolated keypoints (LK)";
     {
         uint64_t state = UINT64_C(0xC0FFEE);
         for (int k = 0; k < kKeypoints; ++k) {
@@ -364,7 +364,7 @@ std::vector<Pattern> buildPatterns(int W) {
 
     Pattern dense;
     dense.name = "DENSE";
-    dense.note = "every position in the frame (corner response, ARCHITECTURE 7.6)";
+    dense.note = "every position in the frame (corner response)";
     dense.sweeps.push_back(Sweep{0, 0, maxX + 1, maxY + 1});
     dense.windowsPerCall = (maxX + 1) * (maxY + 1);
     out.push_back(dense);

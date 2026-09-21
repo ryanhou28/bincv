@@ -560,7 +560,7 @@ int main() {
     std::printf("================================================================================\n\n");
     std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n\n",
                 CV_VERSION, cv::getNumThreads());
-    std::printf("DENOMINATOR (ARCHITECTURE 10.3): the reference pipeline's three-pixel median on the SAME\n");
+    std::printf("DENOMINATOR: the reference pipeline's three-pixel median on the SAME\n");
     std::printf("binary content stored as CV_8U -- cv::min/cv::max over two zero-filled\n");
     std::printf("neighbour matrices, ported call for call. That is what the pipeline runs\n");
     std::printf("today without binCV.\n\n");
@@ -575,7 +575,7 @@ int main() {
     std::printf("The checksum column folds EVERY destination pixel and is representation-\n");
     std::printf("independent, so all rows of a size must print the same value.\n\n");
     std::printf("Working set is one call's live buffers, not a per-buffer ratio (CLAUDE.md,\n");
-    std::printf("ARCHITECTURE 10.4).\n");
+    std::printf("peak).\n");
 
     measureCallFloors();
 

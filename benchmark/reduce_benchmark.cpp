@@ -338,7 +338,7 @@ int main() {
     std::printf("=== binCV reduction benchmark ===\n");
     std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n",
                 CV_VERSION, cv::getNumThreads());
-    std::printf("Denominator: cv::countNonZero on the same content as CV_8U (ARCHITECTURE 10.3)\n");
+    std::printf("Denominator: cv::countNonZero on the same content as CV_8U\n");
     std::printf("popcount lowering: %s\n", popcountLowering());
     std::printf("x86_64 numbers are INDICATIVE. close on the reference device.\n");
 

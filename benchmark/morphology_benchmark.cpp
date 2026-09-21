@@ -617,14 +617,14 @@ int main() {
     std::printf("================================================================================\n\n");
     std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n\n",
                 CV_VERSION, cv::getNumThreads());
-    std::printf("DENOMINATOR (ARCHITECTURE 10.3): cv::erode / cv::dilate / cv::morphologyEx on\n");
+    std::printf("DENOMINATOR: cv::erode / cv::dilate / cv::morphologyEx on\n");
     std::printf("the SAME binary content stored as CV_8U, with the same structuring element,\n");
     std::printf("anchor and border. That is what a user does today without binCV.\n\n");
     std::printf("binCV rows: ops/morphology.hpp at uint32 (the default word type,) and\n");
     std::printf("uint64. erode and dilate use NO scratch; morphologyEx(OPEN) uses exactly one\n");
     std::printf("caller-provided frame.\n\n");
     std::printf("Working set is one call's live buffers, not a per-buffer ratio (CLAUDE.md,\n");
-    std::printf("ARCHITECTURE 10.4). Both columns are ratios against the OpenCV row.\n");
+    std::printf("peak). Both columns are ratios against the OpenCV row.\n");
 
     printCallFloorPreamble();
 

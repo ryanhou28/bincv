@@ -369,7 +369,7 @@ bool runQ2() {
     }
 
     std::printf("\n=== Q2: the 2x2 covariance composed out of versus one fused pass ===\n");
-    std::printf(" %d x %d uint64, %d keypoints, %dx%d windows (ARCHITECTURE 7.5)\n", width, height,
+    std::printf(" %d x %d uint64, %d keypoints, %dx%d windows (the LK pattern)\n", width, height,
                 keypoints, windowSize, windowSize);
 
     // Hazard 4: agreement on every window before anything is timed.

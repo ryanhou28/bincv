@@ -1,6 +1,6 @@
 # Two kinds of benchmark live here, and only one of them needs OpenCV.
 #
-#   * binCV-versus-OpenCV comparisons (ARCHITECTURE 10.3's denominator) include
+#   * binCV-versus-OpenCV comparisons (the OpenCV denominator) include
 #     bench_util.hpp, which pulls in <opencv2/opencv.hpp>. Those need OpenCV
 #     present and are skipped without it.
 #   * The experiment benchmarks compare binCV against

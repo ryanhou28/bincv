@@ -502,7 +502,7 @@ int main(int argc, char* argv[]) {
     bench::Config cfg = bench::parseArgs(argc, argv);
 
     std::printf("\nlogic kernels vs OpenCV on the same binary content as CV_8U\n");
-    std::printf("(ARCHITECTURE 10.3: the denominator is what a user runs today without binCV)\n");
+    std::printf("(the denominator is what a user runs today without binCV)\n");
     // Reported rather than pinned: a user gets whatever OpenCV does by default, so
     // that is what the denominator should be -- but a reader cannot interpret the
     // ratio without knowing whether the other side was allowed more than one core.
