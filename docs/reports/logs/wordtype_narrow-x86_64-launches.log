@@ -1,0 +1,732 @@
+# launch sweep -- 30 separate processes of one benchmark
+# benchmark: ./build/benchmark/wordtype_narrow 
+# launches: 30
+# arch:     x86_64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   80ff0a8
+# governor: none (this host exposes no cpufreq)
+# pinning:  taskset -c 2
+# sleep between launches: 0s
+# date:     2026-09-21T16:00:04-07:00
+# loadavg at start: 1.37 1.79 1.95 1/1305 22651
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17640 ns 1.00x
+ (B) uint64 buffer, scalar fallback    679062 ns  0.03x
+ (C) uint64 buffer, narrowed view     18340 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 2
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17700 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678691 ns  0.03x
+ (C) uint64 buffer, narrowed view     18420 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 3
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17630 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678972 ns  0.03x
+ (C) uint64 buffer, narrowed view     18370 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 4
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17630 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678821 ns  0.03x
+ (C) uint64 buffer, narrowed view     18340 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 5
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17660 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678871 ns  0.03x
+ (C) uint64 buffer, narrowed view     18380 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 6
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17600 ns 1.00x
+ (B) uint64 buffer, scalar fallback    684121 ns  0.03x
+ (C) uint64 buffer, narrowed view     18360 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 7
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17630 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678851 ns  0.03x
+ (C) uint64 buffer, narrowed view     18370 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 8
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17670 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678851 ns  0.03x
+ (C) uint64 buffer, narrowed view     18340 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 9
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17620 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678752 ns  0.03x
+ (C) uint64 buffer, narrowed view     18320 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 10
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17621 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678951 ns  0.03x
+ (C) uint64 buffer, narrowed view     18380 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 11
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17630 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678782 ns  0.03x
+ (C) uint64 buffer, narrowed view     18360 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 12
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17610 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678592 ns  0.03x
+ (C) uint64 buffer, narrowed view     18350 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 13
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17670 ns 1.00x
+ (B) uint64 buffer, scalar fallback    679082 ns  0.03x
+ (C) uint64 buffer, narrowed view     18450 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 14
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17630 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678441 ns  0.03x
+ (C) uint64 buffer, narrowed view     18340 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 15
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17650 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678932 ns  0.03x
+ (C) uint64 buffer, narrowed view     18370 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 16
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17700 ns 1.00x
+ (B) uint64 buffer, scalar fallback    686341 ns  0.03x
+ (C) uint64 buffer, narrowed view     18560 ns  0.95x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 17
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17880 ns 1.00x
+ (B) uint64 buffer, scalar fallback    686172 ns  0.03x
+ (C) uint64 buffer, narrowed view     18610 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 18
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17830 ns 1.00x
+ (B) uint64 buffer, scalar fallback    691012 ns  0.03x
+ (C) uint64 buffer, narrowed view     18570 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 19
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17920 ns 1.00x
+ (B) uint64 buffer, scalar fallback    686412 ns  0.03x
+ (C) uint64 buffer, narrowed view     18620 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 20
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     18070 ns 1.00x
+ (B) uint64 buffer, scalar fallback    739882 ns  0.02x
+ (C) uint64 buffer, narrowed view     18780 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 21
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17650 ns 1.00x
+ (B) uint64 buffer, scalar fallback    679002 ns  0.03x
+ (C) uint64 buffer, narrowed view     18410 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 22
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17650 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678922 ns  0.03x
+ (C) uint64 buffer, narrowed view     18370 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 23
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17650 ns 1.00x
+ (B) uint64 buffer, scalar fallback    679091 ns  0.03x
+ (C) uint64 buffer, narrowed view     18550 ns  0.95x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 24
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17710 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678561 ns  0.03x
+ (C) uint64 buffer, narrowed view     18390 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 25
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17650 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678882 ns  0.03x
+ (C) uint64 buffer, narrowed view     18390 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 26
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17670 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678692 ns  0.03x
+ (C) uint64 buffer, narrowed view     18380 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 27
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17670 ns 1.00x
+ (B) uint64 buffer, scalar fallback    680592 ns  0.03x
+ (C) uint64 buffer, narrowed view     18440 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 28
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17610 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678782 ns  0.03x
+ (C) uint64 buffer, narrowed view     18370 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 29
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17640 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678622 ns  0.03x
+ (C) uint64 buffer, narrowed view     18380 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+### run 30
+=== native 64-bit kernels, or narrowing? ===
+640x480, 15 interleaved rounds, minimum reported
+binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active)
+
+edgeThreshold, 8-bit in, 1-bit out
+ (A) native uint32 buffer     17680 ns 1.00x
+ (B) uint64 buffer, scalar fallback    678852 ns  0.03x
+ (C) uint64 buffer, narrowed view     18380 ns  0.96x
+
+ (A) vs (C), pixel by pixel: 0 of 307200 differ
+
+ memory (row-stride rounding, the reason chose 32):
+ level 0       640x480  uint32   38400 B uint64   38400 B +0.0%
+ level 1       320x240  uint32    9600 B uint64    9600 B +0.0%
+ level 2       160x120  uint32    2400 B uint64    2880 B +20.0%
+ level 3        80x60   uint32     720 B uint64     960 B +33.3%
+ the case       94x60   uint32     720 B uint64     960 B +33.3%
+
+If (C) reaches (A), a native 64-bit kernel can at best MATCH it --
+same kernel, same bytes -- so there is nothing left for it to win, and
+the answer is guidance rather than a second implementation of every
+gated kernel.
+
+# loadavg at end: 1.37 1.79 1.95 1/1305 22692
+# date:     2026-09-21T16:00:04-07:00
+# done
+
+# ---- aggregate (scripts/aggregate_launches.py ) ----
+# 30 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                       n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# i1 / (A) native uint32 buffer            30    17650.0    17600.0    18070.0  1.027     2.7%      --  [ 17635.0,  17670.0]   0.10%   1.001x
+# i1 / (B) uint64 buffer, scalar fallback  30   678902.0   678441.0   739882.0  1.091     9.1%      --  [678821.0, 679032.0]   0.02%   1.000x
+# i1 / (C) uint64 buffer, narrowed view    30    18380.0    18320.0    18780.0  1.025     2.5%      --  [ 18370.0,  18400.0]   0.08%   1.001x
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     i1       edgeThreshold, 8-bit in, 1-bit out

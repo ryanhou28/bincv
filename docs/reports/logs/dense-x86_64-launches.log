@@ -1,0 +1,678 @@
+# launch sweep -- 30 separate processes of one benchmark
+# benchmark: ./build/benchmark/dense_benchmark 
+# launches: 30
+# arch:     x86_64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   80ff0a8
+# governor: none (this host exposes no cpufreq)
+# pinning:  taskset -c 2
+# sleep between launches: 0s
+# date:     2026-09-21T16:04:49-07:00
+# loadavg at start: 2.05 1.85 1.92 2/1314 27120
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       170.11 ms  scratch 95904 B  spread 7%
+ D=64, 9x9, u64 sliding                       107.23 ms  scratch 95904 B  spread 13%
+ D=64, 9x9, u64 RECOMPUTE arm                 366.71 ms  scratch 46752 B  spread 34%
+ D=32, 9x9, u32 sliding                        97.26 ms  scratch 71328 B  spread 25%
+ D=64, 5x5, u32 sliding                       162.54 ms  scratch 71232 B  spread 9%
+
+ sliding vs recompute at u64: 3.42x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          12.36 ms  scratch 32352 B  spread 69%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      20.93 ms  spread 14%  (vector arm 1.69x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.75x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 2
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       160.08 ms  scratch 95904 B  spread 57%
+ D=64, 9x9, u64 sliding                       108.66 ms  scratch 95904 B  spread 13%
+ D=64, 9x9, u64 RECOMPUTE arm                 381.98 ms  scratch 46752 B  spread 32%
+ D=32, 9x9, u32 sliding                        85.33 ms  scratch 71328 B  spread 5%
+ D=64, 5x5, u32 sliding                       163.53 ms  scratch 71232 B  spread 4%
+
+ sliding vs recompute at u64: 3.52x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.38 ms  scratch 32352 B  spread 19%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      24.06 ms  spread 109%  (vector arm 2.32x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.88x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 3
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       166.65 ms  scratch 95904 B  spread 4%
+ D=64, 9x9, u64 sliding                       107.22 ms  scratch 95904 B  spread 64%
+ D=64, 9x9, u64 RECOMPUTE arm                 372.29 ms  scratch 46752 B  spread 33%
+ D=32, 9x9, u32 sliding                        85.24 ms  scratch 71328 B  spread 25%
+ D=64, 5x5, u32 sliding                       173.44 ms  scratch 71232 B  spread 56%
+
+ sliding vs recompute at u64: 3.47x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.32 ms  scratch 32352 B  spread 15%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.11 ms  spread 10%  (vector arm 2.04x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.96x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 4
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       166.09 ms  scratch 95904 B  spread 67%
+ D=64, 9x9, u64 sliding                       105.08 ms  scratch 95904 B  spread 6%
+ D=64, 9x9, u64 RECOMPUTE arm                 383.63 ms  scratch 46752 B  spread 41%
+ D=32, 9x9, u32 sliding                        89.44 ms  scratch 71328 B  spread 61%
+ D=64, 5x5, u32 sliding                       163.78 ms  scratch 71232 B  spread 13%
+
+ sliding vs recompute at u64: 3.65x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.46 ms  scratch 32352 B  spread 33%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.24 ms  spread 98%  (vector arm 2.03x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.86x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2394
+### run 5
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       161.08 ms  scratch 95904 B  spread 4%
+ D=64, 9x9, u64 sliding                       107.85 ms  scratch 95904 B  spread 92%
+ D=64, 9x9, u64 RECOMPUTE arm                 372.91 ms  scratch 46752 B  spread 39%
+ D=32, 9x9, u32 sliding                        86.01 ms  scratch 71328 B  spread 12%
+ D=64, 5x5, u32 sliding                       160.72 ms  scratch 71232 B  spread 43%
+
+ sliding vs recompute at u64: 3.46x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.78 ms  scratch 32352 B  spread 17%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.53 ms  spread 17%  (vector arm 2.00x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.87x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 6
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       169.32 ms  scratch 95904 B  spread 56%
+ D=64, 9x9, u64 sliding                       106.54 ms  scratch 95904 B  spread 15%
+ D=64, 9x9, u64 RECOMPUTE arm                 371.58 ms  scratch 46752 B  spread 12%
+ D=32, 9x9, u32 sliding                        88.69 ms  scratch 71328 B  spread 89%
+ D=64, 5x5, u32 sliding                       166.34 ms  scratch 71232 B  spread 19%
+
+ sliding vs recompute at u64: 3.49x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.16 ms  scratch 32352 B  spread 67%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      22.32 ms  spread 28%  (vector arm 2.20x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.91x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2394
+### run 7
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       161.35 ms  scratch 95904 B  spread 7%
+ D=64, 9x9, u64 sliding                       112.47 ms  scratch 95904 B  spread 102%
+ D=64, 9x9, u64 RECOMPUTE arm                 382.06 ms  scratch 46752 B  spread 49%
+ D=32, 9x9, u32 sliding                        84.42 ms  scratch 71328 B  spread 16%
+ D=64, 5x5, u32 sliding                       168.44 ms  scratch 71232 B  spread 80%
+
+ sliding vs recompute at u64: 3.40x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.18 ms  scratch 32352 B  spread 26%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.05 ms  spread 3%  (vector arm 2.07x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.91x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 8
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       178.01 ms  scratch 95904 B  spread 56%
+ D=64, 9x9, u64 sliding                       111.44 ms  scratch 95904 B  spread 15%
+ D=64, 9x9, u64 RECOMPUTE arm                 378.10 ms  scratch 46752 B  spread 12%
+ D=32, 9x9, u32 sliding                       103.52 ms  scratch 71328 B  spread 65%
+ D=64, 5x5, u32 sliding                       161.33 ms  scratch 71232 B  spread 16%
+
+ sliding vs recompute at u64: 3.39x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.70 ms  scratch 32352 B  spread 95%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      20.80 ms  spread 5%  (vector arm 1.94x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.72x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2436
+### run 9
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       175.02 ms  scratch 95904 B  spread 9%
+ D=64, 9x9, u64 sliding                       110.05 ms  scratch 95904 B  spread 60%
+ D=64, 9x9, u64 RECOMPUTE arm                 381.24 ms  scratch 46752 B  spread 38%
+ D=32, 9x9, u32 sliding                        84.79 ms  scratch 71328 B  spread 2%
+ D=64, 5x5, u32 sliding                       164.61 ms  scratch 71232 B  spread 33%
+
+ sliding vs recompute at u64: 3.46x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.77 ms  scratch 32352 B  spread 9%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.06 ms  spread 7%  (vector arm 1.96x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 2.06x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 10
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       170.58 ms  scratch 95904 B  spread 61%
+ D=64, 9x9, u64 sliding                       109.98 ms  scratch 95904 B  spread 19%
+ D=64, 9x9, u64 RECOMPUTE arm                 376.02 ms  scratch 46752 B  spread 13%
+ D=32, 9x9, u32 sliding                        84.78 ms  scratch 71328 B  spread 14%
+ D=64, 5x5, u32 sliding                       160.29 ms  scratch 71232 B  spread 4%
+
+ sliding vs recompute at u64: 3.42x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.33 ms  scratch 32352 B  spread 105%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.35 ms  spread 8%  (vector arm 2.07x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 2.01x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2394
+### run 11
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       159.53 ms  scratch 95904 B  spread 26%
+ D=64, 9x9, u64 sliding                       122.12 ms  scratch 95904 B  spread 43%
+ D=64, 9x9, u64 RECOMPUTE arm                 373.70 ms  scratch 46752 B  spread 37%
+ D=32, 9x9, u32 sliding                        83.41 ms  scratch 71328 B  spread 10%
+ D=64, 5x5, u32 sliding                       185.28 ms  scratch 71232 B  spread 63%
+
+ sliding vs recompute at u64: 3.06x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.11 ms  scratch 32352 B  spread 15%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.10 ms  spread 12%  (vector arm 2.09x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.91x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2247
+### run 12
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       175.22 ms  scratch 95904 B  spread 11%
+ D=64, 9x9, u64 sliding                       107.07 ms  scratch 95904 B  spread 14%
+ D=64, 9x9, u64 RECOMPUTE arm                 372.24 ms  scratch 46752 B  spread 48%
+ D=32, 9x9, u32 sliding                        84.35 ms  scratch 71328 B  spread 9%
+ D=64, 5x5, u32 sliding                       161.71 ms  scratch 71232 B  spread 7%
+
+ sliding vs recompute at u64: 3.48x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          11.03 ms  scratch 32352 B  spread 71%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      20.88 ms  spread 10%  (vector arm 1.89x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 2.08x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 13
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       177.46 ms  scratch 95904 B  spread 63%
+ D=64, 9x9, u64 sliding                       111.94 ms  scratch 95904 B  spread 9%
+ D=64, 9x9, u64 RECOMPUTE arm                 375.59 ms  scratch 46752 B  spread 36%
+ D=32, 9x9, u32 sliding                        84.75 ms  scratch 71328 B  spread 17%
+ D=64, 5x5, u32 sliding                       166.36 ms  scratch 71232 B  spread 13%
+
+ sliding vs recompute at u64: 3.36x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.29 ms  scratch 32352 B  spread 23%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.96 ms  spread 98%  (vector arm 2.13x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 2.09x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 14
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       173.31 ms  scratch 95904 B  spread 10%
+ D=64, 9x9, u64 sliding                       116.85 ms  scratch 95904 B  spread 18%
+ D=64, 9x9, u64 RECOMPUTE arm                 392.91 ms  scratch 46752 B  spread 17%
+ D=32, 9x9, u32 sliding                        85.09 ms  scratch 71328 B  spread 8%
+ D=64, 5x5, u32 sliding                       162.14 ms  scratch 71232 B  spread 65%
+
+ sliding vs recompute at u64: 3.36x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.13 ms  scratch 32352 B  spread 7%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.20 ms  spread 14%  (vector arm 2.09x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 2.04x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 1953
+### run 15
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       172.89 ms  scratch 95904 B  spread 41%
+ D=64, 9x9, u64 sliding                       111.03 ms  scratch 95904 B  spread 10%
+ D=64, 9x9, u64 RECOMPUTE arm                 376.29 ms  scratch 46752 B  spread 38%
+ D=32, 9x9, u32 sliding                        84.78 ms  scratch 71328 B  spread 4%
+ D=64, 5x5, u32 sliding                       168.48 ms  scratch 71232 B  spread 22%
+
+ sliding vs recompute at u64: 3.39x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.26 ms  scratch 32352 B  spread 4%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      24.55 ms  spread 85%  (vector arm 2.39x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 2.04x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 16
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       161.90 ms  scratch 95904 B  spread 9%
+ D=64, 9x9, u64 sliding                       106.70 ms  scratch 95904 B  spread 11%
+ D=64, 9x9, u64 RECOMPUTE arm                 376.29 ms  scratch 46752 B  spread 37%
+ D=32, 9x9, u32 sliding                        84.33 ms  scratch 71328 B  spread 7%
+ D=64, 5x5, u32 sliding                       164.65 ms  scratch 71232 B  spread 41%
+
+ sliding vs recompute at u64: 3.53x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.55 ms  scratch 32352 B  spread 11%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      20.67 ms  spread 25%  (vector arm 1.96x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.92x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 1953
+### run 17
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       173.82 ms  scratch 95904 B  spread 60%
+ D=64, 9x9, u64 sliding                       105.13 ms  scratch 95904 B  spread 5%
+ D=64, 9x9, u64 RECOMPUTE arm                 375.40 ms  scratch 46752 B  spread 42%
+ D=32, 9x9, u32 sliding                        85.84 ms  scratch 71328 B  spread 19%
+ D=64, 5x5, u32 sliding                       167.52 ms  scratch 71232 B  spread 6%
+
+ sliding vs recompute at u64: 3.57x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          11.78 ms  scratch 32352 B  spread 22%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.78 ms  spread 74%  (vector arm 1.85x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 2.02x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 18
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       164.54 ms  scratch 95904 B  spread 6%
+ D=64, 9x9, u64 sliding                       111.99 ms  scratch 95904 B  spread 9%
+ D=64, 9x9, u64 RECOMPUTE arm                 395.15 ms  scratch 46752 B  spread 18%
+ D=32, 9x9, u32 sliding                        92.53 ms  scratch 71328 B  spread 26%
+ D=64, 5x5, u32 sliding                       175.66 ms  scratch 71232 B  spread 52%
+
+ sliding vs recompute at u64: 3.53x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.57 ms  scratch 32352 B  spread 9%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.19 ms  spread 18%  (vector arm 2.00x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.78x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 19
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       168.44 ms  scratch 95904 B  spread 56%
+ D=64, 9x9, u64 sliding                       107.78 ms  scratch 95904 B  spread 13%
+ D=64, 9x9, u64 RECOMPUTE arm                 384.14 ms  scratch 46752 B  spread 33%
+ D=32, 9x9, u32 sliding                        95.15 ms  scratch 71328 B  spread 83%
+ D=64, 5x5, u32 sliding                       162.97 ms  scratch 71232 B  spread 14%
+
+ sliding vs recompute at u64: 3.56x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.47 ms  scratch 32352 B  spread 13%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      22.65 ms  spread 72%  (vector arm 2.16x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.77x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 20
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       163.99 ms  scratch 95904 B  spread 7%
+ D=64, 9x9, u64 sliding                       119.42 ms  scratch 95904 B  spread 53%
+ D=64, 9x9, u64 RECOMPUTE arm                 371.60 ms  scratch 46752 B  spread 44%
+ D=32, 9x9, u32 sliding                        84.51 ms  scratch 71328 B  spread 4%
+ D=64, 5x5, u32 sliding                       171.06 ms  scratch 71232 B  spread 45%
+
+ sliding vs recompute at u64: 3.11x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.16 ms  scratch 32352 B  spread 28%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.19 ms  spread 3%  (vector arm 2.09x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.94x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 1953
+### run 21
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       163.15 ms  scratch 95904 B  spread 62%
+ D=64, 9x9, u64 sliding                       106.68 ms  scratch 95904 B  spread 31%
+ D=64, 9x9, u64 RECOMPUTE arm                 356.08 ms  scratch 46752 B  spread 51%
+ D=32, 9x9, u32 sliding                        89.92 ms  scratch 71328 B  spread 93%
+ D=64, 5x5, u32 sliding                       170.01 ms  scratch 71232 B  spread 7%
+
+ sliding vs recompute at u64: 3.34x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.37 ms  scratch 32352 B  spread 26%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.71 ms  spread 104%  (vector arm 2.09x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.81x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 22
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       163.82 ms  scratch 95904 B  spread 19%
+ D=64, 9x9, u64 sliding                       115.47 ms  scratch 95904 B  spread 59%
+ D=64, 9x9, u64 RECOMPUTE arm                 379.58 ms  scratch 46752 B  spread 23%
+ D=32, 9x9, u32 sliding                        84.70 ms  scratch 71328 B  spread 21%
+ D=64, 5x5, u32 sliding                       162.92 ms  scratch 71232 B  spread 38%
+
+ sliding vs recompute at u64: 3.29x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.10 ms  scratch 32352 B  spread 3%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      20.76 ms  spread 20%  (vector arm 2.05x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.93x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 23
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       164.49 ms  scratch 95904 B  spread 51%
+ D=64, 9x9, u64 sliding                       109.24 ms  scratch 95904 B  spread 17%
+ D=64, 9x9, u64 RECOMPUTE arm                 379.73 ms  scratch 46752 B  spread 42%
+ D=32, 9x9, u32 sliding                        98.24 ms  scratch 71328 B  spread 81%
+ D=64, 5x5, u32 sliding                       160.90 ms  scratch 71232 B  spread 35%
+
+ sliding vs recompute at u64: 3.48x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.19 ms  scratch 32352 B  spread 67%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.27 ms  spread 8%  (vector arm 2.09x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.67x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2247
+### run 24
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       159.15 ms  scratch 95904 B  spread 5%
+ D=64, 9x9, u64 sliding                       127.23 ms  scratch 95904 B  spread 64%
+ D=64, 9x9, u64 RECOMPUTE arm                 405.32 ms  scratch 46752 B  spread 34%
+ D=32, 9x9, u32 sliding                        88.05 ms  scratch 71328 B  spread 19%
+ D=64, 5x5, u32 sliding                       185.69 ms  scratch 71232 B  spread 35%
+
+ sliding vs recompute at u64: 3.19x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.70 ms  scratch 32352 B  spread 6%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.60 ms  spread 25%  (vector arm 2.02x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.81x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2247
+### run 25
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       170.96 ms  scratch 95904 B  spread 48%
+ D=64, 9x9, u64 sliding                       105.67 ms  scratch 95904 B  spread 10%
+ D=64, 9x9, u64 RECOMPUTE arm                 362.94 ms  scratch 46752 B  spread 4%
+ D=32, 9x9, u32 sliding                        89.57 ms  scratch 71328 B  spread 115%
+ D=64, 5x5, u32 sliding                       162.91 ms  scratch 71232 B  spread 19%
+
+ sliding vs recompute at u64: 3.43x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.43 ms  scratch 32352 B  spread 4%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      20.94 ms  spread 2%  (vector arm 2.01x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.91x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2247
+### run 26
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       162.46 ms  scratch 95904 B  spread 10%
+ D=64, 9x9, u64 sliding                       115.36 ms  scratch 95904 B  spread 58%
+ D=64, 9x9, u64 RECOMPUTE arm                 382.71 ms  scratch 46752 B  spread 35%
+ D=32, 9x9, u32 sliding                        85.26 ms  scratch 71328 B  spread 6%
+ D=64, 5x5, u32 sliding                       179.41 ms  scratch 71232 B  spread 41%
+
+ sliding vs recompute at u64: 3.32x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.29 ms  scratch 32352 B  spread 4%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.06 ms  spread 13%  (vector arm 2.05x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.91x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 27
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       176.57 ms  scratch 95904 B  spread 54%
+ D=64, 9x9, u64 sliding                       118.36 ms  scratch 95904 B  spread 25%
+ D=64, 9x9, u64 RECOMPUTE arm                 373.11 ms  scratch 46752 B  spread 5%
+ D=32, 9x9, u32 sliding                        86.22 ms  scratch 71328 B  spread 8%
+ D=64, 5x5, u32 sliding                       166.78 ms  scratch 71232 B  spread 27%
+
+ sliding vs recompute at u64: 3.15x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          14.98 ms  scratch 32352 B  spread 83%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      23.94 ms  spread 19%  (vector arm 1.60x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 2.05x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 28
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       160.89 ms  scratch 95904 B  spread 16%
+ D=64, 9x9, u64 sliding                       111.63 ms  scratch 95904 B  spread 5%
+ D=64, 9x9, u64 RECOMPUTE arm                 364.17 ms  scratch 46752 B  spread 48%
+ D=32, 9x9, u32 sliding                        84.69 ms  scratch 71328 B  spread 8%
+ D=64, 5x5, u32 sliding                       171.33 ms  scratch 71232 B  spread 16%
+
+ sliding vs recompute at u64: 3.26x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.24 ms  scratch 32352 B  spread 3%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.57 ms  spread 64%  (vector arm 2.11x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.90x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+### run 29
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       166.69 ms  scratch 95904 B  spread 10%
+ D=64, 9x9, u64 sliding                       108.59 ms  scratch 95904 B  spread 9%
+ D=64, 9x9, u64 RECOMPUTE arm                 359.22 ms  scratch 46752 B  spread 60%
+ D=32, 9x9, u32 sliding                        83.21 ms  scratch 71328 B  spread 10%
+ D=64, 5x5, u32 sliding                       167.46 ms  scratch 71232 B  spread 22%
+
+ sliding vs recompute at u64: 3.31x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.52 ms  scratch 32352 B  spread 21%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      21.00 ms  spread 9%  (vector arm 2.00x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 2.00x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 1953
+### run 30
+=== dense disparity (census 5x5, streamed) ===
+ 752x480 pair; the refused cost volume would be 23101440 B per byte of cell
+
+ D=64, 9x9, u32 sliding                       165.36 ms  scratch 95904 B  spread 15%
+ D=64, 9x9, u64 sliding                       109.86 ms  scratch 95904 B  spread 3%
+ D=64, 9x9, u64 RECOMPUTE arm                 388.06 ms  scratch 46752 B  spread 26%
+ D=32, 9x9, u32 sliding                        87.09 ms  scratch 71328 B  spread 6%
+ D=64, 5x5, u32 sliding                       163.96 ms  scratch 71232 B  spread 33%
+
+ sliding vs recompute at u64: 3.53x (the arm the default buys)
+
+ BINARY-NATIVE D=64, 9x9, u64 sliding          10.63 ms  scratch 32352 B  spread 17%
+ (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast paths active))
+ BINARY-NATIVE, portable arm (switch off)      22.25 ms  spread 20%  (vector arm 2.09x)
+ (the caller already holds the bits; the wide arms above pay census
+  for the privilege of not having them)
+
+ D=64 vs D=32 time ratio 1.90x (the design trades time linear in D
+ for peak memory independent of it; this is the linearity check).
+ sink 2541
+
+# loadavg at end: 1.34 1.66 1.83 1/1329 30748
+# date:     2026-09-21T16:08:47-07:00
+# done
+
+# ---- aggregate (scripts/aggregate_launches.py ) ----
+# 30 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                             n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# i1 / D=32, 9x9, u32 sliding                    30    85.2950    83.2100   103.5200  1.244    23.8%      --  [ 84.7800,  87.5700]   1.64%   1.027x
+# i1 / D=64, 5x5, u32 sliding                    30   165.4950   160.2900   185.6900  1.158    15.3%      --  [163.2500, 167.9800]   1.43%   1.015x
+# i1 / D=64, 9x9, u32 sliding                    30   166.3700   159.1500   178.0100  1.119    11.3%      --  [163.9050, 170.3450]   1.94%   1.024x
+# i1 / D=64, 9x9, u64 RECOMPUTE arm              30   376.1550   356.0800   405.3200  1.138    13.1%      --  [373.0100, 380.4850]   0.99%   1.012x
+# i1 / D=64, 9x9, u64 sliding                    30   109.9200   105.0800   127.2300  1.211    20.2%      --  [107.8150, 111.7850]   1.81%   1.020x
+# i2 / BINARY-NATIVE D=64, 9x9, u64 sliding      30    10.4050    10.1000    14.9800  1.483    46.9%      --  [ 10.2900,  10.5600]   1.30%   1.015x
+# i3 / BINARY-NATIVE, portable arm (switch off)  30    21.2200    20.6700    24.5500  1.188    18.3%      --  [ 21.0800,  21.5850]   1.19%   1.017x
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     i1       752x480 pair; the refused cost volume would be 23101440 B 
+#     i2       sliding vs recompute at u64: 3.53x (the arm the default bu
+#     i3       (binCV SIMD: NEON=NO AVX2=yes popcount=hardware (fast path

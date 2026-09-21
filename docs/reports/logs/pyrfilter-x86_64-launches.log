@@ -1,0 +1,725 @@
+# launch sweep -- 30 separate processes of one benchmark
+# benchmark: ./build/benchmark/pyrfilter_benchmark 
+# launches: 30
+# arch:     x86_64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   ac33cf1
+# governor: none (this host exposes no cpufreq)
+# pinning:  taskset -c 2
+# sleep between launches: 0s
+# date:     2026-09-21T15:02:38-07:00
+# loadavg at start: 1.85 3.13 4.12 1/1319 5802
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          27.6     0.86x
+ pyrDown (shipped BOX_2x2 route) N=3          31.9     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.7     0.18x
+ filtered BOX_2x2 N=3                         32.9     1.03x
+ filtered BOX_3x3 N=3                         85.2     2.67x
+ filtered GAUSSIAN_3x3 N=3                    81.7     2.56x
+ filtered GAUSSIAN_5x5 N=3                   187.9     5.88x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2073.7    64.92x
+ filtered BOX_2x2 8 -> 8                     694.8    21.75x
+ GAUSSIAN_5x5 1->3 border=Reflect101         194.9     6.10x
+ GAUSSIAN_5x5 1->3 border=Zero               172.4     5.40x
+ BOX_3x3 1->3 border=Reflect101               82.1     2.57x
+ BOX_2x2 1->3 border=Reflect101               32.5     1.02x
+ cv::pyrDown 8U 640x480 (the denominator)       47.3     1.48x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 2
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.2     0.91x
+ pyrDown (shipped BOX_2x2 route) N=3          31.1     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.6     0.18x
+ filtered BOX_2x2 N=3                         32.4     1.04x
+ filtered BOX_3x3 N=3                         84.1     2.70x
+ filtered GAUSSIAN_3x3 N=3                    84.3     2.71x
+ filtered GAUSSIAN_5x5 N=3                   186.0     5.98x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2053.8    65.99x
+ filtered BOX_2x2 8 -> 8                     681.3    21.89x
+ GAUSSIAN_5x5 1->3 border=Reflect101         184.9     5.94x
+ GAUSSIAN_5x5 1->3 border=Zero               164.3     5.28x
+ BOX_3x3 1->3 border=Reflect101               83.1     2.67x
+ BOX_2x2 1->3 border=Reflect101               32.2     1.03x
+ cv::pyrDown 8U 640x480 (the denominator)       52.1     1.67x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 3
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.0     0.92x
+ pyrDown (shipped BOX_2x2 route) N=3          30.5     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.7     0.19x
+ filtered BOX_2x2 N=3                         33.0     1.08x
+ filtered BOX_3x3 N=3                         81.6     2.67x
+ filtered GAUSSIAN_3x3 N=3                    82.0     2.69x
+ filtered GAUSSIAN_5x5 N=3                   180.8     5.93x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2071.0    67.87x
+ filtered BOX_2x2 8 -> 8                     638.8    20.94x
+ GAUSSIAN_5x5 1->3 border=Reflect101         183.1     6.00x
+ GAUSSIAN_5x5 1->3 border=Zero               165.7     5.43x
+ BOX_3x3 1->3 border=Reflect101               82.5     2.70x
+ BOX_2x2 1->3 border=Reflect101               32.1     1.05x
+ cv::pyrDown 8U 640x480 (the denominator)       47.9     1.57x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 4
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          27.6     0.91x
+ pyrDown (shipped BOX_2x2 route) N=3          30.5     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.6     0.18x
+ filtered BOX_2x2 N=3                         31.9     1.05x
+ filtered BOX_3x3 N=3                         82.3     2.70x
+ filtered GAUSSIAN_3x3 N=3                    82.1     2.69x
+ filtered GAUSSIAN_5x5 N=3                   192.0     6.30x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     3410.0   111.90x
+ filtered BOX_2x2 8 -> 8                     962.7    31.59x
+ GAUSSIAN_5x5 1->3 border=Reflect101         189.2     6.21x
+ GAUSSIAN_5x5 1->3 border=Zero               167.4     5.49x
+ BOX_3x3 1->3 border=Reflect101               82.8     2.72x
+ BOX_2x2 1->3 border=Reflect101               33.1     1.09x
+ cv::pyrDown 8U 640x480 (the denominator)       46.8     1.54x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 5
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.0     0.93x
+ pyrDown (shipped BOX_2x2 route) N=3          30.1     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 6.1     0.20x
+ filtered BOX_2x2 N=3                         33.5     1.11x
+ filtered BOX_3x3 N=3                         82.0     2.72x
+ filtered GAUSSIAN_3x3 N=3                    81.2     2.69x
+ filtered GAUSSIAN_5x5 N=3                   187.5     6.22x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2033.1    67.47x
+ filtered BOX_2x2 8 -> 8                     670.5    22.25x
+ GAUSSIAN_5x5 1->3 border=Reflect101         181.5     6.02x
+ GAUSSIAN_5x5 1->3 border=Zero               164.0     5.44x
+ BOX_3x3 1->3 border=Reflect101               83.5     2.77x
+ BOX_2x2 1->3 border=Reflect101               32.2     1.07x
+ cv::pyrDown 8U 640x480 (the denominator)       47.4     1.57x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 6
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          33.2     1.06x
+ pyrDown (shipped BOX_2x2 route) N=3          31.2     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 6.0     0.19x
+ filtered BOX_2x2 N=3                         33.7     1.08x
+ filtered BOX_3x3 N=3                         82.4     2.64x
+ filtered GAUSSIAN_3x3 N=3                    83.3     2.67x
+ filtered GAUSSIAN_5x5 N=3                   181.5     5.81x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2001.1    64.08x
+ filtered BOX_2x2 8 -> 8                     670.0    21.45x
+ GAUSSIAN_5x5 1->3 border=Reflect101         189.0     6.05x
+ GAUSSIAN_5x5 1->3 border=Zero               166.4     5.33x
+ BOX_3x3 1->3 border=Reflect101               86.9     2.78x
+ BOX_2x2 1->3 border=Reflect101               32.5     1.04x
+ cv::pyrDown 8U 640x480 (the denominator)       47.7     1.53x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 7
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.0     0.92x
+ pyrDown (shipped BOX_2x2 route) N=3          30.6     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.7     0.19x
+ filtered BOX_2x2 N=3                         32.7     1.07x
+ filtered BOX_3x3 N=3                         83.5     2.73x
+ filtered GAUSSIAN_3x3 N=3                    81.1     2.65x
+ filtered GAUSSIAN_5x5 N=3                   184.6     6.03x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2042.1    66.70x
+ filtered BOX_2x2 8 -> 8                     639.4    20.88x
+ GAUSSIAN_5x5 1->3 border=Reflect101         181.6     5.93x
+ GAUSSIAN_5x5 1->3 border=Zero               160.3     5.23x
+ BOX_3x3 1->3 border=Reflect101               83.6     2.73x
+ BOX_2x2 1->3 border=Reflect101               31.9     1.04x
+ cv::pyrDown 8U 640x480 (the denominator)       48.9     1.60x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 8
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.0     0.92x
+ pyrDown (shipped BOX_2x2 route) N=3          30.5     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.8     0.19x
+ filtered BOX_2x2 N=3                         34.3     1.12x
+ filtered BOX_3x3 N=3                         82.1     2.69x
+ filtered GAUSSIAN_3x3 N=3                    81.2     2.66x
+ filtered GAUSSIAN_5x5 N=3                   183.6     6.01x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2014.9    65.99x
+ filtered BOX_2x2 8 -> 8                     664.8    21.77x
+ GAUSSIAN_5x5 1->3 border=Reflect101         181.7     5.95x
+ GAUSSIAN_5x5 1->3 border=Zero               168.1     5.51x
+ BOX_3x3 1->3 border=Reflect101               88.9     2.91x
+ BOX_2x2 1->3 border=Reflect101               33.2     1.09x
+ cv::pyrDown 8U 640x480 (the denominator)       50.5     1.66x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 9
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          27.6     0.89x
+ pyrDown (shipped BOX_2x2 route) N=3          30.9     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.9     0.19x
+ filtered BOX_2x2 N=3                         31.9     1.03x
+ filtered BOX_3x3 N=3                         84.1     2.72x
+ filtered GAUSSIAN_3x3 N=3                    85.1     2.76x
+ filtered GAUSSIAN_5x5 N=3                   185.7     6.01x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2070.1    67.05x
+ filtered BOX_2x2 8 -> 8                     652.1    21.12x
+ GAUSSIAN_5x5 1->3 border=Reflect101         186.0     6.03x
+ GAUSSIAN_5x5 1->3 border=Zero               166.5     5.39x
+ BOX_3x3 1->3 border=Reflect101               84.5     2.74x
+ BOX_2x2 1->3 border=Reflect101               32.6     1.06x
+ cv::pyrDown 8U 640x480 (the denominator)       47.5     1.54x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 10
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          27.9     0.92x
+ pyrDown (shipped BOX_2x2 route) N=3          30.4     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.6     0.19x
+ filtered BOX_2x2 N=3                         32.1     1.05x
+ filtered BOX_3x3 N=3                         86.9     2.86x
+ filtered GAUSSIAN_3x3 N=3                    81.5     2.68x
+ filtered GAUSSIAN_5x5 N=3                   183.1     6.02x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2036.0    66.91x
+ filtered BOX_2x2 8 -> 8                     642.3    21.11x
+ GAUSSIAN_5x5 1->3 border=Reflect101         193.0     6.34x
+ GAUSSIAN_5x5 1->3 border=Zero               172.0     5.65x
+ BOX_3x3 1->3 border=Reflect101               81.9     2.69x
+ BOX_2x2 1->3 border=Reflect101               32.7     1.08x
+ cv::pyrDown 8U 640x480 (the denominator)       47.7     1.57x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 11
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.1     0.87x
+ pyrDown (shipped BOX_2x2 route) N=3          32.2     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.8     0.18x
+ filtered BOX_2x2 N=3                         33.7     1.05x
+ filtered BOX_3x3 N=3                         84.9     2.64x
+ filtered GAUSSIAN_3x3 N=3                    86.2     2.68x
+ filtered GAUSSIAN_5x5 N=3                   182.3     5.67x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2008.3    62.42x
+ filtered BOX_2x2 8 -> 8                     641.7    19.94x
+ GAUSSIAN_5x5 1->3 border=Reflect101         183.4     5.70x
+ GAUSSIAN_5x5 1->3 border=Zero               163.7     5.09x
+ BOX_3x3 1->3 border=Reflect101               82.3     2.56x
+ BOX_2x2 1->3 border=Reflect101               32.4     1.01x
+ cv::pyrDown 8U 640x480 (the denominator)       47.1     1.46x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 12
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          27.7     0.91x
+ pyrDown (shipped BOX_2x2 route) N=3          30.6     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.6     0.18x
+ filtered BOX_2x2 N=3                         34.3     1.12x
+ filtered BOX_3x3 N=3                         82.7     2.71x
+ filtered GAUSSIAN_3x3 N=3                    83.0     2.72x
+ filtered GAUSSIAN_5x5 N=3                   181.7     5.95x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2026.2    66.31x
+ filtered BOX_2x2 8 -> 8                     661.2    21.64x
+ GAUSSIAN_5x5 1->3 border=Reflect101         198.7     6.50x
+ GAUSSIAN_5x5 1->3 border=Zero               164.4     5.38x
+ BOX_3x3 1->3 border=Reflect101               89.1     2.92x
+ BOX_2x2 1->3 border=Reflect101               35.4     1.16x
+ cv::pyrDown 8U 640x480 (the denominator)       50.6     1.66x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 13
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          29.4     0.95x
+ pyrDown (shipped BOX_2x2 route) N=3          30.9     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.7     0.18x
+ filtered BOX_2x2 N=3                         32.3     1.04x
+ filtered BOX_3x3 N=3                         83.3     2.69x
+ filtered GAUSSIAN_3x3 N=3                    81.4     2.63x
+ filtered GAUSSIAN_5x5 N=3                   179.7     5.81x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2009.3    65.02x
+ filtered BOX_2x2 8 -> 8                     626.2    20.26x
+ GAUSSIAN_5x5 1->3 border=Reflect101         179.5     5.81x
+ GAUSSIAN_5x5 1->3 border=Zero               160.4     5.19x
+ BOX_3x3 1->3 border=Reflect101               82.7     2.68x
+ BOX_2x2 1->3 border=Reflect101               32.8     1.06x
+ cv::pyrDown 8U 640x480 (the denominator)       47.4     1.54x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 14
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.2     0.92x
+ pyrDown (shipped BOX_2x2 route) N=3          30.6     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.6     0.18x
+ filtered BOX_2x2 N=3                         32.8     1.07x
+ filtered BOX_3x3 N=3                         84.2     2.75x
+ filtered GAUSSIAN_3x3 N=3                    81.2     2.65x
+ filtered GAUSSIAN_5x5 N=3                   182.4     5.96x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2209.9    72.22x
+ filtered BOX_2x2 8 -> 8                     655.7    21.43x
+ GAUSSIAN_5x5 1->3 border=Reflect101         188.6     6.16x
+ GAUSSIAN_5x5 1->3 border=Zero               168.7     5.51x
+ BOX_3x3 1->3 border=Reflect101               86.0     2.81x
+ BOX_2x2 1->3 border=Reflect101               32.6     1.07x
+ cv::pyrDown 8U 640x480 (the denominator)       47.2     1.54x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 15
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          29.0     0.94x
+ pyrDown (shipped BOX_2x2 route) N=3          30.8     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.9     0.19x
+ filtered BOX_2x2 N=3                         31.8     1.03x
+ filtered BOX_3x3 N=3                         81.5     2.65x
+ filtered GAUSSIAN_3x3 N=3                    81.7     2.65x
+ filtered GAUSSIAN_5x5 N=3                   180.7     5.87x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2076.7    67.45x
+ filtered BOX_2x2 8 -> 8                     661.9    21.50x
+ GAUSSIAN_5x5 1->3 border=Reflect101         180.2     5.85x
+ GAUSSIAN_5x5 1->3 border=Zero               164.6     5.35x
+ BOX_3x3 1->3 border=Reflect101               82.0     2.66x
+ BOX_2x2 1->3 border=Reflect101               33.7     1.09x
+ cv::pyrDown 8U 640x480 (the denominator)       50.8     1.65x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 16
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          27.6     0.90x
+ pyrDown (shipped BOX_2x2 route) N=3          30.5     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.8     0.19x
+ filtered BOX_2x2 N=3                         32.1     1.05x
+ filtered BOX_3x3 N=3                         82.5     2.70x
+ filtered GAUSSIAN_3x3 N=3                    81.4     2.67x
+ filtered GAUSSIAN_5x5 N=3                   185.0     6.06x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2005.5    65.66x
+ filtered BOX_2x2 8 -> 8                     630.0    20.62x
+ GAUSSIAN_5x5 1->3 border=Reflect101         191.8     6.28x
+ GAUSSIAN_5x5 1->3 border=Zero               165.5     5.42x
+ BOX_3x3 1->3 border=Reflect101               83.8     2.74x
+ BOX_2x2 1->3 border=Reflect101               32.8     1.07x
+ cv::pyrDown 8U 640x480 (the denominator)       46.8     1.53x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 17
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          29.3     0.95x
+ pyrDown (shipped BOX_2x2 route) N=3          30.7     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.6     0.18x
+ filtered BOX_2x2 N=3                         32.1     1.05x
+ filtered BOX_3x3 N=3                         82.0     2.67x
+ filtered GAUSSIAN_3x3 N=3                    81.2     2.64x
+ filtered GAUSSIAN_5x5 N=3                   191.0     6.22x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2060.9    67.09x
+ filtered BOX_2x2 8 -> 8                     707.9    23.04x
+ GAUSSIAN_5x5 1->3 border=Reflect101         194.0     6.31x
+ GAUSSIAN_5x5 1->3 border=Zero               173.2     5.64x
+ BOX_3x3 1->3 border=Reflect101               85.1     2.77x
+ BOX_2x2 1->3 border=Reflect101               31.9     1.04x
+ cv::pyrDown 8U 640x480 (the denominator)       47.4     1.54x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 18
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.7     0.86x
+ pyrDown (shipped BOX_2x2 route) N=3          33.3     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.6     0.17x
+ filtered BOX_2x2 N=3                         32.1     0.96x
+ filtered BOX_3x3 N=3                         83.6     2.51x
+ filtered GAUSSIAN_3x3 N=3                    82.7     2.48x
+ filtered GAUSSIAN_5x5 N=3                   180.3     5.41x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2018.5    60.60x
+ filtered BOX_2x2 8 -> 8                     651.2    19.55x
+ GAUSSIAN_5x5 1->3 border=Reflect101         183.4     5.51x
+ GAUSSIAN_5x5 1->3 border=Zero               163.7     4.92x
+ BOX_3x3 1->3 border=Reflect101               83.6     2.51x
+ BOX_2x2 1->3 border=Reflect101               31.9     0.96x
+ cv::pyrDown 8U 640x480 (the denominator)       49.5     1.49x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 19
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.5     0.92x
+ pyrDown (shipped BOX_2x2 route) N=3          30.9     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.7     0.18x
+ filtered BOX_2x2 N=3                         31.9     1.03x
+ filtered BOX_3x3 N=3                         82.8     2.68x
+ filtered GAUSSIAN_3x3 N=3                    82.0     2.66x
+ filtered GAUSSIAN_5x5 N=3                   186.3     6.04x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2154.1    69.81x
+ filtered BOX_2x2 8 -> 8                     637.1    20.65x
+ GAUSSIAN_5x5 1->3 border=Reflect101         185.0     5.99x
+ GAUSSIAN_5x5 1->3 border=Zero               164.9     5.34x
+ BOX_3x3 1->3 border=Reflect101               83.4     2.70x
+ BOX_2x2 1->3 border=Reflect101               33.7     1.09x
+ cv::pyrDown 8U 640x480 (the denominator)       47.2     1.53x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 20
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.0     0.93x
+ pyrDown (shipped BOX_2x2 route) N=3          30.2     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.8     0.19x
+ filtered BOX_2x2 N=3                         32.1     1.06x
+ filtered BOX_3x3 N=3                         83.3     2.76x
+ filtered GAUSSIAN_3x3 N=3                    81.4     2.69x
+ filtered GAUSSIAN_5x5 N=3                   182.3     6.03x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2047.5    67.78x
+ filtered BOX_2x2 8 -> 8                     645.9    21.38x
+ GAUSSIAN_5x5 1->3 border=Reflect101         185.3     6.13x
+ GAUSSIAN_5x5 1->3 border=Zero               164.0     5.43x
+ BOX_3x3 1->3 border=Reflect101               83.7     2.77x
+ BOX_2x2 1->3 border=Reflect101               34.6     1.15x
+ cv::pyrDown 8U 640x480 (the denominator)       53.6     1.77x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 21
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.0     0.93x
+ pyrDown (shipped BOX_2x2 route) N=3          30.1     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.6     0.19x
+ filtered BOX_2x2 N=3                         31.8     1.06x
+ filtered BOX_3x3 N=3                         81.7     2.71x
+ filtered GAUSSIAN_3x3 N=3                    80.9     2.68x
+ filtered GAUSSIAN_5x5 N=3                   180.3     5.98x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2117.3    70.24x
+ filtered BOX_2x2 8 -> 8                     640.6    21.25x
+ GAUSSIAN_5x5 1->3 border=Reflect101         181.1     6.01x
+ GAUSSIAN_5x5 1->3 border=Zero               204.2     6.77x
+ BOX_3x3 1->3 border=Reflect101               85.9     2.85x
+ BOX_2x2 1->3 border=Reflect101               35.8     1.19x
+ cv::pyrDown 8U 640x480 (the denominator)       50.7     1.68x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 22
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          27.7     0.90x
+ pyrDown (shipped BOX_2x2 route) N=3          30.7     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.7     0.19x
+ filtered BOX_2x2 N=3                         32.1     1.05x
+ filtered BOX_3x3 N=3                         82.8     2.70x
+ filtered GAUSSIAN_3x3 N=3                    85.5     2.79x
+ filtered GAUSSIAN_5x5 N=3                   193.3     6.31x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2009.7    65.54x
+ filtered BOX_2x2 8 -> 8                     634.7    20.70x
+ GAUSSIAN_5x5 1->3 border=Reflect101         187.0     6.10x
+ GAUSSIAN_5x5 1->3 border=Zero               165.6     5.40x
+ BOX_3x3 1->3 border=Reflect101               84.7     2.76x
+ BOX_2x2 1->3 border=Reflect101               32.2     1.05x
+ cv::pyrDown 8U 640x480 (the denominator)       49.9     1.63x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 23
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          27.9     0.85x
+ pyrDown (shipped BOX_2x2 route) N=3          32.9     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 6.2     0.19x
+ filtered BOX_2x2 N=3                         34.1     1.03x
+ filtered BOX_3x3 N=3                         86.0     2.61x
+ filtered GAUSSIAN_3x3 N=3                    82.0     2.49x
+ filtered GAUSSIAN_5x5 N=3                   188.3     5.72x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2038.0    61.87x
+ filtered BOX_2x2 8 -> 8                     646.2    19.62x
+ GAUSSIAN_5x5 1->3 border=Reflect101         198.9     6.04x
+ GAUSSIAN_5x5 1->3 border=Zero               164.8     5.00x
+ BOX_3x3 1->3 border=Reflect101               82.9     2.52x
+ BOX_2x2 1->3 border=Reflect101               31.7     0.96x
+ cv::pyrDown 8U 640x480 (the denominator)       47.3     1.44x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 24
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          27.7     0.91x
+ pyrDown (shipped BOX_2x2 route) N=3          30.6     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.9     0.19x
+ filtered BOX_2x2 N=3                         33.7     1.10x
+ filtered BOX_3x3 N=3                         85.8     2.81x
+ filtered GAUSSIAN_3x3 N=3                    82.5     2.70x
+ filtered GAUSSIAN_5x5 N=3                   186.2     6.09x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2004.5    65.59x
+ filtered BOX_2x2 8 -> 8                     651.7    21.33x
+ GAUSSIAN_5x5 1->3 border=Reflect101         183.2     5.99x
+ GAUSSIAN_5x5 1->3 border=Zero               167.5     5.48x
+ BOX_3x3 1->3 border=Reflect101               82.1     2.69x
+ BOX_2x2 1->3 border=Reflect101               31.9     1.04x
+ cv::pyrDown 8U 640x480 (the denominator)       47.1     1.54x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 25
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          30.5     1.00x
+ pyrDown (shipped BOX_2x2 route) N=3          30.7     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.9     0.19x
+ filtered BOX_2x2 N=3                         32.1     1.05x
+ filtered BOX_3x3 N=3                         83.3     2.72x
+ filtered GAUSSIAN_3x3 N=3                    82.3     2.68x
+ filtered GAUSSIAN_5x5 N=3                   190.8     6.22x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2047.6    66.75x
+ filtered BOX_2x2 8 -> 8                     659.3    21.50x
+ GAUSSIAN_5x5 1->3 border=Reflect101         184.7     6.02x
+ GAUSSIAN_5x5 1->3 border=Zero               165.2     5.38x
+ BOX_3x3 1->3 border=Reflect101               82.3     2.68x
+ BOX_2x2 1->3 border=Reflect101               32.1     1.05x
+ cv::pyrDown 8U 640x480 (the denominator)       48.6     1.58x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 26
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.9     0.89x
+ pyrDown (shipped BOX_2x2 route) N=3          32.4     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.7     0.18x
+ filtered BOX_2x2 N=3                         32.4     1.00x
+ filtered BOX_3x3 N=3                         90.5     2.79x
+ filtered GAUSSIAN_3x3 N=3                    82.7     2.55x
+ filtered GAUSSIAN_5x5 N=3                   183.1     5.64x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2025.4    62.45x
+ filtered BOX_2x2 8 -> 8                     655.0    20.19x
+ GAUSSIAN_5x5 1->3 border=Reflect101         185.2     5.71x
+ GAUSSIAN_5x5 1->3 border=Zero               161.1     4.97x
+ BOX_3x3 1->3 border=Reflect101               83.3     2.57x
+ BOX_2x2 1->3 border=Reflect101               32.2     0.99x
+ cv::pyrDown 8U 640x480 (the denominator)       54.3     1.68x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 27
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          27.9     0.91x
+ pyrDown (shipped BOX_2x2 route) N=3          30.5     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 6.3     0.20x
+ filtered BOX_2x2 N=3                         32.8     1.07x
+ filtered BOX_3x3 N=3                         88.4     2.89x
+ filtered GAUSSIAN_3x3 N=3                    82.9     2.71x
+ filtered GAUSSIAN_5x5 N=3                   195.1     6.39x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2041.9    66.87x
+ filtered BOX_2x2 8 -> 8                     680.1    22.27x
+ GAUSSIAN_5x5 1->3 border=Reflect101         183.0     5.99x
+ GAUSSIAN_5x5 1->3 border=Zero               164.8     5.40x
+ BOX_3x3 1->3 border=Reflect101               82.8     2.71x
+ BOX_2x2 1->3 border=Reflect101               31.7     1.04x
+ cv::pyrDown 8U 640x480 (the denominator)       47.1     1.54x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 28
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.7     0.95x
+ pyrDown (shipped BOX_2x2 route) N=3          30.4     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.7     0.19x
+ filtered BOX_2x2 N=3                         33.8     1.11x
+ filtered BOX_3x3 N=3                         82.1     2.70x
+ filtered GAUSSIAN_3x3 N=3                    81.4     2.68x
+ filtered GAUSSIAN_5x5 N=3                   183.7     6.04x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2052.7    67.49x
+ filtered BOX_2x2 8 -> 8                     661.4    21.74x
+ GAUSSIAN_5x5 1->3 border=Reflect101         182.9     6.01x
+ GAUSSIAN_5x5 1->3 border=Zero               170.3     5.60x
+ BOX_3x3 1->3 border=Reflect101               86.2     2.83x
+ BOX_2x2 1->3 border=Reflect101               34.3     1.13x
+ cv::pyrDown 8U 640x480 (the denominator)       52.1     1.71x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 29
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          28.5     0.92x
+ pyrDown (shipped BOX_2x2 route) N=3          31.0     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 5.5     0.18x
+ filtered BOX_2x2 N=3                         31.7     1.02x
+ filtered BOX_3x3 N=3                         82.1     2.65x
+ filtered GAUSSIAN_3x3 N=3                    83.3     2.69x
+ filtered GAUSSIAN_5x5 N=3                   187.4     6.05x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     2008.7    64.83x
+ filtered BOX_2x2 8 -> 8                     624.2    20.14x
+ GAUSSIAN_5x5 1->3 border=Reflect101         184.8     5.97x
+ GAUSSIAN_5x5 1->3 border=Zero               168.0     5.42x
+ BOX_3x3 1->3 border=Reflect101               81.8     2.64x
+ BOX_2x2 1->3 border=Reflect101               33.1     1.07x
+ cv::pyrDown 8U 640x480 (the denominator)       47.0     1.52x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+### run 30
+=== speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 ===
+
+ arm                                            us  vs shipped
+ pyrDown (shipped BOX_2x2 route) N=2          29.2     0.92x
+ pyrDown (shipped BOX_2x2 route) N=3          31.5     1.00x
+ filtered DIRECT_SUBSAMPLE N=1                 6.0     0.19x
+ filtered BOX_2x2 N=3                         32.4     1.03x
+ filtered BOX_3x3 N=3                         83.2     2.64x
+ filtered GAUSSIAN_3x3 N=3                    81.0     2.57x
+ filtered GAUSSIAN_5x5 N=3                   181.0     5.74x
+ filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown shape)     1997.1    63.34x
+ filtered BOX_2x2 8 -> 8                     649.9    20.61x
+ GAUSSIAN_5x5 1->3 border=Reflect101         189.3     6.00x
+ GAUSSIAN_5x5 1->3 border=Zero               162.2     5.14x
+ BOX_3x3 1->3 border=Reflect101               83.4     2.64x
+ BOX_2x2 1->3 border=Reflect101               33.1     1.05x
+ cv::pyrDown 8U 640x480 (the denominator)       49.4     1.57x
+
+ 'vs shipped' is against the hand-written BOX_2x2 route at N=3.
+ pyrDown is 25.8% of the pipeline, and a level-0 pass is the
+ largest of the three the ladder runs.
+
+# loadavg at end: 1.54 2.14 3.40 1/1321 10170
+# date:     2026-09-21T15:07:47-07:00
+# done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio cv::pyrDown 8U 640x480 (the denominator)/pyrDown (shipped BOX_2x2 route) N=3) ----
+# 30 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                              n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# t1 / BOX_2x2 1->3 border=Reflect101             30    32.5500    31.7000    35.8000  1.129    12.6%      --  [ 32.2000,  32.9500]   1.15%   1.012x
+# t1 / BOX_3x3 1->3 border=Reflect101             30    83.4000    81.8000    89.1000  1.089     8.8%      --  [ 82.8000,  83.7500]   0.57%   1.007x
+# t1 / GAUSSIAN_5x5 1->3 border=Reflect101        30   184.9500   179.5000   198.9000  1.108    10.5%      --  [183.3000, 187.8000]   1.22%   1.015x
+# t1 / GAUSSIAN_5x5 1->3 border=Zero              30   165.3500   160.3000   204.2000  1.274    26.5%      --  [164.5000, 166.9500]   0.74%   1.010x
+# t1 / cv::pyrDown 8U 640x480 (the denominator)   30    47.7000    46.8000    54.3000  1.160    15.7%      --  [ 47.3500,  49.4500]   2.20%   1.037x
+# t1 / filtered BOX_2x2 8 -> 8                    30   651.9000   624.2000   962.7000  1.542    51.9%      --  [644.1000, 661.3000]   1.32%   1.014x
+# t1 / filtered BOX_2x2 N=3                       30    32.4000    31.7000    34.3000  1.082     8.0%      --  [ 32.1000,  32.8500]   1.16%   1.014x
+# t1 / filtered BOX_3x3 N=3                       30    83.2500    81.5000    90.5000  1.110    10.8%      --  [ 82.4500,  83.8500]   0.84%   1.010x
+# t1 / filtered DIRECT_SUBSAMPLE N=1              30     5.7000     5.5000     6.3000  1.145    14.0%      --  [  5.7000,   5.8000]   0.88%   1.018x
+# t1 / filtered GAUSSIAN_3x3 N=3                  30    82.0000    80.9000    86.2000  1.066     6.5%      --  [ 81.4000,  82.6000]   0.73%   1.007x
+# t1 / filtered GAUSSIAN_5x5 8 -> 8 (cv::pyrDown  30     2040.0     1997.1     3410.0  1.707    69.3%      --  [  2022.0,   2053.2]   0.77%   1.009x
+# t1 / filtered GAUSSIAN_5x5 N=3                  30   184.1500   179.7000   195.1000  1.086     8.4%      --  [182.3500, 186.2500]   1.06%   1.011x
+# t1 / pyrDown (shipped BOX_2x2 route) N=2        30    28.0000    27.6000    33.2000  1.203    20.0%      --  [ 27.9500,  28.5000]   0.98%   1.018x
+# t1 / pyrDown (shipped BOX_2x2 route) N=3        30    30.7000    30.1000    33.3000  1.106    10.4%      --  [ 30.5500,  30.9000]   0.57%   1.007x
+# 
+# RATIO  cv::pyrDown 8U 640x480 (the denominator)  /  pyrDown (shipped BOX_2x2 route) N=3   over 30 launches
+#   paired per launch (the published estimator)
+#     median 1.5563   min 1.4377   max 1.7748   scatter 21.7%
+#     bootstrap 95% CI of the median: [1.5358, 1.5972]   +/- 1.97%
+#     launches with the ratio above 1.00: 30 of 30
+#     smallest resolvable difference at 30 launches: 1.026x
+#   ratio of the two medians, same launches
+#     point 1.5537   bootstrap 95% CI: [1.5340, 1.6124]
+#     the two intervals differ by 0.12% and 0.97% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     t1       === speed axis: pyrDown filters, 640x480 -> 320x240, NIn=1 | arm  us  vs shipped
