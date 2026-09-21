@@ -316,12 +316,13 @@ in the `*-x86_64-launches.log` files beside the originals. aarch64 is unaffected
 re-run: on the Pi with the governor locked the same benchmark holds 0.05–0.14% within a run
 and 0.41% across launches.
 
-**The ratios came back; the individual times largely did not.** Ten of the published x86
-ratios land inside the new interval or inside the launches' own spread — `bitwiseAnd` 10.01×
-against 9.97×, `countNonZero` 1.62× against 1.62×, `countAnd` 3.47× against 3.49×, optical
-flow 7.13× against 7.19×, Hamming matching 4.72× against 4.70×, `pyrDown` 1.56× against
-1.56×, the crossover's shipped shape 1.49× against 1.49×, `erode` on a 5×5 ellipse 0.32×
-against 0.32×, the spacing mask 23.7× against 23.2×, dense disparity ~1.2× against 1.22×.
+**The ratios came back; the individual times largely did not.** Ten published x86 ratios sit
+inside the new 95% interval — `bitwiseAnd` 10.01× against a median of 9.97×, `countNonZero`
+1.62× against 1.62×, `countAnd` 3.47× against 3.49×, optical flow 7.13× against 7.19× and its
+`1/1/1/1` ladder 28.53× against 29.19×, Hamming matching 4.72× against 4.70×, `pyrDown` 1.56×
+against 1.56×, the crossover's shipped shape 1.49× against 1.47×, `erode` 3×3 1.04× against
+1.05× and on a 5×5 ellipse 0.32× against 0.32×. Dense disparity, whose two arms are separate
+binaries and so cannot be paired, comes out at 1.22× against the published ~1.2×.
 The cells behind them moved much more: **28 of the 40 measured times re-taken read slower in
 their single launch than in the median of thirty**, on both sides at once. A ratio survives
 what its two cells do not, because a launch that lands slow lands slow on both arms — which
