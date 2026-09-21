@@ -101,7 +101,7 @@ int main() {
 #endif
     };
     const auto t = measure::measureInterleaved(b, 7, 60.0);
-    std::printf(" %-38s %10s %9s\n", "arm", "us", "vs shipped");
+    std::printf(" %-38s %10s  %9s\n", "arm", "us", "vs shipped");
     for (size_t i = 0; i < b.size(); ++i) {
         std::printf(" %-38s %10.1f %8.2fx\n", b[i].name.c_str(), t[i].medianNs / 1000.0,
                     t[i].medianNs / t[1].medianNs);

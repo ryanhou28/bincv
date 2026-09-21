@@ -123,10 +123,15 @@ import re
 import sys
 from statistics import median
 
-# A header cell that names a time per something: ns/pixel, us/call, ms/frame.
-# GB/s is a rate and is deliberately not matched -- it is not what a ratio of
-# durations is taken on -- but --column will still select it by name.
-TIMING_COL = re.compile(r'^(?:ns|us|ms|s)/[A-Za-z][A-Za-z /]*$')
+# A header cell that names a time: `ns/pixel`, `us/call`, `ms/frame`, and also
+# the bare `us` or `ms` that a table uses when its caption already says per what
+# -- the pyrDown filter sweep heads one column `us` under a caption naming the
+# geometry, and the LK memory-bound sweep heads one `ms`. Requiring the slash
+# left both of those files reported as unparseable, which read as "no timings
+# here" when what they have is a caption doing the other half of the header's
+# job. GB/s is a rate and is still deliberately not matched -- it is not what a
+# ratio of durations is taken on -- but --column will select it by name.
+TIMING_COL = re.compile(r'^(?:ns|us|ms|s)(?:/[A-Za-z][A-Za-z /]*)?$')
 SECTION = re.compile(r'^###\s*(.*)$')
 RUN_MARK = re.compile(r'\b(?:run|repeat|launch)\s+(\d+)\b', re.I)
 BENCH_NS = re.compile(r'\[BENCH\]\s*(.*?)\s{2,}(\d+(?:\.\d+)?)\s+'
