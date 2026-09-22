@@ -56,6 +56,14 @@ resolve is a **per-row** figure the aggregate prints as `minres`, and across the
 ranges from 1.002× to 1.090×. A row whose `minres` exceeds the difference being claimed does
 not support that claim, however many digits its median has.
 
+**An interval is over the launches that were taken.** It is not a bound on what a different
+thirty will say, and that was tested rather than assumed: seven rows were re-swept from
+scratch on a busier machine before any figure here was adopted
+([logs/README.md](logs/README.md#the-repeats-and-what-they-showed)). Six landed inside the
+first sweep's interval; `bitwiseNot`'s repeat landed 0.7% above the top of it, with the two
+intervals still overlapping. Read a quoted interval as the resolution of one sweep, and a
+difference near its edge as unsettled until a second sweep agrees.
+
 **aarch64 is quoted from one pinned launch, and that is enough there.** Seven launches of
 the corner benchmark on the governor-locked Pi 4 hold 0.05–1.18% within a run and scatter
 0.1–0.8% across the seven ([goodfeatures-aarch64.log](logs/goodfeatures-aarch64.log)) — the
