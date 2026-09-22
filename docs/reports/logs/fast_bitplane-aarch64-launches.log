@@ -1,0 +1,214 @@
+# launch sweep -- 10 separate processes of one benchmark
+# benchmark: ./build-pi/benchmark/fast_bitplane_benchmark 
+# launches: 10
+# arch:     aarch64
+# host:     Raspberry Pi 4 Model B Rev 1.5
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# commit:   80ff0a8
+# governor: performance
+# throttled before: throttled=0x80000
+# temp before: temp=63.3'C
+# pinning:  taskset -c 3
+# sleep between launches: 0s
+# date:     2026-09-21T16:45:56-07:00
+# loadavg at start: 1.00 1.01 0.82 1/307 914102
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2047.2 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2052.6 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            866.5 us  2.36x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     864.1 us  2.37x vs cv::FAST
+ threshold 2              864.0 us  2.37x vs cv::FAST
+ threshold 3              863.8 us  2.37x vs cv::FAST
+ threshold 4              863.8 us  2.37x vs cv::FAST
+ threshold 6              863.8 us  2.37x vs cv::FAST
+ threshold 8              863.5 us  2.37x vs cv::FAST
+ threshold 12             864.0 us  2.37x vs cv::FAST
+ threshold never          863.9 us  2.37x vs cv::FAST
+ bit-plane, scalar arm     2931.2 us  (against the arm lines above; parity = arm not running)
+### run 2
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2046.3 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2050.9 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            865.9 us  2.36x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     864.0 us  2.37x vs cv::FAST
+ threshold 2              863.5 us  2.37x vs cv::FAST
+ threshold 3              863.6 us  2.37x vs cv::FAST
+ threshold 4              863.7 us  2.37x vs cv::FAST
+ threshold 6              863.6 us  2.37x vs cv::FAST
+ threshold 8              863.3 us  2.37x vs cv::FAST
+ threshold 12             863.5 us  2.37x vs cv::FAST
+ threshold never          863.5 us  2.37x vs cv::FAST
+ bit-plane, scalar arm     2931.8 us  (against the arm lines above; parity = arm not running)
+### run 3
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2047.6 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2053.2 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            865.8 us  2.36x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     863.2 us  2.37x vs cv::FAST
+ threshold 2              863.1 us  2.37x vs cv::FAST
+ threshold 3              863.0 us  2.37x vs cv::FAST
+ threshold 4              863.0 us  2.37x vs cv::FAST
+ threshold 6              863.2 us  2.37x vs cv::FAST
+ threshold 8              863.2 us  2.37x vs cv::FAST
+ threshold 12             863.4 us  2.37x vs cv::FAST
+ threshold never          862.9 us  2.37x vs cv::FAST
+ bit-plane, scalar arm     2933.8 us  (against the arm lines above; parity = arm not running)
+### run 4
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2051.0 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2052.7 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            865.0 us  2.37x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     862.3 us  2.38x vs cv::FAST
+ threshold 2              862.6 us  2.38x vs cv::FAST
+ threshold 3              862.1 us  2.38x vs cv::FAST
+ threshold 4              862.3 us  2.38x vs cv::FAST
+ threshold 6              862.3 us  2.38x vs cv::FAST
+ threshold 8              862.6 us  2.38x vs cv::FAST
+ threshold 12             862.5 us  2.38x vs cv::FAST
+ threshold never          862.1 us  2.38x vs cv::FAST
+ bit-plane, scalar arm     2935.6 us  (against the arm lines above; parity = arm not running)
+### run 5
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2048.5 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2052.5 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            864.2 us  2.37x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     862.6 us  2.37x vs cv::FAST
+ threshold 2              862.4 us  2.38x vs cv::FAST
+ threshold 3              862.5 us  2.38x vs cv::FAST
+ threshold 4              862.3 us  2.38x vs cv::FAST
+ threshold 6              862.3 us  2.38x vs cv::FAST
+ threshold 8              862.4 us  2.38x vs cv::FAST
+ threshold 12             862.4 us  2.38x vs cv::FAST
+ threshold never          862.2 us  2.38x vs cv::FAST
+ bit-plane, scalar arm     2935.0 us  (against the arm lines above; parity = arm not running)
+### run 6
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2047.9 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2054.6 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            865.6 us  2.37x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     862.7 us  2.37x vs cv::FAST
+ threshold 2              862.6 us  2.37x vs cv::FAST
+ threshold 3              862.6 us  2.37x vs cv::FAST
+ threshold 4              862.7 us  2.37x vs cv::FAST
+ threshold 6              862.3 us  2.37x vs cv::FAST
+ threshold 8              862.3 us  2.37x vs cv::FAST
+ threshold 12             862.4 us  2.37x vs cv::FAST
+ threshold never          862.2 us  2.38x vs cv::FAST
+ bit-plane, scalar arm     2934.1 us  (against the arm lines above; parity = arm not running)
+### run 7
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2055.5 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2053.0 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            871.1 us  2.36x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     868.6 us  2.37x vs cv::FAST
+ threshold 2              868.6 us  2.37x vs cv::FAST
+ threshold 3              868.5 us  2.37x vs cv::FAST
+ threshold 4              868.7 us  2.37x vs cv::FAST
+ threshold 6              868.4 us  2.37x vs cv::FAST
+ threshold 8              868.5 us  2.37x vs cv::FAST
+ threshold 12             868.8 us  2.37x vs cv::FAST
+ threshold never          868.8 us  2.37x vs cv::FAST
+ bit-plane, scalar arm     2940.2 us  (against the arm lines above; parity = arm not running)
+### run 8
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2050.1 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2051.7 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            867.4 us  2.36x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     865.3 us  2.37x vs cv::FAST
+ threshold 2              865.3 us  2.37x vs cv::FAST
+ threshold 3              864.9 us  2.37x vs cv::FAST
+ threshold 4              864.8 us  2.37x vs cv::FAST
+ threshold 6              865.0 us  2.37x vs cv::FAST
+ threshold 8              864.8 us  2.37x vs cv::FAST
+ threshold 12             865.0 us  2.37x vs cv::FAST
+ threshold never          864.7 us  2.37x vs cv::FAST
+ bit-plane, scalar arm     2933.3 us  (against the arm lines above; parity = arm not running)
+### run 9
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2064.9 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2055.1 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            867.3 us  2.38x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     864.6 us  2.39x vs cv::FAST
+ threshold 2              864.6 us  2.39x vs cv::FAST
+ threshold 3              865.0 us  2.39x vs cv::FAST
+ threshold 4              864.7 us  2.39x vs cv::FAST
+ threshold 6              864.8 us  2.39x vs cv::FAST
+ threshold 8              864.8 us  2.39x vs cv::FAST
+ threshold 12             864.7 us  2.39x vs cv::FAST
+ threshold never          864.7 us  2.39x vs cv::FAST
+ bit-plane, scalar arm     2931.6 us  (against the arm lines above; parity = arm not running)
+### run 10
+=== FAST on a bit-plane against cv::FAST ===
+one thread; 12 interleaved rounds, minimum reported
+
+ benchmark/realframe.bin 752x480
+ corners: cv::FAST 6724 binCV wide 6724 binCV bit-plane 6724 (bit-plane == cv::FAST)
+ (a) cv::FAST on CV_8U         2045.8 us  1.00x    360960 B
+ (b) binCV wide, CV_8U         2051.2 us  1.00x    360960 B
+ (c) binCV BIT-PLANE            864.2 us  2.37x     46080 B (7.8x smaller input)
+ scoring-arm crossover sweep (corners per chunk before the arc masks are used):
+ threshold 0 (always)     862.1 us  2.37x vs cv::FAST
+ threshold 2              862.3 us  2.37x vs cv::FAST
+ threshold 3              862.0 us  2.37x vs cv::FAST
+ threshold 4              861.9 us  2.37x vs cv::FAST
+ threshold 6              862.0 us  2.37x vs cv::FAST
+ threshold 8              862.1 us  2.37x vs cv::FAST
+ threshold 12             861.9 us  2.37x vs cv::FAST
+ threshold never          861.9 us  2.37x vs cv::FAST
+ bit-plane, scalar arm     2874.1 us  (against the arm lines above; parity = arm not running)
+
+# loadavg at end: 1.00 1.01 0.83 1/307 914171
+# throttled after: throttled=0x80000
+# temp after: temp=62.8'C
+# date:     2026-09-21T16:46:13-07:00
+# done
