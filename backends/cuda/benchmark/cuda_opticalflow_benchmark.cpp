@@ -72,7 +72,7 @@ namespace {
 constexpr int kW = 752;   // the reference frame
 constexpr int kH = 480;
 constexpr int kLevels = 4;
-constexpr int kWin = 31;         // the reference frontend's window
+constexpr int kWin = 31;         // the reference pipeline's window
 constexpr int kIterCap = 20;     // ...and its iteration cap
 constexpr int kEdgeThreshold = 17;
 constexpr uint32_t kKeypoints = 200;   // the operating point the design names
@@ -169,7 +169,7 @@ void rule() {
         " labelled one. CASE D is the per-frame cost each side pays when it must\n"
         " also prepare the frame it tracks on, which is the number a pipeline\n"
         " feels. A design draft proposed multiplying a device speedup by\n"
-        " docs/reports/frontend.md's 62.3%% LK share; that clause is STRUCK -- it\n"
+        " docs/reports/feature-tracking.md's 62.3%% LK share; that clause is STRUCK -- it\n"
         " is a HOST pipeline's share and cannot multiply a device kernel result.\n"
         "\n"
         " STOP AND ASK, AND IT IS NOT FILLED IN HERE: how much faster than the\n"
@@ -266,7 +266,7 @@ struct DerivLadder {
 /// its keypoint GpuMats.
 ///
 /// The WIDE staging frame is deliberately NOT in here. It belongs to the sensor
-/// stage, it is one buffer reused for every frame, and a frontend that has one
+/// stage, it is one buffer reused for every frame, and a pipeline that has one
 /// already has it for its detector and its descriptor. Its size is printed
 /// separately below so a reader can add it back rather than have it folded in
 /// where it would flatter neither side honestly.
@@ -420,7 +420,7 @@ int main(int argc, char** argv) {
     prepareLadder(res, frameAt(seq, 1), res.next, false, gStream);
     BINCV_CUDA_CHECK(cudaStreamSynchronize(gStream));
     // TWO REAL KEYPOINT SETS, and both are the detector's own output. The
-    // reference frontend's minDistance is 33.33 px, which on a real EuRoC frame
+    // reference pipeline's minDistance is 33.33 px, which on a real EuRoC frame
     // yields far fewer than the 200 the design names as the operating point, so
     // the comparison is run at BOTH -- the reference spacing and a denser one --
     // rather than at a round number reached by tuning the detector until it
@@ -689,7 +689,7 @@ int main(int argc, char** argv) {
                                       " cleared"));
             return c;
         };
-        roleRow("at the reference frontend's own corner spacing (minDistance 33.33)",
+        roleRow("at the reference pipeline's own corner spacing (minDistance 33.33)",
                 res.prevXY.data(), sparseCount);
         std::printf("\n");
         roleRow("at a denser corner spacing (minDistance 6 px). NOTE: the design\n   names 200 keypoints as the operating point; this real frame yields\n   fewer at every spacing the detector will give, so the row states the\n   count it measured rather than the count that was planned",
@@ -875,7 +875,7 @@ int main(int argc, char** argv) {
         std::printf("   THE HONEST WEAKNESS, because it is most of the number: binCV\n"
                     "   STORES the ternary derivative planes where cv::cuda recomputes\n"
                     "   derivatives inside its kernel from the image it has already\n"
-                    "   bound. In a real frontend those planes are not waste -- the\n"
+                    "   bound. In a real pipeline those planes are not waste -- the\n"
                     "   corner detector reads the same ones -- so storing them is a\n"
                     "   PIPELINE decision, not a tracker one. A tracker-only comparison\n"
                     "   has to say it.\n");

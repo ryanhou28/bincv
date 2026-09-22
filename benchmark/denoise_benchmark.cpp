@@ -1,10 +1,10 @@
 // denoise -- the reference pipeline's three-pixel median -- against OpenCV,
 // and against binCV's own composed spelling.
 //
-// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that denominator is not a judgement call -- it is
-// the reference frontend's denoiser, `three_pix_median_filter`, ported
+// the reference pipeline's denoiser, `three_pix_median_filter`, ported
 // call for call, because that IS what the pipeline runs today without binCV.
 // The two `cv::Mat::zeros` neighbour matrices and the two range-limited copyTo
 // calls are part of the work, not setup: they are how that implementation
@@ -67,7 +67,7 @@
 // ---------------------------------------------------------------------------
 // WHERE THIS IS AUTHORITATIVE
 //
-// On x86_64 it is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms"). The
+// On x86_64 it is INDICATIVE ONLY -- a desktop host's spread decides nothing. The
 // numbers that belong in a claim come from the reference device:
 //
 // BINCV_PI_OPENCV=1./scripts/run_on_pi.sh <target>
@@ -114,7 +114,7 @@ uint64_t nextRandom(uint64_t& state) {
 /// @brief One image in every representation under test, from ONE draw per pixel.
 /// @note The packed matrices and the CV_8U mask are not merely statistically
 /// similar -- they are the same picture, which is what makes the comparison
-/// like for like (the design notes: the same binary content).
+/// like for like: the same binary content.
 struct Image {
     bincv::BinMat<uint32_t> packed32;
     bincv::BinMat<uint64_t> packed64;
@@ -143,7 +143,7 @@ void makeImage(Image& out, int width, int height, uint64_t seed) {
 // The denominator: the reference implementation, ported call for call
 // ---------------------------------------------------------------------------
 
-/// @brief The reference frontend's three-pixel median, in two spellings: the denominator, and
+/// @brief The reference pipeline's three-pixel median, in two spellings: the denominator, and
 /// the reference exactly as written.
 /// @note WHAT IS HOISTED, PRECISELY. The reference constructs SEVEN cv::Mats per
 /// call with `cv::Mat::zeros`, i.e. seven allocations and six zero-fills
@@ -560,7 +560,7 @@ int main() {
     std::printf("================================================================================\n\n");
     std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n\n",
                 CV_VERSION, cv::getNumThreads());
-    std::printf("DENOMINATOR (ARCHITECTURE 10.3): the reference frontend's three-pixel median on the SAME\n");
+    std::printf("DENOMINATOR: the reference pipeline's three-pixel median on the SAME\n");
     std::printf("binary content stored as CV_8U -- cv::min/cv::max over two zero-filled\n");
     std::printf("neighbour matrices, ported call for call. That is what the pipeline runs\n");
     std::printf("today without binCV.\n\n");
@@ -575,7 +575,7 @@ int main() {
     std::printf("The checksum column folds EVERY destination pixel and is representation-\n");
     std::printf("independent, so all rows of a size must print the same value.\n\n");
     std::printf("Working set is one call's live buffers, not a per-buffer ratio (CLAUDE.md,\n");
-    std::printf("ARCHITECTURE 10.4).\n");
+    std::printf("peak).\n");
 
     measureCallFloors();
 

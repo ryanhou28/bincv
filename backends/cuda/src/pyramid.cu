@@ -309,7 +309,7 @@ cudaError_t launchSliced(DevicePlaneBlockConstView src, DevicePlaneBlockView dst
     return cudaGetLastError();
 }
 
-/// The bounded instantiation set: the frontend ladder's own steps, the
+/// The bounded instantiation set: the pipeline ladder's own steps, the
 /// identities, and the 8->8 case. Sixty-four kernels for the other pairs is
 /// code size for nothing, and a pair outside the set is not silently slower --
 /// pyrFastArmCovers() reports it and the benchmark's gate-excluded row reads

@@ -8,7 +8,7 @@
 // of traffic against this platform's launch floor, so every shape of it is the
 // same measurement. What DOES need proving -- that keeping the conversion on
 // the device is worth a launch -- is a property of the PIPELINE, not of this
-// kernel, and the resident frontend example carries both arms of it: the
+// kernel, and the resident pipeline example carries both arms of it: the
 // device conversion against the download-convert-upload round trip it replaces.
 
 #include "bincv/cuda/keypoints.hpp"

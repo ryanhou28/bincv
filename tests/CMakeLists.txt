@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Test backend (T1.7)
+# Test backend
 #
 # Google Test is used wherever it can be obtained, EXCEPT in the configuration
 # whose whole claim is that binCV needs nothing but a C++17 compiler: core-only,
@@ -7,8 +7,8 @@
 # tests/test_util.hpp stays the backend. Both run the same case bodies through
 # the same check macros -- see the header for the full argument.
 #
-# NOT because GTest cannot compile there. TASKS.md T1.7 says "GTest needs
-# exceptions"; measured, that is wrong -- googletest v1.14.0 builds from source
+# NOT because GTest cannot compile there. The assumption going in was that GTest
+# needs exceptions; measured, that is wrong -- googletest v1.14.0 builds from source
 # under -fno-exceptions, runs, and reports failures correctly, EXPECT_DEATH
 # included. `-DBINCV_USE_GTEST=ON` therefore works in that configuration too and
 # is supported. The default declines it for a different reason: the embedded gate
@@ -102,8 +102,8 @@ endfunction()
 
 # Core tests: must build and run without OpenCV.
 #
-# test_logic (T2.2), test_shift (T2.3/T2.4), test_reduce (T2.5/T2.6) and
-# test_bitslice (T2.7) are core tests even though part of each is a comparison
+# test_logic, test_shift, test_reduce and
+# test_bitslice are core tests even though part of each is a comparison
 # against OpenCV -- cv::bitwise_* for the first, cv::borderInterpolate and
 # cv::copyMakeBorder for the second, cv::countNonZero for the third, and the
 # reference pipeline's cv::min/cv::max median for the fourth. That part sits
@@ -112,15 +112,15 @@ endfunction()
 # OpenCV -- including the Debug one, which is the only place their BINCV_ASSERT
 # preconditions are live.
 #
-# test_bitslice is core for a second reason: T2.7's word-level primitives have no
-# OpenCV counterpart at all (bit-sliced arithmetic is Tier 3, ARCHITECTURE 5.1),
+# test_bitslice is core for a second reason: its word-level primitives have no
+# OpenCV counterpart at all (bit-sliced arithmetic is Tier 3, ARCHITECTURE 5),
 # so the exhaustive pattern enumeration that proves them is the ONLY thing
 # standing behind maj3, bitSlicedSum and thresholdGE -- and it has to run in the
 # configuration the embedded claim rests on.
 #
-# test_denoise (T3.1) and test_threshold (T3.2) are core for the same reason and
+# test_denoise and test_threshold are core for the same reason and
 # with one addition. test_denoise's OpenCV half PORTS the reference pipeline's own
-# cv::min/cv::max median, which is the correctness bar T3.1 is written against;
+# cv::min/cv::max median, which is the correctness bar denoise is written against;
 # its core half carries the per-pixel neighbourhood reference, the zero-border
 # cases and the fused-equals-composed check, all of which have to run where the
 # embedded claim does. test_threshold is split by TIER rather than by
@@ -128,7 +128,7 @@ endfunction()
 # (CV_8U -> 1 bit) is Tier 1 and needs cv::threshold, so half the file is behind
 # the guard and half is not.
 #
-# test_morphology (T3.3) is core for the same reason and carries one thing the
+# test_morphology is core for the same reason and carries one thing the
 # others do not: BORDER_WRAP. cv::morphologyEx REFUSES that border type -- it is
 # an OpenCV assertion, not an omission -- so there is no Tier 1 denominator for
 # it at all, and the only thing standing behind binCV's wrapped morphology is
@@ -136,24 +136,24 @@ endfunction()
 # border mapping, plus agreement with ops/shift.hpp for a one-cell element).
 # That coverage would vanish if the suite were OpenCV-only.
 #
-# test_resample (E-8 / X-14) is core for the third reason and the strongest one:
+# test_resample is core for the third reason and the strongest one:
 # horizontal decimation has no OpenCV counterpart at all -- cv::resize resamples
 # both axes on a byte image and rounds rather than keeping the even columns -- so
 # there is no Tier 1 denominator, and this suite is the ONLY thing standing behind
-# the primitive T3.4's pyramid is built on.
-# test_pyramid (T3.4) is core for the same reason once more, and for a fourth
-# that is specific to it: pyrDown is TIER 2 (ARCHITECTURE 5.1) -- cv::pyrDown's
+# the primitive the pyramid is built on.
+# test_pyramid is core for the same reason once more, and for a fourth
+# that is specific to it: pyrDown is TIER 2 (ARCHITECTURE 5) -- cv::pyrDown's
 # name and role with deliberately different numerics -- so there is no
 # bit-exactness promise anywhere in it and no Tier 1 denominator at all. What
 # stands behind it is a per-pixel reference, an enumeration of the requantizer's
-# entire input space, and agreement with the EXPONENTIAL formulation T3.4
+# entire input space, and agreement with the EXPONENTIAL formulation pyrDown
 # replaced (impl::boxSum4Replicated, ops/bitslice.hpp's single-bit adder at
 # k = 4*(2^NIn - 1)). None of those needs OpenCV, and all of them have to run
 # where the embedded claim does -- including Debug, the only configuration in
 # which pyrDown's BINCV_ASSERT preconditions are live. Its OpenCV half is one
 # suite: binCV at NOut = 8 against the reference pipeline's own BOX_2x2 path, and
 # the phase deviation that path's default anchor introduces.
-# test_derivative (T3.5) is core for the same reasons and for one more. The
+# test_derivative is core for the same reasons and for one more. The
 # binarized derivative is TIER 3 -- OpenCV has no operation with these semantics
 # (see ops/derivative.hpp) -- so there is no bit-exactness promise to a cv:: call
 # and no Tier 1 denominator. What stands behind it is a per-pixel reference over
@@ -166,7 +166,7 @@ endfunction()
 # reference pipeline's own calcBinarizedDeriv, ported call for call, plus the two
 # probes that pin cv::filter2D's correlation direction and default border --
 # the two properties this operation would otherwise differ on silently.
-# test_covariance (T3.6) is core for the strongest version of the same reason.
+# test_covariance is core for the strongest version of the same reason.
 # The LK gradient covariance is TIER 3 -- cv:: has no operation with these
 # semantics (cornerEigenValsAndVecs computes something else, from byte images,
 # with a Sobel and a box filter) -- so there is no bit-exactness promise to a cv::
@@ -174,16 +174,16 @@ endfunction()
 # per-pixel FLOAT oracle written before the kernel, swept at every window position
 # from a full window outside each edge to a full window past it, at W = 7, 15 and
 # 31, over four independently built frames per word type. And what it is proving is
-# not one operation's arithmetic but ARCHITECTURE 7.5 -- the claim that the whole
+# not one operation's arithmetic but the covariance identity -- the claim that the whole
 # 2x2 covariance reduces to masked population counts, which is the project's
 # central technical claim. That has to be checked where the embedded claim runs:
 # core-only, -fno-exceptions, and Debug, the only configuration in which the
 # reduction's BINCV_ASSERT preconditions are live. It also counts `operator new`
-# across the calls, which is what keeps D-15's axis-3 trade honest -- the
+# across the calls, which is what keeps the no-scratch trade honest -- the
 # four-argument selector form was taken over the 11-14% FASTER plane form purely
 # because it needs no scratch, and an implementation that allocated would pass
 # every value check in the file.
-# test_corner (T3.7) is core, and for a reason none of the suites above has. The
+# test_corner is core, and for a reason none of the suites above has. The
 # corner response is API TIER 2 -- `cv::goodFeaturesToTrack`'s role with the
 # reference pipeline's BINARIZED derivatives -- so there is no bit-exactness
 # promise to a cv:: call, and `cv::cornerMinEigenVal` works in float over float
@@ -193,14 +193,14 @@ endfunction()
 # (zero response iff singular matrix; an exact half-integer wherever the
 # discriminant is a perfect square), a literal port of gftt.cpp's selection
 # including the dilate buffer and the cell grid, and a hand-built map that pins
-# the ORDER of NMS and the spacing filter. It also carries the check that D-19's
-# reasoning holds: BORDER_REFLECT_101 must give no border ring and BORDER_CONSTANT
+# the ORDER of NMS and the spacing filter. It also carries the check that the
+# border reasoning holds: BORDER_REFLECT_101 must give no border ring and BORDER_CONSTANT
 # must give one. None of that needs OpenCV, all of it has to run where the
 # embedded claim does -- including Debug, the only configuration in which the
 # kernels' BINCV_ASSERT preconditions are live -- and it counts `operator new`,
 # because replacing the reference's unbounded candidate vector and its grid with
 # the caller's own array is the whole no-heap claim.
-# test_opticalflow (T3.8) is core, and it is the suite with the least excuse to
+# test_opticalflow is core, and it is the suite with the least excuse to
 # be anywhere else. The tracker is API TIER 2 -- cv::calcOpticalFlowPyrLK's role
 # over 1-bit content, with the previous window anchored on the integer grid --
 # so there is no cv:: call to be exact against and no Tier 1 denominator. What
@@ -217,8 +217,8 @@ endfunction()
 # `operator new` -- the tracker takes no scratch buffer AT ALL, where the
 # reference copies the warped patch and its derivative into a winSize.area()*3
 # AutoBuffer, so an implementation that allocated would pass every value check in
-# the file. And it carries the frontend FOOTPRINT table, which is the number
-# Phase 4 needs; it is a test rather than a benchmark because the thing it pins --
+# the file. And it carries the tracking pipeline's FOOTPRINT table, which the
+# memory claim rests on; it is a test rather than a benchmark because the thing it pins --
 # which stage dominates -- is a structural property that must fail loudly when it
 # changes, not a timing that is allowed to drift.
 # test_sequence is core for the most literal version of the pack/pnm reason: the
@@ -240,7 +240,7 @@ set(BINCV_CORE_TESTS test_binMat test_quantMat test_storage test_error test_erro
 # Tests that require OpenCV interop.
 set(BINCV_OPENCV_TESTS test_opencv_interop)
 
-# T5.1: the pool is NOT part of bincv_core -- core is allocation-free and builds
+# The pool is NOT part of bincv_core -- core is allocation-free and builds
 # -fno-exceptions, and std::thread is usable under neither. So this test needs a
 # hosted toolchain and Threads, and the three core-only configurations exercise the
 # SERIAL default instead, which is what an embedded target actually gets.
@@ -255,7 +255,7 @@ foreach(TEST_NAME ${BINCV_CORE_TESTS})
 endforeach()
 
 # ---------------------------------------------------------------------------
-# A translation unit that MUST NOT COMPILE (T3.10 triage)
+# A translation unit that MUST NOT COMPILE
 #
 # The plane-ARRAY overload of gradientCovariance() is templated on the plane count
 # and shipped without a bound on it, so a hand-assembled 33-plane view array reached
@@ -283,8 +283,8 @@ set_tests_properties(test_covariance_n_bound PROPERTIES WILL_FAIL TRUE)
 # ---------------------------------------------------------------------------
 # The harness's own regression check
 #
-# T1.7 asks that a deliberately failing assertion still produce a non-zero exit
-# code. Asking is not verifying, so it is a test: the same source is built twice,
+# A deliberately failing assertion must still produce a non-zero exit
+# code. Requiring that is not verifying it, so it is a test: the same source is built twice,
 # once ordinary and once with a case that fails on purpose, and the second is
 # registered WILL_FAIL so ctest passes only when it exits non-zero. Both are
 # built in every configuration, which is what checks BOTH backends.
@@ -310,7 +310,7 @@ set_tests_properties(test_harness_failing PROPERTIES WILL_FAIL TRUE)
 # cover the exceptions and the no-exceptions builds: with exceptions the runtime
 # prints what() while terminating, without them BINCV_THROW prints it itself.
 #
-# Deliberately NOT ported to GTest's EXPECT_DEATH by T1.7. EXPECT_DEATH exists in
+# Deliberately NOT ported to GTest's EXPECT_DEATH. EXPECT_DEATH exists in
 # every configuration binCV builds (verified, -fno-exceptions included), but it
 # works by forking the test process and re-running it, which is materially more
 # fragile under the QEMU user-mode emulation scripts/verify_cross.sh runs in than
@@ -361,7 +361,7 @@ bincv_add_death_test(test_error_abort wrap-null-pointer
 bincv_add_death_test(test_error_abort quant-height-overflow
                      "height x N planes does not fit in an int")
 
-# Plane indices (T1.5/T1.6). Validation rather than element access, so these are
+# Plane indices. Validation rather than element access, so these are
 # live in Release too -- which is the whole point: unchecked, plane(N) handed out
 # a writable view of the next allocation, and magnitude(N) handed back the sign
 # plane. One case per overload, mutable and const, on all three spellings of the
@@ -401,8 +401,8 @@ endif()
 # --- BINCV_ASSERT: the debug-checked preconditions --------------------------
 #
 # This binary forces BINCV_DEBUG_CHECKS on from inside the source (#undef NDEBUG),
-# so these run in all configurations rather than only in the Debug build. Since
-# T1.8 there IS a Debug configuration in the verification set, which compiles the
+# so these run in all configurations rather than only in the Debug build. There
+# IS a Debug configuration in the verification set now, which compiles the
 # same assertions the ordinary way; these cases remain the coverage for the three
 # Release configurations, where NDEBUG would otherwise delete them.
 add_executable(test_assert_abort test_assert_abort.cpp)
@@ -434,7 +434,7 @@ bincv_add_death_test(test_assert_abort view-stride
 bincv_add_death_test(test_assert_abort const-view-stride
                      "BinMatConstView: multi-row view needs a non-zero stride")
 
-# T2.2 kernel preconditions. A kernel never throws (ARCHITECTURE 5.3), so these
+# Logic kernel preconditions. A kernel never throws (ARCHITECTURE 6), so these
 # are the only place the logic kernels' argument checking can be observed
 # failing -- and the alias case is a defect no sanitizer can see, since every
 # address involved is valid memory and only the answer is wrong.
@@ -447,7 +447,7 @@ bincv_add_death_test(test_assert_abort logic-alias
 bincv_add_death_test(test_assert_abort logic-short-stride
                      "every view's stride must cover a whole row")
 
-# T2.3/T2.4 shift preconditions. The overlap case is the one that differs from
+# Shift preconditions. The overlap case is the one that differs from
 # the logic kernels and is the reason it gets its own case rather than being
 # assumed covered by logic-alias: a shift is NOT pointwise in the word index, so
 # the in-place spelling ops/logic.hpp supports is undefined here, and the two
@@ -465,8 +465,8 @@ bincv_add_death_test(test_assert_abort shift-short-stride
 bincv_add_death_test(test_assert_abort shift-border-type
                      "shift: unknown BorderType")
 
-# T2.5/T2.6 reduction preconditions. There is deliberately NO alias case: a
-# reduction reads only, so D-11 does not bind it and every overlap -- including
+# Reduction preconditions. There is deliberately NO alias case: a
+# reduction reads only, so the aliasing rule does not bind it and every overlap -- including
 # countAndSplit(m, m, m, r), which is how a caller asks "how many pixels are set"
 # through the split -- is legal. The two that remain are dimensions and stride,
 # and the dimension check has one case per entry point because countAnd compares
@@ -477,7 +477,7 @@ bincv_add_death_test(test_assert_abort reduce-dims
                      "reduce: masked reductions need views of the same size")
 bincv_add_death_test(test_assert_abort reduce-split-dims
                      "reduce: masked reductions need views of the same size")
-# T2.11 added a FOURTH view (c1) and two more entry points. Each carries its own
+# A later round added a FOURTH view (c1) and two more entry points. Each carries its own
 # copy of the dimension assert, so each is its own deletion -- and a deletion no
 # in-process suite can see: measured, removing c1's half from BOTH four-argument
 # overloads left all four configurations green with byte-identical CHECKS
@@ -502,7 +502,7 @@ bincv_add_death_test(test_assert_abort reduce-sliding-short-stride
 bincv_add_death_test(test_assert_abort reduce-empty-extent
                      "reduce: regionFromExtent needs a non-empty extent")
 
-# T2.7 bit-sliced preconditions. `bitslice-dims` is not a duplicate of logic-dims:
+# Bit-sliced preconditions. `bitslice-dims` is not a duplicate of logic-dims:
 # majority3 compares THREE sources, and a dimension check that forgot the third
 # left all 348061 of test_bitslice's checks green in every configuration when it
 # was deleted. `bitslice-sum-overlap` is the only precondition in the project
@@ -518,7 +518,7 @@ bincv_add_death_test(test_assert_abort bitslice-short-stride
 bincv_add_death_test(test_assert_abort bitslice-sum-overlap
                      "bitSlicedSum: outPlanes must not overlap inputs")
 
-# T3.1 denoise preconditions. `denoise-in-place` is the one that is NOT covered by
+# Denoise preconditions. `denoise-in-place` is the one that is NOT covered by
 # any case above, and it is the reason denoiseMedian3 takes viewsShareNoWord
 # rather than destinationAliasIsSafe: destination row y reads SOURCE ROW y - 1, so
 # the in-place spelling ops/logic.hpp supports would feed the filter its own
@@ -532,10 +532,10 @@ bincv_add_death_test(test_assert_abort denoise-in-place
 bincv_add_death_test(test_assert_abort denoise-short-stride
                      "denoiseMedian3: every view's stride must cover a whole row")
 
-# T3.2 binarize preconditions. `binarize-dims` is a PER-PLANE check -- the loop
+# Binarize preconditions. `binarize-dims` is a PER-PLANE check -- the loop
 # compares every one of the N planes against dst, so a check that only looked at
 # plane 0 would read planes 1..N-1 at plane 0's geometry, off the end of a shorter
-# buffer, and an N-bit source arrives as N separate views under D-5.
+# buffer, and an N-bit source arrives as N separate views.
 # `binarize-alias` is the exact-alias case ops/logic.hpp permits and this kernel
 # does not: plane p is read at word i AFTER dst's word i has been written for the
 # lower planes, so writing into a source plane corrupts values still to be read.
@@ -546,11 +546,11 @@ bincv_add_death_test(test_assert_abort binarize-alias
 bincv_add_death_test(test_assert_abort binarize-short-stride
                      "binarize: every view's stride must cover a whole row")
 
-# T3.3 morphology preconditions. TWO OF THESE HAVE NO ANALOGUE ANYWHERE ELSE IN
+# Morphology preconditions. TWO OF THESE HAVE NO ANALOGUE ANYWHERE ELSE IN
 # THE PROJECT, which is why the list is longer than denoise's or binarize's:
 #
-#   `morphex-scratch-size` / `morphex-scratch-overlap` are the D-16 SCRATCH
-#   CONTRACT, and morphologyEx is the only kernel in binCV that takes a
+#   `morphex-scratch-size` / `morphex-scratch-overlap` are the CALLER-PROVIDED
+#   SCRATCH CONTRACT, and morphologyEx is the only kernel in binCV that takes a
 #   caller-provided intermediate. An undersized scratch is not a wrong answer but
 #   an overrun of the caller's array -- OPEN erodes into every word of scratch and
 #   then reads every word back -- and a scratch aliasing dst makes the second step
@@ -584,15 +584,15 @@ bincv_add_death_test(test_assert_abort morphex-scratch-size
 bincv_add_death_test(test_assert_abort morphex-scratch-overlap
                      "morphologyEx: scratch must share no word with src or dst")
 
-# T3.5 derivative preconditions. TWO OF THESE ARE A CLASS NO OTHER KERNEL HAS,
-# and it is the class T3.5 was set to discover: the derivative is the first
+# Derivative preconditions. TWO OF THESE ARE A CLASS NO OTHER KERNEL HAS,
+# and it is the class the derivative was set to discover: the derivative is the first
 # operation with a MULTI-PLANE destination, so "no aliasing" stops meaning
 # src-versus-dst alone and starts meaning DESTINATION-VERSUS-DESTINATION as well.
 #
 #   `derivative-sign-alias` is the one that matters most. A sign plane sharing
 #   words with a magnitude plane compiles, runs, and leaves pixels at magnitude 0
 #   with the sign bit SET -- SignedQuantMat's canonical-zero rule broken, which
-#   corrupts T3.6's sumXY while leaving sumXX and sumYY exactly right. Every
+#   corrupts the covariance's sumXY while leaving sumXX and sumYY exactly right. Every
 #   magnitude-only test passes over it.
 #   `derivative-mag-alias` is the N > 1 half of the same class: the ripple writes
 #   magnitude plane p and reads it back in the conditional negate.
@@ -622,8 +622,8 @@ bincv_add_death_test(test_assert_abort derivative-mag-alias
 bincv_add_death_test(test_assert_abort derivative-border-type
                      "derivative: unknown BorderType")
 
-# The tracker's destination-aliasing predicate (T3.8). Its destination is an array
-# of points rather than a view, which is why it fell outside the D-11 pattern every
+# The tracker's destination-aliasing predicate. Its destination is an array
+# of points rather than a view, which is why it fell outside the aliasing pattern every
 # other kernel follows and why it had no check at all until a review found it: an
 # in-place call returned status 1 for every point and answers up to 23 px wrong, in
 # the Debug build, with no diagnostic.
@@ -640,7 +640,7 @@ if(BINCV_OPENCV_FOUND)
     endforeach()
 
     # -----------------------------------------------------------------------
-    # Equivalence harness (T2.1)
+    # Equivalence harness
     #
     # Needs cv::Mat, so it is an OpenCV test. It does no image I/O, so unlike the
     # suites above it does not link bincv_support and does not need a working
@@ -651,11 +651,12 @@ if(BINCV_OPENCV_FOUND)
 
     # --- the harness's own regression check --------------------------------
     #
-    # T2.1: "a harness that passes everything is worse than no harness, because
-    # it licenses every kernel built on it." The same source is rebuilt once per
-    # deliberate conversion fault and registered WILL_FAIL, so ctest passes only
-    # when the harness REPORTS the fault. Same shape as test_harness_failing
-    # above, and for the same reason: asking for a property is not verifying it.
+    # The harness's own rule: "a harness that passes everything is worse than no
+    # harness, because it licenses every kernel built on it." The same source is
+    # rebuilt once per deliberate conversion fault and registered WILL_FAIL, so
+    # ctest passes only when the harness REPORTS the fault. Same shape as
+    # test_harness_failing above, and for the same reason: asking for a property is
+    # not verifying it.
     #
     # Measured, with each fault compiled in (checks passed, of 9922):
     #   1 column off-by-one       8405 -- PackingAnchor and Transpose go red
@@ -694,7 +695,7 @@ if(BINCV_OPENCV_FOUND)
     bincv_add_faulted_equivalence_test(dirty_padding        4)
 
     # -----------------------------------------------------------------------
-    # The same proof for the suite that CONSUMES the harness (T2.2)
+    # The same proof for the suite that CONSUMES the harness
     #
     # test_equivalence going red under a fault says the harness can detect one.
     # It says nothing about whether a kernel suite built on the harness can, and

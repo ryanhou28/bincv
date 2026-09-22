@@ -145,7 +145,7 @@ BINCV_TEST(Fast, DetectionsMatchCvFast) {
 #endif
 
 // ---------------------------------------------------------------------------
-// earlier work: THE BIT-PLANE OVERLOAD, WHICH IS FAST ON binCV'S OWN TYPE.
+// THE BIT-PLANE OVERLOAD, WHICH IS FAST ON binCV'S OWN TYPE.
 //
 // THE EQUIVALENCE THIS RESTS ON. For binary content stored as CV_8U in {0, 255},
 // `cv::FAST` at ANY threshold in [1, 254] accepts exactly the corners the bit-plane

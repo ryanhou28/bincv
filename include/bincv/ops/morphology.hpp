@@ -3,7 +3,7 @@
 /// @file morphology.hpp
 /// @brief erode / dilate / morphologyEx on bit-packed binary frames.
 ///
-/// **API TIER 1** (the design notes): every entry point here is bit-exact
+/// **API TIER 1**: every entry point here is bit-exact
 /// against `cv::erode`, `cv::dilate` and `cv::morphologyEx` on the same binary
 /// content stored as `CV_8U` -- interior, edge and corner alike, for every
 /// `BorderType` and every structuring element this file can express.
@@ -122,7 +122,7 @@
 /// `iterations`. `cv::erode(..., iterations = n)` is `n` sequential erosions, and
 /// n > 1 needs a second buffer to ping-pong through. A caller that wants it can
 /// write the loop with the scratch it already owns, and the MVP's pipeline does
-/// not (the reference frontend uses single-pass 3x3 morphology). Adding a parameter that silently
+/// not (the reference pipeline uses single-pass 3x3 morphology). Adding a parameter that silently
 /// requires more memory than the signature shows would be the wrong default for
 /// this project.
 ///
@@ -359,7 +359,7 @@ template <bool IsErode, typename WordType>
 struct MorphFold {
     /// @note The outer static_cast is not decoration: at uint8_t and uint16_t both
     /// arms of the conditional are promoted to int, and returning that int
-    /// is exactly the narrowing -Wconversion is on to catch ( compiles
+    /// is exactly the narrowing -Wconversion is on to catch (the gate compiles
     /// every kernel at all four widths).
     static WordType identity() {
         return static_cast<WordType>(IsErode ? static_cast<WordType>(~static_cast<WordType>(0))
@@ -487,7 +487,7 @@ inline void morphFixupPixel(BinMatConstView<WordType> src, WordType* dstRow, siz
 /// -- 2 of 640 for a 3x3 element -- and an `if (interior) continue;` inside
 /// a `for (c = 0; c < width; ++c)` still pays `width` iterations to do it.
 /// Measured on x86 at 640x480, `uint64_t`, `rect3x3`, best of 5 x 200
-/// calls (indicative only -- see EXPERIMENTS.md on measurement platforms):
+/// calls (indicative only -- a desktop host does not decide a ratio here):
 /// the skipping form ran 19.5 us under BORDER_CONSTANT, which never calls
 /// this, against 241-260 us under the other four. The fixup cost 12x the
 /// entire word path to rewrite 960 of 307200 pixels, and made binCV 6-10x
@@ -652,7 +652,7 @@ inline void morphRowGeneric(BinMatConstView<WordType> src, WordType* dstRow, siz
 /// At 640x480 the general path costs 2.12x (rect3x3 erode, `uint32_t`),
 /// 3.17x (rect3x3 dilate), 2.47x / 3.69x at `uint64_t`, and 2.78x-3.67x for
 /// cross3x3; across the whole pyramid ladder the range is 2.1x-3.7x, at
-/// batch spreads under 4%. That is the number a Phase 5 reader deciding
+/// batch spreads under 4%. That is the number a reader deciding
 /// whether to vectorize one path or both should start from, and it is why
 /// the duplicated code stays.
 /// @note Driven by the element's own cells, so it serves rect, cross, ellipse and
@@ -790,7 +790,7 @@ inline bool morphArgumentsAreSane(BinMatConstView<WordType> src, BinMatView<Word
 }  // namespace impl
 
 // ---------------------------------------------------------------------------
-// The kernels ( views, never containers)
+// The kernels (views, never containers)
 // ---------------------------------------------------------------------------
 
 /// @brief Morphological erosion: `dst(x,y) = AND over the element of src(x+dx, y+dy)`.
@@ -820,7 +820,7 @@ inline bool morphArgumentsAreSane(BinMatConstView<WordType> src, BinMatView<Word
 /// past `width` are CLEARED: padding in the usual case, and a wider parent's
 /// next 1..WordBits-1 live pixels when `dst` is a sub-width window onto one.
 /// Nothing diagnoses that -- every address written is inside the parent.
-/// @note Never throws and never allocates (the design notes). Mismatched
+/// @note Never throws and never allocates. Mismatched
 /// dimensions, a stride shorter than a row, an unknown `BorderType`, an
 /// invalid element, and any overlap between src and dst are programming
 /// errors: `BINCV_ASSERT` reports them in debug builds and they are
@@ -908,7 +908,7 @@ inline bool morphologyExNeedsScratch(MorphOp op) {
 /// cleared -- a wider parent's live pixels when either is a sub-width window
 /// onto one, and undiagnosable.
 /// @note Never throws and never allocates. Every precondition above is a
-/// `BINCV_ASSERT` (the design notes).
+/// `BINCV_ASSERT`.
 template <typename WordType>
 inline void morphologyEx(BinMatConstView<WordType> src, BinMatView<WordType> dst, MorphOp op,
                          const StructuringElement& element, BinMatView<WordType> scratch,

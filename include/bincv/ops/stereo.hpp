@@ -7,7 +7,7 @@
 /// ---------------------------------------------------------------------------
 /// WHAT THIS IS
 ///
-/// A stereo frontend turns a left keypoint into a depth by finding it in the
+/// A stereo pipeline turns a left keypoint into a depth by finding it in the
 /// right image. On a RECTIFIED pair that search is one-dimensional -- same row,
 /// disparity in a known range -- and both stages of the standard method are
 /// operations this library is built from:
@@ -30,7 +30,7 @@
 /// search has no OpenCV equivalent and borrows no OpenCV name.
 ///
 /// The two stages are separate entry points because they have separate callers:
-/// a frontend with descriptors runs both; a caller with an initial disparity
+/// a pipeline with descriptors runs both; a caller with an initial disparity
 /// from anywhere else (a projection of a map point, a previous frame) fills
 /// `StereoMatch::disparity` itself and runs refinement alone.
 ///
@@ -117,7 +117,7 @@ struct StereoMatch {
 /// @param out One `StereoMatch` per LEFT keypoint, every entry written.
 /// @note Brute force over the right set per left keypoint -- O(L * R) distance
 /// tests, each gated by two float comparisons before any descriptor word is
-/// read. At frontend counts (hundreds against hundreds) the gate leaves a
+/// read. At pipeline counts (hundreds against hundreds) the gate leaves a
 /// few candidates per keypoint; a row-bucketed index would need scratch,
 /// and the no-scratch rule outranks a constant factor here until a profile
 /// says otherwise.

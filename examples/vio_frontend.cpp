@@ -1,8 +1,12 @@
 // ===========================================================================
 // A BINARY-FRAME VIO VISION FRONTEND, END TO END, ON binCV KERNELS.
 //
-// T4.3b asked whether binCV's kernel set is SUFFICIENT for a real VIO frontend.
-// Every prior end-to-end measurement in this project runs a
+// A VIO *frontend* is the image-processing half of a visual-inertial odometry
+// system -- sensor stage, pyramid, detection, tracking, track lifecycle -- the
+// part that turns camera frames into feature tracks for the estimator behind it.
+//
+// This example asks whether binCV's kernel set is SUFFICIENT for a real VIO
+// frontend. Every prior end-to-end measurement in this project runs a
 // benchmark loop: detect wholesale every N frames, track, compare. A real
 // frontend does something structurally different, and this is that loop --
 // modelled on HybVIO's, which is what the reference pipeline drives:
@@ -87,7 +91,7 @@ namespace {
 // `medianWide` with the reference's L neighbourhood, then `edgeThreshold`,
 // whose no-argument defaults ARE the reference's operation (ops/edge.hpp) --
 // straight from the gray buffer into bit-planes, no 8-bit edge image at any
-// point. benchmark/frontend_sequence.cpp holds this spelling bit-identical to
+// point. benchmark/feature_tracking_sequence.cpp holds this spelling bit-identical to
 // the reference pipeline every frame, so this example adds no new claim. It is
 // what the CORE-ONLY build runs, because it is what an embedded caller runs:
 // nothing upstream of it but the sensor buffer.
@@ -139,7 +143,7 @@ struct Track {
 /// detection's corners against EACH OTHER, which is `cv::goodFeaturesToTrack`'s job and
 /// all of it, and the previous frame's tracks are not among its inputs. Every user of
 /// this library wrote this loop. `bincv::spaceCandidates` is now that operation, and
-/// a measurement measured it against a bit-plane alternative before choosing this shape.
+/// it was measured against a bit-plane alternative before choosing this shape.
 size_t spaceAgainstLive(std::vector<Point2f>& fresh, const std::vector<Track>& live, float r) {
     // The tracks' positions, contiguous -- the kernel takes a Point2f array, and a
     // vector of Track is not one. Kept across frames so the top-up allocates nothing.

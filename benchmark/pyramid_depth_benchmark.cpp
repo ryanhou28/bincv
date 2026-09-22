@@ -1,13 +1,13 @@
 // ===========================================================================
-// earlier work -- THE SPEED AXIS OF THE PYRAMID-DEPTH CHOICE.
+// THE SPEED AXIS OF THE PYRAMID-DEPTH CHOICE.
 //
-// that measurement’s accuracy and footprint axes are exact and device-independent and closed
+// The accuracy and footprint axes are exact and device-independent and closed
 // on the development machine. This is the third axis, and it is the reference
-// device's alone: that measurement’s caveat 1 measured the SAME kernel moving 1.46x between
+// device's alone: a caveat there measured the SAME kernel moving 1.46x between
 // two binaries built from unchanged source, so a ladder chosen on a laptop timing
 // would not survive contact with the device it has to run on.
 //
-// THE COST MODEL, WRITTEN OUT BEFORE MEASURING -- it is that measurement’s hypothesis 3,
+// THE COST MODEL, WRITTEN OUT BEFORE MEASURING -- it is hypothesis 3,
 // restated here as numbers so the measurement can contradict it.
 //
 // The two stages weight the levels OPPOSITELY, and that is the whole point:
@@ -34,7 +34,7 @@
 // 1/3/5/7 84 21.00x
 //
 // So the binding constraint on this is predicted to be TRACKER TIME, not
-// footprint, and 1/2/2/2 -- that measurement’s accuracy leader -- is predicted to cost 3.25x
+// footprint, and 1/2/2/2 -- the accuracy leader -- is predicted to cost 3.25x
 // the shipped ladder's tracking time for 1.16x its bytes. IF FOOTPRINT BINDS
 // FIRST, OR IF THE TRACK RATIOS COME IN FLAT, THE MODEL ABOVE IS WRONG AND THE
 // ENTRY MUST SAY SO RATHER THAN RE-FITTING.
@@ -283,17 +283,17 @@ void runAt(int w, int h, int step, int margin, int repeats, double targetMs) {
     // THE INTERMEDIATE LADDERS. named these and nobody had ever run
     // them, on either axis. They ask the question 1/2/2/2 answers by assertion:
     // does EVERY coarse level need two bits, or only the first one that is no
-    // longer binary? The deepening arms below answer the opposite direction and
-    // has already closed it -- BOX_2x2 is flat from N=2 to N=7 -- so these
+    // longer binary? The deepening arms below answer the opposite direction, and that
+    // direction is already closed -- BOX_2x2 is flat from N=2 to N=7 -- so these
     // are where the remaining uncertainty is.
     addArm<W, BOX2, 1, 2, 1, 1>(arms, keep, "1/2/1/1 b2", sumOfSquares({1, 2, 1, 1}), w, h, pts);
     addArm<W, BOX3, 1, 2, 1, 1>(arms, keep, "1/2/1/1 b3", sumOfSquares({1, 2, 1, 1}), w, h, pts);
     addArm<W, BOX2, 1, 2, 2, 1>(arms, keep, "1/2/2/1 b2", sumOfSquares({1, 2, 2, 1}), w, h, pts);
     addArm<W, BOX3, 1, 2, 2, 1>(arms, keep, "1/2/2/1 b3", sumOfSquares({1, 2, 2, 1}), w, h, pts);
     addArm<W, BOX2, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b2", sumOfSquares({1, 2, 2, 2}), w, h, pts);
-    // earlier work: the SAME ladder and filter at uint64_t. Every NEON path in the
+    // The SAME ladder and filter at uint64_t. Every NEON path in the
     // tracker is guarded on sizeof(WordType) == 4, so this arm runs LK fully
-    // scalar -- which is the cost the guards impose and the thing needs priced.
+    // scalar -- which is the cost the guards impose, and it needs pricing.
     addArm<uint64_t, BOX2, 1, 2, 2, 2>(arms, keep, "1/2/2/2 b2 u64",
                                        sumOfSquares({1, 2, 2, 2}), w, h, pts);
     addArm<uint64_t, BOX2, 1, 1, 1, 1>(arms, keep, "1/1/1/1 b2 u64",

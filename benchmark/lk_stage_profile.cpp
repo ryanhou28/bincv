@@ -9,11 +9,11 @@
 //
 // Nothing in this project has ever measured WHICH of the per-point stages that is --
 // staging, the covariance, the clip. Two guesses had already been made and measured at
-// 1.9% and 0.0%, which is what this benchmark is for. earlier work is the same lesson from
-// the frontend's side: `build` looked like one thing and decomposed into three, one of
+// 1.9% and 0.0%, which is what this benchmark is for. The same lesson turned up on
+// the pipeline's side: `build` looked like one thing and decomposed into three, one of
 // which was 3.6%.
 //
-// Same frontend, ladder and parameters as `frontend_sequence`, so the shares are the
+// Same pipeline, ladder and parameters as `feature_tracking_sequence`, so the shares are the
 // shipped tracker's and not a synthetic frame's.
 //
 // Usage: lk_stage_profile <frame-dir> [max-frames]
@@ -39,7 +39,7 @@ using W = uint32_t;
 
 namespace {
 
-// ---- frontend_sequence's preprocessing, verbatim -------------------------
+// ---- feature_tracking_sequence's preprocessing, verbatim -------------------------
 cv::Mat referenceDenoise(const cv::Mat& img) {
     cv::Mat right = cv::Mat::zeros(img.size(), img.type());
     cv::Mat above = cv::Mat::zeros(img.size(), img.type());
@@ -67,14 +67,14 @@ cv::Mat preprocess(const cv::Mat& gray, int thr) {
     return out;
 }
 
-struct Frontend {
+struct Pipeline {
     bincv::Pyramid<W, 1, 2, 2, 2> prev, next;
     bincv::SignedQuantMat<1, W> dx0, dy0;
     bincv::SignedQuantMat<2, W> dx1, dy1, dx2, dy2, dx3, dy3;
     bincv::LKLevels<W, 1, 2, 2, 2> levels;
     std::vector<float> ring;
 
-    Frontend(int w, int h)
+    Pipeline(int w, int h)
         : prev(w, h), next(w, h), dx0(w, h), dy0(w, h),
           dx1(w / 2 + (w & 1), h / 2 + (h & 1)), dy1(w / 2 + (w & 1), h / 2 + (h & 1)),
           dx2((w + 3) / 4, (h + 3) / 4), dy2((w + 3) / 4, (h + 3) / 4),
@@ -118,12 +118,12 @@ int main(int argc, char** argv) {
     const cv::Mat first = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
     const int w = first.cols, h = first.rows;
 
-    bincv::LKParams lk;                     // the reference frontend's parameters verbatim
+    bincv::LKParams lk;                     // the reference pipeline's parameters verbatim
     bincv::GoodFeaturesParams gftt;
     const int kMinTracks = 60;
     // (the ladder depth; the stage counters are per point-level, not per level)
 
-    // THE SCALAR PATH ON BOTH ARCHITECTURES, DELIBERATELY. x86 takes the design rule’s keypoint
+    // THE SCALAR PATH ON BOTH ARCHITECTURES, DELIBERATELY. x86 takes the keypoint
     // batch, which does not go through `trackOnePoint` and so records nothing -- and
     // the reference device has no batch at all. Profiling the same code both places is
     // what makes the two columns comparable, and the device column is the one this is
@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
     bincv::impl::lkBatchEnabled() = false;
 #endif
 
-    Frontend fe(w, h);
+    Pipeline fe(w, h);
     std::vector<bincv::Corner> corners(20000);
     std::vector<bincv::Point2f> pts;
 
@@ -192,7 +192,7 @@ int main(int argc, char** argv) {
     std::printf(" %-38s %10.3f ms\n", "TOTAL (instrumented)", total / 1e6);
     // How much of the iteration loop is TAP EXTRACTION rather than arithmetic. A window
     // is 31 rows, so `tapRows / iterations / 31` is the fraction of iterations that had
-    // to refresh their taps -- that measurement’s cache absorbing the rest.
+    // to refresh their taps -- the tap cache absorbing the rest.
     std::printf("\n residualSums calls per point-level %8.3f\n",
                 s.points ? static_cast<double>(s.iterations) / static_cast<double>(s.points) : 0.0);
     std::printf(" tap ROWS extracted per point-level %8.1f\n",

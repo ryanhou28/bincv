@@ -2,19 +2,19 @@
 //
 // WHY THIS MEASUREMENT IS A DELIVERABLE AND NOT AN AFTERTHOUGHT
 //
-// a measurement measured the hybrid LK tracker missing its accuracy tolerance on the
+// A measurement found the hybrid LK tracker missing its accuracy tolerance on the
 // reference pipeline's own edge-map content and separated the causes: on windows
 // that never clip, four 1-BIT pyramid levels are still ~600x worse than one,
 // because a level whose pixels are bits cannot localise sub-pixel motion better
-// than its own quantization. a measurement measured the levels needing 1/3/4/5 bits. So the
-// fix is N-bit levels, is the task that has to CHOOSE a bit depth per
-// level -- and a choice needs a price. This file is the price.
+// than its own quantization. The levels measured as needing 1/3/4/5 bits. So the
+// fix is N-bit levels, and choosing a bit depth per level is a choice that needs
+// a price. This file is the price.
 //
 // THE COST MODEL, WRITTEN OUT BEFORE MEASURING
 //
 // The covariance of two N-bit values is a sum over plane PAIRS, so it is quadratic
-// in N where that work’s derivative is linear (the design rule’s scope limit says exactly this, and
-// flagged it). Counting the popcounts ops/covariance.hpp issues per word:
+// in N where the derivative is linear, and ops/derivative.hpp says so at its own
+// definition. Counting the popcounts ops/covariance.hpp issues per word:
 //
 // N(N+1)/2 for sumXX (the diagonal is symmetric: upper triangle, doubled)
 // N(N+1)/2 for sumYY
@@ -60,7 +60,7 @@
 // difference is the accumulator and nothing else.
 //
 // It is here because the per-row split is a MEASURED decision taken
-// at N = 1 ( item 4; a measurement measured 1.08x at W=31 and a 5-6%
+// at N = 1 (measured 1.08x at W=31 and a 5-6%
 // loss at W=7) and its cost is O(N^2) PER ROW -- 4N^2 counters
 // zeroed and 4N^2 added, 128 operations per row at N = 4 -- while
 // the work it is amortized over is O(N^2) per WORD. A 31-pixel
@@ -181,7 +181,7 @@ constexpr double popcountsPerWord(size_t n) {
 
 /// @brief `kInputs` N-bit derivative pairs, and the plane-array views the
 /// entry point takes.
-/// @note The content comes from that work’s `derivativeX` / `derivativeY` over a random
+/// @note The content comes from `derivativeX` / `derivativeY` over a random
 /// `QuantMat<N>` level, which is what an N-bit pyramid level actually feeds
 /// the covariance. The kernels are content-independent -- every word in the
 /// window is loaded and counted whatever it holds -- so the fill ratio moves
@@ -516,7 +516,7 @@ int main() {
 #endif
     std::printf("%dx%d, %d keypoints, one window each -- the LK access pattern of\n", kWidth,
                 kHeight, kKeypoints);
-    std::printf("ARCHITECTURE 7.5. The cost model and the rule are in this file's header,\n");
+    std::printf("a tracker. The cost model and the rule are in this file's header,\n");
     std::printf("written before measuring. 'predicted' is (3N^2+N)/4, the popcount count\n");
     std::printf("per word; 'vs N=1' is measured against the BIT-SLICED N=1 arm, so the\n");
     std::printf("column is one kernel's curve in N and not a change of kernel.\n");

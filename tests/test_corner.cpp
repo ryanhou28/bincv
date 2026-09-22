@@ -39,7 +39,7 @@
 //
 // THE BORDER CHECK IS THE ONE THAT VERIFIES A DECISION RATHER THAN A KERNEL
 //
-// the design rule chose BORDER_REFLECT_101 for the derivative partly BECAUSE a zero fill
+// BORDER_REFLECT_101 was chosen for the derivative partly BECAUSE a zero fill
 // manufactures an edge around the whole frame that THIS operation would select as
 // spurious keypoints. `Corner.BorderRing_*` checks that the reasoning holds, and
 // checks it in the only way that can fail: reflect-101 must give ZERO corners on a
@@ -288,7 +288,7 @@ BinMat<WordType> pack(const Frame& f) {
 // It reads the derivative pair through the CONTAINER accessor, one pixel at a
 // time, into plain signed bytes -- a path that touches no view, no region clip and
 // no word arithmetic -- and then accumulates in FLOAT, which is the formulation
-// the design notes claims the popcounts replace.
+// the popcounts claim to replace.
 // ---------------------------------------------------------------------------
 
 struct Ternary {
@@ -544,7 +544,7 @@ struct SweepTally {
     size_t interior = 0;         ///< positions whose window lies fully inside the frame
     size_t clipped = 0;          ///< positions whose window is cut by an edge
     size_t valueMismatch = 0;    ///< map != minEigenValue(reference triple)
-    size_t tripleMismatch = 0;   ///< reference triple != that work’s gradientCovariance
+    size_t tripleMismatch = 0;   ///< reference triple != gradientCovariance
     size_t exactChecked = 0;     ///< positions where D is a perfect square
     size_t exactMismatch = 0;    ///<... and the map is not the exact half-integer
     size_t zeroMismatch = 0;     ///< (response == 0) != (det == 0)
@@ -585,7 +585,7 @@ SweepTally sweepFrame(const Frame& f, int blockSize) {
             // suite unchanged.
             if (got != static_cast<float>(responseDouble(ref))) ++t.precisionMismatch;
 
-            // (b) the reference's triple is that work’s, exactly. This is what tells a
+            // (b) the reference's triple is the covariance's, exactly. This is what tells a
             // reader WHICH side is wrong when (a) fails: the sliding sweep or
             // the oracle.
             const GradientCovariance cov = bincv::gradientCovariance(
@@ -1271,9 +1271,9 @@ BINCV_TEST(Corner, Structure_IsolatedDot) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. THE BORDER RING EXISTS TO PREVENT
+// 7. THE BORDER RING REFLECT-101 EXISTS TO PREVENT
 //
-// chose BORDER_REFLECT_101 for the derivative partly BECAUSE a zero fill
+// ops/derivative.hpp chose BORDER_REFLECT_101 partly BECAUSE a zero fill
 // manufactures an edge around the whole frame that this operation would select as
 // spurious keypoints. That is checked here, in the only form that can fail: the
 // ring must be ABSENT under reflect-101 and PRESENT under BORDER_CONSTANT.
@@ -1682,7 +1682,7 @@ struct SelectionParams {
 };
 
 const SelectionParams kStreamParams[] = {
-    // the reference frontend's parameters verbatim -- the configuration the decision is taken at.
+    // the reference pipeline's parameters verbatim -- the configuration the decision is taken at.
     {"reference-defaults", 200, 0.01, 33.33333333333},
     // The spacing filter DISABLED (gftt.cpp's `else` branch), so the answer is a
     // pure top-`maxCorners` and every tie in the sort is visible in the output.
@@ -1847,7 +1847,7 @@ BINCV_TEST(Corner, Streaming_IdenticalCorners_uint64_t) { streamingSuite<uint64_
 // word types. A frame that size has tens of survivors and a `minDistance` of 33
 // selects two or three corners, so the greedy filter barely runs. These frames
 // are large enough that the spacing filter does real work and the survivor count
-// is in the hundreds -- which is the regime measures and the frontend runs.
+// is in the hundreds -- which is the regime measures and the pipeline runs.
 // ---------------------------------------------------------------------------
 
 BINCV_TEST(Corner, Streaming_IdenticalCorners_LargeFrames) {

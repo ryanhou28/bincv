@@ -6,7 +6,7 @@
 // BINCV_ASSERT for the row precondition, and BINCV_ABI_NAMESPACE. The views
 // are the type kernels bind to, so their preconditions are exactly the hot-path
 // case the project's error policy is written for -- not a place for a raw
-// assert and its stringified-condition-only diagnostic (the design notes).
+// assert and its stringified-condition-only diagnostic.
 #include "error.hpp"
 
 namespace bincv {
@@ -79,8 +79,8 @@ struct BinMatView {
     /// the aggregate initializer is not self-announcing -- a missing ptr,
     /// width or height leaves the view empty, whereas a missing stride
     /// yields a plausible-looking view in which every row aliases row 0
-    /// (the design notes: an inconsistent view is a programming error,
-    /// caught by assertion in debug).
+    /// (an inconsistent view is a programming error, caught by assertion
+    /// in debug).
     WordType* row(size_t y) {
         BINCV_ASSERT(stride != 0 || height <= 1,
                      "BinMatView: multi-row view needs a non-zero stride");
@@ -108,8 +108,8 @@ struct BinMatView {
 /// @tparam WordType_ The unsigned integral type pixels are packed into.
 ///
 /// @note Identical to BinMatView except that the referenced words are const.
-/// These are two distinct types rather than BinMatView<const WordType>
-///: templating on constness fights the unsigned-integral constraint
+/// These are two distinct types rather than BinMatView<const WordType>:
+/// templating on constness fights the unsigned-integral constraint
 /// on WordType and produces unreadable diagnostics.
 /// @note Construct with BinMatConstView<W>{ptr, width, height, stride} -- all four.
 template <typename WordType_>
@@ -213,7 +213,7 @@ inline BinMatConstView<uint32_t> narrowPlane(BinMatConstView<WordType> v) {
 ///
 /// @note **The aliasing rule is the caller's and it is not decorative.** The narrowed
 /// view and the original address the same bytes, so writing through one while
-/// reading the other in the same kernel call is exactly the overlap the design rule’s
+/// reading the other in the same kernel call is exactly the overlap the aliasing
 /// predicates reject. Narrow the DESTINATION, pass the source as it is, and do not
 /// hold both spellings of the same plane across a call that writes.
 /// @note Everything the const form promises holds here: padding stays zero, alignment

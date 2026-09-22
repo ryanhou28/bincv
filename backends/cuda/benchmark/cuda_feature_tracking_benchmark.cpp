@@ -1,8 +1,8 @@
-// The frontend's entry point, priced: FAST, the minimum-eigenvalue response,
+// The pipeline's entry point, priced: FAST, the minimum-eigenvalue response,
 // good-features selection and sub-pixel refinement.
 //
 // ONE EXECUTABLE, ALWAYS BUILT, with the cv::cuda role arms behind
-// BINCV_CUDA_FRONTEND_OPENCV inside it -- the shape cuda_window_benchmark and
+// BINCV_CUDA_FEATURE_TRACKING_OPENCV inside it -- the shape cuda_window_benchmark and
 // cuda_sensor_benchmark already use, and for the reason their CMake blocks give:
 // scripts/verify_cuda.sh derives its benchmark list from the TEXT of
 // benchmark/CMakeLists.txt and hand-excludes exactly one name, so a target that
@@ -58,7 +58,7 @@
 #include "bincv/quantMat.hpp"
 #include "cuda_bench_util.hpp"
 
-#if BINCV_CUDA_FRONTEND_OPENCV
+#if BINCV_CUDA_FEATURE_TRACKING_OPENCV
 #include <opencv2/core.hpp>
 #include <opencv2/core/cuda.hpp>
 #include <opencv2/core/cuda_stream_accessor.hpp>
@@ -114,7 +114,7 @@ bincv::BinMat<Word> allOnesFrame() {
 /// baseline is NOT a kernel: cv::cuda's good-features detector downloads its
 /// candidate list and runs the minimum-distance spacing filter on the HOST, so a
 /// CUDA-event clock on that side silently excludes half the operation.
-#if BINCV_CUDA_FRONTEND_OPENCV
+#if BINCV_CUDA_FEATURE_TRACKING_OPENCV
 PairedTiming timeWallPaired(const std::function<void()>& bodyA,
                             const std::function<void()>& bodyB, int itersA, int itersB,
                             int repeats) {
@@ -150,7 +150,7 @@ PairedTiming timeWallPaired(const std::function<void()>& bodyA,
     // arithmetic one that makes a ratio depend on which arm is the denominator.
     return summarizePaired(sa, sb);
 }
-#endif  // BINCV_CUDA_FRONTEND_OPENCV
+#endif  // BINCV_CUDA_FEATURE_TRACKING_OPENCV
 
 void rule() {
     std::printf(
@@ -204,9 +204,11 @@ void rule() {
 "   SPEED  *** NOT WRITABLE. STOP AND ASK. *** The design wrote '>= 1.00x' and\n"
 "          then flagged the same number as unruled in its own open questions,\n"
 "          which is exactly the laundering CLAUDE.md names -- and its stated\n"
-"          derivation imports a HOST CPU-vs-CPU ratio (0.92x x86, 0.69x aarch64\n"
-"          against cv::goodFeaturesToTrack) to set a GPU-vs-GPU bar, which it\n"
-"          cannot do. What the owner is asked: this is the frontend's entry\n"
+"          derivation imports a HOST CPU-vs-CPU ratio against\n"
+"          cv::goodFeaturesToTrack to set a GPU-vs-GPU bar, which it cannot do.\n"
+"          (The two host figures it quoted have since been re-measured and were\n"
+"          both wrong, which is a second reason not to import them, not the\n"
+"          first.) What the owner is asked: this is the pipeline's entry\n"
 "          point; the fused arm's claim is the ABSENCE of every frame-sized\n"
 "          intermediate; what speed result against cudaimgproc's detector ships\n"
 "          it, and what result sends it back to be optimized? Until that ruling\n"
@@ -271,8 +273,8 @@ void rule() {
 " believed to be running, which is the exact failure the rule exists to catch.\n"
 "\n"
 " WHAT THESE MEASUREMENTS COVER. Each is ONE OPERATION IN A LOOP. Detection runs\n"
-" at a duty cycle in a real frontend, so an operation ratio times that duty cycle\n"
-" is what a frontend sees, and that multiplication belongs to a resident-frontend\n"
+" at a duty cycle in a real pipeline, so an operation ratio times that duty cycle\n"
+" is what a caller sees, and that multiplication belongs to a resident-pipeline\n"
 " example that does not exist yet. No end-to-end claim may be quoted from here.\n"
 "\n");
 }
@@ -288,7 +290,7 @@ int main() {
     cudaStreamCreate(&gStream);
 
     std::printf("============================================================\n"
-                "  binCV CUDA -- the frontend's entry point\n"
+                "  binCV CUDA -- the pipeline's entry point\n"
                 "============================================================\n");
     printDevice();
     std::printf("\n *** THESE TIMINGS ARE INDICATIVE. *** They were taken on a SHARED GPU in\n"
@@ -579,7 +581,7 @@ const uint32_t kFastCapacity = 16384;
     bc::DeviceArray<bc::DeviceCorner> dcorners(kCornerCapacity);
     bc::DeviceArray<bc::DeviceCornerResult> dresult(1);
 
-    bincv::GoodFeaturesParams params;  // the frontend's own four values
+    bincv::GoodFeaturesParams params;  // the pipeline's own four values
     bc::DeviceGoodFeaturesWorkspace work;
     work.candidates =
         bc::DeviceCornerBuffer(dcand.data(), candCounter.devicePtr(), kCandidateCapacity);
@@ -1063,7 +1065,7 @@ const uint32_t kFastCapacity = 16384;
                 " THE ROLE BARS\n"
                 "----------------------------------------------------------------\n");
 
-#if BINCV_CUDA_FRONTEND_OPENCV
+#if BINCV_CUDA_FEATURE_TRACKING_OPENCV
     {
         cv::cuda::Stream cvStream = cv::cuda::StreamAccessor::wrapStream(gStream);
         cv::Mat hostBytes(static_cast<int>(kHeight), static_cast<int>(kWidth), CV_8UC1);

@@ -17,7 +17,7 @@
 // 2. THE ARMS AGREE -- same kept points, same order, over random populations.
 // 3. THE VECTOR ARM IS THE SCALAR ARM -- and can be switched off, so it is checked.
 // 4. IT DOES THE JOB IT WAS ADDED FOR -- a candidate on top of a live track is
-// rejected, which is the thing binCV could not do before earlier work.
+// rejected, which is the thing binCV could not do before this operation existed.
 // ===========================================================================
 
 #include <cmath>
@@ -270,8 +270,8 @@ BINCV_TEST(Occupancy, RejectsCandidatesOnTopOfLiveTracks) {
 
     // Three live tracks and five candidates: one exactly on a track, one just inside
     // the radius, one just outside, and two far away. This is the case binCV could not
-    // express before earlier work -- ops/corner.hpp spaces candidates against each other and
-    // has never seen `live`.
+    // express before this operation existed -- ops/corner.hpp spaces candidates
+    // against each other and has never seen `live`.
     const std::vector<Point2f> live = {{20.0f, 20.0f}, {60.4f, 33.7f}, {100.0f, 90.0f}};
     const float radius = 10.0f;
     std::vector<Point2f> cand = {

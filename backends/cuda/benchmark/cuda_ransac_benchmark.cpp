@@ -1,9 +1,9 @@
 // ===========================================================================
-// CAN THE FRONTEND'S RANSAC GEOMETRY STAGE MOVE TO THE GPU?
+// CAN THE PIPELINE'S RANSAC GEOMETRY STAGE MOVE TO THE GPU?
 //
 // This binary exists to answer that question and to keep the answer
 // reproducible. It prices a device RANSAC round against the host arm the
-// frontend runs today, on the same machine, the same scene and one explicit
+// pipeline runs today, on the same machine, the same scene and one explicit
 // stream, and it prints the decision rule BEFORE the first number.
 //
 // ---------------------------------------------------------------------------
@@ -11,7 +11,7 @@
 //
 // METRICS THAT DECIDE THIS CASE
 //   M1  geometry-stage wall time per frame, host arm vs device arm, at the
-//       frontend's operating point. M1 IS THE ADOPTION NUMBER. A hypotheses/ms
+//       pipeline's operating point. M1 IS THE ADOPTION NUMBER. A hypotheses/ms
 //       microbenchmark is a diagnostic and is never multiplied by a stage share
 //       to produce one.
 //   M2  working set, SYMMETRIC. The host's solver frame is measured by g++
@@ -38,7 +38,7 @@
 // the scoring.
 //
 // THE GATES, in order, each able to end the work.
-//   G0  AMDAHL. Geometry's share of binCV frontend total on this host bounds
+//   G0  AMDAHL. Geometry's share of binCV pipeline total on this host bounds
 //       an infinitely fast device stage at total/(total-geometry). KILL if that
 //       ceiling does not clear the host arm's own measured spread here.
 //   G1  WHERE THE PER-HYPOTHESIS COST IS. If scoring is fraction f of a
@@ -71,7 +71,7 @@
 // ---------------------------------------------------------------------------
 // WHAT THE NUMBERS BELOW ARE
 //
-// The host clock on this machine is not timing-grade -- the same frontend run
+// The host clock on this machine is not timing-grade -- the same pipeline run
 // three times gives geometry-stage times that differ by 2.2x -- so every ratio
 // here is measured INTERLEAVED, arm A then arm B then arm B then arm A, with
 // the ratio formed WITHIN each round. Ranges are printed beside every median,
@@ -111,14 +111,14 @@ using bincv::RansacParams;
 using bincv::RansacResult;
 namespace probe = cudabench::ransacprobe;
 
-// The frontend's own operating point, re-measured on this host rather than
+// The pipeline's own operating point, re-measured on this host rather than
 // inherited: examples/slam_frontend on EuRoC V1_02 at 752x480, budget 500
 // keypoints over four levels, gated matcher at window 48 / ratio 75, reports
 // 140.6 ratio-test accepts per frame at a 77.5% inlier rate and 21 adaptive
 // RANSAC iterations. 141 and 23% are those numbers.
-constexpr size_t kFrontendCount = 141;
-constexpr int kFrontendOutlierPct = 23;
-// 1.5 px at the EuRoC cam0 focal length, which is what the frontend passes.
+constexpr size_t kPipelineCount = 141;
+constexpr int kPipelineOutlierPct = 23;
+// 1.5 px at the EuRoC cam0 focal length, which is what the pipeline passes.
 constexpr float kThreshold = 0.00405f;
 constexpr uint64_t kSeed = UINT64_C(0x9E3779B97F4A7C15);
 
@@ -328,17 +328,17 @@ int main() {
     checkCuda(cudaStreamCreate(&stream), "stream create");
 
     const Scene sc =
-        makeScene(kFrontendCount, kFrontendOutlierPct, 0x5EED + kFrontendCount);
+        makeScene(kPipelineCount, kPipelineOutlierPct, 0x5EED + kPipelineCount);
     std::printf("\n scene: %zu correspondences, %d%% outliers, %zu planted inliers,\n"
-                "        threshold %.5f (1.5 px at the frontend's focal length)\n",
-                kFrontendCount, kFrontendOutlierPct, sc.planted,
+                "        threshold %.5f (1.5 px at the pipeline's focal length)\n",
+                kPipelineCount, kPipelineOutlierPct, sc.planted,
                 static_cast<double>(kThreshold));
 
     // -----------------------------------------------------------------------
     // G1
     // -----------------------------------------------------------------------
     std::printf("\n--- G1: where a hypothesis's cost is (host only) ---\n");
-    const Split split = hostSplit(sc, kFrontendCount, 7, 1024);
+    const Split split = hostSplit(sc, kPipelineCount, 7, 1024);
     std::printf(" models per hypothesis        %8.3f\n", split.modelsPerHyp);
     std::printf(" five-point solver            %8.5f ms/hypothesis\n",
                 split.solverMsPerHyp);
@@ -362,46 +362,46 @@ int main() {
     Point2f* dFrom = nullptr;
     Point2f* dTo = nullptr;
     unsigned long long* dKey = nullptr;
-    checkCuda(cudaMalloc(&dFrom, kFrontendCount * sizeof(Point2f)), "malloc from");
-    checkCuda(cudaMalloc(&dTo, kFrontendCount * sizeof(Point2f)), "malloc to");
+    checkCuda(cudaMalloc(&dFrom, kPipelineCount * sizeof(Point2f)), "malloc from");
+    checkCuda(cudaMalloc(&dTo, kPipelineCount * sizeof(Point2f)), "malloc to");
     checkCuda(cudaMalloc(&dKey, sizeof(unsigned long long)), "malloc key");
 
     RansacParams rp;
     rp.threshold = static_cast<double>(kThreshold);
     rp.confidence = 0.99;
     rp.maxIterations = 2000;
-    std::vector<uint32_t> hostScratch(2 * bincv::ransacScratchWords(kFrontendCount));
+    std::vector<uint32_t> hostScratch(2 * bincv::ransacScratchWords(kPipelineCount));
 
     // The host arm once, un-timed, to read I and the consensus it reaches.
     EssentialMatrix hostModel;
     const RansacResult probeResult = bincv::findEssentialMat(
-        sc.from.data(), sc.to.data(), kFrontendCount, rp,
-        bincv::RansacScratch{hostScratch.data(), kFrontendCount}, &hostModel);
+        sc.from.data(), sc.to.data(), kPipelineCount, rp,
+        bincv::RansacScratch{hostScratch.data(), kPipelineCount}, &hostModel);
     const int I = probeResult.iterations;
     std::printf("\n host arm: %d adaptive iterations, %zu inliers\n", I,
                 probeResult.inliers);
 
     auto hostArm = [&] {
         EssentialMatrix e;
-        bincv::findEssentialMat(sc.from.data(), sc.to.data(), kFrontendCount, rp,
-                                bincv::RansacScratch{hostScratch.data(), kFrontendCount},
+        bincv::findEssentialMat(sc.from.data(), sc.to.data(), kPipelineCount, rp,
+                                bincv::RansacScratch{hostScratch.data(), kPipelineCount},
                                 &e);
     };
 
     unsigned long long bestDeviceKey = 0;
     auto deviceRound = [&](unsigned H, bool ceilingArm) {
         const unsigned long long zero = 0;
-        checkCuda(cudaMemcpyAsync(dFrom, sc.from.data(), kFrontendCount * sizeof(Point2f),
+        checkCuda(cudaMemcpyAsync(dFrom, sc.from.data(), kPipelineCount * sizeof(Point2f),
                                   cudaMemcpyHostToDevice, stream), "up from");
-        checkCuda(cudaMemcpyAsync(dTo, sc.to.data(), kFrontendCount * sizeof(Point2f),
+        checkCuda(cudaMemcpyAsync(dTo, sc.to.data(), kPipelineCount * sizeof(Point2f),
                                   cudaMemcpyHostToDevice, stream), "up to");
         checkCuda(cudaMemcpyAsync(dKey, &zero, sizeof(zero), cudaMemcpyHostToDevice,
                                   stream), "up key");
         const cudaError_t rc =
-            ceilingArm ? probe::roundOneSamplePerWarpAsync(dFrom, dTo, kFrontendCount,
+            ceilingArm ? probe::roundOneSamplePerWarpAsync(dFrom, dTo, kPipelineCount,
                                                            kSeed, 0, H, kThreshold, dKey,
                                                            stream)
-                       : probe::roundAsync(dFrom, dTo, kFrontendCount, kSeed, 0, H,
+                       : probe::roundAsync(dFrom, dTo, kPipelineCount, kSeed, 0, H,
                                            kThreshold, dKey, stream);
         checkCuda(rc, "round launch");
         unsigned long long key = 0;
@@ -508,11 +508,11 @@ int main() {
         bool expect1x;
     };
     const SwitchCase cases[] = {
-        {"count = 141 (the frontend's)", kFrontendCount, false},
+        {"count = 141 (the pipeline's)", kPipelineCount, false},
         {"count = 16 -- BELOW the warp arm's own gate", kGateExcludedCount, true},
     };
     for (const SwitchCase& c : cases) {
-        const Scene s2 = makeScene(c.count, kFrontendOutlierPct, 0x5EED + c.count);
+        const Scene s2 = makeScene(c.count, kPipelineOutlierPct, 0x5EED + c.count);
         Point2f* f2 = nullptr;
         Point2f* t2 = nullptr;
         checkCuda(cudaMalloc(&f2, c.count * sizeof(Point2f)), "malloc f2");
@@ -553,14 +553,14 @@ int main() {
     checkCuda(cudaGetDeviceProperties(&props, 0), "device properties");
     const int smCount = props.multiProcessorCount;
     const int maxThreadsPerSm = props.maxThreadsPerMultiProcessor;
-    cudabench::printMemoryHeader("one RANSAC call at the frontend's operating point");
-    const size_t points = 2 * kFrontendCount * sizeof(Point2f);
+    cudabench::printMemoryHeader("one RANSAC call at the pipeline's operating point");
+    const size_t points = 2 * kPipelineCount * sizeof(Point2f);
     const size_t hostTotal =
-        bincv::ransacScratchBytes(kFrontendCount) + bincv::essentialSolverStackBytes() +
+        bincv::ransacScratchBytes(kPipelineCount) + bincv::essentialSolverStackBytes() +
         points;
     std::printf("\n   HOST arm (the arm a binCV user runs today)\n");
     cudabench::printAllocSum("ransacScratchBytes(141)",
-                             bincv::ransacScratchBytes(kFrontendCount));
+                             bincv::ransacScratchBytes(kPipelineCount));
     cudabench::printAllocSum("essentialSolverStackBytes()  [g++ -fstack-usage]",
                              bincv::essentialSolverStackBytes());
     cudabench::printAllocSum("the caller's points", points);
@@ -599,8 +599,8 @@ int main() {
         Point2f* a = nullptr;
         Point2f* b = nullptr;
         unsigned long long* k = nullptr;
-        checkCuda(cudaMalloc(&a, kFrontendCount * sizeof(Point2f)), "meter a");
-        checkCuda(cudaMalloc(&b, kFrontendCount * sizeof(Point2f)), "meter b");
+        checkCuda(cudaMalloc(&a, kPipelineCount * sizeof(Point2f)), "meter a");
+        checkCuda(cudaMalloc(&b, kPipelineCount * sizeof(Point2f)), "meter b");
         checkCuda(cudaMalloc(&k, sizeof(unsigned long long)), "meter k");
         const size_t delta = meter.deltaBytes();
         cudabench::printDriverDelta("the device arm's global allocations", delta, step);

@@ -3,7 +3,7 @@
 /// @file threshold.hpp
 /// @brief Producing the 1-bit frame from a higher-precision source.
 ///
-/// the design notes: in a deployed system the binarization may happen in-sensor;
+/// In a deployed system the binarization may happen in-sensor;
 /// binCV provides it for pipelines that binarize on the host. Two sources, two
 /// tiers, and the tier difference is the whole reason they have different names.
 ///
@@ -40,11 +40,11 @@
 /// TIER 1 FOR CV_8U, TIER 3 FOR QuantMat<N>
 ///
 /// The CV_8U entry point IS `cv::threshold(src, dst, thresh, 255, THRESH_BINARY)`
-/// on the same content, so it takes OpenCV's name (the design notes) and
-/// tests/test_threshold.cpp proves bit-exactness through that work’s harness across
+/// on the same content, so it takes OpenCV's name and
+/// tests/test_threshold.cpp proves bit-exactness through the equivalence harness across
 /// its full size and fill matrix. What differs is the OUTPUT CONTAINER, not the
 /// answer: a bit-packed BinMat rather than a CV_8U matrix, which is the entire
-/// point -- 640x480 in 38400 bytes rather than 307200 (the design notes). The
+/// point -- 640x480 in 38400 bytes rather than 307200. The
 /// harness compares by unpacking to CV_8U {0, 255}, so "bit-exact" is asserted
 /// against OpenCV's actual bytes and not against a normalization of them.
 ///
@@ -52,13 +52,13 @@
 /// is 1 by construction; a `maxval` argument could only be ignored or asserted
 /// on, and an ignored argument that looks like OpenCV's is worse than an absent
 /// one. Nor is there a `type` parameter: THRESH_BINARY is the operation
-/// the design notes names, THRESH_BINARY_INV is `bitwiseNot` of it (ops/logic.hpp),
+/// this file provides, THRESH_BINARY_INV is `bitwiseNot` of it (ops/logic.hpp),
 /// and the four truncating types cannot be expressed in a 1-bit destination at
 /// all. A ThresholdType enum whose every other value asserted would be a promise
 /// this file cannot keep.
 ///
 /// The QuantMat<N> entry point has no OpenCV counterpart -- OpenCV has no N-bit
-/// image type -- so it is Tier 3 and must NOT borrow the name (the design notes).
+/// image type -- so it is Tier 3 and must NOT borrow the name.
 /// It is `binarize`, and it is checked against a per-pixel reference:
 /// `src.at(y, x) > thresh`, the same comparison as above, so the two entry points
 /// cannot drift into disagreeing about their boundary.
@@ -114,7 +114,7 @@
 /// hold (ops/bitslice.hpp says so in as many words). Storing that unmasked
 /// would leave phantom set bits past `width` and every later word-wise
 /// reduction would over-count them.
-/// 4. **Never throws** (the design notes). Dimension mismatches, a short stride,
+/// 4. **Never throws.** Dimension mismatches, a short stride,
 /// a source of the wrong cv::Mat type and a null destination are programming
 /// errors, reported by BINCV_ASSERT in debug builds and undefined in release.
 ///
@@ -141,7 +141,7 @@
 #include "../core/view.hpp"
 // impl::rowTailMask, impl::strideCoversARow, impl::viewsShareNoWord.
 #include "../impl/kernel_util.hpp"
-// thresholdGE -- that work’s bit-sliced comparison, and the entire arithmetic of
+// thresholdGE -- the bit-sliced comparison, and the entire arithmetic of
 // binarize. Its whole (value, threshold) input space is enumerated by
 // tests/test_bitslice.cpp, so this file supplies the row geometry and nothing
 // else.
@@ -169,7 +169,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// @brief dst = (src > thresh), pixel for pixel, over an N-plane bit-sliced
 /// source. **API TIER 3.**
 /// @tparam N Number of source planes, deduced from the array argument. Plane 0 is
-/// the LEAST significant bit, matching QuantMat (the design notes).
+/// the LEAST significant bit, matching QuantMat.
 /// @param planes The N source plane views, all of the same dimensions as `dst`.
 /// @param dst Destination view; must have the planes' dimensions and share no
 /// word with any of them.
@@ -368,7 +368,7 @@ BINCV_HOST_DEVICE inline int thresholdCutoff(double thresh) {
 /// @note THIS IS THE ONLY ENTRY POINT IN ops/ THAT NAMES A cv:: TYPE, and it is
 /// behind BINCV_WITH_OPENCV: the core-only, no-exceptions and Debug
 /// configurations never see it. Nothing the embedded claim rests on
-/// depends on OpenCV (the design notes).
+/// depends on OpenCV.
 /// @note The destination's padding bits are zero on return: the row's trailing
 /// partial word is assembled from live pixels only, and the bits past
 /// `width` are never set.

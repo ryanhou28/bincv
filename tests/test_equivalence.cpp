@@ -41,7 +41,7 @@
 
 #include "bincv/binMat.hpp"
 // QuantMat, for the bit-plane row of the packing anchor: a plane view is the one
-// conversion that work’s per-plane Tier 1 checks depend on, and it is not a BinMat view.
+// conversion the per-plane Tier 1 checks depend on, and it is not a BinMat view.
 #include "bincv/quantMat.hpp"
 #include "equivalence.hpp"
 #include "test_util.hpp"
@@ -731,7 +731,7 @@ void testPackingAnchor(const char* wordTypeName) {
                 // the allocation.
                 //
                 // Added because the anchor pinned only BinMat views while
-                // that work’s plane overloads are checked through constPlane ->
+                // the plane overloads are checked through constPlane ->
                 // unpackTo8U on the binCV side -- so the one conversion those
                 // 2592 checks depend on was the one conversion nothing here
                 // pinned. A plane pitch off by a row would be invisible to any
@@ -773,8 +773,8 @@ void testPackingAnchor(const char* wordTypeName) {
 // 4. The demonstration: countNonZero against cv::countNonZero
 // ===========================================================================
 
-/// @brief that work’s "done when": the harness, on an operation that already exists.
-/// @note The denominator is the design notes's -- OpenCV performing the same
+/// @brief The harness, on an operation that already exists.
+/// @note The denominator -- OpenCV performing the same
 /// semantic operation on the SAME binary content stored as CV_8U, which is
 /// what toCvMask produces.
 /// @note Note what this case can and cannot see. countNonZero reduces an image to
@@ -807,7 +807,7 @@ void testCountNonZeroEquivalence(const char* wordTypeName) {
 
 /// @brief transposed against cv::transpose, through expectBitExact.
 /// @note countNonZero returns a scalar, so it cannot exercise the pixel-by-pixel
-/// comparison that every Tier 1 kernel in earlier work..this will assert through.
+/// comparison every Tier 1 kernel will assert through.
 /// This does: an already-implemented binCV operation, its exact OpenCV
 /// equivalent, and the two compared through the harness.
 /// @note Deliberately smaller than the full sweep -- transposed is a naive

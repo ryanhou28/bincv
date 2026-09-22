@@ -1,7 +1,7 @@
 // ===========================================================================
 // core/simd.hpp -- which fast paths this build actually compiled.
 //
-// F-5: a binCV user added `-I.../include` and never linked `bincv_core`, so every NEON
+// A binCV user added `-I.../include` and never linked `bincv_core`, so every NEON
 // kernel was #ifdef-ed out. Nothing warned and nothing computed a different answer --
 // the vector kernels are bit-exact with the scalar ones -- and their tracker ran 2.25x
 // slower than it should have on a Pi 4. Measured on this repo's own diagnostic, on the

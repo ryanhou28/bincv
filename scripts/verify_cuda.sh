@@ -181,7 +181,7 @@ run_configuration() {
     # The worked examples, in BOTH configurations. An example is the one thing a
     # reader can run to check a claim, and an example no gate compiles rots at
     # the speed the headers under it change -- the same argument that made the
-    # benchmarks a gate target. They are built, not run: the resident frontend
+    # benchmarks a gate target. They are built, not run: the resident tracking pipeline
     # needs a frame blob and an idle GPU, neither of which this gate may assume.
     #
     # DERIVED FROM THE FILENAMES rather than listed here, because that directory

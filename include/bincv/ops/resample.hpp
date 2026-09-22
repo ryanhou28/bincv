@@ -5,13 +5,13 @@
 /// (measured as ). **API TIER 3**
 /// throughout: OpenCV has no operation that subsamples columns without
 /// also filtering, so nothing here borrows an OpenCV name -- `cv::resize`
-/// and `cv::pyrDown` both mean something else, and the design notes
-/// forbids reusing the name for the different thing.
+/// and `cv::pyrDown` both mean something else, and the tier rules
+/// forbid reusing a name for a different thing.
 ///
 /// ---------------------------------------------------------------------------
 /// WHY THIS FILE EXISTS AT ALL
 ///
-/// the design notes's primitive table has no resample row, and that work’s pyramid
+/// The design notes' primitive table has no resample row, and the pyramid
 /// step is "box 2x2 sum THEN SUBSAMPLE". The subsample half splits into two
 /// halves that are nothing alike:
 ///
@@ -30,10 +30,10 @@
 /// ---------------------------------------------------------------------------
 /// THE THREE ROUTES, AND WHY ALL THREE ARE STILL HERE
 ///
-/// registered the choice as speed against footprint -- "a per-pixel gather
+/// The choice was registered as speed against footprint -- "a per-pixel gather
 /// loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant
-/// masks" -- which is the trade CLAUDE.md forbids settling by argument.
-/// measured three routes on the reference device against a rule written first:
+/// masks" -- which is the trade CLAUDE.md forbids settling by argument. Three
+/// routes were measured on the reference device against a rule written first:
 ///
 /// A impl::decimateColumnsBy2Gather per destination pixel, read source
 /// bit 2j into a local word. Word
@@ -47,10 +47,10 @@
 /// log2(rowBits) masked shift-or passes
 /// over a caller-provided scratch row
 /// against a caller-built mask table at
-/// frame width. that work’s "frame-masked"
+/// frame width. The "frame-masked"
 /// route, and the only one costing bytes.
 ///
-/// **B won, and that work’s premise turned out to be wrong.** The register did not list
+/// **B won, and the premise behind the choice turned out to be wrong.** The register did not list
 /// the word-local unshuffle as a third option; it framed the choice as buying
 /// speed with frame-sized masks. Measured at 640x480 -> 320x240 on a Cortex-A72,
 /// B is 14.6x/26.4x faster than A and 11.2x/8.3x faster than C (uint32_t /
@@ -99,12 +99,12 @@
 ///
 /// 1. **Views, never containers**. Strides are read per row and src and
 /// dst may differ.
-/// 2. **No allocation, no throw** (the design notes). Variant C's scratch and
+/// 2. **No allocation, no throw.** Variant C's scratch and
 /// mask table are the CALLER's, which is why they are in its signature.
 /// 3. **Padding bits stay zero** in the destination.
 /// 4. **No aliasing between src and dst.** Destination word i reads source words
 /// 2i and 2i+1, so this is not pointwise in the word index and the in-place
-/// half of this does not apply -- impl::viewsShareNoWord, the same predicate
+/// half of the aliasing rule does not apply -- impl::viewsShareNoWord, the same predicate
 /// ops/shift.hpp takes, and for the same reason.
 
 #include <cstddef>
@@ -183,10 +183,10 @@ inline void checkDecimateArgs(BinMatConstView<WordType> src, BinMatView<WordType
 // A -- the gather loop
 // ---------------------------------------------------------------------------
 
-/// @brief variant A: horizontal decimation one destination pixel at a time.
+/// @brief Variant A: horizontal decimation one destination pixel at a time.
 /// @note Two spellings of "a gather loop" were available and this is deliberately
-/// the stronger one, because compares ROUTES and a route measured in
-/// its weakest spelling proves nothing about the route. The bit is
+/// the stronger one, because the comparison is between ROUTES, and a route
+/// measured in its weakest spelling proves nothing about the route. The bit is
 /// accumulated into a local word and stored once per destination word
 /// rather than read-modify-writing memory per pixel; and it is OR-ed in
 /// branchlessly rather than tested with an `if`, which on ~50%-fill image
@@ -230,8 +230,8 @@ inline void decimateColumnsBy2Gather(BinMatConstView<WordType> src,
 // B -- the word-local unshuffle's word primitive
 //
 // The kernel that uses it is the PUBLIC decimateColumnsBy2 below, not another
-// impl:: arm: chose it, so the benchmark times the shipped function itself
-// rather than a copy that could drift from it (the lesson).
+// impl:: arm: the route comparison chose it, so the benchmark times the shipped
+// function itself rather than a copy that could drift from it.
 // ---------------------------------------------------------------------------
 
 /// @brief Even bits of one word, packed into its low half. **Internal.**
@@ -241,7 +241,7 @@ inline void decimateColumnsBy2Gather(BinMatConstView<WordType> src,
 /// doubling the size of the block whose even bits are already contiguous at
 /// the block's base. Three steps at uint8_t, six at uint64_t.
 /// @note The masks are WORD LITERALS -- 0x55.., 0x33.., 0x0f.. and so on -- not
-/// frame-sized constants. That is the whole of that work’s "word-local" branch:
+/// frame-sized constants. That is the whole of the "word-local" branch:
 /// word-parallel and zero auxiliary bytes at the same time.
 /// @note The casts are the -Wconversion tax on integer promotion, exactly as in
 /// maj3 (ops/bitslice.hpp): `x | (x >> 1)` is an int for uint8_t and
@@ -275,7 +275,7 @@ inline WordType gatherEvenBits(WordType x) {
 //
 // The same log-depth gather as variant B, done on the ROW as one big integer:
 // pass k masks with period 2^(k+1) and shifts right by 2^(k-1) words-and-bits
-// across the whole row. Two things follow, and they are what this is asking about:
+// across the whole row. Two things follow, and they are what the route comparison asks:
 //
 // * every step is a PASS OVER MEMORY rather than a register operation, and
 // there are log2(rowBits) of them -- ten at 640 columns, against six register
@@ -351,12 +351,12 @@ inline void buildFrameMaskedPlan(size_t srcWidth, WordType* masks) {
     }
 }
 
-/// @brief variant C: horizontal decimation as a big-integer unshuffle.
+/// @brief Variant C: horizontal decimation as a big-integer unshuffle.
 /// @param masks frameMaskedPlanWords<WordType>(src.width) words from
 /// buildFrameMaskedPlan. Depends on the width and word type only.
 /// @param scratch frameMaskedRowWords<WordType>(src.width) words, clobbered.
 /// @note The mask table and the scratch row are the caller's because a kernel may
-/// not allocate (CLAUDE.md), and they are the footprint side of that work’s trade.
+/// not allocate (CLAUDE.md), and they are the footprint side of the trade.
 template <typename WordType>
 inline void decimateColumnsBy2FrameMasked(BinMatConstView<WordType> src,
                                           BinMatView<WordType> dst,
@@ -436,7 +436,7 @@ inline void decimateColumnsBy2FrameMasked(BinMatConstView<WordType> src,
 } // namespace impl
 
 // ---------------------------------------------------------------------------
-// The primitive chose
+// The primitive the route comparison chose
 // ---------------------------------------------------------------------------
 
 /// @brief Horizontal decimation by two: `dst(y, j) = src(y, 2j)`. **API TIER 3.**
@@ -445,8 +445,8 @@ inline void decimateColumnsBy2FrameMasked(BinMatConstView<WordType> src,
 /// @param dst Destination view, exactly `decimatedWidth(src.width)` wide and
 /// `src.height` tall. Must not share a word with `src`.
 ///
-/// @note This is that work’s answer, chosen by measurement (,
-/// ): the word-local unshuffle, which needs no scratch,
+/// @note This is the answer, chosen by measurement: the word-local unshuffle,
+/// which needs no scratch,
 /// no mask table and no prepared plan, and was also 8-26x faster than both
 /// alternatives on the reference device.
 /// @note Destination word i is `gather(src[2i]) | gather(src[2i+1]) << WordBits/2`
@@ -454,7 +454,7 @@ inline void decimateColumnsBy2FrameMasked(BinMatConstView<WordType> src,
 /// the row read as zero, which can only affect destination padding bits.
 /// @note Never throws, never allocates. Shape and aliasing violations are
 /// programming errors, reported by BINCV_ASSERT in debug and undefined in
-/// release (the design notes).
+/// release.
 template <typename WordType>
 inline void decimateColumnsBy2(BinMatConstView<WordType> src, BinMatView<WordType> dst) {
     impl::checkDecimateArgs(src, dst);

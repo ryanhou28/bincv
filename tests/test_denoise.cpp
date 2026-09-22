@@ -2,7 +2,7 @@
 //
 // THE CORRECTNESS BAR IS NOT "MATCHES A FORMULA I WROTE DOWN". It is "matches
 // the reference implementation pixel for pixel on binary input", and the
-// reference is the reference frontend's denoiser. Two consequences shape
+// reference is the reference pipeline's denoiser. Two consequences shape
 // this file:
 //
 // * The OpenCV half PORTS THE REFERENCE'S ACTUAL cv:: CALLS -- cv::Mat::zeros
@@ -70,7 +70,7 @@ using bincv::denoiseMedian3;
 // Content: the same generator as tests/equivalence.hpp, minus OpenCV
 // ---------------------------------------------------------------------------
 //
-// Duplicated rather than shared, for that work’s reason: a harness that shared a
+// Duplicated rather than shared, for the usual reason: a harness that shared a
 // generator with the suite judging it could cancel a fault through both sides.
 
 uint64_t nextRandom(uint64_t& state) {
@@ -149,7 +149,7 @@ bool refMedian3(bool p1, bool p2, bool p3) {
 
 /// @brief The reference filter's three-pixel L, per pixel, with the zero border.
 /// @note THE NEIGHBOURHOOD AND THE BORDER, both from
-/// the reference frontend's denoiser:
+/// the reference pipeline's denoiser:
 /// p1 = src[y - 1][x] -- `above_pixels`, whose rowRange(1, rows) is the
 /// only part ever written, so row 0 reads the
 /// cv::Mat::zeros it was built with.
@@ -185,7 +185,7 @@ const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70, 128, 640};
 const int HEIGHTS[] = {1, 2, 3, 17, 37};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (the design rule makes alignment a per-object choice).
+// An over-aligned row stride (alignment is a per-object choice).
 constexpr size_t PADDED_ALIGNMENT = 32;
 
 // ===========================================================================
@@ -480,7 +480,7 @@ void testDegenerateViews(const char* wordTypeName) {
 }
 
 /// @brief Two views over ONE buffer that share no word must be ACCEPTED.
-/// @note the aliasing predicate is exact and per row, not a bounding-box
+/// @note The aliasing predicate is exact and per row, not a bounding-box
 /// test, so interleaved row bands over a single allocation are legal
 /// arguments. Rejecting them would abort the Debug build on a view a caller
 /// is entitled to build. Nothing here checks a pixel that the
@@ -526,10 +526,10 @@ void testDisjointViewsAccepted(const char* wordTypeName) {
 
 #ifdef BINCV_WITH_OPENCV
 
-/// @brief The reference frontend's three-pixel median, transcribed.
+/// @brief The reference pipeline's three-pixel median, transcribed.
 ///
 /// @note This is a PORT, not a paraphrase. Every line below appears in
-/// the reference frontend's denoiser in this order, including the
+/// the reference pipeline's denoiser in this order, including the
 /// two `cv::Mat::zeros` constructions and the two range-limited copyTo
 /// calls that are the entire border specification:
 ///
@@ -590,7 +590,7 @@ void testAgainstReference(const char* wordTypeName) {
 
                 // The harness's SECOND generator, which never touches the packing
                 // or the unpacking path -- so the two sides of the comparison do
-                // not share a conversion that could cancel (that work’s anchor).
+                // not share a conversion that could cancel (the packing anchor).
                 const cv::Mat cvSrc = bincv::test::randomCvMask(width, height, fill, seed);
 
                 bincv::BinMat<WordType> dst(width, height);

@@ -1,7 +1,7 @@
 // ===========================================================================
-// earlier work -- THE SPEED AXIS OF ROUTE (a) AGAINST ROUTE (b).
+// THE SPEED AXIS OF ROUTE (a) AGAINST ROUTE (b).
 //
-// that measurement’s band B requires yield-per-millisecond for both routes, so this supplies
+// Band B of the rule requires yield-per-millisecond for both routes, so this supplies
 // the millisecond. Interleaved round-robin; the reference device closes it.
 //
 // PRE-WRITTEN COST MODEL. Route (a) scores (2R+1)^2 windows per point per level,

@@ -1,7 +1,7 @@
 // The LK gradient covariance -- ops/covariance.hpp.
 //
 // THIS SUITE IS WHAT STANDS BEHIND THE PROJECT'S CENTRAL TECHNICAL CLAIM.
-// the design notes asserts that the whole 2x2 Lucas-Kanade gradient covariance
+// The project asserts that the whole 2x2 Lucas-Kanade gradient covariance
 // reduces to masked population counts over sign-magnitude ternary planes. If that
 // identity is wrong, bit-parallel software cannot do this job and the project's
 // premise is wrong -- so the identity is not assumed here, it is PROVEN against a
@@ -66,7 +66,7 @@
 // of each kind, so the zero is a reading and not a blind spot. This is not
 // decoration: the four-argument selector form was chosen over the 11-14%
 // FASTER precomputed-plane form precisely because it needs no plane (
-// axis 3,, CLAUDE.md's memory tiebreak). A covariance that quietly
+// axis 3, CLAUDE.md's memory tiebreak). A covariance that quietly
 // allocated would have discarded the speed and bought nothing.
 // * THE SIGN PLANE IS READ ONLY WHERE BOTH MAGNITUDES ARE SET. Dirtying every
 // sign bit over a zero magnitude -- which the canonical-zero rule says carries
@@ -234,7 +234,7 @@ size_t g_invariancePositions = 0;
 
 // splitmix64, so a failure reproduces exactly. Deliberately this file's own copy:
 // the generator that builds an input and the reference that judges the output must
-// not share machinery, or a fault in the shared part cancels (that work’s rule).
+// not share machinery, or a fault in the shared part cancels.
 uint64_t nextRandom(uint64_t& state) {
     state += UINT64_C(0x9E3779B97F4A7C15);
     uint64_t z = state;
@@ -300,7 +300,7 @@ bool bitAt(const BinMatConstView<WordType>& v, int y, int x) {
 // ---------------------------------------------------------------------------
 //
 // It knows nothing about words, masks or popcounts. It reads a ternary pixel as a
-// float, multiplies, and accumulates -- the formulation the design notes claims
+// float, multiplies, and accumulates -- the formulation the popcount identity claims
 // the masked popcounts are equal to. That is the whole point: two spellings of the
 // same popcount agreeing would prove nothing about the identity.
 
@@ -466,9 +466,9 @@ size_t sweepAgainstOracle(const BinMatConstView<WordType>& magX,
                            " mismatches=" + std::to_string(bad) + " first: " + firstBad);
         }
         // THE REGRESSION CHECK for the frame that was too short. Clipped positions
-        // are the interesting ones for earlier work, but a suite made only of them never
-        // reduces a full-height window at all, and the 31x31 window of
-        // the design notes is the one the operation exists for.
+        // are the interesting ones, but a suite made only of them never
+        // reduces a full-height window at all, and the 31x31 window is the one
+        // the operation exists for.
         const size_t expectedInterior = static_cast<size_t>(width - windowSize + 1) *
                                         static_cast<size_t>(height - windowSize + 1);
         COV_EXPECT(interior == expectedInterior && interior > 0,
@@ -575,7 +575,7 @@ void testGeneratedFrame(const char* wordTypeName) {
     }
 }
 
-/// @brief Case 2: the planes the REAL pipeline produces -- that work’s derivative.
+/// @brief Case 2: the planes the REAL pipeline produces -- the binarized derivative.
 /// @note The generated case above draws dx and dy independently, so its cross term
 /// hovers around zero. A real binarized derivative pair is correlated, sparse
 /// and structured, and its sign planes are the borrow bits ops/derivative.hpp
@@ -748,10 +748,10 @@ void testDirtyPadding(const char* wordTypeName) {
                label + " mismatches=" + std::to_string(bad) + " first: " + firstBad);
 }
 
-/// @brief Case 5: a view that WINDOWS A WIDER FRAME (the design rule’s second half).
+/// @brief Case 5: a view that WINDOWS A WIDER FRAME (the padding rule's second half).
 /// @note The pixels past the view's width are not padding, they are a neighbour's
 /// live pixels -- and they are set, since the wider frame is dense. One
-/// sentence of earlier work covers both, and this is the half no container can
+/// sentence covers both, and this is the half no container can
 /// express: the views are built by hand over the wide frame's planes with a
 /// narrower width and the wide frame's stride.
 template <typename WordType>
@@ -845,7 +845,7 @@ void testDegenerate(const char* wordTypeName) {
 
 /// @brief Case 7: WHAT A TAP-ORDER INVERSION DOES TO THIS MATRIX, and what it
 /// does not.
-/// @note the design notes, ops/derivative.hpp and tests/test_derivative.cpp all
+/// @note ops/derivative.hpp and tests/test_derivative.cpp both
 /// used to say that a cv::filter2D correlate-vs-convolve mix-up would leave
 /// sumXX and sumYY correct "while silently negating the cross term", so that
 /// this covariance was a tripwire for it. **It is not, and the arithmetic
@@ -978,7 +978,7 @@ void testColumnSweepAgreement(const char* wordTypeName) {
 /// @brief Case 9: WHICH SPELLING ACCEPTS WHAT, checked rather than asserted.
 /// @note shipped with `SignedQuantMat<N, W>` for N > 1 matching NO overload,
 /// and this case pinned that. ** reverses it deliberately**: a measurement found
-/// the tracker's accuracy failure IS the 1-bit pyramid, so the frontend needs
+/// the tracker's accuracy failure IS the 1-bit pyramid, so the pipeline needs
 /// N-bit levels and the covariance has to form at N > 1. The container
 /// spelling now dispatches on the plane count -- ternary to the
 /// single-popcount kernel, N-bit to the bit-sliced one -- and what this case
@@ -1156,10 +1156,10 @@ void testNoScratch(const char* wordTypeName) {
 /// @brief The largest bit depth swept. Every N-bit sweep runs at 1..MAX_BIT_DEPTH,
 /// DRIVEN BY THIS CONSTANT rather than hand-unrolled, so the depths swept
 /// and the exactness guard below cannot drift apart.
-/// @note **7, and the justification is that measurement’s, not that measurement’s.** An earlier version of
-/// this comment stopped at 4 and cited that measurement’s "1/3/4/5 bits". superseded
-/// that premise (the design notes: "'1/3/4/5' was the sample, not the
-/// requirement"): the reachable alphabet an uncapped 2x2 mean produces is
+/// @note **7, and the justification is the representation's, not a sample's.** An
+/// earlier version of this comment stopped at 4 and cited "1/3/4/5 bits". That
+/// premise is superseded: 1/3/4/5 was the sample, not the
+/// requirement. The reachable alphabet an uncapped 2x2 mean produces is
 /// 1/3/5/7 bits, because a four-input sum of N-bit values needs N + 2. So
 /// N = 5 and N = 7 are the depths this will actually run, and stopping at 4
 /// left them uninstantiated. 7 is also SignedQuantMat's own limit, so this
@@ -1444,7 +1444,7 @@ void testBitSlicedGeneratedFrame(const char* wordTypeName) {
 }
 
 // ---------------------------------------------------------------------------
-// the case B: the planes the REAL N-bit pipeline produces -- that work’s derivative
+// Case B: the planes the REAL N-bit pipeline produces -- the binarized derivative
 // over a QuantMat<N> level
 // ---------------------------------------------------------------------------
 
@@ -1513,7 +1513,7 @@ template <typename WordType>
 void testTernaryIsTheNEqualsOneInstance(const char* wordTypeName) {
     const std::string label = std::string(wordTypeName) + " [N=1 identity]";
 
-    // Two frames: a generated ternary pair, and the pair that work’s derivative writes.
+    // Two frames: a generated ternary pair, and the pair the derivative writes.
     TernaryMat<WordType> genX(SWEEP_WIDTH, SWEEP_HEIGHT);
     TernaryMat<WordType> genY(SWEEP_WIDTH, SWEEP_HEIGHT);
     fillRandomTernary(genX, UINT64_C(0x5EED0C0FFEE00121), 1);
@@ -1867,8 +1867,8 @@ void testBitSlicedNoScratch(const char* wordTypeName) {
     (void)sink;
 }
 
-/// @brief Every case, for one word type. The word type is the axis the design rule makes
-/// load-bearing: every mask and shift is compiled at 8, 16, 32 and 64 bits.
+/// @brief Every case, for one word type. The word type is the load-bearing axis:
+/// every mask and shift is compiled at 8, 16, 32 and 64 bits.
 template <typename WordType>
 void testWordType(const char* wordTypeName) {
     std::cout << "\n--- LK gradient covariance: " << wordTypeName << " ---\n";
@@ -1933,7 +1933,7 @@ void testBitSlicedWordType(const char* wordTypeName) {
     testBitSlicedContracts<3, WordType>(wordTypeName);
     testBitSlicedWeightsByHand<WordType>(wordTypeName);
     // **Every depth, not only the deep ones.** The no-heap rule is the library's
-    // central one and N = 1 and N = 2 are the depths the frontend's lowest levels
+    // central one and N = 1 and N = 2 are the depths the pipeline's lowest levels
     // run at, so leaving them out left the promise unmeasured exactly where a
     // per-plane-pair temporary would be cheapest to introduce unnoticed.
     noScratchAtEveryBitDepth<WordType>(wordTypeName, std::make_index_sequence<MAX_BIT_DEPTH>{});

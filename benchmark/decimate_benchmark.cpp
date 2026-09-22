@@ -1,7 +1,7 @@
 // -- horizontal decimation by two: which route, and at what footprint?
 //
-// The decision rule this benchmark feeds was committed BEFORE it ran; it is in
-// EXPERIMENTS.md as, and the short form is:
+// The decision rule this benchmark feeds was committed BEFORE it ran, and the
+// short form is:
 //
 // 1. The frame-masked route (C) ships only if it beats the better word-local
 // route by >= 1.5x with non-overlapping spreads at both word types on
@@ -11,15 +11,15 @@
 // difference inside the larger spread is a null result that takes the
 // simpler one -- the gather loop.
 //
-// NO OPENCV. All three variants are binCV, so the design notes's denominator
+// NO OPENCV. All three variants are binCV, so an OpenCV denominator
 // does not apply and this builds in the reference device's DEFAULT core-only
 // build. (cv::resize would not be that denominator anyway: it resamples both axes
 // on a byte image and rounds, rather than keeping the even columns.)
 //
 // VARIANTS impl::decimateColumnsBy2Gather per-pixel gather loop, 0 B aux
 // decimateColumnsBy2 word-local Morton deinterleave,
-// 0 B aux -- and after earlier work chose
-// it this is the SHIPPED
+// 0 B aux -- and since it was
+// chosen this is the SHIPPED
 // entry point, so re-running this
 // benchmark measures the library
 // rather than a copy of one arm
@@ -32,7 +32,7 @@
 // beside the auxiliary bytes each route needs. Speed and memory in one
 // table, because rule 1 weighs the pair.
 //
-// VALIDITY (EXPERIMENTS.md "Verify the benchmark measures something"):
+// VALIDITY -- what makes this benchmark measure something:
 // * measure::g_sink consumes a destination word from every timed call;
 // * four distinct random sources rotate, so nothing constant-folds;
 // * all three variants are compared against a per-pixel reference AND against
@@ -47,7 +47,7 @@
 // all three variants read the same rowsDecimatedBy2 view, so the difference
 // between them is the horizontal half alone.
 //
-// On x86_64 this is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms").
+// On x86_64 this is INDICATIVE ONLY -- a desktop host's spread decides nothing.
 // The authoritative run is
 //
 //./scripts/run_on_pi.sh pi4 './benchmark/decimate_benchmark'

@@ -132,7 +132,7 @@ echo "  design variants can INVERT here. A number produced in this container is"
 echo "  not a slow number, it is not a number at all."
 echo
 echo "  It answers correctness perfectly, and nothing else. Performance decisions"
-echo "  close on real hardware -- EXPERIMENTS.md, section \"Measurement platforms\"."
+echo "  close on real hardware, on the reference device."
 echo
 
 # --- refuse a comparison that cannot fail ------------------------------------

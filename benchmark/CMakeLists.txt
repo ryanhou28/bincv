@@ -1,16 +1,16 @@
 # Two kinds of benchmark live here, and only one of them needs OpenCV.
 #
-#   * binCV-versus-OpenCV comparisons (ARCHITECTURE 10.3's denominator) include
+#   * binCV-versus-OpenCV comparisons (the OpenCV denominator) include
 #     bench_util.hpp, which pulls in <opencv2/opencv.hpp>. Those need OpenCV
 #     present and are skipped without it.
-#   * The Phase 2 experiment benchmarks (E-1 / E-2 / E-3) compare binCV against
+#   * The experiment benchmarks compare binCV against
 #     binCV. No OpenCV denominator applies to "which of our own alternatives is
 #     faster", so they include measure_util.hpp and nothing external.
 #
 # The whole directory used to be gated on OpenCV, which meant the reference
 # device's DEFAULT build -- core-only, which is the configuration the embedded
-# claim rests on -- could not produce the three binaries that close E-1, E-2 and
-# E-3 at all. A failed reproduction then looks like a missing binary rather than a
+# claim rests on -- could not produce the binaries that close those questions at
+# all. A failed reproduction then looks like a missing binary rather than a
 # misconfiguration. Partitioning by what a file actually includes fixes that and
 # keeps working as benchmarks are added.
 
@@ -23,9 +23,9 @@ file(GLOB BENCHMARK_SOURCES CONFIGURE_DEPENDS *.cpp)
 set(BINCV_HEAP_PROBE ${CMAKE_CURRENT_SOURCE_DIR}/heap_probe.cpp)
 list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_HEAP_PROBE})
 
-# X-32: residualSums' tap extraction, one TU per arm (see residual_arms.hpp).
+# residualSums' tap extraction, one TU per arm (see residual_arms.hpp).
 
-# X-31: the corner response's three arms, one TU each (see cornerresp_arms.hpp).
+# The corner response's three arms, one TU each (see cornerresp_arms.hpp).
 
 set(BINCV_BENCH_CORE "")
 set(BINCV_BENCH_OPENCV "")
@@ -70,7 +70,7 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
     endif()
     target_include_directories(${benchmark_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     # The real binarized frame, for benchmarks whose arms differ in CONVERGENCE
-    # behavior and therefore cannot use synthetic content (X-50).
+    # behavior and therefore cannot use synthetic content.
     target_compile_definitions(${benchmark_name} PRIVATE
         BINCV_REALFRAME_PATH="${CMAKE_CURRENT_SOURCE_DIR}/realframe.bin")
 

@@ -20,7 +20,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// never this type, so a kernel never has to care whether its arguments own
 /// their memory.
 /// @note Two backings are supported, and they are the reason this type exists
-/// rather than a std::vector member (the design notes):
+/// rather than a std::vector member:
 /// - owning: a heap allocation this object created and will free
 /// - non-owning: a caller-provided buffer (static, stack, DMA, sensor),
 /// which is the Tier 2 / no-heap path and never allocates

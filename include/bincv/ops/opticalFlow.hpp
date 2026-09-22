@@ -6,8 +6,8 @@
 /// deliberately different numerics. NOT bit-exact against OpenCV, and no
 /// such promise is available even in principle (see THE BOUNDARY below).
 ///
-/// This is the design notes's **known hard problem**,
-/// and route **(b)** of the two it names. Lucas-Kanade warps its window to
+/// This is the library's **known hard problem**, and it takes route **(b)** of
+/// the two that are open to it. Lucas-Kanade warps its window to
 /// subpixel positions and bilinearly interpolates; that is continuous and does not
 /// bit-parallelize. Route (a) -- census/Hamming block matching at integer pixels,
 /// fully bit-parallel -- is a different algorithm and is, not this
@@ -27,12 +27,12 @@
 /// ever copied out. The reference copies the warped patch into `IWinBuf` and
 /// `derivIWinBuf` (`winSize.area * 3` shorts = 5766 B at 31x31, per
 /// invoker); this file copies nothing and needs no scratch buffer.
-/// 2. **The 2x2 normal-equations matrix `A`.** One call to that work’s
-/// `gradientCovariance` -- four masked popcounts in one traversal, no scratch
-/// (the design notes). Its three entries are EXACT INTEGERS, which is
+/// 2. **The 2x2 normal-equations matrix `A`.** One call to ops/covariance.hpp's
+/// `gradientCovariance` -- four masked popcounts in one traversal, no scratch.
+/// Its three entries are EXACT INTEGERS, which is
 /// what lets the singularity test below be exact rather than epsilon-guarded.
 /// 3. **THE RESIDUAL `b = sum(diff * grad)`, WHICH IS ALSO POPCOUNTS.** This is
-/// the one place this file goes further than [the design notes] promised, and
+/// the one place this file goes further than route (b) promised, and
 /// the reason is an identity rather than an optimization. Bilinear
 /// interpolation is LINEAR in the four taps, and the taps of a BINARY next
 /// frame are bits:
@@ -73,25 +73,24 @@
 ///
 /// So the per-pixel cost of this tracker is **integers and popcounts only**, and
 /// the floating point is O(iterations), not O(iterations * window area). That is a
-/// STRONGER result than [the design notes] specified route (b) with -- it named
+/// STRONGER result than route (b) was specified with -- that specification named
 /// only the window and the covariance -- and it is stated here rather than buried
 /// because the boundary IS the claim. What could not be moved across the line is
-/// items 6-9: the position, the weights and the solve are irreducibly continuous,
-/// exactly as 7.9 says. the design rule records the placement.
+/// items 6-9: the position, the weights and the solve are irreducibly continuous.
 ///
 /// ===========================================================================
 /// WHAT IS DELIBERATELY DIFFERENT FROM THE REFERENCE, AND WHY
 /// ===========================================================================
-/// Ported from the reference frontend's tracker and the vendored OpenCV LK
-/// invoker it calls, with that frontend's parameters (win 31x31, maxLevel 3, maxCount 20,
+/// Ported from the reference pipeline's tracker and the vendored OpenCV LK
+/// invoker it calls, with that pipeline's parameters (win 31x31, maxLevel 3, maxCount 20,
 /// eps 0.03, minEig 0.001, BINARIZED derivative, BOX_2x2 pyrDown) -- all of which
 /// are this file's defaults, verbatim.
 ///
 /// **(i) THE PREVIOUS WINDOW SITS ON THE INTEGER GRID.** The reference warps BOTH
 /// windows: it bilinearly interpolates the previous frame and its derivative at
 /// the fractional `prevPt`, then interpolates the next frame at `nextPt`. A
-/// bit-plane derivative cannot be interpolated -- the popcount identity of
-/// the design notes is exact only for values in {-1, 0, +1} -- so the previous
+/// bit-plane derivative cannot be interpolated -- the popcount identity the
+/// covariance rests on is exact only for values in {-1, 0, +1} -- so the previous
 /// window is anchored at `floor(prevPt - halfWin)` and the ENTIRE subpixel
 /// displacement is carried on the next-frame side. The estimated flow is
 /// unaffected: the residual still compares `I(z)` with `J(z + d)` for `d` the
@@ -115,7 +114,7 @@
 /// read as the nearest edge pixel (BORDER_REPLICATE). Reflect-101 -- the
 /// reference's choice -- is a per-pixel index mapping and is not word-parallel;
 /// replicate is two mask-selects per word. Replicate also cannot manufacture a
-/// gradient outside the frame, which is the property the design rule chose reflect-101 for
+/// gradient outside the frame, which is the property reflect-101 was chosen for
 /// on the derivative.
 ///
 /// **(iv) THE SINGULARITY TEST IS EXACT.** The reference guards `D < FLT_EPSILON`
@@ -127,11 +126,11 @@
 /// **(v) ONE BIT PER PYRAMID LEVEL.** Every level here is binary, because the
 /// popcount covariance is exact only for a TERNARY derivative and a ternary
 /// derivative is what a ONE-bit level produces (ops/covariance.hpp promise 1). An
-/// N-bit level needs the bit-sliced weighted-sum covariance that the design notes
-/// describes and nothing in binCV implements. **How many bits each level actually
-/// needs is, which depends on this task and is where that choice gets
-/// made and measured** -- it is not settled here, and 1/1/1/1 is what the shipped
-/// kernels can express, not a claim that it is right.
+/// N-bit level needs a bit-sliced weighted-sum covariance, which nothing in
+/// binCV implements. **How many bits each level actually
+/// needs is an open question, to be settled by measurement** -- it is not settled
+/// here, and 1/1/1/1 is what the shipped kernels can express, not a claim that it
+/// is right.
 ///
 /// **(vi) A LEVEL NO LARGER THAN THE WINDOW IS IGNORED, NOT REFUSED.** The
 /// reference stops BUILDING levels at the first one that is not strictly larger
@@ -176,7 +175,7 @@
 /// clamps `criteria.maxCount`.
 /// * **Converged when `|delta|^2 <= epsilon^2`.** The reference squares
 /// `criteria.epsilon` once up front and compares `delta.ddot(delta)`; 0.03 px
-/// is the reference frontend's value and the default here.
+/// is the reference pipeline's value and the default here.
 /// * **The oscillation rule, which is NOT the epsilon rule.** From iteration 1
 /// on, if `|delta + prevDelta| < 0.01` in both components -- i.e. this step
 /// almost exactly undoes the last one -- the point is declared converged, the
@@ -200,7 +199,7 @@
 /// accuracy".
 ///
 /// `minEigThreshold` is quoted in the REFERENCE's units so that
-/// the reference frontend's 0.001 can be used verbatim.
+/// the reference pipeline's 0.001 can be used verbatim.
 /// `impl::kReferenceMinEigScale` is the conversion, and it is a derivation and not
 /// a fitted constant: the reference's `A11` is `FLT_SCALE * sum(ixval^2)` with
 /// `ixval = 16*255*Ix`, i.e. `(16*255)^2 / 2^20 = 65025/4096 = 15.875244...` times
@@ -212,7 +211,7 @@
 /// ===========================================================================
 /// **Tracking across real image sequences is a separate, end-to-end question. ADVIO ships
 /// `.mov`; frame extraction and a comparison harness against the reference
-/// frontend are pipeline validation, on the far side of the design notes's
+/// pipeline are end-to-end validation, on the far side of the library's input
 /// boundary. What is claimed here is measured against SYNTHETIC WARPS with
 /// EXACTLY KNOWN ground-truth displacement -- see tests/test_opticalflow.cpp for
 /// the tolerance, which is stated with its derivation BEFORE any error is
@@ -227,18 +226,18 @@
 /// * **No heap, anywhere.** The keypoint arrays, the status array and the error
 /// array are the caller's. There is no scratch buffer of any kind -- not one
 /// byte -- because item 1 above never copies a patch out.
-/// * **Never throws** (the design notes). Inconsistent arguments are programming
+/// * **Never throws.** Inconsistent arguments are programming
 /// errors reported by BINCV_ASSERT in debug and undefined in release. A track
 /// that fails reports `status[i] == 0`; that is a value, not an error.
 /// * **Read-only inputs**, so aliasing between any two inputs is unrestricted.
 /// The OUT arrays are a different matter: `nextPts` must not overlap `prevPts`.
 /// The level loop writes every `nextPts` entry before it reads any `prevPts`
 /// entry, so an in-place call tracks from the wrong anchor -- a BINCV_ASSERT,
-/// in the shape of earlier work, rather than a documented hazard.
+/// in the shape of the aliasing rule, rather than a documented hazard.
 /// * `nextPts` is written for every point at every level and holds LEVEL
 /// coordinates while the level loop runs; on return it holds level-0
 /// coordinates. This is the reference's own use of the same array.
-// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
 // compiler's own macros on aarch64, so an include-only integration still gets the
 // NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
 // its gate before its first core include.
@@ -273,7 +272,7 @@
 // the same question and must not be able to answer it differently.
 #include "corner.hpp"
 // impl::clipRegion / visitRowWords / popcountWord / RegionWords -- the region
-// walk every reduction in the library shares (the design rule’s clipping and padding
+// walk every reduction in the library shares (the clipping and padding
 // contract lives there, not here).
 #include "reduce.hpp"
 
@@ -284,22 +283,22 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// because this operation's whole job is to produce fractional positions.
 /// @note Deliberately NOT reused for ops/corner.hpp's `Corner`, which is integer
 /// by construction and carries a response.
-/// @brief The tracker's parameters, defaulted to the reference frontend's verbatim.
+/// @brief The tracker's parameters, defaulted to the reference pipeline's verbatim.
 /// @note `lk_win_size_width/height: 31`, `lk_term_criteria_max_count: 20`,
 /// `lk_term_criteria_eps: 0.03`, `lk_min_eig_threshold: 0.001`.
 /// `lk_max_level: 3` is not a field: the number of levels is `levelCount`,
 /// because the caller owns the pyramid.
 /// `lk_use_initial_flow: 0` IS a field -- `useInitialFlow` below. It used to be
 /// absent, on the grounds that an unused mode is an untested one; that was
-/// checked against the reference frontend's parameters, where the flag is off, and not against
+/// checked against the reference pipeline's parameters, where the flag is off, and not against
 /// the pipeline around it, where `predictOpticalFlow` turns it on.
-/// @brief Which pyramid level a keypoint ENTERS at. **earlier work.**
+/// @brief Which pyramid level a keypoint ENTERS at.
 /// @note Not a border and not a padding scheme: it is a policy about which levels
 /// a given point is allowed to be tracked on at all. binCV clips where the
 /// reference pads (deviation (ii)), and a window that is mostly outside a
 /// coarse level yields an ill-conditioned `A` and a one-sided `b` whose
-/// error is then multiplied by `2^level` on the way down. a measurement measured that
-/// cost: `1/2/2/2` is 0.8356 px over all 141 real-frame keypoints and
+/// error is then multiplied by `2^level` on the way down. That cost is measured:
+/// `1/2/2/2` is 0.8356 px over all 141 real-frame keypoints and
 /// **0.0010 px over the 58 that never clip**.
 enum class LKEntryLevel {
     /// Every point enters at the coarsest usable level. **What ships**, and the
@@ -319,7 +318,7 @@ struct LKParams {
     float epsilon = 0.03f;       ///< converged when |delta| <= this, in pixels
     float minEigThreshold = 0.001f;  ///< IN THE REFERENCE'S UNITS; see UNITS above
 
-    /// Which level each keypoint enters the pyramid at (earlier work). Defaults to
+    /// Which level each keypoint enters the pyramid at. Defaults to
     /// the shipped behavior; nothing changes unless a caller asks for it.
     LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
 
@@ -340,7 +339,7 @@ struct LKParams {
     /// starting estimate for the NEXT frame moves -- which is what the flag means
     /// in OpenCV and the only reading under which the residual is still the
     /// residual.
-    /// @note **WHEN IT PAYS, AND IT DOES NOT ALWAYS.** a measurement measured this against guess
+    /// @note **WHEN IT PAYS, AND IT DOES NOT ALWAYS.** This was measured against guess
     /// error on both architectures, and the answer is conditional on how far the
     /// frame moved:
     ///
@@ -364,9 +363,9 @@ struct LKParams {
     bool useInitialFlow = false;
 
     /// @brief Reject a point whose level-0 residual exceeds this, by clearing `status`.
-    /// **0 disables, which is the default.** (.)
+    /// **0 disables, which is the default.**
     ///
-    /// **WHAT IT IS FOR.** a measurement found the tracker returning a mean endpoint error of
+    /// **WHAT IT IS FOR.** A measurement found the tracker returning a mean endpoint error of
     /// 54.7 px on a 24 px translation while reporting `status = 1` for every point: past
     /// the pyramid's reach it does not fail, it answers confidently. `minEigThreshold`
     /// does not catch this -- the windows are well conditioned, they are simply matched
@@ -384,9 +383,10 @@ struct LKParams {
     /// 2.83 ms to 6.15 ms on x86 for a caller who was passing `err == nullptr` --
     /// **2.17x**. A caller who ALREADY requests `err` pays nothing extra, because
     /// that request costs the same 2.16x on its own.
-    /// @note **It is a LOSS RULE, so it shortens tracks by construction, and the design rule says
-    /// that is not automatically a win.** The default is off and the shipped value
-    /// is whatever a measurement measured on a real sequence against track lifetime -- not
+    /// @note **It is a LOSS RULE, so it shortens tracks by construction, and that is
+    /// not automatically a win.** The default is off and the shipped value
+    /// is whatever a measurement on a real sequence against track lifetime supports --
+    /// not
     /// the synthetic gap above, which is the easy case.
     float maxResidual = 0.0f;
 };
@@ -410,7 +410,7 @@ struct LKLevel {
 
     /// Bits per pixel at this level -- one, by construction. `LKLevelN<N>` below
     /// is the same level at N, and the tracking body is written against this
-    /// surface so that ONE body serves both ( genericity in N is not paid
+    /// surface so that ONE body serves both (genericity in N is not paid
     /// for at N == 1).
     static constexpr size_t Bits = 1;
 
@@ -496,14 +496,13 @@ namespace impl {
 
 #ifdef BINCV_LK_STAGE_TIMING
 /// @brief Where `track`'s time actually goes, by stage. **DIAGNOSTIC ONLY — off by
-/// default and compiled out otherwise.** (.)
+/// default and compiled out otherwise.**
 ///
 /// **THIS EXISTS BECAUSE THREE GUESSES IN A ROW MISSED.** An iteration-cap sweep on the
 /// reference device put roughly **45% of `track` OUTSIDE the iteration loop** —
 /// staging, the covariance, the clip — and nothing in this project had ever measured
 /// which of those it is. Guessing produced a 1.9% win and a 0.0% win before this was
-/// written; earlier work is the
-/// same lesson from the frontend's side.
+/// written.
 ///
 /// Nanoseconds, accumulated over every point and level. Four clock reads against a
 /// ~2 300 ns point-level is a few percent, and it is compared only against itself.
@@ -556,7 +555,7 @@ constexpr double kReferenceMinEigScale = (16.0 * 255.0) * (16.0 * 255.0) / 10485
 /// @param bits Bits per pixel at the level, `>= 1`.
 ///
 /// **THIS IS WHAT KEEPS `minEigThreshold` MEANING THE SAME THING AT EVERY N, AND
-/// WITHOUT IT that work’s ACCURACY CURVE WOULD COMPARE DIFFERENT POINT SETS.** The
+/// WITHOUT IT AN ACCURACY CURVE ACROSS N WOULD COMPARE DIFFERENT POINT SETS.** The
 /// derivation above fixes binCV's full-scale intensity at 1 because a bit is the
 /// whole alphabet; at N bits the alphabet runs `[0, 2^N - 1]` and the SAME
 /// physical intensity is now `2^N - 1` LSBs rather than 1. The reference's
@@ -618,8 +617,8 @@ BINCV_HOST_DEVICE inline long long floorDiv(long long a, long long b) {
 /// of the file is what that implements.
 /// @note Bits past `width` in the last word are cleared by `tailMask` before any
 /// shift, so a source plane with dirty padding gives the clean plane's
-/// answer -- the design rule’s rule, applied one level down from the reductions that
-/// state it.
+/// answer -- the padding invariant, applied one level down from the reductions
+/// that state it.
 /// @note `word` and `sourceWord` carry BINCV_HOST_DEVICE. They are SCALAR and
 /// TRAVERSAL-FREE -- at most two indexed word reads, a funnel shift and two
 /// mask-selects, with no loop over anything -- and the CUDA tracker builds
@@ -753,7 +752,7 @@ inline long long signedMaskedSum(WordType mag, WordType sign, WordType m) {
 ///
 /// -- the same `total - 2*set` spelling `signedMaskedSum` uses, for the same two
 /// reasons (one popcount cheaper than forming both halves, and it never forms
-/// `~sign`, which would set every padding bit of a trailing word,). This is
+/// `~sign`, which would set every padding bit of a trailing word). This is
 /// the generalization of `signedMaskedSum`, which it reduces to exactly at N = 1.
 ///
 /// @note The weight is a MULTIPLY, not a shift. `(total - 2*opposing)` is signed
@@ -762,10 +761,10 @@ inline long long signedMaskedSum(WordType mag, WordType sign, WordType m) {
 /// `int64_t(1) << (i + j)` for the same reason.
 /// @note One accumulator, not `N^2` of them. The per-(i,j) counts are weighted and
 /// folded immediately, so the register footprint does NOT grow with N and
-/// that work’s O(N^2)-per-row accumulator concern -- which is about
+/// the O(N^2)-per-row accumulator concern -- which is about
 /// `BitSlicedPairCounts<N>` in ops/covariance.hpp -- does not arise here.
 /// @note The plane operands are POINTERS, not array references, so a caller holding
-/// them in a staged buffer or a tap cache passes them IN PLACE (that work’s
+/// them in a staged buffer or a tap cache passes them IN PLACE (see
 /// `RowOperands`). Array arguments decay, so every existing call site is
 /// unchanged; `N` was already explicit at all of them.
 /// @tparam UseNeon False forces the portable scalar path even where NEON exists.
@@ -778,9 +777,9 @@ inline long long slicedSignedSum(const WordType* maskedMag, WordType sign,
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     if constexpr (UseNeon) {
     // ===================================================================
-    // NEON: THE PLANE-PAIR POPCOUNTS BATCHED INTO LANES (Phase 5.1).
+    // NEON: THE PLANE-PAIR POPCOUNTS BATCHED INTO LANES.
     //
-    // This is the design rule’s reservation being cashed in.
+    // This is the bulk-only reduction rule's reservation being cashed in.
     // aarch64 has NO SCALAR POPCOUNT: `CNT` lives in the vector registers, so
     // every scalar `popcountWord` pays `fmov` in and `fmov` out. This call issues
     // `2N^2` of them -- EIGHT at N = 2, the depth three of four levels of the
@@ -788,8 +787,9 @@ inline long long slicedSignedSum(const WordType* maskedMag, WordType sign,
     // lanes crosses the register domain ONCE, at the horizontal add, instead of
     // eight times.
     //
-    // forbade a per-word popcount in the public API precisely so that the
-    // reductions would be shaped to allow this; nothing here would be possible if
+    // The bulk-only rule forbade a per-word popcount in the public API precisely
+    // so that the reductions would be shaped to allow this; nothing here would be
+    // possible if
     // callers had been handed `popcountWord`.
     //
     // BIT-EXACT: the same integers, weighted the same way. The scalar path below
@@ -955,7 +955,7 @@ BINCV_HOST_DEVICE inline WordType alignedWord(const WordType* row, size_t words,
 /// way round for an embedded target — hence `BINCV_STAGING_BUDGET_BYTES` below.
 constexpr size_t kStagedMaxRows = 64;
 
-/// @brief The stack these two structures may occupy, in BYTES. **.**
+/// @brief The stack these two structures may occupy, in BYTES.
 ///
 /// **WHY A BYTE BUDGET EXISTS ALONGSIDE THE ROW CAP.** The row cap bounds the window's
 /// SHAPE; the memory it costs then floats with the bit depth, because every row carries
@@ -983,7 +983,7 @@ constexpr size_t kStagedMaxRows = 64;
 ///
 /// Of the twelve words a row needs, **eight belong to the PREVIOUS frame** -- `self`,
 /// `magX`, `magY`, `signX`, `signY` -- and LK linearises about the previous frame, so
-/// they are identical on every one of that measurement’s **4.29 mean iterations** and were being
+/// they are identical on every one of the measured **4.29 mean iterations** and were being
 /// re-extracted on all of them. `region` is fixed per point per level, so one staging
 /// serves the whole iteration.
 template <size_t N, typename WordType>
@@ -998,7 +998,7 @@ struct StagedWindow {
 /// @brief The four TAP words per row, cached against the integer displacement they
 /// were read at. **INTERNAL**.
 ///
-/// The taps move, which is why this could not stage them -- but they move as
+/// The taps move, which is why the row staging could not cache them -- but they move as
 /// `floor(offX)`, and the iteration is *shrinking* `off`. Once the estimate settles
 /// inside a pixel the integer part stops changing and the same four words are
 /// re-extracted every remaining iteration. **Sound by construction:** the tap words
@@ -1011,7 +1011,7 @@ struct TapCache {
     /// one plane in the four lanes of a vector, so this layout makes that a single
     /// `vld1q_u32`. Stored as four separate arrays it was **eight stores and two loads
     /// a row** to marshal them, each load waiting on its stores — the same store-to-load
-    /// round trip a measurement found costing 1.5× in the covariance.
+    /// round trip measured costing 1.5× in the covariance.
     WordType taps[kStagedMaxRows][N][4];
     long long tapX = 0;
     long long tapY = 0;
@@ -1067,7 +1067,7 @@ inline bool stageWindow(const LKLevel<WordType>&, const RegionWords<WordType>&,
 /// **`levelCovariance` WALKS THE SAME WINDOW `stageWindow` HAS JUST FINISHED WALKING.**
 /// The staged buffer holds `magX`, `magY`, `signX`, `signY` per row — which is exactly
 /// and only what the covariance reads — so the second traversal of the level's planes
-/// is pure repetition. a measurement measured the covariance at
+/// is pure repetition. The covariance measured
 /// **27.5% of `track` on the reference device**; this removes its memory traffic
 /// entirely and leaves the arithmetic reading a ~2 KB stack buffer.
 ///
@@ -1084,7 +1084,7 @@ inline GradientCovariance stagedCovariance(const StagedWindow<N, WordType>& s, s
     BitSlicedPairCounts<N> total;
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     if constexpr ((N == 1 || N == 2) && sizeof(WordType) == 4) {
-        // that measurement’s lane kernel, on the staged buffer: the counts stay in lanes to the end
+        // The lane kernel, on the staged buffer: the counts stay in lanes to the end
         // of the window and the register domain is crossed once per point per level.
         const auto counts = [](uint32x4_t v) {
             return vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(v))));
@@ -1163,9 +1163,9 @@ inline GradientCovariance stagedCovariance(const StagedWindow<N, WordType>& s, s
 
 /// @brief One row's twelve operands, as POINTERS. **INTERNAL**.
 /// @note **Pointers, and that was measured.** They let a staged or cached operand be
-/// used IN PLACE, which is the whole point of earlier work. Copying them into a
-/// value struct instead gave back what staging bought -- a measurement measured both,
-/// and only pointers PLUS a compile-time `Staged` reached parity.
+/// used IN PLACE, which is the whole point of staging and the tap cache. Copying
+/// them into a value struct instead gave back what staging bought -- both were
+/// measured, and only pointers PLUS a compile-time `Staged` reached parity.
 template <size_t N, typename WordType>
 struct RowOperands {
     const WordType (*taps)[4];   ///< `[plane][tap]`; see `TapCache`
@@ -1180,15 +1180,15 @@ struct RowOperands {
 
 /// @brief The ONE place a window row's operands are read. **INTERNAL**.
 ///
-/// **WHY THIS EXISTS.** recorded **three copies** of this extraction block and
-/// recommended collapsing them *for maintenance*. made it worth doing
-/// *for speed*: staging and tap-caching have to reach the NEON paths too, and writing
+/// **WHY THIS EXISTS.** There were **three copies** of this extraction block, worth
+/// collapsing *for maintenance*. Staging and tap-caching made it worth doing
+/// *for speed*: they have to reach the NEON paths too, and writing
 /// them into each copy separately would have made **five**. One reader serves scalar
-/// and NEON, staged and unstaged -- and that measurement’s `+1`-tap-is-a-shift and that measurement’s interior
+/// and NEON, staged and unstaged -- and the `+1`-tap-is-a-shift and the interior
 /// fast path live here once instead of four times.
 ///
-/// @tparam Staged Compile-time, NOT a runtime pointer test. a measurement measured a single
-/// body branching on `staged != nullptr` per row costing **17% of `track` on
+/// @tparam Staged Compile-time, NOT a runtime pointer test. A measurement put a single
+/// body branching on `staged != nullptr` per row at **17% of `track` on
 /// x86**: the compiler stops specializing the row loop. Two instantiations of
 /// one source is the price of that 17%.
 template <size_t N, typename WordType, bool Staged>
@@ -1242,14 +1242,14 @@ public:
     }
 
 private:
-    /// The four displaced taps. that measurement’s `+1`-is-a-shift and that measurement’s interior fast path.
+    /// The four displaced taps: the `+1`-is-a-shift and the interior fast path.
     ///
     /// **ROW i's LOWER TAP IS ROW i+1's UPPER TAP** — they name the same level row at
     /// the same displacement, and the window is walked in increasing `y`, so carrying
     /// it forward halves the reads of `lv.next`..
     ///
     /// Sound because the two spellings agree wherever both apply: `alignedWord` is
-    /// that measurement’s interior fast path for exactly the case `displacedRow(...).word(0)` would
+    /// the interior fast path for exactly the case `displacedRow(...).word(0)` would
     /// compute the same bits more slowly, and outside it both take `displacedRow`.
     WordType readNext(long long sy, size_t k, long long sx) const {
         if (colsInside_ && sx == srcX_ && sy >= 0 &&
@@ -1315,9 +1315,9 @@ private:
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
 /// @brief The aligned residual at **N == 1**, batching across the FOUR TAPS with
 /// accumulators carried across the WHOLE WINDOW. **INTERNAL**.
-/// @note `Staged` is compile-time; see `RowReader`. This is the NEON paths get
-/// that measurement’s staging and that measurement’s tap cache without a fifth copy of the extraction
-/// block a measurement counted three of.
+/// @note `Staged` is compile-time; see `RowReader`. This is that same consolidation:
+/// the NEON paths get staging and the tap cache without a fifth copy of the
+/// extraction block.
 template <typename WordType, bool Staged>
 inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
                                          const RegionWords<WordType>& r, long long tapX,
@@ -1436,7 +1436,7 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
     // AND, `cnt`, byte-add.
     //
     // Six operations where there were eleven, and it is the same trick
-    // a measurement used to make the bit-plane FAST worth having.
+    // used to make the bit-plane FAST worth having.
     //
     // Sixteen byte accumulators — total and opposing for each of the four plane pairs,
     // twice for the two components — plus four for the previous-frame term. aarch64
@@ -1631,7 +1631,7 @@ inline void alignedResidualSums(const LKLevelN<N, WordType>& lv, const RegionWor
 /// @note **`20 N^2` popcounts per word**, against 20 at N = 1, which this reduces
 /// to exactly: five plane sums (four taps and the previous frame) for each
 /// of two gradient components, `2N^2` popcounts each. That quadratic is the
-/// cost side of earlier work and it is the same `3N^2 + N`-shaped growth
+/// cost side of going to N bits and it is the same `3N^2 + N`-shaped growth
 /// ops/covariance.hpp pays -- both come from the SAME source, a product of
 /// two bit-sliced values needing every plane pair.
 /// @note The per-row partial sums are the same ten `long long`s at every N, for
@@ -1666,7 +1666,7 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
     // Measured on the reference device: **2.13x**, bit-exact.
     //
     // Guarded on the window fitting a word -- `LKParams` allows any `winWidth`,
-    // and at 31x31 (the reference frontend's window) it fits at every word type binCV supports.
+    // and at 31x31 (the reference pipeline's window) it fits at every word type binCV supports.
     // ===================================================================
     if (r.x1 - r.x0 <= bitsPerWord<WordType>()) {
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
@@ -1845,15 +1845,15 @@ inline float windowMeanAbsDiff(const LKLevel<WordType>& lv, const RegionWords<Wo
 /// So this is computed PER PIXEL, and that is a real and acknowledged asymmetry
 /// with the 1-bit form above. It is not a hole in the tracker's claim, for four
 /// reasons that are properties of where `err` sits rather than excuses: it is an
-/// OPTIONAL output (`err == nullptr` is the frontend's own call and skips this
+/// OPTIONAL output (`err == nullptr` is the pipeline's own call and skips this
 /// entirely), it is computed at level 0 ONLY, it runs once per point per frame and
 /// never inside the iteration loop, and nothing in the solve reads it -- `status`
 /// does not depend on it unless `LKParams::maxResidual` is set (deviation (vii),
-/// and that work’s reject is the one thing that departs from it). **The per-pixel cost of
+/// and that reject is the one thing that departs from it). **The per-pixel cost of
 /// TRACKING at N bits remains integers and popcounts only.**
 ///
 /// **AND HERE IS WHAT "OPTIONAL" COSTS, WHICH THIS PARAGRAPH USED TO ASSERT WITHOUT A
-/// NUMBER.** Measured by earlier work on 816 keypoints over a 1/2/2/2 ladder, asking for `err`
+/// NUMBER.** Measured on 816 keypoints over a 1/2/2/2 ladder, asking for `err`
 /// takes `track` from 2.83 ms to 6.12 ms on x86 -- **2.16x**. It is one window pass per
 /// point against an iteration loop that averages under two iterations, so it is not a
 /// surprise once stated; it was simply never stated. A caller who passes an `err` array
@@ -1935,18 +1935,18 @@ BINCV_HOST_DEVICE inline long long floorToLL(float v) {
 
 namespace impl {
 
-/// The most pyramid levels the tracker will consume. The reference frontend's
+/// The most pyramid levels the tracker will consume. The reference pipeline's
 /// `lk_max_level: 3` is four; a 640x480 frame stalls at 1 pixel after 10. Fixed so
 /// that `LKContext` can carry every level's extent WITHOUT a scratch allocation.
 constexpr size_t kMaxLevels = 16;
 
 
 #ifdef BINCV_LK_ITERATION_HISTOGRAM
-/// @brief that measurement’s iteration counter. **DIAGNOSTIC ONLY — off by default, and it must
+/// @brief The iteration counter. **DIAGNOSTIC ONLY — off by default, and it must
 /// stay that way.**
 ///
-/// that work’s AVX2 keypoint batch runs eight lanes in lockstep, so a batch costs the
-/// **maximum** iteration count over its eight points, not the mean a measurement measured. That
+/// The AVX2 keypoint batch runs eight lanes in lockstep, so a batch costs the
+/// **maximum** iteration count over its eight points, not the mean. That
 /// ratio decides whether the batch is worth writing at all, and it is knowable from a
 /// histogram before any AVX2 exists — which is the entire reason this hook exists.
 ///
@@ -1992,7 +1992,7 @@ struct LKContext {
     double minEigThreshold = 0.0;
     LKEntryLevel entryLevel = LKEntryLevel::Coarsest;
     bool useInitialFlow = false;
-    double maxResidual = 0.0;   ///< 0 disables; that work’s reject
+    double maxResidual = 0.0;   ///< 0 disables; the residual reject
 
     /// Every usable level's extent, so that a point's entry level can be RECOMPUTED
     /// rather than cached. A per-point array would be scratch, and this operation
@@ -2083,7 +2083,7 @@ inline GradientCovariance levelCovariance(const LKLevelN<N, WordType>& lv, Rect 
 /// **INTERNAL.**
 ///
 /// **THIS WAS THE `parallelFor` LAMBDA AND IT IS UNCHANGED.** It was lifted out so
-/// that that measurement’s batched path has something to fall back
+/// that the batched path has something to fall back
 /// TO: a window the batch cannot stage — wider than a word, or taller than
 /// `kLkBatchMaxRows` — must still be tracked, and tracked identically. Naming the
 /// body once is what keeps "identically" a property of the code rather than of two
@@ -2117,7 +2117,7 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
         return;
     }
 
-    // extract the window's ITERATION-INVARIANT words ONCE. a measurement measured
+    // extract the window's ITERATION-INVARIANT words ONCE. Measured:
     // a mean of 4.29 iterations per point per level, every one of which was
     // re-reading the same eight previous-frame words per row. `region` is fixed
     // for the whole iteration, so one staging serves all of them.
@@ -2451,7 +2451,7 @@ inline void stageLane(const LKLevelN<N, WordType>& lv, const RegionWords<WordTyp
 
 /// @brief Refresh ONE lane's four tap words per row at a new integer displacement.
 /// **INTERNAL**. `RowReader::extractTaps`, scattered into the lane.
-/// @note that measurement’s `+1`-tap-is-a-shift and that measurement’s interior fast path, both preserved:
+/// @note The `+1`-tap-is-a-shift and the interior fast path, both preserved:
 /// the taps for row `i+1`'s upper pair are row `i`'s lower pair, and a window
 /// narrower than a word gets its `+1` column by shifting rather than re-reading.
 template <size_t N, typename WordType>
@@ -2472,7 +2472,7 @@ inline void extractLaneTaps(const LKLevelN<N, WordType>& lv, const RegionWords<W
     // `lv.next` halves the scalar half of the batch's inner loop.
     //
     // Sound because the two spellings agree wherever both apply: `alignedWord` is
-    // that measurement’s interior fast path for exactly the case `displacedRow(...).word(0)` would
+    // the interior fast path for exactly the case `displacedRow(...).word(0)` would
     // compute the same bits more slowly, and outside it both sides take `displacedRow`.
     const auto readRow = [&](long long sy, size_t k, long long sx) -> WordType {
         if (colsInside && sy >= 0 && sy < static_cast<long long>(height) && sx == srcX) {
@@ -2546,7 +2546,7 @@ inline GradientCovariance stagedCovarianceLane(const LkBatchArrays<N, WordType>&
 /// refill**. **INTERNAL**.
 ///
 /// **THE REFILL IS THE DESIGN, NOT A REFINEMENT ON TOP OF IT.**
-/// a measurement counted the iteration distribution before any of
+/// The iteration distribution was counted before any of
 /// this was written: **72.6% of point-levels finish in two iterations or fewer, and a
 /// 3.6% tail runs the cap of twenty.** Eight lanes in lockstep cost the MAXIMUM of
 /// eight draws from that distribution, which measured **5.20 against a mean of 3.24 --
@@ -2605,7 +2605,8 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
                 const double residual = windowMeanAbsDiff(lv, s.region, tx, ty,
                     (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
                 if (c.err != nullptr) c.err[s.p] = static_cast<float>(residual);
-                //, and it MUST be here too: the batch is the shipped x86 path, so a
+                // The residual reject, and it MUST be here too: the batch is the
+                // shipped x86 path, so a
                 // reject applied only in `trackOnePoint` would be silently absent from
                 // every AVX2 build -- the failure mode CLAUDE.md warns about, in the
                 // direction x86 does compile.
@@ -2729,7 +2730,7 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
             s.w01 = fx * (1.0 - fy);
             s.w10 = (1.0 - fx) * fy;
             s.w11 = fx * fy;
-            // that measurement’s tap cache, per lane: the iteration SHRINKS the displacement, so
+            // The tap cache, per lane: the iteration SHRINKS the displacement, so
             // once the estimate settles inside a pixel the integer part stops moving
             // and the same four words would be re-extracted every remaining iteration.
             if (!s.tapValid || s.tapX != tapX || s.tapY != tapY) {
@@ -2816,7 +2817,7 @@ template <typename LevelT, typename WordType = typename LevelT::Word>
 inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
     // The one place the level's depth reaches the tracking logic. See
     // referenceMinEigScale for why holding the 1-bit constant here would silently
-    // reject more points at higher N and confound that work’s accuracy curve.
+    // reject more points at higher N and confound an accuracy curve across N.
     constexpr double kLevelMinEigScale = referenceMinEigScale(LevelT::Bits);
 
     const bool finest = (li == 0);
@@ -2861,18 +2862,18 @@ inline void trackOneLevel(const LevelT& lv, size_t li, const LKContext& c) {
     // Each iteration writes only `nextPts[p]`, `status[p]` and `err[p]` -- distinct
     // indices -- and reads only the level's views, which are const. Nothing is
     // accumulated across points, so a split cannot move a flow vector. That is why
-    // a measurement measured 2.60x by splitting the ARRAY with no library change at all; this
+    // 2.60x was measured by splitting the ARRAY with no library change at all; this
     // only makes it askable.
     //
     // Serial unless a caller installs a backend (core/parallel.hpp). On a core-only
     // build this is exactly the loop it replaces.
 #if defined(BINCV_X86_LK_BATCH)
-    // earlier work: EIGHT KEYPOINTS PER AVX2 REGISTER, WITH LANE REFILL.
+    // EIGHT KEYPOINTS PER AVX2 REGISTER, WITH LANE REFILL.
     // Selected at run time, so nothing about the library's baseline ISA changes and a
     // machine without AVX2 takes the loop below. The split is by RANGE rather than by
     // point, because each range carries its own refill cursor -- and by at most one
     // range per thread, since a short final batch is the one thing a range boundary
-    // costs and a measurement measured idle lanes to be expensive.
+    // costs and idle lanes were measured to be expensive.
     if constexpr (kBatchableLevel<LevelT>) {
         if (hasLkBatch() && lkBatchEnabled()) {
             size_t groups = c.pointCount / kLkBatchLanes;
@@ -2905,7 +2906,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
                  "opticalFlow: prevPts, nextPts and status must be non-null");
     // PASS 1 writes `nextPts[p]` before PASS 2 reads `prevPts[p]`, so an in-place
     // call is not merely inexact, it tracks from the wrong anchor -- measured at up
-    // to 23 px of divergence on a three-level frontend. Every other kernel in the
+    // to 23 px of divergence on a three-level pipeline. Every other kernel in the
     // library carries an explicit predicate; this is that predicate, on the
     // destination array rather than on a view.
     BINCV_ASSERT(byteRangesDisjoint(prevPts, pointCount * sizeof(Point2f), nextPts,
@@ -2946,7 +2947,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
         if (err != nullptr) err[i] = 0.0f;
     }
 
-    // Degenerate but legal, and a VALUE rather than an error (the design notes):
+    // Degenerate but legal, and a VALUE rather than an error:
     // with no levels there is nothing to track on, so every point is lost and its
     // last estimate is the point itself.
     if (levelCount == 0) {
@@ -2997,7 +2998,7 @@ inline size_t usableLevelCount(size_t levelCount, int winW, int winH, DimFn dims
 /// @tparam WordType The planes' word type.
 /// @param levels `levelCount` per-level view bundles, **level 0 (the finest)
 /// first**. Every level's six planes must share that level's dimensions.
-/// @param levelCount Number of pyramid levels. The reference frontend's
+/// @param levelCount Number of pyramid levels. The reference pipeline's
 /// `lk_max_level: 3` means four levels. **Levels at or below the window
 /// size are ignored** (deviation (vi)), so passing more of them than the
 /// frame can carry is harmless rather than silently wrong; 0 is legal and
@@ -3018,7 +3019,7 @@ inline size_t usableLevelCount(size_t levelCount, int winW, int winH, DimFn dims
 /// pixel count and not the window area.
 /// @param pointCount Number of keypoints.
 /// @param params Window, iteration limit, epsilon and minimum-eigenvalue
-/// threshold; defaulted to the reference frontend's parameters.
+/// threshold; defaulted to the reference pipeline's parameters.
 ///
 /// @note **No allocation, no scratch, no throw.** The four arrays are the
 /// caller's and nothing else is needed; tests/test_opticalflow.cpp counts
@@ -3027,7 +3028,7 @@ inline size_t usableLevelCount(size_t levelCount, int winW, int winH, DimFn dims
 /// @note **Every level of THIS overload is one bit deep.** For deeper levels see
 /// the `LKLevelN<N, WordType>` overload below (a ladder all at one depth)
 /// and `LKLevels<WordType, LevelBits...>` (a ladder of MIXED depths, which
-/// is the form needs). All three run the same body; the depth
+/// is the form a 1/3/4/5 ladder needs). All three run the same body; the depth
 /// reaches it in exactly two places, `impl::referenceMinEigScale` and
 /// `impl::levelCovariance`.
 /// @note **Windows clip at the frame edge** (deviation (ii)) and next-frame taps
@@ -3161,7 +3162,7 @@ inline void calcOpticalFlowPyrLK(const LKLevelN<N, WordType>* levels, size_t lev
                   "kernels then apply at full speed. Otherwise use uint32_t "
                   "(bincv::DefaultWord). A wider word is correct and lands in the "
                   "scalar fallback on BOTH x86 and aarch64; measured 8.6x slower "
-                  "keypoint tracking in a real frontend. Define "
+                  "keypoint tracking in a real pipeline. Define "
                   "BINCV_ALLOW_SCALAR_LK_WORD to measure the scalar path on purpose.");
 #endif
     impl::LKContext c;
@@ -3180,14 +3181,14 @@ inline void calcOpticalFlowPyrLK(const LKLevelN<N, WordType>* levels, size_t lev
 /// @brief A tracking ladder whose levels have **DIFFERENT bit depths**, level 0
 /// first. **API TIER 2.**
 /// @tparam LevelBits One depth per level -- `LKLevels<uint32_t, 1, 3, 4, 5>` is
-/// the ladder the design notes measured on the reference pipeline.
+/// the ladder measured on the reference pipeline.
 ///
 /// @note **The depths are a template parameter list, not a runtime vector, and
 /// that is `Pyramid`'s decision rather than a new one.** `QuantMat` is
 /// templated on N, so levels of different depths have different TYPES; a
 /// runtime container of them would need type erasure, and the `N^2` inner
 /// loops of `impl::slicedSignedSum` would become runtime-bounded, which
-/// would confound exactly the ns/pixel axis has to report. This mirrors
+/// would confound exactly the ns/pixel axis a depth comparison has to report. This mirrors
 /// `Pyramid<WordType, LevelBits...>` one-for-one so that a pyramid and the
 /// tracker that reads it are declared the same way.
 /// @note Holds VIEWS, not containers, so it owns nothing and allocates
@@ -3285,8 +3286,8 @@ inline void calcOpticalFlowPyrLK(const LKLevels<WordType, LevelBits...>& levels,
 /// **API TIER 3.**
 ///
 /// **This is the whole of the tracker's per-call memory.** Everything else it keeps is
-/// O(1): there is no scratch buffer and no allocation anywhere (, and CLAUDE.md's
-/// hard rule that a kernel does not allocate).
+/// O(1): there is no scratch buffer and no allocation anywhere, which is CLAUDE.md's
+/// hard rule that a kernel does not allocate.
 ///
 /// @note **For sizing a thread stack, and for asserting against a budget binCV cannot
 /// know.** It grows with the bit depth — `64 * (7N + 2)` words — so it is 4 KB at

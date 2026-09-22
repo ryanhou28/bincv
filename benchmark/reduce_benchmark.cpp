@@ -1,6 +1,6 @@
 // bulk reductions versus OpenCV, and versus the per-pixel loop.
 //
-// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
 // semantic operation on the SAME binary content stored as CV_8U -- what a user
 // does today without binCV. For countNonZero that denominator is exact: OpenCV
 // has the identical function, and this is a Tier 1 operation. For countAnd it is
@@ -8,9 +8,9 @@
 // temporary, then cv::countNonZero -- and the temporary is part of the cost,
 // which is the point of having a masked reduction at all.
 //
-// A THIRD ROW, because asks for it: BinMat::countNonZero, the per-pixel
-// loop the container has carried since before this task. It is the "before" this
-// work is supposed to improve on, and it is measured rather than assumed.
+// A THIRD ROW, and the reason it is here: BinMat::countNonZero, the per-pixel
+// loop the container has carried from the start. It is the "before" the bulk
+// reductions are supposed to improve on, and it is measured rather than assumed.
 //
 // ---------------------------------------------------------------------------
 // MEASUREMENT VALIDITY -- the same four hazards benchmark/logic_benchmark.cpp
@@ -47,7 +47,7 @@
 // It is NOT or. It reports word types side by side and windows at
 // three sizes because those are the workloads- need, but a number
 // measured here is x86_64 and therefore NON-AUTHORITATIVE for every one of those
-// questions (EXPERIMENTS.md, "Measurement platforms"). They close on the
+// questions -- a desktop host's spread decides nothing. They close on the
 // reference device through scripts/run_on_pi.sh, and this file is the code they
 // run, not the answer they produce.
 
@@ -264,7 +264,7 @@ bool runSize(int width, int height) {
 
     // --- countAndSplit over LK-sized windows ---------------------------------
     //
-    // Context for earlier work, not an answer to it: the MVP recomputes per
+    // Context for the incremental question, not an answer to it: the MVP recomputes per
     // window, windows overlap heavily, and this is what recomputation costs. The
     // incremental alternative is deliberately not implemented here -- measuring
     // one option is not an experiment.
@@ -338,7 +338,7 @@ int main() {
     std::printf("=== binCV reduction benchmark ===\n");
     std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n",
                 CV_VERSION, cv::getNumThreads());
-    std::printf("Denominator: cv::countNonZero on the same content as CV_8U (ARCHITECTURE 10.3)\n");
+    std::printf("Denominator: cv::countNonZero on the same content as CV_8U\n");
     std::printf("popcount lowering: %s\n", popcountLowering());
     std::printf("x86_64 numbers are INDICATIVE. close on the reference device.\n");
 

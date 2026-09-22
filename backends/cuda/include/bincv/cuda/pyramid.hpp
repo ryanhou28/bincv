@@ -151,7 +151,7 @@ cudaError_t pyrDownBox(DevicePlaneBlockConstView src, DevicePlaneBlockView dst,
 ///
 /// @note Public, and deliberately so: this is the device analogue of
 /// `simdStatus()`. The fast arm is a templated bit-sliced kernel, so it
-/// exists only for a bounded set of (NIn, NOut) pairs -- the frontend
+/// exists only for a bounded set of (NIn, NOut) pairs -- the pipeline
 /// ladder, the identities, and the 8->8 case -- and 64 kernels for the rest
 /// is code size for nothing. A caller outside the set silently takes the
 /// reference arm, and "silently" is the part this function removes. It is

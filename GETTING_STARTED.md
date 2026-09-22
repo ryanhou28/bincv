@@ -1,6 +1,9 @@
 # Getting started
 
-binCV is header-only and needs a C++17 compiler. OpenCV is optional.
+binCV is header-only and needs a C++17 compiler. **The library itself never uses
+OpenCV** — every `#include <opencv2/...>` in `include/` sits behind
+`BINCV_WITH_OPENCV`. OpenCV buys you `cv::Mat` interop, the tests that check Tier 1
+operations against it, and the benchmarks that compare against it.
 
 ## Build
 
@@ -15,7 +18,7 @@ Run the tests:
 cd build && ctest --output-on-failure
 ```
 
-Without OpenCV — this is the core-only configuration an embedded target uses:
+Building without it — the core-only configuration an embedded target uses:
 
 ```bash
 cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Release -DBINCV_USE_OPENCV=OFF
@@ -103,11 +106,13 @@ bincv::edgeThreshold(src, w, h, stride, bincv::narrowPlaneMutable(dst64.view()),
 That is a reinterpretation, not a copy — a 64-bit bit-plane already is a 32-bit one with
 twice the stride — and it runs at native 32-bit speed.
 
-## A tracking frontend
+## A feature tracking pipeline
 
-`examples/vio_frontend.cpp` is a complete keypoint-tracking frontend: sensor
+`examples/vio_frontend.cpp` is a complete feature tracking pipeline: sensor
 stage, pyramid, derivatives, corner detection, Lucas–Kanade, and re-detection when tracks
-run out. It is the best starting point for anything larger than one operation.
+run out. (A *VIO frontend* is what visual-inertial odometry calls exactly that stack — the
+image-processing half that feeds the optimizer.) It is the best starting point for anything
+larger than one operation.
 
 ```bash
 ./build/examples/vio_frontend <directory-of-png-frames>   # OpenCV builds
@@ -125,7 +130,7 @@ is PNM (`readPbm`/`writePbm`, `readPgm`/`writePgm`) plus the blob reader
 (`io/sequence.hpp`), which need nothing.
 
 `examples/slam_frontend.cpp` is the descriptor-association counterpart — the
-SLAM-shaped loop: FAST per pyramid level, intensity-centroid orientation, steered
+SLAM frontend loop: FAST per pyramid level, intensity-centroid orientation, steered
 BRIEF, Hamming matching against the previous frame, and the five-point essential
 matrix under RANSAC. It prints a per-stage, per-level profile and its headline is
 the RANSAC inlier rate.

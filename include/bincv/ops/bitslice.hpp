@@ -2,8 +2,8 @@
 
 /// @file bitslice.hpp
 /// @brief Small-count arithmetic over bit-packed planes. **API TIER 3**
-/// throughout -- bit-sliced arithmetic has no OpenCV counterpart
-/// (the design notes), so nothing here borrows an OpenCV name.
+/// throughout -- bit-sliced arithmetic has no OpenCV counterpart, so nothing
+/// here borrows an OpenCV name.
 ///
 /// Three word-level primitives and one view-level kernel:
 ///
@@ -12,27 +12,26 @@
 /// thresholdGE(planes, n, threshold) compare that count against a constant
 /// majority3(a, b, c, dst) maj3 over three views
 ///
-/// This is the arithmetic layer the first two MVP operations sit on
-/// (the design notes):
+/// This is the arithmetic layer the first two MVP operations sit on:
 ///
-/// - **Denoise, median of 3** (the design notes). For binary input the
+/// - **Denoise, median of 3.** For binary input the
 /// median IS the majority, so the whole kernel is maj3 over three views --
 /// which is why majority3 exists here rather than being open-coded there.
-/// - **Pyramid box 2x2** (the design notes), *at the first level*.
+/// - **Pyramid box 2x2**, *at the first level*.
 /// Over a 1-bit source the 2x2 sum is bitSlicedSum at k = 4 and the
 /// requantization that follows is a comparison against constants, i.e.
-/// thresholdGE. That is the level-0 case only, and that work’s pyrDown needs
+/// thresholdGE. That is the level-0 case only, and ops/pyramid.hpp's pyrDown needs
 /// two further things this file deliberately does not provide -- read the
 /// next section before building on it.
 ///
 /// ---------------------------------------------------------------------------
 /// WHY A BIT-SLICED SUM AND NOT A POPCOUNT
 ///
-/// the design rule forbids exposing a per-word popcount, and this file is not a way around
+/// The library forbids exposing a per-word popcount, and this file is not a way around
 /// it -- it is the alternative that makes the prohibition affordable. A popcount
 /// answers "how many bits are set in this word", collapsing 64 independent pixels
 /// into one scalar; on aarch64 it also pays two register-domain crossings to do
-/// it (the design notes). A bit-sliced sum answers a different question: for each
+/// it. A bit-sliced sum answers a different question: for each
 /// of the 64 bit positions independently, how many of the k inputs have that bit
 /// set. The answer is not a scalar, it is ceil(log2(k+1)) WORDS -- plane 0 the
 /// least significant bit of every lane's count, plane 1 the next, and so on -- so
@@ -48,7 +47,7 @@
 /// PLANE ORDER, AND HOW MANY PLANES
 ///
 /// `outPlanes[0]` is the least significant bit of the count, `outPlanes[n-1]` the
-/// most significant, matching QuantMat's plane order (the design notes). The
+/// most significant, matching QuantMat's plane order. The
 /// count is exact and unsaturated: k inputs need bitSlicedSumPlanes(k) ==
 /// ceil(log2(k+1)) planes, which is 1 for k = 1, 2 for k = 2 and 3, 3 for k = 4,
 /// 4 for k = 9 and 5 for k = 16. **The caller sizes and owns that array** -- no
@@ -73,9 +72,9 @@
 /// ---------------------------------------------------------------------------
 /// WHAT pyrDown STILL NEEDS, AND WHY IT IS NOT HERE
 ///
-/// that work’s `pyrDownBox<NOut, NIn>` is "box 2x2 sum, then subsample" over a QuantMat.
+/// ops/pyramid.hpp's `pyrDownBox<NOut, NIn>` is "box 2x2 sum, then subsample" over a QuantMat.
 /// Two of its three parts have no primitive anywhere in ops/ yet. Both were found
-/// by review of THIS file, and are recorded here rather than left for earlier work to
+/// by review of THIS file, and are recorded here rather than left for the pyramid to
 /// discover, because the header used to read as though the pyramid step were
 /// covered:
 ///
@@ -84,12 +83,12 @@
 /// worth up to 2^NIn - 1 each, which this signature cannot express. It can
 /// be *faked* by replicating plane p of each pixel 2^p times -- correct, and
 /// exponential: k = 4 * (2^NIn - 1), so 4 inputs at NIn = 1 but 124 at
-/// NIn = 5, and the design notes measures NIn = 3, 4 and 5 as the real case
+/// NIn = 5, and NIn = 3, 4 and 5 are the measured real case
 /// for every level above the first. A bit-sliced adder over multi-bit
 /// operands is linear in NIn instead. It is not added here because
 /// specifies three single-bit primitives, and the adder's shape -- weighted
 /// (word, weight) inputs, or plane-array plus plane-array -- should be fixed
-/// by the caller that needs it in earlier work rather than guessed one task early.
+/// by the caller that needs it rather than guessed in advance.
 ///
 /// 2. **There is no horizontal decimation, anywhere.** Vertical decimation is
 /// free: a BinMatConstView with twice the stride and half the height reads
@@ -100,18 +99,17 @@
 /// routes are a per-pixel at/set loop (slow, no extra memory) and a
 /// log2(width) big-integer unshuffle (word-parallel, but frame-sized
 /// constant masks), which is speed against footprint -- the trade CLAUDE.md
-/// forbids settling by argument. It is registered as ****
-/// (the design notes) and gates.
+/// forbids settling by argument. It was an open question, and it gated pyrDown.
 ///
-/// **RESOLVED, and neither of those two won.** a measurement measured a third route
+/// **RESOLVED, and neither of those two won.** A measurement found a third route
 /// the paragraph above did not consider -- a WORD-LOCAL unshuffle, which is
 /// word-parallel and needs no frame-sized masks at all -- and it beat both
 /// by 8.3x-26.4x on the reference device. ops/resample.hpp now ships it as
-/// decimateColumnsBy2; see the design notes. The speed-against-footprint
+/// decimateColumnsBy2. The speed-against-footprint
 /// framing above is left standing because it is what the gap looked like
 /// from here, and being wrong about that is the useful part of the record.
 ///
-/// the design notes's primitive table says "nearly every operation in the MVP set
+/// The design notes' primitive table says "nearly every operation in the MVP set
 /// is a composition of these"; it has no resample row, and now says so.
 ///
 /// ---------------------------------------------------------------------------
@@ -126,8 +124,7 @@
 /// file's 16 -- and for k = 9 a carry-save tree of 3:2 compressors beats the
 /// ripple by more.
 ///
-/// The ripple is here because says in as many words to prefer a correct
-/// reference over a clever minimal network, and the reason is what a wrong adder
+/// The ripple is here because a correct reference beats a clever minimal network, and the reason is what a wrong adder
 /// costs: every pyramid level and every denoised frame in the MVP is built on it,
 /// and the corruption would be a few pixels per frame rather than a crash. This
 /// form is ONE loop nest that is correct for every k, with an invariant a reader
@@ -136,7 +133,7 @@
 /// bitSlicedSumPlanes(i+1)); a per-k tree is a different shape per k, and the
 /// shapes that matter -- 4 and 9 -- are exactly the ones the MVP depends on.
 ///
-/// Phase 5 may replace the body with a compressor tree. The interface does not
+/// A vectorized rewrite may replace the body with a compressor tree. The interface does not
 /// change when it does, and tests/test_bitslice.cpp enumerates every one of the
 /// 2^k input patterns for each k it tests, so a replacement is proven rather than
 /// argued.
@@ -145,7 +142,7 @@
 /// NO HEAP, NO THROW, NO ALIASING BETWEEN inputs AND outPlanes
 ///
 /// Everything here is BINCV_ASSERT-checked and undefined in release, exactly as
-/// at is (the design notes). The one contract worth stating twice:
+/// at() is. The one contract worth stating twice:
 /// `bitSlicedSum` accumulates IN the destination planes, so `outPlanes` must not
 /// overlap `inputs`. The alternative -- a scratch accumulator -- would either
 /// allocate or add a caller-provided buffer to the signature, and the call sites
@@ -159,7 +156,7 @@
 // impl::rowTailMask, impl::strideCoversARow, impl::destinationAliasIsSafe and
 // impl::byteRangesDisjoint -- the row-geometry and aliasing vocabulary
 // shared with ops/logic.hpp and ops/shift.hpp. majority3 is pointwise in the
-// word index, so it takes the same half of earlier work that ops/logic.hpp does.
+// word index, so it takes the same half of the aliasing rule that ops/logic.hpp does.
 #include "../impl/kernel_util.hpp"
 
 namespace bincv {
@@ -189,10 +186,10 @@ constexpr size_t bitSlicedSumPlanes(size_t k) {
 /// @brief Bitwise majority of three words: `(a & b) | (b & c) | (a & c)`.
 /// **API TIER 3.**
 /// @return A word whose bit i is set iff at least two of a, b, c have bit i set.
-/// @note For binary pixels this is also the MEDIAN of the three (ARCHITECTURE
-/// 7.1): with values drawn from {0, 1}, the middle of three sorted values
+/// @note For binary pixels this is also the MEDIAN of the three: with values
+/// drawn from {0, 1}, the middle of three sorted values
 /// is whichever value appears at least twice. That equivalence is what
-/// makes that work’s denoise one expression, and tests/test_bitslice.cpp checks
+/// makes ops/denoise.hpp's filter one expression, and tests/test_bitslice.cpp checks
 /// it against a per-pixel median rather than against this formula restated.
 /// @note It is also the CARRY of a full adder over a, b, c -- the same gate the
 /// adder network below uses -- which is the other way to see why "at least
@@ -282,7 +279,7 @@ inline void bitSlicedSum(const WordType* inputs, size_t k, WordType* outPlanes) 
 /// reaches by arithmetic rather than by choice: `threshold == 0` passes
 /// every lane (all ones), and a threshold above what `nPlanes` bits can
 /// hold passes none (zero). A caller sweeping thresholds 0..k+1 over a
-/// k-input sum -- which is what that work’s requantization does -- never has to
+/// k-input sum -- which is what the pyramid's requantization does -- never has to
 /// special-case its own loop bounds.
 /// @note MSB-first, tracking two masks: `greater` (a more significant bit has
 /// already decided this lane ABOVE the threshold) and `notLess` (no more
@@ -430,7 +427,7 @@ inline void applyMajority3(BinMatConstView<WordType> a, BinMatConstView<WordType
 } // namespace impl
 
 // ---------------------------------------------------------------------------
-// The view-level kernel ( views, never containers)
+// The view-level kernel (views, never containers)
 // ---------------------------------------------------------------------------
 
 /// @brief dst = the per-pixel MAJORITY of a, b and c -- which for binary pixels
@@ -441,11 +438,11 @@ inline void applyMajority3(BinMatConstView<WordType> a, BinMatConstView<WordType
 /// @param c Third source view; must have a's dimensions.
 /// @param dst Destination view; must have a's dimensions. May be `a`, `b` or `c`
 /// exactly (in-place), or share no memory with any of them -- the same
-/// halves of earlier work ops/logic.hpp takes, and for the same reason: this
+/// halves of the aliasing rule ops/logic.hpp takes, and for the same reason: this
 /// kernel is pointwise in the word index.
-/// @note This is that work’s denoise once its three neighbour views exist: the
+/// @note This is ops/denoise.hpp's filter once its three neighbour views exist: the
 /// reference three-pixel median filter takes the pixel above, the pixel
-/// itself and the pixel to its right (the design notes), which are two
+/// itself and the pixel to its right, which are two
 /// shifts (ops/shift.hpp) and this call.
 /// @note Padding bits past `width` are zero in the destination on return, even
 /// when a source's are not.

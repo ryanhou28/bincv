@@ -45,7 +45,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// The comparison rows' vector arm. F-5: BEFORE THE GATE, NOT AFTER -- simd.hpp
+// The comparison rows' vector arm. BEFORE THE GATE, NOT AFTER -- simd.hpp
 // defines BINCV_HAVE_NEON from the compiler's own macros on aarch64. The x86
 // arm is SSE2, which is baseline for x86-64, so neither arm needs a CPU probe;
 // the runtime switch below exists for the rule, not for dispatch.

@@ -220,7 +220,7 @@ unsigned& matchQueryTile();
 /// reference GPU at 5000 x 5000, 256-bit: tile 1 at 1.744 ms, tile 4 at
 /// 0.658 ms, tile 8 at 0.441 ms. A wider tile trades blocks for reuse --
 /// one train word load feeds `Tile` XOR-popcount pairs -- and at eight the
-/// grid is still wide enough to fill the device at both the frontend and
+/// grid is still wide enough to fill the device at both the pipeline and
 /// the map-scale point. The benchmark reprints the sweep next to this
 /// value, so the number that chose it travels with it.
 inline constexpr unsigned kMatchDefaultTile = 8;
@@ -307,7 +307,7 @@ inline cudaError_t matchDescriptors(DeviceDescriptorSetConstView query,
                                       maxRatio, dOut, stream);
 }
 
-/// @brief `matchDescriptors` restricted to candidates a frontend's priors
+/// @brief `matchDescriptors` restricted to candidates a pipeline's priors
 /// admit: a position window, and optionally an octave band. **API TIER 3.**
 /// @param queryPts,trainPts The positions the gate tests, and -- when
 /// `octave` is non-null on BOTH -- the pyramid levels the band tests. Null
@@ -322,7 +322,7 @@ inline cudaError_t matchDescriptors(DeviceDescriptorSetConstView query,
 /// @note **ON DEVICE THE GATE IS NOT A SPEED FEATURE, and this header does not
 /// claim it is.** It rejects a candidate on two float compares before any
 /// descriptor word is read, which on a CPU saves the `words` XORs and
-/// popcounts behind it. On the device at frontend scale the whole
+/// popcounts behind it. On the device at pipeline scale the whole
 /// brute-force match is a launch's worth of work, so there is nothing for
 /// the gate to save; and it COSTS memory, since it carries two position
 /// arrays the ungated form does not. What it still does is change the

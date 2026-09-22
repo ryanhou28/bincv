@@ -4,8 +4,8 @@
 /// @brief Horizontal and vertical shifts with OpenCV border semantics.
 ///
 /// The primitive morphology and the binarized derivative are both
-/// built out of, and -- as says in as many words -- the easiest
-/// operation in the project to get subtly wrong. Nothing here is clever; the value
+/// built out of, and the easiest operation in the project to get subtly wrong.
+/// Nothing here is clever; the value
 /// is in the edge cases being enumerated rather than discovered later.
 ///
 /// ---------------------------------------------------------------------------
@@ -20,10 +20,9 @@
 /// shiftUp (src, dst, k): dst[r][c] = src[r + k][c] row offset, no bit work
 /// shiftDown (src, dst, k): dst[r][c] = src[r - k][c] row offset, no bit work
 ///
-/// This matches the design notes, which writes the derivative's rising edge as
-/// `(src >> 1) & ~(src << 1)` and writes the same expression as
-/// `shiftLeft(src, 1) & ~shiftRight(src, 1)`. Both spellings must mean one thing,
-/// and this is it.
+/// The derivative's rising edge is written both as `(src >> 1) & ~(src << 1)`
+/// and as `shiftLeft(src, 1) & ~shiftRight(src, 1)`. Both spellings must mean one
+/// thing, and this is it.
 ///
 /// The word recurrence for shiftLeft, with `wordShift = k / WordBits` and
 /// `bitShift = k % WordBits`:
@@ -83,8 +82,8 @@
 /// real cv::erode / cv::dilate rather than leaving it as a claim in a comment.
 ///
 /// So every entry point here takes `(BorderType borderType, bool borderValue)`,
-/// defaulting to BORDER_CONSTANT / false -- the plain zero fill specifies for
-/// the bare three-argument call, and what that work’s derivative wants.
+/// defaulting to BORDER_CONSTANT / false -- the plain zero fill the bare
+/// three-argument call specifies, and what the derivative wants.
 ///
 /// dilate step: shift(src, dst, dx, dy, BORDER_CONSTANT, false)
 /// erode step: shift(src, dst, dx, dy, BORDER_CONSTANT, true)
@@ -113,7 +112,7 @@
 /// between src and dst.
 /// 2. **Padding bits stay zero** in the destination, whatever the source held and
 /// whatever the fill is. Every row's trailing word is stored masked.
-/// 3. **No allocation, no throw** (the design notes). A 2-D shift is one pass
+/// 3. **No allocation, no throw.** A 2-D shift is one pass
 /// over the destination -- the vertical part is a row-index remap, so it needs
 /// no scratch and the caller needs no temporary between the two axes.
 /// 4. **PRECONDITION ON `dst`, identical to ops/logic.hpp**: it must span its
@@ -126,9 +125,9 @@
 /// ---------------------------------------------------------------------------
 /// ALIASING: `src` AND `dst` MUST SHARE NO WORD. IN PLACE IS NOT SUPPORTED.
 ///
-/// This is the half of earlier work that applies, and the exact-alias half deliberately
-/// does NOT extend here. permits `dst` to be exactly a source because the
-/// kernels are POINTWISE IN THE WORD INDEX -- word i of the destination is
+/// This is the half of the aliasing rule that applies, and the exact-alias half
+/// deliberately does NOT extend here. That rule permits `dst` to be exactly a
+/// source where the kernels are POINTWISE IN THE WORD INDEX -- word i of the destination is
 /// read from word i of the source and from nothing else, so it is read immediately
 /// before it is overwritten. A shift is not pointwise: word i of the destination
 /// is built from words i +/- wordShift and i +/- wordShift + 1.
@@ -140,7 +139,7 @@
 /// 10-row image, shiftUp by 5, BORDER_REFLECT_101. Destination row 9 reads source
 /// row borderIndex(14) = 4 -- a row an ascending loop overwrote four iterations
 /// ago, and a descending loop has not written yet but will need again. There is no
-/// row order that works for every (dy, BorderType), and the design rule forbids the temporary
+/// row order that works for every (dy, BorderType), and the aliasing rule forbids the temporary
 /// that would make one unnecessary.
 ///
 /// So: exactly one supported relationship, checked per row rather than by bounding
@@ -158,7 +157,7 @@
 #include "../core/view.hpp"
 // impl::rowTailMask, impl::strideCoversARow, impl::viewsShareNoWord, and the
 // impl:: word helpers (bitsPerWord, bitMask, minRowWords) the row arithmetic below
-// is written in terms of. Shared with ops/logic.hpp so that has one copy.
+// is written in terms of. Shared with ops/logic.hpp so that the aliasing rule has one copy.
 #include "../impl/kernel_util.hpp"
 
 namespace bincv {
@@ -171,7 +170,7 @@ namespace impl {
 /// the two together must not overflow. Half of PTRDIFF_MAX is astronomically
 /// more than any image dimension and leaves the sum exact; anything beyond it
 /// is a programming error, reported by BINCV_ASSERT like every other
-/// precondition here (the design notes).
+/// precondition here.
 inline constexpr size_t maxShiftOffset() {
     return static_cast<size_t>(PTRDIFF_MAX) / 2;
 }
@@ -202,7 +201,7 @@ inline bool isKnownBorderType(BorderType type) {
 /// BORDER_REFLECT_101 (gfedcb|abcdefg|fedcba), so one signed modulo into the
 /// period reaches the same fixed point the loop iterates towards. The
 /// difference that matters is termination: shifting a 7-pixel row by 500 --
-/// which requires to be correct, not merely defined -- costs the loop
+/// which has to be correct, not merely defined -- costs the loop
 /// ~35 iterations per pixel and costs this one modulo.
 /// @note `len == 1` returns 0 for BOTH reflect flavours, matching OpenCV. The
 /// REFLECT_101 period is 2*len-2 == 0 there, so the closed form would divide
@@ -291,7 +290,7 @@ inline void fillRowWords(WordType* dstRow, size_t rowWords, WordType value, Word
 /// word operation, and the source's own bit alignment never has to match the
 /// destination's.
 /// @note Deliberately NOT split into a bounds-check-free interior loop and two
-/// edge loops. That is the obvious optimization and it is Phase 5's business
+/// edge loops. That is the obvious optimization and it is a vector rewrite's business
 /// (: "correct scalar first"); the branch inside
 /// extendedRowWord is perfectly predictable and the alternative doubles the
 /// number of index expressions that can be off by one.
@@ -415,7 +414,7 @@ inline void fixupHorizontalBorder(const WordType* srcRow, WordType* dstRow, size
 } // namespace impl
 
 // ---------------------------------------------------------------------------
-// The kernels ( views, never containers)
+// The kernels (views, never containers)
 // ---------------------------------------------------------------------------
 
 /// @brief dst[y][x] = src[y + dy][x + dx], extrapolating outside the image.
@@ -449,7 +448,7 @@ inline void fixupHorizontalBorder(const WordType* srcRow, WordType* dstRow, size
 /// @note The destination's padding bits are zero on return regardless of the fill,
 /// and the source's padding bits are never read as pixels even when the
 /// source wraps a buffer whose padding is dirty.
-/// @note Never throws and never allocates (the design notes). Mismatched
+/// @note Never throws and never allocates. Mismatched
 /// dimensions, a stride shorter than a row, an unknown BorderType, an
 /// absurd offset, and any overlap between src and dst are programming
 /// errors: BINCV_ASSERT reports them in debug builds and they are undefined
@@ -517,8 +516,8 @@ inline void shift(BinMatConstView<WordType> src, BinMatView<WordType> dst, ptrdi
 /// @param k Shift distance in pixels. 0 is a copy; k >= width leaves every column
 /// coming from the border.
 /// @note The default border is BORDER_CONSTANT with value false, i.e. the
-/// zero-filled right edge specifies for the three-argument
-/// call. Pass `true` for the erode step; see the fill section at the top of
+/// zero-filled right edge the three-argument call specifies.
+/// Pass `true` for the erode step; see the fill section at the top of
 /// this file.
 template <typename WordType>
 inline void shiftLeft(BinMatConstView<WordType> src, BinMatView<WordType> dst, size_t k,
@@ -532,7 +531,7 @@ inline void shiftLeft(BinMatConstView<WordType> src, BinMatView<WordType> dst, s
 /// @brief dst[y][x] = src[y][x - k] -- moves the image RIGHT by k columns.
 /// **API TIER 3** by name, TIER 1 border semantics. See shift.
 /// @note The mirror image of shiftLeft, and the other half of the derivative's
-/// `(src >> 1) & ~(src << 1)` (the design notes).
+/// `(src >> 1) & ~(src << 1)`.
 template <typename WordType>
 inline void shiftRight(BinMatConstView<WordType> src, BinMatView<WordType> dst, size_t k,
                        BorderType borderType = BORDER_CONSTANT, bool borderValue = false) {

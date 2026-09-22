@@ -1,28 +1,28 @@
 // ===========================================================================
-// T4.3a / -- END-TO-END VALIDATION OVER A REAL SEQUENCE.
+// END-TO-END VALIDATION OF THE FEATURE TRACKING PIPELINE OVER A REAL SEQUENCE.
 //
-// Three of the four ROADMAP success criteria, and the fourth (tier-1
+// Three of the project's four success criteria; the fourth (tier-1
 // bit-exactness) is already enforced per operation:
 //
-// 2. tier-2 operations agreeing with the REFERENCE FRONTEND frame by frame --
+// 2. tier-2 operations agreeing with the REFERENCE PIPELINE frame by frame --
 // feature positions, flow vectors, track lifetimes
-// 3. several-fold smaller PEAK FOOTPRINT over the frontend operation set
+// 3. several-fold smaller PEAK FOOTPRINT over the pipeline operation set
 // 4. FASTER execution against the byte-per-pixel denominator
 //
 // THE DENOMINATOR IS CLAUDE.md's, NOT A FLATTERING ONE: OpenCV doing the same
-// semantic operation on the SAME BINARY CONTENT stored as CV_8U. Both frontends
+// semantic operation on the SAME BINARY CONTENT stored as CV_8U. Both pipelines
 // see bit-identical input -- the reference pipeline's two-stage preprocessing,
 // median_filter then rl_fast_edge_filter_wide -- so the comparison is of the
 // implementations and not of the content.
 //
-// TWO INDEPENDENT FRONTENDS, NOT ONE DRIVING THE OTHER. Each detects its own
+// TWO INDEPENDENT PIPELINES, NOT ONE DRIVING THE OTHER. Each detects its own
 // corners, maintains its own track set and re-detects on its own schedule. That is
 // what makes track LIFETIME a comparable quantity: a harness that fed binCV's
 // points to OpenCV would measure per-frame flow agreement and nothing else, and
-// lifetime is the criterion that most directly reflects whether a frontend is
+// lifetime is the criterion that most directly reflects whether a pipeline is
 // usable.
 //
-// Usage: frontend_sequence <frame-dir> [max-frames]
+// Usage: feature_tracking_sequence <frame-dir> [max-frames]
 // ===========================================================================
 
 #include <opencv2/opencv.hpp>
@@ -53,7 +53,7 @@
 #include "bincv/ops/pyramid.hpp"
 
 // The word type is a build-time choice so the SAME binary shape can be measured
-// at 32 and 64 bits. a measurement measured uint64_t on aarch64 and it LOST on track --
+// at 32 and 64 bits. uint64_t was measured on aarch64 and it LOST on track --
 // but only because every NEON path is guarded on sizeof(WordType) == 4 and
 // compiled out. ON x86 THERE ARE NO SUCH GUARDS, so the 2x packing is not paid
 // for with a lost fast path, and that case had never been measured.
@@ -72,10 +72,10 @@ using refsensor::preprocess;
 
 // ---- THE SAME TWO STAGES, IN binCV --------------------------------
 //
-// the design notes puts the edge filter inside the MVP set,
-// and this benchmark used to run BOTH frontends on an OpenCV-preprocessed frame with a
+// The edge filter is inside the MVP set,
+// and this benchmark used to run BOTH pipelines on an OpenCV-preprocessed frame with a
 // comment calling that stage "deliberately NOT binCV's claim". Those disagreed. binCV
-// has had `medianWide` and `edgeThreshold` since earlier work -- bit-exact against the
+// has `medianWide` and `edgeThreshold` -- bit-exact against the
 // reference, 0 of 1219 and 0 of 3367 pixels differing -- and they were tested but never
 // USED.
 //
@@ -118,8 +118,8 @@ size_t binaryFramesAgree(const bincv::BinMat<W>& mine, const cv::Mat& theirs) {
     return bad;
 }
 
-// ---- binCV's frontend state, ladder 1/2/2/2 -----------------------
-struct BincvFrontend {
+// ---- binCV's pipeline state, ladder 1/2/2/2 -----------------------
+struct BincvPipeline {
     static constexpr size_t kLevels = 4;
     bincv::Pyramid<W, 1, 2, 2, 2> prev, next;
     bincv::SignedQuantMat<1, W> dx0, dy0;
@@ -128,7 +128,7 @@ struct BincvFrontend {
     std::vector<float> ring;  // kResponseRingRows rows, the streaming response
     int w, h;
 
-    BincvFrontend(int width, int height)
+    BincvPipeline(int width, int height)
         : prev(width, height), next(width, height), dx0(width, height), dy0(width, height),
           dx1(width / 2 + (width & 1), height / 2 + (height & 1)),
           dy1(width / 2 + (width & 1), height / 2 + (height & 1)),
@@ -169,7 +169,7 @@ struct BincvFrontend {
         msLoad += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
     }
     double msPyrDown = 0.0, msDeriv = 0.0;   ///< put `build` at 52% of the
-                                            ///< frontend at T=12; this splits it,
+                                            ///< pipeline at T=12; this splits it,
                                             ///< because a measurement found `derivative`
                                             ///< auto-vectorizes and `pyrDown` does
                                             ///< not, so the two halves have very
@@ -194,7 +194,7 @@ struct BincvFrontend {
         levels.get<2>() = bincv::lkLevel<2>(prev.level<2>(), next.level<2>(), dx2, dy2);
         levels.get<3>() = bincv::lkLevel<2>(prev.level<3>(), next.level<3>(), dx3, dy3);
     }
-    /// Peak working set of the whole frontend operation set, by construction.
+    /// Peak working set of the whole pipeline operation set, by construction.
     size_t bytes() const {
         const size_t pyr = prev.sizeInBytes() + next.sizeInBytes();
         const size_t der = (dx0.sizeInWords() + dy0.sizeInWords() + dx1.sizeInWords() +
@@ -204,7 +204,7 @@ struct BincvFrontend {
     }
 };
 
-/// OpenCV's frontend footprint on the same content, computed the way it allocates:
+/// OpenCV's pipeline footprint on the same content, computed the way it allocates:
 /// a CV_8U pyramid with a winSize border on every level (buildOpticalFlowPyramid),
 /// plus goodFeaturesToTrack's CV_32F response map.
 size_t opencvBytes(int w, int h, int levels, int win) {
@@ -225,11 +225,11 @@ struct Stats {
     size_t bTried = 0, bSurvived = 0, oTried = 0, oSurvived = 0;
     double flowRmsPx = 0.0, flowMaxPx = 0.0;
     size_t compared = 0, agreeWithin1px = 0;
-    std::vector<double> flowErrs;   // that measurement’s lesson: this distribution has a tail
+    std::vector<double> flowErrs;   // this distribution has a tail
     double bincvMs = 0.0, opencvMs = 0.0;
-    // PER-STAGE, INSIDE THE REAL LOOP. profiled one detection and one track
-    // per frame; the real frontend re-detects on a few percent of frames, and that
-    // over-weighted detection ~33x and sent the design rule’s target list to the wrong kernel.
+    // PER-STAGE, INSIDE THE REAL LOOP. An earlier profile took one detection and one
+    // track per frame; the real pipeline re-detects on a few percent of frames, and that
+    // over-weighted detection ~33x and sent the optimization effort to the wrong kernel.
     // These timers are taken at the ACTUAL duty cycle.
     double msBuild = 0.0, msDetect = 0.0, msTrack = 0.0;
     size_t preprocMismatch = 0;   ///< binCV's sensor stage vs OpenCV's
@@ -244,14 +244,14 @@ double median(std::vector<int> v) {
 
 } // namespace
 
-// earlier work ->. The benchmark's own thread pool and point-array splitter are
+// The benchmark's own thread pool and point-array splitter are
 // GONE: binCV ships `bincv::ThreadPool` and `bincv::parallelFor`, and
 // `calcOpticalFlowPyrLK` splits over keypoints internally. What used to be thirty
-// lines here is now one `install` -- which is the whole point of earlier work, since the
+// lines here is now one `install` -- which is the whole point, since the
 // speedup was never missing, only the way to ask for it.
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
-    if (argc < 2) { std::printf("usage: frontend_sequence <frame-dir> [max-frames]\n"); return 2; }
+    if (argc < 2) { std::printf("usage: feature_tracking_sequence <frame-dir> [max-frames]\n"); return 2; }
     const size_t maxFrames = argc > 2 ? static_cast<size_t>(std::atoi(argv[2])) : 0;
 
     std::vector<fs::path> files;
@@ -285,14 +285,14 @@ int main(int argc, char** argv) {
     bincv::ThreadPool pool(lkThreads);
     if (lkThreads > 1) pool.install();
 
-    // earlier work: the keypoint batch's WHOLE-FRONTEND arm. a measurement measured 1.75x in a
-    // kernel and 0.31x on the frontend, so a kernel number is not a result here --
+    // The keypoint batch's WHOLE-PIPELINE arm. A measurement put it at 1.75x in a
+    // kernel and 0.31x on the pipeline, so a kernel number is not a result here --
     // and lockstep batching changes the very quantity that did that, how many
     // iterations run. BINCV_LK_BATCH=0 takes the scalar path in the same binary.
     if (const char* e = std::getenv("BINCV_LK_BATCH")) {
         if (std::atoi(e) == 0) bincv::impl::lkBatchEnabled() = false;
     }
-    // F-5. The two ways to lose a fast path silently are an unlinked target and a
+    // The two ways to lose a fast path silently are an unlinked target and a
     // missing -mpopcnt, and neither changes an answer. One line, printed by every
     // benchmark, is what makes a number comparable to a recorded one.
     std::printf("%s\n", bincv::simdStatusString());
@@ -308,16 +308,16 @@ int main(int argc, char** argv) {
 
     const cv::Mat first = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
     const int w = first.cols, h = first.rows;
-    std::printf("=== a / frontend over %zu frames, %dx%d ===\n", files.size(), w, h);
-    std::printf("both frontends see bit-identical input: median_filter then "
+    std::printf("=== a / pipeline over %zu frames, %dx%d ===\n", files.size(), w, h);
+    std::printf("both pipelines see bit-identical input: median_filter then "
                 "rl_fast_edge_filter_wide(17)\n\n");
 
-    bincv::LKParams lk;                       // the reference frontend's parameters verbatim
-    // The iteration cap is the reference frontend's 20. Nothing in this project has ever
+    bincv::LKParams lk;                       // the reference pipeline's parameters verbatim
+    // The iteration cap is the reference pipeline's 20. Nothing in this project has ever
     // measured how many iterations the tracker actually NEEDS, and at 94.7% of
-    // frontend time an unnecessary iteration is the most expensive thing there is.
+    // pipeline time an unnecessary iteration is the most expensive thing there is.
     if (const char* it = std::getenv("BINCV_LK_ITERS")) lk.maxIterations = std::atoi(it);
-    // earlier work. The residual reject, so the rule can be measured against TRACK
+    // The residual reject, so the rule can be measured against TRACK
     // LIFETIME on a real sequence rather than against the synthetic gap that made it
     // look free. a rule that removes the failures by also removing the tracks is
     // not a fix.
@@ -328,7 +328,7 @@ int main(int argc, char** argv) {
     bincv::GoodFeaturesParams gftt;           // ditto
     const int kMinTracks = 60;
 
-    BincvFrontend fe(w, h);
+    BincvPipeline fe(w, h);
     Stats st;
     // CAPACITY MUST EXCEED maxCorners, AND BY A LOT. `goodFeaturesToTrack` ranks
     // NMS survivors into this array and only THEN applies the minDistance spacing
@@ -445,7 +445,7 @@ int main(int argc, char** argv) {
         st.opencvMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 
         // ---------------- criterion 2: flow agreement ----------------
-        // NEAREST-NEIGHBOUR MATCHING. The two frontends detect independently, so
+        // NEAREST-NEIGHBOUR MATCHING. The two pipelines detect independently, so
         // their arrays share no ordering and index-matching compares unrelated
         // points -- which is what an earlier version of this file did, and it
         // reported zero comparisons rather than wrong ones, which is how it was
@@ -519,7 +519,7 @@ int main(int argc, char** argv) {
     const size_t bcvBytes = fe.bytes();
     const size_t ocvBytes = opencvBytes(w, h, 4, lk.winWidth);
 
-    std::printf("\n--- CRITERION 2: agreement with the reference frontend ---\n");
+    std::printf("\n--- CRITERION 2: agreement with the reference pipeline ---\n");
     std::printf(" flow vectors compared : %zu over %zu frames (%zu re-detections)\n",
                 st.compared, st.frames, st.detections);
     // REPORTED AS PERCENTILES, NOT AS RMS. a measurement established that this project's
@@ -554,7 +554,7 @@ int main(int argc, char** argv) {
 
     std::printf(" detections truncated : %zu of %zu (capacity %zu)\n", truncatedDetections,
                 st.detections, corners.size());
-    std::printf("\n--- CRITERION 3: peak footprint over the frontend operation set ---\n");
+    std::printf("\n--- CRITERION 3: peak footprint over the pipeline operation set ---\n");
     std::printf(" binCV : %8zu B (1/2/2/2 pyramid x2, derivative ladders, 3-row response ring)\n",
                 bcvBytes);
     std::printf(" OpenCV : %8zu B (CV_8U pyramid x2 with %d-px border/level, CV_32F eigen map)\n",
@@ -611,20 +611,20 @@ int main(int argc, char** argv) {
                 " LK and gftt are SIMD-vectorized.\n",
                 cv::getNumThreads());
     if (cv::getNumThreads() != 1) {
-        std::printf(" *** NOT THE RECORDED DENOMINATOR. Every entry in EXPERIMENTS.md\n"
+        std::printf(" *** NOT THE RECORDED DENOMINATOR. Every recorded measurement\n"
                     " *** that states its thread count states ONE. binCV has no threading,\n"
                     " *** so this ratio mixes a parallelism difference into what reads as\n"
-                    " *** an implementation difference. See.\n");
+                    " *** an implementation difference.\n");
     }
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     std::printf(" binCV has its NEON path here, so this is SIMD against\n"
                 " SIMD on the deployment target -- the comparison criterion 4 is about.\n");
 #else
-    // STALE UNTIL. This used to read "binCV has NO VECTOR PATH ON x86
-    // (ROADMAP 5.3 is unwritten), so this is binCV SCALAR against OpenCV SSE" -- and
-    // this same program prints "LK residual kernel: AVX2, eight keypoints per batch"
-    // five hundred lines earlier. One output contradicting itself is worse than either
-    // claim alone, because a reader believes whichever half they read first.
+    // STALE UNTIL. This used to read "binCV has NO VECTOR PATH ON x86, so this is
+    // binCV SCALAR against OpenCV SSE" -- and this same program prints "LK residual
+    // kernel: AVX2, eight keypoints per batch" five hundred lines earlier. One
+    // output contradicting itself is worse than either claim alone, because a
+    // reader believes whichever half they read first.
     std::printf(" binCV has its AVX2 paths here -- the eight-keypoint LK batch,\n"
                 " the sensor stage's median and edge kernels, and packing --\n"
                 " so this is SIMD against SIMD, as the aarch64 arm is. What\n"

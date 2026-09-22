@@ -3,10 +3,10 @@
 /// @file equivalence.hpp
 /// @brief The Tier 1 equivalence harness: bit-exactness against OpenCV.
 ///
-/// the design notes says every Tier 1 operation ships with a test asserting
+/// Every Tier 1 operation ships with a test asserting
 /// bit-exactness against the equivalent OpenCV expression on the same content.
 /// This header is the machinery that makes that a *claim* rather than an
-/// assertion, and it is deliberately built BEFORE the kernels of earlier work-, so
+/// assertion, and it is deliberately built BEFORE the kernels it judges, so
 /// that no kernel can be written to fit a weak test.
 ///
 /// Two entry points, per the spec:
@@ -92,7 +92,7 @@
 /// `inline namespace BINCV_ABI_NAMESPACE`, matching
 /// tests/test_util.hpp. Opening it here would create a second `test`
 /// namespace inside the inline one, and `bincv::test` would then be
-/// ambiguous between the two in every suite that includes both. the design rule’s
+/// ambiguous between the two in every suite that includes both. The ABI-namespace
 /// hazard -- one configuration's inline function bodies silently merging
 /// with another's at link time -- does not arise for a test-side header
 /// that only ever appears in a single translation unit per binary.
@@ -410,7 +410,7 @@ cv::Mat unpackTo8U(const BinMatConstView<WordType>& v,
 }
 
 /// @brief The benchmark and equivalence denominator: this binary content, as CV_8U.
-/// @note the design notes -- "OpenCV performing the same semantic operation on
+/// @note The denominator -- "OpenCV performing the same semantic operation on
 /// the same binary content stored as CV_8U" -- so this is the function that
 /// builds OpenCV's *inputs* in a Tier 1 equivalence test, while
 /// expectBitExact checks its *output*.

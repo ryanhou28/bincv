@@ -10,10 +10,10 @@
 //
 // 2. The OPENCV half checks majority3 against the reference pipeline's own
 // three-pixel median, written as OpenCV calls: max(min(a,b), min(max(a,b), c))
-// over CV_8U (the reference frontend's denoiser). That is a SECOND
+// over CV_8U (the reference pipeline's denoiser). That is a SECOND
 // REFERENCE, not a tier promise -- bit-sliced arithmetic is Tier 3
-// (the design notes) and OpenCV has no pointwise median of three images.
-// It is here because must match that formula, and the cheapest way to
+// and OpenCV has no pointwise median of three images.
+// It is here because the denoise kernel must match that formula, and the cheapest way to
 // be sure the majority IS that median is to run the formula.
 //
 // EXHAUSTIVE, NOT SAMPLED -- WHICH IS AFFORDABLE HERE AND NOWHERE ELSE
@@ -154,7 +154,7 @@ constexpr size_t wordBits() {
 // ---------------------------------------------------------------------------
 
 /// @brief Median of three binary pixels, as the reference pipeline computes it.
-/// @note max(min(a, b), min(max(a, b), c)), i.e. the reference frontend's three-pixel median
+/// @note max(min(a, b), min(max(a, b), c)), i.e. the reference pipeline's three-pixel median
 /// with cv::min / cv::max read as && / || on {0, 255}. Deliberately NOT
 /// (a&b)|(b&c)|(a&c): a reference that restates the implementation cannot
 /// disagree with it.
@@ -584,7 +584,7 @@ const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70, 128, 640};
 const int HEIGHTS[] = {1, 2, 3, 17};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (the design rule makes alignment a per-object choice).
+// An over-aligned row stride (alignment is a per-object choice).
 constexpr size_t PADDED_ALIGNMENT = 32;
 
 template <typename WordType>
@@ -850,8 +850,8 @@ void testDirtySources(const char* wordTypeName) {
 // notion of `width`: every lane is answered, including the lanes past a row's
 // last pixel, and at `threshold == 0` every lane is answered *yes* whatever the
 // planes hold -- which is precisely the value a caller sweeping thresholds from 0
-// reaches by arithmetic rather than by choice (that work’s requantization does exactly
-// that sweep). A caller that stores such a word into a row's trailing word
+// reaches by arithmetic rather than by choice (the pyramid's requantization does
+// exactly that sweep). A caller that stores such a word into a row's trailing word
 // without masking leaves padding bits set past `width`, and the next word-wise
 // reduction over that image over-counts: the failure, in a place no
 // -Werror, no assert and no pixel comparison can see.
@@ -969,11 +969,11 @@ void testThresholdPaddingContract(const char* wordTypeName) {
 
 #ifdef BINCV_WITH_OPENCV
 
-/// @brief max(min(a, b), min(max(a, b), c)) over CV_8U -- the reference frontend's three-pixel
+/// @brief max(min(a, b), min(max(a, b), c)) over CV_8U -- the reference pipeline's three-pixel
 /// median, unchanged.
 /// @note NOT a Tier 1 claim: OpenCV has no pointwise median of three images, and
-/// bit-sliced arithmetic is Tier 3 (the design notes). This is a second,
-/// independent reference for the operation has to reproduce.
+/// bit-sliced arithmetic is Tier 3. This is a second, independent reference
+/// for the formula the operation has to reproduce.
 cv::Mat openCvMedian3(const cv::Mat& a, const cv::Mat& b, const cv::Mat& c) {
     cv::Mat minAB, maxAB, minMaxC, out;
     cv::min(a, b, minAB);

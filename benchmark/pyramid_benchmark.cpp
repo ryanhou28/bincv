@@ -1,11 +1,10 @@
 // -- the pyramid's bit growth, its footprint, and the cost of the box sum.
 //
-// THIS IS NOT AN EXPERIMENT AND HAS NO DECISION RULE. that work’s done-when clauses
-// ask for two numbers that feed -- bit growth and peak footprint of a
-// four-level pyramid at several NOut caps -- plus evidence for the cost claim the
-// task's second blocking gap turns on. this is the entry that will WEIGH these
-// against tracking accuracy, and it is deliberately deferred: parameterizing the
-// cap is what buys the right to defer measuring it (the design notes).
+// THIS IS NOT AN EXPERIMENT AND HAS NO DECISION RULE. What it produces is two
+// numbers -- bit growth and peak footprint of a four-level pyramid at several
+// NOut caps -- plus evidence for the cost claim the remaining blocking gap turns
+// on. Weighing those against tracking accuracy is deliberately deferred:
+// parameterizing the cap is what buys the right to defer measuring it.
 //
 // NO OPENCV, so this builds and runs in the reference device's DEFAULT core-only
 // configuration. Three things are measured here and all three are binCV against
@@ -28,7 +27,7 @@
 // steps. The point is the SHAPE of the two curves, not the ratio at any one
 // NIn -- at NIn = 1 they are the same four inputs and should be close.
 //
-// VALIDITY (EXPERIMENTS.md "Verify the benchmark measures something"):
+// VALIDITY -- what makes this benchmark measure something:
 // * measure::g_sink consumes a destination word from every timed call;
 // * four distinct random sources rotate, so nothing constant-folds;
 // * the two routes are checked to agree pixel for pixel on every case BEFORE
@@ -37,8 +36,8 @@
 // * the reported spread bounds within-run noise; a difference smaller than it
 // is a null result.
 //
-// On x86_64 the TIMING half is indicative only (EXPERIMENTS.md, "Measurement
-// platforms"); the growth and footprint halves are architecture-independent and
+// On x86_64 the TIMING half is indicative only -- a desktop host's spread decides
+// nothing; the growth and footprint halves are architecture-independent and
 // close anywhere. The authoritative timing run is
 //
 //./scripts/run_on_pi.sh pi4 './benchmark/pyramid_benchmark'
@@ -89,8 +88,8 @@ size_t distinctValues(const QuantMat<N, Word>& m) {
 ///
 /// This is the number that says how many bits a level NEEDS; the distinct count
 /// of an actual frame says how many it happened to CONTAIN, which is a sample
-/// statistic and falls with the frame size. the design notes's 1/3/4/5 is the
-/// second kind of number (a measurement counted a 256x256 frame), and the two disagree --
+/// statistic and falls with the frame size. The recorded 1/3/4/5 is the
+/// second kind of number (counted on a 256x256 frame), and the two disagree --
 /// see the note under the table.
 ///
 /// The requantized value depends on the SUM alone, so the reachable set at the
@@ -196,9 +195,9 @@ void reportGrowthAndFootprint() {
     // ever thrown away. This row is the answer to "how much precision does a 2x2
     // box actually create", and every other row is a refusal of some of it.
     reportLadder<3, 5, 7>("1-3-5-7 uncapped");
-    // The ladder the design notes measured on the reference pipeline.
+    // The ladder measured on the reference pipeline.
     reportLadder<3, 4, 5>("1-3-4-5 reference");
-    // Progressively harder caps -- that work’s candidates.
+    // Progressively harder caps -- the candidates.
     reportLadder<3, 3, 3>("1-3-3-3");
     reportLadder<2, 2, 2>("1-2-2-2");
     reportLadder<1, 1, 1>("1-1-1-1 re-binarized");
@@ -207,7 +206,7 @@ void reportGrowthAndFootprint() {
     std::printf("\n \"in the frame\" counts DISTINCT VALUES PRESENT in one %dx%d-derived\n"
                 " level; \"reachable\" is the alphabet the arithmetic can produce at all, and\n"
                 " \"bits needed\" follows the reachable column. The two differ, and the\n"
-                " difference matters: EXPERIMENTS.md reported 2/5/15/26 for the CV_8U\n"
+                " difference matters: an earlier run reported 2/5/15/26 for the CV_8U\n"
                 " ladder, which is what a 256x256 frame CONTAINED -- its level 3 is 32x32,\n"
                 " i.e. 1024 pixels drawn from an alphabet of 65. A frame statistic falls\n"
                 " with the frame size; the reachable alphabet does not.\n",

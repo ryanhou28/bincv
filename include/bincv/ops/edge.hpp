@@ -7,7 +7,7 @@
 /// ---------------------------------------------------------------------------
 /// READ OUT OF THE REFERENCE, NOT INFERRED
 ///
-/// the reference frontend's edge filter, `rl_fast_edge_filter_wide`:
+/// the reference pipeline's edge filter, `rl_fast_edge_filter_wide`:
 ///
 /// kernel_x = [-1 0 1] diff_x = |filter2D(img, kernel_x)|
 /// kernel_y = [-1 0 1]^T diff_y = |filter2D(img, kernel_y)|
@@ -29,16 +29,17 @@
 /// are compile-time parameters, so a caller pays only for the one instantiated and
 /// the comparison folds to a single predicate -- the same requirement ops/pack.hpp
 /// puts on its rules, for the same measured reason
-/// ( a runtime flag cost 17% elsewhere).
+/// (a runtime flag cost 17% elsewhere).
 ///
 /// The point of the operation is that these choices are cheap. A caller wanting AND
 /// instead of OR, or an adjacent difference instead of a central one, should not have
 /// to fork the kernel.
 ///
 /// ---------------------------------------------------------------------------
-/// WHY `SrcT` AND NOT JUST `uint8_t` (the design notes)
+/// WHY `SrcT` AND NOT JUST `uint8_t`
 ///
-/// **This operation is why that section exists.** "Downconvert 12->8 yourself, then
+/// **This operation is why the input contract in ops/pack.hpp reaches past
+/// 8 bits.** "Downconvert 12->8 yourself, then
 /// call binCV" is `v >> 4`, which truncates the OPERANDS before they are differenced:
 /// a genuine 12-bit gradient of 15 counts becomes **exactly zero**, and the edge is
 /// gone before binCV sees the pixel. Low contrast -- indoors, at night, on untextured
@@ -56,7 +57,7 @@
 /// `BORDER_REFLECT_101`, so index -1 reads index 1 and index `w` reads index `w-2`.
 /// That is what makes the shipped defaults reproduce the reference exactly rather
 /// than approximately.
-// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
 // compiler's own macros on aarch64, so an include-only integration still gets the
 // NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
 // its gate before its first core include.
@@ -168,7 +169,7 @@ inline bool isEdge(const SrcT* src, size_t width, size_t height, size_t stride, 
 
 
 // ==================================================================
-// earlier work: THE EDGE PREDICATE, THIRTY-TWO PIXELS AT A TIME.
+// THE EDGE PREDICATE, THIRTY-TWO PIXELS AT A TIME.
 //
 // `|a - b| >= t` on unsigned bytes is `subs_epu8(a,b) | subs_epu8(b,a)` for the absolute
 // difference and `subs_epu8(t, d) == 0` for the comparison — **no widening, no sign, no
@@ -178,7 +179,7 @@ inline bool isEdge(const SrcT* src, size_t width, size_t height, size_t stride, 
 // even inside the kernel.**
 //
 // aarch64 has no move-mask, so bit weights and three pairwise adds fold sixteen byte
-// masks into sixteen bits — the same substitute a measurement measured for the row packer.
+// masks into sixteen bits — the same substitute measured for the row packer.
 //
 // The scalar body above stays: it is the border rule, the general `SrcT`, the general
 // `EdgeSpatial`, and the oracle `tests/test_edge.cpp` compares against.
@@ -296,7 +297,7 @@ inline void edgeThreshold(const SrcT* src, size_t width, size_t height, size_t s
     const long long tt = static_cast<long long>(t);
 
 #if defined(BINCV_EDGE_AVX2) || defined(BINCV_EDGE_NEON)
-    // earlier work: the vector interior. Only the shipped shape — 8-bit source, 32-bit
+    // The vector interior. Only the shipped shape — 8-bit source, 32-bit
     // words, the WIDE central difference — because that is what the sensor stage runs
     // and every other combination still has the scalar body, which is also the oracle.
     //

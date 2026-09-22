@@ -2,8 +2,8 @@
 // -- HOW MANY ITERATIONS DOES A POINT ACTUALLY RUN, AND WHAT DOES THE
 // MAXIMUM OVER EIGHT COST?
 //
-// that work’s AVX2 keypoint batch puts eight keypoints in lanes and iterates them IN
-// LOCKSTEP, so a batch runs until its LAST lane converges. a measurement measured the MEAN
+// The AVX2 keypoint batch puts eight keypoints in lanes and iterates them IN
+// LOCKSTEP, so a batch runs until its LAST lane converges. A measurement put the MEAN
 // at 4.29 iterations per point per level; the batch pays the MAXIMUM OVER EIGHT,
 // and that number decides whether the batch is worth writing.
 //
@@ -11,12 +11,12 @@
 // with lane refill = kernel x mean(iters) / (mean(iters) + refill)
 //
 // THE POINT OF MEASURING THIS FIRST is that it is decisive and nearly free.
-// exists because a measurement measured 1.75x in a kernel and 0.31x on the frontend, and
+// exists because a kernel gain of 1.75x came out as 0.31x on the pipeline, and
 // lockstep batching changes exactly the quantity that did that -- how many
 // iterations run.
 //
-// This harness reproduces frontend_sequence's frontend exactly: the same
-// preprocessing, the same 1/2/2/2 ladder, the same reference-frontend parameters and
+// This harness reproduces feature_tracking_sequence's pipeline exactly: the same
+// preprocessing, the same 1/2/2/2 ladder, the same reference-pipeline parameters and
 // the same re-detection schedule, so the distribution is the one the shipped
 // tracker sees and not one a synthetic frame produced.
 //
@@ -43,7 +43,7 @@ using W = uint32_t;
 
 namespace {
 
-// ---- frontend_sequence's preprocessing, verbatim -------------------------
+// ---- feature_tracking_sequence's preprocessing, verbatim -------------------------
 cv::Mat referenceDenoise(const cv::Mat& img) {
     cv::Mat right = cv::Mat::zeros(img.size(), img.type());
     cv::Mat above = cv::Mat::zeros(img.size(), img.type());
@@ -71,14 +71,14 @@ cv::Mat preprocess(const cv::Mat& gray, int thr) {
     return out;
 }
 
-struct Frontend {
+struct Pipeline {
     bincv::Pyramid<W, 1, 2, 2, 2> prev, next;
     bincv::SignedQuantMat<1, W> dx0, dy0;
     bincv::SignedQuantMat<2, W> dx1, dy1, dx2, dy2, dx3, dy3;
     bincv::LKLevels<W, 1, 2, 2, 2> levels;
     std::vector<float> ring;
 
-    Frontend(int w, int h)
+    Pipeline(int w, int h)
         : prev(w, h), next(w, h), dx0(w, h), dy0(w, h),
           dx1(w / 2 + (w & 1), h / 2 + (h & 1)), dy1(w / 2 + (w & 1), h / 2 + (h & 1)),
           dx2((w + 3) / 4, (h + 3) / 4), dy2((w + 3) / 4, (h + 3) / 4),
@@ -160,12 +160,12 @@ int main(int argc, char** argv) {
     const cv::Mat first = cv::imread(files[0].string(), cv::IMREAD_GRAYSCALE);
     const int w = first.cols, h = first.rows;
 
-    bincv::LKParams lk;                     // the reference frontend's parameters verbatim
+    bincv::LKParams lk;                     // the reference pipeline's parameters verbatim
     bincv::GoodFeaturesParams gftt;
     const int kMinTracks = 60;
     constexpr size_t kLevels = 4;
 
-    Frontend fe(w, h);
+    Pipeline fe(w, h);
     std::vector<bincv::Corner> corners(20000);
     std::vector<bincv::Point2f> pts;
     std::vector<unsigned> iters;
@@ -239,7 +239,7 @@ int main(int argc, char** argv) {
                 gSlots, gUsed, (1.0 - gUsed / gSlots) * 100.0);
 
     // The projection the decision rule is written against. The kernel factor is
-    // that measurement’s arm D, measured; everything else here is this run's distribution.
+    // measured in arm D; everything else here is this run's distribution.
     constexpr double kKernel = 2.1;
     std::printf("\n projected `track` speedup, naive lockstep %5.2fx\n", kKernel * ratio);
     std::printf(" projected `track` speedup, with lane refill %5.2fx (refill excluded)\n",

@@ -16,7 +16,7 @@
 //     a plausible wrong answer, which is the kind this project treats as worse
 //     than a crash.
 //  3. **THE PADDING SLOTS MUST BE REJECTED BY THE CONSUMERS.** The whole reason
-//     the resident frontend can enqueue a frame with no mid-pipeline
+//     the resident pipeline can enqueue a frame with no mid-pipeline
 //     synchronize is that orientation and BRIEF may be launched over `capacity`
 //     keypoints rather than `count`, because a keypoint at (0, 0) fails every
 //     bounding-box test. That is an assumption about OTHER headers' kernels, so
@@ -28,7 +28,7 @@
 // A .cpp rather than a .cu: everything this needs is a host-callable launcher,
 // and ops/fast.hpp and ops/medianWide.hpp gate their AVX2 kernels off under
 // __CUDACC__ -- so a host arm compiled by nvcc is not the host arm a caller
-// runs. Same reason test_cuda_frontend_corner.cpp gives.
+// runs. Same reason test_cuda_feature_tracking_corner.cpp gives.
 //
 // Exits 77 when no CUDA device is present, like the other suites here.
 
@@ -322,7 +322,7 @@ BINCV_TEST(CudaKeypointsFromCorners, ThePaddingSlotsAreRejectedByTheConsumers) {
 BINCV_TEST(CudaKeypointsFromCorners, TheWholeChainAgreesWithTheCornersTheSameLaunchProduced) {
     // In situ: a real goodFeaturesToTrack selection, then the conversion, with
     // the xy array held to the corner records that very launch wrote. This is
-    // the pairing the resident frontend performs, and it is the one place the
+    // the pairing the resident pipeline performs, and it is the one place the
     // two families meet.
     const int w = 256, h = 192;
     bc::DeviceBinMat dxBlock(w, 2 * h), dyBlock(w, 2 * h);

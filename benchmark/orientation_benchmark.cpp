@@ -2,7 +2,7 @@
 //
 // CLAUDE.md's rule, and the scar it came from: an operation with no benchmark arm
 // ships correct and untimed, and nothing notices until something calls it -- at
-// which point it was 78% of the frontend. These arms exist the day the kernels do.
+// which point it was 78% of the pipeline. These arms exist the day the kernels do.
 //
 // Core-only on purpose: the family needs no OpenCV, so the reference device's
 // default build can produce these numbers. There is no OpenCV denominator here --

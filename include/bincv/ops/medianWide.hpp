@@ -12,15 +12,15 @@
 /// That is the right kernel and it is not going anywhere.
 ///
 /// But the reference filters the **grayscale** image, BEFORE binarization:
-/// the reference frontend's top level runs `three_pix_median_filter(img)` and only then
+/// the reference pipeline's top level runs `three_pix_median_filter(img)` and only then
 /// `rl_fast_edge_filter_wide(img, t)`. A binary-only median cannot sit where the
-/// reference puts it, so a frontend that wanted the reference's pipeline had to
+/// reference puts it, so a caller that wanted the reference's pipeline had to
 /// borrow OpenCV for this one step.
 ///
 /// ---------------------------------------------------------------------------
 /// THE NEIGHBOURHOOD IS THE CALLER'S, AND THE REFERENCE HAS TWO OF THEM
 ///
-/// the reference frontend's denoiser carries `three_pix_median_filter` --
+/// the reference pipeline's denoiser carries `three_pix_median_filter` --
 /// the asymmetric L, `p1` above / `p2` center / `p3` right -- **and**
 /// `five_pix_median_filter`, the plus. Both ship here as named constants, and an
 /// arbitrary offset set is a template argument rather than a fork.
@@ -37,7 +37,7 @@
 /// ZEROS. A pixel at the top row therefore takes its median against a 0, not
 /// against a replicated or reflected neighbour. ops/denoise.hpp records the same
 /// rule for the same reason.
-// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
 // compiler's own macros on aarch64, so an include-only integration still gets the
 // NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
 // its gate before its first core include.
@@ -175,14 +175,15 @@ inline void medianWide(const SrcT* src, size_t width, size_t height, size_t srcS
                  "medianWide: a non-empty image needs non-null pointers");
 
     // ==================================================================
-    // earlier work: THE THREE-SAMPLE MEDIAN IS MIN AND MAX, AND NOTHING ELSE.
+    // THE THREE-SAMPLE MEDIAN IS MIN AND MAX, AND NOTHING ELSE.
     //
     // med3(a, b, c) = max(min(a, b), min(max(a, b), c))
     //
     // Five register operations for as many pixels as fit — thirty-two on AVX2, sixteen
     // on NEON — against a scalar sorting network **and three bounds-checked gathers**
-    // per pixel. put this kernel at **78% of the whole frontend** the moment it
-    // was wired in, which is what made it worth writing.
+    // per pixel. The first end-to-end profile put this kernel at **78% of the
+    // whole pipeline** the moment it was wired in, which is what made it worth
+    // writing.
     //
     // ONLY THE INTERIOR. A row or column where any offset leaves the image keeps the
     // scalar body below, which is also the oracle: `tests/test_median_wide.cpp` compares

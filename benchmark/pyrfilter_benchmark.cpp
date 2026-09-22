@@ -1,13 +1,13 @@
 // ===========================================================================
-// earlier work -- THE SPEED AXIS of the pyramid design space.
+// THE SPEED AXIS of the pyramid design space.
 //
-// a measurement measured the accuracy frontier with reference implementations and found the
+// The accuracy frontier was measured with reference implementations, which found the
 // two axes are NOT independent: BOX_2x2 saturates at 3 bits (+0.82 yield points
 // from N=2 to N=7) where GAUSSIAN_5x5 keeps paying (+3.93). The points worth
 // pricing are GAUSSIAN_5x5 @ N=3 (0.65 below the anchor) and BOX_3x3 @ N=3.
 //
-// This is the cost side. It matters because a measurement measured pyrDown at 25.8% of the
-// frontend -- up from 4.5%, because LK got 3.44x faster and the build did not.
+// This is the cost side. It matters because pyrDown measured 25.8% of the
+// pipeline -- up from 4.5%, because LK got 3.44x faster and the build did not.
 //
 // The shipped `pyrDown` (hand-written BOX_2x2 route) is included as a control: the
 // generic framework has to be compared against what it would replace, not only
@@ -107,7 +107,7 @@ int main() {
                     t[i].medianNs / t[1].medianNs);
     }
     std::printf("\n 'vs shipped' is against the hand-written BOX_2x2 route at N=3.\n"
-                " pyrDown is 25.8%% of the frontend, and a level-0 pass is the\n"
+                " pyrDown is 25.8%% of the pipeline, and a level-0 pass is the\n"
                 " largest of the three the ladder runs.\n");
     return 0;
 }

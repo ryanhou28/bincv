@@ -8,10 +8,11 @@
 // WHAT CHANGED WHEN LANDED, AND WHY THIS FILE HAD TO BE RE-RUN
 // ===========================================================================
 //
-// closed against measurement copies: the winning variants lived in this file,
-// because writing them into ops/reduce.hpp in the same commit as the measurement
-// that gated them is the inversion EXPERIMENTS.md exists to prevent. then
-// landed them for real, so this file now times the SHIPPED entry points --
+// The axes below closed against measurement copies: the winning variants lived in
+// this file, because writing them into ops/reduce.hpp in the same commit as the
+// measurement that gated them is the inversion the measurement protocol exists to
+// prevent. A later round landed them for real, so this file now times the SHIPPED
+// entry points --
 // bincv::SlidingWindowCount, bincv::countCovariance and the four-argument
 // bincv::countAndSplit -- and a copy survives here only where nothing shipped
 // (INC-COL, which axis 1 explicitly declines to expose).
@@ -20,9 +21,9 @@
 // carried one accumulator across a whole region, one dependency chain through the
 // popcount latency, and its row bodies now each return their own partial sum. That
 // landed FIRST of the four, so the recompute baseline every ratio below is divided
-// by is up to 1.32x faster than the one a measurement measured. The axis-1 ratios here are
-// therefore SMALLER than that measurement’s, by design and not by regression: predicted
-// roughly 5.6x and 15x where it had measured 7.3x and 20x. 
+// by is up to 1.32x faster than the one measured then. The axis-1 ratios here are
+// therefore SMALLER than the originals, by design and not by regression: predicted
+// roughly 5.6x and 15x where the earlier run measured 7.3x and 20x. This file
 // records both sets side by side; neither replaces the other, because they answer
 // "what did the accumulator buy" and "what does it buy in the shipped library".
 //
@@ -45,13 +46,13 @@
 // reported separately, and the rule is applied to each rather than to an average
 // that would hide the disagreement:
 //
-// SPARSE 200 isolated windows at scattered keypoints. the design notes: the
+// SPARSE 200 isolated windows at scattered keypoints: the
 // LK covariance per tracked keypoint. Windows barely overlap.
 // SEARCH 200 keypoints x an 8x8 sweep of window positions = 12800 windows.
 // Heavy LOCAL overlap; a block-matching / search-region pattern.
-// DENSE every window position in the frame. the design notes's corner
+// DENSE every window position in the frame. The corner
 // response is computed from the same covariance machinery over the
-// whole image, so this is the frontend's real maximum-overlap case
+// whole image, so this is the pipeline's real maximum-overlap case
 // rather than a synthetic upper bound.
 //
 // TWO incremental forms are measured, because "a sliding accumulator" over
@@ -76,35 +77,36 @@
 // because a rejected alternative with no number next to it is an assertion rather
 // than a decision.
 //
-// A FOURTH variant, recompute-1acc, is the recompute path with earlier work item 4
-// UNDONE: one accumulator across the whole region. It is timed interleaved with
-// the other three so that item 4's own effect is measured the same way everything
-// else here is, rather than inferred by comparing absolute ns against a run from
-// another session. It also keeps that measurement’s original denominator alive, so the
-// pre-split ratios that entry quotes can be reproduced from this binary.
+// A FOURTH variant, recompute-1acc, is the recompute path with the per-row
+// accumulator split UNDONE: one accumulator across the whole region. It is timed
+// interleaved with the other three so that the split's own effect is measured the
+// same way everything else here is, rather than inferred by comparing absolute ns
+// against a run from another session. It also keeps the original denominator alive,
+// so the pre-split ratios can be reproduced from this binary.
 //
 // Windows are placed fully inside the image on this axis. Edge clipping is real
-// (the design notes) and axes 2 and 3 below include it; the shipped
+// and axes 2 and 3 below include it; the shipped
 // SlidingWindowCount clips exactly (tests/test_reduce.cpp sweeps whole frames
 // checking it position by position), but INC-COL here does not, and a comparison
-// between two implementations of clipping is not the question asks.
+// between two implementations of clipping is not the question this axis asks.
 //
 // ===========================================================================
-// AXIS 2 -- the 2x2 covariance composed out of earlier work versus one fused pass
+// AXIS 2 -- the 2x2 covariance composed out of the primitives versus one fused pass
 // ===========================================================================
 //
-// Registered as that work’s second axis after a measurement measured 1.30x on the reference
-// device. Rule, verbatim, same threshold: a covariance-shaped entry point
+// Registered as the second axis after a measurement put the gap at 1.30x on the
+// reference device. Rule, verbatim, same threshold: a covariance-shaped entry point
 // (returning xx, yy, whenClear, whenSet from one visitRowWords pass) beats the
-// composition by > 15% at 31x31 -> add it to earlier work before this is written; within
-// 15% -> keep the composition and record that the fused form was rejected on data.
+// composition by > 15% at 31x31 -> add it before anything is written against the
+// composition; within 15% -> keep the composition and record that the fused form
+// was rejected on data.
 //
-// The fused side is now bincv::countCovariance. BOTH sides carry that work’s per-row
+// The fused side is now bincv::countCovariance. BOTH sides carry the per-row
 // accumulator split, so this ratio is still redundant traversal and nothing else:
 // splitting only the fused side would have made it a mixture of two effects.
 //
 // Re-measured here at three window sizes and at two word widths, in the same
-// session as axis 1, rather than resting on that measurement’s single 31x31 uint64_t point.
+// session as axis 1, rather than resting on a single 31x31 uint64_t point.
 //
 // ===========================================================================
 // AXIS 3 -- frame-sized selector plane versus a four-argument countAndSplit
@@ -116,9 +118,9 @@
 // plane at all. Both are now shipped overloads of bincv::countAndSplit, so this
 // axis times the library rather than a copy.
 //
-// TASKS.md states NO numeric threshold for this axis -- it requires that both
-// memory and speed be reported, "since this is precisely a case where the two
-// goals may disagree". No threshold is invented here. Both numbers are printed,
+// NO numeric threshold is set for this axis. The rule written first requires only
+// that both memory and speed be reported, since this is precisely a case where the
+// two goals may disagree. No threshold is invented here. Both numbers are printed,
 // including the plane's formation cost amortized over the keypoints that use it,
 // and the weighing is against CLAUDE.md's stated tiebreak: memory wins when the
 // goals conflict and no explicit choice has been made.
@@ -131,9 +133,9 @@
 // on x86_64 and fmov/cnt/uaddlv/fmov on aarch64. The ratio between a popcounting
 // variant and a bit-reading one IS the thing that lowering changes, so x86 cannot
 // rank these at all and this experiment closes only on the reference device. No
-// -march flag is added: that is a dispatch decision (ROADMAP 2.3) that no
-// experiment has settled, and changing it mid-experiment would confound exactly
-// these comparisons.
+// -march flag is added: that is a dispatch decision that no experiment has
+// settled, and changing it mid-experiment would confound exactly these
+// comparisons.
 //
 // VALIDITY: measure::g_sink consumes every result; four distinct random images
 // rotate through each timed body, on a call counter that runs on across batches --
@@ -241,8 +243,8 @@ size_t sweepRecomputeOneAccumulator(const BinMatConstView<Word>& v, const Sweep&
     return total;
 }
 
-/// @brief What the API ships: one countNonZero per window position, with earlier work
-/// item 4's per-row partial sums inside it.
+/// @brief What the API ships: one countNonZero per window position, with the
+/// per-row partial sums inside it.
 template <typename Word>
 size_t sweepRecompute(const BinMatConstView<Word>& v, const Sweep& s, int W) {
     size_t total = 0;
@@ -329,7 +331,7 @@ std::vector<Pattern> buildPatterns(int W) {
 
     Pattern sparse;
     sparse.name = "SPARSE";
-    sparse.note = "200 isolated keypoints (LK, ARCHITECTURE 7.5)";
+    sparse.note = "200 isolated keypoints (LK)";
     {
         uint64_t state = UINT64_C(0xC0FFEE);
         for (int k = 0; k < kKeypoints; ++k) {
@@ -362,7 +364,7 @@ std::vector<Pattern> buildPatterns(int W) {
 
     Pattern dense;
     dense.name = "DENSE";
-    dense.note = "every position in the frame (corner response, ARCHITECTURE 7.6)";
+    dense.note = "every position in the frame (corner response)";
     dense.sweeps.push_back(Sweep{0, 0, maxX + 1, maxY + 1});
     dense.windowsPerCall = (maxX + 1) * (maxY + 1);
     out.push_back(dense);
@@ -495,9 +497,9 @@ bool sameCovariance(const bincv::CovarianceCount& a, const bincv::CovarianceCoun
            a.xy.whenSet == b.xy.whenSet;
 }
 
-/// @brief the design notes through the primitives: three calls, therefore
+/// @brief The LK covariance through the primitives: three calls, therefore
 /// three traversals of one window. Still a shipped composition -- a caller
-/// who has not read writes exactly this -- so it is the denominator.
+/// who has not read the guidance writes exactly this -- so it is the denominator.
 template <typename Word>
 bincv::CovarianceCount covarianceComposed(const BinMatConstView<Word>& magX,
                                           const BinMatConstView<Word>& magY,
@@ -737,8 +739,8 @@ int main() {
                 " which issues none, so the x86 popcount lowering can "
                 "invert the ranking outright.\n");
 #endif
-    std::printf("Decision rules are in this file's header, written before measuring "
-                "(EXPERIMENTS.md).\n");
+    std::printf("Decision rules are in this file's header, written before "
+                "measuring.\n");
 
     bool ok = runAxis1();
 

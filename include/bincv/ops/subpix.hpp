@@ -41,7 +41,7 @@
 /// `cv::cornerSubPix`'s. **The gradient is not**: OpenCV computes its own from the
 /// 8-bit image with a Sobel-like scheme, and this takes binCV's already-computed
 /// `SignedQuantMat` derivatives -- which is (a kernel binds to views, and the
-/// frontend has these already) and also the only shape that avoids materializing an
+/// pipeline has these already) and also the only shape that avoids materializing an
 /// 8-bit image the library exists to avoid.
 
 #include <cmath>
@@ -80,9 +80,9 @@ struct SubPixResult {
     /// **This is `cv::cornerSubPix`'s own rule, not an addition** -- "if new point is too
     /// far from initial, it means poor convergence; leave initial point as the result",
     /// tested on `|dx| > win.width || |dy| > win.height` after the loop. binCV did not
-    /// implement it until F-4, and the difference is not subtle: a seed that walks out of
-    /// its own window is exactly the case where the two answers diverge by more than the
-    /// window is wide.
+    /// implement it until a user reported the gap, and the difference is not subtle: a
+    /// seed that walks out of its own window is exactly the case where the two answers
+    /// diverge by more than the window is wide.
     size_t diverged = 0;
 };
 
@@ -95,7 +95,7 @@ namespace impl {
 /// the sum of squares -- `vy = exp(-y*y)` with `y = (i - win.height)/win.height`,
 /// times the same in x -- so the weight is exactly 1/e at the edge of the window
 /// along either axis.
-/// @note **THIS WAS WRONG UNTIL F-4, BY A FACTOR OF TWO IN THE EXPONENT** -- the
+/// @note **THIS WAS WRONG BY A FACTOR OF TWO IN THE EXPONENT** -- the
 /// denominator read `2*(winHalf/2)^2 = winHalf^2/2`, giving `exp(-2r^2/winHalf^2)`,
 /// a Gaussian sqrt(2) too narrow. Reported from outside at 4.53 px mean against
 /// OpenCV on real frames.

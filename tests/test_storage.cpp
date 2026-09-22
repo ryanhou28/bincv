@@ -250,7 +250,7 @@ void testStorage(const char* label) {
     blockOwner.data()[1] = W(0x3D);
     BINCV_CHECK(wrapAtBase.data()[1] == W(0x3D));  // and still the same memory
 
-    // Same defect through an interior pointer -- the shape that work’s non-owning
+    // Same defect through an interior pointer -- the shape the non-owning
     // BinMat constructor makes reachable as `frame = roiWrapper`.
     S interiorOwner(6);
     interiorOwner.data()[3] = W(0x5E);
@@ -453,7 +453,7 @@ void testAllocationDiscipline() {
 // REGRESSION: the constraint used to be `is_integral && is_unsigned` alone, which
 // admits three things it should not:
 // - `const`/`volatile` word types, so BinMatView<const uint32_t> instantiated --
-// exactly the const-templated view the design rule forbids, and a fourth view type that
+// exactly the const-templated view the two-view-types rule forbids, and a fourth view type that
 // kernels would silently be instantiated on
 // - `bool`, for which WordBits = sizeof * 8 is a lie: the object holds one
 // usable bit, so bit packing would discard seven pixels in eight

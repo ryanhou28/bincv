@@ -179,7 +179,7 @@ plain C++ that any target compiles. Three things it settled:
 
 Worth noting for the x86 POPCNT argument in the top-level `CMakeLists`: L2 without any
 population count instruction runs within 4% of L0 *with* one (0.373 vs 0.357 ns/word).
-That does not overturn the 3.75x frontend figure, which covers far more than
+That does not overturn the 3.75x tracking-pipeline figure, which covers far more than
 reductions, but it does mean the reductions' share of it would shrink.
 
 **Not measured: aarch64.** The reference device was unavailable. It has `cnt`, so it
@@ -187,10 +187,10 @@ is in the family where L2 is predicted to be neutral or slightly worse — and t
 above means it keeps its current path either way. That prediction is unverified and
 should be checked before anyone relies on it.
 
-### And what it is worth on the frontend: nothing
+### And what it is worth on the feature tracking pipeline: nothing
 
-`benchmark/frontend_profile.cpp`, built with `BINCV_X86_POPCNT` ON and OFF, prices how
-much of the frontend is population count at all (640x480, 140 keypoints, 31x31 window;
+`benchmark/feature_tracking_profile.cpp`, built with `BINCV_X86_POPCNT` ON and OFF, prices how
+much of the pipeline is population count at all (640x480, 140 keypoints, 31x31 window;
 host spreads 7-47%, so read the large ratios only):
 
 | stage | POPCNT on | POPCNT off | ratio |
@@ -199,7 +199,7 @@ host spreads 7-47%, so read the large ratios only):
 | corner response sweep | 3.101 ms | 3.503 ms | 1.13x |
 | corner selection | 2.413 ms | 2.214 ms | ~1 |
 | build | 1.032 ms | 0.992 ms | ~1 |
-| whole frontend | 7.31 ms | 8.12 ms | **1.11x** |
+| whole pipeline | 7.31 ms | 8.12 ms | **1.11x** |
 
 **L2 does not apply to any of it.** The one popcount-bound stage is the LK covariance,
 and `bitSlicedPairRowRegion` issues `3N^2 + N` scalar per-word counts over a **31x31
@@ -208,23 +208,23 @@ consecutive words, and a window row does not contain sixteen. Nothing on the hot
 calls a whole-frame `countNonZero` either.
 
 So L2's 2.6x is real and is confined to **long contiguous reductions** — a full-frame
-or large-region count, which the public API offers and this frontend never performs.
-Adopting it for the frontend's sake would be optimizing a loop shape the frontend does
+or large-region count, which the public API offers and this pipeline never performs.
+Adopting it for the pipeline's sake would be optimizing a loop shape the pipeline does
 not execute, which is the failure CLAUDE.md names: a kernel nobody calls makes no
 performance claim.
 
 Two things this turned up that are worth more than L2 was:
 
-- **The frontend is only 1.11x popcount-sensitive here**, against the 3.75x recorded
-  in the top-level `CMakeLists` for X-57. That is not a correction — this is a
+- **The pipeline is only 1.11x popcount-sensitive here**, against the 3.75x recorded
+  in the top-level `CMakeLists`. That is not a correction — this is a
   different workload on a different machine (640x480 synthetic at 7.31 ms, against
-  X-57's 12.9 -> 3.4 ms) and the conditions to reproduce X-57 are not recorded here.
+  that run's 12.9 -> 3.4 ms) and the conditions to reproduce it are not recorded here.
   It is a discrepancy large enough to be worth resolving before the 3.75x is quoted
   again.
 - **The biggest stage is not popcount-bound at all.** The corner response sweep moves
   **1.13x** where the LK covariance moves 2.30x, so whatever governs it is not the
   population count. It is **56-61% of detect**, and 42-43% of this profile's whole
-  frontend — but that second figure assumes detection runs every frame, which #7
+  pipeline — but that second figure assumes detection runs every frame, which #7
   records as the misleading assumption: detection's share is a function of the duty
   cycle, not a property of the operation. The 1.13x is the part that does not depend
   on the duty cycle, and it is the part worth carrying to #7.
@@ -232,7 +232,7 @@ Two things this turned up that are worth more than L2 was:
 If the covariance is worth attacking, the shape that fits it is L2's *idea* applied
 across a window's rows and its `3N^2 + N` sums -- accumulate lanes, collapse once per
 window -- not L2's code. Even done perfectly that is bounded by the covariance's
-13.7% share of the software-popcount frontend.
+13.7% share of the software-popcount pipeline.
 
 ## Dense disparity, and the word-type claim (rule written before the board ran it)
 

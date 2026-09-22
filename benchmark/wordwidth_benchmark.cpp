@@ -11,7 +11,7 @@
 // * Within 10%, or footprint increases at small pyramid levels -> keep uint32_t
 // (memory wins ties)
 //
-// And the trap the task states explicitly, which this file exists to not fall
+// And the trap stated explicitly up front, which this file exists to not fall
 // into: "wider words round row strides up more coarsely, so the footprint effect
 // is worst exactly at upper pyramid levels. Measure footprint at 94x60, not only
 // at 640x480, or this experiment will reach the wrong conclusion." Both sizes are
@@ -20,7 +20,7 @@
 // anywhere. The SPEED half closes only on the reference device.
 //
 // VARIANTS uint8_t, uint16_t, uint32_t, uint64_t, each at its own word
-// granularity (the design rule’s default alignment -- the alignment axis is that work’s)
+// granularity (the default alignment -- alignment is a separate axis)
 // WORKLOAD bitwiseAnd and countNonZero, whole image,
 // 640x480 and 94x60
 // METRIC ns/pixel and allocated bytes at both resolutions
@@ -37,8 +37,8 @@
 // good on x86 (a uint8_t image pays 8x the calls of a uint64_t one but each call
 // is the same price, so the ranking can inverts against the target), while on
 // aarch64 it is fmov/cnt/uaddlv/fmov. x86 numbers from this file cannot rank these
-// variants at all. No -march flag is added: that is a dispatch decision
-// (ROADMAP 2.3) that no experiment has settled.
+// variants at all. No -march flag is added: that is a dispatch decision that no
+// experiment has settled.
 //
 // VALIDITY: measure::g_sink consumes every result; four distinct random images
 // rotate through each timed body, on a call counter that runs on across batches so
@@ -261,8 +261,8 @@ bool runCase(const Case& c) {
     return true;
 }
 
-/// @brief The footprint half of earlier work, as exact arithmetic over a pyramid ladder.
-/// @note This is the half the task warns about. It needs no device and no timing:
+/// @brief The footprint half, as exact arithmetic over a pyramid ladder.
+/// @note This is the half to be careful with. It needs no device and no timing:
 /// a row stride is ceil(width / wordBits) words, so a wider word rounds up
 /// more coarsely, and the penalty grows as the level shrinks.
 void printPyramidFootprint() {
@@ -305,8 +305,8 @@ int main() {
     std::printf("sizeof(void*) = %zu; a 32-bit host would synthesise every uint64_t "
                 "operation and answer a different question.\n",
                 sizeof(void*));
-    std::printf("The decision rule is in this file's header, written before measuring "
-                "(EXPERIMENTS.md).\n");
+    std::printf("The decision rule is in this file's header, written before "
+                "measuring.\n");
 
     printPyramidFootprint();
 

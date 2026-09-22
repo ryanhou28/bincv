@@ -153,7 +153,7 @@ caller exactly as far from bits as before.
 **Everything from such an array down to bits is binCV's, including sources wider than
 8 bits.** Downconverting first is not merely slower, it changes the answer: a 12-bit
 gradient of 15 counts becomes exactly zero once the operands are truncated to 8 bits, and
-low-contrast scenes are where a frontend needs every edge it can get.
+low-contrast scenes are where a feature tracker needs every edge it can get.
 
 ### What binCV computes, as opposed to what it accepts
 
@@ -171,8 +171,8 @@ exist (owner's decision, 2026-09-11). What an in-repo caller *is* for is pricing
 operation still gets a benchmark arm the day it is written, and a representative pipeline
 is what turns kernel numbers into shares.
 
-That covers image processing, features and tracking, stereo, and the geometry the frontend
-consumes downstream of them. The SLAM use case brought the descriptor path — orientation,
+That covers image processing, features and tracking, stereo, and the geometry the
+tracking pipeline consumes downstream of them. The SLAM use case brought the descriptor path — orientation,
 steered BRIEF, Hamming matching — and sparse rectified stereo, for the same reason tracking
 brought LK: users' pipelines run them, and bits make them cheaper. Dense disparity is
 scheduled on the same test. IMU fusion and bundle adjustment are absent on the second
@@ -191,8 +191,8 @@ to test or benchmark against. That is tooling, and tooling runs on a host — in
 desktop, where the host already has OpenCV.
 
 So there is no optional decoder target and no vendored codec. The measured size argument —
-`libpng` + `libz` at 336 KB against the frontend's 436,704-byte peak working set — is real
-but secondary; it argues about linkage. The decisive point is that a decoder would sit on a
+`libpng` + `libz` at 336 KB against the tracking pipeline's 436,704-byte peak working
+set — is real but secondary; it argues about linkage. The decisive point is that a decoder would sit on a
 path nobody walks. It is also worth noting where a vendored decoder fits worst: the target
 with no package manager is the one that can hold neither the decoder nor the wide frame it
 would produce, and it is the target that argument was aimed at.
@@ -262,7 +262,7 @@ caller-installed backend, so a target with no threads never installs one.
 drags in enough of newlib's stdio to want `_sbrk` at link time. No kernel allocates,
 throws or does I/O, so neither reaches one.
 
-**What is NOT measured there:** any OpenCV comparison, any frontend or tracker timing, and
+**What is NOT measured there:** any OpenCV comparison, any pipeline or tracker timing, and
 anything at the part's full clock — the reductions were timed at the 64 MHz reset default.
 
 **The stack was expected to be the binding constraint. On the first real part it was
@@ -336,7 +336,7 @@ two sides would otherwise each have to derive. Geometry and addressing:
 `impl::bitMask`, `impl::lowBitsMask`, `impl::extendedRowWord` and
 `impl::squareInsideImage`. Value rules: `impl::quantScale`,
 `impl::thresholdCutoff`, `impl::minEigenValue`, `maj3`, `thresholdGE` and
-`SplitCount::crossTerm`. And, from the frontend round, the per-word arithmetic
+`SplitCount::crossTerm`. And, from the feature tracking round, the per-word arithmetic
 those kernels are written in: `impl::rowBit`, `impl::ternaryDifference`,
 `impl::signedDifference` and `impl::signedDifferenceRipple`;
 `impl::combineBitSlicedPairs`; `impl::boxHorizontal3`, `impl::boxVertical3`,
@@ -374,7 +374,7 @@ own header comment claimed nothing was copied, and `pack.cu` carried a
 deliberate — a drifted copy there would have read as that divergence finally
 being fixed. Both now call the host's own definition.
 
-The frontend round produced one more, and it is worth naming because it is the
+The feature tracking round produced one more, and it is worth naming because it is the
 same failure in a different disguise. The rule "is this keypoint far enough from
 the edge to read a square patch around it" existed in **seven spellings** — twice
 in `ops/orientation.hpp`, three times in `ops/descriptor.hpp`, and once each as a

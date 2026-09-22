@@ -379,13 +379,13 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
 endif()
 
 # ---------------------------------------------------------------------------
-# The frontend's entry point: detectFast, cornerMinEigenVal,
+# The pipeline's entry point: detectFast, cornerMinEigenVal,
 # goodFeaturesToTrack and cornerSubPix -- every arm through its runtime switch,
 # three gate-excluded controls that must read ~1.00x, and the decision rule
 # printed before the first number.
 #
 # ONE executable, ALWAYS BUILT, with the cv::cuda role arms behind
-# BINCV_CUDA_FRONTEND_OPENCV inside it -- the shape cuda_window_benchmark and
+# BINCV_CUDA_FEATURE_TRACKING_OPENCV inside it -- the shape cuda_window_benchmark and
 # cuda_sensor_benchmark use, and for the reason their blocks give:
 # scripts/verify_cuda.sh derives its benchmark list from the TEXT of this file
 # and hand-excludes exactly one name, so a target that exists only when an
@@ -403,10 +403,10 @@ endif()
 # BLOCKED, which is what the both-axes ship rule requires. It does not
 # substitute a bar and it does not fall silent.
 # ---------------------------------------------------------------------------
-add_executable(cuda_frontend_benchmark cuda_frontend_benchmark.cpp cuda_bench_null.cu)
-target_link_libraries(cuda_frontend_benchmark PRIVATE bincv_core bincv_cuda bincv_warnings)
-target_include_directories(cuda_frontend_benchmark PRIVATE ${BINCV_POLICY_ROOT}/benchmark)
-set_target_properties(cuda_frontend_benchmark PROPERTIES
+add_executable(cuda_feature_tracking_benchmark cuda_feature_tracking_benchmark.cpp cuda_bench_null.cu)
+target_link_libraries(cuda_feature_tracking_benchmark PRIVATE bincv_core bincv_cuda bincv_warnings)
+target_include_directories(cuda_feature_tracking_benchmark PRIVATE ${BINCV_POLICY_ROOT}/benchmark)
+set_target_properties(cuda_feature_tracking_benchmark PROPERTIES
     CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
 
 if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
@@ -414,20 +414,20 @@ if(BINCV_CUDA_OPENCV_DIR AND NOT BINCV_OPENCV_FOUND)
                  cudafilters cudaarithm
                  PATHS ${BINCV_CUDA_OPENCV_DIR} NO_DEFAULT_PATH)
     if(OpenCV_FOUND AND TARGET opencv_cudafeatures2d AND TARGET opencv_cudaimgproc)
-        target_compile_definitions(cuda_frontend_benchmark PRIVATE
-            BINCV_CUDA_FRONTEND_OPENCV=1)
-        target_link_libraries(cuda_frontend_benchmark PRIVATE
+        target_compile_definitions(cuda_feature_tracking_benchmark PRIVATE
+            BINCV_CUDA_FEATURE_TRACKING_OPENCV=1)
+        target_link_libraries(cuda_feature_tracking_benchmark PRIVATE
             opencv_core opencv_imgproc opencv_cudafeatures2d opencv_cudaimgproc
             opencv_cudafilters opencv_cudaarithm)
-        target_include_directories(cuda_frontend_benchmark SYSTEM PRIVATE
+        target_include_directories(cuda_feature_tracking_benchmark SYSTEM PRIVATE
             ${OpenCV_INCLUDE_DIRS})
-        message(STATUS "cuda_frontend_benchmark: role comparison against "
+        message(STATUS "cuda_feature_tracking_benchmark: role comparison against "
                        "cv::cuda::FastFeatureDetector and "
                        "cv::cuda::createGoodFeaturesToTrackDetector enabled "
                        "(OpenCV ${OpenCV_VERSION} from ${BINCV_CUDA_OPENCV_DIR})")
     else()
         message(WARNING "BINCV_CUDA_OPENCV_DIR set but no OpenCV with cudafeatures2d + "
-                        "cudaimgproc found there; cuda_frontend_benchmark keeps its binCV "
+                        "cudaimgproc found there; cuda_feature_tracking_benchmark keeps its binCV "
                         "arms and reports both role bars as BLOCKED.")
     endif()
 endif()
@@ -447,7 +447,7 @@ endif()
 #
 # ONE EXECUTABLE, ALWAYS BUILT, with the cv::cuda arms behind
 # BINCV_CUDA_LKFLOW_OPENCV inside it -- the shape cuda_window_benchmark,
-# cuda_sensor_benchmark and cuda_frontend_benchmark use, and for the reason they
+# cuda_sensor_benchmark and cuda_feature_tracking_benchmark use, and for the reason they
 # give: scripts/verify_cuda.sh derives its benchmark list from the TEXT of this
 # file and hand-excludes exactly one name, so a target that exists only when an
 # OpenCV is pointed at is one the gate tries to build on every machine that has
@@ -552,7 +552,7 @@ set_target_properties(cuda_ransac_benchmark PROPERTIES
 #
 # ONE executable, ALWAYS BUILT, with the cv::cuda arms behind
 # BINCV_CUDA_SPARSE_OPENCV inside it -- the shape cuda_sensor_benchmark and
-# cuda_frontend_benchmark use, and for the reason their blocks give:
+# cuda_feature_tracking_benchmark use, and for the reason their blocks give:
 # scripts/verify_cuda.sh derives its benchmark list from the TEXT of this file
 # and hand-excludes exactly one name, so a target that exists only when an
 # OpenCV is pointed at is one the gate tries to build on every machine that has

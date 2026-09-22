@@ -4,7 +4,7 @@
 // concrete, so it has to be verified in the configurations that claim serves.
 //
 // What is being defended here, in one line: a binary frame does not stay binary
-// through the pyramid (the design notes measured 1 -> 3 -> 4 -> 5 bits), so the
+// through the pyramid (measured at 1 -> 3 -> 4 -> 5 bits), so the
 // N-plane container is required, and the thing that makes it affordable is that
 // N planes cost ONE allocation of exactly N times the binary footprint -- not N
 // allocations, and not a byte more than the arithmetic says.
@@ -178,7 +178,7 @@ void testPlaneLayout(const char* label) {
     BINCV_CHECK(m.plane(N - 1).ptr + m.planeWords() == m.data() + m.sizeInWords());
 }
 
-// The footprint claim from earlier work, in bytes, measured at the allocator.
+// The footprint claim, in bytes, measured at the allocator.
 void testFootprint() {
     std::cout << "\n--- Footprint: QuantMat<3, uint32_t> at 640x480 ---\n";
 
@@ -200,7 +200,7 @@ void testFootprint() {
         BINCV_CHECK_EQ(frame.sizeInWords() * sizeof(uint32_t), size_t(115200));
     }
     // ONE allocation, of exactly 3 x 38400 bytes -- not three allocations, and
-    // not a byte of slack. This is the whole memory argument (the design notes).
+    // not a byte of slack. This is the whole memory argument.
     BINCV_CHECK_EQ(news, size_t(1));
     BINCV_CHECK_EQ(bytes, 3 * binaryBytes);
 

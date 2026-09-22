@@ -5,17 +5,18 @@
 /// **API TIER 3** -- see the tier note below.
 ///
 /// The first operation in the project whose output is a MULTI-PLANE SIGNED image,
-/// and therefore the first real exercise of `SignedQuantMat` / `TernaryMat`
-/// (the design notes). What it produces is what that work’s LK gradient
-/// covariance consumes ([the design notes]), so the two planes it writes -- a
-/// magnitude stack and a sign plane -- are exactly the arguments
+/// and therefore the first real exercise of `SignedQuantMat` / `TernaryMat`,
+/// which carry a signed value as sign-magnitude rather than two's complement.
+/// What it produces is what ops/covariance.hpp's LK gradient covariance
+/// consumes, so the two planes it writes -- a magnitude stack and a sign
+/// plane -- are exactly the arguments
 /// `countCovariance(dx.constMagnitude(0), dy.constMagnitude(0), dx.constSign,
 /// dy.constSign, window)` takes.
 ///
 /// ---------------------------------------------------------------------------
 /// THE OPERATION, READ OUT OF THE REFERENCE RATHER THAN INFERRED
 ///
-/// the reference frontend's gradient stage, `calcBinarizedDeriv`:
+/// the reference pipeline's gradient stage, `calcBinarizedDeriv`:
 ///
 /// cv::Mat kernelX = (cv::Mat_<int>(1, 3) << -1, 0, 1);
 /// cv::Mat kernelY = (cv::Mat_<int>(3, 1) << -1, 0, 1);
@@ -41,7 +42,7 @@
 /// convolution predicts `-255` there.
 ///
 /// **Nothing downstream catches this, and that is why the probe exists.** It is
-/// tempting to say that work’s cross term would catch it -- `sumXX` and `sumYY` are
+/// tempting to say the covariance's cross term would catch it -- `sumXX` and `sumYY` are
 /// popcounts of the MAGNITUDE and a negation cannot touch them, while `sumXY` is
 /// the one entry that reads the sign planes. But the inversion negates BOTH
 /// derivatives, and `(-Ix)(-Iy) = IxIy`: the whole 2x2 covariance, cross term
@@ -61,17 +62,18 @@
 /// `BORDER_CONSTANT` gives `dx(0) = +255`.
 ///
 /// **THIS FILE THEREFORE DEFAULTS TO `BORDER_REFLECT_101`, DELIBERATELY BREAKING
-/// WITH the design rule’s DEFAULT**, and the border is still a parameter so a caller can ask
-/// for any of the five. Two reasons, and the second is why the deviation is not
+/// WITH THE LIBRARY'S `BORDER_CONSTANT` DEFAULT**, and the border is still a
+/// parameter so a caller can ask for any of the five. Two reasons, and the
+/// second is why the deviation is not
 /// merely a compatibility tax:
 ///
-/// * It is what the reference does, and this is written against derivatives
-/// that agree with the reference at every pixel, borders included.
+/// * It is what the reference does, and ops/covariance.hpp is written against
+/// derivatives that agree with the reference at every pixel, borders included.
 /// * Reflect-101 makes the derivative EXACTLY ZERO on the first and last
 /// column (for d/dx) and row (for d/dy): both taps read the same source
 /// pixel, so they cancel. A zero fill instead manufactures a full-strength
 /// edge all the way around the frame wherever the second column is set --
-/// which the corner response of this would then read as a ring of features
+/// which the corner response in ops/corner.hpp would then read as a ring of features
 /// along the image border. Reflect-101 is the answer that is both
 /// reference-exact and right.
 ///
@@ -87,10 +89,10 @@
 /// {-4080, 0, +4080}. binCV stores the same picture as {0, 1} at one bit per
 /// pixel, so its derivative is {-1, 0, +1} -- the same sign and the same
 /// zero/non-zero structure, scaled by 4080. Everything downstream in the MVP
-/// reads sign and magnitude and nothing else: the design notes's covariance is
+/// reads sign and magnitude and nothing else: the LK covariance is
 /// three population counts over masks, and a common positive factor multiplies
 /// every entry of the 2x2 matrix identically, leaving eigenvector directions and
-/// the min-eigenvalue ORDERING that selects on unchanged. Reproducing 4080
+/// the min-eigenvalue ORDERING that ops/corner.hpp selects on unchanged. Reproducing 4080
 /// would cost 13 more magnitude planes per pixel to carry no information.
 /// tests/test_derivative.cpp compares against the ported reference after dividing
 /// its output by 4080, and checks that the division is exact -- i.e. that no
@@ -104,11 +106,10 @@
 /// pos = a & ~b rising edge, +1
 /// neg = b & ~a falling edge, -1
 /// mag = pos | neg which is a ^ b
-/// sign = neg a set sign bit means NEGATIVE (the design notes)
+/// sign = neg a set sign bit means NEGATIVE
 ///
-/// which is 's spelling and the design notes's, and it is three
-/// word operations per 8..64 pixels. `impl::ternaryDifference` is that
-/// expression.
+/// which is three word operations per 8..64 pixels.
+/// `impl::ternaryDifference` is that expression.
 ///
 /// **binCV's `shiftLeft(src, k)` is `dst[c] = src[c + k]`** (ops/shift.hpp's
 /// header states the convention and its test sweeps it), so `shiftLeft(src, 1)`
@@ -127,7 +128,7 @@
 /// LEVEL >= 1: AN N-BIT SOURCE, AND WHY THE COST IS LINEAR IN N
 ///
 /// Above level 0 the pyramid is not binary -- distinct values grow 2 -> 5 -> 15
-/// -> 26 across levels 0..3 (the design notes), i.e. 1 -> 3 -> 4 -> 5 bits -- so
+/// -> 26 across levels 0..3, i.e. 1 -> 3 -> 4 -> 5 bits -- so
 /// the derivative is a bit-sliced subtraction of the two shifted N-bit planes.
 /// Its range is [-(2^N - 1), +(2^N - 1)], which is exactly `SignedQuantMat<N>`:
 /// N magnitude planes and one sign plane, N+1 planes in all.
@@ -151,7 +152,7 @@
 /// each other so the claim is a number a test can assert rather than a sentence.
 ///
 /// **Ternary is the N = 1 instance of this, not a separate operation**, which is
-/// what the sign-magnitude convention buys (the design notes). At N = 1 the ripple
+/// what the sign-magnitude convention buys. At N = 1 the ripple
 /// reduces to `mag = a ^ b`, `sign = ~a & b` algebraically -- the borrow chain has
 /// one stage and the conditional negate cancels against it -- so
 /// `impl::signedDifference` dispatches to the three-operation ternary spelling and
@@ -161,11 +162,11 @@
 ///
 /// **WHAT SIGN-MAGNITUDE COSTS HERE, STATED RATHER THAN HIDDEN.** A two's
 /// complement output would be the subtraction alone -- N+1 stages over
-/// sign-extended operands -- so costs this operation roughly N-1 extra
+/// sign-extended operands -- so sign-magnitude costs this operation roughly N-1 extra
 /// adder-class stages per destination word, approaching 2x at large N. That is
-/// the price of the design notes's covariance being three population counts over
-/// masks instead of a bit-sliced multiply, and 7.5 is run 31x31 times per
-/// keypoint while this runs once per pixel. The trade is recorded, not measured:
+/// the price of the LK covariance being three population counts over
+/// masks instead of a bit-sliced multiply, and that covariance runs 31x31 times
+/// per keypoint while this runs once per pixel. The trade is recorded, not measured:
 /// no experiment has priced the two-complement alternative end to end, because
 /// nothing in the MVP would consume it.
 ///
@@ -175,7 +176,7 @@
 /// `SignedQuantMat`'s convention is that magnitude 0 means zero and the sign bit
 /// is then ignored -- "-0" is not a distinct value -- and a kernel that wrote a
 /// set sign bit over a zero magnitude would still be legal but would be writing
-/// noise into the plane that work’s cross term reads. Nothing here can:
+/// noise into the plane the covariance's cross term reads. Nothing here can:
 ///
 /// sign == borrow out of (a - b) == (a < b)
 ///
@@ -202,15 +203,15 @@
 /// uint32_t, N = 1, that is 2 x 38400 B added to a 38400 B source and a
 /// 76800 B destination: the composed form's peak working set is **1.67x the
 /// fused form's FOR ONE AXIS** (5 planes against 3). The figure quoted
-/// everywhere else -- benchmark/derivative_benchmark.cpp, -- is
+/// everywhere else -- benchmark/derivative_benchmark.cpp -- is
 /// **1.40x**, which is the same comparison for BOTH AXES (7 planes against
 /// 5), because the two scratch frames are reused across the axes and a
 /// caller that wants a covariance needs both. 1.40x is the number a footprint
 /// claim should use; 1.67x is what one axis in isolation costs. The
 /// horizontal neighbours are computed into registers by
 /// shifting each source word by one bit; the vertical ones are a row index
-/// ( a vertical shift moves no bits). This is the design rule’s finding applied to
-/// the operation names as its second caller.
+/// (a vertical shift moves no bits). That is the rule that an edge fixup must
+/// cost the boundary and not the row, and this operation is its second caller.
 /// 3. **PADDING BITS STAY ZERO** in every destination plane, sign included --
 /// the trailing word of each is stored masked, and the sign plane needs that
 /// as much as the magnitude planes do, because a padding bit set there is a
@@ -233,14 +234,14 @@
 /// 4. **Never throws.** Mismatched dimensions, a stride shorter than a row, an
 /// unknown BorderType and any overlap between a source plane and a
 /// destination plane are programming errors, reported by BINCV_ASSERT in
-/// debug builds and undefined in release (the design notes). The container
+/// debug builds and undefined in release. The container
 /// wrappers can throw, but only from `plane` / `magnitude`, whose index
 /// is a loop variable bounded by N and cannot be out of range.
 ///
 /// ---------------------------------------------------------------------------
 /// ALIASING: NO DESTINATION PLANE MAY SHARE A WORD WITH ANY SOURCE PLANE
 ///
-/// The half of earlier work that ops/shift.hpp and ops/denoise.hpp take, and for the same
+/// The half of the aliasing rule that ops/shift.hpp and ops/denoise.hpp take, and for the same
 /// reason: neither axis is pointwise in the word index. Destination word i of
 /// `derivativeX` reads source words i-1, i and i+1; destination row y of
 /// `derivativeY` reads source rows y-1 and y+1. In place is not supported.
@@ -265,7 +266,7 @@
 /// different kernels; `cv::filter2D` is a general correlation over a byte or
 /// float image producing a byte or float image, not a sign-magnitude bit-plane
 /// pair, and this file deliberately drops the reference's scale factor. So
-/// nothing here borrows an OpenCV name (the design notes) and nothing here
+/// nothing here borrows an OpenCV name and nothing here
 /// promises to be a drop-in for one. The BORDER semantics are Tier 1 all the
 /// same, being `impl::borderIndex`'s, which is pinned against
 /// `cv::borderInterpolate` by tests/test_shift.cpp -- that is what lets the
@@ -312,7 +313,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// stages for the conditional two's-complement negate that turns the
 /// modular difference into a magnitude.
 /// @note Exists so that "linear in N" is a number rather than a claim in a
-/// comment, exactly as `impl::boxSumFullAdders` does for that work’s box sum.
+/// comment, exactly as `impl::boxSumFullAdders` does for ops/bitslice.hpp's box sum.
 /// Compare `derivativeReplicatedInputs(n)` beside it.
 constexpr size_t derivativeAdderStages(size_t n) { return 2 * n; }
 
@@ -330,7 +331,7 @@ constexpr size_t derivativeAdderStages(size_t n) { return 2 * n; }
 /// only answer that keeps "the replication route is worse" true.
 /// @return `2 * (2^n - 1)`: 2 at n = 1, 30 at n = 4, 62 at n = 5, 510 at n = 8;
 /// `SIZE_MAX` out of domain.
-/// @note The same failure mode that work’s `impl::boxSum4ReplicatedInputs` names for
+/// @note The same failure mode ops/bitslice.hpp's `impl::boxSum4ReplicatedInputs` names for
 /// the box sum -- unary-encode each operand and hand the result to
 /// ops/bitslice.hpp's single-bit adder network. Kept next to
 /// `derivativeAdderStages` so the two can be printed side by side; the
@@ -340,7 +341,7 @@ constexpr size_t derivativeAdderStages(size_t n) { return 2 * n; }
 /// pyramid's pair had one caller (its own file), and this pair has three --
 /// this header, tests/test_derivative.cpp and
 /// benchmark/derivative_benchmark.cpp, which prints them beside the measured
-/// ns/pixel so that measurement’s linear-in-N reading is a comparison against a named
+/// ns/pixel so the benchmark's linear-in-N reading is a comparison against a named
 /// number rather than against a sentence.
 constexpr size_t derivativeReplicatedInputs(size_t n) {
     return (n >= impl::bitsPerWord<size_t>()) ? static_cast<size_t>(-1)
@@ -355,8 +356,7 @@ namespace impl {
 
 /// @brief One bit of a packed row, by column. **Internal.**
 /// @note Only ever called on the at most two border columns per row, never in
-/// the word loop -- the design rule’s lesson is that an edge fixup must cost the
-/// boundary and not the row.
+/// the word loop -- an edge fixup must cost the boundary and not the row.
 /// @note BINCV_HOST_DEVICE. One indexed word read and a mask, no traversal, so
 /// the CUDA backend's derivative kernels call it for their own border columns.
 template <typename WordType>
@@ -368,7 +368,7 @@ BINCV_HOST_DEVICE inline bool rowBit(const WordType* row, size_t x) {
 /// @param a The `src(x+1)` tap, `b` the `src(x-1)` tap; both single planes.
 /// @param mag Set where the two differ -- the ternary magnitude, |a - b|.
 /// @param negative Set where `b` is set and `a` is not, i.e. where a - b == -1.
-/// @note 's and the design notes's spelling, kept literally:
+/// @note The ternary spelling, kept literally:
 /// `pos = a & ~b`, `neg = b & ~a`, `mag = pos | neg`, `sign = neg`.
 /// Three word operations over 8..64 pixels.
 /// @note It is the N = 1 instance of signedDifferenceRipple below and not a
@@ -522,7 +522,7 @@ inline void checkDerivativeArgs(const BinMatConstView<WordType> (&src)[N],
 }
 
 // ---------------------------------------------------------------------------
-// The kernels ( views, never containers)
+// The kernels (views, never containers)
 // ---------------------------------------------------------------------------
 
 /// @brief d/dx: `dst(x, y) = src(x + 1, y) - src(x - 1, y)`. **Internal**; the
@@ -533,8 +533,8 @@ inline void checkDerivativeArgs(const BinMatConstView<WordType> (&src)[N],
 /// previous word is carried in a register rather than re-read.
 /// @note THE LEFT BORDER IS CARRIED AS A SYNTHETIC "WORD BEFORE WORD 0" whose top
 /// bit holds whatever column 0's left neighbour resolves to. That keeps the
-/// shift recurrence identical at i == 0 and everywhere else -- the design rule’s rule
-/// that an edge fixup must cost the boundary rather than a test per word.
+/// shift recurrence identical at i == 0 and everywhere else -- an edge fixup
+/// must cost the boundary rather than a test per word.
 /// The RIGHT border is folded into the trailing word's branch, which the
 /// tail mask requires anyway, so it costs nothing extra.
 template <size_t N, typename WordType, bool ForceGeneric>
@@ -637,8 +637,8 @@ inline void derivativeXRoute(const BinMatConstView<WordType> (&src)[N],
                 magRow[p][i] = last ? static_cast<WordType>(m[p] & tailMask) : m[p];
             }
             // The sign plane is masked too. Padding that reads as "negative zero"
-            // is still a violation of the canonical-zero rule, and counts
-            // padding bits in every plane, not only the ones carrying magnitude.
+            // is still a violation of the canonical-zero rule, and the padding
+            // invariant covers every plane, not only the ones carrying magnitude.
             signRow[i] = last ? static_cast<WordType>(s & tailMask) : s;
         }
     }
@@ -666,7 +666,7 @@ inline void derivativeYRoute(const BinMatConstView<WordType> (&src)[N],
     const size_t words = minRowWords<WordType>(width);
     const WordType tailMask = rowTailMask<WordType>(width);
     // A `true` constant border means every magnitude plane reads all-ones, i.e.
-    // the maximum representable value -- the N-bit reading of the design rule’s `bool`, and
+    // the maximum representable value -- the N-bit reading of the `bool` borderValue, and
     // the same convention cv::erode's default border takes to the depth's maximum.
     const WordType fill =
         borderValue ? static_cast<WordType>(~static_cast<WordType>(0)) : static_cast<WordType>(0);
@@ -749,11 +749,11 @@ inline void derivativeYGeneric(const BinMatConstView<WordType> (&src)[N],
 /// @param mag N destination magnitude plane views, the source's size. Plane 0 is
 /// the least significant bit of |dst|.
 /// @param sign One destination plane view, the source's size. **A set bit means
-/// NEGATIVE** (the design notes), and it is set exactly where
+/// NEGATIVE**, and it is set exactly where
 /// `src(x+1) < src(x-1)`.
 /// @param borderType How a coordinate outside the image extrapolates. **Defaults
 /// to BORDER_REFLECT_101, which is cv::filter2D's default and therefore
-/// the reference's** -- deliberately not the design rule’s BORDER_CONSTANT default.
+/// the reference's** -- deliberately not the library's BORDER_CONSTANT default.
 /// See the file header for the measurement and for why reflect-101 is also
 /// the right answer rather than only the compatible one.
 /// @param borderValue The pixel value outside the image under BORDER_CONSTANT;
@@ -763,13 +763,13 @@ inline void derivativeYGeneric(const BinMatConstView<WordType> (&src)[N],
 /// @note **CORRELATION, NOT CONVOLUTION**: the `+1` tap is the RIGHT neighbour.
 /// That is `cv::filter2D`'s behavior with `[-1, 0, 1]`, verified by
 /// experiment rather than inferred; getting it backwards negates every
-/// gradient and silently negates that work’s cross term while leaving `sumXX`
+/// gradient and silently negates the covariance's cross term while leaving `sumXX`
 /// and `sumYY` correct. See the file header.
 /// @note **The values are {-1, 0, +1}, where the reference's are
 /// {-4080, 0, +4080}.** A representational difference, not a semantic one --
 /// binCV's pixels are {0, 1} where the reference's are {0, 255}, and the
 /// reference then scales by 16. Sign and magnitude structure are identical,
-/// and sign and magnitude are all the design notes's covariance reads.
+/// and sign and magnitude are all the LK covariance reads.
 /// @note The result satisfies `SignedQuantMat`'s CANONICAL-ZERO rule by
 /// construction: the sign plane is the subtraction's borrow-out, which
 /// cannot be set where the operands are equal. No fix-up pass exists or is
@@ -777,7 +777,7 @@ inline void derivativeYGeneric(const BinMatConstView<WordType> (&src)[N],
 /// @note One pass, no scratch buffer, no allocation. Padding bits past `width`
 /// are zero in every destination plane on return, sign included, even when
 /// the source's are not.
-/// @note Never throws (the design notes). Mismatched dimensions, a stride shorter
+/// @note Never throws. Mismatched dimensions, a stride shorter
 /// than a row, an unknown BorderType, an overlap between a source and a
 /// destination plane, and two destination planes that overlap each other
 /// are programming errors: BINCV_ASSERT reports them in debug builds and
@@ -813,7 +813,8 @@ namespace impl {
 
 /// @brief Names `src`'s and `dst`'s planes into the arrays the kernels take.
 /// @note A thin wrapper, not a second implementation -- the shape
-/// ops/pyramid.hpp and ops/threshold.hpp both use, and for the design rule’s reason.
+/// ops/pyramid.hpp and ops/threshold.hpp both use, and for the same reason: kernels
+/// take views, never containers.
 /// @note This is the only place in the file that can throw, and only from
 /// `plane` / `magnitude`, whose bounds check is live in every build
 /// (quantMat.hpp says why). The index is a loop variable bounded by N, so

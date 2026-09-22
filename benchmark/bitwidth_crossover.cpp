@@ -1,6 +1,6 @@
 // -- WHERE DOES BIT-SLICING STOP PAYING?
 //
-// a measurement measured the two endpoints of pyrDown against cv::pyrDown: 5.52x FASTER at
+// The two endpoints of pyrDown were measured against cv::pyrDown: 5.52x FASTER at
 // 1 -> 3 bits, 13.7x SLOWER at 8 -> 8. The crossover between them has never been
 // measured, and it is the number that decides binCV's operating range -- whether
 // "low bit width" means <= 3, <= 5 or <= 7, and where an 8-bit specialization would

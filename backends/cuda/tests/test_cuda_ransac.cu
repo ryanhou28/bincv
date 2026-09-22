@@ -29,7 +29,7 @@
 //
 // Counts are swept over 5 (exactly the minimal set), 6, 31, 32 (exactly one flag
 // word), 33 (the first padding-bit case), 64, 127 and 141 (the count the
-// frontend actually produces). The degenerate paths are reached on purpose: a
+// pipeline actually produces). The degenerate paths are reached on purpose: a
 // scene of collinear points drives the solver's rank-deficient return, and a
 // count below the minimal set must be refused rather than launched.
 //
@@ -204,7 +204,7 @@ HostSample hostSample(const Scene& sc, size_t count, uint64_t seed, uint64_t ite
 }
 
 /// @brief The counts the ladder sweeps. 32 is exactly one flag word, 33 is the
-/// first case with padding bits, 141 is the count the frontend produces.
+/// first case with padding bits, 141 is the count the pipeline produces.
 const size_t kCounts[] = {5, 6, 31, 32, 33, 64, 127, 141};
 
 struct Ladder {

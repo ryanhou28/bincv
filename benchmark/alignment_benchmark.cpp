@@ -1,18 +1,17 @@
 // -- does row alignment beyond word granularity earn its memory?
 //
-// This is the BENEFIT side of earlier work, which measured only the cost. (word
-// granularity by default) is the project's only PROVISIONAL decision, and it is
-// provisional precisely because nobody had measured whether a wider row stride
-// buys any kernel anything.
+// This is the BENEFIT side of a measurement that took only the cost. Row
+// alignment at word granularity by default is the project's only PROVISIONAL
+// decision, and it is provisional precisely because nobody had measured whether a
+// wider row stride buys any kernel anything.
 //
-// DECISION RULE -- copied verbatim from, and recorded in
-// before this file was written:
+// DECISION RULE -- written before this file was:
 //
 // * Speedup < 5% on all kernels -> confirmed, close, do not build a
 // profile system
 // * 5-20% -> stands as default; larger alignment stays opt-in and is
 // documented as worth it for specific kernels
-// * > 20% on a kernel the frontend calls per frame -> reopen, report
+// * > 20% on a kernel the pipeline calls per frame -> reopen, report
 // before changing anything
 //
 // "Speedup" is read the way the rule is written: variant faster than the word
@@ -22,9 +21,9 @@
 //
 // VARIANTS rowAlignment in {sizeof(WordType) == 4, 16, 32, 64} bytes
 // WORKLOAD bitwiseAnd and countNonZero, whole image,
-// 640x480 and 94x60 -- the two extremes a measurement measured
+// 640x480 and 94x60 -- the two extremes measured
 // METRIC ns/pixel AND allocated bytes, both, per the protocol
-// WORD TYPE uint32_t, the shipped default. The word-width axis is that work’s, and
+// WORD TYPE uint32_t, the shipped default. Word width is a separate axis, and
 // mixing them would leave neither answerable.
 //
 // WHAT ALIGNMENT ACTUALLY CHANGES HERE, so the result can be read honestly:
@@ -51,8 +50,8 @@
 // to `call __popcountdi2@PLT` on x86_64 and to fmov/cnt/uaddlv/fmov on aarch64.
 // The countNonZero rows below therefore measure that lowering as much as they
 // measure alignment, and x86 numbers from this file are signal only. No -march
-// flag is added: that is a dispatch decision (ROADMAP 2.3) no experiment has
-// settled, and changing it mid-experiment would confound this comparison.
+// flag is added: that is a dispatch decision no experiment has settled, and
+// changing it mid-experiment would confound this comparison.
 // This experiment closes on the reference device (scripts/run_on_pi.sh).
 //
 // VALIDITY: measure::g_sink consumes every result; four distinct random images
@@ -83,8 +82,8 @@ constexpr int kInputs = 4;
 constexpr int kRepeats = 9;
 constexpr double kTargetMs = 40.0;
 
-// The two extremes from earlier work: a full VIO frame, and pyramid level 3, where
-// measured 172% overhead for 32-byte alignment.
+// The two extremes: a full VIO frame, and pyramid level 3, where 32-byte
+// alignment measured 172% overhead.
 struct Case {
     const char* name;
     int width;
@@ -309,8 +308,8 @@ int main() {
     std::printf("target: not aarch64 -- INDICATIVE ONLY; closes on the reference "
                 "device\n");
 #endif
-    std::printf("The decision rule is in this file's header, written before measuring "
-                "(EXPERIMENTS.md).\n");
+    std::printf("The decision rule is in this file's header, written before "
+                "measuring.\n");
     std::printf("new[] guarantees %zu-byte alignment here, so rowAlignment aligns the "
                 "STRIDE, not the base pointer.\n",
                 static_cast<size_t>(__STDCPP_DEFAULT_NEW_ALIGNMENT__));

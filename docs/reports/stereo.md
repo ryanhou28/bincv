@@ -4,36 +4,43 @@
 disparity map, winner-take-all over a window-aggregated cost. One thread on both sides.
 Setup and denominator rule: [README.md](README.md).
 
-This is the operation where the library's premise is most literal: a binCV pipeline
-already holds packed binary frames, and on bits the dense matching cost is one XOR per
-word of 64 pixels. The binary path is faster than StereoBM on both measured
-architectures **and** holds roughly a twenty-second of its working set — the first
-operation in these reports to lead its role bar on speed and memory at once.
+This is where the library's premise is most literal: a binCV pipeline already holds packed
+binary frames, and on bits the dense matching cost is one XOR per word of 64 pixels. The binary
+path is faster than StereoBM on both measured architectures **and** holds roughly a
+twenty-second of its working set.
 
 ## Summary
 
-752×480, 64 disparities, 9×9 aggregation, one thread. StereoBM at its default
-`blockSize 21`, the strongest configuration measured for it here.
+**Every `ratio` column below is OpenCV ÷ binCV: above 1× means binCV is ahead, below 1× means OpenCV is.** Where a table divides something else, its header says so.
 
-| | x86-64 | aarch64 | working set |
-|---|---|---|---|
-| `denseDisparityBinary` (packed frames in) | **~12.0 ms** | **60.4 ms** | **32.4 KB scratch** + 1 B/px out |
-| `denseDisparity` (census 5×5, wide frames in) | ~200 ms | 462 ms | 95.9 KB scratch + 1 B/px out |
-| `cv::StereoBM` | ~14.7 ms | 79.8 ms | ≥ 722 KB output alone (2 B/px) |
-| binary path vs StereoBM | **~1.2×** | **1.32×** | **~22× smaller** |
+752×480 · 64 disparities · 9×9 aggregation · one thread on both sides · `cv::StereoBM` at
+its default `blockSize 21`, the strongest configuration measured for it here. Time is
+milliseconds per frame and working set is bytes held live, so the smaller number is the
+better one. **x86-64 and aarch64 are separate columns** — different OpenCV builds on
+different machines, never averaged.
 
-x86-64 figures are floors of interleaved runs on a host with 20–100% spreads and are
-claimed only at this granularity; aarch64 figures are pinned-clock, 0–1% spread. The
-census spelling exists for callers arriving with wide images: it pays a 24-bit census
-transform per pixel to compete on StereoBM's own terms, and it is behind — stated here
-rather than averaged away. The binary path is the operating point a binCV pipeline runs.
+| arm | x86-64 (ms) | x86-64 ratio | aarch64 (ms) | aarch64 ratio | working set | memory ratio |
+|---|---|---|---|---|---|---|
+| `cv::StereoBM` | ~14.7 | — | 79.8 | — | ≥ 722 KB, its output alone (2 B/px) | — |
+| **`denseDisparityBinary`** (packed frames in) | **~12.0** | **~1.2×** | **60.4** | **1.32×** | **32.4 KB scratch** + 1 B/px out | **~22×**, a lower bound |
+| `denseDisparity` (census 5×5, wide frames in) | ~200 | not published | 462 | not published | 95.9 KB scratch + 1 B/px out | not published |
+
+The census row's times are here and they lose; its ratio cells read `not published` because
+this report has never published a ratio for that arm, and deriving one now would add a figure
+no measurement record states. That spelling exists for callers arriving with wide images: it
+pays a 24-bit census transform per pixel to compete on StereoBM's own terms, and it is behind.
+The binary path is the operating point a binCV pipeline runs.
+
+x86-64 figures are floors of interleaved runs on a host with 20–100% spreads and are claimed
+only at that granularity; aarch64 figures are pinned-clock, 0–1% spread.
 
 ## What the number is made of
 
-The path was built and priced in stages, each committed with its measurement
-(reference device, pinned clock):
+The path was built and priced in stages, each committed with its measurement (reference
+device, pinned clock). This is binCV against its own earlier arms, so there is no OpenCV
+column and no ratio — the smaller the number gets, the better:
 
-| stage | ms/frame |
+| stage | time, aarch64 (ms/frame) |
 |---|---|
 | census v1 (per-pixel, the shape that prompted the rebuild) | 1842 |
 | census v2, sliding vertical accumulator | 489 |
@@ -47,25 +54,32 @@ The path was built and priced in stages, each committed with its measurement
 
 The vector arms exist at `uint64` on both architectures (NEON pairs, AVX2 quads),
 runtime-dispatched on x86 so the baseline ISA is unchanged, switchable off
-(`denseSimdEnabled`), and held byte-identical to the portable arm by a test that runs
-both from one binary. The scalar arm measures 100.2 ms on the reference device.
+(`denseSimdEnabled`), and held byte-identical to the portable arm by a test that runs both
+from one binary. The scalar arm measures 100.2 ms on the reference device.
 
 ## The third architecture
 
-The same kernel, unchanged, executes on a Cortex-M7 (STM32H753, no vector unit, no
-hardware popcount): a 320×240, 32-disparity map in **6.5 KB of scratch**, bit-exact
-against the host — 825 ms at `uint32` at the 64 MHz floor clock. That run also
-measured the word-type guidance inverting at 32-bit pointer width (`uint64` 1.30×
-slower there); the header carries the width-qualified guidance. Details and the
-pre-registered rule: [targets/stm32h753/README.md](../../targets/stm32h753/README.md).
+The same kernel, unchanged, executes on a Cortex-M7 (STM32H753, no vector unit, no hardware
+popcount): a 320×240, 32-disparity map in **6.5 KB of scratch**, bit-exact against the host —
+825 ms at `uint32` at the 64 MHz floor clock. That run also measured the word-type guidance
+inverting at 32-bit pointer width (`uint64` 1.30× slower there); the header carries the
+width-qualified guidance. Details and the pre-registered rule:
+[targets/stm32h753/README.md](../../targets/stm32h753/README.md).
 
 ## Memory
 
-The refused allocation is the point: a dense cost volume at this configuration is
-23 MB. The kernel streams — a band of rows and one accumulator ring per disparity —
-so peak scratch is 32.4 KB (binary path) against StereoBM's ≥ 722 KB for its output
-alone, before its internal buffers, which `methodology-memory.md`'s tooling cannot
-observe from outside. Both paths write 1 byte per pixel out.
+The refused allocation is the point: a dense cost volume at this configuration is 23 MB. The
+kernel streams instead — a band of rows and one accumulator ring per disparity:
+
+|  | working set | what it is | ratio |
+|---|---|---|---|
+| `cv::StereoBM` | ≥ 722 KB | its output buffer alone, before its internal buffers | — |
+| **`denseDisparityBinary`** | **32.4 KB** | streaming scratch — a row band and one accumulator ring per disparity | **~22×** |
+
+Both paths write 1 byte per pixel out on top of that. StereoBM's figure is a **lower bound**:
+its internal buffers are not observable from outside with the tooling
+[methodology-memory.md](methodology-memory.md) describes, so binCV's ~22× lead is a lower
+bound too.
 
 ## Reproduce
 
@@ -75,5 +89,5 @@ observe from outside. Both paths write 1 byte per pixel out.
 ./build/benchmark/dense_stage_profile      # where the binary path's time goes, by stage
 ```
 
-The census transform's own price (27.5 → 4.7 ms on the reference device with its
-vector rows, which the census dense path streams) is `census_benchmark`.
+The census transform's own price (27.5 → 4.7 ms on the reference device with its vector rows,
+which the census dense path streams) is `census_benchmark`.

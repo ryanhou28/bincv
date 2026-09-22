@@ -20,7 +20,7 @@ Two modes, because they test different things:
                  tests only what is downstream of the binary frame.
 
 The packed mode's sensor stage is the reference pipeline's two-stage
-preprocessing, exactly as benchmark/frontend_sequence.cpp spells it (and as
+preprocessing, exactly as benchmark/feature_tracking_sequence.cpp spells it (and as
 binCV's own medianWide + edgeThreshold reproduce bit for bit):
 
   1. the L-shaped three-pixel median -- min/max over {above, center, right},
@@ -74,7 +74,7 @@ def load_gray(path):
 def reference_denoise(img):
     """The reference's three-pixel median: min/max over {above, center, right}.
 
-    A port of benchmark/frontend_sequence.cpp's referenceDenoise, slicing
+    A port of benchmark/feature_tracking_sequence.cpp's referenceDenoise, slicing
     included: the shifted neighbours are built as ZEROS and the overlapping
     region copied in, so the row and column that fall off the edge keep the
     zeros -- that IS the border rule, specified by what the copies do not write.

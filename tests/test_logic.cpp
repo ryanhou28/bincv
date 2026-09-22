@@ -11,7 +11,7 @@
 //
 // 2. The OPENCV half asserts what Tier 1 actually promises: bit-exactness
 // against cv::bitwise_and/or/xor/not on the same binary content stored as
-// CV_8U (the design notes, 10.3), through that work’s harness, across its full
+// CV_8U, through the equivalence harness, across its full
 // size and fill matrix, at all four word widths.
 //
 // The two are not redundant. A per-pixel reference written next to the kernel can
@@ -103,7 +103,7 @@ void runOp(Op op, const bincv::BinMat<WordType>& a, const bincv::BinMat<WordType
 // SplitMix64 draw and the same threshold mapping, so a case that fails here
 // reproduces there; it is duplicated rather than shared because moving it out of
 // equivalence.hpp would mean the harness and the suite it judges shared a
-// generator, and that work’s whole argument is that shared machinery cancels faults.
+// generator, and the whole argument is that shared machinery cancels faults.
 
 uint64_t nextRandom(uint64_t& state) {
     state += UINT64_C(0x9E3779B97F4A7C15);
@@ -198,7 +198,7 @@ const int WIDTHS[] = {1, 7, 31, 33, 40, 63, 65, 70, 128, 640};
 const int HEIGHTS[] = {1, 2, 3, 17};
 const float FILLS[] = {0.0f, 0.01f, 0.5f, 0.99f, 1.0f};
 
-// An over-aligned row stride (the design rule makes alignment a per-object choice): 32 bytes
+// An over-aligned row stride (alignment is a per-object choice): 32 bytes
 // is a whole number of 1-, 2-, 4- and 8-byte words, so every word type gets a
 // stride strictly larger than the ceil(width / WordBits) words its rows need.
 constexpr size_t PADDED_ALIGNMENT = 32;
@@ -248,7 +248,7 @@ void testAgainstReference(const char* wordTypeName) {
 //
 // The failure this exists to catch: a kernel that walks its arguments as one
 // dense run is correct whenever every argument was built the same way, and wrong
-// the moment one is over-aligned or wraps a caller's buffer. Measured during earlier work
+// the moment one is over-aligned or wraps a caller's buffer. Measured
 // on the default-alignment sweep -- stride was the minimum in 48 of 48 cases, so
 // nothing there could have noticed.
 //
@@ -670,9 +670,9 @@ void testDirtySources(const char* wordTypeName) {
 // MEASURED, before the fix: each of the three cases below aborted a Debug build
 // with "dst must alias an input exactly or not overlap it", and each was fully
 // correct in a Release build -- 0 wrong words and 0 source words modified. Both
-// shapes are ordinary: alternate row bands are what a pyramid downsample takes
-// (the design notes), column tiles are how one frame is split across a loop, and
-// the design rule says a kernel takes any {ptr, width, height, stride}.
+// shapes are ordinary: alternate row bands are what a pyramid downsample takes,
+// column tiles are how one frame is split across a loop, and
+// a kernel takes any {ptr, width, height, stride}.
 //
 // This case runs in every configuration but only MEANS anything in the Debug one,
 // where BINCV_ASSERT is live. That is the configuration verify.sh added for
@@ -985,7 +985,7 @@ void fillRandomQuantWithMasks(bincv::QuantMat<3, WordType>& m, cv::Mat (&planes)
 }
 
 /// @brief What OpenCV produces for one operation on the same content as CV_8U.
-/// @note the design notes's denominator, as an oracle: the same binary content a
+/// @note The denominator, as an oracle: the same binary content a
 /// user has today without binCV, through the function they call today.
 cv::Mat openCvResult(Op op, const cv::Mat& a, const cv::Mat& b) {
     cv::Mat out;

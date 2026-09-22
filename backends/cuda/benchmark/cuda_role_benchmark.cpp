@@ -130,7 +130,7 @@ namespace bc = bincv::cuda;
 
 namespace {
 
-// The reference frame. 752x480 is the EuRoC geometry this project's frontend
+// The reference frame. 752x480 is the EuRoC geometry this project's pipeline
 // numbers are all taken at, and it is where every implementer's written bar
 // was set. 1920x1080 is carried alongside because several of these ops sit on
 // the launch floor at 752x480, where a ratio between two arms is a ratio
@@ -488,7 +488,7 @@ void printMemPair(const char* what, const char* geom, size_t binBytes, size_t oc
 
 using Ladder = bc::DevicePyramid<1, 2, 2, 2>;
 constexpr int kLkLevels = 4;
-constexpr int kLkWin = 31;        ///< the reference frontend's window
+constexpr int kLkWin = 31;        ///< the reference pipeline's window
 constexpr int kLkIterCap = 20;    ///< ...and its iteration cap
 constexpr int kEdgeThr = 17;      ///< ...and its edge threshold
 constexpr uint32_t kTrackCapacity = 2048;
@@ -643,9 +643,9 @@ uint32_t deviceDetect(DeviceTracker& t, double minDistance, float* dstXY,
 using HW = uint32_t;
 
 /// The host arm's whole state, allocated once. This mirrors
-/// benchmark/frontend_sequence.cpp's `BincvFrontend` -- the same 1/2/2/2
+/// benchmark/feature_tracking_sequence.cpp's `BincvPipeline` -- the same 1/2/2/2
 /// ladder, the same swap scheme, the same streaming response ring -- so the
-/// host number here is the host frontend's number and not a second spelling
+/// host number here is the host pipeline's number and not a second spelling
 /// of it that might have drifted.
 struct HostTracker {
     bincv::Pyramid<HW, 1, 2, 2, 2> prev, next;
@@ -772,19 +772,19 @@ int main(int argc, char** argv) {
     // THE REAL FRAME, LOADED ONCE AT THE TOP, and why it is not the synthetic
     // one the rest of this file uses where content matters.
     //
-    // HOISTED HERE rather than declared beside the frontend families because
+    // HOISTED HERE rather than declared beside the pipeline families because
     // two sections need it and both need it for the same reason: a figure that
     // depends on what is IN the picture cannot be taken on smoothed noise.
     // Section 7b meters cv::cuda::StereoBM on it, to answer whether StereoBM's
     // footprint moves with content the way OpenCV's FAST turned out to.
-    // The frontend families detect on it, because a detector's cost is a
+    // The pipeline families detect on it, because a detector's cost is a
     // function of how many corners its input has, and edgeThreshold on
     // SMOOTHED NOISE sets ~83% of pixels -- a frame
     // on which both FAST implementations overflow any sane capacity, so the
     // corner-set gate cannot even run. The real content this project measures
     // on is a EuRoC sequence blob; point BINCV_CUDA_ROLE_FRAMES at one
     // (scripts/make_sequence_blob.py, --mode 8bit) and frame 0 of it is used.
-    // Without one the synthetic frame is used and every frontend row below
+    // Without one the synthetic frame is used and every pipeline row below
     // says so, because a role bar taken on saturating content is not the role
     // bar anyone means.
     std::vector<uint8_t> frontFrame = frame;
@@ -2103,29 +2103,29 @@ int main(int argc, char** argv) {
 
 
     // ======================================================================
-    // ROUND 2 -- the frontend families' role bars, brought into this process
+    // ROUND 2 -- the pipeline families' role bars, brought into this process
     //
     // WHY THEY ARE HERE AND NOT LEFT IN THEIR FAMILY BENCHMARKS. Each family
     // wrote its own OpenCV arm against its own find_package, in its own
     // process, and two of them read memory on a meter the other side does not
     // share. That is four answers to one question. The rule this file was
-    // built on applies unchanged to the frontend set: one process, one
+    // built on applies unchanged to the pipeline set: one process, one
     // explicit stream on both sides, interleaved rounds, and meter 2 on both
     // sides of anything that crosses the library boundary.
     //
     // THE INPUT, AND WHY IT IS THE PIPELINE'S OWN. Every arm below reads a
     // binary frame produced by binCV's OWN sensor stage -- medianWide<3> then
-    // edgeThreshold at the reference frontend's threshold of 17 -- rather than
+    // edgeThreshold at the reference pipeline's threshold of 17 -- rather than
     // a synthetic bit pattern. A detector's cost is a function of how many
     // corners its input has, so a frame with the wrong density prices the
     // wrong operation. OpenCV's side reads the SAME bits, expanded to the
     // CV_8U {0,255} picture its detectors require, which is the construction
     // ops/fast.hpp proves accepts the identical corner set.
     // ======================================================================
-    const bool wantFrontend = want("fast") || want("gftt") || want("cornerresp") ||
+    const bool wantFeatures = want("fast") || want("gftt") || want("cornerresp") ||
                               want("describe") || want("matcher");
 
-    // Declared out here so every frontend family shares one set of device
+    // Declared out here so every pipeline family shares one set of device
     // buffers and one upload: a per-family upload would put a 361 KB transfer
     // inside a process that is timing launches.
     bc::DeviceImage<uint8_t> fWide(static_cast<int>(kW), static_cast<int>(kH));
@@ -2137,11 +2137,11 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> picture(kW * kH);
 
 
-    if (wantFrontend) {
+    if (wantFeatures) {
         bc::uploadImage(frontFrame.data(), kW, kH, kW, fWide.view(), gStream);
         bc::medianWide<3>(fWide.constView(), fDenoised.view(), bincv::kMedianReferenceL,
                           gStream);
-        // The reference frontend's threshold, overridable so the frontend rows
+        // The reference pipeline's threshold, overridable so the feature rows
         // can be read against a SWEEP of corner density rather than at one
         // point. FAST's cost on this backend turns out to track the corner
         // COUNT rather than the capacity, and that is only checkable by moving
@@ -2178,7 +2178,7 @@ int main(int argc, char** argv) {
         size_t setBits = 0;
         for (size_t i = 0; i < kW * kH; ++i) setBits += picture[i] != 0 ? 1u : 0u;
         std::printf("\n=====================================================================\n"
-                    " ROUND 2 -- the frontend role bars. INPUT, stated once for all of\n"
+                    " ROUND 2 -- the pipeline role bars. INPUT, stated once for all of\n"
                     " them: binCV's own sensor stage output at %zux%zu -- medianWide<3>\n"
                     " then edgeThreshold(17) -- %.2f%% of pixels set. OpenCV reads the\n"
                     " identical bits as a CV_8U {0,255} picture.\n"
@@ -2234,7 +2234,7 @@ int main(int argc, char** argv) {
         const bc::DeviceFastCornerBuffer fastBuf(dfast.data(), fastCounter.devicePtr(), cap);
         // THE SHIPPED ARM'S NUMBER. This binary runs only the arm production runs,
         // so it sizes for that arm: 380 bytes at 752x480 rather than the reference
-        // arm's nextPow2(capacity) records. The frontend benchmark, which times
+        // arm's nextPow2(capacity) records. The pipeline benchmark, which times
         // both arms against one buffer, asks for FastArm::Reference instead.
         const size_t fastScratchBytes =
             bc::fastScratchBytes(kW, kH, cap, bc::FastArm::Ordered);
@@ -2866,7 +2866,7 @@ int main(int argc, char** argv) {
         constexpr size_t kDescWords = 8;   // 256 bits, the ORB/BRIEF width
         const size_t mq[] = {470, 5000};
         const size_t mt[] = {470, 5000};
-        const char* mName[] = {"470x470 (frontend scale -- DOES NOT DECIDE)",
+        const char* mName[] = {"470x470 (pipeline scale -- DOES NOT DECIDE)",
                                "5000x5000 (map scale -- the deciding row)"};
         for (int g = 0; g < 2; ++g) {
             const size_t qn = mq[g], tn = mt[g];
@@ -3213,7 +3213,7 @@ int main(int argc, char** argv) {
         deviceBuildLevels(dev, lkLevels);
 
         // TWO real keypoint sets from the detector's own output, at the
-        // reference frontend's spacing and at a denser one. Corner density is
+        // reference pipeline's spacing and at a denser one. Corner density is
         // what decides this comparison, so the row prints the count it got
         // rather than a round number reached by tuning the detector.
         const uint32_t sparseN = deviceDetect(dev, 33.33333333333, dev.prevXY.data(), gStream);
@@ -3314,7 +3314,7 @@ int main(int argc, char** argv) {
                         " per keypoint; cv::cuda = one launch per level, 256 threads per\n"
                         " keypoint. Those shapes cross. Rows below are PREFIXES of the\n"
                         " minDistance-6 set, so only the count moves.\n");
-            lkRow("752x480, minDistance 33.33 (the reference frontend's spacing)",
+            lkRow("752x480, minDistance 33.33 (the reference pipeline's spacing)",
                   dev.prevXY.data(), sparseN);
             const uint32_t sweep[] = {64, 128, 256, 512, 1024};
             for (uint32_t n : sweep) {
@@ -3434,7 +3434,7 @@ int main(int argc, char** argv) {
                         " invented here.\n"
                         "\n"
                         " A DECLARED SIMPLIFICATION, stated before measuring: the fixed\n"
-                        " re-detection cadence replaces the frontend's adaptive\n"
+                        " re-detection cadence replaces the pipeline's adaptive\n"
                         " 'detect when live tracks fall below 60' policy. The adaptive\n"
                         " policy needs the surviving count on the host every frame, which\n"
                         " would put a device-to-host round trip in the device arm's loop\n"

@@ -46,7 +46,7 @@ struct Size {
 /// half-open, like cv::Rect. `width` and `height` are extents, not
 /// coordinates of the far corner.
 /// @note **Signed on purpose.** A window centerd on a keypoint near an edge has a
-/// negative origin (the design notes: 31x31 windows over the whole frame),
+/// negative origin (31x31 windows over the whole frame),
 /// and the alternative -- making the caller clamp before it can express the
 /// window -- moves the same clipping arithmetic into every call site, where
 /// it would be written once per caller instead of once per library. Every
@@ -123,7 +123,7 @@ enum BorderType {
 template <size_t N, typename WordType = uint32_t> class QuantMat;
 
 /// @brief The 1-bit container: an alias for the N=1 specialization of QuantMat.
-/// @note the design notes. BinMat is a name, not a separate type -- QuantMat<1>
+/// @note BinMat is a name, not a separate type -- QuantMat<1>
 /// IS the hand-written single-plane container, so a kernel or container
 /// written against QuantMat<N> accepts the binary case with no adapter and
 /// no plane loop. binMat.hpp defines that specialization.
@@ -154,12 +154,11 @@ struct Point2f {
 /// gated on `sizeof(WordType) == 4`.
 ///
 /// A wider word looks like it should mean fewer operations per row, and
-/// a measurement measured exactly that for *reductions*. For
-/// *tracking* it opts out of every vector path instead:
-/// a measurement measured `uint64_t` at **1.32× slower on `track`**,
+/// that is exactly what reductions measure. For
+/// *tracking* it opts out of every vector path instead: `uint64_t` measures
+/// **1.32× slower on `track`**,
 /// and an integrator who chose it for a real VIO frontend measured **8.6× slower**
-/// keypoint tracking before finding the gate
-///.
+/// keypoint tracking before finding the gate.
 ///
 /// The tracker now refuses to compile at a depth that HAS vector kernels with a word
 /// that cannot reach them, so this is a recommendation rather than a trap — but

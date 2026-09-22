@@ -4,7 +4,7 @@
 #include <cstdlib>
 
 /// @file error.hpp
-/// @brief The project's single error policy (the design notes).
+/// @brief The project's single error policy.
 ///
 /// Two macros, and the split between them is the whole policy:
 ///
@@ -23,7 +23,7 @@
 /// caller made. This wrapper prints both the condition and a written
 /// message, and otherwise does exactly what assert does.
 /// @note Why the abort path exists at all: Tier 2 targets build with exceptions
-/// disabled (the design notes), and a library that can only report errors by
+/// disabled, and a library that can only report errors by
 /// throwing cannot be built for them at all. Aborting is not a graceful
 /// answer, but it is a defined one, and it keeps the validation checks in
 /// the code rather than compiled out of the configuration that can least
@@ -277,7 +277,7 @@ namespace detail {
 /// dependency the previous note refuses: the type would have to be complete
 /// and constructible on a target that may have no <stdexcept>.
 /// @note This is for setup-time checking only. Anything on a per-pixel path
-/// belongs in BINCV_ASSERT; see the design notes.
+/// belongs in BINCV_ASSERT.
 #if BINCV_EXCEPTIONS_ENABLED
 #  define BINCV_THROW(ExceptionType, message) throw ExceptionType(message)
 #else

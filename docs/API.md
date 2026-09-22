@@ -155,7 +155,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | | tier | |
 |---|---|---|
 | `ResponseMap` *(struct)* | 3 | A caller-owned, non-owning view of a `float` response map |
-| `ConstResponseMap` *(struct)* | — | The read-only spelling of ResponseMap (the design rule’s two-view-types rule) |
+| `ConstResponseMap` *(struct)* | — | The read-only spelling of ResponseMap (the two-view-types rule) |
 | `Corner` *(struct)* | — | One detected corner: integer pixel coordinates and its response |
 | `GoodFeaturesParams` *(struct)* | — | The four parameters `goodFeaturesToTrack` takes, defaulted to the values the reference pipeline actually runs |
 | `CornerResult` *(struct)* | — | What `goodFeaturesToTrack` / `selectGoodFeatures` report back |
@@ -239,7 +239,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `hammingDistance` | 3 | `popcount(a ^ b)` over `words` |
 | `DescriptorMatch` *(struct)* | — | One query's best and second-best match |
 | `matchDescriptors` | 3 | Brute-force nearest neighbour with Lowe's ratio test |
-| `matchDescriptorsGated` | 3 | `matchDescriptors` restricted to candidates a frontend's priors admit: a position window, and optionally an octave band |
+| `matchDescriptorsGated` | 3 | `matchDescriptors` restricted to candidates a pipeline's priors admit: a position window, and optionally an octave band |
 
 ## `ops/edge.hpp`
 
@@ -375,7 +375,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `combine` | — | `w00*t00 + w01*t01 + w10*t10 + w11*t11 - self` |
 | `kStagedMaxRows` *(constant)* | — | Rows the staging path handles |
 | `floorToLL` | — | `floor(v)` as a `long long`, for a value already known to be finite and within the frame's range |
-| `IterationTrace` *(struct)* | — | that measurement’s iteration counter |
+| `IterationTrace` *(struct)* | — | The iteration counter |
 | `windowFitsAtLevel` | — | Is point `p`'s window entirely inside level `li`? |
 | `entryLevelFor` | — | The coarsest usable level whose window contains point `p`, or 0 |
 | `kLkVectorPath` *(constant)* | — | Does this level reach a VECTORIZED residual kernel? |
@@ -494,7 +494,7 @@ Anything marked INTERNAL in its docstring is omitted here.
 | | tier | |
 |---|---|---|
 | `SplitCount` *(struct)* | — | The two halves of a split count: pixels where the selector `c` was clear, and pixels where it was set |
-| `crossTerm` | — | The LK cross term: `whenClear - whenSet`, signed (the design notes) |
+| `crossTerm` | — | The LK cross term: `whenClear - whenSet`, signed |
 | `CovarianceCount` *(struct)* | 3 | The four numbers of a 2x2 gradient covariance over one region: popcount(a), popcount(b), and the split of `a & b` by the selector |
 | `RegionWords` *(struct)* | — | A region clipped to a view, expressed in the words a row loop walks |
 | `regionFromExtent` | — | Region geometry from an already-clipped, non-empty pixel extent |
@@ -522,8 +522,8 @@ Anything marked INTERNAL in its docstring is omitted here.
 | `decimatedWidth` | 3 | Destination width for a horizontal decimation by two |
 | `rowsDecimatedBy2` | 3 | The FREE half of a 2x2 subsample: every other row, as a view |
 | `checkDecimateArgs` | — | The shape and aliasing contract every decimation kernel here shares |
-| `decimateColumnsBy2Gather` | — | variant A: horizontal decimation one destination pixel at a time |
-| `decimateColumnsBy2FrameMasked` | — | variant C: horizontal decimation as a big-integer unshuffle |
+| `decimateColumnsBy2Gather` | — | Variant A: horizontal decimation one destination pixel at a time |
+| `decimateColumnsBy2FrameMasked` | — | Variant C: horizontal decimation as a big-integer unshuffle |
 | `decimateColumnsBy2` | 3 | Horizontal decimation by two: `dst(y, j) = src(y, 2j)` |
 
 ## `ops/shift.hpp`

@@ -8,9 +8,9 @@
 // policy -- the live BINCV_ASSERT, and the bounds checks that at and set are
 // specified to have -- would never be compiled or run.
 //
-// WHAT IT REPLACES: before earlier work, out-of-range at/set threw std::out_of_range
+// WHAT IT REPLACES: out-of-range at/set used to throw std::out_of_range
 // and tests/test_binMat.cpp asserted that with three BINCV_CHECK_THROWS lines
-// (plus one in tests/test_opencv_interop.cpp). removed the throw, and those
+// (plus one in tests/test_opencv_interop.cpp). The throw was removed, and those
 // four assertions were deleted with it and not replaced -- deleting both bounds
 // checks from binMat_impl.hpp left Release, Debug and -fno-exceptions all
 // reporting 100% passed. These cases are that coverage, restored at the checked
@@ -166,7 +166,7 @@ int caseSignedSetIntMin() {
     return m.at(0, 0);
 }
 
-// The the kernel preconditions. Kernels never throw (the design notes), so
+// The kernel preconditions. Kernels never throw, so
 // mismatched dimensions and an unsafe destination alias are BINCV_ASSERT sites --
 // which means they are observable only from outside the process, exactly like the
 // per-pixel checks above.
@@ -226,7 +226,7 @@ int caseLogicShortStride() {
 // above do not.
 //
 // `shift-in-place` is the important one. ops/logic.hpp ACCEPTS a destination that
-// is exactly a source -- the design rule’s in-place idiom -- because those kernels are
+// is exactly a source -- the in-place idiom -- because those kernels are
 // pointwise in the word index. A shift is not: word i of the destination is built
 // from words i +/- wordShift of the source, so the same call that is legal for
 // bitwiseAnd is undefined here. That difference is invisible in a release build
@@ -364,14 +364,14 @@ int caseReduceShortStride() {
 // caller, not a live bug: x1 == 0 underflows `x1 - 1` and yields lastWord =
 // SIZE_MAX / WordBits with isEmpty == false, which visitRowWords would walk
 // straight off the end of the buffer. The assertion is what stops that being
-// discovered by a segfault in Phase 3; this case is what stops the assertion from
+// discovered by a segfault; this case is what stops the assertion from
 // being deleted as unreachable.
 int caseReduceEmptyExtent() {
     const bincv::impl::RegionWords<uint32_t> r = bincv::impl::regionFromExtent<uint32_t>(0, 0, 0, 1);
     return static_cast<int>(r.lastWord);
 }
 
-// that work’s preconditions. `denoise-in-place` is the one no case above states:
+// The denoise preconditions. `denoise-in-place` is the one no case above states:
 // denoiseMedian3 reads SOURCE ROW y - 1 while writing destination row y, so it is
 // not pointwise in the word index and the in-place spelling ops/logic.hpp
 // supports is undefined here. Nothing diagnoses it -- the memory is valid and the
@@ -400,7 +400,7 @@ int caseDenoiseShortStride() {
     return static_cast<int>(g_denDst[0]);
 }
 
-// that work’s preconditions. `binarize-dims` is a PER-PLANE check: an N-bit source
+// The threshold preconditions. `binarize-dims` is a PER-PLANE check: an N-bit source
 // arrives as N separate views, and a check that only inspected plane 0
 // would read the rest at plane 0's geometry. The narrowed plane here is plane 1,
 // not plane 0, so a loop that stops after the first plane does not fire.
@@ -443,7 +443,7 @@ int caseBinarizeShortStride() {
     return static_cast<int>(g_binDst[0]);
 }
 
-// that work’s preconditions. Two of these say something NO OTHER CASE IN THIS FILE
+// The bit-sliced preconditions. Two of these say something NO OTHER CASE IN THIS FILE
 // says, because no other kernel in the project takes a caller-provided scratch
 // view and none takes a shape object:
 //
@@ -575,7 +575,7 @@ int caseBitSliceDims() {
 int caseBitSliceAlias() {
     // Same shape, same buffer, one word apart -- half a row, so the two views
     // really do share words rather than merely sharing a buffer (the disjoint
-    // cases are legal under earlier work and are covered in-process).
+    // cases are legal under the aliasing rule and are covered in-process).
     const bincv::BinMatConstView<uint32_t> a{g_majA, 64, 3, 2};
     const bincv::BinMatConstView<uint32_t> b{g_majB, 64, 3, 2};
     const bincv::BinMatConstView<uint32_t> c{g_majC, 64, 3, 2};
@@ -602,7 +602,7 @@ int caseBitSliceSumOverlap() {
     return static_cast<int>(g_sumBuffer[0]);
 }
 
-// that work’s preconditions. TWO OF THESE ARE A CLASS NO OTHER KERNEL IN THE PROJECT
+// The derivative preconditions. TWO OF THESE ARE A CLASS NO OTHER KERNEL IN THE PROJECT
 // HAS, which is why they lead the block rather than trail it.
 //
 // `derivative-sign-alias` / `derivative-mag-alias` are DESTINATION-VERSUS-
@@ -613,7 +613,7 @@ int caseBitSliceSumOverlap() {
 // magnitude plane leaves pixels at magnitude 0 with the sign bit SET, which is
 // precisely the canonical-zero violation ops/derivative.hpp's header says
 // "would compile, run, and quietly produce an image where the canonical-zero
-// rule no longer holds" -- and which corrupts only that work’s sumXY, leaving sumXX
+// rule no longer holds" -- and which corrupts only the covariance's sumXY, leaving sumXX
 // and sumYY correct. No magnitude-checking test can see it.
 //
 // `derivative-border-type` goes through derivativeY rather than derivativeX, so

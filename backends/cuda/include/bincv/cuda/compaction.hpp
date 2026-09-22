@@ -25,7 +25,7 @@
 /// read a number out of the result without saying which number they meant.**
 ///
 /// * **TRUNCATE, DO NOT FAIL.** A caller who caps their buffer on purpose --
-///   the frontend that wants at most 500 corners and sized for it -- is doing
+///   the pipeline that wants at most 500 corners and sized for it -- is doing
 ///   the normal thing, and an error return would make the normal thing an
 ///   exceptional path. The elements written are real detections, not garbage,
 ///   so throwing the launch away throws away work that is already correct. The

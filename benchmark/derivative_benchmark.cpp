@@ -1,9 +1,9 @@
 // binarized spatial derivative -- against cv::filter2D with the same kernel.
 //
-// THE DENOMINATOR (the design notes, CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that is not a judgement call either -- it is
-// the reference frontend's gradient stage, calcBinarizedDeriv, which is two
+// the reference pipeline's gradient stage, calcBinarizedDeriv, which is two
 // cv::filter2D calls with [-1, 0, 1] as a 1x3 and a 3x1. That IS what the
 // pipeline runs today without binCV.
 //
@@ -86,7 +86,7 @@
 // ---------------------------------------------------------------------------
 // WHERE THIS IS AUTHORITATIVE
 //
-// On x86_64 it is INDICATIVE ONLY (EXPERIMENTS.md, "Measurement platforms"). The
+// On x86_64 it is INDICATIVE ONLY -- a desktop host's spread decides nothing. The
 // numbers that belong in a claim come from the reference device:
 //
 // BINCV_PI_OPENCV=1./scripts/run_on_pi.sh <target>
@@ -722,7 +722,7 @@ int main() {
     std::printf("================================================================================\n\n");
     std::printf("OpenCV %s, cv::getNumThreads() = %d; binCV is single-threaded\n\n",
                 CV_VERSION, cv::getNumThreads());
-    std::printf("DENOMINATOR (ARCHITECTURE 10.3): the reference frontend's calcBinarizedDeriv on the SAME binary\n");
+    std::printf("DENOMINATOR: the reference pipeline's calcBinarizedDeriv on the SAME binary\n");
     std::printf("content stored as CV_8U -- two cv::filter2D calls with [-1, 0, 1] as a 1x3 and\n");
     std::printf("a 3x1, ported. That is what the pipeline runs today without binCV.\n\n");
     std::printf("The DENOMINATOR row is 'OpenCV filter2D x2' -- the derivative and nothing else.\n");

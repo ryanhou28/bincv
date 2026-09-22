@@ -43,8 +43,8 @@
 // state. ops/corner.hpp's "this is the sliding form" note stands, and the
 // magnitude recorded here -- not 15.9x -- is what a caller should plan with.
 // * SLIDING WITHIN THE MEASURED SPREAD OF RECOMPUTE, OR SLOWER -> that
-// CONTRADICTS a documented claim (, ops/reduce.hpp's "WHICH SHAPE TO REACH
-// FOR" table, ops/covariance.hpp's docstring, and that work’s own spec, all of
+// CONTRADICTS a documented claim (ops/reduce.hpp's "WHICH SHAPE TO REACH
+// FOR" table and ops/covariance.hpp's docstring, both of
 // which point a dense sweep at the incremental form). CLAUDE.md's rule for
 // that case is explicit: report it, do not adjust the code to fit the doc. The
 // conclusion would be that the sliding form is not worth its complexity in
@@ -64,7 +64,7 @@
 // two SlidingWindowCounts carry sumXX and sumYY; per position, one
 // four-argument countAndSplit for the cross term.
 // RECOMPUTE the same map, with `gradientCovariance(dx, dy, window)` called per
-// position -- that work’s own entry point, which is the obvious way to
+// position -- ops/covariance.hpp's own entry point, which is the obvious way to
 // write this operation and is what ops/covariance.hpp's docstring
 // tells a dense caller NOT to do. All three numbers are recomputed
 // over the whole window at every pixel, ROW-MAJOR, which is how
@@ -167,13 +167,13 @@ void operator delete[](void* p, std::size_t, std::align_val_t) noexcept { benchF
 
 namespace {
 
-using Word = uint32_t;  // the design rule’s default, and what a VIO frontend would run
+using Word = uint32_t;  // the library's default word, and what a VIO frontend would run
 
 constexpr int kWidth = 640;
 constexpr int kHeight = 480;
 const int kBlockSizes[] = {3, 7, 15, 31};
 
-/// @brief THE AVOIDABLE COST: the same response map, with that work’s covariance called
+/// @brief THE AVOIDABLE COST: the same response map, with the covariance called
 /// once per pixel instead of two accumulators slid down each column.
 ///
 /// This is not a straw man -- it is the natural way to write the operation once

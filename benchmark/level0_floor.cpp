@@ -1,11 +1,11 @@
 // ===========================================================================
-// earlier work -- THE 1-BIT LEVEL-0 LOCALISATION FLOOR.
+// THE 1-BIT LEVEL-0 LOCALISATION FLOOR.
 //
-// Three pyramid parameters had been measured and none explained that work’s standing
+// Three pyramid parameters had been measured and none explained the standing
 // accuracy MISS, so the question became whether the REPRESENTATION was the limit.
 // This file answers it, and the answer is no.
 //
-// ARM 1 -- THE PARTITION METHOD, and it replaces the oracle that measurement’s rule first
+// ARM 1 -- THE PARTITION METHOD, and it replaces the oracle the rule first
 // sketched. That sketch was DEGENERATE: it formed candidates the same way as the
 // observation, so the Hamming-nearest candidate was the observation itself and the
 // "floor" would have been exactly zero by construction. The flaw was found and the
@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
                 // A window with no edge in it carries no information at all and
                 // would report a floor of 0.29 px (a whole pixel of ignorance)
                 // while being simply untrackable. Those are excluded and counted:
-                // the floor is a statement about windows a frontend would USE.
+                // the floor is a statement about windows a pipeline would USE.
                 const size_t setPx = static_cast<size_t>(
                     std::count(states[0].begin(), states[0].end(), '1'));
                 if (setPx < static_cast<size_t>(win)) continue;

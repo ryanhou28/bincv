@@ -3,7 +3,7 @@
 /// @file test_util.hpp
 /// @brief The suites' assertion and registration vocabulary, over two backends.
 ///
-/// asked for a Google Test migration. What is here is a hybrid, and the
+/// A Google Test migration was asked for. What is here is a hybrid, and the
 /// reason is the shape of this project rather than a preference about frameworks:
 ///
 /// - Google Test is the backend wherever it can be had. Suites are structured
@@ -13,7 +13,7 @@
 /// - The built-in harness stays as the backend of the DEPENDENCY-FREE
 /// configuration -- core-only, `-fno-exceptions`. That configuration exists
 /// to demonstrate that binCV needs a C++17 compiler and nothing else
-/// (the design notes, Tier 2). Making its verification require a downloaded
+/// (Tier 2). Making its verification require a downloaded
 /// desktop test framework would quietly retire that claim, and would put the
 /// one gate this project most depends on behind a network fetch. See
 /// tests/CMakeLists.txt.
@@ -205,7 +205,7 @@ inline int runAll(const char* suiteName, int argc, char** argv) {
 /// @note Guarded at the definition, not at each call site. Without exceptions the
 /// try/catch below is not merely useless, it is ill-formed -- the catch(...)
 /// handler was the single largest source of errors in the -fno-exceptions
-/// build before earlier work -- so every caller would otherwise have to repeat the
+/// build -- so every caller would otherwise have to repeat the
 /// same #if.
 /// @note In a build without exceptions this does NOT evaluate `expr`. The
 /// validation it probes reports through BINCV_THROW, which aborts there:

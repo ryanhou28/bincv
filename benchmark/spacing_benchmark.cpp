@@ -1,5 +1,5 @@
 // ===========================================================================
-// earlier work -- SPACING NEW DETECTIONS AGAINST LIVE TRACKS: WHICH ARM?
+// SPACING NEW DETECTIONS AGAINST LIVE TRACKS: WHICH ARM?
 //
 // A VIO frontend detects to top up, so every fresh corner must be rejected if it lands
 // on a track already being followed. Two shapes, and the DECISION RULE WAS FIXED BEFORE
@@ -11,7 +11,7 @@
 // then one bit test per candidate. COSTS ONE 1-BIT FRAME: 38 400 B at 640x480.
 //
 // The rule: the mask becomes the recommended path only if it is FASTER at the
-// frontend's own operating point on BOTH architectures. Parity is a loss -- CLAUDE.md
+// pipeline's own operating point on BOTH architectures. Parity is a loss -- CLAUDE.md
 // settles unclaimed speed/footprint conflicts in favor of memory, and 38 400 B has to
 // buy something.
 //
@@ -88,7 +88,7 @@ int main() {
                         "-------------------------------------");
 
     const size_t kLive[] = {4, 50, 100, 200};
-    // Out to 5 000 deliberately. The frontend never sees more than a few hundred
+    // Out to 5 000 deliberately. The pipeline never sees more than a few hundred
     // candidates, but the pre-registered rule asks WHERE the mask crosses over, and an
     // extrapolated crossover is not a measured one -- 1 000 and 5 000 bracket it on
     // both architectures, which is what the rule needs. It stops there rather than at
@@ -111,11 +111,11 @@ int main() {
                     Point2f{static_cast<float>(rng.next() % kWidth),
                             static_cast<float>(rng.next() % kHeight)});
             }
-            // UNCAPPED. `limit` is the frontend's free-slot count, and capping it here
+            // UNCAPPED. `limit` is the pipeline's free-slot count, and capping it here
             // would stop the scan early and time the CAP rather than the filter -- at
             // live = 200 the cap is zero and the first version of this benchmark
             // measured a filter that exits immediately, reporting `kept = 1` for four
-            // whole rows. The frontend's own operating point, cap included, is the
+            // whole rows. The pipeline's own operating point, cap included, is the
             // separate section at the bottom.
             const size_t limit = newCount;
 
@@ -256,7 +256,7 @@ int main() {
     }
 
     // -----------------------------------------------------------------------
-    // THE FRONTEND'S OWN OPERATING POINT, cap included.
+    // THE PIPELINE'S OWN OPERATING POINT, cap included.
     //
     // examples/vio_frontend.cpp targets 200 live tracks and detects when the count
     // falls below a hysteresis low-water mark, so a detect sees roughly 120 live

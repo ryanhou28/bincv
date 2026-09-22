@@ -45,9 +45,9 @@ constexpr unsigned signedMagnitude(int value) {
 /// @note WHY THIS EXISTS, and it is measured rather than speculative: a binary
 /// frame does not stay binary through the reference pyramid. Distinct
 /// values grow 2 -> 5 -> 15 -> 26 across levels 0..3, i.e. 1 -> 3 -> 4 -> 5
-/// bits (the design notes). A binary-only library cannot represent pyramid
+/// bits. A binary-only library cannot represent pyramid
 /// level 1 at all, so the VIO frontend needs this container.
-/// @note Layout (the design notes, 4.3): plane p holds bit p of every pixel,
+/// @note Layout: plane p holds bit p of every pixel,
 /// row-packed exactly as a BinMat is, and plane p begins at word offset
 /// p * planeWords. ONE allocation holds all N planes -- not N of them --
 /// which is what keeps the footprint arithmetic honest on a constrained
@@ -245,8 +245,8 @@ public:
     /// invalidated by anything that reallocates.
     /// @note VALIDATION, not element access -- which is why this is the one
     /// accessor on the container that is checked in release too, where at
-    /// and set are not. the design notes puts the unchecked-in-release
-    /// rule on per-pixel access; plane is a view factory called at most N
+    /// and set are not. The unchecked-in-release
+    /// rule is about per-pixel access; plane is a view factory called at most N
     /// (<= 8) times per image, so the compare against a compile-time
     /// constant costs nothing measurable and folds away entirely at the
     /// constant call sites this interface is written for. The blast radius
@@ -347,7 +347,7 @@ public:
     // re-quantized toward zero. For masks and inspection.
     // toCVMatNormalized round(v * 255 / MaxValue) -- the OpenCV bridge. What
     // to call before handing a wide intermediate to an
-    // OpenCV operation ( above the crossover, OpenCV is
+    // OpenCV operation (above the crossover, OpenCV is
     // the faster implementation and this is the way there).
     // fromCVMat round(v * MaxValue / 255) -- toCVMatNormalized's EXACT
     // inverse: fromCVMat(toCVMatNormalized(m)) == m at every
@@ -357,8 +357,8 @@ public:
     //
     // The QuantMat<1> SPECIALIZATION keeps its established nonzero-threshold
     // fromCVMat (any set byte reads 1); this general form quantizes to nearest,
-    // so the two disagree for bytes 1..127 at N == 1. Recorded difference
-    //, not retroactively unified -- N == 1 callers depend on the
+    // so the two disagree for bytes 1..127 at N == 1. A recorded difference,
+    // not retroactively unified -- N == 1 callers depend on the
     // threshold reading. THIS IS THE THIRD DIVERGENCE the class docstring
     // counts, and the one that makes generic-over-N code NOT testable at N == 1
     // on the conversion path specifically.
@@ -391,7 +391,7 @@ public:
         // THE RULE ITSELF LIVES IN ONE PLACE NOW. It used to be written out here
         // and nowhere else, so the core-only `packQuant` would have been a second
         // spelling of a load-bearing expression -- `toCVMatNormalized`'s exact inverse,
-        // with the design rule’s deliberate divergence from OpenCV at bytes 1..127 inside it.
+        // with its deliberate divergence from OpenCV at bytes 1..127 inside it.
         // `impl::quantScale` is that expression; `Pack.QuantScaleReproducesFromCVMatsRule`
         // pins the two paths equal at N in {1, 2, 3, 4, 8}.
         uint8_t lut[256];
@@ -519,7 +519,7 @@ private:
 /// @tparam N Number of MAGNITUDE planes, 1 to 7. The container holds N+1.
 /// @tparam WordType_ The unsigned integral type pixels are packed into.
 ///
-/// @note Sign-magnitude rather than two's complement (the design notes),
+/// @note Sign-magnitude rather than two's complement,
 /// because it makes the LK gradient covariance fall out as population
 /// counts over masks, and because ternary is then the N=1 instance of the
 /// general form rather than a special case.
@@ -722,9 +722,9 @@ private:
 /// @brief A ternary image: values {-1, 0, +1}, one magnitude plane and one sign
 /// plane, two bits per pixel.
 /// @note The N=1 instance of the general signed form, not a special case
-/// (the design notes). It is what the binarized spatial derivative at
-/// pyramid level 0 produces (7.4) and what the LK gradient covariance
-/// consumes as masked population counts (7.5).
+/// It is what the binarized spatial derivative at
+/// pyramid level 0 produces and what the LK gradient covariance
+/// consumes as masked population counts.
 /// @note Class template argument deduction does not see through an alias template
 /// before C++20, so spell the argument list: TernaryMat<> or
 /// TernaryMat<uint32_t>.

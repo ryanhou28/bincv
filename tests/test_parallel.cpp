@@ -3,8 +3,8 @@
 // BIT-EXACTNESS IS THE PRECONDITION, NOT A GOAL. Keypoints are independent -- each
 // iteration writes only nextPts[p], status[p] and err[p], and reads only const views
 // -- so splitting the point array cannot move a flow vector. If it ever does, the
-// split has a data race and any timing measured through it is meaningless. made
-// that a precondition of the experiment; this file is where it is enforced.
+// split has a data race and any timing measured through it is meaningless. That was
+// made a precondition of the experiment; this file is where it is enforced.
 //
 // The pool itself is NOT part of bincv_core: core is allocation-free and builds
 // -fno-exceptions, and std::thread is usable under neither. This test therefore lives
@@ -55,7 +55,7 @@ BINCV_TEST(Parallel, TrackerIsBitExactWithAPoolInstalled) {
     // The claim that matters. Same frames, same points, same parameters; the only
     // difference is whether a backend is installed.
     //
-    // Self-contained on purpose -- test_opticalflow.cpp's frontend helpers live in its
+    // Self-contained on purpose -- test_opticalflow.cpp's pipeline helpers live in its
     // anonymous namespace, and a copy of them here would drift. What this needs is a
     // level with real structure and points inside it, which is a dozen lines.
     constexpr int kW = 200, kH = 160;

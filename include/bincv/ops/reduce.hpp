@@ -20,7 +20,7 @@
 /// one row out, one row in Tier 3
 ///
 /// The split forms are the Lucas-Kanade covariance cross-term written out, and
-/// countCovariance is the whole 2x2 matrix (the design notes). They are here in
+/// countCovariance is the whole 2x2 matrix. They are here in
 /// the MVP, next to the plain count, because designing them later would mean
 /// designing a *second* reduction interface after callers had been written
 /// against the first.
@@ -31,8 +31,7 @@
 /// Several of those entry points can produce numbers another one also produces,
 /// so a caller choosing between them needs the argument and not just the
 /// signatures. Every clause below is measured, on the reference device, three
-/// runs, against a rule written before the measurement ( /
-///, and; ):
+/// runs, against a rule written before the measurement:
 ///
 /// ONE window, or windows that do not overlap
 /// countNonZero / countAnd / countAndSplit, once per window. There is
@@ -41,7 +40,7 @@
 /// nothing (0.98x at W=7, ~1.0x at 31). **One window is a countNonZero.**
 ///
 /// A COLUMN of window positions -- a search sweep, a dense scan, the corner
-/// response of the design notes -- AT A LARGE ENOUGH WINDOW
+/// response in ops/corner.hpp -- AT A LARGE ENOUGH WINDOW
 /// SlidingWindowCount. Consecutive windows differ by two rows out of W, and
 /// recomputing all W of them re-reads what the previous position already
 /// counted. Measured 7.3x on an 8x8 search sweep and 20x on a dense scan at
@@ -52,9 +51,9 @@
 /// that selected this branch.
 ///
 /// **THOSE ARE ONE-PLANE, ONE-NUMBER SWEEPS, AND THE QUALIFICATION "AT A
-/// LARGE ENOUGH WINDOW" IS MEASURED RATHER THAN CAUTIOUS.** this is the
-/// first real caller of this shape, and it sweeps a 2x2 covariance of which
-/// only two numbers slide., on the reference device at 640x480: the
+/// LARGE ENOUGH WINDOW" IS MEASURED RATHER THAN CAUTIOUS.** ops/corner.hpp is
+/// the first real caller of this shape, and it sweeps a 2x2 covariance of which
+/// only two numbers slide. Measured on the reference device at 640x480: the
 /// incremental sweep is 1.22x FASTER at a 31x31 window and 1.20x SLOWER at
 /// 3x3 -- the size the reference pipeline runs -- over FOUR runs whose
 /// ranking never changes (run-to-run scatter 0.18-0.34% on the ratio below
@@ -73,19 +72,19 @@
 /// THREE traversals of the region and 5 word loads per word index against
 /// the fused pass's 3 -- countNonZero(a), countNonZero(b), then a, b and c
 /// again in the split. That redundancy measured 1.27x (`uint32_t`) and
-/// 1.29x (`uint64_t`) at 31x31 pre-split (the axis 2, reproducing that measurement’s
-/// 1.30x); against the shipped code measures **1.20x** and **1.27x**
+/// 1.29x (`uint64_t`) at 31x31 pre-split, reproducing an earlier
+/// 1.30x; against the shipped code it measures **1.20x** and **1.27x**
 /// there, and 1.20x-1.65x across the three window sizes.
 ///
 /// THE SELECTOR: `c`, or `c0` and `c1`
 /// The four-argument forms XOR the two sign planes inside the word loop and
 /// need no selector plane at all; the three-argument forms read a plane the
 /// caller already holds. The plane is FASTER per frame even after paying to
-/// form it -- 16-18% at earlier work, **11-14% against the shipped code** (
-/// axis 3) -- and costs a fifth frame-sized plane at
+/// form it -- 16-18% when first measured, **11-14% against the shipped
+/// code** -- and costs a fifth frame-sized plane at
 /// every pyramid level, +25% of the derivative working set, ~51 kB over four
 /// levels. CLAUDE.md's tiebreak takes the memory when the two goals
-/// disagree, so **the four-argument form is the default and calls it**;
+/// disagree, so **the four-argument form is the default and the covariance calls it**;
 /// the three-argument one stays for a caller that formed a plane for other
 /// reasons and should not have to unform it.
 ///
@@ -100,7 +99,7 @@
 ///
 /// A reasonable-looking library would export `popcount(WordType)` and let callers
 /// write their own loops. binCV must not, and the reason is measured aarch64
-/// codegen rather than taste (the design notes). aarch64 -- the primary
+/// codegen rather than taste. aarch64 -- the primary
 /// target -- has no scalar population-count instruction, so every popcount has to
 /// travel to the NEON register file and its result has to come back, and the cost
 /// is dominated by those register-domain crossings rather than by `cnt` itself.
@@ -127,7 +126,7 @@
 /// countAndSplit 4 crossings/word two values in (`fmov d30, x2`,
 /// `fmov d31, x0`) and two out (`fmov x2, d30`,
 /// `fmov x0, d31`) -- and this is the LK
-/// covariance path (the design notes)
+/// covariance path
 ///
 /// countCovariance four popcounts per word rather than two,
 /// over the same three loads. It costs MORE
@@ -153,14 +152,14 @@
 /// **Today's implementation is the scalar one that asks for** -- one
 /// `__builtin_popcountll` per word, in impl::popcountWord -- so the loops below do
 /// NOT yet keep anything in vector registers, and on the reference device they run
-/// at the speed of the per-word loop the design rule forbids exposing. That is measured, and it
-/// is recorded rather than papered over:, the aarch64 half of
-///, measured 0.99x against that loop with 1.8x available from a vector
+/// at the speed of the per-word loop the bulk-only rule forbids exposing. That is
+/// measured, and it is recorded rather than papered over: on aarch64 the loops
+/// measured 0.99x against that loop, with 1.8x available from a vector
 /// accumulator. The interface decision and the implementation status are two
 /// different things, and only the first is settled here.
 ///
 /// The point of the interface is that it never made a caller write that loop, so
-/// replacing the loop body with NEON in Phase 5 touches this file and nothing else.
+/// replacing the loop body with NEON touches this file and nothing else.
 /// impl::popcountWord is internal (`impl::`, no stability promise) and is
 /// deliberately NOT in impl/kernel_util.hpp, which is the vocabulary every kernel
 /// header reaches for: a per-word popcount that is one include away from every
@@ -175,7 +174,7 @@
 /// **Spell the arguments `constMagnitude` / `constSign` / `constView`,
 /// not `magnitude` / `sign` / `view`.** Every entry point below takes
 /// BinMatConstView<W>, and template argument deduction does not consider
-/// user-defined conversions (, and the note on
+/// user-defined conversions (see the note on
 /// BinMatView::operator BinMatConstView), so handing one a BinMatView from a
 /// NON-const container is a deduction failure, not an implicit conversion:
 ///
@@ -186,18 +185,18 @@
 /// and does not mention the conversion, which is why it is written out here
 /// rather than left to be met at a call site. SignedQuantMat::constMagnitude,
 /// constSign and BinMat::constView exist for exactly this, and every example
-/// in this file, in the design notes and in tests/test_reduce.cpp uses them.
+/// in this file and in tests/test_reduce.cpp uses them.
 /// (Reductions take no destination, so unlike ops/logic.hpp there is no
 /// container overload here that would hide the distinction.)
 ///
-/// 2. **No allocation and no throw** (the design notes). Mismatched dimensions
+/// 2. **No allocation and no throw.** Mismatched dimensions
 /// and a stride too short to hold a row are programming errors, reported by
 /// BINCV_ASSERT in debug builds and undefined in release. There is no error
 /// return: a count is a `size_t`, and a sentinel would have to be checked by
 /// every caller of an operation that cannot fail on valid views.
 ///
 /// 3. **Read-only, so ALIASING IS UNRESTRICTED.** This is the one family of
-/// kernels this does not bind: nothing is written, so `a`, `b` and `c` may be
+/// kernels the aliasing rule does not bind: nothing is written, so `a`, `b` and `c` may be
 /// the same view, may overlap partially, or may be unrelated.
 /// `countAndSplit(m, m, m, r)` is well defined (it reports every set pixel as
 /// `whenSet`). Callers of the covariance do exactly this kind of thing --
@@ -217,7 +216,7 @@
 /// may lie wholly outside; the pixels that exist are counted and the rest
 /// contribute nothing. A region with `width <= 0` or `height <= 0` counts zero.
 ///
-/// This is not leniency, it is the calling convention needs. The LK window is
+/// This is not leniency, it is the calling convention the covariance needs. The LK window is
 /// 31x31 centerd on a keypoint, so every keypoint within 15 pixels of an edge
 /// produces an out-of-range rectangle. The alternative -- assert and make the
 /// caller clamp -- puts the same four `min`/`max` expressions in every call site,
@@ -227,8 +226,8 @@
 ///
 /// Word alignment is irrelevant to a caller: a region may begin and end at any
 /// column. The first and last words of each row are masked, and only the words
-/// strictly between them are accumulated whole -- which is the loop Phase 5
-/// vectorizes, and the reason the masks are hoisted out of it rather than applied
+/// strictly between them are accumulated whole -- which is the loop a vector
+/// rewrite targets, and the reason the masks are hoisted out of it rather than applied
 /// per word.
 ///
 /// ---------------------------------------------------------------------------
@@ -237,8 +236,8 @@
 /// **A reduction here counts only bits inside the requested region intersected
 /// with the image. A bit at or past `width` is never counted, whatever it holds.**
 ///
-/// specifies "whole-word accumulation; correctness depends on padding bits
-/// being zero". Taken literally that means accumulating a row's trailing partial
+/// The obvious implementation is whole-word accumulation whose correctness depends
+/// on padding bits being zero. Taken literally that means accumulating a row's trailing partial
 /// word unmasked and relying on the invariant. This file **does not** do that, and
 /// the deviation is deliberate:
 ///
@@ -253,7 +252,7 @@
 /// source's padding is trustworthy would be worse than either rule.
 /// - The cost is one AND per ROW, not per word. The trailing word is masked
 /// outside the interior loop exactly as in ops/logic.hpp, so the loop that
-/// matters carries no mask and Phase 5's vectorization is unaffected.
+/// matters carries no mask and a vectorized rewrite is unaffected.
 ///
 /// The invariant is still load-bearing for everything else: a region's INTERIOR
 /// words are accumulated unmasked, which is correct only because every bit of a
@@ -267,7 +266,7 @@
 /// ---------------------------------------------------------------------------
 /// countAndSplit IS SINGLE PASS, AND WHY THAT IS SPELLED OUT
 ///
-/// requires each word to be read once. The row body reads `a[i]`, `b[i]` and
+/// Single pass means each word is read once. The row body reads `a[i]`, `b[i]` and
 /// `c[i]` once each per word index and produces both halves of the answer from
 /// them:
 ///
@@ -279,7 +278,7 @@
 ///
 /// Two popcounts per word, not three: `whenClear` is `total - set` rather than
 /// `popcount(both & ~c[i])`. That is not only cheaper on the target (the popcount
-/// is the expensive operation, see), it removes a padding hazard -- `~c[i]`
+/// is the expensive operation), it removes a padding hazard -- `~c[i]`
 /// SETS every padding bit of the trailing word, so the three-popcount spelling
 /// would count phantom pixels unless the mask were applied a second time.
 ///
@@ -290,19 +289,19 @@
 /// a property asserted about four separate loops.
 ///
 /// **Single pass is a property of each CALL, not of the covariance built out of
-/// them, and the difference is measured.** the design notes needs four numbers over
+/// them, and the difference is measured.** The LK covariance needs four numbers over
 /// one window; through these primitives that is three calls -- countNonZero(mag_x),
 /// countNonZero(mag_y), countAndSplit(...) -- and therefore three traversals of the
 /// same window, issuing the same popcounts a fused traversal would issue once, and
 /// making 5 word loads per word index where the fused pass makes 3. On the
 /// reference device that composition costs 1.30x a fused pass, reproducibly, with
-/// the popcount count identical on both sides (, reproduced at
-/// 1.27-1.29x across two word widths and three window sizes by earlier work, and at
-/// 1.20-1.65x against the SHIPPED entry points by earlier work).
+/// the popcount count identical on both sides (reproduced at
+/// 1.27-1.29x across two word widths and three window sizes, and at
+/// 1.20-1.65x against the SHIPPED entry points).
 ///
-/// ** IS SETTLED, AND IT WENT AGAINST THE SHAPE THIS FILE ORIGINALLY SHIPPED**
-/// ( /, ). All three of its axes
-/// moved off the simpler form, and landed all three plus a fourth finding:
+/// **THE SHAPE IS SETTLED, AND IT WENT AGAINST THE ONE THIS FILE ORIGINALLY
+/// SHIPPED.** All three axes moved off the simpler form, and the sweep landed
+/// all three plus a fourth finding:
 ///
 /// 1. a vertically-sliding accumulator beats recompute by 7.3x on a search sweep
 /// and 20x on a dense scan at 31x31 -> SlidingWindowCount;
@@ -315,24 +314,24 @@
 /// impl:: each return their own partial sum.
 ///
 /// The interface was deliberately NOT changed in the same commit as the
-/// measurement that gated it; the measurement is and the interface is.
+/// measurement that gated it.
 /// Item 4 landed FIRST of the four, so items 1-3's re-measured ratios report the
 /// gain the shipped code actually has rather than a gain against a baseline that
 /// no longer exists.
 ///
-/// **THOSE FOUR NUMBERS ARE that measurement’s, AND RE-MEASURED THEM AGAINST THE CODE
-/// THAT SHIPPED.** Every ratio quoted below carries both where they differ, because
+/// **THOSE FOUR NUMBERS COME FROM THE ORIGINAL SWEEP, AND WERE RE-MEASURED AGAINST
+/// THE CODE THAT SHIPPED.** Every ratio quoted below carries both where they differ, because
 /// a reader picking an entry point wants the shipped one and a reader auditing the
 /// decision wants the one the rule was applied to. Item 1 becomes 5.96x / 15.9x;
 /// item 2 becomes 1.20x / 1.27x at 31x31 (1.20-1.65x across the three window
 /// sizes); item 3's gap narrows to 11-14%. Item 4's own figure moved furthest and
-/// is the one to be careful with: recorded 1.15-1.32x, but never measured it
+/// is the one to be careful with: the first run recorded 1.15-1.32x, but never measured it
 /// directly -- it inferred it from axis 1's isolated-keypoint column, which differs
 /// from a per-window countNonZero in TWO ways rather than one. Timed directly and
-/// interleaved, puts the split at **1.03-1.09x** at the LK window sizes and a
+/// interleaved, the split comes out at **1.03-1.09x** at the LK window sizes and a
 /// 5-6% LOSS at W=7 on the overlapping patterns. No decision moves -- the split
 /// costs no memory and no interface and still wins at W=15 and W=31 -- but
-/// 1.03-1.09x is the number to quote (, amended).
+/// 1.03-1.09x is the number to quote.
 
 #include <climits>  // INT_MIN / INT_MAX -- SlidingWindowCount::window asserts its range
 #include <cstddef>
@@ -352,7 +351,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// @brief The two halves of a split count: pixels where the selector `c` was
 /// clear, and pixels where it was set.
 /// @note Named for what they select rather than for what a caller does with them.
-/// In the LK covariance (the design notes) `c` is `sign_x ^ sign_y`, so
+/// In the LK covariance `c` is `sign_x ^ sign_y`, so
 /// `whenClear` counts agreeing signs (products of +1) and `whenSet` counts
 /// opposing ones (products of -1), and the cross term is
 /// `whenClear - whenSet`.
@@ -369,7 +368,7 @@ struct SplitCount {
     size_t whenClear = 0;  ///< pixels in the region where a & b is set and c is clear
     size_t whenSet = 0;    ///< pixels in the region where a & b is set and c is set
 
-    /// @brief The LK cross term: `whenClear - whenSet`, signed (the design notes).
+    /// @brief The LK cross term: `whenClear - whenSet`, signed.
     /// @return ΣIxIy over the region when this came from countAndSplit(mag_x,
     /// mag_y, sign_x ^ sign_y, window). Negative is ordinary, not an error.
     /// @note `long long` because the difference is signed and because it is exact:
@@ -391,15 +390,15 @@ struct SplitCount {
 /// @brief The four numbers of a 2x2 gradient covariance over one region:
 /// popcount(a), popcount(b), and the split of `a & b` by the selector.
 /// @note **API TIER 3.** Returned by countCovariance, which produces all four
-/// from ONE traversal ( item 2). The three-call composition --
+/// from ONE traversal. The three-call composition --
 /// countNonZero(a) + countNonZero(b) + countAndSplit(a, b, c) -- produces
 /// the same four numbers with the same popcounts, three traversals and 5
 /// word loads per word index to the fused pass's 3, and measured 1.27x
 /// (`uint32_t`) / 1.29x (`uint64_t`) slower at 31x31 pre-split
-/// ( axis 2, reproducing that measurement’s 1.30x) and **1.20x /
+/// (reproducing an earlier 1.30x) and **1.20x /
 /// 1.27x** against the shipped code.
-/// @note With `a = mag_x`, `b = mag_y` and the selector `sign_x ^ sign_y`
-/// (the design notes): `xx` is the Sigma-Ix-squared term, `yy` the
+/// @note With `a = mag_x`, `b = mag_y` and the selector `sign_x ^ sign_y`:
+/// `xx` is the Sigma-Ix-squared term, `yy` the
 /// Sigma-Iy-squared term, and `crossTerm` is Sigma-IxIy.
 /// @note `xy` is a whole SplitCount rather than a pre-subtracted difference so
 /// that the two halves stay available -- and so that the SIGNED
@@ -441,8 +440,8 @@ namespace impl {
 /// @note **Compiled unconditionally, on every toolchain, and tested against the
 /// builtin** by Reduce.PortablePopcount_*. Guarding the definition itself
 /// behind the #if would make it source that no configuration this project
-/// verifies ever compiles -- the shape of dead gate CLAUDE.md and are
-/// both written about. It costs one unreferenced inline template.
+/// verifies ever compiles -- the shape of dead gate CLAUDE.md warns about. It
+/// costs one unreferenced inline template.
 template <typename WordType>
 inline size_t popcountWordPortable(WordType w) {
     uint64_t v = static_cast<uint64_t>(w);
@@ -453,7 +452,7 @@ inline size_t popcountWordPortable(WordType w) {
 }
 
 /// @brief Population count of one word. **INTERNAL.**
-/// @note The scalar form specifies. On aarch64 this is two register-domain
+/// @note The scalar form. On aarch64 this is two register-domain
 /// crossings around a `cnt`, which is precisely why no caller outside this
 /// file may reach it: the crossings are amortized by the bulk loops here
 /// and cannot be amortized by anyone calling this per word.
@@ -462,10 +461,10 @@ inline size_t popcountWordPortable(WordType w) {
 /// dispatch lands -- `__builtin_popcountll` is not `popcntq` at all. GCC
 /// emits a CALL to libgcc's `__popcountdi2`, once per word, and clang
 /// inlines the SWAR sequence above. Measured cost: 4.2x slower than
-/// cv::countNonZero, against 2.0x faster once the instruction is available
-///. A third target tier whose per-word cost dwarfs the
-/// count itself, which is the design rule’s argument rather than an exception to it.
-/// @note Phase 5 replaces the LOOPS below, not this function. A vectorized
+/// cv::countNonZero, against 2.0x faster once the instruction is available.
+/// A third target tier whose per-word cost dwarfs the
+/// count itself, which is the bulk-only rule's argument rather than an exception to it.
+/// @note A vector rewrite replaces the LOOPS below, not this function. A vectorized
 /// reduction keeps whole vectors in NEON registers and never forms a
 /// per-word count at all.
 template <typename WordType>
@@ -626,7 +625,7 @@ BINCV_HOST_DEVICE inline RegionWords<WordType> clipRegion(size_t width, size_t h
 /// @param visit Called as `visit(wordIndex, mask)`; `mask` selects the bits of
 /// that word which lie inside the region.
 ///
-/// @note THE SINGLE-PASS SKELETON. All four entry points share it, so that work’s
+/// @note THE SINGLE-PASS SKELETON. All four entry points share it, so
 /// "reads each word once" is a property of one function rather than of four
 /// loops that happen to agree today, and tests/test_reduce.cpp drives it
 /// with a recording visitor to check exactly that.
@@ -634,7 +633,7 @@ BINCV_HOST_DEVICE inline RegionWords<WordType> clipRegion(size_t width, size_t h
 /// loop -- the one that runs for all but two words of a row -- folds to an
 /// unmasked accumulation. Applying the head/tail masks per word instead
 /// would be simpler to write and would put a loop-carried select in the only
-/// loop Phase 5 cares about.
+/// loop a vector rewrite cares about.
 template <typename WordType, typename Visit>
 inline void visitRowWords(const RegionWords<WordType>& r, Visit visit) {
     if (r.firstWord == r.lastWord) {
@@ -654,8 +653,7 @@ inline void visitRowWords(const RegionWords<WordType>& r, Visit visit) {
 //
 // Every reduction in this file is a loop over rows whose body is one of the four
 // functions below. They return a row's count rather than adding into a
-// caller-held accumulator, and that is a MEASURED choice, not a stylistic one
-// ( item 4;, ).
+// caller-held accumulator, and that is a MEASURED choice, not a stylistic one.
 //
 // The previous shape carried ONE size_t across every row and every word of a
 // region. On the reference device that makes a window traversal a single
@@ -665,24 +663,24 @@ inline void visitRowWords(const RegionWords<WordType>& r, Visit visit) {
 // nothing: addition of counts is associative and none of these sums can overflow,
 // since each is bounded by the region's pixel count.
 //
-// HOW MUCH IT IS WORTH, AND THE FIGURE THAT WAS WITHDRAWN. recorded
+// HOW MUCH IT IS WORTH, AND THE FIGURE THAT WAS WITHDRAWN. The first run recorded
 // 1.15-1.32x at LK window sizes, read off its isolated-keypoint column on the
 // argument that the sliding path never executes there, so the accumulator was the
 // only thing left to explain the gap. That argument has a hole: the sliding form
 // differs from a per-window countNonZero in TWO ways, not one -- where the sum
 // lands, AND that it clips its column band once at construction instead of running
-// the full region clip per position. a measurement timed the split directly and
+// the full region clip per position. A second run timed the split directly and
 // interleaved, identical popcounts over identical words with only the accumulator
 // changed, and measured **1.03-1.09x at the LK window sizes (1.08x at W=31) and a
 // 5-6% LOSS at W=7 on the overlapping patterns**. That is the number to quote;
-// this is amended to it.
+// the 1.15-1.32x above is withdrawn.
 //
 // The decision is unchanged -- the split costs no memory, no interface and no
 // popcount, and it is a gain at both window sizes LK uses. What changed is only
 // the magnitude, and the dependency-chain reasoning is what survives: the gain
 // growing with the row count is what that explanation predicts, and it does.
 //
-// a measurement measured it on countViewRegion. It is applied to all four row bodies
+// The split was measured on countViewRegion. It is applied to all four row bodies
 // because the argument is about where a sum lands and not about which kernel is
 // summing, and because leaving countAnd/countAndSplit unsplit would have made the
 // re-measured fused-versus-composed ratio a mix of two effects instead of the
@@ -780,7 +778,7 @@ inline size_t countViewRegion(const BinMatConstView<WordType>& src,
 } // namespace impl
 
 // ---------------------------------------------------------------------------
-// The reductions ( views, never containers; bulk, never per word)
+// The reductions (views, never containers; bulk, never per word)
 // ---------------------------------------------------------------------------
 
 /// @brief Number of set pixels in `src`. **API TIER 1** -- equal to
@@ -795,9 +793,9 @@ inline size_t countViewRegion(const BinMatConstView<WordType>& src,
 /// buffer whose padding bits are dirty -- a supported construction -- gives
 /// the same answer as a clean one. See the padding-bit section at the top of
 /// this file for why this file spends one AND per row on that.
-/// @note Reads only, so there is no aliasing precondition of any kind ( binds
-/// kernels that write).
-/// @note Never throws and never allocates (the design notes). A stride shorter
+/// @note Reads only, so there is no aliasing precondition of any kind (the
+/// aliasing rule binds kernels that write).
+/// @note Never throws and never allocates. A stride shorter
 /// than one row is a programming error: BINCV_ASSERT reports it in debug
 /// builds, and it is undefined in release, exactly as an out-of-range at
 /// is.
@@ -849,8 +847,8 @@ inline size_t countNonZero(BinMatConstView<WordType> src, Rect region) {
 }
 
 /// @brief Number of pixels set in BOTH `a` and `b` inside `region`.
-/// **API TIER 3** -- a masked reduction, which OpenCV has no equivalent of
-/// (the design notes); `cv::countNonZero(a & b)` needs an intermediate
+/// **API TIER 3** -- a masked reduction, which OpenCV has no equivalent of;
+/// `cv::countNonZero(a & b)` needs an intermediate
 /// image and this needs none.
 /// @param a First source view.
 /// @param b Second source view; must have a's dimensions.
@@ -863,7 +861,7 @@ inline size_t countNonZero(BinMatConstView<WordType> src, Rect region) {
 /// would be a heap allocation in a kernel (forbidden) or a caller-provided
 /// buffer whose only purpose is to be counted and discarded.
 /// @note This is ΣIx² / ΣIy² territory for the LK covariance when a == b, and the
-/// `mag_x & mag_y` factor of the cross term otherwise (the design notes).
+/// `mag_x & mag_y` factor of the cross term otherwise.
 /// @note RECOMPUTES PER WINDOW, and that is the right thing for ONE window. LK
 /// windows are 31x31 and overlap heavily, so consecutive calls over a
 /// COLUMN of positions re-read almost the same words -- SlidingWindowCount
@@ -895,16 +893,16 @@ inline size_t countAnd(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
 }
 
 /// @brief popcount(a & b & ~c) and popcount(a & b & c) over `region`, in ONE pass.
-/// **API TIER 3** -- the design notes names "masked window reductions" as
-/// the Tier 3 example, and this is that operation.
+/// **API TIER 3** -- "masked window reductions" are the Tier 3 example, and
+/// this is that operation.
 /// @param a First source view.
 /// @param b Second source view; must have a's dimensions.
 /// @param c Selector view; must have a's dimensions.
 /// @param region Rectangle in pixels, half-open, intersected with the image.
 /// @return `{whenClear, whenSet}` -- the pixels of `a & b` split by `c`.
 ///
-/// @note **THIS IS THE LK COVARIANCE CROSS-TERM** (the design notes), and the
-/// reason this is in the MVP rather than added when needs it. With
+/// @note **THIS IS THE LK COVARIANCE CROSS-TERM**, and the
+/// reason countAndSplit is in the MVP rather than added when the covariance needs it. With
 /// `a = mag_x`, `b = mag_y` and `c = sign_x ^ sign_y`:
 ///
 /// ΣIxIy = whenClear - whenSet
@@ -944,7 +942,7 @@ inline size_t countAnd(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
 /// four-argument overload below takes `c0` and `c1` and XORs them in the
 /// word loop, needing no plane at any pyramid level, and it is the form
 /// calls: axis 3 measured the plane faster per frame INCLUDING its
-/// formation cost -- 16-18% at earlier work, 11-14% against the shipped code
+/// formation cost -- 16-18% when first measured, 11-14% against the shipped code
 /// -- against a fifth frame-sized plane at every level
 /// (+25% of the derivative working set), and CLAUDE.md's tiebreak takes the
 /// memory. This three-argument form stays for a caller that already has a
@@ -991,14 +989,14 @@ inline SplitCount countAndSplit(BinMatConstView<WordType> a, BinMatConstView<Wor
 /// @param region Rectangle in pixels, half-open, intersected with the image.
 /// @return `{whenClear, whenSet}` -- the pixels of `a & b` split by `c0 ^ c1`.
 ///
-/// @note **THIS IS THE FORM THE COVARIANCE CALLS** (the design notes),
+/// @note **THIS IS THE FORM THE COVARIANCE CALLS**,
 /// with `c0 = sign_x` and `c1 = sign_y`. It is identical in value to
 /// `countAndSplit(a, b, xorPlane, region)` where `xorPlane` was filled by
 /// bitwiseXor(c0, c1,...) -- and needs no such plane to exist.
 /// @note **IT IS ALSO THE SLOWER OF THE TWO, AND THAT IS THE DECISION.** Axis 3
 /// measured the precomputed plane faster per frame at 200 keypoints
-/// INCLUDING the cost of forming it -- 16-18% at earlier work, and 11-14% against
-/// the code that shipped (, 125.7 us against 139.1 us per frame at
+/// INCLUDING the cost of forming it -- 16-18% when first measured, and 11-14%
+/// against the code that shipped (125.7 us against 139.1 us per frame at
 /// W=31 with formation included). The four-argument form loads
 /// a fourth stream and XORs it in the word loop, and that costs more than
 /// one streaming pass over the frame. What it buys is the plane itself --
@@ -1059,8 +1057,8 @@ inline SplitCount countAndSplit(BinMatConstView<WordType> a, BinMatConstView<Wor
 /// 5 word loads per word index against this one's 3 (`a` and `b` are each
 /// read twice, `c` once). That measured 1.27x (`uint32_t`) and 1.29x
 /// (`uint64_t`) slower at 31x31 on the reference device pre-split
-/// ( axis 2, reproducing that measurement’s 1.30x; ARCHITECTURE.md
-///), and **1.20x / 1.27x against the code that shipped**, holding from
+/// (reproducing an earlier 1.30x), and **1.20x / 1.27x against the code that
+/// shipped**, holding from
 /// 1.20x to 1.65x across the three window sizes and two word widths
 /// (the axis 2). The delta is redundant traversal and nothing else, which
 /// is why it is an entry point rather than an optimization hint.
@@ -1109,8 +1107,8 @@ inline CovarianceCount countCovariance(BinMatConstView<WordType> a, BinMatConstV
 /// a time inside the loop. Both must have a's dimensions.
 /// @param region Rectangle in pixels, half-open, intersected with the image.
 ///
-/// @note **THIS IS THE SIGNATURE CALLS.** It is the conjunction of the two
-/// decisions recorded: fused rather than composed (axis 2, 1.27-1.29x
+/// @note **THIS IS THE SIGNATURE THE COVARIANCE CALLS.** It is the conjunction of the two
+/// measured decisions: fused rather than composed (axis 2, 1.27-1.29x
 /// pre-split, 1.20-1.27x at 31x31 against the shipped code by design) and
 /// four-argument rather than plane (axis 3, memory wins the tiebreak).
 /// Composing those two decisions leaves exactly one entry point that is both
@@ -1118,7 +1116,7 @@ inline CovarianceCount countCovariance(BinMatConstView<WordType> a, BinMatConstV
 /// window with **0 B** of caller memory beyond the derivative planes it must
 /// read anyway.
 /// @note It is the SLOWER selector form, deliberately; see the four-argument
-/// countAndSplit above for the 11-14% (16-18% at earlier work) and the +25% it is
+/// countAndSplit above for the 11-14% (16-18% when first measured) and the +25% it is
 /// traded against.
 /// A caller that already holds a `sign_x ^ sign_y` plane should call the
 /// four-argument overload of this function instead and keep the speed.
@@ -1157,7 +1155,7 @@ inline CovarianceCount countCovariance(BinMatConstView<WordType> a, BinMatConstV
 }
 
 // ---------------------------------------------------------------------------
-// INCREMENTAL WINDOW STATE -- THE INC-ROW FORM ( item 1, earlier work)
+// INCREMENTAL WINDOW STATE -- THE INC-ROW FORM
 // ---------------------------------------------------------------------------
 
 /// @brief A window count slid DOWNWARD one pixel row at a time: the sum gains the
@@ -1175,15 +1173,15 @@ inline CovarianceCount countCovariance(BinMatConstView<WordType> a, BinMatConstV
 ///
 ///
 /// DENSE every window position in a frame 20x 15.9x
-/// (the corner response of the design notes)
+/// (the corner response in ops/corner.hpp)
 /// SEARCH 200 keypoints x an 8x8 sweep 7.3x 5.96x
 /// SPARSE 200 isolated keypoints 1.32x 1.10x
-/// (the LK covariance of 7.5)
+/// (the LK covariance)
 ///
-/// DENSE and SEARCH are far past the 15% line that selected this branch of
-///, at either baseline. They fell because item 4 -- the per-row
-/// accumulator split in impl's row bodies -- made the DENOMINATOR faster,
-/// which is exactly what predicted when it required item 4 to land
+/// DENSE and SEARCH are far past the 15% line that selected this branch, at
+/// either baseline. They fell because the per-row
+/// accumulator split in impl's row bodies made the DENOMINATOR faster,
+/// which is exactly what was predicted when that split was required to land
 /// first ("roughly 15x and 5.6x"); the measurement met the prediction.
 ///
 /// SPARSE is the row to read carefully. **Treat it as nothing.** With one

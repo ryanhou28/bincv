@@ -6,8 +6,8 @@
 /// ---------------------------------------------------------------------------
 /// WHAT IS BEING ASKED
 ///
-/// reduce.hpp says of its per-word counter: "Phase 5 replaces the LOOPS below, not
-/// this function." Measuring the per-word counter on a Cortex-M7 said the same thing
+/// reduce.hpp says of its per-word counter: "A vector rewrite replaces the LOOPS
+/// below, not this function." Measuring the per-word counter on a Cortex-M7 said the same thing
 /// from the other side -- hand-writing the arithmetic gained nothing, because the
 /// compiler already emits a good SWAR. So the question is what the LOOP costs, and
 /// whether a better loop is portable rather than per-chip.

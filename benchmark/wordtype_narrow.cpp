@@ -1,5 +1,5 @@
 // ===========================================================================
-// earlier work -- NATIVE 64-BIT KERNELS, OR NARROWING?
+// NATIVE 64-BIT KERNELS, OR NARROWING?
 //
 // Several kernels are gated on `sizeof(WordType) == 4`: the LK residual, the covariance
 // lane kernel, `edgeThreshold` and `packQuant`. A caller holding 64-bit words takes the
@@ -13,7 +13,7 @@
 // kernel can at best match the 32-bit one running on the same bytes, so if narrowing
 // recovers native 32-bit speed there is nothing left for it to win. Measuring a
 // hypothetical native kernel against the fallback would be measuring the wrong thing --
-// which is the whole reason that measurement’s rule was written down first.
+// which is the whole reason the rule was written down first.
 //
 // Usage: wordtype_narrow
 // ===========================================================================
@@ -105,7 +105,7 @@ int main() {
     // costs both word types exactly the same and reports nothing -- the first version of
     // this line printed "38400 B against 38400 B" under the words "the gap widens".
     // The penalty is a ROW-STRIDE ROUNDING, so it appears at the upper pyramid levels,
-    // which is where measured it and where an embedded target is tightest.
+    // which is where it was measured and where an embedded target is tightest.
     std::printf("\n memory (row-stride rounding, the reason chose 32):\n");
     const struct { size_t w, h; const char* what; } kSizes[] = {
         {640, 480, "level 0"}, {320, 240, "level 1"}, {160, 120, "level 2"},

@@ -1,7 +1,7 @@
 // Pyramid downsample: the 2x2 box mean, subsampled, requantized to NOut
 // bits -- ops/pyramid.hpp.
 //
-// CORE, AND MOSTLY NOT BY OMISSION. pyrDown is API TIER 2 (the design notes):
+// CORE, AND MOSTLY NOT BY OMISSION. pyrDown is API TIER 2:
 // it has cv::pyrDown's name and role and deliberately different numerics, so
 // there is no bit-exactness promise to check and no Tier 1 denominator. What
 // stands behind it is three independent references, and only the third needs
@@ -17,10 +17,10 @@
 // plane p of each pixel 2^p times (k = 4 * (2^NIn - 1) inputs). It is the
 // exponential route exists to replace, and keeping it under test is
 // what makes "the shipped route is linear in NIn" a comparison rather than
-// a claim -- the same reason ops/resample.hpp keeps that work’s losing arms.
+// a claim -- the same reason ops/resample.hpp keeps its losing arms.
 // 3. THE REFERENCE PIPELINE'S BOX_2x2 PATH, behind BINCV_WITH_OPENCV:
 // cv::blur(2x2) then subsample with the Gaussian disabled, which is what
-// the reference frontend's pyramid does. Two things are checked
+// the reference pipeline's pyramid does. Two things are checked
 // there and neither is a tier promise: that binCV at NOut = 8 reproduces
 // the reference's value set exactly on the aligned block, and that
 // cv::blur's DEFAULT anchor really does shift its window half a pixel up
@@ -201,7 +201,7 @@ void dirtyThePadding(QuantMat<N, WordType>& m) {
 std::vector<size_t> sweepWidths(size_t wordBits) {
     std::vector<size_t> widths;
     for (size_t w = 0; w <= 2 * wordBits + 3; ++w) widths.push_back(w);
-    // The pyramid ladder a 640x480 frontend actually walks.
+    // The pyramid ladder a 640x480 pipeline actually walks.
     for (size_t w : {size_t{94}, size_t{160}, size_t{320}}) widths.push_back(w);
     return widths;
 }
@@ -600,7 +600,7 @@ void testRouteAgreement(const char* wordName) {
 // 4. The cost claim
 // ---------------------------------------------------------------------------
 
-/// that work’s second blocking gap, stated as numbers. The shipped box is
+/// The second blocking gap, stated as numbers. The shipped box is
 /// 3*NIn + 1 full-adder stages; the replication route is 4*(2^NIn - 1) single-bit
 /// inputs. A regression that reintroduced the exponential shape would break these.
 void testCostIsNotExponential() {
@@ -762,7 +762,7 @@ void testFootprintClaims() {
 // 5. The ladder
 // ---------------------------------------------------------------------------
 
-/// Pyramid<W, 1, 3, 4, 5> -- the ladder the design notes measured -- must size its
+/// Pyramid<W, 1, 3, 4, 5> -- the measured ladder -- must size its
 /// levels by ceil/2 and must produce exactly what four separate pyrDown calls do.
 template <typename WordType>
 void testPyramidLadder(const char* wordName) {
@@ -837,9 +837,9 @@ void testPyramidLadder(const char* wordName) {
 
 #ifdef BINCV_WITH_OPENCV
 
-/// the reference frontend's BOX_2x2 pyrDown, transcribed.
+/// the reference pipeline's BOX_2x2 pyrDown, transcribed.
 ///
-/// @note This is a PORT of what the reference frontend's pyramid does, not
+/// @note This is a PORT of what the reference pipeline's pyramid does, not
 /// a paraphrase: `cv::blur(_src, _src_new, cv::Size(2, 2))` with OpenCV's
 /// DEFAULT anchor and border, then -- because `disableGaussian` is true for
 /// every filter type except GAUSSIAN_5x5 -- PyrDownInvoker's early-out,
@@ -885,7 +885,7 @@ cv::Mat randomBinaryMat(int width, int height, uint64_t seed) {
 /// **A MEASUREMENT, NOT AN ASSUMPTION.** `cv::blur` on CV_8U does not round the
 /// exact mean to nearest: measured over every quadruple this sweep visits, its
 /// 2x2 box is `ceil((a + b + c + d) / 4)` -- it rounds the mean UP. That is where
-/// the design notes's level-1 value set `{0, 64, 128, 192, 255}` comes from; the
+/// the measured level-1 value set `{0, 64, 128, 192, 255}` comes from; the
 /// exact means are `{0, 63.75, 127.5, 191.25, 255}`, and rounding those to
 /// NEAREST would give 191, not 192.
 ///
@@ -948,7 +948,7 @@ void testAgainstReferencePipeline(const char* wordName) {
                     // 1. OpenCV's rule, measured rather than assumed.
                     PYR_EXPECT(openCv == openCvBoxRule(a, b, c, d),
                                "cv::blur's CV_8U 2x2 box is ceil(sum / 4) -- it rounds the "
-                               "mean UP, which is where ARCHITECTURE 7.2's 192 comes from",
+                               "mean UP, which is where the pyramid ladder's 192 comes from",
                                where);
                     // 2. binCV's rule: the exact mean, rounded once, half up.
                     PYR_EXPECT(got == (a + b + c + d + 2) / 4,
@@ -1126,7 +1126,7 @@ void testAgainstReferencePipeline(const char* wordName) {
         testRequantizeEnumerated<NOut, NIn, WordType>(#name);                         \
     }
 
-// The ladder the design notes measured, at every word width: 1 -> 3 -> 4 -> 5.
+// The measured ladder, at every word width: 1 -> 3 -> 4 -> 5.
 PYRAMID_SWEEP(1, 3, uint8_t, uint8_t)
 PYRAMID_SWEEP(1, 3, uint16_t, uint16_t)
 PYRAMID_SWEEP(1, 3, uint32_t, uint32_t)
@@ -1173,9 +1173,9 @@ BINCV_TEST(Pyramid, ReferencePipeline_uint64_t) {
 
 
 // ---------------------------------------------------------------------------
-// earlier work: the FILTERED pyrDown routes against a per-pixel integer reference.
+// The FILTERED pyrDown routes against a per-pixel integer reference.
 //
-// that measurement’s rule asks each filter to reproduce ITS OWN definition exactly -- not
+// The rule asks each filter to reproduce ITS OWN definition exactly -- not
 // OpenCV's, since these deliberately compute different functions and the border
 // rule is binCV's (zero outside, the same rule the shipped route applies to source
 // words past the row). That is what this checks, at several (NIn, NOut) pairs,

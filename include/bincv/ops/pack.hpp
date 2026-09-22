@@ -15,7 +15,7 @@
 /// A sensor hands a driver a buffer. That buffer is what this file takes.
 ///
 /// ---------------------------------------------------------------------------
-/// THE INPUT CONTRACT (the design notes)
+/// THE INPUT CONTRACT
 ///
 /// binCV accepts a SINGLE-CHANNEL, INTEGER-TYPED, STRIDED pixel array and turns
 /// it into bits. Getting to that array is the caller's job. The Y plane of a
@@ -29,11 +29,11 @@
 /// ---------------------------------------------------------------------------
 /// WHY THE RULE IS A TEMPLATE PARAMETER AND NOT A FUNCTION POINTER
 ///
-/// a measurement measured this loop at **46x** on x86 and
+/// This loop was measured at **46x** on x86 and
 /// **14x** on aarch64 by turning it into a compare and a move-mask. That only
 /// works if the comparison is ONE PREDICATE the compiler can see. A runtime
 /// callback would put a call in the inner loop and give the whole factor back --
-/// a measurement measured a mere runtime BRANCH costing 17%
+/// a mere runtime BRANCH was measured costing 17%
 /// elsewhere in this library.
 ///
 /// So the shipped rules are an enum, resolved at compile time. `packBitsIf`
@@ -48,7 +48,7 @@
 
 // the N-bit packer's vector path, selected at RUN TIME on x86 so the library's
 // baseline ISA is unchanged, and baseline on aarch64 where NEON always exists.
-// F-5: BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
+// BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
 // compiler's own macros on aarch64, so an include-only integration still gets the
 // NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
 // its gate before its first core include.
@@ -227,7 +227,7 @@ inline bool hasPackQuantSimd() { return packQuantSimdEnabled(); }
 
 /// @brief The same, without a move-mask. **INTERNAL.**
 /// @note aarch64 has none, so AND with per-lane bit weights and let pairwise adds fold
-/// sixteen byte masks into sixteen bits -- that measurement’s substitute, unchanged.
+/// sixteen byte masks into sixteen bits -- the move-mask's substitute, unchanged.
 template <size_t N>
 inline void quantMask32(const uint8_t* src, const uint8_t* thresholds, unsigned maxValue,
                         uint32_t* bits) {
@@ -304,7 +304,7 @@ inline void packQuant(const SrcT* src, size_t width, size_t height, size_t srcSt
         // THE SCALE IS A HANDFUL OF COMPARISONS AND THE TRANSPOSE IS A MOVE-MASK.
         // `quantScale` is monotonic, so the value is the number of thresholds a pixel
         // clears -- `MaxValue` byte compares, three at N = 2. Extracting plane p is then
-        // one AND, one compare and one move-mask per plane, which is that measurement’s trick with
+        // one AND, one compare and one move-mask per plane, which is the same trick with
         // the comparison replaced. A 256-entry lookup table, which is what
         // `fromCVMat` uses, cannot be done in a vector register at all.
         if constexpr (sizeof(SrcT) == 1 && sizeof(WordType) == 4 && kMaxValue <= 15) {
@@ -525,7 +525,7 @@ inline size_t writePbm(BinMatConstView<WordType> src, uint8_t* out, size_t cap) 
 /// @return Bytes written, or the bytes REQUIRED if `cap` is too small (and nothing is
 /// written). Call once with `cap == 0` to size the buffer.
 /// @note **Looking at what binCV produced on a target with no OpenCV**, and debugging
-/// a frontend you cannot see is not debugging. PNM is chosen because it is the only
+/// a pipeline you cannot see is not debugging. PNM is chosen because it is the only
 /// image format whose encoder is a header and a copy -- binCV carries no real codec,
 /// on any target, because nothing on a caller's path decodes anything (the design
 /// notes).
