@@ -444,6 +444,22 @@ int main() {
                                dxs[k], dys[k], params, ringView, corners.data(), corners.size());
                            measure::g_sink += r.count;
                        }});
+    // The SAME call with the suppression prefilter's vector arm switched off.
+    // Two things this is here for, both required by CLAUDE.md: a vector arm must
+    // be switchable, and the benchmark must SHOW it is running -- a ratio of
+    // ~1.00x between these two rows means the fast path is not on, which is how
+    // this project once measured three "improvements" against a block the
+    // compiler had removed.
+    benches.push_back({"binCV streaming, scalar NMS", [&](int i) {
+                           const size_t k = static_cast<size_t>(i % kInputs);
+                           bincv::impl::cornerNmsSimdEnabled() = false;
+                           bincv::derivativeX(bins[k], dxs[k]);
+                           bincv::derivativeY(bins[k], dys[k]);
+                           const bincv::CornerResult r = bincv::goodFeaturesToTrackStreaming(
+                               dxs[k], dys[k], params, ringView, corners.data(), corners.size());
+                           bincv::impl::cornerNmsSimdEnabled() = true;
+                           measure::g_sink += r.count;
+                       }});
     benches.push_back({"OpenCV binarized", [&](int i) {
                            const size_t k = static_cast<size_t>(i % kInputs);
                            openCvBinarized(bytes[k], cvb, cvBinarized);
@@ -458,11 +474,16 @@ int main() {
                        }});
 
     const std::vector<measure::Timing> t = measure::measureInterleaved(benches, 5, 200.0);
-    const double denom = t[2].medianNs;
+    // "OpenCV binarized" is the denominator and is index 3 now that the
+    // scalar-NMS arm sits before it. Naming it by position is how this table
+    // once divided by the wrong row.
+    const double denom = t[3].medianNs;
 
     std::printf(" %-18s %12s %10s %8s %12s %10s\n", "variant", "ns/frame", "ns/pixel", "spread",
                 "vs OpenCV", "B/pixel");
-    const size_t setBytes[4] = {binCvSet, binCvStreamSet, cvSet, cvSobelSet};
+    // The scalar-NMS arm is the same call over the same buffers as the streaming
+    // arm, so it carries the same working set.
+    const size_t setBytes[5] = {binCvSet, binCvStreamSet, binCvStreamSet, cvSet, cvSobelSet};
     for (size_t i = 0; i < benches.size(); ++i) {
         std::printf(" %-18s %12.0f %10.3f %7.2f%% %11.2fx %10.2f\n", benches[i].name.c_str(),
                     t[i].medianNs, t[i].medianNs / static_cast<double>(pixels), t[i].spreadPct(),
