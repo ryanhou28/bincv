@@ -46,6 +46,21 @@ Or the full sweep, `./scripts/run_all_benchmarks.sh`.
 **Always benchmark a Release build**, and read the rules below on the comparison
 denominator before quoting a ratio.
 
+**One run is one draw.** The spread a benchmark prints bounds the noise *inside* that
+process; what a launch pays once is constant within it and invisible to it. Take a figure
+as a sweep of launches instead, and let the tool say how far the host can actually see:
+
+```bash
+./scripts/run_launches.sh -n 30 ./build/benchmark/corner_opencv_benchmark   # -g locks the governor
+./scripts/aggregate_launches.py corner_opencv_benchmark-x86_64-launches.log --ladder
+```
+
+On the reference device the two agree closely and this is a formality. On a desktop it is
+not: the same ratio has scattered 66% across sixty launches while every launch reported ~5%.
+**Every x86-64 figure in [docs/reports/](docs/reports/README.md) is taken this way** — a
+median of thirty launches with a bootstrap interval — and a single-launch x86 number is not
+published there.
+
 ## Use it in your project
 
 With CMake — **do this rather than adding the include path by hand:**

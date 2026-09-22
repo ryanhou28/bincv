@@ -8,6 +8,13 @@ faster, FAST on a wide image is at parity, and corner detection wins by far more
 deployment target than on the desktop. **x86-64 and aarch64 are separate columns** — different
 OpenCV builds on different machines, never averaged.
 
+**Every x86-64 figure on this page is the median of thirty pinned launches**, with the
+bootstrap 95% interval those thirty put around each ratio. The ratio is formed inside each
+launch, so it is not the quotient of the two cells beside it. **Every aarch64 figure is the
+median of ten** with the same interval —
+[methodology-timing.md](methodology-timing.md#the-protocol-each-host-needs) says why ten
+there and thirty here.
+
 ## Summary
 
 ### Speed
@@ -19,20 +26,31 @@ number is the faster side.
 
 | operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
-| Lucas–Kanade, `1/2/2/2` | `cv::calcOpticalFlowPyrLK` | 3.871 ms | **0.543 ms** | **7.13×** | 23.476 ms | **2.843 ms** | **8.26×** |
-| Lucas–Kanade, `1/1/1/1` | `cv::calcOpticalFlowPyrLK` | 3.871 ms | **0.136 ms** | **28.53×** | 23.476 ms | **0.609 ms** | **38.54×** |
-| BRIEF descriptors | `cv::ORB::compute` † | 0.660 ms | **0.141 ms** | 4.69× | 6.816 ms | **0.648 ms** | 10.51× |
-| Hamming matching, kNN=2 | `cv::BFMatcher` | 9.184 ms | **1.947 ms** | **4.72×** | 38.269 ms | **19.391 ms** | 1.97× |
-| FAST, wide image | `cv::FAST` | 0.363 ms | 0.344 ms | 1.05× | 2.906 ms | 3.024 ms | 0.96× |
-| FAST, bit-plane | `cv::FAST` | 266.2 µs | **177.0 µs** | **1.50×** | 2054.5 µs | **865.3 µs** | **2.37×** |
-| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` | 13.67 ns/px | **12.06 ns/px** | 1.13× | 74.99 ns/px | **43.49 ns/px** | **1.72×** |
-| `cornerSubPix` | `cv::cornerSubPix` | not published | not published | ~13× | not published | not published | 13.70× |
+| Lucas–Kanade, `1/2/2/2` | `cv::calcOpticalFlowPyrLK` | 3.978 ms | **0.5585 ms** | **7.19× [6.89, 7.40]** | 23.400 ms | **2.838 ms** | **8.227× [8.189, 8.284]** |
+| Lucas–Kanade, `1/1/1/1` | `cv::calcOpticalFlowPyrLK` | 3.978 ms | **0.1380 ms** | **29.2× [26.8, 29.9]** | 23.400 ms | **0.603 ms** | **38.81× [38.50, 39.13]** |
+| BRIEF descriptors | `cv::ORB::compute` † | 0.639 ms | **0.123 ms** | 5.18× [5.15, 5.22] | 7.167 ms | **0.658 ms** | 10.81× [10.59, 11.17] |
+| Hamming matching, kNN=2 | `cv::BFMatcher` | 9.071 ms | **1.916 ms** | **4.70× [4.65, 4.79]** | 38.187 ms | **19.520 ms** | 1.953× [1.944, 1.972] |
+| FAST, wide image | `cv::FAST` | 0.359 ms | **0.345 ms** | 1.039× [1.033, 1.048] | 2.910 ms | 3.025 ms | 0.962× [0.961, 0.963] |
+| FAST, bit-plane | `cv::FAST` | 265.2 µs | **180.2 µs** | **1.472× [1.470, 1.474]** | 2048.2 µs | **865.8 µs** | **2.365× [2.363, 2.370]** |
+| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` | 13.65 ns/px | **12.09 ns/px** | 1.132× [1.118, 1.145] | 75.29 ns/px | **43.49 ns/px** | **1.731× [1.723, 1.735]** |
+| `cornerSubPix` | `cv::cornerSubPix` | not published | not published | ~13× | 8.595 ms | **0.625 ms** | 13.76× [13.70, 13.80] |
 
-**`cornerSubPix` is the one row here whose measurements did not survive into the
-repository.** The two times were taken and the ratio recorded; the values behind it were
-not, so the cells say so rather than being filled in. `corner_subpix_benchmark` exists and is
-named below, so the remedy is one run — and until that run happens this row is a claim on
-trust where every other row on this page can be checked.
+**`FAST, bit-plane`'s move from 1.50× to 1.472× is the one on this page that is not noise.**
+The runtime switch that makes the vector arm provably off-switchable is read once per image
+row; reverting only that read measures 12.8% faster with the two intervals disjoint, and
+hoisting it out of the row loop keeps the switch and recovers all of it —
+[issue #73](https://github.com/ryanhou28/bincv/issues/73), which would take the row to about
+1.66×. Of the other moves here, `BRIEF` gaining 4.69× → 5.18× is the largest, and a
+refactor that looked like its cause was A/B'd at thirty launches each and is not
+(122,596 ns against 123,834, intervals overlapping) — the old cell was a slow draw.
+**`1/1/1/1` resolves only 1.090× on this host**, so its interval is wide and that row should
+not be read to three digits. [The index](README.md#on-the-x86-64-host) has the whole comparison.
+
+**`cornerSubPix`'s measurements did not survive into the repository, and the device half of
+them now has.** The two times were taken and the ratio recorded; the values behind it were
+not, so the cells said so rather than being filled in. Ten device launches supply them —
+8.595 ms against 0.625, a ratio of 13.76× where 13.70× was published — and the x86-64 half
+is still a claim on trust, because that host has no sweep of this benchmark.
 
 ### Memory
 
@@ -69,27 +87,36 @@ on each side.
 
 | arm | x86-64 (ms) | x86-64 ratio | aarch64 (ms) | aarch64 ratio |
 |---|---|---|---|---|
-| `cv::calcOpticalFlowPyrLK` on the same bits as `CV_8U` | 3.871 | — | 23.476 | — |
-| **binCV, `1/2/2/2` ladder (shipped)** | **0.543** | **7.13×** | **2.843** | **8.26×** |
-| binCV, `1/1/1/1` ladder | 0.136 | **28.53×** | 0.609 | **38.54×** |
+| `cv::calcOpticalFlowPyrLK` on the same bits as `CV_8U` | 3.978 | — | 23.400 | — |
+| **binCV, `1/2/2/2` ladder (shipped)** | **0.5585** | **7.19× [6.89, 7.40]** | **2.838** | **8.227× [8.189, 8.284]** |
+| binCV, `1/1/1/1` ladder | 0.1380 | **29.2× [26.8, 29.9]** | 0.603 | **38.81× [38.50, 39.13]** |
+
+**This is the widest x86-64 interval in these reports, and the row says so.** Thirty launches
+resolve 1.044× on the shipped ladder and only 1.090× on `1/1/1/1`: this host cannot tell
+29× from 31×, so that cell is quoted to three significant figures and no more. Both arms swing
+together — the OpenCV arm's own launches run 3.724 to 8.215 ms — which is why the ratio
+survives what the individual times do not.
 
 Both trackers stop early on their own convergence rules here, so they do not run the same
 number of iterations — the realistic comparison, but it leaves iteration count as a confound.
 Forcing both to twenty iterations (`BINCV_FORCE_ITERS=1`) gives 0.881 ms against OpenCV's
 8.403 for the shipped ladder and 0.194 against the same 8.403 for `1/1/1/1` — 9.54× and
-43.28×. The free-running numbers are the conservative ones and are what is quoted.
+43.28×. **Those three figures are single-launch and were not re-taken**, so they carry the
+uncertainty this page's other x86 numbers no longer do. The free-running numbers are the
+conservative ones and are what is quoted.
 
 Most of the advantage is in setup rather than in the iteration: OpenCV copies a 961-pixel
 window times three shorts, per point, per level, into its own buffers before it iterates.
 binCV reads the bit-planes in place.
 
-**The ladder is the dominant cost on binCV's side**: `1/2/2/2` costs 4.00× on x86 and 4.67×
-on the device over `1/1/1/1`, because the tracker pays roughly `20N²` population counts per
-window row at every level regardless of how small that level is. `1/1/1/1` is faster and
-less accurate; the shipped ladder is the operating point that keeps keypoint yield up.
+**The ladder is the dominant cost on binCV's side**: `1/2/2/2` costs 4.10× [3.89, 4.20] on
+x86 and 4.67× on the device over `1/1/1/1`, because the tracker pays roughly `20N²`
+population counts per window row at every level regardless of how small that level is.
+`1/1/1/1` is faster and less accurate; the shipped ladder is the operating point that keeps
+keypoint yield up.
 
 **This is Lucas–Kanade against Lucas–Kanade.** Wired into a whole pipeline the end-to-end
-figure is 3.30×, and the gap between the two is the honest part of the result — the stages
+figure is 3.66×, and the gap between the two is the honest part of the result — the stages
 around tracking do not have this ratio. See [feature-tracking.md](feature-tracking.md).
 
 ## Descriptors and matching
@@ -98,8 +125,8 @@ around tracking do not have this ratio. See [feature-tracking.md](feature-tracki
 
 | arm | OpenCV, x86-64 (ms) | binCV, x86-64 (ms) | x86-64 ratio | OpenCV, aarch64 (ms) | binCV, aarch64 (ms) | aarch64 ratio |
 |---|---|---|---|---|---|---|
-| describe, against `cv::ORB` † | 0.660 | **0.141** | 4.69× | 6.816 | **0.648** | 10.51× |
-| match, kNN=2 over 1000×1000, against `cv::BFMatcher` | 9.184 | **1.947** | **4.72×** | 38.269 | **19.391** | 1.97× |
+| describe, against `cv::ORB` † | 0.639 | **0.123** | 5.18× [5.15, 5.22] | 7.167 | **0.658** | 10.81× [10.59, 11.17] |
+| match, kNN=2 over 1000×1000, against `cv::BFMatcher` | 9.071 | **1.916** | **4.70× [4.65, 4.79]** | 38.187 | **19.520** | 1.953× [1.944, 1.972] |
 
 Matching suits binCV's thesis most directly — a Hamming distance over 256-bit descriptors is
 four population counts — and it is **the result that transfers worst to the deployment
@@ -115,9 +142,9 @@ tracking pipeline's own frame for the others.
 
 | input | corners | `cv::FAST`, x86-64 | binCV, x86-64 | x86-64 ratio | `cv::FAST`, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
-| `CV_8U`, wide image | 4144 | 0.363 ms | 0.344 ms | 1.05× | 2.906 ms | 3.024 ms | 0.96× |
-| `CV_8U`, the pipeline's own frame | 6724 | 266.2 µs | 262.5 µs | 1.01× | 2054.5 µs | 2051.0 µs | 1.00× |
-| **bit-plane**, same frame | 6724 | 266.2 µs | **177.0 µs** | **1.50×** | 2054.5 µs | **865.3 µs** | **2.37×** |
+| `CV_8U`, wide image | 4144 | 0.359 ms | **0.345 ms** | 1.039× [1.033, 1.048] | 2.910 ms | 3.025 ms | 0.962× [0.961, 0.963] |
+| `CV_8U`, the pipeline's own frame | 6724 | 265.2 µs | **258.8 µs** | 1.024× [1.022, 1.026] | 2048.2 µs | 2052.6 µs | 0.998× [0.997, 1.000] |
+| **bit-plane**, same frame | 6724 | 265.2 µs | **180.2 µs** | **1.472× [1.470, 1.474]** | 2048.2 µs | **865.8 µs** | **2.365× [2.363, 2.370]** |
 
 **Parity on the wide-image entry point is the honest outcome and it ships that way.**
 `cv::FAST` is a mature vectorised kernel, and a caller who is holding bytes should not be
@@ -125,7 +152,7 @@ told to pack them first — for that caller the answer is that binCV matches Ope
 nothing to adopt.
 
 The bit-plane overload is the interesting one. A caller who already has a binary image gets
-1.50× on x86 and **2.37× on the device** on an input of 46,080 bytes against `cv::FAST`'s
+1.47× on x86 and **2.365× on the device** on an input of 46,080 bytes against `cv::FAST`'s
 360,960, bit-exact corner-for-corner with `cv::FAST` in scan order. It is one of the few
 results *better* on the deployment target, and the reason is register pressure: the arc test
 needs sixteen live vectors, and aarch64 has thirty-two vector registers where x86 has sixteen,
@@ -135,14 +162,16 @@ operation.
 
 Scoring is a substantial part of the cost. The bit-plane path chooses per chunk between a
 per-corner transpose and arc masks; sweeping that threshold on x86-64 moves the whole operation
-between 171.9 µs and 189.9 µs against `cv::FAST`'s 266.2 — 1.55× at the fast end, 1.40× at the
-slow one, and 177.0 µs or 1.50× at the shipped adaptive setting. binCV's score is a different
+between 178.4 µs and 202.4 µs against `cv::FAST`'s 265.2 — 1.49× at the fast end, 1.31× with
+the masks switched off entirely, and 180.2 µs or 1.472× at the shipped adaptive setting. The
+whole sweep sits about 4% above where the single-launch log had it, for the reason
+[issue #73](https://github.com/ryanhou28/bincv/issues/73) names. binCV's score is a different
 quantity from OpenCV's — the longest qualifying arc rather than the largest surviving threshold
 — which is why this is Tier 2.
 
 ## Corner detection
 
-**1.72× on the reference device and 1.13× on the desktop, while holding a fifth of the
+**1.73× on the reference device and 1.13× on the desktop, while holding a fifth of the
 memory on both.**
 
 Both spellings, at 640×480, returning the same corners and timed in the same interleaved run.
@@ -152,29 +181,32 @@ including on the last row, where both sides are OpenCV:
 
 | variant | x86-64 (ns/px) | x86-64, denominator ÷ this arm | aarch64 (ns/px) | aarch64, denominator ÷ this arm | working set (B/px) |
 |---|---|---|---|---|---|
-| OpenCV, binarized (the denominator) | 13.67 | — | 74.99 | — | 36.94 |
-| binCV, frame map | 12.03 | **1.14×** | 43.70 | **1.72×** | 16.54 |
-| **binCV, streaming ring (shipped)** | **12.06** | **1.13×** | **43.49** | **1.72×** | **12.56** |
-| `cv::goodFeaturesToTrack` (stock, different numerics) | 8.14 | **1.68×** | 58.31 | **1.29×** | 29.00 |
+| OpenCV, binarized (the denominator) | 13.65 | — | 75.29 | — | 36.94 |
+| binCV, frame map | 12.05 | **1.148× [1.124, 1.166]** | 43.69 | **1.723× [1.716, 1.727]** | 16.54 |
+| **binCV, streaming ring (shipped)** | **12.09** | **1.132× [1.118, 1.145]** | **43.49** | **1.731× [1.723, 1.735]** | **12.56** |
+| `cv::goodFeaturesToTrack` (stock, different numerics) | 8.139 | **1.675× [1.651, 1.705]** | 58.41 | **1.290× [1.278, 1.294]** | 29.00 |
 
-Every cell is a median of whole process launches — seven on the device, thirty on x86-64 —
-rather than one run; why the two counts differ is two paragraphs down.
+Every cell is a median of whole process launches — ten on the device, **sixty** on x86-64,
+two independent thirties pooled — rather than one run; why the two counts differ is two
+paragraphs down.
 
 Agreement is exact against OpenCV: 723 corners against 723, every position matching, worst
 displacement 0.00 px. The two binCV spellings agree corner for corner, which the benchmark
 asserts before it times anything.
 
 **The device numbers are the trustworthy ones, and on x86 a single launch settles nothing.**
-On the device the within-run spread is 0.05–1.11% and seven launches put the ratio between
-1.714× and 1.728×. On the shared x86 box the same thirty launches scatter the *ratio* from
-0.95× to 1.60× — wider than either arm alone, so interleaving the two arms does not cancel
-it. What survives there is the median: 1.13×, with a bootstrap 95% confidence interval of
-1.11–1.15× over the thirty. Quote that interval or nothing; a lone run on this host can
-return almost anything.
+On the device the within-run spread is 0.05–1.11% and ten launches put the ratio between
+1.723× and 1.735×. On the shared x86 box sixty launches scatter the *ratio* from 0.86× to
+1.61× — wider than either arm alone, so interleaving the two arms does not cancel it. What
+survives there is the median: 1.132×, with a bootstrap 95% confidence interval of
+[1.118, 1.145] over the sixty, and 56 of them above 1.00×. Quote that interval or nothing; a
+lone run on this host can return almost anything. The two sweeps behind those sixty were
+taken a fortnight apart and landed 0.4% apart, each interval containing the other's median —
+which is the evidence that the protocol, and not just the row, reproduces.
 
 **The margin is smaller on the desktop because the desktop's denominator is the faster one.**
 binCV's code is identical in both columns. Stock `cv::goodFeaturesToTrack` runs at 1.68× the
-binarized pipeline on x86-64 and 1.29× on the device, so OpenCV's x86 build is the one
+binarized pipeline on x86-64 and 1.290× on the device, so OpenCV's x86 build is the one
 getting more out of its machine — a property of the two OpenCV builds, not of binCV.
 
 ### This row has been corrected twice
@@ -189,7 +221,7 @@ were recorded at commit `05ce58f`, before the response sweep's tail was rewritte
 eight pixels at a time; the page carried a note calling them conservative and the note stood.
 Rebuilt and run today in the same harness, that commit's kernel measures 51.93 ns/pixel on
 the device and puts the ratio back at 1.45× — the published number, reproduced — against the
-shipped kernel's 43.49 and 1.72×. The denominator moved 0.8%, so the whole of the difference
+shipped kernel's 43.49 and 1.731×. The denominator moved 0.8%, so the whole of the difference
 is binCV's arm. **The split the previous version of this page called genuine was not one.**
 
 On x86-64 the same rebuild separates two causes the old row had fused. That commit's kernel,
@@ -203,7 +235,7 @@ The two kernels return the same answer, which is what makes that a speed compari
 the response map is bit-identical and the corner list matches in position, order and value
 over the benchmark's four frames, on both architectures. The footprint was never in question
 — 28 bytes per pixel against binCV's 5.14 at the measured survivor count. Detection is
-11.5–14.6% of the assembled pipeline at [that benchmark's](feature-tracking.md) duty cycle,
+11.5–13.6% of the assembled pipeline at [that benchmark's](feature-tracking.md) duty cycle,
 so the end-to-end cost either way is small.
 
 ## Reproduce
@@ -214,11 +246,14 @@ BINCV_FORCE_ITERS=1 ./build/benchmark/lk_headtohead
 ./build/benchmark/feature_benchmark              # FAST, BRIEF, matching
 ./build/benchmark/fast_bitplane_benchmark        # FAST on a bit-plane
 ./build/benchmark/corner_opencv_benchmark        # goodFeaturesToTrack
-./build/benchmark/corner_subpix_benchmark        # cornerSubPix; the ratio-only row above
+./build/benchmark/corner_subpix_benchmark        # cornerSubPix
 ```
 
-All five are self-contained. Logs:
-[optical flow](logs/lk_headtohead-x86_64.log), [aarch64](logs/lk_headtohead-aarch64.log) ·
-[features](logs/features-x86_64.log), [aarch64](logs/features-aarch64.log) ·
-[bit-plane FAST](logs/fast_bitplane-x86_64.log), [aarch64](logs/fast_bitplane-aarch64.log) ·
-[goodFeaturesToTrack](logs/goodfeatures-x86_64.log), [aarch64](logs/goodfeatures-aarch64.log)
+All five are self-contained. Each column above is `./scripts/run_launches.sh -n <N> <binary>`
+read back through `./scripts/aggregate_launches.py` — thirty launches on x86-64, ten on the
+device. Logs — the sweep behind each column, and the single launch each replaced:
+[optical flow](logs/lk_headtohead-x86_64-launches.log), [single](logs/lk_headtohead-x86_64.log), [aarch64](logs/lk_headtohead-aarch64-launches.log), [single](logs/lk_headtohead-aarch64.log) ·
+[features](logs/features-x86_64-launches.log), [single](logs/features-x86_64.log), [aarch64](logs/feature-aarch64-launches.log), [single](logs/features-aarch64.log) ·
+[bit-plane FAST](logs/fast_bitplane-x86_64-launches.log), [single](logs/fast_bitplane-x86_64.log), [aarch64](logs/fast_bitplane-aarch64-launches.log), [single](logs/fast_bitplane-aarch64.log) ·
+[goodFeaturesToTrack](logs/goodfeatures-x86_64-launches.log), [first thirty](logs/goodfeatures-x86_64.log), [aarch64](logs/goodfeatures-aarch64-launches.log), [single](logs/goodfeatures-aarch64.log) ·
+[cornerSubPix](logs/corner_subpix-aarch64-launches.log) — aarch64 only

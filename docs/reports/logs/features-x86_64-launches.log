@@ -1,0 +1,657 @@
+# launch sweep -- 30 separate processes of one benchmark
+# benchmark: ./build/benchmark/feature_benchmark 
+# launches: 30
+# arch:     x86_64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   05ab53c
+# governor: none (this host exposes no cpufreq)
+# pinning:  taskset -c 2
+# sleep between launches: 0s
+# date:     2026-09-21T14:56:44-07:00
+# loadavg at start: 3.01 6.12 5.18 4/1313 31136
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 343487.0        1.03x
+ FAST cv::FAST                              354841.7             
+ describe binCV BRIEF                       123536.6        5.04x
+ describe cv::ORB (does more)               622092.9             
+ match kNN=2 binCV                         1891060.0        4.89x
+ match kNN=2 cv::BFMatcher                 9253078.2             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17329762
+### run 2
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 341424.9        1.08x
+ FAST cv::FAST                              367690.7             
+ describe binCV BRIEF                       128581.4        5.29x
+ describe cv::ORB (does more)               680579.0             
+ match kNN=2 binCV                         1955123.8        4.47x
+ match kNN=2 cv::BFMatcher                 8743681.1             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17789824
+### run 3
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 341921.6        1.03x
+ FAST cv::FAST                              351785.5             
+ describe binCV BRIEF                       120070.9        5.33x
+ describe cv::ORB (does more)               640217.9             
+ match kNN=2 binCV                         1994107.9        4.41x
+ match kNN=2 cv::BFMatcher                 8796994.2             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 18192646
+### run 4
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 340026.0        1.03x
+ FAST cv::FAST                              350479.2             
+ describe binCV BRIEF                       125306.7        5.25x
+ describe cv::ORB (does more)               658117.0             
+ match kNN=2 binCV                         1935540.4        4.54x
+ match kNN=2 cv::BFMatcher                 8778575.1             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 18109054
+### run 5
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 336589.0        1.05x
+ FAST cv::FAST                              352878.8             
+ describe binCV BRIEF                       122415.7        5.18x
+ describe cv::ORB (does more)               633754.3             
+ match kNN=2 binCV                         1871438.1        4.70x
+ match kNN=2 cv::BFMatcher                 8794108.8             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17641342
+### run 6
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 345734.8        1.02x
+ FAST cv::FAST                              351463.4             
+ describe binCV BRIEF                       122823.5        5.29x
+ describe cv::ORB (does more)               649825.6             
+ match kNN=2 binCV                         1937695.2        4.65x
+ match kNN=2 cv::BFMatcher                 9008406.6             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17163730
+### run 7
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 339582.2        1.05x
+ FAST cv::FAST                              355680.3             
+ describe binCV BRIEF                       121032.1        5.13x
+ describe cv::ORB (does more)               620653.5             
+ match kNN=2 binCV                         2022364.4        4.49x
+ match kNN=2 cv::BFMatcher                 9075564.4             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17468560
+### run 8
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 347715.7        1.04x
+ FAST cv::FAST                              360583.2             
+ describe binCV BRIEF                       124231.6        5.18x
+ describe cv::ORB (does more)               642927.5             
+ match kNN=2 binCV                         1905105.2        4.66x
+ match kNN=2 cv::BFMatcher                 8885529.8             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 16997428
+### run 9
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 345317.4        1.04x
+ FAST cv::FAST                              359385.2             
+ describe binCV BRIEF                       121990.3        5.18x
+ describe cv::ORB (does more)               632093.4             
+ match kNN=2 binCV                         1973529.5        4.41x
+ match kNN=2 cv::BFMatcher                 8701935.8             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 18131108
+### run 10
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 344817.5        1.07x
+ FAST cv::FAST                              369783.7             
+ describe binCV BRIEF                       122938.4        5.13x
+ describe cv::ORB (does more)               630527.8             
+ match kNN=2 binCV                         1991083.2        4.71x
+ match kNN=2 cv::BFMatcher                 9376480.2             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 18621926
+### run 11
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 348486.5        1.03x
+ FAST cv::FAST                              358548.3             
+ describe binCV BRIEF                       120756.8        5.21x
+ describe cv::ORB (does more)               628682.0             
+ match kNN=2 binCV                         1881967.0        4.65x
+ match kNN=2 cv::BFMatcher                 8755308.2             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 18446014
+### run 12
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 338684.1        1.06x
+ FAST cv::FAST                              359423.7             
+ describe binCV BRIEF                       130744.1        4.86x
+ describe cv::ORB (does more)               635595.1             
+ match kNN=2 binCV                         1902959.8        4.62x
+ match kNN=2 cv::BFMatcher                 8799773.8             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17312914
+### run 13
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 353795.8        1.05x
+ FAST cv::FAST                              370011.7             
+ describe binCV BRIEF                       133725.6        4.61x
+ describe cv::ORB (does more)               616611.6             
+ match kNN=2 binCV                         1919635.4        4.93x
+ match kNN=2 cv::BFMatcher                 9455662.0             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17468560
+### run 14
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 342345.3        1.08x
+ FAST cv::FAST                              369773.0             
+ describe binCV BRIEF                       134590.6        4.99x
+ describe cv::ORB (does more)               671340.8             
+ match kNN=2 binCV                         1926203.4        4.68x
+ match kNN=2 cv::BFMatcher                 9010492.7             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 18029062
+### run 15
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 339272.3        1.07x
+ FAST cv::FAST                              364664.3             
+ describe binCV BRIEF                       119810.2        5.17x
+ describe cv::ORB (does more)               619431.1             
+ match kNN=2 binCV                         1869891.1        4.99x
+ match kNN=2 cv::BFMatcher                 9332296.9             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 16378678
+### run 16
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 339576.1        1.05x
+ FAST cv::FAST                              355930.2             
+ describe binCV BRIEF                       120547.0        5.85x
+ describe cv::ORB (does more)               704740.6             
+ match kNN=2 binCV                         1961375.6        4.78x
+ match kNN=2 cv::BFMatcher                 9381913.8             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17989786
+### run 17
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 344642.2        1.05x
+ FAST cv::FAST                              361080.7             
+ describe binCV BRIEF                       123207.3        5.08x
+ describe cv::ORB (does more)               625320.0             
+ match kNN=2 binCV                         1957721.4        4.63x
+ match kNN=2 cv::BFMatcher                 9066933.8             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17632936
+### run 18
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 342898.5        1.07x
+ FAST cv::FAST                              367422.7             
+ describe binCV BRIEF                       120397.1        5.22x
+ describe cv::ORB (does more)               628792.9             
+ match kNN=2 binCV                         2004297.1        4.70x
+ match kNN=2 cv::BFMatcher                 9420416.2             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 18245314
+### run 19
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 345306.3        1.02x
+ FAST cv::FAST                              352628.1             
+ describe binCV BRIEF                       123387.4        5.21x
+ describe cv::ORB (does more)               642308.8             
+ match kNN=2 binCV                         1899405.0        4.82x
+ match kNN=2 cv::BFMatcher                 9146927.0             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17926318
+### run 20
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 343618.7        1.03x
+ FAST cv::FAST                              355197.4             
+ describe binCV BRIEF                       121878.2        5.26x
+ describe cv::ORB (does more)               641406.5             
+ match kNN=2 binCV                         1979986.2        4.45x
+ match kNN=2 cv::BFMatcher                 8804778.0             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 18341406
+### run 21
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 344713.8        1.04x
+ FAST cv::FAST                              357745.8             
+ describe binCV BRIEF                       128707.5        4.95x
+ describe cv::ORB (does more)               637442.1             
+ match kNN=2 binCV                         1915195.7        5.16x
+ match kNN=2 cv::BFMatcher                 9877288.4             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 16829362
+### run 22
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 346532.1        1.04x
+ FAST cv::FAST                              359934.8             
+ describe binCV BRIEF                       121395.7        5.21x
+ describe cv::ORB (does more)               632707.3             
+ match kNN=2 binCV                         1881376.3        4.77x
+ match kNN=2 cv::BFMatcher                 8982744.1             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 16095070
+### run 23
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 344601.7        1.06x
+ FAST cv::FAST                              366158.8             
+ describe binCV BRIEF                       120334.7        5.37x
+ describe cv::ORB (does more)               645984.0             
+ match kNN=2 binCV                         1917183.3        4.67x
+ match kNN=2 cv::BFMatcher                 8954559.9             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 18048448
+### run 24
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 366035.1        0.98x
+ FAST cv::FAST                              357804.1             
+ describe binCV BRIEF                       122830.6        5.16x
+ describe cv::ORB (does more)               633995.1             
+ match kNN=2 binCV                         1912367.8        4.94x
+ match kNN=2 cv::BFMatcher                 9447485.5             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 16452478
+### run 25
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 358924.2        1.02x
+ FAST cv::FAST                              365889.6             
+ describe binCV BRIEF                       130586.4        5.15x
+ describe cv::ORB (does more)               673135.6             
+ match kNN=2 binCV                         1912499.3        4.81x
+ match kNN=2 cv::BFMatcher                 9205858.4             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17884864
+### run 26
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 343285.2        1.02x
+ FAST cv::FAST                              349902.3             
+ describe binCV BRIEF                       126210.8        4.93x
+ describe cv::ORB (does more)               621958.1             
+ match kNN=2 binCV                         1912706.1        4.62x
+ match kNN=2 cv::BFMatcher                 8830106.5             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 18291610
+### run 27
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 346381.6        1.04x
+ FAST cv::FAST                              361650.7             
+ describe binCV BRIEF                       124923.4        5.18x
+ describe cv::ORB (does more)               646914.3             
+ match kNN=2 binCV                         1954896.7        4.79x
+ match kNN=2 cv::BFMatcher                 9355079.6             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17844670
+### run 28
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 347414.1        1.04x
+ FAST cv::FAST                              361356.1             
+ describe binCV BRIEF                       124256.1        5.22x
+ describe cv::ORB (does more)               648664.8             
+ match kNN=2 binCV                         1892355.4        4.87x
+ match kNN=2 cv::BFMatcher                 9208773.4             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 16961878
+### run 29
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 341181.2        1.03x
+ FAST cv::FAST                              351635.1             
+ describe binCV BRIEF                       122205.4        5.29x
+ describe cv::ORB (does more)               646038.5             
+ match kNN=2 binCV                         1910035.0        4.79x
+ match kNN=2 cv::BFMatcher                 9146124.1             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 17513380
+### run 30
+=== descriptors, matching and FAST ===
+ 752x480, FAST threshold 40, 256-bit descriptors, OpenCV at 1 thread
+
+ detections: binCV 4144, cv::FAST 4144 (1.1% of pixels)
+
+ arm                                        ns/frame    vs OpenCV
+ FAST binCV                                 346700.6        1.03x
+ FAST cv::FAST                              358805.2             
+ describe binCV BRIEF                       126201.3        5.14x
+ describe cv::ORB (does more)               648923.9             
+ match kNN=2 binCV                         1887135.2        4.86x
+ match kNN=2 cv::BFMatcher                 9177451.4             
+
+ 1000 keypoints described and matched.
+ cv::ORB::compute ALSO computes orientation and rotates its pattern per
+ keypoint, so that row is not a like-for-like comparison and is not a
+ claim. FAST and matching are.
+
+ sink 14933728
+
+# loadavg at end: 2.35 4.73 4.79 1/1314 1783
+# date:     2026-09-21T14:58:58-07:00
+# done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio match kNN=2 cv::BFMatcher/match kNN=2 binCV) ----
+# 30 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                 n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# t1 / FAST binCV                    30   344622.0   336589.0   366035.1  1.087     8.5%      --  [342621.9, 345526.1]   0.42%   1.006x
+# t1 / FAST cv::FAST                 30   359095.2   349902.3   370011.7  1.057     5.6%      --  [355805.2, 361218.4]   0.75%   1.009x
+# t1 / describe binCV BRIEF          30   123072.9   119810.2   134590.6  1.123    12.0%      --  [122097.9, 124589.8]   1.01%   1.012x
+# t1 / describe cv::ORB (does more)  30   638830.0   616611.6   704740.6  1.143    13.8%      --  [632400.4, 646011.2]   1.07%   1.011x
+# t1 / match kNN=2 binCV             30  1916189.5  1869891.1  2022364.4  1.082     8.0%      --  [1907570.1, 1946295.9]   1.01%   1.016x
+# t1 / match kNN=2 cv::BFMatcher     30  9071249.1  8701935.8  9877288.4  1.135    13.0%      --  [8920044.9, 9207315.9]   1.58%   1.017x
+# 
+# RATIO  match kNN=2 cv::BFMatcher  /  match kNN=2 binCV   over 30 launches
+#   paired per launch (the published estimator)
+#     median 4.6996   min 4.4093   max 5.1573   scatter 15.9%
+#     bootstrap 95% CI of the median: [4.6506, 4.7885]   +/- 1.47%
+#     launches with the ratio above 1.00: 30 of 30
+#     smallest resolvable difference at 30 launches: 1.019x
+#   ratio of the two medians, same launches
+#     point 4.7340   bootstrap 95% CI: [4.6296, 4.8117]
+#     the two intervals differ by 0.45% and 0.49% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     t1       detections: binCV 4144, cv::FAST 4144 (1.1% of pixels) | arm  ns/frame  vs OpenCV

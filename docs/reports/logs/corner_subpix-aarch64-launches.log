@@ -1,0 +1,154 @@
+# launch sweep -- 10 separate processes of one benchmark
+# benchmark: ./build-pi/benchmark/corner_subpix_benchmark 
+# launches: 10
+# arch:     aarch64
+# host:     Raspberry Pi 4 Model B Rev 1.5
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# commit:   80ff0a8
+# governor: performance
+# throttled before: throttled=0x80000
+# temp before: temp=64.2'C
+# pinning:  taskset -c 3
+# sleep between launches: 0s
+# date:     2026-09-21T16:56:01-07:00
+# loadavg at start: 1.04 1.03 0.95 1/308 916865
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+=== cornerSubPix vs cv::cornerSubPix (role), 752x480, 140 corners ===
+ mean |ours - cv| after refining the same seeds: 1.6869 px
+ (different gradients by design -- ternary vs Sobel-like; the test
+  suite owns exactness against the shared refinement rule)
+
+ bincv::cornerSubPix (ternary derivs)        0.625 ms  spread 0%
+ cv::cornerSubPix (8-bit image)              8.627 ms  spread 0%
+
+ ratio 13.80x  (>1 means binCV is faster)
+ working sets: binCV reads the pipeline's existing ternary planes, no
+ allocation in the kernel; cv reweights from the 8-bit frame per call.
+ sink 83236
+### run 2
+=== cornerSubPix vs cv::cornerSubPix (role), 752x480, 140 corners ===
+ mean |ours - cv| after refining the same seeds: 1.6869 px
+ (different gradients by design -- ternary vs Sobel-like; the test
+  suite owns exactness against the shared refinement rule)
+
+ bincv::cornerSubPix (ternary derivs)        0.625 ms  spread 0%
+ cv::cornerSubPix (8-bit image)              8.604 ms  spread 0%
+
+ ratio 13.78x  (>1 means binCV is faster)
+ working sets: binCV reads the pipeline's existing ternary planes, no
+ allocation in the kernel; cv reweights from the 8-bit frame per call.
+ sink 84469
+### run 3
+=== cornerSubPix vs cv::cornerSubPix (role), 752x480, 140 corners ===
+ mean |ours - cv| after refining the same seeds: 1.6869 px
+ (different gradients by design -- ternary vs Sobel-like; the test
+  suite owns exactness against the shared refinement rule)
+
+ bincv::cornerSubPix (ternary derivs)        0.624 ms  spread 0%
+ cv::cornerSubPix (8-bit image)              8.549 ms  spread 0%
+
+ ratio 13.69x  (>1 means binCV is faster)
+ working sets: binCV reads the pipeline's existing ternary planes, no
+ allocation in the kernel; cv reweights from the 8-bit frame per call.
+ sink 83236
+### run 4
+=== cornerSubPix vs cv::cornerSubPix (role), 752x480, 140 corners ===
+ mean |ours - cv| after refining the same seeds: 1.6869 px
+ (different gradients by design -- ternary vs Sobel-like; the test
+  suite owns exactness against the shared refinement rule)
+
+ bincv::cornerSubPix (ternary derivs)        0.625 ms  spread 0%
+ cv::cornerSubPix (8-bit image)              8.551 ms  spread 1%
+
+ ratio 13.68x  (>1 means binCV is faster)
+ working sets: binCV reads the pipeline's existing ternary planes, no
+ allocation in the kernel; cv reweights from the 8-bit frame per call.
+ sink 84469
+### run 5
+=== cornerSubPix vs cv::cornerSubPix (role), 752x480, 140 corners ===
+ mean |ours - cv| after refining the same seeds: 1.6869 px
+ (different gradients by design -- ternary vs Sobel-like; the test
+  suite owns exactness against the shared refinement rule)
+
+ bincv::cornerSubPix (ternary derivs)        0.625 ms  spread 0%
+ cv::cornerSubPix (8-bit image)              8.640 ms  spread 0%
+
+ ratio 13.82x  (>1 means binCV is faster)
+ working sets: binCV reads the pipeline's existing ternary planes, no
+ allocation in the kernel; cv reweights from the 8-bit frame per call.
+ sink 84469
+### run 6
+=== cornerSubPix vs cv::cornerSubPix (role), 752x480, 140 corners ===
+ mean |ours - cv| after refining the same seeds: 1.6869 px
+ (different gradients by design -- ternary vs Sobel-like; the test
+  suite owns exactness against the shared refinement rule)
+
+ bincv::cornerSubPix (ternary derivs)        0.624 ms  spread 0%
+ cv::cornerSubPix (8-bit image)              8.594 ms  spread 0%
+
+ ratio 13.77x  (>1 means binCV is faster)
+ working sets: binCV reads the pipeline's existing ternary planes, no
+ allocation in the kernel; cv reweights from the 8-bit frame per call.
+ sink 84469
+### run 7
+=== cornerSubPix vs cv::cornerSubPix (role), 752x480, 140 corners ===
+ mean |ours - cv| after refining the same seeds: 1.6869 px
+ (different gradients by design -- ternary vs Sobel-like; the test
+  suite owns exactness against the shared refinement rule)
+
+ bincv::cornerSubPix (ternary derivs)        0.626 ms  spread 0%
+ cv::cornerSubPix (8-bit image)              8.543 ms  spread 0%
+
+ ratio 13.65x  (>1 means binCV is faster)
+ working sets: binCV reads the pipeline's existing ternary planes, no
+ allocation in the kernel; cv reweights from the 8-bit frame per call.
+ sink 84469
+### run 8
+=== cornerSubPix vs cv::cornerSubPix (role), 752x480, 140 corners ===
+ mean |ours - cv| after refining the same seeds: 1.6869 px
+ (different gradients by design -- ternary vs Sobel-like; the test
+  suite owns exactness against the shared refinement rule)
+
+ bincv::cornerSubPix (ternary derivs)        0.625 ms  spread 0%
+ cv::cornerSubPix (8-bit image)              8.596 ms  spread 1%
+
+ ratio 13.75x  (>1 means binCV is faster)
+ working sets: binCV reads the pipeline's existing ternary planes, no
+ allocation in the kernel; cv reweights from the 8-bit frame per call.
+ sink 84469
+### run 9
+=== cornerSubPix vs cv::cornerSubPix (role), 752x480, 140 corners ===
+ mean |ours - cv| after refining the same seeds: 1.6869 px
+ (different gradients by design -- ternary vs Sobel-like; the test
+  suite owns exactness against the shared refinement rule)
+
+ bincv::cornerSubPix (ternary derivs)        0.625 ms  spread 2%
+ cv::cornerSubPix (8-bit image)              8.587 ms  spread 0%
+
+ ratio 13.74x  (>1 means binCV is faster)
+ working sets: binCV reads the pipeline's existing ternary planes, no
+ allocation in the kernel; cv reweights from the 8-bit frame per call.
+ sink 84469
+### run 10
+=== cornerSubPix vs cv::cornerSubPix (role), 752x480, 140 corners ===
+ mean |ours - cv| after refining the same seeds: 1.6869 px
+ (different gradients by design -- ternary vs Sobel-like; the test
+  suite owns exactness against the shared refinement rule)
+
+ bincv::cornerSubPix (ternary derivs)        0.628 ms  spread 0%
+ cv::cornerSubPix (8-bit image)              8.672 ms  spread 0%
+
+ ratio 13.82x  (>1 means binCV is faster)
+ working sets: binCV reads the pipeline's existing ternary planes, no
+ allocation in the kernel; cv reweights from the 8-bit frame per call.
+ sink 83236
+
+# loadavg at end: 1.03 1.03 0.95 1/308 916905
+# throttled after: throttled=0x80000
+# temp after: temp=63.7'C
+# date:     2026-09-21T16:56:10-07:00
+# done

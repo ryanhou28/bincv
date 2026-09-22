@@ -39,8 +39,50 @@ other work on it. Seven launches there can return almost any answer; thirty put 
 for every row, it is that **a host's resolution has to be measured before the row is quoted,
 and quoted with it** — see [features.md](features.md#corner-detection), where that is done.
 
-That test decides whether the *size* of a difference clears the noise. It does not decide
-whether the *sign* is settled, and on one row the two came apart.
+## The protocol each host needs
+
+**A single-launch x86-64 figure is not publishable here.** Every x86-64 number in these
+reports is the **median of thirty pinned launches**, with a percentile bootstrap 95% interval
+on that median (10,000 resamples, seed 12345) and each ratio formed *inside* a launch before
+the median is taken — so a ratio is not the quotient of the two times printed beside it.
+`scripts/run_launches.sh` takes the launches, `scripts/aggregate_launches.py` reads them, and
+every sweep is committed as `logs/*-x86_64-launches.log` with its aggregate appended. A
+ratio is quoted to the digits its interval separates and no further.
+
+**Thirty is this host's price, not a project-wide bar.** `--ladder` resamples the launches
+already taken to say what a shorter sweep would have said: on the corner row one launch
+resolves nothing at all (±32%), ten resolve 1.053×, thirty 1.026×. What thirty launches
+resolve is a **per-row** figure the aggregate prints as `minres`, and across the rows here it
+ranges from 1.002× to 1.090×. A row whose `minres` exceeds the difference being claimed does
+not support that claim, however many digits its median has.
+
+**An interval is over the launches that were taken.** It is not a bound on what a different
+thirty will say, and that was tested rather than assumed: seven rows were re-swept from
+scratch on a busier machine before any figure here was adopted
+([logs/README.md](logs/README.md#the-repeats-and-what-they-showed)). Six landed inside the
+first sweep's interval; `bitwiseNot`'s repeat landed 0.7% above the top of it, with the two
+intervals still overlapping. Read a quoted interval as the resolution of one sweep, and a
+difference near its edge as unsettled until a second sweep agrees.
+
+**aarch64 is quoted from ten pinned launches, governor locked to `performance` and restored
+after.** Ten rather than thirty because the device resolves far more per launch: `--ladder` on
+the corner row there resolves **1.008× at one launch and 1.005× at ten**, where the same row
+on x86-64 resolves nothing at one (±32%) and 1.026× at thirty. Ten was chosen to cover every
+published row rather than a few rows deeply, because the question the device sweep answers is
+whether a figure is still *true*, which shows up in the first launch, and not how finely it
+can be split. `minres` is still per-row and still printed: the loosest row behind a published
+device figure resolves 1.065×, not 1.005×.
+
+**One launch was enough there for three rounds, and the claim behind that was read from one
+row.** `goodFeaturesToTrack` does hold 0.05–1.18% within a run and 0.1–0.8% across launches.
+The logic and reduction rows do not: binCV's 640×480 `bitwiseAnd` arm scatters **16.9%**
+across ten launches, because a 38 KB packed plane's cache residency is set per launch by the
+allocator, while the 307 KB OpenCV arm never fits and scatters 4.0%. Above L2 — 8192×4096 —
+both settle to about 2%. A host's resolution is a property of the row as much as the machine,
+which is the rule stated two paragraphs up, applied to the device this time.
+
+The difference-against-spread test decides whether the *size* of a difference clears the
+noise. It does not decide whether the *sign* is settled, and on one row the two came apart.
 
 ## The spread bounds the magnitude, not the direction
 
