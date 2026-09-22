@@ -36,12 +36,11 @@ architectures — AVX2 against AVX2, NEON against NEON — and the run prints bo
 **x86-64 and aarch64 are separate columns everywhere on this page.** They are different
 measurements against different OpenCV builds on different machines, and are never averaged.
 
-**On this page the two columns are also of different code.** The x86-64 figures are thirty
-pinned launches taken after the [2026-09-06 change to one pyramid build per
-frame](#addendum-2026-09-06-one-pyramid-build-per-frame); the aarch64 figures predate it and
-are a single pinned launch. Each column is internally consistent and neither stands in for
-the other — which was already true across the two machines and is now true across a commit
-as well.
+**Both columns are now of the same code.** The x86-64 figures are thirty pinned launches and
+the aarch64 figures five, both taken at commit `80ff0a8`, after the [2026-09-06 change to one
+pyramid build per frame](#addendum-2026-09-06-one-pyramid-build-per-frame). The aarch64
+column used to predate that change and to be a single launch; re-taking it is what found the
+regression the next section describes.
 
 ## Speed
 
@@ -52,14 +51,21 @@ pipeline.
 
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|
-| the assembled pipeline, ms/frame | 3.7275 | **1.0215** | **3.658× [3.633, 3.681]** | 23.249–23.451 | **4.906–4.949** | **4.73×** |
+| the assembled pipeline, ms/frame | 3.7275 | **1.0215** | **3.658× [3.633, 3.681]** | 23.588 | **5.097** | **4.620× [4.596, 4.628]** |
 
-The x86-64 cells are medians of thirty pinned launches and the ratio is formed inside each
-launch, above 1.00 in 30 of 30; the interval is a percentile bootstrap over the thirty.
-The aarch64 ratio is the conservative one of three device runs, 4.73× to 4.74×. Almost all
-of the x86 scatter is OpenCV's — its arm's launches run 3.622 to 4.919 ms while binCV's run
-0.991 to 1.217. The device's 0.2% spread against the desktop's 13% is what a pinned,
-governor-locked machine buys, and it is why one launch is quoted there and thirty here.
+Both ratios are formed inside each launch and are medians of those per-launch ratios, above
+1.00 in 30 of 30 on x86-64 and 5 of 5 on the device; each interval is a percentile bootstrap
+over its own launches. Almost all of the x86 scatter is OpenCV's — its arm's launches run
+3.622 to 4.919 ms while binCV's run 0.991 to 1.217. The device's 0.6% ratio scatter against
+the desktop's 13% is what a pinned, governor-locked machine buys, and it is why five launches
+are quoted there and thirty here.
+
+**The aarch64 row was 4.73× and it is 4.620×, and that is a regression rather than noise.**
+It is the one published figure the device re-measurement moved beyond its own band, and the
+stage table below says where: **every stage but one got faster, `pyrDown` by half, and the
+pipeline still got slower** — because Lucas–Kanade is three quarters of it and grew 14.5%.
+An independent five-launch sweep taken separately reads 4.616× [4.611, 4.637], so the two
+sweeps agree and the published 4.73× is outside both.
 
 **An independent sweep agrees.** The `BINCV_LK_BATCH=1` arm in
 [limits.md](limits.md#the-vector-arms-and-proving-they-are-on) is the same pipeline in a
@@ -68,12 +74,14 @@ overlapping.
 
 **The reference device is where binCV does better**, and it is the deployment-class part.
 
-Re-verified on aarch64 after the corner-sweep and census optimizations landed: binCV 6.17
-ms/frame against OpenCV's 29.3 at 120 frames — **4.76×**, unchanged within spread. (Absolute
-ms/frame differ from the table because frame count and warm-up differ; the ratio is the
-claim.) The detect stage itself runs 12% faster (0.336 → 0.295 ms/frame), but at this
-sequence's 1.7% re-detection duty cycle that amortizes to under 1% of the whole pipeline — the
-duty-cycle dependence issue #7 records.
+It was re-verified on aarch64 once before, after the corner-sweep and census optimizations
+landed, at 120 frames rather than 1709: binCV 6.17 ms/frame against OpenCV's 29.3 —
+**4.76×**, read as unchanged. **The full-sequence re-take above supersedes that**, and the
+disagreement is the useful part: a 120-frame check with its own warm-up was not a fine enough
+instrument to see a 2.3% move in the ratio, and it was quoted as if it were. The detect-stage
+figure from that check stands on its own terms — 12% faster, 0.336 to 0.295 ms/frame — and at
+this sequence's 1.7% re-detection duty cycle it amortizes to under 1% of the whole pipeline,
+the duty-cycle dependence issue #7 records.
 
 ## Memory
 
@@ -94,20 +102,40 @@ total:
 
 | stage | time, x86-64 (ms/frame) | share of the x86-64 pipeline | time, aarch64 (ms/frame) | share of the aarch64 pipeline |
 |---|---|---|---|---|
-| track (Lucas–Kanade) | 0.704 | 68.9% | 3.307 | 66.8% |
-| build (pyramid + derivatives) | 0.181 | 17.7% | 1.072 | 21.7% |
-| — sensor stage | 0.086 | 8.4% | 0.543 | 11.0% |
-| — `pyrDown` | 0.057 | 5.6% | 0.377 | 7.6% |
-| — derivatives | 0.038 | 3.7% | 0.149 | 3.0% |
-| detect | 0.139 | 13.6% | 0.570 | 11.5% |
+| track (Lucas–Kanade) | 0.704 | 68.9% | 3.787 | 74.3% |
+| build (pyramid + derivatives) | 0.181 | 17.7% | 0.860 | 16.9% |
+| — sensor stage | 0.086 | 8.4% | 0.519 | 10.2% |
+| — `pyrDown` | 0.057 | 5.6% | 0.189 | 3.7% |
+| — derivatives | 0.038 | 3.7% | 0.150 | 2.9% |
+| detect | 0.139 | 13.6% | 0.457 | 9.0% |
 
 Tracking dominates on both, so the operations that move this number are the ones inside the
 Lucas–Kanade loop rather than the ones with the largest per-operation ratios: `pyrDown` is
-5.6% of the x86 pipeline after the one-build-per-frame change, and an infinite speedup on it
-would now be worth about 1.06×. The aarch64 column still carries the double build, which is
-where most of the difference between the two `pyrDown` shares comes from; on every other
-stage the two architectures spend their time within five points of each other, so nothing
-here is bottlenecked on anything architecture-specific.
+5.6% of the x86 pipeline and 3.7% of the device's, and an infinite speedup on it would now be
+worth about 1.06× on either. Both columns now carry the one-build-per-frame change, so the
+two `pyrDown` shares finally describe the same code; on every other stage the two
+architectures spend their time within five points of each other, so nothing here is
+bottlenecked on anything architecture-specific.
+
+**What the device column moved, stage by stage**, against the same table at commit `25065d7`:
+
+| stage | published | re-taken at `80ff0a8` | |
+|---|---|---|---|
+| — `pyrDown` | 0.377 | **0.189** | −49.9% |
+| build | 1.072 | 0.860 | −19.8% |
+| detect | 0.570 | **0.457** | −19.8% |
+| — sensor stage | 0.543 | 0.519 | −4.4% |
+| **track (Lucas–Kanade)** | **3.307** | **3.787** | **+14.5%** |
+| **the pipeline** | **4.906–4.949** | **5.097** | **+3.0 to +3.9%** |
+
+**Lucas–Kanade's own kernel is not what regressed.** `lk_headtohead` on the same commit is
+flat — 2.843 ms to 2.838, and OpenCV's arm 23.476 to 23.400 — so the 14.5% is in what the
+pipeline hands the tracker rather than in the tracker. `pyrDown` halving over the same
+interval is the obvious place to look and the pyramid it produces is what LK reads, but
+nothing here measures that link, and naming a cause this page has not measured is how a
+figure like 4.73× survived three weeks in the first place. The workload is identical on both
+sides of the comparison: 1710 frames, 1709 pairs, 82 re-detections, the same track lifetimes,
+and a peak of 436,704 B exactly as published.
 
 ## Accuracy
 
@@ -219,6 +247,8 @@ way to produce a wrong ratio here.
 Logs: [x86-64, thirty launches](logs/feature-tracking-x86_64-launches.log) ·
 [x86-64, the single run it replaced](logs/feature-tracking-x86_64.log) ·
 [x86 repeats](logs/feature-tracking-repeats-x86_64.log) ·
-[aarch64](logs/feature-tracking-aarch64.log) ·
+[aarch64, five launches](logs/feature-tracking-aarch64-launches.log) ·
+[aarch64, the independent sweep that confirms them](logs/feature-tracking-spotcheck-aarch64-launches.log) ·
+[aarch64, the single run they replaced](logs/feature-tracking-aarch64.log) ·
 [device repeats](logs/feature-tracking-repeats-aarch64.log) ·
 [threading](logs/feature-tracking-threads-x86_64.log)

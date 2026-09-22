@@ -7,8 +7,30 @@ and they are not interchangeable.
 |---|---|
 | `<bench>-x86_64-launches.log` | **thirty separate pinned process launches** of one benchmark, with the aggregate appended as a comment block. This is what an x86-64 figure in the reports is. |
 | `<bench>-x86_64.log` | the **single launch** that figure used to be. Kept, not deleted — a number that moved should be checkable against the reading it replaced. |
-| `<bench>-aarch64.log` | the reference device, one pinned launch with the governor locked. That host's run-to-run scatter is 0.1–0.8%, so one launch is quoted there. |
+| `<bench>-aarch64-launches.log` | **ten separate pinned process launches** on the reference device, governor locked to `performance` and restored after. This is what an aarch64 figure in the reports is. The two stereo binaries have seven. |
+| `<bench>-aarch64.log` | the **single launch** that figure used to be. Kept for the same reason as the x86 singles. |
+| `<bench>-spotcheck-aarch64-launches.log` | an **independent** device sweep of a benchmark whose figure moved, taken separately to check it. Two exist, for `feature-tracking` and `pyrfilter`. |
 | `<bench>-x86_64-launches-repeat.log` | a **second, independent** thirty-launch sweep of the same benchmark, taken on a deliberately busier machine before the figures were published. Two exist, for `logic` and `morphology`. |
+
+## The device spot-checks, and what they showed
+
+The device sweep moved one published figure beyond its band and left the rest where they
+were, so two rows were re-taken as an independent sweep before anything was adopted — one
+that moved and one that did not. The rule was written first, in the same shape as the x86
+repeats below: the spot-check's interval must overlap the sweep's, and a disagreement is
+investigated rather than averaged.
+
+| row | device sweep | independent spot-check | |
+|---|---|---|---|
+| the assembled pipeline, ms/frame | 5.097 [5.084, 5.145] | 5.101 [5.093, 5.124] | agrees; both outside the published 4.906–4.949 |
+| the assembled pipeline, ratio | 4.6199 [4.5957, 4.6278] | 4.6160 [4.6112, 4.6371] | agrees |
+| — of which `track (LK)` | 3.787 | 3.791 | agrees — the stage the regression is in |
+| — of which `pyrDown` | 0.189 | 0.190 | agrees — halved from a published 0.377 |
+| `pyrDown` 1-bit, ratio | 5.5093 [5.4797, 5.5493] | 5.4920 [5.4717, 5.6411] | agrees; binCV's arm 93.8 µs against 93.7 |
+
+The clock was sampled every two seconds on the pinned core throughout both, 169 samples all
+at 1,800,000 kHz, peak 62.8 °C — because `vcgencmd get_throttled` on this board reads
+`0x80000` before and after and cannot report a *new* event.
 
 ## The repeats, and what they showed
 

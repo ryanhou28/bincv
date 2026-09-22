@@ -64,11 +64,22 @@ first sweep's interval; `bitwiseNot`'s repeat landed 0.7% above the top of it, w
 intervals still overlapping. Read a quoted interval as the resolution of one sweep, and a
 difference near its edge as unsettled until a second sweep agrees.
 
-**aarch64 is quoted from one pinned launch, and that is enough there.** Seven launches of
-the corner benchmark on the governor-locked Pi 4 hold 0.05–1.18% within a run and scatter
-0.1–0.8% across the seven ([goodfeatures-aarch64.log](logs/goodfeatures-aarch64.log)) — the
-run-to-run half is smaller than a single x86 launch's own printed spread. The protocol
-follows the host, not the architecture.
+**aarch64 is quoted from ten pinned launches, governor locked to `performance` and restored
+after.** Ten rather than thirty because the device resolves far more per launch: `--ladder` on
+the corner row there resolves **1.008× at one launch and 1.005× at ten**, where the same row
+on x86-64 resolves nothing at one (±32%) and 1.026× at thirty. Ten was chosen to cover every
+published row rather than a few rows deeply, because the question the device sweep answers is
+whether a figure is still *true*, which shows up in the first launch, and not how finely it
+can be split. `minres` is still per-row and still printed: the loosest row behind a published
+device figure resolves 1.065×, not 1.005×.
+
+**One launch was enough there for three rounds, and the claim behind that was read from one
+row.** `goodFeaturesToTrack` does hold 0.05–1.18% within a run and 0.1–0.8% across launches.
+The logic and reduction rows do not: binCV's 640×480 `bitwiseAnd` arm scatters **16.9%**
+across ten launches, because a 38 KB packed plane's cache residency is set per launch by the
+allocator, while the 307 KB OpenCV arm never fits and scatters 4.0%. Above L2 — 8192×4096 —
+both settle to about 2%. A host's resolution is a property of the row as much as the machine,
+which is the rule stated two paragraphs up, applied to the device this time.
 
 The difference-against-spread test decides whether the *size* of a difference clears the
 noise. It does not decide whether the *sign* is settled, and on one row the two came apart.

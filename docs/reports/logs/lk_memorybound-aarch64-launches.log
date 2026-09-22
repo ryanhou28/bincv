@@ -1,0 +1,234 @@
+# launch sweep -- 10 separate processes of one benchmark
+# benchmark: ./build-pi/benchmark/lk_memorybound 
+# launches: 10
+# arch:     aarch64
+# host:     Raspberry Pi 4 Model B Rev 1.5
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# commit:   80ff0a8
+# governor: performance
+# throttled before: throttled=0x80000
+# temp before: temp=62.3'C
+# pinning:  taskset -c 3
+# sleep between launches: 0s
+# date:     2026-09-21T16:52:42-07:00
+# loadavg at start: 1.01 1.03 0.92 1/308 915961
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8426        24.0743
+       80       1.7880        22.3503
+      140       3.2503        23.2165
+      300       7.3030        24.3433
+      560      13.7388        24.5336
+     1160      29.5647        25.4868
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.5766        25.5470
+      640x480       37.5       3.2494        23.2103
+     1280x960      150.0       3.8235        27.3110
+    1920x1440      337.5       3.7887        27.0622
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.
+### run 2
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8522        24.3498
+       80       1.8092        22.6147
+      140       3.2595        23.2821
+      300       7.3609        24.5364
+      560      13.8287        24.6942
+     1160      29.7629        25.6577
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.5954        25.6816
+      640x480       37.5       3.2576        23.2685
+     1280x960      150.0       3.7532        26.8088
+    1920x1440      337.5       3.8365        27.4036
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.
+### run 3
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8399        23.9961
+       80       1.7743        22.1786
+      140       3.2239        23.0275
+      300       7.2583        24.1944
+      560      13.6322        24.3432
+     1160      29.3965        25.3418
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.6186        25.8469
+      640x480       37.5       3.2258        23.0411
+     1280x960      150.0       3.7700        26.9285
+    1920x1440      337.5       3.8202        27.2875
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.
+### run 4
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8433        24.0947
+       80       1.7631        22.0390
+      140       3.2012        22.8659
+      300       7.1955        23.9850
+      560      13.5282        24.1575
+     1160      29.1012        25.0873
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.5759        25.5421
+      640x480       37.5       3.2012        22.8660
+     1280x960      150.0       3.7942        27.1016
+    1920x1440      337.5       3.8257        27.3263
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.
+### run 5
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8406        24.0161
+       80       1.7621        22.0263
+      140       3.2041        22.8868
+      300       7.1998        23.9993
+      560      13.5336        24.1671
+     1160      29.1368        25.1179
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.6088        25.7769
+      640x480       37.5       3.2028        22.8769
+     1280x960      150.0       3.7858        27.0416
+    1920x1440      337.5       3.7846        27.0330
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.
+### run 6
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8435        24.0991
+       80       1.7710        22.1370
+      140       3.2193        22.9949
+      300       7.2541        24.1803
+      560      13.5880        24.2644
+     1160      29.3272        25.2821
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.5777        25.5552
+      640x480       37.5       3.2227        23.0191
+     1280x960      150.0       3.7915        27.0821
+    1920x1440      337.5       3.7992        27.1371
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.
+### run 7
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8491        24.2611
+       80       1.7896        22.3704
+      140       3.2499        23.2137
+      300       7.3133        24.3777
+      560      13.7301        24.5181
+     1160      29.6127        25.5282
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.5861        25.6153
+      640x480       37.5       3.2502        23.2155
+     1280x960      150.0       3.7488        26.7773
+    1920x1440      337.5       3.8211        27.2937
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.
+### run 8
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8517        24.3342
+       80       1.7835        22.2940
+      140       3.2568        23.2625
+      300       7.3023        24.3410
+      560      13.7473        24.5487
+     1160      29.5080        25.4379
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.5857        25.6123
+      640x480       37.5       3.2558        23.2561
+     1280x960      150.0       3.7703        26.9305
+    1920x1440      337.5       3.8031        27.1649
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.
+### run 9
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8556        24.4446
+       80       1.8085        22.6057
+      140       3.2783        23.4163
+      300       7.3756        24.5854
+      560      13.8654        24.7596
+     1160      29.8622        25.7433
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.6293        25.9235
+      640x480       37.5       3.2776        23.4112
+     1280x960      150.0       3.7577        26.8409
+    1920x1440      337.5       3.8874        27.7668
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.
+### run 10
+=== Is LK memory-bound? N=1, one level, 31x31 window ===
+
+ (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit)
+   points           ms   us per point
+       35       0.8461        24.1740
+       80       1.7731        22.1638
+      140       3.2264        23.0455
+      300       7.2450        24.1500
+      560      13.6364        24.3507
+     1160      29.3658        25.3154
+
+ (b) frame size at 140 points (same compute, wider spread)
+        frame   KB @1bit           ms   us per point
+      320x240        9.4       3.5923        25.6591
+      640x480       37.5       3.2248        23.0339
+     1280x960      150.0       3.7875        27.0533
+    1920x1440      337.5       3.7929        27.0922
+
+ FLAT us/point => compute-bound, and the 8x footprint buys nothing here.
+ RISING => memory-bound, and it should.
+
+# loadavg at end: 1.00 1.02 0.92 1/308 916149
+# throttled after: throttled=0x80000
+# temp after: temp=63.3'C
+# date:     2026-09-21T16:53:29-07:00
+# done

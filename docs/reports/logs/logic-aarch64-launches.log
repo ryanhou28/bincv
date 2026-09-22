@@ -1,0 +1,1294 @@
+# launch sweep -- 10 separate processes of one benchmark
+# benchmark: ./build-pi/benchmark/logic_benchmark 
+# launches: 10
+# arch:     aarch64
+# host:     Raspberry Pi 4 Model B Rev 1.5
+# kernel:   6.18.34+rpt-rpi-v8
+# compiler: g++ (Debian 14.2.0-19) 14.2.0
+# commit:   80ff0a8
+# governor: performance
+# throttled before: throttled=0x80000
+# temp before: temp=59.9'C
+# pinning:  taskset -c 3
+# sleep between launches: 0s
+# date:     2026-09-21T16:27:14-07:00
+# loadavg at start: 0.90 0.64 0.29 1/311 909833
+# NO launch is discarded -- a cold start is part of what varies between
+# launches, and trimming it would trim the tail this sweep measures.
+
+### run 1
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+logic kernels vs OpenCV on the same binary content as CV_8U
+(the denominator is what a user runs today without binCV)
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+ OpenCV build:    Configuration:               Release
+ OpenCV build:    Baseline:                    NEON FP16
+ OpenCV build:    Dispatched code generation:  NEON_DOTPROD NEON_FP16 NEON_BF16
+
+================ 640 x 480 (307200 pixels) ================
+ footprint per buffer: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+ bitwiseAnd   set pixels: binCV    76512 OpenCV    76512 agree
+ bitwiseOr    set pixels: binCV   230224 OpenCV   230224 agree
+ bitwiseXor   set pixels: binCV   153712 OpenCV   153712 agree
+ bitwiseNot   set pixels: binCV   153774 OpenCV   153774 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 38400 B buffer 22.62 GB/s (22.51) 307200 B buffer 12.19 GB/s (9.46)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 22.63 GB/s, 11.46 GB/s
+ working set per call: binCV 115200 B, OpenCV 921600 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.02398 ns/px    15.64 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.02215 ns/px    16.93 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61332 ns/px     4.89 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.02445 ns/px    15.34 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.02343 ns/px    16.00 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61534 ns/px     4.88 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.02477 ns/px    15.14 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.02243 ns/px    16.72 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.64474 ns/px     4.65 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.01927 ns/px    12.97 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.01890 ns/px    13.23 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.31564 ns/px     6.34 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.02398      15.64       25.58x
+ bitwiseAnd   binCV uint64          0.02215      16.93       27.69x
+ bitwiseAnd   OpenCV CV_8U          0.61332       4.89        1.00x
+ bitwiseOr    binCV uint32          0.02445      15.34       25.17x
+ bitwiseOr    binCV uint64          0.02343      16.00       26.26x
+ bitwiseOr    OpenCV CV_8U          0.61534       4.88        1.00x
+ bitwiseXor   binCV uint32          0.02477      15.14       26.03x
+ bitwiseXor   binCV uint64          0.02243      16.72       28.75x
+ bitwiseXor   OpenCV CV_8U          0.64474       4.65        1.00x
+ bitwiseNot   binCV uint32          0.01927      12.97       16.38x
+ bitwiseNot   binCV uint64          0.01890      13.23       16.70x
+ bitwiseNot   OpenCV CV_8U          0.31564       6.34        1.00x
+ ratio > 1 means binCV is faster. sink=11920694340841457381
+
+================ 1024 x 1024 (1048576 pixels) ================
+ footprint per buffer: binCV uint32 131072 B, binCV uint64 131072 B, OpenCV CV_8U 1048576 B (8.0x)
+ bitwiseAnd   set pixels: binCV   261799 OpenCV   261799 agree
+ bitwiseOr    set pixels: binCV   787067 OpenCV   787067 agree
+ bitwiseXor   set pixels: binCV   525268 OpenCV   525268 agree
+ bitwiseNot   set pixels: binCV   523860 OpenCV   523860 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 131072 B buffer 14.17 GB/s (8.39) 1048576 B buffer 6.37 GB/s (6.00)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 12.84 GB/s, 5.98 GB/s
+ working set per call: binCV 393216 B, OpenCV 3145728 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.04833 ns/px     7.76 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.04731 ns/px     7.93 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62563 ns/px     4.80 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.04997 ns/px     7.50 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.04865 ns/px     7.71 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62568 ns/px     4.79 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.05036 ns/px     7.45 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.04466 ns/px     8.40 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.62600 ns/px     4.79 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02716 ns/px     9.20 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02695 ns/px     9.28 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.38164 ns/px     5.24 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.04833       7.76       12.94x
+ bitwiseAnd   binCV uint64          0.04731       7.93       13.22x
+ bitwiseAnd   OpenCV CV_8U          0.62563       4.80        1.00x
+ bitwiseOr    binCV uint32          0.04997       7.50       12.52x
+ bitwiseOr    binCV uint64          0.04865       7.71       12.86x
+ bitwiseOr    OpenCV CV_8U          0.62568       4.79        1.00x
+ bitwiseXor   binCV uint32          0.05036       7.45       12.43x
+ bitwiseXor   binCV uint64          0.04466       8.40       14.02x
+ bitwiseXor   OpenCV CV_8U          0.62600       4.79        1.00x
+ bitwiseNot   binCV uint32          0.02716       9.20       14.05x
+ bitwiseNot   binCV uint64          0.02695       9.28       14.16x
+ bitwiseNot   OpenCV CV_8U          0.38164       5.24        1.00x
+ ratio > 1 means binCV is faster. sink=16822861792505912224
+
+================ 8192 x 4096 (33554432 pixels) ================
+ footprint per buffer: binCV uint32 4194304 B, binCV uint64 4194304 B, OpenCV CV_8U 33554432 B (8.0x)
+ bitwiseAnd   set pixels: binCV  8389345 OpenCV  8389345 agree
+ bitwiseOr    set pixels: binCV 25165591 OpenCV 25165591 agree
+ bitwiseXor   set pixels: binCV 16776246 OpenCV 16776246 agree
+ bitwiseNot   set pixels: binCV 16778496 OpenCV 16778496 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 4194304 B buffer 5.40 GB/s (5.30) 33554432 B buffer 5.35 GB/s (5.09)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 4.47 GB/s, 5.63 GB/s
+ working set per call: binCV 12582912 B, OpenCV 100663296 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.07593 ns/px     4.94 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.07569 ns/px     4.95 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62375 ns/px     4.81 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.07572 ns/px     4.95 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.07591 ns/px     4.94 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62425 ns/px     4.81 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.07566 ns/px     4.96 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.07593 ns/px     4.94 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.62428 ns/px     4.81 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.04591 ns/px     5.45 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.04612 ns/px     5.42 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.38320 ns/px     5.22 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.07593       4.94        8.21x
+ bitwiseAnd   binCV uint64          0.07569       4.95        8.24x
+ bitwiseAnd   OpenCV CV_8U          0.62375       4.81        1.00x
+ bitwiseOr    binCV uint32          0.07572       4.95        8.24x
+ bitwiseOr    binCV uint64          0.07591       4.94        8.22x
+ bitwiseOr    OpenCV CV_8U          0.62425       4.81        1.00x
+ bitwiseXor   binCV uint32          0.07566       4.96        8.25x
+ bitwiseXor   binCV uint64          0.07593       4.94        8.22x
+ bitwiseXor   OpenCV CV_8U          0.62428       4.81        1.00x
+ bitwiseNot   binCV uint32          0.04591       5.45        8.35x
+ bitwiseNot   binCV uint64          0.04612       5.42        8.31x
+ bitwiseNot   OpenCV CV_8U          0.38320       5.22        1.00x
+ ratio > 1 means binCV is faster. sink=11223284064666399148
+### run 2
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+logic kernels vs OpenCV on the same binary content as CV_8U
+(the denominator is what a user runs today without binCV)
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+ OpenCV build:    Configuration:               Release
+ OpenCV build:    Baseline:                    NEON FP16
+ OpenCV build:    Dispatched code generation:  NEON_DOTPROD NEON_FP16 NEON_BF16
+
+================ 640 x 480 (307200 pixels) ================
+ footprint per buffer: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+ bitwiseAnd   set pixels: binCV    76512 OpenCV    76512 agree
+ bitwiseOr    set pixels: binCV   230224 OpenCV   230224 agree
+ bitwiseXor   set pixels: binCV   153712 OpenCV   153712 agree
+ bitwiseNot   set pixels: binCV   153774 OpenCV   153774 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 38400 B buffer 21.68 GB/s (21.62) 307200 B buffer 10.84 GB/s (8.53)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 21.75 GB/s, 9.99 GB/s
+ working set per call: binCV 115200 B, OpenCV 921600 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.02392 ns/px    15.68 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.02016 ns/px    18.60 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62402 ns/px     4.81 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.02406 ns/px    15.59 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.02266 ns/px    16.55 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.65279 ns/px     4.60 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.02335 ns/px    16.06 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.02276 ns/px    16.48 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.65162 ns/px     4.60 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.01981 ns/px    12.62 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02050 ns/px    12.20 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.32677 ns/px     6.12 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.02392      15.68       26.09x
+ bitwiseAnd   binCV uint64          0.02016      18.60       30.96x
+ bitwiseAnd   OpenCV CV_8U          0.62402       4.81        1.00x
+ bitwiseOr    binCV uint32          0.02406      15.59       27.13x
+ bitwiseOr    binCV uint64          0.02266      16.55       28.81x
+ bitwiseOr    OpenCV CV_8U          0.65279       4.60        1.00x
+ bitwiseXor   binCV uint32          0.02335      16.06       27.91x
+ bitwiseXor   binCV uint64          0.02276      16.48       28.63x
+ bitwiseXor   OpenCV CV_8U          0.65162       4.60        1.00x
+ bitwiseNot   binCV uint32          0.01981      12.62       16.50x
+ bitwiseNot   binCV uint64          0.02050      12.20       15.94x
+ bitwiseNot   OpenCV CV_8U          0.32677       6.12        1.00x
+ ratio > 1 means binCV is faster. sink=1069668415129683537
+
+================ 1024 x 1024 (1048576 pixels) ================
+ footprint per buffer: binCV uint32 131072 B, binCV uint64 131072 B, OpenCV CV_8U 1048576 B (8.0x)
+ bitwiseAnd   set pixels: binCV   261799 OpenCV   261799 agree
+ bitwiseOr    set pixels: binCV   787067 OpenCV   787067 agree
+ bitwiseXor   set pixels: binCV   525268 OpenCV   525268 agree
+ bitwiseNot   set pixels: binCV   523860 OpenCV   523860 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 131072 B buffer 14.76 GB/s (10.27) 1048576 B buffer 6.18 GB/s (5.86)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 13.10 GB/s, 6.11 GB/s
+ working set per call: binCV 393216 B, OpenCV 3145728 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.04627 ns/px     8.11 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.04860 ns/px     7.72 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62300 ns/px     4.82 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.04781 ns/px     7.84 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.04745 ns/px     7.90 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62173 ns/px     4.83 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.05091 ns/px     7.37 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.04763 ns/px     7.87 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.62333 ns/px     4.81 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02708 ns/px     9.23 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02816 ns/px     8.88 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37255 ns/px     5.37 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.04627       8.11       13.47x
+ bitwiseAnd   binCV uint64          0.04860       7.72       12.82x
+ bitwiseAnd   OpenCV CV_8U          0.62300       4.82        1.00x
+ bitwiseOr    binCV uint32          0.04781       7.84       13.00x
+ bitwiseOr    binCV uint64          0.04745       7.90       13.10x
+ bitwiseOr    OpenCV CV_8U          0.62173       4.83        1.00x
+ bitwiseXor   binCV uint32          0.05091       7.37       12.24x
+ bitwiseXor   binCV uint64          0.04763       7.87       13.09x
+ bitwiseXor   OpenCV CV_8U          0.62333       4.81        1.00x
+ bitwiseNot   binCV uint32          0.02708       9.23       13.76x
+ bitwiseNot   binCV uint64          0.02816       8.88       13.23x
+ bitwiseNot   OpenCV CV_8U          0.37255       5.37        1.00x
+ ratio > 1 means binCV is faster. sink=7637342868104936730
+
+================ 8192 x 4096 (33554432 pixels) ================
+ footprint per buffer: binCV uint32 4194304 B, binCV uint64 4194304 B, OpenCV CV_8U 33554432 B (8.0x)
+ bitwiseAnd   set pixels: binCV  8389345 OpenCV  8389345 agree
+ bitwiseOr    set pixels: binCV 25165591 OpenCV 25165591 agree
+ bitwiseXor   set pixels: binCV 16776246 OpenCV 16776246 agree
+ bitwiseNot   set pixels: binCV 16778496 OpenCV 16778496 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 4194304 B buffer 4.89 GB/s (4.67) 33554432 B buffer 5.63 GB/s (5.57)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 4.46 GB/s, 5.55 GB/s
+ working set per call: binCV 12582912 B, OpenCV 100663296 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.07573 ns/px     4.95 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.07594 ns/px     4.94 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62184 ns/px     4.82 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.07565 ns/px     4.96 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.07586 ns/px     4.94 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62247 ns/px     4.82 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.07556 ns/px     4.96 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.07587 ns/px     4.94 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.62242 ns/px     4.82 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.04590 ns/px     5.45 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.04604 ns/px     5.43 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.38093 ns/px     5.25 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.07573       4.95        8.21x
+ bitwiseAnd   binCV uint64          0.07594       4.94        8.19x
+ bitwiseAnd   OpenCV CV_8U          0.62184       4.82        1.00x
+ bitwiseOr    binCV uint32          0.07565       4.96        8.23x
+ bitwiseOr    binCV uint64          0.07586       4.94        8.21x
+ bitwiseOr    OpenCV CV_8U          0.62247       4.82        1.00x
+ bitwiseXor   binCV uint32          0.07556       4.96        8.24x
+ bitwiseXor   binCV uint64          0.07587       4.94        8.20x
+ bitwiseXor   OpenCV CV_8U          0.62242       4.82        1.00x
+ bitwiseNot   binCV uint32          0.04590       5.45        8.30x
+ bitwiseNot   binCV uint64          0.04604       5.43        8.27x
+ bitwiseNot   OpenCV CV_8U          0.38093       5.25        1.00x
+ ratio > 1 means binCV is faster. sink=6378175510550024054
+### run 3
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+logic kernels vs OpenCV on the same binary content as CV_8U
+(the denominator is what a user runs today without binCV)
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+ OpenCV build:    Configuration:               Release
+ OpenCV build:    Baseline:                    NEON FP16
+ OpenCV build:    Dispatched code generation:  NEON_DOTPROD NEON_FP16 NEON_BF16
+
+================ 640 x 480 (307200 pixels) ================
+ footprint per buffer: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+ bitwiseAnd   set pixels: binCV    76512 OpenCV    76512 agree
+ bitwiseOr    set pixels: binCV   230224 OpenCV   230224 agree
+ bitwiseXor   set pixels: binCV   153712 OpenCV   153712 agree
+ bitwiseNot   set pixels: binCV   153774 OpenCV   153774 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 38400 B buffer 21.85 GB/s (21.74) 307200 B buffer 10.36 GB/s (7.70)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 21.92 GB/s, 10.64 GB/s
+ working set per call: binCV 115200 B, OpenCV 921600 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.02330 ns/px    16.10 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.02339 ns/px    16.03 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61968 ns/px     4.84 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.02401 ns/px    15.62 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.02390 ns/px    15.69 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.64662 ns/px     4.64 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.02191 ns/px    17.11 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.02308 ns/px    16.25 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.64592 ns/px     4.64 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.01711 ns/px    14.61 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.01919 ns/px    13.03 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.32251 ns/px     6.20 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.02330      16.10       26.60x
+ bitwiseAnd   binCV uint64          0.02339      16.03       26.49x
+ bitwiseAnd   OpenCV CV_8U          0.61968       4.84        1.00x
+ bitwiseOr    binCV uint32          0.02401      15.62       26.94x
+ bitwiseOr    binCV uint64          0.02390      15.69       27.06x
+ bitwiseOr    OpenCV CV_8U          0.64662       4.64        1.00x
+ bitwiseXor   binCV uint32          0.02191      17.11       29.47x
+ bitwiseXor   binCV uint64          0.02308      16.25       27.98x
+ bitwiseXor   OpenCV CV_8U          0.64592       4.64        1.00x
+ bitwiseNot   binCV uint32          0.01711      14.61       18.85x
+ bitwiseNot   binCV uint64          0.01919      13.03       16.81x
+ bitwiseNot   OpenCV CV_8U          0.32251       6.20        1.00x
+ ratio > 1 means binCV is faster. sink=18431309896268055533
+
+================ 1024 x 1024 (1048576 pixels) ================
+ footprint per buffer: binCV uint32 131072 B, binCV uint64 131072 B, OpenCV CV_8U 1048576 B (8.0x)
+ bitwiseAnd   set pixels: binCV   261799 OpenCV   261799 agree
+ bitwiseOr    set pixels: binCV   787067 OpenCV   787067 agree
+ bitwiseXor   set pixels: binCV   525268 OpenCV   525268 agree
+ bitwiseNot   set pixels: binCV   523860 OpenCV   523860 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 131072 B buffer 13.19 GB/s (7.85) 1048576 B buffer 6.00 GB/s (4.53)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 13.39 GB/s, 5.71 GB/s
+ working set per call: binCV 393216 B, OpenCV 3145728 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.04678 ns/px     8.02 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.04556 ns/px     8.23 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62316 ns/px     4.81 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.04684 ns/px     8.01 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.04582 ns/px     8.18 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62230 ns/px     4.82 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.04914 ns/px     7.63 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.04791 ns/px     7.83 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.62235 ns/px     4.82 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02608 ns/px     9.58 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02677 ns/px     9.34 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37369 ns/px     5.35 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.04678       8.02       13.32x
+ bitwiseAnd   binCV uint64          0.04556       8.23       13.68x
+ bitwiseAnd   OpenCV CV_8U          0.62316       4.81        1.00x
+ bitwiseOr    binCV uint32          0.04684       8.01       13.28x
+ bitwiseOr    binCV uint64          0.04582       8.18       13.58x
+ bitwiseOr    OpenCV CV_8U          0.62230       4.82        1.00x
+ bitwiseXor   binCV uint32          0.04914       7.63       12.67x
+ bitwiseXor   binCV uint64          0.04791       7.83       12.99x
+ bitwiseXor   OpenCV CV_8U          0.62235       4.82        1.00x
+ bitwiseNot   binCV uint32          0.02608       9.58       14.33x
+ bitwiseNot   binCV uint64          0.02677       9.34       13.96x
+ bitwiseNot   OpenCV CV_8U          0.37369       5.35        1.00x
+ ratio > 1 means binCV is faster. sink=8474133970166090284
+
+================ 8192 x 4096 (33554432 pixels) ================
+ footprint per buffer: binCV uint32 4194304 B, binCV uint64 4194304 B, OpenCV CV_8U 33554432 B (8.0x)
+ bitwiseAnd   set pixels: binCV  8389345 OpenCV  8389345 agree
+ bitwiseOr    set pixels: binCV 25165591 OpenCV 25165591 agree
+ bitwiseXor   set pixels: binCV 16776246 OpenCV 16776246 agree
+ bitwiseNot   set pixels: binCV 16778496 OpenCV 16778496 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 4194304 B buffer 5.66 GB/s (4.69) 33554432 B buffer 5.65 GB/s (5.30)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 4.39 GB/s, 5.59 GB/s
+ working set per call: binCV 12582912 B, OpenCV 100663296 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.07669 ns/px     4.89 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.07650 ns/px     4.90 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61231 ns/px     4.90 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.07653 ns/px     4.90 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.07641 ns/px     4.91 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61394 ns/px     4.89 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.07660 ns/px     4.90 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.07660 ns/px     4.90 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61266 ns/px     4.90 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.04769 ns/px     5.24 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.04721 ns/px     5.30 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37032 ns/px     5.40 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.07669       4.89        7.98x
+ bitwiseAnd   binCV uint64          0.07650       4.90        8.00x
+ bitwiseAnd   OpenCV CV_8U          0.61231       4.90        1.00x
+ bitwiseOr    binCV uint32          0.07653       4.90        8.02x
+ bitwiseOr    binCV uint64          0.07641       4.91        8.03x
+ bitwiseOr    OpenCV CV_8U          0.61394       4.89        1.00x
+ bitwiseXor   binCV uint32          0.07660       4.90        8.00x
+ bitwiseXor   binCV uint64          0.07660       4.90        8.00x
+ bitwiseXor   OpenCV CV_8U          0.61266       4.90        1.00x
+ bitwiseNot   binCV uint32          0.04769       5.24        7.77x
+ bitwiseNot   binCV uint64          0.04721       5.30        7.84x
+ bitwiseNot   OpenCV CV_8U          0.37032       5.40        1.00x
+ ratio > 1 means binCV is faster. sink=704351057184277008
+### run 4
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+logic kernels vs OpenCV on the same binary content as CV_8U
+(the denominator is what a user runs today without binCV)
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+ OpenCV build:    Configuration:               Release
+ OpenCV build:    Baseline:                    NEON FP16
+ OpenCV build:    Dispatched code generation:  NEON_DOTPROD NEON_FP16 NEON_BF16
+
+================ 640 x 480 (307200 pixels) ================
+ footprint per buffer: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+ bitwiseAnd   set pixels: binCV    76512 OpenCV    76512 agree
+ bitwiseOr    set pixels: binCV   230224 OpenCV   230224 agree
+ bitwiseXor   set pixels: binCV   153712 OpenCV   153712 agree
+ bitwiseNot   set pixels: binCV   153774 OpenCV   153774 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 38400 B buffer 21.65 GB/s (21.58) 307200 B buffer 11.79 GB/s (9.06)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 21.61 GB/s, 11.05 GB/s
+ working set per call: binCV 115200 B, OpenCV 921600 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.02377 ns/px    15.77 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.02193 ns/px    17.10 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.63812 ns/px     4.70 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.02307 ns/px    16.25 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.02279 ns/px    16.45 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.64482 ns/px     4.65 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.02265 ns/px    16.56 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.02244 ns/px    16.71 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61920 ns/px     4.84 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.01972 ns/px    12.68 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.01857 ns/px    13.46 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.31480 ns/px     6.35 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.02377      15.77       26.84x
+ bitwiseAnd   binCV uint64          0.02193      17.10       29.09x
+ bitwiseAnd   OpenCV CV_8U          0.63812       4.70        1.00x
+ bitwiseOr    binCV uint32          0.02307      16.25       27.95x
+ bitwiseOr    binCV uint64          0.02279      16.45       28.29x
+ bitwiseOr    OpenCV CV_8U          0.64482       4.65        1.00x
+ bitwiseXor   binCV uint32          0.02265      16.56       27.34x
+ bitwiseXor   binCV uint64          0.02244      16.71       27.60x
+ bitwiseXor   OpenCV CV_8U          0.61920       4.84        1.00x
+ bitwiseNot   binCV uint32          0.01972      12.68       15.96x
+ bitwiseNot   binCV uint64          0.01857      13.46       16.95x
+ bitwiseNot   OpenCV CV_8U          0.31480       6.35        1.00x
+ ratio > 1 means binCV is faster. sink=6495181377985460539
+
+================ 1024 x 1024 (1048576 pixels) ================
+ footprint per buffer: binCV uint32 131072 B, binCV uint64 131072 B, OpenCV CV_8U 1048576 B (8.0x)
+ bitwiseAnd   set pixels: binCV   261799 OpenCV   261799 agree
+ bitwiseOr    set pixels: binCV   787067 OpenCV   787067 agree
+ bitwiseXor   set pixels: binCV   525268 OpenCV   525268 agree
+ bitwiseNot   set pixels: binCV   523860 OpenCV   523860 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 131072 B buffer 15.71 GB/s (9.43) 1048576 B buffer 6.30 GB/s (5.54)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 17.67 GB/s, 6.28 GB/s
+ working set per call: binCV 393216 B, OpenCV 3145728 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.04614 ns/px     8.13 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.04293 ns/px     8.73 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62346 ns/px     4.81 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.04561 ns/px     8.22 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.04297 ns/px     8.73 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62364 ns/px     4.81 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.04839 ns/px     7.75 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.04365 ns/px     8.59 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.62364 ns/px     4.81 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02721 ns/px     9.19 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.01880 ns/px    13.30 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37520 ns/px     5.33 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.04614       8.13       13.51x
+ bitwiseAnd   binCV uint64          0.04293       8.73       14.52x
+ bitwiseAnd   OpenCV CV_8U          0.62346       4.81        1.00x
+ bitwiseOr    binCV uint32          0.04561       8.22       13.67x
+ bitwiseOr    binCV uint64          0.04297       8.73       14.51x
+ bitwiseOr    OpenCV CV_8U          0.62364       4.81        1.00x
+ bitwiseXor   binCV uint32          0.04839       7.75       12.89x
+ bitwiseXor   binCV uint64          0.04365       8.59       14.29x
+ bitwiseXor   OpenCV CV_8U          0.62364       4.81        1.00x
+ bitwiseNot   binCV uint32          0.02721       9.19       13.79x
+ bitwiseNot   binCV uint64          0.01880      13.30       19.96x
+ bitwiseNot   OpenCV CV_8U          0.37520       5.33        1.00x
+ ratio > 1 means binCV is faster. sink=14223425429581077044
+
+================ 8192 x 4096 (33554432 pixels) ================
+ footprint per buffer: binCV uint32 4194304 B, binCV uint64 4194304 B, OpenCV CV_8U 33554432 B (8.0x)
+ bitwiseAnd   set pixels: binCV  8389345 OpenCV  8389345 agree
+ bitwiseOr    set pixels: binCV 25165591 OpenCV 25165591 agree
+ bitwiseXor   set pixels: binCV 16776246 OpenCV 16776246 agree
+ bitwiseNot   set pixels: binCV 16778496 OpenCV 16778496 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 4194304 B buffer 5.38 GB/s (5.27) 33554432 B buffer 5.58 GB/s (5.14)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 4.43 GB/s, 5.56 GB/s
+ working set per call: binCV 12582912 B, OpenCV 100663296 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.07667 ns/px     4.89 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.07705 ns/px     4.87 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61755 ns/px     4.86 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.07674 ns/px     4.89 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.07705 ns/px     4.87 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61717 ns/px     4.86 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.07682 ns/px     4.88 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.07738 ns/px     4.85 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61766 ns/px     4.86 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.04751 ns/px     5.26 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.04774 ns/px     5.24 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37496 ns/px     5.33 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.07667       4.89        8.05x
+ bitwiseAnd   binCV uint64          0.07705       4.87        8.02x
+ bitwiseAnd   OpenCV CV_8U          0.61755       4.86        1.00x
+ bitwiseOr    binCV uint32          0.07674       4.89        8.04x
+ bitwiseOr    binCV uint64          0.07705       4.87        8.01x
+ bitwiseOr    OpenCV CV_8U          0.61717       4.86        1.00x
+ bitwiseXor   binCV uint32          0.07682       4.88        8.04x
+ bitwiseXor   binCV uint64          0.07738       4.85        7.98x
+ bitwiseXor   OpenCV CV_8U          0.61766       4.86        1.00x
+ bitwiseNot   binCV uint32          0.04751       5.26        7.89x
+ bitwiseNot   binCV uint64          0.04774       5.24        7.85x
+ bitwiseNot   OpenCV CV_8U          0.37496       5.33        1.00x
+ ratio > 1 means binCV is faster. sink=8623847701741563968
+### run 5
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+logic kernels vs OpenCV on the same binary content as CV_8U
+(the denominator is what a user runs today without binCV)
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+ OpenCV build:    Configuration:               Release
+ OpenCV build:    Baseline:                    NEON FP16
+ OpenCV build:    Dispatched code generation:  NEON_DOTPROD NEON_FP16 NEON_BF16
+
+================ 640 x 480 (307200 pixels) ================
+ footprint per buffer: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+ bitwiseAnd   set pixels: binCV    76512 OpenCV    76512 agree
+ bitwiseOr    set pixels: binCV   230224 OpenCV   230224 agree
+ bitwiseXor   set pixels: binCV   153712 OpenCV   153712 agree
+ bitwiseNot   set pixels: binCV   153774 OpenCV   153774 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 38400 B buffer 21.91 GB/s (21.79) 307200 B buffer 10.87 GB/s (9.13)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 21.94 GB/s, 11.64 GB/s
+ working set per call: binCV 115200 B, OpenCV 921600 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.02070 ns/px    18.12 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.02375 ns/px    15.79 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62770 ns/px     4.78 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.02384 ns/px    15.73 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.02012 ns/px    18.64 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.65870 ns/px     4.55 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.02358 ns/px    15.90 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.02298 ns/px    16.32 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.66178 ns/px     4.53 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02015 ns/px    12.41 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.01930 ns/px    12.95 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.32563 ns/px     6.14 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.02070      18.12       30.33x
+ bitwiseAnd   binCV uint64          0.02375      15.79       26.43x
+ bitwiseAnd   OpenCV CV_8U          0.62770       4.78        1.00x
+ bitwiseOr    binCV uint32          0.02384      15.73       27.63x
+ bitwiseOr    binCV uint64          0.02012      18.64       32.75x
+ bitwiseOr    OpenCV CV_8U          0.65870       4.55        1.00x
+ bitwiseXor   binCV uint32          0.02358      15.90       28.06x
+ bitwiseXor   binCV uint64          0.02298      16.32       28.79x
+ bitwiseXor   OpenCV CV_8U          0.66178       4.53        1.00x
+ bitwiseNot   binCV uint32          0.02015      12.41       16.16x
+ bitwiseNot   binCV uint64          0.01930      12.95       16.87x
+ bitwiseNot   OpenCV CV_8U          0.32563       6.14        1.00x
+ ratio > 1 means binCV is faster. sink=13005796933412146513
+
+================ 1024 x 1024 (1048576 pixels) ================
+ footprint per buffer: binCV uint32 131072 B, binCV uint64 131072 B, OpenCV CV_8U 1048576 B (8.0x)
+ bitwiseAnd   set pixels: binCV   261799 OpenCV   261799 agree
+ bitwiseOr    set pixels: binCV   787067 OpenCV   787067 agree
+ bitwiseXor   set pixels: binCV   525268 OpenCV   525268 agree
+ bitwiseNot   set pixels: binCV   523860 OpenCV   523860 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 131072 B buffer 13.93 GB/s (7.79) 1048576 B buffer 6.21 GB/s (5.24)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 12.30 GB/s, 6.12 GB/s
+ working set per call: binCV 393216 B, OpenCV 3145728 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.04202 ns/px     8.93 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.05080 ns/px     7.38 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62195 ns/px     4.82 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.04285 ns/px     8.75 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.05012 ns/px     7.48 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62054 ns/px     4.83 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.03979 ns/px     9.43 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.04813 ns/px     7.79 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.62264 ns/px     4.82 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02771 ns/px     9.02 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02678 ns/px     9.34 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37307 ns/px     5.36 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.04202       8.93       14.80x
+ bitwiseAnd   binCV uint64          0.05080       7.38       12.24x
+ bitwiseAnd   OpenCV CV_8U          0.62195       4.82        1.00x
+ bitwiseOr    binCV uint32          0.04285       8.75       14.48x
+ bitwiseOr    binCV uint64          0.05012       7.48       12.38x
+ bitwiseOr    OpenCV CV_8U          0.62054       4.83        1.00x
+ bitwiseXor   binCV uint32          0.03979       9.43       15.65x
+ bitwiseXor   binCV uint64          0.04813       7.79       12.94x
+ bitwiseXor   OpenCV CV_8U          0.62264       4.82        1.00x
+ bitwiseNot   binCV uint32          0.02771       9.02       13.46x
+ bitwiseNot   binCV uint64          0.02678       9.34       13.93x
+ bitwiseNot   OpenCV CV_8U          0.37307       5.36        1.00x
+ ratio > 1 means binCV is faster. sink=14205106239252592232
+
+================ 8192 x 4096 (33554432 pixels) ================
+ footprint per buffer: binCV uint32 4194304 B, binCV uint64 4194304 B, OpenCV CV_8U 33554432 B (8.0x)
+ bitwiseAnd   set pixels: binCV  8389345 OpenCV  8389345 agree
+ bitwiseOr    set pixels: binCV 25165591 OpenCV 25165591 agree
+ bitwiseXor   set pixels: binCV 16776246 OpenCV 16776246 agree
+ bitwiseNot   set pixels: binCV 16778496 OpenCV 16778496 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 4194304 B buffer 5.25 GB/s (5.10) 33554432 B buffer 5.62 GB/s (5.29)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 4.46 GB/s, 5.54 GB/s
+ working set per call: binCV 12582912 B, OpenCV 100663296 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.07625 ns/px     4.92 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.07641 ns/px     4.91 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61569 ns/px     4.87 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.07598 ns/px     4.94 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.07636 ns/px     4.91 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61642 ns/px     4.87 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.07607 ns/px     4.93 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.07659 ns/px     4.90 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61517 ns/px     4.88 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.04640 ns/px     5.39 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.04649 ns/px     5.38 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37601 ns/px     5.32 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.07625       4.92        8.07x
+ bitwiseAnd   binCV uint64          0.07641       4.91        8.06x
+ bitwiseAnd   OpenCV CV_8U          0.61569       4.87        1.00x
+ bitwiseOr    binCV uint32          0.07598       4.94        8.11x
+ bitwiseOr    binCV uint64          0.07636       4.91        8.07x
+ bitwiseOr    OpenCV CV_8U          0.61642       4.87        1.00x
+ bitwiseXor   binCV uint32          0.07607       4.93        8.09x
+ bitwiseXor   binCV uint64          0.07659       4.90        8.03x
+ bitwiseXor   OpenCV CV_8U          0.61517       4.88        1.00x
+ bitwiseNot   binCV uint32          0.04640       5.39        8.10x
+ bitwiseNot   binCV uint64          0.04649       5.38        8.09x
+ bitwiseNot   OpenCV CV_8U          0.37601       5.32        1.00x
+ ratio > 1 means binCV is faster. sink=8605528511413079156
+### run 6
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+logic kernels vs OpenCV on the same binary content as CV_8U
+(the denominator is what a user runs today without binCV)
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+ OpenCV build:    Configuration:               Release
+ OpenCV build:    Baseline:                    NEON FP16
+ OpenCV build:    Dispatched code generation:  NEON_DOTPROD NEON_FP16 NEON_BF16
+
+================ 640 x 480 (307200 pixels) ================
+ footprint per buffer: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+ bitwiseAnd   set pixels: binCV    76512 OpenCV    76512 agree
+ bitwiseOr    set pixels: binCV   230224 OpenCV   230224 agree
+ bitwiseXor   set pixels: binCV   153712 OpenCV   153712 agree
+ bitwiseNot   set pixels: binCV   153774 OpenCV   153774 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 38400 B buffer 21.89 GB/s (21.83) 307200 B buffer 11.72 GB/s (9.14)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 21.97 GB/s, 10.64 GB/s
+ working set per call: binCV 115200 B, OpenCV 921600 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.02364 ns/px    15.86 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.02231 ns/px    16.81 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.63635 ns/px     4.71 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.02381 ns/px    15.75 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.02247 ns/px    16.69 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.64085 ns/px     4.68 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.02417 ns/px    15.51 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.02375 ns/px    15.79 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.65091 ns/px     4.61 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.01941 ns/px    12.88 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.01873 ns/px    13.35 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.30794 ns/px     6.49 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.02364      15.86       26.92x
+ bitwiseAnd   binCV uint64          0.02231      16.81       28.53x
+ bitwiseAnd   OpenCV CV_8U          0.63635       4.71        1.00x
+ bitwiseOr    binCV uint32          0.02381      15.75       26.92x
+ bitwiseOr    binCV uint64          0.02247      16.69       28.52x
+ bitwiseOr    OpenCV CV_8U          0.64085       4.68        1.00x
+ bitwiseXor   binCV uint32          0.02417      15.51       26.93x
+ bitwiseXor   binCV uint64          0.02375      15.79       27.41x
+ bitwiseXor   OpenCV CV_8U          0.65091       4.61        1.00x
+ bitwiseNot   binCV uint32          0.01941      12.88       15.86x
+ bitwiseNot   binCV uint64          0.01873      13.35       16.44x
+ bitwiseNot   OpenCV CV_8U          0.30794       6.49        1.00x
+ ratio > 1 means binCV is faster. sink=2154771007700854667
+
+================ 1024 x 1024 (1048576 pixels) ================
+ footprint per buffer: binCV uint32 131072 B, binCV uint64 131072 B, OpenCV CV_8U 1048576 B (8.0x)
+ bitwiseAnd   set pixels: binCV   261799 OpenCV   261799 agree
+ bitwiseOr    set pixels: binCV   787067 OpenCV   787067 agree
+ bitwiseXor   set pixels: binCV   525268 OpenCV   525268 agree
+ bitwiseNot   set pixels: binCV   523860 OpenCV   523860 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 131072 B buffer 14.42 GB/s (8.06) 1048576 B buffer 6.18 GB/s (5.15)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 12.34 GB/s, 6.08 GB/s
+ working set per call: binCV 393216 B, OpenCV 3145728 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.04347 ns/px     8.63 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.04485 ns/px     8.36 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62106 ns/px     4.83 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.04380 ns/px     8.56 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.04573 ns/px     8.20 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62308 ns/px     4.81 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.04428 ns/px     8.47 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.04436 ns/px     8.45 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.62034 ns/px     4.84 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02746 ns/px     9.11 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02760 ns/px     9.06 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37323 ns/px     5.36 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.04347       8.63       14.29x
+ bitwiseAnd   binCV uint64          0.04485       8.36       13.85x
+ bitwiseAnd   OpenCV CV_8U          0.62106       4.83        1.00x
+ bitwiseOr    binCV uint32          0.04380       8.56       14.23x
+ bitwiseOr    binCV uint64          0.04573       8.20       13.63x
+ bitwiseOr    OpenCV CV_8U          0.62308       4.81        1.00x
+ bitwiseXor   binCV uint32          0.04428       8.47       14.01x
+ bitwiseXor   binCV uint64          0.04436       8.45       13.99x
+ bitwiseXor   OpenCV CV_8U          0.62034       4.84        1.00x
+ bitwiseNot   binCV uint32          0.02746       9.11       13.59x
+ bitwiseNot   binCV uint64          0.02760       9.06       13.52x
+ bitwiseNot   OpenCV CV_8U          0.37323       5.36        1.00x
+ ratio > 1 means binCV is faster. sink=2619140758585131692
+
+================ 8192 x 4096 (33554432 pixels) ================
+ footprint per buffer: binCV uint32 4194304 B, binCV uint64 4194304 B, OpenCV CV_8U 33554432 B (8.0x)
+ bitwiseAnd   set pixels: binCV  8389345 OpenCV  8389345 agree
+ bitwiseOr    set pixels: binCV 25165591 OpenCV 25165591 agree
+ bitwiseXor   set pixels: binCV 16776246 OpenCV 16776246 agree
+ bitwiseNot   set pixels: binCV 16778496 OpenCV 16778496 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 4194304 B buffer 5.68 GB/s (5.61) 33554432 B buffer 5.38 GB/s (4.75)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 4.47 GB/s, 5.62 GB/s
+ working set per call: binCV 12582912 B, OpenCV 100663296 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.07649 ns/px     4.90 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.07646 ns/px     4.90 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61688 ns/px     4.86 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.07609 ns/px     4.93 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.07658 ns/px     4.90 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61638 ns/px     4.87 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.07643 ns/px     4.91 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.07725 ns/px     4.85 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61680 ns/px     4.86 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.04690 ns/px     5.33 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.04738 ns/px     5.28 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37458 ns/px     5.34 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.07649       4.90        8.06x
+ bitwiseAnd   binCV uint64          0.07646       4.90        8.07x
+ bitwiseAnd   OpenCV CV_8U          0.61688       4.86        1.00x
+ bitwiseOr    binCV uint32          0.07609       4.93        8.10x
+ bitwiseOr    binCV uint64          0.07658       4.90        8.05x
+ bitwiseOr    OpenCV CV_8U          0.61638       4.87        1.00x
+ bitwiseXor   binCV uint32          0.07643       4.91        8.07x
+ bitwiseXor   binCV uint64          0.07725       4.85        7.98x
+ bitwiseXor   OpenCV CV_8U          0.61680       4.86        1.00x
+ bitwiseNot   binCV uint32          0.04690       5.33        7.99x
+ bitwiseNot   binCV uint64          0.04738       5.28        7.91x
+ bitwiseNot   OpenCV CV_8U          0.37458       5.34        1.00x
+ ratio > 1 means binCV is faster. sink=13296101919312870032
+### run 7
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+logic kernels vs OpenCV on the same binary content as CV_8U
+(the denominator is what a user runs today without binCV)
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+ OpenCV build:    Configuration:               Release
+ OpenCV build:    Baseline:                    NEON FP16
+ OpenCV build:    Dispatched code generation:  NEON_DOTPROD NEON_FP16 NEON_BF16
+
+================ 640 x 480 (307200 pixels) ================
+ footprint per buffer: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+ bitwiseAnd   set pixels: binCV    76512 OpenCV    76512 agree
+ bitwiseOr    set pixels: binCV   230224 OpenCV   230224 agree
+ bitwiseXor   set pixels: binCV   153712 OpenCV   153712 agree
+ bitwiseNot   set pixels: binCV   153774 OpenCV   153774 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 38400 B buffer 21.54 GB/s (21.43) 307200 B buffer 10.84 GB/s (8.44)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 21.58 GB/s, 15.54 GB/s
+ working set per call: binCV 115200 B, OpenCV 921600 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.02470 ns/px    15.18 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.02349 ns/px    15.97 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.63578 ns/px     4.72 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.02349 ns/px    15.97 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.02230 ns/px    16.81 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.64104 ns/px     4.68 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.02077 ns/px    18.06 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.02296 ns/px    16.33 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.64444 ns/px     4.66 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02062 ns/px    12.13 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02055 ns/px    12.16 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.31202 ns/px     6.41 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.02470      15.18       25.74x
+ bitwiseAnd   binCV uint64          0.02349      15.97       27.07x
+ bitwiseAnd   OpenCV CV_8U          0.63578       4.72        1.00x
+ bitwiseOr    binCV uint32          0.02349      15.97       27.29x
+ bitwiseOr    binCV uint64          0.02230      16.81       28.74x
+ bitwiseOr    OpenCV CV_8U          0.64104       4.68        1.00x
+ bitwiseXor   binCV uint32          0.02077      18.06       31.03x
+ bitwiseXor   binCV uint64          0.02296      16.33       28.06x
+ bitwiseXor   OpenCV CV_8U          0.64444       4.66        1.00x
+ bitwiseNot   binCV uint32          0.02062      12.13       15.13x
+ bitwiseNot   binCV uint64          0.02055      12.16       15.18x
+ bitwiseNot   OpenCV CV_8U          0.31202       6.41        1.00x
+ ratio > 1 means binCV is faster. sink=1069668415129805841
+
+================ 1024 x 1024 (1048576 pixels) ================
+ footprint per buffer: binCV uint32 131072 B, binCV uint64 131072 B, OpenCV CV_8U 1048576 B (8.0x)
+ bitwiseAnd   set pixels: binCV   261799 OpenCV   261799 agree
+ bitwiseOr    set pixels: binCV   787067 OpenCV   787067 agree
+ bitwiseXor   set pixels: binCV   525268 OpenCV   525268 agree
+ bitwiseNot   set pixels: binCV   523860 OpenCV   523860 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 131072 B buffer 13.62 GB/s (8.13) 1048576 B buffer 6.11 GB/s (5.12)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 18.67 GB/s, 5.99 GB/s
+ working set per call: binCV 393216 B, OpenCV 3145728 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.04714 ns/px     7.96 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.04524 ns/px     8.29 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62454 ns/px     4.80 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.05081 ns/px     7.38 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.04498 ns/px     8.34 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62731 ns/px     4.78 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.04883 ns/px     7.68 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.04465 ns/px     8.40 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.62522 ns/px     4.80 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02748 ns/px     9.10 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02704 ns/px     9.25 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.38054 ns/px     5.26 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.04714       7.96       13.25x
+ bitwiseAnd   binCV uint64          0.04524       8.29       13.81x
+ bitwiseAnd   OpenCV CV_8U          0.62454       4.80        1.00x
+ bitwiseOr    binCV uint32          0.05081       7.38       12.35x
+ bitwiseOr    binCV uint64          0.04498       8.34       13.95x
+ bitwiseOr    OpenCV CV_8U          0.62731       4.78        1.00x
+ bitwiseXor   binCV uint32          0.04883       7.68       12.80x
+ bitwiseXor   binCV uint64          0.04465       8.40       14.00x
+ bitwiseXor   OpenCV CV_8U          0.62522       4.80        1.00x
+ bitwiseNot   binCV uint32          0.02748       9.10       13.85x
+ bitwiseNot   binCV uint64          0.02704       9.25       14.07x
+ bitwiseNot   OpenCV CV_8U          0.38054       5.26        1.00x
+ ratio > 1 means binCV is faster. sink=4956659313694240012
+
+================ 8192 x 4096 (33554432 pixels) ================
+ footprint per buffer: binCV uint32 4194304 B, binCV uint64 4194304 B, OpenCV CV_8U 33554432 B (8.0x)
+ bitwiseAnd   set pixels: binCV  8389345 OpenCV  8389345 agree
+ bitwiseOr    set pixels: binCV 25165591 OpenCV 25165591 agree
+ bitwiseXor   set pixels: binCV 16776246 OpenCV 16776246 agree
+ bitwiseNot   set pixels: binCV 16778496 OpenCV 16778496 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 4194304 B buffer 5.41 GB/s (5.24) 33554432 B buffer 5.34 GB/s (5.11)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 4.48 GB/s, 5.40 GB/s
+ working set per call: binCV 12582912 B, OpenCV 100663296 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.07556 ns/px     4.96 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.07550 ns/px     4.97 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61732 ns/px     4.86 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.07549 ns/px     4.97 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.07562 ns/px     4.96 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61766 ns/px     4.86 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.07546 ns/px     4.97 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.07579 ns/px     4.95 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61715 ns/px     4.86 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.04536 ns/px     5.51 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.04568 ns/px     5.47 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37702 ns/px     5.30 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.07556       4.96        8.17x
+ bitwiseAnd   binCV uint64          0.07550       4.97        8.18x
+ bitwiseAnd   OpenCV CV_8U          0.61732       4.86        1.00x
+ bitwiseOr    binCV uint32          0.07549       4.97        8.18x
+ bitwiseOr    binCV uint64          0.07562       4.96        8.17x
+ bitwiseOr    OpenCV CV_8U          0.61766       4.86        1.00x
+ bitwiseXor   binCV uint32          0.07546       4.97        8.18x
+ bitwiseXor   binCV uint64          0.07579       4.95        8.14x
+ bitwiseXor   OpenCV CV_8U          0.61715       4.86        1.00x
+ bitwiseNot   binCV uint32          0.04536       5.51        8.31x
+ bitwiseNot   binCV uint64          0.04568       5.47        8.25x
+ bitwiseNot   OpenCV CV_8U          0.37702       5.30        1.00x
+ ratio > 1 means binCV is faster. sink=15633620474421976552
+### run 8
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+logic kernels vs OpenCV on the same binary content as CV_8U
+(the denominator is what a user runs today without binCV)
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+ OpenCV build:    Configuration:               Release
+ OpenCV build:    Baseline:                    NEON FP16
+ OpenCV build:    Dispatched code generation:  NEON_DOTPROD NEON_FP16 NEON_BF16
+
+================ 640 x 480 (307200 pixels) ================
+ footprint per buffer: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+ bitwiseAnd   set pixels: binCV    76512 OpenCV    76512 agree
+ bitwiseOr    set pixels: binCV   230224 OpenCV   230224 agree
+ bitwiseXor   set pixels: binCV   153712 OpenCV   153712 agree
+ bitwiseNot   set pixels: binCV   153774 OpenCV   153774 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 38400 B buffer 22.49 GB/s (22.43) 307200 B buffer 10.49 GB/s (9.04)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 22.56 GB/s, 15.69 GB/s
+ working set per call: binCV 115200 B, OpenCV 921600 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.02242 ns/px    16.73 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.02299 ns/px    16.31 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62542 ns/px     4.80 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.02509 ns/px    14.95 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.02278 ns/px    16.47 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62618 ns/px     4.79 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.02384 ns/px    15.73 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.02212 ns/px    16.95 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.64846 ns/px     4.63 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.01998 ns/px    12.51 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.01817 ns/px    13.76 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.31754 ns/px     6.30 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.02242      16.73       27.90x
+ bitwiseAnd   binCV uint64          0.02299      16.31       27.20x
+ bitwiseAnd   OpenCV CV_8U          0.62542       4.80        1.00x
+ bitwiseOr    binCV uint32          0.02509      14.95       24.96x
+ bitwiseOr    binCV uint64          0.02278      16.47       27.49x
+ bitwiseOr    OpenCV CV_8U          0.62618       4.79        1.00x
+ bitwiseXor   binCV uint32          0.02384      15.73       27.20x
+ bitwiseXor   binCV uint64          0.02212      16.95       29.31x
+ bitwiseXor   OpenCV CV_8U          0.64846       4.63        1.00x
+ bitwiseNot   binCV uint32          0.01998      12.51       15.89x
+ bitwiseNot   binCV uint64          0.01817      13.76       17.47x
+ bitwiseNot   OpenCV CV_8U          0.31754       6.30        1.00x
+ ratio > 1 means binCV is faster. sink=2154771007701184115
+
+================ 1024 x 1024 (1048576 pixels) ================
+ footprint per buffer: binCV uint32 131072 B, binCV uint64 131072 B, OpenCV CV_8U 1048576 B (8.0x)
+ bitwiseAnd   set pixels: binCV   261799 OpenCV   261799 agree
+ bitwiseOr    set pixels: binCV   787067 OpenCV   787067 agree
+ bitwiseXor   set pixels: binCV   525268 OpenCV   525268 agree
+ bitwiseNot   set pixels: binCV   523860 OpenCV   523860 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 131072 B buffer 13.67 GB/s (7.86) 1048576 B buffer 6.17 GB/s (5.73)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 11.90 GB/s, 6.11 GB/s
+ working set per call: binCV 393216 B, OpenCV 3145728 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.04509 ns/px     8.32 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.04234 ns/px     8.86 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.62095 ns/px     4.83 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.04521 ns/px     8.29 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.04236 ns/px     8.85 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.62372 ns/px     4.81 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.04341 ns/px     8.64 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.04221 ns/px     8.89 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.62221 ns/px     4.82 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02657 ns/px     9.41 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02723 ns/px     9.18 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37606 ns/px     5.32 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.04509       8.32       13.77x
+ bitwiseAnd   binCV uint64          0.04234       8.86       14.67x
+ bitwiseAnd   OpenCV CV_8U          0.62095       4.83        1.00x
+ bitwiseOr    binCV uint32          0.04521       8.29       13.79x
+ bitwiseOr    binCV uint64          0.04236       8.85       14.73x
+ bitwiseOr    OpenCV CV_8U          0.62372       4.81        1.00x
+ bitwiseXor   binCV uint32          0.04341       8.64       14.33x
+ bitwiseXor   binCV uint64          0.04221       8.89       14.74x
+ bitwiseXor   OpenCV CV_8U          0.62221       4.82        1.00x
+ bitwiseNot   binCV uint32          0.02657       9.41       14.15x
+ bitwiseNot   binCV uint64          0.02723       9.18       13.81x
+ bitwiseNot   OpenCV CV_8U          0.37606       5.32        1.00x
+ ratio > 1 means binCV is faster. sink=18057539992963100816
+
+================ 8192 x 4096 (33554432 pixels) ================
+ footprint per buffer: binCV uint32 4194304 B, binCV uint64 4194304 B, OpenCV CV_8U 33554432 B (8.0x)
+ bitwiseAnd   set pixels: binCV  8389345 OpenCV  8389345 agree
+ bitwiseOr    set pixels: binCV 25165591 OpenCV 25165591 agree
+ bitwiseXor   set pixels: binCV 16776246 OpenCV 16776246 agree
+ bitwiseNot   set pixels: binCV 16778496 OpenCV 16778496 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 4194304 B buffer 5.12 GB/s (4.95) 33554432 B buffer 5.58 GB/s (5.11)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 4.46 GB/s, 5.40 GB/s
+ working set per call: binCV 12582912 B, OpenCV 100663296 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.07582 ns/px     4.95 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.07606 ns/px     4.93 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61619 ns/px     4.87 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.07569 ns/px     4.95 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.07596 ns/px     4.94 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61735 ns/px     4.86 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.07580 ns/px     4.95 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.07619 ns/px     4.92 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61612 ns/px     4.87 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.04628 ns/px     5.40 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.04651 ns/px     5.38 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37599 ns/px     5.32 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.07582       4.95        8.13x
+ bitwiseAnd   binCV uint64          0.07606       4.93        8.10x
+ bitwiseAnd   OpenCV CV_8U          0.61619       4.87        1.00x
+ bitwiseOr    binCV uint32          0.07569       4.95        8.16x
+ bitwiseOr    binCV uint64          0.07596       4.94        8.13x
+ bitwiseOr    OpenCV CV_8U          0.61735       4.86        1.00x
+ bitwiseXor   binCV uint32          0.07580       4.95        8.13x
+ bitwiseXor   binCV uint64          0.07619       4.92        8.09x
+ bitwiseXor   OpenCV CV_8U          0.61612       4.87        1.00x
+ bitwiseNot   binCV uint32          0.04628       5.40        8.12x
+ bitwiseNot   binCV uint64          0.04651       5.38        8.08x
+ bitwiseNot   OpenCV CV_8U          0.37599       5.32        1.00x
+ ratio > 1 means binCV is faster. sink=12457962265123587740
+### run 9
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+logic kernels vs OpenCV on the same binary content as CV_8U
+(the denominator is what a user runs today without binCV)
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+ OpenCV build:    Configuration:               Release
+ OpenCV build:    Baseline:                    NEON FP16
+ OpenCV build:    Dispatched code generation:  NEON_DOTPROD NEON_FP16 NEON_BF16
+
+================ 640 x 480 (307200 pixels) ================
+ footprint per buffer: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+ bitwiseAnd   set pixels: binCV    76512 OpenCV    76512 agree
+ bitwiseOr    set pixels: binCV   230224 OpenCV   230224 agree
+ bitwiseXor   set pixels: binCV   153712 OpenCV   153712 agree
+ bitwiseNot   set pixels: binCV   153774 OpenCV   153774 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 38400 B buffer 22.62 GB/s (22.23) 307200 B buffer 11.47 GB/s (8.76)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 22.65 GB/s, 10.67 GB/s
+ working set per call: binCV 115200 B, OpenCV 921600 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.02336 ns/px    16.05 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.02345 ns/px    15.99 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61921 ns/px     4.84 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.02227 ns/px    16.84 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.02351 ns/px    15.95 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.64800 ns/px     4.63 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.02311 ns/px    16.22 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.02361 ns/px    15.88 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.64777 ns/px     4.63 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.01958 ns/px    12.77 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.01943 ns/px    12.87 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.30229 ns/px     6.62 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.02336      16.05       26.51x
+ bitwiseAnd   binCV uint64          0.02345      15.99       26.40x
+ bitwiseAnd   OpenCV CV_8U          0.61921       4.84        1.00x
+ bitwiseOr    binCV uint32          0.02227      16.84       29.10x
+ bitwiseOr    binCV uint64          0.02351      15.95       27.56x
+ bitwiseOr    OpenCV CV_8U          0.64800       4.63        1.00x
+ bitwiseXor   binCV uint32          0.02311      16.22       28.03x
+ bitwiseXor   binCV uint64          0.02361      15.88       27.44x
+ bitwiseXor   OpenCV CV_8U          0.64777       4.63        1.00x
+ bitwiseNot   binCV uint32          0.01958      12.77       15.44x
+ bitwiseNot   binCV uint64          0.01943      12.87       15.56x
+ bitwiseNot   OpenCV CV_8U          0.30229       6.62        1.00x
+ ratio > 1 means binCV is faster. sink=18431309896268271371
+
+================ 1024 x 1024 (1048576 pixels) ================
+ footprint per buffer: binCV uint32 131072 B, binCV uint64 131072 B, OpenCV CV_8U 1048576 B (8.0x)
+ bitwiseAnd   set pixels: binCV   261799 OpenCV   261799 agree
+ bitwiseOr    set pixels: binCV   787067 OpenCV   787067 agree
+ bitwiseXor   set pixels: binCV   525268 OpenCV   525268 agree
+ bitwiseNot   set pixels: binCV   523860 OpenCV   523860 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 131072 B buffer 15.51 GB/s (8.27) 1048576 B buffer 6.17 GB/s (5.84)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 12.53 GB/s, 6.20 GB/s
+ working set per call: binCV 393216 B, OpenCV 3145728 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.04250 ns/px     8.82 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.04254 ns/px     8.81 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61858 ns/px     4.85 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.04342 ns/px     8.64 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.04119 ns/px     9.11 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61926 ns/px     4.84 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.04436 ns/px     8.45 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.04236 ns/px     8.85 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61902 ns/px     4.85 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02737 ns/px     9.13 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02811 ns/px     8.89 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37312 ns/px     5.36 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.04250       8.82       14.55x
+ bitwiseAnd   binCV uint64          0.04254       8.81       14.54x
+ bitwiseAnd   OpenCV CV_8U          0.61858       4.85        1.00x
+ bitwiseOr    binCV uint32          0.04342       8.64       14.26x
+ bitwiseOr    binCV uint64          0.04119       9.11       15.04x
+ bitwiseOr    OpenCV CV_8U          0.61926       4.84        1.00x
+ bitwiseXor   binCV uint32          0.04436       8.45       13.95x
+ bitwiseXor   binCV uint64          0.04236       8.85       14.61x
+ bitwiseXor   OpenCV CV_8U          0.61902       4.85        1.00x
+ bitwiseNot   binCV uint32          0.02737       9.13       13.63x
+ bitwiseNot   binCV uint64          0.02811       8.89       13.27x
+ bitwiseNot   OpenCV CV_8U          0.37312       5.36        1.00x
+ ratio > 1 means binCV is faster. sink=1481312246599108272
+
+================ 8192 x 4096 (33554432 pixels) ================
+ footprint per buffer: binCV uint32 4194304 B, binCV uint64 4194304 B, OpenCV CV_8U 33554432 B (8.0x)
+ bitwiseAnd   set pixels: binCV  8389345 OpenCV  8389345 agree
+ bitwiseOr    set pixels: binCV 25165591 OpenCV 25165591 agree
+ bitwiseXor   set pixels: binCV 16776246 OpenCV 16776246 agree
+ bitwiseNot   set pixels: binCV 16778496 OpenCV 16778496 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 4194304 B buffer 5.42 GB/s (5.35) 33554432 B buffer 5.38 GB/s (4.98)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 4.50 GB/s, 5.60 GB/s
+ working set per call: binCV 12582912 B, OpenCV 100663296 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.07701 ns/px     4.87 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.07650 ns/px     4.90 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61437 ns/px     4.88 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.07724 ns/px     4.86 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.07626 ns/px     4.92 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61477 ns/px     4.88 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.07686 ns/px     4.88 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.07693 ns/px     4.87 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61505 ns/px     4.88 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.04787 ns/px     5.22 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.04709 ns/px     5.31 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37400 ns/px     5.35 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.07701       4.87        7.98x
+ bitwiseAnd   binCV uint64          0.07650       4.90        8.03x
+ bitwiseAnd   OpenCV CV_8U          0.61437       4.88        1.00x
+ bitwiseOr    binCV uint32          0.07724       4.86        7.96x
+ bitwiseOr    binCV uint64          0.07626       4.92        8.06x
+ bitwiseOr    OpenCV CV_8U          0.61477       4.88        1.00x
+ bitwiseXor   binCV uint32          0.07686       4.88        8.00x
+ bitwiseXor   binCV uint64          0.07693       4.87        8.00x
+ bitwiseXor   OpenCV CV_8U          0.61505       4.88        1.00x
+ bitwiseNot   binCV uint32          0.04787       5.22        7.81x
+ bitwiseNot   binCV uint64          0.04709       5.31        7.94x
+ bitwiseNot   OpenCV CV_8U          0.37400       5.35        1.00x
+ ratio > 1 means binCV is faster. sink=14328478592469146812
+### run 10
+=== Benchmark Config ===
+Width: 640, Height: 480, Iterations: 100, DType: uint8, Sparsity: 1
+
+logic kernels vs OpenCV on the same binary content as CV_8U
+(the denominator is what a user runs today without binCV)
+OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
+ OpenCV build:    Configuration:               Release
+ OpenCV build:    Baseline:                    NEON FP16
+ OpenCV build:    Dispatched code generation:  NEON_DOTPROD NEON_FP16 NEON_BF16
+
+================ 640 x 480 (307200 pixels) ================
+ footprint per buffer: binCV uint32 38400 B, binCV uint64 38400 B, OpenCV CV_8U 307200 B (8.0x)
+ bitwiseAnd   set pixels: binCV    76512 OpenCV    76512 agree
+ bitwiseOr    set pixels: binCV   230224 OpenCV   230224 agree
+ bitwiseXor   set pixels: binCV   153712 OpenCV   153712 agree
+ bitwiseNot   set pixels: binCV   153774 OpenCV   153774 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 38400 B buffer 22.60 GB/s (22.54) 307200 B buffer 11.85 GB/s (9.28)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 22.64 GB/s, 15.45 GB/s
+ working set per call: binCV 115200 B, OpenCV 921600 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.02374 ns/px    15.79 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.02361 ns/px    15.88 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.63523 ns/px     4.72 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.02375 ns/px    15.79 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.02238 ns/px    16.75 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.63979 ns/px     4.69 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.02472 ns/px    15.17 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.02150 ns/px    17.44 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61119 ns/px     4.91 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.01843 ns/px    13.56 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02075 ns/px    12.05 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.31457 ns/px     6.36 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.02374      15.79       26.75x
+ bitwiseAnd   binCV uint64          0.02361      15.88       26.90x
+ bitwiseAnd   OpenCV CV_8U          0.63523       4.72        1.00x
+ bitwiseOr    binCV uint32          0.02375      15.79       26.94x
+ bitwiseOr    binCV uint64          0.02238      16.75       28.59x
+ bitwiseOr    OpenCV CV_8U          0.63979       4.69        1.00x
+ bitwiseXor   binCV uint32          0.02472      15.17       24.72x
+ bitwiseXor   binCV uint64          0.02150      17.44       28.43x
+ bitwiseXor   OpenCV CV_8U          0.61119       4.91        1.00x
+ bitwiseNot   binCV uint32          0.01843      13.56       17.07x
+ bitwiseNot   binCV uint64          0.02075      12.05       15.16x
+ bitwiseNot   OpenCV CV_8U          0.31457       6.36        1.00x
+ ratio > 1 means binCV is faster. sink=8665386563128160879
+
+================ 1024 x 1024 (1048576 pixels) ================
+ footprint per buffer: binCV uint32 131072 B, binCV uint64 131072 B, OpenCV CV_8U 1048576 B (8.0x)
+ bitwiseAnd   set pixels: binCV   261799 OpenCV   261799 agree
+ bitwiseOr    set pixels: binCV   787067 OpenCV   787067 agree
+ bitwiseXor   set pixels: binCV   525268 OpenCV   525268 agree
+ bitwiseNot   set pixels: binCV   523860 OpenCV   523860 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 131072 B buffer 18.89 GB/s (9.78) 1048576 B buffer 6.16 GB/s (5.54)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 14.07 GB/s, 5.98 GB/s
+ working set per call: binCV 393216 B, OpenCV 3145728 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.04550 ns/px     8.24 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.04328 ns/px     8.67 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61932 ns/px     4.84 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.04375 ns/px     8.57 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.04350 ns/px     8.62 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61977 ns/px     4.84 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.04293 ns/px     8.73 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.04295 ns/px     8.73 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61854 ns/px     4.85 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.02681 ns/px     9.32 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.02759 ns/px     9.06 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37061 ns/px     5.40 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.04550       8.24       13.61x
+ bitwiseAnd   binCV uint64          0.04328       8.67       14.31x
+ bitwiseAnd   OpenCV CV_8U          0.61932       4.84        1.00x
+ bitwiseOr    binCV uint32          0.04375       8.57       14.16x
+ bitwiseOr    binCV uint64          0.04350       8.62       14.25x
+ bitwiseOr    OpenCV CV_8U          0.61977       4.84        1.00x
+ bitwiseXor   binCV uint32          0.04293       8.73       14.41x
+ bitwiseXor   binCV uint64          0.04295       8.73       14.40x
+ bitwiseXor   OpenCV CV_8U          0.61854       4.85        1.00x
+ bitwiseNot   binCV uint32          0.02681       9.32       13.82x
+ bitwiseNot   binCV uint64          0.02759       9.06       13.43x
+ bitwiseNot   OpenCV CV_8U          0.37061       5.40        1.00x
+ ratio > 1 means binCV is faster. sink=11171866258736739284
+
+================ 8192 x 4096 (33554432 pixels) ================
+ footprint per buffer: binCV uint32 4194304 B, binCV uint64 4194304 B, OpenCV CV_8U 33554432 B (8.0x)
+ bitwiseAnd   set pixels: binCV  8389345 OpenCV  8389345 agree
+ bitwiseOr    set pixels: binCV 25165591 OpenCV 25165591 agree
+ bitwiseXor   set pixels: binCV 16776246 OpenCV 16776246 agree
+ bitwiseNot   set pixels: binCV 16778496 OpenCV 16778496 agree
+ physical bound (1 read + 1 write word copy, fastest batch; worst in parentheses):
+ 4194304 B buffer 5.26 GB/s (5.08) 33554432 B buffer 5.30 GB/s (4.88)
+ std::memcpy at the same footprints (context only, NOT the bound, and not monotonic in size): 4.47 GB/s, 5.58 GB/s
+ working set per call: binCV 12582912 B, OpenCV 100663296 B (three buffers)
+[BENCH] bitwiseAnd             binCV uint32        0.07728 ns/px     4.85 GB/s
+[BENCH] bitwiseAnd             binCV uint64        0.07705 ns/px     4.87 GB/s
+[BENCH] bitwiseAnd             OpenCV CV_8U        0.61352 ns/px     4.89 GB/s
+[BENCH] bitwiseOr              binCV uint32        0.07706 ns/px     4.87 GB/s
+[BENCH] bitwiseOr              binCV uint64        0.07709 ns/px     4.86 GB/s
+[BENCH] bitwiseOr              OpenCV CV_8U        0.61399 ns/px     4.89 GB/s
+[BENCH] bitwiseXor             binCV uint32        0.07706 ns/px     4.87 GB/s
+[BENCH] bitwiseXor             binCV uint64        0.07769 ns/px     4.83 GB/s
+[BENCH] bitwiseXor             OpenCV CV_8U        0.61405 ns/px     4.89 GB/s
+[BENCH] bitwiseNot             binCV uint32        0.04804 ns/px     5.20 GB/s
+[BENCH] bitwiseNot             binCV uint64        0.04776 ns/px     5.23 GB/s
+[BENCH] bitwiseNot             OpenCV CV_8U        0.37245 ns/px     5.37 GB/s
+
+ OP           IMPLEMENTATION       ns/pixel       GB/s    vs OpenCV
+ ---------------------------------------------------------------------
+ bitwiseAnd   binCV uint32          0.07728       4.85        7.94x
+ bitwiseAnd   binCV uint64          0.07705       4.87        7.96x
+ bitwiseAnd   OpenCV CV_8U          0.61352       4.89        1.00x
+ bitwiseOr    binCV uint32          0.07706       4.87        7.97x
+ bitwiseOr    binCV uint64          0.07709       4.86        7.96x
+ bitwiseOr    OpenCV CV_8U          0.61399       4.89        1.00x
+ bitwiseXor   binCV uint32          0.07706       4.87        7.97x
+ bitwiseXor   binCV uint64          0.07769       4.83        7.90x
+ bitwiseXor   OpenCV CV_8U          0.61405       4.89        1.00x
+ bitwiseNot   binCV uint32          0.04804       5.20        7.75x
+ bitwiseNot   binCV uint64          0.04776       5.23        7.80x
+ bitwiseNot   OpenCV CV_8U          0.37245       5.37        1.00x
+ ratio > 1 means binCV is faster. sink=2855861909532975370
+
+# loadavg at end: 1.03 0.89 0.49 1/308 910735
+# throttled after: throttled=0x80000
+# temp after: temp=63.7'C
+# date:     2026-09-21T16:31:41-07:00
+# done

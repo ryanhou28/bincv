@@ -120,18 +120,27 @@ so.
 
 | decision | speed | memory | outcome |
 |---|---|---|---|
-| `uint64_t` as the default word type | 1.95× faster on `countNonZero` at 640×480, aarch64 — **ratio only** | 2,880 B against `uint32_t`'s 2,400 at 160×120 and 960 against 720 at 94×60 — 20% and 33% more | **declined** |
+| `uint64_t` as the default word type | 1.953× faster on `countNonZero` at 640×480, aarch64 [1.952, 1.953] | 2,880 B against `uint32_t`'s 2,400 at 160×120 and 960 against 720 at 94×60 — 20% and 33% more | **declined** |
 | an occupancy mask for spacing detections | 76,077 ns against the direct test's 3,281 on x86-64 — **the mask is 23.17× slower** [23.07, 23.33] | 38,400 B against the direct test's 0 | **declined twice over** |
 | fused morphology kernel | 0.6985 ns/pixel against `cv::erode`'s 0.2238 on a 5×5 ellipse, x86-64 — binCV at 0.319× | 76,800 B against `cv::erode`'s 614,400 — 8× smaller | **accepted, and it costs** |
 | interleaved bit-plane layout † | +8% on the pipeline — **not reproducible** | +92,160 B on a 436,704-byte peak, +21% — **not reproducible** | **declined** |
 
-The word-type row is the canonical one. `uint64_t` is genuinely 1.95× faster on
+The word-type row is the canonical one. `uint64_t` is genuinely 1.953× faster on
 `countNonZero` at 640×480 on the reference device, and it was turned down, because a wider
 word rounds each row's stride up more coarsely and the upper pyramid levels are exactly where
-a small target is tightest. **The 1.95× is the one figure in this table with no measured pair
-behind it in the repository**: the linked word-width log times the same comparison at 1.914×,
-so restating the row from it would move a published figure. The ratio stands as published and
-the row is owed a re-measurement.
+a small target is tightest.
+
+**This row was carried for three rounds as having no measured pair behind it. It has one,
+and had one all along.** The reduce benchmark times exactly this comparison at 640×480 and
+reads 1.953× [1.952, 1.953] over ten device launches, reproducing the published 1.95× to
+four figures ([log](logs/reduce-aarch64-launches.log)). What made it look unsourced is the
+*other* benchmark: the word-width sweep times the same two word types at the same geometry
+and reads **1.914×**, also over ten launches and tighter still. Both are right. The word-width
+sweep interleaves all four widths in one batch — 1,350 KiB resident, past the Pi's 1 MiB L2 —
+where the reduce benchmark times one width at a time inside a 38,400-byte plane. A two per
+cent gap between two correct measurements of "the same comparison" is what residency is worth
+here, and neither number is the one to delete. The row above quotes the reduce figure, which
+is the one that matches the operation as a caller runs it.
 
 **A 64-bit caller loses nothing for that choice.** On little-endian a 64-bit bit-plane already
 *is* a 32-bit bit-plane at twice the stride, so it is reinterpreted rather than converted — no
@@ -140,9 +149,9 @@ the baseline, with 0 of 307,200 pixels differing:
 
 | arm | x86-64 (ns) | x86-64, native ÷ this arm | aarch64 (ns) | aarch64, native ÷ this arm |
 |---|---|---|---|---|
-| native `uint32_t` buffer | 17,650 | — | 259,108 | — |
-| `uint64_t` buffer, narrowed view | 18,380 | 0.9605× [0.9597, 0.9611] | 259,182 | 1.00× |
-| `uint64_t` buffer, scalar fallback | 678,902 | 0.026× | 2,162,550 | 0.12× |
+| native `uint32_t` buffer | 17,650 | — | 257,350 | — |
+| `uint64_t` buffer, narrowed view | 18,380 | 0.9605× [0.9597, 0.9611] | 257,489 | 0.9995× [0.9994, 0.9996] |
+| `uint64_t` buffer, scalar fallback | 678,902 | 0.026× | 2,163,581 | 0.1189× [0.1189, 0.1190] |
 
 The narrowed view is within four per cent of the native buffer, and this is the tightest
 interval in these reports: thirty launches of the row scatter 1.2% and resolve a difference
@@ -172,7 +181,7 @@ built for and would have taken the pipeline from about 1.52× to 1.65× against 
 92,160 additional bytes on a 436,704-byte peak, taking the footprint result from 6.23× to
 5.15×. Twenty-one percent of the footprint advantage for eight percent of the speed is not a
 trade this library makes. (The 1.52× baseline is an older pipeline figure, superseded by the
-3.658× and 4.73× in [feature-tracking.md](feature-tracking.md); the proportions are what
+3.658× and 4.620× in [feature-tracking.md](feature-tracking.md); the proportions are what
 the decision turned on.)
 
 Two other figures here come from that same record rather than a committed benchmark: the
@@ -200,20 +209,22 @@ BINCV_LK_THREADS=4 /usr/bin/time -v ./build/benchmark/feature_tracking_sequence 
 ```
 
 The bytes on this page are computed from buffer geometry and do not vary between launches;
-the **times** beside them do, so each x86-64 time here is the median of thirty pinned
-launches. Logs:
-[feature tracking](logs/feature-tracking-x86_64-launches.log), [single](logs/feature-tracking-x86_64.log) ·
-[morphology](logs/morphology-x86_64-launches.log), [single](logs/morphology-x86_64.log), [aarch64](logs/morphology-aarch64.log) ·
-[derivative](logs/derivative-x86_64-launches.log), [single](logs/derivative-x86_64.log), [aarch64](logs/derivative-aarch64.log) ·
-[denoise](logs/denoise-x86_64-launches.log), [single](logs/denoise-x86_64.log), [aarch64](logs/denoise-aarch64.log) ·
-[goodFeaturesToTrack](logs/goodfeatures-x86_64-launches.log), [first thirty](logs/goodfeatures-x86_64.log), [aarch64](logs/goodfeatures-aarch64.log) ·
-[pyramid](logs/pyramid-x86_64.log), [aarch64](logs/pyramid-aarch64.log) ·
-[word width](logs/wordwidth-x86_64.log), [aarch64](logs/wordwidth-aarch64.log) ·
+the **times** beside them do, so each time here is the median of a launch sweep — thirty on
+x86-64, ten on the device. Logs:
+[feature tracking](logs/feature-tracking-x86_64-launches.log), [single](logs/feature-tracking-x86_64.log), [aarch64](logs/feature-tracking-aarch64-launches.log) ·
+[morphology](logs/morphology-x86_64-launches.log), [single](logs/morphology-x86_64.log), [aarch64](logs/morphology-aarch64-launches.log), [single](logs/morphology-aarch64.log) ·
+[derivative](logs/derivative-x86_64-launches.log), [single](logs/derivative-x86_64.log), [aarch64](logs/derivative-aarch64-launches.log), [single](logs/derivative-aarch64.log) ·
+[denoise](logs/denoise-x86_64-launches.log), [single](logs/denoise-x86_64.log), [aarch64](logs/denoise-aarch64-launches.log), [single](logs/denoise-aarch64.log) ·
+[reduce](logs/reduce-x86_64-launches.log), [aarch64](logs/reduce-aarch64-launches.log) — the word-type row's source ·
+[goodFeaturesToTrack](logs/goodfeatures-x86_64-launches.log), [first thirty](logs/goodfeatures-x86_64.log), [aarch64](logs/goodfeatures-aarch64-launches.log), [single](logs/goodfeatures-aarch64.log) ·
+[pyramid](logs/pyramid-x86_64.log), [aarch64](logs/pyramid-aarch64-launches.log), [single](logs/pyramid-aarch64.log) ·
+[word width](logs/wordwidth-x86_64.log), [aarch64](logs/wordwidth-aarch64-launches.log), [single](logs/wordwidth-aarch64.log) ·
 [peak RSS against threads](logs/feature-tracking-rss-x86_64.log) ·
 [spacing](logs/spacing-x86_64-launches.log), [single](logs/spacing-x86_64.log) ·
-[64-bit narrowing](logs/wordtype_narrow-x86_64-launches.log), [single](logs/wordtype_narrow-x86_64.log), [aarch64](logs/wordtype_narrow-aarch64.log)
+[64-bit narrowing](logs/wordtype_narrow-x86_64-launches.log), [single](logs/wordtype_narrow-x86_64.log), [aarch64](logs/wordtype_narrow-aarch64-launches.log), [single](logs/wordtype_narrow-aarch64.log)
 
 **[pyramid](logs/pyramid-x86_64.log) and [word width](logs/wordwidth-x86_64.log) are still
-single launches**, and they are the two whose published figures are computed byte counts
-rather than timings — exact, and identical on both architectures — plus one aarch64 ratio.
-Nothing on this page reads an x86-64 time out of either.
+single launches on x86-64**, and they are the two whose published figures are computed byte
+counts rather than timings — exact, and identical on both architectures. Nothing on this page
+reads an x86-64 time out of either. Both now have a ten-launch device sweep, which is how the
+word-type row's second measurement came to light.
