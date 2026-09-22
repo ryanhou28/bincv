@@ -386,6 +386,24 @@
 // two sums that slide. Nothing here writes a word loop.
 #include "reduce.hpp"
 
+// The non-maximum suppression prefilter's vector path, gated the way
+// ops/pack.hpp gates the packer's: selected at RUN TIME on x86 so the baseline
+// ISA is unchanged, baseline on aarch64 where NEON always exists. The gate is
+// evaluated BEFORE the first core include for the same reason it is there --
+// an include-only integration must still get the NEON arm.
+#include "../core/simd.hpp"
+
+// !__CUDACC__: no vector arm is reachable from device code.
+#if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && \
+    !defined(__CUDACC__)
+#define BINCV_CORNERNMS_AVX2 1
+#define BINCV_CORNERNMS_SIMD 1
+#include <immintrin.h>
+#elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+#define BINCV_CORNERNMS_SIMD 1
+#include <arm_neon.h>
+#endif
+
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
@@ -558,6 +576,105 @@ struct CornerStronger {
         return a.x > b.x;
     }
 };
+
+// ---------------------------------------------------------------------------
+// THE NON-MAXIMUM SUPPRESSION PREFILTER
+//
+// Both selection forms ask the same question of every interior pixel: is
+// `mid[x]` above the threshold, and is any of its nine neighbours STRICTLY
+// greater? Measured on the 752x480 real frame, that scan plus the heap it feeds
+// is 38% of a whole detection and the response sweep -- the stage the packed
+// representation actually accelerates -- is 30%. The scan is the larger half and
+// was entirely scalar, while the same test on OpenCV's side is `cv::dilate`,
+// which is vectorized on both architectures.
+//
+// Only about 2.7% of pixels survive, so the useful shape is a PREFILTER: test
+// eight (or four) pixels at once, and run the scalar body only on the lanes that
+// pass. No buffer is added -- the mask is consumed lane by lane where it is
+// produced -- because peak working set is the axis this operation wins on.
+//
+// THE PREDICATE IS THE SCALAR ONE, NOT AN APPROXIMATION OF IT. `m` is the
+// maximum over all nine, so `mid[x] >= m` holds exactly when no neighbour is
+// strictly greater, which is what the scalar loop's `isMax` computes. Ties do
+// not suppress, there as here.
+// ---------------------------------------------------------------------------
+
+/// @brief Force the portable prefilter, for the benchmark and the tests. **INTERNAL.**
+/// @note Not a tuning knob. It is how the vector arm is held to producing the same
+/// candidates as the scalar one, and how a benchmark can show the vector arm is
+/// actually RUNNING -- this project has shipped a vector block that was compiled
+/// out and measured three "improvements" against it.
+inline bool& cornerNmsSimdEnabled() {
+    static bool on = true;
+    return on;
+}
+
+#if defined(BINCV_CORNERNMS_AVX2)
+inline bool hasCornerNmsSimd() {
+    static const bool kYes = __builtin_cpu_supports("avx2");
+    return kYes && cornerNmsSimdEnabled();
+}
+#elif defined(BINCV_CORNERNMS_SIMD)
+inline bool hasCornerNmsSimd() { return cornerNmsSimdEnabled(); }
+#else
+inline bool hasCornerNmsSimd() { return false; }
+#endif
+
+/// @brief How many pixels one prefilter step covers. **INTERNAL.**
+#if defined(BINCV_CORNERNMS_AVX2)
+inline constexpr int kNmsLanes = 8;
+#elif defined(BINCV_CORNERNMS_SIMD)
+inline constexpr int kNmsLanes = 4;
+#else
+inline constexpr int kNmsLanes = 1;
+#endif
+
+#if defined(BINCV_CORNERNMS_AVX2)
+/// @brief Which of the eight pixels at `x` are strict 3x3 maxima above `threshold`.
+/// @return Bit `i` set means `x + i` passes; the caller does the rest scalar.
+/// @note Reads `above/mid/below` at `x - 1 .. x + 8`, so the caller must keep one
+/// pixel of margin on each side -- both call sites scan `[1, width - 1)`.
+__attribute__((target("avx2"))) inline unsigned nmsLaneMask(const float* above, const float* mid,
+                                                            const float* below, int x,
+                                                            float threshold) {
+    const float* a = above + x;
+    const float* m = mid + x;
+    const float* b = below + x;
+    const __m256 c = _mm256_loadu_ps(m);
+    __m256 mx = _mm256_max_ps(_mm256_loadu_ps(a - 1), _mm256_loadu_ps(a));
+    mx = _mm256_max_ps(mx, _mm256_loadu_ps(a + 1));
+    mx = _mm256_max_ps(mx, _mm256_loadu_ps(m - 1));
+    mx = _mm256_max_ps(mx, c);
+    mx = _mm256_max_ps(mx, _mm256_loadu_ps(m + 1));
+    mx = _mm256_max_ps(mx, _mm256_loadu_ps(b - 1));
+    mx = _mm256_max_ps(mx, _mm256_loadu_ps(b));
+    mx = _mm256_max_ps(mx, _mm256_loadu_ps(b + 1));
+    const __m256 overT = _mm256_cmp_ps(c, _mm256_set1_ps(threshold), _CMP_GT_OQ);
+    const __m256 isMax = _mm256_cmp_ps(c, mx, _CMP_GE_OQ);
+    return static_cast<unsigned>(_mm256_movemask_ps(_mm256_and_ps(overT, isMax)));
+}
+#elif defined(BINCV_CORNERNMS_SIMD)
+/// @brief The same over four lanes; aarch64 has no move-mask, so fold the lane
+/// bits with a weighted AND and a pairwise add. **INTERNAL.**
+inline unsigned nmsLaneMask(const float* above, const float* mid, const float* below, int x,
+                            float threshold) {
+    const float* a = above + x;
+    const float* m = mid + x;
+    const float* b = below + x;
+    const float32x4_t c = vld1q_f32(m);
+    float32x4_t mx = vmaxq_f32(vld1q_f32(a - 1), vld1q_f32(a));
+    mx = vmaxq_f32(mx, vld1q_f32(a + 1));
+    mx = vmaxq_f32(mx, vld1q_f32(m - 1));
+    mx = vmaxq_f32(mx, c);
+    mx = vmaxq_f32(mx, vld1q_f32(m + 1));
+    mx = vmaxq_f32(mx, vld1q_f32(b - 1));
+    mx = vmaxq_f32(mx, vld1q_f32(b));
+    mx = vmaxq_f32(mx, vld1q_f32(b + 1));
+    const uint32x4_t pass = vandq_u32(vcgtq_f32(c, vdupq_n_f32(threshold)), vcgeq_f32(c, mx));
+    static const uint32_t kWeights[4] = {1u, 2u, 4u, 8u};
+    return static_cast<unsigned>(vaddvq_u32(vandq_u32(pass, vld1q_u32(kWeights))));
+}
+#endif
 
 } // namespace impl
 
@@ -1611,18 +1728,14 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
         const float* mid = ring.row(static_cast<size_t>(cy) % kResponseRingRows);
         const float* below = cur;
 
-        for (int x = 1; x + 1 < width; ++x) {
-            const float val = mid[static_cast<size_t>(x)];
-            if (!(val > running)) continue;  // permanently dead; see above
-            bool isMax = true;
-            for (int dx = -1; dx <= 1 && isMax; ++dx) {
-                const size_t c = static_cast<size_t>(x + dx);
-                if (above[c] > val || mid[c] > val || below[c] > val) isMax = false;
-            }
-            if (!isMax) continue;
+        // What a surviving maximum does. Written once and called from both the
+        // vector-prefiltered sweep and the scalar remainder, so the two arms
+        // cannot drift -- the prefilter decides WHICH pixels reach here and
+        // nothing else.
+        const auto consider = [&](int x, float val) {
             // AFTER the suppression, as in the frame-map form: a masked-out pixel
             // still suppresses an admitted neighbour it dominates.
-            if (!admit(x, cy)) continue;
+            if (!admit(x, cy)) return;
 
             Corner candidate;
             candidate.x = x;
@@ -1632,14 +1745,15 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
             if (retained < capacity) {
                 corners[retained++] = candidate;
                 std::push_heap(corners, corners + retained, impl::CornerStronger());
-                continue;
+                return;
             }
             if (capacity == 0) {
                 // Nothing can be retained, so every raw maximum is discarded and
-                // the flag is decided entirely by `maxDiscarded`. No early return:
-                // the threshold this is judged against is not known yet.
+                // the flag is decided entirely by `maxDiscarded`. No early return
+                // from the SWEEP: the threshold this is judged against is not
+                // known yet.
                 if (val > maxDiscarded) maxDiscarded = val;
-                continue;
+                return;
             }
             // Full. `corners[0]` is the WEAKEST retained candidate -- the heap is
             // built with the SORT's comparator, so its maximum is the weakest.
@@ -1653,6 +1767,35 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
             } else if (val > maxDiscarded) {
                 maxDiscarded = val;
             }
+        };
+
+        // The sweep. The vector arm tests `kNmsLanes` pixels per step and hands
+        // the survivors to `consider`; the remainder -- the tail, and every pixel
+        // when the arm is switched off -- runs the same predicate scalar.
+        int x = 1;
+        const int xEnd = width - 1;
+#if defined(BINCV_CORNERNMS_SIMD)
+        if (impl::hasCornerNmsSimd()) {
+            for (; x + impl::kNmsLanes <= xEnd; x += impl::kNmsLanes) {
+                unsigned lanes = impl::nmsLaneMask(above, mid, below, x, running);
+                while (lanes != 0u) {
+                    const int lane = __builtin_ctz(lanes);
+                    lanes &= lanes - 1u;
+                    consider(x + lane, mid[static_cast<size_t>(x + lane)]);
+                }
+            }
+        }
+#endif
+        for (; x < xEnd; ++x) {
+            const float val = mid[static_cast<size_t>(x)];
+            if (!(val > running)) continue;  // permanently dead; see above
+            bool isMax = true;
+            for (int dx = -1; dx <= 1 && isMax; ++dx) {
+                const size_t c = static_cast<size_t>(x + dx);
+                if (above[c] > val || mid[c] > val || below[c] > val) isMax = false;
+            }
+            if (!isMax) continue;
+            consider(x, val);
         }
     }
 

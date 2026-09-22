@@ -2241,4 +2241,61 @@ BINCV_TEST(Corner, Mask_StreamingMatchesFrameMap) {
     std::printf(" mask: frame map, ring and owning overload agree on %zu corners\n", ra.count);
 }
 
+// The suppression prefilter's vector arm against its portable arm, in ONE
+// binary, via the runtime switch -- the same contract the packer's and the dense
+// matcher's arms carry. The prefilter decides only WHICH pixels reach the scalar
+// body, so an arm that disagrees is an arm that loses or invents corners, and
+// this is what says so.
+//
+// A width that is not a multiple of the lane count is deliberate: the sweep's
+// tail is scalar on both arms, and a prefilter that got the tail boundary wrong
+// would still agree on a width it divides evenly.
+BINCV_TEST(Corner, SuppressionArmsAgree) {
+    const int w = 157, h = 71;
+    Frame f = makeFrame("suppression-arms", w, h);
+    uint64_t st = 0xBEEFULL;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            f.set(y, x, static_cast<unsigned>(nextRandom(st) & 1ULL));
+    // Structure as well as noise, so the frame has real maxima and long flat
+    // runs -- the flats are where a `>=` that should be `>` shows up.
+    for (int y = 10; y < 60; ++y)
+        for (int x = 20; x < 140; ++x)
+            f.set(y, x, static_cast<unsigned>((x / 9 + y / 7) % 2));
+
+    const Derived<uint32_t> d(f, BORDER_REFLECT_101);
+
+    GoodFeaturesParams p;
+    p.blockSize = 3;
+    p.minDistance = 3.0;
+    p.maxCorners = 0;
+    p.qualityLevel = 0.01;
+
+    const size_t cap = static_cast<size_t>(w) * static_cast<size_t>(h);
+    std::vector<float> ringStorage(bincv::kResponseRingRows * static_cast<size_t>(w));
+    const ResponseMap ring{ringStorage.data(), static_cast<size_t>(w), bincv::kResponseRingRows,
+                           static_cast<size_t>(w)};
+
+    std::vector<Corner> vec(cap), sca(cap);
+    const CornerResult rv =
+        bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, p, ring, vec.data(), cap);
+
+    bincv::impl::cornerNmsSimdEnabled() = false;
+    const CornerResult rs =
+        bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, p, ring, sca.data(), cap);
+    bincv::impl::cornerNmsSimdEnabled() = true;
+
+    BINCV_CHECK_EQ(rv.count, rs.count);
+    BINCV_CHECK(rv.count > 0);
+    BINCV_CHECK_EQ(rv.candidatesRanked, rs.candidatesRanked);
+    size_t differ = 0;
+    for (size_t i = 0; i < rv.count && i < rs.count; ++i)
+        if (vec[i].x != sca[i].x || vec[i].y != sca[i].y || vec[i].response != sca[i].response)
+            ++differ;
+    BINCV_CHECK_EQ(differ, size_t{0});
+    std::printf(" suppression arms: %zu corners, %zu ranked, %zu differ (vector arm %s)\n",
+                rv.count, rv.candidatesRanked, differ,
+                bincv::impl::hasCornerNmsSimd() ? "present" : "absent on this build");
+}
+
 BINCV_TEST_MAIN("test_corner")
