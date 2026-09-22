@@ -8,6 +8,29 @@ and they are not interchangeable.
 | `<bench>-x86_64-launches.log` | **thirty separate pinned process launches** of one benchmark, with the aggregate appended as a comment block. This is what an x86-64 figure in the reports is. |
 | `<bench>-x86_64.log` | the **single launch** that figure used to be. Kept, not deleted — a number that moved should be checkable against the reading it replaced. |
 | `<bench>-aarch64.log` | the reference device, one pinned launch with the governor locked. That host's run-to-run scatter is 0.1–0.8%, so one launch is quoted there. |
+| `<bench>-x86_64-launches-repeat.log` | a **second, independent** thirty-launch sweep of the same benchmark, taken on a deliberately busier machine before the figures were published. Two exist, for `logic` and `morphology`. |
+
+## The repeats, and what they showed
+
+Two sweeps were re-taken independently before any figure was adopted: one row that
+moved and changed sign (`dilate` 3×3) and one that did not (`bitwiseAnd`), plus five
+others that came free with them. The rule was written first: the repeat's bootstrap
+interval must overlap the first sweep's, and a disagreement is investigated rather than
+averaged.
+
+| row | first sweep | repeat | |
+|---|---|---|---|
+| `dilate` 3×3, `uint32` | 1.0570 [1.0463, 1.0725] | 1.0589 [1.0527, 1.0776] | agrees |
+| `erode` 3×3, `uint32` | 1.0532 [1.0351, 1.0656] | 1.0369 [1.0297, 1.0611] | agrees |
+| `morphologyEx(OPEN)`, `uint32` | 1.0222 [1.0158, 1.0430] | 1.0251 [1.0169, 1.0406] | agrees |
+| `erode` 5×5 ellipse, `uint32` | 0.3189 [0.3177, 0.3227] | 0.3186 [0.3152, 0.3213] | agrees |
+| `bitwiseAnd`, `uint32` | 9.9748 [9.8200, 10.2812] | 10.2036 [9.9359, 10.4291] | agrees |
+| `bitwiseOr`, `uint64` | 9.9857 [9.8834, 10.1002] | 9.9405 [9.7337, 10.1349] | agrees |
+| `bitwiseNot`, `uint32` | 17.9859 [17.8190, 18.1402] | 18.2741 [18.0552, 19.0970] | intervals overlap; **the repeat's median is 0.7% above the first sweep's interval** |
+
+**Six of the seven repeats land inside the first sweep's interval and one lands just
+outside it.** That is the caveat to carry: a bootstrap interval is over the thirty
+launches that were taken, and is not a bound on what a different thirty will say.
 
 ## What changed, and when
 
