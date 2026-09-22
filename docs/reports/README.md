@@ -350,39 +350,6 @@ single launch than in the median of thirty**, and the asymmetry is in the size a
 count: the worst overstatement is **49%** and the worst understatement **3.3%**. A launch can
 go badly wrong and cannot go much right. The median cell reads 1.6% slow.
 
-### On the aarch64 device
-
-**The device column has been re-taken too, and the headline is that it held.** Nineteen
-benchmarks, ten launches each (seven on the two stereo binaries), governor locked to
-`performance` and restored afterwards, every one at commit `80ff0a8`. Of the published device
-figures, **two moved beyond their own band for a reason that is not the measurement**:
-
-| figure | published | re-taken | what moved |
-|---|---|---|---|
-| the assembled pipeline | 4.73× | **4.620×** | binCV's arm, +3.2% — a regression, [feature-tracking.md](feature-tracking.md#speed) |
-| `denseDisparity` census, aarch64 | 462 ms | **730.6 ms** | the row's two columns were timing different word-type arms, [stereo.md](stereo.md) |
-
-Everything else reproduced. The ratios that shifted shifted because the `cv::` denominator
-did — `countAnd` 6.55× to 6.242× on a binCV arm that moved 0.19%, `morphologyEx(OPEN)` 1.11×
-to 1.146× on one that moved 0.07% — and `goodFeaturesToTrack`'s corrected 1.72× came back at
-1.731× from an independent sweep, which is the control this round had.
-
-**The device is reliable, but not uniformly, and the old protocol note overstated it.**
-`goodFeaturesToTrack` scatters 1.5% across ten launches and is what "0.1–0.8% run-to-run" was
-read from. The small-frame logic and reduction rows scatter far more: **binCV's 640×480
-`bitwiseAnd` arm scatters 16.9% across ten launches** where OpenCV's scatters 4.0%, and the
-mechanism is binCV's own advantage — a 38 KB packed plane's cache residency is decided per
-launch by where the allocator put it, while OpenCV's 307 KB arm never fits and so never
-varies. The scatter falls to 2.0–2.3% at 8192×4096, where neither side fits. That is why
-`bitwiseAnd` reads 26.68× rather than 28.59× and why neither number is worth defending: the
-published figure sits inside the ten launches' own range of 25.58× to 30.32×.
-
-**What this round could not do is date the old figures.** A figure that reproduces was either
-never stale or was stale in a kernel that has since come back to where it was, and nothing in
-the repository distinguishes those. What the pipeline row shows is that the second case is
-not hypothetical: every stage of it but one got faster, `pyrDown` by half, and its total got
-slower — so a stable headline can sit on top of a column that has moved underneath it.
-
 So the single-launch protocol biased the published *times* slow while the *ratios* largely
 survived, because a launch that lands slow lands slow on both arms at once.
 `wordtype_narrow` is the clean demonstration: all three of its arms read about 20% high in
@@ -440,6 +407,39 @@ thread counts. [logs/README.md](logs/README.md) lists them with their reasons. T
 threading rows in [feature-tracking.md](feature-tracking.md#what-this-does-not-claim) are the
 one place an un-swept x86 *timing* is still published, because a threading arm cannot be
 pinned; that table says so.
+
+### On the aarch64 device
+
+**The device column has been re-taken too, and the headline is that it held.** Nineteen
+benchmarks, ten launches each (seven on the two stereo binaries), governor locked to
+`performance` and restored afterwards, every one at commit `80ff0a8`. Of the published device
+figures, **two moved beyond their own band for a reason that is not the measurement**:
+
+| figure | published | re-taken | what moved |
+|---|---|---|---|
+| the assembled pipeline | 4.73× | **4.620×** | binCV's arm, +3% — a regression, [feature-tracking.md](feature-tracking.md#speed) |
+| `denseDisparity` census, aarch64 | 462 ms | **730.6 ms** | the row's two columns were timing different word-type arms, [stereo.md](stereo.md) |
+
+Everything else reproduced. The ratios that shifted shifted because the `cv::` denominator
+did — `countAnd` 6.55× to 6.242× on a binCV arm that moved 0.19%, `morphologyEx(OPEN)` 1.11×
+to 1.146× on one that moved 0.07% — and `goodFeaturesToTrack`'s corrected 1.72× came back at
+1.731× from an independent sweep, which is the control this round had.
+
+**The device is reliable, but not uniformly, and the old protocol note overstated it.**
+`goodFeaturesToTrack` scatters 1.5% across ten launches and is what "0.1–0.8% run-to-run" was
+read from. The small-frame logic and reduction rows scatter far more: **binCV's 640×480
+`bitwiseAnd` arm scatters 16.9% across ten launches** where OpenCV's scatters 4.0%, and the
+mechanism is binCV's own advantage — a 38 KB packed plane's cache residency is decided per
+launch by where the allocator put it, while OpenCV's 307 KB arm never fits and so never
+varies. The scatter falls to 2.0–2.3% at 8192×4096, where neither side fits. That is why
+`bitwiseAnd` reads 26.68× rather than 28.59× and why neither number is worth defending: the
+published figure sits inside the ten launches' own range of 25.58× to 30.32×.
+
+**What this round could not do is date the old figures.** A figure that reproduces was either
+never stale or was stale in a kernel that has since come back to where it was, and nothing in
+the repository distinguishes those. What the pipeline row shows is that the second case is
+not hypothetical: every stage of it but one got faster, `pyrDown` by half, and its total got
+slower — so a stable headline can sit on top of a column that has moved underneath it.
 
 ## The workload
 
