@@ -46,11 +46,11 @@ refactor that looked like its cause was A/B'd at thirty launches each and is not
 **`1/1/1/1` resolves only 1.090× on this host**, so its interval is wide and that row should
 not be read to three digits. [The index](README.md#on-the-x86-64-host) has the whole comparison.
 
-**`cornerSubPix` is the one row here whose measurements did not survive into the
-repository.** The two times were taken and the ratio recorded; the values behind it were
-not, so the cells say so rather than being filled in. `corner_subpix_benchmark` exists and is
-named below, so the remedy is one run — and until that run happens this row is a claim on
-trust where every other row on this page can be checked.
+**`cornerSubPix`'s measurements did not survive into the repository, and the device half of
+them now has.** The two times were taken and the ratio recorded; the values behind it were
+not, so the cells said so rather than being filled in. Ten device launches supply them —
+8.595 ms against 0.625, a ratio of 13.76× where 13.70× was published — and the x86-64 half
+is still a claim on trust, because that host has no sweep of this benchmark.
 
 ### Memory
 

@@ -39,7 +39,7 @@ is not in these tables — it is not an operation — and is
 row names its own unit, and on all of them the smaller number is the faster side.
 
 **Each ratio carries the bootstrap 95% interval of its launches** — thirty on x86-64, ten on
-the device — and each time cell is those launches' median. The ratio is formed inside each
+the device, seven for dense disparity — and each time cell is those launches' median. The ratio is formed inside each
 launch, so it is not the quotient of the two cells beside it.
 [methodology-timing.md](methodology-timing.md#the-protocol-each-host-needs) says why the two
 counts differ.
@@ -411,8 +411,9 @@ pinned; that table says so.
 ### On the aarch64 device
 
 **The device column has been re-taken too, and the headline is that it held.** Nineteen
-benchmarks, ten launches each (seven on the two stereo binaries), governor locked to
-`performance` and restored afterwards, every one at commit `80ff0a8`. Of the published device
+benchmarks, ten launches each — seven on the two stereo binaries and five on the
+1709-frame pipeline, which costs a minute a launch — governor locked to `performance` and
+restored afterwards, every one at commit `80ff0a8`. Of the published device
 figures, **two moved beyond their own band for a reason that is not the measurement**:
 
 | figure | published | re-taken | what moved |

@@ -38,8 +38,8 @@ with a bootstrap 95% interval ([`cv::StereoBM` and census](logs/dense_opencv-x86
 reports that **cannot be paired**: the two arms live in different binaries, so the launches
 cannot be matched up and the interval comes from resampling the two sweeps independently.
 That makes it the weakest of the x86 intervals here, and it is wide enough to say so —
-[1.199, 1.240] against a median of 1.218×. **The aarch64 column had no committed log at all
-until now, and has seven pinned launches of each binary**
+[1.199, 1.240] against a median of 1.218×. **The aarch64 column had no committed log at
+all until now, and has seven pinned launches of each binary**
 ([`cv::StereoBM` and census](logs/dense_opencv-aarch64-launches.log),
 [the binary path](logs/dense-aarch64-launches.log)). It cannot be paired for the same reason;
 its two arms scatter 0.4% and 0.6%, so the unpaired ratio is 1.319× and the published 1.32×
