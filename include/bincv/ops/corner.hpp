@@ -394,14 +394,20 @@
 #include "../core/simd.hpp"
 
 // !__CUDACC__: no vector arm is reachable from device code.
+//
+// x86 ONLY, AND THAT IS A MEASUREMENT RATHER THAN AN OVERSIGHT. A NEON arm was
+// written, compiled and run on the reference device, and it LOST: 43.936 ns per
+// pixel against the scalar path's 43.395, at 0.13% and 0.30% spread, so the
+// regression is several times the noise. AVX2 tests eight pixels per step where
+// NEON tests four, and the prefilter issues nine unconditional maxima where the
+// scalar path short-circuits on a cheap threshold compare that rejects ~97% of
+// pixels. At four lanes that trade does not pay. The arm is gated to the ISA it
+// was measured to help on, not to every ISA that could host it.
 #if (defined(__x86_64__) || defined(__i386__)) && (defined(__GNUC__) || defined(__clang__)) && \
     !defined(__CUDACC__)
 #define BINCV_CORNERNMS_AVX2 1
 #define BINCV_CORNERNMS_SIMD 1
 #include <immintrin.h>
-#elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
-#define BINCV_CORNERNMS_SIMD 1
-#include <arm_neon.h>
 #endif
 
 namespace bincv {
@@ -614,8 +620,6 @@ inline bool hasCornerNmsSimd() {
     static const bool kYes = __builtin_cpu_supports("avx2");
     return kYes && cornerNmsSimdEnabled();
 }
-#elif defined(BINCV_CORNERNMS_SIMD)
-inline bool hasCornerNmsSimd() { return cornerNmsSimdEnabled(); }
 #else
 inline bool hasCornerNmsSimd() { return false; }
 #endif
@@ -623,8 +627,6 @@ inline bool hasCornerNmsSimd() { return false; }
 /// @brief How many pixels one prefilter step covers. **INTERNAL.**
 #if defined(BINCV_CORNERNMS_AVX2)
 inline constexpr int kNmsLanes = 8;
-#elif defined(BINCV_CORNERNMS_SIMD)
-inline constexpr int kNmsLanes = 4;
 #else
 inline constexpr int kNmsLanes = 1;
 #endif
@@ -652,27 +654,6 @@ __attribute__((target("avx2"))) inline unsigned nmsLaneMask(const float* above, 
     const __m256 overT = _mm256_cmp_ps(c, _mm256_set1_ps(threshold), _CMP_GT_OQ);
     const __m256 isMax = _mm256_cmp_ps(c, mx, _CMP_GE_OQ);
     return static_cast<unsigned>(_mm256_movemask_ps(_mm256_and_ps(overT, isMax)));
-}
-#elif defined(BINCV_CORNERNMS_SIMD)
-/// @brief The same over four lanes; aarch64 has no move-mask, so fold the lane
-/// bits with a weighted AND and a pairwise add. **INTERNAL.**
-inline unsigned nmsLaneMask(const float* above, const float* mid, const float* below, int x,
-                            float threshold) {
-    const float* a = above + x;
-    const float* m = mid + x;
-    const float* b = below + x;
-    const float32x4_t c = vld1q_f32(m);
-    float32x4_t mx = vmaxq_f32(vld1q_f32(a - 1), vld1q_f32(a));
-    mx = vmaxq_f32(mx, vld1q_f32(a + 1));
-    mx = vmaxq_f32(mx, vld1q_f32(m - 1));
-    mx = vmaxq_f32(mx, c);
-    mx = vmaxq_f32(mx, vld1q_f32(m + 1));
-    mx = vmaxq_f32(mx, vld1q_f32(b - 1));
-    mx = vmaxq_f32(mx, vld1q_f32(b));
-    mx = vmaxq_f32(mx, vld1q_f32(b + 1));
-    const uint32x4_t pass = vandq_u32(vcgtq_f32(c, vdupq_n_f32(threshold)), vcgeq_f32(c, mx));
-    static const uint32_t kWeights[4] = {1u, 2u, 4u, 8u};
-    return static_cast<unsigned>(vaddvq_u32(vandq_u32(pass, vld1q_u32(kWeights))));
 }
 #endif
 
