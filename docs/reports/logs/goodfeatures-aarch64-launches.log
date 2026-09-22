@@ -1,18 +1,18 @@
 # launch sweep -- 10 separate processes of one benchmark
-# benchmark: ./build-pi/benchmark/corner_opencv_benchmark 
+# benchmark: ./build/benchmark/corner_opencv_benchmark 
 # launches: 10
 # arch:     aarch64
 # host:     Raspberry Pi 4 Model B Rev 1.5
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
-# commit:   80ff0a8
+# commit:   6d74d57
 # governor: performance
 # throttled before: throttled=0x80000
-# temp before: temp=64.2'C
+# temp before: temp=55.5'C
 # pinning:  taskset -c 3
 # sleep between launches: 0s
-# date:     2026-09-21T16:49:11-07:00
-# loadavg at start: 1.00 1.00 0.86 1/306 914933
+# date:     2026-09-22T16:34:46-07:00
+# loadavg at start: 0.39 0.14 0.14 1/315 1799535
 # NO launch is discarded -- a cold start is part of what varies between
 # launches, and trimming it would trim the tail this sweep measures.
 
@@ -29,6 +29,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  covariance integers exactly; the remaining gap is the float eig map and
  how ties fall out of it.)
 
+ YIELD against STOCK cv::goodFeaturesToTrack over 4 frames (the published denominator):
+ binCV corners 723, stock corners 686 (1.05x), binCV corners within 3 px of a stock one: 540 of 723
+ worst displacement 34.83 px -- DIFFERENT CORNERS, deliberately: stock runs a 3x3 Sobel
+ over the byte image. This records comparable yield, not agreement.
+
  FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
 
  PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
@@ -59,14 +64,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                  13425921     43.704    0.18%        1.72x      16.54
- binCV streaming        13356062     43.477    0.16%        1.73x      12.56
- OpenCV binarized       23122087     75.267    1.71%        1.00x      36.94
- OpenCV Sobel           17801386     57.947    0.67%        1.30x      29.00
+ binCV                   7815250     25.440    0.30%        2.97x      16.54
+ binCV streaming         7476867     24.339    0.54%        3.11x      12.56
+ binCV streaming, scalar NMS      7477745     24.342    0.53%        3.11x      12.56
+ OpenCV binarized       23225935     75.605    0.61%        1.00x      36.94
+ OpenCV Sobel           17923336     58.344    1.64%        1.30x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 72138
+ sink 171306
 ### run 2
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -80,6 +86,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  covariance integers exactly; the remaining gap is the float eig map and
  how ties fall out of it.)
 
+ YIELD against STOCK cv::goodFeaturesToTrack over 4 frames (the published denominator):
+ binCV corners 723, stock corners 686 (1.05x), binCV corners within 3 px of a stock one: 540 of 723
+ worst displacement 34.83 px -- DIFFERENT CORNERS, deliberately: stock runs a 3x3 Sobel
+ over the byte image. This records comparable yield, not agreement.
+
  FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
 
  PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
@@ -110,14 +121,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                  13418390     43.680    0.14%        1.72x      16.54
- binCV streaming        13405284     43.637    0.15%        1.72x      12.56
- OpenCV binarized       23094261     75.177    0.86%        1.00x      36.94
- OpenCV Sobel           17932847     58.375    0.36%        1.29x      29.00
+ binCV                   7776970     25.316    0.21%        3.00x      16.54
+ binCV streaming         7439074     24.216    0.38%        3.13x      12.56
+ binCV streaming, scalar NMS      7429248     24.184    0.16%        3.14x      12.56
+ OpenCV binarized       23297942     75.840    1.16%        1.00x      36.94
+ OpenCV Sobel           17959798     58.463    0.93%        1.30x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 72138
+ sink 172575
 ### run 3
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -131,6 +143,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  covariance integers exactly; the remaining gap is the float eig map and
  how ties fall out of it.)
 
+ YIELD against STOCK cv::goodFeaturesToTrack over 4 frames (the published denominator):
+ binCV corners 723, stock corners 686 (1.05x), binCV corners within 3 px of a stock one: 540 of 723
+ worst displacement 34.83 px -- DIFFERENT CORNERS, deliberately: stock runs a 3x3 Sobel
+ over the byte image. This records comparable yield, not agreement.
+
  FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
 
  PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
@@ -161,14 +178,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                  13420375     43.686    0.09%        1.71x      16.54
- binCV streaming        13360046     43.490    0.15%        1.72x      12.56
- OpenCV binarized       22973284     74.783    0.75%        1.00x      36.94
- OpenCV Sobel           18012681     58.635    0.56%        1.28x      29.00
+ binCV                   7794588     25.373    0.23%        2.96x      16.54
+ binCV streaming         7389420     24.054    0.15%        3.12x      12.56
+ binCV streaming, scalar NMS      7391464     24.061    0.14%        3.12x      12.56
+ OpenCV binarized       23051404     75.037    0.22%        1.00x      36.94
+ OpenCV Sobel           17843956     58.086    1.87%        1.29x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 72138
+ sink 173844
 ### run 4
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -182,6 +200,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  covariance integers exactly; the remaining gap is the float eig map and
  how ties fall out of it.)
 
+ YIELD against STOCK cv::goodFeaturesToTrack over 4 frames (the published denominator):
+ binCV corners 723, stock corners 686 (1.05x), binCV corners within 3 px of a stock one: 540 of 723
+ worst displacement 34.83 px -- DIFFERENT CORNERS, deliberately: stock runs a 3x3 Sobel
+ over the byte image. This records comparable yield, not agreement.
+
  FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
 
  PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
@@ -212,14 +235,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                  13427717     43.710    0.20%        1.72x      16.54
- binCV streaming        13360973     43.493    0.18%        1.73x      12.56
- OpenCV binarized       23137052     75.316    1.44%        1.00x      36.94
- OpenCV Sobel           18048441     58.751    0.30%        1.28x      29.00
+ binCV                   7774358     25.307    0.30%        2.98x      16.54
+ binCV streaming         7404716     24.104    0.23%        3.13x      12.56
+ binCV streaming, scalar NMS      7389068     24.053    0.32%        3.14x      12.56
+ OpenCV binarized       23200514     75.523    1.61%        1.00x      36.94
+ OpenCV Sobel           17852638     58.114    0.24%        1.30x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 72138
+ sink 171313
 ### run 5
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -233,6 +257,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  covariance integers exactly; the remaining gap is the float eig map and
  how ties fall out of it.)
 
+ YIELD against STOCK cv::goodFeaturesToTrack over 4 frames (the published denominator):
+ binCV corners 723, stock corners 686 (1.05x), binCV corners within 3 px of a stock one: 540 of 723
+ worst displacement 34.83 px -- DIFFERENT CORNERS, deliberately: stock runs a 3x3 Sobel
+ over the byte image. This records comparable yield, not agreement.
+
  FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
 
  PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
@@ -263,14 +292,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                  13416305     43.673    0.17%        1.73x      16.54
- binCV streaming        13356036     43.477    0.10%        1.74x      12.56
- OpenCV binarized       23175882     75.442    1.08%        1.00x      36.94
- OpenCV Sobel           17919668     58.332    1.08%        1.29x      29.00
+ binCV                   7789977     25.358    0.40%        2.97x      16.54
+ binCV streaming         7392212     24.063    0.04%        3.13x      12.56
+ binCV streaming, scalar NMS      7396766     24.078    0.19%        3.13x      12.56
+ OpenCV binarized       23168829     75.419    0.43%        1.00x      36.94
+ OpenCV Sobel           17805439     57.960    1.25%        1.30x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 72138
+ sink 173844
 ### run 6
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -284,6 +314,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  covariance integers exactly; the remaining gap is the float eig map and
  how ties fall out of it.)
 
+ YIELD against STOCK cv::goodFeaturesToTrack over 4 frames (the published denominator):
+ binCV corners 723, stock corners 686 (1.05x), binCV corners within 3 px of a stock one: 540 of 723
+ worst displacement 34.83 px -- DIFFERENT CORNERS, deliberately: stock runs a 3x3 Sobel
+ over the byte image. This records comparable yield, not agreement.
+
  FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
 
  PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
@@ -314,14 +349,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                  13424620     43.700    0.12%        1.71x      16.54
- binCV streaming        13354919     43.473    0.13%        1.72x      12.56
- OpenCV binarized       22946366     74.695    0.62%        1.00x      36.94
- OpenCV Sobel           17956340     58.452    0.79%        1.28x      29.00
+ binCV                   7790609     25.360    0.24%        3.01x      16.54
+ binCV streaming         7404038     24.102    0.25%        3.17x      12.56
+ binCV streaming, scalar NMS      7397213     24.079    0.08%        3.17x      12.56
+ OpenCV binarized       23467201     76.391    1.95%        1.00x      36.94
+ OpenCV Sobel           18065209     58.806    0.34%        1.30x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 72138
+ sink 172582
 ### run 7
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -335,6 +371,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  covariance integers exactly; the remaining gap is the float eig map and
  how ties fall out of it.)
 
+ YIELD against STOCK cv::goodFeaturesToTrack over 4 frames (the published denominator):
+ binCV corners 723, stock corners 686 (1.05x), binCV corners within 3 px of a stock one: 540 of 723
+ worst displacement 34.83 px -- DIFFERENT CORNERS, deliberately: stock runs a 3x3 Sobel
+ over the byte image. This records comparable yield, not agreement.
+
  FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
 
  PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
@@ -365,14 +406,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                  13421708     43.690    0.12%        1.73x      16.54
- binCV streaming        13360614     43.492    0.15%        1.73x      12.56
- OpenCV binarized       23163781     75.403    0.54%        1.00x      36.94
- OpenCV Sobel           17904365     58.282    0.26%        1.29x      29.00
+ binCV                   7794790     25.374    0.25%        2.98x      16.54
+ binCV streaming         7401064     24.092    0.21%        3.14x      12.56
+ binCV streaming, scalar NMS      7396249     24.076    0.16%        3.15x      12.56
+ OpenCV binarized       23266602     75.738    0.14%        1.00x      36.94
+ OpenCV Sobel           17884900     58.219    2.02%        1.30x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 72138
+ sink 173844
 ### run 8
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -386,6 +428,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  covariance integers exactly; the remaining gap is the float eig map and
  how ties fall out of it.)
 
+ YIELD against STOCK cv::goodFeaturesToTrack over 4 frames (the published denominator):
+ binCV corners 723, stock corners 686 (1.05x), binCV corners within 3 px of a stock one: 540 of 723
+ worst displacement 34.83 px -- DIFFERENT CORNERS, deliberately: stock runs a 3x3 Sobel
+ over the byte image. This records comparable yield, not agreement.
+
  FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
 
  PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
@@ -416,14 +463,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                  13415453     43.670    0.12%        1.74x      16.54
- binCV streaming        13359035     43.486    0.20%        1.74x      12.56
- OpenCV binarized       23301498     75.851    0.46%        1.00x      36.94
- OpenCV Sobel           18015823     58.645    0.22%        1.29x      29.00
+ binCV                   7794662     25.373    0.25%        2.96x      16.54
+ binCV streaming         7402127     24.095    0.12%        3.12x      12.56
+ binCV streaming, scalar NMS      7406140     24.109    0.16%        3.12x      12.56
+ OpenCV binarized       23097624     75.188    1.18%        1.00x      36.94
+ OpenCV Sobel           17940033     58.399    0.32%        1.29x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 72138
+ sink 173844
 ### run 9
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -437,6 +485,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  covariance integers exactly; the remaining gap is the float eig map and
  how ties fall out of it.)
 
+ YIELD against STOCK cv::goodFeaturesToTrack over 4 frames (the published denominator):
+ binCV corners 723, stock corners 686 (1.05x), binCV corners within 3 px of a stock one: 540 of 723
+ worst displacement 34.83 px -- DIFFERENT CORNERS, deliberately: stock runs a 3x3 Sobel
+ over the byte image. This records comparable yield, not agreement.
+
  FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
 
  PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
@@ -467,14 +520,15 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                  13422602     43.693    0.08%        1.73x      16.54
- binCV streaming        13354266     43.471    0.13%        1.74x      12.56
- OpenCV binarized       23180495     75.457    0.94%        1.00x      36.94
- OpenCV Sobel           18159544     59.113    0.76%        1.28x      29.00
+ binCV                   7787928     25.351    0.19%        2.98x      16.54
+ binCV streaming         7405736     24.107    0.18%        3.13x      12.56
+ binCV streaming, scalar NMS      7395072     24.072    0.16%        3.14x      12.56
+ OpenCV binarized       23206538     75.542    0.92%        1.00x      36.94
+ OpenCV Sobel           17928523     58.361    1.53%        1.29x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 72138
+ sink 173844
 ### run 10
 binCV -- goodFeaturesToTrack against OpenCV (the TIER 2 denominator)
 OpenCV 4.10.0, cv::getNumThreads() = 1; binCV is single-threaded
@@ -488,6 +542,11 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  covariance integers exactly; the remaining gap is the float eig map and
  how ties fall out of it.)
 
+ YIELD against STOCK cv::goodFeaturesToTrack over 4 frames (the published denominator):
+ binCV corners 723, stock corners 686 (1.05x), binCV corners within 3 px of a stock one: 540 of 723
+ worst displacement 34.83 px -- DIFFERENT CORNERS, deliberately: stock runs a 3x3 Sobel
+ over the byte image. This records comparable yield, not agreement.
+
  FRAME MAP vs STREAMING: 184 and 184 corners, 0 positions differ
 
  PEAK WORKING SET -- live buffers for ONE call (CLAUDE.md), 307200 pixels
@@ -518,17 +577,18 @@ frame 640x480, blockSize 3, maxCorners 200, qualityLevel 0.01, minDistance 33.33
  -> binCV footprint vs the denominator: 5.71x smaller
 
  variant                ns/frame   ns/pixel   spread    vs OpenCV    B/pixel
- binCV                  13421124     43.689    0.15%        1.72x      16.54
- binCV streaming        13368907     43.519    0.13%        1.73x      12.56
- OpenCV binarized       23080974     75.133    0.94%        1.00x      36.94
- OpenCV Sobel           17860128     58.138    1.60%        1.29x      29.00
+ binCV                   7791871     25.364    0.26%        2.96x      16.54
+ binCV streaming         7402661     24.097    0.05%        3.12x      12.56
+ binCV streaming, scalar NMS      7397482     24.080    0.21%        3.12x      12.56
+ OpenCV binarized       23089566     75.161    1.10%        1.00x      36.94
+ OpenCV Sobel           17919618     58.332    0.39%        1.29x      29.00
 
  READ THE TWO COLUMNS TOGETHER, per CLAUDE.md -- neither settles the
  question alone, and for this operation they point opposite ways.
- sink 72138
+ sink 173844
 
-# loadavg at end: 1.14 1.05 0.90 1/306 915188
+# loadavg at end: 1.31 0.52 0.27 1/318 1800558
 # throttled after: throttled=0x80000
-# temp after: temp=63.3'C
-# date:     2026-09-21T16:50:19-07:00
+# temp after: temp=59.9'C
+# date:     2026-09-22T16:36:24-07:00
 # done

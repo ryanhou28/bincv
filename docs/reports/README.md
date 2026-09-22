@@ -58,7 +58,7 @@ counts differ.
 | optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.978 | 0.5585 | 7.19× [6.89, 7.40] | 23.400 | 2.838 | 8.227× [8.189, 8.284] | [features.md](features.md) |
 | BRIEF descriptors, 1000 kpts, ms | `cv::ORB::compute` | 0.639 | 0.123 | 5.18× [5.15, 5.22] | 7.167 | 0.658 | 10.81× [10.59, 11.17] | [features.md](features.md) |
 | Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.071 | 1.916 | 4.70× [4.65, 4.79] | 38.187 | 19.520 | 1.953× [1.944, 1.972] | [features.md](features.md) |
-| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack`, binarized | 13.65 | 12.09 | 1.132× [1.118, 1.145] | 75.29 | 43.49 | 1.731× [1.723, 1.735] | [features.md](features.md) |
+| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack` | 8.807 | 6.368 | 1.383× [1.350, 1.426] | 58.338 | 24.099 | 2.421× [2.412, 2.424] | [features.md](features.md) |
 | FAST, wide image, ms/call | `cv::FAST` | 0.359 | 0.345 | 1.039× [1.033, 1.048] | 2.910 | 3.025 | 0.962× [0.961, 0.963] | [features.md](features.md) |
 | FAST, bit-plane, µs/call | `cv::FAST` | 265.2 | 180.2 | 1.472× [1.470, 1.474] | 2048.2 | 865.8 | 2.365× [2.363, 2.370] | [features.md](features.md) |
 | dense disparity, ms/frame | `cv::StereoBM` | 12.675 | 10.405 | 1.218× [1.199, 1.240] | 79.90 | 60.57 | 1.319× | [stereo.md](stereo.md) |
@@ -325,13 +325,13 @@ distribution nobody had characterised. Not wrong; unexamined, which is not a sta
 "commit the benchmark" rule leaves room for.
 
 The desktop under WSL2 is not timing-grade and the launch sweep is how much it is not.
-goodFeaturesToTrack there prints a ~5–9% within-run spread and the **same ratio scatters 66%
-across sixty launches** — seven to thirteen times the figure one process can report — and one
-launch has returned anything from 0.86× to 1.61×. Sixty launches put a 95% interval of
-[1.118, 1.145] around a median of 1.132×, which is ±1.2%: enough to settle a 5% question and
-not a 2% one. Those sixty are two independent thirties taken a fortnight apart, 1.1346 and
-1.1297, each interval containing the other's median — the protocol reproduces, not just the
-row.
+goodFeaturesToTrack there prints a ~21–39% within-run spread and the arms it times scatter
+12–30% **across thirty launches of the same binary** — so one launch has returned anything
+from 0.86× to 1.61× on rows whose interval is a few per cent wide. Thirty launches put a 95%
+interval of [1.350, 1.426] around a median of 1.383×, which is ±2.8%: enough to settle a 38%
+question and not a 3% one. Two independent thirties of that kernel taken an hour apart landed
+at 1.374× and 1.383×, each inside the other's interval — the protocol reproduces, not just
+the row.
 
 **Nineteen sweeps carry the x86-64 tables**, one per benchmark, in the
 `*-x86_64-launches.log` files beside the single launches they replaced. The device was re-taken
@@ -423,11 +423,13 @@ figures, **two moved beyond their own band for a reason that is not the measurem
 
 Everything else reproduced. The ratios that shifted shifted because the `cv::` denominator
 did — `countAnd` 6.55× to 6.242× on a binCV arm that moved 0.19%, `morphologyEx(OPEN)` 1.11×
-to 1.146× on one that moved 0.07% — and `goodFeaturesToTrack`'s corrected 1.72× came back at
-1.731× from an independent sweep, which is the control this round had.
+to 1.146× on one that moved 0.07% — and `goodFeaturesToTrack`'s corrected figure came back
+from an independent sweep within its interval, which is the control this round had. (That
+round's `goodFeaturesToTrack` numbers were against the binarized denominator; the row now
+leads with stock, and [features.md](features.md#corner-detection) says why.)
 
 **The device is reliable, but not uniformly, and the old protocol note overstated it.**
-`goodFeaturesToTrack` scatters 1.5% across ten launches and is what "0.1–0.8% run-to-run" was
+`goodFeaturesToTrack` scatters 1.2% across ten launches and is what "0.1–0.8% run-to-run" was
 read from. The small-frame logic and reduction rows scatter far more: **binCV's 640×480
 `bitwiseAnd` arm scatters 16.9% across ten launches** where OpenCV's scatters 4.0%, and the
 mechanism is binCV's own advantage — a 38 KB packed plane's cache residency is decided per

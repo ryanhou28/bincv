@@ -95,12 +95,17 @@ architectures and concluded that this was "a property of the operation rather th
 machine's dispatch"; in fact it had timed the frame-map spelling while that spelling was
 still on an older response kernel than the streaming form every pipeline here calls. The
 second version read 0.92× on x86 and 1.45× on the device and called that a genuine split.
-It was not: those numbers were taken before the response sweep's tail was rewritten, and the
-shipped kernel measures **1.132× on x86 and 1.731× on the device** — ahead on both, so the row
-belongs in [features.md](features.md#corner-detection) and not on a page about where binCV
-stops paying. What survives of the original point is the second half of this section's
-thesis rather than the first: 1.731× against the denominator doing less vector work and
-1.132× against the one doing more.
+It was not: those numbers were taken before the response sweep's tail was rewritten.
+
+**A third thing was wrong with both, and it was the denominator.** All of those figures were
+against a hand-written OpenCV pipeline reproducing binCV's semantics, not against the call a
+caller makes. Against stock `cv::goodFeaturesToTrack` this operation *was* on this page until
+recently — 0.737× on x86-64 — and the page never said so, because the headline column used
+the other baseline. It leaves the list now on the strength of a measurement against the right
+one: **1.383× on x86 and 2.421× on the device**, ahead on both, so the row belongs in
+[features.md](features.md#corner-detection). What survives of the original point is the
+second half of this section's thesis rather than the first: the margin is wider against the
+denominator doing less vector work.
 
 ## 4. A footprint win is not a speed win
 

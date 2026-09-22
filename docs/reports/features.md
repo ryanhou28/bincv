@@ -32,7 +32,7 @@ number is the faster side.
 | Hamming matching, kNN=2 | `cv::BFMatcher` | 9.071 ms | **1.916 ms** | **4.70× [4.65, 4.79]** | 38.187 ms | **19.520 ms** | 1.953× [1.944, 1.972] |
 | FAST, wide image | `cv::FAST` | 0.359 ms | **0.345 ms** | 1.039× [1.033, 1.048] | 2.910 ms | 3.025 ms | 0.962× [0.961, 0.963] |
 | FAST, bit-plane | `cv::FAST` | 265.2 µs | **180.2 µs** | **1.472× [1.470, 1.474]** | 2048.2 µs | **865.8 µs** | **2.365× [2.363, 2.370]** |
-| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` | 13.65 ns/px | **12.09 ns/px** | 1.132× [1.118, 1.145] | 75.29 ns/px | **43.49 ns/px** | **1.731× [1.723, 1.735]** |
+| `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` (stock) | 8.807 ns/px | **6.368 ns/px** | **1.383× [1.350, 1.426]** | 58.338 ns/px | **24.099 ns/px** | **2.421× [2.412, 2.424]** |
 | `cornerSubPix` | `cv::cornerSubPix` | not published | not published | ~13× | 8.595 ms | **0.625 ms** | 13.76× [13.70, 13.80] |
 
 **`FAST, bit-plane`'s move from 1.50× to 1.472× is the one on this page that is not noise.**
@@ -72,9 +72,11 @@ memory result is a whole-pipeline figure and belongs to
 † `cv::ORB::compute` also computes orientation and rotates its pattern per keypoint. It is
 not a like-for-like comparison and is printed for scale rather than claimed.
 
-The `goodFeaturesToTrack` rows were recorded before the response sweep was optimized and
-carried a note saying so. They have been re-measured on the shipped kernel and the note is
-gone; [what the old rows were measuring](#corner-detection) says what moved.
+The `goodFeaturesToTrack` speed row is now measured against **stock
+`cv::goodFeaturesToTrack`** rather than the hand-written binarized pipeline it used to lead
+with; [Corner detection](#corner-detection) says why the denominator changed and prints both.
+The footprint row still leads with the binarized pipeline, because that side's buffers are
+READ off the objects and stock's can only be accounted.
 `cornerSubPix` refines the same seeds
 from its already-computed ternary derivatives against `cv::cornerSubPix` on the 8-bit image,
 each side's own natural input.
@@ -171,72 +173,146 @@ quantity from OpenCV's — the longest qualifying arc rather than the largest su
 
 ## Corner detection
 
-**1.73× on the reference device and 1.13× on the desktop, while holding a fifth of the
-memory on both.**
+**1.383× on the desktop and 2.421× on the reference device against stock
+`cv::goodFeaturesToTrack`, at 12.56 bytes per pixel against its 29.00.**
 
 Both spellings, at 640×480, returning the same corners and timed in the same interleaved run.
 Time is nanoseconds per pixel and working set is bytes per pixel, so the smaller number is
-the better one. Both ratio columns are against the binarized denominator in the first row —
-including on the last row, where both sides are OpenCV:
+the better one. Measured at commit `6d74d57`; thirty launches on x86-64, ten on the device.
 
-| variant | x86-64 (ns/px) | x86-64, denominator ÷ this arm | aarch64 (ns/px) | aarch64, denominator ÷ this arm | working set (B/px) |
+| variant | x86-64 (ns/px) | x86-64 vs stock | aarch64 (ns/px) | aarch64 vs stock | working set (B/px) |
 |---|---|---|---|---|---|
-| OpenCV, binarized (the denominator) | 13.65 | — | 75.29 | — | 36.94 |
-| binCV, frame map | 12.05 | **1.148× [1.124, 1.166]** | 43.69 | **1.723× [1.716, 1.727]** | 16.54 |
-| **binCV, streaming ring (shipped)** | **12.09** | **1.132× [1.118, 1.145]** | **43.49** | **1.731× [1.723, 1.735]** | **12.56** |
-| `cv::goodFeaturesToTrack` (stock, different numerics) | 8.139 | **1.675× [1.651, 1.705]** | 58.41 | **1.290× [1.278, 1.294]** | 29.00 |
+| `cv::goodFeaturesToTrack` (stock, the denominator) | 8.807 | — | 58.338 | — | 29.00 † |
+| OpenCV, binarized (the correctness reference) | 14.452 | 0.609× [0.598, 0.632] | 75.532 | 0.772× [0.770, 0.776] | 36.94 |
+| binCV, frame map | 7.490 | **1.176× [1.159, 1.213]** | 25.362 | **2.300× [2.291, 2.304]** | 16.54 |
+| **binCV, streaming ring (shipped)** | **6.368** | **1.383× [1.350, 1.426]** | **24.099** | **2.421× [2.412, 2.424]** | **12.56** |
+| binCV, streaming, vector arms off | 7.596 | 1.159× | 24.079 | 2.423× | 12.56 |
 
-Every cell is a median of whole process launches — ten on the device, **sixty** on x86-64,
-two independent thirties pooled — rather than one run; why the two counts differ is two
-paragraphs down.
+† Stock's working set is **accounted, not read** — `cornerMinEigenVal` materializes `Dx`,
+`Dy` and a `CV_32FC3` covariance inside the call and `gftt` adds `eig` and a dilate
+destination, none of which a caller can measure from outside. Every other figure in that
+column is read off the objects.
 
-Agreement is exact against OpenCV: 723 corners against 723, every position matching, worst
-displacement 0.00 px. The two binCV spellings agree corner for corner, which the benchmark
-asserts before it times anything.
+### The denominator changed, and that is the point of this row
+
+**Until now this row led with the binarized pipeline, and that was the wrong baseline.** The
+denominator was `openCvBinarized()` in `benchmark/corner_opencv_benchmark.cpp` — about ten
+OpenCV calls hand-written to reproduce binCV's exact semantics. CLAUDE.md: *"The bar for a
+new implementation is the best existing option, not the worst."* Nobody writes that pipeline;
+they call `cv::goodFeaturesToTrack`. Against the real call the published x86-64 figure
+changed **sign**, and the reports printed the flattering one in the headline column.
+
+So stock leads now, on both architectures, and the binarized pipeline stays exactly where it
+earns its place: it is the **correctness reference**, and the only arm that can be one. binCV
+and it agree on 723 corners of 723 with a worst displacement of 0.00 px over the benchmark's
+four frames, and their response maps are bit-identical over 360,960 pixels on the real frame.
+Stock cannot prove that, because it runs a 3×3 Sobel over the byte image and finds different
+corners by construction — which is what Tier 2 means here.
+
+**A speed ratio against an arm whose yield nobody recorded is speed at unknown accuracy**, so
+the benchmark now records stock's: over the same four frames binCV returns **723 corners to
+stock's 686**, and 540 of binCV's sit within 3 px of a stock one. The two arms are doing
+comparable amounts of work under identical parameters. They are not finding the same corners
+and this page does not claim they are.
+
+### What the 1.383× replaced, and where it came from
+
+At the previous commit (`cc06082`) this operation was **0.737× [0.721, 0.754] against stock
+on x86-64 — a loss, in 0 of 30 launches above 1.00** — and 1.368× [1.364, 1.382] on the
+device. Both sweeps were taken on these same two machines in the same session as the ones
+above, and the denominators moved less than their own intervals between them, so the whole of
+the difference is binCV's arm: **11.310 → 6.368 ns/px on x86-64 (1.78×) and 43.337 → 24.099
+on the device (1.80×)**.
+
+**The stage that paid for it had never been optimized, and the x86 host could not see it.**
+`goodFeaturesToTrack`'s response sweep — the stage the packed representation accelerates — is
+the *minority* of its own runtime; selection is the rest. `benchmark/detect_stage_profile`
+was supposed to split that and on this host it put the spacing filter at **minus 8%** of a
+detection, because it differenced prefix arms on a machine with 50% run-to-run scatter. An
+instruction-count profile of the same frame is deterministic and named four stages nothing
+had looked at: the spacing filter at 18.5%, `boxWordAt`'s out-of-range guard at 9.3%, the
+running maximum at 6.8%, and the rank at 7% by instruction count but **27% by time**, which
+is what a comparison sort over a pool of ties costs in branch mispredicts.
+
+Two of those are worth stating as findings rather than as changes:
+
+* **The running maximum never vectorized**, though the code carried a comment saying the
+  compiler was free to turn it into a vector max-reduce. `max` over floats is not
+  reassociable — NaN and −0.0 make the result depend on the order the lanes combine in — so
+  GCC and Clang both leave it scalar whatever the flags. A response is never negative and
+  never NaN, so reducing the IEEE **bit patterns** is the same answer and does vectorize.
+* **The rank need not compare two corners at all.** The suppression sweep appends candidates
+  in raster order and the threshold pass only compacts, so *reversed*, the pool is already in
+  `CornerStronger`'s tie order — y descending, then x descending. The rank is therefore a
+  stable sort on the response alone: counting passes over the byte lanes of its bit pattern,
+  no comparator, nothing to mispredict. **4.9× on that stage.** This is the host form of what
+  `backends/cuda/src/corner.cu` found on the device, where replacing a comparison sort with
+  count, prefix-sum and emit was worth 4×.
+
+`detect_stage_profile` is rebuilt on the library's own functions rather than a verbatim copy
+of the kernel's prefix. The copy had gone stale — it kept the scalar running maximum and the
+per-candidate heap after the kernel dropped both — so the arm that was supposed to be a
+*prefix* of the shipped call ran slower than the whole of it. That is where the negative
+stage came from, and a profile that can print one is not measuring the shipped kernel.
+
+### Nothing was traded for it
+
+**Peak working set is unchanged at 12.56 B/pixel**, which the pre-registered rule made a
+ceiling rather than a budget. None of the five changes takes a byte: the spacing filter
+reorders the accepted set it already had, and the rank's counting passes scatter into the
+caller's own array past the candidates — slack the capacity contract already sizes for the
+worst case. Where that slack is absent, or the top-K heap has reordered the pool,
+`std::sort` runs instead and `Corner.RankArmsAgree` holds the two to the same answer.
+
+**Output is unchanged**, which is what makes any of this a speed comparison: 723 corners of
+723 against the binarized pipeline at 0.00 px, frame map and streaming identical corner for
+corner, asserted before anything is timed, and 40 tests / 3717 assertions green on x86-64
+and on the device.
+
+### Reading the two hosts
 
 **The device numbers are the trustworthy ones, and on x86 a single launch settles nothing.**
-On the device the within-run spread is 0.05–1.11% and ten launches put the ratio between
-1.723× and 1.735×. On the shared x86 box sixty launches scatter the *ratio* from 0.86× to
-1.61× — wider than either arm alone, so interleaving the two arms does not cancel it. What
-survives there is the median: 1.132×, with a bootstrap 95% confidence interval of
-[1.118, 1.145] over the sixty, and 56 of them above 1.00×. Quote that interval or nothing; a
-lone run on this host can return almost anything. The two sweeps behind those sixty were
-taken a fortnight apart and landed 0.4% apart, each interval containing the other's median —
-which is the evidence that the protocol, and not just the row, reproduces.
+On the device the within-run spread is 0.16–1.09% and ten launches put the ratio between
+2.412× and 2.424×. The x86 host scatters 12–30% across thirty launches of the *same binary*;
+what survives there is the median and its interval, 1.383× [1.350, 1.426], with 30 of 30
+launches above 1.00×. Quote that interval or nothing.
 
-**The margin is smaller on the desktop because the desktop's denominator is the faster one.**
-binCV's code is identical in both columns. Stock `cv::goodFeaturesToTrack` runs at 1.68× the
-binarized pipeline on x86-64 and 1.290× on the device, so OpenCV's x86 build is the one
+Two independent thirty-launch sweeps of this kernel were taken an hour apart on that host and
+landed at 1.374× and 1.383× — within each other's intervals, which is the control this round
+had. The published row is the one taken at the commit.
+
+**The margin is wider on the device because the desktop's denominator is the faster one.**
+binCV's code is identical in both columns. Stock `cv::goodFeaturesToTrack` runs at 1.64× the
+binarized pipeline on x86-64 and 1.29× on the device, so OpenCV's x86 build is the one
 getting more out of its machine — a property of the two OpenCV builds, not of binCV.
 
-### This row has been corrected twice
+**The vector arms are provably running.** The `vector arms off` row is the same call with
+`impl::cornerSimdEnabled()` false: on x86-64 it is 1.193× [1.167, 1.212] slower, and on
+aarch64 it is 0.999× [0.9986, 1.0003] — the arm is x86-only by measurement, so the
+architecture its own gate excludes reports 1.00× exactly as CLAUDE.md requires. A ratio near
+1.00× on x86-64 would mean the fast path was not the one being timed.
+
+### This row has been corrected three times
 
 **The first version published 0.53× on both architectures, and that was wrong**: it timed the
 frame-map spelling while that spelling was still on an older response kernel than the
 streaming form every pipeline calls. Sharing one kernel took the frame map from 26.06 to
 about 14.9 ns/pixel, and the row became 0.92× on x86 and 1.45× on the device.
 
-**Those figures were stale when they were published, and this is the second correction.** They
-were recorded at commit `05ce58f`, before the response sweep's tail was rewritten to run
+**Those figures were stale when they were published, and that was the second correction.**
+They were recorded at commit `05ce58f`, before the response sweep's tail was rewritten to run
 eight pixels at a time; the page carried a note calling them conservative and the note stood.
-Rebuilt and run today in the same harness, that commit's kernel measures 51.93 ns/pixel on
-the device and puts the ratio back at 1.45× — the published number, reproduced — against the
-shipped kernel's 43.49 and 1.731×. The denominator moved 0.8%, so the whole of the difference
-is binCV's arm. **The split the previous version of this page called genuine was not one.**
+Rebuilt and run in the same harness, that commit's kernel measured 51.93 ns/pixel on the
+device and put the ratio back at 1.45× — the published number, reproduced — against the then
+shipped kernel's 43.49 and 1.731×. **The split the previous version of this page called
+genuine was not one.**
 
-On x86-64 the same rebuild separates two causes the old row had fused. That commit's kernel,
-run here today against the shipped one in twelve alternating pairs, measures **1.04×** — not
-the 0.92× that was published. The distance from 0.92× to 1.04× is three launches on a host
-whose ratio scatters by half; the distance from 1.04× to 1.13× is the kernel, which came out
-1.21× faster in eleven of those twelve pairs. On the device there is nothing to separate: the
-old kernel reproduces its published 1.45×, and every bit of the move is the kernel.
-
-The two kernels return the same answer, which is what makes that a speed comparison at all:
-the response map is bit-identical and the corner list matches in position, order and value
-over the benchmark's four frames, on both architectures. The footprint was never in question
-— 28 bytes per pixel against binCV's 5.14 at the measured survivor count. Detection is
-11.5–13.6% of the assembled pipeline at [that benchmark's](feature-tracking.md) duty cycle,
-so the end-to-end cost either way is small.
+**This is the third, and it is a correction of the BASELINE rather than of the number.** Both
+earlier corrections were measured against the hand-written binarized pipeline, so both were
+true of a denominator nobody runs. Against the call people actually make, the kernel those
+corrections were defending was losing on x86-64 the whole time, and this page printed
+1.132× in its headline column while the row against stock read 0.673×. The figure was in the
+report; it was not in the headline. That is what changed.
 
 ## Reproduce
 

@@ -85,7 +85,7 @@ Inventory: [docs/API.md](docs/API.md). What each area covers and what the tiers 
 | `pyrDown`, 1 bit in → 3 bits out, µs/call | `cv::pyrDown` on `CV_8U` | 47.70 | 30.70 | 1.556× [1.536, 1.597] | 516.5 | 93.8 | 5.509× [5.480, 5.549] | [primitives.md](docs/reports/primitives.md) |
 | Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.071 | 1.916 | 4.70× [4.65, 4.79] | 38.187 | 19.520 | 1.953× [1.944, 1.972] | [features.md](docs/reports/features.md) |
 | `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01501 | 0.009270 | 1.62× [1.61, 1.63] | 0.16921 | 0.06365 | 2.658× [2.618, 2.673] | [primitives.md](docs/reports/primitives.md) |
-| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack`, binarized | 13.65 | 12.09 | 1.132× [1.118, 1.145] | 75.29 | 43.49 | 1.731× [1.723, 1.735] | [features.md](docs/reports/features.md) |
+| `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack` | 8.807 | 6.368 | 1.383× [1.350, 1.426] | 58.338 | 24.099 | 2.421× [2.412, 2.424] | [features.md](docs/reports/features.md) |
 | dense disparity, ms/frame | `cv::StereoBM` | 12.675 | 10.405 | 1.218× [1.199, 1.240] | 79.90 | 60.57 | 1.319× | [stereo.md](docs/reports/stereo.md) |
 | `erode`, 5×5 ellipse, ns/pixel | `cv::erode` | 0.2238 | 0.6985 | 0.319× [0.318, 0.323] | 1.85196 | 3.59587 | 0.514× [0.510, 0.522] | [primitives.md](docs/reports/primitives.md) |
 
