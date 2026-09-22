@@ -1,23 +1,81 @@
 # binCV
 
-**Image processing at the bit width the image actually has**, with OpenCV's API shape. A
-binary image gets one bit per pixel, a ternary image two, a few-bit image three or four.
+**binCV provides computer vision operations for binary, ternary and other low-bit-width
+images at their true native bit widths.** A binary image gets one bit per pixel, a ternary
+image two, a few-bit image three or four. It is a header-only C++ library with zero
+dependencies.
 
-Binary images are everywhere in a vision pipeline — masks, thresholded edges. Mainstream
+Binary images are everywhere in a vision pipeline — masks, thresholded edges. Conventional
 libraries store them one **byte** per pixel and do eight-bit arithmetic on them: 8× the
-memory and 8× the work. On a small device the memory is the part that hurts.
+memory and 8× the work.
 
 binCV packs them and operates on whole machine words: an AND becomes an AND over words,
 counting set pixels becomes a population count, dilating becomes a shift and an OR — plain
 integer code that any CPU runs. **Few-bit** images work the same way, one plane per bit, so
-arithmetic stays word-wide.
+arithmetic stays word-wide. [Performance and memory](#performance-and-memory) has what that
+buys, measured on both counts.
 
-binCV provides alternatives to individual OpenCV calls. Keep the pipeline you have and call
-binCV for the operations where a packed representation pays. It takes a single-channel,
-integer-typed, strided pixel array; decoding, demosaicing and color conversion stay on your
-side of that line. Header-only C++, zero dependencies.
+For the operations OpenCV also has, binCV provides the same functionality in the same API
+shape — keep the pipeline you have and call binCV where a packed representation pays. Some
+operations match less closely, and some have no OpenCV counterpart at all; every entry point
+states which ([docs/API.md](docs/API.md)). binCV takes a single-channel, integer-typed,
+strided pixel array; decoding, demosaicing and color conversion stay on your side of that
+line.
 
-## Performance
+## Building
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+OpenCV is optional (`-DBINCV_USE_OPENCV=OFF`). Adding `include/` to your include path works
+too — but **link the `bincv_core` target if you use CMake**, because the ISA flags ride on
+it. See [GETTING_STARTED.md](GETTING_STARTED.md).
+
+## Using it
+
+```cpp
+#include "bincv/ops/logic.hpp"
+#include "bincv/ops/morphology.hpp"
+#include "bincv/ops/reduce.hpp"
+
+// Binary images, one bit per pixel. A 640x480 mask is 38 KB, not 307 KB.
+bincv::BinMat<uint32_t> mask(640, 480), roi(640, 480);
+bincv::BinMat<uint32_t> cleaned(640, 480), scratch(640, 480);
+
+// Remove speckle, then keep only what falls inside a region of interest.
+bincv::morphologyEx(mask.constView(), cleaned.view(), bincv::MORPH_OPEN,
+                    bincv::StructuringElement{}, scratch.view());
+bincv::bitwiseAnd(cleaned.constView(), roi.constView(), cleaned.view());
+
+const size_t pixels = bincv::countNonZero(cleaned.constView());
+```
+
+Each of those operations touches 32 pixels per instruction, because 32 pixels fit in a
+`uint32_t`. The same code compiles at 8, 16, 32 or 64 bits per word. Kernels take their
+scratch from the caller, so what a call will cost is known before it runs.
+
+## Platforms
+
+Zero dependencies and header-only C++17: desktop, mobile, embedded Linux and bare-metal
+microcontrollers, plus `backends/cuda/` for NVIDIA GPUs.
+**[docs/README.md](docs/README.md#where-bincv-runs) says which targets have been built, which
+have been measured, and what each one gets.**
+
+## What is in it
+
+Packing from 8- and 16-bit sources, logic and shifts, bulk and windowed reductions,
+morphology, resampling, thresholding, bit-sliced arithmetic; pyramids, derivatives, corner
+detection, FAST, BRIEF, Hamming matching and pyramidal Lucas–Kanade; sparse and dense stereo;
+RANSAC over caller-owned scratch. `cv::Mat` in and out when OpenCV is present, raw buffers
+and PNM otherwise. Every entry point states an **API tier** — bit-exact with the OpenCV
+function it names, the same role with different numerics, or no OpenCV equivalent.
+
+Inventory: [docs/API.md](docs/API.md). What each area covers and what the tiers mean:
+[docs/README.md](docs/README.md#what-is-in-it).
+
+## Performance and memory
 
 <!-- figure-check values="OpenCV, x86-64|binCV, x86-64|speedup, x86-64|OpenCV, aarch64|binCV, aarch64|speedup, aarch64" source="source" -->
 | operation | OpenCV equivalent | OpenCV, x86-64 | binCV, x86-64 | speedup, x86-64 | OpenCV, aarch64 | binCV, aarch64 | speedup, aarch64 | source |
@@ -36,8 +94,8 @@ are one thread — compare at equal thread counts, or a ratio means nothing. Eve
 the median of a sweep of whole process launches with the bootstrap 95% interval those
 launches put around it: **thirty on x86-64, ten on the device** (seven for dense disparity),
 which needs fewer because its clock is pinned.
-[Where it does not pay](#where-it-does-not-pay) covers the rows where a packed representation
-costs more than it saves.
+[Where it does not pay](#where-it-does-not-pay), below, covers the rows where a packed
+representation costs more than it saves.
 
 Memory is the other half, and usually the half that decides whether something fits. Each row
 is one call's peak working set, from buffer geometry, identical on both architectures:
@@ -63,73 +121,18 @@ There is a CUDA backend too, against `cv::cuda` on the same GPU:
 architectures and the GPU, wins and losses in the same tables, with the machines, the method
 and the command that reproduces each row.
 
-## Using it
-
-```cpp
-#include "bincv/ops/logic.hpp"
-#include "bincv/ops/morphology.hpp"
-#include "bincv/ops/reduce.hpp"
-
-// Binary images, one bit per pixel. A 640x480 mask is 38 KB, not 307 KB.
-bincv::BinMat<uint32_t> mask(640, 480), roi(640, 480);
-bincv::BinMat<uint32_t> cleaned(640, 480), scratch(640, 480);
-
-// Remove speckle, then keep only what falls inside a region of interest.
-bincv::morphologyEx(mask.constView(), cleaned.view(), bincv::MORPH_OPEN,
-                    bincv::StructuringElement{}, scratch.view());
-bincv::bitwiseAnd(cleaned.constView(), roi.constView(), cleaned.view());
-
-const size_t pixels = bincv::countNonZero(cleaned.constView());
-```
-
-Each of those operations touches 32 pixels per instruction, because 32 pixels fit in a
-`uint32_t`. The same code compiles at 8, 16, 32 or 64 bits per word. Kernels take their
-scratch from the caller, so what a call will cost is known before it runs.
-
-## Building
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-```
-
-OpenCV is optional (`-DBINCV_USE_OPENCV=OFF`). Adding `include/` to your include path works
-too — but **link the `bincv_core` target if you use CMake**, because the ISA flags ride on
-it. See [GETTING_STARTED.md](GETTING_STARTED.md).
-
-## What is in it
-
-Packing from 8- and 16-bit sources, logic and shifts, bulk and windowed reductions,
-morphology, resampling, thresholding, bit-sliced arithmetic; pyramids, derivatives, corner
-detection, FAST, BRIEF, Hamming matching and pyramidal Lucas–Kanade; sparse and dense stereo;
-RANSAC over caller-owned scratch. `cv::Mat` in and out when OpenCV is present, raw buffers
-and PNM otherwise. Every entry point states an **API tier** — bit-exact with the OpenCV
-function it names, the same role with different numerics, or no OpenCV equivalent.
-
-Inventory: [docs/API.md](docs/API.md). What each area covers and what the tiers mean:
-[docs/README.md](docs/README.md#what-is-in-it).
-
-## Platforms
-
-Header-only C++ with zero dependencies: desktop, mobile, embedded Linux and bare-metal
-microcontrollers, plus `backends/cuda/` for NVIDIA GPUs.
-**[docs/README.md](docs/README.md#where-bincv-runs) says which targets have been built, which
-have been measured, and what each one gets.**
-
-## Where it does not pay
+### Where it does not pay
 
 **A non-separable structuring element.** A 5×5 ellipse costs one shifted-OR per set element,
 and binCV runs it at 0.319× of `cv::erode` on x86-64. The fused kernel shipped at that price
 because it holds 76,800 bytes against `cv::erode`'s 614,400 — when speed and footprint
-conflict here, footprint wins. A 3×3 element is 1.053× on x86-64 and 1.00× on the Pi, and
-holds the same 76,800 bytes. ([primitives.md](docs/reports/primitives.md))
+conflict here, footprint wins. A 3×3 element is 1.053× on x86-64 and 1.00× on the Pi, at the
+same 76,800 bytes. ([primitives.md](docs/reports/primitives.md))
 
-**Wide inputs into a bit-sliced filter.** binCV's filters carry one plane per bit, so an
-accumulator has to hold the weighted sum and the work grows with input depth. At one bit
-there is nothing to accumulate; at eight, a byte kernel's vector unit wins outright —
-`pyrDown` fed eight bits runs at 0.0235× on x86-64 and 0.0701× on aarch64. That is the library
-outside its premise: it ships as 1 bit in, 3 bits out, and the crossover sits at a different
-depth on each machine. ([limits.md](docs/reports/limits.md))
+**Wide inputs into a bit-sliced filter.** One plane per bit means the work grows with input
+depth, and at eight bits a byte kernel's vector unit wins outright — `pyrDown` fed eight bits
+runs at 0.0235× on x86-64 and 0.0701× on aarch64. That is the library outside its premise: it
+ships as 1 bit in, 3 bits out. ([limits.md](docs/reports/limits.md))
 
 **On the GPU, one path is faster and bigger.** The census dense entry beats
 `cv::cuda::StereoBM` at 1.47× but holds 4,512.0 KB against its 3,072.0, because the census
