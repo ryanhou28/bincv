@@ -71,6 +71,16 @@ stated decision rule.
 - **Report memory and speed together** — they trade off, so one alone cannot be weighed
   against goals that conflict.
 - **Commit the benchmark.** Every performance claim must be reproducible.
+- **A published figure names the commit it was taken at, and a change to the kernel
+  behind it re-takes it or marks it stale.** A figure is only true of the code it was
+  measured on. `verify.sh` gates whether a kernel is CORRECT; nothing gates whether a
+  number is still TRUE, and the two come apart exactly when an optimization preserves
+  every output bit — which is the change this project makes most often. Measured cost of
+  not doing this: a response-sweep optimization made `goodFeaturesToTrack` 18% faster on
+  both architectures and left the reports publishing a LOSS the library did not have, for
+  three weeks, while `features.md` carried a note saying the rows were stale. The note was
+  not enough; only the stamp and the re-take are. `scripts/run_launches.sh` records the
+  commit in every log it writes, so the cost is naming it in the table.
 - **Pick the right baseline.** The bar for a new implementation is the best existing
   option, not the worst. Measuring against a fallback nobody would use makes anything
   look like a win.
