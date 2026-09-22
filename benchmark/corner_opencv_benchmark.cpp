@@ -325,6 +325,59 @@ int main() {
                 " covariance integers exactly; the remaining gap is the float eig map and\n"
                 " how ties fall out of it.)\n\n");
 
+    // -----------------------------------------------------------------------
+    // WHAT STOCK gftt FINDS, since the published ratio is against stock.
+    //
+    // A speed ratio against an arm whose yield nobody recorded is speed at
+    // unknown accuracy. This is NOT an agreement check and cannot be one:
+    // `cv::goodFeaturesToTrack` runs a 3x3 Sobel over the byte image where
+    // binCV runs a [-1,0,1] tap over one bit, so the two find DIFFERENT
+    // corners by construction and the tier note says so. What it records is
+    // whether the two arms are doing comparable amounts of work -- how many
+    // corners each returns under identical parameters, and how far a binCV
+    // corner sits from the nearest stock one.
+    // -----------------------------------------------------------------------
+    {
+        size_t binTotal = 0, stockTotal = 0, within3 = 0, binCorners = 0;
+        double worst = 0.0;
+        for (int k = 0; k < kInputs; ++k) {
+            const size_t ki = static_cast<size_t>(k);
+            bincv::derivativeX(bins[ki], dxs[ki]);
+            bincv::derivativeY(bins[ki], dys[ki]);
+            const bincv::CornerResult r = bincv::goodFeaturesToTrack(
+                dxs[ki], dys[ki], params, mapView, corners.data(), corners.size());
+            cv::goodFeaturesToTrack(bytes[ki], cvSobel, kMaxCorners, kQualityLevel, kMinDistance,
+                                    cv::noArray(), kBlockSize, false, 0.04);
+            binTotal += r.count;
+            stockTotal += cvSobel.size();
+            for (size_t i = 0; i < r.count; ++i) {
+                double best = -1.0;
+                for (size_t j = 0; j < cvSobel.size(); ++j) {
+                    const double ddx = corners[i].x - static_cast<double>(cvSobel[j].x);
+                    const double ddy = corners[i].y - static_cast<double>(cvSobel[j].y);
+                    const double d2 = ddx * ddx + ddy * ddy;
+                    if (best < 0.0 || d2 < best) best = d2;
+                }
+                if (best < 0.0) continue;
+                ++binCorners;
+                if (best <= 9.0) ++within3;
+                if (best > worst) worst = best;
+            }
+        }
+        std::printf(" YIELD against STOCK cv::goodFeaturesToTrack over %d frames"
+                    " (the published denominator):\n", kInputs);
+        std::printf(" binCV corners %zu, stock corners %zu (%.2fx), binCV corners within"
+                    " 3 px of a stock one: %zu of %zu\n",
+                    binTotal, stockTotal,
+                    stockTotal == 0 ? 0.0
+                                    : static_cast<double>(binTotal) /
+                                          static_cast<double>(stockTotal),
+                    within3, binCorners);
+        std::printf(" worst displacement %.2f px -- DIFFERENT CORNERS, deliberately: stock"
+                    " runs a 3x3 Sobel\n over the byte image. This records comparable"
+                    " yield, not agreement.\n\n", std::sqrt(worst));
+    }
+
     // THE TWO binCV SPELLINGS MUST RETURN THE SAME CORNERS. ops/corner.hpp promises
     // it -- same count, same coordinates, same order -- and a benchmark that times
     // both without checking would happily report a ratio between two different
@@ -452,12 +505,12 @@ int main() {
     // compiler had removed.
     benches.push_back({"binCV streaming, scalar NMS", [&](int i) {
                            const size_t k = static_cast<size_t>(i % kInputs);
-                           bincv::impl::cornerNmsSimdEnabled() = false;
+                           bincv::impl::cornerSimdEnabled() = false;
                            bincv::derivativeX(bins[k], dxs[k]);
                            bincv::derivativeY(bins[k], dys[k]);
                            const bincv::CornerResult r = bincv::goodFeaturesToTrackStreaming(
                                dxs[k], dys[k], params, ringView, corners.data(), corners.size());
-                           bincv::impl::cornerNmsSimdEnabled() = true;
+                           bincv::impl::cornerSimdEnabled() = true;
                            measure::g_sink += r.count;
                        }});
     benches.push_back({"OpenCV binarized", [&](int i) {

@@ -2280,10 +2280,10 @@ BINCV_TEST(Corner, SuppressionArmsAgree) {
     const CornerResult rv =
         bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, p, ring, vec.data(), cap);
 
-    bincv::impl::cornerNmsSimdEnabled() = false;
+    bincv::impl::cornerSimdEnabled() = false;
     const CornerResult rs =
         bincv::goodFeaturesToTrackStreaming(d.dx, d.dy, p, ring, sca.data(), cap);
-    bincv::impl::cornerNmsSimdEnabled() = true;
+    bincv::impl::cornerSimdEnabled() = true;
 
     BINCV_CHECK_EQ(rv.count, rs.count);
     BINCV_CHECK(rv.count > 0);
@@ -2295,7 +2295,144 @@ BINCV_TEST(Corner, SuppressionArmsAgree) {
     BINCV_CHECK_EQ(differ, size_t{0});
     std::printf(" suppression arms: %zu corners, %zu ranked, %zu differ (vector arm %s)\n",
                 rv.count, rv.candidatesRanked, differ,
-                bincv::impl::hasCornerNmsSimd() ? "present" : "absent on this build");
+                bincv::impl::hasCornerSimd() ? "present" : "absent on this build");
+}
+
+// The rank's two arms, in ONE binary, on the same pool. The counting arm is not
+// a faster sort -- it does not compare two corners at all, and gets the tie rule
+// from the raster order the sweep appended the pool in -- so "it agrees with
+// std::sort" is the entire claim it makes and this is what holds it.
+//
+// TIES ARE THE POINT. A binarized response takes about ninety distinct values
+// over a frame, so almost every comparison the sort arm makes is between equal
+// responses and the answer is decided by the tie rule. A pool of distinct
+// responses would let a wrong tie rule pass.
+BINCV_TEST(Corner, RankArmsAgree) {
+    uint64_t st = 0x5EED1234ULL;
+    // Raster order, as the suppression sweep appends it: y ascending, then x.
+    // Responses drawn from a small set, so ties are everywhere.
+    std::vector<Corner> pool;
+    for (int y = 0; y < 90; ++y) {
+        for (int x = 0; x < 130; ++x) {
+            if ((nextRandom(st) & 3ULL) != 0ULL) continue;
+            Corner c;
+            c.x = x;
+            c.y = y;
+            c.response = static_cast<float>(nextRandom(st) % 7ULL) * 0.25f;
+            pool.push_back(c);
+        }
+    }
+    BINCV_CHECK(pool.size() > 1000);
+
+    std::vector<Corner> viaSort(pool);
+    std::sort(viaSort.begin(), viaSort.end(), bincv::impl::CornerStronger());
+
+    // The counting arm needs room to scatter into, which `rankCandidates` takes
+    // from the array's own slack -- so the vector is twice the pool.
+    std::vector<Corner> viaCounting(pool);
+    viaCounting.resize(pool.size() * 2);
+    bincv::impl::rankCandidates(viaCounting.data(), pool.size(), viaCounting.size(), true);
+
+    size_t differ = 0;
+    for (size_t i = 0; i < pool.size(); ++i) {
+        if (viaCounting[i].x != viaSort[i].x || viaCounting[i].y != viaSort[i].y ||
+            viaCounting[i].response != viaSort[i].response)
+            ++differ;
+    }
+    BINCV_CHECK_EQ(differ, size_t{0});
+
+    // The fallback is reached two ways and both must give the same answer: a
+    // pool the heap has reordered, and a buffer with no slack to scatter into.
+    std::vector<Corner> noSlack(pool);
+    bincv::impl::rankCandidates(noSlack.data(), pool.size(), pool.size(), true);
+    size_t differNoSlack = 0;
+    for (size_t i = 0; i < pool.size(); ++i)
+        if (noSlack[i].x != viaSort[i].x || noSlack[i].y != viaSort[i].y) ++differNoSlack;
+    BINCV_CHECK_EQ(differNoSlack, size_t{0});
+
+    std::vector<Corner> notRaster(pool);
+    notRaster.resize(pool.size() * 2);
+    bincv::impl::rankCandidates(notRaster.data(), pool.size(), notRaster.size(), false);
+    size_t differNotRaster = 0;
+    for (size_t i = 0; i < pool.size(); ++i)
+        if (notRaster[i].x != viaSort[i].x || notRaster[i].y != viaSort[i].y) ++differNotRaster;
+    BINCV_CHECK_EQ(differNotRaster, size_t{0});
+
+    // One response for the whole pool: every byte lane is constant, so no
+    // counting pass runs at all and the order is the tie rule alone.
+    std::vector<Corner> flat(pool);
+    for (Corner& c : flat) c.response = 2.0f;
+    std::vector<Corner> flatSorted(flat);
+    std::sort(flatSorted.begin(), flatSorted.end(), bincv::impl::CornerStronger());
+    flat.resize(pool.size() * 2);
+    bincv::impl::rankCandidates(flat.data(), pool.size(), flat.size(), true);
+    size_t differFlat = 0;
+    for (size_t i = 0; i < pool.size(); ++i)
+        if (flat[i].x != flatSorted[i].x || flat[i].y != flatSorted[i].y) ++differFlat;
+    BINCV_CHECK_EQ(differFlat, size_t{0});
+
+    std::printf(" rank arms: %zu candidates, %zu differ (counting), %zu (no slack),"
+                " %zu (not raster), %zu (one response)\n",
+                pool.size(), differ, differNoSlack, differNotRaster, differFlat);
+}
+
+// The spacing filter against the exhaustive loop it replaces. It holds the
+// accepted set in ROW order so a candidate is tested against one contiguous run
+// of it rather than all of it, and it tests on integers rather than doubles --
+// neither of which may change which corners come out, or in what order.
+BINCV_TEST(Corner, SpacingFilterMatchesExhaustive) {
+    uint64_t st = 0xA5A5F00DULL;
+    for (double minDistance : {1.0, 1.5, 4.0, 7.0, 33.33333333333}) {
+        std::vector<Corner> pool;
+        for (int i = 0; i < 1500; ++i) {
+            Corner c;
+            c.x = static_cast<int>(nextRandom(st) % 200ULL);
+            c.y = static_cast<int>(nextRandom(st) % 150ULL);
+            c.response = static_cast<float>(nextRandom(st) % 11ULL) * 0.125f;
+            pool.push_back(c);
+        }
+        // Positions must be distinct for CornerStronger to be a total order,
+        // which is what both arms rest on.
+        std::sort(pool.begin(), pool.end(), [](const Corner& a, const Corner& b) {
+            return a.y != b.y ? a.y < b.y : a.x < b.x;
+        });
+        pool.erase(std::unique(pool.begin(), pool.end(),
+                               [](const Corner& a, const Corner& b) {
+                                   return a.x == b.x && a.y == b.y;
+                               }),
+                   pool.end());
+        std::sort(pool.begin(), pool.end(), bincv::impl::CornerStronger());
+
+        for (size_t limit : {size_t{3}, size_t{40}, pool.size()}) {
+            // The exhaustive loop, spelled out: every candidate against every
+            // acceptance so far, in double, accepting in rank order.
+            std::vector<Corner> want;
+            const double sq = minDistance * minDistance;
+            for (size_t i = 0; i < pool.size() && want.size() < limit; ++i) {
+                bool good = true;
+                for (size_t j = 0; j < want.size(); ++j) {
+                    const double dx = static_cast<double>(pool[i].x) - want[j].x;
+                    const double dy = static_cast<double>(pool[i].y) - want[j].y;
+                    if (dx * dx + dy * dy < sq) {
+                        good = false;
+                        break;
+                    }
+                }
+                if (good) want.push_back(pool[i]);
+            }
+
+            std::vector<Corner> got(pool);
+            const size_t kept =
+                bincv::impl::spacingFilter(got.data(), got.size(), minDistance, limit);
+            BINCV_CHECK_EQ(kept, want.size());
+            size_t differ = 0;
+            for (size_t i = 0; i < kept && i < want.size(); ++i)
+                if (got[i].x != want[i].x || got[i].y != want[i].y) ++differ;
+            BINCV_CHECK_EQ(differ, size_t{0});
+        }
+    }
+    std::printf(" spacing filter: row-ordered and exhaustive arms agree at five"
+                " distances and three limits\n");
 }
 
 BINCV_TEST_MAIN("test_corner")
