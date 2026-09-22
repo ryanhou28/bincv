@@ -387,12 +387,14 @@
 #include "reduce.hpp"
 
 // The non-maximum suppression prefilter's vector path, gated the way
-// ops/pack.hpp gates the packer's: selected at RUN TIME on x86 so the baseline
-// ISA is unchanged, baseline on aarch64 where NEON always exists. The gate is
-// evaluated BEFORE the first core include for the same reason it is there --
-// an include-only integration must still get the NEON arm.
-#include "../core/simd.hpp"
-
+// ops/pack.hpp gates the packer's: selected at RUN TIME so the baseline ISA is
+// unchanged and a benchmark can time both arms.
+//
+// IT IS ATTACHED TO THE STREAMING FORM ONLY. That is the recommended path at
+// the reference pipeline's blockSize 3, the one with the smaller working set
+// (12.56 B/pixel against the frame map's 16.54) and the one the reports
+// publish. The frame-map form keeps the scalar scan: it is a different caller's
+// path, and an arm nobody has measured there would be an arm nobody has priced.
 // !__CUDACC__: no vector arm is reachable from device code.
 //
 // x86 ONLY, AND THAT IS A MEASUREMENT RATHER THAN AN OVERSIGHT. A NEON arm was
