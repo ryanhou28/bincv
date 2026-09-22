@@ -34,8 +34,8 @@ side of that line. Header-only C++, zero dependencies.
 x86-64 is a desktop Ryzen 5 5600X, aarch64 a Raspberry Pi 4 at a pinned clock. Both columns
 are one thread — compare at equal thread counts, or a ratio means nothing. Every speedup is
 the median of a sweep of whole process launches with the bootstrap 95% interval those
-launches put around it: **thirty on x86-64, ten on the device**, which needs fewer because
-its clock is pinned.
+launches put around it: **thirty on x86-64, ten on the device** (seven for dense disparity),
+which needs fewer because its clock is pinned.
 [Where it does not pay](#where-it-does-not-pay) covers the rows where a packed representation
 costs more than it saves.
 
