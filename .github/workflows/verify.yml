@@ -55,6 +55,12 @@ jobs:
 
   aarch64:
     name: aarch64 correctness (emulated)
+    # PRs and main only. QEMU emulates the whole suite and this job takes ~37
+    # minutes against the others' 6, 3 and under 1 -- long enough on every
+    # feature-branch push to become the noise people learn to scroll past, which
+    # is the habit this workflow exists to break. A branch gets it when it opens
+    # a PR, which is when the answer is worth waiting for.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,7 +72,14 @@ jobs:
         # verify_cross.sh compares the emulated check counts against a native
         # run's, and refuses to compare an architecture against itself. That
         # reference is build-logs/checks-*.txt, so the native run comes first.
-        run: ./scripts/verify.sh --only core
+        #
+        # BOTH configurations, because verify_cross.sh builds and tests `core`
+        # AND `noexcept` in the container. Referencing only `core` left the
+        # second with nothing to compare against, and with
+        # BINCV_CROSS_REQUIRE_REFERENCE=1 that is a failure rather than a quiet
+        # "NOT PERFORMED" -- which is the contract working, and it caught this
+        # workflow on its first run.
+        run: ./scripts/verify.sh --only core,noexcept
       - name: verify_cross.sh -- aarch64 under QEMU
         env:
           BINCV_CROSS_REQUIRE_REFERENCE: '1'
