@@ -13,6 +13,14 @@
 # is a broken workflow, and exit 77 is treated as red rather than reported and
 # passed over.
 #
+# aarch64 RUNS NATIVELY, on GitHub's arm64 runners, which are free for public
+# repositories. It used to run `verify_cross.sh` under QEMU and took 40 minutes.
+# Emulation was always the second-best answer -- verify_cross.sh's own header
+# says QEMU models no cache hierarchy and can invert A/B rankings -- and it is
+# not needed when the architecture can be had for real at roughly x86's cost.
+# What emulation was providing beyond compilation, the cross-architecture check
+# count comparison, is now the `count-parity` job.
+#
 # WHAT THIS DOES NOT COVER, stated so a green tick is not read as more than it
 # is: every published performance figure. Those need the reference device and a
 # pinned governor (docs/reports/README.md), and a GitHub runner is shared,
@@ -52,48 +60,36 @@ jobs:
         # it would otherwise degrade to core-only and fail on the two suites that
         # then vanish, which is verify.sh correctly refusing to call that a pass.
         run: ./scripts/verify.sh --only core,noexcept,debug
+      - name: Keep the check counts for the parity job
+        uses: actions/upload-artifact@v4
+        with:
+          name: checks-x86_64
+          path: build-logs/checks-*.txt
+          if-no-files-found: error
 
   aarch64:
-    name: aarch64 correctness (emulated)
-    # PRs and main only. QEMU emulates the whole suite and this job takes ~37
-    # minutes against the others' 6, 3 and under 1 -- long enough on every
-    # feature-branch push to become the noise people learn to scroll past, which
-    # is the habit this workflow exists to break. A branch gets it when it opens
-    # a PR, which is when the answer is worth waiting for.
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    name: aarch64 correctness (native)
+    # NATIVE, not emulated. This job used to run verify_cross.sh under QEMU and
+    # took 40 minutes -- QEMU translating 1.87 million assertions -- which on
+    # every push is the noise people learn to scroll past. GitHub's arm64 runners
+    # are free for public repositories, so the architecture that x86 never
+    # compiles is now tested on the real thing at roughly x86's cost.
+    #
+    # It runs verify.sh directly rather than verify_cross.sh: there is nothing to
+    # emulate and nothing to cross-compare from here, because this IS aarch64.
+    # The check counts from both native jobs are compared in `count-parity`
+    # below, which is the part verify_cross.sh was providing.
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-      - name: Enable arm64 emulation
-        uses: docker/setup-qemu-action@v3
+      - name: verify.sh -- core, -fno-exceptions, Debug
+        run: ./scripts/verify.sh --only core,noexcept,debug
+      - name: Keep the check counts for the parity job
+        uses: actions/upload-artifact@v4
         with:
-          platforms: arm64
-      - name: Native reference run
-        # verify_cross.sh compares the emulated check counts against a native
-        # run's, and refuses to compare an architecture against itself. That
-        # reference is build-logs/checks-*.txt, so the native run comes first.
-        #
-        # BOTH configurations, because verify_cross.sh builds and tests `core`
-        # AND `noexcept` in the container. Referencing only `core` left the
-        # second with nothing to compare against, and with
-        # BINCV_CROSS_REQUIRE_REFERENCE=1 that is a failure rather than a quiet
-        # "NOT PERFORMED" -- which is the contract working, and it caught this
-        # workflow on its first run.
-        run: ./scripts/verify.sh --only core,noexcept
-      - name: verify_cross.sh -- aarch64 under QEMU
-        env:
-          BINCV_CROSS_REQUIRE_REFERENCE: '1'
-        run: |
-          set +e
-          ./scripts/verify_cross.sh
-          rc=$?
-          set -e
-          if [ "$rc" = "77" ]; then
-            echo "::error::verify_cross.sh exited 77 (could not run). On a runner that"
-            echo "::error::provisions QEMU itself that is a broken workflow, not a fair skip."
-            exit 1
-          fi
-          exit $rc
+          name: checks-aarch64
+          path: build-logs/checks-*.txt
+          if-no-files-found: error
 
   cortex-m:
     name: Cortex-M7 (32-bit size_t, bare metal)
@@ -135,3 +131,45 @@ jobs:
       - run: python3 scripts/check_links.py
       - run: python3 scripts/check_report_figures.py
       - run: python3 scripts/check_figure_staleness.py
+
+  count-parity:
+    name: check counts agree across architectures
+    needs: [x86-64, aarch64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: checks-x86_64
+          path: counts/x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: checks-aarch64
+          path: counts/aarch64
+      - name: Compare
+        # This is the half of verify_cross.sh that was worth its 40 minutes: two
+        # architectures running the same suites must execute the same number of
+        # assertions, or one of them is compiling something out. `test_simd` is
+        # exempt by construction -- it counts the ISA features it finds, and
+        # finding different ones is the point of it.
+        run: |
+          rc=0
+          for f in counts/x86_64/checks-*.txt; do
+            cfg=$(basename "$f")
+            other="counts/aarch64/${cfg}"
+            [ -f "$other" ] || { echo "::error::${cfg} missing from the aarch64 run"; rc=1; continue; }
+            while IFS=$'\t' read -r suite checks skipped; do
+              [ -n "$suite" ] || continue
+              case "$suite" in \#*|test_simd) continue ;; esac
+              theirs=$(awk -F'\t' -v s="$suite" '$1==s {print $2; exit}' "$other")
+              if [ -z "$theirs" ]; then
+                echo "::error::${cfg}: ${suite} ran on x86_64 and not on aarch64"
+                rc=1
+              elif [ "$theirs" != "$checks" ]; then
+                echo "::error::${cfg}: ${suite} executed ${checks} checks on x86_64 and ${theirs} on aarch64"
+                rc=1
+              fi
+            done < "$f"
+            echo "  ${cfg}: compared"
+          done
+          exit $rc
