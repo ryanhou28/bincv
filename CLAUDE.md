@@ -119,6 +119,23 @@ python3 scripts/check_links.py
 python3 scripts/check_figure_staleness.py   # a kernel change under a published figure
 ```
 
+**CI runs four of these on every push** (`.github/workflows/verify.yml`): x86-64 correctness,
+aarch64 under emulation, the Cortex-M7 compile gate, and the three documentation checks.
+**It is deliberately not a merge requirement** — `main` is unprotected and stays that way, so
+a push is never blocked waiting on a runner.
+
+Two things about it are worth knowing before reading a green tick:
+
+- **A skip is a failure there.** The scripts exit 77 when they cannot run, which is honest on
+  a laptop and meaningless on a runner that provisions its own QEMU and toolchain. CI turns
+  77 into red, because a gate that silently skipped for weeks is what the workflow exists to
+  prevent.
+- **It installs no OpenCV and measures nothing.** `test_equivalence` and
+  `test_opencv_interop` do not run there, so the OpenCV bit-exactness claims are verified on
+  a maintainer's machine and nowhere else — run `./scripts/verify.sh` with no `--only` before
+  anything that touches them. Every published figure needs the reference device with a pinned
+  governor, which a shared virtualised runner is the opposite of.
+
 `verify.sh` builds and tests four configurations — Release+OpenCV, Release core-only,
 `-fno-exceptions` core-only, and **Debug** core-only — with `-DBINCV_WERROR=ON`, and exits
 non-zero if anything fails. It starts with a **gate self-check**: two throwaway builds

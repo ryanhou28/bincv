@@ -1,0 +1,124 @@
+# binCV verification, on every push and pull request.
+#
+# WHY THIS EXISTS. This repository has nine gates and, until this file, none of
+# them ran anywhere but a maintainer's desktop when a maintainer remembered. The
+# failure that produced this workflow was not somebody merging bad code: it was
+# `verify_cortex_m.sh` exiting 77 -- "could not run", which its own docstring
+# says "is not a pass" -- for long enough that `main` went red on it unnoticed.
+# A gate that can skip will skip. CI is how a skip becomes visible.
+#
+# SO A SKIP IS A FAILURE HERE, and that is the one place this deliberately
+# disagrees with the scripts. On a laptop, "Docker is not running" is a fair
+# reason not to verify aarch64. On a runner that this workflow provisions, it
+# is a broken workflow, and exit 77 is treated as red rather than reported and
+# passed over.
+#
+# WHAT THIS DOES NOT COVER, stated so a green tick is not read as more than it
+# is: every published performance figure. Those need the reference device and a
+# pinned governor (docs/reports/README.md), and a GitHub runner is shared,
+# unpinned and virtualised -- the one thing measurement cannot be. The CUDA
+# gate needs a GPU. Correctness and the gates that silently skip are what runs
+# here; speed is not.
+#
+# OpenCV IS NOT INSTALLED, by choice. It is the slowest part of the build and
+# the interop suites are a small part of the surface. The cost is real and is
+# named rather than hidden: `test_equivalence` and `test_opencv_interop` do not
+# run in CI, so the OpenCV bit-exactness claims are verified on a maintainer's
+# machine and nowhere else. `verify.sh --only` prints "PARTIAL RUN GREEN" and
+# names what it did not run, so this cannot read as a full pass.
+
+name: verify
+
+on:
+  push:
+  pull_request:
+
+# A second push to the same branch makes the first one's answer irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  x86-64:
+    name: x86-64 correctness (3 of 4 configs, no OpenCV)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: verify.sh -- core, -fno-exceptions, Debug
+        # The `opencv` configuration is left out because OpenCV is not installed;
+        # it would otherwise degrade to core-only and fail on the two suites that
+        # then vanish, which is verify.sh correctly refusing to call that a pass.
+        run: ./scripts/verify.sh --only core,noexcept,debug
+
+  aarch64:
+    name: aarch64 correctness (emulated)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable arm64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: Native reference run
+        # verify_cross.sh compares the emulated check counts against a native
+        # run's, and refuses to compare an architecture against itself. That
+        # reference is build-logs/checks-*.txt, so the native run comes first.
+        run: ./scripts/verify.sh --only core
+      - name: verify_cross.sh -- aarch64 under QEMU
+        env:
+          BINCV_CROSS_REQUIRE_REFERENCE: '1'
+        run: |
+          set +e
+          ./scripts/verify_cross.sh
+          rc=$?
+          set -e
+          if [ "$rc" = "77" ]; then
+            echo "::error::verify_cross.sh exited 77 (could not run). On a runner that"
+            echo "::error::provisions QEMU itself that is a broken workflow, not a fair skip."
+            exit 1
+          fi
+          exit $rc
+
+  cortex-m:
+    name: Cortex-M7 (32-bit size_t, bare metal)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the bare-metal toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-arm-none-eabi
+      - name: verify_cortex_m.sh
+        # This is the only place size_t is 32 bits, and currently also the only
+        # place a second compiler sees the code -- arm-none-eabi-gcc is a
+        # different GCC major than the host's, and both bugs it has caught were
+        # diagnostics the host compiler does not raise.
+        run: |
+          set +e
+          ./scripts/verify_cortex_m.sh
+          rc=$?
+          set -e
+          if [ "$rc" = "77" ]; then
+            echo "::error::verify_cortex_m.sh exited 77 (no toolchain). The install step"
+            echo "::error::above is meant to prevent exactly that."
+            exit 1
+          fi
+          exit $rc
+
+  docs:
+    name: links, figures, staleness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # check_figure_staleness.py reads each log's stamped commit out of
+          # history to compare that commit's code against the tree. A shallow
+          # clone has no such history and the gate would report every log
+          # unmappable -- which is the quiet-pass failure it exists to prevent.
+          fetch-depth: 0
+      - run: python3 scripts/check_links.py
+      - run: python3 scripts/check_report_figures.py
+      - run: python3 scripts/check_figure_staleness.py

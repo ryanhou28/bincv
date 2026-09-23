@@ -214,14 +214,35 @@ config_expect_macros() {
     esac
 }
 
+# --only takes a LIST, because the reason to run a subset is usually a property
+# of the environment rather than of one configuration: a machine with no OpenCV
+# can run three of the four and none of them is "the one". Every name is checked
+# against the real set, so a typo is an error rather than a silently smaller run.
+SKIPPED_CONFIGS=()
 if [[ -n "${ONLY}" ]]; then
-    found=0
-    for n in "${CONFIG_NAMES[@]}"; do if [[ "$n" == "${ONLY}" ]]; then found=1; fi; done
-    if [[ $found -eq 0 ]]; then
-        echo "verify.sh: --only expects one of: ${CONFIG_NAMES[*]}" >&2
-        exit 2
-    fi
-    CONFIG_NAMES=("${ONLY}")
+    requested=()
+    IFS=',' read -r -a requested <<< "${ONLY}"
+    for want in "${requested[@]}"; do
+        want="${want// /}"
+        [[ -n "${want}" ]] || continue
+        found=0
+        for n in "${CONFIG_NAMES[@]}"; do if [[ "$n" == "${want}" ]]; then found=1; fi; done
+        if [[ $found -eq 0 ]]; then
+            echo "verify.sh: --only expects a comma-separated subset of: ${CONFIG_NAMES[*]}" >&2
+            echo "verify.sh: '${want}' is not one of them" >&2
+            exit 2
+        fi
+    done
+    for n in "${CONFIG_NAMES[@]}"; do
+        keep=0
+        for want in "${requested[@]}"; do
+            [[ "${want// /}" == "$n" ]] && keep=1
+        done
+        [[ ${keep} -eq 1 ]] || SKIPPED_CONFIGS+=("$n")
+    done
+    CONFIG_NAMES=()
+    IFS=',' read -r -a CONFIG_NAMES <<< "${ONLY}"
+    for i in "${!CONFIG_NAMES[@]}"; do CONFIG_NAMES[$i]="${CONFIG_NAMES[$i]// /}"; done
 fi
 
 if [[ ${UPDATE_BASELINE} -eq 1 && -n "${ONLY}" ]]; then
@@ -814,7 +835,14 @@ fi
 
 echo
 if [[ ${FAILED} -eq 0 ]]; then
-    echo "  ALL CONFIGURATIONS GREEN"
+    if [[ ${#SKIPPED_CONFIGS[@]} -gt 0 ]]; then
+        # A subset run must not read like a full one. This is the same contract
+        # the 77 exits carry: not verified is not the same as verified.
+        echo "  PARTIAL RUN GREEN -- ${#CONFIG_NAMES[@]} of $(( ${#CONFIG_NAMES[@]} + ${#SKIPPED_CONFIGS[@]} )) configurations"
+        echo "  NOT RUN: ${SKIPPED_CONFIGS[*]} -- those configurations are unverified here."
+    else
+        echo "  ALL CONFIGURATIONS GREEN"
+    fi
     if [[ ${RUN_CROSS} -eq 0 || -n "${CROSS_NOTE}" ]]; then
         if [[ -n "${CROSS_ARCH}" ]]; then
             echo "  ${HOST_ARCH} only. ./scripts/verify_cross.sh covers ${CROSS_ARCH} under"
