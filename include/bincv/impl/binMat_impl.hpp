@@ -347,16 +347,14 @@ inline void packRowNonZeroPortable(const uint8_t* rowIn, size_t from, size_t wid
 enum class PackCmp { NonZero, GreaterThan, GreaterEqual };
 
 /// @brief One pixel's bit, scalar.
+/// @note ONE return over a ternary on the template parameter, which folds away, rather
+/// than an `if constexpr` chain whose every branch returns: nvcc's front end reports
+/// such a chain as a missing return, and this header is compiled by nvcc wherever a
+/// `.cu` packs bits.
 template <PackCmp R, typename SrcT>
 inline bool packCmp(SrcT v, SrcT t) {
-    if constexpr (R == PackCmp::NonZero) {
-        (void)t;
-        return v != SrcT{0};
-    } else if constexpr (R == PackCmp::GreaterThan) {
-        return v > t;
-    } else {
-        return v >= t;
-    }
+    return (R == PackCmp::NonZero) ? (v != SrcT{0})
+                                   : (R == PackCmp::GreaterThan) ? (v > t) : (v >= t);
 }
 
 #if defined(BINCV_X86_RUNTIME_AVX2)

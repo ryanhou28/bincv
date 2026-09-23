@@ -848,8 +848,11 @@ inline void addShifted(WordType* acc, const WordType* v) {
 /// ranges -- taps and the set bits of each tap's weight -- and C++17 has no
 /// constexpr for-loop that can instantiate `addShifted` per iteration. Weights
 /// in `FilterTaps` never exceed 6, so four bit positions cover every filter.
+/// `[[maybe_unused]]` because the terminating instantiation reads neither argument, and
+/// g++-9 reports that as set-but-unused where gcc 11 does not.
 template <PyrDownFilter F, size_t NIn, size_t OutN, size_t Tap, size_t Bit, typename WordType>
-inline void weightedAxisStage(const WordType (*taps)[NIn], WordType* out) {
+inline void weightedAxisStage([[maybe_unused]] const WordType (*taps)[NIn],
+                              [[maybe_unused]] WordType* out) {
     constexpr FilterTaps T = filterTaps(F);
     constexpr size_t kTapCount = static_cast<size_t>(T.hi - T.lo + 1);
     if constexpr (Tap < kTapCount) {
@@ -882,8 +885,10 @@ inline void weightedAxis(const WordType (*taps)[NIn], WordType* out) {
 /// @note The box version is this with `KSum == 4`. Same three steps: scale to the
 /// output's full range, add half the divisor to round to nearest, divide.
 /// @brief One quotient bit of `divideByConstantT`, unrolled at compile time.
+/// `[[maybe_unused]]` for `weightedAxisStage`'s reason: the `Q == 0` base case reads
+/// neither argument.
 template <unsigned Divisor, size_t N, size_t Q, typename WordType>
-inline void divideStage(WordType* value, WordType* quotient) {
+inline void divideStage([[maybe_unused]] WordType* value, [[maybe_unused]] WordType* quotient) {
     if constexpr (Q > 0) {
         constexpr unsigned kScaled = Divisor << (Q - 1);
         const WordType fits = thresholdGE<WordType>(value, N, kScaled);
@@ -1200,21 +1205,16 @@ struct PyramidLevels<WordType, N0, N1, Rest...> {
                static_cast<int>(pyrDownHeight(height > 0 ? static_cast<size_t>(height) : 0)),
                rowAlignment) {}
 
+    // Level 0 or a deeper one, chosen by OVERLOAD rather than an `if constexpr` whose
+    // branches both return: nvcc's front end reads that shape as a missing return, and
+    // this header is compiled by nvcc wherever a `.cu` builds a pyramid.
     template <size_t I>
     auto& get() {
-        if constexpr (I == 0) {
-            return mat;
-        } else {
-            return rest.template get<I - 1>();
-        }
+        return at(LevelIndex<I>{});
     }
     template <size_t I>
     const auto& get() const {
-        if constexpr (I == 0) {
-            return mat;
-        } else {
-            return rest.template get<I - 1>();
-        }
+        return at(LevelIndex<I>{});
     }
 
     size_t words() const { return mat.sizeInWords() + rest.words(); }
@@ -1223,6 +1223,20 @@ struct PyramidLevels<WordType, N0, N1, Rest...> {
     void buildDown() {
         pyrDownFiltered<F, N1, N0, WordType, Bo>(mat, rest.mat);
         rest.template buildDown<F, Bo>();
+    }
+
+private:
+    template <size_t I>
+    struct LevelIndex {};
+    QuantMat<N0, WordType>& at(LevelIndex<0>) { return mat; }
+    const QuantMat<N0, WordType>& at(LevelIndex<0>) const { return mat; }
+    template <size_t I>
+    auto& at(LevelIndex<I>) {
+        return rest.template get<I - 1>();
+    }
+    template <size_t I>
+    const auto& at(LevelIndex<I>) const {
+        return rest.template get<I - 1>();
     }
 };
 

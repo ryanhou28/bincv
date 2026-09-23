@@ -988,6 +988,19 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
         }
     };
 
+#if defined(BINCV_FAST_RUNTIME_AVX2) || defined(BINCV_FAST_NEON)
+    // THE GATE IS READ ONCE PER CALL, NOT PER ROW. It is a runtime switch (so the
+    // benchmark can time both arms), and a runtime read inside the row loop keeps the
+    // scalar body live in every row: read per row it cost 12.8% of the whole call on
+    // x86-64. Neither the switch nor the threshold can change during a call.
+#if defined(BINCV_FAST_RUNTIME_AVX2)
+    const bool vectorReady = impl::hasFastBitAvx2();
+    const int scoreMaskThreshold = impl::fastScoreMaskThreshold();
+#else
+    const bool vectorReady = impl::fastSimdEnabled();
+#endif
+#endif
+
     for (size_t y = 3; y + 3 < height && !overflow; ++y) {
         const WordType* centerRow = img.row(y);
         const WordType* ringRow[7];
@@ -1009,10 +1022,8 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
         // boolean algebra moves into a vector register.
 #if defined(BINCV_FAST_RUNTIME_AVX2)
         constexpr size_t kChunkBytes = 32;
-        const bool vectorReady = impl::hasFastBitAvx2();
 #else
         constexpr size_t kChunkBytes = 16;
-        const bool vectorReady = impl::fastSimdEnabled();
 #endif
         constexpr size_t kChunkWords = kChunkBytes / sizeof(WordType);
         if (vectorReady && kChunkWords >= 1 && y >= 4 && y + 4 < height) {
@@ -1030,7 +1041,7 @@ inline size_t detectFast(const BinMatConstView<WordType>& img, FastCorner* out,
 #if defined(BINCV_FAST_RUNTIME_AVX2)
                 const bool scored = impl::fastBitChunk256(
                     ringBytes, centerBytes, w * sizeof(WordType), arcLength,
-                    impl::fastScoreMaskThreshold(),
+                    scoreMaskThreshold,
                     reinterpret_cast<uint32_t*>(maskBuf),
                     reinterpret_cast<uint32_t*>(diffBuf));
 #else
