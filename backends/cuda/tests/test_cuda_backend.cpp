@@ -624,6 +624,71 @@ BINCV_TEST(CudaCensus, Census5x5_uint8_t) { testCensus<24, uint8_t>(bincv::kCens
 BINCV_TEST(CudaCensus, Census3x3_uint8_t) { testCensus<8, uint8_t>(bincv::kCensus3x3); }
 BINCV_TEST(CudaCensus, Census5x5_uint16_t) { testCensus<24, uint16_t>(bincv::kCensus5x5); }
 
+namespace {
+// Thirty-two distinct offsets -- the pattern POD's whole capacity, so every slot
+// the kernels unroll over is read, and a slot that picked up its neighbour's
+// offset would compare against the wrong pixel. A 7x5 neighbourhood less its
+// centre and the two bottom corners.
+constexpr bincv::CensusPattern<32> kCensusFullPod = {{
+    {-3, -2}, {-2, -2}, {-1, -2}, {0, -2}, {1, -2}, {2, -2}, {3, -2},
+    {-3, -1}, {-2, -1}, {-1, -1}, {0, -1}, {1, -1}, {2, -1}, {3, -1},
+    {-3, 0},  {-2, 0},  {-1, 0},  {1, 0},  {2, 0},  {3, 0},
+    {-3, 1},  {-2, 1},  {-1, 1},  {0, 1},  {1, 1},  {2, 1},  {3, 1},
+    {-2, 2},  {-1, 2},  {0, 2},   {1, 2},  {2, 2},
+}};
+
+/// Bit k of every packed descriptor against plane k of the host transform. The
+/// dense suite reaches the packed layout only through a disparity map, which a
+/// permutation of the bits cannot change; this holds each bit to its own plane.
+template <size_t K>
+void testCensusPackedBits(const bincv::CensusPattern<K>& pattern) {
+    const size_t w = 101, h = 37;
+    const auto frame = randomFrame<uint8_t>(w, h, 0xCE9A00 + K);
+    std::vector<bincv::BinMat<uint32_t>> planes;
+    std::vector<bincv::BinMatView<uint32_t>> views;
+    planes.reserve(K);
+    for (size_t k = 0; k < K; ++k)
+        planes.emplace_back(static_cast<int>(w), static_cast<int>(h));
+    for (size_t k = 0; k < K; ++k) views.push_back(planes[k].view());
+    bincv::censusTransform<K, uint8_t, uint32_t>(frame.data(), w, h, w, pattern,
+                                                 views.data());
+
+    bincv::cuda::DeviceImage<uint8_t> dImg(static_cast<int>(w), static_cast<int>(h));
+    BINCV_CHECK_EQ(bincv::cuda::uploadImage<uint8_t>(frame.data(), w, h, w, dImg.view()),
+                   cudaSuccess);
+    bincv::cuda::DeviceImage<uint32_t> dDesc(static_cast<int>(w), static_cast<int>(h));
+    BINCV_CHECK_EQ(bincv::cuda::censusTransformPacked<K>(dImg.constView(), pattern,
+                                                         dDesc.view()),
+                   cudaSuccess);
+    std::vector<uint32_t> desc(w * h, 0xDEADBEEFu);
+    BINCV_CHECK_EQ(bincv::cuda::downloadImage<uint32_t>(dDesc.constView(), desc.data(), w),
+                   cudaSuccess);
+    BINCV_CHECK_EQ(cudaDeviceSynchronize(), cudaSuccess);
+
+    size_t bad = 0;
+    for (size_t y = 0; y < h; ++y) {
+        for (size_t x = 0; x < w; ++x) {
+            uint32_t expect = 0;
+            for (size_t k = 0; k < K; ++k)
+                expect |= ((planes[k].constView().row(y)[x / 32] >> (x % 32)) & 1u) << k;
+            if (desc[y * w + x] != expect) ++bad;
+        }
+    }
+    BINCV_CHECK_EQ(bad, 0u);
+}
+} // namespace
+
+BINCV_TEST(CudaCensus, FullPodPattern_uint8_t) {
+    testCensus<32, uint8_t>(kCensusFullPod);
+}
+BINCV_TEST(CudaCensus, FullPodPattern_uint16_t) {
+    testCensus<32, uint16_t>(kCensusFullPod);
+}
+BINCV_TEST(CudaCensus, PackedBitsArePlanes) {
+    testCensusPackedBits<24>(bincv::kCensus5x5);
+    testCensusPackedBits<32>(kCensusFullPod);
+}
+
 // ---------------------------------------------------------------------------
 // Dense disparity, binary entry: the device map against the host map, byte for
 // byte, across parameter shapes including the degenerate ones.

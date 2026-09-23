@@ -60,7 +60,7 @@ counts differ.
 | Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.071 | 1.916 | 4.70× [4.65, 4.79] | 38.187 | 19.520 | 1.953× [1.944, 1.972] | [features.md](features.md) |
 | `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack` | 8.807 | 6.368 | 1.383× [1.350, 1.426] | 58.338 | 24.099 | 2.421× [2.412, 2.424] | [features.md](features.md) |
 | FAST, wide image, ms/call | `cv::FAST` | 0.359 | 0.345 | 1.039× [1.033, 1.048] | 2.910 | 3.025 | 0.962× [0.961, 0.963] | [features.md](features.md) |
-| FAST, bit-plane, µs/call | `cv::FAST` | 265.2 | 180.2 | 1.472× [1.470, 1.474] | 2048.2 | 865.8 | 2.365× [2.363, 2.370] | [features.md](features.md) |
+| FAST, bit-plane, µs/call | `cv::FAST` | 267.7 | 161.7 | 1.651× [1.643, 1.658] | 2051.1 | 865.2 | 2.371× [2.368, 2.374] | [features.md](features.md) |
 | dense disparity, ms/frame | `cv::StereoBM` | 12.675 | 10.405 | 1.218× [1.199, 1.240] | 79.90 | 60.57 | 1.319× | [stereo.md](stereo.md) |
 
 Four rows carry a qualification their report states and a table cell cannot:
@@ -225,8 +225,8 @@ says what that covers — but it produced no OpenCV comparison, so it is not her
 
 Neither CPU stands in for the other: results move a long way between them, and always
 because of what OpenCV's two builds do rather than what binCV's code does. Hamming matching
-is 4.70× on x86 and 1.953× on the device; bit-plane FAST goes the other way, 1.47× against
-2.365×; and the bit width at which a bit-sliced pyramid stops beating `cv::pyrDown` differs by
+is 4.70× on x86 and 1.953× on the device; bit-plane FAST goes the other way, 1.651× against
+2.371×; and the bit width at which a bit-sliced pyramid stops beating `cv::pyrDown` differs by
 several bits between them.
 
 | | **x86-64** — development host | **aarch64** — reference device |
@@ -366,12 +366,11 @@ kind:
   slow OpenCV.
 - **`morphologyEx(OPEN)` is 1.022×, not 1.15×**, and four of its thirty launches fall below
   1.00×. It is a near-parity row published as a clear win.
-- **`FAST, bit-plane` is 1.472×, not 1.50×, and that one is real.** The runtime switch that
-  makes the vector arm provably off-switchable is read once per image row, and reverting only
-  that read measures 12.8% faster with the intervals disjoint. Hoisting it out of the row loop
-  keeps the switch and recovers all of it —
-  [issue #73](https://github.com/ryanhou28/bincv/issues/73), which would take the row to about
-  1.66×.
+- **`FAST, bit-plane` was 1.472×, not the 1.50× first published, and that gap was real — it
+  is now 1.651×.** The runtime switch that makes the vector arm provably off-switchable was
+  read once per image row, keeping the scalar body live in every row. Read once per call, the
+  operation is 180.85 µs → 161.70 µs with the intervals disjoint, and the old code
+  re-measured on both sides of the new one in the same session agrees with itself.
 - **`dilate` 3×3 was published as a 0.80× loss and is not one.** Thirty launches put it at
   1.057×, ahead in 30 of 30, on a kernel whose source has not changed. That launch timed
   binCV's arm at 0.13037 ns/pixel where thirty span 0.09260 to 0.09680 — one slow draw, on the

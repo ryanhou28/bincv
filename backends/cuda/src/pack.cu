@@ -1,10 +1,10 @@
-// The device sensor stage. One warp produces one packed word: lane x of the
-// warp reads pixel 32*i + x, evaluates the rule, and __ballot_sync IS the
-// packed word -- the format's 32-bit granule and the warp width coinciding.
-// The N-bit packer is the same shape, N ballots deep.
+// The device sensor stage. A warp produces packed words: lane x of the warp
+// reads pixel 32*i + x, evaluates the rule, and __ballot_sync IS the packed
+// word -- the format's 32-bit granule and the warp width coinciding. The N-bit
+// packer is the same shape, N ballots deep.
 //
 // ---------------------------------------------------------------------------
-// THREE ARMS, TWO SWITCHES, AND WHY THE FIRST ONE ALONE WAS NOT ENOUGH
+// THE ARMS, THEIR SWITCHES, AND WHY THE FIRST ONE ALONE WAS NOT ENOUGH
 //
 // The grid-stride arm below is the shape this file shipped with, and it is
 // still the oracle every other arm is held to. It is not the shape that gets
@@ -23,32 +23,27 @@
 // divide instruction, so a variable divisor is a function call's worth of
 // arithmetic per pixel.
 //
-//   ROW-GRID ARM (`packRowGridEnabled`, default on). blockIdx.y IS the row.
-//     Both divides are deleted outright rather than strength-reduced: the two
-//     quantities the loop was computing are now the two components of the
-//     launch shape. Identical body, identical output, one instantiation per
-//     (SrcT, rule) exactly as before. Costs a gate -- gridDim.y is capped at
+//   ROW-GRID ARM (`packRowGridEnabled`, default on). The launch shape carries
+//     the row and the word, so both divides are deleted outright rather than
+//     strength-reduced. One warp produces EIGHT consecutive words: it issues
+//     its eight loads before its first ballot, and lanes 0..7 store the eight
+//     words together, one whole 32-byte sector. One word per warp, stored by
+//     lane 0, wrote 4 bytes per sector -- 8.0x the output in store sectors --
+//     and kept one load per lane in flight; at 7680x4320 the profiler reads
+//     DRAM 22% -> 66% for a uint8 source and 41% -> 94% for uint16, store
+//     sectors 8.0x -> 1.0x. Costs a gate -- a grid dimension is capped at
 //     65535 -- and above that the grid-stride arm runs.
-//
-//   BYTE-LANE ARM (`packByteLaneEnabled`, default on, one level down). One
-//     lane, FOUR pixels: a 32-bit load where the warp was issuing 32 one-byte
-//     loads, `__vsetgeu4` for the four comparisons and `__dp4a` to fold four
-//     byte flags into a nibble -- the shape edge.cu's byte-lane arm already
-//     runs, on the same part, for the same reason. Eight lanes' nibbles are one
-//     output word, gathered by a three-step shuffle butterfly.
-//
-// The byte-lane arm folds the rule into ONE unsigned cutoff (`v >= cutoff`)
-// because `__vsetgeu4` has one spelling: NonZero is cutoff 1, GreaterThan is
-// t + 1, GreaterEqual is t. That is the fold edge.cu's launcher already does
-// with EdgeRelation, and it is why this arm is one kernel rather than three.
-// A cutoff of 256 -- GreaterThan at t == 255, "nothing passes" -- cannot be
-// expressed in a byte lane, so it is one of this arm's gates.
 //
 // SHARED OWNERSHIP IS THE HAZARD HERE. This kernel is `packBits`',
 // `packRows`' and `cuda::threshold`'s, and `packQuantKernel` next to it is the
-// N-deep twin with the same two divides. Both got the row grid; the byte-lane
-// arm is `packKernel`'s alone, because a quantized lane resolves N planes from
-// one value and there is no four-at-a-time spelling of that.
+// N-deep twin with the same two divides. Both got the row grid, and packQuant
+// has a wide lane of its own (`packQuantWideLaneEnabled`). The one-word-per-
+// warp quantized ballot arm spent ~90 warp instructions per word at N = 2,
+// most of them per plane -- a ballot, a branch and a lane-0 store with its own
+// 64-bit address -- and read 15% of peak DRAM with SM at up to 66%. The wide
+// lane evaluates the scale for four bytes at once in 16-bit fields, extracts
+// each plane with one `__dp4a` per four pixels and stores two planes per store
+// instruction: ~10x fewer instructions, 92% of peak DRAM at 7680x4320.
 
 #include "bincv/cuda/pack.hpp"
 
@@ -59,29 +54,19 @@ inline namespace BINCV_ABI_NAMESPACE {
 namespace cuda {
 namespace {
 
-/// @brief Pixels one warp of the byte-lane arm covers: 32 lanes x 4 = 4 words.
-constexpr unsigned kPackLanePixelsPerWarp = 128;
+/// @brief Words one warp of a ballot row-grid arm produces: eight, so the eight
+/// lanes that store them write one whole 32-byte sector.
+constexpr unsigned kBallotWords = 8;
 
-/// @brief The largest `gridDim.y` a launch may ask for. The row-grid arms put
-/// the image row in that dimension, so this is their domain bound.
+/// @brief Pixels one lane of the wide-lane arm covers: one 16-byte load.
+constexpr unsigned kWideLanePixels = 16;
+
+/// @brief Pixels one warp of the wide-lane arm covers: 32 lanes x 16 = 16 words.
+constexpr unsigned kWideWarpPixels = 512;
+
+/// @brief The largest `gridDim.y` a launch may ask for. The row-grid family puts
+/// a band of rows in that dimension; see `packRowGridApplies` for the gate.
 constexpr size_t kMaxGridY = 65535;
-
-/// @brief The three rules as ONE unsigned cutoff: `v >= cutoff` is each of them.
-/// @note `NonZero` is `v >= 1`; `GreaterThan` is `v >= t + 1`; `GreaterEqual` is
-/// `v >= t`. Computed in `unsigned`, so `t + 1` at the type's maximum is 256
-/// (or 65536) -- "nothing passes" by arithmetic, with no special case.
-template <typename SrcT>
-unsigned packCutoff(PackRule rule, SrcT t) {
-    switch (rule) {
-        case PackRule::NonZero:
-            return 1u;
-        case PackRule::GreaterThan:
-            return static_cast<unsigned>(t) + 1u;
-        case PackRule::GreaterEqual:
-            return static_cast<unsigned>(t);
-    }
-    return 1u;
-}
 
 // ---------------------------------------------------------------------------
 // The grid-stride arm -- the oracle
@@ -111,81 +96,50 @@ __global__ void packKernel(DeviceImageConstView<SrcT> src, DeviceBinMatView dst,
 }
 
 // ---------------------------------------------------------------------------
-// The row-grid arm -- the same body, with the two divides deleted
+// The row-grid arm -- no divides, eight words per warp
 // ---------------------------------------------------------------------------
 
-/// @note The body is the grid-stride arm's, character for character, from `x`
-/// onward. What changed is above it: `y` is `blockIdx.y` and `i` is the x
-/// dimension, so neither has to be recovered from a flat index.
+/// @note The grid-stride arm's rule and ballot, eight times over. What changed
+/// is the traversal: a block is eight rows of one eight-word column, so the
+/// row and the first word come from the launch shape and neither has to be
+/// recovered from a flat index.
+/// @note ALL EIGHT LOADS ARE ISSUED BEFORE THE FIRST BALLOT, and lanes 0..7
+/// store the eight words in one instruction. One word per warp, stored by
+/// lane 0, wrote 4 bytes into each 32-byte sector and kept one load per lane
+/// in flight; this writes whole sectors wherever a row starts on one.
 /// @note The early return is taken by a WHOLE WARP or none of it -- `threadIdx.y`
 /// is uniform across a warp at `blockDim.x == 32` -- so the `__ballot_sync`
-/// below still sees all 32 lanes, which is what makes its mask legal.
+/// below still sees all 32 lanes, which is what makes its mask legal. The
+/// words past the row's last are ballots of nothing and are not stored.
 template <typename SrcT, PackRule R>
 __global__ void packKernelRowGrid(DeviceImageConstView<SrcT> src, DeviceBinMatView dst,
                                   size_t dstRow, SrcT t, size_t words) {
     const unsigned lane = threadIdx.x;
-    const size_t i = blockIdx.x * blockDim.y + threadIdx.y;
-    if (i >= words) return;
-    const size_t y = blockIdx.y;
-    const size_t x = i * 32 + lane;
-    bool pred = false;
-    if (x < src.width) {
-        const SrcT v = src.row(y)[x];
-        if (R == PackRule::NonZero) pred = v != SrcT{0};
-        if (R == PackRule::GreaterThan) pred = v > t;
-        if (R == PackRule::GreaterEqual) pred = v >= t;
+    const size_t y = static_cast<size_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    if (y >= src.height) return;
+    const size_t i0 = static_cast<size_t>(blockIdx.x) * kBallotWords;
+    const SrcT* row = src.row(y);
+    SrcT v[kBallotWords];
+#pragma unroll
+    for (unsigned k = 0; k < kBallotWords; ++k) {
+        const size_t x = (i0 + k) * 32 + lane;
+        v[k] = (x < src.width) ? row[x] : SrcT{0};
     }
-    const uint32_t word = __ballot_sync(0xFFFFFFFFu, pred);
-    if (lane == 0) dst.row(dstRow + y)[i] = word;
-}
-
-// ---------------------------------------------------------------------------
-// The byte-lane arm -- four pixels per lane
-// ---------------------------------------------------------------------------
-
-/// @param cutoff The folded rule, `v >= cutoff`, 0..255 by this arm's gate.
-/// @param cutoffV The same cutoff in all four byte lanes.
-/// @note A lane whose quad straddles `width` -- at most one per row -- falls to
-/// the scalar comparison for its four pixels, which is the SAME expression
-/// the fast path folds, not a second spelling of it. Pixels past `width`
-/// contribute 0, so the padding invariant holds by construction.
-__global__ void packKernelByteLane(DeviceImageConstView<uint8_t> src, DeviceBinMatView dst,
-                                   size_t dstRow, unsigned cutoff, uint32_t cutoffV,
-                                   size_t words, size_t groups) {
-    const unsigned lane = threadIdx.x;
-    const size_t g = blockIdx.x * blockDim.y + threadIdx.y;
-    // Uniform across the warp, so the shuffles below are still reached by all
-    // 32 lanes -- the property the early return in the row-grid arm relies on.
-    if (g >= groups) return;
-    const size_t y = blockIdx.y;
-    const size_t x0 = g * kPackLanePixelsPerWarp + static_cast<size_t>(lane) * 4;
-
-    unsigned nib = 0;
-    if (x0 + 4 <= src.width) {
-        // The gate guarantees `src.ptr` and `src.stride` are 4-byte aligned, so
-        // this quad is one aligned 32-bit load: 128 B per warp load instruction
-        // against the 32 B a per-lane byte load moves.
-        const uint32_t quad = reinterpret_cast<const uint32_t*>(src.row(y))[x0 >> 2];
-        // Bytes of 0 or 1, then 1*b0 + 2*b1 + 4*b2 + 8*b3 in one IDP.4A --
-        // LSB = the lowest x, which is the format's own bit order.
-        nib = static_cast<unsigned>(__dp4a(__vsetgeu4(quad, cutoffV), 0x08040201u, 0u));
-    } else {
-        for (unsigned k = 0; k < 4; ++k) {
-            const size_t x = x0 + k;
-            if (x < src.width && static_cast<unsigned>(src.row(y)[x]) >= cutoff)
-                nib |= (1u << k);
+    uint32_t mine = 0;
+#pragma unroll
+    for (unsigned k = 0; k < kBallotWords; ++k) {
+        const size_t x = (i0 + k) * 32 + lane;
+        bool pred = false;
+        if (x < src.width) {
+            if (R == PackRule::NonZero) pred = v[k] != SrcT{0};
+            if (R == PackRule::GreaterThan) pred = v[k] > t;
+            if (R == PackRule::GreaterEqual) pred = v[k] >= t;
         }
+        const uint32_t word = __ballot_sync(0xFFFFFFFFu, pred);
+        if (lane == k) mine = word;
     }
-
-    // Eight lanes' nibbles are one output word. A three-step butterfly OR
-    // leaves it in every lane of the group; lane 0 of the group stores it, and
-    // the four stores of a warp are 16 contiguous bytes.
-    uint32_t val = nib << (4u * (lane & 7u));
-    val |= __shfl_xor_sync(0xFFFFFFFFu, val, 1);
-    val |= __shfl_xor_sync(0xFFFFFFFFu, val, 2);
-    val |= __shfl_xor_sync(0xFFFFFFFFu, val, 4);
-    const size_t wordIdx = g * 4 + (lane >> 3);
-    if ((lane & 7u) == 0 && wordIdx < words) dst.row(dstRow + y)[wordIdx] = val;
+    const size_t i = i0 + lane;
+    if (lane < kBallotWords && i < words) dst.row(dstRow + y)[i] = mine;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,24 +179,140 @@ __global__ void packQuantKernel(DeviceImageConstView<SrcT> src,
     }
 }
 
-/// @note The N-deep twin of `packKernelRowGrid`, and the same one change: the
-/// row is the grid's y dimension, so the two divides go. The plane loop,
-/// the scale and the store are the grid-stride arm's, unchanged.
+/// @note The N-deep twin of `packKernelRowGrid`, with the same traversal and the
+/// grid-stride arm's scale and ballots. Eight words of N planes are 8N
+/// ballots; lane `8 * (p % 4) + k` keeps plane p's word k, so planes 0..3
+/// leave in one store instruction and planes 4..7 in a second, each plane's
+/// eight words one 32-byte sector.
+/// @note The plane loop is unrolled to QuantMat's cap of 8 and stops at `n`,
+/// which is uniform across the warp, so every ballot is reached by all 32
+/// lanes and no register array is indexed at run time.
 template <typename SrcT>
 __global__ void packQuantKernelRowGrid(DeviceImageConstView<SrcT> src,
                                        DeviceBinMatView planeBlock, unsigned n,
                                        unsigned maxValue, size_t words) {
     const unsigned lane = threadIdx.x;
-    const size_t i = blockIdx.x * blockDim.y + threadIdx.y;
-    if (i >= words) return;
-    const size_t y = blockIdx.y;
-    const size_t x = i * 32 + lane;
-    const unsigned value = (x < src.width)
-                               ? bincv::impl::quantScale<SrcT>(src.row(y)[x], maxValue)
-                               : 0u;
-    for (unsigned p = 0; p < n; ++p) {
-        const uint32_t word = __ballot_sync(0xFFFFFFFFu, ((value >> p) & 1u) != 0u);
-        if (lane == 0) planeBlock.row(static_cast<size_t>(p) * src.height + y)[i] = word;
+    const size_t y = static_cast<size_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    if (y >= src.height) return;
+    const size_t i0 = static_cast<size_t>(blockIdx.x) * kBallotWords;
+    const SrcT* row = src.row(y);
+    unsigned value[kBallotWords];
+#pragma unroll
+    for (unsigned k = 0; k < kBallotWords; ++k) {
+        const size_t x = (i0 + k) * 32 + lane;
+        value[k] = (x < src.width) ? bincv::impl::quantScale<SrcT>(row[x], maxValue) : 0u;
+    }
+    uint32_t lo = 0, hi = 0;
+#pragma unroll
+    for (unsigned p = 0; p < 8; ++p) {
+        if (p >= n) break;
+#pragma unroll
+        for (unsigned k = 0; k < kBallotWords; ++k) {
+            const uint32_t word = __ballot_sync(0xFFFFFFFFu, ((value[k] >> p) & 1u) != 0u);
+            if (lane == 8u * (p & 3u) + k) {
+                if (p < 4) lo = word;
+                else hi = word;
+            }
+        }
+    }
+    const unsigned plane = lane >> 3;
+    const size_t i = i0 + (lane & 7u);
+    if (i < words) {
+        if (plane < n) planeBlock.row(static_cast<size_t>(plane) * src.height + y)[i] = lo;
+        if (plane + 4 < n)
+            planeBlock.row(static_cast<size_t>(plane + 4) * src.height + y)[i] = hi;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The N-bit wide-lane arm -- sixteen pixels per lane, every plane
+// ---------------------------------------------------------------------------
+
+/// @brief `impl::quantScale<uint8_t>` for the four pixels of `quad` at once:
+/// `(v * maxValue + 127) / 255` per byte, in the same byte order.
+/// @note TWO PIXELS PER 32-BIT REGISTER, in 16-bit fields -- bytes 0 and 2 in
+/// one, 1 and 3 in the other -- because `v * maxValue + 127` reaches 65152 at
+/// v = maxValue = 255, which fits a field and does not carry out of it.
+/// @note The divide is `floor(x / 255) == (x + 1 + (x >> 8)) >> 8`, true for
+/// every x below 65535 (checked exhaustively; it fails only AT 65535), so the
+/// quotient is byte 1 of each field. Every sum stays below 65536.
+/// @note A SECOND SPELLING of the host's one definition, which the scalar arms
+/// call directly. The suite holds it to the host's quantizer at every byte
+/// value, in every byte position, at every depth 1..8 -- the whole domain.
+__device__ __forceinline__ uint32_t quantScaleQuad(uint32_t quad, unsigned maxValue) {
+    const uint32_t lo = __byte_perm(quad, 0u, 0x4240u) * maxValue + 0x007F007Fu;
+    const uint32_t hi = __byte_perm(quad, 0u, 0x4341u) * maxValue + 0x007F007Fu;
+    const uint32_t sl = lo + 0x00010001u + __byte_perm(lo, 0u, 0x4341u);
+    const uint32_t sh = hi + 0x00010001u + __byte_perm(hi, 0u, 0x4341u);
+    return __byte_perm(sl, sh, 0x7351u);
+}
+
+/// @brief Bit `p` of sixteen quantized pixels, LSB = the lowest x: one `__dp4a`
+/// per quad, the second of each pair weighing its bits 16..128.
+__device__ __forceinline__ unsigned planeHalf(const uint32_t (&q)[4], unsigned p) {
+    const unsigned lo = __dp4a((q[1] >> p) & 0x01010101u, 0x80402010u,
+                               __dp4a((q[0] >> p) & 0x01010101u, 0x08040201u, 0u));
+    const unsigned hi = __dp4a((q[3] >> p) & 0x01010101u, 0x80402010u,
+                               __dp4a((q[2] >> p) & 0x01010101u, 0x08040201u, 0u));
+    return lo | (hi << 8);
+}
+
+/// @note One lane, sixteen pixels: one aligned 16-byte load -- 512 B per warp
+/// load instruction, sixteen bytes in flight per thread -- scaled four at a
+/// time, and every plane extracted from the same four registers. Two lanes are
+/// one word, the even lane holding its low half. A lane whose pixels straddle
+/// `width` assembles its quads from byte loads with zeros past `width`, and
+/// `quantScale(0)` is 0 in every plane -- so the padding invariant holds by
+/// arithmetic, and the bytes between `width` and the stride are never read.
+/// @note TWO PLANES PER STORE INSTRUCTION. After a pair's shuffle both lanes
+/// hold both words; the even lane stores plane p and the odd lane plane p + 1,
+/// each set of sixteen lanes writing 64 contiguous bytes of its own plane. An
+/// odd N ends on a store with only the even lanes live.
+__global__ void packQuantKernelWideLane(DeviceImageConstView<uint8_t> src,
+                                        DeviceBinMatView planeBlock, unsigned n,
+                                        unsigned maxValue, size_t words) {
+    const unsigned lane = threadIdx.x;
+    const size_t y = static_cast<size_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    if (y >= src.height) return;
+    const size_t x0 = static_cast<size_t>(blockIdx.x) * kWideWarpPixels +
+                      static_cast<size_t>(lane) * kWideLanePixels;
+    const uint8_t* row = src.row(y);
+
+    uint32_t q[4];
+    if (x0 + kWideLanePixels <= src.width) {
+        const uint4 v = *reinterpret_cast<const uint4*>(row + x0);
+        q[0] = quantScaleQuad(v.x, maxValue);
+        q[1] = quantScaleQuad(v.y, maxValue);
+        q[2] = quantScaleQuad(v.z, maxValue);
+        q[3] = quantScaleQuad(v.w, maxValue);
+    } else {
+        uint32_t b[4] = {0u, 0u, 0u, 0u};
+#pragma unroll
+        for (unsigned k = 0; k < kWideLanePixels; ++k) {
+            const size_t x = x0 + k;
+            if (x < src.width)
+                b[k >> 2] |= static_cast<uint32_t>(row[x]) << (8u * (k & 3u));
+        }
+#pragma unroll
+        for (unsigned j = 0; j < 4; ++j) q[j] = quantScaleQuad(b[j], maxValue);
+    }
+
+    const size_t wordIdx =
+        static_cast<size_t>(blockIdx.x) * (kWideWarpPixels / 32) + (lane >> 1);
+    const unsigned odd = lane & 1u;
+    for (unsigned p = 0; p < n; p += 2) {
+        uint32_t a = planeHalf(q, p) << (16u * odd);
+        a |= __shfl_xor_sync(0xFFFFFFFFu, a, 1);
+        uint32_t b = 0;
+        if (p + 1 < n) {
+            b = planeHalf(q, p + 1) << (16u * odd);
+            b |= __shfl_xor_sync(0xFFFFFFFFu, b, 1);
+        }
+        const unsigned plane = p + odd;
+        if (plane < n && wordIdx < words) {
+            planeBlock.row(static_cast<size_t>(plane) * src.height + y)[wordIdx] =
+                odd ? b : a;
+        }
     }
 }
 
@@ -261,13 +331,16 @@ dim3 warpGrid(size_t words, size_t height, const dim3& block) {
     return dim3(static_cast<unsigned>(warps < 4096 ? (warps ? warps : 1) : 4096));
 }
 
-/// @brief One block per (word group, ROW): the shape that deletes the divides.
-/// @param units Work units along a row -- words for the row-grid arm, groups of
-/// four words for the byte-lane one.
-dim3 rowGrid(size_t units, size_t height, const dim3& block) {
-    const size_t xBlocks = (units + block.y - 1) / block.y;
-    return dim3(static_cast<unsigned>(xBlocks ? xBlocks : 1),
-                static_cast<unsigned>(height));
+/// @brief One warp per (unit, row), a block being `block.y` consecutive rows of
+/// one unit column -- the row-grid arms' and packQuant's wide lane's shape.
+/// @param units Work units along a row: eight words for a ballot arm, 512
+/// pixels for the wide lane.
+/// @note Rows in the block, not units, because a unit is wide: a 752-pixel row
+/// is three ballot units and two wide-lane ones, and a block of eight units
+/// along one row would leave most of its warps with nothing to do.
+dim3 rowBandGrid(size_t units, size_t height, const dim3& block) {
+    return dim3(static_cast<unsigned>(units ? units : 1),
+                static_cast<unsigned>((height + block.y - 1) / block.y));
 }
 
 /// @brief One rule, either ballot arm. The rule stays a TEMPLATE parameter and
@@ -279,8 +352,9 @@ void launchBallotArm(bool rowGridArm, DeviceImageConstView<SrcT> src, DeviceBinM
                      size_t dstRow, SrcT t, size_t words, const dim3& block,
                      cudaStream_t stream) {
     if (rowGridArm) {
-        packKernelRowGrid<SrcT, R><<<rowGrid(words, src.height, block), block, 0, stream>>>(
-            src, dst, dstRow, t, words);
+        const size_t units = (words + kBallotWords - 1) / kBallotWords;
+        packKernelRowGrid<SrcT, R><<<rowBandGrid(units, src.height, block), block, 0,
+                                     stream>>>(src, dst, dstRow, t, words);
     } else {
         packKernel<SrcT, R><<<warpGrid(words, src.height, block), block, 0, stream>>>(
             src, dst, dstRow, t, words);
@@ -300,26 +374,9 @@ cudaError_t launchPack(DeviceImageConstView<SrcT> src, DeviceBinMatView dst,
     BINCV_ASSERT(dst.stride >= rowWords(dst.width),
                  "cuda packRows: dst's stride must cover a whole row");
     const size_t words = rowWords(dst.width);
-    const dim3 block(32, 8);  // eight warps, eight words per block iteration
+    const dim3 block(32, 8);  // eight warps
     const bool rowGridArm =
         impl::packRowGridEnabled() && impl::packRowGridApplies(src.height);
-
-    // The byte-lane arm is one level below the row grid, as denseBitSlicedEnabled
-    // sits below denseFastArmEnabled: with the row grid off it selects nothing,
-    // because its own geometry IS the row grid.
-    if constexpr (sizeof(SrcT) == 1) {
-        const unsigned cutoff = packCutoff<SrcT>(rule, t);
-        if (rowGridArm && impl::packByteLaneEnabled() &&
-            impl::packByteLaneApplies(src.stride, src.ptr, sizeof(SrcT), cutoff)) {
-            const size_t groups = (words + 3) / 4;
-            const DeviceImageConstView<uint8_t> src8{
-                reinterpret_cast<const uint8_t*>(src.ptr), src.width, src.height,
-                src.stride};
-            packKernelByteLane<<<rowGrid(groups, src.height, block), block, 0, stream>>>(
-                src8, dst, dstRow, cutoff, cutoff * 0x01010101u, words, groups);
-            return cudaGetLastError();
-        }
-    }
 
     switch (rule) {
         case PackRule::NonZero:
@@ -351,11 +408,27 @@ cudaError_t launchPackQuant(DeviceImageConstView<SrcT> src, DeviceBinMatView pla
     const size_t words = rowWords(planeBlock.width);
     const dim3 block(32, 8);
     const unsigned maxValue = (1u << n) - 1u;
+    // The wide lane is one level below the row grid; with the row grid off it
+    // selects nothing.
     if (impl::packRowGridEnabled() && impl::packRowGridApplies(src.height)) {
-        packQuantKernelRowGrid<SrcT><<<rowGrid(words, src.height, block), block, 0,
-                                       stream>>>(src, planeBlock,
-                                                 static_cast<unsigned>(n), maxValue,
-                                                 words);
+        if constexpr (sizeof(SrcT) == 1) {
+            if (impl::packQuantWideLaneEnabled() &&
+                impl::packWideLaneApplies(src.stride, src.ptr, sizeof(SrcT))) {
+                const DeviceImageConstView<uint8_t> src8{
+                    reinterpret_cast<const uint8_t*>(src.ptr), src.width, src.height,
+                    src.stride};
+                const size_t units = (src.width + kWideWarpPixels - 1) / kWideWarpPixels;
+                packQuantKernelWideLane<<<rowBandGrid(units, src.height, block), block, 0,
+                                          stream>>>(src8, planeBlock,
+                                                    static_cast<unsigned>(n), maxValue,
+                                                    words);
+                return cudaGetLastError();
+            }
+        }
+        const size_t units = (words + kBallotWords - 1) / kBallotWords;
+        packQuantKernelRowGrid<SrcT><<<rowBandGrid(units, src.height, block), block, 0,
+                                       stream>>>(src, planeBlock, static_cast<unsigned>(n),
+                                                 maxValue, words);
         return cudaGetLastError();
     }
     const dim3 grid = warpGrid(words, src.height, block);
@@ -374,30 +447,29 @@ bool& packRowGridEnabled() {
     return on;
 }
 
-bool& packByteLaneEnabled() {
+bool& packQuantWideLaneEnabled() {
     static bool on = true;
     return on;
 }
 
-bool packRowGridApplies(size_t height) {
-    // The row lives in gridDim.y, which the hardware caps. Above the cap there
-    // is no launch to make, so the grid-stride arm -- whose whole reason to
-    // exist is that one flat dimension has no such bound -- runs instead.
-    return height <= kMaxGridY;
+bool packWideLaneApplies(size_t stride, const void* base, size_t srcElemSize) {
+    // uint8 only: the scale treats each 32-bit quarter of the load as four byte
+    // pixels.
+    if (srcElemSize != 1) return false;
+    // The load is an aligned 16-byte access, so the base AND every row it
+    // strides to must be 16-byte aligned -- and a tight stride is 16-byte
+    // aligned only when the width is.
+    if (stride % 16u != 0u) return false;
+    return (reinterpret_cast<std::uintptr_t>(base) % 16u) == 0u;
 }
 
-bool packByteLaneApplies(size_t stride, const void* base, size_t srcElemSize,
-                         unsigned cutoff) {
-    // uint8 only: `__vsetgeu4` compares four BYTES. A 16-bit source has
-    // `__vsetgeu2`, which is half the win for a second kernel to keep
-    // bit-exact forever, and no caller has priced that trade.
-    if (srcElemSize != 1) return false;
-    // A byte lane cannot express "nothing passes" -- GreaterThan at t == 255.
-    if (cutoff > 255u) return false;
-    // The quad load is an aligned 32-bit access, so the base AND every row it
-    // strides to must be 4-byte aligned.
-    if (stride % 4u != 0u) return false;
-    return (reinterpret_cast<std::uintptr_t>(base) % 4u) == 0u;
+bool packRowGridApplies(size_t height) {
+    // The row-grid family puts a band of eight rows in gridDim.y, which the
+    // hardware caps, and shares this gate so one test selects the whole family.
+    // The gate admits the row count against the cap -- stricter than the band
+    // launch needs -- and above it the grid-stride arm, whose whole reason to
+    // exist is that one flat dimension has no such bound, runs instead.
+    return height <= kMaxGridY;
 }
 
 } // namespace impl

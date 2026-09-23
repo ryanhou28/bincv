@@ -117,6 +117,28 @@ the census entry at **0.5418 against 0.7584 — 1.43×** and the census matcher 
 — 1.88×**. Which to quote is **not settled here**; the census row's run-to-run scatter is
 1.14×, so its 1.38×, 1.43× and 1.47× readings are one number rather than three.
 
+**Five rows above now measure kernels that a profile-driven round changed, and they have
+not been re-anchored.** The census pair and the three `threshold` rows sit over
+`censusPackedKernel` and the ballot packers, both rewritten
+([#64](https://github.com/ryanhou28/bincv/issues/64)). The effect was isolated by running
+`cuda_role_benchmark` at `main` and at the branch in **one session**, 7 processes each,
+rather than against the numbers above — binCV's side, in ms:
+
+| | `main` | after | control |
+|---|---|---|---|
+| `threshold` 752×480 | 0.0085 | 0.0074 | |
+| `threshold` 1920×1080 | 0.0106 | 0.0115 | |
+| `threshold` 3840×2160 | 0.0272 | 0.0250 | |
+| census entry | 0.5772 | 0.4833 | |
+| `denseDisparityBinary` | 0.0639 | 0.0638 | untouched by that round |
+
+The untouched row moving 0.2% is what makes the rest readable. **The absolutes above were
+taken in an earlier session and several do not reproduce at their own commit** — the dense
+and `threshold` rows do, the census pair reads 14–18% slow on both sides, and
+`goodFeaturesToTrack` reads **5.3× published against 8.40× now at the same commit**, its two
+arms moving in opposite directions. These tables commit no logs and no gate reads them, so
+nothing caught it: [#89](https://github.com/ryanhou28/bincv/issues/89).
+
 ## Memory, operation by operation
 
 `cudaMemGetInfo` delta taken identically on both sides, 752×480, peak working set per
@@ -236,12 +258,17 @@ One mechanism per published number, and nothing here is a second claim.
   (0xFFFF−x)`, whose ascending `uint64_t` order *is* the host's `CornerStronger` — so eight
   bytes replace sixteen with no payload array, and `goodFeaturesScratchBytes(65536)` fell
   **1,088 KB → 576 KB, 1.89×**.
-- **`threshold`: two software divides.** It is header-only over the host's own cutoff
-  composed with `cuda::packBits`, so the kernel under the number is `packKernel`, and
-  `cuobjdump -sass` showed 184 instructions around one LDG and one STG — including
-  `wordIdx / words` and a 64-bit divide. A row-grid shape deletes both and a byte-lane shape
-  reads four pixels per lane: **184 instructions became 104**, and the profile moves from
-  67.2% SM / 19.3% DRAM to 49.4% / 63.8%, where a packer belongs.
+- **`threshold`: two software divides, then eight stores to every sector.** It is
+  header-only over the host's own cutoff composed with `cuda::packBits`. `cuobjdump -sass`
+  on the original `packKernel` showed 184 instructions around one LDG and one STG,
+  including `wordIdx / words` and a 64-bit divide, and a row-grid launch shape deleted
+  both. The profiler then found a second mechanism: one lane stored one 32-bit word per
+  warp, so every 32-byte sector was written eight times. One warp now produces eight
+  consecutive words and stores them as one sector — **store traffic 8.0× → 1.00× of the
+  output**, DRAM 23.9% → 67.4% of peak at 3840×2160, and **0.33–0.52× the time at 4K and
+  8K** for every packer. A byte-lane arm that read four pixels per lane had been 2.66×
+  faster than the one-word row grid; against the eight-word one it is a null at every
+  geometry, and it was deleted.
 - **Descriptor matching: kernel shape, not popcount width.** `cuda/descriptor.hpp` claimed
   word emission gave a matcher "a real ~4× instruction advantage" over `cv::cuda`'s `uchar`
   popcounts. The instruction count is right and **it buys 1.02×**, measured on OpenCV's own
@@ -412,6 +439,23 @@ recorded in full on the issue it belongs to.
   morphology arm refused on the 1.28× precedent, and the log-depth fold that is the best
   remaining unexploited win in the family but buys nothing while the ops are launch-bound —
   [#60](https://github.com/ryanhou28/bincv/issues/60).
+- **The profile-driven round: eight items measured, three adopted, five negatives, and two
+  of the profiler's own stated mechanisms refuted.** Adopted: the census kernels' 72-byte
+  local stack frame (DRAM writes 25.9 MB → 1.1 MB), whole-sector stores in every ballot
+  packer (8.0× → 1.00× store amplification), and a 16-byte-lane `packQuant` (DRAM 15.0% →
+  92.5% at 8K). Deleted as no longer paying for a second body: the 32-bit byte lane, and a
+  `packBits` wide lane that won 104 of 105 rounds at 8K and still did not clear the bar.
+  The five negatives are worth more than the adoptions: removing **509,440** shared-bank
+  conflicts from `fusedCandidateKernel` bought **1.00×** because it is FP64-bound at 73.7%
+  of peak; `responseKernelSliced` is not occupancy-limited at all (its grid is **0.38
+  waves**) and its real cost is the FP64 `sqrt`, priced at **3.5–6.0×** of the kernel by a
+  single-precision probe; the LK tracker's named fix removed 80% of its indexed constant
+  loads and made it **6% slower** by costing registers; every strip value for the
+  bit-sliced dense matcher is slower than the shipped one, 105 rounds to 0, so the
+  `kBoxStrip` precedent does not transfer; and a spacing spatial index that is **1.18× on
+  its kernel** is **1.05× on the operation**, which is a null. Full numbers, and the
+  method trap that would have corrupted three of them, on
+  [#64](https://github.com/ryanhou28/bincv/issues/64).
 - **Everything the profiler found and nothing implemented** — the ranked opportunity list
   R1–R10, the profiler-enablement recipe, and the readings that **contradicted** four
   documented limiters while leaving every decision standing, are on
@@ -446,10 +490,13 @@ reading is quoted as a duration.
 ## Coverage
 
 `scripts/verify_cuda.sh` proves each device kernel gives the host library's answer byte for
-byte — **seventeen suites, 194,975 checks in the Release configuration and 194,922 in the
-Debug one**. The counts differ by design: a suite exercising a narrowed domain can only
-test the half of that contract its configuration has — the assertion is live in Debug, the
-error return reachable in Release — and each such suite prints which half it ran.
+byte — **eighteen suites, 191,579 checks in the Release configuration and 191,542 in the
+Debug one**, each suite held to its own floor per configuration
+([`expected-checks.txt`](../../backends/cuda/tests/expected-checks.txt)). The counts differ
+by design: a deliberate domain violation that trips an assertion can only have its error
+return checked where the assertion is compiled out, so each of those 37 call sites counts
+in Release and prints `[not run in a checked build]` in Debug. A refusal with no assertion
+on its path runs in both.
 
 **One test-method finding qualifies that evidence.** Every dense-disparity case built its
 right image as an *exact shift* of the left, where the correct disparity's window cost is 0

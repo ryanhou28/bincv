@@ -49,6 +49,7 @@
 #include "bincv/cuda/morphology.hpp"
 #include "bincv/cuda/transfer.hpp"
 #include "bincv/ops/morphology.hpp"
+#include "bincv/ops/pack.hpp"
 #include "bincv/ops/shift.hpp"
 #include "test_util.hpp"
 
@@ -67,24 +68,15 @@ uint64_t splitmix(uint64_t& s) {
     return z ^ (z >> 31);
 }
 
-/// A random bit frame whose padding starts clean.
-/// @note Packed by an explicit loop rather than through
-/// `bincv::packBits<PackRule::GreaterThan>`, and NOT for convenience:
-/// instantiating that template in a CUDA translation unit makes nvcc's
-/// front end emit "missing return statement" for `impl::toPackCmp` and
-/// `impl::packCmp` -- it does not see their switch over a two-value enum
-/// as exhaustive -- and verify_cuda.sh fails the gate on any line
-/// matching "warning:". The functor form (`packBitsIf`) has no such
-/// problem, which is why the existing CUDA suites do not hit this.
+/// A random bit frame whose padding starts clean, packed by the host library.
+/// @note Through `bincv::packBits` on purpose: a CUDA translation unit that packs
+/// bits is the case that once put two nvcc warnings from a host header into the gate.
 BinMat<uint32_t> randomBits(size_t w, size_t h, uint64_t seed) {
+    std::vector<uint8_t> frame(w * h);
+    for (auto& v : frame) v = static_cast<uint8_t>(splitmix(seed) >> 24);
     BinMat<uint32_t> m(static_cast<int>(w), static_cast<int>(h));
-    for (size_t y = 0; y < h; ++y) {
-        uint32_t* row = m.view().row(y);
-        for (size_t x = 0; x < w; ++x) {
-            const bool bit = static_cast<uint8_t>(splitmix(seed) >> 24) > 127u;
-            if (bit) row[x >> 5] |= (uint32_t{1} << (x & 31u));
-        }
-    }
+    bincv::packBits<bincv::PackRule::GreaterThan>(frame.data(), w, h, w, m.view(),
+                                                  uint8_t{127});
     return m;
 }
 
@@ -517,23 +509,15 @@ BINCV_TEST(CudaMorphology, ElementsOutsideTheDeviceDomainAreRefused) {
         // both configurations.
         BINCV_CHECK_EQ(el.valid, 0);
 
-#if !BINCV_DEBUG_CHECKS
-        // THE ERROR RETURN is checked only where the assertion is compiled OUT.
-        // Owner ruling R4 requires a narrowed device domain to be BOTH asserted
-        // and returned as an error, and BINCV_ASSERT aborts by design -- so
-        // calling the launcher with a refused element under the gate's Debug
-        // configuration would kill the suite rather than test it. The Debug
-        // configuration's job here is that the assertion COMPILES for nvcc's
-        // device pass; this configuration's job is that the contract a release
-        // caller actually sees is the documented one.
-        BINCV_CHECK_EQ(bincv::cuda::erode(dSrc.constView(), dDst.view(), el),
-                       cudaErrorInvalidValue);
-        BINCV_CHECK_EQ(bincv::cuda::dilate(dSrc.constView(), dDst.view(), el),
-                       cudaErrorInvalidValue);
+        // The launchers assert the element and THEN return the error, so these
+        // are deliberate domain violations -- see BINCV_CHECK_EQ_UNLESS_CHECKED.
+        BINCV_CHECK_EQ_UNLESS_CHECKED(bincv::cuda::erode(dSrc.constView(), dDst.view(), el),
+                                      cudaErrorInvalidValue);
+        BINCV_CHECK_EQ_UNLESS_CHECKED(bincv::cuda::dilate(dSrc.constView(), dDst.view(), el),
+                                      cudaErrorInvalidValue);
         // A refusal must leave no launch error behind for the next call to
         // inherit: it launches nothing, so nothing can have failed.
         BINCV_CHECK_EQ(cudaGetLastError(), cudaSuccess);
-#endif
     }
 
     // Tall-but-legal, at the very edge of the domain, still has to be RIGHT.

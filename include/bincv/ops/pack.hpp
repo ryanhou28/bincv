@@ -82,15 +82,13 @@ namespace impl {
 /// @note Two enums exist because impl/binMat_impl.hpp owns the row packer and cannot
 /// include this file -- pack.hpp includes binMat.hpp, which includes that one.
 /// The row packer is shared; only the name of the tag differs.
+/// One return, for the reason `impl::packCmp` gives: nvcc reads an `if constexpr`
+/// chain whose every branch returns as a missing return.
 template <PackRule R>
 constexpr PackCmp toPackCmp() {
-    if constexpr (R == PackRule::NonZero) {
-        return PackCmp::NonZero;
-    } else if constexpr (R == PackRule::GreaterThan) {
-        return PackCmp::GreaterThan;
-    } else {
-        return PackCmp::GreaterEqual;
-    }
+    return (R == PackRule::NonZero)       ? PackCmp::NonZero
+           : (R == PackRule::GreaterThan) ? PackCmp::GreaterThan
+                                          : PackCmp::GreaterEqual;
 }
 
 } // namespace impl

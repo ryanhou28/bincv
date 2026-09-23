@@ -49,33 +49,7 @@
 #include "bincv/cuda/shift.hpp"
 #include "bincv/cuda/transfer.hpp"
 #include "bincv/ops/pack.hpp"
-// ops/pyramid.hpp IS THE REFERENCE THIS SUITE COMPARES AGAINST, and it is the
-// first host header this backend compiles with nvcc that its two extra
-// compilers dislike. Three diagnostics, none of them a defect in the header and
-// none of them reachable from a .cpp:
-//
-//   cudafe 186  `p >= Shift` in impl::addShifted, at the Shift == 0
-//               instantiation -- the comparison is pointless only in that one
-//               instantiation, and writing it any other way would cost the
-//               general case.
-//   cudafe 940  a `missing return` on impl::PyramidLevels::get<I>() const,
-//               whose returns are all inside `if constexpr`. gcc and clang see
-//               the exhaustiveness; nvcc's front end does not.
-//   g++-9's -Wunused-but-set-parameter on impl::divideStage's Q == 0 base case,
-//               whose body is an empty `if constexpr`. gcc 11 (the host gate's
-//               compiler) does not warn; nvcc's -ccbin here is g++-9.
-//
-// Suppressed HERE rather than in the header, because the header is shared and
-// this is the only translation unit with the problem. The right fix is in the
-// host header and it is not this family's to make.
-#ifdef __CUDACC__
-#  pragma diag_suppress 186
-#  pragma diag_suppress 940
-#endif
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-parameter"
 #include "bincv/ops/pyramid.hpp"
-#pragma GCC diagnostic pop
 #include "bincv/ops/shift.hpp"
 #include "bincv/quantMat.hpp"
 #include "test_util.hpp"

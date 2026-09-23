@@ -246,17 +246,28 @@ inline int runAll(const char* suiteName, int argc, char** argv) {
 /// says so in the checked one, where the gate has still COMPILED the assertion,
 /// which is what the checked configuration exists to prove.
 ///
+/// Only a call that TRIPS an assertion belongs here. A refusal that is a plain
+/// comparison and return, with no assertion on its path, is an ordinary
+/// BINCV_CHECK_EQ and runs in every configuration.
+///
 /// @note The expected value is a parameter rather than baked in, so this stays
 /// in the shared harness without dragging any one backend's error
 /// enumeration into every host suite.
 /// @note A checked build reports one FEWER check per call site. That is the
 /// reason a Debug configuration legitimately counts below its Release
 /// twin, and it is why the two are compared against separate floors.
+/// @note A checked build still COMPILES the call, in a branch that never runs.
+/// Without it, an argument built only for the refused call -- a params
+/// struct, a pattern -- is "declared but never referenced" to nvcc's front
+/// end in that build, and the gate fails on the warning.
 #if BINCV_DEBUG_CHECKS
-#  define BINCV_CHECK_EQ_UNLESS_CHECKED(call, expected)                          \
-      std::printf("  [not run in a checked build] %s\n"                          \
-                  "    BINCV_ASSERT aborts before the error code is returned\n", \
-                  #call)
+#  define BINCV_CHECK_EQ_UNLESS_CHECKED(call, expected)                              \
+      do {                                                                           \
+          if (false) (void)((call) == (expected));                                   \
+          std::printf("  [not run in a checked build] %s\n"                          \
+                      "    BINCV_ASSERT aborts before the error code is returned\n", \
+                      #call);                                                        \
+      } while (0)
 #else
 #  define BINCV_CHECK_EQ_UNLESS_CHECKED(call, expected) BINCV_CHECK_EQ((call), (expected))
 #endif

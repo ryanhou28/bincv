@@ -33,6 +33,7 @@
 #include "bincv/ops/bitslice.hpp"
 #include "bincv/ops/denoise.hpp"
 #include "bincv/ops/medianWide.hpp"
+#include "bincv/ops/pack.hpp"
 #include "test_util.hpp"
 
 namespace {
@@ -63,22 +64,13 @@ std::vector<T> tiedFrame(size_t w, size_t h, uint64_t seed) {
     return img;
 }
 
-/// @note The packing is spelled out here rather than taken from
-/// `bincv::packBits`, and the reason is a gate hazard rather than a
-/// preference: `packBits<PackRule>` is a chain of `if constexpr ... else if
-/// constexpr ... else`, and nvcc's front end reports "missing return statement"
-/// for such a chain in a DEBUG build. Instantiating it from this CUDA
-/// translation unit therefore puts two warnings from a HOST header into the
-/// gate's log, where -Werror does not catch them but the log scan does. The
-/// three lines below are the same rule and owe nothing to a header.
+/// Packed by the host library, from a CUDA translation unit on purpose: that is the
+/// case that once put two nvcc warnings from a host header into the gate.
 bincv::BinMat<uint32_t> randomBits(size_t w, size_t h, uint64_t seed) {
     const auto frame = randomFrame<uint8_t>(w, h, seed);
     bincv::BinMat<uint32_t> m(static_cast<int>(w), static_cast<int>(h));
-    for (size_t y = 0; y < h; ++y) {
-        uint32_t* row = m.view().row(y);
-        for (size_t x = 0; x < w; ++x)
-            if (frame[y * w + x] > 127u) row[x / 32] |= (uint32_t{1} << (x % 32));
-    }
+    bincv::packBits<bincv::PackRule::GreaterThan>(frame.data(), w, h, w, m.view(),
+                                                  uint8_t{127});
     return m;
 }
 
@@ -238,19 +230,14 @@ BINCV_TEST(CudaMedian, DenoiseEmptyAndDomain) {
     bincv::cuda::DeviceBinMatView emptyDst{};
     BINCV_CHECK_EQ(bincv::cuda::denoiseMedian3(emptySrc, emptyDst), cudaSuccess);
 
-    // In place is refused rather than silently wrong. THE REFUSAL IS A RETURN
-    // VALUE AND AN ASSERTION, and a debug build takes the assertion -- which
-    // aborts, by design, because passing an overlapping destination is a
-    // programming error and not a runtime condition. So the return value is
-    // exercised where the assertion is compiled out; the DEBUG gate's job here
-    // is that the assertion BUILDS for nvcc's device pass, which it does by
-    // being in this translation unit's launcher at all.
-#if !BINCV_DEBUG_CHECKS
+    // In place is refused rather than silently wrong. The refusal is an
+    // assertion AND a return value, because an overlapping destination is a
+    // programming error rather than a runtime condition -- so this is a
+    // deliberate domain violation; see BINCV_CHECK_EQ_UNLESS_CHECKED.
     bincv::cuda::DeviceBinMat m(64, 8);
-    BINCV_CHECK_EQ(bincv::cuda::denoiseMedian3(m.constView(), m.view()),
-                   cudaErrorInvalidValue);
+    BINCV_CHECK_EQ_UNLESS_CHECKED(bincv::cuda::denoiseMedian3(m.constView(), m.view()),
+                                  cudaErrorInvalidValue);
     BINCV_CHECK_EQ(cudaGetLastError(), cudaSuccess);
-#endif
 }
 
 BINCV_TEST(CudaMedian, DenoiseSubWindowViewIsStillCorrect) {
@@ -398,20 +385,19 @@ BINCV_TEST(CudaMedian, WideEmptyAndDomain) {
     // Aliasing and an out-of-domain offset are refused, not computed. The
     // device's aliasing check is a bounding box and therefore stricter than the
     // host's per-row predicate; the header says so. Both refusals are an
-    // assertion AND a return value, and a debug build takes the assertion,
-    // which aborts -- so the return value is exercised in the configuration
-    // where the assertion is compiled out.
-#if !BINCV_DEBUG_CHECKS
+    // assertion AND a return value -- deliberate domain violations; see
+    // BINCV_CHECK_EQ_UNLESS_CHECKED.
     bincv::cuda::DeviceImage<uint8_t> img(64, 8);
-    BINCV_CHECK_EQ(bincv::cuda::medianWide<3>(img.constView(), img.view(), kWideL),
-                   cudaErrorInvalidValue);
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::medianWide<3>(img.constView(), img.view(), kWideL),
+        cudaErrorInvalidValue);
 
     const bincv::MedianPattern<3> tooFar{{{0, 200}, {0, 0}, {0, -1}}};
     bincv::cuda::DeviceImage<uint8_t> dst(64, 8);
-    BINCV_CHECK_EQ(bincv::cuda::medianWide<3>(img.constView(), dst.view(), tooFar),
-                   cudaErrorInvalidValue);
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::medianWide<3>(img.constView(), dst.view(), tooFar),
+        cudaErrorInvalidValue);
     BINCV_CHECK_EQ(cudaGetLastError(), cudaSuccess);
-#endif
 }
 
 namespace {

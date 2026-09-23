@@ -448,31 +448,22 @@ BINCV_TEST(CudaBinarize, ConsumesPackQuantOutputUnchanged) {
 
 // The device domain is narrower than what the view type can express, and the
 // rule for such a domain is that the op NAMES it, ASSERTS it, and RETURNS an
-// error outside it. Those two halves cannot be exercised in one build: where the
-// assertion is live it aborts before the return is reached. So the case exists
-// in both configurations and checks the half that configuration has, rather than
-// disappearing from one of them -- a check that silently stops running is worse
-// than one that says which half it is.
-#if BINCV_DEBUG_CHECKS
+// error outside it. The plane count is asserted before it is refused, so these
+// are deliberate domain violations; see BINCV_CHECK_EQ_UNLESS_CHECKED.
 BINCV_TEST(CudaBinarize, RejectsAPlaneCountOutsideItsDomain) {
-    BINCV_CHECK_EQ(BINCV_DEBUG_CHECKS, 1);
-    std::printf("        [half] assertions are LIVE here, so cuda::binarize aborts on an\n"
-                "               out-of-domain plane count before its error return is\n"
-                "               reached. The RETURN half runs in the release build.\n");
-}
-#else
-BINCV_TEST(CudaBinarize, RejectsAPlaneCountOutsideItsDomain) {
-    BINCV_CHECK_EQ(BINCV_DEBUG_CHECKS, 0);
     const size_t w = 64, h = 4;
     bincv::cuda::DeviceBinMat dBlock(static_cast<int>(w), static_cast<int>(h));
     bincv::cuda::DeviceBinMat dOut(static_cast<int>(w), static_cast<int>(h));
     const bincv::cuda::DeviceBinMatConstView bv = dBlock.constView();
     const bincv::cuda::DevicePlaneBlockConstView tooMany{bv.ptr, w, h, bv.stride, 33};
     const bincv::cuda::DevicePlaneBlockConstView none{bv.ptr, w, h, bv.stride, 0};
-    BINCV_CHECK_EQ(bincv::cuda::binarize(tooMany, dOut.view(), 0u), cudaErrorInvalidValue);
-    BINCV_CHECK_EQ(bincv::cuda::binarize(none, dOut.view(), 0u), cudaErrorInvalidValue);
+    BINCV_CHECK_EQ_UNLESS_CHECKED(bincv::cuda::binarize(tooMany, dOut.view(), 0u),
+                                  cudaErrorInvalidValue);
+    BINCV_CHECK_EQ_UNLESS_CHECKED(bincv::cuda::binarize(none, dOut.view(), 0u),
+                                  cudaErrorInvalidValue);
+    // A refusal launches nothing, so it leaves no error for the next call.
+    BINCV_CHECK_EQ(cudaGetLastError(), cudaSuccess);
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // edgeThreshold -- TIER 3. Twelve parameter combinations, two source types, four

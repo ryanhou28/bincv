@@ -87,7 +87,7 @@ and where it has done less the same binCV code wins.
 Parity on FAST ships as parity. A caller who is holding bytes should not be told to pack them
 first, and for that caller the honest answer is that binCV costs nothing to adopt and gains
 nothing either. The [bit-plane overload](features.md#fast) is where the thesis actually
-applies, and it is 1.47× on x86 and 2.365× on the device.
+applies, and it is 1.65× on x86 and 2.371× on the device.
 
 **`goodFeaturesToTrack` has left this list, and the way it left is worth keeping.** It was
 published here twice and was wrong both times. The first version read 0.53× on *both*
