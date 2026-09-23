@@ -827,8 +827,15 @@ template <size_t AccN, size_t VN, size_t Shift, typename WordType>
 inline void addShifted(WordType* acc, const WordType* v) {
     WordType carry = 0;
     for (size_t p = 0; p < AccN; ++p) {
-        const WordType y = (p >= Shift && p - Shift < VN) ? v[p - Shift]
-                                                          : static_cast<WordType>(0);
+        // `p >= Shift` is a tautology at `Shift == 0` -- both are unsigned -- and
+        // that stage is the common one, so the test is resolved at compile time
+        // rather than written in a form that reads as a range check and is not.
+        WordType y;
+        if constexpr (Shift == 0) {
+            y = (p < VN) ? v[p] : static_cast<WordType>(0);
+        } else {
+            y = (p >= Shift && p - Shift < VN) ? v[p - Shift] : static_cast<WordType>(0);
+        }
         const WordType x = acc[p];
         acc[p] = static_cast<WordType>(static_cast<WordType>(x ^ y) ^ carry);
         carry = maj3<WordType>(x, y, carry);

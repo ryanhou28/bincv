@@ -73,14 +73,18 @@ stated decision rule.
 - **Commit the benchmark.** Every performance claim must be reproducible.
 - **A published figure names the commit it was taken at, and a change to the kernel
   behind it re-takes it or marks it stale.** A figure is only true of the code it was
-  measured on. `verify.sh` gates whether a kernel is CORRECT; nothing gates whether a
-  number is still TRUE, and the two come apart exactly when an optimization preserves
-  every output bit — which is the change this project makes most often. Measured cost of
-  not doing this: a response-sweep optimization made `goodFeaturesToTrack` 18% faster on
-  both architectures and left the reports publishing a LOSS the library did not have, for
-  three weeks, while `features.md` carried a note saying the rows were stale. The note was
-  not enough; only the stamp and the re-take are. `scripts/run_launches.sh` records the
-  commit in every log it writes, so the cost is naming it in the table.
+  measured on. `verify.sh` gates whether a kernel is CORRECT; **`check_figure_staleness.py`
+  gates whether a number is still TRUE.** The two come apart exactly when an optimization
+  preserves every output bit — which is the change this project makes most often. Measured
+  cost of not having the second gate: a response-sweep optimization made
+  `goodFeaturesToTrack` 18% faster on both architectures and left the reports publishing a
+  LOSS the library did not have, for three weeks, while `features.md` carried a note saying
+  the rows were stale. The note was not enough; only the stamp and the re-take are.
+  `scripts/run_launches.sh` records the commit in every log it writes, and the gate compares
+  that commit's code against the current tree — so a figure whose kernel moved now fails a
+  check instead of waiting for a reader to notice. Already-stale logs are listed in
+  `docs/reports/logs/expected-stale.txt` **with the files that moved under them**, so being
+  listed does not excuse the next change to the same code.
 - **Pick the right baseline.** The bar for a new implementation is the best existing
   option, not the worst. Measuring against a fallback nobody would use makes anything
   look like a win.
@@ -112,6 +116,7 @@ if that case does not report ~1.00×, the fast path is not running where you thi
 ./scripts/verify_cross.sh     # the other architecture under emulation; skips without Docker
 ./scripts/verify_cortex_m.sh  # Cortex-M7 compile gate; skips without arm-none-eabi
 python3 scripts/check_links.py
+python3 scripts/check_figure_staleness.py   # a kernel change under a published figure
 ```
 
 `verify.sh` builds and tests four configurations — Release+OpenCV, Release core-only,

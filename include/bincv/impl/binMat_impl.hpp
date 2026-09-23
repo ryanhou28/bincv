@@ -756,7 +756,13 @@ void QuantMat<1, WordType_>::set(int row, int col, bool value) {
     if (value) {
         word |= mask;   // set bit
     } else {
-        word &= ~mask;  // clear bit
+        // `~mask` integer-promotes to `int`, so the compound form narrows on the
+        // way back into an 8- or 16-bit WordType and -Wconversion says so. The
+        // complement is taken AT the word type instead, which is the same bits
+        // and states that the narrowing is the point. Only some compilers
+        // diagnose it -- GCC 10 for Cortex-M does, GCC 11 for the host does not
+        // -- which is why it survived to be found by the bare-metal gate.
+        word = static_cast<WordType>(word & static_cast<WordType>(~mask));  // clear bit
     }
 }
 

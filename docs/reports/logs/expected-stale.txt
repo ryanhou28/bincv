@@ -1,0 +1,60 @@
+# Logs whose measured code has moved since they were taken.
+# Written by scripts/check_figure_staleness.py --update-baseline.
+# A log leaves this list by being RE-TAKEN, not by being edited.
+# Adding a line here is a decision to publish a figure that is known
+# not to describe the current code, and belongs in review.
+#
+# This baseline is the repository's state when the gate was introduced. It is not a
+# clean slate -- it is the backlog the gate exists to stop growing.
+#
+# Each line records WHICH files moved under that log. A log fails when that set
+# GROWS, so being listed here does not excuse the next change to the code beneath
+# it. A log leaves the list by being re-taken.
+#
+# MOST of these predate commits that genuinely changed the kernels they measure.
+# Those figures may well be wrong, and only a re-take can say.
+#
+# THE REST went stale on a bit-identical narrowing fix to QuantMat<1,W>::set, a
+# header every benchmark includes, landed to make verify_cortex_m.sh pass. That
+# change cannot move a figure -- it is the same bits, and set() builds frames
+# outside every timed region. Accepted rather than re-taking 38 sweeps for a
+# static_cast, and written down so the judgement is visible rather than assumed.
+#
+corner_subpix-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+denoise-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+dense-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+dense-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+dense_opencv-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+dense_opencv-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+derivative-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+derivative-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
+fast_bitplane-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+fast_bitplane-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp
+feature-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+feature-tracking-aarch64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+feature-tracking-spotcheck-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/pyramid.hpp
+feature-tracking-x86_64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+features-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp
+goodfeatures-aarch64-launches.log	6d74d57	include/bincv/impl/binMat_impl.hpp
+goodfeatures-x86_64-launches.log	6d74d57	include/bincv/impl/binMat_impl.hpp
+lk_batch_off-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/pyramid.hpp
+lk_headtohead-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/pyramid.hpp
+lk_headtohead-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/pyramid.hpp
+lk_memorybound-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp
+lk_memorybound-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp
+logic-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+logic-x86_64-launches-repeat.log	0b9b73c	include/bincv/impl/binMat_impl.hpp
+logic-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
+morphology-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+morphology-x86_64-launches-repeat.log	a152536	include/bincv/impl/binMat_impl.hpp
+morphology-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
+pyramid-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+pyrfilter-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+pyrfilter-spotcheck-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+pyrfilter-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+reduce-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+reduce-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
+spacing-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+wordtype_narrow-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+wordtype_narrow-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+wordwidth-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
