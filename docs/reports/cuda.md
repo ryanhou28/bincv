@@ -439,17 +439,20 @@ recorded in full on the issue it belongs to.
   morphology arm refused on the 1.28× precedent, and the log-depth fold that is the best
   remaining unexploited win in the family but buys nothing while the ops are launch-bound —
   [#60](https://github.com/ryanhou28/bincv/issues/60).
-- **The profile-driven round: eight items measured, three adopted, five negatives, and two
+- **The profile-driven round: nine items measured, four adopted, five negatives, and two
   of the profiler's own stated mechanisms refuted.** Adopted: the census kernels' 72-byte
   local stack frame (DRAM writes 25.9 MB → 1.1 MB), whole-sector stores in every ballot
-  packer (8.0× → 1.00× store amplification), and a 16-byte-lane `packQuant` (DRAM 15.0% →
-  92.5% at 8K). Deleted as no longer paying for a second body: the 32-bit byte lane, and a
+  packer (8.0× → 1.00× store amplification), a 16-byte-lane `packQuant` (DRAM 15.0% →
+  92.5% at 8K), and — from what the refutation below turned up — the response's FP64 `sqrt`
+  memoized over the 100-cell integer domain a 3×3 window bounds it to, which took the FP64
+  pipe from **74.8% to 45.4%** of peak and the kernel to **3.00× / 3.56× / 4.27×** at
+  752×480 / 1080p / 4K, 105 of 105 rounds at each. Deleted as no longer paying for a second body: the 32-bit byte lane, and a
   `packBits` wide lane that won 104 of 105 rounds at 8K and still did not clear the bar.
   The five negatives are worth more than the adoptions: removing **509,440** shared-bank
   conflicts from `fusedCandidateKernel` bought **1.00×** because it is FP64-bound at 73.7%
   of peak; `responseKernelSliced` is not occupancy-limited at all (its grid is **0.38
-  waves**) and its real cost is the FP64 `sqrt`, priced at **3.5–6.0×** of the kernel by a
-  single-precision probe; the LK tracker's named fix removed 80% of its indexed constant
+  waves**) and its real cost is the FP64 `sqrt`, which a single-precision probe bounded at
+  **3.5–6.0×** of the kernel and an exact memo then collected 3.00–4.27× of; the LK tracker's named fix removed 80% of its indexed constant
   loads and made it **6% slower** by costing registers; every strip value for the
   bit-sliced dense matcher is slower than the shipped one, 105 rounds to 0, so the
   `kBoxStrip` precedent does not transfer; and a spacing spatial index that is **1.18× on

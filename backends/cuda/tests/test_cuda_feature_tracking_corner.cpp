@@ -532,32 +532,41 @@ void checkResponseMapMatches(const BinMat<Word>& frame, int blockSize, const cha
                                    d.dx.constSign(), d.dy.constSign(), blockSize,
                                    ResponseMap(host.data(), w, h, w));
 
+    // Both switches, every position, against the ONE host answer: the response
+    // arm and whether the bit-sliced arm looks its square root up. The memo's
+    // domain is the sliced arm's, so the two OFF positions of the memo switch at
+    // a blockSize other than 3 run identical code -- which is what makes them
+    // the gate-excluded control rather than a fourth case.
     for (int sliced = 1; sliced >= 0; --sliced) {
-        bc::impl::cornerSlicedEnabled() = sliced != 0;
-        bc::DeviceImage<float> dmap(static_cast<int>(w), static_cast<int>(h));
-        const cudaError_t err = bc::cornerMinEigenValAsync(
-            d.magX.constView(), d.magY.constView(), d.signX.constView(), d.signY.constView(),
-            blockSize, dmap.view());
-        BINCV_CHECK_EQ(static_cast<int>(err), static_cast<int>(cudaSuccess));
-        cudaDeviceSynchronize();
-        std::vector<float> dev(w * h, -1.0f);
-        bc::downloadImage<float>(dmap.constView(), dev.data(), w);
-        cudaStreamSynchronize(nullptr);
-        const bool same = std::memcmp(dev.data(), host.data(), w * h * sizeof(float)) == 0;
-        BINCV_CHECK(same);
-        if (!same) {
-            for (size_t i = 0; i < w * h; ++i) {
-                if (dev[i] != host[i]) {
-                    std::printf("  [%s] bs %d sliced %d: first mismatch at (%zu,%zu): "
-                                "device %.9g host %.9g\n",
-                                what, blockSize, sliced, i % w, i / w,
-                                static_cast<double>(dev[i]), static_cast<double>(host[i]));
-                    break;
+        for (int memo = 1; memo >= 0; --memo) {
+            bc::impl::cornerSlicedEnabled() = sliced != 0;
+            bc::impl::cornerSqrtMemoEnabled() = memo != 0;
+            bc::DeviceImage<float> dmap(static_cast<int>(w), static_cast<int>(h));
+            const cudaError_t err = bc::cornerMinEigenValAsync(
+                d.magX.constView(), d.magY.constView(), d.signX.constView(),
+                d.signY.constView(), blockSize, dmap.view());
+            BINCV_CHECK_EQ(static_cast<int>(err), static_cast<int>(cudaSuccess));
+            cudaDeviceSynchronize();
+            std::vector<float> dev(w * h, -1.0f);
+            bc::downloadImage<float>(dmap.constView(), dev.data(), w);
+            cudaStreamSynchronize(nullptr);
+            const bool same = std::memcmp(dev.data(), host.data(), w * h * sizeof(float)) == 0;
+            BINCV_CHECK(same);
+            if (!same) {
+                for (size_t i = 0; i < w * h; ++i) {
+                    if (dev[i] != host[i]) {
+                        std::printf("  [%s] bs %d sliced %d memo %d: first mismatch at "
+                                    "(%zu,%zu): device %.9g host %.9g\n",
+                                    what, blockSize, sliced, memo, i % w, i / w,
+                                    static_cast<double>(dev[i]), static_cast<double>(host[i]));
+                        break;
+                    }
                 }
             }
         }
     }
     bc::impl::cornerSlicedEnabled() = true;
+    bc::impl::cornerSqrtMemoEnabled() = true;
 }
 
 struct DeviceCornerRun {
@@ -722,6 +731,52 @@ BINCV_TEST(CudaCorner, CornersMatchHostAcrossShapes) {
             GoodFeaturesParams p;
             p.minDistance = 3.5;
             checkCornersMatch(structuredBits(w, h, seed++), p, 512, "shape");
+        }
+    }
+}
+
+// The square-root memo through the FUSED candidate kernel, which is the other
+// kernel that reaches the bit-sliced response word and the one the published
+// goodFeaturesToTrack row runs. `checkResponseMapMatches` already sweeps both
+// switch positions of the standalone response map; this holds the corner array,
+// the ranked count and the frame maximum the two positions reduce to the same
+// values on frames dense enough that the suppression and the spacing filter
+// both do work.
+// The exhaustive part of this claim is not here: `test_cuda_shared_helpers.cu`
+// sweeps every table entry and every one of the 1900 `(xx, yy, xy)` codes. What
+// a frame adds is the kernels' own indexing of it.
+BINCV_TEST(CudaCorner, SqrtMemoGivesTheEvaluatedArmsCorners) {
+    const size_t widths[] = {752, 97, 33};
+    const size_t heights[] = {41, 13};
+    uint64_t seed = 0x5C11;
+    for (size_t w : widths) {
+        for (size_t h : heights) {
+            const BinMat<Word> frame = structuredBits(w, h, seed++);
+            Derivatives d(frame);
+            const size_t candidateCapacity = w > 2 && h > 2 ? (w - 2) * (h - 2) : 1;
+            GoodFeaturesParams p;
+            p.minDistance = 3.5;
+
+            DeviceCornerRun run[2];
+            for (int memo = 1; memo >= 0; --memo) {
+                bc::impl::cornerSqrtMemoEnabled() = memo != 0;
+                run[memo] = runDeviceCorners(d, w, h, p, 512, candidateCapacity,
+                                             /*fused=*/true);
+                BINCV_CHECK_EQ(static_cast<int>(run[memo].err),
+                               static_cast<int>(cudaSuccess));
+            }
+            bc::impl::cornerSqrtMemoEnabled() = true;
+
+            BINCV_CHECK_EQ(run[1].result.count, run[0].result.count);
+            BINCV_CHECK_EQ(run[1].result.candidatesRanked, run[0].result.candidatesRanked);
+            BINCV_CHECK(std::memcmp(&run[1].frameMax, &run[0].frameMax,
+                                    sizeof(float)) == 0);
+            const bool same =
+                run[1].corners.size() == run[0].corners.size() &&
+                (run[1].corners.empty() ||
+                 std::memcmp(run[1].corners.data(), run[0].corners.data(),
+                             run[1].corners.size() * sizeof(Corner)) == 0);
+            BINCV_CHECK(same);
         }
     }
 }

@@ -75,6 +75,10 @@ namespace {
 constexpr size_t kWidth = 752;
 constexpr size_t kHeight = 480;
 constexpr int kRounds = 11;
+// The square-root memo's pairs run fifteen rather than eleven: the rule that
+// decides them was written with the round count in it, and only those pairs are
+// affected so nothing else in this file moves.
+constexpr int kMemoRounds = 15;
 
 cudaStream_t gStream = nullptr;
 
@@ -88,17 +92,21 @@ uint64_t splitmix(uint64_t& s) {
 
 /// A binarized frame with blob structure plus noise -- not pure noise, which
 /// makes nearly every pixel a FAST corner and prices a case no caller has.
-bincv::BinMat<Word> referenceFrame(uint64_t seed = 0x51EEDu) {
-    bincv::BinMat<Word> m(static_cast<int>(kWidth), static_cast<int>(kHeight));
-    for (size_t y = 0; y < kHeight; ++y) {
+bincv::BinMat<Word> frameOfSize(size_t w, size_t h, uint64_t seed = 0x51EEDu) {
+    bincv::BinMat<Word> m(static_cast<int>(w), static_cast<int>(h));
+    for (size_t y = 0; y < h; ++y) {
         Word* row = m.view().row(y);
-        for (size_t x = 0; x < kWidth; ++x) {
+        for (size_t x = 0; x < w; ++x) {
             const bool blob = ((x / 17) + (y / 13)) % 2 == 0;
             const bool noise = (splitmix(seed) & 31u) == 0u;
             if (blob != noise) row[x / 32] |= (Word{1} << (x % 32));
         }
     }
     return m;
+}
+
+bincv::BinMat<Word> referenceFrame(uint64_t seed = 0x51EEDu) {
+    return frameOfSize(kWidth, kHeight, seed);
 }
 
 bincv::BinMat<Word> allOnesFrame() {
@@ -569,6 +577,103 @@ const uint32_t kFastCapacity = 16384;
         std::printf("   cornerSlicedApplies(7) = %s\n\n",
                     bincv::cuda::impl::cornerSlicedApplies(7) ? "true" : "FALSE");
         bincv::cuda::impl::cornerSlicedEnabled() = true;
+
+        // THE SQUARE-ROOT MEMO. The bit-sliced response is FP64-bound -- ncu
+        // names FP64 as its highest-utilised pipeline at 74.8% of peak on a part
+        // that runs FP64 at 1/64 the FP32 rate -- and at blockSize 3 the root's
+        // argument is an integer in a 100-cell box. Both arms are separate
+        // template instantiations of one kernel body and the OFF position is
+        // verified byte-identical to the committed kernel with cuobjdump, so
+        // this pair is the memo and nothing else.
+        const PairedTiming memo = timeKernelPaired(
+            [&] {
+                bincv::cuda::impl::cornerSqrtMemoEnabled() = true;
+                bc::cornerMinEigenValAsync(dmagX.constView(), dmagY.constView(),
+                                           dsignX.constView(), dsignY.constView(), 3,
+                                           dmap.view(), gStream);
+            },
+            [&] {
+                bincv::cuda::impl::cornerSqrtMemoEnabled() = false;
+                bc::cornerMinEigenValAsync(dmagX.constView(), dmagY.constView(),
+                                           dsignX.constView(), dsignY.constView(), 3,
+                                           dmap.view(), gStream);
+            },
+            5, 5, kMemoRounds, gStream);
+        printPaired("cornerMinEigenVal bs 3, sqrt MEMOIZED",
+                    "cornerMinEigenVal bs 3, sqrt EVALUATED", memo, "kernel");
+        std::printf("   off-switch ratio evaluated/memoized: %.2fx\n\n", memo.ratioMedian);
+
+        // THE MEMO'S GATE-EXCLUDED CONTROL: at blockSize 7 the response runs the
+        // per-pixel window arm, whose discriminant has no bounded integer domain
+        // and which therefore has no memo instantiation. Both switch positions
+        // run the same kernel and this MUST read ~1.00x.
+        const PairedTiming memoControl = timeKernelPaired(
+            [&] {
+                bincv::cuda::impl::cornerSqrtMemoEnabled() = true;
+                bc::cornerMinEigenValAsync(dmagX.constView(), dmagY.constView(),
+                                           dsignX.constView(), dsignY.constView(), 7,
+                                           dmap.view(), gStream);
+            },
+            [&] {
+                bincv::cuda::impl::cornerSqrtMemoEnabled() = false;
+                bc::cornerMinEigenValAsync(dmagX.constView(), dmagY.constView(),
+                                           dsignX.constView(), dsignY.constView(), 7,
+                                           dmap.view(), gStream);
+            },
+            2, 2, kMemoRounds, gStream);
+        printPaired("CONTROL bs 7, memo ON  (gate excludes it)", "CONTROL bs 7, memo OFF",
+                    memoControl, "kernel", /*expect1x=*/true);
+        std::printf("   cornerSqrtMemoApplies(7) = %s\n\n",
+                    bincv::cuda::impl::cornerSqrtMemoApplies(7) ? "true" : "FALSE");
+        bincv::cuda::impl::cornerSqrtMemoEnabled() = true;
+    }
+
+    // THE MEMO AT TWO LARGER GEOMETRIES, in its own scope so the buffers go back
+    // before the selection's do. 752x480 above is where the published
+    // cornerMinEigenVal row is taken, and it is 90 blocks on 48 SMs -- 0.38
+    // waves, so a large part of what it measures is the launch. These two fill
+    // the machine, where what is read is the kernel.
+    {
+        struct ResponseGeometry {
+            size_t w, h;
+            const char* name;
+            int iters;
+        };
+        const ResponseGeometry geometries[] = {{1920, 1080, "1920x1080", 5},
+                                               {3840, 2160, "3840x2160", 3}};
+        for (const ResponseGeometry& g : geometries) {
+            const bincv::BinMat<Word> big = frameOfSize(g.w, g.h);
+            bincv::TernaryMat<Word> bdx(static_cast<int>(g.w), static_cast<int>(g.h));
+            bincv::TernaryMat<Word> bdy(static_cast<int>(g.w), static_cast<int>(g.h));
+            bincv::derivativeX<1, Word>(big, bdx);
+            bincv::derivativeY<1, Word>(big, bdy);
+            bc::DeviceBinMat bmagX(static_cast<int>(g.w), static_cast<int>(g.h));
+            bc::DeviceBinMat bmagY(static_cast<int>(g.w), static_cast<int>(g.h));
+            bc::DeviceBinMat bsignX(static_cast<int>(g.w), static_cast<int>(g.h));
+            bc::DeviceBinMat bsignY(static_cast<int>(g.w), static_cast<int>(g.h));
+            bc::upload(bdx.constMagnitude(0), bmagX.view(), gStream);
+            bc::upload(bdy.constMagnitude(0), bmagY.view(), gStream);
+            bc::upload(bdx.constSign(), bsignX.view(), gStream);
+            bc::upload(bdy.constSign(), bsignY.view(), gStream);
+            bc::DeviceImage<float> bmap(static_cast<int>(g.w), static_cast<int>(g.h));
+            cudaStreamSynchronize(gStream);
+
+            const auto runBig = [&](bool memoOn) {
+                bincv::cuda::impl::cornerSqrtMemoEnabled() = memoOn;
+                bc::cornerMinEigenValAsync(bmagX.constView(), bmagY.constView(),
+                                           bsignX.constView(), bsignY.constView(), 3,
+                                           bmap.view(), gStream);
+            };
+            const PairedTiming big2 = timeKernelPaired([&] { runBig(true); },
+                                                       [&] { runBig(false); }, g.iters,
+                                                       g.iters, kMemoRounds, gStream);
+            char nameA[96], nameB[96];
+            std::snprintf(nameA, sizeof nameA, "cornerMinEigenVal @%s, sqrt MEMOIZED", g.name);
+            std::snprintf(nameB, sizeof nameB, "cornerMinEigenVal @%s, sqrt EVALUATED", g.name);
+            printPaired(nameA, nameB, big2, "kernel");
+            std::printf("   off-switch ratio evaluated/memoized: %.2fx\n\n", big2.ratioMedian);
+        }
+        bincv::cuda::impl::cornerSqrtMemoEnabled() = true;
     }
 
     const uint32_t kCandidateCapacity = 65536;
@@ -628,6 +733,22 @@ const uint32_t kFastCapacity = 16384;
                         : "The fused arm is SLOWER -- the two goals conflict and that is a "
                           "STOP AND ASK.");
         bincv::cuda::impl::cornerFusedEnabled() = true;
+
+        // THE MEMO ON THE WHOLE OPERATION, because a kernel ratio is not an
+        // end-to-end result. `fusedCandidateKernel` is one of six launches here
+        // and the sort ladder and the one-block spacing pass are the rest, so
+        // what the response arm saves arrives divided by its share.
+        const PairedTiming memoOp = timeKernelPaired(
+            [&] { bincv::cuda::impl::cornerSqrtMemoEnabled() = true; runCorners(); },
+            [&] { bincv::cuda::impl::cornerSqrtMemoEnabled() = false; runCorners(); }, 5, 5,
+            kMemoRounds, gStream);
+        printPaired("goodFeaturesToTrack, sqrt MEMOIZED", "goodFeaturesToTrack, sqrt EVALUATED",
+                    memoOp, "kernel");
+        std::printf("   off-switch ratio evaluated/memoized: %.2fx  -- ON THE OPERATION, not\n"
+                    "   on the candidate kernel. The response arm's own pair is printed\n"
+                    "   above; this is what it is worth after the selection tail.\n\n",
+                    memoOp.ratioMedian);
+        bincv::cuda::impl::cornerSqrtMemoEnabled() = true;
     }
 
     // THE TWO SELECTION ARMS. The tail the reference positions run -- one block,

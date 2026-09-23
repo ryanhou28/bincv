@@ -8,6 +8,12 @@
 // `boxVertical3`, `boxValueAt` and `boxWordAt` are the host's own functions,
 // and the full adder that makes the box sum exact has one definition.
 //
+// THE ONE PIECE OF IT THAT IS MEMOIZED is the square root, and only where a 3x3
+// window bounds its argument to an integer: `cornerSqrtMemo.cuh` holds
+// `sqrt(d^2 + 4c^2)` for `|d|, |c| <= 9` and the file header there states why a
+// memo of `sqrt` is not a second definition of the response. The formula, the
+// order of its operations and every other caller are unchanged.
+//
 // SLICED ARM (blockSize 3). One thread per output WORD. A box sum of bits is
 // word-parallel -- horizontally `a(x-1) + a(x) + a(x+1)` is ONE full adder into
 // two planes, vertically three of those sum into four planes (0..9 fits
@@ -49,6 +55,8 @@
 #include <cmath>
 #include <cstdint>
 
+#include "bincv/cuda/cornerSqrtMemo.cuh"
+
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 namespace cuda {
@@ -71,6 +79,13 @@ struct CovViews {
 /// pixels, and their box sums are NOT zero (the window of `x == width` reaches
 /// `x - 1`, which is a real pixel), so leaving them would put a response where
 /// the host writes nothing.
+/// @tparam Memo true to look the square root up (cornerSqrtMemo.cuh), false to
+/// evaluate `impl::minEigenValue` in full. A TEMPLATE PARAMETER and not a
+/// runtime flag: threading a runtime flag into a device helper of this family
+/// took `fusedCandidateKernel` from 64 to 89 registers and +9.5% instructions
+/// in the OFF position, which moves the baseline the ON position is measured
+/// against.
+template <bool Memo>
 __device__ void slicedResponseWord(const CovViews& v, size_t words, size_t y, size_t w,
                                    float* out) {
     const uint32_t* mxr[3];
@@ -151,8 +166,22 @@ __device__ void slicedResponseWord(const CovViews& v, size_t words, size_t y, si
         const long long yy = bincv::impl::boxValueAt<uint32_t>(vB, bit);
         const long long pos = bincv::impl::boxValueAt<uint32_t>(vP, bit);
         const long long neg = bincv::impl::boxValueAt<uint32_t>(vN, bit);
-        out[b] = ((xx | yy | pos | neg) == 0) ? 0.0f
-                                              : bincv::impl::minEigenValue(xx, yy, pos - neg);
+        // The two arms differ in NOTHING but the root -- same operands, same
+        // expression, same order -- so they agree bit for bit rather than
+        // closely, and the suite pins that over the whole reachable domain. The
+        // branch is `if constexpr` and the expression is written out twice
+        // rather than factored behind a helper: an extra inlining layer moved
+        // this kernel's OFF position by eight SASS instructions, and an OFF
+        // position that is not the committed kernel is not a baseline.
+        if constexpr (Memo) {
+            out[b] = ((xx | yy | pos | neg) == 0)
+                         ? 0.0f
+                         : impl::minEigenValueMemo3(xx, yy, pos - neg);
+        } else {
+            out[b] = ((xx | yy | pos | neg) == 0)
+                         ? 0.0f
+                         : bincv::impl::minEigenValue(xx, yy, pos - neg);
+        }
     }
 }
 
@@ -161,6 +190,11 @@ __device__ void slicedResponseWord(const CovViews& v, size_t words, size_t y, si
 /// anchors it -- and CLIPS at the frame edge, which is the host's promise 2.
 /// The three sums are popcounts of exact integers, so they cannot differ from
 /// the host's by a traversal order.
+/// @note NO SQUARE-ROOT MEMO HERE, and that is the gate rather than an
+/// oversight: `blockSize` arrives at runtime, so the discriminant is bounded by
+/// `5*blockSize^4` and not by a table. This arm evaluates the root, which is
+/// also what makes a blockSize other than 3 the control that must read ~1.00x
+/// between the memo switch's positions.
 __device__ float windowResponse(const CovViews& v, int blockSize, long long x, long long y) {
     const long long off = blockSize / 2;
     long long xs = x - off, ys = y - off;
@@ -218,6 +252,7 @@ __device__ float windowResponse(const CovViews& v, int blockSize, long long x, l
 constexpr int kRespThreads = 128;
 constexpr int kRespPitch = 33;
 
+template <bool Memo>
 __global__ void responseKernelSliced(CovViews v, DeviceImageView<float> dst, size_t words) {
     __shared__ float stage[kRespThreads][kRespPitch];
     const size_t total = words * v.magX.height;
@@ -228,7 +263,7 @@ __global__ void responseKernelSliced(CovViews v, DeviceImageView<float> dst, siz
         if (idx < total) {
             const size_t y = idx / words;
             const size_t w = idx - y * words;
-            slicedResponseWord(v, words, y, w, &stage[threadIdx.x][0]);
+            slicedResponseWord<Memo>(v, words, y, w, &stage[threadIdx.x][0]);
         }
         __syncthreads();
         const size_t units = (total - base) < static_cast<size_t>(kRespThreads)
@@ -312,7 +347,7 @@ __device__ inline void reduceFrameMax(float myMax, float* shared, uint32_t* maxB
     if (threadIdx.x == 0) atomicMax(maxBits, __float_as_uint(shared[0]));
 }
 
-template <bool Sliced>
+template <bool Sliced, bool Memo>
 __global__ void fusedCandidateKernel(CovViews v, int blockSize, DeviceCornerBuffer cand,
                                      uint32_t* maxBits, size_t words) {
     __shared__ float resp[kFuseTileRows][kFuseCols];
@@ -334,7 +369,8 @@ __global__ void fusedCandidateKernel(CovViews v, int blockSize, DeviceCornerBuff
         if (gy < 0 || gy >= height || gw < 0 || gw >= static_cast<long long>(words)) {
             for (int b = 0; b < 32; ++b) out[b] = 0.0f;
         } else if (Sliced) {
-            slicedResponseWord(v, words, static_cast<size_t>(gy), static_cast<size_t>(gw), out);
+            slicedResponseWord<Memo>(v, words, static_cast<size_t>(gy), static_cast<size_t>(gw),
+                                     out);
         } else {
             for (int b = 0; b < 32; ++b) {
                 const long long x = gw * 32 + b;
@@ -916,6 +952,13 @@ bool& cornerSlicedEnabled() {
 
 bool cornerSlicedApplies(int blockSize) { return blockSize == 3; }
 
+bool& cornerSqrtMemoEnabled() {
+    static bool on = true;
+    return on;
+}
+
+bool cornerSqrtMemoApplies(int blockSize) { return cornerSlicedApplies(blockSize); }
+
 bool& cornerFusedEnabled() {
     static bool on = true;
     return on;
@@ -975,8 +1018,12 @@ cudaError_t cornerMinEigenValAsync(DeviceBinMatConstView magX, DeviceBinMatConst
 
     const size_t words = rowWords(magX.width);
     if (impl::cornerSlicedEnabled() && impl::cornerSlicedApplies(blockSize)) {
-        responseKernelSliced<<<linearGrid(words * magX.height, kRespThreads), kRespThreads, 0,
-                               stream>>>(v, dst, words);
+        const dim3 grid = linearGrid(words * magX.height, kRespThreads);
+        if (impl::cornerSqrtMemoEnabled()) {
+            responseKernelSliced<true><<<grid, kRespThreads, 0, stream>>>(v, dst, words);
+        } else {
+            responseKernelSliced<false><<<grid, kRespThreads, 0, stream>>>(v, dst, words);
+        }
     } else {
         responseKernelWindow<<<linearGrid(dst.width * dst.height, 128), 128, 0, stream>>>(
             v, dst, blockSize);
@@ -1040,11 +1087,17 @@ cudaError_t goodFeaturesToTrackAsync(DeviceBinMatConstView magX, DeviceBinMatCon
     if (fused) {
         const dim3 grid(static_cast<unsigned>((words + kFuseWords - 1) / kFuseWords),
                         static_cast<unsigned>((magX.height + kFuseRows - 1) / kFuseRows));
-        if (sliced) {
-            fusedCandidateKernel<true><<<grid, kFuseThreads, 0, stream>>>(
+        if (sliced && impl::cornerSqrtMemoEnabled()) {
+            fusedCandidateKernel<true, true><<<grid, kFuseThreads, 0, stream>>>(
+                v, params.blockSize, work.candidates, work.maxBits, words);
+        } else if (sliced) {
+            fusedCandidateKernel<true, false><<<grid, kFuseThreads, 0, stream>>>(
                 v, params.blockSize, work.candidates, work.maxBits, words);
         } else {
-            fusedCandidateKernel<false><<<grid, kFuseThreads, 0, stream>>>(
+            // The window arm takes its blockSize at runtime, so its discriminant
+            // has no bounded integer domain and there is no memo instantiation
+            // of it to choose between.
+            fusedCandidateKernel<false, false><<<grid, kFuseThreads, 0, stream>>>(
                 v, params.blockSize, work.candidates, work.maxBits, words);
         }
     } else {
