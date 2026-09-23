@@ -25,7 +25,7 @@
 # assertion on its path is an ordinary check and runs in both. The per-suite
 # difference is therefore exactly the number of those lines the suite prints.
 
-release	test_cuda_backend	706	0
+release	test_cuda_backend	734	0
 release	test_cuda_custom	10	0
 release	test_cuda_vocabulary	91	0
 release	test_cuda_shared_helpers	31	0
@@ -44,7 +44,7 @@ release	test_cuda_sparse_match	2850	0
 release	test_cuda_census_box	1082	0
 release	test_cuda_bench_stats	280	0
 
-debug	test_cuda_backend	706	0
+debug	test_cuda_backend	734	0
 debug	test_cuda_custom	10	0
 debug	test_cuda_vocabulary	91	0
 debug	test_cuda_shared_helpers	31	0

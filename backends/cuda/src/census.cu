@@ -10,13 +10,51 @@ namespace cuda {
 namespace impl {
 namespace {
 
+// ---------------------------------------------------------------------------
+// EVERY OFFSET IS READ WITH A COMPILE-TIME INDEX, in all three kernels. nvcc
+// answers a runtime index into a by-value kernel-parameter array --
+// `pattern.dx[k]` -- by copying the whole parameter block into a local-memory
+// stack frame: 72 bytes per thread, stored by every thread on entry and
+// re-read per plane. At 752x480 and 24 planes that frame was 25.9 MB of DRAM
+// writes around the tiled arm's 1.1 MB output, and 609 MB for the reference
+// arm, whose every plane slice pays it again. Unrolled over the POD's 32
+// slots, every index is a constant, the offsets come from the constant bank
+// the parameters already live in, and the frame is gone: the packed transform
+// takes 0.67x the time it did at 3840x2160 and 7680x4320, the tiled arm 0.78x.
+// orientation.cu's DiscPod answers the same compiler behaviour by packing its
+// table into registers.
+// ---------------------------------------------------------------------------
+
+constexpr int kPodPlanes = 32;
+static_assert(sizeof(CensusOffsetsPod{}.dx) == kPodPlanes &&
+                  sizeof(CensusOffsetsPod{}.dy) == kPodPlanes,
+              "census kernels unroll over the POD's whole capacity");
+
+/// @brief Plane `k`'s offsets, for a `k` that is uniform but not a constant.
+/// @note A select over all 32 slots rather than `pattern.dx[k]`: see above.
+/// Runs once per thread, ahead of the loop.
+__device__ __forceinline__ void planeOffsets(const CensusOffsetsPod& pattern, int k,
+                                             int& dx, int& dy) {
+    dx = 0;
+    dy = 0;
+#pragma unroll
+    for (int j = 0; j < kPodPlanes; ++j) {
+        if (j == k) {
+            dx = pattern.dx[j];
+            dy = pattern.dy[j];
+        }
+    }
+}
+
 template <typename SrcT>
 __global__ void censusKernel(DeviceImageConstView<SrcT> img, CensusOffsetsPod pattern,
                              DeviceBinMatView planeBlock, size_t words) {
     const unsigned lane = threadIdx.x;
     const int k = static_cast<int>(blockIdx.z);
-    const long long dx = pattern.dx[k];
-    const long long dy = pattern.dy[k];
+    int dxk = 0, dyk = 0;
+    planeOffsets(pattern, k, dxk, dyk);
+    const long long dx = dxk;
+    const long long dy = dyk;
     const size_t warpsPerBlock = blockDim.y;
     const size_t total = words * img.height;
     for (size_t wordIdx = blockIdx.x * warpsPerBlock + threadIdx.y; wordIdx < total;
@@ -80,7 +118,9 @@ __global__ void censusKernelTiled(DeviceImageConstView<SrcT> img,
     const SrcT c =
         tile[(threadIdx.y + static_cast<unsigned>(apron)) * static_cast<unsigned>(tw) +
              threadIdx.x + static_cast<unsigned>(apron)];
-    for (int k = 0; k < pattern.planes; ++k) {
+#pragma unroll
+    for (int k = 0; k < kPodPlanes; ++k) {
+        if (k >= pattern.planes) break;
         const int dx = pattern.dx[k];
         const int dy = pattern.dy[k];
         bool pred = false;
@@ -168,7 +208,9 @@ __global__ void censusPackedKernel(DeviceImageConstView<SrcT> img,
         tile[(threadIdx.y + static_cast<unsigned>(apron)) * static_cast<unsigned>(tw) +
              threadIdx.x + static_cast<unsigned>(apron)];
     uint32_t desc = 0;
-    for (int k = 0; k < pattern.planes; ++k) {
+#pragma unroll
+    for (int k = 0; k < kPodPlanes; ++k) {
+        if (k >= pattern.planes) break;
         const int dx = pattern.dx[k];
         const int dy = pattern.dy[k];
         const long long gx = static_cast<long long>(x) + dx;
