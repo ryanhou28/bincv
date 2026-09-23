@@ -167,20 +167,28 @@
 /// (`benchmark/corner_opencv_benchmark.cpp`,
 /// `results/corner_opencv_benchmark_pi4.log`). The denominator is the reference
 /// pipeline written out in stock OpenCV: two `filter2D` taps, three product planes,
-/// a `boxFilter` SUM, the min eigenvalue, then gftt.cpp's selection. Reference
-/// device, 640x480:
+/// a `boxFilter` SUM, the min eigenvalue, then gftt.cpp's selection. It is joined
+/// by STOCK `cv::goodFeaturesToTrack`, which is the arm a caller would otherwise
+/// run and is therefore the one the ratio leads with. Reference device, 640x480,
+/// ten launches at commit `6d74d57`:
 ///
-/// variant ns/pixel vs denom B/pixel
-/// binCV 138.11 0.55x 16.54 (5.14 sized)
-/// OpenCV binarized (denominator) 76.06 1.00x 36.94 (29.35 sized)
-/// OpenCV Sobel (stock, different numerics) 59.50 1.28x 29.00
+/// variant ns/pixel vs stock B/pixel
+/// binCV, streaming ring (shipped) 24.099 2.421x 12.56 (5.14 sized)
+/// binCV, frame map 25.362 2.300x 16.54
+/// OpenCV Sobel (stock cv::goodFeaturesToTrack) 58.338 1.00x 29.00
+/// OpenCV binarized (the correctness reference) 75.532 0.772x 36.94 (29.35 sized)
 ///
-/// **binCV is 2.23x smaller (5.71x once both candidate buffers are sized to the
-/// measured survivor count) and 1.82x slower.** Roughly a third of that 1.82x is
-/// the sliding form's own 1.20x loss at `blockSize` 3, measured above. The rest is
-/// that the OpenCV side spends SEVEN frame-sized `float` planes where this file
-/// spends ONE -- which is the trade, stated with both numbers because neither
-/// settles it alone.
+/// **binCV is 2.31x smaller than stock and 2.421x faster; against the binarized
+/// pipeline it is 3.134x faster and 5.71x smaller once both candidate buffers are
+/// sized to the measured survivor count.** The OpenCV side spends SEVEN
+/// frame-sized `float` planes where this file spends THREE ROWS -- which is the
+/// trade, stated with both numbers because neither settles it alone.
+///
+/// **WHICH DENOMINATOR LEADS IS A DECISION, and it is stock.** The binarized
+/// pipeline is what this file's semantics are PROVEN against and the only arm that
+/// can be; it is not what a caller would otherwise run. Publishing against it made
+/// a loss on x86-64 read as a win for two rounds
+/// (docs/reports/features.md, "The denominator changed").
 ///
 /// **And the two agree exactly on which corners those are.** Over four synthetic
 /// frames, 723 corners of 723 at identical positions, worst displacement 0.00 px;
@@ -911,11 +919,18 @@ inline size_t spacingFilter(Corner* corners, size_t ranked, double minDistance, 
 //
 // Both selection forms ask the same question of every interior pixel: is
 // `mid[x]` above the threshold, and is any of its nine neighbours STRICTLY
-// greater? Measured on the 752x480 real frame, that scan plus the heap it feeds
-// is 38% of a whole detection and the response sweep -- the stage the packed
-// representation actually accelerates -- is 30%. The scan is the larger half and
-// was entirely scalar, while the same test on OpenCV's side is `cv::dilate`,
-// which is vectorized on both architectures.
+// greater? When this prefilter was written, that scan plus the heap it feeds was
+// 38% of a whole detection on the 752x480 real frame and the response sweep --
+// the stage the packed representation actually accelerates -- was 30%. The scan
+// was the larger half and was entirely scalar, while the same test on OpenCV's
+// side is `cv::dilate`, which is vectorized on both architectures.
+//
+// Those two shares have since swapped, because the other selection stages were
+// optimized around this one: on the reference device the split is now response
+// sweep 48.6%, this scan plus its heap 33.4%, rank 5.7%, spacing 12.4%
+// (`benchmark/detect_stage_profile`, commit `6d74d57`, spreads 0-7%). The scan
+// is still the largest selection stage and still the one with no arm on
+// aarch64.
 //
 // Only about 2.7% of pixels survive, so the useful shape is a PREFILTER: test
 // eight (or four) pixels at once, and run the scalar body only on the lanes that
@@ -1293,7 +1308,8 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
     // The mask-free path is split out, and the split is a MEASURED fix, not
     // tidiness: with the admit test inside, the per-pixel branch left the
     // compiler nothing to vectorize at all, and the equivalent pass in the
-    // streaming form was 29% of a whole detection on the reference device.
+    // streaming form was 29% of a whole detection on the reference device when
+    // that split was measured.
     // `Admit` is a compile-time type, so the no-mask specialization resolves at
     // instantiation, not per pixel. Splitting the loop was NOT enough on its
     // own -- see THE RUNNING MAXIMUM on why `rowMax` reduces bit patterns
@@ -1582,6 +1598,16 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 // -- so quote the ratio, not the third digit of a nanosecond. Both runs give the
 // same verdict at every block size, both word types and both frame sizes.
 //
+// THE FIGURES IN THIS SECTION ARE THE DECISION'S, AT THE COMMIT IT WAS TAKEN.
+// They are not re-taken here and the shipped kernel is much faster than all of
+// them: selection was optimized afterwards and the two forms now measure 24.099
+// and 25.362 ns/pixel on this device, so the ratio this section reports as 1.29x
+// is **1.05x** today (1.18x on x86-64). The DECISION is unchanged -- the
+// streaming form is still the faster and much smaller of the two at the
+// reference pipeline's block size -- but do not quote 1.29x, or any ns/pixel
+// below, as a current figure. The crossover table further down is likewise the
+// decision's and has not been re-taken at the block sizes it sweeps.
+//
 // **THE STREAMING FORM IS 1.29x FASTER, NOT 2x SLOWER AS THE ESTIMATE HAD IT**,
 // and 3.44x smaller across the whole pipeline. Every earlier estimate said
 // "roughly 2x the response compute"; all of them are corrected here rather than
@@ -1687,7 +1713,11 @@ namespace impl {
 //
 // Measured on the reference device, 752x480 real reference content:
 // **per-pixel 37.93 ms, bit-sliced 7.89 ms (4.81x), with the sparsity skip
-// 5.43 ms (6.98x)**.
+// 5.43 ms (6.98x)**. Those three are the reformulation's own figures and are NOT
+// re-taken: the sliced path has since had its bounds tests hoisted out of the
+// word loop and an empty-pixel-group skip added, so 4.81x and 6.98x UNDERSTATE
+// the gap today. The decision they support -- slice the box sums -- is not in
+// question, which is why they are marked rather than re-run.
 // ===========================================================================
 
 /// @brief `h = L + C + R` for one bit-plane: one full adder, two output planes.
@@ -1857,7 +1887,8 @@ inline void cornerMinEigenValWordSliced(const WordType* const (&mxr)[3],
     // Eight pixels per step through the 8x8 bit transpose, not one bit test
     // per (pixel, plane): the per-pixel gathers were 38% of the whole sweep
     // on the reference device when this loop read the planes a bit at a
-    // time. vA and vB ride one transpose (nibble each), vP and vN the
+    // time -- that share is the transpose's own decision figure and is not
+    // re-taken here. vA and vB ride one transpose (nibble each), vP and vN the
     // other, so a byte comes out holding a pixel's two values.
     for (size_t x0 = lo; x0 < hi; x0 += 8) {
         const unsigned b8 = static_cast<unsigned>(x0 - lo);
