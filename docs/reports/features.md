@@ -31,16 +31,17 @@ number is the faster side.
 | BRIEF descriptors | `cv::ORB::compute` † | 0.639 ms | **0.123 ms** | 5.18× [5.15, 5.22] | 7.167 ms | **0.658 ms** | 10.81× [10.59, 11.17] |
 | Hamming matching, kNN=2 | `cv::BFMatcher` | 9.071 ms | **1.916 ms** | **4.70× [4.65, 4.79]** | 38.187 ms | **19.520 ms** | 1.953× [1.944, 1.972] |
 | FAST, wide image | `cv::FAST` | 0.359 ms | **0.345 ms** | 1.039× [1.033, 1.048] | 2.910 ms | 3.025 ms | 0.962× [0.961, 0.963] |
-| FAST, bit-plane | `cv::FAST` | 265.2 µs | **180.2 µs** | **1.472× [1.470, 1.474]** | 2048.2 µs | **865.8 µs** | **2.365× [2.363, 2.370]** |
+| FAST, bit-plane | `cv::FAST` | 267.7 µs | **161.7 µs** | **1.651× [1.643, 1.658]** | 2051.1 µs | **865.2 µs** | **2.371× [2.368, 2.374]** |
 | `goodFeaturesToTrack` | `cv::goodFeaturesToTrack` (stock) | 8.807 ns/px | **6.368 ns/px** | **1.383× [1.350, 1.426]** | 58.338 ns/px | **24.099 ns/px** | **2.421× [2.412, 2.424]** |
 | `cornerSubPix` | `cv::cornerSubPix` | not published | not published | ~13× | 8.595 ms | **0.625 ms** | 13.76× [13.70, 13.80] |
 
-**`FAST, bit-plane`'s move from 1.50× to 1.472× is the one on this page that is not noise.**
-The runtime switch that makes the vector arm provably off-switchable is read once per image
-row; reverting only that read measures 12.8% faster with the two intervals disjoint, and
-hoisting it out of the row loop keeps the switch and recovers all of it —
-[issue #73](https://github.com/ryanhou28/bincv/issues/73), which would take the row to about
-1.66×. Of the other moves here, `BRIEF` gaining 4.69× → 5.18× is the largest, and a
+**`FAST, bit-plane` is 1.651× on x86-64, up from a published 1.472×, and the gain is a gate
+that was being read in the wrong place.** The runtime switch that makes the vector arm
+provably off-switchable was read once per image row, which kept the scalar body live in
+every row; read once per call instead, the whole operation is 180.85 µs → 161.70 µs, with
+the intervals disjoint and the old code re-measured twice in the same session on either
+side of the new one (180.85 and 181.30). The switch still works: the scalar arm reads
+605.35 µs, 3.73× the vector line. Of the other moves here, `BRIEF` gaining 4.69× → 5.18× is the largest, and a
 refactor that looked like its cause was A/B'd at thirty launches each and is not
 (122,596 ns against 123,834, intervals overlapping) — the old cell was a slow draw.
 **`1/1/1/1` resolves only 1.090× on this host**, so its interval is wide and that row should
@@ -145,8 +146,8 @@ tracking pipeline's own frame for the others.
 | input | corners | `cv::FAST`, x86-64 | binCV, x86-64 | x86-64 ratio | `cv::FAST`, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
 | `CV_8U`, wide image | 4144 | 0.359 ms | **0.345 ms** | 1.039× [1.033, 1.048] | 2.910 ms | 3.025 ms | 0.962× [0.961, 0.963] |
-| `CV_8U`, the pipeline's own frame | 6724 | 265.2 µs | **258.8 µs** | 1.024× [1.022, 1.026] | 2048.2 µs | 2052.6 µs | 0.998× [0.997, 1.000] |
-| **bit-plane**, same frame | 6724 | 265.2 µs | **180.2 µs** | **1.472× [1.470, 1.474]** | 2048.2 µs | **865.8 µs** | **2.365× [2.363, 2.370]** |
+| `CV_8U`, the pipeline's own frame | 6724 | 267.7 µs | **262.0 µs** | 1.021× [1.009, 1.024] | 2051.1 µs | 2052.1 µs | 0.998× [0.997, 1.001] |
+| **bit-plane**, same frame | 6724 | 267.7 µs | **161.7 µs** | **1.651× [1.643, 1.658]** | 2051.1 µs | **865.2 µs** | **2.371× [2.368, 2.374]** |
 
 **Parity on the wide-image entry point is the honest outcome and it ships that way.**
 `cv::FAST` is a mature vectorised kernel, and a caller who is holding bytes should not be
@@ -154,7 +155,7 @@ told to pack them first — for that caller the answer is that binCV matches Ope
 nothing to adopt.
 
 The bit-plane overload is the interesting one. A caller who already has a binary image gets
-1.47× on x86 and **2.365× on the device** on an input of 46,080 bytes against `cv::FAST`'s
+1.65× on x86 and **2.371× on the device** on an input of 46,080 bytes against `cv::FAST`'s
 360,960, bit-exact corner-for-corner with `cv::FAST` in scan order. It is one of the few
 results *better* on the deployment target, and the reason is register pressure: the arc test
 needs sixteen live vectors, and aarch64 has thirty-two vector registers where x86 has sixteen,
@@ -164,10 +165,10 @@ operation.
 
 Scoring is a substantial part of the cost. The bit-plane path chooses per chunk between a
 per-corner transpose and arc masks; sweeping that threshold on x86-64 moves the whole operation
-between 178.4 µs and 202.4 µs against `cv::FAST`'s 265.2 — 1.49× at the fast end, 1.31× with
-the masks switched off entirely, and 180.2 µs or 1.472× at the shipped adaptive setting. The
-whole sweep sits about 4% above where the single-launch log had it, for the reason
-[issue #73](https://github.com/ryanhou28/bincv/issues/73) names. binCV's score is a different
+between 160.8 µs and 202.9 µs against `cv::FAST`'s 267.7 — 1.665× at the fast end, 1.318×
+with the masks switched off entirely, and 161.7 µs or 1.651× at the shipped adaptive
+setting. On aarch64 the sweep is flat at ~863.5 µs, because that path's own measurement
+made the scored arm a loss on NEON and it is compiled out. binCV's score is a different
 quantity from OpenCV's — the longest qualifying arc rather than the largest surviving threshold
 — which is why this is Tier 2.
 

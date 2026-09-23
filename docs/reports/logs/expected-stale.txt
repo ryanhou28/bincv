@@ -4,6 +4,7 @@
 # Adding a line here is a decision to publish a figure that is known
 # not to describe the current code, and belongs in review.
 #
+#
 # This baseline is the repository's state when the gate was introduced. It is not a
 # clean slate -- it is the backlog the gate exists to stop growing.
 #
@@ -11,7 +12,7 @@
 # GROWS, so being listed here does not excuse the next change to the code beneath
 # it. A log leaves the list by being re-taken.
 #
-# THREE CAUSES, and they are not the same thing.
+# FOUR CAUSES, and they are not the same thing.
 #
 # 1. MOST of these predate commits that genuinely changed the kernels they
 # measure. Those figures may well be wrong, and only a re-take can say.
@@ -27,21 +28,30 @@
 # the allocator chose in six spill pairs. The figures are still true of that
 # code, so they are accepted here rather than re-taken.
 #
-corner_subpix-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+# 4. Five logs -- corner_subpix-aarch64, dense-aarch64, dense-x86_64,
+# feature-aarch64 and features-x86_64 -- went stale on ops/pack.hpp and
+# ops/fast.hpp being made instantiable from a .cu without warnings, and on the
+# bit-plane FAST gate moving out of its row loop. Checked the same way, and more
+# tightly: every function of corner_subpix_benchmark, dense_benchmark and
+# feature_benchmark was disassembled before and after, on BOTH architectures,
+# with addresses normalised out. Zero functions differ in any of the six
+# binaries. The only function that differs anywhere is detectFast<uint32_t>, and
+# the two logs that measure IT were re-taken rather than listed here.
+#
+#
+corner_subpix-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pack.hpp
 denoise-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-dense-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-dense-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+dense-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pack.hpp
+dense-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pack.hpp
 dense_opencv-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
 dense_opencv-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
 derivative-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
 derivative-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
-fast_bitplane-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-fast_bitplane-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp
-feature-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
+feature-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/fast.hpp
 feature-tracking-aarch64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
 feature-tracking-spotcheck-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
 feature-tracking-x86_64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
-features-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp
+features-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/fast.hpp
 goodfeatures-aarch64-launches.log	6d74d57	include/bincv/impl/binMat_impl.hpp
 goodfeatures-x86_64-launches.log	6d74d57	include/bincv/impl/binMat_impl.hpp
 lk_batch_off-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
