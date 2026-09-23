@@ -186,8 +186,9 @@ two runs an arm over 400 frames — put the tracking figure between 1.66× and 1
 launches an arm narrow that to the interval above, which is what the extra launches bought.
 
 The batch-on sweep is also an independent repeat of the pipeline figure in
-[feature-tracking.md](feature-tracking.md) — 3.632× [3.614, 3.648] against that sweep's
-3.658× [3.633, 3.681], 0.7% apart with overlapping intervals. Two sweeps of the same quantity
+[feature-tracking.md](feature-tracking.md) as that page then carried it — 3.632×
+[3.614, 3.648] against that sweep's 3.658× [3.633, 3.681], 0.7% apart with overlapping
+intervals. (Both are that commit's; the page now reads 3.969× on a faster detect stage.) Two sweeps of the same quantity
 through different command lines agreeing to within their intervals is the check that the
 protocol reproduces, not just the row.
 

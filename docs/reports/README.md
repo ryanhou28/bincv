@@ -195,7 +195,7 @@ pipeline, and it is not the number to compare against a library call.
 <!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64 ratio|OpenCV, aarch64|binCV, aarch64|aarch64 ratio" source="source" -->
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | source |
 |---|---|---|---|---|---|---|---|
-| time, ms/frame | 3.7275 | 1.0215 | 3.658× [3.633, 3.681] | 23.588 | 5.097 | 4.620× [4.596, 4.628] | [feature-tracking.md](feature-tracking.md) |
+| time, ms/frame | 4.0070 | 1.0095 | 3.969× [3.935, 4.004] | 23.614 | 4.435 | 5.324× [5.307, 5.335] | [feature-tracking.md](feature-tracking.md) |
 
 Peak working set is computed from buffer geometry and is identical on both architectures, so
 it is one pair rather than two:
@@ -418,7 +418,7 @@ figures, **two moved beyond their own band for a reason that is not the measurem
 
 | figure | published | re-taken | what moved |
 |---|---|---|---|
-| the assembled pipeline | 4.73× | **4.620×** | binCV's arm, +3% — a regression, [feature-tracking.md](feature-tracking.md#speed) |
+| the assembled pipeline | 4.73× | **4.620×** | binCV's arm, +3% — read as a regression at the time; a later sweep at `880704b` puts the same stage back and the row at 5.324×, [feature-tracking.md](feature-tracking.md#speed) |
 | `denseDisparity` census, aarch64 | 462 ms | **730.6 ms** | the row's two columns were timing different word-type arms, [stereo.md](stereo.md) |
 
 Everything else reproduced. The ratios that shifted shifted because the `cv::` denominator

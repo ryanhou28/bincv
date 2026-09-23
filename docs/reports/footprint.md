@@ -188,7 +188,7 @@ built for and would have taken the pipeline from about 1.52× to 1.65× against 
 92,160 additional bytes on a 436,704-byte peak, taking the footprint result from 6.23× to
 5.15×. Twenty-one percent of the footprint advantage for eight percent of the speed is not a
 trade this library makes. (The 1.52× baseline is an older pipeline figure, superseded by the
-3.658× and 4.620× in [feature-tracking.md](feature-tracking.md); the proportions are what
+3.969× and 5.324× in [feature-tracking.md](feature-tracking.md); the proportions are what
 the decision turned on.)
 
 Two other figures here come from that same record rather than a committed benchmark: the
