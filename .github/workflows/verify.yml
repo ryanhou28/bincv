@@ -28,12 +28,17 @@
 # gate needs a GPU. Correctness and the gates that silently skip are what runs
 # here; speed is not.
 #
-# OpenCV IS NOT INSTALLED, by choice. It is the slowest part of the build and
-# the interop suites are a small part of the surface. The cost is real and is
-# named rather than hidden: `test_equivalence` and `test_opencv_interop` do not
-# run in CI, so the OpenCV bit-exactness claims are verified on a maintainer's
-# machine and nowhere else. `verify.sh --only` prints "PARTIAL RUN GREEN" and
-# names what it did not run, so this cannot read as a full pass.
+# OpenCV IS INSTALLED, in its own job, and it did not used to be. The argument
+# for leaving it out was that it is the slowest part of the build and the
+# interop suites are a small part of the surface; the cost was named rather
+# than hidden -- `test_equivalence` and `test_opencv_interop` ran on a
+# maintainer's machine and nowhere else. That stopped being a cost anyone could
+# pay: on aarch64 with gcc 14, `verify.sh`'s OpenCV configuration does not
+# build at all, so the machine of last resort could not run it either and the
+# Tier 1 bit-exactness claims were verified NOWHERE on the deployment
+# architecture. The `opencv-interop` job below is that cover. The other jobs
+# still run `--only`, which prints "PARTIAL RUN GREEN" and names what it did
+# not run, so no single job reads as a full pass.
 
 name: verify
 
@@ -90,6 +95,41 @@ jobs:
           name: checks-aarch64
           path: build-logs/checks-*.txt
           if-no-files-found: error
+
+  opencv-interop:
+    name: OpenCV interop (${{ matrix.arch }})
+    # THE ONLY PLACE THE TIER 1 CLAIMS ARE CHECKED. `test_equivalence` and
+    # `test_opencv_interop` compile only where OpenCV does, and they are what
+    # proves a Tier 1 operation gives cv::'s answer bit for bit. Before this job
+    # they ran on one desktop when someone remembered, and on aarch64 they could
+    # not run at all.
+    #
+    # BOTH ARCHITECTURES, because the claim is per-architecture: a NEON path and
+    # an AVX2 path are different code, and bit-exactness proven on one says
+    # nothing about the other.
+    #
+    # This is the slowest job here -- it is the whole build plus OpenCV's
+    # headers -- and it is deliberately not merged into the other two: a job
+    # that installs OpenCV cannot also prove the CORE-ONLY configuration builds
+    # without it, which is the configuration the memory argument rests on.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86-64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCV
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libopencv-dev
+          pkg-config --modversion opencv4
+      - name: verify.sh -- the OpenCV configuration
+        run: ./scripts/verify.sh --only opencv
 
   cortex-m:
     name: Cortex-M7 (32-bit size_t, bare metal)
