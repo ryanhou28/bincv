@@ -11,14 +11,21 @@
 # GROWS, so being listed here does not excuse the next change to the code beneath
 # it. A log leaves the list by being re-taken.
 #
-# MOST of these predate commits that genuinely changed the kernels they measure.
-# Those figures may well be wrong, and only a re-take can say.
+# THREE CAUSES, and they are not the same thing.
 #
-# THE REST went stale on a bit-identical narrowing fix to QuantMat<1,W>::set, a
-# header every benchmark includes, landed to make verify_cortex_m.sh pass. That
-# change cannot move a figure -- it is the same bits, and set() builds frames
-# outside every timed region. Accepted rather than re-taking 38 sweeps for a
-# static_cast, and written down so the judgement is visible rather than assumed.
+# 1. MOST of these predate commits that genuinely changed the kernels they
+# measure. Those figures may well be wrong, and only a re-take can say.
+#
+# 2. Some went stale on a bit-identical narrowing fix to QuantMat<1,W>::set, a
+# header every benchmark includes, landed to make verify_cortex_m.sh pass.
+#
+# 3. The optical-flow logs went stale on a NEON lane index becoming a template
+# parameter rather than an int -- a fix for a Debug build that would not
+# compile at all. Checked rather than assumed: the same translation unit built
+# at -O3 on the reference device before and after gives IDENTICAL OPCODE
+# HISTOGRAMS, 18711 instructions either way, differing only in which register
+# the allocator chose in six spill pairs. The figures are still true of that
+# code, so they are accepted here rather than re-taken.
 #
 corner_subpix-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
 denoise-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
@@ -31,17 +38,17 @@ derivative-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
 fast_bitplane-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
 fast_bitplane-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp
 feature-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
-feature-tracking-aarch64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
-feature-tracking-spotcheck-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/pyramid.hpp
-feature-tracking-x86_64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pyramid.hpp
+feature-tracking-aarch64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
+feature-tracking-spotcheck-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
+feature-tracking-x86_64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
 features-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp
 goodfeatures-aarch64-launches.log	6d74d57	include/bincv/impl/binMat_impl.hpp
 goodfeatures-x86_64-launches.log	6d74d57	include/bincv/impl/binMat_impl.hpp
-lk_batch_off-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/pyramid.hpp
-lk_headtohead-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/pyramid.hpp
-lk_headtohead-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/pyramid.hpp
-lk_memorybound-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp
-lk_memorybound-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp
+lk_batch_off-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
+lk_headtohead-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
+lk_headtohead-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
+lk_memorybound-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp
+lk_memorybound-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp
 logic-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
 logic-x86_64-launches-repeat.log	0b9b73c	include/bincv/impl/binMat_impl.hpp
 logic-x86_64-launches.log	ac33cf1	include/bincv/impl/binMat_impl.hpp
