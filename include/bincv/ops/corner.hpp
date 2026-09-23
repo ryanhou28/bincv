@@ -167,20 +167,28 @@
 /// (`benchmark/corner_opencv_benchmark.cpp`,
 /// `results/corner_opencv_benchmark_pi4.log`). The denominator is the reference
 /// pipeline written out in stock OpenCV: two `filter2D` taps, three product planes,
-/// a `boxFilter` SUM, the min eigenvalue, then gftt.cpp's selection. Reference
-/// device, 640x480:
+/// a `boxFilter` SUM, the min eigenvalue, then gftt.cpp's selection. It is joined
+/// by STOCK `cv::goodFeaturesToTrack`, which is the arm a caller would otherwise
+/// run and is therefore the one the ratio leads with. Reference device, 640x480,
+/// ten launches at commit `6d74d57`:
 ///
-/// variant ns/pixel vs denom B/pixel
-/// binCV 138.11 0.55x 16.54 (5.14 sized)
-/// OpenCV binarized (denominator) 76.06 1.00x 36.94 (29.35 sized)
-/// OpenCV Sobel (stock, different numerics) 59.50 1.28x 29.00
+/// variant ns/pixel vs stock B/pixel
+/// binCV, streaming ring (shipped) 24.099 2.421x 12.56 (5.14 sized)
+/// binCV, frame map 25.362 2.300x 16.54
+/// OpenCV Sobel (stock cv::goodFeaturesToTrack) 58.338 1.00x 29.00
+/// OpenCV binarized (the correctness reference) 75.532 0.772x 36.94 (29.35 sized)
 ///
-/// **binCV is 2.23x smaller (5.71x once both candidate buffers are sized to the
-/// measured survivor count) and 1.82x slower.** Roughly a third of that 1.82x is
-/// the sliding form's own 1.20x loss at `blockSize` 3, measured above. The rest is
-/// that the OpenCV side spends SEVEN frame-sized `float` planes where this file
-/// spends ONE -- which is the trade, stated with both numbers because neither
-/// settles it alone.
+/// **binCV is 2.31x smaller than stock and 2.421x faster; against the binarized
+/// pipeline it is 3.134x faster and 5.71x smaller once both candidate buffers are
+/// sized to the measured survivor count.** The OpenCV side spends SEVEN
+/// frame-sized `float` planes where this file spends THREE ROWS -- which is the
+/// trade, stated with both numbers because neither settles it alone.
+///
+/// **WHICH DENOMINATOR LEADS IS A DECISION, and it is stock.** The binarized
+/// pipeline is what this file's semantics are PROVEN against and the only arm that
+/// can be; it is not what a caller would otherwise run. Publishing against it made
+/// a loss on x86-64 read as a win for two rounds
+/// (docs/reports/features.md, "The denominator changed").
 ///
 /// **And the two agree exactly on which corners those are.** Over four synthetic
 /// frames, 723 corners of 723 at identical positions, worst displacement 0.00 px;
@@ -341,9 +349,11 @@
 /// pointer/extent/stride shape the bit views use.
 /// 2. **NO HEAP, ANYWHERE.** No allocation in the response map, in the NMS scan,
 /// in the ranking or in the spacing filter. The candidate list IS the caller's
-/// output array (see the capacity contract on selectGoodFeatures), the ranking
-/// is an in-place `std::sort` and a bounded `std::push_heap`/`pop_heap`, and
-/// the spacing filter compacts in place. tests/test_corner.cpp counts
+/// output array (see the capacity contract on selectGoodFeatures); the
+/// ranking's counting passes scatter into that array's own slack and its
+/// fallback is an in-place `std::sort`, the top-K bound is a
+/// `std::make_heap`/`pop_heap`/`push_heap` over the same array, and the
+/// spacing filter compacts in place. tests/test_corner.cpp counts
 /// `operator new` -- plain and C++17 over-aligned -- across every entry point
 /// and requires zero.
 /// 3. **Never throws.** Mismatched dimensions, a non-positive
@@ -371,10 +381,11 @@
 /// `blockSize` 3; the frame-map form stays for callers who need the
 /// map itself, and is faster at large blocks. See "STAGE 4" below.
 
-#include <algorithm>  // std::sort, push_heap, pop_heap -- none of which allocates
+#include <algorithm>  // std::sort, make_heap, push_heap, pop_heap -- none of which allocates
 #include <cmath>      // std::sqrt, correctly rounded (see PRECISION above)
 #include <cstddef>
 #include <cstdint>
+#include <cstring>  // std::memcpy for the bit-pattern max, std::memmove for the spacing insert
 #include <new>  // std::nothrow -- the owning overload at the bottom, and nothing else
 #include <type_traits>  // is_same_v -- the mask-free max-reduce specialization
 
@@ -578,23 +589,348 @@ inline Rect blockWindow(int x, int y, int blockSize) {
 /// @note A TOTAL order over distinct positions, as `greaterThanPtr` is over
 /// distinct addresses -- so `std::sort` needs no stability from either.
 struct CornerStronger {
+    /// @note **The response is compared as its BIT PATTERN, which is the same
+    /// order.** A response is never negative and never NaN (PRECISION, at
+    /// the top of this file), so `bits(a) > bits(b)` holds exactly when
+    /// `a > b` does and `bits(a) == bits(b)` exactly when they are equal --
+    /// the two cases a float comparison needs an unordered test to
+    /// separate. The CUDA backend's ordering key rests on the same fact
+    /// (`backends/cuda/src/corner.cu`); this is that fact used one step
+    /// earlier, on the host, where the corner is still a struct.
     bool operator()(const Corner& a, const Corner& b) const {
-        if (a.response != b.response) return a.response > b.response;
+        uint32_t ra, rb;
+        std::memcpy(&ra, &a.response, sizeof(ra));
+        std::memcpy(&rb, &b.response, sizeof(rb));
+        if (ra != rb) return ra > rb;
         if (a.y != b.y) return a.y > b.y;
         return a.x > b.x;
     }
 };
 
 // ---------------------------------------------------------------------------
+// THE RUNNING MAXIMUM
+//
+// Both selection forms reduce every pixel of the map to one maximum. It reads
+// like the one loop a compiler is certain to vectorize and it is the one it
+// cannot: `max` over floats is not reassociable, because NaN and -0.0 make the
+// result depend on the order the lanes are combined in, so GCC and Clang both
+// leave a float max-reduce scalar whatever the flags. Measured by instruction
+// count on the 752x480 real frame, that scalar pass was 6.8% of a whole
+// detection -- more than the AVX2 suppression prefilter costs.
+//
+// A response is never negative and never NaN (PRECISION, at the top of this
+// file), so its IEEE bit pattern orders exactly as the float does and the
+// maximum of the patterns IS the maximum of the values. An UNSIGNED integer
+// max-reduce is reassociable, so the same loop over the same bytes vectorizes.
+// ---------------------------------------------------------------------------
+
+/// @brief The largest of `n` NON-NEGATIVE responses, by bit pattern. **INTERNAL.**
+/// @note The precondition is the file's own PRECISION guarantee, not a hope: a
+/// response is `0.5 * (s - sqrt(disc))` with `s*s >= disc` by Cauchy-Schwarz
+/// on exact integers, so it is `+0.0f` or positive and never NaN. Feed this a
+/// map from anywhere else and a negative value reads as very large.
+/// @note Seeded at 0 rather than at `row[0]`, which is the same answer for a
+/// non-negative row and one fewer special case.
+inline float rowMaxNonNegative(const float* row, size_t n) {
+    uint32_t m = 0;
+    for (size_t i = 0; i < n; ++i) {
+        uint32_t bits;
+        std::memcpy(&bits, row + i, sizeof(bits));
+        m = bits > m ? bits : m;
+    }
+    float out;
+    std::memcpy(&out, &m, sizeof(out));
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// THE RANK, AND WHY IT NEED NOT COMPARE TWO CORNERS AT ALL
+//
+// `CornerStronger` is response descending, then y descending, then x
+// descending. The suppression sweep appends candidates in RASTER order -- row
+// by row, column by column, in both selection forms and through both
+// suppression arms -- and the threshold pass that follows only compacts, so the
+// pool reaching this stage is still in raster order. Reversed, raster order IS
+// "y descending, then x descending": the tie rule, already in the array.
+//
+// So the rank is a STABLE sort on the response and nothing else. Four
+// stable counting passes over the byte lanes of the response's bit pattern,
+// complemented so that ascending key order is descending response, with the
+// first pass reading the pool backwards to do the reversal. No comparator runs,
+// so none of `std::sort`'s branches are there to mispredict -- and mispredicts
+// are what the stage costs: on the 752x480 real frame the sort was 7% of a
+// detection by instruction count and 27% of it by TIME.
+//
+// This is the host form of what `backends/cuda/src/corner.cu` found on the
+// device, where replacing a comparison sort with count, prefix-sum and emit was
+// worth 4x: the raster order already fixes the tie, so ordering work spent
+// rediscovering it is work nobody needs.
+//
+// TWO PRECONDITIONS, AND THE CALLER CHECKS BOTH.
+//
+// 1. **The pool is in raster order.** It is, unless the candidate buffer
+//    FILLED and the top-K heap started evicting -- which reorders it. The
+//    callers track that and fall back to `std::sort`, which is the same answer
+//    by the same total order.
+// 2. **There is room for a scratch pool of `n` corners.** A counting pass
+//    scatters, so it needs somewhere to scatter to. That somewhere is the
+//    caller's OWN array, past the candidates: the capacity contract already
+//    sizes it for the worst-case survivor count, and using slack a caller has
+//    already paid for adds nothing to the peak working set -- which is the
+//    ceiling this operation is held to. When the slack is not there, the
+//    fallback runs.
+// ---------------------------------------------------------------------------
+
+/// @brief The response's bit pattern, complemented: ascending key order is
+/// DESCENDING response. **INTERNAL.**
+/// @note Non-negative and never NaN, so the pattern orders as the float does --
+/// the same fact `CornerStronger` and the CUDA key both rest on.
+inline uint32_t responseRankKey(const Corner& c) {
+    uint32_t bits;
+    std::memcpy(&bits, &c.response, sizeof(bits));
+    return ~bits;
+}
+
+/// @brief Put a RASTER-ORDERED candidate pool into `CornerStronger` order, by
+/// stable counting passes and no comparisons. **INTERNAL.**
+/// @param corners The pool, in raster order. Sorted in place.
+/// @param n Pool size, at least 1.
+/// @param scratch Room for `n` corners, which this may leave in any state.
+/// @note **ONE 256-entry histogram, reused.** Holding all four at once is
+/// 8 kB of stack and this library compiles for a Cortex-M7, so each pass
+/// counts its own lane immediately before scattering it. That pass is a
+/// sequential read of four bytes per corner against a scatter of twelve,
+/// so it is much the cheaper half of what it buys back in stack.
+/// @note A pass whose lane is the same for every corner is the identity
+/// permutation, so it is skipped. On a binarized response the high lanes
+/// usually are -- the map takes about ninety distinct values -- so this is
+/// typically two scatters, not four.
+inline void rankRasterPool(Corner* corners, size_t n, Corner* scratch) {
+    constexpr int kPasses = 4;
+    size_t histogram[256];
+
+    Corner* src = corners;
+    Corner* dst = scratch;
+    bool reversed = false;  // the first pass RUN carries the reversal
+    for (int p = 0; p < kPasses; ++p) {
+        const int shift = 8 * p;
+        for (size_t b = 0; b < 256; ++b) histogram[b] = 0;
+        for (size_t i = 0; i < n; ++i) {
+            ++histogram[(responseRankKey(src[i]) >> shift) & 0xFFu];
+        }
+        if (histogram[(responseRankKey(src[0]) >> shift) & 0xFFu] == n) continue;
+
+        // Prefix-sum in place: the histogram becomes each lane's write cursor.
+        size_t running = 0;
+        for (size_t b = 0; b < 256; ++b) {
+            const size_t c = histogram[b];
+            histogram[b] = running;
+            running += c;
+        }
+        if (!reversed) {
+            // Backwards, so that equal responses come out in reverse raster
+            // order -- y descending then x descending, which is the tie rule.
+            for (size_t i = n; i-- > 0;) {
+                dst[histogram[(responseRankKey(src[i]) >> shift) & 0xFFu]++] = src[i];
+            }
+            reversed = true;
+        } else {
+            for (size_t i = 0; i < n; ++i) {
+                dst[histogram[(responseRankKey(src[i]) >> shift) & 0xFFu]++] = src[i];
+            }
+        }
+        Corner* const other = src;
+        src = dst;
+        dst = other;
+    }
+
+    if (!reversed) {
+        // Every lane constant: one response for the whole pool. The order is
+        // then the tie rule alone, which is the pool reversed.
+        for (size_t i = 0, j = n; i < j;) {
+            --j;
+            const Corner t = corners[i];
+            corners[i] = corners[j];
+            corners[j] = t;
+            ++i;
+        }
+        return;
+    }
+    if (src != corners) {
+        std::memmove(corners, src, n * sizeof(Corner));
+    }
+}
+
+/// @brief Rank `n` candidates into `CornerStronger` order. **INTERNAL.**
+/// @param rasterOrdered Whether the pool is still in the order the sweep
+/// appended it -- false once the top-K heap has evicted anything.
+/// @param capacity The caller's whole array, which is where the counting
+/// passes find their scratch.
+/// @note The two arms are the same answer: `CornerStronger` is a total order
+/// over distinct positions, so the sorted sequence is unique and no sort
+/// can choose between two of them. `Corner.RankArmsAgree` pins it.
+inline void rankCandidates(Corner* corners, size_t n, size_t capacity, bool rasterOrdered) {
+    // `capacity / 2 >= n` rather than `capacity - n >= n`: the same test on
+    // every input the callers can produce, and it cannot wrap on one they
+    // cannot.
+    if (rasterOrdered && n != 0 && capacity / 2 >= n) {
+        rankRasterPool(corners, n, corners + n);
+        return;
+    }
+    std::sort(corners, corners + n, CornerStronger());
+}
+
+// ---------------------------------------------------------------------------
+// THE GREEDY SPACING FILTER
+//
+// Walk the ranked candidates strongest first and accept one when no
+// ALREADY-ACCEPTED corner is within `minDistance` of it. That is gftt.cpp's
+// loop and this is the same answer; what changed is how many corners a
+// candidate has to be compared against.
+//
+// The naive form tests every candidate against every acceptance so far.
+// Measured by instruction count on the 752x480 real frame -- 9852 candidates,
+// 117 kept -- that was 18.5% of a whole detection, at about 49 distance tests
+// per candidate: the second-largest stage of the operation, behind the response
+// sweep and ahead of the sort it has always been billed under. `detect_stage_profile`
+// could not see it, because on a host with 50% run-to-run scatter the prefix
+// arms it differences put the stage at MINUS 8%.
+//
+// Two changes, and neither takes a byte:
+//
+// 1. **THE TEST IS INTEGER.** `dx` and `dy` are pixel differences, so
+//    `dx*dx + dy*dy` is an integer, and comparing an integer against
+//    `minDistance^2` is comparing it against that square's CEILING. The double
+//    form was already exact -- the operands are small integers -- so this is
+//    the same predicate with the two conversions and the double compare
+//    removed.
+//
+// 2. **THE ACCEPTED SET IS HELD IN ROW ORDER.** A corner further than
+//    `floor(sqrt(minDistance^2 - 1))` rows away cannot be within `minDistance`
+//    whatever its column, so with the accepted set sorted by `y` the corners
+//    that could conflict are ONE CONTIGUOUS RUN of it, found by binary search.
+//    A rejection scans that run instead of the whole set, and an acceptance
+//    pays a twelve-byte-per-corner memmove instead of the full rescan it used
+//    to -- cheaper than the scan it replaces, so the worst case improves too.
+//    The greedy's decision depends on the CONTENTS of the accepted set and not
+//    on its order, which is what lets the set be stored in a different one.
+//
+// The caller is promised the corners strongest first, so the accepted set is
+// put back into `CornerStronger` order at the end. That restores the answer
+// rather than choosing one: a subset of a `CornerStronger`-sorted list, sorted
+// by the same total order, is in its original relative order.
+// ---------------------------------------------------------------------------
+
+/// @brief The greedy minimum-distance filter, compacting accepted corners to the
+/// front of `corners`. **INTERNAL.**
+/// @param corners `ranked` candidates in `CornerStronger` order. On return the
+/// first `kept` entries are the accepted corners, in that same order.
+/// @param minDistance The reference's `minDistance`, which the caller has
+/// already established is at least 1 -- below that gftt.cpp runs no spacing
+/// filter at all and neither do the callers here.
+/// @param limit The most corners that may be kept.
+/// @return How many were kept.
+/// @note In place, and the write index never passes the read index: the
+/// candidate is copied out before anything moves, and every write lands at or
+/// below `kept`, which is at most `i`.
+inline size_t spacingFilter(Corner* corners, size_t ranked, double minDistance, size_t limit) {
+    // An integer d^2 is below minDistance^2 exactly when it is below that
+    // square's ceiling -- for an integer square the ceiling is the square and
+    // the STRICT comparison is unchanged, and for any other the ceiling is the
+    // first integer above it. Capped short of `long long`'s range so a caller
+    // passing an absurd distance saturates instead of wrapping; at that size
+    // every pair in any frame conflicts either way.
+    const double sq = minDistance * minDistance;
+    constexpr double kCap = 4.0e18;
+    const long long limitSq =
+        (sq >= kCap) ? static_cast<long long>(kCap) : static_cast<long long>(std::ceil(sq));
+
+    // The widest row separation that can still conflict: the largest `band`
+    // with `band*band < limitSq`. Taken from the square root and then walked to
+    // the exact integer, because a root that lands a ulp either side of the
+    // boundary would narrow the search by a row and drop a real conflict.
+    long long band = static_cast<long long>(std::sqrt(static_cast<double>(limitSq)));
+    if (band < 0) band = 0;
+    while (band > 0 && band * band >= limitSq) --band;
+    while ((band + 1) * (band + 1) < limitSq) ++band;
+
+    size_t kept = 0;
+    for (size_t i = 0; i < ranked && kept < limit; ++i) {
+        const Corner candidate = corners[i];
+        const long long cy = static_cast<long long>(candidate.y);
+        const long long cx = static_cast<long long>(candidate.x);
+
+        // The first accepted corner whose row is within the band. Everything
+        // before it is too far above to conflict, whatever its column.
+        size_t lo = 0, hi = kept;
+        while (lo < hi) {
+            const size_t mid = lo + (hi - lo) / 2;
+            if (static_cast<long long>(corners[mid].y) < cy - band) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+
+        bool good = true;
+        for (size_t j = lo; j < kept; ++j) {
+            const long long dy = static_cast<long long>(corners[j].y) - cy;
+            if (dy > band) break;  // sorted by row: nothing after this is closer
+            const long long dx = static_cast<long long>(corners[j].x) - cx;
+            // The column has the same bound as the row, and testing it before
+            // squaring is what keeps `dx*dx + dy*dy` inside `long long`: both
+            // terms are then below `limitSq`, whose own cap is a quarter of the
+            // type. The double form this replaces could not overflow and this
+            // one must not either.
+            if (dx > band || dx < -band) continue;
+            if (dx * dx + dy * dy < limitSq) {
+                good = false;
+                break;
+            }
+        }
+        if (!good) continue;
+
+        // Insert in row order. The position is at or after `lo`, since every
+        // corner before it is on a strictly earlier row.
+        size_t ip = lo, ihi = kept;
+        while (ip < ihi) {
+            const size_t mid = ip + (ihi - ip) / 2;
+            if (static_cast<long long>(corners[mid].y) <= cy) {
+                ip = mid + 1;
+            } else {
+                ihi = mid;
+            }
+        }
+        if (ip < kept) {
+            std::memmove(corners + ip + 1, corners + ip, (kept - ip) * sizeof(Corner));
+        }
+        corners[ip] = candidate;
+        ++kept;
+    }
+
+    // Back into the order the caller is promised. See the section comment on
+    // why this restores the answer rather than picking one.
+    std::sort(corners, corners + kept, CornerStronger());
+    return kept;
+}
+
+// ---------------------------------------------------------------------------
 // THE NON-MAXIMUM SUPPRESSION PREFILTER
 //
 // Both selection forms ask the same question of every interior pixel: is
 // `mid[x]` above the threshold, and is any of its nine neighbours STRICTLY
-// greater? Measured on the 752x480 real frame, that scan plus the heap it feeds
-// is 38% of a whole detection and the response sweep -- the stage the packed
-// representation actually accelerates -- is 30%. The scan is the larger half and
-// was entirely scalar, while the same test on OpenCV's side is `cv::dilate`,
-// which is vectorized on both architectures.
+// greater? When this prefilter was written, that scan plus the heap it feeds was
+// 38% of a whole detection on the 752x480 real frame and the response sweep --
+// the stage the packed representation actually accelerates -- was 30%. The scan
+// was the larger half and was entirely scalar, while the same test on OpenCV's
+// side is `cv::dilate`, which is vectorized on both architectures.
+//
+// Those two shares have since swapped, because the other selection stages were
+// optimized around this one: on the reference device the split is now response
+// sweep 48.6%, this scan plus its heap 33.4%, rank 5.7%, spacing 12.4%
+// (`benchmark/detect_stage_profile`, commit `6d74d57`, spreads 0-7%). The scan
+// is still the largest selection stage and still the one with no arm on
+// aarch64.
 //
 // Only about 2.7% of pixels survive, so the useful shape is a PREFILTER: test
 // eight (or four) pixels at once, and run the scalar body only on the lanes that
@@ -607,23 +943,27 @@ struct CornerStronger {
 // not suppress, there as here.
 // ---------------------------------------------------------------------------
 
-/// @brief Force the portable prefilter, for the benchmark and the tests. **INTERNAL.**
-/// @note Not a tuning knob. It is how the vector arm is held to producing the same
-/// candidates as the scalar one, and how a benchmark can show the vector arm is
-/// actually RUNNING -- this project has shipped a vector block that was compiled
-/// out and measured three "improvements" against it.
-inline bool& cornerNmsSimdEnabled() {
+/// @brief Force the portable arms, for the benchmark and the tests. **INTERNAL.**
+/// @note Not a tuning knob. It is how the vector arms are held to producing the
+/// same candidates and the same threshold as the scalar ones, and how a
+/// benchmark can show a vector arm is actually RUNNING -- this project has
+/// shipped a vector block that was compiled out and measured three
+/// "improvements" against it.
+/// @note ONE switch for both of this file's arms -- the suppression prefilter
+/// and the running maximum. They are compiled by the same gate and timed by
+/// the same benchmark row, so two switches would be two things to forget.
+inline bool& cornerSimdEnabled() {
     static bool on = true;
     return on;
 }
 
 #if defined(BINCV_CORNERNMS_AVX2)
-inline bool hasCornerNmsSimd() {
+inline bool hasCornerSimd() {
     static const bool kYes = __builtin_cpu_supports("avx2");
-    return kYes && cornerNmsSimdEnabled();
+    return kYes && cornerSimdEnabled();
 }
 #else
-inline bool hasCornerNmsSimd() { return false; }
+inline bool hasCornerSimd() { return false; }
 #endif
 
 /// @brief How many pixels one prefilter step covers. **INTERNAL.**
@@ -658,6 +998,46 @@ __attribute__((target("avx2"))) inline unsigned nmsLaneMask(const float* above, 
     return static_cast<unsigned>(_mm256_movemask_ps(_mm256_and_ps(overT, isMax)));
 }
 #endif
+
+#if defined(BINCV_CORNERNMS_AVX2)
+/// @brief `rowMaxNonNegative` over eight lanes. **INTERNAL.**
+/// @note `vpmaxud` is one instruction for eight lanes. The baseline ISA has no
+/// unsigned 32-bit maximum at all -- `pmaxud` arrived with SSE4.1 -- so the
+/// portable arm compiles to a bias-compare-blend sequence over four lanes,
+/// which is why this is worth an arm where the reduction is otherwise
+/// unremarkable. aarch64 needs none: `umax` is baseline NEON there and the
+/// portable loop already vectorizes.
+/// @note The tail is the portable arm on the same bytes, so the two agree by
+/// construction rather than by test -- though the test checks anyway.
+__attribute__((target("avx2"))) inline float rowMaxNonNegativeAvx2(const float* row, size_t n) {
+    __m256i acc = _mm256_setzero_si256();
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + i));
+        acc = _mm256_max_epu32(acc, v);
+    }
+    alignas(32) uint32_t lanes[8];
+    _mm256_store_si256(reinterpret_cast<__m256i*>(lanes), acc);
+    uint32_t m = 0;
+    for (size_t k = 0; k < 8; ++k) m = lanes[k] > m ? lanes[k] : m;
+    for (; i < n; ++i) {
+        uint32_t bits;
+        std::memcpy(&bits, row + i, sizeof(bits));
+        m = bits > m ? bits : m;
+    }
+    float out;
+    std::memcpy(&out, &m, sizeof(out));
+    return out;
+}
+#endif
+
+/// @brief The running maximum's dispatch. **INTERNAL.**
+inline float rowMax(const float* row, size_t n) {
+#if defined(BINCV_CORNERNMS_AVX2)
+    if (hasCornerSimd()) return rowMaxNonNegativeAvx2(row, n);
+#endif
+    return rowMaxNonNegative(row, n);
+}
 
 } // namespace impl
 
@@ -924,25 +1304,23 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
 
     // 1. maxVal over the WHOLE map, border included -- cv::minMaxLoc's region, and
     // over the ADMITTED pixels of it, because cv::minMaxLoc takes the mask too. With
-    // no mask every pixel is admitted and this is the plain maximum, seeded from
-    // (0, 0) exactly as it was before the mask existed.
+    // no mask every pixel is admitted and this is the plain maximum.
     // The mask-free path is split out, and the split is a MEASURED fix, not
-    // tidiness: with the admit test inside, the per-pixel branch kept the
-    // compiler from turning this into the vector max-reduce it plainly is --
-    // max over floats is exact, so the vector form is the same answer -- and
-    // the equivalent pass in the streaming form was 29% of a whole detection
-    // on the reference device. `Admit` is a compile-time type, so the no-mask
-    // specialization resolves at instantiation, not per pixel.
+    // tidiness: with the admit test inside, the per-pixel branch left the
+    // compiler nothing to vectorize at all, and the equivalent pass in the
+    // streaming form was 29% of a whole detection on the reference device when
+    // that split was measured.
+    // `Admit` is a compile-time type, so the no-mask specialization resolves at
+    // instantiation, not per pixel. Splitting the loop was NOT enough on its
+    // own -- see THE RUNNING MAXIMUM on why `rowMax` reduces bit patterns
+    // rather than floats.
     float maxVal = 0.0f;
     bool admittedAny = false;
     if constexpr (std::is_same_v<Admit, AdmitAll>) {
-        maxVal = response.row(0)[0];
         for (int y = 0; y < height; ++y) {
             const float* r = response.row(static_cast<size_t>(y));
-            for (int x = 0; x < width; ++x) {
-                const float v = r[static_cast<size_t>(x)];
-                maxVal = v > maxVal ? v : maxVal;
-            }
+            const float m = impl::rowMax(r, static_cast<size_t>(width));
+            maxVal = m > maxVal ? m : maxVal;
         }
         admittedAny = true;
     } else {
@@ -977,6 +1355,10 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
     // the reference's second frame-sized float buffer is not needed and is not
     // taken.
     size_t ranked = 0;
+    // The pool is appended in raster order and stays that way until the buffer
+    // fills and the heap starts evicting. The rank below is cheaper when it
+    // holds -- see THE RANK above -- so it is tracked rather than assumed.
+    bool rasterOrdered = true;
     for (int y = 1; y + 1 < height; ++y) {
         const float* prev = response.row(static_cast<size_t>(y - 1));
         const float* cur = response.row(static_cast<size_t>(y));
@@ -1000,8 +1382,15 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
             candidate.response = val;
 
             if (ranked < capacity) {
+                // Appended, not pushed. The heap exists only to bound the
+                // retained set to `capacity`, so until the buffer is full it
+                // orders nothing that is not re-sorted below anyway -- and this
+                // loop runs once per NMS survivor, 9852 times on the real
+                // frame. It is heapified once, at the moment it first matters.
                 corners[ranked++] = candidate;
-                std::push_heap(corners, corners + ranked, impl::CornerStronger());
+                if (ranked == capacity) {
+                    std::make_heap(corners, corners + ranked, impl::CornerStronger());
+                }
             } else {
                 // Full: the buffer is a max-heap under CornerStronger, and
                 // CornerStronger is the SORT order -- "less" means "stronger" --
@@ -1024,6 +1413,7 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
                     out.candidatesRanked = 0;
                     return out;
                 }
+                rasterOrdered = false;
                 if (impl::CornerStronger()(candidate, corners[0])) {
                     std::pop_heap(corners, corners + ranked, impl::CornerStronger());
                     corners[ranked - 1] = candidate;
@@ -1035,9 +1425,10 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
     out.candidatesRanked = ranked;
     if (ranked == 0) return out;
 
-    // 4a. Rank. std::sort is in place and does not allocate; std::stable_sort
-    // would, which is why the comparator is a TOTAL order instead.
-    std::sort(corners, corners + ranked, impl::CornerStronger());
+    // 4a. Rank. Neither arm allocates: the counting passes scatter into the
+    // caller's own slack and `std::sort` is in place. `std::stable_sort` would
+    // allocate, which is why the comparator is a TOTAL order instead.
+    impl::rankCandidates(corners, ranked, capacity, rasterOrdered);
 
     // 4b. The greedy spacing filter, compacting accepted corners to the front. The
     // write index never passes the read index, so the compaction is safe in
@@ -1048,20 +1439,7 @@ inline CornerResult selectGoodFeaturesWith(ConstResponseMap response, const Admi
                              : capacity;
     size_t kept = 0;
     if (params.minDistance >= 1.0) {
-        const double minDistanceSq = params.minDistance * params.minDistance;
-        for (size_t i = 0; i < ranked && kept < limit; ++i) {
-            const Corner candidate = corners[i];
-            bool good = true;
-            for (size_t j = 0; j < kept; ++j) {
-                const double dx = static_cast<double>(candidate.x) - static_cast<double>(corners[j].x);
-                const double dy = static_cast<double>(candidate.y) - static_cast<double>(corners[j].y);
-                if (dx * dx + dy * dy < minDistanceSq) {
-                    good = false;
-                    break;
-                }
-            }
-            if (good) corners[kept++] = candidate;
-        }
+        kept = impl::spacingFilter(corners, ranked, params.minDistance, limit);
     } else {
         // gftt.cpp's `else` branch: no spacing at all, just the strongest
         // `maxCorners`. Already sorted and already in place.
@@ -1220,6 +1598,16 @@ inline CornerResult goodFeaturesToTrack(const TernaryMat<WordType>& dx,
 // -- so quote the ratio, not the third digit of a nanosecond. Both runs give the
 // same verdict at every block size, both word types and both frame sizes.
 //
+// THE FIGURES IN THIS SECTION ARE THE DECISION'S, AT THE COMMIT IT WAS TAKEN.
+// They are not re-taken here and the shipped kernel is much faster than all of
+// them: selection was optimized afterwards and the two forms now measure 24.099
+// and 25.362 ns/pixel on this device, so the ratio this section reports as 1.29x
+// is **1.05x** today (1.18x on x86-64). The DECISION is unchanged -- the
+// streaming form is still the faster and much smaller of the two at the
+// reference pipeline's block size -- but do not quote 1.29x, or any ns/pixel
+// below, as a current figure. The crossover table further down is likewise the
+// decision's and has not been re-taken at the block sizes it sweeps.
+//
 // **THE STREAMING FORM IS 1.29x FASTER, NOT 2x SLOWER AS THE ESTIMATE HAD IT**,
 // and 3.44x smaller across the whole pipeline. Every earlier estimate said
 // "roughly 2x the response compute"; all of them are corrected here rather than
@@ -1325,7 +1713,11 @@ namespace impl {
 //
 // Measured on the reference device, 752x480 real reference content:
 // **per-pixel 37.93 ms, bit-sliced 7.89 ms (4.81x), with the sparsity skip
-// 5.43 ms (6.98x)**.
+// 5.43 ms (6.98x)**. Those three are the reformulation's own figures and are NOT
+// re-taken: the sliced path has since had its bounds tests hoisted out of the
+// word loop and an empty-pixel-group skip added, so 4.81x and 6.98x UNDERSTATE
+// the gap today. The decision they support -- slice the box sums -- is not in
+// question, which is why they are marked rather than re-run.
 // ===========================================================================
 
 /// @brief `h = L + C + R` for one bit-plane: one full adder, two output planes.
@@ -1382,6 +1774,156 @@ BINCV_HOST_DEVICE inline WordType boxWordAt(const WordType* row, size_t words, l
     return row[static_cast<size_t>(w)];
 }
 
+// ---------------------------------------------------------------------------
+// WHY THE WORD BODY IS A TEMPLATE AND NOT A LOOP
+//
+// `boxWordAt` reads a word that may not exist -- an out-of-frame row is a null
+// pointer and a column past either end of the row has no word -- and returning
+// zero for both is what makes the clipped window EXACT rather than approximate.
+// The sweep asks it 54 times per word: 18 for the sparsity test and 36 for the
+// four planes at three columns. On the 752x480 real frame that guard alone was
+// 9.3% of a whole detection by instruction count, and it costs a second time by
+// standing between the sparsity test and the load that re-reads the same words,
+// where it blocks the common subexpression.
+//
+// It only ever fires on the frame's first and last ROW and each row's first and
+// last WORD. So the body is compiled twice from one source: once guarded, for
+// those edges, and once with the guard dropped where the caller has already
+// established every read is in range. Two rows of 480 and two words of 24 take
+// the guarded arm; everything else takes the other.
+// ---------------------------------------------------------------------------
+
+/// @brief One word of the bit-sliced `blockSize == 3` sweep. **INTERNAL.**
+/// @tparam Bounded Whether the reads need `boxWordAt`'s guard. `false` requires
+/// that all three rows exist AND that `w` has a word on each side of it --
+/// the caller establishes both, and getting it wrong reads out of bounds.
+/// @note The two instantiations are the same arithmetic on the same words. Only
+/// the addressing differs, so the response is bit-identical between them.
+template <typename WordType, bool Bounded>
+inline void cornerMinEigenValWordSliced(const WordType* const (&mxr)[3],
+                                        const WordType* const (&myr)[3],
+                                        const WordType* const (&sxr)[3],
+                                        const WordType* const (&syr)[3], size_t words, size_t w,
+                                        size_t lo, size_t hi, float* dstRow) {
+    constexpr size_t kBits = bitsPerWord<WordType>();
+    const auto at = [words](const WordType* row, long long ww) -> WordType {
+        if constexpr (Bounded) {
+            return boxWordAt<WordType>(row, words, ww);
+        } else {
+            (void)words;
+            return row[static_cast<size_t>(ww)];
+        }
+    };
+
+    // THE SPARSITY SKIP. A word's outputs depend on source columns
+    // [kBits*w - 1, kBits*w + kBits], which live in words w-1, w and w+1. If
+    // `magX | magY` is zero across all three in all three rows, every box sum
+    // is zero, so minEig is exactly 0 for a whole word of pixels and no sqrt is
+    // taken. Measured skip rate on the reference pipeline's own content:
+    // 22-39% of words, and it is worth 1.45x on top of the reformulation
+    //. It is data-dependent by nature -- a dense frame skips nothing.
+    WordType any = 0;
+    for (size_t i = 0; i < 3; ++i) {
+        for (long long d = -1; d <= 1; ++d) {
+            const long long ww = static_cast<long long>(w) + d;
+            any = static_cast<WordType>(any | at(mxr[i], ww) | at(myr[i], ww));
+        }
+    }
+    if (any == 0) {
+        for (size_t x = lo; x < hi; ++x) dstRow[x] = 0.0f;
+        return;
+    }
+
+    WordType hA[3][2], hB[3][2], hP[3][2], hN[3][2];
+    for (size_t i = 0; i < 3; ++i) {
+        WordType ca = 0, cb = 0, cp = 0, cn = 0;
+        WordType pa = 0, pb = 0, pp = 0, pn = 0;
+        WordType na = 0, nb = 0, np = 0, nn = 0;
+        auto load = [&](long long ww, WordType& oa, WordType& ob, WordType& op, WordType& on) {
+            const WordType a = at(mxr[i], ww);
+            const WordType b = at(myr[i], ww);
+            const WordType sel = static_cast<WordType>(at(sxr[i], ww) ^ at(syr[i], ww));
+            const WordType both = static_cast<WordType>(a & b);
+            oa = a;
+            ob = b;
+            on = static_cast<WordType>(both & sel);
+            op = static_cast<WordType>(both ^ on);
+        };
+        load(static_cast<long long>(w), ca, cb, cp, cn);
+        load(static_cast<long long>(w) - 1, pa, pb, pp, pn);
+        load(static_cast<long long>(w) + 1, na, nb, np, nn);
+        // Pixel x lives at bit x % kBits, so column x-1 is one bit lower: a LEFT
+        // shift brings it to x, pulling in the previous word's top bit.
+        auto sl = [kBits](WordType cur, WordType prev) {
+            return static_cast<WordType>((cur << 1) | (prev >> (kBits - 1)));
+        };
+        auto sr = [kBits](WordType cur, WordType next) {
+            return static_cast<WordType>((cur >> 1) | (next << (kBits - 1)));
+        };
+        boxHorizontal3<WordType>(sl(ca, pa), ca, sr(ca, na), hA[i][0], hA[i][1]);
+        boxHorizontal3<WordType>(sl(cb, pb), cb, sr(cb, nb), hB[i][0], hB[i][1]);
+        boxHorizontal3<WordType>(sl(cp, pp), cp, sr(cp, np), hP[i][0], hP[i][1]);
+        boxHorizontal3<WordType>(sl(cn, pn), cn, sr(cn, nn), hN[i][0], hN[i][1]);
+    }
+
+    WordType vA[4], vB[4], vP[4], vN[4];
+    boxVertical3<WordType>(hA[0], hA[1], hA[2], vA);
+    boxVertical3<WordType>(hB[0], hB[1], hB[2], vB);
+    boxVertical3<WordType>(hP[0], hP[1], hP[2], vP);
+    boxVertical3<WordType>(hN[0], hN[1], hN[2], vN);
+
+    // The word survived the sparsity skip, but most of its PIXELS can still be
+    // empty -- a word is 32 or 64 columns and an edge crosses a few of them.
+    // A pixel is zero exactly when its bit is clear in all sixteen count
+    // planes, so one OR of the planes says which pixels have anything at all,
+    // and a group of eight with nothing in it skips the gather and the
+    // transpose rather than being gathered, transposed and then found empty
+    // one pixel at a time.
+    WordType anyPix = 0;
+    for (size_t pp = 0; pp < 4; ++pp) {
+        anyPix = static_cast<WordType>(anyPix | vA[pp] | vB[pp] | vP[pp] | vN[pp]);
+    }
+
+    // Eight pixels per step through the 8x8 bit transpose, not one bit test
+    // per (pixel, plane): the per-pixel gathers were 38% of the whole sweep
+    // on the reference device when this loop read the planes a bit at a
+    // time -- that share is the transpose's own decision figure and is not
+    // re-taken here. vA and vB ride one transpose (nibble each), vP and vN the
+    // other, so a byte comes out holding a pixel's two values.
+    for (size_t x0 = lo; x0 < hi; x0 += 8) {
+        const unsigned b8 = static_cast<unsigned>(x0 - lo);
+        const size_t span = hi - x0 < 8 ? hi - x0 : 8;
+        if (((anyPix >> b8) & WordType{0xFF}) == 0) {
+            for (size_t j = 0; j < span; ++j) dstRow[x0 + j] = 0.0f;
+            continue;
+        }
+        uint64_t gAB = 0, gPN = 0;
+        for (size_t pp = 0; pp < 4; ++pp) {
+            gAB |= static_cast<uint64_t>((vA[pp] >> b8) & WordType{0xFF}) << (8 * pp);
+            gAB |= static_cast<uint64_t>((vB[pp] >> b8) & WordType{0xFF}) << (8 * (pp + 4));
+            gPN |= static_cast<uint64_t>((vP[pp] >> b8) & WordType{0xFF}) << (8 * pp);
+            gPN |= static_cast<uint64_t>((vN[pp] >> b8) & WordType{0xFF}) << (8 * (pp + 4));
+        }
+        const uint64_t tAB = transpose8x8(gAB);
+        const uint64_t tPN = transpose8x8(gPN);
+        for (size_t j = 0; j < span; ++j) {
+            const unsigned ab = static_cast<unsigned>((tAB >> (8 * j)) & 0xFFu);
+            const unsigned pn = static_cast<unsigned>((tPN >> (8 * j)) & 0xFFu);
+            // A pixel with every count zero is exactly 0 -- the word skip
+            // above catches empty WORDS, and on edge-sparse content most
+            // pixels of a surviving word are still empty. Same integers,
+            // no sqrt.
+            if ((ab | pn) == 0u) {
+                dstRow[x0 + j] = 0.0f;
+                continue;
+            }
+            dstRow[x0 + j] = minEigenValue(
+                static_cast<long long>(ab & 0xFu), static_cast<long long>(ab >> 4),
+                static_cast<long long>(pn & 0xFu) - static_cast<long long>(pn >> 4));
+        }
+    }
+}
+
 /// @brief One row of `cornerMinEigenVal` at `blockSize == 3`, bit-sliced.
 /// @note Bit-identical to the per-pixel form; see the section comment above.
 template <typename WordType>
@@ -1407,104 +1949,20 @@ inline void cornerMinEigenValRowSliced(BinMatConstView<WordType> magX,
         sxr[i] = ok ? signX.row(static_cast<size_t>(r)) : nullptr;
         syr[i] = ok ? signY.row(static_cast<size_t>(r)) : nullptr;
     }
+    // Every row this one reads exists, so no read can be a null plane. The
+    // word test is per word, below -- together they are the precondition the
+    // unguarded body is compiled against.
+    const bool rowsPresent = y > 0 && y + 1 < height;
 
     for (size_t w = 0; w < words; ++w) {
-        // THE SPARSITY SKIP. A word's outputs depend on source columns
-        // [kBits*w - 1, kBits*w + kBits], which live in words w-1, w and w+1. If
-        // `magX | magY` is zero across all three in all three rows, every box sum
-        // is zero, so minEig is exactly 0 for a whole word of pixels and no sqrt is
-        // taken. Measured skip rate on the reference pipeline's own content:
-        // 22-39% of words, and it is worth 1.45x on top of the reformulation
-        //. It is data-dependent by nature -- a dense frame skips nothing.
-        WordType any = 0;
-        for (size_t i = 0; i < 3; ++i) {
-            for (long long d = -1; d <= 1; ++d) {
-                const long long ww = static_cast<long long>(w) + d;
-                any = static_cast<WordType>(any | boxWordAt<WordType>(mxr[i], words, ww) |
-                                            boxWordAt<WordType>(myr[i], words, ww));
-            }
-        }
         const size_t lo = w * kBits;
         const size_t hi = (lo + kBits < width) ? (lo + kBits) : width;
-        if (any == 0) {
-            for (size_t x = lo; x < hi; ++x) dstRow[x] = 0.0f;
-            continue;
-        }
-
-        WordType hA[3][2], hB[3][2], hP[3][2], hN[3][2];
-        for (size_t i = 0; i < 3; ++i) {
-            WordType ca = 0, cb = 0, cp = 0, cn = 0;
-            WordType pa = 0, pb = 0, pp = 0, pn = 0;
-            WordType na = 0, nb = 0, np = 0, nn = 0;
-            auto load = [&](long long ww, WordType& oa, WordType& ob, WordType& op,
-                            WordType& on) {
-                const WordType a = boxWordAt<WordType>(mxr[i], words, ww);
-                const WordType b = boxWordAt<WordType>(myr[i], words, ww);
-                const WordType sel = static_cast<WordType>(boxWordAt<WordType>(sxr[i], words, ww) ^
-                                                           boxWordAt<WordType>(syr[i], words, ww));
-                const WordType both = static_cast<WordType>(a & b);
-                oa = a;
-                ob = b;
-                on = static_cast<WordType>(both & sel);
-                op = static_cast<WordType>(both ^ on);
-            };
-            load(static_cast<long long>(w), ca, cb, cp, cn);
-            load(static_cast<long long>(w) - 1, pa, pb, pp, pn);
-            load(static_cast<long long>(w) + 1, na, nb, np, nn);
-            // Pixel x lives at bit x % kBits, so column x-1 is one bit lower: a LEFT
-            // shift brings it to x, pulling in the previous word's top bit.
-            auto sl = [kBits](WordType cur, WordType prev) {
-                return static_cast<WordType>((cur << 1) | (prev >> (kBits - 1)));
-            };
-            auto sr = [kBits](WordType cur, WordType next) {
-                return static_cast<WordType>((cur >> 1) | (next << (kBits - 1)));
-            };
-            boxHorizontal3<WordType>(sl(ca, pa), ca, sr(ca, na), hA[i][0], hA[i][1]);
-            boxHorizontal3<WordType>(sl(cb, pb), cb, sr(cb, nb), hB[i][0], hB[i][1]);
-            boxHorizontal3<WordType>(sl(cp, pp), cp, sr(cp, np), hP[i][0], hP[i][1]);
-            boxHorizontal3<WordType>(sl(cn, pn), cn, sr(cn, nn), hN[i][0], hN[i][1]);
-        }
-
-        WordType vA[4], vB[4], vP[4], vN[4];
-        boxVertical3<WordType>(hA[0], hA[1], hA[2], vA);
-        boxVertical3<WordType>(hB[0], hB[1], hB[2], vB);
-        boxVertical3<WordType>(hP[0], hP[1], hP[2], vP);
-        boxVertical3<WordType>(hN[0], hN[1], hN[2], vN);
-
-        // Eight pixels per step through the 8x8 bit transpose, not one bit test
-        // per (pixel, plane): the per-pixel gathers were 38% of the whole sweep
-        // on the reference device when this loop read the planes a bit at a
-        // time. vA and vB ride one transpose (nibble each), vP and vN the
-        // other, so a byte comes out holding a pixel's two values.
-        for (size_t x0 = lo; x0 < hi; x0 += 8) {
-            const unsigned b8 = static_cast<unsigned>(x0 - lo);
-            uint64_t gAB = 0, gPN = 0;
-            for (size_t pp = 0; pp < 4; ++pp) {
-                gAB |= static_cast<uint64_t>((vA[pp] >> b8) & WordType{0xFF}) << (8 * pp);
-                gAB |= static_cast<uint64_t>((vB[pp] >> b8) & WordType{0xFF})
-                       << (8 * (pp + 4));
-                gPN |= static_cast<uint64_t>((vP[pp] >> b8) & WordType{0xFF}) << (8 * pp);
-                gPN |= static_cast<uint64_t>((vN[pp] >> b8) & WordType{0xFF})
-                       << (8 * (pp + 4));
-            }
-            const uint64_t tAB = transpose8x8(gAB);
-            const uint64_t tPN = transpose8x8(gPN);
-            const size_t lim = hi - x0 < 8 ? hi - x0 : 8;
-            for (size_t j = 0; j < lim; ++j) {
-                const unsigned ab = static_cast<unsigned>((tAB >> (8 * j)) & 0xFFu);
-                const unsigned pn = static_cast<unsigned>((tPN >> (8 * j)) & 0xFFu);
-                // A pixel with every count zero is exactly 0 -- the word skip
-                // above catches empty WORDS, and on edge-sparse content most
-                // pixels of a surviving word are still empty. Same integers,
-                // no sqrt.
-                if ((ab | pn) == 0u) {
-                    dstRow[x0 + j] = 0.0f;
-                    continue;
-                }
-                dstRow[x0 + j] = minEigenValue(
-                    static_cast<long long>(ab & 0xFu), static_cast<long long>(ab >> 4),
-                    static_cast<long long>(pn & 0xFu) - static_cast<long long>(pn >> 4));
-            }
+        if (rowsPresent && w > 0 && w + 1 < words) {
+            cornerMinEigenValWordSliced<WordType, false>(mxr, myr, sxr, syr, words, w, lo, hi,
+                                                         dstRow);
+        } else {
+            cornerMinEigenValWordSliced<WordType, true>(mxr, myr, sxr, syr, words, w, lo, hi,
+                                                        dstRow);
         }
     }
 }
@@ -1640,11 +2098,10 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
     // parted company, which is exactly the equality this function promises.
     // `Corner.Mask_StreamingSeedRowObeysTheMask` pins the adversarial case.
     //
-    // The unmasked path seeds from `first[0]` and runs a bare max-reduce -- max
-    // over floats is exact, so the compiler is free to vectorize it, and the
-    // masked path's per-pixel gate is kept out of its way on purpose: this loop
-    // and its per-row twin below were 29% of a whole detection on the reference
-    // device before the split.
+    // The unmasked path reduces the row through `rowMax`, and the masked path's
+    // per-pixel gate is kept out of its way on purpose: this loop and its
+    // per-row twin below were 29% of a whole detection on the reference device
+    // before the split.
     //
     // The masked seed starts BELOW every response (-1: a response is never
     // negative, see PRECISION above). Until the first admitted pixel arrives the
@@ -1662,11 +2119,7 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
                 runningMax = first[static_cast<size_t>(x)];
         }
     } else {
-        runningMax = first[0];
-        for (int x = 1; x < width; ++x) {
-            const float v = first[static_cast<size_t>(x)];
-            runningMax = v > runningMax ? v : runningMax;
-        }
+        runningMax = impl::rowMax(first, static_cast<size_t>(width));
     }
 
     // The whole carry, beside the caller's two buffers: the number of retained
@@ -1676,14 +2129,16 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
     // never negative (PRECISION, at the top of this file).
     size_t retained = 0;
     float maxDiscarded = -1.0f;
+    // See the frame-map form: raster order survives until the heap evicts.
+    bool rasterOrdered = true;
 
     for (int y = 1; y < height; ++y) {
         float* cur = ring.row(static_cast<size_t>(y) % kResponseRingRows);
         cornerMinEigenValRow<WordType>(magX, magY, signX, signY, blockSize, y, cur);
         // The mask gates this the way it gates the frame-map form's maxVal: the
         // threshold is a fraction of the strongest ADMITTED response, because
-        // that is the region cv::minMaxLoc is given. The unmasked twin is the
-        // bare max-reduce -- see the seed loop on why the two are split.
+        // that is the region cv::minMaxLoc is given. The unmasked twin is
+        // `rowMax` -- see the seed loop on why the two are split.
         if (masked) {
             for (int x = 0; x < width; ++x) {
                 if (!masked_admit(x, y)) continue;
@@ -1691,10 +2146,8 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
                     runningMax = cur[static_cast<size_t>(x)];
             }
         } else {
-            for (int x = 0; x < width; ++x) {
-                const float v = cur[static_cast<size_t>(x)];
-                runningMax = v > runningMax ? v : runningMax;
-            }
+            const float m = impl::rowMax(cur, static_cast<size_t>(width));
+            runningMax = m > runningMax ? m : runningMax;
         }
 
         if (y < 2) continue;  // row `y - 1` has no row above it yet
@@ -1726,8 +2179,13 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
             candidate.response = val;
 
             if (retained < capacity) {
+                // Appended, not pushed -- see the frame-map form on why the
+                // heap is built once, when the buffer first fills, rather than
+                // maintained from the first survivor.
                 corners[retained++] = candidate;
-                std::push_heap(corners, corners + retained, impl::CornerStronger());
+                if (retained == capacity) {
+                    std::make_heap(corners, corners + retained, impl::CornerStronger());
+                }
                 return;
             }
             if (capacity == 0) {
@@ -1742,6 +2200,7 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
             // built with the SORT's comparator, so its maximum is the weakest.
             // Whichever of the two loses becomes a discarded candidate, and that
             // is the only place `maxDiscarded` can move once the buffer is full.
+            rasterOrdered = false;
             if (impl::CornerStronger()(candidate, corners[0])) {
                 if (corners[0].response > maxDiscarded) maxDiscarded = corners[0].response;
                 std::pop_heap(corners, corners + retained, impl::CornerStronger());
@@ -1758,7 +2217,7 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
         int x = 1;
         const int xEnd = width - 1;
 #if defined(BINCV_CORNERNMS_SIMD)
-        if (impl::hasCornerNmsSimd()) {
+        if (impl::hasCornerSimd()) {
             for (; x + impl::kNmsLanes <= xEnd; x += impl::kNmsLanes) {
                 unsigned lanes = impl::nmsLaneMask(above, mid, below, x, running);
                 while (lanes != 0u) {
@@ -1807,28 +2266,16 @@ inline CornerResult goodFeaturesToTrackStreaming(BinMatConstView<WordType> magX,
     if (ranked == 0) return out;
 
     // From here the stages are selectGoodFeatures' 4a and 4b, on the same array
-    // with the same comparator and the same limit.
-    std::sort(corners, corners + ranked, impl::CornerStronger());
+    // in the same order with the same limit. The threshold pass above only
+    // compacted, so a raster-ordered pool is raster-ordered still.
+    impl::rankCandidates(corners, ranked, capacity, rasterOrdered);
 
     const size_t limit = (params.maxCorners > 0)
                              ? std::min(capacity, static_cast<size_t>(params.maxCorners))
                              : capacity;
     size_t kept = 0;
     if (params.minDistance >= 1.0) {
-        const double minDistanceSq = params.minDistance * params.minDistance;
-        for (size_t i = 0; i < ranked && kept < limit; ++i) {
-            const Corner candidate = corners[i];
-            bool good = true;
-            for (size_t j = 0; j < kept; ++j) {
-                const double dx = static_cast<double>(candidate.x) - static_cast<double>(corners[j].x);
-                const double dy = static_cast<double>(candidate.y) - static_cast<double>(corners[j].y);
-                if (dx * dx + dy * dy < minDistanceSq) {
-                    good = false;
-                    break;
-                }
-            }
-            if (good) corners[kept++] = candidate;
-        }
+        kept = impl::spacingFilter(corners, ranked, params.minDistance, limit);
     } else {
         kept = (ranked < limit) ? ranked : limit;
     }

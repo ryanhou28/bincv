@@ -51,26 +51,34 @@ pipeline.
 
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|
-| the assembled pipeline, ms/frame | 3.7275 | **1.0215** | **3.658× [3.633, 3.681]** | 23.588 | **5.097** | **4.620× [4.596, 4.628]** |
+| the assembled pipeline, ms/frame | 4.0070 | **1.0095** | **3.969× [3.935, 4.004]** | 23.614 | **4.435** | **5.324× [5.307, 5.335]** |
 
 Both ratios are formed inside each launch and are medians of those per-launch ratios, above
-1.00 in 30 of 30 on x86-64 and 5 of 5 on the device; each interval is a percentile bootstrap
-over its own launches. Almost all of the x86 scatter is OpenCV's — its arm's launches run
-3.622 to 4.919 ms while binCV's run 0.991 to 1.217. The device's 0.6% ratio scatter against
-the desktop's 13% is what a pinned, governor-locked machine buys, and it is why five launches
-are quoted there and thirty here.
+1.00 in 30 of 30 on x86-64 and 10 of 10 on the device; each interval is a percentile bootstrap
+over its own launches. Re-taken at commit `880704b`. Almost all of the x86 scatter is
+OpenCV's — its arm's launches run 3.924 to 4.446 ms while binCV's run 0.975 to 1.084. The
+device's 0.5% ratio scatter against the desktop's 13% is what a pinned, governor-locked
+machine buys, and it is why ten launches are quoted there and thirty here.
 
-**The aarch64 row was 4.73× and it is 4.620×, and that is a regression rather than noise.**
-It is the one published figure the device re-measurement moved beyond its own band, and the
-stage table below says where: **every stage but one got faster, `pyrDown` by half, and the
-pipeline still got slower** — because Lucas–Kanade is three quarters of it and grew 14.5%.
-An independent five-launch sweep taken separately reads 4.616× [4.611, 4.637], so the two
-sweeps agree and the published 4.73× is outside both.
+**The device row moved 4.620× → 5.324×, and only part of that is this round's work.** The
+stage table below splits it, and the split matters more than the headline:
 
-**An independent sweep agrees.** The `BINCV_LK_BATCH=1` arm in
-[limits.md](limits.md#the-vector-arms-and-proving-they-are-on) is the same pipeline in a
-separate thirty-launch sweep and reads 3.632× [3.614, 3.648] — 0.7% away, intervals
-overlapping.
+* **`detect` went 0.457 → 0.298 ms/frame**, which is `goodFeaturesToTrack`'s selection
+  optimization ([features.md](features.md#corner-detection)) arriving at the pipeline's
+  4.8% re-detection duty cycle. On its own that stage change takes the row to about
+  **4.78×**.
+* **`track` went 3.787 → 3.279 ms/frame, and nothing here changed Lucas–Kanade.** That is
+  the rest of the move, and this page does not have a cause for it.
+
+**The previously published Lucas–Kanade regression does not reproduce.** This page recorded
+3.307 → 3.787 ms/frame as "a regression rather than noise" and said the pipeline got slower
+because of it. At `880704b` that stage reads **3.279** — back where it started, across ten
+launches whose own scatter is 1.8%. Three measurements of a stage nobody edited reading
+3.307, 3.787 and 3.279 is not a regression that was fixed; it is a stage whose
+run-to-run behaviour across *sweeps* is wider than any one sweep's interval suggests, and the
++14.5% should not have been called a regression on one re-take. Recorded rather than
+explained: naming a cause this page has not measured is the failure it already has a name for
+two sections down.
 
 **The reference device is where binCV does better**, and it is the deployment-class part.
 
@@ -102,12 +110,12 @@ total:
 
 | stage | time, x86-64 (ms/frame) | share of the x86-64 pipeline | time, aarch64 (ms/frame) | share of the aarch64 pipeline |
 |---|---|---|---|---|
-| track (Lucas–Kanade) | 0.704 | 68.9% | 3.787 | 74.3% |
-| build (pyramid + derivatives) | 0.181 | 17.7% | 0.860 | 16.9% |
-| — sensor stage | 0.086 | 8.4% | 0.519 | 10.2% |
-| — `pyrDown` | 0.057 | 5.6% | 0.189 | 3.7% |
-| — derivatives | 0.038 | 3.7% | 0.150 | 2.9% |
-| detect | 0.139 | 13.6% | 0.457 | 9.0% |
+| track (Lucas–Kanade) | 0.7365 | 73.0% | 3.279 | 73.9% |
+| build (pyramid + derivatives) | 0.1995 | 19.8% | 0.8525 | 19.2% |
+| — sensor stage | 0.098 | 9.7% | 0.505 | 11.4% |
+| — `pyrDown` | 0.059 | 5.8% | 0.190 | 4.3% |
+| — derivatives | 0.042 | 4.2% | 0.1535 | 3.5% |
+| **detect** | **0.073** | **7.2%** | **0.298** | **6.7%** |
 
 Tracking dominates on both, so the operations that move this number are the ones inside the
 Lucas–Kanade loop rather than the ones with the largest per-operation ratios: `pyrDown` is
@@ -117,25 +125,32 @@ two `pyrDown` shares finally describe the same code; on every other stage the tw
 architectures spend their time within five points of each other, so nothing here is
 bottlenecked on anything architecture-specific.
 
-**What the device column moved, stage by stage**, against the same table at commit `25065d7`:
+**What the device column has done over three sweeps**, the same table at three commits:
 
-| stage | published | re-taken at `80ff0a8` | |
-|---|---|---|---|
-| — `pyrDown` | 0.377 | **0.189** | −49.9% |
-| build | 1.072 | 0.860 | −19.8% |
-| detect | 0.570 | **0.457** | −19.8% |
-| — sensor stage | 0.543 | 0.519 | −4.4% |
-| **track (Lucas–Kanade)** | **3.307** | **3.787** | **+14.5%** |
-| **the pipeline** | **4.906–4.949** | **5.097** | **+3.0 to +3.9%** |
+| stage | `25065d7` | `80ff0a8` | `880704b` | |
+|---|---|---|---|---|
+| — `pyrDown` | 0.377 | **0.189** | 0.190 | halved at `80ff0a8`, flat since |
+| build | 1.072 | 0.860 | 0.8525 | |
+| **detect** | 0.570 | 0.457 | **0.298** | **−34.8% this round** |
+| — sensor stage | 0.543 | 0.519 | 0.505 | |
+| **track (Lucas–Kanade)** | **3.307** | **3.787** | **3.279** | **unedited, and it has moved ±14%** |
+| **the pipeline** | **4.906–4.949** | **5.097** | **4.435** | |
 
-**Lucas–Kanade's own kernel is not what regressed.** `lk_headtohead` on the same commit is
-flat — 2.843 ms to 2.838, and OpenCV's arm 23.476 to 23.400 — so the 14.5% is in what the
-pipeline hands the tracker rather than in the tracker. `pyrDown` halving over the same
-interval is the obvious place to look and the pyramid it produces is what LK reads, but
-nothing here measures that link, and naming a cause this page has not measured is how a
-figure like 4.73× survived three weeks in the first place. The workload is identical on both
-sides of the comparison: 1710 frames, 1709 pairs, 82 re-detections, the same track lifetimes,
-and a peak of 436,704 B exactly as published.
+**`detect` is the one this round moved, and it is the only one this round touched.**
+`goodFeaturesToTrack`'s selection is 1.8× faster ([features.md](features.md#corner-detection))
+and this is that arriving at a 4.8% re-detection duty cycle. Detection is now 6.7% of the
+device pipeline and 7.2% of the desktop's, so there is little left in it: another halving
+would be worth about 1.04× end to end.
+
+**Lucas–Kanade is the row to be careful about.** Nothing has edited it across these three
+sweeps and it reads 3.307, 3.787, 3.279. `lk_headtohead` was flat across the first two —
+2.843 ms to 2.838, and OpenCV's arm 23.476 to 23.400 — which was read at the time as
+evidence that the +14.5% lived in "what the pipeline hands the tracker". The third sweep
+undoes it without anything being fixed, so the simpler reading is that this stage's
+sweep-to-sweep spread is wider than any one sweep's 1.8% interval, and that it should not
+have been called a regression. The workload is identical across all three: 1710 frames, 1709
+pairs, 82 re-detections, the same track lifetimes, and a peak of 436,704 B exactly as
+published.
 
 ## Accuracy
 
@@ -175,9 +190,11 @@ library. The agreement figures are evidence that the kernels are sufficient, not
 about pose error.
 
 **The detection duty cycle belongs to the benchmark.** This harness re-detects only when it
-runs out of tracks — 4.8% of frames here, so detection is 11.5–13.6% of the total. A
+runs out of tracks — 4.8% of frames here, so detection is 6.7–7.2% of the total. A
 tracker that tops up whenever its track count falls below a target detects far more often,
-and the detect stage then dominates in a way none of these numbers show.
+and the detect stage then dominates in a way none of these numbers show. That also cuts the
+other way: `goodFeaturesToTrack` getting 1.8× faster is worth 4% of *this* pipeline and would
+be worth much more of that one.
 
 **It is one thread on each side, and that is binCV's best case.** binCV is serial unless a
 caller installs a threading backend; OpenCV is not. Both scale, OpenCV scales better, so the
@@ -220,9 +237,10 @@ to replace the aarch64 column, which is why that column is still the pre-change 
 
 **The x86-64 half of the re-measurement now exists, and the tables above carry it.** Thirty
 pinned launches
-([logs/feature-tracking-x86_64-launches.log](logs/feature-tracking-x86_64-launches.log)):
-OpenCV 3.7275 ms/frame, binCV 1.0215, **3.658×** with a bootstrap 95% interval of
-[3.633, 3.681] and above 1.00 in 30 of 30, against the 3.30× the pre-change table carried.
+([logs/feature-tracking-x86_64-launches.log](logs/feature-tracking-x86_64-launches.log))
+read OpenCV 3.7275 ms/frame, binCV 1.0215, **3.658×** [3.633, 3.681], above 1.00 in 30 of 30,
+against the 3.30× the pre-change table carried. (Those are that round's figures; the tables
+above are re-taken at `880704b`, where the same sweep reads 3.969×.)
 The stage shares moved the way the change predicts — `pyrDown` 0.137 → 0.057 ms/frame, build
 0.297 → 0.181, sensor 0.118 → 0.086, track 0.799 → 0.704, detect 0.186 → 0.139. **This is the
 row-by-row edit the paragraph above declined, and it is being made deliberately**: leaving a

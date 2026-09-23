@@ -41,8 +41,15 @@ provisioning the frame-map form holds 16.54 bytes per pixel and the streaming fo
 the streaming form is what every pipeline here calls.
 
 **Against the OpenCV denominator it is 5.71× smaller at the measured survivor count and 2.23×
-when both sides are provisioned for their worst case** ([the log](logs/goodfeatures-x86_64.log)
-has both; the pessimistic one is safer to design against). The gap is the candidate array,
+when both sides are provisioned for their worst case** ([the log](logs/goodfeatures-x86_64-launches.log)
+has both; the pessimistic one is safer to design against). **Against stock
+`cv::goodFeaturesToTrack`, which is what [features.md](features.md#corner-detection) now
+publishes the SPEED against, the streaming form is 2.31× smaller — 12.56 bytes per pixel
+against 29.00.** That row stays on the binarized denominator because stock's buffers are
+*accounted* and not read: `cornerMinEigenVal` materializes `Dx`, `Dy` and a `CV_32FC3`
+covariance inside the call and `gftt` adds `eig` and a dilate destination, none of which a
+caller can measure from outside. Every figure in this table is read off the objects, and a
+row mixing the two kinds would not be. The gap is the candidate array,
 which is a per-frame reading rather than a bound: a binarized min-eigenvalue map takes few
 distinct values, so large numbers of pixels tie and survive non-maximum suppression. Size that
 pool from the ranked count rather than from `maxCorners` and watch the truncation flag — the
@@ -181,7 +188,7 @@ built for and would have taken the pipeline from about 1.52× to 1.65× against 
 92,160 additional bytes on a 436,704-byte peak, taking the footprint result from 6.23× to
 5.15×. Twenty-one percent of the footprint advantage for eight percent of the speed is not a
 trade this library makes. (The 1.52× baseline is an older pipeline figure, superseded by the
-3.658× and 4.620× in [feature-tracking.md](feature-tracking.md); the proportions are what
+3.969× and 5.324× in [feature-tracking.md](feature-tracking.md); the proportions are what
 the decision turned on.)
 
 Two other figures here come from that same record rather than a committed benchmark: the
