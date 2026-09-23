@@ -1313,6 +1313,22 @@ private:
 };
 
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+/// @brief `tv[I] - 2*ov[I]`, widened, with the lane index a TEMPLATE parameter.
+/// **INTERNAL.**
+/// @note **The index cannot be a function argument.** `vgetq_lane_u32` takes an
+/// immediate, so an `int` parameter only compiles where the optimizer inlines
+/// the call and folds it to a constant -- which it does at `-O2` and does not
+/// at `-O0`. This was a lambda taking `int i`: it built in every Release
+/// configuration and in none of the Debug ones, on the library's primary
+/// vector target. Nothing caught it, because the emulated cross gate builds
+/// `core` and `noexcept` and never `debug`, so no gate had compiled this
+/// region at `-O0` at all. A template parameter cannot regress that way.
+template <int I>
+inline long long neonLaneResidual(uint32x4_t tv, uint32x4_t ov) {
+    return static_cast<long long>(vgetq_lane_u32(tv, I)) -
+           2 * static_cast<long long>(vgetq_lane_u32(ov, I));
+}
+
 /// @brief The aligned residual at **N == 1**, batching across the FOUR TAPS with
 /// accumulators carried across the WHOLE WINDOW. **INTERNAL**.
 /// @note `Staged` is compile-time; see `RowReader`. This is that same consolidation:
@@ -1383,17 +1399,19 @@ inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
     }
     if (sinceFlush != 0) flush();
 
-    // ONE domain crossing per window per component, not one per row.
-    auto lane = [](uint32x4_t tv, uint32x4_t ov, int i) {
-        return static_cast<long long>(vgetq_lane_u32(tv, i)) -
-               2 * static_cast<long long>(vgetq_lane_u32(ov, i));
-    };
-    sumsX.t00 += lane(totX, oppX, 0); sumsX.t01 += lane(totX, oppX, 1);
-    sumsX.t10 += lane(totX, oppX, 2); sumsX.t11 += lane(totX, oppX, 3);
+    // ONE domain crossing per window per component, not one per row. The lane
+    // index is a template argument because the intrinsic takes an immediate --
+    // see neonLaneResidual above, and the Debug build that found it.
+    sumsX.t00 += neonLaneResidual<0>(totX, oppX);
+    sumsX.t01 += neonLaneResidual<1>(totX, oppX);
+    sumsX.t10 += neonLaneResidual<2>(totX, oppX);
+    sumsX.t11 += neonLaneResidual<3>(totX, oppX);
     sumsX.self += static_cast<long long>(vgetq_lane_u32(accSelf, 0)) -
                   2 * static_cast<long long>(vgetq_lane_u32(accSelf, 1));
-    sumsY.t00 += lane(totY, oppY, 0); sumsY.t01 += lane(totY, oppY, 1);
-    sumsY.t10 += lane(totY, oppY, 2); sumsY.t11 += lane(totY, oppY, 3);
+    sumsY.t00 += neonLaneResidual<0>(totY, oppY);
+    sumsY.t01 += neonLaneResidual<1>(totY, oppY);
+    sumsY.t10 += neonLaneResidual<2>(totY, oppY);
+    sumsY.t11 += neonLaneResidual<3>(totY, oppY);
     sumsY.self += static_cast<long long>(vgetq_lane_u32(accSelf, 2)) -
                   2 * static_cast<long long>(vgetq_lane_u32(accSelf, 3));
 }
