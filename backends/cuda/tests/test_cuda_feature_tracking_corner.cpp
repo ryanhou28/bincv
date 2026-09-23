@@ -381,10 +381,10 @@ BINCV_TEST(CudaFast, TheOrderedArmsGateIsTheCallersScratch) {
 }
 
 BINCV_TEST(CudaFast, RefusesAnArcLengthOutsideTheRing) {
-    // R4: a device op may accept a narrower domain than its host twin, but it
-    // must NAME it, assert it and RETURN AN ERROR outside it. Release only --
-    // the assertion aborts in a checked build, which is what it is for.
-#if !BINCV_DEBUG_CHECKS
+    // A device op may accept a narrower domain than its host twin, but it must
+    // NAME it, assert it and RETURN AN ERROR outside it. The arc length is
+    // asserted before it is refused -- a deliberate domain violation; see
+    // BINCV_CHECK_EQ_UNLESS_CHECKED.
     const BinMat<Word> img = structuredBits(64, 16, 7);
     bc::DeviceBinMat dimg(64, 16);
     bc::upload(img.constView(), dimg.view());
@@ -394,19 +394,19 @@ BINCV_TEST(CudaFast, RefusesAnArcLengthOutsideTheRing) {
     const bc::DeviceFastCornerBuffer buf(dout.data(), counter.devicePtr(), 16u);
     const size_t want = bc::fastScratchBytes(64, 16, 16);
     bc::DeviceArray<uint8_t> scratch(want);
-    BINCV_CHECK_EQ(static_cast<int>(bc::detectFastAsync(dimg.constView(), buf, scratch.data(),
-                                                        want, 17)),
-                   static_cast<int>(cudaErrorInvalidValue));
-    BINCV_CHECK_EQ(static_cast<int>(bc::detectFastAsync(dimg.constView(), buf, scratch.data(),
-                                                        want, 0)),
-                   static_cast<int>(cudaErrorInvalidValue));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(static_cast<int>(bc::detectFastAsync(
+                                      dimg.constView(), buf, scratch.data(), want, 17)),
+                                  static_cast<int>(cudaErrorInvalidValue));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(static_cast<int>(bc::detectFastAsync(
+                                      dimg.constView(), buf, scratch.data(), want, 0)),
+                                  static_cast<int>(cudaErrorInvalidValue));
     // A scratch buffer shorter than the sizing function says is a refusal, not a
-    // device-side out-of-bounds write.
+    // device-side out-of-bounds write. It is a plain comparison with no assertion
+    // on its path, so it runs in every configuration.
     BINCV_CHECK_EQ(static_cast<int>(bc::detectFastAsync(dimg.constView(), buf, scratch.data(),
                                                         want - 1, 9)),
                    static_cast<int>(cudaErrorInvalidValue));
     BINCV_CHECK_EQ(static_cast<int>(cudaGetLastError()), static_cast<int>(cudaSuccess));
-#endif
 }
 
 BINCV_TEST(CudaFast, AnOrderedSizedBufferMeetingTheReferenceArmIsRefused) {
@@ -859,22 +859,27 @@ BINCV_TEST(CudaCorner, CandidateOverflowRefusesRatherThanGuesses) {
 }
 
 BINCV_TEST(CudaCorner, RefusesOutsideItsDocumentedDomain) {
-#if !BINCV_DEBUG_CHECKS
+    // A refusal the launcher asserts first is a deliberate domain violation and
+    // goes through BINCV_CHECK_EQ_UNLESS_CHECKED; one that is a plain comparison
+    // with no assertion on its path runs in every configuration.
     const BinMat<Word> frame = structuredBits(64, 16, 5);
     Derivatives d(frame);
     bc::DeviceImage<float> dmap(64, 16);
-    BINCV_CHECK_EQ(static_cast<int>(bc::cornerMinEigenValAsync(
-                       d.magX.constView(), d.magY.constView(), d.signX.constView(),
-                       d.signY.constView(), 0, dmap.view())),
-                   static_cast<int>(cudaErrorInvalidValue));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(static_cast<int>(bc::cornerMinEigenValAsync(
+                                      d.magX.constView(), d.magY.constView(),
+                                      d.signX.constView(), d.signY.constView(), 0,
+                                      dmap.view())),
+                                  static_cast<int>(cudaErrorInvalidValue));
     bc::DeviceImage<float> wrong(32, 16);
-    BINCV_CHECK_EQ(static_cast<int>(bc::cornerMinEigenValAsync(
-                       d.magX.constView(), d.magY.constView(), d.signX.constView(),
-                       d.signY.constView(), 3, wrong.view())),
-                   static_cast<int>(cudaErrorInvalidValue));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(static_cast<int>(bc::cornerMinEigenValAsync(
+                                      d.magX.constView(), d.magY.constView(),
+                                      d.signX.constView(), d.signY.constView(), 3,
+                                      wrong.view())),
+                                  static_cast<int>(cudaErrorInvalidValue));
 
     // The reference arm needs the frame map the fused arm exists not to have,
-    // and says so rather than writing through a null pointer.
+    // and says so rather than writing through a null pointer. Neither this nor
+    // the short scratch below is asserted, so both are plain checks.
     bc::impl::cornerFusedEnabled() = false;
     bc::DeviceArray<bc::DeviceCorner> dcand(64);
     bc::DeviceAppendCounter counter;
@@ -908,13 +913,13 @@ BINCV_TEST(CudaCorner, RefusesOutsideItsDocumentedDomain) {
     // a wrapped coordinate would order corners plausibly and wrongly.
     bc::DeviceBinMat wideFrame(65537, 1);
     work.scratchBytes = bc::goodFeaturesScratchBytes(64);
-    BINCV_CHECK_EQ(static_cast<int>(bc::goodFeaturesToTrackAsync(
-                       wideFrame.constView(), wideFrame.constView(), wideFrame.constView(),
-                       wideFrame.constView(), GoodFeaturesParams(), work, dout.data(), 16u,
-                       dres.data())),
-                   static_cast<int>(cudaErrorInvalidValue));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(static_cast<int>(bc::goodFeaturesToTrackAsync(
+                                      wideFrame.constView(), wideFrame.constView(),
+                                      wideFrame.constView(), wideFrame.constView(),
+                                      GoodFeaturesParams(), work, dout.data(), 16u,
+                                      dres.data())),
+                                  static_cast<int>(cudaErrorInvalidValue));
     BINCV_CHECK_EQ(static_cast<int>(cudaGetLastError()), static_cast<int>(cudaSuccess));
-#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -1053,7 +1058,8 @@ BINCV_TEST(CudaSubPix, MatchesHostOnBordersAndEmptySets) {
 }
 
 BINCV_TEST(CudaSubPix, RefusesOutsideItsDocumentedDomain) {
-#if !BINCV_DEBUG_CHECKS
+    // Every refusal here is asserted first -- deliberate domain violations; see
+    // BINCV_CHECK_EQ_UNLESS_CHECKED.
     const BinMat<Word> frame = structuredBits(64, 32, 9);
     Derivatives d(frame);
     SubPixParams good;
@@ -1063,24 +1069,24 @@ BINCV_TEST(CudaSubPix, RefusesOutsideItsDocumentedDomain) {
 
     SubPixParams tooBig;
     tooBig.winHalf = bincv::impl::kMaxWinHalf + 1;
-    BINCV_CHECK_EQ(static_cast<int>(bc::cornerSubPixAsync(
-                       d.magX.constView(), d.magY.constView(), d.signX.constView(),
-                       d.signY.constView(), dxy.data(), 4u, tooBig, mask.devicePtr(),
-                       dres.data())),
-                   static_cast<int>(cudaErrorInvalidValue));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(static_cast<int>(bc::cornerSubPixAsync(
+                                      d.magX.constView(), d.magY.constView(),
+                                      d.signX.constView(), d.signY.constView(), dxy.data(),
+                                      4u, tooBig, mask.devicePtr(), dres.data())),
+                                  static_cast<int>(cudaErrorInvalidValue));
     SubPixParams tooSmall;
     tooSmall.winHalf = 0;
-    BINCV_CHECK_EQ(static_cast<int>(bc::cornerSubPixAsync(
-                       d.magX.constView(), d.magY.constView(), d.signX.constView(),
-                       d.signY.constView(), dxy.data(), 4u, tooSmall, mask.devicePtr(),
-                       dres.data())),
-                   static_cast<int>(cudaErrorInvalidValue));
-    BINCV_CHECK_EQ(static_cast<int>(bc::cornerSubPixAsync(
-                       d.magX.constView(), d.magY.constView(), d.signX.constView(),
-                       d.signY.constView(), nullptr, 4u, good, mask.devicePtr(), dres.data())),
-                   static_cast<int>(cudaErrorInvalidValue));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(static_cast<int>(bc::cornerSubPixAsync(
+                                      d.magX.constView(), d.magY.constView(),
+                                      d.signX.constView(), d.signY.constView(), dxy.data(),
+                                      4u, tooSmall, mask.devicePtr(), dres.data())),
+                                  static_cast<int>(cudaErrorInvalidValue));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(static_cast<int>(bc::cornerSubPixAsync(
+                                      d.magX.constView(), d.magY.constView(),
+                                      d.signX.constView(), d.signY.constView(), nullptr, 4u,
+                                      good, mask.devicePtr(), dres.data())),
+                                  static_cast<int>(cudaErrorInvalidValue));
     BINCV_CHECK_EQ(static_cast<int>(cudaGetLastError()), static_cast<int>(cudaSuccess));
-#endif
 }
 
 BINCV_TEST(CudaSubPix, TheMaskIsTheHostsOwn) {

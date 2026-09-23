@@ -931,11 +931,10 @@ BINCV_TEST(CudaSparseMatch, BlockMatchingOnADirtyPlaneAndThroughItsOwnGate) {
 }
 
 BINCV_TEST(CudaSparseMatch, BlockMatchingRefusesOutsideItsDocumentedDomain) {
-    // R4: a device op may accept a narrower domain than its host twin if it
-    // NAMES it, ASSERTS it and RETURNS AN ERROR outside it. Under Debug the
-    // assertions fire first, so the refusal is only observable in a build
-    // where they are compiled out -- which is the build this checks.
-#if !BINCV_DEBUG_CHECKS
+    // A device op may accept a narrower domain than its host twin if it NAMES
+    // it, ASSERTS it and RETURNS AN ERROR outside it. Both refusals below are
+    // asserted first -- deliberate domain violations; see
+    // BINCV_CHECK_EQ_UNLESS_CHECKED.
     const size_t w = 64, h = 64;
     const std::vector<bincv::Point2f> pts = trackPoints(w, h, 8, 0x7500u);
     Ladder L(w, h, 2, 0x7600u, false);
@@ -946,20 +945,18 @@ BINCV_TEST(CudaSparseMatch, BlockMatchingRefusesOutsideItsDocumentedDomain) {
 
     bincv::BlockMatchParams tooWide;
     tooWide.searchRadius = bincv::cuda::kMaxBlockMatchRadius + 1;
-    BINCV_CHECK_EQ(bincv::cuda::calcOpticalFlowBlockMatch(
-                       L.devLevels.data(), 2, dPrev.data(), dNext.data(), dStatus.data(),
-                       pts.size(), dScratch.data(), dScratch.size(), tooWide),
-                   cudaErrorInvalidValue);
+    BINCV_CHECK_EQ_UNLESS_CHECKED(bincv::cuda::calcOpticalFlowBlockMatch(
+                                      L.devLevels.data(), 2, dPrev.data(), dNext.data(),
+                                      dStatus.data(), pts.size(), dScratch.data(),
+                                      dScratch.size(), tooWide),
+                                  cudaErrorInvalidValue);
 
     // Too few scratch bytes for the arm that needs them.
     bincv::BlockMatchParams ok;
-    BINCV_CHECK_EQ(bincv::cuda::calcOpticalFlowBlockMatch(
-                       L.devLevels.data(), 2, dPrev.data(), dNext.data(), dStatus.data(),
-                       pts.size(), dScratch.data(), 8, ok),
-                   cudaErrorInvalidValue);
-#else
-    BINCV_CHECK(bincv::cuda::kMaxBlockMatchRadius > 0);
-#endif
+    BINCV_CHECK_EQ_UNLESS_CHECKED(bincv::cuda::calcOpticalFlowBlockMatch(
+                                      L.devLevels.data(), 2, dPrev.data(), dNext.data(),
+                                      dStatus.data(), pts.size(), dScratch.data(), 8, ok),
+                                  cudaErrorInvalidValue);
 }
 
 BINCV_TEST(CudaSparseMatch, TheScratchFormulaIsTheStructsOwnSize) {

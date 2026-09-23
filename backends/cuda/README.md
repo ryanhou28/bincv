@@ -186,18 +186,21 @@ Exits 77 (not a pass) without a toolkit or a device. It runs **two** configurati
 Release, which also compiles the benchmarks, and Debug, the only one where `BINCV_ASSERT`
 reaches nvcc's device pass — and derives its suite list from `tests/CMakeLists.txt` rather
 than a hard-coded one, cross-checking `bincv_add_test_target()` against `add_test()` so
-neither half can quietly lose a suite. **Seventeen suites, 194,975 checks in Release and
-194,922 in Debug**: every device kernel compared against the host library byte for byte,
+neither half can quietly lose a suite. **Eighteen suites, 195,266 checks in Release and
+195,229 in Debug**: every device kernel compared against the host library byte for byte,
 every optimized arm held to the same map as its reference arm in one binary. The two counts
-differ by design — a suite exercising a narrowed domain can only test the half of that
-contract its configuration has, and prints which half it ran.
+differ by design — a deliberate domain violation that trips an assertion can only have its
+error return checked where the assertion is compiled out, so those call sites print
+`[not run in a checked build]` in Debug (`BINCV_CHECK_EQ_UNLESS_CHECKED`).
 [cuda.md](../../docs/reports/cuda.md#coverage) has the arithmetic behind an earlier count
 that was too high by 2,112.
 
-There is **no per-suite check-count floor for the CUDA suites**, because
-`tests/expected-checks.txt` is read by `verify.sh`, which builds no `.cu`. An edit that
-quietly drops half a sweep therefore still passes this gate green. That is a known gap,
-not an oversight.
+**Every suite's check count is held to a floor, per configuration**, in
+[`tests/expected-checks.txt`](tests/expected-checks.txt) — the same contract `verify.sh`
+enforces for the host suites, in a separate file because `verify.sh` builds no `.cu`. A
+suite that runs fewer checks than its row fails the gate even though every check that did
+run passed; raising a floor is `./scripts/verify_cuda.sh --update-checks-baseline` and a
+reviewed diff.
 
 ## Benchmark
 
@@ -229,4 +232,5 @@ packaged OpenCV ships; point `-DBINCV_CUDA_OPENCV_DIR=<prefix>` at such a build.
 target that wants one is **always built** and reports its role bar as BLOCKED or
 OUTSTANDING when it is absent, rather than existing conditionally — a target that exists
 conditionally is one the gate tries to build everywhere. `cuda_stereobm_benchmark` is the
-single exception and is hand-excluded by name in `scripts/verify_cuda.sh`.
+single exception; `scripts/verify_cuda.sh` asks CMake which declared benchmarks the
+configuration created and prints the ones a guard left out by name.

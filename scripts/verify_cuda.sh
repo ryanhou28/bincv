@@ -35,6 +35,13 @@
 #
 #   BINCV_CUDA_BUILD_DIR=/scratch/bincv-cuda-gate ./scripts/verify_cuda.sh
 #
+# Every suite's CHECK COUNT is held to a floor, per configuration, in
+# backends/cuda/tests/expected-checks.txt -- the same contract, and the same row
+# format, as tests/expected-checks.txt is for verify.sh. Raising a floor is a
+# reviewed edit:
+#
+#   ./scripts/verify_cuda.sh --update-checks-baseline   # then commit the diff
+#
 # EXIT CODES
 #   0   CUDA backend built and the device-vs-host suite passed
 #   1   verification FAILED (build error, a warning under -Werror, or a check)
@@ -47,6 +54,16 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_DIR="${BINCV_CUDA_BUILD_DIR:-${REPO_ROOT}/build-cuda-gate}"
+BASELINE_FILE="${REPO_ROOT}/backends/cuda/tests/expected-checks.txt"
+
+UPDATE_BASELINE=0
+for arg in "$@"; do
+    case "${arg}" in
+        --update-checks-baseline) UPDATE_BASELINE=1 ;;
+        -h|--help) sed -n '3,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "verify_cuda.sh: unknown argument '${arg}'" >&2; exit 2 ;;
+    esac
+done
 
 echo "============================================================"
 echo "  binCV -- CUDA backend (device-vs-host bit-exactness)"
@@ -196,12 +213,36 @@ run_configuration() {
     if [ "${benchmarks}" = "ON" ]; then
         # Derived, not listed, for the same reason the suites are: a benchmark
         # added the intended way must not be one this gate silently skips.
+        #
+        # The text names every benchmark the file DECLARES; CMake knows which of
+        # them this configuration CREATED. A target inside an `if()` guard -- one
+        # that needs an OpenCV with the cv::cuda modules, say -- is declared and
+        # not created, and asking for it by name fails the build with "No rule to
+        # make target". So the declared list is intersected with CMake's own, and
+        # whatever the guard left out is printed by name rather than skipped in
+        # silence or excluded by a name written here.
+        local configured
+        configured="$(cmake --build "${dir}" --target help 2>/dev/null)"
+        local built=() unconfigured=()
         while IFS= read -r bench; do
-            [ -n "${bench}" ] && targets+=("${bench}")
+            [ -n "${bench}" ] || continue
+            if grep -qw -- "${bench}" <<<"${configured}"; then
+                built+=("${bench}")
+            else
+                unconfigured+=("${bench}")
+            fi
         done < <(sed -n 's/^[[:space:]]*add_executable([[:space:]]*\([A-Za-z0-9_][A-Za-z0-9_]*\).*/\1/p' \
-                     "${REPO_ROOT}/backends/cuda/benchmark/CMakeLists.txt" 2>/dev/null \
-                 | grep -v cuda_stereobm_benchmark)
-        echo "  benchmark targets: ${targets[*]:$((1 + ${#SUITES[@]}))}"
+                     "${REPO_ROOT}/backends/cuda/benchmark/CMakeLists.txt" 2>/dev/null)
+        if [ ${#built[@]} -eq 0 ]; then
+            echo "  NO BENCHMARK TARGETS CONFIGURED -- the derivation or CMake's target"
+            echo "  list is broken, and this gate would compile no benchmark arm at all."
+            exit 1
+        fi
+        targets+=("${built[@]}")
+        echo "  benchmark targets: ${built[*]}"
+        if [ ${#unconfigured[@]} -gt 0 ]; then
+            echo "  declared but NOT CONFIGURED here (their CMake guard is off): ${unconfigured[*]}"
+        fi
     fi
 
     echo "  building..."
@@ -221,30 +262,133 @@ run_configuration() {
     fi
 
     echo "  running device-vs-host suites..."
+    local counts="${dir}.checks.txt"
+    : > "${counts}"
     for suite in "${SUITES[@]}"; do
-        "${dir}/backends/cuda/tests/${suite}"
-        RC=$?
+        local out="${dir}.${suite}.out"
+        "${dir}/backends/cuda/tests/${suite}" 2>&1 | tee "${out}"
+        RC=${PIPESTATUS[0]}
         if [ ${RC} -eq 77 ]; then
             skip "built cleanly, but no CUDA device is available to run ${suite}"
         elif [ ${RC} -ne 0 ]; then
             echo "  DEVICE-VS-HOST SUITE FAILED: ${suite} (${name})"
             exit 1
         fi
+        local line n k
+        line="$( { grep -oE '[0-9]+/[0-9]+ checks passed' "${out}" || true; } | head -1)"
+        if [ -z "${line}" ]; then
+            echo "  ${suite} passed but printed no check summary -- it is not reporting"
+            echo "  through tests/test_util.hpp, so its coverage cannot be counted."
+            exit 1
+        fi
+        n="${line%%/*}"
+        k="$( { grep -oE ', [0-9]+ skipped' "${out}" || true; } | head -1 | { grep -oE '[0-9]+' || true; })"
+        printf '%s\t%s\t%s\n' "${suite}" "${n}" "${k:-0}" >> "${counts}"
     done
+    check_floors "${name}" "${counts}"
 }
 
-# cuda_stereobm_benchmark is excluded from the derived benchmark list above: it
-# exists only when BINCV_CUDA_OPENCV_DIR points at a cudastereo-capable OpenCV,
-# so naming it as a target would fail this gate on every machine that has not
-# built one. Its own CMake guard already decides whether it exists.
+# ---------------------------------------------------------------------------
+# Check-count floors
+#
+# Exit codes say whether every check that RAN passed; they say nothing about
+# how many ran. An edit that narrows a width sweep, drops a border mode from a
+# loop or removes a MorphOp still exits 0 -- the failure tests/expected-checks.txt
+# exists to catch on the host, and one this backend had no defence against while
+# its suites went from 784 checks to tens of thousands.
+#
+# The floors are PER CONFIGURATION because the two legitimately differ: a
+# deliberate domain violation that trips an assertion can only have its error
+# return checked where the assertion is compiled out, so Debug reports one fewer
+# check per such call (BINCV_CHECK_EQ_UNLESS_CHECKED in tests/test_util.hpp).
+# ---------------------------------------------------------------------------
+baseline_rows() {   # config -> "suite<TAB>checks<TAB>skipped"
+    { grep -v '^[[:space:]]*#' "${BASELINE_FILE}" 2>/dev/null || true; } \
+        | awk -F'\t' -v c="$1" 'NF>=4 && $1==c {printf "%s\t%s\t%s\n", $2, $3, $4}'
+}
+
+FLOOR_DRIFT=0
+check_floors() {
+    local name="$1" counts="$2" drift=0 rises=""
+    while IFS=$'\t' read -r b_suite b_checks b_skipped; do
+        [ -n "${b_suite}" ] || continue
+        local row got_c got_s
+        row="$(awk -F'\t' -v s="${b_suite}" '$1==s {print; exit}' "${counts}")"
+        if [ -z "${row}" ]; then
+            echo "  MISSING SUITE ${b_suite} -- ${BASELINE_FILE#"${REPO_ROOT}"/} lists it for"
+            echo "  '${name}' and it did not run. That is ${b_checks} checks gone."
+            drift=1
+            continue
+        fi
+        got_c="$(cut -f2 <<<"${row}")"
+        got_s="$(cut -f3 <<<"${row}")"
+        if [ "${got_c}" -lt "${b_checks}" ] || [ "${got_s}" -lt "${b_skipped}" ]; then
+            echo "  CHECK COUNT DROPPED  ${b_suite} (${name}): ${got_c}+${got_s}s,"
+            echo "  expected at least ${b_checks}+${b_skipped}s."
+            drift=1
+        elif [ "${got_c}" -gt "${b_checks}" ] || [ "${got_s}" -gt "${b_skipped}" ]; then
+            rises="${rises}    ${b_suite}: ${b_checks}+${b_skipped}s -> ${got_c}+${got_s}s\n"
+        fi
+    done < <(baseline_rows "${name}")
+
+    # A suite with no row has no floor, so it could lose every assertion it has
+    # without this gate noticing.
+    while IFS=$'\t' read -r r_suite _ _; do
+        [ -n "${r_suite}" ] || continue
+        if ! baseline_rows "${name}" | awk -F'\t' -v s="${r_suite}" '$1==s{f=1} END{exit !f}'; then
+            echo "  UNRECORDED SUITE ${r_suite} ran in '${name}' but has no floor."
+            drift=1
+        fi
+    done < "${counts}"
+
+    if [ -n "${rises}" ]; then
+        echo "  check counts ROSE (not a failure):"
+        printf "%b" "${rises}"
+        echo "    raise the floor with: ./scripts/verify_cuda.sh --update-checks-baseline"
+    fi
+    if [ ${drift} -eq 1 ]; then
+        if [ ${UPDATE_BASELINE} -eq 1 ]; then
+            echo "  (--update-checks-baseline: recording the current counts anyway)"
+        else
+            echo "  CHECK-COUNT FLOOR FAILED (${name})"
+            FLOOR_DRIFT=1
+        fi
+    fi
+    local total
+    total="$(awk -F'\t' '{t+=$2} END{print t+0}' "${counts}")"
+    echo "  ${name}: ${total} checks across ${#SUITES[@]} suites"
+}
 
 run_configuration release Release ON
 run_configuration debug   Debug   OFF
 
+if [ ${UPDATE_BASELINE} -eq 1 ]; then
+    # Keep the header block -- it explains why the configurations differ, and
+    # is worth more than the numbers under it.
+    {
+        awk 'BEGIN{done=0} !done && (/^[[:space:]]*#/ || /^[[:space:]]*$/) {print; next} {done=1}' \
+            "${BASELINE_FILE}" 2>/dev/null
+        for cfg in release debug; do
+            while IFS=$'\t' read -r s c k; do
+                [ -n "${s}" ] && printf '%s\t%s\t%s\t%s\n' "${cfg}" "${s}" "${c}" "${k}"
+            done < "${BUILD_DIR}-${cfg}.checks.txt"
+            echo
+        done
+    } > "${BASELINE_FILE}.new" && mv "${BASELINE_FILE}.new" "${BASELINE_FILE}"
+    echo
+    echo "  floors rewritten: ${BASELINE_FILE#"${REPO_ROOT}"/} -- review and commit the diff"
+fi
+
+if [ ${FLOOR_DRIFT} -eq 1 ]; then
+    echo
+    echo "  CUDA BACKEND NOT VERIFIED: a suite ran fewer checks than its floor."
+    exit 1
+fi
+
 echo
 echo "  CUDA BACKEND VERIFIED"
 echo "  Built with -Werror on both host and device halves, Release and Debug;"
-echo "  every device kernel matched the host library byte for byte, and the"
-echo "  benchmark arms compile."
+echo "  every device kernel matched the host library byte for byte, every suite"
+echo "  met its check-count floor, and the benchmark arms compile."
 echo
 exit 0

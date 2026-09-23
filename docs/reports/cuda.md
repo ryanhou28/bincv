@@ -446,10 +446,13 @@ reading is quoted as a duration.
 ## Coverage
 
 `scripts/verify_cuda.sh` proves each device kernel gives the host library's answer byte for
-byte — **seventeen suites, 194,975 checks in the Release configuration and 194,922 in the
-Debug one**. The counts differ by design: a suite exercising a narrowed domain can only
-test the half of that contract its configuration has — the assertion is live in Debug, the
-error return reachable in Release — and each such suite prints which half it ran.
+byte — **eighteen suites, 195,266 checks in the Release configuration and 195,229 in the
+Debug one**, each suite held to its own floor per configuration
+([`expected-checks.txt`](../../backends/cuda/tests/expected-checks.txt)). The counts differ
+by design: a deliberate domain violation that trips an assertion can only have its error
+return checked where the assertion is compiled out, so each of those 37 call sites counts
+in Release and prints `[not run in a checked build]` in Debug. A refusal with no assertion
+on its path runs in both.
 
 **One test-method finding qualifies that evidence.** Every dense-disparity case built its
 right image as an *exact shift* of the left, where the correct disparity's window cost is 0

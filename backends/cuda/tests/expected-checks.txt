@@ -1,0 +1,65 @@
+# binCV CUDA backend expected check counts -- the floor scripts/verify_cuda.sh enforces.
+#
+# The CUDA suites' twin of tests/expected-checks.txt, and the same contract:
+#
+#   <configuration>  <suite>  <checks>  <skipped>       (tab-separated)
+#
+# verify_cuda.sh fails when a suite reports FEWER checks or skips than its row,
+# when a listed suite did not run, or when a suite ran that has no row. A count
+# that RISES prints a notice; raising the floor is a reviewed edit:
+#
+#   ./scripts/verify_cuda.sh --update-checks-baseline
+#
+# and commit the diff with the change that earned it.
+#
+# WHY THIS IS A SEPARATE FILE. verify.sh builds no .cu translation unit, so it can
+# never produce these rows -- and its --update-checks-baseline rewrites every row
+# of its own file from the configurations it ran, which would delete them.
+#
+# WHY RELEASE AND DEBUG DIFFER, LEGITIMATELY. A device op that accepts a narrower
+# domain than its host twin asserts the domain and then returns an error. A test
+# that calls it with a deliberate violation can only compare the error code where
+# the assertion is compiled out, so in Debug each such call site is reported as
+# "[not run in a checked build]" and counts one fewer check
+# (BINCV_CHECK_EQ_UNLESS_CHECKED in tests/test_util.hpp). A refusal with no
+# assertion on its path is an ordinary check and runs in both. The per-suite
+# difference is therefore exactly the number of those lines the suite prints.
+
+release	test_cuda_backend	706	0
+release	test_cuda_custom	10	0
+release	test_cuda_vocabulary	91	0
+release	test_cuda_shared_helpers	31	0
+release	test_cuda_morphology	8225	0
+release	test_cuda_median	2814	0
+release	test_cuda_pyramid	1287	0
+release	test_cuda_sensor	23679	0
+release	test_cuda_packfast	16618	0
+release	test_cuda_derivcov	910	0
+release	test_cuda_orientation_descriptor	927	0
+release	test_cuda_feature_tracking_corner	5783	0
+release	test_cuda_keypoints	118	0
+release	test_cuda_opticalflow	345	0
+release	test_cuda_ransac	129510	0
+release	test_cuda_sparse_match	2850	0
+release	test_cuda_census_box	1082	0
+release	test_cuda_bench_stats	280	0
+
+debug	test_cuda_backend	706	0
+debug	test_cuda_custom	10	0
+debug	test_cuda_vocabulary	91	0
+debug	test_cuda_shared_helpers	31	0
+debug	test_cuda_morphology	8219	0
+debug	test_cuda_median	2811	0
+debug	test_cuda_pyramid	1283	0
+debug	test_cuda_sensor	23677	0
+debug	test_cuda_packfast	16618	0
+debug	test_cuda_derivcov	901	0
+debug	test_cuda_orientation_descriptor	927	0
+debug	test_cuda_feature_tracking_corner	5775	0
+debug	test_cuda_keypoints	115	0
+debug	test_cuda_opticalflow	345	0
+debug	test_cuda_ransac	129510	0
+debug	test_cuda_sparse_match	2848	0
+debug	test_cuda_census_box	1082	0
+debug	test_cuda_bench_stats	280	0
+
