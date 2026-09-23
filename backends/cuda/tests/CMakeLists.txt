@@ -106,17 +106,18 @@ target_include_directories(test_cuda_sensor PRIVATE ${BINCV_POLICY_ROOT}/tests)
 add_test(NAME cuda_sensor COMMAND test_cuda_sensor)
 set_tests_properties(cuda_sensor PROPERTIES SKIP_RETURN_CODE 77)
 
-# The packer's three arms -- grid-stride, row grid and byte lane -- held to ONE
-# answer, with both runtime switches toggled inside this one binary.
+# The packers' arms -- grid-stride, row grid and wide lane, for packBits and for
+# packQuant -- held to ONE answer, with every runtime switch toggled inside this
+# one binary.
 #
 # A SEPARATE SUITE, not an addition to any existing one, because what it proves
 # is different in kind: every other suite here runs whichever arm the switches
-# default to, so two of the three are invisible to all of them. This is where a
-# switch that quietly stopped switching, or an arm that ran outside the domain
-# its gate claims to refuse, is observable. It also drives BOTH gates from the
-# excluded side -- a 70,000-row image past `gridDim.y`, an odd-strided view, a
-# uint16 source, a cutoff of 256 -- which are the four shapes a fast arm would
-# corrupt and nothing else would notice.
+# default to, so every arm but the fastest is invisible to all of them. This is
+# where a switch that quietly stopped switching, or an arm that ran outside the
+# domain its gate claims to refuse, is observable. It also drives every gate
+# from the excluded side -- a 70,000-row image, an odd-strided view, a stride of
+# 4 mod 16, a uint16 source, a cutoff of 256 -- which are the shapes a fast arm
+# would corrupt and nothing else would notice.
 #
 # HOST C++ rather than a CUDA translation unit, for test_cuda_sensor's reason:
 # nothing here needs a kernel of its own, and compiling it as host C++ also

@@ -33,7 +33,7 @@ release	test_cuda_morphology	8225	0
 release	test_cuda_median	2814	0
 release	test_cuda_pyramid	1287	0
 release	test_cuda_sensor	23679	0
-release	test_cuda_packfast	16618	0
+release	test_cuda_packfast	12903	0
 release	test_cuda_derivcov	910	0
 release	test_cuda_orientation_descriptor	927	0
 release	test_cuda_feature_tracking_corner	5783	0
@@ -52,7 +52,7 @@ debug	test_cuda_morphology	8219	0
 debug	test_cuda_median	2811	0
 debug	test_cuda_pyramid	1283	0
 debug	test_cuda_sensor	23677	0
-debug	test_cuda_packfast	16618	0
+debug	test_cuda_packfast	12903	0
 debug	test_cuda_derivcov	901	0
 debug	test_cuda_orientation_descriptor	927	0
 debug	test_cuda_feature_tracking_corner	5775	0
