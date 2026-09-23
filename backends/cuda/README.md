@@ -83,19 +83,19 @@ so the smaller cell is the faster side, and the faster side is bold.
 | operation | `cv::cuda` arm | cv::cuda (ms) | binCV (ms) | ratio |
 |---|---|---|---|---|
 | `denseDisparityBinary` | `cv::cuda::StereoBM(64, 9)` | 0.7152 | **0.0648** | **11.0×** |
-| census entry (transform ×2 + match) | ″ | 0.6996 | **0.5076** | **1.47×** |
+| census entry (transform ×2 + match) | ″ | 0.7101 | **0.4789** | **1.504×** |
 | `detectFastAsync` | `FastFeatureDetector` | 0.1459 | **0.0247** | **6.01×** |
 | `computeBrief`, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 | **0.0107** | **9.3×** |
 | `matchDescriptors`, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 | **0.2189** | **9.1×** |
-| `goodFeaturesToTrackAsync`, wall clock | `createGoodFeaturesToTrackDetector` | 3.7282 | **0.8405** | **5.3×** |
+| `goodFeaturesToTrackAsync`, wall clock | `createGoodFeaturesToTrackDetector` | 3.4029 | **0.4240** | **8.76×** |
 | `calcOpticalFlowPyrLKAsync`, 204 pts | `SparsePyrLKOpticalFlow` | 0.1475 | **0.0792** | **1.35× to 4.36×** |
 | `calcOpticalFlowPyrLKAsync`, 2048 pts | ″ | **0.3287** | 0.3558 | null result |
-| `cornerMinEigenValAsync` | `createMinEigenValCorner` | **0.0515** | 0.0590 | null result |
-| `threshold` → bits, 3840×2160 | `cv::cuda::threshold` | 0.0362 | **0.0268** | null result |
+| `cornerMinEigenValAsync` | `createMinEigenValCorner` | 0.0519 | **0.0201** | **2.597×** |
+| `threshold` → bits, 3840×2160 | `cv::cuda::threshold` | 0.0364 | **0.0255** | null result |
 | `calcOpticalFlowBlockMatch` | `SparsePyrLKOpticalFlow` | 0.2320 | **0.0540** | not published |
 
-**A null result is not a loss.** Lucas-Kanade at 2048 points, `cornerMinEigenValAsync` and
-`threshold` each have 0 or 1 of 7 runs disjoint, so neither direction is established and
+**A null result is not a loss.** Lucas-Kanade at 2048 points and `threshold` each have 0 or
+1 of 7 runs disjoint, so neither direction is established and
 binCV's cell being the larger one is not a finding. LK at 2048 points is the crossover the
 tracker's header names: the lead holds to about 512 keypoints and stops there. Block
 matching is faster but the reports publish its ratio only as 0.230 (binCV ÷ cv::cuda), so

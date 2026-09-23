@@ -79,19 +79,19 @@ milliseconds, so the smaller cell is the faster side and the faster side is bold
 | operation | `cv::cuda` arm | cv::cuda (ms) | binCV (ms) | ratio | what the rounds say |
 |---|---|---|---|---|---|
 | `denseDisparityBinary` — the binary entry | `cv::cuda::StereoBM(64, 9)` | 0.7152 | **0.0648** | **11.0×** | 7/7 disjoint; a result (10.95× against a 1.78× bar) |
-| census entry (2 transforms + match) | ″ | 0.6996 | **0.5076** | **1.47×** | 7/7; a result (1.47× vs 1.25×) — but it **loses on memory** |
+| census entry (2 transforms + match) | ″ | 0.7101 | **0.4789** | **1.504×** | 105 of 105; a result (1.50× vs 1.41×) — but it **loses on memory** ‡ |
 | census matcher alone | ″ | 0.6864 | **0.3692** | **1.87×** | 7/7; a result (1.94× vs 1.37×) |
 | `calcOpticalFlowBlockMatch` | `SparsePyrLKOpticalFlow` | 0.2320 | **0.0540** | not published | 7/7; speed met, **accuracy floor unset** |
 | `detectFastAsync` | `FastFeatureDetector` | 0.1459 | **0.0247** | **6.01×** | 7/7; a result (6.01× vs 3.39×), from **14.84× behind** |
 | `computeBrief`, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 | **0.0107** | **9.3×** | 7/7; a result (9.25× vs 2.10×) |
 | `matchDescriptors`, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 | **0.2189** | **9.1×** | 7/7; a result (9.11× vs 1.29×) |
-| `goodFeaturesToTrackAsync`, wall clock | `createGoodFeaturesToTrackDetector` | 3.7282 | **0.8405** | **5.3×** | 105 of 105 rounds, 3.53× to 15.52×; a result (4.42× vs 3.16×) |
-| `cornerMinEigenValAsync` | `createMinEigenValCorner` | **0.0515** | 0.0590 | null result | 23 of 105 rounds binCV's way; 1.15× against a 1.76× bar |
+| `goodFeaturesToTrackAsync`, wall clock | `createGoodFeaturesToTrackDetector` | 3.4029 | **0.4240** | **8.76×** | 105 of 105; a result (8.76× vs 5.46×) ‡ |
+| `cornerMinEigenValAsync` | `createMinEigenValCorner` | 0.0519 | **0.0201** | **2.597×** | 105 of 105; a result (2.60× vs 2.42×). **Was a null at 0.0590 ms** until the response's FP64 `sqrt` was memoized ‡ |
 | `calcOpticalFlowPyrLKAsync`, 204 pts | `SparsePyrLKOpticalFlow` | 0.1475 | **0.0792** | **1.35× to 4.36×** | 105 of 105 rounds; direction established, magnitude a null |
 | `calcOpticalFlowPyrLKAsync`, 2048 pts | ″ | **0.3287** | 0.3558 | null result | 98–7, seven rounds crossed — the crossover |
-| `threshold` → bits, 752×480 | `cv::cuda::threshold` | 0.0091 | **0.0084** | null result | 44–60 with one round tied |
-| `threshold` → bits, 1920×1080 | ″ | 0.0116 | **0.0100** | null result | 17–88 |
-| `threshold` → bits, 3840×2160 | ″ | 0.0362 | **0.0268** | null result | 8–97; the 1.35× median is unquotable on this host |
+| `threshold` → bits, 752×480 | `cv::cuda::threshold` | 0.0083 | **0.0079** | null result | 36–69; on the launch floor ‡ |
+| `threshold` → bits, 1920×1080 | ″ | **0.0113** | 0.0115 | null result | 60–45 ‡ |
+| `threshold` → bits, 3840×2160 | ″ | 0.0364 | **0.0255** | null result | 7–98; the 1.43× median is still unquotable on this host ‡ |
 
 **A null result is not a loss.** It means neither the direction nor the size cleared this
 host's noise, and it is itself a result. `threshold`'s own written rule was a *fail*
@@ -117,27 +117,28 @@ the census entry at **0.5418 against 0.7584 — 1.43×** and the census matcher 
 — 1.88×**. Which to quote is **not settled here**; the census row's run-to-run scatter is
 1.14×, so its 1.38×, 1.43× and 1.47× readings are one number rather than three.
 
-**Five rows above now measure kernels that a profile-driven round changed, and they have
-not been re-anchored.** The census pair and the three `threshold` rows sit over
-`censusPackedKernel` and the ballot packers, both rewritten
-([#64](https://github.com/ryanhou28/bincv/issues/64)). The effect was isolated by running
-`cuda_role_benchmark` at `main` and at the branch in **one session**, 7 processes each,
-rather than against the numbers above — binCV's side, in ms:
+**‡ The six marked rows were re-taken, and they are the first CUDA figures in this
+repository with provenance.** They come from
+[one committed sweep](logs/cuda_role-x86_64-cuda-launches.log) — 7 independent processes of
+`cuda_role_benchmark`, stamped at commit `7c8055f`, on the device and driver the log's own
+header records. `scripts/check_figure_staleness.py` reads it, so a change to any of the 87
+first-party files under it now ages these rows instead of leaving a reader to find out.
 
-| | `main` | after | control |
-|---|---|---|---|
-| `threshold` 752×480 | 0.0085 | 0.0074 | |
-| `threshold` 1920×1080 | 0.0106 | 0.0115 | |
-| `threshold` 3840×2160 | 0.0272 | 0.0250 | |
-| census entry | 0.5772 | 0.4833 | |
-| `denseDisparityBinary` | 0.0639 | 0.0638 | untouched by that round |
+Each was re-taken because its kernel moved: the census pair over `censusPackedKernel`, the
+three `threshold` rows over the ballot packers, and `cornerMinEigenValAsync` and
+`goodFeaturesToTrack` over the response's square root
+([#64](https://github.com/ryanhou28/bincv/issues/64),
+[#91](https://github.com/ryanhou28/bincv/issues/91)). **`cornerMinEigenValAsync` was a null
+result and is now a 2.60× lead**, which is what a memo over a 100-cell integer domain bought.
 
-The untouched row moving 0.2% is what makes the rest readable. **The absolutes above were
-taken in an earlier session and several do not reproduce at their own commit** — the dense
-and `threshold` rows do, the census pair reads 14–18% slow on both sides, and
-`goodFeaturesToTrack` reads **5.3× published against 8.40× now at the same commit**, its two
-arms moving in opposite directions. These tables commit no logs and no gate reads them, so
-nothing caught it: [#89](https://github.com/ryanhou28/bincv/issues/89).
+**The unmarked rows are older figures from a session that left nothing behind, and two of
+them are known not to reproduce.** Measured at `main` in one controlled session before any of
+this landed, the dense and `threshold` rows came back within a few per cent, the census pair
+read 14–18% slow on *both* sides, and `goodFeaturesToTrack` read **5.3× published against
+8.40×** with its two arms moving in opposite directions — on the row whose `cv::cuda`
+denominator this report already says swings **3.24–13.61 ms**. Re-anchoring the rest in one
+session is [#89](https://github.com/ryanhou28/bincv/issues/89)'s remaining half; the
+mechanism that makes it checkable now exists, which is why these six could be done at all.
 
 ## Memory, operation by operation
 
@@ -562,5 +563,8 @@ packaged OpenCV ships; point `-DBINCV_CUDA_OPENCV_DIR=<prefix>` at such a build.
 target that wants one is always built and reports its role bar as BLOCKED or OUTSTANDING
 when it is absent.
 
-**No raw output for these tables is committed under [logs/](logs/)**, which holds host
-benchmark output only. Each table above names the binary that produces it instead.
+**One sweep is committed under [logs/](logs/)** — `cuda_role-x86_64-cuda-launches.log`,
+which the six ‡-marked rows of the speed table come from, written by
+`scripts/run_cuda_launches.sh` and read by `scripts/check_figure_staleness.py`. Every other
+table here still names only the binary that produces it, and its figures are therefore
+un-gated; re-anchoring them is [#89](https://github.com/ryanhou28/bincv/issues/89).

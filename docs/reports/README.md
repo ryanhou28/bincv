@@ -87,18 +87,20 @@ smaller number is the faster side.
 | operation | `cv::cuda` arm | cv::cuda, ms | binCV, ms | ratio | source |
 |---|---|---|---|---|---|
 | dense disparity, binary entry | `cv::cuda::StereoBM(64, 9)` | 0.7152 | 0.0648 | 11.0× | [cuda.md](cuda.md) |
-| dense disparity, census entry | ″ | 0.6996 | 0.5076 | 1.47× | [cuda.md](cuda.md) |
+| dense disparity, census entry | ″ | 0.7101 | 0.4789 | 1.504× | [cuda.md](cuda.md) |
 | FAST | `cv::cuda::FastFeatureDetector` | 0.1459 | 0.0247 | 6.01× | [cuda.md](cuda.md) |
 | descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 | 0.2189 | 9.1× | [cuda.md](cuda.md) |
 | describe, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 | 0.0107 | 9.3× | [cuda.md](cuda.md) |
-| `goodFeaturesToTrack`, wall clock | `createGoodFeaturesToTrackDetector` | 3.7282 | 0.8405 | 5.3× | [cuda.md](cuda.md) |
+| `goodFeaturesToTrack`, wall clock | `createGoodFeaturesToTrackDetector` | 3.4029 | 0.4240 | 8.76× | [cuda.md](cuda.md) |
 | optical flow, 204 points | `SparsePyrLKOpticalFlow` | 0.1475 | 0.0792 | 1.35×–4.36×, per round | [cuda.md](cuda.md) |
 | optical flow, 2048 points | ″ | 0.3287 | 0.3558 | null result | [cuda.md](cuda.md) |
-| min-eigenvalue response | `createMinEigenValCorner` | 0.0515 | 0.0590 | null result, 1.15× apart | [cuda.md](cuda.md) |
+| min-eigenvalue response | `createMinEigenValCorner` | 0.0519 | 0.0201 | 2.597× | [cuda.md](cuda.md) |
 
-**The two rows where binCV's cell is larger are published as null results, not as losses.**
-Both are inside this host's noise — 0 of 7 runs disjoint on each — so [cuda.md](cuda.md)
-records that neither direction is established rather than claiming OpenCV won. Two more rows
+**The one row where binCV's cell is larger is published as a null result, not a loss.**
+It is inside this host's noise — 0 of 7 runs disjoint — so [cuda.md](cuda.md)
+records that no direction is established rather than claiming OpenCV won. The other such row,
+the min-eigenvalue response, stopped being one: memoizing its FP64 square root took it from a
+null to a 2.60× lead. Two more rows
 are qualified there: optical flow's direction is settled by 105 of 105 paired rounds but its
 magnitude is not, which is why its cell is a range; and `goodFeaturesToTrack`'s denominator
 swings 3.24–13.61 ms across runs because `cv::cuda`'s spacing filter runs on the CPU. GPU

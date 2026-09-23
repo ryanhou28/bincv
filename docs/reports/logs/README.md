@@ -11,7 +11,7 @@ and they are not interchangeable.
 | `<bench>-aarch64.log` | the **single launch** that figure used to be. Kept for the same reason as the x86 singles. |
 | `<bench>-spotcheck-aarch64-launches.log` | an **independent** device sweep of a benchmark whose figure moved, taken separately to check it. Two exist, for `feature-tracking` and `pyrfilter`. |
 | `<bench>-x86_64-launches-repeat.log` | a **second, independent** thirty-launch sweep of the same benchmark, taken on a deliberately busier machine before the figures were published. Two exist, for `logic` and `morphology`. |
-| `<bench>-cuda-launches.log` | **separate processes of one CUDA benchmark on the reference GPU**, written by `scripts/run_cuda_launches.sh`. None is committed yet; the shape and the header contract are described below. |
+| `<bench>-cuda-launches.log` | **separate processes of one CUDA benchmark on the reference GPU**, written by `scripts/run_cuda_launches.sh`. The first is `cuda_role-x86_64-cuda-launches.log`, which the six marked rows of [cuda.md](../cuda.md)'s speed table come from; the header contract is described below. |
 
 ## The CUDA sweeps
 
