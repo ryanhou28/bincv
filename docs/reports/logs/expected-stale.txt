@@ -39,6 +39,7 @@
 # the two logs that measure IT were re-taken rather than listed here.
 #
 #
+#
 corner_subpix-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pack.hpp
 denoise-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp
 dense-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/pack.hpp
@@ -54,7 +55,6 @@ feature-tracking-x86_64-launches.log	880704b	include/bincv/impl/binMat_impl.hpp,
 features-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/fast.hpp
 goodfeatures-aarch64-launches.log	6d74d57	include/bincv/impl/binMat_impl.hpp
 goodfeatures-x86_64-launches.log	6d74d57	include/bincv/impl/binMat_impl.hpp
-lk_batch_off-x86_64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
 lk_headtohead-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
 lk_headtohead-x86_64-launches.log	05ab53c	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp,include/bincv/ops/pyramid.hpp
 lk_memorybound-aarch64-launches.log	80ff0a8	include/bincv/impl/binMat_impl.hpp,include/bincv/ops/corner.hpp,include/bincv/ops/opticalFlow.hpp
