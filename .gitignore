@@ -2,8 +2,14 @@
 build*/
 **/build*/
 cmake-build*/
-# scripts/verify_cuda.sh writes its configure and build logs beside the tree.
-build-cuda-gate.*.log
+# scripts/verify_cuda.sh writes its per-configuration logs, harvested check counts
+# and per-suite output beside the tree, named after the build directory. The
+# directories themselves are covered by build*/ above; these are the loose files
+# next to them, and the pattern has to admit the configuration suffix -- the gate
+# builds `build-cuda-gate-release` and `-debug`, not `build-cuda-gate`.
+build-cuda-gate*.log
+build-cuda-gate*.txt
+build-cuda-gate*.out
 
 # Benchmark output.
 results/

@@ -11,6 +11,42 @@ and they are not interchangeable.
 | `<bench>-aarch64.log` | the **single launch** that figure used to be. Kept for the same reason as the x86 singles. |
 | `<bench>-spotcheck-aarch64-launches.log` | an **independent** device sweep of a benchmark whose figure moved, taken separately to check it. Two exist, for `feature-tracking` and `pyrfilter`. |
 | `<bench>-x86_64-launches-repeat.log` | a **second, independent** thirty-launch sweep of the same benchmark, taken on a deliberately busier machine before the figures were published. Two exist, for `logic` and `morphology`. |
+| `<bench>-cuda-launches.log` | **separate processes of one CUDA benchmark on the reference GPU**, written by `scripts/run_cuda_launches.sh`. Three are committed — `cuda_role-`, `cuda_role_lk-` and `cuda_sparse-x86_64-cuda-launches.log` — and the fourteen marked rows of [cuda.md](../cuda.md)'s speed table come from them. There is more than one because a benchmark measures what it measures: the Lucas-Kanade rows need a real frame sequence and refuse to synthesize one, and block matching is timed in the sparse family's own binary. The header contract is described below. |
+
+## The CUDA sweeps
+
+[cuda.md](../cuda.md) promises "the median of 7 independent process runs" for every figure
+in it and, until the mechanism described here existed, committed none of them. What that
+cost is measured: re-run at its own published commit, `goodFeaturesToTrack` read 5.3× on
+the page and 8.40× on the machine, its two arms moving in **opposite** directions — which
+a session can do and a kernel cannot. Nothing could separate the two stories, because the
+session that produced the page left nothing behind.
+
+`scripts/run_cuda_launches.sh` is the CUDA counterpart of `run_launches.sh`. It writes one
+file per sweep with `### run N` between launches — the same shape, so
+`scripts/aggregate_cuda_runs.py` reads a committed sweep and a directory of per-process
+outputs identically — and a header that records what a CUDA figure is a claim about:
+the **device** and its compute capability, the **driver** and the CUDA version it exposes,
+the **nvcc** and **architecture** the kernels were built for (read from the build tree, not
+from `PATH` — this backend builds under 11.1 while the driver here exposes 12.6), the
+**OpenCV** supplying the role comparison's denominators, the **GPU clock, throttle reasons
+and temperature** before and after, and that **no profiler was running**. That last one is a
+refusal, not a note: `ncu` replays every kernel to collect its counters, so a timing taken
+beside one is a timing of the replay, and the run will not start.
+
+The clock is recorded rather than held. No host this backend has run on permits locking it
+— WSL2 reports application clocks as `N/A` — so the header says so, and an unlocked clock
+shows up where it should, in the scatter across launches.
+
+The sweep is gated like the host ones: `scripts/check_figure_staleness.py` maps a CUDA log
+through its benchmark's includes **and one link step**, because the backend is not
+header-only. A benchmark includes `bincv/cuda/threshold.hpp`, which declares the entry and
+contains no kernel; the kernel is `backends/cuda/src/threshold.cu`, a translation unit no
+`#include` names. The gate pairs the two by name, checks that pairing is complete before it
+will run, and reads the rest of a benchmark's translation units — `cuda_bench_null.cu`
+carries the launch floor — out of the `add_executable` that names them. `--explain <log>`
+answers for one log, and the runner calls it on what it has just written: a sweep the gate
+cannot map is a sweep whose figures nothing can ever call stale.
 
 ## The device spot-checks, and what they showed
 

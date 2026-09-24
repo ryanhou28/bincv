@@ -39,7 +39,7 @@ recorded them.
 | `bitwiseNot` | `cv::bitwise_not` | 0.06336 | **0.003510** | **17.99× [17.82, 18.14]** | 0.31522 | **0.01965** | **16.06× [15.67, 16.72]** |
 | `countNonZero` | `cv::countNonZero` | 0.01501 | **0.009270** | 1.62× [1.61, 1.63] | 0.16921 | **0.06365** | 2.658× [2.618, 2.673] |
 | `countAnd` | `cv::bitwise_and` + `countNonZero` | 0.04172 | **0.01196** | **3.49× [3.45, 3.52]** | 0.54791 | **0.08775** | **6.242× [6.155, 6.313]** |
-| denoise, 3-pixel median | composed `cv::min` / `cv::max` | 0.1887 | **0.009865** | **19.09× [18.94, 19.38]** | 3.4379 | **0.05941** | **57.71× [56.91, 58.03]** |
+| denoise, 3-pixel median | composed `cv::min` / `cv::max` | 0.1926 | **0.009930** | **19.17× [19.01, 19.51]** | 3.4379 | **0.05941** | **57.71× [56.91, 58.03]** |
 | spatial derivative | `cv::filter2D` ×2 | 0.5156 | **0.04645** | **11.12× [11.07, 11.28]** | 5.0430 | **0.20753** | **24.28× [24.13, 24.51]** |
 | `erode` 3×3 | `cv::erode` | 0.1013 | **0.09595** | 1.053× [1.035, 1.066] | 0.73595 | **0.72189** | 1.021× [0.991, 1.040] |
 | `dilate` 3×3 | `cv::dilate` | 0.09972 | **0.09446** | 1.057× [1.046, 1.073] | 0.73419 | **0.48573** | **1.507× [1.476, 1.533]** |
@@ -152,10 +152,10 @@ for call from the tracking pipeline binCV was written to replace.
 
 | implementation | x86-64 (ns/px) | x86-64 ratio | aarch64 (ns/px) | aarch64 ratio | working set (bytes) |
 |---|---|---|---|---|---|
-| OpenCV `CV_8U`, composed (the denominator) | 0.1887 | — | 3.4379 | — | 2,150,400 |
-| **binCV fused, `uint32_t`** | **0.009865** | **19.09× [18.94, 19.38]** | **0.05941** | **57.71× [56.91, 58.03]** | **76,800** |
+| OpenCV `CV_8U`, composed (the denominator) | 0.1926 | — | 3.4379 | — | 2,150,400 |
+| **binCV fused, `uint32_t`** | **0.009930** | **19.17× [19.01, 19.51]** | **0.05941** | **57.71× [56.91, 58.03]** | **76,800** |
 | binCV fused, `uint64_t` | 0.007385 | **25.39× [25.16, 25.80]** | 0.04731 | **72.67× [72.24, 73.03]** | 76,800 |
-| binCV composed, `uint32_t` | 0.04820 | 3.91× [3.88, 3.95] | 0.21097 | 16.28× [16.16, 16.40] | 153,600 |
+| binCV composed, `uint32_t` | 0.04838 | 3.92× [3.88, 3.99] | 0.21097 | 16.28× [16.16, 16.40] | 153,600 |
 
 The aarch64 column read `ratio only` for three rounds because the device times behind those
 ratios were never carried into this report. They are here now, ten pinned launches

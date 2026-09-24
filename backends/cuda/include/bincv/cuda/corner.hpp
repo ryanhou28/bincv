@@ -15,14 +15,30 @@
 /// for byte, and never against OpenCV.
 ///
 /// ---------------------------------------------------------------------------
-/// THE RESPONSE IS BIT-EXACT BY CONSTRUCTION, AND THERE IS NO LOOKUP TABLE
+/// THE RESPONSE IS BIT-EXACT BY CONSTRUCTION, AND THERE IS NO TABLE OF IT
 ///
 /// `bincv::impl::minEigenValue` already carries BINCV_HOST_DEVICE, and
 /// `test_cuda_shared_helpers.cu` already sweeps nvcc's device compilation of it
 /// against the host's over the reachable `(xx, yy, xy)` domain. So the device
 /// kernels CALL IT. There is no device transcription of the response, no
-/// host-built table uploaded to stand in for it, and nothing for the two to
-/// drift over.
+/// host-built table of responses uploaded to stand in for it, and nothing for
+/// the two to drift over.
+///
+/// **WHERE THE LINE FALLS, because a memo of one operand is not a second
+/// definition of the formula.** What is forbidden above is a second rule for
+/// what a response IS: a table of `(xx, yy, xy) -> float` -- or of anything
+/// else that would have to be kept in agreement with `minEigenValue` as that
+/// function changes. `cornerSqrtMemo.cuh` is not one. It memoizes `sqrt` over
+/// the integers a 3x3 window bounds its argument to, and the response formula
+/// around it -- the operands, the expression, the order of its operations, the
+/// rounding to float -- is `minEigenValue`'s, unchanged. `sqrt` of an integer
+/// is fixed by IEEE-754 for as long as the format exists, so there is nothing
+/// in the table that can come to disagree with anything; a table of responses
+/// would go stale the first time the formula moved. The memo is confined to the
+/// bit-sliced response word, which is the `blockSize == 3` arm; the per-pixel
+/// window arm, `ops/opticalFlow.hpp`'s 31x31 windows and `opticalFlow.cu` all
+/// still evaluate the root, because none of them has a bounded integer
+/// discriminant.
 ///
 /// **AND NO `-fmad=false` ON THIS FILE, WHICH IS A CORRECTION TO THE FAMILY'S
 /// OWN DESIGN.** The hazard the design guarded against does not exist here:
@@ -285,6 +301,23 @@ bool& cornerSlicedEnabled();
 /// is therefore the control case that must read ~1.00x between switch
 /// positions.
 bool cornerSlicedApplies(int blockSize);
+
+/// @brief Forces the bit-sliced response to evaluate its square root instead of
+/// looking it up (`cornerSqrtMemo.cuh`). **INTERNAL.**
+/// @note The two arms are separate template instantiations of one kernel body,
+/// so the OFF position is the code that shipped before the memo existed; the
+/// benchmark times both in one binary and the suite holds the ON position's
+/// response map to the OFF position's and to the host's.
+bool& cornerSqrtMemoEnabled();
+
+/// @brief Whether the square-root memo's domain covers this `blockSize`.
+/// **INTERNAL** -- the gate-excluded control names it rather than restating it.
+/// @note It is `cornerSlicedApplies`: the memo lives inside the bit-sliced
+/// response word, whose own gate is `blockSize == 3`, and that is also the only
+/// blockSize at which the discriminant is an integer the table can index. A
+/// `blockSize` of 7 therefore runs the per-pixel window arm and must read
+/// ~1.00x between the memo switch's positions.
+bool cornerSqrtMemoApplies(int blockSize);
 
 /// @brief Selects the FUSED arm (default) or the frame-map REFERENCE arm.
 /// **INTERNAL.** The reference arm needs `work.frameMap`; the fused arm

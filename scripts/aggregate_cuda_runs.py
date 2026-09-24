@@ -86,6 +86,17 @@ USAGE
 Each input may be a directory of run outputs or a single file.  A run's family
 is taken from the file name up to the last underscore, so `lk_3.txt` and
 `lk_4.txt` aggregate together and `stereo_3.txt` stays separate.
+
+ONE FILE MAY HOLD SEVERAL RUNS, and a committed sweep does.
+`scripts/run_cuda_launches.sh` writes a whole sweep as a single stamped log --
+one artifact per sweep, with a `### run N` line between launches -- because the
+staleness gate reads one header per log and a directory of unstamped files
+names no commit.  So a file is split on those markers before anything is
+parsed, using the same splitter `scripts/aggregate_launches.py` uses on the
+host logs.  Without that split a seven-process sweep would read as ONE run: the
+run-to-run half of the rule would collapse to 1.000 and every row would look
+far better established than the measurements support.  A file with no markers
+is one run, which is what a directory of per-process outputs still is.
 """
 
 import argparse
@@ -94,6 +105,27 @@ import re
 import sys
 from statistics import median
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# One definition of what a launch marker looks like, shared with the host
+# aggregator rather than copied: the two scripts read the same `### run N`
+# convention out of logs written by two runners, and a second spelling of it
+# would silently read a seven-process sweep as one process.
+from aggregate_launches import split_launches  # noqa: E402
+
+
+def _family_of(path):
+    """The group a file's runs belong to.
+
+    A whole sweep in one file is its own family, named for the sweep. Otherwise
+    the file is one process of a family and the name carries the index, so
+    `role_3.txt` and `role_4.txt` join and `stereo_3.txt` stays apart.
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    for suffix in ('-cuda-launches', '-launches'):
+        if stem.endswith(suffix):
+            return stem[:-len(suffix)]
+    return stem.rsplit('_', 1)[0]
+
 
 def _families(paths):
     """Yields (family, path) for every run file under the given paths."""
@@ -101,10 +133,16 @@ def _families(paths):
         if os.path.isdir(p):
             for name in sorted(os.listdir(p)):
                 full = os.path.join(p, name)
-                if os.path.isfile(full) and not name.endswith(('.py', '.sh', '.log')):
-                    yield name.rsplit('_', 1)[0], full
+                if not os.path.isfile(full) or name.endswith(('.py', '.sh')):
+                    continue
+                # A `.log` in a run directory is a build or gate transcript, not
+                # a run -- except a committed sweep, which is a whole family in
+                # one file and is named as one.
+                if name.endswith('.log') and not name.endswith('-launches.log'):
+                    continue
+                yield _family_of(full), full
         else:
-            yield os.path.basename(p).rsplit('_', 1)[0], p
+            yield _family_of(p), p
 
 
 def sign_test_two_sided_p(wins_a, wins_b):
@@ -148,36 +186,48 @@ def _sample(ratio_min, ratio_med, ratio_max, wins_a, wins_b, separated,
                 rounds=rounds, tied=tied)
 
 
+def _parse_run(fam, lines, runs):
+    """One process's output -> its samples, appended to `runs`."""
+    for line in lines:
+        line = line.rstrip('\n')
+        s = None
+        if line.startswith('PAIRED|'):
+            f = line.split('|')
+            if len(f) >= 22:
+                try:
+                    s = (fam, f[2].strip() + '  vs  ' + f[3].strip(), f[1].strip())
+                    v = _sample(float(f[10]), float(f[11]), float(f[12]),
+                                int(f[15]), int(f[16]), int(f[21]),
+                                int(f[14]), int(f[17]))
+                except ValueError:
+                    s = None
+        elif line.startswith('ROW,'):
+            f = line.split(',')
+            if len(f) >= 21:
+                try:
+                    s = (fam, f[1], f[2])
+                    v = _sample(float(f[9]), float(f[10]), float(f[11]),
+                                int(f[15]), int(f[16]), int(f[12]),
+                                int(f[13]), int(f[17]))
+                except ValueError:
+                    s = None
+        if s is not None and v is not None:
+            runs.setdefault(s, []).append(v)
+    return runs
+
+
 def collect(paths):
-    """key -> [per-run sample].  A key is (family, name, scope)."""
+    """key -> [per-run sample].  A key is (family, name, scope).
+
+    A file is split into launches first, so a committed sweep contributes the
+    seven samples it holds rather than one -- see the header.
+    """
     runs = {}
     for fam, path in _families(paths):
         with open(path, errors='replace') as fh:
-            for line in fh:
-                line = line.rstrip('\n')
-                s = None
-                if line.startswith('PAIRED|'):
-                    f = line.split('|')
-                    if len(f) >= 22:
-                        try:
-                            s = (fam, f[2].strip() + '  vs  ' + f[3].strip(), f[1].strip())
-                            v = _sample(float(f[10]), float(f[11]), float(f[12]),
-                                        int(f[15]), int(f[16]), int(f[21]),
-                                        int(f[14]), int(f[17]))
-                        except ValueError:
-                            s = None
-                elif line.startswith('ROW,'):
-                    f = line.split(',')
-                    if len(f) >= 21:
-                        try:
-                            s = (fam, f[1], f[2])
-                            v = _sample(float(f[9]), float(f[10]), float(f[11]),
-                                        int(f[15]), int(f[16]), int(f[12]),
-                                        int(f[13]), int(f[17]))
-                        except ValueError:
-                            s = None
-                if s is not None and v is not None:
-                    runs.setdefault(s, []).append(v)
+            text = fh.read()
+        for _label, lines in split_launches(text):
+            _parse_run(fam, lines, runs)
     return runs
 
 

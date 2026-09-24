@@ -28,6 +28,7 @@
 //
 // Exits 77 when no CUDA device is present, like the other suites here.
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -38,6 +39,7 @@
 
 #include "bincv/core/error.hpp"
 #include "bincv/core/types.hpp"
+#include "bincv/cuda/cornerSqrtMemo.cuh"
 #include "bincv/ops/bitslice.hpp"
 #include "bincv/ops/corner.hpp"
 #include "bincv/ops/edge.hpp"
@@ -213,6 +215,38 @@ __global__ void kMinEig(const EigCase* in, size_t n, float* out) {
     for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
          i += gridDim.x * blockDim.x) {
         out[i] = bincv::impl::minEigenValue(in[i].xx, in[i].yy, in[i].xy);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// cuda::impl::minEigenValueMemo3 and its table -- backends/cuda's
+// cornerSqrtMemo.cuh. Not a BINCV_HOST_DEVICE helper, and here anyway for this
+// file's own reason: the memo is exact only because the device's `sqrt`, the
+// host's `std::sqrt` and a written-out double are one value, and "IEEE-754 says
+// so" is the kind of claim this file exists to sweep rather than accept. The
+// table is `static` per translation unit, so these sweep THIS unit's copy of
+// the one definition in that header.
+// ---------------------------------------------------------------------------
+
+__global__ void kSqrtMemoTable(double* out) {
+    for (int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+         i < bincv::cuda::impl::kSqrtMemoSide * bincv::cuda::impl::kSqrtMemoSide;
+         i += static_cast<int>(gridDim.x * blockDim.x)) {
+        out[i] = bincv::cuda::impl::kSqrtMemo[i];
+    }
+}
+
+__global__ void kDeviceSqrt(size_t n, double* out) {
+    for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
+         i += gridDim.x * blockDim.x) {
+        out[i] = sqrt(static_cast<double>(i));
+    }
+}
+
+__global__ void kMemoEig(const EigCase* in, size_t n, float* out) {
+    for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
+         i += gridDim.x * blockDim.x) {
+        out[i] = bincv::cuda::impl::minEigenValueMemo3(in[i].xx, in[i].yy, in[i].xy);
     }
 }
 
@@ -521,6 +555,88 @@ BINCV_TEST(CudaSharedHelpers, MinEigenValueIsBitIdenticalToHost) {
         if (bits(got[i]) != bits(want)) ++bad;
     }
     BINCV_CHECK_EQ(bad, 0u);
+}
+
+// The claim the square-root memo rests on, checked rather than cited: IEEE-754
+// requires `sqrt` to be correctly rounded, so there is exactly ONE double for
+// each of these arguments and the device's libm must produce it. `disc` at
+// blockSize 3 is an integer in [0, 405], so the sweep is the whole domain and
+// not a sample of it. A single disagreement here would mean the memo cannot be
+// exact -- and equally that `minEigenValue` itself does not give one answer on
+// two targets, which is a larger finding than the memo.
+BINCV_TEST(CudaSharedHelpers, DeviceSqrtIsTheHostsOverTheDiscriminantDomain) {
+    constexpr size_t kDiscCount = 406;
+    DevArray<double> dOut(kDiscCount);
+    kDeviceSqrt<<<blocksFor(kDiscCount), 256>>>(kDiscCount, dOut.get());
+    BINCV_CHECK(launchOk());
+    const std::vector<double> got = dOut.download();
+
+    size_t bad = 0;
+    for (size_t i = 0; i < kDiscCount; ++i) {
+        const double want = std::sqrt(static_cast<double>(i));
+        if (std::memcmp(&got[i], &want, sizeof(double)) != 0) ++bad;
+    }
+    BINCV_CHECK_EQ(bad, 0u);
+}
+
+// EVERY entry of the table, not the ones a frame happens to reach. The kernels
+// can only index the 55 cells with `|d| + |c| <= 9`, so a wrong value in any of
+// the other 45 would sit there until the reachable set changed.
+BINCV_TEST(CudaSharedHelpers, SqrtMemoTableIsTheHostsSquareRoot) {
+    constexpr int kSide = bincv::cuda::impl::kSqrtMemoSide;
+    DevArray<double> dOut(static_cast<size_t>(kSide * kSide));
+    kSqrtMemoTable<<<1, 256>>>(dOut.get());
+    BINCV_CHECK(launchOk());
+    const std::vector<double> got = dOut.download();
+
+    size_t bad = 0;
+    for (int a = 0; a < kSide; ++a) {
+        for (int c = 0; c < kSide; ++c) {
+            const double want = std::sqrt(static_cast<double>(a * a + 4 * c * c));
+            if (std::memcmp(&got[static_cast<size_t>(a * kSide + c)], &want,
+                            sizeof(double)) != 0) {
+                ++bad;
+                if (bad == 1u) {
+                    std::printf("  sqrt memo [|d|=%d][|c|=%d]: table %.17g host %.17g\n", a, c,
+                                got[static_cast<size_t>(a * kSide + c)], want);
+                }
+            }
+        }
+    }
+    BINCV_CHECK_EQ(bad, 0u);
+}
+
+// And the memo in place of the root, over the WHOLE box a 3x3 window can
+// produce -- `xx`, `yy` in [0, 9] and `xy` in [-9, 9], every one of the 1900
+// codes, which is a superset of the 670 a plane pair can actually realize. The
+// comparison is against `impl::minEigenValue` itself, by bit pattern, because
+// the memo's whole claim is that it is the same function and not a close one.
+BINCV_TEST(CudaSharedHelpers, MemoisedResponseIsMinEigenValueBitForBit) {
+    std::vector<EigCase> cases;
+    for (long long xx = 0; xx <= 9; ++xx)
+        for (long long yy = 0; yy <= 9; ++yy)
+            for (long long xy = -9; xy <= 9; ++xy) cases.push_back(EigCase{xx, yy, xy});
+
+    DevArray<EigCase> dIn(cases);
+    DevArray<float> dMemo(cases.size());
+    DevArray<float> dLive(cases.size());
+    kMemoEig<<<blocksFor(cases.size()), 256>>>(dIn.get(), cases.size(), dMemo.get());
+    BINCV_CHECK(launchOk());
+    kMinEig<<<blocksFor(cases.size()), 256>>>(dIn.get(), cases.size(), dLive.get());
+    BINCV_CHECK(launchOk());
+    const std::vector<float> memo = dMemo.download();
+    const std::vector<float> live = dLive.download();
+
+    size_t badDevice = 0, badHost = 0;
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (bits(memo[i]) != bits(live[i])) ++badDevice;
+        const float want =
+            bincv::impl::minEigenValue(cases[i].xx, cases[i].yy, cases[i].xy);
+        if (bits(memo[i]) != bits(want)) ++badHost;
+    }
+    BINCV_CHECK_EQ(cases.size(), size_t{1900});
+    BINCV_CHECK_EQ(badDevice, 0u);
+    BINCV_CHECK_EQ(badHost, 0u);
 }
 
 BINCV_TEST(CudaSharedHelpers, ThresholdCutoffAgreesWithHost) {

@@ -133,11 +133,12 @@ Two things about it are worth knowing before reading a green tick:
   a laptop and meaningless on a runner that provisions its own QEMU and toolchain. CI turns
   77 into red, because a gate that silently skipped for weeks is what the workflow exists to
   prevent.
-- **It installs no OpenCV and measures nothing.** `test_equivalence` and
-  `test_opencv_interop` do not run there, so the OpenCV bit-exactness claims are verified on
-  a maintainer's machine and nowhere else — run `./scripts/verify.sh` with no `--only` before
-  anything that touches them. Every published figure needs the reference device with a pinned
-  governor, which a shared virtualised runner is the opposite of.
+- **It measures nothing.** Every published figure needs the reference device with a pinned
+  governor, which a shared virtualised runner is the opposite of. It does now install OpenCV,
+  in a job of its own on both architectures, so `test_equivalence` and `test_opencv_interop`
+  — the suites that prove the Tier 1 bit-exactness claims — are checked somewhere other than
+  one desktop. They were not, and on aarch64 they could not be: `verify.sh`'s OpenCV
+  configuration does not build under gcc 14.
 
 `verify.sh` builds and tests four configurations — Release+OpenCV, Release core-only,
 `-fno-exceptions` core-only, and **Debug** core-only — with `-DBINCV_WERROR=ON`, and exits

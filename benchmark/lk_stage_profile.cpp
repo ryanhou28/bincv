@@ -154,9 +154,15 @@ int main(int argc, char** argv) {
                                              static_cast<float>(corners[i].y)});
             }
         }
-        if (!pts.empty()) {
-            std::vector<bincv::Point2f> out(pts.size());
-            std::vector<uint8_t> status(pts.size());
+        // The count is named once and tested here rather than through
+        // `!pts.empty()`, so the allocations below are provably non-zero to the
+        // optimiser: gcc 13 and 14 do not carry the range across `empty()`, and
+        // report the vector constructor as a 1-byte write into a 0-byte region
+        // under -Werror.
+        const size_t pointCount = pts.size();
+        if (pointCount != 0) {
+            std::vector<bincv::Point2f> out(pointCount);
+            std::vector<uint8_t> status(pointCount);
             bincv::calcOpticalFlowPyrLK(fe.levels, pts.data(), out.data(), status.data(),
                                         nullptr, pts.size(), lk);
 

@@ -177,20 +177,38 @@ architectures:
 
 | arm | binCV tracking, ms/frame | binCV pipeline, ms/frame | OpenCV pipeline, ms/frame | ratio |
 |---|---|---|---|---|
-| `BINCV_LK_BATCH=0` | 1.3140 | 1.6340 | 3.8185 | 2.319× [2.305, 2.326] |
-| **`BINCV_LK_BATCH=1`** | **0.7050** | **1.0285** | 3.7175 | **3.632× [3.614, 3.648]** |
+| `BINCV_LK_BATCH=0` | 1.3040 | 1.5610 | 3.7725 | 2.415× [2.411, 2.422] |
+| **`BINCV_LK_BATCH=1`** | **0.7070** | **0.9620** | 3.7445 | **3.900× [3.875, 3.917]** |
 
-**The batch is worth 1.864× [1.843, 1.903] on tracking** and takes the whole pipeline from
-2.32× to 3.63×. It is bit-exact with the scalar path. An earlier reading of the same pair —
+**The batch is worth 1.844× [1.822, 1.865] on tracking** and takes the whole pipeline from
+2.42× to 3.90×. It is bit-exact with the scalar path. An earlier reading of the same pair —
 two runs an arm over 400 frames — put the tracking figure between 1.66× and 1.88×; thirty
 launches an arm narrow that to the interval above, which is what the extra launches bought.
 
+**Both arms were re-taken together, and the pipeline column moved for a reason worth
+stating.** Tracking did not change — 0.7050 → 0.7070 with the batch on, 1.3140 → 1.3040 with
+it off — but the pipeline ratio went 3.632× → 3.900×, because **the detect stage is 1.93×
+faster: 0.1390 → 0.0720 ms/frame.** That is `goodFeaturesToTrack`'s selection work
+([#83](https://github.com/ryanhou28/bincv/issues/83),
+[#84](https://github.com/ryanhou28/bincv/issues/84)) arriving in a pipeline figure taken
+before it, and the saving flows through almost exactly: 0.067 ms off detect against 0.0665 ms
+off the pipeline.
+
+**Nothing could have told a reader that.** The `BINCV_LK_BATCH=1` log had been taken from a
+modified tree, so it was stamped `(dirty)`, named no commit, and
+`check_figure_staleness.py` could not map it at all. Given a clean stamp it reports STALE and
+names `ops/corner.hpp` — the file those two PRs changed. The figure sat 1.93× wrong on one
+stage with the one gate that would have caught it switched off by a stray build artifact
+([#89](https://github.com/ryanhou28/bincv/issues/89)).
+
 The batch-on sweep is also an independent repeat of the pipeline figure in
-[feature-tracking.md](feature-tracking.md) as that page then carried it — 3.632×
-[3.614, 3.648] against that sweep's 3.658× [3.633, 3.681], 0.7% apart with overlapping
-intervals. (Both are that commit's; the page now reads 3.969× on a faster detect stage.) Two sweeps of the same quantity
-through different command lines agreeing to within their intervals is the check that the
-protocol reproduces, not just the row.
+[feature-tracking.md](feature-tracking.md), through a different command line: **3.900×
+[3.875, 3.917] here against that page's 3.969× [3.935, 4.004]**, 1.8% apart. The two are not
+at the same commit — this sweep is at `5c6a47d` and that page's at `880704b` — so they are
+not expected to coincide, and 1.8% across an intervening detect-stage change is the check
+that the protocol reproduces rather than just the row. Before the re-take the same pair read
+3.632× against 3.658×, 0.7% apart with overlapping intervals; both readings agree that the
+two command lines measure the same quantity.
 
 This machinery exists because it has caught real errors. A vector block was once compiled out
 entirely by a mis-attached `#define`, and three consecutive "improvements" were measured

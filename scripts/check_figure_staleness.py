@@ -22,6 +22,30 @@ Every file in that set is then COMPARED, at the log's commit against the working
 tree.  If any of them differs, every figure quoted from that log is a figure
 about code that no longer exists.
 
+THE PREPROCESSOR IS NOT ENOUGH FOR A CUDA LOG, AND THAT IS THE WHOLE DIFFICULTY.
+A `.cu` is no different in kind from a `.cpp` -- same comment syntax, same quoted
+includes, same walk -- but the host library is header-only and the CUDA backend is
+not.  `cuda_role_benchmark.cpp` includes `bincv/cuda/threshold.hpp`, which DECLARES
+`thresholdToBits` and contains none of it; the kernel is in
+`backends/cuda/src/threshold.cu`, a separate translation unit the preprocessor
+never sees.  A closure that stopped at the headers would leave every device kernel
+in the repository outside this gate while reporting that it covered them, which is
+worse than not covering them at all.  So the walk takes one LINK step the compiler
+takes too:
+
+  * a header at `backends/cuda/include/bincv/cuda/X.hpp` pulls in
+    `backends/cuda/src/X.cu`, the translation unit that implements it;
+  * a benchmark or test pulls in the other sources its `add_executable` (or
+    `bincv_add_test_target`) names -- `cuda_bench_null.cu` carries the launch
+    floor every kernel-resident figure sits on, and it is reached no other way.
+
+The first of those is a naming convention, so it is CHECKED rather than trusted:
+a `.cu` in the backend's `src/` with no same-named public header would be a kernel
+no log could ever go stale on, and the self-check refuses to run until it has one.
+Precision is the point of doing it this way rather than declaring all of
+`bincv_cuda` a dependency of every CUDA log: a median-kernel edit must not age a
+dense-disparity figure, or the gate is the alarm described below.
+
 IT COMPARES CONTENT, NOT HISTORY, and that is not a stylistic choice.  Asking
 "what has `git log <stamp>..HEAD` touched" is wrong the moment a branch is
 SQUASH-merged: the squash commit is not a descendant of the stamp, so the whole
@@ -66,7 +90,13 @@ edit is meant to be read in review rather than waved through.
 
 Exits non-zero when a log has gone stale that the baseline does not already name.
 
+`--explain LOG` answers the same question for one log and says why, which is what
+`scripts/run_cuda_launches.sh` calls on the log it has just written: a sweep whose
+output this cannot map is a sweep outside the gate, and the runner should say so
+while the machine is still warm rather than let a reviewer find it.
+
 Usage: python3 scripts/check_figure_staleness.py [--update-baseline] [-v]
+       python3 scripts/check_figure_staleness.py --explain <log>
 """
 
 import argparse
@@ -82,6 +112,36 @@ BASELINE = os.path.join(LOGS, 'expected-stale.txt')
 
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.M)
 
+# The -I list the build actually passes, in the build's own order. The host
+# library's `include/` first so nothing about a host benchmark's closure depends
+# on the two entries added for the backend; `benchmark/` last because that is
+# where a CUDA benchmark reaches measure_util.hpp from another directory.
+INCLUDE_DIRS = ('include', os.path.join('backends', 'cuda', 'include'), 'benchmark')
+
+# Where a benchmark binary's own translation unit lives, and what it may be
+# called. A .cu is a benchmark source like any other -- test_cuda_custom is one.
+SOURCE_DIRS = ('benchmark', 'tests', 'examples',
+               os.path.join('backends', 'cuda', 'benchmark'),
+               os.path.join('backends', 'cuda', 'tests'),
+               os.path.join('backends', 'cuda', 'examples'))
+SOURCE_EXTS = ('.cpp', '.cc', '.cu')
+
+# The backend's declaration/definition split: the caller includes the .hpp, the
+# kernel is compiled from the .cu of the same name. self_check() holds this to
+# being complete rather than taking it on trust.
+CUDA_HEADER_DIR = os.path.join('backends', 'cuda', 'include', 'bincv', 'cuda')
+CUDA_SRC_DIR = os.path.join('backends', 'cuda', 'src')
+
+# The CMake lists naming the translation units a benchmark links. The host ones
+# are read too and contribute nothing today -- every host target that names its
+# sources literally names exactly one -- but that is an invariant nothing
+# enforces, and reading the list costs nothing.
+LINK_LISTS = (os.path.join('benchmark', 'CMakeLists.txt'),
+              os.path.join('tests', 'CMakeLists.txt'),
+              os.path.join('backends', 'cuda', 'benchmark', 'CMakeLists.txt'),
+              os.path.join('backends', 'cuda', 'tests', 'CMakeLists.txt'))
+TARGET_RE = re.compile(r'\b(?:add_executable|bincv_add_test_target)\s*\(([^)]*)\)')
+
 
 def git(*args):
     """git, from the repository root, stdout as text ('' on failure)."""
@@ -93,27 +153,50 @@ def git(*args):
         return ''
 
 
+def implementing_unit(header):
+    """The `.cu` that defines what `header` declares, or None.
+
+    The backend's one naming convention: `include/bincv/cuda/X.hpp` is the public
+    face of `src/X.cu`. Nothing else in the repository has a definition the
+    preprocessor cannot reach, so nothing else needs this step.
+    """
+    rel = os.path.relpath(header, ROOT)
+    if os.path.dirname(rel) != CUDA_HEADER_DIR:
+        return None
+    cand = os.path.join(ROOT, CUDA_SRC_DIR,
+                        os.path.splitext(os.path.basename(rel))[0] + '.cu')
+    return cand if os.path.isfile(cand) else None
+
+
 def first_party_deps(source, _seen=None):
-    """`source` plus every first-party header it reaches, as repo-relative paths.
+    """`source` plus every first-party file it reaches, as repo-relative paths.
 
     Resolution is the compiler's: a quoted include is tried against the including
-    file's own directory first, then `include/`. Anything that resolves outside
-    the repository -- a system or OpenCV header -- is not ours and is dropped,
-    because a figure does not go stale when OpenCV does. That is a real limit and
-    it is stated rather than hidden: an OpenCV upgrade moves denominators and
-    nothing here will say so.
+    file's own directory first, then the build's -I list. Anything that resolves
+    outside the repository -- a system, CUDA toolkit or OpenCV header -- is not
+    ours and is dropped, because a figure does not go stale when OpenCV does.
+    That is a real limit and it is stated rather than hidden: an OpenCV upgrade
+    moves denominators and nothing here will say so.
+
+    "Reaches" is the preprocessor's relation plus one link step, because the CUDA
+    backend's kernels live in translation units no include names -- see the
+    header comment.
     """
     seen = _seen if _seen is not None else set()
     rel = os.path.relpath(source, ROOT)
     if rel in seen or not os.path.isfile(source):
         return seen
     seen.add(rel)
+    impl = implementing_unit(source)
+    if impl is not None:
+        first_party_deps(impl, seen)
     try:
         text = open(source, encoding='utf-8', errors='replace').read()
     except OSError:
         return seen
     for inc in INCLUDE_RE.findall(text):
-        for base in (os.path.dirname(source), os.path.join(ROOT, 'include')):
+        for base in [os.path.dirname(source)] + [os.path.join(ROOT, d)
+                                                 for d in INCLUDE_DIRS]:
             cand = os.path.normpath(os.path.join(base, inc))
             if cand.startswith(ROOT) and os.path.isfile(cand):
                 first_party_deps(cand, seen)
@@ -201,20 +284,52 @@ def code_differs(rev, path):
 def benchmark_source(binary):
     """The source file behind a benchmark binary, or None.
 
-    Benchmarks are one translation unit named after the binary, in benchmark/ or
-    tests/. A binary this cannot place is reported rather than assumed.
+    A benchmark is one translation unit named after the binary, in benchmark/,
+    tests/ or the backend's copies of those. A binary this cannot place is
+    reported rather than assumed.
     """
     stem = os.path.basename(binary)
-    for d in ('benchmark', 'tests', 'examples'):
-        for ext in ('.cpp', '.cc'):
+    for d in SOURCE_DIRS:
+        for ext in SOURCE_EXTS:
             cand = os.path.join(ROOT, d, stem + ext)
             if os.path.isfile(cand):
                 return cand
     return None
 
 
+def linked_sources(binary, cache={}):
+    """The OTHER translation units the build links into `binary`, absolute paths.
+
+    Read out of the CMakeLists that declares the target rather than guessed from
+    a naming rule, because these files have no naming rule:
+    `cuda_bench_null.cu` holds the empty kernel every launch-floor figure is
+    measured against, and `cuda_ransac_kernels.cu` holds one benchmark's own
+    kernels. Neither is named by any include, and a figure that sits on the
+    launch floor moves when the launch floor's translation unit does.
+    """
+    if not cache:
+        for rel in LINK_LISTS:
+            path = os.path.join(ROOT, rel)
+            if not os.path.isfile(path):
+                continue
+            text = open(path, encoding='utf-8', errors='replace').read()
+            for body in TARGET_RE.findall(text):
+                words = body.split()
+                if not words:
+                    continue
+                here = os.path.dirname(path)
+                cache[words[0]] = [os.path.join(here, w) for w in words[1:]
+                                   if w.endswith(SOURCE_EXTS)
+                                   and os.path.isfile(os.path.join(here, w))]
+    return cache.get(os.path.basename(binary), [])
+
+
 def read_header(path):
-    """The `# key: value` preamble run_launches.sh writes, as a dict."""
+    """The `# key: value` preamble a launch runner writes, as a dict.
+
+    `benchmark` and `commit` are the two fields this gate needs, which makes them
+    the contract run_launches.sh and run_cuda_launches.sh both have to keep.
+    """
     fields = {}
     try:
         with open(path, encoding='utf-8', errors='replace') as fh:
@@ -254,7 +369,9 @@ def self_check():
     for a code one. If `strip_comments` regressed, it would go quiet for BOTH and
     report a clean repository -- the failure mode that looks like success, which
     is the one `verify.sh` grew its own self-check for. Four cases, on strings, so
-    it costs nothing and runs every time.
+    it costs nothing and runs every time. cuda_kernels_are_reachable() is the
+    other half: a mapping that has silently stopped covering the device kernels
+    fails the same quiet way.
     """
     base = 'int f() {\n  return 1;  // one\n}\n'
     cases = [
@@ -274,6 +391,39 @@ def self_check():
     if strip_comments('const char* u = "a//b";') == strip_comments('const char* u = "a";'):
         print('SELF-CHECK FAILED: a // inside a string literal was treated as a comment',
               file=sys.stderr)
+        return False
+    return cuda_kernels_are_reachable()
+
+
+def cuda_kernels_are_reachable():
+    """Every device translation unit must be reachable from the header above it.
+
+    The link step this gate takes for the CUDA backend is a naming convention --
+    `src/X.cu` is what `include/bincv/cuda/X.hpp` declares -- and a convention
+    that has quietly stopped holding is the failure mode that looks like success:
+    the gate would report every CUDA log fresh while a rewritten kernel sat under
+    it. So the convention is checked structurally, the way
+    bincv_assert_warning_policy() checks the warning flags, rather than asserted
+    in a comment. A new `.cu` with no public header of its own belongs to some
+    header anyway; name it after that header, or this walk has to learn how it is
+    reached.
+    """
+    src = os.path.join(ROOT, CUDA_SRC_DIR)
+    if not os.path.isdir(src):
+        return True
+    orphans = []
+    for name in sorted(os.listdir(src)):
+        if not name.endswith('.cu'):
+            continue
+        stem = os.path.splitext(name)[0]
+        if not any(os.path.isfile(os.path.join(ROOT, CUDA_HEADER_DIR, stem + ext))
+                   for ext in ('.hpp', '.cuh')):
+            orphans.append(os.path.join(CUDA_SRC_DIR, name))
+    if orphans:
+        print('SELF-CHECK FAILED: device translation units no CUDA log can go stale on,\n'
+              '  because no header of the same name reaches them:', file=sys.stderr)
+        for o in orphans:
+            print('      %s' % o, file=sys.stderr)
         return False
     return True
 
@@ -295,12 +445,69 @@ def load_baseline():
     return out
 
 
+def classify(path):
+    """One log -> ('unmappable', why) or ('fresh'|'stale', commit, deps, moved).
+
+    The single definition of what this gate asks of a log, so `--explain` and the
+    sweep cannot answer it differently.
+    """
+    head = read_header(path)
+
+    commit = head.get('commit', '')
+    if not commit:
+        return ('unmappable', 'no commit stamp -- predates run_launches.sh recording one')
+    if '(dirty)' in commit:
+        return ('unmappable', 'taken from a modified tree, so it names no commit')
+    commit = commit.split()[0]
+    if not git('cat-file', '-e', commit + '^{commit}') and not git('rev-parse', '--verify',
+                                                                   '--quiet', commit):
+        return ('unmappable', 'commit %s is not in this history' % commit)
+
+    binary = head.get('benchmark', '').split()[0] if head.get('benchmark') else ''
+    if not binary:
+        return ('unmappable', 'no benchmark line -- cannot tell what it measured')
+    source = benchmark_source(binary)
+    if source is None:
+        return ('unmappable', 'no source found for %s' % os.path.basename(binary))
+
+    deps = set()
+    for root in [source] + linked_sources(binary):
+        first_party_deps(root, deps)
+    deps = sorted(deps)
+    moved = [d for d in deps if code_differs(commit, d)]
+    return (('stale' if moved else 'fresh'), commit, deps, moved)
+
+
+def explain(path):
+    """Answer for one log, out loud. Non-zero when it is stale or unmappable."""
+    name = os.path.basename(path)
+    if not os.path.isfile(path):
+        print('no such log: %s' % path, file=sys.stderr)
+        return 2
+    verdict = classify(path)
+    if verdict[0] == 'unmappable':
+        print('  UNMAPPABLE  %s\n    %s' % (name, verdict[1]))
+        print('    This log is OUTSIDE the staleness gate: nothing can tell whether a\n'
+              '    figure quoted from it still describes the code. Do not commit it.')
+        return 2
+    _, commit, deps, moved = verdict
+    print('  %-6s %s\n    taken at %s, over %d first-party files'
+          % (verdict[0].upper(), name, commit, len(deps)))
+    for d in moved[:12]:
+        print('      moved: %s' % d)
+    if len(moved) > 12:
+        print('      ... and %d more' % (len(moved) - 12))
+    return 1 if moved else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--update-baseline', action='store_true',
                     help='rewrite expected-stale.txt from what is stale now')
     ap.add_argument('--note', default='',
                     help='a line recorded in the baseline saying WHY this batch is accepted')
+    ap.add_argument('--explain', metavar='LOG', default='',
+                    help='map one log and say what it covers; non-zero if it is not fresh')
     ap.add_argument('-v', '--verbose', action='store_true',
                     help='list the fresh and unmappable logs too')
     args = ap.parse_args()
@@ -312,42 +519,21 @@ def main():
         print('not a git repository -- cannot tell when anything was taken')
         return 0
 
+    if args.explain:
+        return explain(args.explain)
+
     fresh, stale, unmappable = [], {}, {}
 
     for name in sorted(os.listdir(LOGS)):
         if not name.endswith('.log'):
             continue
-        path = os.path.join(LOGS, name)
-        head = read_header(path)
-
-        commit = head.get('commit', '')
-        if not commit:
-            unmappable[name] = 'no commit stamp -- predates run_launches.sh recording one'
-            continue
-        if '(dirty)' in commit:
-            unmappable[name] = 'taken from a modified tree, so it names no commit'
-            continue
-        commit = commit.split()[0]
-        if not git('cat-file', '-e', commit + '^{commit}') and not git('rev-parse', '--verify',
-                                                                       '--quiet', commit):
-            unmappable[name] = 'commit %s is not in this history' % commit
-            continue
-
-        binary = head.get('benchmark', '').split()[0] if head.get('benchmark') else ''
-        if not binary:
-            unmappable[name] = 'no benchmark line -- cannot tell what it measured'
-            continue
-        source = benchmark_source(binary)
-        if source is None:
-            unmappable[name] = 'no source found for %s' % os.path.basename(binary)
-            continue
-
-        deps = sorted(first_party_deps(source))
-        moved = [d for d in deps if code_differs(commit, d)]
-        if moved:
-            stale[name] = (commit, moved)
+        verdict = classify(os.path.join(LOGS, name))
+        if verdict[0] == 'unmappable':
+            unmappable[name] = verdict[1]
+        elif verdict[0] == 'stale':
+            stale[name] = (verdict[1], verdict[3])
         else:
-            fresh.append((name, commit, len(deps)))
+            fresh.append((name, verdict[1], len(verdict[2])))
 
     if args.update_baseline:
         with open(BASELINE, 'w', encoding='utf-8') as fh:
@@ -385,6 +571,20 @@ def main():
 
     print('figure staleness: %d fresh, %d stale, %d unmappable, of %d logs'
           % (len(fresh), len(stale), len(unmappable), len(fresh) + len(stale) + len(unmappable)))
+
+    # A log taken from a MODIFIED tree is a different thing from one that predates
+    # the runner, and lumping the two together hides it. The runner stamped this
+    # one; it said the tree was dirty. So the figures under it name no commit and
+    # no sweep can ever check them -- they are not stale, they are unverifiable,
+    # and the only fix is a re-take from a clean tree. Named here rather than
+    # counted, because two of these were sitting among the unmappable.
+    dirty = sorted(n for n, why in unmappable.items() if 'modified tree' in why)
+    if dirty:
+        print('  %d log(s) taken from a MODIFIED tree, so they name no commit and cannot'
+              % len(dirty))
+        print('  be checked at all. Re-take from a clean tree:')
+        for name in dirty:
+            print('      %s' % name)
 
     if args.verbose:
         for name, commit, n in fresh:
