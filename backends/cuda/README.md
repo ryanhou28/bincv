@@ -186,8 +186,8 @@ Exits 77 (not a pass) without a toolkit or a device. It runs **two** configurati
 Release, which also compiles the benchmarks, and Debug, the only one where `BINCV_ASSERT`
 reaches nvcc's device pass — and derives its suite list from `tests/CMakeLists.txt` rather
 than a hard-coded one, cross-checking `bincv_add_test_target()` against `add_test()` so
-neither half can quietly lose a suite. **Eighteen suites, 191,579 checks in Release and
-191,542 in Debug**: every device kernel compared against the host library byte for byte,
+neither half can quietly lose a suite. **Eighteen suites, 191,764 checks in Release and
+191,727 in Debug**: every device kernel compared against the host library byte for byte,
 every optimized arm held to the same map as its reference arm in one binary. The two counts
 differ by design — a deliberate domain violation that trips an assertion can only have its
 error return checked where the assertion is compiled out, so those call sites print

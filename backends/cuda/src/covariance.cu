@@ -240,7 +240,17 @@ __device__ __forceinline__ void walkShare(const DevicePlaneBlockConstView& dx,
 }
 
 constexpr unsigned kBatchBlock = 64;  // one block per window; ~62 word visits
-constexpr unsigned kRegionBlock = 256;
+// 64, not the 256 this shape started at, and the reason is `gridFor`'s 4096-block
+// cap rather than the block size itself. The epilogue is a warp reduce plus
+// three 64-bit atomics on ONE address, paid once per warp however many words
+// the warp visited; capping the grid at 4096 blocks means a narrower block is
+// FEWER warps each visiting more words. Measured on a whole 7680x4320 region,
+// where the cap binds: 1.82x faster in 105 of 105 paired rounds, DRAM 41.3% ->
+// 84.9% of peak on identical load traffic (518,400 sectors either way), while
+// achieved occupancy FALLS 81.9% -> 61.9%. Below the cap -- 3840x2160 and the
+// reference frame -- both block sizes give one word per thread and the two are
+// a null, so this costs nothing there.
+constexpr unsigned kRegionBlock = 64;
 
 // ---------------------------------------------------------------------------
 // THE BATCH: one BLOCK per window. reduce.cu's batchKernel shape, so the two
