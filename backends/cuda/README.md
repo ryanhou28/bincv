@@ -92,7 +92,7 @@ so the smaller cell is the faster side, and the faster side is bold.
 | `calcOpticalFlowPyrLKAsync`, 2048 pts | ″ | **0.3769** | 0.3976 | null result |
 | `cornerMinEigenValAsync` | `createMinEigenValCorner` | 0.0519 | **0.0201** | **2.597×** |
 | `threshold` → bits, 3840×2160 | `cv::cuda::threshold` | 0.0364 | **0.0255** | null result |
-| `calcOpticalFlowBlockMatch` | `SparsePyrLKOpticalFlow` | 0.2320 | **0.0540** | not published |
+| `calcOpticalFlowBlockMatch` | **none — OpenCV does not implement this** | — | 0.0570 | no bar exists |
 
 **A null result is not a loss.** Lucas-Kanade at 2048 points and `threshold` each have 0 or
 1 of 7 runs disjoint, so neither direction is established and

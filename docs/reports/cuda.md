@@ -81,7 +81,7 @@ milliseconds, so the smaller cell is the faster side and the faster side is bold
 | `denseDisparityBinary` — the binary entry | `cv::cuda::StereoBM(64, 9)` | 0.7134 | **0.0640** | **11.16×** | 105 of 105; a result (11.16× vs 3.46×) ‡ |
 | census entry (2 transforms + match) | ″ | 0.7101 | **0.4789** | **1.504×** | 105 of 105; a result (1.50× vs 1.41×) — but it **loses on memory** ‡ |
 | census matcher alone | ″ | 0.7190 | **0.3900** | **1.888×** | 105 of 105; a result (1.89× vs 1.85×) ‡ |
-| `calcOpticalFlowBlockMatch` | `SparsePyrLKOpticalFlow` | 0.2320 | **0.0540** | not published | 7/7; speed met, **accuracy floor unset** |
+| `calcOpticalFlowBlockMatch` | **none — OpenCV does not implement this** | — | 0.0570 | no bar exists | binCV's own figure, 7 processes; the verdict is OUTSTANDING ‡ |
 | `detectFastAsync` | `FastFeatureDetector` | 0.1221 | **0.0208** | **6.015×** | 105 of 105; a result (6.02× vs 5.75×), from **14.84× behind** ‡ |
 | `computeBrief`, N=1000 | `cv::cuda::ORB::computeAsync` | 0.0896 | **0.0094** | **8.82×** | 105 of 105; a result (8.82× vs 3.65×) ‡ |
 | `matchDescriptors`, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 2.0087 | **0.2105** | **9.51×** | 105 of 105; a result (9.51× vs 1.71×) ‡ |
@@ -117,7 +117,7 @@ the census entry at **0.5418 against 0.7584 — 1.43×** and the census matcher 
 — 1.88×**. Which to quote is **not settled here**; the census row's run-to-run scatter is
 1.14×, so its 1.38×, 1.43× and 1.47× readings are one number rather than three.
 
-**‡ The thirteen marked rows were re-taken, and they are the first CUDA figures in this
+**‡ The fourteen marked rows were re-taken, and they are the first CUDA figures in this
 repository with provenance.** They come from
 [one committed sweep](logs/cuda_role-x86_64-cuda-launches.log) — 7 independent processes of
 `cuda_role_benchmark`, stamped at commit `7c8055f`, on the device and driver the log's own
@@ -138,6 +138,10 @@ single-session figure cannot show: `detectFastAsync` 6.01× → 6.015×, `matchD
 9.1× → 9.51×, the census matcher 1.87× → 1.888×, `denseDisparityBinary` 11.0× → 11.16×, and
 `computeBrief` 9.3× → **8.82×** — the one that moved against binCV. None is a code change and
 all five are inside the scatter the report's own conditions warn about.
+
+`calcOpticalFlowBlockMatch`'s own figure comes from
+[a third sweep](logs/cuda_sparse-x86_64-cuda-launches.log) of the benchmark that measures it,
+now that the table publishes binCV's number alone rather than a comparison.
 
 The Lucas–Kanade pair comes from
 [a second sweep](logs/cuda_role_lk-x86_64-cuda-launches.log), because those two rows are
@@ -383,9 +387,16 @@ GPU one anywhere on this list**:
   sparse stereo is `StereoBM`'s dense map plus a host lookup, not an operation.
 - **`matchDescriptorsGated`** — no library exposes a gated matcher.
 
-`calcOpticalFlowBlockMatch` is measured against `cv::cuda`'s LK above because that is the
-best existing option for the job, not because it is the same operation
-(`cv::cuda::FastOpticalFlowBM` is a dense field, not a sparse tracker).
+- **`calcOpticalFlowBlockMatch`** — pyramidal tracking by integer Hamming block matching.
+  OpenCV ships no sparse block matcher: `cv::cuda::FastOpticalFlowBM` is a dense field, not a
+  tracker, and `SparsePyrLKOpticalFlow` solves a different equation *and* is already the bar
+  for `calcOpticalFlowPyrLKAsync`, which solves the same one. It was published against that
+  LK arm anyway until 2026-09-24, and the measurement that settled it is what one denominator
+  serving two questions looks like: **the same `cv::cuda::SparsePyrLKOpticalFlow` reads 0.1748 ms
+  as the LK row's bar, 0.2320 ms as this row's published bar, and 0.5352 ms in the benchmark
+  where this operation is actually measured** — three values for one baseline. Owner's ruling:
+  where there is no matching algorithm there is no comparison, and the table says OpenCV does
+  not implement it.
 
 **Descriptor matching left this list**, because it now has a device arm and therefore a
 real bar; it is timed above.
@@ -585,9 +596,9 @@ packaged OpenCV ships; point `-DBINCV_CUDA_OPENCV_DIR=<prefix>` at such a build.
 target that wants one is always built and reports its role bar as BLOCKED or OUTSTANDING
 when it is absent.
 
-**Two sweeps are committed under [logs/](logs/)** — `cuda_role-x86_64-cuda-launches.log` and
-`cuda_role_lk-x86_64-cuda-launches.log`, which the thirteen ‡-marked rows of the speed table
-come from (the second needs a real frame sequence: `BINCV_CUDA_ROLE_FRAMES` pointed at an
+**Three sweeps are committed under [logs/](logs/)** — `cuda_role-`, `cuda_role_lk-` and
+`cuda_sparse-x86_64-cuda-launches.log`, which the fourteen ‡-marked rows of the speed table
+come from (the LK one needs a real frame sequence: `BINCV_CUDA_ROLE_FRAMES` pointed at an
 8-bit BSQ1 blob, since the benchmark will not run those rows on synthetic frames), written by
 `scripts/run_cuda_launches.sh` and read by `scripts/check_figure_staleness.py`. Every other
 table here still names only the binary that produces it, and its figures are therefore
