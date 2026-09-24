@@ -1,0 +1,2036 @@
+# launch sweep -- 7 separate processes of one CUDA benchmark
+# benchmark: /home/ryanhou28/bigscratch/role-retake/backends/cuda/benchmark/cuda_role_benchmark lk
+# launches: 7
+# arch:     x86_64
+# host:     AMD Ryzen 5 5600X 6-Core Processor
+# kernel:   5.15.167.4-microsoft-standard-WSL2
+# compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
+# commit:   06246c2
+# device:   NVIDIA GeForce RTX 3070 Ti (compute 8.6, 8192 MiB)
+# driver:   560.94, exposing CUDA 12.6
+# nvcc:     /usr/local/cuda-11.1/bin/nvcc (release 11.1)
+# cuda arch: unset
+# nvcc ccbin: g++-9
+# build type: Release
+# build dir: /home/ryanhou28/bigscratch/role-retake
+# opencv for role arms: /home/ryanhou28/bigscratch/opencv-cuda/install
+# profiler: none running -- ncu, nsys, nvprof all absent at start
+# compute apps at start: none
+# gpu clock lock: not locked -- this host exposes no application clocks
+# gpu clock before: sm 1860 MHz, mem 9501 MHz, pstate P0
+# gpu throttle before: 0x0000000000000001
+# gpu temp before: 47 C
+# governor: none (this host exposes no cpufreq)
+# pinning:  taskset -c 2
+# sleep between launches: 0s
+# date:     2026-09-24T01:12:34-07:00
+# loadavg at start: 0.62 0.26 0.14 1/419 20011
+# NO launch is discarded -- the first pays for context creation and any
+# JIT, which is part of what a caller pays and part of what varies.
+
+### run 1
+=======================================================================
+ CUDA ROLE COMPARISONS -- every cv::cuda bar, one process, one protocol
+=======================================================================
+ device: NVIDIA GeForce RTX 3070 Ti (sm_86, 48 SMs, 608 GB/s peak)
+ OpenCV 4.5.4
+ frames: 752x480 (the reference geometry, where every written bar was
+ set) and 1920x1080 (carried because several of these ops sit ON the
+ launch floor at the reference size, where a ratio between two arms is
+ a ratio between two launches).
+
+ ORIENTATION: every ratio below is binCV / OpenCV. Under 1.000x is
+ binCV ahead. Arm A is OpenCV, arm B is binCV, in every pair.
+
+ LAUNCH FLOOR (empty kernel, same protocol)      0.0115 ms  spread  238%  [kernel]
+   Every kernel-resident number below sits on top of this. An arm within
+   a few multiples of it is reporting launch overhead, not its own work,
+   and a RATIO between two such arms is reporting almost none of either.
+   The spread is part of the answer, not a blemish on it: under WSL2 a
+   launch costs what it costs plus whatever the host was doing.
+FLOOR,0.005988,0.011510,0.033410
+
+ Driver meter step, measured in this run: 2.00 MB. Every memory
+ reading below is taken over 256 working sets for that reason.
+
+=====================================================================
+ 14. SPARSE LUCAS-KANADE -- binCV cuda::calcOpticalFlowPyrLKAsync
+     vs cv::cuda::SparsePyrLKOpticalFlow (cudaoptflow)
+=====================================================================
+ ROLE: 'track a keypoint set from one frame to the next over a
+ pyramid, on device'. BOTH SIDES' PYRAMIDS ARE RESIDENT AT ENTRY
+ and neither arm builds one inside the bracket -- cv::cuda's
+ calc() overload that takes std::vector<GpuMat> pyramids is used
+ for exactly that reason, so the row is a like-for-like rather
+ than a subtraction estimate.
+ SAME WINDOW BOTH SIDES: 31x31, 4 levels, iteration cap 20,
+ err off on both, both free-running (cv::cuda breaks on its own
+ 0.01-pixel convergence test; binCV on its own epsilon rule --
+ forcing equal iteration counts would be forcing a DIFFERENT
+ algorithm on one of them).
+ keypoints: 204 at the reference minDistance of 33.33 px, 2048 at
+ 6 px, both from goodFeaturesToTrack on frame 0 of the REAL
+ sequence.
+
+ THE SWEEP, and why it is a sweep: binCV = one launch, one warp
+ per keypoint; cv::cuda = one launch per level, 256 threads per
+ keypoint. Those shapes cross. Rows below are PREFIXES of the
+ minDistance-6 set, so only the count moves.
+
+ sparse LK, 31x31, 4 levels, 204 keypoints  [752x480, minDistance 33.33 (the reference pipeline's spacing)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.164 ms  spread  195%  [kernel]  (launch floor 7% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.092 ms  spread   23%  [kernel]  (launch floor 12% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.566x <- QUOTE THIS  (binCV  1.77x FASTER)
+                                           geomean 0.479x   per-round range 0.171-0.649x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.54x to 5.86x, median 1.77x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 1.77x apart on the MEDIAN per-round ratio,
+            short of the 3.80x it has to beat (the larger of: per-round swing 3.80x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 33.33 (the reference pipeline's spacing),0.143811,0.164188,0.463252,0.075590,0.092423,0.096399,0.170515,0.566225,0.648533,1,15,0.479256,0,15,0,1.766083,3.803386,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1082 ms enqueue vs  0.1642 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0060 ms enqueue vs  0.0924 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 33.33 (the reference pipeline's spacing),0.108195,0.164188,0.006049,0.092423
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 64 keypoints  [752x480, 64 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.191 ms  spread   94%  [kernel]  (launch floor 6% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.060 ms  spread   29%  [kernel]  (launch floor 19% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.314x <- QUOTE THIS  (binCV  3.18x FASTER)
+                                           geomean 0.313x   per-round range 0.206-0.425x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 2.35x to 4.85x, median 3.18x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 3.18x apart on the MEDIAN per-round ratio,
+            clearing the 2.06x it has to beat (the larger of: per-round swing 2.06x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 64 pts (prefix of minDistance 6),0.140513,0.190751,0.318956,0.052122,0.060334,0.069714,0.206113,0.314499,0.424760,1,15,0.312571,0,15,0,3.179662,2.060812,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1029 ms enqueue vs  0.1908 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0063 ms enqueue vs  0.0603 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 64 pts (prefix of minDistance 6),0.102876,0.190751,0.006284,0.060334
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 128 keypoints  [752x480, 128 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.223 ms  spread  207%  [kernel]  (launch floor 5% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.065 ms  spread   34%  [kernel]  (launch floor 18% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.298x <- QUOTE THIS  (binCV  3.36x FASTER)
+                                           geomean 0.266x   per-round range 0.118-0.433x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 2.31x to 8.51x, median 3.36x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 3.36x apart on the MEDIAN per-round ratio,
+            short of the 3.69x it has to beat (the larger of: per-round swing 3.69x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 128 pts (prefix of minDistance 6),0.155218,0.223171,0.616612,0.053903,0.065434,0.076165,0.117544,0.297972,0.433284,1,15,0.265940,0,15,0,3.356021,3.686162,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.0974 ms enqueue vs  0.2232 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0147 ms enqueue vs  0.0654 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 128 pts (prefix of minDistance 6),0.097426,0.223171,0.014745,0.065434
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 256 keypoints  [752x480, 256 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.163 ms  spread   34%  [kernel]  (launch floor 7% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.086 ms  spread   34%  [kernel]  (launch floor 13% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.538x <- QUOTE THIS  (binCV  1.86x FASTER)
+                                           geomean 0.519x   per-round range 0.369-0.640x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.56x to 2.71x, median 1.86x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 1.86x apart on the MEDIAN per-round ratio,
+            clearing the 1.73x it has to beat (the larger of: per-round swing 1.73x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 256 pts (prefix of minDistance 6),0.145572,0.162509,0.200253,0.071516,0.085827,0.100721,0.368831,0.537809,0.639567,1,15,0.519497,0,15,0,1.859395,1.734037,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1045 ms enqueue vs  0.1625 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0071 ms enqueue vs  0.0858 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 256 pts (prefix of minDistance 6),0.104548,0.162509,0.007146,0.085827
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 512 keypoints  [752x480, 512 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.179 ms  spread   57%  [kernel]  (launch floor 6% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.115 ms  spread   20%  [kernel]  (launch floor 10% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.643x <- QUOTE THIS  (binCV  1.56x FASTER)
+                                           geomean 0.623x   per-round range 0.455-0.844x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.18x to 2.20x, median 1.56x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 1.56x apart on the MEDIAN per-round ratio,
+            short of the 1.86x it has to beat (the larger of: per-round swing 1.86x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 512 pts (prefix of minDistance 6),0.144343,0.178788,0.245494,0.099779,0.115077,0.123209,0.454826,0.642784,0.844211,1,15,0.622536,0,15,0,1.555733,1.856119,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1304 ms enqueue vs  0.1788 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0065 ms enqueue vs  0.1151 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 512 pts (prefix of minDistance 6),0.130448,0.178788,0.006518,0.115077
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 1024 keypoints  [752x480, 1024 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.239 ms  spread   49%  [kernel]  (launch floor 5% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.227 ms  spread   10%  [kernel]  (launch floor 5% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.931x <- QUOTE THIS  (binCV  1.07x FASTER)
+                                           geomean 0.945x   per-round range 0.744-1.173x (15 rounds)
+   sign test over those paired rounds: 6 favour A, 9 favour B, 0 tied -- two-sided p = 0.607
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.07x apart on the MEDIAN per-round ratio,
+            short of the 1.58x it has to beat (the larger of: per-round swing 1.58x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 1024 pts (prefix of minDistance 6),0.189809,0.239206,0.307241,0.215507,0.226693,0.238895,0.744359,0.931495,1.172529,0,15,0.944593,6,9,0,1.073543,1.575220,0.6072
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1151 ms enqueue vs  0.2392 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0071 ms enqueue vs  0.2267 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 1024 pts (prefix of minDistance 6),0.115149,0.239206,0.007140,0.226693
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 2048 keypoints  [752x480, minDistance 6, the whole set]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.367 ms  spread   15%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.398 ms  spread    6%  [kernel]  (launch floor 3% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 1.072x <- QUOTE THIS  (binCV  0.93x SLOWER)
+                                           geomean 1.068x   per-round range 0.981-1.161x (15 rounds)
+   sign test over those paired rounds: 13 favour A, 2 favour B, 0 tied -- two-sided p = 0.00739
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.07x apart on the MEDIAN per-round ratio,
+            short of the 1.18x it has to beat (the larger of: per-round swing 1.18x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 6; the whole set,0.343552,0.367369,0.399647,0.389464,0.397599,0.414205,0.980969,1.072016,1.161490,0,15,1.068126,13,2,0,1.072016,1.184023,0.007385
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.2598 ms enqueue vs  0.3674 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0071 ms enqueue vs  0.3976 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 6, the whole set,0.259813,0.367369,0.007065,0.397599
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK tracker resident state (both frames at every level + keypoint arrays)  [752x480]  -- METER 2 on BOTH sides (cudaMemGetInfo delta),
+ each side over enough independent working sets that the meter's
+ 2.00 MB unit resolves, then divided by its own count.
+   [meter 2] cv::cuda       44.00 MB over   32 sets =    1408.0 KB/frame  (22 units)
+   [meter 2] binCV          42.00 MB over   96 sets =     448.0 KB/frame  (21 units)
+   [meter 2] ROUNDING: one 2.00 MB unit is 21.3 KB/frame at 96 sets (4.76% of binCV's
+             figure) and 64.0 KB/frame at 32 sets (4.55% of OpenCV's).
+   ratio OpenCV/binCV = 3.143x  -- binCV is SMALLER by 3.143x.
+   The OpenCV side is an UPPER BOUND: GpuMat pads its pitch, and any
+   filter buffer or NPP scratch held past the call is inside this
+   delta. binCV's side is cudaMalloc with nothing in between.
+MEM,lk,752x480,44040192,46137344,2097152,96,32
+   HONEST WEAKNESS, printed at the number: binCV STORES the
+   ternary derivative planes where cv::cuda recomputes them
+   in-kernel, which is most of binCV's side of this reading.
+   A fused-derivative variant would take it further and is not
+   in this measurement.
+
+=====================================================================
+ END. One run is NOT a number on this host: aggregate the ROW lines
+ across at least seven independent processes before quoting anything.
+=====================================================================
+### run 2
+=======================================================================
+ CUDA ROLE COMPARISONS -- every cv::cuda bar, one process, one protocol
+=======================================================================
+ device: NVIDIA GeForce RTX 3070 Ti (sm_86, 48 SMs, 608 GB/s peak)
+ OpenCV 4.5.4
+ frames: 752x480 (the reference geometry, where every written bar was
+ set) and 1920x1080 (carried because several of these ops sit ON the
+ launch floor at the reference size, where a ratio between two arms is
+ a ratio between two launches).
+
+ ORIENTATION: every ratio below is binCV / OpenCV. Under 1.000x is
+ binCV ahead. Arm A is OpenCV, arm B is binCV, in every pair.
+
+ LAUNCH FLOOR (empty kernel, same protocol)      0.0063 ms  spread  350%  [kernel]
+   Every kernel-resident number below sits on top of this. An arm within
+   a few multiples of it is reporting launch overhead, not its own work,
+   and a RATIO between two such arms is reporting almost none of either.
+   The spread is part of the answer, not a blemish on it: under WSL2 a
+   launch costs what it costs plus whatever the host was doing.
+FLOOR,0.005427,0.006268,0.027361
+
+ Driver meter step, measured in this run: 2.00 MB. Every memory
+ reading below is taken over 256 working sets for that reason.
+
+=====================================================================
+ 14. SPARSE LUCAS-KANADE -- binCV cuda::calcOpticalFlowPyrLKAsync
+     vs cv::cuda::SparsePyrLKOpticalFlow (cudaoptflow)
+=====================================================================
+ ROLE: 'track a keypoint set from one frame to the next over a
+ pyramid, on device'. BOTH SIDES' PYRAMIDS ARE RESIDENT AT ENTRY
+ and neither arm builds one inside the bracket -- cv::cuda's
+ calc() overload that takes std::vector<GpuMat> pyramids is used
+ for exactly that reason, so the row is a like-for-like rather
+ than a subtraction estimate.
+ SAME WINDOW BOTH SIDES: 31x31, 4 levels, iteration cap 20,
+ err off on both, both free-running (cv::cuda breaks on its own
+ 0.01-pixel convergence test; binCV on its own epsilon rule --
+ forcing equal iteration counts would be forcing a DIFFERENT
+ algorithm on one of them).
+ keypoints: 204 at the reference minDistance of 33.33 px, 2048 at
+ 6 px, both from goodFeaturesToTrack on frame 0 of the REAL
+ sequence.
+
+ THE SWEEP, and why it is a sweep: binCV = one launch, one warp
+ per keypoint; cv::cuda = one launch per level, 256 threads per
+ keypoint. Those shapes cross. Rows below are PREFIXES of the
+ minDistance-6 set, so only the count moves.
+
+ sparse LK, 31x31, 4 levels, 204 keypoints  [752x480, minDistance 33.33 (the reference pipeline's spacing)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.182 ms  spread  132%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.089 ms  spread   28%  [kernel]  (launch floor 7% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.496x <- QUOTE THIS  (binCV  2.01x FASTER)
+                                           geomean 0.460x   per-round range 0.229-0.689x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.45x to 4.37x, median 2.01x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 2.01x apart on the MEDIAN per-round ratio,
+            short of the 3.01x it has to beat (the larger of: per-round swing 3.01x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 33.33 (the reference pipeline's spacing),0.145114,0.182411,0.385843,0.075121,0.089457,0.099983,0.229082,0.496292,0.688998,1,15,0.459613,0,15,0,2.014943,3.007645,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1117 ms enqueue vs  0.1824 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0066 ms enqueue vs  0.0895 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 33.33 (the reference pipeline's spacing),0.111750,0.182411,0.006617,0.089457
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 64 keypoints  [752x480, 64 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.161 ms  spread  251%  [kernel]  (launch floor 4% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.062 ms  spread   27%  [kernel]  (launch floor 10% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.350x <- QUOTE THIS  (binCV  2.85x FASTER)
+                                           geomean 0.328x   per-round range 0.113-0.457x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 2.19x to 8.87x, median 2.85x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 2.85x apart on the MEDIAN per-round ratio,
+            short of the 4.05x it has to beat (the larger of: per-round swing 4.05x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 64 pts (prefix of minDistance 6),0.146678,0.161014,0.551377,0.052182,0.062177,0.068977,0.112767,0.350400,0.456864,1,15,0.328050,0,15,0,2.853884,4.051384,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1085 ms enqueue vs  0.1610 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0058 ms enqueue vs  0.0622 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 64 pts (prefix of minDistance 6),0.108538,0.161014,0.005792,0.062177
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 128 keypoints  [752x480, 128 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.183 ms  spread  170%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.069 ms  spread   37%  [kernel]  (launch floor 9% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.358x <- QUOTE THIS  (binCV  2.79x FASTER)
+                                           geomean 0.336x   per-round range 0.163-0.473x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 2.12x to 6.15x, median 2.79x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 2.79x apart on the MEDIAN per-round ratio,
+            short of the 2.91x it has to beat (the larger of: per-round swing 2.91x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 128 pts (prefix of minDistance 6),0.154501,0.182579,0.465428,0.054088,0.069425,0.079913,0.162501,0.357936,0.472625,1,15,0.335789,0,15,0,2.793795,2.908438,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1189 ms enqueue vs  0.1826 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0116 ms enqueue vs  0.0694 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 128 pts (prefix of minDistance 6),0.118882,0.182579,0.011648,0.069425
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 256 keypoints  [752x480, 256 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.174 ms  spread  108%  [kernel]  (launch floor 4% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.085 ms  spread   44%  [kernel]  (launch floor 7% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.493x <- QUOTE THIS  (binCV  2.03x FASTER)
+                                           geomean 0.449x   per-round range 0.241-0.700x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.43x to 4.14x, median 2.03x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 2.03x apart on the MEDIAN per-round ratio,
+            short of the 2.90x it has to beat (the larger of: per-round swing 2.90x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 256 pts (prefix of minDistance 6),0.156426,0.174346,0.344611,0.072110,0.084869,0.109548,0.241402,0.492541,0.700314,1,15,0.448896,0,15,0,2.030289,2.901032,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.2157 ms enqueue vs  0.1743 ms event  -> DISPATCH-BOUND: the event bracket is timing the API call
+     bincv LK                                     0.0162 ms enqueue vs  0.0849 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 256 pts (prefix of minDistance 6),0.215712,0.174346,0.016170,0.084869
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 512 keypoints  [752x480, 512 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.196 ms  spread   93%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.119 ms  spread   17%  [kernel]  (launch floor 5% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.605x <- QUOTE THIS  (binCV  1.65x FASTER)
+                                           geomean 0.542x   per-round range 0.342-0.660x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.51x to 2.93x, median 1.65x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 1.65x apart on the MEDIAN per-round ratio,
+            short of the 1.93x it has to beat (the larger of: per-round swing 1.93x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 512 pts (prefix of minDistance 6),0.173937,0.195707,0.355820,0.113807,0.119146,0.134410,0.341718,0.604691,0.660073,1,15,0.542447,0,15,0,1.653736,1.931634,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1153 ms enqueue vs  0.1957 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0074 ms enqueue vs  0.1191 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 512 pts (prefix of minDistance 6),0.115259,0.195707,0.007420,0.119146
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 1024 keypoints  [752x480, 1024 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.230 ms  spread   48%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.225 ms  spread   11%  [kernel]  (launch floor 3% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.973x <- QUOTE THIS  (binCV  1.03x FASTER)
+                                           geomean 0.993x   per-round range 0.774-1.200x (15 rounds)
+   sign test over those paired rounds: 6 favour A, 9 favour B, 0 tied -- two-sided p = 0.607
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.03x apart on the MEDIAN per-round ratio,
+            short of the 1.55x it has to beat (the larger of: per-round swing 1.55x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 1024 pts (prefix of minDistance 6),0.189624,0.230195,0.300073,0.207028,0.225280,0.232161,0.773683,0.973308,1.199914,0,15,0.992583,6,9,0,1.027424,1.550912,0.6072
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1178 ms enqueue vs  0.2302 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0076 ms enqueue vs  0.2253 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 1024 pts (prefix of minDistance 6),0.117809,0.230195,0.007634,0.225280
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 2048 keypoints  [752x480, minDistance 6, the whole set]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.373 ms  spread   12%  [kernel]  (launch floor 2% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.400 ms  spread    7%  [kernel]  (launch floor 2% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 1.079x <- QUOTE THIS  (binCV  0.93x SLOWER)
+                                           geomean 1.083x   per-round range 1.037-1.179x (15 rounds)
+   sign test over those paired rounds: 15 favour A, 0 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM A is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.04x to 1.18x, median 1.08x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 1.08x apart on the MEDIAN per-round ratio,
+            short of the 1.14x it has to beat (the larger of: per-round swing 1.14x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 6; the whole set,0.341074,0.372634,0.385577,0.392124,0.399688,0.422072,1.036860,1.079269,1.179236,1,15,1.082577,15,0,0,1.079269,1.137315,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1064 ms enqueue vs  0.3726 ms event  -> kernel-bound: the host feeds the device faster than it drains
+     bincv LK                                     0.0075 ms enqueue vs  0.3997 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 6, the whole set,0.106354,0.372634,0.007528,0.399688
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK tracker resident state (both frames at every level + keypoint arrays)  [752x480]  -- METER 2 on BOTH sides (cudaMemGetInfo delta),
+ each side over enough independent working sets that the meter's
+ 2.00 MB unit resolves, then divided by its own count.
+   [meter 2] cv::cuda       44.00 MB over   32 sets =    1408.0 KB/frame  (22 units)
+   [meter 2] binCV          42.00 MB over   96 sets =     448.0 KB/frame  (21 units)
+   [meter 2] ROUNDING: one 2.00 MB unit is 21.3 KB/frame at 96 sets (4.76% of binCV's
+             figure) and 64.0 KB/frame at 32 sets (4.55% of OpenCV's).
+   ratio OpenCV/binCV = 3.143x  -- binCV is SMALLER by 3.143x.
+   The OpenCV side is an UPPER BOUND: GpuMat pads its pitch, and any
+   filter buffer or NPP scratch held past the call is inside this
+   delta. binCV's side is cudaMalloc with nothing in between.
+MEM,lk,752x480,44040192,46137344,2097152,96,32
+   HONEST WEAKNESS, printed at the number: binCV STORES the
+   ternary derivative planes where cv::cuda recomputes them
+   in-kernel, which is most of binCV's side of this reading.
+   A fused-derivative variant would take it further and is not
+   in this measurement.
+
+=====================================================================
+ END. One run is NOT a number on this host: aggregate the ROW lines
+ across at least seven independent processes before quoting anything.
+=====================================================================
+### run 3
+=======================================================================
+ CUDA ROLE COMPARISONS -- every cv::cuda bar, one process, one protocol
+=======================================================================
+ device: NVIDIA GeForce RTX 3070 Ti (sm_86, 48 SMs, 608 GB/s peak)
+ OpenCV 4.5.4
+ frames: 752x480 (the reference geometry, where every written bar was
+ set) and 1920x1080 (carried because several of these ops sit ON the
+ launch floor at the reference size, where a ratio between two arms is
+ a ratio between two launches).
+
+ ORIENTATION: every ratio below is binCV / OpenCV. Under 1.000x is
+ binCV ahead. Arm A is OpenCV, arm B is binCV, in every pair.
+
+ LAUNCH FLOOR (empty kernel, same protocol)      0.0059 ms  spread  192%  [kernel]
+   Every kernel-resident number below sits on top of this. An arm within
+   a few multiples of it is reporting launch overhead, not its own work,
+   and a RATIO between two such arms is reporting almost none of either.
+   The spread is part of the answer, not a blemish on it: under WSL2 a
+   launch costs what it costs plus whatever the host was doing.
+FLOOR,0.005007,0.005939,0.016394
+
+ Driver meter step, measured in this run: 2.00 MB. Every memory
+ reading below is taken over 256 working sets for that reason.
+
+=====================================================================
+ 14. SPARSE LUCAS-KANADE -- binCV cuda::calcOpticalFlowPyrLKAsync
+     vs cv::cuda::SparsePyrLKOpticalFlow (cudaoptflow)
+=====================================================================
+ ROLE: 'track a keypoint set from one frame to the next over a
+ pyramid, on device'. BOTH SIDES' PYRAMIDS ARE RESIDENT AT ENTRY
+ and neither arm builds one inside the bracket -- cv::cuda's
+ calc() overload that takes std::vector<GpuMat> pyramids is used
+ for exactly that reason, so the row is a like-for-like rather
+ than a subtraction estimate.
+ SAME WINDOW BOTH SIDES: 31x31, 4 levels, iteration cap 20,
+ err off on both, both free-running (cv::cuda breaks on its own
+ 0.01-pixel convergence test; binCV on its own epsilon rule --
+ forcing equal iteration counts would be forcing a DIFFERENT
+ algorithm on one of them).
+ keypoints: 204 at the reference minDistance of 33.33 px, 2048 at
+ 6 px, both from goodFeaturesToTrack on frame 0 of the REAL
+ sequence.
+
+ THE SWEEP, and why it is a sweep: binCV = one launch, one warp
+ per keypoint; cv::cuda = one launch per level, 256 threads per
+ keypoint. Those shapes cross. Rows below are PREFIXES of the
+ minDistance-6 set, so only the count moves.
+
+ sparse LK, 31x31, 4 levels, 204 keypoints  [752x480, minDistance 33.33 (the reference pipeline's spacing)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.169 ms  spread   81%  [kernel]  (launch floor 4% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.089 ms  spread   28%  [kernel]  (launch floor 7% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.497x <- QUOTE THIS  (binCV  2.01x FASTER)
+                                           geomean 0.482x   per-round range 0.328-0.619x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.62x to 3.05x, median 2.01x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 2.01x apart on the MEDIAN per-round ratio,
+            clearing the 1.89x it has to beat (the larger of: per-round swing 1.89x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; minDistance 33.33 (the reference pipeline's spacing),0.143913,0.169370,0.280538,0.074568,0.089310,0.099144,0.327552,0.497442,0.618876,1,15,0.482333,0,15,0,2.010285,1.889399,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.0918 ms enqueue vs  0.1694 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0065 ms enqueue vs  0.0893 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 33.33 (the reference pipeline's spacing),0.091803,0.169370,0.006473,0.089310
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 64 keypoints  [752x480, 64 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.168 ms  spread   66%  [kernel]  (launch floor 4% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.060 ms  spread   30%  [kernel]  (launch floor 10% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.361x <- QUOTE THIS  (binCV  2.77x FASTER)
+                                           geomean 0.354x   per-round range 0.218-0.500x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 2.00x to 4.58x, median 2.77x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 2.77x apart on the MEDIAN per-round ratio,
+            clearing the 2.29x it has to beat (the larger of: per-round swing 2.29x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 64 pts (prefix of minDistance 6),0.132236,0.168216,0.242790,0.052285,0.059611,0.070410,0.218136,0.360746,0.500371,1,15,0.353845,0,15,0,2.772033,2.293849,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1109 ms enqueue vs  0.1682 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0072 ms enqueue vs  0.0596 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 64 pts (prefix of minDistance 6),0.110919,0.168216,0.007179,0.059611
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 128 keypoints  [752x480, 128 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.201 ms  spread   67%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.055 ms  spread   32%  [kernel]  (launch floor 11% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.322x <- QUOTE THIS  (binCV  3.11x FASTER)
+                                           geomean 0.315x   per-round range 0.203-0.527x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.90x to 4.92x, median 3.11x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 3.11x apart on the MEDIAN per-round ratio,
+            clearing the 2.60x it has to beat (the larger of: per-round swing 2.60x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 128 pts (prefix of minDistance 6),0.134834,0.201006,0.270397,0.054047,0.055025,0.071719,0.203060,0.321627,0.527008,1,15,0.315111,0,15,0,3.109193,2.595333,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1098 ms enqueue vs  0.2010 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0072 ms enqueue vs  0.0550 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 128 pts (prefix of minDistance 6),0.109775,0.201006,0.007150,0.055025
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 256 keypoints  [752x480, 256 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.178 ms  spread   92%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.084 ms  spread   28%  [kernel]  (launch floor 7% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.451x <- QUOTE THIS  (binCV  2.22x FASTER)
+                                           geomean 0.427x   per-round range 0.233-0.592x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.69x to 4.29x, median 2.22x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 2.22x apart on the MEDIAN per-round ratio,
+            short of the 2.54x it has to beat (the larger of: per-round swing 2.54x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 256 pts (prefix of minDistance 6),0.144158,0.177910,0.308081,0.071735,0.083537,0.094984,0.233265,0.450836,0.592277,1,15,0.427365,0,15,0,2.218101,2.539077,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1154 ms enqueue vs  0.1779 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0111 ms enqueue vs  0.0835 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 256 pts (prefix of minDistance 6),0.115393,0.177910,0.011128,0.083537
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 512 keypoints  [752x480, 512 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.181 ms  spread   47%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.117 ms  spread   20%  [kernel]  (launch floor 5% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.657x <- QUOTE THIS  (binCV  1.52x FASTER)
+                                           geomean 0.641x   per-round range 0.473-0.739x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.35x to 2.11x, median 1.52x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 1.52x apart on the MEDIAN per-round ratio,
+            short of the 1.56x it has to beat (the larger of: per-round swing 1.56x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 512 pts (prefix of minDistance 6),0.158106,0.181084,0.242872,0.105286,0.116508,0.128614,0.473058,0.657470,0.739496,1,15,0.641459,0,15,0,1.520982,1.563223,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.2556 ms enqueue vs  0.1811 ms event  -> DISPATCH-BOUND: the event bracket is timing the API call
+     bincv LK                                     0.0160 ms enqueue vs  0.1165 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 512 pts (prefix of minDistance 6),0.255570,0.181084,0.015971,0.116508
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 1024 keypoints  [752x480, 1024 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.230 ms  spread   60%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.227 ms  spread   18%  [kernel]  (launch floor 3% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.958x <- QUOTE THIS  (binCV  1.04x FASTER)
+                                           geomean 0.948x   per-round range 0.656-1.203x (15 rounds)
+   sign test over those paired rounds: 5 favour A, 10 favour B, 0 tied -- two-sided p = 0.302
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.04x apart on the MEDIAN per-round ratio,
+            short of the 1.83x it has to beat (the larger of: per-round swing 1.83x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 1024 pts (prefix of minDistance 6),0.202486,0.230093,0.340827,0.204568,0.226693,0.244573,0.656346,0.958274,1.202500,0,15,0.947550,5,10,0,1.043543,1.832112,0.3018
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1015 ms enqueue vs  0.2301 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0089 ms enqueue vs  0.2267 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 1024 pts (prefix of minDistance 6),0.101453,0.230093,0.008948,0.226693
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 2048 keypoints  [752x480, minDistance 6, the whole set]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.379 ms  spread   10%  [kernel]  (launch floor 2% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.399 ms  spread    9%  [kernel]  (launch floor 1% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 1.044x <- QUOTE THIS  (binCV  0.96x SLOWER)
+                                           geomean 1.048x   per-round range 0.973-1.119x (15 rounds)
+   sign test over those paired rounds: 12 favour A, 3 favour B, 0 tied -- two-sided p = 0.0352
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.04x apart on the MEDIAN per-round ratio,
+            short of the 1.15x it has to beat (the larger of: per-round swing 1.15x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 6; the whole set,0.369828,0.379312,0.406999,0.386724,0.398950,0.423936,0.972749,1.044031,1.119249,0,15,1.047815,12,3,0,1.044031,1.150604,0.03516
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1186 ms enqueue vs  0.3793 ms event  -> kernel-bound: the host feeds the device faster than it drains
+     bincv LK                                     0.0073 ms enqueue vs  0.3990 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 6, the whole set,0.118562,0.379312,0.007251,0.398950
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK tracker resident state (both frames at every level + keypoint arrays)  [752x480]  -- METER 2 on BOTH sides (cudaMemGetInfo delta),
+ each side over enough independent working sets that the meter's
+ 2.00 MB unit resolves, then divided by its own count.
+   [meter 2] cv::cuda       44.00 MB over   32 sets =    1408.0 KB/frame  (22 units)
+   [meter 2] binCV          42.00 MB over   96 sets =     448.0 KB/frame  (21 units)
+   [meter 2] ROUNDING: one 2.00 MB unit is 21.3 KB/frame at 96 sets (4.76% of binCV's
+             figure) and 64.0 KB/frame at 32 sets (4.55% of OpenCV's).
+   ratio OpenCV/binCV = 3.143x  -- binCV is SMALLER by 3.143x.
+   The OpenCV side is an UPPER BOUND: GpuMat pads its pitch, and any
+   filter buffer or NPP scratch held past the call is inside this
+   delta. binCV's side is cudaMalloc with nothing in between.
+MEM,lk,752x480,44040192,46137344,2097152,96,32
+   HONEST WEAKNESS, printed at the number: binCV STORES the
+   ternary derivative planes where cv::cuda recomputes them
+   in-kernel, which is most of binCV's side of this reading.
+   A fused-derivative variant would take it further and is not
+   in this measurement.
+
+=====================================================================
+ END. One run is NOT a number on this host: aggregate the ROW lines
+ across at least seven independent processes before quoting anything.
+=====================================================================
+### run 4
+=======================================================================
+ CUDA ROLE COMPARISONS -- every cv::cuda bar, one process, one protocol
+=======================================================================
+ device: NVIDIA GeForce RTX 3070 Ti (sm_86, 48 SMs, 608 GB/s peak)
+ OpenCV 4.5.4
+ frames: 752x480 (the reference geometry, where every written bar was
+ set) and 1920x1080 (carried because several of these ops sit ON the
+ launch floor at the reference size, where a ratio between two arms is
+ a ratio between two launches).
+
+ ORIENTATION: every ratio below is binCV / OpenCV. Under 1.000x is
+ binCV ahead. Arm A is OpenCV, arm B is binCV, in every pair.
+
+ LAUNCH FLOOR (empty kernel, same protocol)      0.0128 ms  spread  174%  [kernel]
+   Every kernel-resident number below sits on top of this. An arm within
+   a few multiples of it is reporting launch overhead, not its own work,
+   and a RATIO between two such arms is reporting almost none of either.
+   The spread is part of the answer, not a blemish on it: under WSL2 a
+   launch costs what it costs plus whatever the host was doing.
+FLOOR,0.007485,0.012759,0.029747
+
+ Driver meter step, measured in this run: 2.00 MB. Every memory
+ reading below is taken over 256 working sets for that reason.
+
+=====================================================================
+ 14. SPARSE LUCAS-KANADE -- binCV cuda::calcOpticalFlowPyrLKAsync
+     vs cv::cuda::SparsePyrLKOpticalFlow (cudaoptflow)
+=====================================================================
+ ROLE: 'track a keypoint set from one frame to the next over a
+ pyramid, on device'. BOTH SIDES' PYRAMIDS ARE RESIDENT AT ENTRY
+ and neither arm builds one inside the bracket -- cv::cuda's
+ calc() overload that takes std::vector<GpuMat> pyramids is used
+ for exactly that reason, so the row is a like-for-like rather
+ than a subtraction estimate.
+ SAME WINDOW BOTH SIDES: 31x31, 4 levels, iteration cap 20,
+ err off on both, both free-running (cv::cuda breaks on its own
+ 0.01-pixel convergence test; binCV on its own epsilon rule --
+ forcing equal iteration counts would be forcing a DIFFERENT
+ algorithm on one of them).
+ keypoints: 204 at the reference minDistance of 33.33 px, 2048 at
+ 6 px, both from goodFeaturesToTrack on frame 0 of the REAL
+ sequence.
+
+ THE SWEEP, and why it is a sweep: binCV = one launch, one warp
+ per keypoint; cv::cuda = one launch per level, 256 threads per
+ keypoint. Those shapes cross. Rows below are PREFIXES of the
+ minDistance-6 set, so only the count moves.
+
+ sparse LK, 31x31, 4 levels, 204 keypoints  [752x480, minDistance 33.33 (the reference pipeline's spacing)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.171 ms  spread   84%  [kernel]  (launch floor 7% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.088 ms  spread   23%  [kernel]  (launch floor 14% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.499x <- QUOTE THIS  (binCV  2.00x FASTER)
+                                           geomean 0.475x   per-round range 0.328-0.607x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.65x to 3.05x, median 2.00x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 2.00x apart on the MEDIAN per-round ratio,
+            clearing the 1.85x it has to beat (the larger of: per-round swing 1.85x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; minDistance 33.33 (the reference pipeline's spacing),0.146369,0.170926,0.289997,0.074691,0.088003,0.095061,0.327801,0.499443,0.606692,1,15,0.474653,0,15,0,2.002229,1.850795,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1060 ms enqueue vs  0.1709 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0057 ms enqueue vs  0.0880 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 33.33 (the reference pipeline's spacing),0.106026,0.170926,0.005732,0.088003
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 64 keypoints  [752x480, 64 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.184 ms  spread   95%  [kernel]  (launch floor 7% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.058 ms  spread   43%  [kernel]  (launch floor 22% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.284x <- QUOTE THIS  (binCV  3.52x FASTER)
+                                           geomean 0.305x   per-round range 0.167-0.555x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.80x to 6.00x, median 3.52x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 3.52x apart on the MEDIAN per-round ratio,
+            clearing the 3.33x it has to beat (the larger of: per-round swing 3.33x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 64 pts (prefix of minDistance 6),0.138854,0.183830,0.314204,0.052163,0.057730,0.077066,0.166536,0.284200,0.555015,1,15,0.305315,0,15,0,3.518645,3.332695,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1115 ms enqueue vs  0.1838 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0060 ms enqueue vs  0.0577 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 64 pts (prefix of minDistance 6),0.111505,0.183830,0.005984,0.057730
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 128 keypoints  [752x480, 128 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.169 ms  spread   73%  [kernel]  (launch floor 8% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.065 ms  spread   36%  [kernel]  (launch floor 20% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.372x <- QUOTE THIS  (binCV  2.69x FASTER)
+                                           geomean 0.363x   per-round range 0.264-0.495x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 2.02x to 3.79x, median 2.69x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 2.69x apart on the MEDIAN per-round ratio,
+            clearing the 1.88x it has to beat (the larger of: per-round swing 1.88x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 128 pts (prefix of minDistance 6),0.136369,0.168858,0.260260,0.053903,0.065167,0.077517,0.264153,0.372254,0.495295,1,15,0.362623,0,15,0,2.686341,1.875032,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1137 ms enqueue vs  0.1689 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0051 ms enqueue vs  0.0652 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 128 pts (prefix of minDistance 6),0.113653,0.168858,0.005085,0.065167
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 256 keypoints  [752x480, 256 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.179 ms  spread   92%  [kernel]  (launch floor 7% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.085 ms  spread   24%  [kernel]  (launch floor 15% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.446x <- QUOTE THIS  (binCV  2.24x FASTER)
+                                           geomean 0.444x   per-round range 0.279-0.655x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.53x to 3.58x, median 2.24x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 2.24x apart on the MEDIAN per-round ratio,
+            short of the 2.34x it has to beat (the larger of: per-round swing 2.34x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 256 pts (prefix of minDistance 6),0.141210,0.179159,0.305377,0.071946,0.085402,0.092447,0.279257,0.445936,0.654677,1,15,0.444112,0,15,0,2.242476,2.344355,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1101 ms enqueue vs  0.1792 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0063 ms enqueue vs  0.0854 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 256 pts (prefix of minDistance 6),0.110109,0.179159,0.006290,0.085402
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 512 keypoints  [752x480, 512 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.192 ms  spread   43%  [kernel]  (launch floor 7% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.116 ms  spread   25%  [kernel]  (launch floor 11% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.614x <- QUOTE THIS  (binCV  1.63x FASTER)
+                                           geomean 0.623x   per-round range 0.497-0.738x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.36x to 2.01x, median 1.63x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 1.63x apart on the MEDIAN per-round ratio,
+            clearing the 1.49x it has to beat (the larger of: per-round swing 1.49x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 512 pts (prefix of minDistance 6),0.151306,0.192451,0.234185,0.105221,0.116306,0.134697,0.496641,0.614016,0.737593,1,15,0.622552,0,15,0,1.628623,1.485162,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1057 ms enqueue vs  0.1925 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0062 ms enqueue vs  0.1163 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 512 pts (prefix of minDistance 6),0.105664,0.192451,0.006220,0.116306
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 1024 keypoints  [752x480, 1024 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.216 ms  spread   42%  [kernel]  (launch floor 6% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.222 ms  spread   12%  [kernel]  (launch floor 6% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 1.026x <- QUOTE THIS  (binCV  0.97x SLOWER)
+                                           geomean 0.988x   per-round range 0.722-1.168x (15 rounds)
+   sign test over those paired rounds: 8 favour A, 7 favour B, 0 tied -- two-sided p = 1
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.03x apart on the MEDIAN per-round ratio,
+            short of the 1.62x it has to beat (the larger of: per-round swing 1.62x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 1024 pts (prefix of minDistance 6),0.194089,0.216453,0.284938,0.205679,0.222249,0.232526,0.721836,1.026493,1.168208,0,15,0.988082,8,7,0,1.026493,1.618384,1
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.2154 ms enqueue vs  0.2165 ms event  -> DISPATCH-BOUND: the event bracket is timing the API call
+     bincv LK                                     0.0138 ms enqueue vs  0.2222 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 1024 pts (prefix of minDistance 6),0.215389,0.216453,0.013780,0.222249
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 2048 keypoints  [752x480, minDistance 6, the whole set]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.374 ms  spread   12%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.393 ms  spread    7%  [kernel]  (launch floor 3% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 1.051x <- QUOTE THIS  (binCV  0.95x SLOWER)
+                                           geomean 1.053x   per-round range 0.972-1.130x (15 rounds)
+   sign test over those paired rounds: 13 favour A, 2 favour B, 0 tied -- two-sided p = 0.00739
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.05x apart on the MEDIAN per-round ratio,
+            short of the 1.16x it has to beat (the larger of: per-round swing 1.16x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 6; the whole set,0.359158,0.374149,0.404032,0.388772,0.393007,0.414533,0.972115,1.050945,1.129828,0,15,1.053418,13,2,0,1.050945,1.162238,0.007385
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1080 ms enqueue vs  0.3741 ms event  -> kernel-bound: the host feeds the device faster than it drains
+     bincv LK                                     0.0069 ms enqueue vs  0.3930 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 6, the whole set,0.107952,0.374149,0.006946,0.393007
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK tracker resident state (both frames at every level + keypoint arrays)  [752x480]  -- METER 2 on BOTH sides (cudaMemGetInfo delta),
+ each side over enough independent working sets that the meter's
+ 2.00 MB unit resolves, then divided by its own count.
+   [meter 2] cv::cuda       44.00 MB over   32 sets =    1408.0 KB/frame  (22 units)
+   [meter 2] binCV          42.00 MB over   96 sets =     448.0 KB/frame  (21 units)
+   [meter 2] ROUNDING: one 2.00 MB unit is 21.3 KB/frame at 96 sets (4.76% of binCV's
+             figure) and 64.0 KB/frame at 32 sets (4.55% of OpenCV's).
+   ratio OpenCV/binCV = 3.143x  -- binCV is SMALLER by 3.143x.
+   The OpenCV side is an UPPER BOUND: GpuMat pads its pitch, and any
+   filter buffer or NPP scratch held past the call is inside this
+   delta. binCV's side is cudaMalloc with nothing in between.
+MEM,lk,752x480,44040192,46137344,2097152,96,32
+   HONEST WEAKNESS, printed at the number: binCV STORES the
+   ternary derivative planes where cv::cuda recomputes them
+   in-kernel, which is most of binCV's side of this reading.
+   A fused-derivative variant would take it further and is not
+   in this measurement.
+
+=====================================================================
+ END. One run is NOT a number on this host: aggregate the ROW lines
+ across at least seven independent processes before quoting anything.
+=====================================================================
+### run 5
+=======================================================================
+ CUDA ROLE COMPARISONS -- every cv::cuda bar, one process, one protocol
+=======================================================================
+ device: NVIDIA GeForce RTX 3070 Ti (sm_86, 48 SMs, 608 GB/s peak)
+ OpenCV 4.5.4
+ frames: 752x480 (the reference geometry, where every written bar was
+ set) and 1920x1080 (carried because several of these ops sit ON the
+ launch floor at the reference size, where a ratio between two arms is
+ a ratio between two launches).
+
+ ORIENTATION: every ratio below is binCV / OpenCV. Under 1.000x is
+ binCV ahead. Arm A is OpenCV, arm B is binCV, in every pair.
+
+ LAUNCH FLOOR (empty kernel, same protocol)      0.0061 ms  spread  191%  [kernel]
+   Every kernel-resident number below sits on top of this. An arm within
+   a few multiples of it is reporting launch overhead, not its own work,
+   and a RATIO between two such arms is reporting almost none of either.
+   The spread is part of the answer, not a blemish on it: under WSL2 a
+   launch costs what it costs plus whatever the host was doing.
+FLOOR,0.005216,0.006072,0.016784
+
+ Driver meter step, measured in this run: 2.00 MB. Every memory
+ reading below is taken over 256 working sets for that reason.
+
+=====================================================================
+ 14. SPARSE LUCAS-KANADE -- binCV cuda::calcOpticalFlowPyrLKAsync
+     vs cv::cuda::SparsePyrLKOpticalFlow (cudaoptflow)
+=====================================================================
+ ROLE: 'track a keypoint set from one frame to the next over a
+ pyramid, on device'. BOTH SIDES' PYRAMIDS ARE RESIDENT AT ENTRY
+ and neither arm builds one inside the bracket -- cv::cuda's
+ calc() overload that takes std::vector<GpuMat> pyramids is used
+ for exactly that reason, so the row is a like-for-like rather
+ than a subtraction estimate.
+ SAME WINDOW BOTH SIDES: 31x31, 4 levels, iteration cap 20,
+ err off on both, both free-running (cv::cuda breaks on its own
+ 0.01-pixel convergence test; binCV on its own epsilon rule --
+ forcing equal iteration counts would be forcing a DIFFERENT
+ algorithm on one of them).
+ keypoints: 204 at the reference minDistance of 33.33 px, 2048 at
+ 6 px, both from goodFeaturesToTrack on frame 0 of the REAL
+ sequence.
+
+ THE SWEEP, and why it is a sweep: binCV = one launch, one warp
+ per keypoint; cv::cuda = one launch per level, 256 threads per
+ keypoint. Those shapes cross. Rows below are PREFIXES of the
+ minDistance-6 set, so only the count moves.
+
+ sparse LK, 31x31, 4 levels, 204 keypoints  [752x480, minDistance 33.33 (the reference pipeline's spacing)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.175 ms  spread  114%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.090 ms  spread   22%  [kernel]  (launch floor 7% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.460x <- QUOTE THIS  (binCV  2.17x FASTER)
+                                           geomean 0.462x   per-round range 0.253-0.707x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.41x to 3.95x, median 2.17x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 2.17x apart on the MEDIAN per-round ratio,
+            short of the 2.79x it has to beat (the larger of: per-round swing 2.79x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 33.33 (the reference pipeline's spacing),0.139858,0.174817,0.338760,0.080404,0.089928,0.100227,0.253431,0.459934,0.707433,1,15,0.461939,0,15,0,2.174223,2.791426,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1900 ms enqueue vs  0.1748 ms event  -> DISPATCH-BOUND: the event bracket is timing the API call
+     bincv LK                                     0.0108 ms enqueue vs  0.0899 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 33.33 (the reference pipeline's spacing),0.189983,0.174817,0.010828,0.089928
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 64 keypoints  [752x480, 64 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.200 ms  spread  183%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.058 ms  spread   32%  [kernel]  (launch floor 10% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.288x <- QUOTE THIS  (binCV  3.47x FASTER)
+                                           geomean 0.274x   per-round range 0.136-0.497x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 2.01x to 7.36x, median 3.47x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 3.47x apart on the MEDIAN per-round ratio,
+            short of the 3.66x it has to beat (the larger of: per-round swing 3.66x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 64 pts (prefix of minDistance 6),0.141885,0.199864,0.508621,0.052122,0.058163,0.070554,0.135897,0.288473,0.497257,1,15,0.273886,0,15,0,3.466527,3.659078,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.0988 ms enqueue vs  0.1999 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0073 ms enqueue vs  0.0582 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 64 pts (prefix of minDistance 6),0.098844,0.199864,0.007272,0.058163
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 128 keypoints  [752x480, 128 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.146 ms  spread   85%  [kernel]  (launch floor 4% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.065 ms  spread   36%  [kernel]  (launch floor 9% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.436x <- QUOTE THIS  (binCV  2.29x FASTER)
+                                           geomean 0.394x   per-round range 0.256-0.553x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.81x to 3.90x, median 2.29x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 2.29x apart on the MEDIAN per-round ratio,
+            clearing the 2.16x it has to beat (the larger of: per-round swing 2.16x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 128 pts (prefix of minDistance 6),0.135148,0.145587,0.259564,0.053924,0.064573,0.077023,0.256194,0.436192,0.553400,1,15,0.394114,0,15,0,2.292570,2.160083,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.0916 ms enqueue vs  0.1456 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0053 ms enqueue vs  0.0646 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 128 pts (prefix of minDistance 6),0.091550,0.145587,0.005346,0.064573
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 256 keypoints  [752x480, 256 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.162 ms  spread  101%  [kernel]  (launch floor 4% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.082 ms  spread   22%  [kernel]  (launch floor 7% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.512x <- QUOTE THIS  (binCV  1.95x FASTER)
+                                           geomean 0.453x   per-round range 0.241-0.601x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.66x to 4.15x, median 1.95x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 1.95x apart on the MEDIAN per-round ratio,
+            short of the 2.50x it has to beat (the larger of: per-round swing 2.50x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 256 pts (prefix of minDistance 6),0.135721,0.161521,0.298496,0.071844,0.081670,0.090214,0.240686,0.511918,0.600724,1,15,0.452777,0,15,0,1.953438,2.495883,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1074 ms enqueue vs  0.1615 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0055 ms enqueue vs  0.0817 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 256 pts (prefix of minDistance 6),0.107438,0.161521,0.005508,0.081670
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 512 keypoints  [752x480, 512 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.176 ms  spread   32%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.114 ms  spread   12%  [kernel]  (launch floor 5% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.647x <- QUOTE THIS  (binCV  1.54x FASTER)
+                                           geomean 0.653x   per-round range 0.580-0.780x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.28x to 1.73x, median 1.54x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 1.54x apart on the MEDIAN per-round ratio,
+            clearing the 1.35x it has to beat (the larger of: per-round swing 1.35x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 512 pts (prefix of minDistance 6),0.145859,0.176164,0.201462,0.107131,0.114133,0.120525,0.579502,0.647264,0.780118,1,15,0.652626,0,15,0,1.544964,1.346187,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1164 ms enqueue vs  0.1762 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0071 ms enqueue vs  0.1141 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 512 pts (prefix of minDistance 6),0.116387,0.176164,0.007113,0.114133
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 1024 keypoints  [752x480, 1024 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.211 ms  spread   16%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.227 ms  spread   15%  [kernel]  (launch floor 3% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 1.086x <- QUOTE THIS  (binCV  0.92x SLOWER)
+                                           geomean 1.089x   per-round range 0.992-1.239x (15 rounds)
+   sign test over those paired rounds: 14 favour A, 1 favour B, 0 tied -- two-sided p = 0.000977
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.09x apart on the MEDIAN per-round ratio,
+            short of the 1.25x it has to beat (the larger of: per-round swing 1.25x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 1024 pts (prefix of minDistance 6),0.189460,0.210883,0.222515,0.214917,0.227021,0.248443,0.992450,1.086240,1.238569,0,15,1.089181,14,1,0,1.086240,1.247991,0.0009766
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1044 ms enqueue vs  0.2109 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0082 ms enqueue vs  0.2270 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 1024 pts (prefix of minDistance 6),0.104429,0.210883,0.008242,0.227021
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 2048 keypoints  [752x480, minDistance 6, the whole set]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.382 ms  spread   32%  [kernel]  (launch floor 2% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.397 ms  spread    6%  [kernel]  (launch floor 2% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 1.039x <- QUOTE THIS  (binCV  0.96x SLOWER)
+                                           geomean 1.020x   per-round range 0.815-1.102x (15 rounds)
+   sign test over those paired rounds: 12 favour A, 3 favour B, 0 tied -- two-sided p = 0.0352
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.04x apart on the MEDIAN per-round ratio,
+            short of the 1.35x it has to beat (the larger of: per-round swing 1.35x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 6; the whole set,0.362735,0.382403,0.484284,0.384573,0.397293,0.408474,0.815406,1.038818,1.101873,0,15,1.019662,12,3,0,1.038818,1.351318,0.03516
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1222 ms enqueue vs  0.3824 ms event  -> kernel-bound: the host feeds the device faster than it drains
+     bincv LK                                     0.0082 ms enqueue vs  0.3973 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 6, the whole set,0.122212,0.382403,0.008167,0.397293
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK tracker resident state (both frames at every level + keypoint arrays)  [752x480]  -- METER 2 on BOTH sides (cudaMemGetInfo delta),
+ each side over enough independent working sets that the meter's
+ 2.00 MB unit resolves, then divided by its own count.
+   [meter 2] cv::cuda       44.00 MB over   32 sets =    1408.0 KB/frame  (22 units)
+   [meter 2] binCV          42.00 MB over   96 sets =     448.0 KB/frame  (21 units)
+   [meter 2] ROUNDING: one 2.00 MB unit is 21.3 KB/frame at 96 sets (4.76% of binCV's
+             figure) and 64.0 KB/frame at 32 sets (4.55% of OpenCV's).
+   ratio OpenCV/binCV = 3.143x  -- binCV is SMALLER by 3.143x.
+   The OpenCV side is an UPPER BOUND: GpuMat pads its pitch, and any
+   filter buffer or NPP scratch held past the call is inside this
+   delta. binCV's side is cudaMalloc with nothing in between.
+MEM,lk,752x480,44040192,46137344,2097152,96,32
+   HONEST WEAKNESS, printed at the number: binCV STORES the
+   ternary derivative planes where cv::cuda recomputes them
+   in-kernel, which is most of binCV's side of this reading.
+   A fused-derivative variant would take it further and is not
+   in this measurement.
+
+=====================================================================
+ END. One run is NOT a number on this host: aggregate the ROW lines
+ across at least seven independent processes before quoting anything.
+=====================================================================
+### run 6
+=======================================================================
+ CUDA ROLE COMPARISONS -- every cv::cuda bar, one process, one protocol
+=======================================================================
+ device: NVIDIA GeForce RTX 3070 Ti (sm_86, 48 SMs, 608 GB/s peak)
+ OpenCV 4.5.4
+ frames: 752x480 (the reference geometry, where every written bar was
+ set) and 1920x1080 (carried because several of these ops sit ON the
+ launch floor at the reference size, where a ratio between two arms is
+ a ratio between two launches).
+
+ ORIENTATION: every ratio below is binCV / OpenCV. Under 1.000x is
+ binCV ahead. Arm A is OpenCV, arm B is binCV, in every pair.
+
+ LAUNCH FLOOR (empty kernel, same protocol)      0.0059 ms  spread  150%  [kernel]
+   Every kernel-resident number below sits on top of this. An arm within
+   a few multiples of it is reporting launch overhead, not its own work,
+   and a RATIO between two such arms is reporting almost none of either.
+   The spread is part of the answer, not a blemish on it: under WSL2 a
+   launch costs what it costs plus whatever the host was doing.
+FLOOR,0.005202,0.005854,0.014006
+
+ Driver meter step, measured in this run: 2.00 MB. Every memory
+ reading below is taken over 256 working sets for that reason.
+
+=====================================================================
+ 14. SPARSE LUCAS-KANADE -- binCV cuda::calcOpticalFlowPyrLKAsync
+     vs cv::cuda::SparsePyrLKOpticalFlow (cudaoptflow)
+=====================================================================
+ ROLE: 'track a keypoint set from one frame to the next over a
+ pyramid, on device'. BOTH SIDES' PYRAMIDS ARE RESIDENT AT ENTRY
+ and neither arm builds one inside the bracket -- cv::cuda's
+ calc() overload that takes std::vector<GpuMat> pyramids is used
+ for exactly that reason, so the row is a like-for-like rather
+ than a subtraction estimate.
+ SAME WINDOW BOTH SIDES: 31x31, 4 levels, iteration cap 20,
+ err off on both, both free-running (cv::cuda breaks on its own
+ 0.01-pixel convergence test; binCV on its own epsilon rule --
+ forcing equal iteration counts would be forcing a DIFFERENT
+ algorithm on one of them).
+ keypoints: 204 at the reference minDistance of 33.33 px, 2048 at
+ 6 px, both from goodFeaturesToTrack on frame 0 of the REAL
+ sequence.
+
+ THE SWEEP, and why it is a sweep: binCV = one launch, one warp
+ per keypoint; cv::cuda = one launch per level, 256 threads per
+ keypoint. Those shapes cross. Rows below are PREFIXES of the
+ minDistance-6 set, so only the count moves.
+
+ sparse LK, 31x31, 4 levels, 204 keypoints  [752x480, minDistance 33.33 (the reference pipeline's spacing)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.181 ms  spread   52%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.089 ms  spread   30%  [kernel]  (launch floor 7% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.500x <- QUOTE THIS  (binCV  2.00x FASTER)
+                                           geomean 0.477x   per-round range 0.330-0.691x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.45x to 3.03x, median 2.00x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 2.00x apart on the MEDIAN per-round ratio,
+            short of the 2.09x it has to beat (the larger of: per-round swing 2.09x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 33.33 (the reference pipeline's spacing),0.146883,0.181309,0.240660,0.074629,0.089252,0.101455,0.329847,0.500242,0.690720,1,15,0.476777,0,15,0,1.999034,2.094060,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1066 ms enqueue vs  0.1813 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0064 ms enqueue vs  0.0893 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 33.33 (the reference pipeline's spacing),0.106608,0.181309,0.006414,0.089252
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 64 keypoints  [752x480, 64 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.151 ms  spread   51%  [kernel]  (launch floor 4% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.057 ms  spread   34%  [kernel]  (launch floor 10% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.377x <- QUOTE THIS  (binCV  2.65x FASTER)
+                                           geomean 0.367x   per-round range 0.254-0.484x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 2.07x to 3.94x, median 2.65x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 2.65x apart on the MEDIAN per-round ratio,
+            clearing the 1.91x it has to beat (the larger of: per-round swing 1.91x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 64 pts (prefix of minDistance 6),0.132888,0.151267,0.209551,0.052077,0.056771,0.071311,0.253894,0.376733,0.484066,1,15,0.367241,0,15,0,2.654401,1.906566,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.2236 ms enqueue vs  0.1513 ms event  -> DISPATCH-BOUND: the event bracket is timing the API call
+     bincv LK                                     0.0086 ms enqueue vs  0.0568 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 64 pts (prefix of minDistance 6),0.223645,0.151267,0.008598,0.056771
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 128 keypoints  [752x480, 128 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.225 ms  spread  111%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.067 ms  spread   41%  [kernel]  (launch floor 9% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.283x <- QUOTE THIS  (binCV  3.53x FASTER)
+                                           geomean 0.278x   per-round range 0.158-0.510x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.96x to 6.34x, median 3.53x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 3.53x apart on the MEDIAN per-round ratio,
+            clearing the 3.23x it has to beat (the larger of: per-round swing 3.23x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 128 pts (prefix of minDistance 6),0.133689,0.225094,0.382483,0.054023,0.066908,0.081551,0.157794,0.283112,0.509668,1,15,0.277645,0,15,0,3.532174,3.229955,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1136 ms enqueue vs  0.2251 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0053 ms enqueue vs  0.0669 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 128 pts (prefix of minDistance 6),0.113632,0.225094,0.005311,0.066908
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 256 keypoints  [752x480, 256 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.189 ms  spread   54%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.079 ms  spread   29%  [kernel]  (launch floor 7% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.458x <- QUOTE THIS  (binCV  2.18x FASTER)
+                                           geomean 0.425x   per-round range 0.287-0.552x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.81x to 3.48x, median 2.18x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 2.18x apart on the MEDIAN per-round ratio,
+            clearing the 1.92x it has to beat (the larger of: per-round swing 1.92x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 256 pts (prefix of minDistance 6),0.147681,0.189460,0.250363,0.071796,0.079401,0.094781,0.287368,0.457893,0.551806,1,15,0.425185,0,15,0,2.183917,1.920207,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.0933 ms enqueue vs  0.1895 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0064 ms enqueue vs  0.0794 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 256 pts (prefix of minDistance 6),0.093262,0.189460,0.006377,0.079401
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 512 keypoints  [752x480, 512 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.191 ms  spread  108%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.117 ms  spread   30%  [kernel]  (launch floor 5% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.618x <- QUOTE THIS  (binCV  1.62x FASTER)
+                                           geomean 0.595x   per-round range 0.337-0.908x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.10x to 2.97x, median 1.62x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 1.62x apart on the MEDIAN per-round ratio,
+            short of the 2.70x it has to beat (the larger of: per-round swing 2.70x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 512 pts (prefix of minDistance 6),0.144481,0.190894,0.350884,0.099881,0.117146,0.135414,0.336719,0.617917,0.908491,1,15,0.594522,0,15,0,1.618340,2.698073,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1065 ms enqueue vs  0.1909 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0068 ms enqueue vs  0.1171 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 512 pts (prefix of minDistance 6),0.106499,0.190894,0.006818,0.117146
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 1024 keypoints  [752x480, 1024 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.256 ms  spread   54%  [kernel]  (launch floor 2% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.223 ms  spread   15%  [kernel]  (launch floor 3% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.890x <- QUOTE THIS  (binCV  1.12x FASTER)
+                                           geomean 0.914x   per-round range 0.696-1.138x (15 rounds)
+   sign test over those paired rounds: 5 favour A, 10 favour B, 0 tied -- two-sided p = 0.302
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.12x apart on the MEDIAN per-round ratio,
+            short of the 1.64x it has to beat (the larger of: per-round swing 1.64x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 1024 pts (prefix of minDistance 6),0.190095,0.255834,0.328703,0.205251,0.222982,0.238403,0.695579,0.889616,1.138332,0,15,0.914021,5,10,0,1.124080,1.636525,0.3018
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1095 ms enqueue vs  0.2558 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0079 ms enqueue vs  0.2230 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 1024 pts (prefix of minDistance 6),0.109464,0.255834,0.007900,0.222982
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 2048 keypoints  [752x480, minDistance 6, the whole set]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.382 ms  spread   16%  [kernel]  (launch floor 2% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.398 ms  spread    7%  [kernel]  (launch floor 1% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 1.048x <- QUOTE THIS  (binCV  0.95x SLOWER)
+                                           geomean 1.050x   per-round range 0.941-1.168x (15 rounds)
+   sign test over those paired rounds: 12 favour A, 3 favour B, 0 tied -- two-sided p = 0.0352
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.05x apart on the MEDIAN per-round ratio,
+            short of the 1.24x it has to beat (the larger of: per-round swing 1.24x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 6; the whole set,0.356106,0.382362,0.416236,0.386355,0.398435,0.415805,0.941252,1.048305,1.167644,0,15,1.049650,12,3,0,1.048305,1.240523,0.03516
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.2380 ms enqueue vs  0.3824 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0126 ms enqueue vs  0.3984 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 6, the whole set,0.238042,0.382362,0.012614,0.398435
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK tracker resident state (both frames at every level + keypoint arrays)  [752x480]  -- METER 2 on BOTH sides (cudaMemGetInfo delta),
+ each side over enough independent working sets that the meter's
+ 2.00 MB unit resolves, then divided by its own count.
+   [meter 2] cv::cuda       44.00 MB over   32 sets =    1408.0 KB/frame  (22 units)
+   [meter 2] binCV          42.00 MB over   96 sets =     448.0 KB/frame  (21 units)
+   [meter 2] ROUNDING: one 2.00 MB unit is 21.3 KB/frame at 96 sets (4.76% of binCV's
+             figure) and 64.0 KB/frame at 32 sets (4.55% of OpenCV's).
+   ratio OpenCV/binCV = 3.143x  -- binCV is SMALLER by 3.143x.
+   The OpenCV side is an UPPER BOUND: GpuMat pads its pitch, and any
+   filter buffer or NPP scratch held past the call is inside this
+   delta. binCV's side is cudaMalloc with nothing in between.
+MEM,lk,752x480,44040192,46137344,2097152,96,32
+   HONEST WEAKNESS, printed at the number: binCV STORES the
+   ternary derivative planes where cv::cuda recomputes them
+   in-kernel, which is most of binCV's side of this reading.
+   A fused-derivative variant would take it further and is not
+   in this measurement.
+
+=====================================================================
+ END. One run is NOT a number on this host: aggregate the ROW lines
+ across at least seven independent processes before quoting anything.
+=====================================================================
+### run 7
+=======================================================================
+ CUDA ROLE COMPARISONS -- every cv::cuda bar, one process, one protocol
+=======================================================================
+ device: NVIDIA GeForce RTX 3070 Ti (sm_86, 48 SMs, 608 GB/s peak)
+ OpenCV 4.5.4
+ frames: 752x480 (the reference geometry, where every written bar was
+ set) and 1920x1080 (carried because several of these ops sit ON the
+ launch floor at the reference size, where a ratio between two arms is
+ a ratio between two launches).
+
+ ORIENTATION: every ratio below is binCV / OpenCV. Under 1.000x is
+ binCV ahead. Arm A is OpenCV, arm B is binCV, in every pair.
+
+ LAUNCH FLOOR (empty kernel, same protocol)      0.0090 ms  spread  203%  [kernel]
+   Every kernel-resident number below sits on top of this. An arm within
+   a few multiples of it is reporting launch overhead, not its own work,
+   and a RATIO between two such arms is reporting almost none of either.
+   The spread is part of the answer, not a blemish on it: under WSL2 a
+   launch costs what it costs plus whatever the host was doing.
+FLOOR,0.005100,0.009001,0.023398
+
+ Driver meter step, measured in this run: 2.00 MB. Every memory
+ reading below is taken over 256 working sets for that reason.
+
+=====================================================================
+ 14. SPARSE LUCAS-KANADE -- binCV cuda::calcOpticalFlowPyrLKAsync
+     vs cv::cuda::SparsePyrLKOpticalFlow (cudaoptflow)
+=====================================================================
+ ROLE: 'track a keypoint set from one frame to the next over a
+ pyramid, on device'. BOTH SIDES' PYRAMIDS ARE RESIDENT AT ENTRY
+ and neither arm builds one inside the bracket -- cv::cuda's
+ calc() overload that takes std::vector<GpuMat> pyramids is used
+ for exactly that reason, so the row is a like-for-like rather
+ than a subtraction estimate.
+ SAME WINDOW BOTH SIDES: 31x31, 4 levels, iteration cap 20,
+ err off on both, both free-running (cv::cuda breaks on its own
+ 0.01-pixel convergence test; binCV on its own epsilon rule --
+ forcing equal iteration counts would be forcing a DIFFERENT
+ algorithm on one of them).
+ keypoints: 204 at the reference minDistance of 33.33 px, 2048 at
+ 6 px, both from goodFeaturesToTrack on frame 0 of the REAL
+ sequence.
+
+ THE SWEEP, and why it is a sweep: binCV = one launch, one warp
+ per keypoint; cv::cuda = one launch per level, 256 threads per
+ keypoint. Those shapes cross. Rows below are PREFIXES of the
+ minDistance-6 set, so only the count moves.
+
+ sparse LK, 31x31, 4 levels, 204 keypoints  [752x480, minDistance 33.33 (the reference pipeline's spacing)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.181 ms  spread  127%  [kernel]  (launch floor 5% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.087 ms  spread   22%  [kernel]  (launch floor 10% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.467x <- QUOTE THIS  (binCV  2.14x FASTER)
+                                           geomean 0.429x   per-round range 0.237-0.601x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.67x to 4.21x, median 2.14x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 2.14x apart on the MEDIAN per-round ratio,
+            short of the 2.53x it has to beat (the larger of: per-round swing 2.53x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 33.33 (the reference pipeline's spacing),0.143340,0.181473,0.373248,0.075264,0.087183,0.094140,0.237257,0.467309,0.600514,1,15,0.428664,0,15,0,2.139910,2.531076,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.0988 ms enqueue vs  0.1815 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0065 ms enqueue vs  0.0872 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 33.33 (the reference pipeline's spacing),0.098807,0.181473,0.006462,0.087183
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 64 keypoints  [752x480, 64 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.195 ms  spread   75%  [kernel]  (launch floor 5% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.059 ms  spread   43%  [kernel]  (launch floor 15% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.311x <- QUOTE THIS  (binCV  3.21x FASTER)
+                                           geomean 0.315x   per-round range 0.217-0.531x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.88x to 4.60x, median 3.21x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 3.21x apart on the MEDIAN per-round ratio,
+            clearing the 2.44x it has to beat (the larger of: per-round swing 2.44x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 64 pts (prefix of minDistance 6),0.129434,0.194908,0.275395,0.052119,0.058921,0.077517,0.217229,0.311453,0.531004,1,15,0.314522,0,15,0,3.210757,2.444445,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1198 ms enqueue vs  0.1949 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0059 ms enqueue vs  0.0589 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 64 pts (prefix of minDistance 6),0.119764,0.194908,0.005909,0.058921
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 128 keypoints  [752x480, 128 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.168 ms  spread   89%  [kernel]  (launch floor 5% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.061 ms  spread   45%  [kernel]  (launch floor 15% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.355x <- QUOTE THIS  (binCV  2.82x FASTER)
+                                           geomean 0.356x   per-round range 0.188-0.491x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 2.04x to 5.33x, median 2.82x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 2.82x apart on the MEDIAN per-round ratio,
+            clearing the 2.62x it has to beat (the larger of: per-round swing 2.62x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 128 pts (prefix of minDistance 6),0.138480,0.167832,0.287863,0.054024,0.060641,0.081347,0.187674,0.354738,0.490916,1,15,0.355937,0,15,0,2.818983,2.615796,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1150 ms enqueue vs  0.1678 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0055 ms enqueue vs  0.0606 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 128 pts (prefix of minDistance 6),0.115042,0.167832,0.005490,0.060641
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 256 keypoints  [752x480, 256 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.273 ms  spread   59%  [kernel]  (launch floor 3% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.085 ms  spread   47%  [kernel]  (launch floor 11% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.323x <- QUOTE THIS  (binCV  3.10x FASTER)
+                                           geomean 0.313x   per-round range 0.212-0.435x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED, and A RESULT
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 2.30x to 4.72x, median 3.10x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            A RESULT: the two arms are 3.10x apart on the MEDIAN per-round ratio,
+            clearing the 2.05x it has to beat (the larger of: per-round swing 2.05x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+            That clears the WITHIN-RUN half of the rule only -- nobody has measured
+            this host's run-to-run scatter, and the rule wants the larger of the two.
+ROW,lk,752x480; 256 pts (prefix of minDistance 6),0.204595,0.272835,0.366428,0.071782,0.085053,0.111820,0.211882,0.323045,0.434736,1,15,0.312740,0,15,0,3.095547,2.051780,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1248 ms enqueue vs  0.2728 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0111 ms enqueue vs  0.0851 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 256 pts (prefix of minDistance 6),0.124792,0.272835,0.011114,0.085053
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 512 keypoints  [752x480, 512 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.193 ms  spread   58%  [kernel]  (launch floor 5% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.118 ms  spread   14%  [kernel]  (launch floor 8% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 0.615x <- QUOTE THIS  (binCV  1.63x FASTER)
+                                           geomean 0.613x   per-round range 0.448-0.857x (15 rounds)
+   sign test over those paired rounds: 0 favour A, 15 favour B, 0 tied -- two-sided p = 6.1e-05
+   separation (a FACT, not the verdict): the two arms' sample ranges are DISJOINT
+   verdict: DIRECTION ESTABLISHED
+            ARM B is faster in 15 of 15 paired rounds -- NO ROUND CROSSED 1.00x, so the
+            direction is established by the rounds themselves (two-sided sign-test
+            p = 6.1e-05). Magnitude 1.17x to 2.23x, median 1.63x: the spread bounds
+            HOW MUCH it wins by, not WHETHER it does (owner's ruling, 2026-09-19).
+            NULL on the magnitude: the two arms are 1.63x apart on the MEDIAN per-round ratio,
+            short of the 1.91x it has to beat (the larger of: per-round swing 1.91x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 512 pts (prefix of minDistance 6),0.139756,0.193495,0.251018,0.112472,0.117576,0.129085,0.448063,0.615047,0.856682,1,15,0.613237,0,15,0,1.625892,1.911969,6.104e-05
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.0991 ms enqueue vs  0.1935 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0069 ms enqueue vs  0.1176 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 512 pts (prefix of minDistance 6),0.099083,0.193495,0.006924,0.117576
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 1024 keypoints  [752x480, 1024 pts (prefix of minDistance 6)]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.215 ms  spread   79%  [kernel]  (launch floor 4% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.223 ms  spread   12%  [kernel]  (launch floor 4% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 1.036x <- QUOTE THIS  (binCV  0.97x SLOWER)
+                                           geomean 0.962x   per-round range 0.614-1.164x (15 rounds)
+   sign test over those paired rounds: 10 favour A, 5 favour B, 0 tied -- two-sided p = 0.302
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.04x apart on the MEDIAN per-round ratio,
+            short of the 1.89x it has to beat (the larger of: per-round swing 1.89x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; 1024 pts (prefix of minDistance 6),0.195071,0.215265,0.366141,0.203878,0.222925,0.229786,0.614498,1.035701,1.164098,0,15,0.961670,10,5,0,1.035701,1.894388,0.3018
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1253 ms enqueue vs  0.2153 ms event  -> MIXED: host dispatch is a large share of the bracket
+     bincv LK                                     0.0076 ms enqueue vs  0.2229 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, 1024 pts (prefix of minDistance 6),0.125299,0.215265,0.007594,0.222925
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK, 31x31, 4 levels, 2048 keypoints  [752x480, minDistance 6, the whole set]
+ cv::cuda::SparsePyrLKOpticalFlow (pyramids resident)     0.377 ms  spread    9%  [kernel]  (launch floor 2% of it)
+ bincv::cuda::calcOpticalFlowPyrLKAsync (ladder resident)     0.397 ms  spread    8%  [kernel]  (launch floor 2% of it)
+   ratio binCV/OpenCV, interleaved rounds: median 1.056x <- QUOTE THIS  (binCV  0.95x SLOWER)
+                                           geomean 1.055x   per-round range 0.997-1.146x (15 rounds)
+   sign test over those paired rounds: 14 favour A, 1 favour B, 0 tied -- two-sided p = 0.000977
+   separation (a FACT, not the verdict): the two arms' sample ranges OVERLAP
+   verdict: NULL RESULT, which is a result
+            NULL on the magnitude: the two arms are 1.06x apart on the MEDIAN per-round ratio,
+            short of the 1.15x it has to beat (the larger of: per-round swing 1.15x,
+            run-to-run scatter NOT MEASURED on this host). Decided by measure_util.hpp's
+            difference-against-spread rule, in FACTORS because a percentage of it
+            depends on which arm is the denominator; range separation is not what
+            decided it.
+ROW,lk,752x480; minDistance 6; the whole set,0.359342,0.376933,0.392356,0.379249,0.396718,0.411668,0.996572,1.056049,1.145617,0,15,1.055398,14,1,0,1.056049,1.149558,0.0009766
+   host-enqueue probe (no sync, wall clock per call):
+     cv::cuda SparsePyrLK                         0.1106 ms enqueue vs  0.3769 ms event  -> kernel-bound: the host feeds the device faster than it drains
+     bincv LK                                     0.0076 ms enqueue vs  0.3967 ms event  -> kernel-bound: the host feeds the device faster than it drains
+ENQ,lk,752x480, minDistance 6, the whole set,0.110612,0.376933,0.007578,0.396718
+   READ THIS RATIO WITH THE LAUNCH FLOOR UNDER IT. binCV
+   issues ONE launch for all four levels; cv::cuda issues one
+   per level plus multiply and setTo. The optical-flow family
+   profiled both kernels in one ncu run and found binCV's
+   KERNEL WORK is a 1.56x LOSS at 61 keypoints -- the wall
+   clock advantage is the launch shape, and on a host whose
+   launch is cheap it would shrink.
+
+ sparse LK tracker resident state (both frames at every level + keypoint arrays)  [752x480]  -- METER 2 on BOTH sides (cudaMemGetInfo delta),
+ each side over enough independent working sets that the meter's
+ 2.00 MB unit resolves, then divided by its own count.
+   [meter 2] cv::cuda       44.00 MB over   32 sets =    1408.0 KB/frame  (22 units)
+   [meter 2] binCV          42.00 MB over   96 sets =     448.0 KB/frame  (21 units)
+   [meter 2] ROUNDING: one 2.00 MB unit is 21.3 KB/frame at 96 sets (4.76% of binCV's
+             figure) and 64.0 KB/frame at 32 sets (4.55% of OpenCV's).
+   ratio OpenCV/binCV = 3.143x  -- binCV is SMALLER by 3.143x.
+   The OpenCV side is an UPPER BOUND: GpuMat pads its pitch, and any
+   filter buffer or NPP scratch held past the call is inside this
+   delta. binCV's side is cudaMalloc with nothing in between.
+MEM,lk,752x480,44040192,46137344,2097152,96,32
+   HONEST WEAKNESS, printed at the number: binCV STORES the
+   ternary derivative planes where cv::cuda recomputes them
+   in-kernel, which is most of binCV's side of this reading.
+   A fused-derivative variant would take it further and is not
+   in this measurement.
+
+=====================================================================
+ END. One run is NOT a number on this host: aggregate the ROW lines
+ across at least seven independent processes before quoting anything.
+=====================================================================
+
+# loadavg at end: 0.82 0.34 0.18 2/420 20163
+# gpu clock after: sm 1965 MHz, mem 9501 MHz, pstate P0
+# gpu throttle after: 0x0000000000000024
+# gpu temp after: 52 C
+# profiler at end: none running
+# date:     2026-09-24T01:13:03-07:00
+# done

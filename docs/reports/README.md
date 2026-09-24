@@ -92,8 +92,8 @@ smaller number is the faster side.
 | descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 2.0087 | 0.2105 | 9.51× | [cuda.md](cuda.md) |
 | describe, N=1000 | `cv::cuda::ORB::computeAsync` | 0.0896 | 0.0094 | 8.82× | [cuda.md](cuda.md) |
 | `goodFeaturesToTrack`, wall clock | `createGoodFeaturesToTrackDetector` | 3.4029 | 0.4240 | 8.76× | [cuda.md](cuda.md) |
-| optical flow, 204 points | `SparsePyrLKOpticalFlow` | 0.1475 | 0.0792 | 1.35×–4.36×, per round | [cuda.md](cuda.md) |
-| optical flow, 2048 points | ″ | 0.3287 | 0.3558 | null result | [cuda.md](cuda.md) |
+| optical flow, 204 points | `SparsePyrLKOpticalFlow` | 0.1748 | 0.0893 | 1.41×–5.86×, per round | [cuda.md](cuda.md) |
+| optical flow, 2048 points | ″ | 0.3769 | 0.3976 | null result | [cuda.md](cuda.md) |
 | min-eigenvalue response | `createMinEigenValCorner` | 0.0519 | 0.0201 | 2.597× | [cuda.md](cuda.md) |
 
 **The one row where binCV's cell is larger is published as a null result, not a loss.**

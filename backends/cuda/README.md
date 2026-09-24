@@ -88,8 +88,8 @@ so the smaller cell is the faster side, and the faster side is bold.
 | `computeBrief`, N=1000 | `cv::cuda::ORB::computeAsync` | 0.0896 | **0.0094** | **8.82×** |
 | `matchDescriptors`, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 2.0087 | **0.2105** | **9.51×** |
 | `goodFeaturesToTrackAsync`, wall clock | `createGoodFeaturesToTrackDetector` | 3.4029 | **0.4240** | **8.76×** |
-| `calcOpticalFlowPyrLKAsync`, 204 pts | `SparsePyrLKOpticalFlow` | 0.1475 | **0.0792** | **1.35× to 4.36×** |
-| `calcOpticalFlowPyrLKAsync`, 2048 pts | ″ | **0.3287** | 0.3558 | null result |
+| `calcOpticalFlowPyrLKAsync`, 204 pts | `SparsePyrLKOpticalFlow` | 0.1748 | **0.0893** | **1.41× to 5.86×** |
+| `calcOpticalFlowPyrLKAsync`, 2048 pts | ″ | **0.3769** | 0.3976 | null result |
 | `cornerMinEigenValAsync` | `createMinEigenValCorner` | 0.0519 | **0.0201** | **2.597×** |
 | `threshold` → bits, 3840×2160 | `cv::cuda::threshold` | 0.0364 | **0.0255** | null result |
 | `calcOpticalFlowBlockMatch` | `SparsePyrLKOpticalFlow` | 0.2320 | **0.0540** | not published |
