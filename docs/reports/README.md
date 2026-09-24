@@ -49,7 +49,7 @@ counts differ.
 |---|---|---|---|---|---|---|---|---|
 | `bitwiseAnd`, ns/pixel | `cv::bitwise_and` | 0.02823 | 0.002810 | 9.97× [9.82, 10.28] | 0.62656 | 0.02369 | 26.68× [26.09, 27.37] | [primitives.md](primitives.md) |
 | `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01501 | 0.009270 | 1.62× [1.61, 1.63] | 0.16921 | 0.06365 | 2.658× [2.618, 2.673] | [primitives.md](primitives.md) |
-| denoise, 3-pixel median, ns/pixel | composed `cv::min` / `cv::max` | 0.1887 | 0.009865 | 19.09× [18.94, 19.38] | 3.4379 | 0.05941 | 57.71× [56.91, 58.03] | [primitives.md](primitives.md) |
+| denoise, 3-pixel median, ns/pixel | composed `cv::min` / `cv::max` | 0.1926 | 0.009930 | 19.17× [19.01, 19.51] | 3.4379 | 0.05941 | 57.71× [56.91, 58.03] | [primitives.md](primitives.md) |
 | spatial derivative, both axes, ns/pixel | `cv::filter2D` ×2 | 0.5156 | 0.04645 | 11.12× [11.07, 11.28] | 5.0430 | 0.20753 | 24.28× [24.13, 24.51] | [primitives.md](primitives.md) |
 | `erode` 3×3 rect, ns/pixel | `cv::erode` | 0.1013 | 0.09595 | 1.053× [1.035, 1.066] | 0.73595 | 0.72189 | 1.021× [0.991, 1.040] | [primitives.md](primitives.md) |
 | `erode` 5×5 ellipse, ns/pixel | `cv::erode` | 0.2238 | 0.6985 | 0.319× [0.318, 0.323] | 1.85196 | 3.59587 | 0.514× [0.510, 0.522] | [primitives.md](primitives.md) |
@@ -86,11 +86,11 @@ smaller number is the faster side.
 <!-- figure-check values="cv::cuda, ms|binCV, ms|ratio" source="source" -->
 | operation | `cv::cuda` arm | cv::cuda, ms | binCV, ms | ratio | source |
 |---|---|---|---|---|---|
-| dense disparity, binary entry | `cv::cuda::StereoBM(64, 9)` | 0.7152 | 0.0648 | 11.0× | [cuda.md](cuda.md) |
+| dense disparity, binary entry | `cv::cuda::StereoBM(64, 9)` | 0.7134 | 0.0640 | 11.16× | [cuda.md](cuda.md) |
 | dense disparity, census entry | ″ | 0.7101 | 0.4789 | 1.504× | [cuda.md](cuda.md) |
-| FAST | `cv::cuda::FastFeatureDetector` | 0.1459 | 0.0247 | 6.01× | [cuda.md](cuda.md) |
-| descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 | 0.2189 | 9.1× | [cuda.md](cuda.md) |
-| describe, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 | 0.0107 | 9.3× | [cuda.md](cuda.md) |
+| FAST | `cv::cuda::FastFeatureDetector` | 0.1221 | 0.0208 | 6.015× | [cuda.md](cuda.md) |
+| descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 2.0087 | 0.2105 | 9.51× | [cuda.md](cuda.md) |
+| describe, N=1000 | `cv::cuda::ORB::computeAsync` | 0.0896 | 0.0094 | 8.82× | [cuda.md](cuda.md) |
 | `goodFeaturesToTrack`, wall clock | `createGoodFeaturesToTrackDetector` | 3.4029 | 0.4240 | 8.76× | [cuda.md](cuda.md) |
 | optical flow, 204 points | `SparsePyrLKOpticalFlow` | 0.1475 | 0.0792 | 1.35×–4.36×, per round | [cuda.md](cuda.md) |
 | optical flow, 2048 points | ″ | 0.3287 | 0.3558 | null result | [cuda.md](cuda.md) |

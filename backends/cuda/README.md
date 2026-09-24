@@ -82,11 +82,11 @@ so the smaller cell is the faster side, and the faster side is bold.
 <!-- figure-check values="cv::cuda (ms)|binCV (ms)|ratio" source="@docs/reports/cuda.md" -->
 | operation | `cv::cuda` arm | cv::cuda (ms) | binCV (ms) | ratio |
 |---|---|---|---|---|
-| `denseDisparityBinary` | `cv::cuda::StereoBM(64, 9)` | 0.7152 | **0.0648** | **11.0×** |
+| `denseDisparityBinary` | `cv::cuda::StereoBM(64, 9)` | 0.7134 | **0.0640** | **11.16×** |
 | census entry (transform ×2 + match) | ″ | 0.7101 | **0.4789** | **1.504×** |
-| `detectFastAsync` | `FastFeatureDetector` | 0.1459 | **0.0247** | **6.01×** |
-| `computeBrief`, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 | **0.0107** | **9.3×** |
-| `matchDescriptors`, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 | **0.2189** | **9.1×** |
+| `detectFastAsync` | `FastFeatureDetector` | 0.1221 | **0.0208** | **6.015×** |
+| `computeBrief`, N=1000 | `cv::cuda::ORB::computeAsync` | 0.0896 | **0.0094** | **8.82×** |
+| `matchDescriptors`, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 2.0087 | **0.2105** | **9.51×** |
 | `goodFeaturesToTrackAsync`, wall clock | `createGoodFeaturesToTrackDetector` | 3.4029 | **0.4240** | **8.76×** |
 | `calcOpticalFlowPyrLKAsync`, 204 pts | `SparsePyrLKOpticalFlow` | 0.1475 | **0.0792** | **1.35× to 4.36×** |
 | `calcOpticalFlowPyrLKAsync`, 2048 pts | ″ | **0.3287** | 0.3558 | null result |

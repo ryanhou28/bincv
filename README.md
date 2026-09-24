@@ -114,8 +114,8 @@ There is a CUDA backend too, against `cv::cuda` on the same GPU:
 <!-- figure-check values="cv::cuda, ms|binCV, ms|speedup|cv::cuda, KB|binCV, KB|× smaller" source="source" -->
 | on an RTX 3070 Ti | cv::cuda equivalent | cv::cuda, ms | binCV, ms | speedup | cv::cuda, KB | binCV, KB | × smaller | source |
 |---|---|---|---|---|---|---|---|---|
-| dense disparity, binary entry, per frame | `cv::cuda::StereoBM(64, 9)` | 0.7152 | 0.0648 | 11.0× | 3,072.0 | 448.0 | 6.857× | [cuda.md](docs/reports/cuda.md) |
-| descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 | 0.2189 | 9.1× | 8,277.3 | 400.0 | 20.7× | [cuda.md](docs/reports/cuda.md) |
+| dense disparity, binary entry, per frame | `cv::cuda::StereoBM(64, 9)` | 0.7134 | 0.0640 | 11.16× | 3,072.0 | 448.0 | 6.857× | [cuda.md](docs/reports/cuda.md) |
+| descriptor matching, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 2.0087 | 0.2105 | 9.51× | 8,277.3 | 400.0 | 20.7× | [cuda.md](docs/reports/cuda.md) |
 
 **[docs/reports/](docs/reports/README.md) has the whole set** — every operation on both
 architectures and the GPU, wins and losses in the same tables, with the machines, the method

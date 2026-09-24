@@ -78,13 +78,13 @@ milliseconds, so the smaller cell is the faster side and the faster side is bold
 
 | operation | `cv::cuda` arm | cv::cuda (ms) | binCV (ms) | ratio | what the rounds say |
 |---|---|---|---|---|---|
-| `denseDisparityBinary` — the binary entry | `cv::cuda::StereoBM(64, 9)` | 0.7152 | **0.0648** | **11.0×** | 7/7 disjoint; a result (10.95× against a 1.78× bar) |
+| `denseDisparityBinary` — the binary entry | `cv::cuda::StereoBM(64, 9)` | 0.7134 | **0.0640** | **11.16×** | 105 of 105; a result (11.16× vs 3.46×) ‡ |
 | census entry (2 transforms + match) | ″ | 0.7101 | **0.4789** | **1.504×** | 105 of 105; a result (1.50× vs 1.41×) — but it **loses on memory** ‡ |
-| census matcher alone | ″ | 0.6864 | **0.3692** | **1.87×** | 7/7; a result (1.94× vs 1.37×) |
+| census matcher alone | ″ | 0.7190 | **0.3900** | **1.888×** | 105 of 105; a result (1.89× vs 1.85×) ‡ |
 | `calcOpticalFlowBlockMatch` | `SparsePyrLKOpticalFlow` | 0.2320 | **0.0540** | not published | 7/7; speed met, **accuracy floor unset** |
-| `detectFastAsync` | `FastFeatureDetector` | 0.1459 | **0.0247** | **6.01×** | 7/7; a result (6.01× vs 3.39×), from **14.84× behind** |
-| `computeBrief`, N=1000 | `cv::cuda::ORB::computeAsync` | 0.1070 | **0.0107** | **9.3×** | 7/7; a result (9.25× vs 2.10×) |
-| `matchDescriptors`, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 1.9491 | **0.2189** | **9.1×** | 7/7; a result (9.11× vs 1.29×) |
+| `detectFastAsync` | `FastFeatureDetector` | 0.1221 | **0.0208** | **6.015×** | 105 of 105; a result (6.02× vs 5.75×), from **14.84× behind** ‡ |
+| `computeBrief`, N=1000 | `cv::cuda::ORB::computeAsync` | 0.0896 | **0.0094** | **8.82×** | 105 of 105; a result (8.82× vs 3.65×) ‡ |
+| `matchDescriptors`, 5000² | `BFMatcher::knnMatchAsync(k=2)` | 2.0087 | **0.2105** | **9.51×** | 105 of 105; a result (9.51× vs 1.71×) ‡ |
 | `goodFeaturesToTrackAsync`, wall clock | `createGoodFeaturesToTrackDetector` | 3.4029 | **0.4240** | **8.76×** | 105 of 105; a result (8.76× vs 5.46×) ‡ |
 | `cornerMinEigenValAsync` | `createMinEigenValCorner` | 0.0519 | **0.0201** | **2.597×** | 105 of 105; a result (2.60× vs 2.42×). **Was a null at 0.0590 ms** until the response's FP64 `sqrt` was memoized ‡ |
 | `calcOpticalFlowPyrLKAsync`, 204 pts | `SparsePyrLKOpticalFlow` | 0.1475 | **0.0792** | **1.35× to 4.36×** | 105 of 105 rounds; direction established, magnitude a null |
@@ -117,28 +117,33 @@ the census entry at **0.5418 against 0.7584 — 1.43×** and the census matcher 
 — 1.88×**. Which to quote is **not settled here**; the census row's run-to-run scatter is
 1.14×, so its 1.38×, 1.43× and 1.47× readings are one number rather than three.
 
-**‡ The six marked rows were re-taken, and they are the first CUDA figures in this
+**‡ The eleven marked rows were re-taken, and they are the first CUDA figures in this
 repository with provenance.** They come from
 [one committed sweep](logs/cuda_role-x86_64-cuda-launches.log) — 7 independent processes of
 `cuda_role_benchmark`, stamped at commit `7c8055f`, on the device and driver the log's own
 header records. `scripts/check_figure_staleness.py` reads it, so a change to any of the 87
 first-party files under it now ages these rows instead of leaving a reader to find out.
 
-Each was re-taken because its kernel moved: the census pair over `censusPackedKernel`, the
+Six of them had to be: their kernels moved — the census pair over `censusPackedKernel`, the
 three `threshold` rows over the ballot packers, and `cornerMinEigenValAsync` and
 `goodFeaturesToTrack` over the response's square root
 ([#64](https://github.com/ryanhou28/bincv/issues/64),
 [#91](https://github.com/ryanhou28/bincv/issues/91)). **`cornerMinEigenValAsync` was a null
 result and is now a 2.60× lead**, which is what a memo over a 100-cell integer domain bought.
+The other five did not have to be and are re-taken anyway, because the same sweep already
+measured them and a table half of whose rows can be checked is worse than either whole.
 
-**The unmarked rows are older figures from a session that left nothing behind, and two of
-them are known not to reproduce.** Measured at `main` in one controlled session before any of
-this landed, the dense and `threshold` rows came back within a few per cent, the census pair
-read 14–18% slow on *both* sides, and `goodFeaturesToTrack` read **5.3× published against
-8.40×** with its two arms moving in opposite directions — on the row whose `cv::cuda`
-denominator this report already says swings **3.24–13.61 ms**. Re-anchoring the rest in one
-session is [#89](https://github.com/ryanhou28/bincv/issues/89)'s remaining half; the
-mechanism that makes it checkable now exists, which is why these six could be done at all.
+**What re-taking moved, on rows whose code did not change,** is the size of the thing a
+single-session figure cannot show: `detectFastAsync` 6.01× → 6.015×, `matchDescriptors`
+9.1× → 9.51×, the census matcher 1.87× → 1.888×, `denseDisparityBinary` 11.0× → 11.16×, and
+`computeBrief` 9.3× → **8.82×** — the one that moved against binCV. None is a code change and
+all five are inside the scatter the report's own conditions warn about.
+
+**The unmarked rows are older figures from a session that left nothing behind.** They are the
+Lucas–Kanade pair and `calcOpticalFlowBlockMatch`, which `cuda_role_benchmark` does not
+measure — finishing them needs a second sweep, and it is
+[#89](https://github.com/ryanhou28/bincv/issues/89)'s remaining half along with the question
+of what a row whose denominator swings **3.24–13.61 ms** should publish at all.
 
 ## Memory, operation by operation
 
