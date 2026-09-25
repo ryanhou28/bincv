@@ -426,7 +426,11 @@ __global__ void orientPlaneWarpKernel(DevicePlaneBlockConstView planes,
 // ---------------------------------------------------------------------------
 
 constexpr unsigned kWarpsPerBlock = 8;
-constexpr unsigned kRefBlock = 128;
+// 64, for the reason descriptor.cu's reference arm takes 64: one thread per
+// keypoint spreads over more SMs in narrower blocks. Measured on the wide arm,
+// 1.04x at 2,000 keypoints (105 rounds to 0) and 1.12x at 20,000; 256 costs
+// 1.23x and 512 costs 2.21x at 2,000.
+constexpr unsigned kRefBlock = 64;
 
 template <typename SrcT>
 cudaError_t launchWide(DeviceImageConstView<SrcT> img, DeviceKeypointSetConstView kp,

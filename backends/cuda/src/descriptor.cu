@@ -165,7 +165,12 @@ __global__ void briefBallotKernel(DeviceImageConstView<SrcT> img,
 }
 
 constexpr unsigned kWarpsPerBlock = 8;
-constexpr unsigned kRefBlock = 128;
+// 64: this arm is one thread per keypoint, so the block size is how finely the
+// work spreads over SMs, and 2,000 keypoints is 16 blocks at 128 threads on a
+// 48-SM part. At 64 it is 32 blocks and 1.41x faster (101 of 105 rounds); at
+// 20,000 keypoints, where the grid fills, it is still 0.943x, 105 rounds to 0.
+// Widening loses: 256 costs 1.09-1.48x and 512 up to 3.00x.
+constexpr unsigned kRefBlock = 64;
 
 template <typename SrcT>
 cudaError_t launchBrief(DeviceImageConstView<SrcT> img, DeviceKeypointSetConstView kp,

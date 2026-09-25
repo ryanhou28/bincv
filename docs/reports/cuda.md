@@ -527,7 +527,7 @@ reading is quoted as a duration.
 ## Coverage
 
 `scripts/verify_cuda.sh` proves each device kernel gives the host library's answer byte for
-byte — **eighteen suites, 191,579 checks in the Release configuration and 191,542 in the
+byte — **eighteen suites, 191,764 checks in the Release configuration and 191,727 in the
 Debug one**, each suite held to its own floor per configuration
 ([`expected-checks.txt`](../../backends/cuda/tests/expected-checks.txt)). The counts differ
 by design: a deliberate domain violation that trips an assertion can only have its error

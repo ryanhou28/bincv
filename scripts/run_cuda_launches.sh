@@ -193,6 +193,24 @@ if [ "$COMPUTE_APPS" != none ] && [ "$ANY_DEVICE" != 1 ]; then
     exit 1
 fi
 
+# HOST CPU LOAD, WHICH IS NOT A CPU CONCERN HERE. Under WSL2 the GPU is reached
+# through a virtualization shim and every launch is enqueued by the host, so the
+# LAUNCH FLOOR is host-dispatch-bound -- and several ops in this backend sit on
+# that floor at the reference geometry. Measured cost of not checking: two sweeps
+# of one commit, one at load 0.52 and one at 7.41, put the floor at 0.0063 and
+# 0.0079 ms and moved the launch-bound rows 10-24% with the kernels untouched.
+# The rows far from the floor moved 0.7%, and the paired RATIOS survived -- both
+# arms pay the same contention, which is what pairing is for -- so this warns
+# rather than refuses: a ratio taken here is still sound and an absolute is not.
+LOAD1="$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)"
+if awk -v l="$LOAD1" 'BEGIN{exit !(l > 2.0)}'; then
+    echo "run_cuda_launches.sh: host load average is ${LOAD1}." >&2
+    echo "  The launch floor is host-dispatch-bound through WSL2's GPU shim, so the" >&2
+    echo "  ABSOLUTE times of launch-bound ops will read high and are not comparable" >&2
+    echo "  with committed figures taken on a quiet host. Paired ratios are fine." >&2
+    echo "  Proceeding -- the header records the load either way." >&2
+fi
+
 # The clock cannot be held on any host this backend has run on, so the header
 # says which case applies rather than leaving a reader to assume the good one.
 APP_CLOCK="$(nvq clocks.applications.graphics)"
