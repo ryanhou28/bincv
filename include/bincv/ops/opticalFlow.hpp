@@ -298,8 +298,14 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// reference pads (deviation (ii)), and a window that is mostly outside a
 /// coarse level yields an ill-conditioned `A` and a one-sided `b` whose
 /// error is then multiplied by `2^level` on the way down. That cost is measured:
-/// `1/2/2/2` is 0.8356 px over all 141 real-frame keypoints and
-/// **0.0010 px over the 58 that never clip**.
+/// `1/2/2/2` is 1.1285 px over all 102 real-frame keypoints and
+/// **0.0016 px over the 43 that never clip**.
+/// @note Both are an rms over few points, and on the unclipped set ONE keypoint
+/// owns it: `rms * sqrt(43)` equals the row's own max to four decimals, so the
+/// figure counts a single aperture-degenerate point diverging rather than a
+/// population getting worse. Read the contrast between the two numbers, which is
+/// what clipping costs; do not read either as a per-point accuracy. The
+/// 5%-trimmed rms over the same points is 0.26 px and flat in bit depth.
 enum class LKEntryLevel {
     /// Every point enters at the coarsest usable level. **What ships**, and the
     /// reference's behavior given a padded pyramid it always has enough of.

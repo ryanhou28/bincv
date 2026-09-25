@@ -65,7 +65,7 @@
 // only the derivation, which now rests on the representation alone.
 // T3. At least 80% of eligible points tracked, AND NO TRACKED POINT MAY BE
 // STUCK. `status == 1` is not evidence of tracking on its own: on the real
-// frame every one of 141 points comes back tracked, including ones that
+// frame every one of 102 points comes back tracked, including ones that
 // returned EXACTLY their input position while ground truth moved by 1.4 px.
 // A point is STUCK when ground truth moved it by at least 0.5 px -- the
 // 1-bit localization bound, i.e. a motion the representation can resolve at
@@ -2197,7 +2197,7 @@ BINCV_TEST(Flow, PipelineFootprint_640x480) {
 //
 // AND THE REJECTION THRESHOLD REJECTS NOTHING HERE. `lk_min_eig_threshold: 0.001`
 // against a smallest measured `referenceMinEig` of 0.033 on these points -- a
-// factor of 33. Every one of 141 points comes back tracked in every case above,
+// factor of 33. Every one of 102 points comes back tracked in every case above,
 // including the stuck ones, which is why T3 grew its second half (see the top of
 // the file): a status byte is not evidence of tracking. Outside the blank-frame
 // case in Flow.LossRules, loss rule 2 is untested on real content because it
@@ -2961,8 +2961,8 @@ BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
 // ---------------------------------------------------------------------------
 // THE COARSE-LEVEL WINDOW BORDER.
 //
-// The bit-depth question is blocked here: 1/2/2/2 is 0.8356 px over all 141 real-frame
-// keypoints and 0.0010 px over the 58 that never clip. The metric below is
+// The bit-depth question is blocked here: 1/2/2/2 is 1.1285 px over all 102 real-frame
+// keypoints and 0.0016 px over the 43 that never clip. The metric below is
 // YIELD, pre-registered, because three of the four arms trade points for
 // accuracy and a per-point error alone would reward throwing points away.
 // ---------------------------------------------------------------------------
