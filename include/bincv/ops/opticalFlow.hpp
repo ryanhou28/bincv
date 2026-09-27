@@ -99,6 +99,24 @@
 /// **This is the concrete thing route (b) trades away**, and it is the reason
 /// this operation is Tier 2 rather than Tier 1.
 ///
+/// **WHEN IT IS ACTIVE, AND WHAT IT MEASURES AT.** `floor(prevPt * scale -
+/// halfWin)` truncates nothing when `prevPt` is integral and `scale` is 1: an odd
+/// window makes `halfWin` integral too, so a freshly detected keypoint -- `Corner`
+/// carries `int x, y` -- has its level-0 aperture exactly where the reference would
+/// put it. It IS active at every coarse level, where `scale` makes the product
+/// fractional, and from the second frame of any track, because a caller feeds the
+/// float `nextPts` back in as the next `prevPts` (examples/vio_frontend.cpp does).
+/// So the half-pixel bound is real in a tracking loop and absent on a first step.
+/// Measured on a first step at integer keypoints -- the one case a synthetic
+/// single-warp harness can pose -- its cost on sub-pixel accuracy is not
+/// detectable: a single-level arm, which has no coarse level for it to act on,
+/// is no better than the four-level ladder (0.2487 vs 0.2393 px rms), and
+/// `cv::calcOpticalFlowPyrLK` given the SAME BITS lands in the same place
+/// (0.1423 px median against this tracker's 0.1358). What separates either of
+/// them from the 0.06 px they reach on grayscale is the binarization, not the
+/// anchoring. The multi-frame case is not measured and this note does not claim
+/// it is.
+///
 /// **(ii) THE WINDOW IS CLIPPED, NOT PADDED.** `buildOpticalFlowPyramid` allocates
 /// every pyramid level with a `winSize`-wide border on all four sides and fills it
 /// with BORDER_REFLECT_101 -- at 640x480 and a 31x31 window that is a 702x542
