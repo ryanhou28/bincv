@@ -65,7 +65,7 @@
 // only the derivation, which now rests on the representation alone.
 // T3. At least 80% of eligible points tracked, AND NO TRACKED POINT MAY BE
 // STUCK. `status == 1` is not evidence of tracking on its own: on the real
-// frame every one of 141 points comes back tracked, including ones that
+// frame every one of 102 points comes back tracked, including ones that
 // returned EXACTLY their input position while ground truth moved by 1.4 px.
 // A point is STUCK when ground truth moved it by at least 0.5 px -- the
 // 1-bit localization bound, i.e. a motion the representation can resolve at
@@ -676,20 +676,45 @@ std::vector<Point2f> unclippedAtEveryLevel(const Pipeline<WordType>& fe,
     return out;
 }
 
+/// @note `diverged` and `medianError` exist because `rms` ALONE MISREADS A SMALL SET,
+/// and the cost of that is on the record. This file's ladder sweep was read as
+/// "tracking accuracy peaks at 2 bits per pixel and degrades with more", which sent
+/// an investigation after a mechanism that does not exist. On 43 unclipped points
+/// every one of those rms figures was ONE keypoint: `rms * sqrt(43)` equalled the
+/// row's own `max` to four decimals in every ladder, so the metric was counting a
+/// single aperture-degenerate point diverging rather than a population degrading.
+/// Drop that point and the 500x spread across bit depths becomes 0.001-0.0025 px.
+/// The two numbers were printed side by side the whole time and nobody multiplied.
+///
+/// So the two axes are now separate and both are printed. `medianError` is the
+/// accuracy of the points that tracked; `diverged` is how many did not. Neither
+/// substitutes for the other, and MEDIAN ALONE WOULD BE WORSE THAN RMS: a
+/// configuration losing ten points of forty-three still reads a median near
+/// 0.0002 px and looks flawless. That is also why the timing harness's reason for
+/// preferring medians does not transfer -- a slow timing sample is noise to
+/// reject, a diverged keypoint is an outcome to count.
 struct FlowStats {
     size_t eligible = 0;
     size_t tracked = 0;
     size_t stuck = 0;     ///< T3: tracked, but never moved while truth did
     size_t truthMoved = 0;  ///< points whose ground truth moved >= kTruthMoved
+    size_t diverged = 0;  ///< tracked, but further from truth than the row's own bar
     double rms = 0.0;
+    double medianError = 0.0;
     double maxError = 0.0;
 };
 
+/// @param divergedAbove The bar `diverged` counts against. The caller passes the
+/// tolerance its own verdict uses, so the count and the verdict cannot disagree
+/// about what a failure is.
 FlowStats measure(const std::vector<Point2f>& prevPts, const std::vector<Point2f>& nextPts,
-                  const std::vector<uint8_t>& status, const Warp& warp) {
+                  const std::vector<uint8_t>& status, const Warp& warp,
+                  double divergedAbove = kMaxTolerance) {
     FlowStats s;
     s.eligible = prevPts.size();
     double sumSq = 0.0;
+    std::vector<double> errors;
+    errors.reserve(prevPts.size());
     for (size_t i = 0; i < prevPts.size(); ++i) {
         if (status[i] == 0) continue;
         double gx = 0.0, gy = 0.0;
@@ -699,6 +724,8 @@ FlowStats measure(const std::vector<Point2f>& prevPts, const std::vector<Point2f
         const double e = std::sqrt(ex * ex + ey * ey);
         sumSq += e * e;
         if (e > s.maxError) s.maxError = e;
+        if (e > divergedAbove) ++s.diverged;
+        errors.push_back(e);
         ++s.tracked;
 
         // T3's second half. Both quantities are of the POINT, not of the frame:
@@ -717,6 +744,15 @@ FlowStats measure(const std::vector<Point2f>& prevPts, const std::vector<Point2f
         }
     }
     s.rms = (s.tracked > 0) ? std::sqrt(sumSq / static_cast<double>(s.tracked)) : 0.0;
+    // The median takes no parameter, which is why it is the robust number here
+    // rather than a trimmed mean: a trim fraction would be a threshold nobody
+    // decided, and CLAUDE.md forbids inventing one.
+    if (!errors.empty()) {
+        std::sort(errors.begin(), errors.end());
+        const size_t n = errors.size();
+        s.medianError = (n % 2 == 1) ? errors[n / 2]
+                                     : 0.5 * (errors[n / 2 - 1] + errors[n / 2]);
+    }
     return s;
 }
 
@@ -735,12 +771,13 @@ FlowStats runPoints(const char* label, Pipeline<WordType>& fe, const Warp& warp,
                                           out.data(), status.data(), err.data(), pts.size(),
                                           params);
 
-    const FlowStats s = measure(pts, out, status, warp);
+    const FlowStats s = measure(pts, out, status, warp, kMaxTolerance + modelError);
     const bool withinRms = s.rms <= kRmsTolerance + modelError;
     const bool withinMax = s.maxError <= kMaxTolerance + modelError;
-    std::printf(" %-26s eligible=%3zu tracked=%3zu stuck=%3zu/%3zu rms=%.4f max=%.4f "
-                "(tol rms<=%.4f max<=%.4f) %s\n",
-                label, s.eligible, s.tracked, s.stuck, s.truthMoved, s.rms, s.maxError,
+    std::printf(" %-26s eligible=%3zu tracked=%3zu stuck=%3zu/%3zu div=%3zu med=%.4f "
+                "rms=%.4f max=%.4f (tol rms<=%.4f max<=%.4f) %s\n",
+                label, s.eligible, s.tracked, s.stuck, s.truthMoved, s.diverged,
+                s.medianError, s.rms, s.maxError,
                 kRmsTolerance + modelError, kMaxTolerance + modelError,
                 (withinRms && withinMax) ? "WITHIN" : "OVER TOLERANCE");
     BINCV_CHECK(s.eligible >= 16);
@@ -910,12 +947,13 @@ FlowStats runLadder(const char* label, const BinMat<WordType>& prevSrc,
     std::vector<uint8_t> status(pts.size());
     bincv::calcOpticalFlowPyrLK(fe.levels, pts.data(), out.data(), status.data(), nullptr,
                                 pts.size(), params);
-    const FlowStats s = measure(pts, out, status, warp);
+    const FlowStats s = measure(pts, out, status, warp, kMaxTolerance + modelError);
     const bool within = s.rms <= kRmsTolerance + modelError && s.maxError <= kMaxTolerance +
                         modelError;
-    std::printf(" %-12s tracked=%3zu/%3zu stuck=%2zu/%2zu rms=%7.4f max=%7.4f bytes=%8zu %s\n",
-                label, s.tracked, s.eligible, s.stuck, s.truthMoved, s.rms, s.maxError,
-                fe.bytes(), within ? "WITHIN" : "OVER");
+    std::printf(" %-12s tracked=%3zu/%3zu stuck=%2zu/%2zu div=%2zu med=%7.4f rms=%7.4f "
+                "max=%7.4f bytes=%8zu %s\n",
+                label, s.tracked, s.eligible, s.stuck, s.truthMoved, s.diverged,
+                s.medianError, s.rms, s.maxError, fe.bytes(), within ? "WITHIN" : "OVER");
     return s;
 }
 
@@ -2197,7 +2235,7 @@ BINCV_TEST(Flow, PipelineFootprint_640x480) {
 //
 // AND THE REJECTION THRESHOLD REJECTS NOTHING HERE. `lk_min_eig_threshold: 0.001`
 // against a smallest measured `referenceMinEig` of 0.033 on these points -- a
-// factor of 33. Every one of 141 points comes back tracked in every case above,
+// factor of 33. Every one of 102 points comes back tracked in every case above,
 // including the stuck ones, which is why T3 grew its second half (see the top of
 // the file): a status byte is not evidence of tracking. Outside the blank-frame
 // case in Flow.LossRules, loss rule 2 is untested on real content because it
@@ -2961,8 +2999,8 @@ BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
 // ---------------------------------------------------------------------------
 // THE COARSE-LEVEL WINDOW BORDER.
 //
-// The bit-depth question is blocked here: 1/2/2/2 is 0.8356 px over all 141 real-frame
-// keypoints and 0.0010 px over the 58 that never clip. The metric below is
+// The bit-depth question is blocked here: 1/2/2/2 is 1.1285 px over all 102 real-frame
+// keypoints and 0.0016 px over the 43 that never clip. The metric below is
 // YIELD, pre-registered, because three of the four arms trade points for
 // accuracy and a per-point error alone would reward throwing points away.
 // ---------------------------------------------------------------------------
