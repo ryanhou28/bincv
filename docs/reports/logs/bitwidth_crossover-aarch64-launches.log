@@ -1,218 +1,218 @@
 # launch sweep -- 10 separate processes of one benchmark
-# benchmark: /home/ryan/crossover_launch.sh 
+# benchmark: benchmark/crossover_sweep.sh 
 # launches: 10
 # arch:     aarch64
 # host:     Raspberry Pi 4 Model B Rev 1.5
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
-# commit:   80ff0a8
-# governor: performance
+# commit:   211acaa
+# governor: performance (restored to performance on exit)
 # throttled before: throttled=0x80000
-# temp before: temp=63.7'C
+# temp before: temp=58.9'C
 # pinning:  taskset -c 3
 # sleep between launches: 0s
-# date:     2026-09-21T16:50:19-07:00
-# loadavg at start: 1.14 1.05 0.90 1/306 915220
+# date:     2026-09-29T16:27:38-07:00
+# loadavg at start: 0.52 0.48 0.38 1/314 4009143
 # NO launch is discarded -- a cold start is part of what varies between
 # launches, and trimming it would trim the tail this sweep measures.
 
 ### run 1
-ARM  0 gauss 1 -> 1                        538.5 us
-ARM  1 gauss 2 -> 2                       1448.5 us
-ARM  2 gauss 3 -> 3                       2125.6 us
-ARM  3 gauss 4 -> 4                       2707.8 us
-ARM  4 gauss 5 -> 5                       4392.2 us
-ARM  5 gauss 8 -> 8                       7586.1 us
-ARM  6 gauss 1 -> 3 (binary in)            673.1 us
-ARM  7 gauss 1 -> 5 (binary in)            718.5 us
-ARM  8 box 1 -> 1                          321.2 us
+ARM  0 gauss 1 -> 1                        538.7 us
+ARM  1 gauss 2 -> 2                       1388.2 us
+ARM  2 gauss 3 -> 3                       2015.4 us
+ARM  3 gauss 4 -> 4                       2601.8 us
+ARM  4 gauss 5 -> 5                       4379.1 us
+ARM  5 gauss 8 -> 8                       7326.8 us
+ARM  6 gauss 1 -> 3 (binary in)            599.3 us
+ARM  7 gauss 1 -> 5 (binary in)            615.0 us
+ARM  8 box 1 -> 1                           87.7 us
 ARM  9 box 2 -> 2                          205.0 us
-ARM 10 box 3 -> 3                          306.8 us
-ARM 11 box 4 -> 4                          444.6 us
-ARM 12 box 5 -> 5                          648.3 us
-ARM 13 box 8 -> 8                         2577.6 us
-ARM 14 box 1 -> 3 (SHIPPED shape)          275.7 us
-ARM 15 cv::pyrDown 8U (denominator)        544.7 us
+ARM 10 box 3 -> 3                          306.5 us
+ARM 11 box 4 -> 4                          444.3 us
+ARM 12 box 5 -> 5                          646.8 us
+ARM 13 box 8 -> 8                         2575.7 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          116.1 us
+ARM 15 cv::pyrDown 8U (denominator)        519.6 us
 ### run 2
-ARM  0 gauss 1 -> 1                        538.6 us
-ARM  1 gauss 2 -> 2                       1448.8 us
-ARM  2 gauss 3 -> 3                       2129.8 us
-ARM  3 gauss 4 -> 4                       2713.2 us
-ARM  4 gauss 5 -> 5                       4399.1 us
-ARM  5 gauss 8 -> 8                       7624.3 us
-ARM  6 gauss 1 -> 3 (binary in)            672.9 us
-ARM  7 gauss 1 -> 5 (binary in)            718.4 us
-ARM  8 box 1 -> 1                          312.0 us
-ARM  9 box 2 -> 2                          205.0 us
-ARM 10 box 3 -> 3                          306.7 us
-ARM 11 box 4 -> 4                          444.0 us
-ARM 12 box 5 -> 5                          647.1 us
-ARM 13 box 8 -> 8                         2581.8 us
-ARM 14 box 1 -> 3 (SHIPPED shape)          275.9 us
-ARM 15 cv::pyrDown 8U (denominator)        530.5 us
+ARM  0 gauss 1 -> 1                        539.9 us
+ARM  1 gauss 2 -> 2                       1389.7 us
+ARM  2 gauss 3 -> 3                       2006.6 us
+ARM  3 gauss 4 -> 4                       2608.4 us
+ARM  4 gauss 5 -> 5                       4332.5 us
+ARM  5 gauss 8 -> 8                       7312.7 us
+ARM  6 gauss 1 -> 3 (binary in)            599.0 us
+ARM  7 gauss 1 -> 5 (binary in)            615.3 us
+ARM  8 box 1 -> 1                           87.6 us
+ARM  9 box 2 -> 2                          204.9 us
+ARM 10 box 3 -> 3                          306.6 us
+ARM 11 box 4 -> 4                          444.2 us
+ARM 12 box 5 -> 5                          646.9 us
+ARM 13 box 8 -> 8                         2570.0 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          116.1 us
+ARM 15 cv::pyrDown 8U (denominator)        516.1 us
 ### run 3
 ARM  0 gauss 1 -> 1                        538.6 us
-ARM  1 gauss 2 -> 2                       1450.8 us
-ARM  2 gauss 3 -> 3                       2124.2 us
-ARM  3 gauss 4 -> 4                       2718.5 us
-ARM  4 gauss 5 -> 5                       4390.7 us
-ARM  5 gauss 8 -> 8                       7596.7 us
-ARM  6 gauss 1 -> 3 (binary in)            672.6 us
-ARM  7 gauss 1 -> 5 (binary in)            718.6 us
-ARM  8 box 1 -> 1                          321.3 us
-ARM  9 box 2 -> 2                          204.9 us
-ARM 10 box 3 -> 3                          306.3 us
-ARM 11 box 4 -> 4                          444.4 us
-ARM 12 box 5 -> 5                          638.2 us
-ARM 13 box 8 -> 8                         2574.1 us
-ARM 14 box 1 -> 3 (SHIPPED shape)          276.0 us
-ARM 15 cv::pyrDown 8U (denominator)        517.2 us
-### run 4
-ARM  0 gauss 1 -> 1                        538.8 us
-ARM  1 gauss 2 -> 2                       1447.5 us
-ARM  2 gauss 3 -> 3                       2130.8 us
-ARM  3 gauss 4 -> 4                       2714.7 us
-ARM  4 gauss 5 -> 5                       4387.6 us
-ARM  5 gauss 8 -> 8                       7614.8 us
-ARM  6 gauss 1 -> 3 (binary in)            672.8 us
-ARM  7 gauss 1 -> 5 (binary in)            718.7 us
-ARM  8 box 1 -> 1                          319.7 us
-ARM  9 box 2 -> 2                          204.9 us
-ARM 10 box 3 -> 3                          306.3 us
+ARM  1 gauss 2 -> 2                       1388.4 us
+ARM  2 gauss 3 -> 3                       2005.0 us
+ARM  3 gauss 4 -> 4                       2608.9 us
+ARM  4 gauss 5 -> 5                       4370.7 us
+ARM  5 gauss 8 -> 8                       7324.5 us
+ARM  6 gauss 1 -> 3 (binary in)            598.8 us
+ARM  7 gauss 1 -> 5 (binary in)            614.9 us
+ARM  8 box 1 -> 1                           87.7 us
+ARM  9 box 2 -> 2                          205.1 us
+ARM 10 box 3 -> 3                          306.8 us
 ARM 11 box 4 -> 4                          444.0 us
-ARM 12 box 5 -> 5                          648.2 us
-ARM 13 box 8 -> 8                         2568.9 us
-ARM 14 box 1 -> 3 (SHIPPED shape)          275.9 us
-ARM 15 cv::pyrDown 8U (denominator)        514.8 us
-### run 5
+ARM 12 box 5 -> 5                          648.3 us
+ARM 13 box 8 -> 8                         2594.9 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          116.1 us
+ARM 15 cv::pyrDown 8U (denominator)        514.2 us
+### run 4
 ARM  0 gauss 1 -> 1                        538.6 us
-ARM  1 gauss 2 -> 2                       1447.5 us
-ARM  2 gauss 3 -> 3                       2137.9 us
-ARM  3 gauss 4 -> 4                       2717.7 us
-ARM  4 gauss 5 -> 5                       4394.0 us
-ARM  5 gauss 8 -> 8                       7576.7 us
-ARM  6 gauss 1 -> 3 (binary in)            673.1 us
-ARM  7 gauss 1 -> 5 (binary in)            718.8 us
-ARM  8 box 1 -> 1                          319.8 us
-ARM  9 box 2 -> 2                          204.9 us
+ARM  1 gauss 2 -> 2                       1389.3 us
+ARM  2 gauss 3 -> 3                       2003.7 us
+ARM  3 gauss 4 -> 4                       2608.4 us
+ARM  4 gauss 5 -> 5                       4366.8 us
+ARM  5 gauss 8 -> 8                       7308.4 us
+ARM  6 gauss 1 -> 3 (binary in)            598.7 us
+ARM  7 gauss 1 -> 5 (binary in)            615.0 us
+ARM  8 box 1 -> 1                           87.7 us
+ARM  9 box 2 -> 2                          205.2 us
+ARM 10 box 3 -> 3                          306.6 us
+ARM 11 box 4 -> 4                          443.9 us
+ARM 12 box 5 -> 5                          648.2 us
+ARM 13 box 8 -> 8                         2573.1 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          116.1 us
+ARM 15 cv::pyrDown 8U (denominator)        516.4 us
+### run 5
+ARM  0 gauss 1 -> 1                        538.7 us
+ARM  1 gauss 2 -> 2                       1388.9 us
+ARM  2 gauss 3 -> 3                       2013.8 us
+ARM  3 gauss 4 -> 4                       2607.5 us
+ARM  4 gauss 5 -> 5                       4360.6 us
+ARM  5 gauss 8 -> 8                       7358.8 us
+ARM  6 gauss 1 -> 3 (binary in)            598.9 us
+ARM  7 gauss 1 -> 5 (binary in)            615.1 us
+ARM  8 box 1 -> 1                           87.8 us
+ARM  9 box 2 -> 2                          205.0 us
 ARM 10 box 3 -> 3                          306.5 us
 ARM 11 box 4 -> 4                          444.2 us
-ARM 12 box 5 -> 5                          647.2 us
+ARM 12 box 5 -> 5                          648.4 us
 ARM 13 box 8 -> 8                         2575.8 us
-ARM 14 box 1 -> 3 (SHIPPED shape)          275.6 us
-ARM 15 cv::pyrDown 8U (denominator)        517.9 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          116.2 us
+ARM 15 cv::pyrDown 8U (denominator)        519.4 us
 ### run 6
 ARM  0 gauss 1 -> 1                        538.7 us
-ARM  1 gauss 2 -> 2                       1445.8 us
-ARM  2 gauss 3 -> 3                       2131.5 us
-ARM  3 gauss 4 -> 4                       2712.5 us
-ARM  4 gauss 5 -> 5                       4394.7 us
-ARM  5 gauss 8 -> 8                       7606.0 us
-ARM  6 gauss 1 -> 3 (binary in)            673.4 us
-ARM  7 gauss 1 -> 5 (binary in)            718.6 us
-ARM  8 box 1 -> 1                          312.1 us
+ARM  1 gauss 2 -> 2                       1388.9 us
+ARM  2 gauss 3 -> 3                       2006.4 us
+ARM  3 gauss 4 -> 4                       2600.4 us
+ARM  4 gauss 5 -> 5                       4336.0 us
+ARM  5 gauss 8 -> 8                       7351.7 us
+ARM  6 gauss 1 -> 3 (binary in)            598.9 us
+ARM  7 gauss 1 -> 5 (binary in)            614.9 us
+ARM  8 box 1 -> 1                           87.7 us
 ARM  9 box 2 -> 2                          205.0 us
-ARM 10 box 3 -> 3                          306.4 us
-ARM 11 box 4 -> 4                          445.7 us
-ARM 12 box 5 -> 5                          641.2 us
-ARM 13 box 8 -> 8                         2609.6 us
-ARM 14 box 1 -> 3 (SHIPPED shape)          275.9 us
-ARM 15 cv::pyrDown 8U (denominator)        514.2 us
+ARM 10 box 3 -> 3                          306.6 us
+ARM 11 box 4 -> 4                          445.9 us
+ARM 12 box 5 -> 5                          648.3 us
+ARM 13 box 8 -> 8                         2572.0 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          116.1 us
+ARM 15 cv::pyrDown 8U (denominator)        512.4 us
 ### run 7
-ARM  0 gauss 1 -> 1                        538.9 us
-ARM  1 gauss 2 -> 2                       1447.3 us
-ARM  2 gauss 3 -> 3                       2127.8 us
-ARM  3 gauss 4 -> 4                       2719.2 us
-ARM  4 gauss 5 -> 5                       4381.0 us
-ARM  5 gauss 8 -> 8                       7623.6 us
-ARM  6 gauss 1 -> 3 (binary in)            673.1 us
-ARM  7 gauss 1 -> 5 (binary in)            718.7 us
-ARM  8 box 1 -> 1                          319.7 us
-ARM  9 box 2 -> 2                          205.0 us
+ARM  0 gauss 1 -> 1                        538.6 us
+ARM  1 gauss 2 -> 2                       1391.1 us
+ARM  2 gauss 3 -> 3                       2010.3 us
+ARM  3 gauss 4 -> 4                       2606.1 us
+ARM  4 gauss 5 -> 5                       4365.6 us
+ARM  5 gauss 8 -> 8                       7404.0 us
+ARM  6 gauss 1 -> 3 (binary in)            599.2 us
+ARM  7 gauss 1 -> 5 (binary in)            615.1 us
+ARM  8 box 1 -> 1                           87.6 us
+ARM  9 box 2 -> 2                          205.1 us
 ARM 10 box 3 -> 3                          306.5 us
-ARM 11 box 4 -> 4                          444.1 us
-ARM 12 box 5 -> 5                          648.3 us
-ARM 13 box 8 -> 8                         2571.4 us
-ARM 14 box 1 -> 3 (SHIPPED shape)          275.8 us
-ARM 15 cv::pyrDown 8U (denominator)        517.6 us
+ARM 11 box 4 -> 4                          444.5 us
+ARM 12 box 5 -> 5                          644.2 us
+ARM 13 box 8 -> 8                         2576.7 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          116.2 us
+ARM 15 cv::pyrDown 8U (denominator)        514.8 us
 ### run 8
-ARM  0 gauss 1 -> 1                        540.4 us
-ARM  1 gauss 2 -> 2                       1445.9 us
-ARM  2 gauss 3 -> 3                       2128.6 us
-ARM  3 gauss 4 -> 4                       2720.3 us
-ARM  4 gauss 5 -> 5                       4392.5 us
-ARM  5 gauss 8 -> 8                       7605.0 us
-ARM  6 gauss 1 -> 3 (binary in)            673.0 us
-ARM  7 gauss 1 -> 5 (binary in)            718.3 us
-ARM  8 box 1 -> 1                          312.1 us
+ARM  0 gauss 1 -> 1                        538.8 us
+ARM  1 gauss 2 -> 2                       1389.8 us
+ARM  2 gauss 3 -> 3                       2023.5 us
+ARM  3 gauss 4 -> 4                       2602.1 us
+ARM  4 gauss 5 -> 5                       4373.1 us
+ARM  5 gauss 8 -> 8                       7313.7 us
+ARM  6 gauss 1 -> 3 (binary in)            598.9 us
+ARM  7 gauss 1 -> 5 (binary in)            615.6 us
+ARM  8 box 1 -> 1                           87.9 us
 ARM  9 box 2 -> 2                          205.0 us
 ARM 10 box 3 -> 3                          306.5 us
-ARM 11 box 4 -> 4                          444.2 us
-ARM 12 box 5 -> 5                          648.3 us
-ARM 13 box 8 -> 8                         2575.4 us
-ARM 14 box 1 -> 3 (SHIPPED shape)          275.8 us
-ARM 15 cv::pyrDown 8U (denominator)        533.0 us
-### run 9
-ARM  0 gauss 1 -> 1                        538.5 us
-ARM  1 gauss 2 -> 2                       1448.0 us
-ARM  2 gauss 3 -> 3                       2129.2 us
-ARM  3 gauss 4 -> 4                       2712.0 us
-ARM  4 gauss 5 -> 5                       4395.2 us
-ARM  5 gauss 8 -> 8                       7601.8 us
-ARM  6 gauss 1 -> 3 (binary in)            672.9 us
-ARM  7 gauss 1 -> 5 (binary in)            718.5 us
-ARM  8 box 1 -> 1                          312.1 us
-ARM  9 box 2 -> 2                          205.0 us
-ARM 10 box 3 -> 3                          306.6 us
-ARM 11 box 4 -> 4                          443.2 us
-ARM 12 box 5 -> 5                          647.4 us
-ARM 13 box 8 -> 8                         2571.0 us
-ARM 14 box 1 -> 3 (SHIPPED shape)          275.9 us
-ARM 15 cv::pyrDown 8U (denominator)        517.2 us
-### run 10
-ARM  0 gauss 1 -> 1                        539.7 us
-ARM  1 gauss 2 -> 2                       1447.5 us
-ARM  2 gauss 3 -> 3                       2135.6 us
-ARM  3 gauss 4 -> 4                       2714.2 us
-ARM  4 gauss 5 -> 5                       4400.3 us
-ARM  5 gauss 8 -> 8                       7594.0 us
-ARM  6 gauss 1 -> 3 (binary in)            672.8 us
-ARM  7 gauss 1 -> 5 (binary in)            718.4 us
-ARM  8 box 1 -> 1                          321.0 us
-ARM  9 box 2 -> 2                          205.0 us
-ARM 10 box 3 -> 3                          306.6 us
 ARM 11 box 4 -> 4                          443.8 us
-ARM 12 box 5 -> 5                          647.2 us
-ARM 13 box 8 -> 8                         2570.0 us
-ARM 14 box 1 -> 3 (SHIPPED shape)          275.7 us
-ARM 15 cv::pyrDown 8U (denominator)        517.9 us
+ARM 12 box 5 -> 5                          648.7 us
+ARM 13 box 8 -> 8                         2578.4 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          116.1 us
+ARM 15 cv::pyrDown 8U (denominator)        515.0 us
+### run 9
+ARM  0 gauss 1 -> 1                        539.7 us
+ARM  1 gauss 2 -> 2                       1389.1 us
+ARM  2 gauss 3 -> 3                       2020.8 us
+ARM  3 gauss 4 -> 4                       2598.3 us
+ARM  4 gauss 5 -> 5                       4384.7 us
+ARM  5 gauss 8 -> 8                       7324.0 us
+ARM  6 gauss 1 -> 3 (binary in)            599.0 us
+ARM  7 gauss 1 -> 5 (binary in)            615.0 us
+ARM  8 box 1 -> 1                           88.0 us
+ARM  9 box 2 -> 2                          204.9 us
+ARM 10 box 3 -> 3                          306.6 us
+ARM 11 box 4 -> 4                          444.4 us
+ARM 12 box 5 -> 5                          648.0 us
+ARM 13 box 8 -> 8                         2570.4 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          116.1 us
+ARM 15 cv::pyrDown 8U (denominator)        519.7 us
+### run 10
+ARM  0 gauss 1 -> 1                        540.2 us
+ARM  1 gauss 2 -> 2                       1389.7 us
+ARM  2 gauss 3 -> 3                       2013.8 us
+ARM  3 gauss 4 -> 4                       2601.8 us
+ARM  4 gauss 5 -> 5                       4334.2 us
+ARM  5 gauss 8 -> 8                       7315.8 us
+ARM  6 gauss 1 -> 3 (binary in)            598.9 us
+ARM  7 gauss 1 -> 5 (binary in)            615.0 us
+ARM  8 box 1 -> 1                           87.7 us
+ARM  9 box 2 -> 2                          205.2 us
+ARM 10 box 3 -> 3                          306.2 us
+ARM 11 box 4 -> 4                          443.8 us
+ARM 12 box 5 -> 5                          648.1 us
+ARM 13 box 8 -> 8                         2572.4 us
+ARM 14 box 1 -> 3 (SHIPPED shape)          116.1 us
+ARM 15 cv::pyrDown 8U (denominator)        516.4 us
 
-# loadavg at end: 1.01 1.03 0.92 1/308 915929
+# loadavg at end: 1.03 0.73 0.50 1/315 4011120
 # throttled after: throttled=0x80000
-# temp after: temp=61.8'C
-# date:     2026-09-21T16:52:42-07:00
+# temp after: temp=59.9'C
+# date:     2026-09-29T16:30:01-07:00
 # done
 
 # ---- aggregate (scripts/aggregate_launches.py ) ----
 # 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
 # 
 # row                                        n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
-# i1 / ARM 0 gauss 1 -> 1                   10   538.6500   538.5000   540.4000  1.004     0.4%      --  [538.5500, 539.2500]   0.06%   1.001x
-# i1 / ARM 1 gauss 2 -> 2                   10     1447.5     1445.8     1450.8  1.003     0.3%      --  [  1446.7,   1448.5]   0.06%   1.001x
-# i1 / ARM 10 box 3 -> 3                    10   306.5000   306.3000   306.8000  1.002     0.2%      --  [306.4000, 306.6000]   0.03%   1.000x
-# i1 / ARM 11 box 4 -> 4                    10   444.1500   443.2000   445.7000  1.006     0.6%      --  [443.9000, 444.4000]   0.06%   1.001x
-# i1 / ARM 12 box 5 -> 5                    10   647.3000   638.2000   648.3000  1.016     1.6%      --  [644.2000, 648.3000]   0.32%   1.005x
-# i1 / ARM 13 box 8 -> 8                    10     2574.8     2568.9     2609.6  1.016     1.6%      --  [  2570.7,   2578.8]   0.16%   1.002x
-# i1 / ARM 14 box 1 -> 3 (SHIPPED shape)    10   275.8500   275.6000   276.0000  1.001     0.1%      --  [275.7000, 275.9000]   0.04%   1.001x
-# i1 / ARM 15 cv::pyrDown 8U (denominator)  10   517.7500   514.2000   544.7000  1.059     5.9%      --  [516.0000, 530.5000]   1.40%   1.025x
-# i1 / ARM 2 gauss 3 -> 3                   10     2129.5     2124.2     2137.9  1.006     0.6%      --  [  2127.1,   2133.2]   0.14%   1.002x
-# i1 / ARM 3 gauss 4 -> 4                   10     2714.4     2707.8     2720.3  1.005     0.5%      --  [  2712.5,   2718.5]   0.11%   1.001x
-# i1 / ARM 4 gauss 5 -> 5                   10     4393.2     4381.0     4400.3  1.004     0.4%      --  [  4389.9,   4396.9]   0.08%   1.001x
-# i1 / ARM 5 gauss 8 -> 8                   10     7603.4     7576.7     7624.3  1.006     0.6%      --  [  7591.4,   7614.8]   0.15%   1.002x
-# i1 / ARM 6 gauss 1 -> 3 (binary in)       10   672.9500   672.6000   673.4000  1.001     0.1%      --  [672.8000, 673.1000]   0.02%   1.000x
-# i1 / ARM 7 gauss 1 -> 5 (binary in)       10   718.5500   718.3000   718.8000  1.001     0.1%      --  [718.4000, 718.7000]   0.02%   1.000x
-# i1 / ARM 8 box 1 -> 1                     10   319.7000   312.0000   321.3000  1.030     2.9%      --  [312.1000, 321.0000]   1.39%   1.024x
-# i1 / ARM 9 box 2 -> 2                     10   205.0000   204.9000   205.0000  1.000     0.0%      --  [204.9000, 205.0000]   0.02%   1.000x
+# i1 / ARM 0 gauss 1 -> 1                   10   538.7000   538.6000   540.2000  1.003     0.3%      --  [538.6000, 539.7000]   0.10%   1.002x
+# i1 / ARM 1 gauss 2 -> 2                   10     1389.2     1388.2     1391.1  1.002     0.2%      --  [  1388.7,   1389.8]   0.04%   1.000x
+# i1 / ARM 10 box 3 -> 3                    10   306.5500   306.2000   306.8000  1.002     0.2%      --  [306.5000, 306.6000]   0.02%   1.000x
+# i1 / ARM 11 box 4 -> 4                    10   444.2000   443.8000   445.9000  1.005     0.5%      --  [443.9000, 444.4000]   0.06%   1.001x
+# i1 / ARM 12 box 5 -> 5                    10   648.1500   644.2000   648.7000  1.007     0.7%      --  [646.9000, 648.3500]   0.11%   1.002x
+# i1 / ARM 13 box 8 -> 8                    10     2574.4     2570.0     2594.9  1.010     1.0%      --  [  2571.4,   2577.1]   0.11%   1.001x
+# i1 / ARM 14 box 1 -> 3 (SHIPPED shape)    10   116.1000   116.1000   116.2000  1.001     0.1%      --  [116.1000, 116.1500]   0.02%   1.000x
+# i1 / ARM 15 cv::pyrDown 8U (denominator)  10   516.2500   512.4000   519.7000  1.014     1.4%      --  [514.6000, 519.4000]   0.46%   1.006x
+# i1 / ARM 2 gauss 3 -> 3                   10     2012.0     2003.7     2023.5  1.010     1.0%      --  [  2005.8,   2017.3]   0.29%   1.003x
+# i1 / ARM 3 gauss 4 -> 4                   10     2604.1     2598.3     2608.9  1.004     0.4%      --  [  2601.1,   2608.4]   0.14%   1.002x
+# i1 / ARM 4 gauss 5 -> 5                   10     4366.2     4332.5     4384.7  1.012     1.2%      --  [  4336.0,   4374.9]   0.45%   1.007x
+# i1 / ARM 5 gauss 8 -> 8                   10     7324.2     7308.4     7404.0  1.013     1.3%      --  [  7313.7,   7351.7]   0.26%   1.004x
+# i1 / ARM 6 gauss 1 -> 3 (binary in)       10   598.9000   598.7000   599.3000  1.001     0.1%      --  [598.8500, 599.1000]   0.02%   1.000x
+# i1 / ARM 7 gauss 1 -> 5 (binary in)       10   615.0000   614.9000   615.6000  1.001     0.1%      --  [614.9500, 615.1500]   0.02%   1.000x
+# i1 / ARM 8 box 1 -> 1                     10    87.7000    87.6000    88.0000  1.005     0.5%      --  [ 87.6500,  87.8000]   0.09%   1.001x
+# i1 / ARM 9 box 2 -> 2                     10   205.0000   204.9000   205.2000  1.001     0.1%      --  [204.9500, 205.1500]   0.05%   1.001x
 # 
 #   median   median of the per-launch medians -- the value to quote.
 #   r2r      run-to-run scatter as a factor, max/min of those medians.

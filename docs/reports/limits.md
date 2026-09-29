@@ -47,28 +47,34 @@ own `cv::pyrDown` denominator in the first row:
 
 | arm | x86-64 (µs) | x86-64 ratio | aarch64 (µs) | aarch64 ratio |
 |---|---|---|---|---|
-| `cv::pyrDown`, `CV_8U` (the denominator) | 47.85 | — | 517.8 | — |
-| box filter, 1 → 3 (generic filtered path — the shipped kernel is the row in §1) | 32.20 | 1.47× [1.46, 1.50] | 275.9 | 1.88× [1.87, 1.92] |
-| box filter, 1 → 1 | 79.05 | 0.605× [0.597, 0.617] | 319.7 | 1.63× [1.61, 1.70] |
-| box filter, 2 → 2 | 62.35 | 0.772× [0.758, 0.779] | 205.0 | 2.53× [2.52, 2.59] |
-| box filter, 3 → 3 | 94.30 | 0.508× [0.495, 0.516] | 306.5 | 1.69× [1.69, 1.73] |
-| box filter, 4 → 4 | 132.7 | 0.358× [0.352, 0.364] | 444.2 | 1.17× [1.16, 1.20] |
-| box filter, 5 → 5 | 176.4 | 0.272× [0.268, 0.277] | 647.3 | 0.801× [0.799, 0.820] |
-| box filter, 8 → 8 | 645.3 | 0.0736× [0.0723, 0.0753] | 2575 | 0.201× [0.201, 0.205] |
+| `cv::pyrDown`, `CV_8U` (the denominator) | 47.85 | — | 516.3 | — |
+| box filter, 1 → 3 (generic filtered path; the shipped kernel is the row in §1) | 32.20 | 1.47× [1.46, 1.50] | 116.1 | 4.45× [4.43, 4.47] |
+| box filter, 1 → 1 | 79.05 | 0.605× [0.597, 0.617] | 87.70 | 5.89× [5.87, 5.92] |
+| box filter, 2 → 2 | 62.35 | 0.772× [0.758, 0.779] | 205.0 | 2.52× [2.51, 2.53] |
+| box filter, 3 → 3 | 94.30 | 0.508× [0.495, 0.516] | 306.6 | 1.68× [1.68, 1.69] |
+| box filter, 4 → 4 | 132.7 | 0.358× [0.352, 0.364] | 444.2 | 1.16× [1.16, 1.17] |
+| box filter, 5 → 5 | 176.4 | 0.272× [0.268, 0.277] | 648.2 | 0.797× [0.794, 0.802] |
+| box filter, 8 → 8 | 645.3 | 0.0736× [0.0723, 0.0753] | 2574 | 0.201× [0.200, 0.202] |
 
-**The aarch64 column of this table is provisional.** On aarch64 this benchmark reads the
-generic `1 → 3` call at 275.9 µs where `pyrfilter_benchmark` reads the identical call at
-116.1 µs, on the same commit (`80ff0a8`, on `main` as `086428c`;
-[log](logs/pyrfilter-aarch64-launches.log)). On x86-64 the two benchmarks agree (32.20
-against 32.40 µs), and the `8 → 8` arm agrees on the device too (2575 against 2572 µs). The
-inflation is on the cheap arms, which is exactly what moves the crossover point, so the
-device column stands only until it is re-taken, and the crossover it implies may understate
-binCV.
+**The aarch64 column was re-taken after a benchmark-build defect was found and fixed.** The
+column first published read the generic `1 → 3` call at 275.9 µs where `pyrfilter_benchmark`
+read the identical call at 116.1 µs on the same commit. Re-measured in one session, both
+reproduced to 0.1%, and a probe timing the call on four input densities read 116 µs each
+time. The cause was the benchmark's translation unit: fifteen heavy arms instantiated in one
+file exhaust GCC's per-unit inlining budget, the pyramid's row helpers stay out of line, and
+the cheap arms pay a call per row while the compute-bound `8 → 8` arms do not move.
+`benchmark/CMakeLists.txt` now raises the unit-growth caps for that one target, and the
+column above is ten launches of the rebuilt benchmark
+([log](logs/bitwidth_crossover-aarch64-launches.log), taken at `211acaa`): it agrees with
+`pyrfilter_benchmark` on every arm the two share, and the cheap arms read 2.4–3.6× faster
+than first published. The x86-64 column predates the build change; on that host the two
+benchmarks already agreed (32.20 against 32.40 µs), so it stands until it is re-taken.
 
 **The crossover is not a property of the algorithm — it moves by several bits between the two
-machines.** As this table reads, the bit-sliced box filter on the reference device stays
-ahead of `cv::pyrDown` through four bits per pixel and crosses between four and five. On
-x86-64 the only shape that beats it is the shipped one, and even `1 → 1` is behind at 0.605×.
+machines.** On the reference device the bit-sliced box filter stays ahead of `cv::pyrDown`
+through four bits per pixel (1.16× at `4 → 4`) and crosses between four and five (0.797× at
+`5 → 5`); at one bit in it is 4.45–5.89× ahead. On x86-64 the only shape that beats it is the
+shipped one, and even `1 → 1` is behind at 0.605×.
 
 The reason is the denominator, not binCV: OpenCV's x86-64 build dispatches at run time over
 SSE4.1 through AVX-512 code paths (its build line at the top of every x86-64 log reads
@@ -258,3 +264,4 @@ the figure stands.
 | 2026-09-22 | `goodFeaturesToTrack`, formerly in §3 | 0.530× on both machines; then 0.920× x86-64 / 1.45× aarch64, both against a hand-written OpenCV pipeline | 1.38× / 2.42× against stock `cv::goodFeaturesToTrack`, in features.md | the first figure timed the frame-map spelling on an older response kernel; the second was taken before the response sweep's tail was rewritten; the denominator was changed to the call a caller makes |
 | 2026-09-24 | LK batch, gain on tracking | 1.66×–1.88× (two runs an arm over 400 frames) | 1.84× [1.82, 1.87] (thirty launches an arm, 1709 frames) | re-taken |
 | 2026-09-24 | LK batch, pipeline ratio with the batch on | 3.63× | 3.90× | the detect stage became 1.93× faster (0.1390 → 0.0720 ms/frame) with the selection-stage optimisation in `ops/corner.hpp`; the earlier log was taken from a modified tree, so the staleness gate could not name the change |
+| 2026-09-29 | crossover table, aarch64 column | `1 → 3` 275.9 µs, 1.88×; `1 → 1` 319.7 µs, 1.63× (and the other box arms) | 116.1 µs, 4.45×; 87.70 µs, 5.89× | the benchmark unit's exhausted inlining budget kept the pyramid's row helpers out of line for the cheap arms; caps raised, re-taken at `211acaa` |
