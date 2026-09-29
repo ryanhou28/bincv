@@ -71,3 +71,14 @@ foreach(benchmark_src ${BINCV_BENCH_BUILD})
         BINCV_REALFRAME_PATH="${CMAKE_CURRENT_SOURCE_DIR}/realframe.bin")
 
 endforeach()
+
+# bitwidth_crossover instantiates fifteen heavy pyramid arms in one translation unit,
+# and GCC's inlining budget is per unit: once it runs out the pyramid's row helpers
+# stay out of line and the cheap arms pay a call per row -- 275.8 us for a call that
+# reads 116.1 us from a smaller unit, on the reference device. Raising the unit-growth
+# caps gives each arm the codegen a small unit would; the source comment above
+# runArm() has the measurements. GCC only; other compilers keep their defaults.
+if(TARGET bitwidth_crossover AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(bitwidth_crossover PRIVATE
+        --param=large-unit-insns=200000 --param=inline-unit-growth=2000)
+endif()
