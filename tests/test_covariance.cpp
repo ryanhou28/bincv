@@ -64,9 +64,9 @@
 // replaced at first and an over-aligned scratch buffer was therefore invisible
 // to it -- and must be zero. The counter is itself exercised on one allocation
 // of each kind, so the zero is a reading and not a blind spot. This is not
-// decoration: the four-argument selector form was chosen over the 11-14%
-// FASTER precomputed-plane form precisely because it needs no plane (
-// axis 3, CLAUDE.md's memory tiebreak). A covariance that quietly
+// decoration: the four-argument selector form was chosen over the 1.11-1.14x
+// FASTER precomputed-plane form precisely because it needs no plane (memory
+// wins the tiebreak). A covariance that quietly
 // allocated would have discarded the speed and bought nothing.
 // * THE SIGN PLANE IS READ ONLY WHERE BOTH MAGNITUDES ARE SET. Dirtying every
 // sign bit over a zero magnitude -- which the canonical-zero rule says carries
@@ -182,6 +182,8 @@ using bincv::gradientCovariance;
 
 // The three window sizes this is specified over. 31 is the reference pipeline's
 // LK window; 7 and 15 are the smaller ones a pyramid level uses.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 const int WINDOW_SIZES[] = {7, 15, 31};
 
 // The sweep frame. Wide enough that every word type has SEVERAL words per row and
@@ -845,10 +847,9 @@ void testDegenerate(const char* wordTypeName) {
 
 /// @brief Case 7: WHAT A TAP-ORDER INVERSION DOES TO THIS MATRIX, and what it
 /// does not.
-/// @note ops/derivative.hpp and tests/test_derivative.cpp both
-/// used to say that a cv::filter2D correlate-vs-convolve mix-up would leave
-/// sumXX and sumYY correct "while silently negating the cross term", so that
-/// this covariance was a tripwire for it. **It is not, and the arithmetic
+/// @note A tempting claim is that a cv::filter2D correlate-vs-convolve mix-up
+/// would leave sumXX and sumYY correct while silently negating the cross term,
+/// so that this covariance is a tripwire for it. **It is not, and the arithmetic
 /// says so: a tap-order inversion negates BOTH derivatives, and
 /// (-Ix)(-Iy) = IxIy.** The entire 2x2 matrix, cross term included, is
 /// INVARIANT under a global negation -- so the direction of the taps is
@@ -926,7 +927,7 @@ void testNegationInvariance(const char* wordTypeName) {
 
 /// @brief Case 8: what SlidingWindowCount can and cannot do for a column sweep.
 /// @note ops/covariance.hpp points a column-sweeping caller at
-/// SlidingWindowCount, and used to point it there for the whole operation.
+/// SlidingWindowCount, and only a column-sweeping one.
 /// SlidingWindowCount slides ONE plane's popcount, so it delivers sumXX and
 /// sumYY and cannot deliver sumXY -- there is no sliding form of the
 /// `magX & magY` split anywhere in ops/reduce.hpp. Both halves are pinned:
@@ -1060,8 +1061,8 @@ void testNBitDispatch(const char* wordTypeName) {
 }
 
 /// @brief Case 10: no heap, no scratch (ops/covariance.hpp promise 3).
-/// @note This is the check that keeps the the axis-3 trade honest. The
-/// four-argument selector form was taken over the 11-14% faster plane form
+/// @note This is the check that keeps the memory-for-speed trade honest. The
+/// four-argument selector form was taken over the 1.11-1.14x faster plane form
 /// for one reason: it needs no plane. An implementation that allocated a
 /// window buffer, or built a selector plane internally, would have given up
 /// the speed and kept the memory -- and every value test in this file would

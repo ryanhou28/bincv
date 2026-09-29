@@ -91,11 +91,11 @@ constexpr unsigned kBoxWarps = 4;
 
 /// @brief Lanes of a warp that produce OUTPUT at this window width. The other
 /// `winWidth - 1` are the halo the horizontal aggregation reaches into.
-/// @note ONE definition, used by the kernel AND by the launch geometry. They
-/// were briefly two, and two copies that disagree by one lane still produced a
-/// byte-identical map on a shifted test pair while silently aggregating a
-/// column twice -- a constant that says how far a lane reaches into its
-/// neighbours cannot have a second spelling.
+/// @note ONE definition, used by the kernel AND by the launch geometry. Two
+/// copies that disagree by one lane still produce a byte-identical map on a
+/// shifted test pair while silently aggregating a column twice -- a constant
+/// that says how far a lane reaches into its neighbours cannot have a second
+/// spelling.
 BINCV_CUDA_HD constexpr int boxOutLanes(int winW) { return 33 - winW; }
 
 /// @brief The widest window this arm accepts: the last one that still leaves

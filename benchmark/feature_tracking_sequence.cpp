@@ -8,11 +8,13 @@
 // feature positions, flow vectors, track lifetimes
 // 3. several-fold smaller PEAK FOOTPRINT over the pipeline operation set
 // 4. FASTER execution against the byte-per-pixel denominator
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
-// THE DENOMINATOR IS CLAUDE.md's, NOT A FLATTERING ONE: OpenCV doing the same
+// THE DENOMINATOR IS THE STANDARD ONE, NOT A FLATTERING ONE: OpenCV doing the same
 // semantic operation on the SAME BINARY CONTENT stored as CV_8U. Both pipelines
 // see bit-identical input -- the reference pipeline's two-stage preprocessing,
-// median_filter then rl_fast_edge_filter_wide -- so the comparison is of the
+// its three-pixel median then its edge filter -- so the comparison is of the
 // implementations and not of the content.
 //
 // TWO INDEPENDENT PIPELINES, NOT ONE DRIVING THE OTHER. Each detects its own
@@ -72,20 +74,16 @@ using refsensor::preprocess;
 
 // ---- THE SAME TWO STAGES, IN binCV --------------------------------
 //
-// The edge filter is inside the MVP set,
-// and this benchmark used to run BOTH pipelines on an OpenCV-preprocessed frame with a
-// comment calling that stage "deliberately NOT binCV's claim". Those disagreed. binCV
-// has `medianWide` and `edgeThreshold` -- bit-exact against the
-// reference, 0 of 1219 and 0 of 3367 pixels differing -- and they were tested but never
-// USED.
+// The sensor stage is binCV's claim too: binCV has `medianWide` and `edgeThreshold`,
+// bit-exact against the reference (0 of 1219 and 0 of 3367 pixels differing), so both
+// pipelines run their own.
 //
-// THE PREPROCESSING IS NOW INSIDE BOTH TIMED PIPELINES, AND THAT IS A CHANGE OF
-// DENOMINATOR RATHER THAN A SPEEDUP. Before this, neither side's total included it:
-// binCV was handed a `CV_8U` binary frame and paid `fromCVMat` to unpack it, and OpenCV
-// was handed the same frame free of charge. Now each side builds its own binary frame
-// from the SAME grayscale input, which is what an end-to-end comparison means -- and it
-// removes `fromCVMat` from binCV's pipeline entirely, because binCV's edge filter writes
-// bit-planes directly.
+// THE PREPROCESSING IS INSIDE BOTH TIMED PIPELINES, AND THAT IS A CHOICE OF
+// DENOMINATOR RATHER THAN A SPEEDUP. Handing binCV a `CV_8U` binary frame to unpack
+// with `fromCVMat` while OpenCV gets the same frame free of charge would leave the
+// sensor stage out of both totals. Instead each side builds its own binary frame from
+// the SAME grayscale input, which is what an end-to-end comparison means -- and binCV's
+// pipeline has no `fromCVMat` at all, because its edge filter writes bit-planes directly.
 //
 // `preprocess` above stays, as the CONTROL: `binaryFramesAgree` checks binCV's output
 // against it pixel for pixel, every frame.
@@ -137,10 +135,8 @@ struct BincvPipeline {
           ring(bincv::kResponseRingRows * static_cast<size_t>(width)), w(width), h(height) {}
 
     double msLoad = 0.0;   ///< binCV's OWN sensor stage -- `medianWide` then
-                           ///< `edgeThreshold`, straight from grayscale into bit-planes.
-                           ///< This used to be `fromCVMat` unpacking a CV_8U binary frame
-                           ///< somebody else had produced; binCV produces it now, so the
-                           ///< conversion is gone rather than optimized.
+                           ///< `edgeThreshold`, straight from grayscale into bit-planes;
+                           ///< no `fromCVMat` unpacking of a frame somebody else produced.
     std::vector<uint8_t> medianScratch;
 
     /// Frame 0's whole pyramid, so frame 1's swap hands it a fully built `prev`.
@@ -168,17 +164,16 @@ struct BincvPipeline {
         bincvPreprocess(gray, medianScratch, next.level<0>().plane(0), thr);
         msLoad += std::chrono::duration<double, std::milli>(Clock::now() - t).count();
     }
-    double msPyrDown = 0.0, msDeriv = 0.0;   ///< put `build` at 52% of the
-                                            ///< pipeline at T=12; this splits it,
-                                            ///< because a measurement found `derivative`
-                                            ///< auto-vectorizes and `pyrDown` does
-                                            ///< not, so the two halves have very
-                                            ///< different priors.
+    double msPyrDown = 0.0, msDeriv = 0.0;   ///< `build` measured at 52% of the
+                                            ///< pipeline at T=12; split because
+                                            ///< `derivative` auto-vectorizes and
+                                            ///< `pyrDown` does not, so the two halves
+                                            ///< have very different priors.
     /// ONE pyramid build per frame, not two. `prev` arrived built via the swap; only
     /// the incoming frame's levels are computed. OpenCV's `calcOpticalFlowPyrLK`
     /// still rebuilds both of its pyramids per call -- the redundancy was symmetric,
-    /// and the owner's decision (2026-08-31) is to remove it on binCV's side and
-    /// leave OpenCV its own method, stated openly in the criterion-4 note below.
+    /// and the decision here is to remove it on binCV's side and leave OpenCV its own
+    /// method, stated openly in the criterion-4 note below.
     void build() {
         auto t = Clock::now();
         next.build<bincv::PyrDownFilter::Box2x2, bincv::PyrDownBorder::Replicate>();
@@ -244,11 +239,10 @@ double median(std::vector<int> v) {
 
 } // namespace
 
-// The benchmark's own thread pool and point-array splitter are
-// GONE: binCV ships `bincv::ThreadPool` and `bincv::parallelFor`, and
-// `calcOpticalFlowPyrLK` splits over keypoints internally. What used to be thirty
-// lines here is now one `install` -- which is the whole point, since the
-// speedup was never missing, only the way to ask for it.
+// The benchmark has no thread pool or point-array splitter of its own: binCV ships
+// `bincv::ThreadPool` and `bincv::parallelFor`, and `calcOpticalFlowPyrLK` splits
+// over keypoints internally, so the whole of it here is one `install` -- which is
+// the point, since the speedup was never missing, only the way to ask for it.
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
     if (argc < 2) { std::printf("usage: feature_tracking_sequence <frame-dir> [max-frames]\n"); return 2; }
@@ -268,8 +262,8 @@ int main(int argc, char** argv) {
     // the honest one on its own -- both are reported.
     // ONE THREAD BY DEFAULT, AND THAT IS NOT A HANDICAP ON OPENCV -- it is the
     // denominator every recorded entry already used and the one the reference device
-    // gets for free, because `run_on_pi.sh` runs under `taskset -c 3` and OpenCV's
-    // threads cannot escape a single pinned core.
+    // gets for free, because `scripts/run_launches.sh` pins every launch to one core
+    // with `taskset` and OpenCV's threads cannot escape it.
     //
     // leaving it unset let the x86 runs compare SINGLE-THREADED binCV against
     // TWELVE-THREADED OpenCV, and the resulting 0.65x was read as a SIMD deficit for
@@ -620,11 +614,10 @@ int main(int argc, char** argv) {
     std::printf(" binCV has its NEON path here, so this is SIMD against\n"
                 " SIMD on the deployment target -- the comparison criterion 4 is about.\n");
 #else
-    // STALE UNTIL. This used to read "binCV has NO VECTOR PATH ON x86, so this is
-    // binCV SCALAR against OpenCV SSE" -- and this same program prints "LK residual
-    // kernel: AVX2, eight keypoints per batch" five hundred lines earlier. One
-    // output contradicting itself is worse than either claim alone, because a
-    // reader believes whichever half they read first.
+    // This line has to agree with what the same program prints five hundred lines
+    // earlier ("LK residual kernel: AVX2, eight keypoints per batch"): one output
+    // contradicting itself is worse than either claim alone, because a reader
+    // believes whichever half they read first.
     std::printf(" binCV has its AVX2 paths here -- the eight-keypoint LK batch,\n"
                 " the sensor stage's median and edge kernels, and packing --\n"
                 " so this is SIMD against SIMD, as the aarch64 arm is. What\n"

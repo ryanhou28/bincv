@@ -25,6 +25,8 @@
 // the reference's value set exactly on the aligned block, and that
 // cv::blur's DEFAULT anchor really does shift its window half a pixel up
 // and to the left -- the deviation ops/pyramid.hpp documents.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // THE ARITHMETIC IS ENUMERATED, NOT SAMPLED. The requantizer's whole input space
 // is the 4 * (2^NIn - 1) + 1 possible sums, so Pyramid.Requantize_* runs every
@@ -56,12 +58,11 @@
 // ---------------------------------------------------------------------------
 // The allocation counter, in the idiom tests/test_storage.cpp established.
 //
-// ops/pyramid.hpp promises "no allocation and no scratch parameter". Half of that
-// sentence used to carry a wrong number for the kernel's automatic storage (it
-// quoted the widest single intermediate, NIn + NOut + 2 words, as the total); the
-// stack half is now measured with -fstack-usage and recorded in the header and in
-//, because it is a property of the emitted code rather than
-// of the source. THE HEAP HALF IS CHECKABLE HERE, and is checked -- a kernel that
+// ops/pyramid.hpp promises "no allocation and no scratch parameter". The stack
+// half of that sentence is measured with -fstack-usage and recorded in the header
+// (the widest single intermediate, NIn + NOut + 2 words, is NOT the total),
+// because it is a property of the emitted code rather than of the source. THE
+// HEAP HALF IS CHECKABLE HERE, and is checked -- a kernel that
 // grew a std::vector of scratch would still pass every value test in this file.
 // ---------------------------------------------------------------------------
 namespace {
@@ -680,10 +681,10 @@ void testFootprintClaims() {
                        "pyrDownAutomaticWords is the sum of the arrays the kernel declares",
                        where);
 
-            // THE REGRESSION THIS FILE EXISTS TO CATCH. The header used to quote
-            // the widest single intermediate as the whole budget. It is strictly
-            // smaller for every supported (NIn, NOut), so the two can never again
-            // be confused without this failing.
+            // THE REGRESSION THIS FILE EXISTS TO CATCH: quoting the widest single
+            // intermediate as the whole budget. It is strictly smaller for every
+            // supported (NIn, NOut), so the two cannot be confused without this
+            // failing.
             PYR_EXPECT(words > nIn + nOut + 2,
                        "the automatic-storage budget is strictly larger than the widest "
                        "single intermediate -- quoting one for the other understated the "

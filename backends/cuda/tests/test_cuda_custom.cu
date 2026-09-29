@@ -83,6 +83,22 @@ BINCV_TEST(CudaPackCustom, PackBitsIfMatchesHost) {
     BINCV_CHECK_EQ(mismatchWords(expect, got), 0u);
 }
 
+// The plane-count domain, refused in every build as `packQuant` refuses it:
+// the kernel unrolls eight planes, so a ninth would go unwritten rather than
+// fail.
+BINCV_TEST(CudaPackCustom, PackQuantWithRefusesAPlaneCountOutsideOneToEight) {
+    const size_t w = 64, h = 8;
+    const FoldMap map;
+    bincv::cuda::DeviceImage<uint8_t> dImg(static_cast<int>(w), static_cast<int>(h));
+    bincv::cuda::DeviceBinMat dBlock(static_cast<int>(w), static_cast<int>(9 * h));
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::packQuantWith(dImg.constView(), dBlock.view(), 9, map),
+        cudaErrorInvalidValue);
+    BINCV_CHECK_EQ_UNLESS_CHECKED(
+        bincv::cuda::packQuantWith(dImg.constView(), dBlock.view(), 0, map),
+        cudaErrorInvalidValue);
+}
+
 BINCV_TEST(CudaPackCustom, PackQuantWithMatchesHost) {
     const size_t w = 149, h = 31;
     constexpr size_t N = 3;

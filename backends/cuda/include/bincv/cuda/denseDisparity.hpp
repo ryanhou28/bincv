@@ -38,9 +38,9 @@ namespace cuda {
 
 namespace impl {
 /// @brief Force the straightforward reference kernel, for the benchmark and
-/// the tests. **INTERNAL.** The backend's spelling of the project rule that a
-/// fast arm is switchable off, held to bit-exactness in one binary, and shown
-/// by the benchmark to be the arm it timed.
+/// the tests. **INTERNAL.** A fast arm must be switchable off, held to
+/// bit-exactness against the reference arm in one binary, and shown by the
+/// benchmark to be the arm it timed; this switch is how that is done here.
 bool& denseFastArmEnabled();
 
 /// @brief Force the per-pixel sliding kernel on the binary path, leaving the
@@ -53,18 +53,27 @@ bool& denseBitSlicedEnabled();
 
 /// @brief Dense disparity over an ALREADY-BINARY rectified pair in device
 /// memory -- the premise-native path, cost = windowed popcount(L ^ shift(R)).
-/// **API TIER 3.** Device twin of the host denseDisparityBinary; output map
-/// equal by test. No OpenCV numerical equivalent: the role bar is
+/// **API TIER 3** -- no OpenCV numerical equivalent: the role comparison is
 /// `cv::cuda::StereoBM`, which matches SAD over bytes and gives a different
-/// map by design.
+/// map by design. Bit-exact against the host `bincv::denseDisparityBinary` on
+/// the same planes, all three device arms, proven by test_cuda_backend.
 ///
 /// **WORD-PARALLEL.** A thread owns 32 output anchors, not one: the candidate
 /// cost of all 32 is one xor, the window sums are bit-sliced counts, and the
 /// winner-take-all is a borrow chain and a masked select -- the host kernel's
-/// arithmetic, on the device's word. Measured on the reference frame (752x480,
-/// D=64, 9x9) that is 0.067 ms against the per-pixel arm's 0.41, at the same
-/// 442 KB device working set: the kernel allocates nothing and uses no shared
-/// memory, so the whole gain is arithmetic density.
+/// arithmetic, on the device's word. Measured on the reference GPU (RTX 3070
+/// Ti) at 752x480, D=64, 9x9, that is 0.067 ms against the per-pixel arm's
+/// 0.41, at the same 442 KB device working set: the kernel allocates nothing
+/// and uses no shared memory, so the whole gain is arithmetic density.
+///
+/// **THE DOMAIN, refused with `cudaErrorInvalidValue` in every build:** the
+/// window is odd and at least 3 on a side, `0 <= minDisparity <= maxDisparity
+/// <= 254` (255 marks invalid), the pair and the map share one extent, and
+/// **`winWidth * winHeight <= 255`** -- the host's bound, which keeps its
+/// extraction in bytes, and a real one here too: the word-parallel arm holds a
+/// window sum in eight bit-planes, so a 17x17 window (289) would wrap and give
+/// a plausible, wrong map. The assertions carry the same domain in a checked
+/// build.
 /// @param disparity One byte per pixel, every pixel written.
 cudaError_t denseDisparityBinary(DeviceBinMatConstView left,
                                  DeviceBinMatConstView right,
@@ -82,12 +91,16 @@ cudaError_t denseDisparityBinary(DeviceBinMatConstView left,
 /// arrays: K loads and K popcounts per pixel pair, each popcount counting one
 /// useful bit. Here a pixel's whole descriptor is one word, so the cost of a
 /// pixel pair is `__popc(a ^ b)` -- one load each, one xor, one popcount, with
-/// K of 32 bits doing useful work. Measured, that is the difference between
-/// 7.7 ms and 2.6 ms on the reference frame.
+/// K of 32 bits doing useful work. Measured on the reference GPU (RTX 3070 Ti)
+/// at 752x480, D=64, 9x9: this matcher runs in 0.3900 ms and the plane form
+/// costs 21.7x that (docs/reports/cuda.md), which is why the wide-input entry
+/// should come through this layout.
 ///
 /// Identical output to the plane form and to the host: Hamming distance is
-/// invariant under a permutation of the descriptor's bits, and the tests hold
-/// this path's map byte-equal to the host's wide path.
+/// invariant under a permutation of the descriptor's bits, and
+/// test_cuda_backend holds this path's map byte-equal to the host's wide
+/// path. The domain (window, disparity range, extents) is the binary entry's,
+/// less the window-area bound, and is refused the same way.
 cudaError_t denseDisparityCensusPacked(DeviceImageConstView<uint32_t> leftDesc,
                                        DeviceImageConstView<uint32_t> rightDesc,
                                        const DenseDisparityParams& params,
@@ -97,7 +110,8 @@ cudaError_t denseDisparityCensusPacked(DeviceImageConstView<uint32_t> leftDesc,
 /// @brief Dense disparity over two census PLANE BLOCKS (census.hpp's layout:
 /// K planes of imageHeight rows each). **API TIER 3.** The census entry for
 /// wide-input callers: censusTransform both frames on device, then match here.
-/// Output map equal to the host census path by test.
+/// Bit-exact against the host census path, proven by test_cuda_backend. Same
+/// domain and the same refusals as `denseDisparityCensusPacked`.
 cudaError_t denseDisparityCensus(DeviceBinMatConstView leftPlanes,
                                  DeviceBinMatConstView rightPlanes, size_t planes,
                                  size_t imageHeight,

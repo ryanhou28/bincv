@@ -47,10 +47,11 @@ namespace impl {
 /// @brief Turn the warp-box arm off, leaving the shipped per-pixel sliding
 /// kernel as the reference arm. **INTERNAL.**
 ///
-/// The backend's spelling of the project rule that a fast arm is switchable
-/// off, held to bit-exactness against the arm it replaces in ONE binary, and
-/// shown by the benchmark to be the arm it timed. Off => the kernel that
-/// shipped at 0.91 ms on the reference frame runs, unchanged.
+/// A fast arm must be switchable off, held to bit-exactness against the arm it
+/// replaces in ONE binary, and shown by the benchmark to be the arm it timed;
+/// this switch is how that is done here. Off => the per-pixel sliding kernel
+/// runs, unchanged (0.91 ms at 752x480, D=64, 9x9 on the reference GPU, an
+/// RTX 3070 Ti, against the warp-box arm's 0.3900 ms).
 bool& densePackedBoxEnabled();
 
 /// @brief Whether the warp-box arm accepts this parameter shape.

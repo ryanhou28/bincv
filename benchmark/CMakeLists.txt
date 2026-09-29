@@ -7,12 +7,12 @@
 #     binCV. No OpenCV denominator applies to "which of our own alternatives is
 #     faster", so they include measure_util.hpp and nothing external.
 #
-# The whole directory used to be gated on OpenCV, which meant the reference
-# device's DEFAULT build -- core-only, which is the configuration the embedded
-# claim rests on -- could not produce the binaries that close those questions at
-# all. A failed reproduction then looks like a missing binary rather than a
-# misconfiguration. Partitioning by what a file actually includes fixes that and
-# keeps working as benchmarks are added.
+# Gating the whole directory on OpenCV would mean the reference device's DEFAULT
+# build -- core-only, which is the configuration the embedded claim rests on --
+# could not produce the binaries that close those questions at all, and a failed
+# reproduction would look like a missing binary rather than a misconfiguration.
+# Partitioning by what a file actually includes avoids that and keeps working as
+# benchmarks are added.
 
 file(GLOB BENCHMARK_SOURCES CONFIGURE_DEPENDS *.cpp)
 
@@ -22,10 +22,6 @@ file(GLOB BENCHMARK_SOURCES CONFIGURE_DEPENDS *.cpp)
 # and must not become a target of its own.
 set(BINCV_HEAP_PROBE ${CMAKE_CURRENT_SOURCE_DIR}/heap_probe.cpp)
 list(REMOVE_ITEM BENCHMARK_SOURCES ${BINCV_HEAP_PROBE})
-
-# residualSums' tap extraction, one TU per arm (see residual_arms.hpp).
-
-# The corner response's three arms, one TU each (see cornerresp_arms.hpp).
 
 set(BINCV_BENCH_CORE "")
 set(BINCV_BENCH_OPENCV "")

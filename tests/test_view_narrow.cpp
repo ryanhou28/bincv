@@ -3,8 +3,8 @@
 //
 // binCV's vectorized tracking kernels are gated on 32-bit words, because an LK window
 // is 31 pixels and a wider word is more than half idle. A caller who wants 64-bit words
-// elsewhere -- where they genuinely halve the work -- used to face a choice between that
-// and a tracker running 8.6x slow. `narrowLevel` removes the choice, and it is a VIEW:
+// elsewhere -- where they genuinely halve the work -- would otherwise face a choice
+// between that and a tracker running 8.6x slow. `narrowLevel` removes the choice, and it is a VIEW:
 // no copy, no allocation.
 //
 // It is exact only if a 64-bit plane and a 32-bit plane with twice the stride are the

@@ -17,7 +17,9 @@
 /// ---------------------------------------------------------------------------
 /// THE INTEGRATOR MAY NOT WANT THIS AT ALL, AND THAT IS EXPECTED
 ///
-/// The reference implementation runs single-worker pools per pipeline stage and takes
+/// The reference pipeline (the visual-inertial odometry system, not in this
+/// repository, that binCV was built to serve stage by stage; see
+/// docs/ARCHITECTURE.md) runs single-worker pools per pipeline stage and takes
 /// its parallelism at the stage level. A VIO system that already owns a thread pool
 /// should install ITS OWN backend through `setParallelForBackend` and never let binCV
 /// spawn anything -- oversubscription is worse than serial. This pool is for callers
@@ -29,19 +31,28 @@
 #include <thread>
 #include <vector>
 
+#include "../core/error.hpp"      // BINCV_ABI_NAMESPACE
 #include "../core/parallel.hpp"
 
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
-/// @brief A minimal fixed-size pool that serves `bincv::parallelFor`.
+/// @brief A minimal fixed-size pool that serves `bincv::parallelFor`. **API TIER 3.**
 /// @note Deliberately minimal: work is claimed by index from one counter, which is
 /// the right shape when the items are keypoints -- a few hundred of them, each
 /// a few microseconds. A work-stealing deque would be more code for no
 /// measurable difference at that grain.
+/// @note Not reentrant: one job is in flight at a time, so a `parallelFor` issued
+/// from inside a body is not supported.
 class ThreadPool {
 public:
-    /// @param threads Workers to start. `<= 1` leaves binCV serial.
+    /// @param threads Worker threads to start, in addition to the calling thread,
+    /// which also works: `install` reports `threads + 1` to `setNumThreads`.
+    /// `<= 1` starts no workers and leaves binCV serial.
+    /// @note A worker that cannot be started makes `std::thread` throw
+    /// `std::system_error` out of this constructor, and the workers already
+    /// started are then destroyed unjoined, which terminates the process --
+    /// size the pool for the machine.
     explicit ThreadPool(int threads) {
         if (threads <= 1) return;
         workers_.reserve(static_cast<size_t>(threads));

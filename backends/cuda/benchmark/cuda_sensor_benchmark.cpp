@@ -127,7 +127,7 @@ void printFormula(const char* what, const char* formula, size_t bytes) {
 /// @note The control asks: does a shape the fast arm's own gate REJECTS time the
 /// same with the switch on and off? "The same" is only a decidable question
 /// while the arms are above the launch floor. When they are not, the
-/// per-round ratio scatters over a factor of ten on this host and the
+/// per-round ratio scatters over a factor of ten on the reference host and the
 /// printer's +/-5% band is noise either way -- so the floor share is printed
 /// with the control and the reader is told which case they are looking at.
 /// The control is READ at the geometry where the arms are visible; it is
@@ -177,7 +177,7 @@ int main() {
         // the SAME two names at both geometries. Without the scope the
         // cross-run aggregation pools 752x480 with 3840x2160 under one key and
         // reads the difference between the geometries as run-to-run scatter:
-        // measured on this host, that put the scatter at 3.24x on the byte-lane
+        // measured on the reference host, that put the scatter at 3.24x on the byte-lane
         // pair, where each geometry on its own is 1.2x -- enough to turn a real
         // effect into a null. See cudabench::pairedScope.
         cudabench::pairedScope() = geo.label;
@@ -290,7 +290,7 @@ int main() {
                 &spread);
             std::printf("   %-42s %9.4f ms   spread %3.0f%%  [CPU arm, NOT a GPU bar]\n",
                         "host bincv::binarize n = 2 (same machine)", hostMs, spread);
-            std::printf("   SPEED VERDICT: OUTSTANDING. There is no GPU baseline for an\n"
+            std::printf("   SPEED: no GPU comparison is possible. There is no GPU baseline for an\n"
                         "   N-bit input because OpenCV has no N-bit image type; this op is\n"
                         "   priced against the resident device sensor pipeline when one\n"
                         "   exists, and no substitute bar is invented for it here.\n");
@@ -397,9 +397,9 @@ int main() {
 
     // -----------------------------------------------------------------------
     // The role comparison. Built only where an OpenCV with cudaarithm,
-    // cudafilters and cudaimgproc exists -- and where it does not, this family's
-    // ship rule says threshold and edgeThreshold land BLOCKED rather than merged
-    // on the memory argument alone, so the absence is printed as a verdict.
+    // cudafilters and cudaimgproc exists -- and where it does not, threshold
+    // and edgeThreshold have no role comparison and cannot ship on the memory
+    // argument alone, so the absence is printed as a result of its own.
     // -----------------------------------------------------------------------
 #ifdef BINCV_CUDA_SENSOR_OPENCV
     {
@@ -420,7 +420,7 @@ int main() {
 
         // ---- threshold: THIS COMPARISON LIVES IN cuda_role_benchmark ---------
         //
-        // A cv::cuda::threshold role pair used to run here, and it was measured
+        // A cv::cuda::threshold role pair is deliberately NOT run here: measured
         // with no stream argument on either arm -- that is, on the default
         // stream, where OpenCV's own `if (stream == 0) cudaDeviceSynchronize()`
         // guard charges the comparison a whole-device synchronize that no
@@ -568,7 +568,7 @@ int main() {
                 " cudaarithm + cudafilters + cudaimgproc, so cv::cuda::threshold and\n"
                 " the composed cv::cuda edge chain were not timed. Under this\n"
                 " project's both-axes ship rule that means `threshold` and\n"
-                " `edgeThreshold` have no role comparison and land BLOCKED -- correct,\n"
+                " `edgeThreshold` have no role comparison in this build -- correct,\n"
                 " priced against the host arm and the launch floor, and recorded as\n"
                 " blocked, not merged on the memory argument alone.\n");
     std::printf("===========================================================\n");

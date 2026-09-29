@@ -1,4 +1,4 @@
-// cornerSubPix, priced for the first time (issue #52).
+// cornerSubPix, priced against cv::cornerSubPix.
 //
 // This op shipped as API TIER 2 -- explicitly claiming cv::cornerSubPix's role
 // -- with a correctness suite and NO benchmark: the one op in the library where
@@ -10,7 +10,8 @@
 // same corner set from the same seeds, binCV on its already-computed ternary
 // derivatives against cv::cornerSubPix on the 8-bit image, plus each side's
 // working set stated. If binCV loses its role comparison badly, that is a
-// shipping-rule finding to put in front of the owner, not a number to bury.
+// finding to report -- an operation ships only when it holds up on speed AND
+// memory -- not a number to bury.
 //
 // WHAT THE COMPARISON COVERS: refinement only. binCV's input premise is that
 // the pipeline already holds ternary derivatives (that is the operation's

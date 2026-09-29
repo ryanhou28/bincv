@@ -52,13 +52,13 @@ inline void escape(const void* p) { g_sink = p; }
 // g++ 12.5 (arm64v8/gcc:12) -O0 -O2 <- the image scripts/verify_cross.sh uses
 // clang++ 18 (x86_64) -O0 -O2
 //
-// The -Walloc-size-larger-than= claim that used to sit on the guard below did not
+// A -Walloc-size-larger-than= claim for the guard below did not
 // reproduce either (g++ 11.4, -O0/-O2, guard removed). Keeping a rule no compiler
 // in the gate enforces teaches the next contributor something untrue, so the
 // style reason above is the one that stands. The guard itself stays: it is
 // behavior, not warning-appeasement.
 //
-// The neighbouring -Wuse-after-free finding in core/storage.hpp 
+// The neighbouring -Wuse-after-free finding in core/storage.hpp
 // is a different matter -- that one does reproduce on GCC 12 -- so the two should
 // not be read as equally shaky.
 void* countedAllocate(std::size_t bytes) {
@@ -140,8 +140,8 @@ void testStorage(const char* label) {
     BINCV_CHECK(buf[1] == W(0x5A));
 
     // REGRESSION: a degenerate wrap normalizes to the empty state, so that
-    // `!empty` really does mean `data` is usable. Storage(nullptr, n) used to
-    // report n words at a null pointer, and a caller following the documented
+    // `!empty` really does mean `data` is usable. Storage(nullptr, n) must not
+    // report n words at a null pointer: a caller following the documented
     // `if (!s.empty) s.data[0] =...` idiom -- or building a view from
     // {s.data, w, h, stride} -- would walk it.
     S nullWrap(nullptr, 10);
@@ -234,8 +234,8 @@ void testStorage(const char* label) {
 
     // REGRESSION: aliasing self-assignment. `wrapAtBase` is a *different* object
     // from `blockOwner`, so the this == &other guard does not fire, but it names
-    // the very block blockOwner is about to free. Assigning it used to free the
-    // block and then adopt the freed pointer -- a use-after-free that left both
+    // the very block blockOwner is about to free. A naive assignment frees the
+    // block and then adopts the freed pointer -- a use-after-free that leaves both
     // objects dangling. Ownership must survive, or nothing frees the block and
     // every read through either object is on freed memory.
     S blockOwner(4);
@@ -450,7 +450,7 @@ void testAllocationDiscipline() {
 // ---------------------------------------------------------------------------
 // Word-type constraints
 //
-// REGRESSION: the constraint used to be `is_integral && is_unsigned` alone, which
+// REGRESSION: `is_integral && is_unsigned` alone is a constraint that
 // admits three things it should not:
 // - `const`/`volatile` word types, so BinMatView<const uint32_t> instantiated --
 // exactly the const-templated view the two-view-types rule forbids, and a fourth view type that

@@ -57,7 +57,7 @@
 
 set -uo pipefail
 
-usage() { sed -n '3,50p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { awk 'NR > 2 && !/^#/ { exit } NR > 2 { print }' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 LAUNCHES=""
 CPU=""
@@ -84,6 +84,10 @@ done
 [ $# -ge 1 ] || { echo "run_launches.sh: no benchmark given" >&2; usage >&2; exit 2; }
 BENCH="$1"; shift
 [ -x "$BENCH" ] || { echo "run_launches.sh: not executable: $BENCH" >&2; exit 2; }
+command -v taskset >/dev/null 2>&1 || {
+    echo "run_launches.sh: taskset not found (util-linux); every launch is pinned with it" >&2
+    exit 2
+}
 
 case "$LAUNCHES" in
     ''|*[!0-9]*) echo "run_launches.sh: -n N is required (a positive integer)" >&2
@@ -142,9 +146,20 @@ host_model() {
     echo "$m"
 }
 
+# The benchmark is recorded relative to the repository root, so the log names the
+# benchmark rather than the machine it was taken on, and check_figure_staleness.py
+# can map it to a source. A benchmark outside the repository is recorded as given.
+REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null)"
+BENCH_REC="$BENCH"
+if [ -n "$REPO_ROOT" ] && command -v realpath >/dev/null 2>&1; then
+    case "$(realpath "$BENCH" 2>/dev/null)" in
+        "$REPO_ROOT"/*) BENCH_REC="$(realpath --relative-to="$REPO_ROOT" "$BENCH")" ;;
+    esac
+fi
+
 {
     echo "# launch sweep -- ${LAUNCHES} separate processes of one benchmark"
-    echo "# benchmark: ${BENCH} $*"
+    echo "# benchmark: ${BENCH_REC} $*"
     echo "# launches: ${LAUNCHES}"
     echo "# arch:     ${ARCH}"
     echo "# host:     $(host_model)"

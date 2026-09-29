@@ -12,9 +12,11 @@
 // rather than a spot check.
 //
 // 2. The OPENCV half is the one that matters most: it checks that the DEFAULTS
-// reproduce the reference's own spelling, `rl_fast_edge_filter_wide`, written
+// reproduce the reference pipeline's own edge filter, written
 // out as the OpenCV calls it uses -- two filter2D in CV_32F, two abs, two
 // compares, an OR. Bit-exact, not approximately.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // That is what makes "the defaults are the reference" a checked claim rather
 // than a comment.
@@ -143,7 +145,7 @@ BINCV_TEST(Edge, TruncatingTo8BitLosesEdges) {
 
 #ifdef BINCV_WITH_OPENCV
 BINCV_TEST(Edge, DefaultsMatchTheReferenceSpelling) {
-    // rl_fast_edge_filter_wide, written as the OpenCV calls it actually makes.
+    // The reference pipeline's edge filter, written as the OpenCV calls it actually makes.
     // THIS is what makes "the defaults are the reference" a checked claim.
     constexpr int kW = 91, kH = 37;
     cv::Mat img(kH, kW, CV_8U);
@@ -175,7 +177,7 @@ BINCV_TEST(Edge, DefaultsMatchTheReferenceSpelling) {
                                 (x % 32)) & 1u) != 0;
             if (want != have) ++diff;
         }
-    std::printf(" vs rl_fast_edge_filter_wide(17): %zu of %d pixels differ\n", diff, kW * kH);
+    std::printf(" vs the reference edge filter (17): %zu of %d pixels differ\n", diff, kW * kH);
     BINCV_CHECK(diff == 0);
 }
 #endif

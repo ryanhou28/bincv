@@ -1,9 +1,8 @@
 #pragma once
 
 /// @file resample.hpp
-/// @brief Horizontal decimation by two -- destination bit *j* is source bit 2*j*
-/// (measured as ). **API TIER 3**
-/// throughout: OpenCV has no operation that subsamples columns without
+/// @brief Horizontal decimation by two -- destination bit *j* is source bit 2*j*.
+/// **API TIER 3** throughout: OpenCV has no operation that subsamples columns without
 /// also filtering, so nothing here borrows an OpenCV name -- `cv::resize`
 /// and `cv::pyrDown` both mean something else, and the tier rules
 /// forbid reusing a name for a different thing.
@@ -11,54 +10,51 @@
 /// ---------------------------------------------------------------------------
 /// WHY THIS FILE EXISTS AT ALL
 ///
-/// The design notes' primitive table has no resample row, and the pyramid
-/// step is "box 2x2 sum THEN SUBSAMPLE". The subsample half splits into two
-/// halves that are nothing alike:
+/// The pyramid step is "box 2x2 sum THEN SUBSAMPLE", and the subsample half splits
+/// into two halves that are nothing alike:
 ///
-/// VERTICAL free. A BinMatConstView with twice the stride and half the
-/// height reads every other row and costs no instructions and no
-/// memory. rowsDecimatedBy2 below is that view, written once so
-/// the pyramid does not open-code a stride multiplication.
+///     VERTICAL     free. A BinMatConstView with twice the stride and half the
+///                  height reads every other row and costs no instructions and no
+///                  memory. rowsDecimatedBy2 below is that view, written once so
+///                  the pyramid does not open-code a stride multiplication.
 ///
-/// HORIZONTAL not expressible by anything in ops/. logic.hpp is pointwise in
-/// the lane, shift.hpp moves every lane by the SAME amount, and
-/// bitslice.hpp is per-lane. Moving bit 2j to bit j moves each lane
-/// by a DIFFERENT amount, which is a different kind of operation.
+///     HORIZONTAL   not expressible by anything in ops/. logic.hpp is pointwise in
+///                  the lane, shift.hpp moves every lane by the SAME amount, and
+///                  bitslice.hpp is per-lane. Moving bit 2j to bit j moves each lane
+///                  by a DIFFERENT amount, which is a different kind of operation.
 ///
 /// So the horizontal half is the primitive, and this file is it.
 ///
 /// ---------------------------------------------------------------------------
 /// THE THREE ROUTES, AND WHY ALL THREE ARE STILL HERE
 ///
-/// The choice was registered as speed against footprint -- "a per-pixel gather
-/// loop, or a log2(width) word-parallel unshuffle that needs frame-sized constant
-/// masks" -- which is the trade CLAUDE.md forbids settling by argument. Three
-/// routes were measured on the reference device against a rule written first:
+/// The choice is speed against footprint -- "a per-pixel gather loop, or a
+/// log2(width) word-parallel unshuffle that needs frame-sized constant masks" --
+/// which is a trade to measure rather than argue. Three routes were measured on a
+/// Cortex-A72 against a rule written first:
 ///
-/// A impl::decimateColumnsBy2Gather per destination pixel, read source
-/// bit 2j into a local word. Word
-/// literals only, no scratch.
-/// B decimateColumnsBy2 (below) per destination WORD, deinterleave
-/// the even bits of two source words
-/// with log2(WordBits) mask/shift steps
-/// in registers. Word literals only, no
-/// scratch.
-/// C impl::decimateColumnsBy2FrameMasked the row as one big integer:
-/// log2(rowBits) masked shift-or passes
-/// over a caller-provided scratch row
-/// against a caller-built mask table at
-/// frame width. The "frame-masked"
-/// route, and the only one costing bytes.
+///     A   impl::decimateColumnsBy2Gather        per destination pixel, read source
+///                                               bit 2j into a local word. Word
+///                                               literals only, no scratch.
+///     B   decimateColumnsBy2 (below)            per destination WORD, deinterleave
+///                                               the even bits of two source words
+///                                               with log2(WordBits) mask/shift steps
+///                                               in registers. Word literals only, no
+///                                               scratch.
+///     C   impl::decimateColumnsBy2FrameMasked   the row as one big integer:
+///                                               log2(rowBits) masked shift-or passes
+///                                               over a caller-provided scratch row
+///                                               against a caller-built mask table at
+///                                               frame width. The "frame-masked"
+///                                               route, and the only one costing bytes.
 ///
-/// **B won, and the premise behind the choice turned out to be wrong.** The register did not list
-/// the word-local unshuffle as a third option; it framed the choice as buying
-/// speed with frame-sized masks. Measured at 640x480 -> 320x240 on a Cortex-A72,
-/// B is 14.6x/26.4x faster than A and 11.2x/8.3x faster than C (uint32_t /
-/// uint64_t, batch spreads <= 1.2%) -- so the route that costs zero auxiliary
-/// bytes is also the fastest by an order of magnitude, and there was no trade to
-/// make. See and.
+/// **B won, and there was no trade to make.** Measured at 640x480 -> 320x240 on a
+/// Cortex-A72, B is 14.6x/26.4x faster than A and 11.2x/8.3x faster than C
+/// (uint32_t / uint64_t, batch spreads <= 1.2%) -- so the route that costs zero
+/// auxiliary bytes is also the fastest by an order of magnitude.
+/// benchmark/decimate_benchmark.cpp reproduces it.
 ///
-/// A and C stay in impl:: because a closed experiment whose losing arms cannot be
+/// A and C stay in impl:: because a comparison whose losing arms cannot be
 /// rebuilt is not reproducible: tests/test_resample.cpp checks all three against
 /// the same per-pixel reference, and benchmark/decimate_benchmark.cpp times the
 /// SHIPPED function against them rather than against a copy of it.
@@ -284,7 +280,7 @@ inline WordType gatherEvenBits(WordType x) {
 // are runs of all-ones and all-zero WORDS, so they have to be materialized at
 // frame width, and the row has to be padded to a power-of-two bit count for
 // the block recurrence to tile it. Hence a mask table and a scratch row, both
-// the caller's (no heap in a kernel, CLAUDE.md).
+// the caller's (no heap in a kernel).
 
 /// @brief Words in one padded row for variant C. **Internal.**
 /// @note The block recurrence doubles its period each pass and must end with one
@@ -309,7 +305,8 @@ inline size_t frameMaskedPasses(size_t srcWidth) {
 }
 
 /// @brief Words the caller must provide for variant C's mask table. **Internal.**
-/// @note This is the number weighs against zero for variants A and B. It
+/// @note This is the number the route comparison weighs against zero for variants
+/// A and B. It
 /// depends on the width and the word type only, so one table serves a whole
 /// pyramid level -- but it is still frame-scale state that the word-local
 /// routes do not have.
@@ -356,7 +353,7 @@ inline void buildFrameMaskedPlan(size_t srcWidth, WordType* masks) {
 /// buildFrameMaskedPlan. Depends on the width and word type only.
 /// @param scratch frameMaskedRowWords<WordType>(src.width) words, clobbered.
 /// @note The mask table and the scratch row are the caller's because a kernel may
-/// not allocate (CLAUDE.md), and they are the footprint side of the trade.
+/// not allocate, and they are the footprint side of the trade.
 template <typename WordType>
 inline void decimateColumnsBy2FrameMasked(BinMatConstView<WordType> src,
                                           BinMatView<WordType> dst,
@@ -448,7 +445,7 @@ inline void decimateColumnsBy2FrameMasked(BinMatConstView<WordType> src,
 /// @note This is the answer, chosen by measurement: the word-local unshuffle,
 /// which needs no scratch,
 /// no mask table and no prepared plan, and was also 8-26x faster than both
-/// alternatives on the reference device.
+/// alternatives on a Cortex-A72.
 /// @note Destination word i is `gather(src[2i]) | gather(src[2i+1]) << WordBits/2`
 /// -- see the file header on why that pairing is exact. Source words past
 /// the row read as zero, which can only affect destination padding bits.

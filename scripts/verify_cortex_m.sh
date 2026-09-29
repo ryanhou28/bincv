@@ -16,9 +16,8 @@
 #
 # CORRECTNESS ONLY, AND COMPILE-ONLY. This gate does not execute anything: a
 # Cortex-M image cannot run on the host, and qemu-system emulation of a specific
-# part is a heavier dependency than a gate should carry. Issue #13 allows exactly
-# this ("qemu-user or a cross-compiler suffices, since this is a correctness
-# axis"). Execution is verified on real hardware -- see
+# part is a heavier dependency than a gate should carry; a cross-compiler
+# suffices for a correctness gate. Execution is verified on real hardware -- see
 # targets/stm32h753/README.md -- and nothing here is a timing result.
 #
 #   ./scripts/verify_cortex_m.sh
@@ -85,13 +84,13 @@ echo "             $("${CXX}" --version | head -1)"
 # the target -- and __ARM_ARCH_PROFILE is the same macro core/simd.hpp gates on.
 # (GCC spells the profile as the character constant 'M', which -dM prints as 77.)
 #
-# This probe decides whether the gate runs at all, and it used to be
-# `... | grep -q` with the compiler's stderr sent to /dev/null. It skipped once,
-# here, on an arm-none-eabi-g++ 14.2 that reports __ARM_ARCH_PROFILE 77 when
-# asked directly -- while scripts/verify.sh was building on 12 cores. It has not
-# been reproduced since, including 120 attempts under synthetic load, and the old
-# spelling is why: it threw away both things that would have said which failure
-# it was. Two holes, closed rather than diagnosed:
+# This probe decides whether the gate runs at all, so it is deliberately not
+# `... | grep -q` with the compiler's stderr sent to /dev/null. That spelling
+# skipped once, here, on an arm-none-eabi-g++ 14.2 that reports __ARM_ARCH_PROFILE
+# 77 when asked directly -- while scripts/verify.sh was building on 12 cores. It
+# has not been reproduced since, including 120 attempts under synthetic load, and
+# the spelling is why: it threw away both things that would have said which
+# failure it was. Two holes, closed rather than diagnosed:
 #
 #   * grep -q exits at its first match and closes the pipe. The compiler is
 #     still writing -- the dump is ~16 KB over several writes and the match lands
@@ -123,6 +122,7 @@ echo
 # policy exists to prevent.
 declare -A EXCLUDED=(
   [test_parallel]="threads/pool.hpp needs <thread>/<mutex>; newlib has none. ARCHITECTURE 9: binCV is serial by default and threads through a caller-installed backend, so a target with no threads never installs one."
+  [test_parallel_other_tu]="the second translation unit of test_parallel; it includes threads/pool.hpp for the same reason and is excluded for the same reason."
   [test_opencv_interop]="needs OpenCV, which is not an embedded dependency."
   [test_equivalence]="needs OpenCV; guarded by its own #error."
   [test_covariance_n_bound]="a deliberate compile FAILURE, driven by tests/expect_fatal.cmake. Checked below rather than skipped."

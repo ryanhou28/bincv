@@ -32,7 +32,7 @@
 /// threads, 8 warps, ~30 ops per thread per iteration): ~70 against ~240, about
 /// 3.4x. Two independent counts, one number.
 ///
-/// **WHAT IS NOT AN ADVANTAGE, STATED BECAUSE AN EARLIER DRAFT CLAIMED IT WAS.**
+/// **WHAT IS NOT AN ADVANTAGE.**
 /// `cv::cuda`'s sparse PyrLK keeps its patch in PER-THREAD REGISTERS
 /// (`work_type I_patch[PATCH_Y][PATCH_X]`, 2x2 at a 31x31 window) and uses
 /// shared memory only for three 256-float reduction buffers. There is no
@@ -68,7 +68,8 @@
 /// `err[p]`, and `entryLevelFor` reads only `prevPts[p]` and the level extents.
 /// So fusing the host's two passes and its four levels into ONE kernel is an
 /// identity transform on the output, not an approximation, and it is what this
-/// file does. Four launches at this host's ~9 us floor would have been 36 us
+/// file does. Four launches at the reference host's ~9 us floor (an RTX 3070
+/// Ti reached through WSL2) would have been 36 us
 /// against a few microseconds of kernel work: the same "the cap was the
 /// signature's, not the operation's" result the batched covariance recorded at
 /// 467x, applied one level up.
@@ -86,8 +87,8 @@
 /// ---------------------------------------------------------------------------
 /// THE DOMAIN IS NARROWER THAN THE HOST'S, AND EVERY EDGE OF IT RETURNS A VALUE
 ///
-/// Ruling R4: a device op may accept a narrower domain than its host twin when
-/// the docstring NAMES the domain, the op asserts it, and it returns an error
+/// A device op may accept a narrower domain than its host twin when the
+/// docstring NAMES the domain, the op asserts it, and it returns an error
 /// outside it. This one does all three. Outside the domain it returns
 /// `cudaErrorInvalidValue` and writes nothing -- **a refusal, never a quietly
 /// different answer.**
@@ -137,19 +138,19 @@
 ///   pinning is lost rather than silently changing tracks.
 ///
 /// ---------------------------------------------------------------------------
-/// THE COVARIANCE THIS TRACKER DOES NOT CALL, REPORTED RATHER THAN WORKED AROUND
+/// THE COVARIANCE THIS TRACKER DOES NOT CALL
 ///
-/// `cuda/reduce.hpp` calls `countCovarianceBatchAsync` "THE ENTRY POINT A
-/// TRACKER USES". This tracker does not call it, and neither does it call
+/// This tracker calls neither `countCovarianceBatchAsync` nor
 /// `gradientCovarianceBatchAsync`: the warp already holds the staged window in
 /// lane registers, so the 2x2 costs four popcounts and four warp reductions in
 /// place, where a call into the batch kernel would mean a SECOND full traversal
 /// of the window planes plus a device `Rect` array -- exactly the traversal the
-/// host removed after measuring the covariance at 27.5% of `track`. CLAUDE.md
-/// says a measurement contradicting a documented claim is reported, not worked
-/// around, so: one of those two documents is wrong, `impl::lkCovarianceProbeAsync`
-/// is held equal to `gradientCovarianceBatchAsync` by test so the two spellings
-/// cannot drift, and the wording is the owner's to settle.
+/// host removed after measuring the covariance at 27.5% of `track`. The batched
+/// covariances are the entry points for a caller that holds a set of windows
+/// and no staged patch (a corner-quality or track-quality pass over keypoints),
+/// not for the tracker's own solve, and their headers say so.
+/// `impl::lkCovarianceProbeAsync` is held equal to `gradientCovarianceBatchAsync`
+/// by test, so the in-register 2x2 and the batch kernel cannot drift apart.
 
 #include <cstddef>
 #include <cstdint>
@@ -232,6 +233,7 @@ DeviceLKLevel deviceLkLevel(DevicePlaneBlockConstView prev, DevicePlaneBlockCons
 
 /// @brief The 1-bit spelling: a pyramid level that is a bit matrix reaches this
 /// with no adapter, exactly as the derivative family's binary overloads do.
+/// **API TIER 2** (with the tracker; a setup helper, no kernel).
 inline DeviceLKLevel deviceLkLevel(DeviceBinMatConstView prev, DeviceBinMatConstView next,
                                    DevicePlaneBlockConstView dxSigned,
                                    DevicePlaneBlockConstView dySigned) {
@@ -277,13 +279,17 @@ struct DeviceLKTracks {
 };
 
 /// @brief Pyramidal Lucas-Kanade tracking of a whole keypoint set, in ONE
-/// launch. **THE ENTRY POINT A RESIDENT TRACKER USES. API TIER 2.**
+/// launch. **THE ENTRY POINT A RESIDENT TRACKER USES. API TIER 2** --
+/// `cv::calcOpticalFlowPyrLK`'s role, different numerics; bit-exact against
+/// the host `bincv::calcOpticalFlowPyrLK` as the note below states, proven by
+/// test_cuda_opticalflow.
 ///
 /// @param levels `levelCount` HOST-side level bundles, **level 0 (the finest)
 /// first**, copied into the kernel's parameter space by value. The PLANES
 /// they name are device memory; the array itself is not.
-/// @param levelCount 1..16. Levels at or below the window size are ignored as a
-/// prefix (the host's deviation (vi)); 0 is legal and loses every point.
+/// @param levelCount 0 to `lkMaxLevels()` (16). Levels at or below the window
+/// size are ignored as a prefix (the host's deviation (vi)); 0 is legal and
+/// loses every point, which is a value rather than an error.
 /// @param tracks The four device arrays and the point count.
 /// @param params The host's `LKParams`, unchanged and with the same defaults.
 /// @param stream The stream the launch is enqueued on. **No synchronize, no
@@ -336,8 +342,9 @@ void calcOpticalFlowPyrLK(const DeviceLKLevel* levels, size_t levelCount,
 /// believe is compiled in" and "the arm that ran", and it is the whole reason
 /// the function exists: two arms of this operation produce byte-identical
 /// output BY CONSTRUCTION, so equality between them cannot distinguish an arm
-/// that ran from an arm that was compiled out. That is precisely the
-/// mis-attached-`#define` failure CLAUDE.md records, and it is why the
+/// that ran from an arm that was compiled out. A mis-attached `#define` once
+/// compiled a vector block out of the host library entirely and three
+/// consecutive "improvements" were measured against it, which is why the
 /// `__reduce_add_sync` arm is a RUNTIME switch below rather than a
 /// compile-time one.
 /// @note The benchmark prints this and the test suite asserts it, so an arm that

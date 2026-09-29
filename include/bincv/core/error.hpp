@@ -4,7 +4,8 @@
 #include <cstdlib>
 
 /// @file error.hpp
-/// @brief The project's single error policy.
+/// @brief The project's single error policy. **API TIER 3** -- binCV's own
+/// validation and precondition macros; `CV_Assert` and `cv::error` are not mirrored.
 ///
 /// Two macros, and the split between them is the whole policy:
 ///
@@ -22,7 +23,7 @@
 /// expression about words and strides rather than as the mistake the
 /// caller made. This wrapper prints both the condition and a written
 /// message, and otherwise does exactly what assert does.
-/// @note Why the abort path exists at all: Tier 2 targets build with exceptions
+/// @note Why the abort path exists at all: embedded targets build with exceptions
 /// disabled, and a library that can only report errors by
 /// throwing cannot be built for them at all. Aborting is not a graceful
 /// answer, but it is a defined one, and it keeps the validation checks in
@@ -47,11 +48,10 @@
 ///
 /// @note Detected from the compiler rather than left to the user. Building with
 /// -fno-exceptions and forgetting to also define BINCV_NO_EXCEPTIONS would
-/// otherwise fail with an error per throw site, which is exactly the state
-/// this file was written to fix. Defining BINCV_NO_EXCEPTIONS by hand still
-/// works, and still wins: it forces the abort path even where `throw` would
-/// have compiled, which is how the Tier 2 behavior is exercised on a
-/// desktop toolchain.
+/// otherwise fail with an error per throw site. Defining BINCV_NO_EXCEPTIONS
+/// by hand still works, and still wins: it forces the abort path even where
+/// `throw` would have compiled, which is how the no-exceptions behavior is
+/// exercised on a desktop toolchain.
 /// @note Set it for the WHOLE program if you set it at all. Like NDEBUG it is a
 /// per-translation-unit macro, and it changes the body of every function
 /// containing a check, so a program with both kinds of object in it has two
@@ -100,11 +100,11 @@
 /// different NDEBUG or different BINCV_NO_EXCEPTIONS define the same symbol
 /// differently, which is an ODR violation; the linker keeps one arbitrarily
 /// and the loser silently gets the other configuration's behavior, chosen
-/// by link order. Measured before this namespace existed: linking a release
-/// object ahead of a debug one made an out-of-range set in the DEBUG
-/// object return quietly and set a padding bit; reversing the link order
-/// made the same line abort. The same experiment with BINCV_NO_EXCEPTIONS
-/// made a `catch` in an exceptions-enabled object never run.
+/// by link order. Without this namespace, linking a release object ahead of
+/// a debug one makes an out-of-range set in the DEBUG object return quietly
+/// and set a padding bit; reversing the link order makes the same line
+/// abort. The same experiment with BINCV_NO_EXCEPTIONS makes a `catch` in an
+/// exceptions-enabled object never run.
 /// @note Encoding the configuration in the mangled name is the whole mechanism.
 /// Each object then instantiates and calls the definition it was compiled
 /// for -- no coin flip -- and any interface a mismatched pair really does
@@ -140,9 +140,9 @@
 /// loop. A scalar helper is not a traversal: `impl::clipRegion`,
 /// `impl::borderIndex`, `maj3`, `thresholdGE` and `impl::minEigenValue` are
 /// closed-form arithmetic over a handful of integers, with no loop over
-/// pixels and no memory of their own. Before this macro the backend had to
-/// re-derive such a rule in device code by hand, and a second derivation of
-/// one rule is the failure this project keeps finding: the copy that drifts
+/// pixels and no memory of their own. Without this macro the backend would
+/// have to re-derive such a rule in device code by hand, and a second
+/// derivation of one rule is the failure to avoid: the copy that drifts
 /// does not crash, it answers a plausible question that nobody asked, and
 /// the map comes back subtly wrong. This lets the rule be ONE definition
 /// compiled twice, so there is nothing to keep in agreement.
@@ -184,8 +184,8 @@
 // names, so that type has to be complete at every call site. Every one in the
 // library names a <stdexcept> type, and a caller that reports through its own
 // type includes whatever declares it. Guarded because the abort path constructs
-// nothing: a Tier 2 target is not made to depend on the exception hierarchy, nor
-// to have a <stdexcept> at all.
+// nothing: a freestanding target is not made to depend on the exception
+// hierarchy, nor to have a <stdexcept> at all.
 #if BINCV_EXCEPTIONS_ENABLED
 #  include <stdexcept>
 #endif
@@ -265,13 +265,15 @@ namespace detail {
 /// @note An expression, not a statement, so it composes the same way `throw`
 /// does and needs no trailing-semicolon dance at the call site.
 /// @note `ExceptionType` is dropped entirely on the abort path -- deliberately.
-/// A Tier 2 build must not be made to depend on the exception hierarchy
-/// being available, only on the diagnostic text.
+/// A no-exceptions build must not be made to depend on the exception
+/// hierarchy being available, only on the diagnostic text.
 /// @note Consequence, and it is a real one: in a build without exceptions the
 /// type argument is not compiled at all, so a misspelled or non-exception
 /// type is not diagnosed there. It is diagnosed by the default build, which
-/// is why the project's verification runs all three configurations rather
-/// than only the one a change was written for (CLAUDE.md). Type-checking it
+/// is why the project's verification script builds all four configurations
+/// -- Release with OpenCV, Release core-only, no-exceptions core-only and
+/// Debug core-only -- rather than only the one a change was written for.
+/// Type-checking it
 /// in both would mean naming the type in an unevaluated expression --
 /// `sizeof(ExceptionType(message))` -- which reinstates exactly the
 /// dependency the previous note refuses: the type would have to be complete

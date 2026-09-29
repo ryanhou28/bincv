@@ -172,3 +172,47 @@
 # temp after: temp=62.8'C
 # date:     2026-09-21T16:37:56-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio OpenCV LK on the same bits as CV_8U/binCV LK, ladder 1/2/2/2 (shipped) --ladder) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                              n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# i1 / OpenCV LK on the same bits as CV_8U        10    23.3995    23.2400    23.6490  1.018     1.7%      --  [ 23.3150,  23.5155]   0.43%   1.005x
+# i1 / binCV LK, ladder 1/1/1/1 (N=1 everywhere)  10     0.6030     0.5950     0.6130  1.030     3.0%      --  [  0.5985,   0.6100]   0.95%   1.012x
+# i1 / binCV LK, ladder 1/2/2/2 (shipped)         10     2.8380     2.8320     2.8740  1.015     1.5%      --  [  2.8340,   2.8530]   0.33%   1.005x
+# 
+# RATIO  OpenCV LK on the same bits as CV_8U  /  binCV LK, ladder 1/2/2/2 (shipped)   over 10 launches
+#   paired per launch (the published estimator)
+#     median 8.2270   min 8.1461   max 8.3389   scatter 2.3%
+#     bootstrap 95% CI of the median: [8.1889, 8.2838]   +/- 0.58%
+#     launches with the ratio above 1.00: 10 of 10
+#     smallest resolvable difference at 10 launches: 1.007x
+#   ratio of the two medians, same launches
+#     point 8.2451   bootstrap 95% CI: [8.2053, 8.2918]
+#     the two intervals differ by 0.20% and 0.10% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   launch ladder for OpenCV LK on the same bits as CV_8U / binCV LK, ladder 1/2/2/2 (shipped)  (median of the 10 observed launches = 8.2270)
+#     launches      2.5%     97.5%      +/-   resolves
+#            1    8.1461    8.3389    1.17%     1.014x
+#            2    8.1581    8.3359    1.08%     1.013x
+#            3    8.1461    8.3389    1.17%     1.014x
+#            5    8.1702    8.3330    0.99%     1.013x
+#           10    8.1889    8.2838    0.58%     1.007x
+#     k=1 is the state of every committed x86 log: the band is the whole
+#     observed spread, and a single launch cannot report it.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     i1       === LK vs LK: 140 points, 31x31 window, 4 levels, 20 itera

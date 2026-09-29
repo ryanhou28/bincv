@@ -25,8 +25,8 @@
 # assertion on its path is an ordinary check and runs in both. The per-suite
 # difference is therefore exactly the number of those lines the suite prints.
 
-release	test_cuda_backend	734	0
-release	test_cuda_custom	10	0
+release	test_cuda_backend	760	0
+release	test_cuda_custom	12	0
 release	test_cuda_vocabulary	91	0
 release	test_cuda_shared_helpers	40	0
 release	test_cuda_morphology	8225	0
@@ -35,7 +35,7 @@ release	test_cuda_pyramid	1287	0
 release	test_cuda_sensor	23679	0
 release	test_cuda_packfast	12903	0
 release	test_cuda_derivcov	910	0
-release	test_cuda_orientation_descriptor	927	0
+release	test_cuda_orientation_descriptor	939	0
 release	test_cuda_feature_tracking_corner	5959	0
 release	test_cuda_keypoints	118	0
 release	test_cuda_opticalflow	345	0
@@ -44,7 +44,7 @@ release	test_cuda_sparse_match	2850	0
 release	test_cuda_census_box	1082	0
 release	test_cuda_bench_stats	280	0
 
-debug	test_cuda_backend	734	0
+debug	test_cuda_backend	749	0
 debug	test_cuda_custom	10	0
 debug	test_cuda_vocabulary	91	0
 debug	test_cuda_shared_helpers	40	0
@@ -54,7 +54,7 @@ debug	test_cuda_pyramid	1283	0
 debug	test_cuda_sensor	23677	0
 debug	test_cuda_packfast	12903	0
 debug	test_cuda_derivcov	901	0
-debug	test_cuda_orientation_descriptor	927	0
+debug	test_cuda_orientation_descriptor	929	0
 debug	test_cuda_feature_tracking_corner	5951	0
 debug	test_cuda_keypoints	115	0
 debug	test_cuda_opticalflow	345	0

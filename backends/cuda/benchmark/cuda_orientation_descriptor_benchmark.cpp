@@ -394,7 +394,7 @@ int main(int argc, char** argv) {
             printArm("HOST binCV orient + describe (CPU arm)", host, "host");
             emit("host_stage", host);
             std::printf("   A CPU arm is CONTEXT, not the role bar for a GPU op. It is here\n"
-                        "   because it is what a caller runs today, and because this host is\n"
+                        "   because it is what a caller runs today, and because a WSL2 host is\n"
                         "   not timing-grade under WSL2 -- take its ordering, not its factor.\n");
         }
 
@@ -429,7 +429,7 @@ int main(int argc, char** argv) {
         // MORE ROUNDS THAN THE ARM COMPARISONS ABOVE, on purpose. Each control
         // below runs the SAME kernel on both sides -- the gate rejects the fast
         // path, so the switch selects nothing -- which means every unit of
-        // difference is noise, and on this host the launch floor's own spread
+        // difference is noise, and on the reference host the launch floor's own spread
         // runs to several hundred percent. A control that is allowed to read
         // 1.10x because it was sampled nine times is not a control.
         constexpr int kGateIters = 200;
@@ -516,7 +516,7 @@ int main(int argc, char** argv) {
 #if !BINCV_CUDA_ORB_OPENCV
     std::printf(" UNMEASURED. This binary was built without an OpenCV carrying\n"
                 " cudafeatures2d, so the GPU role bar for orientation and describe is\n"
-                " BLOCKED, not substituted. No CPU number above is a stand-in for it:\n"
+                " UNMEASURED, not substituted. No CPU number above is a stand-in for it:\n"
                 " point BINCV_CUDA_ORB_OPENCV_DIR at such a build and re-run.\n");
 #else
     if (want("role")) {
@@ -635,7 +635,7 @@ int main(int argc, char** argv) {
 
             // binCV's ORIENTATION stage has no isolable counterpart at all:
             // OpenCV runs IC_Angle inside its keypoint pass and exposes no
-            // entry point for it. Verdict OUTSTANDING, per ruling R2 -- and a
+            // entry point for it. No GPU comparison is possible -- and a
             // CPU number is not put in its place.
             const Timing orientT = timeKernel(
                 [&] {
@@ -645,12 +645,12 @@ int main(int argc, char** argv) {
                 60, 9, gStream);
             printArm("binCV cuda::keypointOrientation (wide)", orientT, "kernel");
             emit("bincv_orient_1000", orientT);
-            std::printf("   ROLE BAR FOR ORIENTATION: **OUTSTANDING**. cv::cuda::ORB runs\n"
+            std::printf("   ROLE BAR FOR ORIENTATION: none exists. cv::cuda::ORB runs\n"
                         "   IC_Angle inside its keypoint pass and exposes no device entry\n"
                         "   point that orients provided keypoints, so there is no cv::cuda\n"
-                        "   counterpart to time. Ruling R2: correctness, memory and the host\n"
-                        "   comparison carry it, and the speed verdict is recorded\n"
-                        "   OUTSTANDING rather than given a substitute.\n");
+                        "   counterpart to time. Correctness, memory and the host\n"
+                        "   comparison carry it, and no GPU speed comparison is claimed\n"
+                        "   rather than a substitute given.\n");
         }
 
         // (c) The whole-chain numbers, as CONTEXT for what the stage sits in.

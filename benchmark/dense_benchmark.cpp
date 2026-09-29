@@ -1,4 +1,5 @@
-// Dense disparity, priced at birth (CLAUDE.md's rule).
+// Dense disparity, priced at birth: an operation gets its benchmark arm when it is
+// written.
 //
 // Core-only, binCV against binCV: the roofline questions the dense design left
 // open are answered here -- what the disparity range costs (the memory rule made

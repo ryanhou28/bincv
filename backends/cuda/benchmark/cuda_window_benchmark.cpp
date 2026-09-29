@@ -13,7 +13,7 @@
 // test is that the CPU's dead heat INVERTS here. This binary is where that
 // prediction is confirmed or refuted; it is asserted nowhere else.
 //
-// THE THREE MEASUREMENT RULES THIS FILE FOLLOWS, from CLAUDE.md:
+// THE THREE MEASUREMENT RULES THIS FILE FOLLOWS:
 //   * memory and speed are reported TOGETHER, one meter per comparison, named
 //     at the number;
 //   * every arm has a runtime off-switch AND a case the arm's own gate
@@ -587,8 +587,7 @@ void occupancyDisposition() {
         "   The alternative bar on offer was the host MASK arm (88,767 ns x86 /\n"
         "   380,629 ns aarch64), which spaceCandidates already beats by 26.6x. Making\n"
         "   a device arm pass against the option the header tells callers NOT to use\n"
-        "   is measuring against a fallback nobody would use, which CLAUDE.md names\n"
-        "   by name.\n"
+        "   is measuring against a fallback nobody would use -- the wrong baseline.\n"
         "   Dropped: markOccupiedBatch, occupiedBatch, clearOccupancy. Shipping a\n"
         "   mask producer and a mask reader with no device user between them would\n"
         "   also put two kernels in the bit-exactness budget for a consumer that does\n"
@@ -626,8 +625,8 @@ int main() {
         roleComparison(f);
 #else
         std::printf("\n BAR 1 -- ROLE COMPARISON: UNMEASURED in this build. An op whose\n"
-                    " speed axis cannot be measured does not ship under the owner's\n"
-                    " both-axes rule; rebuild with -DBINCV_CUDA_OPENCV_DIR pointing at\n"
+                    " speed axis cannot be measured does not ship: an operation must\n"
+                    " hold up on both axes. Rebuild with -DBINCV_CUDA_OPENCV_DIR pointing at\n"
                     " an OpenCV that has cudafilters.\n");
 #endif
     }

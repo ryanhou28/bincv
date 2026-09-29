@@ -339,13 +339,13 @@ int main() {
         std::printf("   cv::cuda::resize / cv::cuda::pyrDown arms: NOT BUILT.\n"
                     "   Configure with -DBINCV_CUDA_OPENCV_DIR pointing at an OpenCV\n"
                     "   built with cudawarping; no packaged OpenCV ships the CUDA modules.\n"
-                    "   Until then the GPU role comparison for this family is OUTSTANDING\n"
-                    "   and no substitute bar is quoted in its place.\n");
+                    "   Until then no GPU role comparison exists for this family, and\n"
+                    "   no substitute is quoted in its place.\n");
 #endif
         std::printf("   DISPOSITION (written before measuring): binCV better with DISJOINT\n"
                     "   ranges = a win; ranges OVERLAP = a TIE, which PASSES and reads\n"
                     "   \"a wash on time, 5.006x on memory\"; binCV worse with disjoint\n"
-                    "   ranges = does not merge, and goes to the owner.\n");
+                    "   ranges = a loss, to be optimized before it ships.\n");
     }
 
     // -----------------------------------------------------------------------
@@ -353,10 +353,11 @@ int main() {
     // -----------------------------------------------------------------------
     std::printf("\n--- (3) THE RESIDENT PIPELINE STAND-IN: uploadImage -> packBits ->"
                 " buildPyramidBox ---\n");
-    std::printf(" Issue #59's device tracker does not exist. This stand-in was named in\n"
-                " the decision rule BEFORE measuring and uses only shipped ops. The number\n"
-                " that decides this family is the build's SHARE of a real frame, not the\n"
-                " microbenchmark ratios above.\n");
+    std::printf(" This stand-in was named in the decision rule BEFORE measuring and uses\n"
+                " only the ops that feed the build. The number that decides this family is\n"
+                " the build's SHARE of a real frame, not the microbenchmark ratios above;\n"
+                " the whole resident frame, tracker included, is timed by\n"
+                " examples/cuda_vio_frontend.\n");
     {
         const auto frame = randomFrame(kW, kH, 0x1234u);
         bincv::cuda::DeviceImage<uint8_t> wide(static_cast<int>(kW), static_cast<int>(kH));
@@ -470,8 +471,8 @@ int main() {
                     static_cast<double>(kW * kH) / static_cast<double>(bits),
                     static_cast<double>(kW * kH) / static_cast<double>(bits));
         std::printf("   shift has NO OpenCV counterpart at any API level, on either side\n"
-                    "   of the bus. Its GPU speed verdict against a resident pipeline is\n"
-                    "   recorded as OUTSTANDING; the DMA row above is the byte-side\n"
+                    "   of the bus. No GPU-vs-GPU speed comparison exists for it against\n"
+                    "   a resident pipeline; the DMA row above is the byte-side\n"
                     "   ALTERNATIVE and is labelled as such, not as an OpenCV bar.\n");
     }
 

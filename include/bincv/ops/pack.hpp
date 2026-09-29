@@ -6,11 +6,10 @@
 /// ---------------------------------------------------------------------------
 /// WHY THIS FILE IS IN CORE AND NOT BEHIND `BINCV_WITH_OPENCV`
 ///
-/// Before this file, EVERY path that got pixels into binCV took a `cv::Mat`:
-/// `QuantMat::fromCVMat` and `bincv::threshold` both did, and `QuantMat::wrap`
-/// takes a buffer that is ALREADY bit-packed, which is a different problem. So
-/// the core-only build -- the configuration the whole memory argument rests on,
-/// and three of `verify.sh`'s four -- HAD NO WAY TO RECEIVE AN IMAGE.
+/// The core-only build -- the configuration the whole memory argument rests on,
+/// and three of `verify.sh`'s four -- has to be able to receive an image without
+/// a `cv::Mat`. `QuantMat::fromCVMat` needs OpenCV, and `QuantMat::wrap` takes a
+/// buffer that is ALREADY bit-packed, which is a different problem.
 ///
 /// A sensor hands a driver a buffer. That buffer is what this file takes.
 ///
@@ -24,17 +23,17 @@
 /// `SrcT` is `uint8_t` or `uint16_t`, and the second is not a luxury: 10-, 12-
 /// and 16-bit sensors are ordinary, and downconverting to 8 bits first would
 /// discard the low bits BEFORE the rule decides. For a plain threshold that is a
-/// boundary rounding difference; for a gradient it is a total loss (§7.8.1).
+/// boundary rounding difference; for a gradient it is a total loss: the small
+/// differences a derivative reads live in the bits that were dropped.
 ///
 /// ---------------------------------------------------------------------------
 /// WHY THE RULE IS A TEMPLATE PARAMETER AND NOT A FUNCTION POINTER
 ///
-/// This loop was measured at **46x** on x86 and
-/// **14x** on aarch64 by turning it into a compare and a move-mask. That only
-/// works if the comparison is ONE PREDICATE the compiler can see. A runtime
-/// callback would put a call in the inner loop and give the whole factor back --
-/// a mere runtime BRANCH was measured costing 17%
-/// elsewhere in this library.
+/// Turning this loop into a compare and a move-mask measured **46x** on x86 and
+/// **14x** on aarch64. That only works if the comparison is ONE PREDICATE the
+/// compiler can see. A runtime callback would put a call in the inner loop and
+/// give the whole factor back -- a runtime BRANCH in the tracker's row loop
+/// measured 17% of its time (ops/opticalFlow.hpp, `RowReader`).
 ///
 /// So the shipped rules are an enum, resolved at compile time. `packBitsIf`
 /// takes an arbitrary predicate for anything they cannot express, and is
@@ -46,8 +45,8 @@
 #include "../binMat.hpp"
 #include "../impl/kernel_util.hpp"
 
-// the N-bit packer's vector path, selected at RUN TIME on x86 so the library's
-// baseline ISA is unchanged, and baseline on aarch64 where NEON always exists.
+// The N-bit packer's vector path is selected at RUN TIME on x86, so the library's
+// baseline ISA is unchanged, and is baseline on aarch64, where NEON always exists.
 // BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
 // compiler's own macros on aarch64, so an include-only integration still gets the
 // NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
@@ -70,10 +69,11 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief How a source pixel becomes a bit. **Compile-time; see the file header.**
+/// **API TIER 3.**
 enum class PackRule {
-    NonZero,        ///< `v != 0`. `QuantMat<1>::fromCVMat`'s historical rule.
+    NonZero,        ///< `v != 0`. `QuantMat<1>::fromCVMat`'s rule.
     GreaterThan,    ///< `v > threshold`. `bincv::threshold`'s rule.
-    GreaterEqual,   ///< `v >= threshold`. The reference edge filter's relation.
+    GreaterEqual,   ///< `v >= threshold`. An edge threshold's relation.
 };
 
 namespace impl {
@@ -149,18 +149,15 @@ inline void packBits(const SrcT* src, size_t width, size_t height, size_t srcStr
 // ===========================================================================
 // -- N BITS PER PIXEL, WITHOUT OpenCV.
 //
-// Everything above writes ONE bit per pixel. At `N > 1` the only way into binCV was
-// `QuantMat<N>::fromCVMat`, which takes a `cv::Mat` -- so **N-bit ingestion required
-// linking OpenCV**, which is the one thing the core-only build exists to avoid.
-//
-// AND THE POLICY WAS HARD-CODED, TWICE, INCONSISTENTLY: `BinMat::fromCVMat` reads any
-// nonzero byte as 1, `QuantMat<N>::fromCVMat` scales with `round(v * MaxValue / 255)`.
-// A caller wanting a mid-gray split or a non-monotonic map had to convert and then
-// re-quantize -- two passes and an 8-bit intermediate that this library exists to
-// avoid.
+// Everything above writes ONE bit per pixel. `QuantMat<N>::fromCVMat` also ingests
+// N bits, but it takes a `cv::Mat` and fixes the policy at
+// `round(v * MaxValue / 255)` (where `BinMat::fromCVMat` reads any nonzero byte as
+// 1). A caller wanting a mid-gray split or a non-monotonic map would otherwise
+// convert and then re-quantize -- two passes and an 8-bit intermediate that this
+// library exists to avoid.
 // ===========================================================================
 
-/// @brief How a source pixel becomes an N-bit value. **Compile-time.**
+/// @brief How a source pixel becomes an N-bit value. **Compile-time.** **API TIER 3.**
 enum class QuantRule {
     Scale,   ///< `round(v * MaxValue / SrcMax)`. `QuantMat<N>::fromCVMat`'s rule, and
              ///< the exact inverse of `toCVMatNormalized`.
@@ -168,24 +165,19 @@ enum class QuantRule {
 
 namespace impl {
 
-} // namespace impl
-
-namespace impl {
-
 #if defined(BINCV_PACKQUANT_SIMD)
 
 #if defined(BINCV_PACKQUANT_AVX2)
-/// @brief Is AVX2 present? Asked once, not once per row.
 /// @brief Force the portable path, for the benchmark and the tests. **INTERNAL.**
 /// @note Not a tuning knob. It is how the vector path is held to BIT-EXACTNESS and how
-/// a benchmark can show it is actually RUNNING -- shipped a vector block
-/// that was compiled out and measured three "improvements" against it before the
-/// kernel was timed in isolation and found not to respond to `-mavx2`.
+/// a benchmark can show it is actually RUNNING: a vector block that a mis-attached
+/// `#define` compiles out still measures, as if it were there.
 inline bool& packQuantSimdEnabled() {
     static bool on = true;
     return on;
 }
 
+/// @brief Is AVX2 present? Asked once, not once per row. **INTERNAL.**
 inline bool hasPackQuantSimd() {
     static const bool kYes = __builtin_cpu_supports("avx2");
     return kYes && packQuantSimdEnabled();
@@ -193,8 +185,8 @@ inline bool hasPackQuantSimd() {
 
 /// @brief Thirty-two pixels quantized and transposed into N plane words. **INTERNAL.**
 /// @param bits `out[p]` receives plane `p`'s thirty-two bits, LSB = lowest x, which is
-/// `bitMask(x) = 1 << (x % WordBits)` -- the same convention relies on, so
-/// `movemask_epi8`'s result IS the word with no shuffle.
+/// `bitMask(x) = 1 << (x % WordBits)` -- the convention every kernel in the
+/// library relies on, so `movemask_epi8`'s result IS the word with no shuffle.
 template <size_t N>
 __attribute__((target("avx2"))) inline void quantMask32(const uint8_t* src,
                                                         const uint8_t* thresholds,
@@ -257,11 +249,11 @@ inline void quantMask32(const uint8_t* src, const uint8_t* thresholds, unsigned 
 
 /// @brief Packs a pixel array to **N bits per pixel**, no OpenCV. **API TIER 3.**
 ///
-/// @tparam R The quantization rule, at compile time --
-/// measured a runtime flag in a hot loop costing 17%, and this one is hotter.
+/// @tparam R The quantization rule, at compile time: a runtime flag in the
+/// tracker's row loop measured 17% of its time, and this loop is hotter.
 /// @param dst The N destination planes, LSB first, exactly `QuantMat<N>::plane(i)`.
-/// **Views, not the container** (CLAUDE.md): a kernel must not care how its
-/// arguments were allocated.
+/// **Views, not the container**: a kernel must not care how its arguments were
+/// allocated.
 ///
 /// @note `Scale`'s defaults reproduce `QuantMat<N>::fromCVMat` **bit for bit**, which
 /// `test_pack.cpp` pins against it. That rule is load-bearing: it is
@@ -349,11 +341,22 @@ inline void packQuant(const SrcT* src, size_t width, size_t height, size_t srcSt
 /// cannot see is a map the vector path cannot use. Reach for `packQuant` first.
 /// @note Values above `(1 << N) - 1` are a programming error; the extra bits are
 /// dropped rather than silently corrupting a neighbouring plane.
+/// @note Each destination plane's padding bits are zero on return.
+/// @note Never allocates and never throws. Mismatched dimensions are a
+/// programming error, reported by `BINCV_ASSERT` in debug builds.
 template <size_t N, typename SrcT, typename WordType, typename Map>
 inline void packQuantWith(const SrcT* src, size_t width, size_t height, size_t srcStride,
                           BinMatView<WordType> (&dst)[N], Map map) {
     static_assert(N >= 1 && N <= 8, "packQuantWith: N outside QuantMat's supported range");
+    for (size_t p = 0; p < N; ++p) {
+        BINCV_ASSERT(width == dst[p].width && height == dst[p].height,
+                     "packQuantWith: src and every plane must have the same dimensions");
+        BINCV_ASSERT(impl::strideCoversARow<WordType>(dst[p].width, dst[p].height,
+                                                      dst[p].stride),
+                     "packQuantWith: a plane's stride must cover a whole row");
+    }
     if (width == 0 || height == 0) return;
+    BINCV_ASSERT(src != nullptr, "packQuantWith: a non-empty image needs a non-null pointer");
     constexpr size_t kBits = impl::bitsPerWord<WordType>();
     constexpr unsigned kMaxValue = (1u << N) - 1u;
     const size_t words = impl::minRowWords<WordType>(width);
@@ -380,12 +383,20 @@ inline void packQuantWith(const SrcT* src, size_t width, size_t height, size_t s
 /// @note **Slower on purpose.** A predicate the compiler cannot see is a predicate
 /// the vector path cannot use, so this is the portable loop always. Reach for
 /// `PackRule` first; use this for a lookup table or a non-monotonic rule.
+/// @note `dst`'s padding bits are zero on return: only the `n` live bits of each
+/// word are ever set.
+/// @note Never allocates and never throws. Mismatched dimensions are a
+/// programming error, reported by `BINCV_ASSERT` in debug builds.
 template <typename SrcT, typename WordType, typename Pred>
 inline void packBitsIf(const SrcT* src, size_t width, size_t height, size_t srcStride,
                        BinMatView<WordType> dst, Pred pred) {
     BINCV_ASSERT(width == dst.width && height == dst.height,
                  "packBitsIf: src and dst must have the same dimensions");
+    BINCV_ASSERT(impl::strideCoversARow<WordType>(dst.width, dst.height, dst.stride),
+                 "packBitsIf: dst's stride must cover a whole row");
     if (dst.width == 0 || dst.height == 0) return;
+    BINCV_ASSERT(src != nullptr && dst.ptr != nullptr,
+                 "packBitsIf: a non-empty image needs non-null pointers");
     constexpr size_t kBits = impl::bitsPerWord<WordType>();
     for (size_t y = 0; y < height; ++y) {
         const SrcT* rowIn = src + y * srcStride;
@@ -525,8 +536,7 @@ inline size_t writePbm(BinMatConstView<WordType> src, uint8_t* out, size_t cap) 
 /// @note **Looking at what binCV produced on a target with no OpenCV**, and debugging
 /// a pipeline you cannot see is not debugging. PNM is chosen because it is the only
 /// image format whose encoder is a header and a copy -- binCV carries no real codec,
-/// on any target, because nothing on a caller's path decodes anything (the design
-/// notes).
+/// on any target, because nothing on a caller's path decodes anything.
 /// @note **`writePbm` is the smaller way to do this** and is usually the one to reach
 /// for: it emits one bit per pixel rather than one byte, so it needs an eighth of the
 /// buffer. Use `writePgm` when `onValue`/`zeroValue` matter or a tool only reads PGM.
@@ -540,9 +550,8 @@ inline size_t writePgm(BinMatConstView<WordType> src, uint8_t* out, size_t cap,
     // freestanding target reliably lacks it. It is built INLINE because the length has
     // to stay transparent to the optimizer: routed through a shared out-of-line emitter,
     // `h` goes opaque, `cap < need` stops being provable, and -Warray-bounds reports
-    // unpackTo8Bit's aarch64 vector store as overrunning a short `out`. Measured: that
-    // exact refactor turned the aarch64 -fno-exceptions build red while all four x86
-    // configurations stayed green.
+    // unpackTo8Bit's aarch64 vector store as overrunning a short `out` -- on the
+    // aarch64 -fno-exceptions build only, while every x86 configuration stays green.
     uint8_t header[32];
     size_t h = 0;
     auto put = [&](char c) { if (h < sizeof(header)) header[h++] = static_cast<uint8_t>(c); };

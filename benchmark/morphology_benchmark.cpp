@@ -1,6 +1,6 @@
 // morphology -- erode / dilate / morphologyEx against OpenCV.
 //
-// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR: OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U -- cv::erode,
 // cv::dilate and cv::morphologyEx with the SAME structuring element, the same
 // anchor and the same border. That is what a user does today without binCV, and
@@ -43,7 +43,7 @@
 // the code it measures is not measuring it, and the number this file exists to
 // publish is the one against OpenCV.
 //
-// FOOTPRINT IS REPORTED ALONGSIDE EVERY TIMING, per CLAUDE.md, as the WORKING SET
+// FOOTPRINT IS REPORTED ALONGSIDE EVERY TIMING, as the WORKING SET
 // OF ONE CALL rather than as a per-buffer ratio. For this operation the footprint
 // column is the more interesting one and it is not close: a packed frame is 1/8
 // of a CV_8U frame, and erode/dilate need no scratch at all.
@@ -67,7 +67,7 @@
 // table. All rows of a case must print the same number.
 // 2. CONSTANT FOLDING. Four distinct random images are rotated through. That
 // makes the loop's RESIDENT set larger than the working set of ONE call,
-// which the tables report and which is the number CLAUDE.md asks for: at
+// which the tables report: at
 // 640x480 the timed loop keeps 4 sources + 1 destination live, 1500 KiB on
 // the OpenCV side against 188 KiB at uint32. Only the OpenCV side straddles
 // a 1 MiB L2, so the asymmetry can only flatter binCV -- it is printed per
@@ -87,13 +87,13 @@
 // WHERE THIS IS AUTHORITATIVE
 //
 // On x86_64 it is INDICATIVE ONLY -- a desktop host's spread decides nothing. The
-// numbers that belong in a claim come from the reference device:
+// numbers that belong in a claim come from the reference device, pinned and
+// launched ten times:
 //
-// BINCV_PI_OPENCV=1./scripts/run_on_pi.sh <target>
-// './benchmark/morphology_benchmark > morphology_benchmark.log'
+//   ./scripts/run_launches.sh -n 10 -g ./build/benchmark/morphology_benchmark
 //
-// BINCV_PI_OPENCV=1 is required: the denominator is an OpenCV call, and the
-// device's default build is core-only.
+// The build on the device must be configured with OpenCV: the denominator is an
+// OpenCV call, and a core-only build does not produce this binary.
 
 #include <algorithm>
 #include <chrono>
@@ -331,12 +331,14 @@ void runBinCv(const Case& c, const bincv::BinMat<WordType>& src, bincv::BinMat<W
 // caller would write today without ops/morphology.hpp, and the shipped kernel is
 // its FUSED form.
 //
-// It is here because the choice between them is a footprint choice and CLAUDE.md
-// says those are settled by measurement. The composed form needs a FRAME-SIZED
+// It is here because the choice between them is a footprint choice and those are
+// settled by measurement. The composed form needs a FRAME-SIZED
 // TEMPORARY between the shift and the combine -- a kernel may not allocate one,
 // so it would have to be a caller-provided scratch on erode and dilate as well,
-// which is a third frame on the hottest call in the MVP. The fused form needs
-// none. This row is what says whether that costs anything in time.
+// which is a third frame on the hottest call in the reference pipeline. The fused
+// form needs none. This row is what says whether that costs anything in time.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // Its traversal count is 2k - 1 for a k-cell element against the fused form's
 // one, so the expectation is that it is also slower; an expectation is not a
@@ -388,7 +390,7 @@ int composedTraversals(const bincv::StructuringElement& se) {
 /// operation and its element: measured here, cv::erode 3x3 and
 /// cv::morphologyEx OPEN 3x3 differ by more than 2x, because OPEN issues
 /// two filter calls. Printing one case's floor beside another case's row
-/// -- which this benchmark used to do -- understates it most
+/// -- a tempting shortcut -- understates it most
 /// for exactly the compound row where the ladder argument matters, and the
 /// floor is what the "not cache residency" conclusion rests on.
 void measureCallFloors(const Case& c, double& openCvUs, double& binCvUs) {

@@ -1,6 +1,5 @@
 // Two questions about ops/reduce.hpp that only the REFERENCE DEVICE can answer,
-// each with its decision rule written here before anything was measured
-// (CLAUDE.md, "How performance and footprint decisions get made").
+// each with its decision rule written here before anything was measured.
 //
 // This file compares binCV against BINCV -- alternative implementations of the
 // same reduction -- so unlike benchmark/reduce_benchmark.cpp it has no OpenCV
@@ -79,7 +78,8 @@
 // printing a table under a caveat.
 //
 // x86_64 numbers from this file are INDICATIVE ONLY. Both questions are about the
-// primary target and close on the reference device (scripts/run_on_pi.sh).
+// primary target and close on the reference device:
+//   ./scripts/run_launches.sh -n 10 -g ./build/benchmark/reduce_target_benchmark
 
 #include <algorithm>
 #include <chrono>
@@ -326,7 +326,9 @@ Covariance covarianceFused(const BinMatConstView<uint64_t>& magX,
 
 bool runQ2() {
     // 640x480 and 200 keypoints: the frame size and the keypoint count the
-    // reference pipeline runs (its gftt_max_corners), with its 31x31 window.
+    // reference pipeline runs (its maximum corner count), with its 31x31 window.
+    // (The reference pipeline is the visual-inertial odometry system, not in this
+    // repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
     const int width = 640;
     const int height = 480;
     const int windowSize = 31;

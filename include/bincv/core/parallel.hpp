@@ -35,6 +35,14 @@
 #include <cstddef>
 #include <type_traits>
 
+// error.hpp defines BINCV_ABI_NAMESPACE. Without this include, a translation unit
+// that includes this header first (threads/pool.hpp does) opens a namespace
+// literally named BINCV_ABI_NAMESPACE, and the backend statics below become a
+// second set the kernels never read -- a pool installed from that unit is
+// silently ignored. tests/test_parallel.cpp installs from a separate unit to
+// pin this.
+#include "error.hpp"
+
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 

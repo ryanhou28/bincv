@@ -297,6 +297,37 @@ def benchmark_source(binary):
     return None
 
 
+WRAPPED_RE = re.compile(r'benchmark/(\w+)\b')
+
+
+def wrapper_sources(script):
+    """A sweep script and the benchmark sources it launches, or (None, []).
+
+    The one-arm-per-process sweeps (benchmark/crossover_sweep.sh,
+    benchmark/interop_sweep.sh) are what run_launches.sh is handed, so the log
+    names the script. The script is not the code that was measured; the binaries
+    it invokes as `./benchmark/<name>` are, and their sources are what this maps
+    the log to -- plus the script itself, since a change to which arms it runs
+    changes the figure too.
+    """
+    stem = os.path.basename(script)
+    for d in SOURCE_DIRS:
+        cand = os.path.join(ROOT, d, stem)
+        if not os.path.isfile(cand):
+            continue
+        try:
+            text = open(cand, encoding='utf-8', errors='replace').read()
+        except OSError:
+            return (None, [])
+        srcs = []
+        for name in sorted(set(WRAPPED_RE.findall(text))):
+            s = benchmark_source(name)
+            if s is not None and s not in srcs:
+                srcs.append(s)
+        return (cand, srcs) if srcs else (None, [])
+    return (None, [])
+
+
 def linked_sources(binary, cache={}):
     """The OTHER translation units the build links into `binary`, absolute paths.
 
@@ -467,11 +498,14 @@ def classify(path):
     if not binary:
         return ('unmappable', 'no benchmark line -- cannot tell what it measured')
     source = benchmark_source(binary)
+    wrapped = []
+    if source is None and binary.endswith('.sh'):
+        source, wrapped = wrapper_sources(binary)
     if source is None:
         return ('unmappable', 'no source found for %s' % os.path.basename(binary))
 
     deps = set()
-    for root in [source] + linked_sources(binary):
+    for root in [source] + wrapped + linked_sources(binary):
         first_party_deps(root, deps)
     deps = sorted(deps)
     moved = [d for d in deps if code_differs(commit, d)]

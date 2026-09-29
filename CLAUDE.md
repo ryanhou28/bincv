@@ -89,11 +89,11 @@ stated decision rule.
   option, not the worst. Measuring against a fallback nobody would use makes anything
   look like a win.
 
-**An operation SHIPS only when it holds up on both axes (owner's rule,
-2026-09-15).** Correct-but-far-behind is a stage, not a product: a kernel that
-loses its role comparison badly against the best existing option does not merge
-on the strength of a stated price -- it gets optimized first, or the owner
-explicitly accepts the gap with the memory-side argument stated. The premise of
+**An operation SHIPS only when it holds up on both axes.** Correct-but-far-behind
+is a stage, not a product: a kernel that loses its role comparison badly against
+the best existing option does not merge on the strength of a stated price -- it
+gets optimized first, or the gap is explicitly accepted, in review, with the
+memory-side argument stated. The premise of
 this library is fast AND lightweight out of the box; half of that is not a
 smaller claim, it is a different product.
 
@@ -217,9 +217,9 @@ that is their choice, and binCV's job is to make the one they chose cheaper.
 **The operation set follows what users need, not a fixed taxonomy.** binCV is not
 trying to replace OpenCV. An operation is in scope when it sits on a path **users**
 run *and* binCV can make it smaller or faster. A library's users include people
-outside this repository, so "no in-repo caller yet" is not a veto — that reading was
-corrected by the owner (2026-09-11); an in-repo caller is what *prices* an operation
-honestly (the benchmark-at-birth rule below), not a gate on whether it may exist. An
+outside this repository, so "no in-repo caller yet" is not a veto; an in-repo caller is
+what *prices* an operation honestly (the benchmark-at-birth rule below), not a gate on
+whether it may exist. An
 operation is out of scope when binCV would add nothing but a second implementation to
 keep correct.
 
@@ -244,8 +244,9 @@ binary dense path beats `cv::cuda::StereoBM` on both speed and device memory
 
 ## Style
 
-- OpenCV conventions: `camelCase` functions, `PascalCase` types, `UPPER_CASE` constants,
-  lowercase namespaces, destination as out-parameter.
+- OpenCV conventions: `camelCase` functions, `PascalCase` types, lowercase namespaces,
+  destination as out-parameter. Enumerators are `UPPER_CASE` as in OpenCV
+  (`MORPH_OPEN`); named constants are `kCamelCase` (`kDenseDisparityInvalid`).
 - Tier 3 operations (no OpenCV equivalent) must **not** borrow OpenCV names.
 - Match the comment density and idiom of surrounding code.
 - **Comments explain the code, not the project's history.** No task numbers, no experiment

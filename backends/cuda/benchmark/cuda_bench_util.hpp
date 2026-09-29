@@ -11,7 +11,7 @@
 //
 // The two answer different questions and every table here says which one it
 // prints. WSL2 inflates LAUNCH overhead specifically, so kernel-resident
-// numbers travel better than end-to-end ones; both are honest on this host,
+// numbers travel better than end-to-end ones; both are honest on the reference host,
 // and the spread is printed so a reader can see what a difference must clear.
 //
 // THREE MECHANISMS BEYOND THE SINGLE-ARM TIMER, each closing a gap that has
@@ -21,7 +21,7 @@
 //     kernel, timed by this same protocol. A device op can be individually so
 //     cheap that a microbenchmark ratio is measuring launch overhead rather
 //     than the kernel: the binary matcher runs at 0.069 ms with 24-60% spread
-//     on this host for exactly that reason. The floor is not a footnote beside
+//     on the reference host for exactly that reason. The floor is not a footnote beside
 //     such a number, it is what makes it readable -- so print it.
 //
 //   * THE INTERLEAVED TWO-ARM TIMER -- timeKernelPaired. timeKernel runs one
@@ -274,7 +274,7 @@ inline void printPairedStats(const PairedTiming& p) {
 /// @note BOTH STATEMENTS ARE PRINTED WHENEVER BOTH HOLD, on their own lines.
 /// They answer different questions -- "is it in doubt which arm is ahead"
 /// and "is the distance bigger than the noise" -- and a row given only the
-/// louder one has lost the other. The owner's 2026-09-19 ruling is the
+/// louder one has lost the other. The three-valued result is the
 /// reason the first exists: a spread that lies wholly on one side of 1.00x
 /// bounds how much an arm wins by, not whether it wins.
 /// @note A NULL RESULT IS PRINTED AS A RESULT, in those words, because
@@ -308,8 +308,7 @@ inline void printPairedVerdict(const PairedTiming& p) {
                     " (two-sided sign-test\n"
                     "            p = %.3g). Magnitude %.2fx to %.2fx, median %.2fx: the"
                     " spread bounds\n"
-                    "            HOW MUCH it wins by, not WHETHER it does (owner's"
-                    " ruling, 2026-09-19).\n",
+                    "            HOW MUCH it wins by, not WHETHER it does.\n",
                     p.establishedDirection() == Direction::A ? "ARM A is" : "ARM B is",
                     wins, p.rounds, p.signTestP(), p.magnitudeLoFactor(),
                     p.magnitudeHiFactor(), p.differenceFactor());
@@ -464,7 +463,7 @@ void launchNullKernel(dim3 grid = dim3(1), dim3 block = dim3(32),
 /// @note `iters` defaults to a batch size of the same order the arms here use,
 /// not to the largest batch that would minimize the number: back-to-back
 /// launches pipeline, so a floor measured over 5,000 enqueues is a different
-/// quantity from an arm measured over 100 (swept on this host: 0.0076 ms at
+/// quantity from an arm measured over 100 (swept on the reference host: 0.0076 ms at
 /// 100, 0.0081 at 1,000, 0.0085 at 5,000).
 /// @param stream The stream the floor is measured on. A floor compared against
 /// arms timed on an explicit stream has to be measured on that same stream,

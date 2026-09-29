@@ -19,9 +19,8 @@
 ///   * **The working set is computable from the signature.** `cv::estimateAffine2D`
 ///     allocates internally, so what one call costs is not visible to its caller.
 ///     Here it is `ransacScratchBytes(correspondences)` and nothing else.
-///   * **It needs no OpenCV.** `-DBINCV_USE_OPENCV=OFF` is a supported build, and
-///     before this file a caller on that path had features and flow with no way to
-///     consume them.
+///   * **It needs no OpenCV.** `-DBINCV_USE_OPENCV=OFF` is a supported build, and a
+///     caller on that path has features and flow to consume.
 ///
 /// **THE SPEED IS NOT THE POINT AND IS NOT CLAIMED TO BE.** RANSAC's cost is
 /// dominated by the minimal solver -- dense floating-point arithmetic on very small
@@ -36,17 +35,25 @@
 /// THE MODEL IS A POLICY, SO THE LOOP IS WRITTEN ONCE
 ///
 /// Sampling, scoring, consensus and termination do not depend on what is being
-/// estimated. A model supplies three things and the driver supplies the rest:
+/// estimated. A model supplies four things and the driver supplies the rest:
 ///
+///   using Type = ...;                          // the model itself
 ///   static constexpr size_t kMinimalSetSize;   // correspondences per hypothesis
 ///   static constexpr size_t kMaxModels;        // hypotheses one minimal set yields
 ///   static size_t estimate(const Point2f* from, const Point2f* to,
-///                          const size_t* idx, Model* out);   // -> count written
-///   static float residual(const Model& m, Point2f from, Point2f to);
+///                          const size_t* idx, Type* out);   // -> count written
+///   static float residual(const Type& m, Point2f from, Point2f to);
+///   static bool refine(const Point2f* from, const Point2f* to,
+///                      const uint32_t* inlierFlags, size_t count,
+///                      Type* inout);   // least-squares refit over the consensus
+///                                      // set; false when the model has no
+///                                      // closed-form refit, leaving `inout` as is
 ///
 /// `estimate` returns how many models it produced, because a minimal solver may
 /// produce several (a 3-point pose solver yields up to four) or none (a degenerate
-/// sample). The driver scores every one of them.
+/// sample). The driver scores every one of them. `refine` is called once, on the
+/// winner, when `RansacParams::refine` is set; `inlierFlags` is one bit per
+/// correspondence in the scratch layout `ransacScratchWords` describes.
 ///
 /// This is the shape the harder solvers slot into unchanged. `Affine2D` below is
 /// the one this file ships; an essential-matrix or perspective-pose model is a new
@@ -124,7 +131,7 @@ struct RansacParams {
     ///
     /// **The caller's obligation is the ORDER**: correspondences must arrive
     /// best-first by some quality the caller trusts -- a descriptor matcher's
-    /// distances are exactly that, and were previously thrown away. With a
+    /// distances are exactly that. With a
     /// truthful order the first clean sample arrives iterations earlier and
     /// the adaptive stop does the rest; with a WRONG order this degrades
     /// toward uniform sampling as the prefix grows, it does not break. The
@@ -171,7 +178,7 @@ struct RansacScratch {
     bool empty() const { return words == nullptr || capacity == 0; }
 };
 
-/// @brief Words in one inlier set over `correspondences` points.
+/// @brief Words in one inlier set over `correspondences` points. **API TIER 3.**
 /// @note Annotated for both targets: it is the flag layout's own rule -- which
 /// word a correspondence's bit lives in -- and anything that writes those
 /// flags has to agree with it. A device kernel re-deriving `(n + 31) / 32`
@@ -182,6 +189,7 @@ BINCV_HOST_DEVICE inline constexpr size_t ransacScratchWords(size_t corresponden
 }
 
 /// @brief Bytes of scratch a call over `correspondences` points needs.
+/// **API TIER 3.**
 /// @note **AN INLIER FLAG IS ONE BIT, NOT ONE BYTE**, which is the whole premise of
 /// this library applied to its own scratch. Two sets of flags at one bit each
 /// is 256 B at 1 000 correspondences where a byte each would be 2 000 -- and

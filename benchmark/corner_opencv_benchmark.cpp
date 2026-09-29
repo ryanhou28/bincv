@@ -1,11 +1,11 @@
-// -- goodFeaturesToTrack against OPENCV. This is the tier 2 DENOMINATOR.
+// goodFeaturesToTrack against OPENCV. This is the tier 2 DENOMINATOR.
 //
 // WHY THIS FILE EXISTS BESIDE corner_benchmark.cpp
 //
 // corner_benchmark.cpp is binCV against binCV: the sliding response map against a
 // covariance call per position. That is an internal question and no OpenCV
 // denominator applies to it. But this is **API TIER 2** -- it has a direct cv::
-// counterpart -- and CLAUDE.md's rule for that case is not optional:
+// counterpart -- and the rule for that case is not optional:
 //
 // Denominator: OpenCV doing the *same semantic operation on the same binary
 // content stored as CV_8U* -- that is what a user does today without binCV.
@@ -36,6 +36,8 @@
 // (`gftt_corner_derivative_type: BINARIZED`), so it is the
 // operation a user runs today without binCV, and every ratio
 // below is taken against it.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // Its box filter uses BORDER_CONSTANT, not the reference's
 // BORDER_REPLICATE, because a SUM with a zero fill is exactly
@@ -53,7 +55,7 @@
 //
 // THE MEMORY COLUMN IS THE POINT, AND IT IS AN ACCOUNTING, NOT A GUESS
 //
-// Peak working set is the live buffers ONE call needs, per CLAUDE.md. For binCV
+// Peak working set is the live buffers ONE call needs. For binCV
 // and for the binarized OpenCV row every one of those buffers is allocated in this
 // file, so the total is read off the buffers themselves. For the stock
 // `cv::goodFeaturesToTrack` row it cannot be: that function allocates its
@@ -95,7 +97,7 @@ constexpr int kWidth = 640;
 constexpr int kHeight = 480;
 constexpr int kInputs = 4;
 constexpr int kBlockSize = 3;              // gftt_block_size in the reference pipeline
-constexpr int kMaxCorners = 200;           // gftt_max_corners
+constexpr int kMaxCorners = 200;           // the reference pipeline's maximum corner count
 constexpr double kQualityLevel = 0.01;     // gftt_quality_level
 constexpr double kMinDistance = 33.33333333333;  // gftt_min_distance
 
@@ -498,7 +500,7 @@ int main() {
                            measure::g_sink += r.count;
                        }});
     // The SAME call with the suppression prefilter's vector arm switched off.
-    // Two things this is here for, both required by CLAUDE.md: a vector arm must
+    // Two things this is here for, both required of every vector arm: it must
     // be switchable, and the benchmark must SHOW it is running -- a ratio of
     // ~1.00x between these two rows means the fast path is not on, which is how
     // this project once measured three "improvements" against a block the

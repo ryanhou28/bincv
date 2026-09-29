@@ -482,3 +482,30 @@ sink = 31859289555436
 # temp after: temp=62.3'C
 # date:     2026-09-21T16:54:31-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py ) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                       n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# t1 / NIn=1 linear adder  10     1.3765     1.3762     1.3772  1.001     0.1%   0.10%  [  1.3765,   1.3767]   0.01%   1.000x
+# t1 / NIn=1 replicated    10     2.4508     2.4501     2.4523  1.001     0.1%   0.25%  [  2.4504,   2.4516]   0.02%   1.000x
+# t1 / NIn=2 linear adder  10     2.7574     2.7548     2.7746  1.007     0.7%   0.10%  [  2.7565,   2.7735]   0.31%   1.006x
+# t1 / NIn=2 replicated    10     6.3298     6.3290     6.3356  1.001     0.1%   0.10%  [  6.3292,   6.3323]   0.02%   1.000x
+# t1 / NIn=3 linear adder  10     4.3918     4.3890     4.3973  1.002     0.2%   0.25%  [  4.3905,   4.3934]   0.03%   1.000x
+# t1 / NIn=3 replicated    10    14.0168    13.9908    14.0711  1.006     0.6%   0.20%  [ 14.0122,  14.0425]   0.11%   1.002x
+# t1 / NIn=4 linear adder  10     8.8942     8.8402     8.9495  1.012     1.2%   0.20%  [  8.8770,   8.9166]   0.22%   1.003x
+# t1 / NIn=4 replicated    10    31.2611    31.2204    31.3351  1.004     0.4%   0.15%  [ 31.2289,  31.3198]   0.15%   1.002x
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     t1       row and the difference between the pair is the SUM alone. | route  ns/dst px  spread  stages  inputs  vs linear

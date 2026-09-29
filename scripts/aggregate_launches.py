@@ -23,8 +23,8 @@ within-run and 0.1-0.8% across seven launches of the same benchmark -- which
 is what makes it the reference device.  Until this script, every x86 figure
 under docs/reports/logs/ was one draw from a distribution nobody had
 characterised, because all 24 of those logs were single launches.  Not wrong;
-unexamined, which CLAUDE.md's "commit the benchmark" rule does not allow to
-stand.
+unexamined, which "every performance claim must be reproducible" does not allow
+to stand.
 
 scripts/run_launches.sh produces the input.  This reads it.
 
@@ -76,8 +76,8 @@ WHAT IT COMPUTES, per row, over the launches that carry it:
             these launches cannot tell it from no change at all.  It is derived
             from the row's own scatter and is not a threshold anyone chose --
             `--resolve` compares it against a difference the CALLER states,
-            because how much is worth having is a per-case judgement and
-            CLAUDE.md forbids inventing a project-wide one here.
+            because how much is worth having is a per-case judgement, and a
+            project-wide one is not invented here.
 
 RATIOS ARE PAIRED PER LAUNCH BY DEFAULT.  `--ratio "A/B"` divides A by B inside
 each launch and then takes the median of those ratios, which is what the

@@ -174,6 +174,11 @@ cudaError_t launchCensus(DeviceImageConstView<SrcT> img, const CensusOffsetsPod&
     return cudaGetLastError();
 }
 
+/// @brief Dynamic shared memory a launch may request without opting in: the
+/// bound on the packed kernel's staged tile, `(32 + 2a)(8 + 2a) * sizeof(SrcT)`
+/// for a pattern of reach `a` -- at most 101 for a uint8 source, 68 for uint16.
+constexpr size_t kCensusPackedSharedBytes = 48u * 1024u;
+
 /// @brief The packed layout's kernel: one thread, one pixel, one word out.
 /// The same tile-and-apron staging as the plane arm, so each source byte is
 /// still read once no matter how many comparisons the pattern has.
@@ -247,6 +252,14 @@ cudaError_t launchCensusPacked(DeviceImageConstView<SrcT> img,
                     static_cast<unsigned>((img.height + 7) / 8));
     const size_t sharedBytes = static_cast<size_t>(32 + 2 * apron) *
                                static_cast<size_t>(8 + 2 * apron) * sizeof(SrcT);
+    // The staged tile must fit the dynamic shared memory a launch gets without
+    // opting in, 48 KiB on every architecture this backend targets. The plane
+    // arm falls back to its reference kernel past kCensusApronCap; this layout
+    // has one kernel, so a pattern reaching further than the tile can hold is
+    // refused here, in every build, rather than surfacing as a launch failure.
+    BINCV_ASSERT(sharedBytes <= kCensusPackedSharedBytes,
+                 "cuda censusTransformPacked: the pattern's reach exceeds the staged tile");
+    if (sharedBytes > kCensusPackedSharedBytes) return cudaErrorInvalidValue;
     censusPackedKernel<SrcT><<<grid, block, sharedBytes, stream>>>(img, pattern, dst,
                                                                    apron);
     return cudaGetLastError();

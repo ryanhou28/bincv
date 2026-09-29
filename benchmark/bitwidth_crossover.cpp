@@ -1,4 +1,4 @@
-// -- WHERE DOES BIT-SLICING STOP PAYING?
+// WHERE DOES BIT-SLICING STOP PAYING?
 //
 // The two endpoints of pyrDown were measured against cv::pyrDown: 5.52x FASTER at
 // 1 -> 3 bits, 13.7x SLOWER at 8 -> 8. The crossover between them has never been
@@ -6,7 +6,7 @@
 // "low bit width" means <= 3, <= 5 or <= 7, and where an 8-bit specialization would
 // have to start to be worth building.
 //
-// Denominator (CLAUDE.md): cv::pyrDown on CV_8U, one thread, same content, same
+// Denominator: cv::pyrDown on CV_8U, one thread, same content, same
 // geometry. It is FLAT across the sweep on purpose -- OpenCV has no cheaper mode
 // for a caller who only needs three bits, and that is exactly the asymmetry binCV
 // exists to exploit.

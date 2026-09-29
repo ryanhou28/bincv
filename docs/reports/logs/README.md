@@ -7,20 +7,39 @@ and they are not interchangeable.
 |---|---|
 | `<bench>-x86_64-launches.log` | **thirty separate pinned process launches** of one benchmark, with the aggregate appended as a comment block. This is what an x86-64 figure in the reports is. |
 | `<bench>-x86_64.log` | the **single launch** that figure used to be. Kept, not deleted — a number that moved should be checkable against the reading it replaced. |
-| `<bench>-aarch64-launches.log` | **ten separate pinned process launches** on the reference device, governor locked to `performance` and restored after. This is what an aarch64 figure in the reports is. The two stereo binaries have seven. |
+| `<bench>-aarch64-launches.log` | **ten separate pinned process launches** on the reference device, governor locked to `performance` and restored after, with the aggregate appended. This is what an aarch64 figure in the reports is. The two stereo binaries have seven. `wordwidth-aarch64-launches.log` has no aggregate because it prints byte counts, not timings. |
 | `<bench>-aarch64.log` | the **single launch** that figure used to be. Kept for the same reason as the x86 singles. |
 | `<bench>-spotcheck-aarch64-launches.log` | an **independent** device sweep of a benchmark whose figure moved, taken separately to check it. Two exist, for `feature-tracking` and `pyrfilter`. |
 | `<bench>-x86_64-launches-repeat.log` | a **second, independent** thirty-launch sweep of the same benchmark, taken on a deliberately busier machine before the figures were published. Two exist, for `logic` and `morphology`. |
 | `<bench>-cuda-launches.log` | **separate processes of one CUDA benchmark on the reference GPU**, written by `scripts/run_cuda_launches.sh`. Three are committed — `cuda_role-`, `cuda_role_lk-` and `cuda_sparse-x86_64-cuda-launches.log` — and the fourteen marked rows of [cuda.md](../cuda.md)'s speed table come from them. There is more than one because a benchmark measures what it measures: the Lucas-Kanade rows need a real frame sequence and refuse to synthesize one, and block matching is timed in the sparse family's own binary. The header contract is described below. |
 
+## Which commit a log names
+
+`run_launches.sh` stamps each log with the commit it was taken at. Those are commits on the
+branch that did the measuring, and the branch was squash-merged, so the stamp itself is not
+reachable from `main`. This table maps each stamp to the commit on `main` that carries the
+same code and the log:
+
+| log stamp | on `main` as | what the merge was |
+|---|---|---|
+| `80ff0a8`, `ac33cf1`, `05ab53c`, `0b9b73c`, `a152536` | `086428c` | the launch-sweep protocol and the re-taken x86-64 and aarch64 columns |
+| `25065d7` (the single-launch logs), `83087b0`, `592bce4` | `8780bd1` / `c3e1f78` | the first measurement reports |
+| `05ce58f` | `c6192bb` | footprint report corrections |
+| `880704b`, `6d74d57` | `8729e05` | the `goodFeaturesToTrack` selection-stage optimization and its re-take |
+| `7c8055f`, `06246c2`, `5c6a47d`, `aa8d4bb`, `a608102` | `0d6e302` | the CUDA figures with provenance |
+| `550d45a` | `cb995e7` | the bit-plane FAST gate read once per call |
+| `d13ea10`, `a8214de`, `9ab7325` | `77c46a0` | the RANSAC estimators |
+
+`scripts/check_figure_staleness.py` compares the code a log measured, at its stamp, against
+the current tree; `expected-stale.txt` lists the logs whose code has moved, with the argument
+for why each figure still holds.
+
 ## The CUDA sweeps
 
-[cuda.md](../cuda.md) promises "the median of 7 independent process runs" for every figure
-in it and, until the mechanism described here existed, committed none of them. What that
-cost is measured: re-run at its own published commit, `goodFeaturesToTrack` read 5.3× on
-the page and 8.40× on the machine, its two arms moving in **opposite** directions — which
-a session can do and a kernel cannot. Nothing could separate the two stories, because the
-session that produced the page left nothing behind.
+Every CUDA figure is the median of 7 independent process runs, and the runs are committed
+because a figure with no run behind it cannot be checked: before these sweeps were kept, a
+`goodFeaturesToTrack` row re-run at its own published commit read 8.40× on the machine
+against 5.3× on the page, with nothing left behind to say which session was wrong.
 
 `scripts/run_cuda_launches.sh` is the CUDA counterpart of `run_launches.sh`. It writes one
 file per sweep with `### run N` between launches — the same shape, so
@@ -48,13 +67,12 @@ carries the launch floor — out of the `add_executable` that names them. `--exp
 answers for one log, and the runner calls it on what it has just written: a sweep the gate
 cannot map is a sweep whose figures nothing can ever call stale.
 
-## The device spot-checks, and what they showed
+## The device spot-checks
 
-The device sweep moved one published figure beyond its band and left the rest where they
-were, so two rows were re-taken as an independent sweep before anything was adopted — one
-that moved and one that did not. The rule was written first, in the same shape as the x86
-repeats below: the spot-check's interval must overlap the sweep's, and a disagreement is
-investigated rather than averaged.
+When the device sweep moved a published figure beyond its band, two rows were re-taken as an
+independent sweep before anything was adopted — one that moved and one that did not. The rule
+was written first, in the same shape as the x86 repeats below: the spot-check's interval
+must overlap the sweep's, and a disagreement is investigated rather than averaged.
 
 | row | device sweep | independent spot-check | |
 |---|---|---|---|
@@ -68,13 +86,13 @@ The clock was sampled every two seconds on the pinned core throughout both, 169 
 at 1,800,000 kHz, peak 62.8 °C — because `vcgencmd get_throttled` on this board reads
 `0x80000` before and after and cannot report a *new* event.
 
-## The repeats, and what they showed
+## The x86-64 repeats
 
-Two sweeps were re-taken independently before any figure was adopted: one row that
-moved and changed sign (`dilate` 3×3) and one that did not (`bitwiseAnd`), plus five
-others that came free with them. The rule was written first: the repeat's bootstrap
-interval must overlap the first sweep's, and a disagreement is investigated rather than
-averaged.
+Two x86-64 sweeps were re-taken independently on a deliberately busier machine before any
+figure was adopted: one row that had changed sign between protocols (`dilate` 3×3) and one
+that had not (`bitwiseAnd`), plus five others in the same binaries. The rule was written
+first: the repeat's bootstrap interval must overlap the first sweep's, and a disagreement is
+investigated rather than averaged.
 
 | row | first sweep | repeat | |
 |---|---|---|---|
@@ -90,21 +108,21 @@ averaged.
 outside it.** That is the caveat to carry: a bootstrap interval is over the thirty
 launches that were taken, and is not a bound on what a different thirty will say.
 
-## What changed, and when
+## Why sweeps rather than single launches
 
-Until 2026-09-21 every x86-64 log in this directory was a single process launch, and every
-x86-64 figure in the reports was one draw from a distribution nobody had characterised.
 `benchmark/measure_util.hpp` reports the spread *within* a process by construction, and says
-so; a process cannot see what it paid once, at start-up, for the whole of its own run. On
-this host that gap is eleven-fold — `goodFeaturesToTrack` prints a ~5% spread and the same
-ratio scatters 66% across sixty launches.
+so; a process cannot see what it paid once, at start-up, for the whole of its own run. On the
+x86-64 host that gap is eleven-fold — `goodFeaturesToTrack` prints a ~5% spread and the same
+ratio scatters 66% across sixty launches — which is why the single-launch `<bench>-x86_64.log`
+files are kept only as the readings the sweeps replaced.
 
 The sweeps were taken with `scripts/run_launches.sh` and read back with
 `scripts/aggregate_launches.py`, whose output is the `# ---- aggregate` block at the foot of
 each `-launches.log`. Re-running the aggregator on one of those files reproduces it, except
 that the appended block itself parses as extra tables — read the ones numbered before it.
 
-[The index](../README.md#on-the-x86-64-host) says which published figures moved and why.
+[The index](../README.md#changes-to-published-figures) lists the published figures that moved
+when the sweeps replaced the single launches, and why.
 
 ## The x86-64 logs with no sweep
 

@@ -40,7 +40,7 @@
 #       would have diffed an architecture against itself -- NOT a pass either
 #       way. scripts/verify.sh branches on 77 so that a skipped run cannot be
 #       printed as OK directly underneath this script saying it verified
-#       nothing, which is what it used to do.
+#       nothing.
 #
 # ---------------------------------------------------------------------------
 # Why this compiles directly with g++ instead of configuring CMake
@@ -374,9 +374,9 @@ build_config() {
     # the equivalent is to compile each and require a NON-ZERO exit: a successful
     # compile means the bound it pins has gone missing.
     #
-    # These used to sit in $SUITES, so the compile everyone expects to fail was read as
-    # a build failure and every configuration went red on every architecture. This gate
-    # had therefore never passed, which is worse than a gate nobody has watched fail --
+    # Listed in $SUITES, the compile everyone expects to fail would be read as a build
+    # failure and every configuration would go red on every architecture -- a gate that
+    # has never passed, which is worse than a gate nobody has watched fail --
     # a result that is always red carries no information at all.
     for s in $NOCOMPILE; do
         if g++ $BASE $WARN $extra "$SRC/tests/$s.cpp" -o "$dir/$s" \
@@ -510,9 +510,9 @@ fi
 
 # --- comparison against the native run ---------------------------------------
 #
-# Always reports its outcome. This block used to sit inside a test for the
-# reference's existence, so on a fresh clone -- where build-logs/ is gitignored
-# and absent -- the run printed PASS/PASS having compared nothing at all.
+# Always reports its outcome, and deliberately not from inside a test for the
+# reference's existence: on a fresh clone -- where build-logs/ is gitignored and
+# absent -- that would print PASS/PASS having compared nothing at all.
 STATUS_REF="PASS"
 SAME_ARCH=0
 echo "  comparing check counts against the native ($NATIVE) run"

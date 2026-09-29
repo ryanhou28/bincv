@@ -1,4 +1,4 @@
-// -- what an N-BIT pyramid level costs per LK window.
+// What an N-BIT pyramid level costs per LK window.
 //
 // WHY THIS MEASUREMENT IS A DELIVERABLE AND NOT AN AFTERTHOUGHT
 //
@@ -9,6 +9,8 @@
 // than its own quantization. The levels measured as needing 1/3/4/5 bits. So the
 // fix is N-bit levels, and choosing a bit depth per level is a choice that needs
 // a price. This file is the price.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // THE COST MODEL, WRITTEN OUT BEFORE MEASURING
 //
@@ -28,8 +30,7 @@
 // At N = 1 that is exactly countCovariance's four popcounts, which is the
 // arithmetic statement of "ternary is the N = 1 instance".
 //
-// THE RULE, WRITTEN BEFORE MEASURING (CLAUDE.md: "write the decision rule before
-// measuring"). **Nothing here chooses between two implementations** -- a product of
+// THE RULE, WRITTEN BEFORE MEASURING. **Nothing here chooses between two implementations** -- a product of
 // two N-bit values IS a sum over N^2 plane pairs, and anything linear in N computes
 // a different quantity. So the rule is a falsifiable prediction about the cost
 // curve rather than a selection between arms:
@@ -44,7 +45,7 @@
 // BAND C -- ratios ABOVE the prediction: something is quadratic that should not
 // be -- register spills out of the N^2 counters, or the per-row combine growing
 // with N. That CONTRADICTS the documented cost of the shipped kernel and
-// CLAUDE.md's rule applies: report it, do not adjust the doc to fit.
+// the rule for that case applies: report it, do not adjust the doc to fit.
 //
 // WHAT IS MEASURED
 //
@@ -73,14 +74,14 @@
 // "measured" where it would otherwise say "presumably".
 //
 // Both spellings are VIEW spellings, so no arm pays container plumbing the others
-// do not. Memory is reported beside the time, as CLAUDE.md requires: an N-bit level
+// do not. Memory is reported beside the time: an N-bit level
 // costs (N+1) bits per pixel per derivative against ternary's 2, and that is the
 // other half of the trade this is taking.
 //
 // THE WORKLOAD IS THE LK ONE: 200 keypoints (the reference pipeline's
-// gftt_max_corners), one window each, at 640x480, scattered so border windows clip
-// -- the same shape covariance_benchmark.cpp and use, so the numbers are
-// comparable across the three.
+// maximum corner count), one window each, at 640x480, scattered so border windows
+// clip -- the same shape covariance_benchmark.cpp uses, so the numbers are
+// comparable between the two.
 //
 // Validity: measure_util.hpp's protocol -- volatile sink, four rotating inputs,
 // calibrated batches, interleaved variants, spread reported next to the median. And

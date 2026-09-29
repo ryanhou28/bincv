@@ -19,13 +19,10 @@
 /// the drop-in promise.
 ///
 /// Nothing is restated here. `bincv::impl::extendedRowWord` -- the row-edge
-/// blend that keeps padding bits reading as the fill -- now carries
+/// blend that keeps padding bits reading as the fill -- carries
 /// `BINCV_HOST_DEVICE` too, so the kernel calls the host's own function and
-/// there is no second copy to sweep against. It was briefly restated as
-/// `impl::extendedRowWordDevice`; annotating the original deleted that copy
-/// and morphology's independent one together, and the suite's sweep became
-/// what it should always have been -- the host's function called ON THE
-/// DEVICE and compared against itself on the host.
+/// there is no second copy to sweep against: the suite's sweep is the host's
+/// function called ON THE DEVICE and compared against itself on the host.
 ///
 /// ---------------------------------------------------------------------------
 /// WHAT IS STRUCTURAL HERE, AND WHAT IS NOT
@@ -100,6 +97,9 @@ bool& shiftFunnelEnabled();
 /// so nothing here is promised drop-in. The extrapolation is
 /// `bincv::impl::borderIndex`, the shared host-and-device function that IS
 /// `cv::borderInterpolate`; the device arm calls it rather than restating it.
+/// Bit-exact against the host `bincv::shift` for every offset and border type
+/// swept, both arms, proven by test_cuda_pyramid; the four directional forms
+/// below are this function and inherit the proof.
 ///
 /// @param src Source view.
 /// @param dst Destination view, `src`'s dimensions, sharing no word with `src`.

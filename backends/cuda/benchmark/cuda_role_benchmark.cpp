@@ -3,7 +3,8 @@
 // Every device op in this backend whose job a cv::cuda call already does, timed
 // against that call on the same device, the same frames and the same process
 // run -- and every op whose job no cv::cuda call does, named here with its
-// verdict recorded OUTSTANDING rather than given a substitute bar.
+// result stated as "no GPU comparison is possible" rather than given a
+// substitute bar.
 //
 // WHY A SEPARATE BINARY FROM THE FAMILY BENCHMARKS. The family benchmarks each
 // carry their own role arms, and each was written against its own OpenCV
@@ -49,7 +50,7 @@
 //
 // WHAT IS NOT HERE. No op is given a bar it does not have. cuda::binarize,
 // cuda::shift and cuda::buildPyramidBox's own N-bit ladder have no cv::cuda
-// counterpart at any API level; each is listed in the OUTSTANDING section with
+// counterpart at any API level; each is listed in the no-counterpart section with
 // what it would take to price it. A CPU number is never quoted as a GPU bar.
 
 #include <algorithm>
@@ -75,8 +76,8 @@
 // walked into before being restructured this way.
 //
 // Compiled without that OpenCV the binary still runs and still says something
-// true: it reports every role bar as UNMEASURED and the verdicts that depend
-// on one as BLOCKED or OUTSTANDING, which is what the both-axes ship rule
+// true: it reports every role bar as UNMEASURED and the results that depend
+// on one as unmeasured or not possible, which is what shipping on both axes
 // requires. It does not substitute a bar and it does not fall silent.
 #if BINCV_CUDA_ROLE_OPENCV
 
@@ -221,7 +222,7 @@ std::vector<uint8_t> makeFrame(size_t w, size_t h) {
 // Machine-readable emission
 //
 // This binary is run at least seven times and its rows aggregated across
-// processes -- one run of a small kernel on this host is not a number, it is a
+// processes -- one run of a small kernel on the reference host is not a number, it is a
 // sample of a distribution whose spread reached 338% in a single run. Every
 // timed row therefore also prints a ROW line: a stable key, both arms' full
 // min/median/max, the per-round ratio's own min/median/max, and this run's
@@ -286,7 +287,8 @@ void emitFloor(const Timing& t) {
 //                                  that row is a ratio of two API call costs.
 //
 // This is the measurement that locates a gap a profiler would otherwise be
-// needed for, and no profiler runs on this host.
+// needed for, and the reference host (an RTX 3070 Ti reached through WSL2)
+// runs no profiler.
 // ---------------------------------------------------------------------------
 
 /// @brief Wall time the CALLING THREAD spends per enqueue, no synchronize.
@@ -463,8 +465,8 @@ void printMemPair(const char* what, const char* geom, size_t binBytes, size_t oc
                     "   so its rounding is a large fraction of the reading. Raise that\n"
                     "   side's replica count before quoting this pair.\n");
     } else {
-        // THE DIRECTION IS PRINTED, NOT ASSUMED. This helper used to say
-        // "binCV smaller by that factor" whatever the ratio was, which reads as
+        // THE DIRECTION IS PRINTED, NOT ASSUMED. A helper that says
+        // "binCV smaller by that factor" whatever the ratio is reads as
         // a claim rather than a reading on any row where OpenCV is the smaller
         // side -- and round 3 produced one (the census entry). The ratio is
         // still OpenCV/binCV everywhere so the rows stay comparable; only the
@@ -480,9 +482,9 @@ void printMemPair(const char* what, const char* geom, size_t binBytes, size_t oc
 }
 
 // ---------------------------------------------------------------------------
-// ROUND 3: the tracker state, on device and on the host, so section 14's role
-// row and section 16's sequence row are built from ONE definition of "what a
-// tracker holds". A second definition would let the two sections quietly
+// The tracker state, on device and on the host, so the LK role row and the
+// sequence row are built from ONE definition of "what a tracker holds". A
+// second definition would let the two sections quietly
 // measure two different working sets.
 // ---------------------------------------------------------------------------
 
@@ -1072,7 +1074,7 @@ int main(int argc, char** argv) {
     // ======================================================================
     // 3. medianWide -- cv::cuda::createMedianFilter (cudafilters)
     //    THE BAR THAT DID NOT EXIST. The median family shipped with its uint8
-    //    role verdict recorded OUTSTANDING because its own target linked no
+    //    role comparison unmeasured because its own target linked no
     //    cudafilters-capable OpenCV. This closes it.
     // ======================================================================
     if (want("median")) {
@@ -1453,7 +1455,7 @@ int main(int argc, char** argv) {
                     " depth, and a signed derivative of CV_8U needs CV_16S.\n"
                     " The chain is separable, so it is SEVERAL launches against binCV's\n"
                     " one, and the launch count is derived from the API's structure --\n"
-                    " no profiler runs on this host to count them directly.\n");
+                    " rather than counted with a profiler.\n");
 
         for (int g = 0; g < 2; ++g) {
             const size_t w = g == 0 ? kW : kW2, h = g == 0 ? kH : kH2;
@@ -1571,32 +1573,32 @@ int main(int argc, char** argv) {
     }
 
     // ======================================================================
-    // 6. The ops with NO cv::cuda counterpart -- ruling R2
+    // 6. The ops with NO cv::cuda counterpart
     // ======================================================================
     if (only.empty() || only == "outstanding") {
         std::printf("\n=====================================================================\n"
-                    " 6. NO BAR EXISTS -- verdict OUTSTANDING (owner ruling R2)\n"
+                    " 6. NO BAR EXISTS -- no GPU speed comparison is possible\n"
                     "=====================================================================\n"
-                    " These ops have NO cv::cuda counterpart at any API level. Under R2\n"
-                    " they ship on correctness + memory + the host comparison, with the\n"
-                    " GPU speed verdict recorded explicitly as OUTSTANDING against the\n"
-                    " resident pipeline that will later price them. No substitute bar is\n"
+                    " These ops have NO cv::cuda counterpart at any API level. They\n"
+                    " stand on correctness + memory + the host comparison, with no GPU\n"
+                    " speed comparison possible until a resident pipeline prices them.\n"
+                    " No substitute bar is\n"
                     " invented here and no CPU number is quoted as a GPU bar.\n"
                     "\n"
                     "   cuda::binarize     N-plane bit-sliced source -> bits. OpenCV has\n"
                     "                      no N-bit image type on host or device, so there\n"
                     "                      is nothing to compare the input side against.\n"
-                    "                      SPEED VERDICT: OUTSTANDING.\n"
+                    "                      SPEED: no GPU comparison possible.\n"
                     "   cuda::shift        integer translation of a packed bit plane. The\n"
                     "                      byte side's actual alternative is a pitched DMA\n"
                     "                      (cudaMemcpy2D), not a kernel -- timed below as\n"
                     "                      a reference, not as a bar, because binCV's one\n"
                     "                      funnel-shift instruction is being compared\n"
                     "                      against ZERO instructions on a copy engine.\n"
-                    "                      SPEED VERDICT: OUTSTANDING.\n"
+                    "                      SPEED: no GPU comparison possible.\n"
                     "   cuda::pyrDownBox   the N-bit rung itself (the LADDER has a role\n"
                     "                      bar above; the per-rung N-bit requantize does\n"
-                    "                      not). SPEED VERDICT: OUTSTANDING.\n");
+                    "                      not). SPEED: no GPU comparison possible.\n");
 
         bc::DeviceBinMat s(static_cast<int>(kW), static_cast<int>(kH));
         bc::DeviceBinMat d(static_cast<int>(kW), static_cast<int>(kH));
@@ -2007,7 +2009,7 @@ int main(int argc, char** argv) {
                     " on one side and N pipelined launches on the other. That is not a\n"
                     " kernel-to-kernel comparison, and the difference is not small.\n"
                     "\n"
-                    " WHICH NUMBER IS THE BAR. The explicit-stream one. CLAUDE.md says the\n"
+                    " WHICH NUMBER IS THE BAR. The explicit-stream one: the\n"
                     " bar is the BEST existing option, not the worst; a resident pipeline\n"
                     " uses streams, and OpenCV supports them on every call measured here.\n"
                     " Quoting the default-stream number would be measuring against a\n"
@@ -2416,7 +2418,7 @@ int main(int argc, char** argv) {
                     " THE SPEED BAR FOR THIS OP WAS NOT WRITABLE -- its author escalated\n"
                     " it rather than deriving a number from a host CPU ratio, and this\n"
                     " binary does not invent one either. The ratio is reported; the\n"
-                    " verdict is the owner's.\n");
+                    " decision to ship on it is not this binary's to make.\n");
 
         const bincv::GoodFeaturesParams gp{};
         const uint32_t poolCap = 65536;
@@ -2575,7 +2577,7 @@ int main(int argc, char** argv) {
                     " createMinEigenValCorner is the like-for-like counterpart and is the\n"
                     " bar. createHarrisCorner computes a DIFFERENT response (det - k*tr^2)\n"
                     " over the same covariance and is timed beside it as context -- the\n"
-                    " task named it, and the honest thing is to run it and say plainly\n"
+                    " comparison is often asked for, and the honest thing is to run it and say plainly\n"
                     " that it answers a different question, not to quietly substitute it\n"
                     " for the one that matches.\n"
                     " BOTH OpenCV arms read the CV_8U picture and internally run a Sobel;\n"
@@ -2731,7 +2733,7 @@ int main(int argc, char** argv) {
         std::printf("\n cv::cuda::Feature2DAsync::computeAsync on provided keypoints: %s\n",
                     computeAsyncWorks ? "ACCEPTED" : "REFUSED");
         if (!computeAsyncWorks) {
-            std::printf("   %s\n   ROLE BAR UNMEASURED -> verdict BLOCKED. No substitute.\n",
+            std::printf("   %s\n   ROLE BAR UNMEASURED in this build. No substitute.\n",
                         refusal.substr(0, 200).c_str());
         } else {
             std::printf("   %d keypoints in, %dx%d CV_8U descriptors out.\n", kpProvided.cols,
@@ -2759,7 +2761,7 @@ int main(int argc, char** argv) {
                          pd);
         }
 
-        std::printf("\n ORIENTATION: **OUTSTANDING** (ruling R2). cv::cuda::ORB runs\n"
+        std::printf("\n ORIENTATION: no GPU comparison is possible. cv::cuda::ORB runs\n"
                     " IC_Angle inside its own keypoint pass and exposes no entry point\n"
                     " that orients PROVIDED keypoints, so no cv::cuda denominator exists\n"
                     " at any API level. No CPU number is put in its place.\n");
@@ -2837,9 +2839,9 @@ int main(int argc, char** argv) {
                     "     cv::cuda::DescriptorMatcher::createBFMatcher(NORM_HAMMING)\n"
                     "=====================================================================\n"
                     " ROLE: 'nearest neighbour over binary descriptors with Lowe's ratio\n"
-                    " test, for a whole query set, on device'. A binCV device matcher\n"
-                    " EXISTS as of this round (cuda/sparseMatch.hpp), so the row this\n"
-                    " file used to print -- 'no binCV device counterpart' -- is retired.\n"
+                    " test, for a whole query set, on device'. The binCV device matcher\n"
+                    " is cuda/sparseMatch.hpp's, so this row compares two device matchers\n"
+                    " like for like.\n"
                     "\n"
                     " WHAT THE TIMED REGION IS, AND WHY IT FAVOURS OpenCV. binCV's arm\n"
                     " is ONE launch that produces the ratio-tested result. OpenCV's arm\n"
@@ -3026,9 +3028,9 @@ int main(int argc, char** argv) {
                     " 8 bits per pixel in and 24 out, and the layout that makes it fast\n"
                     " is the conventional one-word-per-pixel descriptor.\n"
                     "\n"
-                    " WHY RE-TAKEN. The packed census matcher was replaced this round by\n"
-                    " a warp-cooperative separable box arm, and the shipped report's\n"
-                    " census rows predate it. Three rows are printed: the matcher alone,\n"
+                    " THREE ROWS, because the packed census matcher's shipped arm is a\n"
+                    " warp-cooperative separable box with the per-pixel sliding arm\n"
+                    " behind a switch. Printed: the matcher alone,\n"
                     " the whole entry (two transforms plus the match, which is what a\n"
                     " caller pays), and the arm's own off-switch ratio inside THIS\n"
                     " protocol so the family's 2.4-2.5x is reproduced or contradicted\n"
@@ -3704,15 +3706,15 @@ int main(int argc, char** argv) {
     }
 
     // ======================================================================
-    // 17. OUTSTANDING -- every round-2 op with no cv::cuda bar at any level
+    // 17. The ops with no cv::cuda bar at any level -- no GPU comparison possible
     // ======================================================================
     if (want("outstanding")) {
         std::printf("\n=====================================================================\n"
-                    " 17. OUTSTANDING (ruling R2) -- round 2's ops with NO cv::cuda\n"
+                    " 17. NO GPU COMPARISON POSSIBLE -- the ops with NO cv::cuda\n"
                     "     counterpart at any API level\n"
                     "=====================================================================\n"
-                    " Each of these ships on correctness, memory and the HOST comparison,\n"
-                    " with its SPEED verdict recorded OUTSTANDING. No substitute bar is\n"
+                    " Each of these stands on correctness, memory and the HOST comparison,\n"
+                    " with no GPU speed comparison possible. No substitute bar is\n"
                     " invented and no CPU number is quoted as a GPU one.\n"
                     "\n"
                     " gradientCovarianceAsync / gradientCovarianceBatchAsync\n"
@@ -3758,22 +3760,22 @@ int main(int argc, char** argv) {
                     "     500 keypoints is a different operation, not a slower\n"
                     "     spelling of this one. Priced instead against binCV's OWN\n"
                     "     device dense path, which is a binCV-to-binCV bar and lives\n"
-                    "     in cuda_sparse_benchmark. SPEED VERDICT: OUTSTANDING.\n"
+                    "     in cuda_sparse_benchmark. SPEED: no GPU comparison possible.\n"
                     "\n"
                     " calcOpticalFlowBlockMatch\n"
                     "     Pyramidal tracking by integer Hamming block matching. The\n"
                     "     nearest cv::cuda call is SparsePyrLKOpticalFlow, which solves\n"
-                    "     a different equation -- and it is already section 14's bar\n"
+                    "     a different equation -- and it is already the LK role row's bar\n"
                     "     for the op that DOES solve the same one. Quoting it twice\n"
-                    "     would make one denominator answer two questions. SPEED\n"
-                    "     VERDICT: OUTSTANDING; the role row that exists is the\n"
+                    "     would make one denominator answer two questions. SPEED: no\n"
+                    "     GPU comparison possible; the role row that exists is the\n"
                     "     sparse family's own, stated as a role comparison there.\n"
                     "\n"
                     " matchDescriptorsGated\n"
                     "     Section 13 prices the UNGATED matcher, which is the one with\n"
                     "     a counterpart. The gate changes the ADMITTED SET, and\n"
                     "     cv::cuda::DescriptorMatcher has no mask that reproduces it,\n"
-                    "     so the gated form has no bar. SPEED VERDICT: OUTSTANDING.\n"
+                    "     so the gated form has no bar. SPEED: no GPU comparison possible.\n"
                     "\n"
                     " the RANSAC geometry stage\n"
                     "     NOT an outstanding row and must not be filed as one. OpenCV\n"
@@ -3783,6 +3785,8 @@ int main(int argc, char** argv) {
                     "     moves only scoring. binCV's own measurement came out the\n"
                     "     same way and the stage stays on the host. There is nothing\n"
                     "     here to ship and therefore nothing to leave outstanding.\n");
+        std::printf(" (machine-readable, one per line: OUTSTANDING,<op> means no cv::cuda\n"
+                    "  counterpart exists, so no comparison is possible)\n");
         std::printf("OUTSTANDING,covariance\nOUTSTANDING,cornerSubPixAsync\n"
                     "OUTSTANDING,gftt_device_spacing\nOUTSTANDING,keypointsFromCorners\n"
                     "OUTSTANDING,keypointOrientation\n"
@@ -3816,17 +3820,17 @@ int main() {
         " Configure with -DBINCV_CUDA_OPENCV_DIR=<install prefix of such a\n"
         " build> to enable it.\n"
         "\n"
-        " VERDICTS IN THIS CONFIGURATION, stated rather than left blank:\n"
-        "   cuda::threshold       role bar UNMEASURED -> BLOCKED on the\n"
-        "                         both-axes ship rule. A memory argument does\n"
-        "                         not carry an op past a missing role bar.\n"
+        " RESULTS IN THIS CONFIGURATION, stated rather than left blank:\n"
+        "   cuda::threshold       role bar UNMEASURED in this build, so it cannot\n"
+        "                         be shown to hold up on both axes. A memory\n"
+        "                         argument does not carry an op past a missing role bar.\n"
         "   cuda::erode/morphologyEx, cuda::medianWide, cuda::edgeThreshold,\n"
         "   cuda::buildPyramidBox, denseDisparityBinary\n"
-        "                         same: role bar UNMEASURED -> BLOCKED.\n"
+        "                         same: role bar UNMEASURED.\n"
         "   cuda::binarize, cuda::shift, cuda::pyrDownBox's N-bit rung\n"
         "                         no cv::cuda counterpart exists at any API\n"
-        "                         level, so these are OUTSTANDING under owner\n"
-        "                         ruling R2 whether or not OpenCV is present.\n"
+        "                         level, so no GPU comparison is possible for\n"
+        "                         them whether or not OpenCV is present.\n"
         "\n"
         " The binCV-against-binCV arms -- every off-switch ratio and every\n"
         " gate-excluded ~1.00x control -- live in the FAMILY benchmarks\n"

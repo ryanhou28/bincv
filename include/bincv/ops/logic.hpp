@@ -28,11 +28,11 @@
 /// and silently wrong the moment one argument is over-aligned (alignment is a
 /// per-object choice) or wraps a caller's buffer with its own stride.
 ///
-/// 3. **PADDING BITS STAY ZERO** (CLAUDE.md, hard rules). Every kernel here
+/// 3. **PADDING BITS STAY ZERO** (the library's hard rule). Every kernel here
 /// writes whole words, so the trailing partial word of each row carries bits
 /// past `width` that no pixel comparison can see -- and bitwiseNot SETS every
-/// one of them. They are masked off before the word is stored. Measured
-/// when it was measured: a word-wise NOT without the mask was bit-exact against
+/// one of them. They are masked off before the word is stored. Measured: a
+/// word-wise NOT without the mask was bit-exact against
 /// cv::bitwise_not on all 240 swept cases at uint64_t and left 826,200
 /// phantom set bits behind, which the next word-wise reduction counts as
 /// pixels. The mask is applied by all four operations, not only by NOT, so a
@@ -42,7 +42,7 @@
 /// 4. **No allocation, and no throw.** Mismatched dimensions,
 /// a stride too short to hold a row, and unsafe aliasing are programming
 /// errors, reported by BINCV_ASSERT in debug builds and undefined in release,
-/// exactly as at is.
+/// exactly as an out-of-range `at()` is.
 ///
 /// 5. **A DESTINATION IS WRITTEN A WHOLE WORD AT A TIME.** See the precondition
 /// section below -- it is the one thing about these kernels a caller can get
@@ -87,8 +87,8 @@
 ///
 /// "No shared word at all" is checked EXACTLY, per row, and not by comparing the
 /// two views' bounding spans. Two views over one buffer can interleave without
-/// sharing a byte -- alternate row bands (the shape a pyramid downsample takes,
-/// takes) and left/right column tiles both do -- and a bounding-box
+/// sharing a byte -- alternate row bands (the shape a pyramid downsample takes)
+/// and left/right column tiles both do -- and a bounding-box
 /// test rejects every one of them. A kernel takes any
 /// {ptr, width, height, stride}; rejecting a legal view in debug and accepting it
 /// in release is the worst of both.
@@ -109,8 +109,7 @@
 #include "../core/view.hpp"
 // impl::rowTailMask, impl::strideCoversARow and impl::destinationAliasIsSafe --
 // the row-geometry and aliasing vocabulary shared with every other kernel
-// under ops/. They lived in this file until needed the same three, at which
-// point one copy became the only way the aliasing rule cannot drift.
+// under ops/. One shared copy is the only way the aliasing rule cannot drift.
 #include "../impl/kernel_util.hpp"
 // QuantMat<N> and BinMat, for the per-plane overloads at the bottom of this file
 // -- which are the ONLY reason a kernel header names a container. It also carries
@@ -130,8 +129,8 @@ namespace impl {
 // `int` for uint8_t and uint16_t, so storing the result back into a WordType is a
 // narrowing conversion -- which is exactly what -Wconversion reports, and what
 // makes a deliberate truncation indistinguishable from an accidental one unless
-// it is written down (CLAUDE.md: "a cast is where a reader is told the truncation
-// is intended").
+// it is written down (a cast is where a reader is told the truncation is
+// intended).
 struct BitAnd {
     template <typename WordType>
     static WordType apply(WordType a, WordType b) { return static_cast<WordType>(a & b); }
@@ -279,7 +278,7 @@ inline void applyUnary(BinMatConstView<WordType> src, BinMatView<WordType> dst) 
 /// dimensions, a stride shorter than a row, and overlapping-but-not-
 /// identical views are programming errors: BINCV_ASSERT reports them in
 /// debug builds, and they are undefined in release, exactly as an
-/// out-of-range at is.
+/// out-of-range `at()` is.
 template <typename WordType>
 inline void bitwiseAnd(BinMatConstView<WordType> a, BinMatConstView<WordType> b,
                        BinMatView<WordType> dst) {
@@ -329,7 +328,8 @@ inline void bitwiseNot(BinMatConstView<WordType> src, BinMatView<WordType> dst) 
 // operations apply per plane and are free -- so these are a loop over plane
 // and nothing else. They are convenience wrappers over the kernels above, NOT
 // kernels themselves -- which is why taking a container here does not contradict
-// the compiled inner loop is still the view kernel, and a caller who holds
+// the views-not-containers rule: the compiled inner loop is still the view
+// kernel, and a caller who holds
 // views rather than containers never reaches this overload.
 //
 // N == 1 comes here too: BinMat IS QuantMat<1> (core/types.hpp), so

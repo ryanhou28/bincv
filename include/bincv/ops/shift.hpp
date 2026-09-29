@@ -3,10 +3,10 @@
 /// @file shift.hpp
 /// @brief Horizontal and vertical shifts with OpenCV border semantics.
 ///
-/// The primitive morphology and the binarized derivative are both
-/// built out of, and the easiest operation in the project to get subtly wrong.
-/// Nothing here is clever; the value
-/// is in the edge cases being enumerated rather than discovered later.
+/// The primitive that morphology and the binarized derivative are both built out
+/// of, and the easiest operation in the project to get subtly wrong. Nothing here
+/// is clever; the value is in the edge cases being enumerated rather than
+/// discovered later.
 ///
 /// ---------------------------------------------------------------------------
 /// THE BIT CONVENTION, AND WHAT "LEFT" MEANS
@@ -15,10 +15,10 @@
 /// (impl::bitMask). So a column index INCREASES with bit significance, and moving
 /// the image LEFT -- towards lower column indices -- is a RIGHT shift of the word:
 ///
-/// shiftLeft (src, dst, k): dst[r][c] = src[r][c + k] words shift >> k
-/// shiftRight(src, dst, k): dst[r][c] = src[r][c - k] words shift << k
-/// shiftUp (src, dst, k): dst[r][c] = src[r + k][c] row offset, no bit work
-/// shiftDown (src, dst, k): dst[r][c] = src[r - k][c] row offset, no bit work
+///     shiftLeft (src, dst, k):   dst[r][c] = src[r][c + k]   words shift >> k
+///     shiftRight(src, dst, k):   dst[r][c] = src[r][c - k]   words shift << k
+///     shiftUp   (src, dst, k):   dst[r][c] = src[r + k][c]   row offset, no bit work
+///     shiftDown (src, dst, k):   dst[r][c] = src[r - k][c]   row offset, no bit work
 ///
 /// The derivative's rising edge is written both as `(src >> 1) & ~(src << 1)`
 /// and as `shiftLeft(src, 1) & ~shiftRight(src, 1)`. Both spellings must mean one
@@ -27,9 +27,9 @@
 /// The word recurrence for shiftLeft, with `wordShift = k / WordBits` and
 /// `bitShift = k % WordBits`:
 ///
-/// bitShift == 0: dst[i] = src[i + wordShift]
-/// otherwise: dst[i] = (src[i + wordShift] >> bitShift)
-/// | (src[i + wordShift + 1] << (WordBits - bitShift))
+///     bitShift == 0:   dst[i] = src[i + wordShift]
+///     otherwise:       dst[i] = (src[i + wordShift] >> bitShift)
+///                             | (src[i + wordShift + 1] << (WordBits - bitShift))
 ///
 /// **`bitShift == 0` IS A SEPARATE BRANCH BECAUSE `x << WordBits` IS UNDEFINED
 /// BEHAVIOR.** Not merely wrong -- undefined, and on x86 the natural encoding
@@ -38,9 +38,8 @@
 /// by exactly one word. tests/test_shift.cpp sweeps k from 0 through 2*WordBits+1
 /// at every word width, which covers 0, WordBits and 2*WordBits by construction,
 /// and the suite is additionally built and run under -fsanitize=undefined so that
-/// a shift-exponent violation is a diagnostic rather than a difference of opinion
-/// (the two commands are in GETTING_STARTED, "Sanitizers"). That was watched
-/// failing, not assumed: with the branch below removed, UBSan reports
+/// a shift-exponent violation is a diagnostic rather than a difference of opinion.
+/// That was watched failing, not assumed: with the branch below removed, UBSan reports
 /// `shift exponent 32 is too large for 32-bit type` and 1008 checks go red.
 ///
 /// ---------------------------------------------------------------------------
@@ -65,13 +64,13 @@
 /// ---------------------------------------------------------------------------
 /// THE FILL IS A PARAMETER, NOT A POLICY -- BECAUSE ERODE AND DILATE DISAGREE
 ///
-/// builds dilate as an OR of shifted copies and erode as an AND of
-/// shifted copies. Those two want OPPOSITE fills, and no single choice serves both:
+/// ops/morphology.hpp builds dilate as an OR of shifted copies and erode as an AND
+/// of shifted copies. Those two want OPPOSITE fills, and no single choice serves both:
 ///
-/// dilate = OR of shifts -- a pixel outside the image must contribute NOTHING
-/// to an OR, so everything outside must read 0.
-/// erode = AND of shifts -- a pixel outside the image must contribute NOTHING
-/// to an AND, so everything outside must read 1.
+///     dilate = OR  of shifts -- a pixel outside the image must contribute NOTHING
+///                               to an OR, so everything outside must read 0.
+///     erode  = AND of shifts -- a pixel outside the image must contribute NOTHING
+///                               to an AND, so everything outside must read 1.
 ///
 /// With the wrong one, erode eats a `k`-wide band off every edge of a full frame
 /// and dilate grows one. OpenCV reaches the same conclusion and encodes it the
@@ -85,9 +84,9 @@
 /// defaulting to BORDER_CONSTANT / false -- the plain zero fill the bare
 /// three-argument call specifies, and what the derivative wants.
 ///
-/// dilate step: shift(src, dst, dx, dy, BORDER_CONSTANT, false)
-/// erode step: shift(src, dst, dx, dy, BORDER_CONSTANT, true)
-/// OpenCV-exact non-constant borders: pass the BorderType through unchanged.
+///     dilate step:   shift(src, dst, dx, dy, BORDER_CONSTANT, false)
+///     erode step:    shift(src, dst, dx, dy, BORDER_CONSTANT, true)
+///     OpenCV-exact non-constant borders: pass the BorderType through unchanged.
 ///
 /// ---------------------------------------------------------------------------
 /// BORDER SEMANTICS ARE OPENCV'S, EXACTLY
@@ -143,8 +142,8 @@
 /// that would make one unnecessary.
 ///
 /// So: exactly one supported relationship, checked per row rather than by bounding
-/// box ( -- interleaved row bands and left/right column tiles share a buffer
-/// without sharing a byte, and rejecting them would reject a pyramid downsample).
+/// box (interleaved row bands and left/right column tiles share a buffer without
+/// sharing a byte, and rejecting them would reject a pyramid downsample).
 /// Callers wanting in-place semantics own a destination and swap.
 ///
 /// Empty views (width or height 0) are a no-op, not an error.
@@ -290,8 +289,8 @@ inline void fillRowWords(WordType* dstRow, size_t rowWords, WordType value, Word
 /// word operation, and the source's own bit alignment never has to match the
 /// destination's.
 /// @note Deliberately NOT split into a bounds-check-free interior loop and two
-/// edge loops. That is the obvious optimization and it is a vector rewrite's business
-/// (: "correct scalar first"); the branch inside
+/// edge loops. That is the obvious optimization and it is a vector rewrite's
+/// business; the branch inside
 /// extendedRowWord is perfectly predictable and the alternative doubles the
 /// number of index expressions that can be off by one.
 template <typename WordType>
@@ -371,7 +370,7 @@ inline void shiftRowHorizontal(const WordType* srcRow, WordType* dstRow, size_t 
 /// WRAP each map a different out-of-range column to a different source
 /// column, so there is no word-wide answer -- but there are at most
 /// min(|dx|, width) such columns at one edge, and |dx| is a structuring
-/// element's radius in every caller the MVP has. The bulk of the row stays
+/// element's radius in every caller in this library. The bulk of the row stays
 /// word-parallel.
 /// @note Writes only columns < width, so it cannot dirty a padding bit.
 template <typename WordType>
@@ -452,7 +451,7 @@ inline void fixupHorizontalBorder(const WordType* srcRow, WordType* dstRow, size
 /// dimensions, a stride shorter than a row, an unknown BorderType, an
 /// absurd offset, and any overlap between src and dst are programming
 /// errors: BINCV_ASSERT reports them in debug builds and they are undefined
-/// in release, exactly as an out-of-range at is.
+/// in release, exactly as an out-of-range `at()` is.
 template <typename WordType>
 inline void shift(BinMatConstView<WordType> src, BinMatView<WordType> dst, ptrdiff_t dx,
                   ptrdiff_t dy, BorderType borderType = BORDER_CONSTANT,

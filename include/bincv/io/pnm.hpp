@@ -6,7 +6,7 @@
 /// ---------------------------------------------------------------------------
 /// binCV LINKS NO CODEC, ON ANY TARGET
 ///
-/// Not austerity for small parts. Every tier's real frame source already **is** the
+/// Not austerity for small parts. Every target's real frame source already **is** the
 /// input contract: a capture SDK's buffer, a camera's YUV420 Y plane, a V4L2 buffer
 /// and a sensor's DMA rows are all single-channel strided integer arrays, which is
 /// why `packBits` and `packRows` take a stride — so they pack with no conversion at
@@ -27,7 +27,8 @@
 /// of the matrix. `P5` stores one **byte** per pixel: a 752x480 frame is 45,120 bytes
 /// packed and 360,960 unpacked, so reading or writing it as `P5` moves a buffer eight
 /// times larger than the image it represents — on the target where buffers are
-/// scarcest. Reach for `readPbm`/`writePbm` unless grey levels are the point.
+/// scarcest. Reach for `readPbm`/`writePbm` (the writers live in ops/pack.hpp, beside
+/// the packers) unless grey levels are the point.
 ///
 /// The two differ only in bit order: binCV puts pixel `x` at bit `x % WordBits`, least
 /// significant first, and `P4` puts a row's leftmost pixel at the most significant bit
@@ -57,7 +58,7 @@
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
-/// @brief What a `readPgm` call found, or why it did not.
+/// @brief What a `readPgm` call found, or why it did not. **API TIER 3.**
 struct PgmHeader {
     size_t width = 0;
     size_t height = 0;
@@ -67,7 +68,7 @@ struct PgmHeader {
     bool valid = false;
 };
 
-/// @brief What a `readPbm` call found, or why it did not.
+/// @brief What a `readPbm` call found, or why it did not. **API TIER 3.**
 /// @note No `maxValue`: `P4` pixels are bits, so the format has no such line.
 struct PbmHeader {
     size_t width = 0;
@@ -91,6 +92,8 @@ inline size_t pnmSkip(const uint8_t* d, size_t n, size_t i) {
     }
 }
 
+/// @brief Parses an unsigned decimal at `i` into `out`; returns the index after it,
+/// or `n + 1` when no digit is there. **INTERNAL.**
 inline size_t pnmNumber(const uint8_t* d, size_t n, size_t i, size_t& out) {
     out = 0;
     size_t digits = 0;
@@ -275,7 +278,7 @@ inline bool readPgm(const uint8_t* data, size_t size, BinMatView<WordType> dst,
 /// the file is the size of the matrix, so unlike `readPgm` there is no wide
 /// intermediate at any point, and no whole-frame buffer to find.
 /// @note **`P4` sets a bit for BLACK**, which is the format's convention and the
-/// opposite of `writePgm`'s default mapping of a set bit to white. `writePbm` and
+/// opposite of `writePgm`'s (ops/pack.hpp) default mapping of a set bit to white. `writePbm` and
 /// this agree with each other, so a round trip is exact; a viewer simply shows set
 /// pixels dark. Pass `onValue = 0, zeroValue = 255` to `writePgm` if the two need
 /// to look alike.

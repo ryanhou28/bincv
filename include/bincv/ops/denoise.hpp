@@ -4,15 +4,14 @@
 /// @brief The reference pipeline's three-pixel median filter.
 /// **API TIER 3** -- see the tier note below.
 ///
-/// The first VIO frontend operation in the project. Everything under ops/ before
-/// this file is a primitive; this is the first kernel a real pipeline calls by
-/// name, and it is defined by what the reference implementation does rather than
-/// by what OpenCV offers.
+/// A kernel defined by what the reference pipeline (the visual-inertial odometry
+/// system, not in this repository, that binCV was built to serve stage by stage;
+/// see docs/ARCHITECTURE.md) does rather than by what OpenCV offers.
 ///
 /// ---------------------------------------------------------------------------
 /// THE NEIGHBOURHOOD, READ OUT OF THE REFERENCE RATHER THAN INFERRED
 ///
-/// the reference pipeline's denoiser, three_pix_median_filter:
+/// The reference pipeline's denoiser, in its own OpenCV spelling:
 ///
 /// cv::Mat right_pixels = cv::Mat::zeros(img.size, img.type);
 /// cv::Mat above_pixels = cv::Mat::zeros(img.size, img.type);
@@ -94,9 +93,9 @@
 /// Both spellings compute the same image. They differ in what they cost:
 ///
 /// composed 3 passes over the frame, and TWO FRAME-SIZED SCRATCH BUFFERS
-/// the caller has to own -- "no heap allocation inside kernels"
-/// (CLAUDE.md) means a kernel cannot conjure them, so they become
-/// part of the pipeline's peak working set. At 640x480 uint32_t
+/// the caller has to own -- a kernel does not allocate, so it cannot
+/// conjure them, and they become part of the pipeline's peak working
+/// set. At 640x480 uint32_t
 /// that is 2 x 38400 B added to a 38400 B frame: 3x the footprint
 /// of the operation.
 /// fused 1 pass, NO scratch at all. The above-neighbour is a row index
@@ -105,8 +104,7 @@
 /// one bit down, computed inline into a register.
 ///
 /// Memory and speed do not conflict here -- the fused form is smaller AND makes
-/// one traversal instead of three -- so no experiment is needed to choose
-/// (CLAUDE.md, "How performance and footprint decisions get made"). It is
+/// one traversal instead of three -- so no experiment is needed to choose. It is
 /// measured rather than asserted all the same: benchmark/denoise_benchmark.cpp
 /// reports both spellings against the OpenCV denominator, with the scratch
 /// footprint alongside, and that is the evidence for this paragraph.
@@ -219,21 +217,19 @@ inline void medianRow3(const WordType* above, const WordType* cur, WordType* dst
     // brings a zero into pixel width - 1 whatever the source's padding held, and
     // there is no next word to take a bit from.
     //
-    // THE STORE IS NOT MASKED AGAIN, AND THAT IS MEASURED RATHER THAN ASSUMED.
-    // Masking `c` puts zeros in every bit past `width` of BOTH `c` and `r`, and
-    // majority needs two of three: maj3(anything, 0, 0) == 0, and `c & r` == 0.
-    // So the destination's padding is already zero when it is stored, whatever
-    // the ABOVE row's padding holds -- and a second `& tailMask` here would be an
-    // operation no test can observe. Measured: the store WAS masked when this
-    // kernel was written, and adding that mask back changes nothing -- 9744 of
-    // 9744 checks pass either way, in every configuration. Deleting the mask on
-    // `c` above fails 1215 of the same 9744.
+    // THE STORE IS NOT MASKED AGAIN. Masking `c` puts zeros in every bit past
+    // `width` of BOTH `c` and `r`, and majority needs two of three:
+    // maj3(anything, 0, 0) == 0, and `c & r` == 0. So the destination's padding
+    // is already zero when it is stored, whatever the ABOVE row's padding holds,
+    // and a second `& tailMask` here is an operation no test can observe:
+    // tests/test_denoise.cpp passes with or without it, and fails if the mask on
+    // `c` is removed instead.
     //
     // The coupling that creates is stated so it cannot be broken silently: in
-    // this kernel the padding invariant (CLAUDE.md) is carried by the mask
-    // on `c`, which is there for a BORDER reason -- the last column's right
-    // neighbour must read 0. Anything that changes this filter's border must
-    // re-establish the invariant explicitly rather than assume it survived.
+    // this kernel the padding invariant is carried by the mask on `c`, which is
+    // there for a BORDER reason -- the last column's right neighbour must read
+    // 0. Anything that changes this filter's border must re-establish the
+    // invariant explicitly rather than assume it survived.
     const WordType c = static_cast<WordType>(cur[words - 1] & tailMask);
     const WordType r = static_cast<WordType>(c >> 1);
     dst[words - 1] = HasAbove ? maj3<WordType>(above[words - 1], c, r)
@@ -249,7 +245,7 @@ inline void medianRow3(const WordType* above, const WordType* cur, WordType* dst
 /// @brief dst[y][x] = median(src[y-1][x], src[y][x], src[y][x+1]), with the
 /// out-of-image neighbours reading 0. **API TIER 3.**
 ///
-/// The reference pipeline's `three_pix_median_filter`, bit-parallel: for binary
+/// The reference pipeline's three-pixel median, bit-parallel: for binary
 /// pixels the median of three IS their majority, so each word
 /// of the destination costs one `maj3` over 8..64 pixels.
 ///
@@ -259,7 +255,7 @@ inline void medianRow3(const WordType* above, const WordType* cur, WordType* dst
 /// section at the top of this file.
 ///
 /// @note THE NEIGHBOURHOOD IS ASYMMETRIC AND THAT IS NOT A BUG: above, self, and
-/// right. It is read directly out of the reference implementation, quoted
+/// right. It is read directly out of the reference pipeline's code, quoted
 /// at the top of this file, and there is no left or below neighbour.
 /// @note THE BORDER IS ZERO FILL, matching the reference's two `cv::Mat::zeros`
 /// neighbour matrices: row 0's above-neighbour is 0 and column
@@ -285,8 +281,8 @@ inline void medianRow3(const WordType* above, const WordType* cur, WordType* dst
 /// @note There is deliberately no QuantMat<N> overload, for ops/bitslice.hpp's
 /// reason: bit 3 of a median is not the median of three bit 3s, so a
 /// per-plane loop would compile, run, and be wrong. The N-bit median is a
-/// sorting network over bit-sliced values and nothing in the MVP asks for
-/// one -- the reference filters the BINARY frame.
+/// sorting network over bit-sliced values and nothing in the pipeline asks
+/// for one -- the reference filters the BINARY frame.
 template <typename WordType>
 inline void denoiseMedian3(BinMatConstView<WordType> src, BinMatView<WordType> dst) {
     BINCV_ASSERT(src.width == dst.width && src.height == dst.height,

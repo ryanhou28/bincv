@@ -33,7 +33,10 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 namespace cuda {
 
-/// @brief Host bit matrix to device bit matrix. Any host word width.
+/// @brief Host bit matrix to device bit matrix. Any host word width. **API TIER
+/// 3** (transfer, no kernel) -- as are the three below; a round trip through
+/// them is byte-identical at every host word width, proven by
+/// test_cuda_backend.
 /// @return The copy call's error code; cudaSuccess on the happy path.
 template <typename WordType>
 inline cudaError_t upload(BinMatConstView<WordType> src, DeviceBinMatView dst,

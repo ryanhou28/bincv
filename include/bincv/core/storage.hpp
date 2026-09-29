@@ -14,6 +14,8 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief Backing memory for a bit-packed matrix: {pointer, word count, ownership}.
+/// **API TIER 3** -- binCV's own backing store; `cv::Mat`'s allocator has no
+/// separable counterpart.
 /// @tparam WordType_ The unsigned integral type the buffer is measured in.
 ///
 /// @note Storage is where allocation lives. Kernels take views (core/view.hpp),
@@ -23,7 +25,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// rather than a std::vector member:
 /// - owning: a heap allocation this object created and will free
 /// - non-owning: a caller-provided buffer (static, stack, DMA, sensor),
-/// which is the Tier 2 / no-heap path and never allocates
+/// which is the no-heap path for embedded targets and never allocates
 /// @note Value semantics: copying an owning Storage deep-copies. There is
 /// no reference counting -- sharing is expressed by taking a view. Copying
 /// a non-owning Storage yields a non-owning Storage over the same memory;
@@ -38,7 +40,7 @@ class Storage {
                   "WordType must be an unsigned integral type, and not bool or char");
     // bool would make WordBits a lie (sizeof is 1 but only one bit is usable), and
     // plain char is unsigned on some targets and signed on others -- accepting it
-    // would make the supported type set differ between the project's two tiers.
+    // would make the supported type set differ between targets.
     static_assert(sizeof(WordType_) == 1 || sizeof(WordType_) == 2 ||
                       sizeof(WordType_) == 4 || sizeof(WordType_) == 8,
                   "WordType must be 8, 16, 32, or 64 bits wide");
@@ -75,7 +77,7 @@ public:
     /// @brief Wraps caller-provided memory without taking ownership of it.
     /// @param ptr First word of the caller's buffer. Must outlive this object.
     /// @param words Number of words available at `ptr`.
-    /// @note Performs no allocation at all -- this is the Tier 2 path.
+    /// @note Performs no allocation at all -- this is the no-heap path.
     /// @note The buffer is used as-is; nothing is zeroed, since the caller may
     /// be wrapping data it has already filled in.
     /// @note A degenerate wrap -- a null pointer, or zero words -- normalizes to
@@ -230,10 +232,8 @@ private:
     /// pointer, which is precisely the bug the warning exists to catch.
     /// Freeing last removes the question instead of answering it, and costs
     /// nothing -- the two orders are otherwise indistinguishable.
-    /// @note Found by scripts/verify_cross.sh: its container ships GCC 12, where
-    /// -Wall enables this warning. GCC 11 -- the desktop compiler this
-    /// project has been developed against -- does not have it at all, so
-    /// "builds warning-free" was true of one compiler and not of the next.
+    /// @note GCC 12's -Wall enables that warning and GCC 11 does not have it at
+    /// all, so this order is what keeps the build warning-free on both.
     void adoptThenFree(WordType* newPtr, size_t newWords, bool newOwns) {
         WordType* const stale = owns_ ? ptr_ : nullptr;
         ptr_ = newPtr;

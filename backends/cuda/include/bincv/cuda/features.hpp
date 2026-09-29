@@ -364,6 +364,8 @@ inline constexpr size_t kDeviceMaxKeypoints = 0xFFFFFFFFu;
 // ---------------------------------------------------------------------------
 
 /// @brief Converts a downloaded device result set to the host library's type.
+/// **API TIER 3** (host-side helper, no kernel), as are the checked factories
+/// below.
 /// @note The batched spelling, because that is the only spelling the families
 /// produce. Both halves are HOST memory: the device-to-host move is
 /// `downloadAppended` (compaction.hpp), and this is the type change after

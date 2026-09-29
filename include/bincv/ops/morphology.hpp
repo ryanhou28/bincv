@@ -20,23 +20,21 @@
 /// the same offset sign for BOTH operations, because OpenCV does not flip the
 /// kernel (its `dst(x,y) = max/min over element of src(x + x', y + y')`).
 ///
-/// **The two fills are opposite and that is **, measured rather than
+/// **The two fills are opposite and that is load-bearing**, measured rather than
 /// argued: a pixel outside the image must contribute nothing, and "nothing" is 0
 /// to an OR and 1 to an AND. One fixed fill makes one of the two wrong at every
-/// edge -- flipping erode's fill to `false` dropped the composition suite that
-/// preceded this file from 12960/12960 to 11056/12960. OpenCV encodes the same
+/// edge: flipping `erode`'s default fill to `false` fails 28862 of
+/// `tests/test_morphology.cpp`'s 298541 checks. OpenCV encodes the same
 /// asymmetry through `morphologyDefaultBorderValue`, which resolves to the
 /// depth's maximum for erosion and its minimum for dilation, and
 /// `tests/test_shift.cpp` (`Shift.MorphologyFillPremise`) pins that claim
 /// against the real `cv::erode` / `cv::dilate` rather than citing it.
-/// Re-measured against THIS file: flipping `erode`'s default fill back to `false`
-/// fails 28862 of `tests/test_morphology.cpp`'s 298541 checks.
 ///
 /// **What this file actually runs is the FUSED form of that composition**, for
 /// one reason: the composed spelling needs a frame-sized temporary between the
-/// shift and the combine, and CLAUDE.md forbids a kernel allocating one. A
-/// caller-provided scratch buffer for `erode` would put a frame of memory on
-/// every call site in the MVP's hot path, and memory is co-equal with speed here.
+/// shift and the combine, and a kernel may not allocate one. A caller-provided
+/// scratch buffer for `erode` would put a frame of memory on every call site on
+/// the frontend's hot path, and memory is co-equal with speed here.
 /// So the accumulation happens IN THE DESTINATION ROW, word by word: for each
 /// destination row the row is set to the combining operation's identity and each
 /// element cell's shifted source word is folded into it. One pass, zero scratch,
@@ -77,7 +75,7 @@
 /// PRECONDITION ON `dst`, IDENTICAL TO ops/logic.hpp's AND ops/shift.hpp's: it
 /// must span its image's full width, or end on a word boundary
 /// (`width % WordBits == 0`). Every destination row's trailing partial word is
-/// stored masked -- that is CLAUDE.md's padding-bits-stay-zero rule, and it is
+/// stored masked -- that is the padding-bits-stay-zero rule, and it is
 /// what `morphApply` does after each row -- which writes zeros into bits
 /// [width, rowWords * WordBits). Those are padding in the usual case, and a WIDER
 /// image's next 1..WordBits-1 live pixels when `dst` is a sub-width window onto
@@ -121,9 +119,10 @@
 ///
 /// `iterations`. `cv::erode(..., iterations = n)` is `n` sequential erosions, and
 /// n > 1 needs a second buffer to ping-pong through. A caller that wants it can
-/// write the loop with the scratch it already owns, and the MVP's pipeline does
-/// not (the reference pipeline uses single-pass 3x3 morphology). Adding a parameter that silently
-/// requires more memory than the signature shows would be the wrong default for
+/// write the loop with the scratch it already owns, and the reference pipeline
+/// (the visual-inertial odometry system, not in this repository, that binCV was
+/// built to serve stage by stage; see docs/ARCHITECTURE.md) does not: it uses
+/// single-pass 3x3 morphology. Adding a parameter that silently requires more memory than the signature shows would be the wrong default for
 /// this project.
 ///
 /// A custom `borderValue` on `morphologyEx`. Each step uses the morphological
@@ -156,6 +155,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 // ---------------------------------------------------------------------------
 
 /// @brief A morphological structuring element: a shape, an extent and an anchor.
+/// **API TIER 1** -- `cv::getStructuringElement`'s shapes, cell for cell.
 ///
 /// @note **Mirrors `cv::getStructuringElement` exactly**, including the parts of
 /// it that are surprising, because Tier 1 means the two must agree cell for
@@ -165,7 +165,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// - `MORPH_ELLIPSE` at 3x3 is a PLUS, not a filled square. OpenCV's
 /// half-axis is `rows/2` and `cols/2`, so at 3x3 the row offsets +/-1
 /// admit only the center column.
-/// - `MORPH_CROSS` is centerd on the ANCHOR, not on the element. That is
+/// - `MORPH_CROSS` is centered on the ANCHOR, not on the element. That is
 /// `getStructuringElement`'s behavior and it is why the anchor is a
 /// field here rather than a separate argument.
 /// - A 1x1 element is a filled 1x1 whatever the shape says.
@@ -249,7 +249,7 @@ struct StructuringElement {
     /// @brief The half-open column range `[first, last)` of row `row` that MAY be
     /// set: exact for the parametric shapes, `[0, cols)` for a mask.
     /// @note Every parametric shape's row is one CONTIGUOUS run -- rect is the
-    /// whole row, ellipse is a centerd run, and cross is either the whole
+    /// whole row, ellipse is a centered run, and cross is either the whole
     /// row (the anchor row) or the single anchor column. That is what lets
     /// the kernels hoist the ellipse's `sqrt` out of the pixel loop and
     /// skip the empty part of a cross's rows entirely, without storing a
@@ -325,9 +325,11 @@ struct StructuringElement {
     }
 };
 
-/// @brief The 3x3 rectangle -- `cv::Mat` passed to `cv::erode`, i.e. its default.
+/// @brief The 3x3 rectangle -- `cv::Mat()` passed to `cv::erode`, i.e. its default.
+/// **API TIER 1.**
 inline StructuringElement rect3x3() { return StructuringElement::rect(3, 3); }
 /// @brief The 3x3 plus -- what BOTH `MORPH_CROSS` and `MORPH_ELLIPSE` give at 3x3.
+/// **API TIER 1.**
 inline StructuringElement cross3x3() { return StructuringElement::cross(3, 3); }
 
 namespace impl {
@@ -630,19 +632,17 @@ inline void morphRowGeneric(BinMatConstView<WordType> src, WordType* dstRow, siz
 
 /// @brief One destination row, 3x3 element anchored at its center.
 ///
-/// @note THE SPECIAL CASE ASKS FOR, and it is a special case of the loop
-/// above rather than a different algorithm: the offsets are known to be
+/// @note THE 3x3 SPECIAL CASE. It is a special case of the loop above rather than
+/// a different algorithm: the offsets are known to be
 /// {-1, 0, +1} in both axes, so the horizontal recurrence collapses to two
 /// one-bit shifts with a carry from the neighbouring word, and the three
 /// source words a destination word needs slide along the row instead of
 /// being fetched per offset.
-/// @note WHAT IT ACTUALLY REMOVES, since the reason first written here was wrong.
-/// That reason was "one `extendedRowWord` per word per element row where the
-/// general path pays two per SET CELL"; morphRowGeneric's window branch
-/// hoists `extendedRowWord` per WORD too, for any element whose row reaches
-/// less than a word sideways -- which every 3x3 element does -- so the load
-/// counts are the same and the claim described a path neither one takes.
-/// What this kernel removes is the inner loop over element cells, the
+/// @note WHAT IT REMOVES. Not loads: morphRowGeneric's window branch already
+/// hoists `extendedRowWord` per WORD for any element whose row reaches less
+/// than a word sideways -- which every 3x3 element does -- so the load counts
+/// are the same on both paths. What this kernel removes is the inner loop over
+/// element cells, the
 /// data-dependent shift count each iteration computes, and the per-row span
 /// queries: three cells become three predictable branches on values hoisted
 /// to the whole call, and `<< 1` / `>> 1` become constants.
@@ -769,7 +769,7 @@ inline void morphApply(BinMatConstView<WordType> src, BinMatView<WordType> dst,
             morphRowGeneric<IsErode>(src, dstRow, y, se, borderType, constantFill, horizontalFill);
         }
 
-        // CLAUDE.md's hard rule: whatever the fold's identity was, the bits past
+        // The padding rule: whatever the fold's identity was, the bits past
         // `width` are zero on return.
         dstRow[rowWords - 1] = static_cast<WordType>(dstRow[rowWords - 1] & tailMask);
 
@@ -849,9 +849,9 @@ inline void erode(BinMatConstView<WordType> src, BinMatView<WordType> dst,
 /// @brief Morphological dilation: `dst(x,y) = OR over the element of src(x+dx, y+dy)`.
 /// **API TIER 1** -- bit-exact against `cv::dilate`.
 /// @param borderValue Defaults to `false`, which is `morphologyDefaultBorderValue`
-/// for a dilation -- the minimum, so the frame does not grow a border
-///. Everything else: see erode, INCLUDING the precondition that
-/// `dst` span its image's full width or end on a word boundary.
+/// for a dilation -- the minimum, so the frame does not grow a border.
+/// @note Everything else: see erode, INCLUDING the precondition that `dst` span
+/// its image's full width or end on a word boundary.
 template <typename WordType>
 inline void dilate(BinMatConstView<WordType> src, BinMatView<WordType> dst,
                    const StructuringElement& element, BorderType borderType = BORDER_CONSTANT,
@@ -874,6 +874,7 @@ inline void dilate(BinMatConstView<WordType> src, BinMatView<WordType> dst,
 }
 
 /// @brief True when `morphologyEx(op,...)` reads and writes its scratch view.
+/// **API TIER 3** -- a query about binCV's own scratch contract.
 /// @note `MORPH_ERODE` and `MORPH_DILATE` are single kernels and need none; the
 /// other five need exactly one frame. Callers that size a scratch buffer
 /// from an `op` chosen at runtime ask this rather than hard-coding the list.

@@ -12,7 +12,7 @@
 /// thresholdGE(planes, n, threshold) compare that count against a constant
 /// majority3(a, b, c, dst) maj3 over three views
 ///
-/// This is the arithmetic layer the first two MVP operations sit on:
+/// This is the arithmetic layer two operations sit on directly:
 ///
 /// - **Denoise, median of 3.** For binary input the
 /// median IS the majority, so the whole kernel is maj3 over three views --
@@ -51,8 +51,7 @@
 /// count is exact and unsaturated: k inputs need bitSlicedSumPlanes(k) ==
 /// ceil(log2(k+1)) planes, which is 1 for k = 1, 2 for k = 2 and 3, 3 for k = 4,
 /// 4 for k = 9 and 5 for k = 16. **The caller sizes and owns that array** -- no
-/// kernel here allocates (CLAUDE.md, hard rules), and the natural call site has
-/// it on the stack:
+/// kernel here allocates, and the natural call site has it on the stack:
 ///
 /// WordType planes[bincv::bitSlicedSumPlanes(4)];
 /// bincv::bitSlicedSum(quad, 4, planes);
@@ -70,47 +69,31 @@
 /// failure: every word-wise reduction over the image then over-counts.
 ///
 /// ---------------------------------------------------------------------------
-/// WHAT pyrDown STILL NEEDS, AND WHY IT IS NOT HERE
+/// WHAT ops/pyramid.hpp NEEDS BEYOND THESE PRIMITIVES
 ///
-/// ops/pyramid.hpp's `pyrDownBox<NOut, NIn>` is "box 2x2 sum, then subsample" over a QuantMat.
-/// Two of its three parts have no primitive anywhere in ops/ yet. Both were found
-/// by review of THIS file, and are recorded here rather than left for the pyramid to
-/// discover, because the header used to read as though the pyramid step were
-/// covered:
+/// ops/pyramid.hpp's `pyrDownBox<NOut, NIn>` is "box 2x2 sum, then subsample" over a
+/// QuantMat, and two of its three parts are not the primitives above:
 ///
 /// 1. **The sum is single-bit and equal-weight.** bitSlicedSum counts k inputs
 /// each worth exactly one. A 2x2 box over an NIn-bit source adds four values
 /// worth up to 2^NIn - 1 each, which this signature cannot express. It can
 /// be *faked* by replicating plane p of each pixel 2^p times -- correct, and
 /// exponential: k = 4 * (2^NIn - 1), so 4 inputs at NIn = 1 but 124 at
-/// NIn = 5, and NIn = 3, 4 and 5 are the measured real case
-/// for every level above the first. A bit-sliced adder over multi-bit
-/// operands is linear in NIn instead. It is not added here because
-/// specifies three single-bit primitives, and the adder's shape -- weighted
-/// (word, weight) inputs, or plane-array plus plane-array -- should be fixed
-/// by the caller that needs it rather than guessed in advance.
+/// NIn = 5, and NIn = 3, 4 and 5 are the depths the upper pyramid levels
+/// reach. ops/pyramid.hpp therefore carries its own bit-sliced adder over
+/// multi-bit operands, linear in NIn, and prices the replication route beside
+/// it as a constant (`impl::boxSum4ReplicatedInputs`).
 ///
-/// 2. **There is no horizontal decimation, anywhere.** Vertical decimation is
-/// free: a BinMatConstView with twice the stride and half the height reads
+/// 2. **Horizontal decimation is not a lane-wise operation.** Vertical decimation
+/// is free: a BinMatConstView with twice the stride and half the height reads
 /// every other row and costs nothing. Horizontal decimation wants output bit
-/// j to come from input bit 2j, and no kernel in ops/ expresses it --
-/// logic.hpp is pointwise in the lane, shift.hpp moves every lane by the
-/// same amount, and this file's primitives are per-lane. The two known
-/// routes are a per-pixel at/set loop (slow, no extra memory) and a
-/// log2(width) big-integer unshuffle (word-parallel, but frame-sized
-/// constant masks), which is speed against footprint -- the trade CLAUDE.md
-/// forbids settling by argument. It was an open question, and it gated pyrDown.
-///
-/// **RESOLVED, and neither of those two won.** A measurement found a third route
-/// the paragraph above did not consider -- a WORD-LOCAL unshuffle, which is
-/// word-parallel and needs no frame-sized masks at all -- and it beat both
-/// by 8.3x-26.4x on the reference device. ops/resample.hpp now ships it as
-/// decimateColumnsBy2. The speed-against-footprint
-/// framing above is left standing because it is what the gap looked like
-/// from here, and being wrong about that is the useful part of the record.
-///
-/// The design notes' primitive table says "nearly every operation in the MVP set
-/// is a composition of these"; it has no resample row, and now says so.
+/// j to come from input bit 2j, and nothing here expresses it -- logic.hpp is
+/// pointwise in the lane, shift.hpp moves every lane by the same amount, and
+/// this file's primitives are per-lane. ops/resample.hpp's `decimateColumnsBy2`
+/// is a WORD-LOCAL unshuffle: word-parallel, with no frame-sized masks, and
+/// measured on the reference device (a Raspberry Pi 4, aarch64) at 8.3-26.4×
+/// faster than either a per-pixel at/set loop or a log2(width) big-integer
+/// unshuffle over frame-sized constant masks.
 ///
 /// ---------------------------------------------------------------------------
 /// THE ADDER NETWORK, AND WHY IT IS THE SLOW ONE
@@ -124,14 +107,15 @@
 /// file's 16 -- and for k = 9 a carry-save tree of 3:2 compressors beats the
 /// ripple by more.
 ///
-/// The ripple is here because a correct reference beats a clever minimal network, and the reason is what a wrong adder
-/// costs: every pyramid level and every denoised frame in the MVP is built on it,
+/// The ripple is here because a correct reference beats a clever minimal network,
+/// and the reason is what a wrong adder costs: every pyramid level and every
+/// denoised frame in the pipeline is built on it,
 /// and the corruption would be a few pixels per frame rather than a crash. This
 /// form is ONE loop nest that is correct for every k, with an invariant a reader
 /// can check in a line (before input i the total is at most i, so it occupies
 /// bitSlicedSumPlanes(i) planes and cannot carry out of
 /// bitSlicedSumPlanes(i+1)); a per-k tree is a different shape per k, and the
-/// shapes that matter -- 4 and 9 -- are exactly the ones the MVP depends on.
+/// shapes that matter -- 4 and 9 -- are exactly the ones the pipeline depends on.
 ///
 /// A vectorized rewrite may replace the body with a compressor tree. The interface does not
 /// change when it does, and tests/test_bitslice.cpp enumerates every one of the
@@ -146,7 +130,7 @@
 /// `bitSlicedSum` accumulates IN the destination planes, so `outPlanes` must not
 /// overlap `inputs`. The alternative -- a scratch accumulator -- would either
 /// allocate or add a caller-provided buffer to the signature, and the call sites
-/// in the MVP have no reason to overlap the two.
+/// have no reason to overlap the two.
 
 #include <cstddef>
 #include <cstdint>
@@ -212,8 +196,8 @@ BINCV_HOST_DEVICE constexpr WordType maj3(WordType a, WordType b, WordType c) {
 /// @brief Bit-sliced sum of `k` single-bit inputs, lane by lane. **API TIER 3.**
 /// @param inputs `k` words. Bit i of `inputs[j]` is input j for lane i.
 /// @param k Number of inputs, **each worth one**. Any k is accepted. The arities
-/// with an MVP caller are 4 (a 2x2 box over a 1-BIT source, ARCHITECTURE
-/// 7.2) and 9 (a 3x3 median); k = 3 is tested as a shape, not called --
+/// with a caller are 4 (a 2x2 box over a 1-BIT source, ops/pyramid.hpp) and
+/// 9 (a 3x3 median); k = 3 is tested as a shape, not called --
 /// the three-pixel median is maj3, which is one expression rather than a
 /// sum and a compare. A 2x2 box over a multi-bit source is NOT k = 4 here;
 /// see the file header on what it needs instead.
@@ -288,11 +272,11 @@ inline void bitSlicedSum(const WordType* inputs, size_t k, WordType* outPlanes) 
 /// is why the comparison needs no subtraction and no borrow chain.
 /// @note `notLess` is deliberately NOT narrowed when a value bit beats the
 /// threshold: that lane is added to `greater` in the same step, and
-/// `greater | notLess` cannot tell the difference. The narrowing was
-/// written first, and is measurably dead -- removing it changed no result
-/// anywhere in tests/test_bitslice.cpp's exhaustive (value, threshold)
-/// enumeration, which is every input this function has for nPlanes <= 5.
-/// Two operations per plane, in a primitive every pyramid level runs.
+/// `greater | notLess` cannot tell the difference. A narrowing there would
+/// be dead -- tests/test_bitslice.cpp's exhaustive (value, threshold)
+/// enumeration, which is every input this function has for nPlanes <= 5,
+/// gives the same result with or without it. Two operations per plane, in a
+/// primitive every pyramid level runs.
 /// @note The per-plane branch is on a bit of `threshold`, not on pixel data, so
 /// it is perfectly predicted -- and with the usual compile-time constant
 /// threshold it disappears entirely.
@@ -461,7 +445,7 @@ inline void applyMajority3(BinMatConstView<WordType> a, BinMatConstView<WordType
 /// three N-bit images is not the median of those images -- bit 3 of the
 /// median is not the majority of the three bit 3s -- so an overload
 /// looping over plane would compile, run, and be wrong. The N-bit median
-/// is a sorting network over bit-sliced values, and nothing in the MVP
+/// is a sorting network over bit-sliced values, and nothing in the pipeline
 /// asks for one.
 template <typename WordType>
 inline void majority3(BinMatConstView<WordType> a, BinMatConstView<WordType> b,

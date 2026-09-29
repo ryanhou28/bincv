@@ -26,3 +26,12 @@ experiments/
 
 # Python bytecode from the measurement scripts.
 __pycache__/
+
+# A local scratch copy of the library tree, and Doxygen's output (docs/Doxyfile
+# writes to docs/api/).
+bincv-cpp/
+docs/api/
+
+# Tool state for the Claude Code harness; settings.json is the one file worth sharing.
+.claude/*
+!.claude/settings.json

@@ -1,6 +1,6 @@
 // The five-point essential matrix against cv::findEssentialMat(RANSAC).
 //
-// THE DENOMINATOR (CLAUDE.md): `cv::findEssentialMat(pts1, pts2, focal=1,
+// THE DENOMINATOR: `cv::findEssentialMat(pts1, pts2, focal=1,
 // pp=(0,0), cv::RANSAC, confidence, threshold, mask)` on the SAME correspondences
 // with the SAME threshold, in the same normalised coordinates. That is what a
 // caller runs today without binCV, and it is the same minimal solver -- OpenCV's
@@ -28,11 +28,11 @@
 // their working arrays and where the real comparison is.
 //
 // The figure comes from heap_probe, which interposes the C allocator. It has to:
-// a replaced `operator new` -- which this file used to use -- cannot see
-// `cv::fastMalloc`, so it missed the matrix data and reported OpenCV at a flat
-// 2 744 B at every input size. The true figure grows with the input, from 16 568 B
-// at 200 correspondences to 84 952 B at 2 000. That error was 17x at 1 000 points
-// and it ran AGAINST binCV, which allocates nothing at all.
+// a replaced `operator new` cannot see `cv::fastMalloc`, so it misses the matrix
+// data and reports OpenCV at a flat 2 744 B at every input size. The true figure
+// grows with the input, from 16 568 B at 200 correspondences to 84 952 B at 2 000.
+// That error is 17x at 1 000 points and it runs AGAINST binCV, which allocates
+// nothing at all.
 //
 // An earlier version summed every allocation instead of tracking the high-water of
 // live bytes, and reported OpenCV at 323 088 B. Peak live and cumulative traffic are

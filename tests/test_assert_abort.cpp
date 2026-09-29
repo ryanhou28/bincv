@@ -8,14 +8,12 @@
 // policy -- the live BINCV_ASSERT, and the bounds checks that at and set are
 // specified to have -- would never be compiled or run.
 //
-// WHAT IT REPLACES: out-of-range at/set used to throw std::out_of_range
-// and tests/test_binMat.cpp asserted that with three BINCV_CHECK_THROWS lines
-// (plus one in tests/test_opencv_interop.cpp). The throw was removed, and those
-// four assertions were deleted with it and not replaced -- deleting both bounds
-// checks from binMat_impl.hpp left Release, Debug and -fno-exceptions all
-// reporting 100% passed. These cases are that coverage, restored at the checked
-// configuration's terms: the failure is now an abort, so it is observed from
-// outside the process by tests/expect_fatal.cmake.
+// WHY IT IS ITS OWN PROGRAM: out-of-range at/set abort rather than throw, so no
+// in-process BINCV_CHECK_THROWS can observe them -- and without these cases,
+// deleting both bounds checks from binMat_impl.hpp leaves Release, Debug and
+// -fno-exceptions all reporting 100% passed. These cases are that coverage, on
+// the checked configuration's terms: the failure is an abort, so it is observed
+// from outside the process by tests/expect_fatal.cmake.
 //
 // Each case is registered in tests/CMakeLists.txt with the diagnostic it must
 // print, so the message is covered too -- an assert that fires with the wrong
@@ -82,7 +80,7 @@ int caseSetCol() {
     Mat m = makeMat();
     // Column 25 is past `width` but inside the first word. In release this
     // silently sets a padding bit that countNonZero cannot see, which is the
-    // invariant break the check exists to catch (CLAUDE.md: padding bits stay
+    // invariant break the check exists to catch (padding bits stay
     // zero).
     m.set(0, 25, true);
     return m.countNonZero();
@@ -138,9 +136,9 @@ int caseQuantSetValue() {
     return static_cast<int>(m.at(0, 0));
 }
 
-// The same value-range precondition at N == 1, which is where it used to go
+// The same value-range precondition at N == 1, which is where it can go
 // missing: BinMat::set takes bool, so an out-of-range value from code written
-// generically over QuantMat<N> narrowed to 1 instead of being reported. The
+// generically over QuantMat<N> would narrow to 1 instead of being reported. The
 // integral overload added for that is what fires here.
 int caseBinMatSetValue() {
     Mat m = makeMat();
@@ -155,9 +153,9 @@ int caseSignedSetValue() {
 }
 
 // The extreme of the same range check. Worth its own case because the value that
-// gets past it is the one that used to be undefined behavior rather than merely
-// wrong: the magnitude was computed as `-value`, and negating INT_MIN is signed
-// overflow. impl::signedMagnitude now does that in unsigned; this case is the
+// gets past it is undefined behavior rather than merely wrong if the magnitude
+// is computed as `-value`: negating INT_MIN is signed overflow.
+// impl::signedMagnitude does that in unsigned; this case is the
 // other half, proving the guard that keeps INT_MIN out is still here.
 int caseSignedSetIntMin() {
     Ternary m(20, 4);

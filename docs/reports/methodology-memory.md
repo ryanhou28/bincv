@@ -36,14 +36,15 @@ storage class:
 
 | instrument | scratch from `malloc`, bytes | scratch on the stack, bytes | `malloc` ÷ stack |
 |---|---|---|---|
-| heap-only | 262,144 | 4,096 | **64×** |
-| stack | 7,784 | 262,456 | not published |
+| heap-only | 262,144 | 4,096 | 64× |
+| stack | 7,784 | 262,456 | — |
 
 A heap-only instrument reports the stack version as **64× leaner while it uses exactly the
-same memory**. This is not a subtle bias; it is the entire result, and it is the direct
-explanation of error 2 below — dividing binCV's stack by OpenCV's heap is this artifact with
-the sign flipped. Every comparison in these reports therefore measures **both** heap and stack
-on **both** sides.
+same memory**. The stack row's ratio is the same artifact inverted — a stack-only instrument
+would report the `malloc` version 33.7× leaner — and is not the one to quote either. This is
+not a subtle bias; it is the entire result, and it is the direct explanation of error 2
+below — dividing binCV's stack by OpenCV's heap is this artifact with the sign flipped. Every
+comparison in these reports therefore measures **both** heap and stack on **both** sides.
 
 Moving memory from the heap to the stack **is** a real benefit — no allocator call, no
 fragmentation, a footprint knowable before the call. But it is not a reduction in bytes, and a
@@ -55,7 +56,9 @@ is expected to size against.
 
 **1. Cumulative allocation reported as footprint.** OpenCV's five-point call was reported at
 323,088 B against binCV's 15,080 B. The 323,088 was the sum of every allocation; the peak live
-figure was a small fraction of it. Wrong in binCV's favour by more than 10×.
+figure was a small fraction of it — the same call's peak live heap reads 16,168 B to 46,616 B
+across the correspondence counts in the committed log, so the published number overstated
+OpenCV's footprint by roughly an order of magnitude, in binCV's favour.
 
 **2. binCV's stack compared against OpenCV's heap.** Having fixed (1), the comparison divided
 binCV's stack frame by OpenCV's peak live heap and concluded binCV used 2.1× *more* memory.
@@ -63,7 +66,8 @@ Those are different quantities and the ratio meant nothing. Measuring both sides
 reversed the conclusion.
 
 **3. A published stack budget 27% low.** `essentialSolverStackBytes()` returned 4,536 B while
-the compiled frame was 6,240 B. A caller sizing a thread from it would have been short.
+the compiled frame on the x86-64 host (g++ 11.4, `-O2`) was 6,240 B. A caller sizing a thread
+from it would have been short.
 
 **4. A replaced `operator new` cannot see OpenCV.** `cv::Mat` allocates through
 `cv::fastMalloc`, which calls `malloc` directly, so a replaced `operator new` never observes
@@ -73,7 +77,7 @@ the matrix data — the largest blocks in the call. Measured both ways in one pr
 | instrument | OpenCV peak live heap, bytes | interposed ÷ `operator new` |
 |---|---|---|
 | replaced `operator new` | 2,744 | — |
-| interposed `malloc` | 46,968 | **17×** |
+| interposed `malloc` | 46,968 | 17× |
 
 An under-count of 17×, entirely on OpenCV's side of the comparison. The tell was in the
 published table and went unread: the `operator new` figure was a flat 2,744 B at 200, 500 and
@@ -199,25 +203,26 @@ It does not affect the figures here, and that is checked rather than assumed:
   that is both large and untouched, which a dense linear-algebra solver does not produce.
 - Cross-checked against the compiler on the device. Every frame in the five-point call graph
   is `static`, so `-fstack-usage` gives a real bound: `fivePointEssential` is 5,120 B and the
-  deepest call path sums to about 6,432 B. The probe reads 6,928 B against that bound —
-  *above* it, which is the safe direction and rules out a skipped frame.
+  deepest call path sums to about 6,432 B. The probe reads 6,928 B on the device against that
+  bound — *above* it, which is the safe direction and rules out a skipped frame.
+
+The compiler check needs one translation unit that includes `bincv/ops/essential.hpp` and
+calls `fivePointEssential`, built on the device from the repository root:
 
 ```bash
-# on the device, from the repository root
-g++ -O2 -std=c++17 -I include -fstack-usage -c su_probe.cpp -o su_probe.o
-sort -t$'\t' -k2 -rn su_probe.su      # frames, largest first
-grep -c dynamic su_probe.su           # 0 means every frame is a real bound
+g++ -O2 -std=c++17 -I include -fstack-usage -c <that file>.cpp
+sort -t$'\t' -k2 -rn <that file>.su      # frames, largest first
+grep -c dynamic <that file>.su           # 0 means every frame is a real bound
 ```
 
 **The comparison is symmetric, which is what the numbers rest on.** Both sides are measured by
 the same instrument in the same process around one call, on the same quantity. A shared
 limitation moves both columns together; an asymmetric one — our stack against their heap —
-produces a ratio that means nothing. binCV has published that mistake twice.
+produces a ratio that means nothing, which is error 2 above.
 
-**Memory figures are deterministic; timings on the development host are not.** The heap and
-stack figures are byte-identical across repeated runs. The x86-64 host is a WSL2 VM whose
-timing spread on these calls reaches 130%, so its *ratios* are indicative only; the reference
-device, pinned and with its governor fixed, holds 0.1–0.6%.
+**Memory figures are deterministic; timings are not.** The heap and stack figures are
+byte-identical across repeated runs. How a difference between two timings is judged, and what
+each host resolves, is [methodology-timing.md](methodology-timing.md).
 
 ## If a worst-case stack bound is ever needed
 
@@ -275,4 +280,10 @@ cmake --build build -j
 ./build/benchmark/essential_stack_benchmark  # stack, with its calibration rows
 ```
 
-Both refuse to print figures if their self-check fails.
+Both refuse to print figures if their self-check fails. The committed runs are
+[essential-x86_64.log](logs/essential-x86_64.log),
+[essential-aarch64.log](logs/essential-aarch64.log),
+[essential_stack-x86_64.log](logs/essential_stack-x86_64.log) and
+[essential_stack-aarch64.log](logs/essential_stack-aarch64.log). Logs marked stale in
+[expected-stale.txt](logs/expected-stale.txt) were taken before a bit-identical change to the
+code beneath them; the file records which files moved and why the figure stands.

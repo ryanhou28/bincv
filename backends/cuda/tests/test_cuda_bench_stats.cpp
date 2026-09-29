@@ -13,9 +13,9 @@
 // binary floating point on purpose (2^-14, 1/8, 0.0390625), so those cases
 // compare exactly rather than to a tolerance.
 //
-// THE CASE THAT MATTERS MOST is RangeTestAndProjectRuleDisagree. The harness
-// used to call a ratio a result only when the two arms' sample RANGES were
-// disjoint. That is not this project's rule -- benchmark/measure_util.hpp tests
+// THE CASE THAT MATTERS MOST is RangeTestAndProjectRuleDisagree. A harness
+// that calls a ratio a result only when the two arms' sample RANGES are
+// disjoint is not applying this project's rule -- benchmark/measure_util.hpp tests
 // a DIFFERENCE AGAINST A SPREAD, on medians -- and the two disagree in BOTH
 // directions:
 //
@@ -177,7 +177,7 @@ BINCV_TEST(PairedStats, SeparatedRangesAreNotSufficientEither) {
 BINCV_TEST(PairedStats, TheVerdictDoesNotDependOnWhichArmIsTheDenominator) {
     // Arm A (OpenCV) is flat at 0.833 ms; arm B (binCV) swings 0.0668-0.1509,
     // which is what a kernel a few multiples above the launch floor does on
-    // this host.
+    // the reference host.
     const std::vector<double> a = {0.833, 0.833, 0.833};
     const std::vector<double> b = {0.0668, 0.0724, 0.1509};
 
@@ -318,7 +318,7 @@ BINCV_TEST(PairedStats, UnanimityHasNoMinimumRoundCount) {
     BINCV_CHECK(summarizePaired({1.0, 1.0, 1.0}, {2.0, 2.0, 2.0}).unanimous());
     // ONE ROUND IS UNANIMITY OVER ONE ROUND, and how little that is worth is
     // read off the p rather than refused by a round-count floor -- a floor
-    // here would be the project-wide "X is enough" bar CLAUDE.md forbids.
+    // here would be the project-wide "X is enough" bar this project forbids.
     BINCV_CHECK(summarizePaired({1.0}, {2.0}).unanimous());
     BINCV_CHECK(summarizePaired({1.0}, {2.0}).signTestP() == 1.0);
     // Split rounds are not unanimous whatever the medians say.
@@ -453,7 +453,7 @@ BINCV_TEST(PairedStats, TheRunToRunScatterIsNotDefaultedToANumber) {
 
 
 // ---------------------------------------------------------------------------
-// THE THREE-VALUED VERDICT (owner's ruling, 2026-09-19).
+// THE THREE-VALUED RESULT.
 //
 // The two-valued predicate asks one question -- is the difference bigger than
 // the noise -- and a set of rounds that never crossed 1.00x answers a second
@@ -486,7 +486,7 @@ BINCV_TEST(PairedStats, TheCaseThatForcedTheRuling) {
     // That predicate is not being weakened -- it is being joined.
     BINCV_CHECK(!p.differenceClearsNoise(kScatterNotMeasured));
 
-    // THE RULING'S READING: no round crossed 1.00x, so the direction is
+    // THE RULE'S READING: no round crossed 1.00x, so the direction is
     // established and the swing bounds only the size of the win.
     BINCV_CHECK(p.directionEstablished());
     BINCV_CHECK(p.establishedDirection() == cudabench::Direction::A);
@@ -502,7 +502,7 @@ BINCV_TEST(PairedStats, TheCaseThatForcedTheRuling) {
 BINCV_TEST(PairedStats, UnanimousButTinyPrintsAWeakP) {
     // TWO ROUNDS, both favouring the same arm. "No round crossed 1.00x" is
     // satisfied, and it has to be -- refusing it would mean inventing a
-    // minimum round count, which is the one bar CLAUDE.md says not to invent.
+    // minimum round count, which is the one bar this project does not invent.
     // What stops it reading like a hundred rounds is the p: two coin flips
     // landing the same way has a two-sided probability of 2 * C(2,0) / 2^2 =
     // 0.5, exact in binary and compared exactly. One round reads 1.0 and
@@ -673,7 +673,7 @@ BINCV_TEST(PairedStats, ARoundThatWasNotAMeasurementIsCountedApartFromATie) {
 BINCV_TEST(PairedStats, AUnanimousRowWhoseMagnitudeSpansAnOrderOfMagnitude) {
     // Seven rounds, every one favouring arm B, by between 1.2x and 15x. The
     // direction is not in the least doubt -- p = 2^-6 -- and the SIZE of the
-    // win is barely known at all. That is exactly the row the ruling exists
+    // win is barely known at all. That is exactly the row the three-valued rule exists
     // for, and exactly the row that must not be quoted as a single number.
     const std::vector<double> a = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
     const std::vector<double> b = {1.0 / 1.2, 1.0 / 2.0, 1.0 / 3.0, 1.0 / 4.0,
@@ -773,8 +773,8 @@ BINCV_TEST(PairedStats, TheTwoHalvesAreIndependentAndBothAreNamed) {
                 "DIRECTION ESTABLISHED, and A RESULT");
 }
 
-BINCV_TEST(PairedStats, TheOldPredicateIsUntouchedByTheRuling) {
-    // The ruling ADDS a statement; it must not have moved the one that was
+BINCV_TEST(PairedStats, TheOldPredicateIsUntouchedByTheDirectionRule) {
+    // The direction rule ADDS a statement; it must not have moved the one that was
     // there. Every case above that exercises differenceClearsNoise re-checks
     // it, and this one re-checks the two the older cases pinned -- the outlier
     // fifteen and the separated-but-scattered three -- so a change to the new
@@ -790,7 +790,7 @@ BINCV_TEST(PairedStats, TheOldPredicateIsUntouchedByTheRuling) {
 
     const PairedTiming scattered = summarizePaired({1.0, 1.0, 1.0}, {1.01, 1.60, 1.02});
     BINCV_CHECK(!scattered.differenceClearsNoise(kScatterNotMeasured));
-    // ...but every round favoured the same arm, so under the ruling it is not
+    // ...but every round favoured the same arm, so under the direction rule it is not
     // the bare null the old rule called it. This is a REAL re-judging, on the
     // rounds an existing case in this file already carries.
     BINCV_CHECK(scattered.directionEstablished());

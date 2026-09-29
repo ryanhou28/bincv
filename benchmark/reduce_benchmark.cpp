@@ -1,6 +1,6 @@
 // bulk reductions versus OpenCV, and versus the per-pixel loop.
 //
-// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR: OpenCV performing the SAME
 // semantic operation on the SAME binary content stored as CV_8U -- what a user
 // does today without binCV. For countNonZero that denominator is exact: OpenCV
 // has the identical function, and this is a Tier 1 operation. For countAnd it is
@@ -37,19 +37,20 @@
 //
 // The timing helpers below are duplicated from logic_benchmark.cpp rather than
 // shared through bench_util.hpp. That file's copy is measurement code behind a
-// published result ( / results/logic_benchmark.log); putting a
-// refactor underneath it would mean re-validating numbers that are already
-// recorded, to save forty lines.
+// published result (docs/reports/logs/logic-*-launches.log); putting a refactor
+// underneath it would mean re-validating numbers that are already recorded, to
+// save forty lines.
 //
 // ---------------------------------------------------------------------------
 // WHAT THIS FILE IS NOT
 //
-// It is NOT or. It reports word types side by side and windows at
-// three sizes because those are the workloads- need, but a number
-// measured here is x86_64 and therefore NON-AUTHORITATIVE for every one of those
-// questions -- a desktop host's spread decides nothing. They close on the
-// reference device through scripts/run_on_pi.sh, and this file is the code they
-// run, not the answer they produce.
+// It is NOT the word-type or window-size decision. It reports word types side by
+// side and windows at three sizes because those are the workloads such a decision
+// needs, but a number measured here is x86_64 and therefore NON-AUTHORITATIVE for
+// every one of those questions -- a desktop host's spread decides nothing. They
+// close on the reference device, and this file is the code they run, not the
+// answer they produce:
+//   ./scripts/run_launches.sh -n 10 -g ./build/benchmark/reduce_benchmark
 
 #include <algorithm>
 #include <chrono>
@@ -264,10 +265,13 @@ bool runSize(int width, int height) {
 
     // --- countAndSplit over LK-sized windows ---------------------------------
     //
-    // Context for the incremental question, not an answer to it: the MVP recomputes per
-    // window, windows overlap heavily, and this is what recomputation costs. The
+    // Context for the incremental question, not an answer to it: the reference pipeline
+    // recomputes per window, windows overlap heavily, and this is what recomputation
+    // costs. The
     // incremental alternative is deliberately not implemented here -- measuring
     // one option is not an experiment.
+    // (The reference pipeline is the visual-inertial odometry system, not in this
+    // repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
     for (int windowSize : {7, 15, 31}) {
         const int stepX = std::max(1, width / 20);
         const int stepY = std::max(1, height / 10);
@@ -318,7 +322,7 @@ const char* popcountLowering() {
     // GPR<->NEON crossing per word for countNonZero (the inbound fmov is elided --
     // `ldr d31, [x2], 8` -- and the horizontal add is `addv b31`, not `uaddlv h0`),
     // 2 for countAnd, and 4 for countAndSplit. Read off `g++ -O2 -DNDEBUG -S` on
-    // the reference device; measured cost in.
+    // the reference device.
     return "aarch64: cnt + addv per word, accumulator in a GPR -- 1/2/4 domain "
            "crossings per word for countNonZero/countAnd/countAndSplit";
 #elif defined(__POPCNT__)

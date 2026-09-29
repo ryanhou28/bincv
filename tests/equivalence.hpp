@@ -62,9 +62,9 @@
 /// check.** unpackTo8U never reads a bit at or past `width`, which means a
 /// kernel that writes whole words and forgets to clear the trailing partial
 /// one produces a result that is bit-exact pixel for pixel and still breaks
-/// CLAUDE.md's hard rule ("padding bits stay zero... or word-wise reductions
-/// over-count"). MEASURED, before this check existed: a word-wise bitwiseNot
-/// over the full the sweep passed 240 of 240 cases at uint64_t while leaving
+/// the padding invariant (padding bits stay zero, or word-wise reductions
+/// over-count). MEASURED, without this check: a word-wise bitwiseNot
+/// over the full sweep passed 240 of 240 cases at uint64_t while leaving
 /// 826,200 phantom set bits behind, and countNonZero -- which loops x < width
 /// -- agreed with OpenCV throughout. expectBitExact therefore reports TWO
 /// verdicts per call, the pixel comparison and expectPaddingClean, so the
@@ -522,9 +522,9 @@ Mismatch firstMismatch(const BinMatConstView<WordType>& actual, const cv::Mat& e
 // ---------------------------------------------------------------------------
 
 /// @brief Where a view's padding bits are dirty, and how badly.
-/// @note CLAUDE.md, hard rules: "Padding bits stay zero. Any operation that
+/// @note The padding invariant: padding bits stay zero, and any operation that
 /// writes whole words past `width` must clear them, or word-wise reductions
-/// over-count." A pixel comparison is structurally blind to this, so it gets
+/// over-count. A pixel comparison is structurally blind to this, so it gets
 /// its own report with its own message rather than being folded into
 /// Mismatch -- a wrong pixel and an uncleared tail are fixed differently.
 struct PaddingViolation {
@@ -728,7 +728,7 @@ void expectPaddingClean(const BinMatConstView<WordType>& v,
 /// difference is a failure, not a reason to compare the overlap.
 /// @note Then checks the padding, because the pixel comparison cannot: a kernel
 /// that writes whole words and never clears the trailing partial one is
-/// bit-exact on every pixel and still breaks CLAUDE.md's hard rule. Both
+/// bit-exact on every pixel and still breaks the padding invariant. Both
 /// properties are what "bit-exact against OpenCV" has to mean for a
 /// bit-packed container, so both are asserted here rather than left to a
 /// companion call a kernel author may forget.
@@ -762,7 +762,7 @@ void expectBitExact(const BinMatConstView<WordType>& actual, const cv::Mat& expe
 // The size and fill matrix
 // ---------------------------------------------------------------------------
 
-/// @brief Widths every Tier 1 equivalence test sweeps. names these.
+/// @brief Widths every Tier 1 equivalence test sweeps.
 /// @note All but 640 are NON-MULTIPLES of at least one supported word width, and
 /// that is the entire point: packing bugs live in the trailing partial
 /// word. 1 is the degenerate row; 7 is shorter than the narrowest word; 31,
@@ -793,7 +793,7 @@ inline const std::vector<int>& equivalenceHeights() {
     return heights;
 }
 
-/// @brief Fill ratios every Tier 1 equivalence test sweeps. names these.
+/// @brief Fill ratios every Tier 1 equivalence test sweeps.
 /// @note 0.0 and 1.0 are exact, not approximate: an all-zero and an all-ones
 /// image are where a masked or short-circuited kernel stops being
 /// exercised. 0.01 and 0.99 are the sparse and dense cases either side.

@@ -1,4 +1,4 @@
-// -- does row alignment beyond word granularity earn its memory?
+// Does row alignment beyond word granularity earn its memory?
 //
 // This is the BENEFIT side of a measurement that took only the cost. Row
 // alignment at word granularity by default is the project's only PROVISIONAL
@@ -52,7 +52,8 @@
 // measure alignment, and x86 numbers from this file are signal only. No -march
 // flag is added: that is a dispatch decision no experiment has settled, and
 // changing it mid-experiment would confound this comparison.
-// This experiment closes on the reference device (scripts/run_on_pi.sh).
+// The question closes on the reference device:
+//   ./scripts/run_launches.sh -n 10 -g ./build/benchmark/alignment_benchmark
 //
 // VALIDITY: measure::g_sink consumes every result; four distinct random images
 // rotate through each timed body (on a call counter that runs on across batches,

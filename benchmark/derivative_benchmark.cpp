@@ -1,11 +1,13 @@
 // binarized spatial derivative -- against cv::filter2D with the same kernel.
 //
-// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR: OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that is not a judgement call either -- it is
-// the reference pipeline's gradient stage, calcBinarizedDeriv, which is two
+// the reference pipeline's gradient stage, which is two
 // cv::filter2D calls with [-1, 0, 1] as a 1x3 and a 3x1. That IS what the
 // pipeline runs today without binCV.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // TWO OpenCV ROWS, and the DENOMINATOR IS THE LEANER ONE:
 //
@@ -43,10 +45,10 @@
 // at one size so the shape of that curve is a measurement and not a comment. The
 // denominator there is cv::filter2D on a CV_8U image holding the pixel VALUES,
 // which needs no scale factor at all -- and it is TIMED, in its own measureNs,
-// beside every row. It used to be run once outside the timed region as a
-// correctness oracle only, which left the N >= 2 path -- the one every pyramid
-// level above 0 uses -- with a denominator named in three places and measured in
-// none. The ladder also carries a WORKING-SET column, because N is the one axis
+// beside every row. Run once outside the timed region as a correctness oracle
+// only, it would leave the N >= 2 path -- the one every pyramid level above 0
+// uses -- with a denominator named in three places and measured in none. The
+// ladder also carries a WORKING-SET column, because N is the one axis
 // in this benchmark along which binCV's footprint moves.
 //
 // ---------------------------------------------------------------------------
@@ -87,13 +89,13 @@
 // WHERE THIS IS AUTHORITATIVE
 //
 // On x86_64 it is INDICATIVE ONLY -- a desktop host's spread decides nothing. The
-// numbers that belong in a claim come from the reference device:
+// numbers that belong in a claim come from the reference device, pinned and
+// launched ten times:
 //
-// BINCV_PI_OPENCV=1./scripts/run_on_pi.sh <target>
-// './benchmark/derivative_benchmark > derivative_benchmark.log'
+//   ./scripts/run_launches.sh -n 10 -g ./build/benchmark/derivative_benchmark
 //
-// BINCV_PI_OPENCV=1 is required: the denominator is an OpenCV call, and the
-// device's default build is core-only.
+// The build on the device must be configured with OpenCV: the denominator is an
+// OpenCV call, and a core-only build does not produce this binary.
 
 #include <algorithm>
 #include <chrono>
@@ -157,7 +159,7 @@ void makeImage(Image& out, int width, int height, uint64_t seed) {
 }
 
 // ---------------------------------------------------------------------------
-// The denominator: calcBinarizedDeriv, ported
+// The denominator: the reference pipeline's gradient stage, ported
 // ---------------------------------------------------------------------------
 
 /// @brief The kernels the reference builds, hoisted out of the timed region.
@@ -184,7 +186,7 @@ void openCvDeriv(const cv::Mat& src, OpenCvScratch& s) {
     cv::filter2D(src, s.dy, CV_16S, s.kernelY);
 }
 
-/// @brief calcBinarizedDeriv as the reference writes it: scale, then merge.
+/// @brief The reference pipeline's gradient stage as it writes it: scale, then merge.
 void openCvDerivAsWritten(const cv::Mat& src, OpenCvScratch& s) {
     cv::filter2D(src, s.dx, CV_16S, s.kernelX);
     cv::filter2D(src, s.dy, CV_16S, s.kernelY);
@@ -391,7 +393,7 @@ bool runSize(int width, int height) {
 
     // --- footprint, reported before the timings rather than after -----------
     //
-    // The working set is ONE CALL's live buffers, per CLAUDE.md, and both axes are
+    // The working set is ONE CALL's live buffers, and both axes are
     // one call's worth of work here because that is what a VIO frontend needs
     // before it can form the covariance.
     const double binCvSet32 = 5.0 * planeBytes32;         // src + dx(2) + dy(2)
@@ -565,13 +567,11 @@ bool runSize(int width, int height) {
 
 /// @brief One row of the N-bit ladder: binCV, its OpenCV denominator, and the
 /// working set each of them costs.
-/// @note THE OpenCV FIGURE HERE IS TIMED, NOT AN ORACLE. It used to be neither:
-/// the two cv::filter2D calls ran once, outside the timed region, purely to
-/// check agreement, while this file's header and both described them as
-/// "the denominator" -- a denominator that was never measured, so the N >= 2
-/// path (which is what every pyramid level above 0 runs) had no OpenCV
-/// comparison anywhere. They are now inside their own measureNs, and the
-/// ladder prints the ratio.
+/// @note THE OpenCV FIGURE HERE IS TIMED, NOT AN ORACLE. Two cv::filter2D calls
+/// run once, outside the timed region, purely to check agreement, would be a
+/// "denominator" that is never measured, so the N >= 2 path (which is what every
+/// pyramid level above 0 runs) would have no OpenCV comparison anywhere. They are
+/// inside their own measureNs, and the ladder prints the ratio.
 struct NBitRow {
     double binCvNs = -1.0;
     double openCvNs = -1.0;
@@ -653,7 +653,7 @@ NBitRow timeNBit(int width, int height, uint64_t& checksumOut) {
     NBitRow row;
     row.binCvNs = ns / pixels;
     row.openCvNs = openCvNs / pixels;
-    // WORKING SET, because CLAUDE.md asks for memory and speed together and this
+    // WORKING SET, because memory and speed are reported together and this
     // is the one table where the footprint MOVES with the variable on the x axis.
     // binCV: N source planes + 2 axes x (N magnitude planes + 1 sign plane).
     // OpenCV: one CV_8U value plane + 2 x CV_16S.

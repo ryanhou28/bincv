@@ -3,19 +3,22 @@
 /// @file pyramid.hpp
 /// @brief Pyramid downsample: filter, then subsample by 2.
 ///
-/// pyrDown 5x5 [1,4,6,4,1] Gaussian, BORDER_REFLECT_101.
-/// **EXACTLY cv::pyrDown.** API TIER 1 at NIn == NOut == 8,
-/// proven against OpenCV in tests/test_pyramid.cpp; TIER 2 at
-/// narrower N, where the caller has asked for a precision
-/// OpenCV cannot express and there is nothing to be exact
-/// against.
-/// pyrDownBox 2x2 box mean, BORDER_REPLICATE. **binCV's own operating
-/// point**, 4.4x faster than cv::pyrDown at low bit widths, and what every
-/// performance result here is measured on. NOT cv::pyrDown and does not claim to be.
-/// pyrDownFiltered<F,..., Bo> any of the five filters x three borders.
-/// pyrDownWidth / pyrDownHeight destination extent, ceil(n / 2)
-/// Pyramid<W, N0, N1,...> a ladder of levels, one bit depth each;
-/// `build<F, Bo>` defaults to the OpenCV pair.
+///     pyrDown                      5x5 [1,4,6,4,1] Gaussian, BORDER_REFLECT_101.
+///                                  **EXACTLY cv::pyrDown.** API TIER 1 at
+///                                  NIn == NOut == 8, proven against OpenCV in
+///                                  tests/test_pyramid.cpp; TIER 2 at narrower N,
+///                                  where the caller has asked for a precision
+///                                  OpenCV cannot express and there is nothing to
+///                                  be exact against.
+///     pyrDownBox                   2x2 box mean, BORDER_REPLICATE. **binCV's own
+///                                  operating point**, 4.4x faster than cv::pyrDown
+///                                  at low bit widths, and what every performance
+///                                  result here is measured on. NOT cv::pyrDown
+///                                  and does not claim to be.
+///     pyrDownFiltered<F,..., Bo>   any of the five filters x three borders.
+///     pyrDownWidth / pyrDownHeight destination extent, ceil(n / 2)
+///     Pyramid<W, N0, N1,...>       a ladder of levels, one bit depth each;
+///                                  `build<F, Bo>` defaults to the OpenCV pair.
 ///
 /// **WHY THE DEFAULT IS THE SLOW ONE.** A function carrying `cv::pyrDown`'s name
 /// computing a different filter is a trap however well documented, so `pyrDown` is
@@ -23,9 +26,9 @@
 /// the whole point of the library rather than an embarrassment. 640x480 ->
 /// 320x240, against cv::pyrDown at one thread:
 ///
-/// pyrDownBox 1 -> 3 bits 116 us 4.4x FASTER
-/// pyrDown 1 -> 3 bits 599 us 0.86x, rough parity
-/// pyrDown 8 -> 8 bits 7349 us 13.7x SLOWER
+///     pyrDownBox   1 -> 3 bits    116 us    4.4x FASTER
+///     pyrDown      1 -> 3 bits    599 us    0.86x, rough parity
+///     pyrDown      8 -> 8 bits   7349 us   13.7x SLOWER
 ///
 /// binCV is fast when its INPUT is narrow; at 8 bits it has no advantage to offer
 /// and no footprint advantage either, since matching OpenCV's output means storing
@@ -35,8 +38,10 @@
 ///
 /// This is the operation where **output precision exceeds input precision**: a
 /// 2x2 mean of 1-bit pixels has five values, and five values do not fit in one
-/// bit. The reference pipeline's own ladder measured 1, 3, 4
-/// and 5 bits, which is why QuantMat<N> exists at all.
+/// bit. The reference pipeline (the visual-inertial odometry system, not in this
+/// repository, that binCV was built to serve stage by stage; see
+/// docs/ARCHITECTURE.md) measured 1, 3, 4 and 5 bits down its own ladder, which
+/// is why QuantMat<N> exists at all.
 ///
 /// ---------------------------------------------------------------------------
 /// THE OPERATION, EXACTLY
@@ -61,15 +66,15 @@
 /// scale, and that is where (2^NOut - 1) / (2^NIn - 1) comes from.
 ///
 /// ---------------------------------------------------------------------------
-/// PROBLEM 1 -- THE SUBSAMPLE. Closed before this file existed.
+/// PROBLEM 1 -- THE SUBSAMPLE.
 ///
 /// Vertical decimation is a row index: destination row y reads source rows 2y and
 /// 2y+1, so it moves no bits (ops/resample.hpp's rowsDecimatedBy2 is the same
 /// arithmetic written as a view; this kernel needs BOTH rows of each pair, so it
 /// indexes them directly rather than taking a stride-doubled view of one of them).
 /// Horizontal decimation is the word-local unshuffle ops/resample.hpp chose:
-/// impl::gatherEvenBits, from ops/resample.hpp, measured on the reference device
-/// as 8.3x-26.4x faster than either route actually named.
+/// impl::gatherEvenBits, from ops/resample.hpp, measured on a Cortex-A72 as
+/// 8.3x-26.4x faster than either alternative.
 ///
 /// This file calls the WORD primitive rather than the view-level
 /// decimateColumnsBy2, and that is a deliberate fusion: an edge fixup must cost
@@ -82,12 +87,11 @@
 /// the four phases are four registers, the arithmetic runs on them, and the
 /// kernel needs **no scratch BUFFER** -- nothing frame-sized, nothing caller-
 /// provided, nothing on the heap. It does use a bounded stack frame; the number
-/// is in promise 2 below, and it is not the one this file used to quote. The odd
-/// phase is the same gather over `word >> 1`, which costs one shift.
+/// is in promise 2 below. The odd phase is the same gather over `word >> 1`,
+/// which costs one shift.
 ///
 /// ---------------------------------------------------------------------------
-/// PROBLEM 2 -- THE N-BIT BOX. Closed here, and this is the part
-/// worth reading.
+/// PROBLEM 2 -- THE N-BIT BOX. This is the part worth reading.
 ///
 /// ops/bitslice.hpp's `bitSlicedSum` counts k inputs **each worth one**. Over a
 /// 1-bit source the 2x2 box is exactly that at k = 4. Over an NIn-bit source the
@@ -102,11 +106,11 @@
 /// **The shipped formulation is a bit-sliced multi-bit ADD, and it is linear in
 /// NIn.** Three ripple-carry additions in a tree:
 ///
-/// t1 = a + b NIn full adders, NIn + 1 planes
-/// t2 = c + d NIn full adders, NIn + 1 planes
-/// S = t1 + t2 NIn + 1 full adders, NIn + 2 planes
-/// ---------------------
-/// 3 * NIn + 1 full adders
+///     t1 = a + b       NIn full adders,       NIn + 1 planes
+///     t2 = c + d       NIn full adders,       NIn + 1 planes
+///     S  = t1 + t2     NIn + 1 full adders,   NIn + 2 planes
+///                      ---------------------
+///                      3 * NIn + 1 full adders
 ///
 /// A full adder is `sum = a ^ b ^ carry` and `carry = maj3(a, b, carry)` -- seven
 /// word operations, the maj3 being ops/bitslice.hpp's, and every one of them is
@@ -114,9 +118,9 @@
 /// **impl::boxSumFullAdders(NIn) == 3 * NIn + 1** adder stages where the
 /// replication route costs 4 * (2^NIn - 1) single-bit accumulate steps:
 ///
-/// NIn 1 2 3 4 5 8
-/// 3*NIn + 1 (shipped) 4 7 10 13 16 25
-/// 4*(2^NIn - 1) (replicated)4 12 28 60 124 1020
+///     NIn                         1    2    3    4     5      8
+///     3*NIn + 1     (shipped)     4    7   10   13    16     25
+///     4*(2^NIn - 1) (replicated)  4   12   28   60   124   1020
 ///
 /// Equal at NIn = 1 -- which is why ops/bitslice.hpp could ship the single-bit form and call
 /// it the box -- and 40x apart by NIn = 8. The replicated route also puts k words
@@ -128,9 +132,9 @@
 /// never exponential in either. It is one constant multiply, one constant add and
 /// a restoring division by a constant:
 ///
-/// Y = S * (2^NOut - 1) = (S << NOut) - S one bit-sliced subtract
-/// Y = Y + 2 * (2^NIn - 1) one constant add
-/// V = Y / (4 * (2^NIn - 1)) NOut restoring steps
+///     Y = S * (2^NOut - 1) = (S << NOut) - S    one bit-sliced subtract
+///     Y = Y + 2 * (2^NIn - 1)                   one constant add
+///     V = Y / (4 * (2^NIn - 1))                 NOut restoring steps
 ///
 /// Multiplying by 2^NOut - 1 is a subtraction rather than a shift-and-add chain
 /// because an all-ones constant is one less than a power of two -- the same
@@ -185,7 +189,7 @@
 /// 2. **The replicated route** (impl::boxSum4Replicated), which reaches the same
 /// S through ops/bitslice.hpp's single-bit adder network instead of this
 /// file's multi-bit one.
-/// 3. **The reference pipeline's own BOX_2x2 path** for the 1-bit level-0 case
+/// 3. **The reference pipeline's own 2x2-box path** for the 1-bit level-0 case
 /// -- cv::blur(2x2) then subsample, with the Gaussian disabled, which is what
 /// the reference pipeline's pyramid does.
 ///
@@ -205,7 +209,7 @@
 /// (0, 0) with BORDER_REPLICATE, i.e. binCV's own geometry expressed in
 /// OpenCV calls -- and NOT the distance to the reference pipeline's whole
 /// level, which also carries the phase deviation below. Measured against the
-/// reference's actual BOX_2x2 level the two differ on **74.9% of destination
+/// reference's actual 2x2-box level the two differ on **74.9% of destination
 /// pixels (848 of 3380 identical) by up to 192 of 255** -- measured by
 /// tests/test_pyramid.cpp check 6, and all of it phase; the third bullet is
 /// where that is accounted for. Rounding a mean up is a
@@ -216,7 +220,7 @@
 ///
 /// * **The cap.** The reference lets precision grow into the CV_8U it was
 /// already paying for. binCV caps each level at NOut bits, which is the
-/// footprint lever exists to price. At NOut = 3 the level-1 value
+/// footprint lever a caller prices by choosing NOut. At NOut = 3 the level-1 value
 /// set is {0, 2, 4, 5, 7}/7 = {0,.286,.571,.714, 1} where the reference's
 /// is {0,.25,.5,.75, 1}: the true quarter-steps are not representable in
 /// three bits, and the nearest three-bit values are what binCV stores. NOut is
@@ -246,25 +250,23 @@
 /// because there is nothing to put in it, and no heap allocation on any path
 /// -- tests/test_pyramid.cpp pins both by counting `operator new` across
 /// pyrDown and Pyramid::build. What the kernel does use is a
-/// **compile-time-bounded stack frame**, and this file used to quote the
-/// wrong number for it: NIn + NOut + 2 words is the widest SINGLE intermediate
-/// (`scaled`), not the total. The source declares
+/// **compile-time-bounded stack frame**. NIn + NOut + 2 words is the widest
+/// SINGLE intermediate (`scaled`), not the total. The source declares
 /// `impl::pyrDownAutomaticWords(NIn, NOut) == 8*NIn + 2*NOut + 6` words --
 /// four phase arrays at NIn, boxSum4's two partials at NIn+1, `sum` at NIn+2,
 /// `scaled` at NIn+NOut+2 and `value` at NOut -- plus 2*NIn + NOut row
 /// pointers. MEASURED with `-fstack-usage` at `-O2 -DNDEBUG`, one call's frame
 /// is (aarch64 / g++ 14.2 above, x86_64 / g++ 11.4 below, in bytes):
 ///
-/// NIn/NOut 1/3 3/4 4/5 8/8
-/// aarch64 u32 224 416 448 640
-/// u64 272 544 592 912
-/// x86_64 u32 288 480 544 720
-/// u64 368 640 704 1040
+///     NIn/NOut         1/3    3/4    4/5    8/8
+///     aarch64   u32    224    416    448    640
+///               u64    272    544    592    912
+///     x86_64    u32    288    480    544    720
+///               u64    368    640    704   1040
 ///
 /// -- larger than the declared words alone, because the compiler also spills,
-/// and smaller on aarch64, which has twice the registers to spill into. The
-/// old sentence implied 48 B at 1/3 and 144 B at 8/8, so it was low by
-/// 5.7x-7.7x across this table. A caller sizing a Cortex-M stack should budget
+/// and smaller on aarch64, which has twice the registers to spill into. A
+/// caller sizing a Cortex-M stack should budget
 /// from here, not from the widest intermediate. The frame does not depend on
 /// image size.
 /// 3. **Never throws.** Shape and aliasing violations are programming errors,
@@ -388,17 +390,16 @@ constexpr size_t pyrDownAdderStages(size_t nIn, size_t nOut) {
 ///
 /// On top of it the kernel holds 2 * NIn + NOut row POINTERS and a few
 /// scalars. None of it scales with the image.
-/// @note **NIn + NOut + 2 -- the widest single intermediate -- was documented as
-/// the whole budget until a `-fstack-usage` measurement said otherwise.**
-/// The file header carries the measured frames; they exceed even this count,
-/// because a compiler that inlines the helpers also spills. So this is a
-/// source-level inventory a reader can check against the declarations, not a
-/// promise about the emitted frame -- and it is deliberately NOT enforced by
+/// @note **NIn + NOut + 2 is the widest single intermediate, not the budget.**
+/// The file header carries the `-fstack-usage` frames; they exceed even this
+/// count, because a compiler that inlines the helpers also spills. So this is
+/// a source-level inventory a reader can check against the declarations, not
+/// a promise about the emitted frame -- and it is deliberately NOT enforced by
 /// restructuring the kernel to match: grouping these into one object, or
 /// hoisting the helpers' locals into the caller, both MEASURED LARGER
 /// (784 B and 816 B against 704 B at NIn = 4 / NOut = 5 / uint64_t, x86_64),
 /// because the compiler can no longer overlap the lifetimes that do not
-/// meet. Memory wins, so the code stayed and the number was corrected.
+/// meet. Memory wins.
 /// @note Does NOT describe impl::pyrDownReplicated, whose rejected box sum adds
 /// 4 * (2^NIn - 1) words of its own -- half of why it lost.
 constexpr size_t pyrDownAutomaticWords(size_t nIn, size_t nOut) {
@@ -665,28 +666,26 @@ inline void gatherPhases(WordType w0, WordType w1, WordType& evenPhase,
 // ===========================================================================
 // THE DOWNSAMPLING FILTER AXIS
 //
-// The reference defines SIX `LKPyrDownFilterType` variants and binCV implemented
-// exactly one, `BOX_2x2`, because that is what the reference pipeline selects. Every
-// accuracy result in this project was therefore measured at one point of a
-// two-dimensional design space -- and a measurement showed the
-// two axes are NOT independent: a 2x2 box sum of four values has five possible
-// outcomes, so it saturates at 3 bits and gains +0.82 yield points from N=2 to
-// N=7, where a 5x5 Gaussian gains +3.93. **The filter decides how much depth is
-// useful.**
+// The reference pipeline offers six downsampling filters and selects the 2x2 box.
+// The filter and the bit depth are NOT independent axes: a 2x2 box sum of four
+// values has five possible outcomes, so it saturates at 3 bits and gains +0.82
+// tracking-yield points from N=2 to N=7, where a 5x5 Gaussian gains +3.93. **The
+// filter decides how much depth is useful.**
 //
 // FIVE OF THE SIX ARE SEPARABLE WEIGHTED SUMS and share this one framework;
 // only the tap offsets and weights change:
 //
-// DIRECT_SUBSAMPLE offsets { 0} weights [1] sum 1
-// BOX_2x2 offsets { 0, +1} weights [1,1] sum 2
-// BOX_3x3 offsets {-1, 0, +1} weights [1,1,1] sum 3
-// GAUSSIAN_3x3 offsets {-1, 0, +1} weights [1,2,1] sum 4
-// GAUSSIAN_5x5 offsets {-2..+2} weights [1,4,6,4,1] sum 16
+//     DirectSubsample   offsets { 0}          weights [1]           sum  1
+//     Box2x2            offsets { 0, +1}      weights [1,1]         sum  2
+//     Box3x3            offsets {-1, 0, +1}   weights [1,1,1]       sum  3
+//     Gaussian3x3       offsets {-1, 0, +1}   weights [1,2,1]       sum  4
+//     Gaussian5x5       offsets {-2..+2}      weights [1,4,6,4,1]   sum 16
 //
-// (`MEDIAN_3x3` is an order statistic, not a weighted sum, and is not here.
-// it measured 7.53 points BELOW the box anyway: a median of a mostly-zero
+// (A 3x3 median is an order statistic, not a weighted sum, and is not here. It
+// measured 7.53 yield points BELOW the box: a median of a mostly-zero
 // neighbourhood returns zero, so it erodes a sparse edge map rather than blurring
-// it. It belongs in the temporal denoiser, which is where the reference pipeline uses it.)
+// it. The reference pipeline's median runs before binarization, where
+// ops/medianWide.hpp puts it.)
 //
 // WHY THE TAPS ARE CHEAP. Output column x reads source column 2x + dx, and
 // `gatherPhases` already separates a source row into its even and odd column
@@ -700,22 +699,24 @@ inline void gatherPhases(WordType w0, WordType w1, WordType& evenPhase,
 // why the weighted sum is barely more expensive than the box.
 // ===========================================================================
 
-/// @brief Which downsampling filter `pyrDown` applies. Names match the reference's
-/// `LKPyrDownFilterType` so a configuration can be carried across.
+/// @brief Which downsampling filter `pyrDownFiltered` applies. **API TIER 3** --
+/// the choice `cv::pyrDown` does not offer. Names follow the reference pipeline's
+/// filter options so a configuration can be carried across.
+/// @note The figures are tracking-yield percentage points relative to the
+/// `Gaussian5x5` anchor, from the filter sweep in docs/reports.
 enum class PyrDownFilter {
-    DirectSubsample,  ///< no lowpass; -19.68 yield points measured. Aliases badly.
-    Box2x2,           ///< the shipped default and the reference's
+    DirectSubsample,  ///< no lowpass; -19.68 yield points. Aliases badly.
+    Box2x2,           ///< `pyrDownBox`, and the reference pipeline's choice
     Box3x3,           ///< -0.80 from the Gaussian anchor at N=3
     Gaussian3x3,      ///< -1.28
     Gaussian5x5,      ///< the ANCHOR: what cv::buildOpticalFlowPyramid applies
 };
 
-/// @brief What a filter reads outside the frame.
+/// @brief What a filter reads outside the frame. **API TIER 3.**
 /// @note `Reflect101` is `cv::BORDER_REFLECT_101` -- what `cv::pyrDown` applies --
 /// and it is the DEFAULT, because binCV's same-named functions match OpenCV's
-/// behavior and the cheaper alternatives are opt-in. `Zero` is the deviation
-/// binCV shipped before, kept because it is genuinely cheaper and because
-/// every measurement taken before the default changed was taken on it.
+/// behavior and the cheaper alternatives are opt-in. `Zero` is kept because it
+/// is genuinely cheaper.
 /// @note THE TWO AXES COST DIFFERENTLY, which is what makes reflect-101 affordable
 /// here after being rejected for the LK taps. VERTICAL reflection is FREE: the
 /// filter reads whole rows, so reflecting is choosing a different row pointer
@@ -725,9 +726,8 @@ enum class PyrDownFilter {
 /// up per pixel on that rim while the interior keeps the word-parallel path.
 enum class PyrDownBorder {
     Reflect101,  ///< cv::BORDER_REFLECT_101, what cv::pyrDown applies. THE DEFAULT.
-    Replicate,   ///< cv::BORDER_REPLICATE -- and what the hand-optimized Box2x2
-                 ///< route has always done, so it is the border under which that
-                 ///< route is reachable and every pre- measurement was taken.
+    Replicate,   ///< cv::BORDER_REPLICATE -- the border the hand-optimized Box2x2
+                 ///< route implements, so the one under which it is reachable.
     Zero,        ///< read outside as 0. The cheapest, and a deviation from both.
 };
 
@@ -754,11 +754,6 @@ constexpr FilterTaps filterTaps(PyrDownFilter f) {
     }
 }
 
-/// @brief Planes needed to hold one axis of the weighted sum of `NIn`-bit values.
-/// @brief `cv::BORDER_REFLECT_101`: fold `i` into `[0, n)` about the EDGE PIXELS,
-/// which are not repeated -- `-1 -> 1`, `n -> n-2`.
-/// @note Loops because a tap can reach past the far edge on a level only a few
-/// pixels wide; at every size this project uses it folds once.
 /// @brief `cv::BORDER_REPLICATE`: clamp to the edge pixel.
 inline size_t replicateIndex(long long i, size_t n) {
     if (n == 0) return 0;
@@ -767,6 +762,10 @@ inline size_t replicateIndex(long long i, size_t n) {
     return static_cast<size_t>(i > last ? last : i);
 }
 
+/// @brief `cv::BORDER_REFLECT_101`: fold `i` into `[0, n)` about the EDGE PIXELS,
+/// which are not repeated -- `-1 -> 1`, `n -> n-2`.
+/// @note Loops because a tap can reach past the far edge on a level only a few
+/// pixels wide; at every size this project uses it folds once.
 inline size_t reflect101(long long i, size_t n) {
     if (n <= 1) return 0;
     const long long last = static_cast<long long>(n) - 1;
@@ -805,6 +804,7 @@ inline void setPixelValue(BinMatView<WordType> (&dst)[NOut], size_t y, size_t x,
     }
 }
 
+/// @brief Planes needed to hold one axis of the weighted sum of `NIn`-bit values.
 constexpr size_t axisPlanes(size_t nIn, unsigned weightSum) {
     size_t bits = 0;
     // max value is weightSum * (2^nIn - 1); count its bits.
@@ -817,9 +817,9 @@ constexpr size_t axisPlanes(size_t nIn, unsigned weightSum) {
 /// @brief `acc += (v << Shift)`, bit-sliced. A shift is free: it is an index
 /// offset, so this is one ripple add.
 /// @note `AccN`, `VN` and `Shift` are TEMPLATE parameters and there is no
-/// staging buffer. The earlier signature took all three at runtime and built
-/// the shifted operand in a `tmp` array first -- which at `Shift == 0`, the
-/// common case, copied the operand onto itself before adding. With the extents
+/// staging buffer. A runtime signature would build the shifted operand in a
+/// `tmp` array first -- which at `Shift == 0`, the common case, copies the
+/// operand onto itself before adding. With the extents
 /// known the loop unrolls and the out-of-range planes fold away: below `Shift`
 /// the addend is literally zero, so the stage degenerates to
 /// `acc[p] ^= carry; carry &= acc_old[p]` with no operand read at all.
@@ -871,19 +871,15 @@ inline void weightedAxisStage([[maybe_unused]] const WordType (*taps)[NIn],
 /// @param taps The filter's tap count operands, each `NIn` planes, in tap order.
 /// @param out `OutN` planes, zeroed by this function then filled.
 /// @note The tap count, the weights and the output width all come from `F`,
-/// which is a template parameter, so none of them are passed at runtime any
-/// more. The previous signature took them as arguments and looped over them --
-/// decomposing compile-time weights into set bits at run time, once per output
-/// word.
+/// which is a template parameter, so none of them is passed at runtime:
+/// passed as arguments, they would decompose compile-time weights into set
+/// bits at run time, once per output word.
 template <PyrDownFilter F, size_t NIn, size_t OutN, typename WordType>
 inline void weightedAxis(const WordType (*taps)[NIn], WordType* out) {
     for (size_t p = 0; p < OutN; ++p) out[p] = 0;
     weightedAxisStage<F, NIn, OutN, 0, 0, WordType>(taps, out);
 }
 
-/// @brief `requantizeBoxSum` for an arbitrary kernel weight sum.
-/// @note The box version is this with `KSum == 4`. Same three steps: scale to the
-/// output's full range, add half the divisor to round to nearest, divide.
 /// @brief One quotient bit of `divideByConstantT`, unrolled at compile time.
 /// `[[maybe_unused]]` for `weightedAxisStage`'s reason: the `Q == 0` base case reads
 /// neither argument.
@@ -911,6 +907,9 @@ inline void divideByConstantT(WordType* value, WordType* quotient) {
     divideStage<Divisor, N, NQ, WordType>(value, quotient);
 }
 
+/// @brief `requantizeBoxSum` for an arbitrary kernel weight sum.
+/// @note The box version is this with `KSum == 4`. Same three steps: scale to the
+/// output's full range, add half the divisor to round to nearest, divide.
 template <size_t NOut, size_t NIn, size_t SumPlanes, unsigned KSum, typename WordType>
 inline void requantizeWeighted(const WordType* sum, WordType* out) {
     constexpr unsigned maxIn = (1u << NIn) - 1u;
@@ -931,7 +930,8 @@ namespace impl {
 
 /// @brief One pyramid level: 2x2 box mean of `src`, subsampled, at NOut bits --
 /// the body BOTH box-sum routes share. **Internal**; the public entry
-/// point is `pyrDown` below, which fixes `Replicated` to false.
+/// point is `pyrDownBox` below (through `pyrDownFiltered`), which fixes
+/// `Replicated` to false.
 /// @tparam Replicated Which 2x2 sum to use: `false` is the shipped multi-bit
 /// adder, linear in NIn; `true` is the rejected replication route through
 /// ops/bitslice.hpp's single-bit network, exponential in NIn. Everything
@@ -940,7 +940,7 @@ namespace impl {
 /// two different operations, and tests/test_pyramid.cpp require them to
 /// agree pixel for pixel.
 /// @tparam NOut Bits per destination pixel. The CAP: this is the footprint lever
-/// exists to price, and it is a parameter rather than a
+/// a caller prices by choosing it, and it is a parameter rather than a
 /// derived value precisely so that it can be measured rather than argued.
 /// @tparam NIn Bits per source pixel.
 /// @param src NIn source plane views, least significant plane first, all the same
@@ -952,7 +952,7 @@ namespace impl {
 /// the 2x2 sum at source rows 2y, 2y+1 and columns 2x, 2x+1, rounded half
 /// up. Read the file header for why the rescale is there and what it costs.
 /// @note **Deviation from the reference pipeline, recorded rather than silent.** The
-/// reference (`LKPyrDownFilterType::BOX_2x2`) lets precision grow into
+/// reference pipeline's 2x2-box path lets precision grow into
 /// CV_8U and never re-binarizes, so its levels are 1/3/4/5 bits by
 /// measurement. binCV caps each level at NOut and stores
 /// the nearest representable value. The reference also anchors its 2x2
@@ -1081,28 +1081,6 @@ inline void pyrDownReplicated(const BinMatConstView<WordType> (&src)[NIn],
     pyrDownRoute<NOut, NIn, WordType, true>(src, dst);
 }
 
-} // namespace impl
-
-/// @brief One pyramid level: 2x2 box mean of `src`, subsampled, at NOut bits.
-/// **API TIER 2** -- cv::pyrDown's role, deliberately different numerics.
-/// This is the entry point; `impl::pyrDownRoute` above is the body, and
-/// this fixes its box-sum route to the linear one ops/bitslice.hpp chose.
-/// @param src NIn source plane views, least significant plane first.
-/// @param dst NOut destination plane views, `pyrDownWidth(src.width)` by
-/// `pyrDownHeight(src.height)`. Must share no word with any source plane.
-/// @note RETIRED AS `pyrDown`. `pyrDown` now means what `cv::pyrDown` means -- a 5x5
-/// Gaussian with BORDER_REFLECT_101 -- and this box route is reached as
-/// `pyrDownBox`, or as `pyrDownFiltered<Box2x2,..., Replicate>` which
-/// dispatches here. The rename is deliberate: a function carrying OpenCV's
-/// name computing a different filter was a trap, however documented.
-template <size_t NOut, size_t NIn, typename WordType>
-inline void pyrDownBoxViews(const BinMatConstView<WordType> (&src)[NIn],
-                            BinMatView<WordType> (&dst)[NOut]) {
-    impl::pyrDownRoute<NOut, NIn, WordType, false>(src, dst);
-}
-
-namespace impl {
-
 /// @brief The same, taking containers, for the benchmark's convenience.
 template <size_t NOut, size_t NIn, typename WordType>
 inline void pyrDownReplicated(const QuantMat<NIn, WordType>& src,
@@ -1115,26 +1093,6 @@ inline void pyrDownReplicated(const QuantMat<NIn, WordType>& src,
 }
 
 } // namespace impl
-
-/// @brief The QuantMat spelling of pyrDown. **API TIER 2.**
-/// @param src Source level, NIn bits per pixel.
-/// @param dst Destination level, NOut bits per pixel, already sized
-/// `pyrDownWidth(src.getWidth) x pyrDownHeight(src.getHeight)`.
-/// @note A thin wrapper that names the planes, not a second implementation -- the
-/// same shape ops/threshold.hpp's binarize uses, and for the same reason
-/// (the kernel binds to views, so it compiles once per (WordType, N)
-/// whatever the container).
-/// @note NIn == 1 comes here too: BinMat IS QuantMat<1> (core/types.hpp), so a
-/// binary level 0 needs no separate entry point.
-template <size_t NOut, size_t NIn, typename WordType>
-inline void pyrDownBoxContainers(const QuantMat<NIn, WordType>& src,
-                                 QuantMat<NOut, WordType>& dst) {
-    BinMatConstView<WordType> srcPlanes[NIn];
-    BinMatView<WordType> dstPlanes[NOut];
-    for (size_t p = 0; p < NIn; ++p) srcPlanes[p] = src.plane(p);
-    for (size_t q = 0; q < NOut; ++q) dstPlanes[q] = dst.plane(q);
-    pyrDownBoxViews<NOut, NIn, WordType>(srcPlanes, dstPlanes);
-}
 
 // ---------------------------------------------------------------------------
 // The ladder
@@ -1261,8 +1219,8 @@ private:
 /// odd extent keeps its last column or row (see pyrDown). The ladder stalls
 /// at 1 pixel: ceil(1/2) is 1.
 /// @note This is a CONTAINER, not a kernel: it owns its levels and allocates them
-/// in its constructor. The no-heap rule binds kernels
-/// (CLAUDE.md, hard rules), and `build` allocates nothing.
+/// in its constructor. The no-heap rule binds kernels, and `build` allocates
+/// nothing.
 template <typename WordType, size_t... LevelBits>
 class Pyramid {
     static_assert(sizeof...(LevelBits) >= 1, "a pyramid needs at least one level");
@@ -1305,12 +1263,11 @@ public:
         return levels_.template get<I>();
     }
 
-    /// @brief Fills levels 1..N-1 by running pyrDown down the ladder.
+    /// @brief Fills levels 1..N-1 by running the chosen filter down the ladder.
     /// @note Level 0 is the caller's input and is not touched. Allocates nothing:
-    /// every level already exists, and pyrDown takes no scratch buffer.
+    /// every level already exists, and the kernel takes no scratch buffer.
     /// tests/test_pyramid.cpp counts operator new across this call and
     /// requires zero.
-    /// @brief Fills levels 1.. from level 0.
     /// @tparam F Which downsampling filter. Defaults to `Gaussian5x5`, so that a
     /// bare `build` matches `cv::buildOpticalFlowPyramid`'s filter, for
     /// the same reason `pyrDown` defaults to it.
@@ -1326,9 +1283,8 @@ public:
     void build() { levels_.template buildDown<F, Bo>(); }
 
     /// @brief Total words across every level -- the pyramid's whole footprint.
-    /// @note This is the number weighs. It is a peak, not a per-buffer
-    /// ratio: the levels coexist, because a tracker reads all of them
-    /// (CLAUDE.md, benchmarking: report peak working set).
+    /// @note This is the number a footprint comparison weighs. It is a peak, not a
+    /// per-buffer ratio: the levels coexist, because a tracker reads all of them.
     size_t sizeInWords() const { return levels_.words(); }
 
     /// @brief Total bytes across every level.
@@ -1355,21 +1311,8 @@ inline WordType phaseAtPlus1(WordType cur, WordType next) {
     return static_cast<WordType>((cur >> 1) | (next << (B - 1)));
 }
 
-/// @brief One pyramid level under an arbitrary SEPARABLE filter. **INTERNAL.**
-///
-/// See the filter-axis section above for why every tap is a phase word shifted by a
-/// whole number of output columns, and why a weight of `2^k` is free.
-///
-/// **BORDER: source outside the frame reads as ZERO**, which is the rule the shipped
-/// `pyrDown` already applies to source words past the row. It is NOT the
-/// reference's `BORDER_REFLECT_101`, and the difference shows on a `Radius`-pixel
-/// rim of each level. Reflect-101 is a per-pixel index map and is not word-parallel
-/// -- the same reason deviation (iii) rejected it for the LK taps. The rule asks
-/// each filter to reproduce **its own** definition exactly, and
-/// tests/test_pyramid.cpp checks that against a per-pixel integer reference using
-/// this same border.
 /// @brief The exact output pixel at `(y, x)`, computed PER PIXEL under an explicit
-/// border rule.
+/// border rule. **INTERNAL.**
 /// @note This is the DEFINITION the word-parallel route reproduces. It is not a test
 /// scaffold: the shipped path calls it on the border rim, so the reference and
 /// the implementation cannot drift apart -- if this is wrong, the rim is wrong,
@@ -1431,6 +1374,20 @@ inline size_t rightRimStart(PyrDownFilter f, size_t srcWidth, size_t dstWidth) {
     return static_cast<size_t>(start) < dstWidth ? static_cast<size_t>(start) : dstWidth;
 }
 
+/// @brief One pyramid level under an arbitrary SEPARABLE filter and border rule.
+/// **INTERNAL.**
+///
+/// See the filter-axis section above for why every tap is a phase word shifted by a
+/// whole number of output columns, and why a weight of `2^k` is free.
+///
+/// **BORDER.** The word-parallel pass reads source outside the frame as ZERO, which
+/// is exact under `PyrDownBorder::Zero`. Under `Reflect101` and `Replicate` the
+/// vertical axis is a different row pointer and costs nothing; the horizontal axis
+/// is a per-pixel index map and is not word-parallel, so the output columns whose
+/// source support crosses an edge -- at most `ceil(Radius/2)` per side -- are
+/// recomputed from `pyrDownPixel` under the same `Bo`, and the interior keeps the
+/// word-parallel path. tests/test_pyramid.cpp checks every filter and border
+/// against `pyrDownPixel` per pixel.
 template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType,
           PyrDownBorder Bo = PyrDownBorder::Reflect101>
 inline void pyrDownFilteredRoute(const BinMatConstView<WordType> (&src)[NIn],
@@ -1558,12 +1515,13 @@ inline void pyrDownFilteredRoute(const BinMatConstView<WordType> (&src)[NIn],
 } // namespace impl
 
 /// @brief One pyramid level under a chosen downsampling filter. **API TIER 3.**
-/// @tparam F Which separable filter. `Box2x2` is the shipped default
-/// and the reference's; `Gaussian5x5` is what `cv::buildOpticalFlowPyramid`
-/// applies and is the accuracy anchor.
-/// @note The existing `pyrDown` is this at `Box2x2`, through a hand-written route
-/// that stays because it is what every prior result was measured on and
-/// tests/test_pyramid.cpp holds the two to agreement.
+/// @tparam F Which separable filter. `Gaussian5x5` with `Reflect101` is `pyrDown`
+/// (`cv::pyrDown`'s filter, and the accuracy anchor); `Box2x2` with `Replicate`
+/// is `pyrDownBox` (the reference pipeline's choice and binCV's operating point).
+/// @tparam Bo The border rule; defaults to OpenCV's.
+/// @note `Box2x2` + `Replicate` dispatches to a hand-optimized route, 1.24x the
+/// generic one computing the same function; tests/test_pyramid.cpp holds the
+/// two to agreement.
 template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType,
           PyrDownBorder Bo = PyrDownBorder::Reflect101>
 inline void pyrDownFiltered(const BinMatConstView<WordType> (&src)[NIn],
@@ -1573,11 +1531,10 @@ inline void pyrDownFiltered(const BinMatConstView<WordType> (&src)[NIn],
     // design rather than an exception -- the same shape ops/opticalFlow.hpp uses to
     // reach alignedResidualSumsNeon1/2.
     //
-    // Box2x2 + Replicate is the one specialization that exists today: the
-    // hand-optimized route through boxSum4 and requantizeBoxSum, 1.24x the generic
-    // route computing the same function, and the border it has always
-    // implemented. The other four filters and the other two borders take the generic
-    // route until someone measures a case worth specializing.
+    // Box2x2 + Replicate is the one specialization: the hand-optimized route
+    // through boxSum4 and requantizeBoxSum, 1.24x the generic route computing the
+    // same function. The other four filters and the other two borders take the
+    // generic route.
     //
     // The two are held to agreement by tests/test_pyramid.cpp at ODD extents
     // specifically, which is the only place they can differ.
@@ -1588,7 +1545,7 @@ inline void pyrDownFiltered(const BinMatConstView<WordType> (&src)[NIn],
     impl::pyrDownFilteredRoute<F, NOut, NIn, WordType, Bo>(src, dst);
 }
 
-/// @brief Container spelling of `pyrDownFiltered`.
+/// @brief Container spelling of `pyrDownFiltered`. **API TIER 3.**
 template <PyrDownFilter F, size_t NOut, size_t NIn, typename WordType, PyrDownBorder Bo>
 inline void pyrDownFiltered(const QuantMat<NIn, WordType>& src, QuantMat<NOut, WordType>& dst) {
     BinMatConstView<WordType> s[NIn];
@@ -1599,11 +1556,12 @@ inline void pyrDownFiltered(const QuantMat<NIn, WordType>& src, QuantMat<NOut, W
 }
 
 /// @brief One pyramid level by 2x2 box mean, `BORDER_REPLICATE`. **API TIER 2.**
-/// @note THIS IS WHAT `pyrDown` USED TO BE, and it is what the VIO frontend wants:
-/// it measures **4.4x faster than cv::pyrDown** at binCV's own bit widths,
-/// against the OpenCV-matching Gaussian's rough parity. It is not `cv::pyrDown`
-/// and does not claim to be -- different filter, different border -- which is
-/// why it no longer holds that name.
+/// @note **binCV's own operating point, and what the VIO frontend wants:** it
+/// measures **4.4x faster than cv::pyrDown** at binCV's own bit widths
+/// (640x480 -> 320x240, 1 -> 3 bits, one thread), against the OpenCV-matching
+/// Gaussian's rough parity. It is not `cv::pyrDown` and does not claim to be --
+/// different filter, different border -- which is why it does not carry that
+/// name.
 /// @note Dispatches to the hand-optimized box route (`impl::pyrDownRoute`), 1.24x the
 /// generic framework computing the same function.
 /// tests/test_pyramid.cpp holds the two to agreement at ODD extents, which is
@@ -1636,9 +1594,9 @@ inline void pyrDownBox(const BinMatConstView<WordType> (&src)[NIn],
 /// is not small. 640x480 -> 320x240 against `cv::pyrDown` at one
 /// thread:
 ///
-/// pyrDownBox 1 -> 3 bits 116 us 4.4x FASTER than cv::pyrDown
-/// pyrDown (this) 1 -> 3 bits 599 us 0.86x -- rough parity
-/// pyrDown (this) 8 -> 8 bits 7349 us 13.7x SLOWER
+///     pyrDownBox       1 -> 3 bits    116 us    4.4x FASTER than cv::pyrDown
+///     pyrDown (this)   1 -> 3 bits    599 us    0.86x -- rough parity
+///     pyrDown (this)   8 -> 8 bits   7349 us   13.7x SLOWER
 ///
 /// **A pipeline should call `pyrDownBox`**, or `pyrDownFiltered` with the
 /// filter it wants; this exists so that `pyrDown` MEANS `cv::pyrDown`.

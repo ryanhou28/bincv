@@ -16,9 +16,8 @@
 ///
 /// That is why this is possible on binCV's data at all. A ternary derivative carries
 /// `+/-1` where a byte pipeline carries `+/-255`, and the refined position is the same
-/// to within rounding. **A binCV user checked it independently before asking for this
-/// operation: refining on a 0/255 image against the same content as 0/1 agreed to
-/// 0.00018 px mean over 5924 corners.**
+/// to within rounding. **Measured: refining on a 0/255 image against the same content
+/// as 0/1 agrees to 0.00018 px mean over 5924 corners.**
 ///
 /// ---------------------------------------------------------------------------
 /// AND WHY IT IS binCV-SHAPED RATHER THAN A PORTED LOOP
@@ -40,8 +39,8 @@
 /// The refinement rule, the Gaussian window, the zero-zone and the termination are
 /// `cv::cornerSubPix`'s. **The gradient is not**: OpenCV computes its own from the
 /// 8-bit image with a Sobel-like scheme, and this takes binCV's already-computed
-/// `SignedQuantMat` derivatives -- which is (a kernel binds to views, and the
-/// pipeline has these already) and also the only shape that avoids materializing an
+/// `SignedQuantMat` derivatives -- which is the library's shape (a kernel binds to
+/// views, and the pipeline has these already) and also the only shape that avoids materializing an
 /// 8-bit image the library exists to avoid.
 
 #include <cmath>
@@ -56,6 +55,7 @@ namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
 /// @brief `cv::cornerSubPix`'s `winSize`, `zeroZone` and `criteria`, in one struct.
+/// **API TIER 2** -- the same meanings `cv::cornerSubPix` gives them.
 struct SubPixParams {
     /// Half-width of the search window; the window is `(2*winHalf + 1)` square.
     /// OpenCV's `winSize(5,5)` -- ORB-SLAM's and HybVIO's choice -- is `winHalf = 5`.
@@ -79,9 +79,8 @@ struct SubPixResult {
     ///
     /// **This is `cv::cornerSubPix`'s own rule, not an addition** -- "if new point is too
     /// far from initial, it means poor convergence; leave initial point as the result",
-    /// tested on `|dx| > win.width || |dy| > win.height` after the loop. binCV did not
-    /// implement it until a user reported the gap, and the difference is not subtle: a
-    /// seed that walks out of its own window is exactly the case where the two answers
+    /// tested on `|dx| > win.width || |dy| > win.height` after the loop. The difference
+    /// is not subtle: a seed that walks out of its own window is exactly the case where the two answers
     /// diverge by more than the window is wide.
     size_t diverged = 0;
 };
@@ -94,17 +93,9 @@ namespace impl {
 /// `cv::cornerSubPix` normalizes each offset by the half-window and exponentiates
 /// the sum of squares -- `vy = exp(-y*y)` with `y = (i - win.height)/win.height`,
 /// times the same in x -- so the weight is exactly 1/e at the edge of the window
-/// along either axis.
-/// @note **THIS WAS WRONG BY A FACTOR OF TWO IN THE EXPONENT** -- the
-/// denominator read `2*(winHalf/2)^2 = winHalf^2/2`, giving `exp(-2r^2/winHalf^2)`,
-/// a Gaussian sqrt(2) too narrow. Reported from outside at 4.53 px mean against
-/// OpenCV on real frames.
-/// @note **THE TEST SAW IT AND PASSED ANYWAY, AND THAT IS THE PART WORTH REMEMBERING.**
-/// `SubPix.AgreesWithOpenCVOnTheSameCorner` measured **0.0325 px with the wrong
-/// mask and 0.0035 px with the right one** -- it was sensitive, by a factor of
-/// nine. It passed because its bound was 0.1, chosen from the number the code
-/// happened to produce rather than from what a correct implementation reaches. A
-/// tolerance fitted to the observed value cannot fail; it can only record.
+/// along either axis. A denominator of `winHalf^2 / 2` -- a Gaussian sqrt(2) too
+/// narrow -- moves the answer by 4.53 px mean against OpenCV on real frames, so
+/// `SubPix.AgreesWithOpenCVOnTheSameCorner` pins the width, not only the shape.
 inline void subPixMask(int winHalf, int zeroHalf, double* mask) {
     const int side = 2 * winHalf + 1;
     const double denom = static_cast<double>(winHalf) * static_cast<double>(winHalf);
@@ -124,8 +115,34 @@ inline void subPixMask(int winHalf, int zeroHalf, double* mask) {
 }
 
 /// The largest window this operation will build a mask for, so the mask is a stack
-/// buffer and the kernel allocates nothing (CLAUDE.md's hard rule).
+/// buffer -- `double[31 * 31]`, 7,688 B -- and the kernel allocates nothing (no heap
+/// in a kernel).
 inline constexpr int kMaxWinHalf = 15;
+
+/// @brief Index of the lowest set bit of a NON-ZERO word, without any compiler
+/// builtin. **INTERNAL.**
+/// @note The MSVC and no-builtin fallback, for the reason ops/reduce.hpp keeps
+/// `popcountWordPortable`: the library claims a C++17 compiler and nothing
+/// else, and `__builtin_ctzll` alone would make this header GCC/clang-only.
+/// A loop, because it runs only where the builtin does not exist and the
+/// caller has already tested the word for zero.
+inline size_t ctzPortable(unsigned long long v) {
+    size_t n = 0;
+    while ((v & 1ull) == 0ull) {
+        v >>= 1;
+        ++n;
+    }
+    return n;
+}
+
+/// @brief Index of the lowest set bit of a NON-ZERO word. **INTERNAL.**
+inline size_t ctzWord(unsigned long long v) {
+#if defined(__GNUC__) || defined(__clang__)
+    return static_cast<size_t>(__builtin_ctzll(v));
+#else
+    return ctzPortable(v);
+#endif
+}
 
 }  // namespace impl
 
@@ -137,8 +154,9 @@ inline constexpr int kMaxWinHalf = 15;
 /// the image, or whose `G` is singular, is **left exactly where it was**.
 /// @param count Number of corners.
 ///
-/// @note **Never allocates and never throws.** The Gaussian mask is a stack buffer
-/// bounded by `impl::kMaxWinHalf`.
+/// @note **Never allocates and never throws.** The Gaussian mask is a stack buffer of
+/// 7,688 B (`double[31 * 31]`, bounded by `impl::kMaxWinHalf`) whatever `winHalf`
+/// is -- half of a 16 KB Cortex-M stack, so a small target budgets for it.
 /// @note A corner is refined **independently of every other**, so this splits over
 /// `parallelFor` exactly as tracking does. It is not split here because the
 /// operation is a few microseconds per frame at realistic corner counts; measure
@@ -175,9 +193,9 @@ inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
             // THE WINDOW IS ANCHORED ON THE ROUNDED POSITION, AND THAT IS A DEVIATION.
             // A bit-plane derivative cannot be interpolated -- the popcount identity is
             // exact only for {-1, 0, +1} -- so the samples are integer pixels and the
-            // refinement is the offset within them. This comment used to claim the
-            // rounding was "as OpenCV's is"; it is not, and saying so hid a real
-            // difference behind a false reassurance.
+            // refinement is the offset within them. OpenCV instead interpolates at
+            // the fractional position, so the two anchor differently by up to half
+            // a pixel.
             const long long ix0 = static_cast<long long>(std::floor(cx + 0.5));
             const long long iy0 = static_cast<long long>(std::floor(cy + 0.5));
             if (ix0 - winHalf < 0 || iy0 - winHalf < 0 ||
@@ -227,8 +245,8 @@ inline SubPixResult cornerSubPix(const SignedQuantMat<N, WordType>& dx,
                     }
 
                     while (nz != 0) {
-                        const size_t b = static_cast<size_t>(
-                            __builtin_ctzll(static_cast<unsigned long long>(nz)));
+                        const size_t b =
+                            impl::ctzWord(static_cast<unsigned long long>(nz));
                         nz = static_cast<WordType>(nz & (nz - 1));
                         const size_t x = wi * kBits + b;
                         const int wx = static_cast<int>(static_cast<long long>(x) - ix0);

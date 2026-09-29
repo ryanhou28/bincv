@@ -1,11 +1,13 @@
 // denoise -- the reference pipeline's three-pixel median -- against OpenCV,
 // and against binCV's own composed spelling.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
-// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR: OpenCV performing the SAME
 // SEMANTIC OPERATION on the SAME binary content stored as CV_8U. For this
 // operation that denominator is not a judgement call -- it is
-// the reference pipeline's denoiser, `three_pix_median_filter`, ported
-// call for call, because that IS what the pipeline runs today without binCV.
+// the reference pipeline's denoiser, ported call for call, because that IS what
+// the pipeline runs today without binCV.
 // The two `cv::Mat::zeros` neighbour matrices and the two range-limited copyTo
 // calls are part of the work, not setup: they are how that implementation
 // obtains its neighbours, and a version that skipped them would be a different
@@ -25,9 +27,9 @@
 // memory and speed conflict, and this pair of rows is how one finds out whether
 // they conflict here.
 //
-// FOOTPRINT IS REPORTED ALONGSIDE EVERY TIMING, per CLAUDE.md ("Report memory
-// and speed together -- they trade off, so one alone cannot be weighed against
-// goals that conflict"), as the WORKING SET OF ONE CALL rather than as a
+// FOOTPRINT IS REPORTED ALONGSIDE EVERY TIMING, because memory and speed trade
+// off, so one alone cannot be weighed against goals that conflict -- as the
+// WORKING SET OF ONE CALL rather than as a
 // per-buffer ratio.
 //
 // ---------------------------------------------------------------------------
@@ -68,13 +70,13 @@
 // WHERE THIS IS AUTHORITATIVE
 //
 // On x86_64 it is INDICATIVE ONLY -- a desktop host's spread decides nothing. The
-// numbers that belong in a claim come from the reference device:
+// numbers that belong in a claim come from the reference device, pinned and
+// launched ten times:
 //
-// BINCV_PI_OPENCV=1./scripts/run_on_pi.sh <target>
-// './benchmark/denoise_benchmark > denoise_benchmark.log'
+//   ./scripts/run_launches.sh -n 10 -g ./build/benchmark/denoise_benchmark
 //
-// BINCV_PI_OPENCV=1 is required: the denominator is an OpenCV call, and the
-// device's default build is core-only.
+// The build on the device must be configured with OpenCV: the denominator is an
+// OpenCV call, and a core-only build does not produce this binary.
 
 #include <algorithm>
 #include <chrono>

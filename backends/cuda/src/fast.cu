@@ -4,10 +4,10 @@
 // REFERENCE ARM: one thread per output WORD, reading the seven ring rows
 // straight from global memory through the HOST's own `impl::fastShiftedWord` and
 // `impl::fastArcAny`. Not a transcription of them -- the functions themselves,
-// which is what ruling R3 buys: the `w + 1 < words` guard that decides the last
-// word of every row has one definition, and the arc schedule that decides which
-// pixels are corners has one definition. This arm is the oracle the tiled arm is
-// held to.
+// which is what a host header carrying BINCV_HOST_DEVICE buys: the
+// `w + 1 < words` guard that decides the last word of every row has one
+// definition, and the arc schedule that decides which pixels are corners has
+// one definition. This arm is the oracle the tiled arm is held to.
 //
 // TILED ARM: block (32, 4), a 34 x 10 word tile in shared memory, and the
 // doubling schedule unrolled at compile time for arcLength 9 and 12. Two things
@@ -716,7 +716,12 @@ __global__ void fastEmitKernel(DeviceBinMatConstView img, size_t words, OrderGeo
     }
 }
 
+/// @brief The smallest power of two at or above `v`, total over the type: above
+/// 2^31 the value saturates rather than spinning, as corner.cu's copy does. No
+/// caller can reach it (2^31 corner records is 24 GB), but a helper that hangs
+/// on an unreachable input is still a hang.
 uint32_t nextPow2(uint32_t v) {
+    if (v > 0x80000000u) return 0x80000000u;
     uint32_t p = 1u;
     while (p < v) p <<= 1;
     return p;

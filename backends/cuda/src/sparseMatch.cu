@@ -63,9 +63,10 @@ using bincv::impl::lowBitsMask;
 using bincv::impl::parabolicOffset;
 
 // ---------------------------------------------------------------------------
-// Shapes. Each is recorded with the number that chose it in the benchmark; a
-// constant inherited from another kernel is the thing this backend's report
-// explicitly says not to do.
+// Shapes. CHOSEN, NOT SWEPT: 128 threads is four warps, the smallest block that
+// keeps every scheduler of an SM busy, and no measurement against 64 or 256
+// stands behind any of the four. A constant inherited by reasoning is stated
+// as such so a reader does not take it for a measured one.
 // ---------------------------------------------------------------------------
 
 constexpr unsigned kMatchBlock = 128;      ///< threads per matcher block (4 warps)

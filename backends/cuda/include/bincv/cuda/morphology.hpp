@@ -98,7 +98,7 @@
 ///
 /// A FUSED SINGLE-KERNEL OPEN/CLOSE. It would save one launch and cover
 /// BORDER_CONSTANT only, which means a second hand-written morphology kernel
-/// to keep bit-exact forever -- a cost CLAUDE.md names as a decision metric
+/// to keep bit-exact forever -- a cost every performance decision here weighs
 /// and which nobody has priced. It is also where a two-stage shared tile gets
 /// its apron arithmetic wrong in a way that is invisible at the frame edge and
 /// wrong at every block seam. Not built; `MORPH_OPEN` is two launches.
@@ -206,7 +206,8 @@ DeviceStructuringElement toDeviceElement(const StructuringElement& se);
 /// @brief Morphological erosion: `dst(x,y) = AND over the element of
 /// src(x+dx, y+dy)`. **API TIER 1** over the domain named at the top of this
 /// file -- bit-exact against `bincv::erode<uint32_t>`, which is itself
-/// bit-exact against `cv::erode`.
+/// bit-exact against `cv::erode`; proven by test_cuda_morphology, as are
+/// `dilate` and `morphologyEx`.
 ///
 /// @param src Source view, device memory.
 /// @param dst Destination, src's dimensions, sharing no word with src. In place

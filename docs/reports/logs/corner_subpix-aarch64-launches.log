@@ -152,3 +152,24 @@
 # temp after: temp=63.7'C
 # date:     2026-09-21T16:56:10-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py ) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                         n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# i1 / bincv::cornerSubPix (ternary derivs)  10     0.6250     0.6240     0.6280  1.006     0.6%      --  [  0.6245,   0.6255]   0.08%   1.001x
+# i1 / cv::cornerSubPix (8-bit image)        10     8.5950     8.5430     8.6720  1.015     1.5%      --  [  8.5510,   8.6270]   0.44%   1.005x
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     i1       suite owns exactness against the shared refinement rule)

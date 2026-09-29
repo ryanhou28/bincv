@@ -14,6 +14,9 @@ RECURSIVE              = YES
 
 # impl/ is internal. Excluding it is a documentation decision, not an oversight.
 EXCLUDE_PATTERNS       = */impl/*
+# The impl (and detail) namespaces inside the public headers are internal for the
+# same reason, at whatever depth the ABI namespace puts them.
+EXCLUDE_SYMBOLS        = impl impl::* *::impl *::impl::* detail detail::* *::detail *::detail::*
 
 EXTRACT_ALL            = NO
 EXTRACT_PRIVATE        = NO

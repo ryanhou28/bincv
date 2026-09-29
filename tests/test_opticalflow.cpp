@@ -55,14 +55,10 @@
 // may miss it by more than a factor of two. A point worse than one whole
 // pixel is not a noisy estimate of the right displacement, it is a different
 // displacement.
-// AN EARLIER VERSION OF THIS FILE JUSTIFIED THE SAME 1.0 px BY ROUTE (a) --
-// "integer-only census/Hamming matching gives 1.0 px, and a subpixel tracker
-// may never be worse". That justification was wrong twice over and is
-// withdrawn: a minimizing integer matcher returns `round(d)`, not
-// `floor(d)`, so its error is `min(q, 1-q) <= 0.5` per axis rather than 1.0;
-// and binCV contains no route (a) implementation to have measured, since
-// route (a) is. The NUMBER is unchanged -- it was not refitted --
-// only the derivation, which now rests on the representation alone.
+// The derivation rests on the representation alone, not on a comparison with an
+// integer-only census/Hamming matcher: such a matcher returns `round(d)`, not
+// `floor(d)`, so its error is `min(q, 1-q) <= 0.5` per axis rather than 1.0, and
+// binCV contains no such matcher to have measured in any case.
 // T3. At least 80% of eligible points tracked, AND NO TRACKED POINT MAY BE
 // STUCK. `status == 1` is not evidence of tracking on its own: on the real
 // frame every one of 102 points comes back tracked, including ones that
@@ -144,9 +140,9 @@
 namespace {
 std::size_t g_newCount = 0;
 // LIVE BYTES AND THEIR HIGH-WATER MARK, not just a call count. A counter of
-// `operator new` CALLS cannot say what a stage's peak is; an earlier pipeline table
-// used to add up the buffers its author had listed, so a buffer nobody listed --
-// including one acquired inside a kernel -- could not move the number. These two
+// `operator new` CALLS cannot say what a stage's peak is, and a table that adds up
+// the buffers its author listed cannot be moved by a buffer nobody listed --
+// including one acquired inside a kernel. These two
 // make the total a READING: every allocation adds its REQUESTED size, every free
 // subtracts it, and `g_peakBytes` records the largest live total since it was last
 // armed. The requested size is recoverable at free time because every block
@@ -597,6 +593,8 @@ std::vector<Point2f> eligiblePoints(const TernaryMat<WordType>& dx,
                     static_cast<size_t>(width)};
     std::vector<Corner> found(static_cast<size_t>(width) * static_cast<size_t>(height));
     GoodFeaturesParams params;  // the reference pipeline's parameters verbatim
+    // (The reference pipeline is the visual-inertial odometry system, not in this
+    // repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
     const CornerResult r =
         bincv::goodFeaturesToTrack(dx, dy, params, map, found.data(), found.size());
 
@@ -746,7 +744,7 @@ FlowStats measure(const std::vector<Point2f>& prevPts, const std::vector<Point2f
     s.rms = (s.tracked > 0) ? std::sqrt(sumSq / static_cast<double>(s.tracked)) : 0.0;
     // The median takes no parameter, which is why it is the robust number here
     // rather than a trimmed mean: a trim fraction would be a threshold nobody
-    // decided, and CLAUDE.md forbids inventing one.
+    // decided, and this project does not invent one.
     if (!errors.empty()) {
         std::sort(errors.begin(), errors.end());
         const size_t n = errors.size();
@@ -911,7 +909,7 @@ struct LadderPipeline {
 
     /// @brief Peak working set of the tracking stage: both pyramids and BOTH
     /// derivative ladders. They coexist -- the tracker reads all of them --
-    /// so this is a peak, not a per-buffer ratio (CLAUDE.md, benchmarking).
+    /// so this is a peak, not a per-buffer ratio.
     size_t bytes() const {
         return prev.sizeInBytes() + next.sizeInBytes() + dx.bytes() + dy.bytes();
     }
@@ -974,9 +972,8 @@ constexpr int kH = 240;
 // the synthetic cases. Two copies of a tolerance is how two tolerances happen.
 //
 // THE BINARIZATION IS THE REFERENCE PIPELINE'S OWN, NOT A THRESHOLD CHOSEN HERE.
-// `rl_fast_edge_filter_wide` (the reference pipeline's edge filter) with
-// `edge_threshold: 17` is what produces the frames the reference pipeline actually
-// tracks: `|[-1,0,1] * I| >= 17` horizontally OR vertically. Ported below, it
+// The reference pipeline's edge filter at threshold 17 is what produces the frames
+// the reference pipeline actually tracks: `|[-1,0,1] * I| >= 17` horizontally OR vertically. Ported below, it
 // reproduces the repo's shipped `_bin_normalized.png` to within 0.024% of pixels,
 // which is how it is known to be the right function rather than a plausible one.
 // An earlier version of this case used a global Otsu threshold instead and
@@ -994,10 +991,8 @@ constexpr int kH = 240;
 // is still the warp's own arithmetic.
 // ---------------------------------------------------------------------------
 
-/// @brief `rl_fast_edge_filter_wide`, ported call for call.
-/// @brief `three_pix_median_filter`, ported line for line from
-/// the reference pipeline's denoiser. **STAGE ONE of the reference
-/// preprocessing, and it was missing from this file until 2026-08-21.**
+/// @brief The reference pipeline's three-pixel median, ported line for line from
+/// its denoiser. **STAGE ONE of the reference preprocessing.**
 /// @note p1 is the pixel ABOVE, p2 the center, p3 the pixel to the RIGHT:
 /// `median = max(min(p1,p2), min(max(p1,p2), p3))`. Borders are ZERO-filled,
 /// which is what the reference's `cv::Mat::zeros` + `copyTo` does -- not a
@@ -1016,7 +1011,7 @@ cv::Mat referenceDenoise(const cv::Mat& img) {
     return out;
 }
 
-/// @brief `rl_fast_edge_filter_wide`. **STAGE TWO.**
+/// @brief The reference pipeline's edge filter, ported call for call. **STAGE TWO.**
 cv::Mat referenceEdgeFilter(const cv::Mat& gray, int edgeThreshold) {
     const cv::Mat kernelX = (cv::Mat_<float>(1, 3) << -1, 0, 1);
     const cv::Mat kernelY = (cv::Mat_<float>(3, 1) << -1, 0, 1);
@@ -1032,23 +1027,13 @@ cv::Mat referenceEdgeFilter(const cv::Mat& gray, int edgeThreshold) {
 }
 
 /// @brief THE REFERENCE PREPROCESSING, BOTH STAGES, in the order
-/// the reference pipeline's temporal stage runs them.
+/// the reference pipeline's temporal stage runs them: the denoiser, then the edge
+/// filter. Its configuration enables the denoiser (the three-pixel median) and sets
+/// the edge threshold to 17, so both stages run and this is the content the
+/// reference pipeline actually sees.
 ///
-/// ```
-/// if (cfg.denoiser_on) median_filter(img, cfg.denoiser_type);
-/// if (cfg.edge_filter_on) rl_fast_edge_filter_wide(img, cfg.edge_threshold);
-/// ```
-///
-/// the reference pipeline's parameters enables the denoiser, `denoiser_type:
-/// "THREE_PIX_MEDIAN"`, `edge_threshold: 17` -- so both stages run and this is the
-/// content the reference pipeline actually sees.
-///
-/// **THIS FILE RAN ONLY STAGE TWO UNTIL 2026-08-21**, which means every
-/// measurement before then applied the right filter to an un-denoised frame. Measured
-/// over 1710 EuRoC V1_02_medium frames the stage is real but small: **14.14% set
-/// without it against 13.04% with it**. Every one of those entries compared its
-/// arms WITHIN one content set, so their rankings were expected to survive the
-/// correction -- and that was re-run rather than assumed.
+/// The denoiser is real but small: measured over 1710 EuRoC V1_02_medium frames,
+/// **14.14% of pixels set without it against 13.04% with it**.
 cv::Mat referencePreprocess(const cv::Mat& gray, int edgeThreshold) {
     return referenceEdgeFilter(referenceDenoise(gray), edgeThreshold);
 }
@@ -1485,7 +1470,7 @@ BINCV_TEST(Flow, WordTypeInvariance) {
 // ===========================================================================
 // `err` IS THE RESIDUAL AT THE POSITION THAT WAS RETURNED
 //
-// THE BUG THIS PINS. `err` used to be computed from the tap offset and the four
+// THE BUG THIS PINS: `err` computed from the tap offset and the four
 // bilinear weights left over from the START of the last executed iteration --
 // i.e. one whole step before the position actually handed back, and one and a
 // half steps before it whenever the oscillation rule fired and backed the
@@ -1714,8 +1699,8 @@ BINCV_TEST(Flow, LossRules_uint32_t) {
     }
 
     // Degenerate arguments are values, not errors -- AND EVERY OUT ENTRY IS
-    // WRITTEN, which is the documented contract. A zero-level call used to return
-    // before the initialization loop, leaving `status` and `err` holding whatever
+    // WRITTEN, which is the documented contract. A zero-level call that returned
+    // before the initialization loop would leave `status` and `err` holding whatever
     // the caller's buffer held; the poison below is what makes that visible
     // rather than accidentally-correct on a zeroed vector.
     {
@@ -1821,7 +1806,7 @@ BINCV_TEST(Flow, PipelineFootprint_640x480) {
     constexpr int W = 640;
     constexpr int H = 480;
     constexpr int LEVELS = 4;   // the reference pipeline's parameters: lk_max_level 3
-    constexpr int POINTS = 200; // the reference pipeline's parameters: gftt_max_corners 200
+    constexpr int POINTS = 200; // the reference pipeline's maximum corner count
     using Word = uint32_t;      //
 
     std::printf("\n PEAK FOOTPRINT OF THE FULL PIPELINE, %dx%d, %d pyramid levels,\n"
@@ -2177,8 +2162,8 @@ BINCV_TEST(Flow, PipelineFootprint_640x480) {
     std::printf(" the response map %s the rest of the pipeline combined.\n",
                 (responseBytes > total - responseBytes) ? "EXCEEDS" : "does not exceed");
 
-    // A SCALE REFERENCE, AND EXPLICITLY NOT CLAUDE.md's DENOMINATOR. CLAUDE.md
-    // requires the comparison to be "OpenCV doing the same semantic operation on
+    // A SCALE REFERENCE, AND EXPLICITLY NOT THE DENOMINATOR. A performance claim
+    // needs the comparison to be "OpenCV doing the same semantic operation on
     // the same binary content stored as CV_8U" -- for this pipeline that is two
     // CV_8U frames, two winSize-padded CV_8U pyramids, CV_16S derivatives and the
     // same float response map, and none of it is computed here. Building and
@@ -2466,7 +2451,7 @@ BINCV_TEST(Flow, NBitResidualIsExactAgainstPerPixel_uint32_t) {
 // * points that converge at different iteration counts, which is the whole reason
 // the refill exists.
 // ---------------------------------------------------------------------------
-BINCV_TEST(Flow, X79_KeypointBatchIsBitExact_uint32_t) {
+BINCV_TEST(Flow, KeypointBatchIsBitExact_uint32_t) {
     const int width = kW, height = kH;
     BinMat<uint32_t> prevSrc(width, height), nextSrc(width, height);
     const Warp warp = translation(1.3, -0.7);
@@ -2644,7 +2629,7 @@ BINCV_TEST(Flow, RealFrameWarps_uint32_t) {
     }
     const cv::Mat bin = referencePreprocess(gray, 17);
     std::printf("\n the repo's real test image, %dx%d, binarized by the reference\n"
-                " pipeline's own rl_fast_edge_filter_wide(edge_threshold = 17):"
+                " pipeline's own edge filter at threshold 17:"
                 " %.2f%% set\n", gray.cols, gray.rows,
                 100.0 * static_cast<double>(cv::countNonZero(bin)) /
                     static_cast<double>(gray.total()));
@@ -3001,7 +2986,7 @@ BINCV_TEST(Flow, X24_LadderSweep_RealFrame_uint32_t) {
 //
 // The bit-depth question is blocked here: 1/2/2/2 is 1.1285 px over all 102 real-frame
 // keypoints and 0.0016 px over the 43 that never clip. The metric below is
-// YIELD, pre-registered, because three of the four arms trade points for
+// YIELD, chosen before the first run, because three of the four arms trade points for
 // accuracy and a per-point error alone would reward throwing points away.
 // ---------------------------------------------------------------------------
 namespace {
@@ -3435,13 +3420,11 @@ const char* filterName(PyrFilter f) {
     }
 }
 
-// The float-reference filters that used to build this harness's levels are GONE
-//. `downOnce` applied cv::sepFilter2D / cv::blur on CV_32F and
-// `quantizeInto` wrote the result into a level, and together they modelled a
-// pyramid with NO CASCADED QUANTIZATION ERROR -- which is the defect traced.
-// Nothing stands in for them: the filters they approximated are now real bit-sliced
-// kernels, verified exact against a per-pixel integer reference in
-// tests/test_pyramid.cpp, so the harness uses those directly.
+// This harness builds its levels with binCV's own bit-sliced pyramid kernels,
+// verified exact against a per-pixel integer reference in tests/test_pyramid.cpp.
+// A float reference -- cv::sepFilter2D / cv::blur on CV_32F, quantized into each
+// level -- would model a pyramid with NO CASCADED QUANTIZATION ERROR, which is not
+// the pyramid the tracker sees; nothing stands in for the real kernels.
 
 } // namespace
 
@@ -3453,27 +3436,22 @@ namespace {
 /// it is the input, not a choice.
 ///
 /// ===========================================================================
-/// THIS REPLACED A FLOAT CASCADE, AND THE REPLACEMENT IS THE POINT.
+/// THE SEED IS THE SHIPPED CASCADE, AND THAT IS THE POINT.
 ///
-/// The old seed built the whole pyramid in `CV_32F` -- `p = downOnce(p, f)` three
-/// times -- and quantized EACH LEVEL FROM THE FLOAT CHAIN. binCV quantizes level 1
-/// to N1 bits, then filters THAT QUANTIZED LEVEL to make level 2, and so on. The
-/// harness therefore modelled a pyramid with **no cascaded quantization error**
-/// where the shipped one has three rounds of it, and it **systematically
-/// understated the cost of taking bits away**: a coarse level in the harness was a
-/// fresh quantization of an exact float rather than a quantization of a
-/// quantization of a quantization.
+/// binCV quantizes level 1 to N1 bits, then filters THAT QUANTIZED LEVEL to make
+/// level 2, and so on, so each coarse level is a quantization of a quantization of
+/// a quantization. A seed that builds the whole pyramid in `CV_32F` and quantizes
+/// EACH LEVEL FROM THE FLOAT CHAIN models a pyramid with **no cascaded quantization
+/// error** where the shipped one has three stages of it, and **systematically
+/// understates the cost of taking bits away**. Measured: such a seed prices level
+/// 3's second bit at **-0.69 yield points** where the pipeline measures **-4.6** --
+/// a 6.7x understatement, enough to invert a dominance claim across all three
+/// pyramid parameters.
 ///
-/// Measured consequence: it priced level 3's second bit at **-0.69 yield
-/// points** where the pipeline measures **-4.6** -- a 6.7x understatement that
-/// inverted a three-axis dominance claim and nearly shipped a worse default. Every
-/// accuracy number from earlier measurements came through that seed.
-///
-/// `MEDIAN_3x3` is gone from this path rather than kept on the float reference:
-/// binCV has no median kernel (one was declined on the evidence), so
-/// there is nothing to measure the shipped pipeline against. Comparing four real
-/// filters against one idealised one in the same table is exactly the mixing this
-/// entry exists to remove.
+/// `MEDIAN_3x3` is not on this path: binCV has no median kernel (one was declined
+/// on the evidence), so there is nothing to measure the shipped pipeline against,
+/// and comparing four real filters against one idealised one in the same table is
+/// exactly the mixing this seed exists to avoid.
 /// ===========================================================================
 template <bincv::PyrDownFilter F, typename WordType, size_t... LevelBits>
 void seedPyramid(LadderPipeline<WordType, LevelBits...>& fe, const cv::Mat& binPrev,
@@ -3506,8 +3484,8 @@ void seedFiltered(LadderPipeline<WordType, LevelBits...>& fe, const cv::Mat& bin
         case PyrFilter::Median3x3:
         default:
             // No binCV kernel exists; callers must not sweep this arm any more.
-            std::fprintf(stderr, "MEDIAN_3x3 has no binCV kernel -- removed the "
-                                 "float-reference path that used to stand in for it.\n");
+            std::fprintf(stderr, "MEDIAN_3x3 has no binCV kernel and no "
+                                 "float-reference stand-in.\n");
             std::abort();
     }
 }
@@ -3546,7 +3524,7 @@ Yield runFilterArm(const cv::Mat& binPrev, const cv::Mat& binNext, const Warp& w
 
 } // namespace
 
-BINCV_TEST(Flow, X39_PyramidFilterDesignSpace_uint32_t) {
+BINCV_TEST(Flow, PyramidFilterDesignSpace_uint32_t) {
     const cv::Mat gray = loadRealFrame();
     if (gray.empty()) { std::printf(" (skipped: sample image not found)\n"); BINCV_CHECK(true); return; }
 
@@ -3620,9 +3598,9 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpace_uint32_t) {
 // must not depend on a dataset that is not in the repository. With no variable
 // set this test skips in one check, which is what verify.sh sees. Set
 //
-// BINCV_X39_FRAMES=<dir> directory of frames (PNG), sorted by name
-// BINCV_X39_STRIDE=<n> sample every n-th frame (default 1)
-// BINCV_X39_SHARD=<i>/<k> run only frames congruent to i mod k
+// BINCV_FILTER_SWEEP_FRAMES=<dir> directory of frames (PNG), sorted by name
+// BINCV_FILTER_SWEEP_STRIDE=<n> sample every n-th frame (default 1)
+// BINCV_FILTER_SWEEP_SHARD=<i>/<k> run only frames congruent to i mod k
 //
 // and it sweeps. Each arm prints one machine-readable ROW line so shards merge
 // by summation -- yields are ratios and cannot be averaged across frames with
@@ -3640,22 +3618,22 @@ BINCV_TEST(Flow, X39_PyramidFilterDesignSpace_uint32_t) {
 //
 // Yield only -- time and bytes come from benchmark/pyramid_depth_benchmark.cpp on
 // the reference device, because a development machine cannot answer either.
-// Gated on BINCV_X50_FRAMES for the same reason the the arm is.
+// Gated on BINCV_LADDER_SWEEP_FRAMES for the same reason the sequence arm above is.
 // ===========================================================================
-BINCV_TEST(Flow, X50_LadderFilterSequence_uint32_t) {
-    const char* dir = std::getenv("BINCV_X50_FRAMES");
+BINCV_TEST(Flow, LadderFilterSequence_uint32_t) {
+    const char* dir = std::getenv("BINCV_LADDER_SWEEP_FRAMES");
     if (!dir) {
-        std::printf(" (skipped: set BINCV_X50_FRAMES=<frame-dir> to run the ladder sweep)\n");
+        std::printf(" (skipped: set BINCV_LADDER_SWEEP_FRAMES=<frame-dir> to run the ladder sweep)\n");
         BINCV_CHECK(true);
         return;
     }
     size_t stride = 1;
-    if (const char* sv = std::getenv("BINCV_X50_STRIDE")) {
+    if (const char* sv = std::getenv("BINCV_LADDER_SWEEP_STRIDE")) {
         const long v = std::atol(sv);
         if (v > 0) stride = static_cast<size_t>(v);
     }
     size_t shard = 0, shards = 1;
-    if (const char* sh = std::getenv("BINCV_X50_SHARD")) {
+    if (const char* sh = std::getenv("BINCV_LADDER_SWEEP_SHARD")) {
         long a = 0, b = 1;
         if (std::sscanf(sh, "%ld/%ld", &a, &b) == 2 && b > 0 && a >= 0 && a < b) {
             shard = static_cast<size_t>(a);
@@ -3743,25 +3721,25 @@ BINCV_TEST(Flow, X50_LadderFilterSequence_uint32_t) {
     }
     for (size_t L = 0; L < 4; ++L)
         for (size_t fk = 0; fk < 2; ++fk)
-            std::printf("ROW50 %zu %zu %zu %zu %zu\n", L, fk, elig[L][fk], usable[L][fk], bytes[L]);
-    std::printf("FRAMES50 %zu\n", frames);
+            std::printf("LADDER_ROW %zu %zu %zu %zu %zu\n", L, fk, elig[L][fk], usable[L][fk], bytes[L]);
+    std::printf("LADDER_FRAMES %zu\n", frames);
     BINCV_CHECK(true);
 }
 
-BINCV_TEST(Flow, X39_PyramidFilterDesignSpaceSequence_uint32_t) {
-    const char* dir = std::getenv("BINCV_X39_FRAMES");
+BINCV_TEST(Flow, PyramidFilterDesignSpaceSequence_uint32_t) {
+    const char* dir = std::getenv("BINCV_FILTER_SWEEP_FRAMES");
     if (!dir) {
-        std::printf(" (skipped: set BINCV_X39_FRAMES=<frame-dir> to run the sequence arm)\n");
+        std::printf(" (skipped: set BINCV_FILTER_SWEEP_FRAMES=<frame-dir> to run the sequence arm)\n");
         BINCV_CHECK(true);
         return;
     }
     size_t stride = 1;
-    if (const char* sv = std::getenv("BINCV_X39_STRIDE")) {
+    if (const char* sv = std::getenv("BINCV_FILTER_SWEEP_STRIDE")) {
         const long v = std::atol(sv);
         if (v > 0) stride = static_cast<size_t>(v);
     }
     size_t shard = 0, shards = 1;
-    if (const char* sh = std::getenv("BINCV_X39_SHARD")) {
+    if (const char* sh = std::getenv("BINCV_FILTER_SWEEP_SHARD")) {
         long a = 0, b = 1;
         if (std::sscanf(sh, "%ld/%ld", &a, &b) == 2 && b > 0 && a >= 0 && a < b) {
             shard = static_cast<size_t>(a);
@@ -4172,3 +4150,65 @@ BINCV_TEST(Flow, StagingStackBytesAreWhatTheBudgetAssumes) {
 }
 
 BINCV_TEST_MAIN("test_opticalflow")
+
+// ---------------------------------------------------------------------------
+// `stagedCovariance`'s NEON arm and its scalar loop are two spellings of the
+// same population counts, and `impl::lkCovarianceNeonEnabled()` is the switch
+// that lets one binary run both. Same frames, same points, same parameters; the
+// only difference is the switch. On a build without the NEON arm (x86-64, or
+// any non-aarch64 target) the switch changes nothing and the comparison is of a
+// run against itself, which is the case where the fast path's own gate excludes
+// it: it still has to report identical output, and it says so in its print.
+// ---------------------------------------------------------------------------
+BINCV_TEST(Flow, CovarianceNeonArmIsBitExact_uint32_t) {
+    const int width = kW, height = kH;
+    BinMat<uint32_t> prevSrc(width, height), nextSrc(width, height);
+    const Warp warp = translation(1.3, -0.7);
+    renderWarped(prevSrc, Warp{});
+    renderWarped(nextSrc, warp);
+
+    LadderPipeline<uint32_t, 1, 2, 2, 2> fe(width, height);
+    seedLevelZero(fe, prevSrc, nextSrc);
+    fe.build();
+
+    std::vector<Point2f> pts;
+    for (int y = 1; y < height - 1; y += 5) {
+        for (int x = 1; x < width - 1; x += 7) {
+            pts.push_back(Point2f{static_cast<float>(x), static_cast<float>(y)});
+        }
+    }
+    const size_t n = pts.size();
+    std::vector<Point2f> outA(n), outB(n);
+    std::vector<uint8_t> stA(n), stB(n);
+    std::vector<float> errA(n), errB(n);
+    LKParams params;
+
+    bincv::impl::lkCovarianceNeonEnabled() = true;
+    calcOpticalFlowPyrLK(fe.levels, pts.data(), outA.data(), stA.data(), errA.data(), n,
+                         params);
+    bincv::impl::lkCovarianceNeonEnabled() = false;
+    calcOpticalFlowPyrLK(fe.levels, pts.data(), outB.data(), stB.data(), errB.data(), n,
+                         params);
+    bincv::impl::lkCovarianceNeonEnabled() = true;
+
+    size_t posDiff = 0, statusDiff = 0, errDiff = 0, tracked = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (stA[i] != stB[i]) ++statusDiff;
+        if (stA[i]) ++tracked;
+        if (std::memcmp(&outA[i], &outB[i], sizeof(Point2f)) != 0) ++posDiff;
+        if (std::memcmp(&errA[i], &errB[i], sizeof(float)) != 0) ++errDiff;
+    }
+#if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+    const char* arm = "EXERCISED (NEON arm compiled)";
+#else
+    const char* arm = "not compiled on this machine (scalar arm both times)";
+#endif
+    std::printf("\n %zu points, %zu tracked; NEON covariance %s\n", n, tracked, arm);
+    std::printf(" NEON vs scalar: %zu positions differ, %zu status, %zu err\n", posDiff,
+                statusDiff, errDiff);
+    BINCV_CHECK(n > 100);
+    BINCV_CHECK(tracked > 20);
+    BINCV_CHECK(posDiff == 0);
+    BINCV_CHECK(statusDiff == 0);
+    BINCV_CHECK(errDiff == 0);
+}

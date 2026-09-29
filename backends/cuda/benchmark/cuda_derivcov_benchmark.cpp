@@ -14,10 +14,10 @@
 // THE DECISION RULE WAS WRITTEN BEFORE ANY OF THESE NUMBERS EXISTED and is
 // printed by this binary, so a reader can reject the bar rather than inherit
 // it. Two of its magnitudes are deliberately ABSENT: where no magnitude is
-// derivable, this file says so and leaves the call to the owner. It does not
+// derivable, this file says so and leaves the magnitude unset. It does not
 // fill one in.
 //
-// ONE RUN OF THIS BINARY IS NOT A NUMBER. Small kernels on this host sit near a
+// ONE RUN OF THIS BINARY IS NOT A NUMBER. Small kernels on the reference host sit near a
 // 8.7-14.4 us launch floor with 24-338% spread. What is quotable is the median
 // across at least seven independent PROCESS runs of the per-round interleaved
 // medians below, and for every ratio, whether the two arms' sample RANGES
@@ -152,7 +152,7 @@ void rule() {
         " THE DECISION RULE -- WRITTEN BEFORE ANY MEASUREMENT\n"
         "=====================================================================\n"
         " Four cases. Two magnitudes are deliberately ABSENT: where none is\n"
-        " derivable, this says so and leaves the call to the owner.\n"
+        " derivable, this says so and leaves the magnitude unset.\n"
         "\n"
         " CASE A -- the ternary/N-bit derivative.\n"
         "   Baseline: cv::cuda::createDerivFilter(CV_8UC1, CV_16SC1, dx, dy,\n"
@@ -167,9 +167,9 @@ void rule() {
         "   A1 MEMORY: report BOTH sides in ABSOLUTE BYTES, cudaMemGetInfo delta,\n"
         "     taken identically. The GATE IS ARITHMETIC AGREEMENT with each\n"
         "     side's predicted geometry, not a ratio; the ratio is a REPORTED\n"
-        "     number. If the owner wants a memory floor below which the op does\n"
-        "     not ship, that floor is theirs -- it is not derivable from the\n"
-        "     compulsory traffic, and an earlier draft's '>= 4x' was 8x halved\n"
+        "     number. A memory floor below which the op does not ship is a\n"
+        "     judgement nobody has made -- it is not derivable from the\n"
+        "     compulsory traffic, and a '>= 4x' derived that way was 8x halved\n"
         "     by an unstated safety factor.\n"
         "   A2 SPEED: strictly faster than that denominator by more than the\n"
         "     LARGER of the two arms' printed spreads. No percentage is invented.\n"
@@ -197,14 +197,14 @@ void rule() {
         "     the window array and the result array -- no allocation inside any\n"
         "     kernel, <= 24 B per window. Meter: allocation sum, binCV to binCV\n"
         "     only, plus a cudaMemGetInfo delta ACROSS the call that must be 0.\n"
-        "   C3 SPEED: **STOP AND ASK. NO MAGNITUDE IS SET HERE.** Neither\n"
+        "   C3 SPEED: **NO MAGNITUDE IS SET HERE, AND NONE IS INVENTED.** Neither\n"
         "     cv::cuda nor cv:: computes this quantity at any API level, so\n"
-        "     ruling R2 applies: it ships on correctness + memory + the host\n"
-        "     comparison with the speed verdict recorded OUTSTANDING. The host\n"
-        "     ratio below is printed as CONTEXT and is NOT a ship gate. An\n"
-        "     earlier draft derived '> 5x at N = 2' by multiplying two numbers\n"
-        "     measured on different machines with different kernels and then\n"
-        "     discounting the product; that is deleted, not re-derived.\n"
+        "     no GPU speed comparison is possible: it stands on correctness +\n"
+        "     memory + the host comparison. The host\n"
+        "     ratio below is printed as CONTEXT and is NOT a ship gate. A\n"
+        "     magnitude derived by multiplying two numbers measured on different\n"
+        "     machines with different kernels and then discounting the product\n"
+        "     is not a magnitude, and none is derived that way here.\n"
         "\n"
         " CASE D -- VALIDITY, not performance: the arms timed are the arms that\n"
         "   ran. Each optimized arm prints its on/off ratio in ONE binary, and\n"
@@ -601,14 +601,14 @@ int main(int argc, char** argv) {
     }
 
     // ==================================================================
-    // 6. THE HOST ARM -- CONTEXT ONLY. Ruling R2, and a different clock.
+    // 6. THE HOST ARM -- CONTEXT ONLY. Not a comparison, and a different clock.
     // ==================================================================
     std::printf("\n=====================================================================\n"
                 " 6. THE HOST ARM -- CONTEXT, NOT A SHIP GATE\n"
                 "=====================================================================\n"
                 " Neither cv::cuda nor cv:: computes a 2x2 gradient covariance at any\n"
-                " API level, so ruling R2 applies and this operation's SPEED VERDICT IS\n"
-                " OUTSTANDING. The row below is the binCV HOST arm on this machine, on a\n"
+                " API level, so NO GPU SPEED COMPARISON IS POSSIBLE for this operation.\n"
+                " The row below is the binCV HOST arm on this machine, on a\n"
                 " DIFFERENT CLOCK (host steady_clock around a synchronous call, against\n"
                 " CUDA events above), and this x86 host under WSL2 is recorded at 30-130%%\n"
                 " spread for CPU arms. It is printed so the reader knows what the device\n"
@@ -814,7 +814,7 @@ int main(int argc, char** argv) {
     std::printf(" NOT COMPILED IN. This target is always built, so the role bar lives\n"
                 " behind BINCV_CUDA_DERIVCOV_OPENCV; point BINCV_CUDA_OPENCV_DIR at an\n"
                 " OpenCV with cudafilters to take it.\n"
-                " CASE A VERDICT: **BLOCKED** -- role bar UNMEASURED. No substitute bar\n"
+                " CASE A RESULT: role bar UNMEASURED in this build. No substitute bar\n"
                 " is invented and no CPU number is quoted as a GPU one.\n");
 #endif
 
@@ -831,9 +831,9 @@ int main(int argc, char** argv) {
                 "         that decides that is the derivative's share of a RESIDENT GPU\n"
                 "         PIPELINE, which does not exist -- on the host the derivative is\n"
                 "         3.0-3.3%% of the whole pipeline, so even an infinite speedup on\n"
-                "         it is worth ~1.03x there. The share verdict is OUTSTANDING, and\n"
-                "         whether the op ships on A1+A2 alone is the OWNER'S call under\n"
-                "         the 2026-09-15 both-axes rule. This file does not answer it.\n"
+                "         it is worth ~1.03x there. No pipeline share can be measured, and\n"
+                "         whether the op ships on A1+A2 alone is a judgement nobody has\n"
+                "         made: an operation ships on both axes. This file does not answer it.\n"
                 " CASE B  fused arm: section 2. Ships only if it clears both printed\n"
                 "         ranges; otherwise the arm and its switch are DELETED.\n"
                 " CASE B' the COVARIANCE's two candidate optimized arms both FAILED this\n"
@@ -845,9 +845,9 @@ int main(int argc, char** argv) {
                 "         kernel is traffic-shaped, so the half it saves was never the\n"
                 "         cost. The shipped covariance is ONE straightforward kernel.\n"
                 " CASE C  covariance: C1 is green in tests/test_cuda_derivcov.cu (986\n"
-                "         checks). C2 is the 0 B reading in section 7. **C3 IS A\n"
-                "         STOP-AND-ASK: no cv::cuda or cv:: counterpart exists at any API\n"
-                "         level, so the speed verdict is OUTSTANDING under ruling R2. The\n"
+                "         checks). C2 is the 0 B reading in section 7. **C3 HAS NO\n"
+                "         MAGNITUDE: no cv::cuda or cv:: counterpart exists at any API\n"
+                "         level, so no GPU speed comparison is possible. The\n"
                 "         host row in section 6 is context on a different clock and is\n"
                 "         not a bar.** cornerHarris / createMinEigenValCorner compute a\n"
                 "         response THROUGH a covariance and are the honest comparison for\n"

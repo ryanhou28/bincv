@@ -108,7 +108,7 @@ BINCV_TEST(Occupancy, MaskMatchesFloatDistance) {
                         if (want != got) ++disagreements;
                     }
                 }
-                // PADDING BITS STAY ZERO (CLAUDE.md). The disc is clipped to `width`,
+                // PADDING BITS STAY ZERO. The disc is clipped to `width`,
                 // so no word past the last pixel may be touched -- and a set padding
                 // bit is invisible to `occupied` while corrupting any word-wise
                 // reduction over the same frame.

@@ -14,7 +14,8 @@
 /// representation, so it compares plane-for-plane against the host.
 /// * `censusTransformPacked` writes ONE WORD PER PIXEL, a pixel's whole
 /// descriptor in a `uint32`. **This is what the dense matcher should
-/// consume** -- see denseDisparity.hpp for the 8.5x and why.
+/// consume** -- see denseDisparity.hpp for the measured cost of the plane
+/// layout in the matcher (21.7x the packed matcher's time) and why.
 ///
 /// Both come from the same pattern and the same comparison, and both are held
 /// to the host's answer by test.
@@ -98,8 +99,9 @@ inline cudaError_t censusTransformDispatch(DeviceImageConstView<SrcT> img,
 
 } // namespace impl
 
-/// @brief Census transform into a K-plane block. Device twin of the host
-/// censusTransform, bit-identical to it by test.
+/// @brief Census transform into a K-plane block. **API TIER 3.** Bit-exact
+/// against the host `bincv::censusTransform`, plane for plane, both arms,
+/// proven by test_cuda_backend.
 template <size_t K>
 inline cudaError_t censusTransform(DeviceImageConstView<uint8_t> img,
                                    const CensusPattern<K>& pattern,
@@ -130,20 +132,28 @@ inline cudaError_t censusTransform(DeviceImageConstView<uint16_t> img,
 // `__popc(a ^ b)` -- ONE load, ONE xor, ONE popcount for all K comparisons,
 // with K of 32 bits doing useful work instead of one.
 //
-// This is issue #34's anticipated case, and its answer: "add a second
-// DOCUMENTED layout to the shared core rather than fork, because two
-// independent definitions means neither can be checked against the other."
+// A second DOCUMENTED layout in the shared core rather than a fork, because two
+// independent definitions means neither can be checked against the other.
 // Both layouts are produced from the same pattern by the same comparison rule,
 // the tests hold the packed matcher's output map byte-equal to the host's, and
 // the bit ORDER does not affect any answer -- Hamming distance is invariant
 // under a permutation of the bits, as long as both images use one order.
 
 /// @brief Census transform into ONE WORD PER PIXEL: bit `k` of `dst(x, y)` is
-/// `I(p + pattern.at[k]) > I(p)`. **API TIER 3.** K <= 32.
+/// `I(p + pattern.at[k]) > I(p)`. **API TIER 3.** K <= 32. No host twin of
+/// the layout exists; bit `k` of every word equals plane `k` of the host
+/// `bincv::censusTransform`, proven by test_cuda_backend.
 /// @param dst `width x height` of uint32, the matcher's input layout.
 /// @note Same comparisons, same out-of-frame rule (a neighbour outside the
 /// frame contributes 0) and same pattern as the plane form; only the
 /// layout differs. `denseDisparityCensusPacked` consumes this.
+/// @note **THE PATTERN'S REACH IS BOUNDED.** The kernel stages a 32x8 tile plus
+/// the pattern's largest |offset| `a` on every side in shared memory, and
+/// that tile, `(32 + 2a)(8 + 2a) * sizeof(pixel)`, must fit the 48 KiB a
+/// launch gets without opting in: `a <= 101` for a `uint8_t` source, `a <= 68`
+/// for `uint16_t`. A pattern reaching further returns `cudaErrorInvalidValue`
+/// without launching, in every build. The plane form has no such bound: past
+/// a reach of 8 it runs its untiled reference arm instead.
 template <size_t K>
 inline cudaError_t censusTransformPacked(DeviceImageConstView<uint8_t> img,
                                          const CensusPattern<K>& pattern,

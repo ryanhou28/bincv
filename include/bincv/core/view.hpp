@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <type_traits>
 
 // BINCV_ASSERT for the row precondition, and BINCV_ABI_NAMESPACE. The views
@@ -15,6 +16,8 @@ inline namespace BINCV_ABI_NAMESPACE {
 template <typename WordType_> struct BinMatConstView;
 
 /// @brief Non-owning, mutable view of a bit-packed matrix: {ptr, size, stride}.
+/// **API TIER 3** -- the argument type binCV's kernels take; `cv::Mat` has no
+/// packed-bit view.
 /// @tparam WordType_ The unsigned integral type pixels are packed into.
 ///
 /// @note This is the type kernels bind to. A kernel compiles once per
@@ -50,19 +53,12 @@ struct BinMatView {
 
     BinMatView() = default;
     /// @note **FOUR ARGUMENTS, AND THE CONSTRUCTOR EXISTS SO THREE WILL NOT COMPILE.**
-    /// As a bare aggregate this type accepted `{ptr, width, height}` and left
+    /// As a bare aggregate this type would accept `{ptr, width, height}` and leave
     /// `stride` zero, which makes every row of a multi-row view alias row 0. The
-    /// `row` precondition below catches it in a checked build and is a **no-op
-    /// in release**, so a release binary runs on garbage and looks like it works.
-    ///
-    /// **That is not hypothetical.** A binCV user hit exactly this on
-    /// `ResponseMap`, whose three-argument construction in
-    /// `examples/vio_frontend.cpp` inflated the detector's NMS survivor count
-    /// threefold; only their checked build caught it. `ResponseMap` is fixed the
-    /// same way, and this type had the identical hole.
-    ///
-    /// A debug-only assertion is the right guard for an index; it is the wrong
-    /// guard for a field a caller can silently fail to supply.
+    /// `row` precondition below catches that only in a checked build and is a
+    /// **no-op in release**, so a release binary would run on garbage and look
+    /// like it works. A debug-only assertion is the right guard for an index; it
+    /// is the wrong guard for a field a caller can silently fail to supply.
     BinMatView(WordType* ptr_, size_t width_, size_t height_, size_t stride_)
         : ptr(ptr_), width(width_), height(height_), stride(stride_) {}
 
@@ -75,12 +71,12 @@ struct BinMatView {
     /// @note stride is a runtime value in words, and is not assumed to be any
     /// particular multiple -- kernels must never assume alignment.
     /// @note Precondition, asserted in debug builds only: a multi-row view must
-    /// carry a non-zero stride. This is the one field whose omission from
-    /// the aggregate initializer is not self-announcing -- a missing ptr,
-    /// width or height leaves the view empty, whereas a missing stride
-    /// yields a plausible-looking view in which every row aliases row 0
-    /// (an inconsistent view is a programming error, caught by assertion
-    /// in debug).
+    /// carry a non-zero stride. This is the one field whose omission is not
+    /// self-announcing -- a missing ptr, width or height leaves the view
+    /// empty, whereas a zero stride yields a plausible-looking view in which
+    /// every row aliases row 0. The four-argument constructor is what stops a
+    /// caller omitting it; this assert is the backstop for a view whose
+    /// fields were assigned by hand.
     WordType* row(size_t y) {
         BINCV_ASSERT(stride != 0 || height <= 1,
                      "BinMatView: multi-row view needs a non-zero stride");
@@ -104,7 +100,8 @@ struct BinMatView {
     operator BinMatConstView<WordType>() const;
 };
 
-/// @brief Non-owning, read-only view of a bit-packed matrix.
+/// @brief Non-owning, read-only view of a bit-packed matrix. **API TIER 3** -- see
+/// BinMatView.
 /// @tparam WordType_ The unsigned integral type pixels are packed into.
 ///
 /// @note Identical to BinMatView except that the referenced words are const.
@@ -137,19 +134,8 @@ struct BinMatConstView {
 
     BinMatConstView() = default;
     /// @note **FOUR ARGUMENTS, AND THE CONSTRUCTOR EXISTS SO THREE WILL NOT COMPILE.**
-    /// As a bare aggregate this type accepted `{ptr, width, height}` and left
-    /// `stride` zero, which makes every row of a multi-row view alias row 0. The
-    /// `row` precondition below catches it in a checked build and is a **no-op
-    /// in release**, so a release binary runs on garbage and looks like it works.
-    ///
-    /// **That is not hypothetical.** A binCV user hit exactly this on
-    /// `ResponseMap`, whose three-argument construction in
-    /// `examples/vio_frontend.cpp` inflated the detector's NMS survivor count
-    /// threefold; only their checked build caught it. `ResponseMap` is fixed the
-    /// same way, and this type had the identical hole.
-    ///
-    /// A debug-only assertion is the right guard for an index; it is the wrong
-    /// guard for a field a caller can silently fail to supply.
+    /// See BinMatView's constructor: a silently zero stride aliases every row of
+    /// a multi-row view onto row 0, and only a checked build would notice.
     BinMatConstView(const WordType* ptr_, size_t width_, size_t height_, size_t stride_)
         : ptr(ptr_), width(width_), height(height_), stride(stride_) {}
 
@@ -183,9 +169,9 @@ inline BinMatView<WordType_>::operator BinMatConstView<WordType_>() const {
 /// — the AVX2 keypoint batch and all four NEON
 /// residual kernels — because an LK window is 31 pixels and a wider word is more than
 /// half idle. A caller who wants 64-bit words for the rest of their pipeline, where
-/// they genuinely halve the work, used to face a choice between that and a tracker
-/// running 8.6× slow. **This removes the choice**: keep the 64-bit storage, narrow the
-/// view at the call, and the vector kernels apply.
+/// they genuinely halve the work, would otherwise face a choice between that and a
+/// tracker running 8.6× slower. **This removes the choice**: keep the 64-bit storage,
+/// narrow the view at the call, and the vector kernels apply.
 ///
 /// @note Padding stays zero, which is the invariant word-wise reductions depend on: a
 /// 64-bit word's zero padding bits are the derived 32-bit word's zero padding

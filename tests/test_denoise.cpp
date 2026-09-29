@@ -1,4 +1,6 @@
 // The reference pipeline's three-pixel median filter: denoiseMedian3.
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // THE CORRECTNESS BAR IS NOT "MATCHES A FORMULA I WROTE DOWN". It is "matches
 // the reference implementation pixel for pixel on binary input", and the
@@ -543,7 +545,7 @@ void testDisjointViewsAccepted(const char* wordTypeName) {
 /// exists to avoid.
 /// @note The only edit is guarding the two copies for a single-column or
 /// single-row image, where cv::Range(1, 1) and cv::Range(0, 0) are empty.
-/// The reference is only ever run on real frames; the the matrix includes
+/// The reference is only ever run on real frames; the matrix includes
 /// 1-pixel extents, and an empty range is a cv::Mat assertion rather than a
 /// no-op.
 cv::Mat referenceMedian3(const cv::Mat& img) {

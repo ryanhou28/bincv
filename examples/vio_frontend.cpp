@@ -159,7 +159,7 @@ size_t spaceAgainstLive(std::vector<Point2f>& fresh, const std::vector<Track>& l
 }
 
 /// binCV's half of the frontend: the shipped 1/2/2/2 ladder, the box
-/// downsample ( -- `build` would default to cv::pyrDown's Gaussian), the
+/// downsample (`build` would otherwise default to cv::pyrDown's Gaussian), the
 /// derivative ladder, and the streaming response ring so detection needs
 /// no frame-sized float map.
 struct Frontend {
@@ -301,7 +301,7 @@ int main(int argc, char** argv) {
     const int lowWater = static_cast<int>(lowFrac * kTarget);
     // ONE LINE THAT WOULD HAVE SAVED AN INTEGRATOR DAYS. binCV's tracking speed
     // depends on the word type this program chose and on what the CPU supports, and
-    // neither is visible from the outside -- see.
+    // neither is visible from the outside without asking.
     std::printf("%s\n", bincv::simdStatusString());
     std::printf("LK residual kernel: %s\n", bincv::lkPathName<bincv::LKLevelN<2, W>>());
 

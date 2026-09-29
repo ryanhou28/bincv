@@ -28,9 +28,9 @@
 ///
 /// **THE LAYOUT IS `[row][plane][lane]` AND THAT IS THE WHOLE TRICK.** A window row is
 /// one `uint32_t` per plane per keypoint, so eight keypoints' words at the same row and
-/// plane are eight adjacent `uint32_t` — one `__m256i` load, no gather.
-/// lost precisely because it gathered; the fix was
-/// never a better gather, it was arranging not to need one.
+/// plane are eight adjacent `uint32_t` — one `__m256i` load, no gather. A layout
+/// that needs a gather loses the win to the gather itself; the fix is never a
+/// better gather, it is arranging not to need one.
 ///
 /// **AND THE MEASURED REASON THE ENTRY POINT IS COARSE.** `target("avx2")` on a leaf
 /// helper blocks inlining — GCC and Clang refuse to inline a callee whose target
@@ -51,13 +51,12 @@ constexpr size_t kLkBatchLanes = 8;
 ///
 /// The batch holds eleven `[row][plane][lane]` arrays; at `N = 2` that is **~20 KB at
 /// 32 rows and ~41 KB at 64**, and the working set has to stay inside L1 or the
-/// transpose the layout exists to avoid comes back as cache traffic.
-/// [CLAUDE.md](../../../CLAUDE.md) says footprint wins a tie, and this one is not even
-/// a tie: the shipped window is 31 rows.
+/// transpose the layout exists to avoid comes back as cache traffic. Footprint
+/// wins a tie, and this one is not even a tie: the shipped window is 31 rows.
 ///
 /// A **taller window is not refused, it is not accelerated** — `trackOnePoint` tracks
-/// it, bit-identically, at the speed it had before this file existed. That is why the
-/// cap can be chosen for the common case rather than the widest one.
+/// it, bit-identically, at the scalar path's speed. That is why the cap can be
+/// chosen for the common case rather than the widest one.
 constexpr size_t kLkBatchMaxRows = 32;
 
 #if defined(BINCV_X86_LK_BATCH)
@@ -114,7 +113,7 @@ BINCV_LKB_FN __m256i lkbFoldToLanes(__m256i bytes, __m256i ones8, __m256i ones16
 template <size_t N>
 BINCV_LKB_FN __m256i lkbWindowSum(const uint32_t* val, const uint32_t* magP,
                                   const uint32_t* magN, size_t rows) {
-    static_assert(N == 1 || N == 2, "lkbWindowSum: only the shipped ladder's depths");
+    static_assert(N == 1 || N == 2, "lkbWindowSum: only the shipped pyramid's depths (1 and 2 bits)");
     const __m256i lut = _mm256_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
                                          0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
     const __m256i lowMask = _mm256_set1_epi8(0x0F);
@@ -237,9 +236,10 @@ inline bool hasLkBatch() { return false; }
 /// @brief The scalar oracle the AVX2 kernel is held to. **INTERNAL, TEST-FACING.**
 ///
 /// Not a fallback — nothing calls it in a shipped build. It exists because
-/// [CLAUDE.md](../../../CLAUDE.md) makes bit-exactness a proven property, and a vector
-/// kernel with no independent spelling of the same arithmetic can only be checked
-/// against itself. Same layout, same arguments, plain C++.
+/// bit-exactness between a vector arm and its scalar spelling is a proven property
+/// here, not an assumed one, and a vector kernel with no independent spelling of
+/// the same arithmetic can only be checked against itself. Same layout, same
+/// arguments, plain C++.
 template <size_t N>
 inline void lkBatchResidualScalar(const uint32_t* self, const uint32_t* t00,
                                   const uint32_t* t01, const uint32_t* t10,

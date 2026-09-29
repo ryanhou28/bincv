@@ -8,11 +8,13 @@
 // reference device: 20.31 ms with NEON against 36.16 ms without, 1.78x.
 //
 // THE REAL GUARD FOR THAT IS NOT IN THIS FILE, and it cannot be: this suite links
-// `bincv_core`, so it gets the define either way and would pass through the whole bug.
-// `scripts/check_arm_syntax.sh` compiles a translation unit with NO defines at all and
-// fails if `BINCV_HAVE_NEON` is absent -- that is the test, and it has been watched to
-// fail. What this file pins is the reported STATUS being consistent with the build it
-// is reporting on, which is what a consumer logs and acts on.
+// `bincv_core`, so it would pass through the whole bug either way. The guard is in
+// core/simd.hpp itself, which derives `BINCV_HAVE_NEON` from the compiler's own
+// `__ARM_NEON` and `__aarch64__` macros rather than from a build-system define, so a
+// translation unit compiled with no defines at all still gets it; `scripts/verify_cross.sh`
+// and the native aarch64 CI job then compile and run every NEON region. What this file
+// pins is the reported STATUS being consistent with the build it is reporting on, which
+// is what a consumer logs and acts on.
 // ===========================================================================
 
 #include <cstdio>

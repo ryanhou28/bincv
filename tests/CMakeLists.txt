@@ -111,6 +111,8 @@ endfunction()
 # checked against a per-pixel reference in the three configurations that have no
 # OpenCV -- including the Debug one, which is the only place their BINCV_ASSERT
 # preconditions are live.
+# (The reference pipeline is the visual-inertial odometry system, not in this
+# repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 #
 # test_bitslice is core for a second reason: its word-level primitives have no
 # OpenCV counterpart at all (bit-sliced arithmetic is Tier 3, ARCHITECTURE 5),
@@ -163,7 +165,7 @@ endfunction()
 # shift+logic route). None of those needs OpenCV, and all of them have to run
 # where the embedded claim does -- including Debug, the only configuration in
 # which the kernels' BINCV_ASSERT preconditions are live. The OpenCV half is the
-# reference pipeline's own calcBinarizedDeriv, ported call for call, plus the two
+# reference pipeline's own gradient stage, ported call for call, plus the two
 # probes that pin cv::filter2D's correlation direction and default border --
 # the two properties this operation would otherwise differ on silently.
 # test_covariance is core for the strongest version of the same reason.
@@ -244,7 +246,7 @@ set(BINCV_OPENCV_TESTS test_opencv_interop)
 # -fno-exceptions, and std::thread is usable under neither. So this test needs a
 # hosted toolchain and Threads, and the three core-only configurations exercise the
 # SERIAL default instead, which is what an embedded target actually gets.
-bincv_add_test_target(test_parallel test_parallel.cpp)
+bincv_add_test_target(test_parallel test_parallel.cpp test_parallel_other_tu.cpp)
 find_package(Threads REQUIRED)
 target_link_libraries(test_parallel PRIVATE Threads::Threads)
 add_test(NAME test_parallel COMMAND test_parallel)
@@ -419,14 +421,14 @@ bincv_add_death_test(test_assert_abort quant-at-col "QuantMat::at: index out of 
 bincv_add_death_test(test_assert_abort quant-set-row "QuantMat::set: index out of range")
 bincv_add_death_test(test_assert_abort quant-set-value
                      "QuantMat::set: value does not fit in N bits")
-# The same precondition at N == 1, where BinMat::set's bool parameter used to
-# swallow it: an out-of-range value narrowed to 1 instead of being reported.
+# The same precondition at N == 1, where BinMat::set's bool parameter would
+# swallow it: an out-of-range value narrows to 1 instead of being reported.
 bincv_add_death_test(test_assert_abort binmat-set-value
                      "QuantMat<1>::set: value does not fit in N bits")
 bincv_add_death_test(test_assert_abort signed-set-value
                      "SignedQuantMat::set: value does not fit in N magnitude bits")
-# INT_MIN specifically: the value whose magnitude used to be computed as `-value`,
-# which is signed-overflow UB rather than merely a wrong number.
+# INT_MIN specifically: the value whose magnitude, computed as `-value`, is
+# signed-overflow UB rather than merely a wrong number.
 bincv_add_death_test(test_assert_abort signed-set-int-min
                      "SignedQuantMat::set: value does not fit in N magnitude bits")
 bincv_add_death_test(test_assert_abort view-stride

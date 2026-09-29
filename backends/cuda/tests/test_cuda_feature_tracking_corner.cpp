@@ -429,7 +429,7 @@ BINCV_TEST(CudaFast, AnOrderedSizedBufferMeetingTheReferenceArmIsRefused) {
 
     const size_t ordered = bc::fastScratchBytes(752, 37, capacity, bc::FastArm::Ordered);
     const size_t reference = bc::fastScratchBytes(752, 37, capacity, bc::FastArm::Reference);
-    // The whole reason this round happened: the two numbers are far apart, and the
+    // The point of the arm argument: the two numbers are far apart, and the
     // shipped arm wants the small one.
     BINCV_CHECK(ordered < reference);
     BINCV_CHECK(bc::impl::fastOrderedApplies(752, 37, capacity));
@@ -441,8 +441,8 @@ BINCV_TEST(CudaFast, AnOrderedSizedBufferMeetingTheReferenceArmIsRefused) {
                    static_cast<int>(cudaSuccess));
     BINCV_CHECK_EQ(static_cast<int>(cudaDeviceSynchronize()), static_cast<int>(cudaSuccess));
 
-    // Same buffer, other arm. This is the case that used to be impossible to reach
-    // because every caller was handed the larger number whether it wanted it or not.
+    // Same buffer, other arm. This is the case a sizing function that hands every
+    // caller the larger number cannot express, and the one the argument exists for.
     bc::impl::fastOrderedEnabled() = false;
     counter.reset();
     BINCV_CHECK_EQ(static_cast<int>(bc::detectFastAsync(dimg.constView(), buf, small.data(),

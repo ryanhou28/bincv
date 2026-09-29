@@ -35,8 +35,8 @@ inline void escape(const void* p) { g_sink = p; }
 
 // Every replacement operator below routes through this pair rather than the
 // scalar forms forwarding to each other -- see tests/test_storage.cpp for why,
-// and for the measurement that retired the compiler-warning story this comment
-// used to tell. Kept identical in both files on purpose: they are the same
+// and for the measurement behind it. Kept identical in both files on purpose:
+// they are the same
 // instrument, and a difference between them would be read as meaningful.
 void* countedAllocate(std::size_t bytes) {
     ++g_newCount;
@@ -276,10 +276,10 @@ void testWordType(const char* label) {
     BINCV_CHECK(thin.empty());
 
     // Argument validation. These are setup-time checks, so they still report
-    // through BINCV_THROW. The at/set bounds cases that used to sit
-    // here cannot: those accessors are debug-checked and unchecked in release
-    // now, so an out-of-range index aborts instead of throwing and no
-    // in-process check can observe it. They moved to tests/test_assert_abort.cpp
+    // through BINCV_THROW. The at/set bounds cases cannot sit here: those
+    // accessors are debug-checked and unchecked in release, so an out-of-range
+    // index aborts instead of throwing and no in-process check can observe it.
+    // They live in tests/test_assert_abort.cpp
     // (cases at-row, at-col, at-negative, set-row, set-col), which forces the
     // checked configuration and runs them as death tests in every build.
     //

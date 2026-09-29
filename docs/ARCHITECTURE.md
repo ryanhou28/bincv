@@ -92,15 +92,17 @@ and **`uint32_t` is the default**.
 
 Wider words do less work per pixel, and on bulk operations 64-bit is measurably faster.
 But binCV's memory footprint is the claim it exists to make, and a wider word rounds each
-row's stride up more coarsely. Measured across a pyramid, 64-bit words cost **+33% at the
-upper levels** and nothing at the base — and the upper levels are where a small target is
-tightest. Where speed and footprint conflict and nothing else settles it, footprint wins.
+row's stride up more coarsely. Measured across a pyramid, 64-bit words cost **1.33× the
+bytes at the upper levels** and nothing at the base — and the upper levels are where a small
+target is tightest ([footprint.md](reports/footprint.md), the word-width rows). Where speed
+and footprint conflict and nothing else settles it, footprint wins.
 
 **A 64-bit caller does not lose the vector kernels.** On little-endian a 64-bit bit-plane
 already *is* a 32-bit bit-plane with twice the stride, so `narrowPlane` and `narrowLevel`
 reinterpret it — no copy, no allocation — and the 32-bit vector paths apply. Measured on
-the reference device, a narrowed buffer runs at 1.00× of native 32-bit, bit-identical.
-That is why there is no second set of 64-bit kernels: they could at best match it.
+the reference device, a narrowed buffer runs at the native 32-bit speed, bit-identical
+([footprint.md](reports/footprint.md), the narrowing rows). That is why there is no second
+set of 64-bit kernels: they could at best match it.
 
 ---
 
@@ -167,16 +169,28 @@ make the one they chose cost less. An operation belongs here when it sits on a p
 **users** run *and* binCV can make it smaller or faster — and does not when binCV would
 contribute nothing but a second implementation to keep correct. A library's users include
 people outside this repository, so an operation does not wait for an in-repo caller to
-exist (owner's decision, 2026-09-11). What an in-repo caller *is* for is pricing: every
+exist. What an in-repo caller *is* for is pricing: every
 operation still gets a benchmark arm the day it is written, and a representative pipeline
 is what turns kernel numbers into shares.
 
 That covers image processing, features and tracking, stereo, and the geometry the
 tracking pipeline consumes downstream of them. The SLAM use case brought the descriptor path — orientation,
 steered BRIEF, Hamming matching — and sparse rectified stereo, for the same reason tracking
-brought LK: users' pipelines run them, and bits make them cheaper. Dense disparity is
-scheduled on the same test. IMU fusion and bundle adjustment are absent on the second
-prong, not the first: float linear algebra offers the representation nothing to exploit.
+brought LK: users' pipelines run them, and bits make them cheaper. Dense disparity came in
+on the same test ([reports/stereo.md](reports/stereo.md)). IMU fusion and bundle adjustment
+are absent on the second prong, not the first: float linear algebra offers the
+representation nothing to exploit.
+
+### The reference pipeline
+
+Headers and reports refer to **the reference pipeline**. It is a visual-inertial odometry
+system, not part of this repository, whose frontend binCV was built to replace stage by
+stage: sensor stage, pyramid, derivatives, corner detection, pyramidal Lucas–Kanade, and
+keypoint lifecycle. Its stage boundaries, window sizes and parameter choices are where
+binCV's defaults come from, and `examples/vio_frontend.cpp` reproduces its stage order with
+binCV calls. Where a header says a choice matches "the reference pipeline", that is the
+system being described, and the choice is stated in the header so the reader does not need
+it.
 
 ### binCV links no codec, on any target
 
@@ -190,9 +204,10 @@ Encoded files turn up in exactly one place, identically on every tier: reading a
 to test or benchmark against. That is tooling, and tooling runs on a host — including on
 desktop, where the host already has OpenCV.
 
-So there is no optional decoder target and no vendored codec. The measured size argument —
-`libpng` + `libz` at 336 KB against the tracking pipeline's 436,704-byte peak working
-set — is real but secondary; it argues about linkage. The decisive point is that a decoder would sit on a
+So there is no optional decoder target and no vendored codec. The size argument —
+`libpng` + `libz` at 336 KB (measured during development, not re-taken) against the
+tracking pipeline's 436,704-byte peak working set — is real but secondary; it argues about
+linkage. The decisive point is that a decoder would sit on a
 path nobody walks. It is also worth noting where a vendored decoder fits worst: the target
 with no package manager is the one that can hold neither the decoder nor the wide frame it
 would produce, and it is the target that argument was aimed at.
@@ -247,10 +262,12 @@ have not been built, and until they are, nothing here is a claim about them.
 Measured on an STM32H753ZI (Cortex-M7) with arm-none-eabi GCC 14.2, `-fno-exceptions
 -fno-rtti`, newlib, and no vendor SDK:
 
-**Runs.** `bincv_core` in full — containers, views and the `ops/` kernels. 34 of the 35
-test suites cross-compile clean under the whole warning set at 32-bit `size_t`, a pointer
-width the four-word-type sweep had never been compiled at before; the one 64-bit
-assumption it exposed was in a test, not the library.
+**Runs.** `bincv_core` in full — containers, views and the `ops/` kernels. 37 of the 42
+test translation units cross-compile clean under the whole warning set at 32-bit `size_t`,
+a pointer width the four-word-type sweep is otherwise never compiled at; the five that do
+not need `<thread>` or OpenCV, or are a deliberate compile failure, and the gate names each
+with its reason. The first run of that gate found one 64-bit assumption, in a test rather
+than the library (`scripts/verify_cortex_m.sh`).
 
 **Does not, by design.** `threads/pool.hpp` needs `<thread>`, `<mutex>` and
 `<condition_variable>`, which newlib does not supply. That is section 9 behaving as
@@ -284,8 +301,7 @@ the two cannot drift.
 ## 8.5 Backends
 
 A backend runs binCV's operations on a different compute device. There is one
-today, `backends/cuda/`, and the shape it takes is a settled decision rather
-than an open question (issue #34).
+today, `backends/cuda/`, and the shape it takes is a settled decision.
 
 **The format and the contract are shared; containers, kernels and the execution
 model are forked entirely.** A device bit-plane is byte-identical to a host one
@@ -336,8 +352,8 @@ two sides would otherwise each have to derive. Geometry and addressing:
 `impl::bitMask`, `impl::lowBitsMask`, `impl::extendedRowWord` and
 `impl::squareInsideImage`. Value rules: `impl::quantScale`,
 `impl::thresholdCutoff`, `impl::minEigenValue`, `maj3`, `thresholdGE` and
-`SplitCount::crossTerm`. And, from the feature tracking round, the per-word arithmetic
-those kernels are written in: `impl::rowBit`, `impl::ternaryDifference`,
+`SplitCount::crossTerm`. And the per-word arithmetic the feature-tracking kernels are
+written in: `impl::rowBit`, `impl::ternaryDifference`,
 `impl::signedDifference` and `impl::signedDifferenceRipple`;
 `impl::combineBitSlicedPairs`; `impl::boxHorizontal3`, `impl::boxVertical3`,
 `impl::boxValueAt` and `impl::boxWordAt`; `impl::fastShiftedWord`,
@@ -356,40 +372,19 @@ what stays forked. What they encode is a closed-form rule about the bits once
 read, which is exactly the thing that must not exist twice. `extendedRowWord` is
 the clearest case: it is the row-edge blend that makes padding bits past `width`
 read as the fill, and a copy of it that differs by one bit is invisible in the
-middle of a frame and makes every word-wise reduction over-count. It was briefly
-restated twice inside the CUDA backend — once in `cuda/shift.hpp` and once,
-independently, in `morphology.cu` — and the two copies had already diverged in
-spelling before either shipped, which is the failure this rule exists to
-prevent arriving exactly on schedule. Folding them back onto the host's own
-function is **instruction-neutral** (the morphology translation unit compiles
-identically either way); the reason to do it is that there is now one
-definition of the rule rather than three.
+middle of a frame and makes every word-wise reduction over-count. Two device
+copies of it existed for a while and had already diverged in spelling; both now
+call the host's function, at no instruction cost.
 
 The reason the line sits there is that a second derivation of one rule is this
 project's recurring failure mode: the copy that drifts does not crash, it
-answers a plausible question nobody asked. `backends/cuda/src/reduce.cu` carried
-a hand-written restatement of the clip geometry for its batch kernel while its
-own header comment claimed nothing was copied, and `pack.cu` carried a
-`quantScaleDevice` restating a rounding form whose divergence from OpenCV is
-deliberate — a drifted copy there would have read as that divergence finally
-being fixed. Both now call the host's own definition.
-
-The feature tracking round produced one more, and it is worth naming because it is the
-same failure in a different disguise. The rule "is this keypoint far enough from
-the edge to read a square patch around it" existed in **seven spellings** — twice
-in `ops/orientation.hpp`, three times in `ops/descriptor.hpp`, and once each as a
-device twin in `orientation.cu` and `descriptor.cu`. Nothing had drifted yet.
-What made it worth folding is what a drift would have *looked* like: orientation
-accepting a keypoint that the descriptor then rejects is not a crash and not a
-wrong pixel, it is a silently short descriptor set, and a caller would read it as
-the detector having found fewer corners. It is now `impl::squareInsideImage` in
-`impl/kernel_util.hpp` — the header that exists for exactly this, having been
-split out when the aliasing predicates faced the same problem. The fold is
-**behaviour-preserving by construction** (the same inequality, unchanged — a
-guard against a negative half-extent was drafted and removed, because
-consolidating and changing behaviour are separate edits) and
-**instruction-neutral**: an inline predicate expanding to the same compares at
-all seven sites. The reason to do it is one definition of the rule, not speed.
+answers a plausible question nobody asked. A restated clip geometry in
+`reduce.cu`, a restated rounding rule in `pack.cu`, and a "does a square patch
+fit inside the image" predicate that existed in seven spellings across the
+orientation and descriptor code on both sides were each folded back onto one
+definition (`impl::squareInsideImage` in `impl/kernel_util.hpp` for the last)
+— behaviour-preserving and instruction-neutral in every case, because the
+reason to fold is one definition of the rule, not speed.
 
 Three properties are **proven rather than asserted**. The library still compiles
 under a plain C++17 compiler with no CUDA installed — `tests/test_error.cpp`
@@ -411,16 +406,18 @@ rules, and the equality tests. The two device copies of the row-geometry helpers
 forms of templated host originals — and are asserted equal to those originals
 across widths rather than trusted to stay in step.
 
-**What runs, and what is measured.** The backend provides bitwise logic, bulk
-population-count reductions, the sensor stage (`packBits`), the census
-transform, and dense disparity by both entries — an already-binary pair, and a
-wide 8-bit pair transformed to census on device. Correctness is bit-exactness
-against the host library, proven by `backends/cuda/tests` and gated by
-`scripts/verify_cuda.sh` (which exits 77 without a GPU, the "not performed" code
-the other cross-target gates use). Speed is measured on an **RTX 3070 Ti (SM
-8.6) under WSL2**, both kernel-resident and end-to-end, next to the host
-library's own arm on the same machine and against `cv::cuda::StereoBM` as the
-best existing GPU option; the numbers and what each covers are in
+**What runs, and what is measured.** The backend covers most of the host
+operation set — logic, reductions, the sensor stage, threshold, shift,
+morphology, the wide median, census, dense disparity by both entries, pyramid,
+derivatives, gradient covariance, corner response and `goodFeaturesToTrack`,
+FAST, orientation, descriptors and matching, sparse stereo, pyramidal
+Lucas–Kanade and sub-pixel refinement — each bit-exact against the host
+library, proven by `backends/cuda/tests` and gated by `scripts/verify_cuda.sh`
+(which exits 77 without a GPU, the "not performed" code the other cross-target
+gates use). `backends/cuda/README.md` has the per-operation table. Speed is
+measured on an **RTX 3070 Ti (SM 8.6) under WSL2** against the `cv::cuda`
+counterpart of each operation, and against the host library's own arm for the
+resident pipeline; the numbers and what each covers are in
 `docs/reports/cuda.md`. As with every other platform in section 8, a number is a
 claim only about the hardware it was measured on: **no Jetson or other device
 has been run**, so nothing here is a claim about one — though the design is
@@ -435,7 +432,8 @@ create threads, and on a core-only build the parallel path compiles to the seria
 
 Tracking splits over keypoints, which is safe by construction: each keypoint writes only
 its own outputs and reads only shared const state. Measured, this scales about 2.6× at
-four threads with peak memory flat, because the only per-thread cost is stack.
+four threads with peak memory flat, because the only per-thread cost is stack
+([feature-tracking.md](reports/feature-tracking.md), the threading rows).
 
 An integrator with an existing pool installs theirs and binCV never spawns anything.
 
@@ -452,9 +450,11 @@ an optimization.
 **A feature gate is derived from the compiler's own macros wherever the compiler can know
 it.** NEON is mandatory in ARMv8, so `__ARM_NEON` is defined with no flags — routing that
 through a build-system define once made every NEON kernel vanish for a consumer who added
-the include path without linking the target, silently, at 1.78× the cost. Build-system
+the include path without linking the target, silently, at 2.25× the cost on the reference
+device (measured during development, not re-taken). Build-system
 defines are reserved for what the compiler genuinely cannot know, such as whether
 `-mpopcnt` was passed, and those are reported by `simdStatus()` instead.
 
 **Runtime dispatch is per-kernel, not per-call.** Marking a small hot function with a
-target attribute blocks inlining; measured, that cost 1.9× — more than the dispatch saved.
+target attribute blocks inlining; measured during development, that cost 1.9× — more than
+the dispatch saved.

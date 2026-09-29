@@ -131,8 +131,9 @@ inline long long bitPositionSum(uint64_t seg) {
 /// rejects is one the descriptor was going to reject anyway.
 /// @param radius Disc radius in pixels, in [1, 31]. 15 pairs with the 31-pixel
 /// descriptor patch.
-/// @note Never allocates. Accumulators are `long long`: a 31x31 disc of
-/// uint16_t pixels weighted by +/-15 peaks well inside 63 bits.
+/// @note Never allocates. Accumulators are `long long`: even at the largest
+/// radius, a 63x63 disc of uint16_t pixels weighted by +/-31 peaks well
+/// inside 63 bits.
 template <typename SrcT>
 inline void keypointOrientation(const SrcT* img, size_t width, size_t height,
                                 size_t stride, const float* keypointsXY, size_t count,

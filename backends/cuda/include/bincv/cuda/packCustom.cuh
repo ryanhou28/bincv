@@ -105,11 +105,15 @@ inline cudaError_t packBitsIf(DeviceImageConstView<SrcT> src, DeviceBinMatView d
     return cudaGetLastError();
 }
 
-/// @brief `packQuant` with an arbitrary per-pixel map. **API TIER 3.**
+/// @brief `packQuant` with an arbitrary per-pixel map. **API TIER 3.** Bit-exact
+/// against the host `bincv::packQuantWith` under the same map, proven by
+/// test_cuda_custom.
 /// @param map `__device__`-callable, `unsigned(SrcT)`, returning a value in
 /// `[0, 2^n)`. Values above that are truncated to the planes that exist,
 /// exactly as the host form truncates.
 /// @param planeBlock N planes in one matrix; see `pack.hpp`'s packQuant.
+/// @param n Planes, 1 to 8; outside that, or with a block that is not
+/// `width x (n * height)`, returns `cudaErrorInvalidValue` without launching.
 template <typename SrcT, typename Map>
 inline cudaError_t packQuantWith(DeviceImageConstView<SrcT> src,
                                  DeviceBinMatView planeBlock, size_t n, Map map,
@@ -118,6 +122,11 @@ inline cudaError_t packQuantWith(DeviceImageConstView<SrcT> src,
                  "cuda packQuantWith: N outside QuantMat's supported range");
     BINCV_ASSERT(src.width == planeBlock.width && planeBlock.height == n * src.height,
                  "cuda packQuantWith: plane block must be width x (N * height)");
+    // Refused in every build, as `packQuant` refuses: the kernel unrolls eight
+    // planes, so a larger `n` would leave planes unwritten rather than fail.
+    if (n < 1 || n > 8) return cudaErrorInvalidValue;
+    if (src.width != planeBlock.width || planeBlock.height != n * src.height)
+        return cudaErrorInvalidValue;
     if (src.width == 0 || src.height == 0) return cudaSuccess;
     BINCV_ASSERT(src.ptr != nullptr && planeBlock.ptr != nullptr,
                  "cuda packQuantWith: a non-empty image needs non-null pointers");

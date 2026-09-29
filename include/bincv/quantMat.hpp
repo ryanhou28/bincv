@@ -24,9 +24,9 @@ namespace impl {
 /// which is undefined behavior -- and undefined in a way that matters more
 /// than the wrong answer: it licenses the optimizer to assume the argument
 /// is never INT_MIN and to drop the `value < 0` test that guards it. The
-/// range assert in SignedQuantMat::set is compiled out under NDEBUG, which
-/// is every configuration this project verifies, so the guard cannot be
-/// relied on to keep INT_MIN away from here.
+/// range assert in SignedQuantMat::set is compiled out under NDEBUG, i.e.
+/// in every release build, so the guard cannot be relied on to keep INT_MIN
+/// away from here.
 /// @note constexpr on purpose, so the property is testable: a constant expression
 /// may not contain signed overflow, so `signedMagnitude(INT_MIN)` inside a
 /// static_assert is ill-formed the moment anyone rewrites this as `-value`.
@@ -39,14 +39,18 @@ constexpr unsigned signedMagnitude(int value) {
 } // namespace impl
 
 /// @brief An N-bit image, stored as N bit-planes in ONE contiguous allocation.
+/// **API TIER 3 as a type** -- OpenCV has no packed sub-byte image; `fromCVMat`
+/// and `toCVMat` are the bridge.
 /// @tparam N Number of bit-planes, i.e. bits per pixel. 1 to 8.
 /// @tparam WordType_ The unsigned integral type pixels are packed into.
 ///
 /// @note WHY THIS EXISTS, and it is measured rather than speculative: a binary
-/// frame does not stay binary through the reference pyramid. Distinct
-/// values grow 2 -> 5 -> 15 -> 26 across levels 0..3, i.e. 1 -> 3 -> 4 -> 5
-/// bits. A binary-only library cannot represent pyramid
-/// level 1 at all, so the VIO frontend needs this container.
+/// frame does not stay binary through a box-filter pyramid. On the frames of
+/// the reference pipeline (the visual-inertial odometry system, not in this
+/// repository, that binCV was built to serve stage by stage; see
+/// docs/ARCHITECTURE.md), distinct values grow 2 -> 5 -> 15 -> 26 across
+/// levels 0..3, i.e. 1 -> 3 -> 4 -> 5 bits. A binary-only library cannot
+/// represent pyramid level 1 at all, so a VIO frontend needs this container.
 /// @note Layout: plane p holds bit p of every pixel,
 /// row-packed exactly as a BinMat is, and plane p begins at word offset
 /// p * planeWords. ONE allocation holds all N planes -- not N of them --
@@ -64,8 +68,8 @@ constexpr unsigned signedMagnitude(int value) {
 /// [p*height, (p+1)*height) of it. Everything subtle about the storage --
 /// deep-copy value semantics, the aliasing rules on copy- and
 /// move-assignment, owning versus wrapped buffers, the zero-fill that keeps
-/// padding bits clear -- is therefore the code already have tests
-/// for, not a second implementation of it that could drift.
+/// padding bits clear -- is therefore code that already has tests, not a
+/// second implementation of it that could drift.
 /// @note Kernels never take this type. They take the per-plane views returned by
 /// plane, so a kernel compiles once per WordType and does not care
 /// how many planes its caller happens to have.
@@ -87,7 +91,7 @@ constexpr unsigned signedMagnitude(int value) {
 /// The third is a deliberate semantic difference, not a spelling one:
 /// - fromCVMat at N == 1 reads any NONZERO byte as 1; this template
 /// quantizes to NEAREST, so the two disagree for input bytes 1..127
-/// (and the block comment on the conversions below).
+/// (see the block comment on the conversions below).
 /// Everything else -- Planes, MaxValue, planeWords, plane, constPlane
 /// and the plane index contract -- reads the same at N == 1 as it does here,
 /// so code generic over QuantMat<N> is testable at N == 1 EXCEPT on the
@@ -141,7 +145,7 @@ public:
     /// least ceil(width / WordBits).
     /// @throws std::invalid_argument as the sized constructor does, and if `data`
     /// is null for a non-empty matrix.
-    /// @note Allocates nothing: the Tier 2 / DMA path, and the reason the planes
+    /// @note Allocates nothing: the no-heap / DMA path, and the reason the planes
     /// are one contiguous block rather than N -- a caller has one buffer to
     /// hand over, laid out plane 0 first.
     /// @note The buffer is used as-is -- neither zeroed nor trailing-bit cleared.
@@ -153,8 +157,8 @@ public:
     /// length, so an undersized buffer is accepted silently and every access
     /// above plane 0 lands in the caller's neighbouring objects. Prefer
     /// wrap, below, which takes the buffer length and checks it -- this
-    /// constructor is the one the spec names, kept for callers whose
-    /// length is not a value they have.
+    /// constructor is kept for callers whose length is not a value they
+    /// have.
     QuantMat(WordType* data, int width, int height, size_t strideWords)
         : stack_(data, width, checkedStackHeight(height), strideWords) {}
 
@@ -169,7 +173,7 @@ public:
     /// @note Same object as the wrapping constructor produces, same lack of
     /// ownership and same zero allocations -- the one difference is that the
     /// container is told how much memory it was given, so the one thing it
-    /// cannot otherwise verify becomes a setup-time check. Free on the Tier 2
+    /// cannot otherwise verify becomes a setup-time check. Free on the no-heap
     /// path: it runs once per wrap, not per access.
     /// @note Named rather than a fifth constructor parameter so the buffer and its
     /// length sit together and neither can be defaulted away.
@@ -355,13 +359,12 @@ public:
     // MaxValue are both odd, so v*255/MaxValue and
     // v*MaxValue/255 are never half-integers.
     //
-    // The QuantMat<1> SPECIALIZATION keeps its established nonzero-threshold
-    // fromCVMat (any set byte reads 1); this general form quantizes to nearest,
-    // so the two disagree for bytes 1..127 at N == 1. A recorded difference,
-    // not retroactively unified -- N == 1 callers depend on the
-    // threshold reading. THIS IS THE THIRD DIVERGENCE the class docstring
-    // counts, and the one that makes generic-over-N code NOT testable at N == 1
-    // on the conversion path specifically.
+    // The QuantMat<1> SPECIALIZATION's fromCVMat reads any nonzero byte as 1;
+    // this general form quantizes to nearest, so the two disagree for bytes
+    // 1..127 at N == 1. The difference is deliberate -- N == 1 callers depend on
+    // the threshold reading -- and it is the third divergence the class
+    // docstring counts, the one that makes generic-over-N code NOT testable at
+    // N == 1 on the conversion path specifically.
 
     /// @brief Replaces this matrix with a quantized copy of an 8-bit cv::Mat:
     /// each byte v becomes round(v * MaxValue / 255). **API TIER 3** --
@@ -371,8 +374,8 @@ public:
     /// the wrapping constructor stops referring to the caller's memory here
     /// and owns its storage afterwards, exactly as the N == 1 specialization
     /// does. The row alignment IS preserved.
-    /// @note Container-level, not a kernel -- CLAUDE.md's no-heap rule binds
-    /// kernels, and this has the same shape as the N == 1 fromCVMat.
+    /// @note Container-level, not a kernel: the no-allocation rule binds kernels,
+    /// and this has the same shape as the N == 1 fromCVMat.
     /// @note Commit-last, as the N == 1 specialization and resize: the new
     /// storage is built completely before this object's dimensions change,
     /// so a failed allocation leaves the matrix as it was.
@@ -388,25 +391,24 @@ public:
         // Quantize once into a table, not once per pixel: 256 bytes, and the
         // per-pixel work drops to one load.
         //
-        // THE RULE ITSELF LIVES IN ONE PLACE NOW. It used to be written out here
-        // and nowhere else, so the core-only `packQuant` would have been a second
-        // spelling of a load-bearing expression -- `toCVMatNormalized`'s exact inverse,
-        // with its deliberate divergence from OpenCV at bytes 1..127 inside it.
-        // `impl::quantScale` is that expression; `Pack.QuantScaleReproducesFromCVMatsRule`
-        // pins the two paths equal at N in {1, 2, 3, 4, 8}.
+        // THE QUANTIZATION RULE HAS ONE DEFINITION, `impl::quantScale`: it is
+        // `toCVMatNormalized`'s exact inverse, with the deliberate divergence from
+        // OpenCV at bytes 1..127 inside it, and the core-only `packQuant` uses the
+        // same expression rather than a second spelling of a load-bearing one.
+        // `Pack.QuantScaleReproducesFromCVMatsRule` pins the two paths equal at N
+        // in {1, 2, 3, 4, 8}.
         uint8_t lut[256];
         for (unsigned v = 0; v < 256u; ++v) {
             lut[v] = static_cast<uint8_t>(impl::quantScale<uint8_t>(static_cast<uint8_t>(v),
                                                                     MaxValue));
         }
         // Alignment is carried through UNCONDITIONALLY, as the N == 1
-        // specialization and resize do. An `empty ? DefaultRowAlignment :...`
-        // guard here was a bug: every constructor establishes a valid alignment, so
-        // it protected against nothing and silently downgraded an opt-in Tier 2 /
-        // DMA stride. It bit on buffer REUSE rather than the degenerate case -- a
-        // moved-from matrix is empty but keeps its alignment, so
-        // `dst = std::move(src); src.fromCVMat(frame);` rebuilt src at word
-        // granularity.
+        // specialization and resize do: every constructor establishes a valid
+        // alignment, and a moved-from matrix is empty but keeps its alignment, so
+        // `dst = std::move(src); src.fromCVMat(frame);` must rebuild `src` at the
+        // alignment it was constructed with rather than at word granularity. A
+        // guard of the form `empty ? DefaultRowAlignment : ...` would silently
+        // downgrade an opt-in DMA stride on exactly that reuse.
         QuantMat fresh(input.cols, input.rows, getRowAlignment());
         const size_t w = static_cast<size_t>(input.cols);
         const size_t pitch = fresh.planeWords();
@@ -516,6 +518,7 @@ private:
 };
 
 /// @brief A signed N-bit image: N magnitude planes plus one sign plane.
+/// **API TIER 3 as a type** -- OpenCV has no packed sub-byte image, signed or not.
 /// @tparam N Number of MAGNITUDE planes, 1 to 7. The container holds N+1.
 /// @tparam WordType_ The unsigned integral type pixels are packed into.
 ///
@@ -698,8 +701,8 @@ public:
     /// @note Debug-checked, unchecked in release; see QuantMat::at.
     /// @note The magnitude is taken in UNSIGNED arithmetic (impl::signedMagnitude).
     /// Writing it as `-value` would be undefined behavior at INT_MIN, and
-    /// the assert above is compiled out in every configuration the project
-    /// verifies, so nothing would stop INT_MIN from reaching it.
+    /// the assert above is compiled out in every release build, so nothing
+    /// would stop INT_MIN from reaching it.
     void set(int row, int col, int value) {
         BINCV_ASSERT(value >= -static_cast<int>(MaxMagnitude) &&
                          value <= static_cast<int>(MaxMagnitude),
@@ -720,8 +723,8 @@ private:
 };
 
 /// @brief A ternary image: values {-1, 0, +1}, one magnitude plane and one sign
-/// plane, two bits per pixel.
-/// @note The N=1 instance of the general signed form, not a special case
+/// plane, two bits per pixel. **API TIER 3 as a type.**
+/// @note The N=1 instance of the general signed form, not a special case.
 /// It is what the binarized spatial derivative at
 /// pyramid level 0 produces and what the LK gradient covariance
 /// consumes as masked population counts.

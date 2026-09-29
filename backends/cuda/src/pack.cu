@@ -316,6 +316,10 @@ __global__ void packQuantKernelWideLane(DeviceImageConstView<uint8_t> src,
     }
 }
 
+/// @brief The tallest image `unpackTo8Bit` launches over: one row per
+/// `blockIdx.y`, whose hardware limit this is.
+constexpr size_t kUnpackMaxHeight = 65535;
+
 __global__ void unpackKernel(DeviceBinMatConstView src, DeviceImageView<uint8_t> dst,
                              uint8_t onValue, uint8_t zeroValue) {
     const size_t x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -402,6 +406,12 @@ cudaError_t launchPackQuant(DeviceImageConstView<SrcT> src, DeviceBinMatView pla
     BINCV_ASSERT(src.width == planeBlock.width &&
                      planeBlock.height == n * src.height,
                  "cuda packQuant: plane block must be width x (N * height)");
+    // Refused in every build: the kernels unroll eight planes and `1u << n` is
+    // undefined at 32, so an `n` outside 1..8 would leave planes unwritten or
+    // scale by garbage rather than fail.
+    if (n < 1 || n > 8) return cudaErrorInvalidValue;
+    if (src.width != planeBlock.width || planeBlock.height != n * src.height)
+        return cudaErrorInvalidValue;
     if (src.width == 0 || src.height == 0) return cudaSuccess;
     BINCV_ASSERT(src.ptr != nullptr && planeBlock.ptr != nullptr,
                  "cuda packQuant: a non-empty image needs non-null pointers");
@@ -514,6 +524,14 @@ cudaError_t unpackTo8Bit(DeviceBinMatConstView src, DeviceImageView<uint8_t> dst
                          uint8_t onValue, uint8_t zeroValue, cudaStream_t stream) {
     BINCV_ASSERT(src.width == dst.width && src.height == dst.height,
                  "cuda unpackTo8Bit: src and dst must have the same dimensions");
+    // One row per `blockIdx.y`, a dimension the hardware caps at 65535. The
+    // packers fall back to a grid-stride arm above it; this kernel has no such
+    // arm, so the bound is named in the header and refused here rather than
+    // left to surface as a launch failure.
+    BINCV_ASSERT(src.height <= kUnpackMaxHeight,
+                 "cuda unpackTo8Bit: height above the 65535-row launch domain");
+    if (src.width != dst.width || src.height != dst.height) return cudaErrorInvalidValue;
+    if (src.height > kUnpackMaxHeight) return cudaErrorInvalidValue;
     if (src.width == 0 || src.height == 0) return cudaSuccess;
     BINCV_ASSERT(src.ptr != nullptr && dst.ptr != nullptr,
                  "cuda unpackTo8Bit: a non-empty image needs non-null pointers");

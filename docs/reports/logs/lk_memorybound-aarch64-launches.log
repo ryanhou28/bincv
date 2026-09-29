@@ -232,3 +232,33 @@
 # temp after: temp=63.3'C
 # date:     2026-09-21T16:53:29-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py ) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row              n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# t1 / 1160       10    29.4522    29.1012    29.8622  1.026     2.6%      --  [ 29.2513,  29.6638]   0.70%   1.007x
+# t1 / 140        10     3.2382     3.2012     3.2783  1.024     2.4%      --  [  3.2140,   3.2568]   0.66%   1.008x
+# t1 / 300        10     7.2803     7.1955     7.3756  1.025     2.5%      --  [  7.2270,   7.3319]   0.72%   1.007x
+# t1 / 35         10     0.8448     0.8399     0.8556  1.019     1.9%      --  [  0.8419,   0.8517]   0.58%   1.008x
+# t1 / 560        10    13.6833    13.5282    13.8654  1.025     2.5%      --  [ 13.5829,  13.7837]   0.73%   1.007x
+# t1 / 80         10     1.7789     1.7621     1.8092  1.027     2.6%      --  [  1.7681,   1.7982]   0.85%   1.011x
+# t2 / 1280x960   10     3.7781     3.7488     3.8235  1.020     2.0%      --  [  3.7577,   3.7915]   0.45%   1.005x
+# t2 / 1920x1440  10     3.8117     3.7846     3.8874  1.027     2.7%      --  [  3.7929,   3.8288]   0.47%   1.005x
+# t2 / 320x240    10     3.5892     3.5759     3.6293  1.015     1.5%      --  [  3.5777,   3.6088]   0.43%   1.005x
+# t2 / 640x480    10     3.2376     3.2012     3.2776  1.024     2.4%      --  [  3.2138,   3.2558]   0.65%   1.007x
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     t1       (a) point count sweep, 640x480 (frame = 37.5 KB at 1 bit) | points  ms  us per point
+#     t2       (b) frame size at 140 points (same compute, wider spread) | frame  KB @1bit  ms  us per point

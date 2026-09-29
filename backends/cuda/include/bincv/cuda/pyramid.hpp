@@ -33,8 +33,9 @@
 /// **THE PING-PONG IS A CALLER CONTRACT, NOT A TYPE INVARIANT.** Nothing here
 /// prevents a caller from overwriting level 0 of the pyramid the tracker has
 /// not finished reading; the result is silently wrong flow with no diagnostic.
-/// Whether a `DevicePyramidPair` that owns both and exposes current()/previous()
-/// should make it structural is an open scope question, not an oversight.
+/// A `DevicePyramidPair` that owns both and exposes current()/previous() would
+/// make it structural; this backend does not provide one, so the contract is
+/// the caller's to keep.
 ///
 /// ---------------------------------------------------------------------------
 /// WHAT IS AND IS NOT CLAIMED HERE
@@ -190,8 +191,7 @@ bool& pyrBitSlicedEnabled();
 /// Every level is a slice of it, at its own offset and its own stride.
 /// @note The default row stride is TIGHT, as `DeviceBinMat`'s is. Rounding this
 /// ladder's rows to 128 bytes costs 2.65x the memory (253,440 B against
-/// 95,760 B at 752x480), and CLAUDE.md says memory wins an unforced
-/// conflict.
+/// 95,760 B at 752x480), and memory wins an unforced conflict.
 /// @note This is a CONTAINER. It owns and allocates; the kernels take views and
 /// allocate nothing.
 template <size_t... LevelBits>
@@ -400,7 +400,9 @@ private:
 };
 
 /// @brief Fills levels 1..L-1 of `p` from level 0, entirely on the device.
-/// **API TIER 2** for the role; no `cv::cuda` equivalent exists.
+/// **API TIER 2** -- `cv::buildPyramid`'s role, different numerics; no
+/// `cv::cuda` equivalent exists. Every level is bit-exact against the host
+/// `bincv::pyrDownBox` ladder, proven by test_cuda_pyramid.
 /// @param p The ladder. Level 0 is the caller's input and is not touched.
 /// @param stream The stream every level's launch is enqueued on, so the ladder
 /// is ordered by the stream rather than by a synchronize.

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Turn a directory of frames into one flat sequence blob ("BSQ1").
 
+Requires numpy; OpenCV's cv2 is used when importable and is optional (see below).
+
 This is the HOST half of the no-codec decision (ARCHITECTURE 7): binCV links no
 decoder on any target, so the decode happens here, where the decoders live, and
 what travels to the target is one flat file -- a 32-byte header, then frames
@@ -22,6 +24,8 @@ Two modes, because they test different things:
 The packed mode's sensor stage is the reference pipeline's two-stage
 preprocessing, exactly as benchmark/feature_tracking_sequence.cpp spells it (and as
 binCV's own medianWide + edgeThreshold reproduce bit for bit):
+(The reference pipeline is the visual-inertial odometry system, not in this
+repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 
   1. the L-shaped three-pixel median -- min/max over {above, center, right},
      out-of-range neighbours reading as ZERO;

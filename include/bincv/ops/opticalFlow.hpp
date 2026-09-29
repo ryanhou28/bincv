@@ -10,8 +10,8 @@
 /// the two that are open to it. Lucas-Kanade warps its window to
 /// subpixel positions and bilinearly interpolates; that is continuous and does not
 /// bit-parallelize. Route (a) -- census/Hamming block matching at integer pixels,
-/// fully bit-parallel -- is a different algorithm and is, not this
-/// file. Route (b) keeps LK's numerics where LK's accuracy comes from and puts
+/// fully bit-parallel -- is a different algorithm and is ops/blockMatch.hpp, not
+/// this file. Route (b) keeps LK's numerics where LK's accuracy comes from and puts
 /// everything else on population counts.
 ///
 /// ===========================================================================
@@ -24,9 +24,11 @@
 /// 1. **Window extraction.** The 31x31 window is a `Rect` clipped against the
 /// level through `impl::clipRegion` and walked by `impl::visitRowWords` --
 /// the same two helpers every reduction in ops/reduce.hpp uses. No patch is
-/// ever copied out. The reference copies the warped patch into `IWinBuf` and
-/// `derivIWinBuf` (`winSize.area * 3` shorts = 5766 B at 31x31, per
-/// invoker); this file copies nothing and needs no scratch buffer.
+/// ever copied out. The reference pipeline (the visual-inertial odometry system,
+/// not in this repository, that binCV was built to serve stage by stage; see
+/// docs/ARCHITECTURE.md) copies the warped patch and its derivative into
+/// per-invoker buffers (`winSize.area * 3` shorts = 5766 B at 31x31); this file
+/// copies nothing and needs no scratch buffer.
 /// 2. **The 2x2 normal-equations matrix `A`.** One call to ops/covariance.hpp's
 /// `gradientCovariance` -- four masked popcounts in one traversal, no scratch.
 /// Its three entries are EXACT INTEGERS, which is
@@ -83,7 +85,7 @@
 /// ===========================================================================
 /// Ported from the reference pipeline's tracker and the vendored OpenCV LK
 /// invoker it calls, with that pipeline's parameters (win 31x31, maxLevel 3, maxCount 20,
-/// eps 0.03, minEig 0.001, BINARIZED derivative, BOX_2x2 pyrDown) -- all of which
+/// eps 0.03, minEig 0.001, BINARIZED derivative, 2x2-box pyrDown) -- all of which
 /// are this file's defaults, verbatim.
 ///
 /// **(i) THE PREVIOUS WINDOW SITS ON THE INTEGER GRID.** The reference warps BOTH
@@ -122,7 +124,7 @@
 /// with BORDER_REFLECT_101 -- at 640x480 and a 31x31 window that is a 702x542
 /// buffer for a 640x480 level, **1.24x the level's own footprint, at every
 /// level**. binCV declines it: the window is intersected with the level exactly as
-/// and ops/reduce.hpp intersect every other region, so `A` and `b` are
+/// ops/covariance.hpp and ops/reduce.hpp intersect every other region, so `A` and `b` are
 /// accumulated over the same clipped pixel set and the solve stays consistent.
 /// A window wholly outside gives `A = {0,0,0}`, a zero determinant, and a lost
 /// point -- a value, not an error.
@@ -141,14 +143,14 @@
 /// is 0 or at least 1, and nothing lies between. The test is `det <= 0`, with no
 /// epsilon, for the same reason ops/corner.hpp's `> threshold` needs none.
 ///
-/// **(v) ONE BIT PER PYRAMID LEVEL.** Every level here is binary, because the
-/// popcount covariance is exact only for a TERNARY derivative and a ternary
-/// derivative is what a ONE-bit level produces (ops/covariance.hpp promise 1). An
-/// N-bit level needs a bit-sliced weighted-sum covariance, which nothing in
-/// binCV implements. **How many bits each level actually
-/// needs is an open question, to be settled by measurement** -- it is not settled
-/// here, and 1/1/1/1 is what the shipped kernels can express, not a claim that it
-/// is right.
+/// **(v) THE BIT DEPTH PER LEVEL IS THE CALLER'S.** Every level of the `LKLevel`
+/// overload is binary: the popcount covariance is exact for a TERNARY derivative,
+/// which is what a ONE-bit level produces (ops/covariance.hpp promise 1). An N-bit
+/// level takes ops/covariance.hpp's bit-sliced weighted-sum form through the
+/// `LKLevelN` and `LKLevels` overloads below. **How many bits each level needs is
+/// a measurement, not a given**: 1/1/1/1 is what the 1-bit overload can express,
+/// and the 1/2/2/2 ladder the figures in this file were taken on is one point of
+/// that measurement, not a claim that it is right.
 ///
 /// **(vi) A LEVEL NO LARGER THAN THE WINDOW IS IGNORED, NOT REFUSED.** The
 /// reference stops BUILDING levels at the first one that is not strictly larger
@@ -171,10 +173,10 @@
 /// ===========================================================================
 /// THE ITERATION AND THE TERMINATION RULE, TAKEN FROM THE REFERENCE
 /// ===========================================================================
-/// `LKTrackerInvoker::operator` decides these, and all five are reproduced:
+/// The reference pipeline's LK invoker decides these, and all five are reproduced:
 ///
 /// * **Coarse to fine, propagating by doubling.** At the coarsest level the
-/// estimate starts at the point itself (`lk_use_initial_flow: 0`); at every
+/// estimate starts at the point itself (`useInitialFlow` off); at every
 /// finer level it starts at twice the level above's answer. The propagation
 /// happens for EVERY point before ANY point is tracked, and it happens even
 /// for points that were skipped at the level above -- so a point that leaves
@@ -207,8 +209,9 @@
 /// binCV's pixels are {0, 1} and its binarized derivative is the raw `[-1, 0, 1]`
 /// tap, so `Ix` is `I(x+1) - I(x-1)`, which is TWICE the central difference
 /// `dI/dx`. The reference reaches the same place by a different route -- pixels in
-/// {0, 255}, derivative scaled by 16 (`calcBinarizedDeriv`), intensity descaled by
-/// `W_BITS1-5` -- whose net effect is a gradient of `Ix/2` per unit intensity,
+/// {0, 255}, derivative scaled by 16 in its binarized-derivative routine, intensity
+/// descaled by its fixed-point shift -- whose net effect is a gradient of `Ix/2`
+/// per unit intensity,
 /// identical. Substituting `g = Ix/2` into `delta = -A^-1 b` scales `A` by 1/4 and
 /// `b` by 1/2, so the step computed from the raw taps must be multiplied by
 /// **exactly 2** (`impl::kCentralDifferenceScale`). Dropping it would not diverge
@@ -261,7 +264,6 @@
 // its gate before its first core include.
 #include "../core/simd.hpp"
 
-
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -297,20 +299,8 @@
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
-/// @brief A subpixel point. **API TIER 2**: `cv::Point2f`'s role and field names,
-/// because this operation's whole job is to produce fractional positions.
-/// @note Deliberately NOT reused for ops/corner.hpp's `Corner`, which is integer
-/// by construction and carries a response.
-/// @brief The tracker's parameters, defaulted to the reference pipeline's verbatim.
-/// @note `lk_win_size_width/height: 31`, `lk_term_criteria_max_count: 20`,
-/// `lk_term_criteria_eps: 0.03`, `lk_min_eig_threshold: 0.001`.
-/// `lk_max_level: 3` is not a field: the number of levels is `levelCount`,
-/// because the caller owns the pyramid.
-/// `lk_use_initial_flow: 0` IS a field -- `useInitialFlow` below. It used to be
-/// absent, on the grounds that an unused mode is an untested one; that was
-/// checked against the reference pipeline's parameters, where the flag is off, and not against
-/// the pipeline around it, where `predictOpticalFlow` turns it on.
-/// @brief Which pyramid level a keypoint ENTERS at.
+/// @brief Which pyramid level a keypoint ENTERS at. **API TIER 3** -- no OpenCV
+/// counterpart: OpenCV pads every level instead.
 /// @note Not a border and not a padding scheme: it is a policy about which levels
 /// a given point is allowed to be tracked on at all. binCV clips where the
 /// reference pads (deviation (ii)), and a window that is mostly outside a
@@ -335,6 +325,15 @@ enum class LKEntryLevel {
     DeepestFitting,
 };
 
+/// @brief The tracker's parameters, defaulted to the reference pipeline's verbatim.
+/// **API TIER 2** -- `cv::calcOpticalFlowPyrLK`'s `winSize`, `criteria` and
+/// `minEigThreshold`, plus the entry-level and residual-reject policies OpenCV
+/// does not have.
+/// @note Window 31x31, 20 iterations, epsilon 0.03, minimum eigenvalue 0.001. The
+/// number of levels is not a field: it is `levelCount`, because the caller owns
+/// the pyramid. `useInitialFlow` IS a field, because the reference pipeline's
+/// own motion predictor turns it on even though its tracker configuration
+/// leaves it off.
 struct LKParams {
     int winWidth = 31;     ///< window width in pixels, > 2
     int winHeight = 31;    ///< window height in pixels, > 2
@@ -401,23 +400,21 @@ struct LKParams {
     /// **0.0378 and below** and lost ones at **0.0792 and above** -- disjoint, with a
     /// factor of two of gap.
     ///
-    /// @note **IT IS NOT FREE, AND THE PRE-REGISTRATION EXPECTED IT TO BE.** The
-    /// comparison is free; computing the residual is not, and setting this makes it
+    /// @note **IT IS NOT FREE.** The comparison is free; computing the residual is not, and setting this makes it
     /// computed whether or not `err` was requested. Measured: `track` goes from
     /// 2.83 ms to 6.15 ms on x86 for a caller who was passing `err == nullptr` --
     /// **2.17x**. A caller who ALREADY requests `err` pays nothing extra, because
     /// that request costs the same 2.16x on its own.
     /// @note **It is a LOSS RULE, so it shortens tracks by construction, and that is
-    /// not automatically a win.** The default is off and the shipped value
-    /// is whatever a measurement on a real sequence against track lifetime supports --
-    /// not
-    /// the synthetic gap above, which is the easy case.
+    /// not automatically a win.** The default is off. A value for a real sequence
+    /// has to come from a measurement against track lifetime, not from the
+    /// synthetic gap above, which is the easy case.
     float maxResidual = 0.0f;
 };
 
-
 /// @brief One pyramid level's six planes: both frames, and the previous frame's
-/// ternary derivative.
+/// ternary derivative. **API TIER 2** -- the per-level input of
+/// `cv::calcOpticalFlowPyrLK`'s role.
 /// @note Views, not containers. All six must share the level's dimensions.
 /// @note The derivative belongs to the PREVIOUS frame only. LK linearizes about
 /// the previous frame, so the next frame's derivative is never formed --
@@ -464,7 +461,7 @@ inline LKLevel<WordType> lkLevel(const BinMat<WordType>& prev, const BinMat<Word
 
 /// @brief One pyramid level at **N bits per pixel**: both frames' bit-planes, and
 /// the previous frame's N-bit signed derivative. The generic-N form of
-/// `LKLevel`, which is this at `N == 1`.
+/// `LKLevel`, which is this at `N == 1`. **API TIER 2.**
 /// @note Views, not containers. All `4N + 2` planes must share the level's
 /// dimensions.
 /// @note `prev[i]` / `next[i]` are bit-plane `i`, **plane 0 being the LEAST
@@ -522,11 +519,9 @@ namespace impl {
 /// @brief Where `track`'s time actually goes, by stage. **DIAGNOSTIC ONLY — off by
 /// default and compiled out otherwise.**
 ///
-/// **THIS EXISTS BECAUSE THREE GUESSES IN A ROW MISSED.** An iteration-cap sweep on the
-/// reference device put roughly **45% of `track` OUTSIDE the iteration loop** —
-/// staging, the covariance, the clip — and nothing in this project had ever measured
-/// which of those it is. Guessing produced a 1.9% win and a 0.0% win before this was
-/// written.
+/// An iteration-cap sweep on the reference device put roughly **45% of `track`
+/// OUTSIDE the iteration loop** -- staging, the covariance, the clip -- and this
+/// is what says which.
 ///
 /// Nanoseconds, accumulated over every point and level. Four clock reads against a
 /// ~2 300 ns point-level is a few percent, and it is compared only against itself.
@@ -562,7 +557,6 @@ inline unsigned long long stageNow() {
 #define BINCV_STAGE_LAP(field) ((void)0)
 #define BINCV_STAGE_POINT() ((void)0)
 #endif
-
 
 /// @brief The factor the raw `[-1, 0, 1]` tap needs to become a central
 /// difference. See UNITS at the top of the file -- this is a derivation,
@@ -953,7 +947,6 @@ inline void residualSums(const LKLevel<WordType>& lv, const RegionWords<WordType
     }
 }
 
-
 /// @brief Bits `[x0, x0 + bitsPerWord)` of a row, aligned to bit 0. **INTERNAL.**
 /// @note The `s == 0` guard is not decoration: shifting a word by its own width is
 /// undefined, and that case is 1 in 32 rather than exotic.
@@ -972,9 +965,9 @@ BINCV_HOST_DEVICE inline WordType alignedWord(const WordType* row, size_t words,
 }
 
 /// @brief Rows the staging path handles. The shipped window is 31.
-/// @note A bound, not a tuning knob: it fixes the size of a STACK buffer, and
-/// CLAUDE.md forbids a kernel allocating. A taller window declines and takes the
-/// unstaged path.
+/// @note A bound, not a tuning knob: it fixes the size of a STACK buffer, and a
+/// kernel may not allocate. A taller window declines and takes the unstaged
+/// path.
 /// @note **THE ROW CAP FIXES THE SHAPE AND LETS THE MEMORY FLOAT**, which is the wrong
 /// way round for an embedded target — hence `BINCV_STAGING_BUDGET_BYTES` below.
 constexpr size_t kStagedMaxRows = 64;
@@ -1033,9 +1026,9 @@ struct TapCache {
     /// `[row][plane][tap]`, tap order `t00, t01, t10, t11`. **THE INNERMOST AXIS IS THE
     /// TAP AND THAT IS THE WHOLE POINT**: the NEON kernels put the four taps of
     /// one plane in the four lanes of a vector, so this layout makes that a single
-    /// `vld1q_u32`. Stored as four separate arrays it was **eight stores and two loads
-    /// a row** to marshal them, each load waiting on its stores — the same store-to-load
-    /// round trip measured costing 1.5× in the covariance.
+    /// `vld1q_u32`. Four separate arrays would cost **eight stores and two loads a
+    /// row** to marshal, each load waiting on its stores -- the store-to-load round
+    /// trip that measured 1.5x in the covariance.
     WordType taps[kStagedMaxRows][N][4];
     long long tapX = 0;
     long long tapY = 0;
@@ -1086,6 +1079,16 @@ inline bool stageWindow(const LKLevel<WordType>&, const RegionWords<WordType>&,
     return false;
 }
 
+/// @brief Force `stagedCovariance`'s scalar arm, for the tests. **INTERNAL, and not
+/// a tuning knob.** The NEON arm and the scalar loop are two spellings of the same
+/// popcounts; this is what lets a test run both on the same window and compare, as
+/// `lkBatchEnabled` does for the AVX2 batch. A plain `bool`, so not thread-safe to
+/// flip while tracking -- tests flip it between calls.
+inline bool& lkCovarianceNeonEnabled() {
+    static bool on = true;
+    return on;
+}
+
 /// @brief The 2x2 covariance from the ALREADY-STAGED window. **INTERNAL**.
 ///
 /// **`levelCovariance` WALKS THE SAME WINDOW `stageWindow` HAS JUST FINISHED WALKING.**
@@ -1103,63 +1106,68 @@ inline bool stageWindow(const LKLevel<WordType>&, const RegionWords<WordType>&,
 ///
 /// @param rows `region.y1 - region.y0`. A staged window is one word wide by
 /// construction, so this is one word per row and no `visitRowWords` at all.
+/// @note The NEON arm is switchable off through `lkCovarianceNeonEnabled`, for the
+/// reason every vector arm in the library is: the scalar loop below is the
+/// oracle, and a test on aarch64 compares the two on the same window.
 template <size_t N, typename WordType>
 inline GradientCovariance stagedCovariance(const StagedWindow<N, WordType>& s, size_t rows) {
     BitSlicedPairCounts<N> total;
 #if defined(BINCV_HAVE_NEON) && defined(__aarch64__)
     if constexpr ((N == 1 || N == 2) && sizeof(WordType) == 4) {
-        // The lane kernel, on the staged buffer: the counts stay in lanes to the end
-        // of the window and the register domain is crossed once per point per level.
-        const auto counts = [](uint32x4_t v) {
-            return vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(v))));
-        };
-        uint32x4_t accA = vdupq_n_u32(0), accB = vdupq_n_u32(0);
-        uint32x4_t accC = vdupq_n_u32(0), accD = vdupq_n_u32(0);
-        for (size_t i = 0; i < rows; ++i) {
-            const uint32_t sel = static_cast<uint32_t>(s.signX[i] ^ s.signY[i]);
-            if constexpr (N == 1) {
-                const uint32_t ax = static_cast<uint32_t>(s.magX[i][0]);
-                const uint32_t ay = static_cast<uint32_t>(s.magY[i][0]);
-                const uint32_t lanes[4] = {ax, ay, ax & ay,
-                                           static_cast<uint32_t>(ax & ay & sel)};
-                accA = vaddq_u32(accA, counts(vld1q_u32(lanes)));
-            } else {
-                const uint32_t base[4] = {static_cast<uint32_t>(s.magX[i][0]),
-                                          static_cast<uint32_t>(s.magX[i][1]),
-                                          static_cast<uint32_t>(s.magY[i][0]),
-                                          static_cast<uint32_t>(s.magY[i][1])};
-                const uint32x4_t v = vld1q_u32(base);
-                accA = vaddq_u32(accA, counts(v));
-                accB = vaddq_u32(accB, counts(vandq_u32(v, vextq_u32(v, v, 1))));
-                const uint32x4_t cross =
-                    vandq_u32(vzip1q_u32(v, v),
-                              vcombine_u32(vget_high_u32(v), vget_high_u32(v)));
-                accC = vaddq_u32(accC, counts(cross));
-                accD = vaddq_u32(accD, counts(vandq_u32(cross, vdupq_n_u32(sel))));
+        if (lkCovarianceNeonEnabled()) {
+            // The lane kernel, on the staged buffer: the counts stay in lanes to the end
+            // of the window and the register domain is crossed once per point per level.
+            const auto counts = [](uint32x4_t v) {
+                return vpaddlq_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_u32(v))));
+            };
+            uint32x4_t accA = vdupq_n_u32(0), accB = vdupq_n_u32(0);
+            uint32x4_t accC = vdupq_n_u32(0), accD = vdupq_n_u32(0);
+            for (size_t i = 0; i < rows; ++i) {
+                const uint32_t sel = static_cast<uint32_t>(s.signX[i] ^ s.signY[i]);
+                if constexpr (N == 1) {
+                    const uint32_t ax = static_cast<uint32_t>(s.magX[i][0]);
+                    const uint32_t ay = static_cast<uint32_t>(s.magY[i][0]);
+                    const uint32_t lanes[4] = {ax, ay, ax & ay,
+                                               static_cast<uint32_t>(ax & ay & sel)};
+                    accA = vaddq_u32(accA, counts(vld1q_u32(lanes)));
+                } else {
+                    const uint32_t base[4] = {static_cast<uint32_t>(s.magX[i][0]),
+                                              static_cast<uint32_t>(s.magX[i][1]),
+                                              static_cast<uint32_t>(s.magY[i][0]),
+                                              static_cast<uint32_t>(s.magY[i][1])};
+                    const uint32x4_t v = vld1q_u32(base);
+                    accA = vaddq_u32(accA, counts(v));
+                    accB = vaddq_u32(accB, counts(vandq_u32(v, vextq_u32(v, v, 1))));
+                    const uint32x4_t cross =
+                        vandq_u32(vzip1q_u32(v, v),
+                                  vcombine_u32(vget_high_u32(v), vget_high_u32(v)));
+                    accC = vaddq_u32(accC, counts(cross));
+                    accD = vaddq_u32(accD, counts(vandq_u32(cross, vdupq_n_u32(sel))));
+                }
             }
+            if constexpr (N == 1) {
+                total.xx[0][0] = vgetq_lane_u32(accA, 0);
+                total.yy[0][0] = vgetq_lane_u32(accA, 1);
+                total.xyTotal[0][0] = vgetq_lane_u32(accA, 2);
+                total.xySet[0][0] = vgetq_lane_u32(accA, 3);
+            } else {
+                total.xx[0][0] = vgetq_lane_u32(accA, 0);
+                total.xx[1][1] = vgetq_lane_u32(accA, 1);
+                total.yy[0][0] = vgetq_lane_u32(accA, 2);
+                total.yy[1][1] = vgetq_lane_u32(accA, 3);
+                total.xx[0][1] = vgetq_lane_u32(accB, 0);
+                total.yy[0][1] = vgetq_lane_u32(accB, 2);
+                total.xyTotal[0][0] = vgetq_lane_u32(accC, 0);
+                total.xyTotal[0][1] = vgetq_lane_u32(accC, 1);
+                total.xyTotal[1][0] = vgetq_lane_u32(accC, 2);
+                total.xyTotal[1][1] = vgetq_lane_u32(accC, 3);
+                total.xySet[0][0] = vgetq_lane_u32(accD, 0);
+                total.xySet[0][1] = vgetq_lane_u32(accD, 1);
+                total.xySet[1][0] = vgetq_lane_u32(accD, 2);
+                total.xySet[1][1] = vgetq_lane_u32(accD, 3);
+            }
+            return combineBitSlicedPairs<N>(total);
         }
-        if constexpr (N == 1) {
-            total.xx[0][0] = vgetq_lane_u32(accA, 0);
-            total.yy[0][0] = vgetq_lane_u32(accA, 1);
-            total.xyTotal[0][0] = vgetq_lane_u32(accA, 2);
-            total.xySet[0][0] = vgetq_lane_u32(accA, 3);
-        } else {
-            total.xx[0][0] = vgetq_lane_u32(accA, 0);
-            total.xx[1][1] = vgetq_lane_u32(accA, 1);
-            total.yy[0][0] = vgetq_lane_u32(accA, 2);
-            total.yy[1][1] = vgetq_lane_u32(accA, 3);
-            total.xx[0][1] = vgetq_lane_u32(accB, 0);
-            total.yy[0][1] = vgetq_lane_u32(accB, 2);
-            total.xyTotal[0][0] = vgetq_lane_u32(accC, 0);
-            total.xyTotal[0][1] = vgetq_lane_u32(accC, 1);
-            total.xyTotal[1][0] = vgetq_lane_u32(accC, 2);
-            total.xyTotal[1][1] = vgetq_lane_u32(accC, 3);
-            total.xySet[0][0] = vgetq_lane_u32(accD, 0);
-            total.xySet[0][1] = vgetq_lane_u32(accD, 1);
-            total.xySet[1][0] = vgetq_lane_u32(accD, 2);
-            total.xySet[1][1] = vgetq_lane_u32(accD, 3);
-        }
-        return combineBitSlicedPairs<N>(total);
     }
 #endif
     for (size_t i = 0; i < rows; ++i) {
@@ -1204,12 +1212,10 @@ struct RowOperands {
 
 /// @brief The ONE place a window row's operands are read. **INTERNAL**.
 ///
-/// **WHY THIS EXISTS.** There were **three copies** of this extraction block, worth
-/// collapsing *for maintenance*. Staging and tap-caching made it worth doing
-/// *for speed*: they have to reach the NEON paths too, and writing
-/// them into each copy separately would have made **five**. One reader serves scalar
-/// and NEON, staged and unstaged -- and the `+1`-tap-is-a-shift and the interior
-/// fast path live here once instead of four times.
+/// **WHY THIS EXISTS.** The extraction block is needed by the scalar path and by each
+/// NEON kernel, staged and unstaged. One reader serves all of them -- and the
+/// `+1`-tap-is-a-shift and the interior fast path live here once instead of in
+/// every copy.
 ///
 /// @tparam Staged Compile-time, NOT a runtime pointer test. A measurement put a single
 /// body branching on `staged != nullptr` per row at **17% of `track` on
@@ -1342,11 +1348,8 @@ private:
 /// @note **The index cannot be a function argument.** `vgetq_lane_u32` takes an
 /// immediate, so an `int` parameter only compiles where the optimizer inlines
 /// the call and folds it to a constant -- which it does at `-O2` and does not
-/// at `-O0`. This was a lambda taking `int i`: it built in every Release
-/// configuration and in none of the Debug ones, on the library's primary
-/// vector target. Nothing caught it, because the emulated cross gate builds
-/// `core` and `noexcept` and never `debug`, so no gate had compiled this
-/// region at `-O0` at all. A template parameter cannot regress that way.
+/// at `-O0`. A lambda taking `int i` builds in every Release configuration and
+/// in none of the Debug ones; a template parameter cannot regress that way.
 template <int I>
 inline long long neonLaneResidual(uint32x4_t tv, uint32x4_t ov) {
     return static_cast<long long>(vgetq_lane_u32(tv, I)) -
@@ -1367,7 +1370,7 @@ inline void alignedResidualSumsNeon1Impl(const LKLevelN<1, WordType>& lv,
     RowReader<1, WordType, Staged> rd(lv, r, tapX, tapY, staged, taps);
     RowOperands<1, WordType> o;
 
-    // byte-domain accumulation, as in the N == 2 kernel. `vcntq_u8` gives per-byte
+    // Byte-domain accumulation, as in the N == 2 kernel. `vcntq_u8` gives per-byte
     // counts and a byte count is at most 8, so 31 rows fit in a byte and the two
     // `vpaddlq` widenings move out of the row loop entirely.
     uint8x16_t bTotX = vdupq_n_u8(0), bOppX = vdupq_n_u8(0);
@@ -1471,14 +1474,14 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
     // THE COUNTS STAY IN BYTES UNTIL THE END OF THE WINDOW.
     //
     // `vcntq_u8` counts per byte. Turning that into a per-TAP total takes two
-    // `vpaddlq` widenings — and the old kernel paid them **on every row**, then
-    // subtracted, shifted and multiply-accumulated: eleven operations per plane pair
+    // `vpaddlq` widenings; paid **on every row**, followed by the subtract, the
+    // shift and the multiply-accumulate, that is eleven operations per plane pair
     // per row. A byte count is at most 8 and a window is 31 rows, so **248 fits in a
     // byte**: the widening can wait for the window's end and the row body collapses to
     // AND, `cnt`, byte-add.
     //
-    // Six operations where there were eleven, and it is the same trick
-    // used to make the bit-plane FAST worth having.
+    // Six operations where there would be eleven, and it is the same trick
+    // that makes the bit-plane FAST worth having.
     //
     // Sixteen byte accumulators — total and opposing for each of the four plane pairs,
     // twice for the two components — plus four for the previous-frame term. aarch64
@@ -1548,8 +1551,8 @@ inline void alignedResidualSumsNeon2Impl(const LKLevelN<2, WordType>& lv,
         // `magY` are each two CONTIGUOUS words in the staged row (and in the unstaged
         // scratch), so a 64-bit load and two lane moves give `{s0,s1,s0,s1}` against
         // `{m0,m0,m1,m1}`. The array spelling was four ANDs, four stores and a load
-        // that waited on all of them — the same store-to-load round trip that has now
-        // cost this project four separate times (and twice here).
+        // that waited on all of them -- the store-to-load round trip the `[plane][tap]`
+        // layout exists to avoid.
         const uint32x4_t ss = vcombine_u32(vld1_u32(o.self), vld1_u32(o.self));
         const auto spread = [](const WordType* m) {
             const uint32x2_t p = vld1_u32(m);
@@ -1620,8 +1623,8 @@ inline void alignedResidualSumsImpl(const LKLevelN<N, WordType>& lv,
         // `slicedSignedSum` wants a value's N planes contiguous -- so this path
         // transposes the 4xN block once a row. It is the generic fallback (the shipped
         // 1/2/2/2 ladder at `uint32_t` takes the NEON kernels or the AVX2 batch), and
-        // 4N moves a row is cheaper than the eight stores a row the old layout cost the
-        // paths that DO ship.
+        // 4N moves a row is cheaper than the eight stores a row the other layout would
+        // cost the paths that DO ship.
         WordType val[4][N];
         for (size_t k = 0; k < N; ++k) {
             val[0][k] = o.taps[k][0];
@@ -1720,9 +1723,9 @@ inline void residualSums(const LKLevelN<N, WordType>& lv, const RegionWords<Word
                                               taps);
             return;
         }
-        // N == 2 is levels 1-3 of the shipped ladder, and had the plane pairs in
-        // lanes but still reduced once per call. folds the pairs into a
-        // window-carried accumulator instead.
+        // N == 2 is levels 1-3 of the shipped ladder. Batching the plane pairs into
+        // lanes but reducing once per call still crosses the register domain per
+        // call; this kernel folds the pairs into a window-carried accumulator instead.
         if constexpr (UseNeon && N == 2 && sizeof(WordType) == 4) {
             if (r.x1 > r.x0) {
                 alignedResidualSumsNeon2<WordType>(lv, r, tapX, tapY, sumsX, sumsY, staged,
@@ -1894,11 +1897,10 @@ inline float windowMeanAbsDiff(const LKLevel<WordType>& lv, const RegionWords<Wo
 /// and that reject is the one thing that departs from it). **The per-pixel cost of
 /// TRACKING at N bits remains integers and popcounts only.**
 ///
-/// **AND HERE IS WHAT "OPTIONAL" COSTS, WHICH THIS PARAGRAPH USED TO ASSERT WITHOUT A
-/// NUMBER.** Measured on 816 keypoints over a 1/2/2/2 ladder, asking for `err`
-/// takes `track` from 2.83 ms to 6.12 ms on x86 -- **2.16x**. It is one window pass per
-/// point against an iteration loop that averages under two iterations, so it is not a
-/// surprise once stated; it was simply never stated. A caller who passes an `err` array
+/// **AND "OPTIONAL" HAS A PRICE.** Measured on 816 keypoints over a 1/2/2/2 ladder,
+/// asking for `err` takes `track` from 2.83 ms to 6.12 ms on x86 -- **2.16x**: one
+/// window pass per point against an iteration loop that averages under two
+/// iterations. A caller who passes an `err` array
 /// "to log it" is more than doubling their tracking time, and one who does not needs to
 /// know that `maxResidual` turns the same cost on.
 ///
@@ -1906,7 +1908,7 @@ inline float windowMeanAbsDiff(const LKLevel<WordType>& lv, const RegionWords<Wo
 /// in `{0, 1}` intensity units; this returns one in `[0, 2^N - 1]` units,
 /// because that is the level's alphabet. Divide by `2^N - 1` to compare
 /// across depths, or multiply by `255 / (2^N - 1)` to reach the reference's
-/// `{0, 255}` scale. At N = 1 both statements are the old one.
+/// `{0, 255}` scale. At N = 1 both statements reduce to the 1-bit form's.
 /// @note The denominator is the CLIPPED pixel count, exactly as above and for the
 /// same reason.
 template <size_t N, typename WordType>
@@ -1978,10 +1980,10 @@ BINCV_HOST_DEVICE inline long long floorToLL(float v) {
 namespace impl {
 
 /// The most pyramid levels the tracker will consume. The reference pipeline's
-/// `lk_max_level: 3` is four; a 640x480 frame stalls at 1 pixel after 10. Fixed so
-/// that `LKContext` can carry every level's extent WITHOUT a scratch allocation.
+/// maximum level of 3 is four levels; a 640x480 frame stalls at 1 pixel after 10.
+/// Fixed so that `LKContext` can carry every level's extent WITHOUT a scratch
+/// allocation.
 constexpr size_t kMaxLevels = 16;
-
 
 #ifdef BINCV_LK_ITERATION_HISTOGRAM
 /// @brief The iteration counter. **DIAGNOSTIC ONLY — off by default, and it must
@@ -2038,7 +2040,7 @@ struct LKContext {
 
     /// Every usable level's extent, so that a point's entry level can be RECOMPUTED
     /// rather than cached. A per-point array would be scratch, and this operation
-    /// has none -- not one byte (CLAUDE.md: no heap allocation inside kernels).
+    /// has none -- not one byte (no heap allocation inside kernels).
     /// The recomputation is at most `kMaxLevels` comparisons per point per level,
     /// against a 31x31 window's worth of popcounts.
     LevelDims dims[kMaxLevels];
@@ -2046,7 +2048,7 @@ struct LKContext {
 
 /// @brief Is point `p`'s window entirely inside level `li`?
 /// @note **This is `unclippedAtEveryLevel`'s predicate in tests/test_opticalflow.cpp,
-/// deliberately spelled the same way.** measures a policy against a
+/// deliberately spelled the same way.** The test measures a policy against a
 /// point set defined by clipping; if the kernel's notion of "fits" and the
 /// harness's disagreed, the experiment would be comparing two definitions
 /// rather than two policies.
@@ -2124,9 +2126,8 @@ inline GradientCovariance levelCovariance(const LKLevelN<N, WordType>& lv, Rect 
 /// @brief One point, one level — the whole tracking body for a single keypoint.
 /// **INTERNAL.**
 ///
-/// **THIS WAS THE `parallelFor` LAMBDA AND IT IS UNCHANGED.** It was lifted out so
-/// that the batched path has something to fall back
-/// TO: a window the batch cannot stage — wider than a word, or taller than
+/// **Named once so that the batched path has something to fall back TO**: a window
+/// the batch cannot stage — wider than a word, or taller than
 /// `kLkBatchMaxRows` — must still be tracked, and tracked identically. Naming the
 /// body once is what keeps "identically" a property of the code rather than of two
 /// copies staying in step.
@@ -2159,16 +2160,16 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
         return;
     }
 
-    // extract the window's ITERATION-INVARIANT words ONCE. Measured:
+    // STAGE: extract the window's ITERATION-INVARIANT words ONCE. Measured:
     // a mean of 4.29 iterations per point per level, every one of which was
     // re-reading the same eight previous-frame words per row. `region` is fixed
     // for the whole iteration, so one staging serves all of them.
     //
-    // The buffer is a STACK local -- 2 048 B at the shipped N = 2 -- because
-    // CLAUDE.md forbids a kernel allocating and this operation has no caller
-    // scratch. `stageWindow` declines rather than overrunning it.
+    // The buffer is a STACK local -- 2 048 B at the shipped N = 2 -- because a
+    // kernel may not allocate and this operation has no caller scratch.
+    // `stageWindow` declines rather than overrunning it.
     BINCV_STAGE_LAP(setup);
-    //. THE BUDGET IS CHECKED WHERE THE BUFFERS ARE DECLARED, so it fires
+    // THE BUDGET IS CHECKED WHERE THE BUFFERS ARE DECLARED, so it fires
     // only for the `(N, WordType)` a caller actually instantiates -- a Cortex-M build
     // tracking the shipped 1-bit ladder never trips it, and one at N = 8 gets a build
     // error naming the number instead of a stack overflow in the field.
@@ -2181,11 +2182,11 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
                   "that big, or use a shallower bit depth. bincv::stagingStackBytes<N, W>() "
                   "is the exact figure.");
     StagedWindow<LevelT::Bits, WordType> stagedWindow;
-    TapCache<LevelT::Bits, WordType> tapCache;   //; invalid until first use
+    TapCache<LevelT::Bits, WordType> tapCache;   // invalid until first use
     const bool staged = stageWindow(lv, region, stagedWindow);
     BINCV_STAGE_LAP(staging);
 
-    // BIT-PARALLEL: the 2x2 matrix. from the STAGED window when there is one,
+    // BIT-PARALLEL: the 2x2 matrix, from the STAGED window when there is one,
     // because `levelCovariance` reads exactly the planes `stageWindow` has just
     // finished reading and nothing else.
     const GradientCovariance a =
@@ -2216,13 +2217,13 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
     bool inRange = true;
 
     // The tap offset and the four weights live INSIDE the loop, and
-    // deliberately do not survive it. They used to be declared here so
-    // that the error term below could reuse them, which made `err` the
-    // residual at the previous ITERATE rather than at the position
-    // actually returned -- measured 134% high at c.maxIterations = 1, and
-    // wrong by a whole half-step whenever the oscillation rule fired.
-    // The reference recomputes them in a separate pass after the loop
-    // (LKTrackerInvoker.cpp:222-259); so does this, below.
+    // deliberately do not survive it. Declared out here, they would let the
+    // error term below reuse them, which makes `err` the residual at the
+    // previous ITERATE rather than at the position actually returned --
+    // 134% high at c.maxIterations = 1, and wrong by a whole half-step
+    // whenever the oscillation rule fired. The reference pipeline's LK
+    // invoker recomputes them in a separate pass after the loop; so does
+    // this, below.
     for (int it = 0; it < c.maxIterations; ++it) {
 #ifdef BINCV_LK_ITERATION_HISTOGRAM
         {
@@ -2343,7 +2344,7 @@ inline void trackOnePoint(const LevelT& lv, size_t li, const LKContext& c, size_
             const double residual = windowMeanAbsDiff(lv, region, tapX, tapY,
                 (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
             if (c.err != nullptr) c.err[p] = static_cast<float>(residual);
-            //. The residual is already here; the reject is one comparison and
+            // The residual is already here; the reject is one comparison and
             // needs no storage, which is why it is applied at the point of computation
             // rather than in a pass over `err` the caller may not have asked for.
             if (c.maxResidual > 0.0 && residual > c.maxResidual) c.status[p] = 0;
@@ -2374,8 +2375,8 @@ struct IsLevelN : std::false_type {};
 template <size_t N, typename WordType>
 struct IsLevelN<LKLevelN<N, WordType>> : std::true_type {};
 
-/// @brief Does this level reach a VECTORIZED residual kernel? **Public, and
-/// queryable** — `bincv::lkVectorPath<LevelT>`.
+/// @brief Does this level reach a VECTORIZED residual kernel? **INTERNAL**;
+/// `lkPathName<LevelT>()` below is the public spelling.
 ///
 /// True when the level is an `LKLevelN` at depth 1 or 2 with `uint32_t` words: those
 /// are the depths the AVX2 batch and the NEON kernels are written for. A deeper level
@@ -2433,8 +2434,9 @@ struct LkLane {
 ///
 /// `[row][plane][lane]`: eight keypoints' words at the same row and plane are eight
 /// adjacent `uint32_t`, so a `__m256i` load fetches one word from each of eight
-/// keypoints. tried the other arrangement and lost --
-/// its vector arithmetic won on operation count and its **gathers** gave the win back.
+/// keypoints. The other arrangement -- one keypoint's window contiguous -- was
+/// measured and lost: its vector arithmetic won on operation count and its
+/// **gathers** gave the win back.
 /// The fix was never a better gather; it was arranging not to need one.
 template <size_t N, typename WordType>
 struct LkBatchArrays {
@@ -2552,8 +2554,8 @@ inline void extractLaneTaps(const LKLevelN<N, WordType>& lv, const RegionWords<W
     }
 }
 
-/// @brief The 2x2 covariance from ONE LANE of an already-staged batch. **INTERNAL**
-///. `stagedCovariance`'s reason, in the batch's `[row][plane][lane]`
+/// @brief The 2x2 covariance from ONE LANE of an already-staged batch. **INTERNAL**.
+/// For `stagedCovariance`'s reason, in the batch's `[row][plane][lane]`
 /// layout: the words are already here, so reading the level's planes a second
 /// time is pure repetition.
 template <size_t N, typename WordType>
@@ -2648,10 +2650,8 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
                     (1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
                 if (c.err != nullptr) c.err[s.p] = static_cast<float>(residual);
                 // The residual reject, and it MUST be here too: the batch is the
-                // shipped x86 path, so a
-                // reject applied only in `trackOnePoint` would be silently absent from
-                // every AVX2 build -- the failure mode CLAUDE.md warns about, in the
-                // direction x86 does compile.
+                // shipped x86 path, so a reject applied only in `trackOnePoint` would
+                // be silently absent from every AVX2 build.
                 if (c.maxResidual > 0.0 && residual > c.maxResidual) c.status[s.p] = 0;
             }
         }
@@ -2688,11 +2688,9 @@ inline void trackRangeBatched(const LKLevelN<N, WordType>& lv, size_t li, const 
                     lv, li, c, p, finest, scale, levelWidth, levelHeight, kLevelMinEigScale);
                 continue;
             }
-            // stage FIRST, then take the covariance off the staged lane. The
-            // order used to be the other way round because the covariance did not need
-            // the staging; now it does, and a rejected point pays one staging it did
-            // not use -- against a whole second traversal of the level's planes for
-            // every point that IS accepted.
+            // Stage FIRST, then take the covariance off the staged lane: a rejected
+            // point pays one staging it did not use, against a whole second traversal
+            // of the level's planes for every point that IS accepted.
             stageLane<N, WordType>(lv, region, b, L, winRows);
             const GradientCovariance a =
                 stagedCovarianceLane<N, WordType>(b, L, rows);
@@ -2968,7 +2966,7 @@ inline bool lkPrologue(size_t levelCount, const Point2f* prevPts, Point2f* nextP
     c.halfWinY = static_cast<float>(c.winH - 1) * 0.5f;
 
     // The reference clamps both criteria before use; so does this, for the same
-    // reason -- they arrive from a YAML file.
+    // reason -- they arrive from a configuration file.
     c.maxIterations = params.maxIterations;
     if (c.maxIterations < 0) c.maxIterations = 0;
     if (c.maxIterations > 100) c.maxIterations = 100;
@@ -3041,7 +3039,7 @@ inline size_t usableLevelCount(size_t levelCount, int winW, int winH, DimFn dims
 /// @param levels `levelCount` per-level view bundles, **level 0 (the finest)
 /// first**. Every level's six planes must share that level's dimensions.
 /// @param levelCount Number of pyramid levels. The reference pipeline's
-/// `lk_max_level: 3` means four levels. **Levels at or below the window
+/// maximum level of 3 means four levels. **Levels at or below the window
 /// size are ignored** (deviation (vi)), so passing more of them than the
 /// frame can carry is harmless rather than silently wrong; 0 is legal and
 /// loses every point.
@@ -3098,21 +3096,6 @@ inline void calcOpticalFlowPyrLK(const LKLevel<WordType>* levels, size_t levelCo
     for (size_t li = c.usableLevels; li-- > 0;) impl::trackOneLevel(levels[li], li, c);
 }
 
-
-/// @brief Pyramidal Lucas-Kanade over a ladder of levels that are all the SAME
-/// depth `N`. **API TIER 2.**
-/// @param levels `levelCount` levels, **LEVEL 0 FIRST**, each `N` bits per pixel.
-/// @note Identical in every respect to the 1-bit entry point above -- same
-/// contracts, same deviations, same loss rules, same `err` denominator --
-/// because it runs the same body. The two differences are consequences of
-/// the depth and are documented where they live:
-/// `impl::referenceMinEigScale` (the `minEigThreshold` conversion, which
-/// is what keeps the threshold meaning one thing across depths) and
-/// `impl::windowMeanAbsDiff` (the `err` term, the one piece of THE BOUNDARY
-/// that does not survive `N > 1`).
-/// @note `N == 1` here is the same computation as `LKLevel` above, through the
-/// generic code path rather than the hand-written one, and
-/// tests/test_opticalflow.cpp requires the two to agree exactly.
 /// @brief Reads a 64-bit pyramid level as a 32-bit one, so the vector kernels apply.
 /// **API TIER 3.** No copy, no allocation.
 ///
@@ -3123,10 +3106,10 @@ inline void calcOpticalFlowPyrLK(const LKLevel<WordType>* levels, size_t levelCo
 /// bincv::calcOpticalFlowPyrLK(narrow, 4, prev, next, status, err, count, params);
 /// ```
 ///
-/// **THIS IS THE ANSWER TO "WHY DOESN'T binCV SUPPORT 64-BIT WORDS IN THE TRACKER".**
-/// It does, now, at full speed — because it never needed 64-bit kernels, only a view.
-/// See `narrowPlane` for why the reinterpretation is exact, and
-/// for the 8.6× an integrator paid before it existed.
+/// **64-BIT STORAGE RUNS THE VECTOR KERNELS THROUGH THIS VIEW**, at full speed: the
+/// tracker never needed 64-bit kernels, only a view. See `narrowPlane` for why the
+/// reinterpretation is exact, and `lkPathName` below for which kernel a level type
+/// reaches.
 template <size_t N, typename WordType>
 inline LKLevelN<N, uint32_t> narrowLevel(const LKLevelN<N, WordType>& lv) {
     static_assert(sizeof(WordType) == 8, "narrowLevel: the source level must be 64-bit");
@@ -3171,18 +3154,31 @@ inline const char* lkPathName() {
     }
 }
 
+/// @brief Pyramidal Lucas-Kanade over a ladder of levels that are all the SAME
+/// depth `N`. **API TIER 2.**
+/// @param levels `levelCount` levels, **LEVEL 0 FIRST**, each `N` bits per pixel.
+/// @note Identical in every respect to the 1-bit entry point above -- same
+/// contracts, same deviations, same loss rules, same `err` denominator --
+/// because it runs the same body. The two differences are consequences of
+/// the depth and are documented where they live:
+/// `impl::referenceMinEigScale` (the `minEigThreshold` conversion, which
+/// is what keeps the threshold meaning one thing across depths) and
+/// `impl::windowMeanAbsDiff` (the `err` term, the one piece of THE BOUNDARY
+/// that does not survive `N > 1`).
+/// @note `N == 1` here is the same computation as `LKLevel` above, through the
+/// generic code path rather than the hand-written one, and
+/// tests/test_opticalflow.cpp requires the two to agree exactly.
 /// @note **THIS REFUSES TO COMPILE AT DEPTH 1 OR 2 WITH A WORD WIDER THAN 32 BITS**,
 /// and the diagnostic names the fix. Those depths have vectorized kernels — the
 /// AVX2 eight-keypoint batch and four NEON residual kernels — all gated on
 /// `sizeof(WordType) == 4`. A wider word is *correct* and lands in the scalar
 /// fallback, silently, on both architectures.
 ///
-/// **That is not a hypothetical.** recorded the
-/// gate and measured `uint64_t` at 1.32× slower on `track`; the record was true
-/// and invisible at the point of use. An integrator building a VIO frontend
-/// chose `uint64_t` — reasoning, correctly, that a wider word means fewer
-/// operations per row — and measured keypoint tracking **8.6× slower** before
-/// finding the gate. Their trajectory error was identical either way, which is
+/// **That is not a hypothetical.** `uint64_t` measures 1.32x slower on `track` in
+/// the benchmark, and the gate is invisible at the point of use: an integrator
+/// building a VIO frontend chose `uint64_t` -- reasoning, correctly, that a wider
+/// word means fewer operations per row -- and measured keypoint tracking **8.6x
+/// slower** before finding the gate. Their trajectory error was identical either way, which is
 /// what made it a performance bug rather than a visible one.
 ///
 /// A deeper level (N >= 3) is scalar by nature and compiles without complaint:
@@ -3303,9 +3299,9 @@ struct LKLevels<WordType, N0, N1, Rest...> {
 /// @brief Pyramidal Lucas-Kanade over a ladder of **mixed-depth** levels.
 /// **API TIER 2.**
 /// @note Same contracts, deviations and loss rules as the two entry points above;
-/// each level runs the same body at its own depth. This is the form
-/// needs, because the question it asks -- how many bits does EACH level need
-/// -- only has an answer a mixed ladder can express.
+/// each level runs the same body at its own depth. This is the form a depth
+/// study needs, because the question it asks -- how many bits does EACH level
+/// need -- only has an answer a mixed ladder can express.
 template <typename WordType, size_t... LevelBits>
 inline void calcOpticalFlowPyrLK(const LKLevels<WordType, LevelBits...>& levels,
                                  const Point2f* prevPts, Point2f* nextPts, uint8_t* status,
@@ -3327,16 +3323,22 @@ inline void calcOpticalFlowPyrLK(const LKLevels<WordType, LevelBits...>& levels,
 /// @brief Stack bytes the tracker's staging buffers occupy at `(N, WordType)`.
 /// **API TIER 3.**
 ///
-/// **This is the whole of the tracker's per-call memory.** Everything else it keeps is
-/// O(1): there is no scratch buffer and no allocation anywhere, which is CLAUDE.md's
-/// hard rule that a kernel does not allocate.
+/// **This is the per-call stack of the scalar and NEON paths.** Everything else
+/// they keep is O(1): there is no scratch buffer and no allocation anywhere. The
+/// AVX2 batch on x86 is the exception it does not cover: `trackRangeBatched`
+/// stages eight keypoints at once in an `impl::LkBatchArrays<N, WordType>` on the
+/// stack -- 11,264 B at `N = 1` and 20,480 B at `N = 2` with 32-bit words, per
+/// `parallelFor` task -- which is neither counted here nor checked by
+/// `BINCV_STAGING_BUDGET_BYTES`, because a target with AVX2 is not one with a
+/// 16 KB stack.
 ///
 /// @note **For sizing a thread stack, and for asserting against a budget binCV cannot
-/// know.** It grows with the bit depth — `64 * (7N + 2)` words — so it is 4 KB at
-/// the shipped `N = 2` with 32-bit words and about 14.5 KB at `N = 8`. On a
-/// desktop that is noise; on a Cortex-M with a 16 KB stack the second figure is
-/// the whole stack. `BINCV_STAGING_BUDGET_BYTES` turns that into a build error
-/// rather than a silent overflow, and this is the number it checks.
+/// know.** It grows with the bit depth -- `64 * (7N + 2)` words plus the tap
+/// cache's key -- so it is 4,120 B at the shipped `N = 2` with 32-bit words and
+/// 14,872 B at `N = 8`. On a desktop that is noise; on a Cortex-M with a 16 KB
+/// stack the second figure is the whole stack. `BINCV_STAGING_BUDGET_BYTES` turns
+/// that into a build error rather than a silent overflow, and this is the number
+/// it checks.
 template <size_t N, typename WordType>
 constexpr size_t stagingStackBytes() {
     return impl::stagingStackBytesImpl<N, WordType>();

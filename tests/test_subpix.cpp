@@ -401,3 +401,25 @@ BINCV_TEST(SubPix, MaskWidthMatchesOpenCV_OnAsymmetricContent) {
 #endif  // BINCV_WITH_OPENCV
 
 BINCV_TEST_MAIN("test_subpix")
+
+// `impl::ctzWord` is the compiler builtin where one exists and `impl::ctzPortable`
+// elsewhere; the two must agree on every bit position, or a build without the
+// builtin would read a different first set bit and refine a different pixel.
+BINCV_TEST(SubPix, CtzPortableMatchesTheBuiltin) {
+    size_t wrong = 0;
+    for (unsigned bit = 0; bit < 64; ++bit) {
+        const unsigned long long lone = 1ull << bit;
+        // the lone bit, and the same bit with everything above it set
+        const unsigned long long crowded = lone | (~0ull << bit);
+        if (bincv::impl::ctzPortable(lone) != bit) ++wrong;
+        if (bincv::impl::ctzPortable(crowded) != bit) ++wrong;
+        if (bincv::impl::ctzWord(lone) != bincv::impl::ctzPortable(lone)) ++wrong;
+        if (bincv::impl::ctzWord(crowded) != bincv::impl::ctzPortable(crowded)) ++wrong;
+#if defined(__GNUC__) || defined(__clang__)
+        if (bincv::impl::ctzWord(crowded) != static_cast<size_t>(__builtin_ctzll(crowded)))
+            ++wrong;
+#endif
+    }
+    std::printf(" ctz: %zu disagreements over 64 bit positions\n", wrong);
+    BINCV_CHECK(wrong == 0);
+}

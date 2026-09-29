@@ -23,8 +23,8 @@
 //
 // * FOUR WORD TYPES, ODD WIDTH. 67 is not a multiple of 8, so the last file
 //   byte is partial; nor of 8/16/32/64, so the last word is partial at every
-//   word type -- two different paddings that must both end zero (CLAUDE.md's
-//   hard rule; a set padding bit makes every word-wise reduction over-count).
+//   word type -- two different paddings that must both end zero (the padding
+//   invariant; a set padding bit makes every word-wise reduction over-count).
 //
 // * THE FIXTURES CLOSE THE TOOL-TO-READER LOOP. The 8-bit blob's bodies must
 //   equal the source PGMs' bodies byte for byte, and the packed blob's frames
@@ -106,7 +106,7 @@ size_t wordsDiffering(const BinMat<W>& a, const BinMat<W>& b) {
     return diff;
 }
 
-/// Set bits past `width` -- CLAUDE.md's padding invariant, on the reading side.
+/// Set bits past `width` -- the padding invariant, on the reading side.
 template <typename W>
 size_t paddingBitsSet(const BinMat<W>& m) {
     const size_t words = (m.getWidth() + BinMat<W>::WordBits - 1) / BinMat<W>::WordBits;

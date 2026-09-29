@@ -1,4 +1,4 @@
-// -- what should BinMat's default word type be?
+// What should BinMat's default word type be?
 //
 // The default template argument is uint32_t today and every kernel in the library
 // inherits it. Nothing has measured the alternative on the target.
@@ -27,8 +27,8 @@
 //
 // WHY THIS IS THE MOST 32-BIT-SENSITIVE OF THE THREE EXPERIMENTS. On armv7l every
 // uint64_t operation is synthesised from 32-bit pairs, so the answer would
-// describe the compiler rather than the hardware. scripts/run_on_pi.sh refuses to
-// run on anything but aarch64 for exactly this reason, and the target is printed
+// describe the compiler rather than the hardware. The reference device must run
+// a 64-bit kernel and userland for exactly this reason, and the target is printed
 // below so a recorded log carries the evidence rather than the assumption.
 //
 // CAVEAT, at its sharpest on this axis. binCV builds with no -march flags, so

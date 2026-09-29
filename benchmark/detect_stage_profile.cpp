@@ -100,6 +100,8 @@ int main() {
     const bincv::BinMatConstView<W> signX = dx.constSign(), signY = dy.constSign();
 
     bincv::GoodFeaturesParams params;   // the reference pipeline's values, verbatim
+    // (The reference pipeline is the visual-inertial odometry system, not in this
+    // repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
     std::vector<float> ring(bincv::kResponseRingRows * w);
     const bincv::ResponseMap ringMap{ring.data(), w, bincv::kResponseRingRows, w};
     const size_t capacity = 20000;      // feature_tracking_sequence.cpp's own pool size

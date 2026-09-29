@@ -1,10 +1,12 @@
 // The binarized spatial derivative: derivativeX / derivativeY.
 //
 // THE CORRECTNESS BAR IS THE REFERENCE IMPLEMENTATION, NOT A FORMULA. The
-// operation is the reference pipeline's gradient stage, calcBinarizedDeriv, and
+// operation is the reference pipeline's gradient stage, and
 // that function is two cv::filter2D calls with [-1, 0, 1] as a 1x3 and a 3x1.
 // Two properties of cv::filter2D decide whether binCV agrees with it, and both
 // are the kind that produce a plausible-looking image when got backwards:
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // * filter2D CORRELATES. dst(x) = src(x+1) - src(x-1). A convolution would
 // negate every gradient -- and NOTHING DOWNSTREAM WOULD NOTICE. It is
@@ -41,7 +43,7 @@
 // generic ripple at N = 1 (impl::derivativeXGeneric), and the fused kernel
 // against the COMPOSED spelling -- shiftLeft/shiftRight plus ops/logic.hpp --
 // which is what keeps the inline shift honest about word boundaries.
-// OPENCV. calcBinarizedDeriv PORTED -- its own cv::filter2D calls, its own
+// OPENCV. The reference pipeline's gradient stage PORTED -- its own cv::filter2D calls, its own
 // scale factor of 16 -- compared at every pixel, borders included, after
 // dividing by 4080. The division is required to be EXACT, which is what makes
 // "the scale factor is representational" a checked claim rather than an
@@ -748,7 +750,7 @@ void checkDegenerate(const char* wordName) {
 
 #ifdef BINCV_WITH_OPENCV
 
-/// @brief calcBinarizedDeriv, PORTED -- its kernels, its ddepth, its scale.
+/// @brief The reference pipeline's gradient stage, PORTED -- its kernels, its ddepth, its scale.
 /// @note Not a reimplementation. The point of porting rather than paraphrasing is
 /// that the border and the correlation direction come from cv::filter2D
 /// itself, so binCV cannot agree with a misreading of them.
@@ -809,7 +811,7 @@ void sweepAgainstReference(const char* wordName) {
                 }
             }
             DERIV_EXPECT(bad == 0 && inexact == 0,
-                         "binCV equals the ported calcBinarizedDeriv, scale divided out",
+                         "binCV equals the ported reference gradient stage, scale divided out",
                          caseLabel(wordName, 1, "dx+dy", "reference", width, height) + ": " +
                              std::to_string(bad) + " mismatches, " + std::to_string(inexact) +
                              " values not a multiple of 4080");

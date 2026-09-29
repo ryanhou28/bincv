@@ -37,9 +37,9 @@
 //
 // TILE GEOMETRY IS NOT SWEPT, and that is stated rather than implied: 8 words by
 // 8 rows with a one-pixel apron is 12,800 B of shared memory and was chosen to
-// fit three blocks per SM, not measured against 16x8 or 8x16. The dense
-// matcher's recorded negatives say a tile sweep must be measured and not
-// reasoned, so this one is an open item and not a result.
+// fit three blocks per SM, not measured against 16x8 or 8x16. A tile shape has
+// to be measured rather than reasoned -- the dense matcher's tile sweep went
+// the other way from its argument -- so this one is a choice and not a result.
 //
 // THE SELECTION. One block, because the greedy spacing filter is sequential in
 // its acceptances and nothing else in the tail is large. The shape is NOT the
@@ -922,7 +922,13 @@ __global__ void spacingKernel(const uint64_t* keys, const uint32_t* state, uint3
     }
 }
 
+/// @brief The smallest power of two at or above `v`, total over the type.
+/// @note Above 2^31 there is no 32-bit power of two, and a loop that shifted
+/// past it would spin forever; the value saturates there instead. No caller
+/// can reach it -- a candidate capacity of 2^31 records is 16 GB of keys --
+/// but a helper that hangs on an unreachable input is still a hang.
 uint32_t nextPow2(uint32_t v) {
+    if (v > 0x80000000u) return 0x80000000u;
     uint32_t p = 1u;
     while (p < v) p <<= 1;
     return p;
@@ -970,9 +976,11 @@ bool& cornerSortParallelEnabled() {
 }
 
 bool cornerSortParallelApplies(size_t candidateCapacity) {
-    return nextPow2(static_cast<uint32_t>(candidateCapacity > 0xFFFFFFFFu
-                                              ? 0xFFFFFFFFu
-                                              : candidateCapacity)) > kSortChunk;
+    // `nextPow2(capacity) > kSortChunk` is `capacity > kSortChunk` when the
+    // chunk is itself a power of two, and the direct form has no width to
+    // clamp to.
+    static_assert((kSortChunk & (kSortChunk - 1)) == 0, "kSortChunk is a power of two");
+    return candidateCapacity > kSortChunk;
 }
 
 bool& cornerSpacingChunkedEnabled() {

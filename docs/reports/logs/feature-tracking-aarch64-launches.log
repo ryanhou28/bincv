@@ -602,3 +602,45 @@ both pipelines see bit-identical input: median_filter then rl_fast_edge_filter_w
 # temp after: temp=63.3'C
 # date:     2026-09-22T17:21:26-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio i2:OpenCV :/i2:binCV :) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                  n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# i1 / ... derivatives                10     0.1535     0.1530     0.1670  1.092     9.1%      --  [  0.1530,   0.1600]   2.28%   1.042x
+# i1 / ... edge                       10     0.3320     0.3310     0.3330  1.006     0.6%      --  [  0.3310,   0.3320]   0.15%   1.003x
+# i1 / ... median                     10     0.1715     0.1640     0.1880  1.146    14.0%      --  [  0.1690,   0.1740]   1.46%   1.015x
+# i1 / ... pyrDown                    10     0.1900     0.1890     0.1900  1.005     0.5%      --  [  0.1895,   0.1900]   0.13%   1.003x
+# i1 / ... sensor stage               10     0.5050     0.4970     0.5210  1.048     4.8%      --  [  0.5020,   0.5085]   0.64%   1.007x
+# i1 / build (pyrDown + derivatives)  10     0.8525     0.8470     0.8660  1.022     2.2%      --  [  0.8500,   0.8575]   0.44%   1.006x
+# i1 / detect                         10     0.2980     0.2970     0.2990  1.007     0.7%      --  [  0.2980,   0.2980]   0.00%   1.000x
+# i1 / track (LK)                     10     3.2790     3.2710     3.3310  1.018     1.8%      --  [  3.2750,   3.2865]   0.18%   1.002x
+# i2 / OpenCV :                       10    23.6140    23.4690    23.8090  1.014     1.4%      --  [ 23.5245,  23.6620]   0.29%   1.004x
+# i2 / binCV :                        10     4.4350     4.4200     4.4840  1.014     1.4%      --  [  4.4245,   4.4390]   0.16%   1.002x
+# 
+# RATIO  i2:OpenCV :  /  i2:binCV :   over 10 launches
+#   paired per launch (the published estimator)
+#     median 5.3281   min 5.2360   max 5.3648   scatter 2.4%
+#     bootstrap 95% CI of the median: [5.3156, 5.3365]   +/- 0.20%
+#     launches with the ratio above 1.00: 10 of 10
+#     smallest resolvable difference at 10 launches: 1.002x
+#   ratio of the two medians, same launches
+#     point 5.3245   bootstrap 95% CI: [5.3071, 5.3352]
+#     the two intervals differ by 0.16% and 0.02% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     i1       --- binCV per-stage, AT THE REAL DUTY CYCLE ---
+#     i2       --- CRITERION 4: speed against the byte-per-pixel denomina

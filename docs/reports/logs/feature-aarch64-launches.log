@@ -222,3 +222,40 @@
 # temp after: temp=62.3'C
 # date:     2026-09-21T16:38:44-07:00
 # done
+
+# ---- aggregate (scripts/aggregate_launches.py --ratio match kNN=2 cv::BFMatcher/match kNN=2 binCV) ----
+# 10 launches parsed from 1 path(s); bootstrap 10000 resamples, seed 12345
+# 
+# row                                 n     median        min        max    r2r  scatter  within     ci95 of the median     +/-   minres
+# t1 / FAST binCV                    10  3024670.0  3022656.4  3026766.8  1.001     0.1%      --  [3024227.7, 3025631.5]   0.02%   1.000x
+# t1 / FAST cv::FAST                 10  2909962.0  2899794.1  2916732.2  1.006     0.6%      --  [2904969.0, 2913714.1]   0.15%   1.002x
+# t1 / describe binCV BRIEF          10   657921.1   655923.3   667186.1  1.017     1.7%      --  [656388.4, 662814.0]   0.49%   1.007x
+# t1 / describe cv::ORB (does more)  10  7167153.5  6932772.8  7458789.2  1.076     7.3%      --  [6972585.6, 7348790.5]   2.62%   1.028x
+# t1 / match kNN=2 binCV             10 19519611.0 19298057.2 19727752.0  1.022     2.2%      --  [19405234.5, 19627855.2]   0.57%   1.006x
+# t1 / match kNN=2 cv::BFMatcher     10 38186719.8 38077415.7 38531250.0  1.012     1.2%      --  [38094810.0, 38345628.3]   0.33%   1.004x
+# 
+# RATIO  match kNN=2 cv::BFMatcher  /  match kNN=2 binCV   over 10 launches
+#   paired per launch (the published estimator)
+#     median 1.9528   min 1.9426   max 1.9966   scatter 2.8%
+#     bootstrap 95% CI of the median: [1.9437, 1.9717]   +/- 0.72%
+#     launches with the ratio above 1.00: 10 of 10
+#     smallest resolvable difference at 10 launches: 1.010x
+#   ratio of the two medians, same launches
+#     point 1.9563   bootstrap 95% CI: [1.9446, 1.9725]
+#     the two intervals differ by 0.04% and 0.04% of the median at the two ends.
+#     Say which estimator a quoted interval came from. The paired one is what the
+#     committed logs publish.
+# 
+#   median   median of the per-launch medians -- the value to quote.
+#   r2r      run-to-run scatter as a factor, max/min of those medians.
+#   scatter  (max-min)/median ACROSS launches: Timing::spreadPct()'s own
+#            arithmetic, so it reads directly against the next column.
+#   within   median of the per-launch spread column -- what one launch
+#            reports about itself, and all it can report.
+#   minres   smallest difference these launches resolve on this row,
+#            max(hi/median, median/lo). Derived from the row's scatter;
+#            whether it is small ENOUGH is a per-case call, so state the
+#            difference with --resolve rather than reading a bar into it.
+# 
+#   tables in a launch, in order:
+#     t1       detections: binCV 4144, cv::FAST 4144 (1.1% of pixels) | arm  ns/frame  vs OpenCV

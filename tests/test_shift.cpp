@@ -957,9 +957,9 @@ std::string fillText(float fill) {
 /// unpacking path. tests/test_logic.cpp measured what the obvious spelling
 /// costs: with both sides built through toCvMask, a one-column fault in the
 /// conversion cancelled exactly and the suite passed 56044 of 56044.
-/// @note **The WHOLE the matrix -- widths, heights AND fill ratios.** It used to
-/// be equivalenceWidths x {1, 3, 17} at a hard-coded fill of 0.5, which is
-/// a subset while the surrounding prose claimed the matrix. Both omissions
+/// @note **The WHOLE matrix -- widths, heights AND fill ratios.**
+/// equivalenceWidths x {1, 3, 17} at a hard-coded fill of 0.5 would be a subset
+/// while the surrounding prose claims the matrix, and both omissions
 /// cost coverage: height 2 is the smallest case where a wrong stride is not
 /// invisible (tests/equivalence.hpp says so in as many words), and 0.0 and
 /// 1.0 are the exact all-clear and all-set frames, which are where a masked

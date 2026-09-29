@@ -17,7 +17,7 @@ is the way it is.
 
 Three pages inside the reports are prerequisites rather than results.
 [reports/methodology-memory.md](reports/methodology-memory.md) names the four different
-quantities that get called "memory" and the four measurement errors this project published;
+quantities that get called "memory" and the ways a memory figure goes wrong;
 [reports/methodology-timing.md](reports/methodology-timing.md) is its twin on the other axis;
 and [reports/README.md](reports/README.md)'s *How the numbers are taken* states the
 denominator rule, the one-thread rule and the correctness check that runs before any timing.
@@ -47,9 +47,12 @@ build and use it; [reports/cuda.md](reports/cuda.md) is what it measures against
   when it is not. binCV links no codec on any target: a camera's Y plane, a V4L2 buffer and a
   sensor's DMA rows are already the input contract.
 
-`examples/slam_frontend.cpp` runs the feature half end to end. It is a program this project
-wrote to exercise the operations, not an operation binCV offers — see
-[reports/README.md](reports/README.md#assembled-pipelines).
+`examples/vio_frontend.cpp` and `examples/slam_frontend.cpp` run the tracking and the
+descriptor halves end to end. They are programs this project wrote to exercise the
+operations, not operations binCV offers — see
+[reports/README.md](reports/README.md#assembled-pipelines). Both run on the two frames under
+`tests/images`; [GETTING_STARTED.md](../GETTING_STARTED.md#a-feature-tracking-pipeline) says
+how to point them at a real sequence.
 
 ## Where binCV runs
 
@@ -57,7 +60,7 @@ The status column is what has actually been done, not what is supported in princ
 
 | target | vector path | status |
 |---|---|---|
-| **x86-64** — desktops, servers | AVX2, selected at run time; `POPCNT` required | measured — Ryzen 5 5600X |
+| **x86-64** — desktops, servers | AVX2, selected at run time; `POPCNT` on for every published figure (the software fallback builds and runs, slower) | measured — Ryzen 5 5600X |
 | **aarch64** (64-bit Arm Cortex-A) — phones, SBCs, embedded Linux | NEON | measured — Raspberry Pi 4 at a pinned clock, the reference device |
 | **Arm Cortex-M**, bare metal — microcontrollers, no OS | none: no NEON, no popcount instruction | built and run on an STM32H753ZI (Cortex-M7); bit-exact against the host. No OpenCV on that part, so no comparison — see below |
 | **armv7-a** (32-bit Arm Cortex-A) — older phones, SBCs | 32-bit NEON | **not built.** No toolchain here and no measurement. A different target from Cortex-M above |

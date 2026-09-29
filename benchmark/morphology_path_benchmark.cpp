@@ -1,4 +1,4 @@
-// -- what is the 3x3 SPECIAL CASE worth? binCV against binCV.
+// What is the 3x3 SPECIAL CASE worth? binCV against binCV.
 //
 // Special-casing 3x3 is worth doing because it is the common case in practice, and
 // ops/morphology.hpp does it: morphRow3x3 is a second row kernel that runs when the
@@ -7,9 +7,9 @@
 // reader deciding whether to vectorize one path or both has a number
 // rather than an assertion.
 //
-// IT IS ALSO A CORRECTION. The special case's docstring used to justify itself by
-// load count -- "one extendedRowWord per word per element row where the general
-// path pays two per SET CELL". That was wrong: morphRowGeneric's window branch
+// IT IS ALSO A CORRECTION of a tempting justification by load count -- "one
+// extendedRowWord per word per element row where the general path pays two per SET
+// CELL". That is wrong: morphRowGeneric's window branch
 // hoists exactly the same call out of its cell loop for any element whose row
 // reaches less than a word sideways, which every 3x3 element does. What the
 // special case actually removes is the per-cell loop itself, the data-dependent
@@ -38,9 +38,9 @@
 // it so a difference smaller than the noise reads as one.
 //
 // On x86_64 this is INDICATIVE ONLY -- a desktop host's spread decides nothing.
-// The authoritative run is
+// The authoritative run is on the reference device, pinned and launched ten times:
 //
-//./scripts/run_on_pi.sh pi4 './benchmark/morphology_path_benchmark'
+//   ./scripts/run_launches.sh -n 10 -g ./build/benchmark/morphology_path_benchmark
 
 #include <cstdint>
 #include <cstdio>

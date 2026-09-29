@@ -11,14 +11,15 @@
 // then one bit test per candidate. COSTS ONE 1-BIT FRAME: 38 400 B at 640x480.
 //
 // The rule: the mask becomes the recommended path only if it is FASTER at the
-// pipeline's own operating point on BOTH architectures. Parity is a loss -- CLAUDE.md
-// settles unclaimed speed/footprint conflicts in favor of memory, and 38 400 B has to
-// buy something.
+// pipeline's own operating point on BOTH architectures. Parity is a loss -- an
+// unclaimed speed/footprint conflict is settled in favor of memory, and 38 400 B has
+// to buy something.
 //
-// The pre-registered prediction, recorded so that agreeing with it is not evidence:
+// The prediction, written down before the first run so that agreeing with it is not
+// evidence:
 // the mask LOSES at small candidate counts and wins past new ~ pi*r^2/WordBits ~ 100.
 //
-// TWO CONTROLS, BOTH REQUIRED BY CLAUDE.md's BENCHMARKING RULES:
+// TWO CONTROLS, BOTH REQUIRED:
 // - the exhaustive arm is timed with the vector path forced OFF as well as on, so
 // the vector arm is shown to be RUNNING rather than assumed to be;
 // - `live = 4` is below the vector width in both ISAs, so its vector/scalar ratio
@@ -89,12 +90,13 @@ int main() {
 
     const size_t kLive[] = {4, 50, 100, 200};
     // Out to 5 000 deliberately. The pipeline never sees more than a few hundred
-    // candidates, but the pre-registered rule asks WHERE the mask crosses over, and an
+    // candidates, but the rule asks WHERE the mask crosses over, and an
     // extrapolated crossover is not a measured one -- 1 000 and 5 000 bracket it on
     // both architectures, which is what the rule needs. It stops there rather than at
     // 20 000 for a physical reason: the reference device SOFT-THROTTLED partway through
-    // the 20 000 rows, `run_on_pi.sh` flagged the whole run INVALID, and a longer sweep
-    // that cannot be measured on the device it has to be measured on is not a sweep.
+    // the 20 000 rows, which invalidates the whole run (the launch log records the
+    // throttle flags before and after), and a longer sweep that cannot be measured on
+    // the device it has to be measured on is not a sweep.
     const size_t kNew[] = {50, 200, 1000, 5000};
 
     for (size_t liveCount : kLive) {

@@ -216,8 +216,8 @@ private:
 /// @tparam T A trivially copyable POD. The result types in features.hpp are
 /// written to be exactly that, so a download is one `cudaMemcpy`.
 ///
-/// @note Here because a kernel does not allocate (CLAUDE.md) and the caller
-/// therefore needs somewhere to put an output set. It is the third owning
+/// @note Here because a kernel never allocates and the caller therefore needs
+/// somewhere to put an output set. It is the third owning
 /// container, not a fourth view: `data()` is what a view is built over.
 /// @note Zero-filled on allocation, like the other two. The reason differs: an
 /// append that truncates, or one that reserves a slot it does not fill,

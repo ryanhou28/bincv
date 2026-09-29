@@ -7,8 +7,8 @@
 /// binCV provides it for pipelines that binarize on the host. Two sources, two
 /// tiers, and the tier difference is the whole reason they have different names.
 ///
-/// threshold(const cv::Mat&, dst, thresh) CV_8U in, 1 bit out. **TIER 1.**
-/// binarize(planes, dst, thresh) N-bit in, 1 bit out. **TIER 3.**
+///     threshold(const cv::Mat&, dst, thresh)   CV_8U in, 1 bit out.   **TIER 1.**
+///     binarize(planes, dst, thresh)            N-bit in, 1 bit out.   **TIER 3.**
 ///
 /// ---------------------------------------------------------------------------
 /// THE COMPARISON IS STRICTLY GREATER THAN, AND IT IS NOT A DETAIL
@@ -29,12 +29,13 @@
 ///
 /// The consequence at the ends, stated so a caller does not have to derive it:
 ///
-/// thresh = 0 every NON-ZERO pixel is set. This is `src != 0`, the usual
-/// "make a mask" call, and it is the one an implementation using
-/// `>=` would turn into "all ones".
-/// thresh = 255 NOTHING is set for a CV_8U source: no uint8 exceeds 255. Not
-/// an error, and not clamped to something more useful -- it is
-/// what cv::threshold returns, and Tier 1 means matching it.
+///     thresh = 0     every NON-ZERO pixel is set. This is `src != 0`, the usual
+///                    "make a mask" call, and it is the one an implementation
+///                    using `>=` would turn into "all ones".
+///     thresh = 255   NOTHING is set for a CV_8U source: no uint8 exceeds 255.
+///                    Not an error, and not clamped to something more useful --
+///                    it is what cv::threshold returns, and Tier 1 means
+///                    matching it.
 ///
 /// ---------------------------------------------------------------------------
 /// TIER 1 FOR CV_8U, TIER 3 FOR QuantMat<N>
@@ -73,12 +74,12 @@
 /// it reduces the double with `cvFloor`, whose `(int)value` conversion is
 /// undefined once the value leaves `int`'s range. Measured on OpenCV 4.5.4, x86-64:
 ///
-/// thresh cv::threshold binCV who is right
-/// ---------------------------------------------------------------------
-/// +1e300 every pixel set none set binCV (nothing exceeds 1e300)
-/// -1e300 none set every pixel binCV (everything exceeds it)
-/// +/-inf same inversion as above binCV
-/// +2^31 every pixel set none set binCV
+///     thresh    cv::threshold        binCV          who is right
+///     ------------------------------------------------------------------
+///     +1e300    every pixel set      none set       binCV (nothing exceeds 1e300)
+///     -1e300    none set             every pixel    binCV (everything exceeds it)
+///     +/-inf    same inversion as above             binCV
+///     +2^31     every pixel set      none set       binCV
 ///
 /// OpenCV's answers there are the *opposite* of the arithmetic, and they flip
 /// direction with the compiler's conversion behavior rather than with the
@@ -150,9 +151,8 @@
 // impl::minRowWords, impl::bitMask, and QuantMat<N> for the container wrapper.
 #include "../quantMat.hpp"
 
-// std::floor, for impl::thresholdCutoff below. UNCONDITIONAL, where it used to
-// be inside the BINCV_WITH_OPENCV block with the reduction that uses it. The
-// reduction moved out; see the note on thresholdCutoff for why it had to.
+// std::floor, for impl::thresholdCutoff below -- which is core-visible, not
+// behind BINCV_WITH_OPENCV; its note says why.
 #include <cmath>
 
 #ifdef BINCV_WITH_OPENCV
@@ -289,16 +289,15 @@ namespace impl {
 /// @return 0 when every pixel passes, 256 when none does, else
 /// `floor(thresh) + 1` in [1, 255].
 ///
-/// @note WHY IT IS HERE AND NOT IN THE CV_8U ENTRY POINT BELOW, WHICH IS ITS ONLY
-/// CALLER TODAY. It used to be four lines inside that function, and that put
-/// it inside `#ifdef BINCV_WITH_OPENCV` -- while the gate that verifies
-/// device kernels against the host (scripts/verify_cuda.sh) configures with
-/// `-DBINCV_USE_OPENCV=OFF` and therefore could not see it at all. A device
-/// threshold could then only ever have been proven equal to a TEST-LOCAL
-/// COPY of this reduction, which is the two-definitions failure the backend
-/// exists to prevent: the copy agrees on 127.5 and disagrees on NaN, and
-/// nothing says so. Core-visible, it is one definition that both arms and
-/// both gates can reach.
+/// @note WHY IT IS HERE AND NOT INSIDE THE CV_8U ENTRY POINT BELOW, ITS ONLY HOST
+/// CALLER. Inside that function it would sit behind `#ifdef BINCV_WITH_OPENCV`,
+/// while the gate that verifies device kernels against the host
+/// (scripts/verify_cuda.sh) configures with `-DBINCV_USE_OPENCV=OFF` and could
+/// not see it. A device threshold could then only be proven equal to a
+/// TEST-LOCAL COPY of this reduction, which is the two-definitions failure the
+/// backend exists to prevent: a copy that agrees on 127.5 and disagrees on NaN,
+/// with nothing to say so. Core-visible, it is one definition that both arms
+/// and both gates reach.
 /// @note For an integer pixel `p > thresh` is `p >= floor(thresh) + 1`, and the
 /// two ends are exact rather than approximated: no CV_8U pixel exceeds 255,
 /// and every one exceeds a negative threshold.
@@ -403,9 +402,9 @@ inline void threshold(const cv::Mat& src, BinMatView<WordType> dst, double thres
 
     // ONE IMPLEMENTATION. The packing, the vector paths and the padding invariant
     // all live in ops/pack.hpp, which is in CORE -- this function's only job is to
-    // reduce `thresh` to a rule and hand over the buffer. Before that split this
-    // loop was a second copy of the same word assembly, and only one of the two was
-    // ever optimized.
+    // reduce `thresh` to a rule and hand over the buffer. A second copy of the
+    // word assembly here would be a second thing to optimize, and only one of the
+    // two would be.
     //
     // `cutoff` is an int precisely so the two degenerate ends survive the reduction:
     // 0 means every pixel passes and 256 means none does, and neither fits a uint8_t.

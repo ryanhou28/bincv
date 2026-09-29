@@ -1,6 +1,6 @@
 // logic kernels versus OpenCV, on the same binary content.
 //
-// THE DENOMINATOR (CLAUDE.md): OpenCV performing the SAME
+// THE DENOMINATOR: OpenCV performing the SAME
 // semantic operation on the SAME binary content stored as CV_8U -- because that
 // is exactly what a user does today without binCV. Not grayscale (different
 // information content), not a hand-written per-pixel strawman. cv::bitwise_and on
@@ -61,9 +61,9 @@
 // once through both implementations and the set-pixel counts compared. A
 // "faster" kernel computing a different answer is not a result -- so a
 // disagreement SKIPS the timing for that size entirely and makes the process
-// exit non-zero. It used to print a warning and then print the full ratio
-// table anyway, which is a benchmark publishing numbers it has itself
-// declared meaningless.
+// exit non-zero. Printing a warning and then the full ratio table anyway
+// would be a benchmark publishing numbers it has itself declared
+// meaningless.
 //
 // 5. FOOTPRINT IS PART OF THE RESULT, not a detail of the setup. binCV's
 // buffers are an eighth the size of OpenCV's, so at most sizes the two sides
@@ -79,7 +79,7 @@
 // work on it measures the other work. Batch length is calibrated per case so every
 // measurement covers a comparable interval regardless of image size.
 //
-// Release only (CLAUDE.md). Run:
+// Release only. Run:
 //./build/benchmark/logic_benchmark
 //./build/benchmark/logic_benchmark --width 752 --height 480
 //

@@ -569,7 +569,7 @@ void testGuardWords(const char* wordTypeName) {
 // claims a destination comes out clean anyway. Without the mask, at width 5 over
 // an all-ones buffer: bits across the stride 16 against countNonZero 10 at
 // uint8_t, 32 vs 10 at uint16_t, 64 vs 10 at uint32_t, 128 vs 10 at uint64_t --
-// a CLAUDE.md hard-rule violation with no test able to see it.
+// a padding-invariant violation with no test able to see it.
 
 /// @brief A matrix wrapping a buffer whose PADDING bits are all ones.
 /// @note Written through set after the wrap, so the pixel bits are the drawn
@@ -751,7 +751,7 @@ void testAliasAcceptsDisjointViews(const char* wordTypeName) {
     // (c) One row, in place, described with two different strides. A single-row
     // view never reads its stride (row(0) == ptr), and BinMatView::row already
     // exempts height <= 1 from its own non-zero-stride precondition; the alias
-    // predicate used to demand the two agree and aborted on a correct call.
+    // predicate that demands the two agree aborts on a correct call.
     {
         std::vector<WordType> buffer(rowWords, static_cast<WordType>(0x0Fu));
         const std::vector<WordType> before = buffer;
@@ -935,7 +935,7 @@ void testQuantMatOverloads(const char* wordTypeName) {
 }
 
 // ===========================================================================
-// 10. Tier 1: bit-exact against OpenCV, across the the matrix
+// 10. Tier 1: bit-exact against OpenCV, across the matrix
 // ===========================================================================
 //
 // WHERE OPENCV'S INPUTS COME FROM, AND WHY IT IS NOT toCvMask.

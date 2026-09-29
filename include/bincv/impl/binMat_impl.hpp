@@ -6,20 +6,15 @@
 #include <ostream>
 #include <utility>
 
-// BINCV_THROW / BINCV_ASSERT. Named here rather than left to binMat.hpp, which
-// is the only file that includes this one: every validation check below is
-// written in terms of these two macros, so the dependency is real. It also
-// carries <stdexcept> in exactly the configuration whose expansion needs it, and
-// BINCV_ABI_NAMESPACE.
-// the AVX2 row packer is selected at RUN TIME, so the library's baseline ISA is
-// unchanged and no -mavx2 build is required. Guarded on the compiler supporting both
-// the target attribute and the cpu probe.
-// BEFORE THE GATE, NOT AFTER. This header defines BINCV_HAVE_NEON from the
-// compiler's own macros on aarch64, so an include-only integration still gets the
-// NEON kernels. Relying on transitive inclusion would not do -- this file evaluates
-// its gate before its first core include.
+// core/simd.hpp comes BEFORE THE GATE, NOT AFTER: it defines BINCV_HAVE_NEON from
+// the compiler's own macros on aarch64, so an include-only integration still gets
+// the NEON kernels. This file evaluates its gate before its first core include,
+// so relying on transitive inclusion would not do.
 #include "../core/simd.hpp"
 
+// The AVX2 row packer is selected at RUN TIME, so the library's baseline ISA is
+// unchanged and no -mavx2 build is required. Guarded on the compiler supporting
+// both the target attribute and the cpu probe.
 // !__CUDACC__: a CUDA translation unit including this header takes the portable
 // arm. No vector arm is reachable from device code, and nvcc's frontend cannot
 // digest gcc's AVX-512 headers under -O3 (__OPTIMIZE__ exposes builtins the
@@ -32,6 +27,11 @@
 #include <arm_neon.h>
 #endif
 
+// BINCV_THROW / BINCV_ASSERT. Named here rather than left to binMat.hpp, which
+// is the only file that includes this one: every validation check below is
+// written in terms of these two macros, so the dependency is real. It also
+// carries <stdexcept> in exactly the configuration whose expansion needs it, and
+// BINCV_ABI_NAMESPACE.
 #include "../core/error.hpp"
 
 // <ostream> is here for operator<< alone, which cannot be expressed without a
@@ -291,11 +291,9 @@ QuantMat<1, WordType_>& QuantMat<1, WordType_>::operator=(QuantMat&& other) noex
 // ---------------------------------------------------------------------------
 // THE ROW PACKER LIVES ABOVE THE OpenCV GUARD, AND THAT PLACEMENT IS THE POINT.
 //
-// It was written inside `#ifdef BINCV_WITH_OPENCV` because its first caller was
-// `fromCVMat`. That made the one path a core-only build needs -- turning a plain
-// pixel array into bits -- available only when OpenCV was present, which is the
-// exact gap ops/pack.hpp exists to close. Caught by a core-only compile, since
-// every OpenCV-enabled build hid it.
+// Turning a plain pixel array into bits is the one path a core-only build needs
+// -- it is what ops/pack.hpp exists for -- so it must not depend on OpenCV being
+// present, even though `fromCVMat` below is one of its callers.
 // ---------------------------------------------------------------------------
 namespace impl {
 
@@ -363,10 +361,11 @@ inline bool packCmp(SrcT v, SrcT t) {
 /// **ONE COARSE ENTRY POINT, NEVER LEAF HELPERS -- and this is the coarse one.**
 /// `__attribute__((target(...)))` stops a compiler inlining a function into a caller
 /// whose feature set is smaller: that is what the attribute is FOR, since the caller
-/// may run where the callee's instructions do not exist.
-/// marked leaf helpers *inside* a hot loop and paid
-/// **310 real calls per window**. Here the call IS the unit of work -- loads, a
-/// compare and a movemask for 32 pixels -- not a helper inside one.
+/// may run where the callee's instructions do not exist. A `target` attribute on a
+/// leaf helper *inside* a hot loop therefore costs a real call per invocation --
+/// **310 per LK window**, measured at 1.9× in impl/lkBatch_impl.hpp. Here the call
+/// IS the unit of work -- loads, a compare and a movemask for 32 pixels -- not a
+/// helper inside one.
 ///
 /// This is why binCV uses AVX2 with **no `-mavx2` build**: the baseline ISA is
 /// unchanged and the fast path is chosen at run time.
@@ -407,8 +406,7 @@ __attribute__((target("avx2"))) inline uint32_t movemask32(const SrcT* p, SrcT t
         if constexpr (R == PackCmp::NonZero) {
             (void)t;
             const __m256i z = _mm256_setzero_si256();
-            mlo = ~_mm256_cmpeq_epi16(lo, z);
-            mhi = ~_mm256_cmpeq_epi16(hi, z);
+            // AVX2 has no "compare not equal": compare against zero and invert once.
             mlo = _mm256_xor_si256(_mm256_cmpeq_epi16(lo, z), _mm256_set1_epi16(-1));
             mhi = _mm256_xor_si256(_mm256_cmpeq_epi16(hi, z), _mm256_set1_epi16(-1));
         } else {
@@ -501,8 +499,8 @@ inline bool hasVectorPack() { return packVectorEnabled(); }
 
 /// @brief Packs one row to 1 bit per pixel under `R`. **INTERNAL**.
 /// @param rowOut Only bits `[0, width)` are written and whole words are STORED, so a
-/// row's PADDING BITS ARE ZERO on return ([CLAUDE.md](../../../CLAUDE.md)'s
-/// hard rule -- word-wise reductions over-count otherwise).
+/// row's PADDING BITS ARE ZERO on return (padding bits must stay zero, or
+/// word-wise reductions over-count).
 ///
 /// **WHY THE BIT ORDERS LINE UP AND NO SHUFFLE IS NEEDED.** `bitMask(x)` is
 /// `1 << (x % WordBits)`, so pixel `x` lands in bit `x` of its word, LSB first.
@@ -513,9 +511,9 @@ inline void packRowCmp(const SrcT* rowIn, size_t width, SrcT t, WordType* rowOut
     size_t x = 0;
 #if defined(BINCV_HAVE_VECTOR_PACK)
     // WHOLE WORDS, NOT WHOLE 32-PIXEL GROUPS. At 64-bit words a 32-pixel group is
-    // half a word, and letting the scalar tail start mid-word put its bits at the
-    // wrong offsets -- caught by the `uint64_t` arm of tests/test_opencv_interop.cpp
-    // and by nothing narrower.
+    // half a word, and a scalar tail that started mid-word would put its bits at
+    // the wrong offsets; the `uint64_t` arm of tests/test_opencv_interop.cpp is
+    // the case that shows it, and nothing narrower can.
     constexpr size_t kGroup =
         bitsPerWord<WordType>() > 32 ? bitsPerWord<WordType>() : size_t{32};
     if (hasVectorPack()) {
@@ -543,16 +541,11 @@ inline void packRowCmp(const SrcT* rowIn, size_t width, SrcT t, WordType* rowOut
     }
 }
 
-/// @brief Unpacks one bit per pixel to one byte per pixel. **INTERNAL**.
-/// @note Lives here rather than in ops/pack.hpp because impl/binMat_impl.hpp cannot
-/// include that file -- pack.hpp includes binMat.hpp, which includes this one.
-/// ops/pack.hpp's `unpackTo8Bit` is the public spelling and calls straight
-/// through.
-// GUARDED ON THE ISA, NOT ON `BINCV_HAVE_VECTOR_PACK`. That macro means "a vector row
-// packer exists" and BOTH backends define it, so using it here compiled the AVX2 branch
-// on aarch64 -- caught by `check_arm_syntax.sh`, which is the third time this session
-// that a guard has been wrong in code x86 never compiles.
+// The unpack's vector arm. GUARDED ON THE ISA, NOT ON `BINCV_HAVE_VECTOR_PACK`: that
+// macro means "a vector row packer exists" and BOTH backends define it, so gating on
+// it would compile the AVX2 branch on aarch64.
 #if defined(BINCV_X86_RUNTIME_AVX2)
+/// @brief True when the AVX2 unpack may run. **INTERNAL.**
 inline bool unpackVectorReady() { return hasVectorPack(); }
 
 /// @brief Thirty-two bits into thirty-two bytes. **INTERNAL.**
@@ -576,8 +569,10 @@ __attribute__((target("avx2"))) inline void unpackWord32(uint32_t w, uint8_t* ou
                                            _mm256_set1_epi8(static_cast<char>(onValue)), m));
 }
 #elif defined(BINCV_HAVE_NEON) && defined(__aarch64__)
+/// @brief True when the NEON unpack may run. **INTERNAL.**
 inline bool unpackVectorReady() { return packVectorEnabled(); }
 
+/// @brief Thirty-two bits into thirty-two bytes, NEON. **INTERNAL.**
 inline void unpackWord32(uint32_t w, uint8_t* out, uint8_t onValue, uint8_t zeroValue) {
     static const uint8_t kSel[16] = {1, 2, 4, 8, 16, 32, 64, 128,
                                      1, 2, 4, 8, 16, 32, 64, 128};
@@ -594,6 +589,11 @@ inline void unpackWord32(uint32_t w, uint8_t* out, uint8_t onValue, uint8_t zero
 }
 #endif
 
+/// @brief Unpacks one bit per pixel to one byte per pixel. **INTERNAL**.
+/// @note Lives here rather than in ops/pack.hpp because impl/binMat_impl.hpp cannot
+/// include that file -- pack.hpp includes binMat.hpp, which includes this one.
+/// ops/pack.hpp's `unpackTo8Bit` is the public spelling and calls straight
+/// through.
 template <typename WordType>
 inline void unpackTo8BitRaw(const WordType* src, size_t srcStride, size_t width,
                             size_t height, uint8_t* dst, size_t dstStride, uint8_t onValue,
@@ -605,17 +605,15 @@ inline void unpackTo8BitRaw(const WordType* src, size_t srcStride, size_t width,
         for (size_t x = 0; x < width; x += kBits) {
             const size_t n = (width - x < kBits) ? (width - x) : kBits;
             // ONE word load per 32 pixels instead of one per pixel: the shift and
-            // mask stay in a register where they used to be recomputed from `x`.
+            // mask stay in a register rather than being recomputed from `x`.
             WordType w = rowIn[x / kBits];
 #if defined(BINCV_X86_RUNTIME_AVX2) || (defined(BINCV_HAVE_NEON) && defined(__aarch64__))
             // THE INVERSE OF A MOVE-MASK, AND IT VECTORIZES THE SAME WAY. Broadcast the
             // word so byte i holds the byte containing bit i, AND with the per-lane bit
-            // weights, compare, and select. Six operations for what was thirty-two
-            // BRANCHES -- and the branch is the cost, not the shift.
-            //
-            // This is the audit CLAUDE.md's benchmark rule produced: `unpackTo8Bit` was
-            // correct, word-wise, and 4x slower than `packBits` doing the same job in the
-            // other direction, because nothing had ever timed it.
+            // weights, compare, and select. Six operations for what is otherwise
+            // thirty-two BRANCHES -- and the branch is the cost, not the shift: without
+            // this arm the byte loop below is 4× slower than `packBits` doing the same
+            // job in the other direction.
             if (n == 32 && sizeof(WordType) == 4 && unpackVectorReady()) {
                 unpackWord32(static_cast<uint32_t>(w), rowOut + x, onValue, zeroValue);
                 continue;
@@ -668,13 +666,12 @@ void QuantMat<1, WordType_>::fromCVMat(const cv::Mat& input) {
     storage = std::move(newData);
 }
 
-// Shared unpacking loop for the two cv::Mat conversions; `transform` maps a bit
-// to the output pixel value.
-/// @note ONE IMPLEMENTATION. The unpacking lives in ops/pack.hpp, in CORE, so the
-/// `cv::Mat` wrapper is a shape adapter and nothing more. Before this split it
-/// was a per-pixel loop recomputing `wordIndex` and `bitMask` for every pixel --
-/// the exact shape `fromCVMat` had before it was split the same way, and
-/// the slowest thing in the library.
+/// @brief The shared unpacking loop for the two cv::Mat conversions; `transform`
+/// maps a bit to the output pixel value. **INTERNAL.**
+/// @note ONE IMPLEMENTATION. The unpacking is `impl::unpackTo8BitRaw`, in core,
+/// so the `cv::Mat` wrapper is a shape adapter and nothing more; a per-pixel
+/// loop recomputing `wordIndex` and `bitMask` for every pixel is the shape
+/// this exists to avoid.
 template <typename WordType, typename PixelTransform>
 inline void toCVMatHelper(const BinMat<WordType>& binmat, cv::Mat& output,
                           PixelTransform transform) {
@@ -689,8 +686,6 @@ inline void toCVMatHelper(const BinMat<WordType>& binmat, cv::Mat& output,
                               output.step, transform(true), transform(false));
 }
 
-// @todo: could an approach using OpenCV's resize and scaling functions be more efficient?
-// need to think more about how to do this efficiently
 template <typename WordType_>
 void QuantMat<1, WordType_>::toCVMat(cv::Mat& output) const {
     toCVMatHelper(*this, output, [](bool value) -> uint8_t { return value ? 1 : 0; });
@@ -724,9 +719,9 @@ void QuantMat<1, WordType_>::clearTrailingBits() {
 
 // at and set
 //
-// Debug-checked, unchecked in release, which is a deliberate change from
-// throwing. These are the two functions on the per-pixel path, and
-// a throw here would sit inside every loop that reads an image. In a release
+// Debug-checked, unchecked in release, deliberately. These are the two
+// functions on the per-pixel path, and a throw here would sit inside every
+// loop that reads an image. In a release
 // build the checks are gone entirely -- what remains is the row offset, a shift
 // and a mask -- and an out-of-range index is undefined behavior, exactly as it
 // is for cv::Mat::at. Callers that cannot guarantee their indices should clamp
@@ -758,8 +753,7 @@ void QuantMat<1, WordType_>::set(int row, int col, bool value) {
         // way back into an 8- or 16-bit WordType and -Wconversion says so. The
         // complement is taken AT the word type instead, which is the same bits
         // and states that the narrowing is the point. Only some compilers
-        // diagnose it -- GCC 10 for Cortex-M does, GCC 11 for the host does not
-        // -- which is why it survived to be found by the bare-metal gate.
+        // diagnose it -- GCC 10 for Cortex-M does, GCC 11 for the host does not.
         word = static_cast<WordType>(word & static_cast<WordType>(~mask));  // clear bit
     }
 }
@@ -776,7 +770,8 @@ typename QuantMat<1, WordType_>::WordType* QuantMat<1, WordType_>::ptr(int row) 
 }
 
 // resize
-// @todo: This could potentially be optimized (word-wise copy when alignment permits)
+// A pixel-by-pixel copy. A word-wise copy applies only when the old and new
+// strides agree, which resize does not require.
 template <typename WordType_>
 void QuantMat<1, WordType_>::resize(int newWidth, int newHeight) {
     if (newWidth < 0 || newHeight < 0)
@@ -812,10 +807,10 @@ void QuantMat<1, WordType_>::resize(int newWidth, int newHeight) {
 }
 
 // pad
-// @todo: This could potentially be optimized further
-// @todo: OpenCV has a copyMakeBorder function, however alignment with our packed
-// representation becomes complicated when padding towards the left.
-// For now we implement our own padding.
+// A constant-value border only, pixel by pixel. `cv::copyMakeBorder`'s replicate
+// and reflect modes are not provided: a left pad shifts every row by `left` bits,
+// and a replicated or reflected edge on top of that shift is a second kernel
+// rather than a fill.
 template <typename WordType_>
 void QuantMat<1, WordType_>::pad(int top, int bottom, int left, int right, bool value) {
     if (top < 0 || bottom < 0 || left < 0 || right < 0) {
@@ -868,8 +863,9 @@ void QuantMat<1, WordType_>::pad(int top, int bottom, int left, int right, bool 
 }
 
 // transposed
-// @todo: naive pixel-by-pixel transpose; replace with a cache-blocked / bit-parallel
-// version (see ARCHITECTURE.md 6.4). This is currently the slowest operation.
+// Pixel by pixel, and the slowest operation on this container; nothing on a
+// measured path calls it. A cache-blocked bit-parallel form (8x8 blocks through
+// impl::transpose8x8) is the shape a fast one would take.
 template <typename WordType_>
 QuantMat<1, WordType_> QuantMat<1, WordType_>::transposed() const {
     // An empty matrix still has a shape to transpose: a 640x0 matrix transposes to
@@ -893,7 +889,8 @@ QuantMat<1, WordType_> QuantMat<1, WordType_>::transposed() const {
 }
 
 // transpose
-// @todo: this could avoid the copy made by transposed for the square case
+// Builds the transpose in fresh storage even for a square matrix; the
+// declaration says why.
 template <typename WordType_>
 void QuantMat<1, WordType_>::transpose() {
     *this = this->transposed();
@@ -935,7 +932,6 @@ void QuantMat<1, WordType_>::printMatrix() const {
 }
 
 // operator<<
-// @todo: consider std::ostringstream or wrapping std::ostream& for reusable logging.
 template <typename WordType>
 std::ostream& operator<<(std::ostream& os, const BinMat<WordType>& binmat) {
     if (binmat.empty()) {
@@ -963,8 +959,8 @@ void QuantMat<1, WordType_>::printInternalData(bool hex) const {
         const WordType* row = storage.data() + y * alignedWidth;
         for (size_t b = 0; b < alignedWidth; ++b) {
             // Widened to the largest word type so one format string covers all
-            // four. Nothing to reset afterwards, unlike the std::hex this used to
-            // leave stuck on std::cout.
+            // four. Nothing to reset afterwards, unlike a std::hex manipulator
+            // left on a stream.
             std::fprintf(stdout, hex ? "%llx " : "%llu ",
                          static_cast<unsigned long long>(row[b]));
         }
@@ -984,23 +980,24 @@ void QuantMat<1, WordType_>::fill(bool value) {
     std::fill(storage.data(), storage.data() + storage.size(), fillWord);
 
     // fill(true) sets the row-padding bits too; clear them so that word-wise
-    // consumers (countNonZero, future bitwise ops) don't see phantom pixels.
+    // consumers (ops/reduce.hpp, ops/logic.hpp) don't see phantom pixels.
     if (value) clearTrailingBits();
 }
 
 // countNonZero
 //
-// STILL A PER-PIXEL LOOP, and deliberately so. The bulk reduction is
-// `bincv::countNonZero(m.constView)` in ops/reduce.hpp, which is 6x faster here
-// and 35x faster where the popcount lowers to an instruction
-// (results/reduce_benchmark.log). This member cannot simply forward to
-// it: ops/reduce.hpp includes binMat.hpp, which includes this file, so the call
-// would close a cycle. It stays for two reasons -- it is the container-shaped
-// spelling callers already use, and it is the "before" the benchmark
-// measures against, which stops being true the moment it becomes a wrapper.
+// A PER-PIXEL LOOP, and deliberately so. The bulk reduction is
+// `bincv::countNonZero(m.constView())` in ops/reduce.hpp, which is 6× faster with
+// a software popcount and 35× faster where the popcount lowers to an
+// instruction. This member cannot simply forward to it: ops/reduce.hpp includes
+// binMat.hpp, which includes this file, so the call would close a cycle. It
+// stays for two reasons -- it is the container-shaped spelling callers already
+// use, and it is the "before" the benchmark measures against, which stops
+// being true the moment it becomes a wrapper.
 //
 // It does NOT rely on padding bits being zero (it never reads one), which is the
-// same guarantee the bulk kernels now make by masking; see.
+// same guarantee the bulk kernels make by masking their tail word
+// (impl::rowTailMask).
 template <typename WordType_>
 int QuantMat<1, WordType_>::countNonZero() const {
     if (empty())

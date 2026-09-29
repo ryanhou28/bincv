@@ -1,5 +1,5 @@
-// Core tests for the N-bit container and its sign-magnitude reading
-//. Deliberately free of OpenCV, so this suite also runs in the core-only
+// Core tests for the N-bit container and its sign-magnitude reading.
+// Deliberately free of OpenCV, so this suite also runs in the core-only
 // and no-exceptions configurations -- QuantMat is what makes the embedded claim
 // concrete, so it has to be verified in the configurations that claim serves.
 //
@@ -507,9 +507,9 @@ void testWrapAllocatesNothing() {
 // ---------------------------------------------------------------------------
 // -- the plane index is validated, in every build
 //
-// REGRESSION. plane used to be debug-checked, and all three verified
-// configurations are Release, so the check was compiled out of every one of
-// them. Measured in that state, one identical caller mistake had three unrelated
+// REGRESSION. A debug-only check on plane is compiled out of every Release
+// configuration. Measured with no check at all, one identical caller mistake
+// had three unrelated
 // outcomes across one type family:
 // QuantMat<3>::plane(3) -> a writable view of the NEXT allocation
 // (a.plane(3).ptr == b.data exactly; a

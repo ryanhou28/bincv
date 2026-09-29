@@ -69,10 +69,14 @@ static cv::Mat shiftX(const cv::Mat& g, double d) {
 }
 
 int main(int argc, char** argv) {
+    if (argc < 2) {
+        printf("usage: level0_floor_noise <grayscale-image> [edge-threshold]\n");
+        return 2;
+    }
     const std::string path = argv[1];
     const int thr = argc > 2 ? std::atoi(argv[2]) : 17;
     const cv::Mat gray = cv::imread(path, cv::IMREAD_GRAYSCALE);
-    if (gray.empty()) return 1;
+    if (gray.empty()) { printf("cannot read %s\n", path.c_str()); return 1; }
 
     const double step = 0.01;
     const int N = 100;

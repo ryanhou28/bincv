@@ -95,7 +95,7 @@ size_t mismatchWords(const BinMat<uint32_t>& expect, const BinMat<uint32_t>& got
     return bad;
 }
 
-/// CLAUDE.md's hard rule, checked on its own so a failure names it: no bit past
+/// The padding invariant, checked on its own so a failure names it: no bit past
 /// `width` may be set in any destination row.
 size_t dirtyPaddingWords(const BinMat<uint32_t>& m) {
     const size_t words = wordsOf(m.getWidth());

@@ -13,7 +13,7 @@
 /// makes RANSAC cheap: fewer points per sample means a clean sample is far more
 /// likely, so far fewer hypotheses are needed at the same outlier ratio. At 50%
 /// outliers and 99% confidence, five points need about 145 iterations where eight
-/// need about 1 177. That is the whole reason VIO frontends are built around this
+/// need about 1177. That is the whole reason VIO frontends are built around this
 /// solver rather than a linear one, and it is why an eight-point or affine
 /// estimator is not a substitute for it.
 ///
@@ -102,13 +102,13 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// `cv::findEssentialMat`'s `CV_64F` result read row by row.
 /// @note `double`, not `float`. The solver eliminates through a degree-10
 /// polynomial and a single-precision intermediate loses roots.
-/// @note **The INPUT is `Point2f`, and that is what bounds the accuracy.** Measured
-/// over 300 random poses, a returned `E` matches the planted one to 1e-3 in
-/// 299 of them but to 1e-6 in only 163 -- the gap is the float coordinates,
-/// not the elimination, and feeding the same solver double coordinates
-/// recovers 1e-6 almost always. Feature detectors produce float positions, so
-/// this is the precision the operation actually runs at; it is recorded here
-/// rather than left for someone to rediscover.
+/// @note **The INPUT is `Point2f`, and that is what bounds the accuracy.** Over the
+/// 300 random poses in the file header's table, a returned `E` matches the
+/// planted one to 1e-3 in nearly every trial but to 1e-6 in only 163 -- the
+/// gap is the float coordinates, not the elimination, and feeding the same
+/// solver double coordinates recovers 1e-6 almost always. Feature detectors
+/// produce float positions, so this is the precision the operation actually
+/// runs at.
 struct EssentialMatrix {
     double m[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 };
@@ -368,10 +368,10 @@ BINCV_HOST_DEVICE inline int eRealRoots(const double* c, int degree, double* out
 /// @brief Stack the five-point solver uses for one call, in bytes.
 /// @note **API TIER 3** -- OpenCV has nothing to report here because it allocates.
 /// This is the number that decides whether the solver fits on a small part.
-/// @note **MEASURED, NOT ADDED UP.** An earlier version of this function summed the
-/// sizes of the solver's arrays and returned 4 536 while the real frame was
-/// 6 240 -- a published budget that was 27% low, which is worse than no budget
-/// at all. The figure below comes from the compiler:
+/// @note **MEASURED, NOT ADDED UP.** Summing the sizes of the solver's arrays
+/// under-reports the frame -- the compiler's frame carries temporaries and
+/// alignment the arrays do not -- and a budget that is low is worse than no
+/// budget at all. The figure below comes from the compiler:
 ///
 /// g++ -std=c++17 -O2 -DNDEBUG -fstack-usage -c <a TU calling it>
 /// grep fivePointEssential *.su
@@ -380,7 +380,7 @@ BINCV_HOST_DEVICE inline int eRealRoots(const double* c, int degree, double* out
 /// margin, not the exact frame, because the frame moves with the compiler
 /// and the optimisation level.
 inline constexpr size_t essentialSolverStackBytes() {
-    return 5376;  // measured 5 136 with g++ 11.4 at -O2, rounded up
+    return 5376;  // measured 5136 B with g++ 11.4 at -O2 on x86-64, rounded up
 }
 
 /// @brief Up to ten essential matrices through five correspondences.

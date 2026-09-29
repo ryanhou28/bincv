@@ -1,5 +1,5 @@
-// The minimum-eigenvalue corner response and the good-features selection
-// -- ops/corner.hpp.
+// The minimum-eigenvalue corner response and the good-features selection of
+// ops/corner.hpp.
 //
 // WHAT THIS SUITE HAS TO STAND BEHIND, GIVEN THAT NOTHING HERE IS BIT-EXACT
 // AGAINST OPENCV
@@ -10,6 +10,8 @@
 // filter over float Sobel outputs. There is therefore no cv:: denominator to be
 // bit-exact against and no Tier 1 promise anywhere in the file. Four things stand
 // in its place, and each is a different kind of evidence:
+// (The reference pipeline is the visual-inertial odometry system, not in this
+// repository, that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md.)
 //
 // 1. A PER-PIXEL REFERENCE FOR THE RESPONSE MAP, written before the kernel and
 // sharing no code with it: it reads each ternary value as a float in
@@ -186,8 +188,8 @@ using bincv::TernaryMat;
 // packed at all four word types and the maps compared bit for bit.
 // ---------------------------------------------------------------------------
 
-// Taller than the largest block size, and pinned. shipped a suite whose
-// frame was shorter than two of its three window sizes, so every swept position
+// Taller than the largest block size, and pinned. An earlier suite had a frame
+// shorter than two of its three window sizes, so every swept position
 // of the two largest windows was clipped and nothing ever reduced a full window.
 // The same mistake is available here and these two lines are what prevent it.
 constexpr int kMaxBlockSize = 31;
@@ -1005,8 +1007,8 @@ BINCV_TEST(Corner, SelectionOrder_PinsNmsBeforeDistance) {
 // ---------------------------------------------------------------------------
 // 5b. THE TIE ORDER, PINNED IN ISOLATION AND IN THE DIRECTION THE REFERENCE SORTS
 //
-// REGRESSION. `impl::CornerStronger` used to break ties by ASCENDING raster order,
-// which is the exact reverse of gftt.cpp's. The reference sorts pointers into the
+// REGRESSION. Breaking ties by ASCENDING raster order is the exact reverse of
+// gftt.cpp's. The reference sorts pointers into the
 // `eig` map with `greaterThanPtr`, whose third arm is `(a > b)` on the ADDRESSES --
 // a strict total order in which a LATER raster position wins a tie. Nothing in the
 // suite caught the inversion, because the oracle in this file was a copy of the

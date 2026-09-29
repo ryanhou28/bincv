@@ -38,7 +38,7 @@
 // the scoring.
 //
 // THE GATES, in order, each able to end the work.
-//   G0  AMDAHL. Geometry's share of binCV pipeline total on this host bounds
+//   G0  AMDAHL. Geometry's share of binCV pipeline total on the reference host bounds
 //       an infinitely fast device stage at total/(total-geometry). KILL if that
 //       ceiling does not clear the host arm's own measured spread here.
 //   G1  WHERE THE PER-HYPOTHESIS COST IS. If scoring is fraction f of a
@@ -48,8 +48,8 @@
 //   G2  FEASIBILITY, AND WHICH KIND OF M4 THIS IS. If fivePointEssential
 //       compiles for the device through BINCV_HOST_DEVICE, M4 stays "one
 //       implementation, two targets". If it must be forked, M4 becomes a second
-//       FP64 elimination to keep correct forever, which is a STOP AND ASK
-//       before a kernel is written.
+//       FP64 elimination to keep correct forever, which is a decision no
+//       measurement settles and is asked before a kernel is written.
 //   G3  THROUGHPUT, THE CONTINUE BAR, stated as a formula and not at a chosen H.
 //       The host runs I adaptive iterations; a device round covers H and costs
 //       one synchronize, so covering the same search needs
@@ -61,7 +61,7 @@
 //       must not exceed the host arm's scratch + solver frame + points.
 //   G5  QUALITY (M3). The device must not find a weaker consensus.
 //
-// THE SHIP BAR IS DELIBERATELY BLANK AND IS A STOP-AND-ASK. How much M1 stage
+// THE SHIP BAR IS DELIBERATELY BLANK, AND IS A DECISION FOR A PERSON. How much M1 stage
 // speedup justifies a permanent hand-written FP64 device path is a judgement
 // about what this library wants to own; no measurement produces it, and
 // inventing one would launder an arbitrary call through the write-it-first
@@ -111,7 +111,7 @@ using bincv::RansacParams;
 using bincv::RansacResult;
 namespace probe = cudabench::ransacprobe;
 
-// The pipeline's own operating point, re-measured on this host rather than
+// The pipeline's own operating point, re-measured on the reference host rather than
 // inherited: examples/slam_frontend on EuRoC V1_02 at 752x480, budget 500
 // keypoints over four levels, gated matcher at window 48 / ratio 75, reports
 // 140.6 ratio-test accepts per frame at a 77.5% inlier rate and 21 adaptive
@@ -347,8 +347,8 @@ int main() {
     std::printf(" f = scoring/(solver+scoring) %8.4f\n", split.f);
     std::printf(" 1/(1-f)                      %8.4fx  <-- the CEILING on a\n"
                 "   scoring-only device arm, at INFINITE device speed. This is the\n"
-                "   split cv::cuda::solvePnPRansac chose, and it is the one issue\n"
-                "   #61 proposes; the ceiling is what decides it, not the kernel.\n",
+                "   split cv::cuda::solvePnPRansac chose, and it is the one a device\n"
+                "   stage would take; the ceiling is what decides it, not the kernel.\n",
                 1.0 / (1.0 - split.f));
 
     // -----------------------------------------------------------------------
@@ -357,7 +357,7 @@ int main() {
     std::printf("\n--- G3: a device round against the host's adaptive search ---\n");
     std::printf(" Both arms on ONE EXPLICIT STREAM. The device arm's measurement\n"
                 " INCLUDES the round trip: correspondences up, key down, one\n"
-                " synchronize -- the question issue #61 actually asks.\n");
+                " synchronize -- the question a device geometry stage actually poses.\n");
 
     Point2f* dFrom = nullptr;
     Point2f* dTo = nullptr;

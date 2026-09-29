@@ -18,9 +18,9 @@
 // configuration deltas (which the synthetic harness does not), while staying
 // cheap enough to sweep with? Measured: it does -- on the axis where the
 // synthetic harness said -0.42 and the pipeline said -4.60, this said -7.24 --
-// and the owner ADOPTED it (2026-09-11): this harness may guide ladder/filter
-// accuracy decisions, with a full pipeline run remaining the final gate before
-// any shipped default changes. The synthetic harness stays restricted to
+// and it was adopted: this harness guides ladder/filter accuracy decisions,
+// with a full pipeline run remaining the final gate before any shipped default
+// changes. The synthetic harness stays restricted to
 // sensitivity questions.
 //
 // Yield here is: of the keypoints BOTH trackers report tracked, the fraction
@@ -220,8 +220,8 @@ int main(int argc, char** argv) {
                     cfg.name, y, y - anchor, cfg.total.both);
     }
     std::printf("\n whole sweep: %.1f s for six configurations -- the price of a harness\n"
-                " that tracks real pairs. Adopted for ladder/filter DIRECTION decisions\n"
-                " (owner, 2026-09-11); a full pipeline run remains the final gate before\n"
+                " that tracks real pairs. Adopted for ladder/filter DIRECTION decisions;\n"
+                " a full pipeline run remains the final gate before\n"
                 " a shipped default changes, and the synthetic harness answers only\n"
                 " sensitivity questions.\n",
                 secs);

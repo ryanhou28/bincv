@@ -2,9 +2,9 @@
 # prove the kernel set composes into something a real pipeline shape can use.
 #
 # NOT gated on OpenCV. The core-only build is the configuration the whole memory
-# argument rests on, and this directory used to be skipped there -- so the one
-# thing a reader could RUN to check the embedded claim needed the dependency the
-# claim is about not needing. vio_frontend now builds in every configuration: its
+# argument rests on, and skipping this directory there would mean the one thing
+# a reader can RUN to check the embedded claim needs the dependency the claim is
+# about not needing. vio_frontend builds in every configuration: its
 # OpenCV pieces (cv::imread over a directory, the cv:: sensor arm) sit behind
 # BINCV_WITH_OPENCV inside the one file, and the core-only build reads frames
 # from a sequence blob (scripts/make_sequence_blob.py) and runs binCV's own

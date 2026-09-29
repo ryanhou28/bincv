@@ -4,8 +4,7 @@
 /// @brief The binarized spatial derivative, `[-1, 0, 1]` on both axes.
 /// **API TIER 3** -- see the tier note below.
 ///
-/// The first operation in the project whose output is a MULTI-PLANE SIGNED image,
-/// and therefore the first real exercise of `SignedQuantMat` / `TernaryMat`,
+/// Its output is a MULTI-PLANE SIGNED image -- `SignedQuantMat` / `TernaryMat`,
 /// which carry a signed value as sign-magnitude rather than two's complement.
 /// What it produces is what ops/covariance.hpp's LK gradient covariance
 /// consumes, so the two planes it writes -- a magnitude stack and a sign
@@ -16,7 +15,9 @@
 /// ---------------------------------------------------------------------------
 /// THE OPERATION, READ OUT OF THE REFERENCE RATHER THAN INFERRED
 ///
-/// the reference pipeline's gradient stage, `calcBinarizedDeriv`:
+/// The gradient stage of the reference pipeline (the visual-inertial odometry
+/// system, not in this repository, that binCV was built to serve stage by stage;
+/// see docs/ARCHITECTURE.md), in its own OpenCV spelling:
 ///
 /// cv::Mat kernelX = (cv::Mat_<int>(1, 3) << -1, 0, 1);
 /// cv::Mat kernelY = (cv::Mat_<int>(3, 1) << -1, 0, 1);
@@ -88,8 +89,8 @@
 /// result by 16 into `CV_16S`, so its derivative takes the values
 /// {-4080, 0, +4080}. binCV stores the same picture as {0, 1} at one bit per
 /// pixel, so its derivative is {-1, 0, +1} -- the same sign and the same
-/// zero/non-zero structure, scaled by 4080. Everything downstream in the MVP
-/// reads sign and magnitude and nothing else: the LK covariance is
+/// zero/non-zero structure, scaled by 4080. Everything downstream reads sign
+/// and magnitude and nothing else: the LK covariance is
 /// three population counts over masks, and a common positive factor multiplies
 /// every entry of the 2x2 matrix identically, leaving eigenvector directions and
 /// the min-eigenvalue ORDERING that ops/corner.hpp selects on unchanged. Reproducing 4080
@@ -127,9 +128,10 @@
 /// ---------------------------------------------------------------------------
 /// LEVEL >= 1: AN N-BIT SOURCE, AND WHY THE COST IS LINEAR IN N
 ///
-/// Above level 0 the pyramid is not binary -- distinct values grow 2 -> 5 -> 15
-/// -> 26 across levels 0..3, i.e. 1 -> 3 -> 4 -> 5 bits -- so
-/// the derivative is a bit-sliced subtraction of the two shifted N-bit planes.
+/// Above level 0 the pyramid is not binary -- on the reference pipeline's frames,
+/// distinct values grow 2 -> 5 -> 15 -> 26 across levels 0..3, i.e. 1 -> 3 -> 4
+/// -> 5 bits -- so the derivative is a bit-sliced subtraction of the two shifted
+/// N-bit planes.
 /// Its range is [-(2^N - 1), +(2^N - 1)], which is exactly `SignedQuantMat<N>`:
 /// N magnitude planes and one sign plane, N+1 planes in all.
 ///
@@ -147,8 +149,8 @@
 /// is the same one rejected for the box sum -- replicate each N-bit operand
 /// into unary and feed ops/bitslice.hpp's single-bit adder network -- and it costs
 /// `derivativeReplicatedInputs(N) == 2 * (2^N - 1)` single-bit inputs: 2 at N = 1,
-/// but 30 at N = 4 and 62 at N = 5, which are the levels the reference pyramid
-/// actually reaches. It is not implemented here, and the two constants sit next to
+/// but 30 at N = 4 and 62 at N = 5, which are the depths a box-filter pyramid of
+/// the reference pipeline's frames reaches. It is not implemented here, and the two constants sit next to
 /// each other so the claim is a number a test can assert rather than a sentence.
 ///
 /// **Ternary is the N = 1 instance of this, not a separate operation**, which is
@@ -166,9 +168,9 @@
 /// adder-class stages per destination word, approaching 2x at large N. That is
 /// the price of the LK covariance being three population counts over
 /// masks instead of a bit-sliced multiply, and that covariance runs 31x31 times
-/// per keypoint while this runs once per pixel. The trade is recorded, not measured:
-/// no experiment has priced the two-complement alternative end to end, because
-/// nothing in the MVP would consume it.
+/// per keypoint while this runs once per pixel. The trade is stated, not measured:
+/// nothing downstream consumes a two's-complement derivative, so the alternative
+/// has not been priced end to end.
 ///
 /// ---------------------------------------------------------------------------
 /// THE CANONICAL-ZERO RULE HOLDS BY CONSTRUCTION, NOT BY A FIX-UP PASS
@@ -198,8 +200,8 @@
 /// 2. **NO SCRATCH AND NO ALLOCATION**, and this is a choice with a footprint
 /// behind it. Written as the composition it is defined as -- two calls into
 /// ops/shift.hpp and then the mask -- each axis needs 2N FRAME-SIZED
-/// temporaries, which a kernel may not conjure (CLAUDE.md) and which would
-/// therefore become caller-provided scratch on the signature. At 640x480,
+/// temporaries, which a kernel may not conjure and which would therefore
+/// become caller-provided scratch on the signature. At 640x480,
 /// uint32_t, N = 1, that is 2 x 38400 B added to a 38400 B source and a
 /// 76800 B destination: the composed form's peak working set is **1.67x the
 /// fused form's FOR ONE AXIS** (5 planes against 3). The figure quoted
@@ -222,15 +224,14 @@
 /// move here too -- `cur >> 1` carries bit `width % WordBits` into pixel
 /// `width - 1` -- but it lands on precisely the bit the right-border fixup
 /// overwrites a moment later, so a mask there is an operation no test can
-/// observe. That is measured, not argued, and both halves of the measurement
-/// are in the kernel: deleting the mask changes no result (48526 of 48526
-/// either way), deleting the fixup from the SHIPPED kernel fails 16772.
+/// observe: tests/test_derivative.cpp passes with or without it.
 ///
-/// THE TWO ARE COUPLED, AND THE COUPLING IS ITSELF MEASURED. Deleting the
-/// fixup while the mask is still present fails 16744; deleting it from the
-/// shipped, unmasked kernel fails 16772. The 28-check gap is exactly
-/// Derivative.DirtyPadding*, and it is the proof that the mask is dead
-/// BECAUSE the fixup is there rather than dead outright.
+/// THE TWO ARE COUPLED, and the coupling is stated so it cannot be broken
+/// silently: the mask is dead BECAUSE the fixup is there, not dead outright.
+/// The last column's right tap is carried by the border fixup alone and the
+/// padding invariant by the store masks, and `Derivative.DirtyPadding*` --
+/// built on wrapped buffers whose padding is all ones -- is what fails if
+/// either is narrowed.
 /// 4. **Never throws.** Mismatched dimensions, a stride shorter than a row, an
 /// unknown BorderType and any overlap between a source plane and a
 /// destination plane are programming errors, reported by BINCV_ASSERT in
@@ -273,7 +274,7 @@
 /// agreement with `cv::filter2D` be exact at the edges as well as the interior.
 ///
 /// The two axes are also kept as two images rather than merged into one
-/// two-channel destination the way `calcBinarizedDeriv` does. `cv::merge` exists
+/// two-channel destination the way the reference's gradient stage does. `cv::merge` exists
 /// to feed OpenCV's interleaved-channel kernels; binCV's reductions read plane
 /// views, and interleaving would put every second word out of reach of a
 /// word-parallel popcount.
@@ -313,7 +314,7 @@ inline namespace BINCV_ABI_NAMESPACE {
 /// stages for the conditional two's-complement negate that turns the
 /// modular difference into a magnitude.
 /// @note Exists so that "linear in N" is a number rather than a claim in a
-/// comment, exactly as `impl::boxSumFullAdders` does for ops/bitslice.hpp's box sum.
+/// comment, exactly as `impl::boxSumFullAdders` does for ops/pyramid.hpp's box sum.
 /// Compare `derivativeReplicatedInputs(n)` beside it.
 constexpr size_t derivativeAdderStages(size_t n) { return 2 * n; }
 
@@ -324,14 +325,13 @@ constexpr size_t derivativeAdderStages(size_t n) { return 2 * n; }
 /// below that, so every real call is far inside it -- but this is a public
 /// `constexpr` taking a `size_t`, and `size_t{1} << 64` is undefined
 /// rather than ill-formed, so it would be UB at run time and a silently
-/// wrong constant at compile time. Measured with `-fsanitize=undefined`
-/// before the guard existed: `n = 64` gave "shift exponent 64 is too large"
-/// and returned 0, and `n = 100` returned 137438953470. The guard makes the
-/// function TOTAL: out of domain it saturates at `SIZE_MAX`, which is the
+/// wrong constant at compile time. Without the guard, `-fsanitize=undefined`
+/// reports "shift exponent 64 is too large" at `n = 64` (which returns 0),
+/// and `n = 100` returns 137438953470. The guard makes the function TOTAL: out of domain it saturates at `SIZE_MAX`, which is the
 /// only answer that keeps "the replication route is worse" true.
 /// @return `2 * (2^n - 1)`: 2 at n = 1, 30 at n = 4, 62 at n = 5, 510 at n = 8;
 /// `SIZE_MAX` out of domain.
-/// @note The same failure mode ops/bitslice.hpp's `impl::boxSum4ReplicatedInputs` names for
+/// @note The same failure mode ops/pyramid.hpp's `impl::boxSum4ReplicatedInputs` names for
 /// the box sum -- unary-encode each operand and hand the result to
 /// ops/bitslice.hpp's single-bit adder network. Kept next to
 /// `derivativeAdderStages` so the two can be printed side by side; the
@@ -582,30 +582,19 @@ inline void derivativeXRoute(const BinMatConstView<WordType> (&src)[N],
             WordType b[N];
 
             for (size_t p = 0; p < N; ++p) {
-                // THE SOURCE'S TRAILING WORD IS NOT MASKED, AND THAT IS MEASURED
-                // RATHER THAN ASSUMED. ops/denoise.hpp masks its own because
-                // `cur >> 1` moves bit `width % WordBits` -- PADDING, which a
-                // wrapped buffer's caller owns and may leave dirty -- into pixel
-                // `width - 1`. The same movement happens here, and it lands on
-                // exactly the bit the right-border fixup below overwrites: with
-                // `width = kB + r` and `r != 0`, the leak arrives at bit r - 1 and
-                // `lastLiveBit` IS bit (width - 1) % B == r - 1. At r == 0 the mask
-                // is a no-op anyway. So it is dead. Measured: deleting it changes
-                // nothing -- 48526 of 48526 checks pass either way, in every
-                // configuration, INCLUDING Derivative.DirtyPadding1_* /
-                // DirtyPadding3_*, which are built on wrapped buffers whose padding
-                // is all ones. Deleting the FIXUP from this kernel as it stands
-                // instead fails 16772 of them -- and with the mask restored it
-                // fails only 16744. Those 28 checks are DirtyPadding cases, and
-                // they are what "the mask is dead BECAUSE the fixup is there"
-                // means as a number: remove the fixup and the mask stops being
-                // dead in the same instant.
-                //
-                // The coupling that creates is stated so it cannot be broken
-                // silently: in this kernel the last column's right tap is carried
-                // by the border fixup alone, and the padding invariant by
-                // the store masks below. Anything that narrows the fixup must
-                // re-establish both explicitly rather than assume they survived.
+                // THE SOURCE'S TRAILING WORD IS NOT MASKED. ops/denoise.hpp masks
+                // its own because `cur >> 1` moves bit `width % WordBits` --
+                // PADDING, which a wrapped buffer's caller owns and may leave dirty
+                // -- into pixel `width - 1`. The same movement happens here, and it
+                // lands on exactly the bit the right-border fixup below overwrites:
+                // with `width = kB + r` and `r != 0`, the leak arrives at bit r - 1
+                // and `lastLiveBit` IS bit (width - 1) % B == r - 1. At r == 0 the
+                // mask is a no-op anyway. So it is dead -- BECAUSE the fixup is
+                // there, which is the coupling the file header states: the last
+                // column's right tap is carried by the border fixup alone, and the
+                // padding invariant by the store masks below. Anything that
+                // narrows the fixup must re-establish both explicitly rather than
+                // assume they survived; Derivative.DirtyPadding* is what fails.
                 const WordType cur = srcRow[p][i];
                 // Bit 0 of word i+1 is pixel (i+1)*WordBits, which is inside
                 // `width` for every i that has a successor, so it needs no mask.

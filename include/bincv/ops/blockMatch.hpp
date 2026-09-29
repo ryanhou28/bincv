@@ -1,22 +1,24 @@
 #pragma once
 
 /// @file blockMatch.hpp
-/// @brief Route (a): fully bit-parallel keypoint tracking by Hamming block
-/// matching over bit-packed frames. **API TIER 3** -- no
-/// OpenCV equivalent, so it borrows no OpenCV name.
+/// @brief Keypoint tracking by integer Hamming block matching over bit-packed
+/// frames. **API TIER 3** -- no OpenCV equivalent. The name follows
+/// `calcOpticalFlowPyrLK`'s shape because it fills the same slot in a
+/// pipeline, not because OpenCV has this operation.
 ///
-/// There are TWO routes for tracking on
-/// binary frames and only route (b) had ever been built. This is route (a).
+/// There are two ways to track keypoints on binary frames: Lucas-Kanade over
+/// binarized derivatives (ops/opticalFlow.hpp, "the LK tracker" below) and the
+/// block matching here. This file is the second, built so the two can be
+/// compared.
 ///
-/// **SCOPE, BECAUSE [CLAUDE.md](../../../CLAUDE.md) PUTS TEMPLATE MATCHING OUT OF
-/// SCOPE.** It does, as an *operation*: `cv::matchTemplate` is deliberately absent
-/// and stays absent. This is not that. It is an internal tracker search the design
-/// notes name in section 7.9, and it exposes no
-/// template-matching API -- the entry point takes keypoints and returns tracked
-/// keypoints, exactly as `calcOpticalFlowPyrLK` does.
+/// **SCOPE.** `cv::matchTemplate` is deliberately absent from binCV and stays
+/// absent: template matching as an OPERATION is out of scope (docs/ARCHITECTURE.md,
+/// section 7). This is not that. It is a tracker's internal search, and it
+/// exposes no template-matching API -- the entry point takes keypoints and
+/// returns tracked keypoints, exactly as `calcOpticalFlowPyrLK` does.
 ///
 /// ===========================================================================
-/// WHAT IT IS, AND WHAT IT COSTS AND SAVES AGAINST ROUTE (b)
+/// WHAT IT IS, AND WHAT IT COSTS AND SAVES AGAINST THE LK TRACKER
 /// ===========================================================================
 /// For each keypoint, take the previous frame's window and slide it over the next
 /// frame at INTEGER displacements, scoring each by Hamming distance. On bit-packed
@@ -25,9 +27,10 @@
 /// floating-point operation inside the search**.
 ///
 /// * **IT NEEDS NO DERIVATIVE, AND THAT IS A FOOTPRINT RESULT, NOT A DETAIL.**
-/// Route (b) carries two `SignedQuantMat` ladders -- `2(N+1)` planes per level
-/// on top of the two frames. Route (a) carries the two frames and nothing else.
-/// * **Its cost is `O(R²)` per level where route (b)'s is `O(iterations)`.** The
+/// The LK tracker carries two `SignedQuantMat` pyramids -- `2(N+1)` planes per
+/// level on top of the two frames. Block matching carries the two frames and
+/// nothing else.
+/// * **Its cost is `O(R²)` per level where the LK tracker's is `O(iterations)`.** The
 /// search radius is the whole cost story, and the benchmark sweeps it.
 /// * **Its accuracy floor is derivable and is stated before any measurement**:
 /// a whole-pixel matcher returns `round(d)`, so on a translation with
@@ -35,12 +38,12 @@
 /// `q` uniform is **0.2887 px per axis and 0.408 px over two**. `subPixel`
 /// below is what addresses that, and it is the only part of this file that is
 /// not integer arithmetic.
-/// * **It is a ONE-BIT algorithm.** Hamming distance is defined on bits. Route
-/// (b) does better on a `1/2/2/2` ladder than on `1/1/1/1`, and route (a)
-/// cannot enter that
-/// comparison without an N-bit cost function. The benchmark reports both the same-ladder
-/// comparison (the algorithm question) and the best-ladder one (the practical
-/// question) rather than picking whichever flatters route (a).
+/// * **It is a ONE-BIT algorithm.** Hamming distance is defined on bits. The LK
+/// tracker does better on a 1/2/2/2-bit pyramid than on 1/1/1/1, and block
+/// matching cannot enter that comparison without an N-bit cost function. The
+/// benchmark reports both the same-depth comparison (the algorithm question)
+/// and the best-depth one (the practical question) rather than picking
+/// whichever flatters block matching.
 ///
 /// ===========================================================================
 /// CONTRACTS -- the same ones ops/opticalFlow.hpp carries
@@ -53,7 +56,7 @@
 /// * **Never throws.** A track that fails reports `status[i] == 0`.
 /// * **Windows clip at the frame edge** and next-frame reads outside the level
 /// **replicate**, through the same `impl::clipRegion` and
-/// `impl::ReplicatedShiftedRow` route (b) uses -- so the two routes differ in
+/// `impl::ReplicatedShiftedRow` the LK tracker uses -- so the two differ in
 /// the SEARCH and in nothing else, which is what makes a comparison.
 
 #include <cmath>
@@ -65,7 +68,7 @@
 #include "../core/view.hpp"
 #include "../impl/kernel_util.hpp"
 // Point2f, impl::displacedRow, impl::ReplicatedShiftedRow, impl::floorToLL --
-// route (a) reuses route (b)'s tap machinery deliberately. Two implementations of
+// block matching reuses the LK tracker's tap machinery deliberately. Two implementations of
 // "read the next frame displaced by (dx, dy) with a replicate border" is how two
 // border behaviors happen, and the comparison would then not be one.
 #include "opticalFlow.hpp"
@@ -74,7 +77,7 @@
 namespace bincv {
 inline namespace BINCV_ABI_NAMESPACE {
 
-/// @brief Search and window parameters for `calcOpticalFlowBlockMatch`.
+/// @brief Search and window parameters for `calcOpticalFlowBlockMatch`. **API TIER 3.**
 struct BlockMatchParams {
     int winWidth = 31;   ///< window width in pixels, > 2
     int winHeight = 31;  ///< window height in pixels, > 2
@@ -95,8 +98,9 @@ struct BlockMatchParams {
     bool subPixel = true;
 };
 
-/// @brief One pyramid level for route (a): both frames, and **no derivative**.
-/// @note Deliberately not `LKLevel`. Route (a) never forms a gradient, and a level
+/// @brief One pyramid level for block matching: both frames, and **no derivative**.
+/// **API TIER 3.**
+/// @note Deliberately not `LKLevel`. Block matching never forms a gradient, and a level
 /// type that carried four unused planes would misstate the footprint this
 /// operation is partly being measured on.
 template <typename WordType>
@@ -124,7 +128,7 @@ namespace impl {
 /// displaced by `(tapX, tapY)`. **INTERNAL.**
 /// @return `sum over the window of popcount(prev ^ nextDisplaced)`.
 /// @note One XOR and one popcount per word -- the cheapest per-word body in the
-/// library, and the entire reason route (a) exists as a candidate.
+/// library, and the entire reason block matching exists as a candidate.
 template <typename WordType>
 inline long long hammingAt(const BlockMatchLevel<WordType>& lv, const RegionWords<WordType>& r,
                            long long tapX, long long tapY) {
@@ -173,12 +177,12 @@ BINCV_HOST_DEVICE inline double parabolicOffset(long long cm, long long c0, long
 /// @param pointCount Number of keypoints.
 /// @param params Window, search radius and sub-pixel refinement.
 ///
-/// @note Coarse to fine over the same ladder route (b) uses: the displacement found
+/// @note Coarse to fine over the same pyramid the LK tracker uses: the displacement found
 /// at a level is DOUBLED into the next one and refined there, so a radius of
 /// `R` over `L` levels reaches `R * (2^L - 1)` pixels.
-/// @note **The previous window sits on the integer grid**, exactly as in route (b)
-/// (deviation (i)), and for the same reason -- so that the two routes see the
-/// same aperture and the comparison is of the search.
+/// @note **The previous window sits on the integer grid**, exactly as in the LK
+/// tracker, and for the same reason -- so that the two see the same aperture
+/// and the comparison is of the search.
 /// @note **No allocation, no scratch, no throw.**
 template <typename WordType>
 inline void calcOpticalFlowBlockMatch(const BlockMatchLevel<WordType>* levels, size_t levelCount,
@@ -211,9 +215,9 @@ inline void calcOpticalFlowBlockMatch(const BlockMatchLevel<WordType>* levels, s
     const float halfWinY = static_cast<float>(winH - 1) * 0.5f;
     const long long radius = static_cast<long long>(params.searchRadius);
 
-    // The same pyramid cap route (b) applies (deviation (vi)), through the same
-    // rule -- a level at or below the window size gives every point nearly the
-    // same window and therefore nearly the same answer.
+    // The same pyramid cap the LK tracker applies, through the same rule -- a
+    // level at or below the window size gives every point nearly the same
+    // window and therefore nearly the same answer.
     size_t usableLevels = 1;
     while (usableLevels < levelCount &&
            levels[usableLevels].width() > static_cast<size_t>(winW) &&
@@ -256,7 +260,7 @@ inline void calcOpticalFlowBlockMatch(const BlockMatchLevel<WordType>* levels, s
             }
 
             // THE SEARCH. A running minimum, not a cost surface -- see CONTRACTS.
-            // Ties keep the FIRST candidate in scan order, and the scan is centerd,
+            // Ties keep the FIRST candidate in scan order, and the scan is centered,
             // so a flat plateau resolves to its top-left rather than drifting with
             // the previous estimate.
             long long bestCost = -1;

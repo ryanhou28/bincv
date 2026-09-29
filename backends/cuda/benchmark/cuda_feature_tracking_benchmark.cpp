@@ -9,7 +9,7 @@
 // exists only when an OpenCV is pointed at is one the gate tries to build on
 // every machine that has not built one. Without that OpenCV this binary still
 // runs and still says something true: it reports the role bars as UNMEASURED and
-// the verdicts that depend on them as BLOCKED.
+// the results that depend on them as unmeasured.
 //
 // THE MEASUREMENT PROTOCOL, and every clause of it is a correction to something
 // that went wrong before:
@@ -188,20 +188,20 @@ void rule() {
 "          collected 1.50x on x86 and 2.37x on aarch64, so no number between 1.0\n"
 "          and 32 is derivable from the instruction ratio. WHAT RATIO SHIPS THE\n"
 "          FAST CLAIM UNQUALIFIED IS A JUDGEMENT NOBODY HAS MADE: it is an\n"
-"          explicit STOP AND ASK, not a number filled in here.\n"
+"          explicitly left unset, not a number filled in here.\n"
 "   MEMORY *** THE DESIGN'S '>= 3.0x smaller' IS DELETED. *** Nothing derived 3.0\n"
 "          and no identified failure mode lands there. In its place, two things\n"
 "          that are actually checkable: (a) the INPUT-IMAGE component must measure\n"
 "          8x smaller, which is true by construction and whose failure means the\n"
 "          upload path is materialising bytes it should not; (b) the whole\n"
 "          working set is REPORTED at each capacity with NO pass/fail number.\n"
-"          The sentence that used to stand here -- that the per-corner record\n"
-"          ratio is fixed by the host FastCorner struct at 16 B -- was WRONG and\n"
-"          was costing 4 bytes a corner: the device record carries the bit-plane\n"
-"          score, whose whole attainable range is an arc length in [1, 16], so it\n"
-"          is 12 B and the host type widens it back on the way out. What is left\n"
-"          fixed is the CAPACITY the caller chooses, which is the caller's.\n"
-"          A ship gate on (b) is the owner's to set.\n"
+"          The per-corner record is NOT fixed by the host FastCorner struct at\n"
+"          16 B, and assuming so would cost 4 bytes a corner: the device record\n"
+"          carries the bit-plane score, whose whole attainable range is an arc\n"
+"          length in [1, 16], so it is 12 B and the host type widens it back on\n"
+"          the way out. What is left fixed is the CAPACITY the caller chooses,\n"
+"          which is the caller's.\n"
+"          A ship gate on (b) is a judgement nobody has made.\n"
 "\n"
 " OP2  goodFeaturesToTrackAsync.  Role bar: cv::cuda::createGoodFeaturesToTrack\n"
 "      Detector(CV_8UC1, 200, 0.01, 33.333, 3, useHarris=false) over\n"
@@ -209,18 +209,15 @@ void rule() {
 "      binarized [-1,0,1] taps against a Sobel over bytes.\n"
 "   GATE   byte-identical Corner arrays and an identical result triple against\n"
 "          the host's goodFeaturesToTrackStreaming (the suite).\n"
-"   SPEED  *** NOT WRITABLE. STOP AND ASK. *** The design wrote '>= 1.00x' and\n"
-"          then flagged the same number as unruled in its own open questions,\n"
-"          which is exactly the laundering CLAUDE.md names -- and its stated\n"
-"          derivation imports a HOST CPU-vs-CPU ratio against\n"
-"          cv::goodFeaturesToTrack to set a GPU-vs-GPU bar, which it cannot do.\n"
-"          (The two host figures it quoted have since been re-measured and were\n"
-"          both wrong, which is a second reason not to import them, not the\n"
-"          first.) What the owner is asked: this is the pipeline's entry\n"
-"          point; the fused arm's claim is the ABSENCE of every frame-sized\n"
-"          intermediate; what speed result against cudaimgproc's detector ships\n"
-"          it, and what result sends it back to be optimized? Until that ruling\n"
-"          exists the ratio below is REPORTED and the verdict is PENDING.\n"
+"   SPEED  *** NO MAGNITUDE IS SET, AND NONE IS INVENTED HERE. *** A bar of\n"
+"          '>= 1.00x' derived from a HOST CPU-vs-CPU ratio against\n"
+"          cv::goodFeaturesToTrack cannot set a GPU-vs-GPU bar, and a bar that\n"
+"          came from nowhere makes an arbitrary judgement look derived. The\n"
+"          open question: this is the pipeline's entry point; the fused arm's\n"
+"          claim is the ABSENCE of every frame-sized intermediate; what speed\n"
+"          result against cudaimgproc's detector ships it, and what result\n"
+"          sends it back to be optimized? Until that magnitude is set the\n"
+"          ratio below is REPORTED and no pass/fail is printed.\n"
 "   PROTOCOL  settled before measuring, because without it the ratio is\n"
 "          unarguable in either direction. VERIFIED in the module source:\n"
 "          cv::cuda::GoodFeaturesToTrackDetector::detect DOWNLOADS its sorted\n"
@@ -245,14 +242,14 @@ void rule() {
 "          percentage: performance and footprint are co-equal, and when they\n"
 "          conflict with no explicit choice made, MEMORY WINS. So if the fused\n"
 "          arm is not slower than the reference arm, the fused arm ships. If the\n"
-"          fused arm is SLOWER and the reference arm would clear a bar the owner\n"
-"          has not set, the two goals genuinely conflict and that is a second\n"
-"          stop-and-ask, not a number to fill in.\n"
+"          fused arm is SLOWER and the reference arm would clear a bar nobody\n"
+"          has set, the two goals genuinely conflict and that is a second\n"
+"          unset magnitude, not a number to fill in.\n"
 "\n"
 " OP3  cornerSubPixAsync.  *** THERE IS NO cv::cuda COUNTERPART. *** Not in\n"
 "      cudaimgproc, cudafeatures2d, cudaarithm, cudawarping, cudafilters,\n"
-"      cudaoptflow or cudastereo. Ruling R2 applies: it ships on correctness,\n"
-"      memory and the host comparison, speed verdict recorded OUTSTANDING, and\n"
+"      cudaoptflow or cudastereo. It stands on correctness,\n"
+"      memory and the host comparison, no GPU speed comparison is possible, and\n"
 "      NO GPU-vs-GPU number is quoted or implied.\n"
 "   GATE   byte-identical Point2f arrays (exact float compare, no tolerance) and\n"
 "          identical {refined, singular, clamped, diverged} (the suite).\n"
@@ -730,8 +727,8 @@ const uint32_t kFastCapacity = 16384;
                     static_cast<double>(kWidth * kHeight * sizeof(float)) / (1024.0 * 1024.0),
                     arms.ratioMedian >= 1.0
                         ? "The fused arm is not slower, so the fused arm ships."
-                        : "The fused arm is SLOWER -- the two goals conflict and that is a "
-                          "STOP AND ASK.");
+                        : "The fused arm is SLOWER -- the two goals conflict and no "
+                          "measurement settles which wins.");
         bincv::cuda::impl::cornerFusedEnabled() = true;
 
         // THE MEMO ON THE WHOLE OPERATION, because a kernel ratio is not an
@@ -899,7 +896,7 @@ const uint32_t kFastCapacity = 16384;
     // OP3 -- cornerSubPix
     // -----------------------------------------------------------------------
     std::printf("----------------------------------------------------------------\n"
-                " OP3  cornerSubPixAsync -- NO cv::cuda COUNTERPART (ruling R2)\n"
+                " OP3  cornerSubPixAsync -- NO cv::cuda COUNTERPART\n"
                 "----------------------------------------------------------------\n");
 
     const uint32_t kSubPixCorners = 200;
@@ -1212,7 +1209,7 @@ const uint32_t kFastCapacity = 16384;
                     "cv::cuda::FastFeatureDetector (CV_8U, nms off)", fastRole, "kernel");
         std::printf("   ratio binCV/OpenCV (>1 means binCV is FASTER): %.2fx\n"
                     "   RULE: required >= 1.00x -> %s.  Whether a ratio above parity ships\n"
-                    "   the FAST claim UNQUALIFIED is the owner's to rule; this binary does\n"
+                    "   the FAST claim UNQUALIFIED is a judgement nobody has made; this binary does\n"
                     "   not invent that number.\n",
                     fastRole.ratioMedian,
                     fastRole.ratioMedian >= 1.0 ? "MET" : "MISSED");
@@ -1362,8 +1359,8 @@ const uint32_t kFastCapacity = 16384;
                         "   silently exclude that pass and flatter OpenCV. binCV's selection\n"
                         "   never leaves the device -- that residency has no OpenCV\n"
                         "   counterpart at all, and it is a claim in its own right.\n"
-                        "   ratio binCV/OpenCV: %.2fx.  VERDICT: PENDING AN OWNER RULING --\n"
-                        "   the speed bar for this op was NOT WRITABLE (see the rule above).\n",
+                        "   ratio binCV/OpenCV: %.2fx.  No speed bar is stated for this op\n"
+                        "   (see the rule above), so this is a figure, not a result.\n",
                         params.minDistance, gfttRole.ratioMedian);
             if (!gfttRole.separated()) {
                 std::printf("   (the two arms' sample RANGES overlap -- a fact, not the"
@@ -1415,18 +1412,18 @@ const uint32_t kFastCapacity = 16384;
         }
     }
 #else
-    std::printf(" OP1 detectFastAsync            role bar UNMEASURED -> verdict BLOCKED\n"
-                " OP2 goodFeaturesToTrackAsync   role bar UNMEASURED -> verdict BLOCKED\n"
+    std::printf(" OP1 detectFastAsync            role bar UNMEASURED in this build\n"
+                " OP2 goodFeaturesToTrackAsync   role bar UNMEASURED in this build\n"
                 "\n"
                 " This binary was built without an OpenCV carrying cudafeatures2d and\n"
-                " cudaimgproc, so the two role bars could not be run. Under the owner's\n"
-                " both-axes ship rule a missing role comparison is NOT a memory argument\n"
-                " that carries the op anyway: the verdict is BLOCKED, and no CPU number is\n"
+                " cudaimgproc, so the two role bars could not be run. Since an operation\n"
+                " ships only on both axes, a missing role comparison is NOT a memory argument\n"
+                " that carries the op anyway: the result is unmeasured, and no CPU number is\n"
                 " quoted in a GPU bar's place. Point -DBINCV_CUDA_OPENCV_DIR at such a\n"
                 " build to run them.\n\n");
 #endif
     std::printf(" OP3 cornerSubPixAsync          NO cv::cuda COUNTERPART EXISTS\n"
-                "                                -> speed verdict OUTSTANDING (ruling R2).\n"
+                "                                -> no GPU speed comparison is possible.\n"
                 "     It ships on correctness, memory and the ROUND-TRIP rule above. The\n"
                 "     host library's 13.70x against cv::cornerSubPix is a HOST result and\n"
                 "     is not restated here as a device claim.\n\n");

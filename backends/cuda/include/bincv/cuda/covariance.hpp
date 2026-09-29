@@ -26,16 +26,19 @@
 /// level.** OpenCV exposes no 2x2 gradient covariance: `cv::cuda::createHarrisCorner`
 /// and `cv::cuda::createMinEigenValCorner` compute a DENSE FLOAT CORNER RESPONSE
 /// *through* a covariance, which makes them the honest comparison for a composed
-/// corner operation and not for this one. So this operation's speed verdict is
-/// recorded OUTSTANDING rather than measured against a substitute bar.
+/// corner operation and not for this one. So this operation has no GPU-vs-GPU
+/// speed comparison -- none is possible -- and none is substituted.
 ///
 /// ---------------------------------------------------------------------------
 /// TWO SHAPES, AND THE BATCHED ONE IS THE POINT
 ///
-/// A launch is ~5-14 us on this host; a 31x31 window is ~62 word visits, i.e.
-/// nanoseconds of work. One launch per window is latency, not compute -- so the
-/// entry point a tracker uses takes the WHOLE keypoint set and issues ONE
-/// launch. The single-region form stays for a caller with one region (which may
+/// A launch is ~5-14 us on the reference host (an RTX 3070 Ti reached through
+/// WSL2); a 31x31 window is ~62 word visits, i.e. nanoseconds of work. One
+/// launch per window is latency, not compute -- so the entry point a
+/// keypoint-shaped caller uses takes the WHOLE window set and issues ONE
+/// launch. (The device LK tracker is not that caller: it forms its 2x2 from
+/// the window it already holds in lane registers; see opticalFlow.hpp.) The
+/// single-region form stays for a caller with one region (which may
 /// be a whole frame) and because the batch is held to it by test. This is the
 /// same division reduce.hpp makes, for the same measured reason.
 ///
@@ -86,21 +89,21 @@
 /// the switch says -- which is the case the benchmark uses as its gate-excluded
 /// control.
 ///
-/// **THE SPREAD, SAID AT THE NUMBER.** Every ratio above was taken on a WSL2
-/// host under concurrent load, where an empty kernel measures 103-5854% spread,
-/// and they are INDICATIVE. The arms' sample ranges overlap within most
-/// individual runs; what is reported is the consistency of the per-process
-/// medians across 7 processes, which is weaker evidence and is labelled as such.
-/// That is also why the losing arm is switched off rather than deleted: a
-/// serial pass has to be able to re-take the number that rejected it, and a
-/// deleted arm cannot be re-measured.
+/// **THE SPREAD, SAID AT THE NUMBER.** Every ratio above was taken on the
+/// reference host, a WSL2 desktop under concurrent load, where an empty kernel
+/// measures 103-5854% spread, and they are INDICATIVE: the arms' sample ranges
+/// overlap within most individual runs, and what is reported is the
+/// consistency of the per-process medians across 7 processes, which is weaker
+/// evidence and is labelled as such. That is also why the losing arm is
+/// switched off rather than deleted: the number that rejected it has to be
+/// re-takeable, and a deleted arm cannot be re-measured.
 ///
 /// ---------------------------------------------------------------------------
 /// NO SCRATCH, AND THE BUS CARRIES THE ANSWER RATHER THAN THE WORKINGS
 ///
 /// The selector `sign_x ^ sign_y` is XORed inside the word loop and never
-/// materialized as a plane -- the host's no-scratch trade, preserved, and
-/// CLAUDE.md's memory tiebreak with it. `~(s_x ^ s_y)` is never formed:
+/// materialized as a plane -- the host's no-scratch trade, preserved: memory
+/// wins an unforced conflict. `~(s_x ^ s_y)` is never formed:
 /// `whenClear` is `total - set`, which is also what keeps a trailing word's
 /// padding bits out of the count.
 ///
@@ -152,7 +155,8 @@ struct DeviceGradientCovariance {
 static_assert(sizeof(DeviceGradientCovariance) == 24,
               "a window's result is 24 bytes -- the figure the memory plan quotes");
 
-/// @brief The host spelling of a device result.
+/// @brief The host spelling of a device result. **API TIER 3** (host-side
+/// helper, no kernel).
 inline GradientCovariance toHost(const DeviceGradientCovariance& d) {
     GradientCovariance out;
     out.sumXX = static_cast<int64_t>(d.sumXX);
@@ -194,7 +198,9 @@ constexpr size_t covarianceMaxPlanes() { return 4; }
 // ---------------------------------------------------------------------------
 
 /// @brief One 2x2 gradient covariance per window, all in a single launch.
-/// **THE ENTRY POINT A TRACKER USES. API TIER 3.**
+/// **THE ENTRY POINT FOR A KEYPOINT-SHAPED CALLER. API TIER 3.** Bit-exact
+/// against the host `bincv::gradientCovariance` per window, at every N in the
+/// domain and on both arms, proven by test_cuda_derivcov.
 /// @param dxSigned,dySigned The two derivative blocks, `planes == N + 1`:
 /// magnitude 0..N-1 then the SIGN plane at index N. Exactly what this
 /// backend's `derivativeX` / `derivativeY` write, and byte-identical to the

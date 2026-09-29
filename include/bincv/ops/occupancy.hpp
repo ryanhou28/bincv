@@ -15,14 +15,11 @@
 /// `ops/corner.hpp`'s spacing filter does NOT do this. It spaces the corners of one
 /// detection against **each other**, which is `cv::goodFeaturesToTrack`'s job and all
 /// of it; the previous frame's tracks are not among its inputs and cannot be. The
-/// reference keeps the two apart the same way and supplies the second half
-/// separately -- `MaskedFeatureDetector::applyMinDistance(corners, prevCorners,
-/// maskRadius)`, called on every detect.
-///
-/// binCV had no second half, so `examples/vio_frontend.cpp` grew a private copy of
-/// one. That is the evidence this file is missing rather than an argument that it is:
-/// the library's own example could not do a normal pipeline's normal thing with the
-/// library's own operations.
+/// reference pipeline (the visual-inertial odometry system, not in this repository,
+/// that binCV was built to serve stage by stage; see docs/ARCHITECTURE.md) keeps the
+/// two apart the same way and supplies the second half separately -- its
+/// minimum-distance filter against the previous frame's tracks, called on every
+/// detect. `examples/vio_frontend.cpp` is the in-repo caller.
 ///
 /// ---------------------------------------------------------------------------
 /// TWO ARMS, AND WHICH ONE TO CALL IS A MEASUREMENT
@@ -37,8 +34,8 @@
 /// 640x480 with `uint32_t` words.
 ///
 /// **CALL `spaceCandidates`. THE BIT-PLANE ARM LOST, AND IT LOST BY AN ORDER OF
-/// MAGNITUDE.** fixed the rule before either arm existed and then measured both at
-/// the pipeline's own operating point -- 640x480, radius 32, 120 live tracks, 300
+/// MAGNITUDE.** The decision rule was written before either arm existed, and both
+/// were measured at the pipeline's own operating point -- 640x480, radius 32, 120 live tracks, 300
 /// candidates, 80 free slots:
 ///
 /// | | exhaustive | mask |
@@ -53,10 +50,9 @@
 /// **The reason is structural, not an unoptimized inner loop.** Stamping a disc touches
 /// pi*r^2 = 3 217 pixels to encode what the exhaustive arm consumes in ONE distance
 /// test per candidate -- and that test is vectorized eight-wide on AVX2 and four-wide
-/// on NEON, while a disc stamp is scalar per row. The pre-registration predicted a
-/// crossover near 100 candidates and was **wrong by a factor of about fifty**, because
-/// it counted the disc's word-writes and neither the per-row bound arithmetic nor the
-/// vector width on the other side.
+/// on NEON, while a disc stamp is scalar per row. Counting the disc's word-writes
+/// alone predicts a crossover near 100 candidates; the per-row bound arithmetic and
+/// the vector width on the other side move it by a factor of about fifty.
 ///
 /// The mask stays because the crossover is real and measured, not because it might be
 /// useful: a caller filtering thousands of candidates -- masking a response map before
@@ -114,8 +110,8 @@ namespace impl {
 /// @brief Force the portable distance loop, for the benchmark and the tests. **INTERNAL.**
 /// @note Not a tuning knob. It is how the vector arm is held to giving the SAME answer
 /// as the scalar one, and how a benchmark can show the vector arm is actually
-/// running -- shipped a vector block that a mis-attached `#define` had
-/// compiled out and measured three "improvements" against it.
+/// running: a vector block that a mis-attached `#define` compiles out still
+/// measures, as if it were there.
 inline bool& spacingSimdEnabled() {
     static bool on = true;
     return on;
@@ -209,7 +205,7 @@ inline bool anyWithin(const Point2f* pts, size_t count, float cx, float cy, floa
 
 /// @brief Sets bits `[x0, x1]` INCLUSIVE of one packed row. **INTERNAL.**
 /// @note The caller has already clamped both ends inside `[0, width)`, which is what
-/// keeps padding bits zero (CLAUDE.md's hard rule) without a masking pass: a
+/// keeps padding bits zero (the library's hard rule) without a masking pass: a
 /// disc never reaches past the last pixel of a row, so no word past `width` is
 /// ever touched.
 template <typename WordType>
@@ -249,12 +245,12 @@ inline void setBitRange(WordType* row, size_t x0, size_t x1) {
 /// @param live The points already being tracked. May be `nullptr` when `liveCount` is 0.
 /// @param liveCount Entries in `live`.
 /// @param radius Minimum separation, in pixels. **Rejection is `distance < radius`,
-/// strictly** -- the reference's comparison and `ops/corner.hpp`'s.
+/// strictly** -- the reference pipeline's comparison and `ops/corner.hpp`'s.
 /// @param limit Stop after keeping this many. Pass the number of free track slots.
 /// @return How many candidates were kept; they are `candidates[0, return)`.
 ///
 /// @note **`radius < 1` disables the filter entirely** and keeps the first `limit`
-/// candidates. That is `gftt.cpp`'s rule, reproduced because
+/// candidates. That is `cv::goodFeaturesToTrack`'s rule, reproduced because
 /// `GoodFeaturesParams::minDistance` documents the same one and a caller
 /// forwarding that field to this function must not get a different answer at
 /// 0.5 than `goodFeaturesToTrack` would.
@@ -424,8 +420,8 @@ inline bool occupied(BinMatConstView<WordType> mask, long long x, long long y) {
 /// point `spaceCandidates` is 26.6x faster on x86 and 7.7x on the reference
 /// device, and costs no memory against this arm's 38 400 B. The crossover is
 /// around 2 000 candidates on aarch64 and 5 000 on x86, so this arm is
-/// for a caller filtering THOUSANDS -- which a detection top-up is not.
-/// @see for the sweep and the memory cost.
+/// for a caller filtering THOUSANDS -- which a detection top-up is not. The table
+/// at the top of this file has the sweep and the memory cost.
 template <typename WordType>
 inline size_t spaceCandidatesMasked(BinMatView<WordType> mask, Point2f* candidates,
                                     size_t count, float radius, size_t limit) {
