@@ -14,7 +14,7 @@
 #
 # WHY A SECOND SCRIPT RATHER THAN A FLAG ON run_launches.sh. The same reason
 # the backend forks its kernels: what is SHARED here is the log's header --
-# `# benchmark:` and `# commit:` are the contract scripts/check_figure_staleness.py
+# `# benchmark:`, `# commit:` and `# sources:` are the contract scripts/check_figure_staleness.py
 # reads, and a second spelling of them would put a whole sweep outside the gate
 # without saying so. What is FORKED is the protocol, because almost none of the
 # host runner's applies. Its long argument is about what a LAUNCH pays once:
@@ -275,6 +275,9 @@ host_model() {
     echo "# kernel:   $(uname -r)"
     echo "# compiler: $(g++ --version 2>/dev/null | head -1)"
     echo "# commit:   $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null)$(git -C "$REPO_ROOT" diff --quiet 2>/dev/null || echo ' (dirty)')"
+    # The measured code, as content hashes -- what the staleness gate reads; the
+    # commit above is a note for a person (see run_launches.sh).
+    echo "# sources:  $(python3 "${SCRIPT_DIR}/check_figure_staleness.py" --stamp "$BENCH" 2>/dev/null || echo "(unmappable -- the gate could not resolve ${BENCH}; see check_figure_staleness.py --explain)")"
     echo "# device:   $(nvq name) (compute $(nvq compute_cap), $(nvq memory.total))"
     echo "# driver:   $(nvq driver_version), exposing CUDA $(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9.]*\).*/\1/p' | head -1)"
     echo "# nvcc:     ${NVCC}"

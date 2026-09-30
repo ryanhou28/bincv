@@ -71,7 +71,7 @@ stated decision rule.
 - **Report memory and speed together** — they trade off, so one alone cannot be weighed
   against goals that conflict.
 - **Commit the benchmark.** Every performance claim must be reproducible.
-- **A published figure names the commit it was taken at, and a change to the kernel
+- **A published figure records the code it was taken on, and a change to the kernel
   behind it re-takes it or marks it stale.** A figure is only true of the code it was
   measured on. `verify.sh` gates whether a kernel is CORRECT; **`check_figure_staleness.py`
   gates whether a number is still TRUE.** The two come apart exactly when an optimization
@@ -80,9 +80,13 @@ stated decision rule.
   `goodFeaturesToTrack` 18% faster on both architectures and left the reports publishing a
   LOSS the library did not have, for three weeks, while `features.md` carried a note saying
   the rows were stale. The note was not enough; only the stamp and the re-take are.
-  `scripts/run_launches.sh` records the commit in every log it writes, and the gate compares
-  that commit's code against the current tree — so a figure whose kernel moved now fails a
-  check instead of waiting for a reader to notice. Already-stale logs are listed in
+  `scripts/run_launches.sh` writes into every log a `# sources:` line — each first-party
+  file the benchmark measured, with a hash of its comment-stripped content — and the gate
+  compares those hashes against the current tree, so a figure whose kernel moved fails a
+  check instead of waiting for a reader to notice. The hashes live in the log rather than
+  in git because this repository squash-merges: the commit a sweep ran from is never on
+  `main`, so a log that named only the commit could be checked on one machine and no
+  other. The commit line is still written, as a note for a person. Already-stale logs are listed in
   `docs/reports/logs/expected-stale.txt` **with the files that moved under them**, so being
   listed does not excuse the next change to the same code.
 - **Pick the right baseline.** The bar for a new implementation is the best existing

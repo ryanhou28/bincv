@@ -6,6 +6,7 @@
 # kernel:   5.15.167.4-microsoft-standard-WSL2
 # compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
 # commit:   80ff0a8
+# sources:  benchmark/bitwidth_crossover.cpp=e29b2f89ce14 benchmark/crossover_sweep.sh=ee77a0fae81a benchmark/measure_util.hpp=7b35f7a51f9b include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=342aae906df4 include/bincv/impl/binMat_impl.hpp=f25f40f9b1d4 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/pyramid.hpp=b24cd24378a5 include/bincv/ops/resample.hpp=d0db5aee157f include/bincv/quantMat.hpp=9571cce97de6 (recorded as /tmp/claude-1000/-home-ryanhou28-bincv/9701f524-273f-42fa-95bb-f9794ea2112b/scratchpad/crossover_launch.sh; resolved as benchmark/crossover_sweep.sh)
 # governor: none (this host exposes no cpufreq)
 # pinning:  taskset -c 2
 # sleep between launches: 0s

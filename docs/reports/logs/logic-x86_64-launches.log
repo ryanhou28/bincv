@@ -6,6 +6,7 @@
 # kernel:   5.15.167.4-microsoft-standard-WSL2
 # compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
 # commit:   ac33cf1
+# sources:  benchmark/bench_util.hpp=531a431b8165 benchmark/logic_benchmark.cpp=0748273db337 include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=342aae906df4 include/bincv/impl/binMat_impl.hpp=f25f40f9b1d4 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/logic.hpp=bd14f7da7dc8 include/bincv/quantMat.hpp=9571cce97de6
 # governor: none (this host exposes no cpufreq)
 # pinning:  taskset -c 2
 # sleep between launches: 0s

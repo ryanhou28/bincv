@@ -13,12 +13,20 @@ and they are not interchangeable.
 | `<bench>-x86_64-launches-repeat.log` | a **second, independent** thirty-launch sweep of the same benchmark, taken on a deliberately busier machine before the figures were published. Two exist, for `logic` and `morphology`. |
 | `<bench>-cuda-launches.log` | **separate processes of one CUDA benchmark on the reference GPU**, written by `scripts/run_cuda_launches.sh`. Three are committed — `cuda_role-`, `cuda_role_lk-` and `cuda_sparse-x86_64-cuda-launches.log` — and the fourteen marked rows of [cuda.md](../cuda.md)'s speed table come from them. There is more than one because a benchmark measures what it measures: the Lucas-Kanade rows need a real frame sequence and refuse to synthesize one, and block matching is timed in the sparse family's own binary. The header contract is described below. |
 
-## Which commit a log names
+## What a log records about the code it measured
 
-`run_launches.sh` stamps each log with the commit it was taken at. Those are commits on the
-branch that did the measuring, and the branch was squash-merged, so the stamp itself is not
-reachable from `main`. This table maps each stamp to the commit on `main` that carries the
-same code and the log:
+Every log's header carries a `# sources:` line: each first-party file the benchmark
+measured — its own source, the units linked into it, and every first-party header they
+reach, with the backend's one link step — followed by a twelve-digit hash of that file's
+comment-stripped content at the moment of the run. `scripts/check_figure_staleness.py`
+compares those hashes against the working tree, so a log can be checked on any clone, and a
+comment edit under a figure does not age it. The `# commit:` line above it is a note for a
+person: this repository squash-merges, so that commit is never on `main`, and a log that
+named only the commit could be checked on the machine that took it and nowhere else. Logs
+older than the `# sources:` line were given one by `--backfill`, computed from the commit
+they stamp while it still existed locally.
+
+The stamps those older logs carry, and the commits on `main` that merged the same code:
 
 | log stamp | on `main` as | what the merge was |
 |---|---|---|
@@ -30,12 +38,12 @@ same code and the log:
 | `550d45a` | `cb995e7` | the bit-plane FAST gate read once per call |
 | `d13ea10`, `a8214de`, `9ab7325` | `77c46a0` | the RANSAC estimators |
 
-Logs taken on the pre-release branch (`b36dc73`, `211acaa`, `4c4b3bf`) name commits of that branch,
-reachable from `main` once it is merged.
+Logs taken on the pre-release branch (`b36dc73`, `211acaa`, `4c4b3bf`) name commits of that
+branch; their `# sources:` lines are what the gate reads, so nothing depends on where those
+commits end up.
 
-`scripts/check_figure_staleness.py` compares the code a log measured, at its stamp, against
-the current tree; `expected-stale.txt` lists the logs whose code has moved, with the argument
-for why each figure still holds.
+`expected-stale.txt` lists the logs whose measured code has moved, with the argument for why
+each figure still holds.
 
 ## The CUDA sweeps
 

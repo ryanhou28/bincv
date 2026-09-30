@@ -21,8 +21,9 @@ row whose binCV cell is the larger number is a row binCV lost, and it needs no m
 | [methodology-timing.md](methodology-timing.md) | how a difference between two timings is judged real — read before quoting a speed ratio |
 
 Raw output for every table is in [logs/](logs/): one file per benchmark per machine, each a
-sweep of separate process launches with the aggregate appended, and each stamped with the
-commit it was taken at ([logs/README.md](logs/README.md) maps those stamps to `main`).
+sweep of separate process launches with the aggregate appended, and each recording, in its
+header, a content hash of every first-party file it measured — so the staleness gate can
+check it on any clone without the commit it also names ([logs/README.md](logs/README.md)).
 Logs listed in [logs/expected-stale.txt](logs/expected-stale.txt) were taken before a
 change to the code beneath them; that file records which files moved and why each figure
 still stands, and a figure is re-taken rather than argued when it does not.

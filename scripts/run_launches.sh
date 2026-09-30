@@ -166,6 +166,12 @@ fi
     echo "# kernel:   $(uname -r)"
     echo "# compiler: $(g++ --version 2>/dev/null | head -1)"
     echo "# commit:   $(git -C "$(dirname "$0")" rev-parse --short HEAD 2>/dev/null)$(git -C "$(dirname "$0")" diff --quiet 2>/dev/null || echo ' (dirty)')"
+    # What was measured, as content hashes of every first-party file behind the
+    # benchmark. This is what check_figure_staleness.py reads: the commit above
+    # is a note for a person, and on a squash-merging repository it is not on
+    # main, so a log that named only the commit could not be checked anywhere
+    # but the machine that took it.
+    echo "# sources:  $(python3 "$(dirname "$0")/check_figure_staleness.py" --stamp "$BENCH" 2>/dev/null || echo "(unmappable -- the gate could not resolve ${BENCH}; see check_figure_staleness.py --explain)")"
     echo "# governor: ${GOV}"
     command -v vcgencmd >/dev/null 2>&1 && echo "# throttled before: $(vcgencmd get_throttled)"
     command -v vcgencmd >/dev/null 2>&1 && echo "# temp before: $(vcgencmd measure_temp)"

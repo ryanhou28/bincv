@@ -6,6 +6,7 @@
 # kernel:   5.15.167.4-microsoft-standard-WSL2
 # compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0
 # commit:   80ff0a8
+# sources:  benchmark/dense_opencv_benchmark.cpp=a96944692419 benchmark/measure_util.hpp=7b35f7a51f9b include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=342aae906df4 include/bincv/impl/binMat_impl.hpp=f25f40f9b1d4 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/census.hpp=78527edb280f include/bincv/ops/denseDisparity.hpp=07acea201657 include/bincv/ops/shift.hpp=ef3c19a45dad
 # governor: none (this host exposes no cpufreq)
 # pinning:  taskset -c 2
 # sleep between launches: 0s

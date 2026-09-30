@@ -6,6 +6,7 @@
 # kernel:   6.18.34+rpt-rpi-v8
 # compiler: g++ (Debian 14.2.0-19) 14.2.0
 # commit:   211acaa
+# sources:  benchmark/bitwidth_crossover.cpp=e29b2f89ce14 benchmark/crossover_sweep.sh=6a06d4255f6e benchmark/measure_util.hpp=7b35f7a51f9b include/bincv/binMat.hpp=90b29c8f718a include/bincv/core/error.hpp=43506907e810 include/bincv/core/simd.hpp=19736b8d5614 include/bincv/core/storage.hpp=74525f70a0a6 include/bincv/core/types.hpp=97966010c55c include/bincv/core/view.hpp=de7b81a310b6 include/bincv/impl/binMat_impl.hpp=ba680e237764 include/bincv/impl/kernel_util.hpp=66921f7f7ffe include/bincv/ops/bitslice.hpp=218ecd55278c include/bincv/ops/pyramid.hpp=59388d95dccc include/bincv/ops/resample.hpp=d0db5aee157f include/bincv/quantMat.hpp=9571cce97de6
 # governor: performance (restored to performance on exit)
 # throttled before: throttled=0x80000
 # temp before: temp=58.9'C
