@@ -36,8 +36,10 @@ architectures — AVX2 against AVX2, NEON against NEON — and the run prints bo
 **x86-64 and aarch64 are separate columns everywhere on this page.** They are different
 measurements against different OpenCV builds on different machines, and are never averaged.
 
-**Both columns are of the same code**, taken at `880704b` (on `main` as `8729e05`): thirty
-pinned launches on x86-64 and ten on aarch64 with the governor locked. Both include the
+**Both columns are of the same code.** x86-64 is thirty pinned launches taken at `880704b`
+(on `main` as `8729e05`); aarch64 is ten launches with the governor locked, re-taken at
+`4c4b3bf` after the tracker's NEON covariance arm gained its runtime off-switch, and every
+cell landed inside the previous interval. Both include the
 one-pyramid-per-frame asymmetry described [below](#one-pyramid-build-per-frame).
 
 ## Speed
@@ -49,12 +51,12 @@ pipeline.
 
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|
-| the assembled pipeline, ms/frame | 4.007 | 1.010 | 3.97× [3.94, 4.00] | 23.61 | 4.435 | 5.32× [5.31, 5.34] |
+| the assembled pipeline, ms/frame | 4.007 | 1.010 | 3.97× [3.94, 4.00] | 23.65 | 4.434 | 5.34× [5.32, 5.35] |
 
 Each ratio is the ratio of the two medians, with a percentile bootstrap over the same
 launches; the per-launch ratio is above 1.00 in 30 of 30 launches on x86-64 and 10 of 10 on
 the device. Almost all of the x86-64 scatter is OpenCV's — its arm's launches run 3.924 to
-4.446 ms while binCV's run 0.9750 to 1.084. The device's arms scatter 1.4% across ten
+4.446 ms while binCV's run 0.9750 to 1.084. The device's arms scatter under 1% across ten
 launches against the desktop's 11–13% across thirty, which is what a pinned, governor-locked
 machine buys and why ten launches are quoted there and thirty here. The reference device is
 where binCV does better, and it is the deployment-class part.
@@ -78,11 +80,11 @@ total:
 
 | stage | time, x86-64 (ms/frame) | share of the x86-64 pipeline | time, aarch64 (ms/frame) | share of the aarch64 pipeline |
 |---|---|---|---|---|
-| track (Lucas–Kanade) | 0.7365 | 73.0% | 3.279 | 73.9% |
-| build (pyramid + derivatives) | 0.1995 | 19.8% | 0.8525 | 19.2% |
-| — sensor stage | 0.098 | 9.7% | 0.505 | 11.4% |
+| track (Lucas–Kanade) | 0.7365 | 73.0% | 3.287 | 74.1% |
+| build (pyramid + derivatives) | 0.1995 | 19.8% | 0.8480 | 19.1% |
+| — sensor stage | 0.098 | 9.7% | 0.503 | 11.3% |
 | — `pyrDown` | 0.059 | 5.8% | 0.190 | 4.3% |
-| — derivatives | 0.042 | 4.2% | 0.1535 | 3.5% |
+| — derivatives | 0.042 | 4.2% | 0.153 | 3.5% |
 | detect | 0.073 | 7.2% | 0.298 | 6.7% |
 
 Tracking dominates on both, so the operations that move this number are the ones inside the
@@ -216,3 +218,4 @@ the figure stands.
 | 2026-09-21 | aarch64 column | one launch, 4.73× | five pinned launches, 4.62× at `80ff0a8` | protocol change; the track stage read 3.791 ms/frame against 3.307 in the single launch, on unchanged code |
 | 2026-09-21 | 120-frame device check | 4.76× | superseded by the full-sequence sweeps | a 120-frame check with its own warm-up cannot resolve a 1.02× move |
 | 2026-09-22 | both columns | 3.658× x86-64, 4.62× aarch64 | 3.97× [3.94, 4.00], 5.32× [5.31, 5.34] at `880704b` | `goodFeaturesToTrack`'s selection optimization (device detect 0.457 → 0.298 ms/frame); the track stage read 3.279 ms/frame, within 1% of the first sweep |
+| 2026-09-29 | aarch64 column | 23.61 / 4.435 ms, 5.32× [5.31, 5.34]; track 3.279 | 23.65 / 4.434 ms, 5.34× [5.32, 5.35]; track 3.287 | re-taken at `4c4b3bf` after the NEON covariance off-switch; every cell inside the previous interval |

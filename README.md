@@ -81,7 +81,7 @@ Inventory: [docs/API.md](docs/API.md). What each area covers and what the tiers 
 | operation | OpenCV equivalent | OpenCV, x86-64 | binCV, x86-64 | ratio, x86-64 | OpenCV, aarch64 | binCV, aarch64 | ratio, aarch64 | source |
 |---|---|---|---|---|---|---|---|---|
 | `bitwiseAnd`, ns/pixel | `cv::bitwise_and` | 0.02823 | 0.002810 | 9.97× [9.82, 10.3] | 0.6266 | 0.02369 | 26.7× [26.1, 27.4] | [primitives.md](docs/reports/primitives.md) |
-| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.978 | 0.5585 | 7.19× [6.89, 7.40] | 23.40 | 2.838 | 8.23× [8.19, 8.28] | [features.md](docs/reports/features.md) |
+| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.978 | 0.5585 | 7.19× [6.89, 7.40] | 23.47 | 2.837 | 8.27× [8.20, 8.36] | [features.md](docs/reports/features.md) |
 | `pyrDown`, 1 bit in → 3 bits out, µs/call | `cv::pyrDown` on `CV_8U` | 47.70 | 30.70 | 1.56× [1.54, 1.60] | 516.5 | 93.8 | 5.51× [5.48, 5.55] | [primitives.md](docs/reports/primitives.md) |
 | Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.071 | 1.916 | 4.70× [4.65, 4.79] | 38.19 | 19.52 | 1.95× [1.94, 1.97] | [features.md](docs/reports/features.md) |
 | `countNonZero`, ns/pixel | `cv::countNonZero` | 0.01501 | 0.009270 | 1.62× [1.61, 1.63] | 0.1692 | 0.06365 | 2.66× [2.62, 2.67] | [primitives.md](docs/reports/primitives.md) |

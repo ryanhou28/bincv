@@ -62,7 +62,7 @@ launch counts differ. Times are quoted to four significant figures and ratios to
 | `erode` 5×5 ellipse, ns/pixel | `cv::erode` | 0.2238 | 0.6985 | 0.319× [0.318, 0.323] | 1.852 | 3.596 | 0.514× [0.510, 0.522] | [primitives.md](primitives.md) |
 | `pyrDown`, 1 bit in, µs/call | `cv::pyrDown` on `CV_8U` | 47.70 | 30.70 | 1.56× [1.54, 1.60] | 516.5 | 93.8 | 5.51× [5.48, 5.55] | [primitives.md](primitives.md) |
 | `pyrDown`, 8 bits in, µs/call | `cv::pyrDown` on `CV_8U` | 47.70 | 2040 | 0.0235× [0.0233, 0.0242] | 516.5 | 7360 | 0.0701× [0.0698, 0.0706] | [limits.md](limits.md) |
-| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.978 | 0.5585 | 7.19× [6.89, 7.40] | 23.40 | 2.838 | 8.23× [8.19, 8.28] | [features.md](features.md) |
+| optical flow, 140 points, ms/call | `cv::calcOpticalFlowPyrLK` | 3.978 | 0.5585 | 7.19× [6.89, 7.40] | 23.47 | 2.837 | 8.27× [8.20, 8.36] | [features.md](features.md) |
 | BRIEF descriptors, 1000 kpts, ms | `cv::ORB::compute` | 0.6388 | 0.1231 | 5.18× [5.15, 5.22] | 7.167 | 0.6579 | 10.8× [10.6, 11.2] | [features.md](features.md) |
 | Hamming matching, kNN=2 over 1000×1000, ms | `cv::BFMatcher` | 9.071 | 1.916 | 4.70× [4.65, 4.79] | 38.19 | 19.52 | 1.95× [1.94, 1.97] | [features.md](features.md) |
 | `goodFeaturesToTrack`, ns/pixel | `cv::goodFeaturesToTrack` | 8.807 | 6.368 | 1.38× [1.35, 1.43] | 58.34 | 24.10 | 2.42× [2.41, 2.42] | [features.md](features.md) |
@@ -186,7 +186,7 @@ pipeline, and it is not the number to compare against a library call.
 <!-- figure-check values="OpenCV, x86-64|binCV, x86-64|x86-64 ratio|OpenCV, aarch64|binCV, aarch64|aarch64 ratio" source="source" -->
 |  | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio | source |
 |---|---|---|---|---|---|---|---|
-| time, ms/frame | 4.007 | 1.010 | 3.97× [3.94, 4.00] | 23.61 | 4.435 | 5.32× [5.31, 5.34] | [feature-tracking.md](feature-tracking.md) |
+| time, ms/frame | 4.007 | 1.010 | 3.97× [3.94, 4.00] | 23.65 | 4.434 | 5.34× [5.32, 5.35] | [feature-tracking.md](feature-tracking.md) |
 
 Peak working set is computed from buffer geometry and is identical on both architectures, so
 it is one pair rather than two:
@@ -307,9 +307,11 @@ two seconds instead: 1,183 samples across the whole run, every one at 1,800,000 
 65.2 °C against an 80 °C limit. That is the evidence the numbers were not taken on a ramp.
 
 **The device column is ten launches per benchmark** (seven on the two stereo binaries),
-governor locked, taken at `80ff0a8` (on `main` as `086428c`); `goodFeaturesToTrack` and the
-assembled pipeline were re-taken at `880704b` (on `main` as `8729e05`) after the
-selection-stage optimization that moved them. Small-plane rows scatter more than large ones
+governor locked, taken at `80ff0a8` (on `main` as `086428c`); `goodFeaturesToTrack` was
+re-taken at `880704b` (on `main` as `8729e05`) after the selection-stage optimization that
+moved it, and the three tracker sweeps (optical flow, the assembled pipeline, the
+memory-bound study) at `4c4b3bf` after the NEON covariance arm gained its off-switch, where
+every cell landed inside its previous interval. Small-plane rows scatter more than large ones
 on this device — binCV's 115 KB `bitwiseAnd` arm scatters 16.9% across ten launches where
 OpenCV's 921 KB arm scatters 4.0%, because a plane that fits the 1 MiB L2 has its residency
 decided per launch by where the allocator put it; at 8192×4096 both fall to about 2%.

@@ -30,8 +30,8 @@ number is the faster side. Taken at `05ab53c` on x86-64 and `80ff0a8` on aarch64
 
 | operation | measured against | OpenCV, x86-64 | binCV, x86-64 | x86-64 ratio | OpenCV, aarch64 | binCV, aarch64 | aarch64 ratio |
 |---|---|---|---|---|---|---|---|
-| **Lucas–Kanade, `1/2/2/2` (shipped)** | `cv::calcOpticalFlowPyrLK` | 3.978 ms | 0.5585 ms | 7.19× [6.89, 7.40] | 23.40 ms | 2.838 ms | 8.23× [8.19, 8.28] |
-| Lucas–Kanade, `1/1/1/1` | `cv::calcOpticalFlowPyrLK` | 3.978 ms | 0.1380 ms | 29.2× [26.8, 29.9] | 23.40 ms | 0.6030 ms | 38.8× [38.5, 39.1] |
+| **Lucas–Kanade, `1/2/2/2` (shipped)** | `cv::calcOpticalFlowPyrLK` | 3.978 ms | 0.5585 ms | 7.19× [6.89, 7.40] | 23.47 ms | 2.837 ms | 8.27× [8.20, 8.36] |
+| Lucas–Kanade, `1/1/1/1` | `cv::calcOpticalFlowPyrLK` | 3.978 ms | 0.1380 ms | 29.2× [26.8, 29.9] | 23.47 ms | 0.6070 ms | 38.7× [38.3, 39.1] |
 | BRIEF descriptors | `cv::ORB::compute` † | 0.6388 ms | 0.1231 ms | 5.18× [5.15, 5.22] | 7.167 ms | 0.6579 ms | 10.8× [10.6, 11.2] |
 | Hamming matching, kNN=2 | `cv::BFMatcher` | 9.071 ms | 1.916 ms | 4.70× [4.65, 4.79] | 38.19 ms | 19.52 ms | 1.95× [1.94, 1.97] |
 | FAST, 8-bit, synthetic 752×480 (4144 corners) | `cv::FAST` | 0.3591 ms | 0.3446 ms | 1.04× [1.03, 1.05] | 2.910 ms | 3.025 ms | 0.962× [0.961, 0.963] |
@@ -84,9 +84,9 @@ content · one thread on each side. Taken at `05ab53c` on x86-64 and `80ff0a8` o
 
 | arm | x86-64 (ms) | x86-64 ratio | aarch64 (ms) | aarch64 ratio |
 |---|---|---|---|---|
-| `cv::calcOpticalFlowPyrLK` on the same bits as `CV_8U` | 3.978 | — | 23.40 | — |
-| **binCV, `1/2/2/2` ladder (shipped)** | 0.5585 | 7.19× [6.89, 7.40] | 2.838 | 8.23× [8.19, 8.28] |
-| binCV, `1/1/1/1` ladder | 0.1380 | 29.2× [26.8, 29.9] | 0.6030 | 38.8× [38.5, 39.1] |
+| `cv::calcOpticalFlowPyrLK` on the same bits as `CV_8U` | 3.978 | — | 23.47 | — |
+| **binCV, `1/2/2/2` ladder (shipped)** | 0.5585 | 7.19× [6.89, 7.40] | 2.837 | 8.27× [8.20, 8.36] |
+| binCV, `1/1/1/1` ladder | 0.1380 | 29.2× [26.8, 29.9] | 0.6070 | 38.7× [38.3, 39.1] |
 
 **This is the widest x86-64 interval in these reports.** Thirty launches resolve 1.04× on
 the shipped ladder and only 1.09× on `1/1/1/1`: this host cannot tell 29× from 31×, so that
@@ -108,7 +108,7 @@ window times three shorts, per point, per level, into its own buffers before it 
 binCV reads the bit-planes in place.
 
 **The ladder is the dominant cost on binCV's side**: `1/2/2/2` costs 4.10× [3.89, 4.20] on
-x86-64 and 4.71× [4.67, 4.76] on the device over `1/1/1/1` (binCV ÷ binCV, paired per
+x86-64 and 4.67× [4.64, 4.71] on the device over `1/1/1/1` (binCV ÷ binCV, paired per
 launch), because the tracker pays roughly `20N²` population counts per window row at every
 level regardless of how small that level is. `1/1/1/1` is faster and less accurate; the
 shipped ladder is the operating point that keeps keypoint yield up.
@@ -307,3 +307,4 @@ the figure stands.
 | 2026-09-22 | `goodFeaturesToTrack`, denominator | the hand-written binarized pipeline (headline 1.132× on x86-64) | stock `cv::goodFeaturesToTrack` | the baseline is the call a caller makes; against it the kernel of the time read 0.737× [0.721, 0.754] on x86-64 and 1.368× [1.364, 1.382] on the device |
 | 2026-09-22 | `goodFeaturesToTrack`, both columns | 0.737× x86-64, 1.368× aarch64 | 1.38× [1.35, 1.43], 2.42× [2.41, 2.42] | selection stage optimized (bit-pattern running maximum, counting-sort rank, spacing filter): binCV 11.310 → 6.368 ns/px on x86-64 and 43.337 → 24.10 on the device, denominators unchanged within their intervals |
 | 2026-09-23 | FAST bit-plane, x86-64 | 1.472× (180.85 µs) | 1.65× (161.7 µs) | the vector arm's runtime switch was read once per image row, keeping the scalar body live; read once per call |
+| 2026-09-29 | Lucas–Kanade, aarch64 column | 23.40 / 2.838 ms, 8.23× [8.19, 8.28]; `1/1/1/1` 0.6030 ms, 38.8× | 23.47 / 2.837 ms, 8.27× [8.20, 8.36]; 0.6070 ms, 38.7× | re-taken at `4c4b3bf` after the NEON covariance arm gained its runtime off-switch; every cell inside the previous interval |
