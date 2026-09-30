@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="350" viewBox="0 0 820 350" role="img" aria-label="Eight 3-bit pixels stored as packed 3-bit fields and as three bit-planes">
+<style>
+.bg{fill:#ffffff}
+.fg{fill:#1f2328}
+.muted{fill:#59636e}
+.on{fill:#2f6fdb}
+.off{fill:#eef1f5}
+.hi{fill:#d4620f}
+.hisoft{fill:#fbe3cf}
+.neg{fill:#d4620f}
+.pad{fill:#d7dbe0}
+.cell{stroke:#aeb6bf;stroke-width:0.75}
+.word{fill:none;stroke:#1f2328;stroke-width:2}
+.box{fill:none;stroke:#59636e;stroke-width:1;stroke-dasharray:3 3}
+.ring{fill:none;stroke:#d4620f;stroke-width:2.5}
+.edge{stroke:#59636e;stroke-width:1.25;fill:none}
+.arrowhead{fill:#59636e}
+.hiedge{stroke:#d4620f;stroke-width:2;fill:none}
+.hiarrowhead{fill:#d4620f}
+.bar1{fill:#aeb6bf}
+.bar2{fill:#2f6fdb}
+.s1{stroke:#2f6fdb;stroke-width:2.5;fill:none}
+.s2{stroke:#d4620f;stroke-width:2.5;fill:none}
+.d1{fill:#2f6fdb}
+.d2{fill:#d4620f}
+.gridline{stroke:#d7dbe0;stroke-width:1}
+.refline{stroke:#1f2328;stroke-width:1.5;stroke-dasharray:5 4}
+.axis{stroke:#59636e;stroke-width:1}
+.halo{paint-order:stroke;stroke:#ffffff;stroke-width:4px;stroke-linejoin:round}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.oninv{fill:#ffffff}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117}
+.fg{fill:#e6edf3}
+.muted{fill:#9198a1}
+.on{fill:#4493f8}
+.off{fill:#1c2129}
+.hi{fill:#f0883e}
+.hisoft{fill:#4a2a12}
+.neg{fill:#f0883e}
+.pad{fill:#3d444d}
+.cell{stroke:#3d444d}
+.word{stroke:#e6edf3}
+.box{stroke:#9198a1}
+.ring{stroke:#f0883e}
+.edge{stroke:#9198a1}
+.arrowhead{fill:#9198a1}
+.hiedge{stroke:#f0883e}
+.hiarrowhead{fill:#f0883e}
+.bar1{fill:#59636e}
+.bar2{fill:#4493f8}
+.s1{stroke:#4493f8}
+.s2{stroke:#f0883e}
+.d1{fill:#4493f8}
+.d2{fill:#f0883e}
+.gridline{stroke:#30363d}
+.refline{stroke:#e6edf3}
+.axis{stroke:#9198a1}
+.halo{stroke:#0d1117}
+.oninv{fill:#0d1117}
+}
+</style>
+<rect width="100%%" height="100%%" class="bg" rx="8"/>
+<text x="176" y="56" font-size="13" text-anchor="end" class="fg">pixel values</text>
+<rect x="190" y="34" width="34" height="34" class="hisoft cell"/>
+<text x="207" y="56" font-size="15" text-anchor="middle" class="fg mono">5</text>
+<text x="207" y="28" font-size="10" text-anchor="middle" class="muted mono">101</text>
+<rect x="224" y="34" width="34" height="34" class="off cell"/>
+<text x="241" y="56" font-size="15" text-anchor="middle" class="fg mono">3</text>
+<text x="241" y="28" font-size="10" text-anchor="middle" class="muted mono">011</text>
+<rect x="258" y="34" width="34" height="34" class="off cell"/>
+<text x="275" y="56" font-size="15" text-anchor="middle" class="fg mono">0</text>
+<text x="275" y="28" font-size="10" text-anchor="middle" class="muted mono">000</text>
+<rect x="292" y="34" width="34" height="34" class="off cell"/>
+<text x="309" y="56" font-size="15" text-anchor="middle" class="fg mono">7</text>
+<text x="309" y="28" font-size="10" text-anchor="middle" class="muted mono">111</text>
+<rect x="326" y="34" width="34" height="34" class="off cell"/>
+<text x="343" y="56" font-size="15" text-anchor="middle" class="fg mono">2</text>
+<text x="343" y="28" font-size="10" text-anchor="middle" class="muted mono">010</text>
+<rect x="360" y="34" width="34" height="34" class="off cell"/>
+<text x="377" y="56" font-size="15" text-anchor="middle" class="fg mono">6</text>
+<text x="377" y="28" font-size="10" text-anchor="middle" class="muted mono">110</text>
+<rect x="394" y="34" width="34" height="34" class="off cell"/>
+<text x="411" y="56" font-size="15" text-anchor="middle" class="fg mono">1</text>
+<text x="411" y="28" font-size="10" text-anchor="middle" class="muted mono">001</text>
+<rect x="428" y="34" width="34" height="34" class="off cell"/>
+<text x="445" y="56" font-size="15" text-anchor="middle" class="fg mono">4</text>
+<text x="445" y="28" font-size="10" text-anchor="middle" class="muted mono">100</text>
+<text x="190" y="98" font-size="14" text-anchor="start" class="fg" font-weight="600">Bit-planes: plane i holds bit i of every pixel</text>
+<text x="176" y="134" font-size="13" text-anchor="end" class="fg">plane 0 (weight 1)</text>
+<rect x="190" y="112" width="34" height="34" class="on cell"/>
+<text x="207" y="133.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="224" y="112" width="34" height="34" class="on cell"/>
+<text x="241" y="133.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="258" y="112" width="34" height="34" class="off cell"/>
+<text x="275" y="133.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="292" y="112" width="34" height="34" class="on cell"/>
+<text x="309" y="133.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="326" y="112" width="34" height="34" class="off cell"/>
+<text x="343" y="133.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="360" y="112" width="34" height="34" class="off cell"/>
+<text x="377" y="133.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="394" y="112" width="34" height="34" class="on cell"/>
+<text x="411" y="133.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="428" y="112" width="34" height="34" class="off cell"/>
+<text x="445" y="133.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="190" y="112" width="272" height="34" class="word"/>
+<rect x="190" y="112" width="34" height="34" class="ring"/>
+<text x="176" y="176" font-size="13" text-anchor="end" class="fg">plane 1 (weight 2)</text>
+<rect x="190" y="154" width="34" height="34" class="off cell"/>
+<text x="207" y="175.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="224" y="154" width="34" height="34" class="on cell"/>
+<text x="241" y="175.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="258" y="154" width="34" height="34" class="off cell"/>
+<text x="275" y="175.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="292" y="154" width="34" height="34" class="on cell"/>
+<text x="309" y="175.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="326" y="154" width="34" height="34" class="on cell"/>
+<text x="343" y="175.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="360" y="154" width="34" height="34" class="on cell"/>
+<text x="377" y="175.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="394" y="154" width="34" height="34" class="off cell"/>
+<text x="411" y="175.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="428" y="154" width="34" height="34" class="off cell"/>
+<text x="445" y="175.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="190" y="154" width="272" height="34" class="word"/>
+<rect x="190" y="154" width="34" height="34" class="ring"/>
+<text x="176" y="218" font-size="13" text-anchor="end" class="fg">plane 2 (weight 4)</text>
+<rect x="190" y="196" width="34" height="34" class="on cell"/>
+<text x="207" y="217.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="224" y="196" width="34" height="34" class="off cell"/>
+<text x="241" y="217.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="258" y="196" width="34" height="34" class="off cell"/>
+<text x="275" y="217.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="292" y="196" width="34" height="34" class="on cell"/>
+<text x="309" y="217.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="326" y="196" width="34" height="34" class="off cell"/>
+<text x="343" y="217.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="360" y="196" width="34" height="34" class="on cell"/>
+<text x="377" y="217.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="394" y="196" width="34" height="34" class="off cell"/>
+<text x="411" y="217.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="428" y="196" width="34" height="34" class="on cell"/>
+<text x="445" y="217.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="190" y="196" width="272" height="34" class="word"/>
+<rect x="190" y="196" width="34" height="34" class="ring"/>
+<text x="482" y="134" font-size="12" text-anchor="start" class="muted">three 8-bit words</text>
+<text x="482" y="152" font-size="12" text-anchor="start" class="muted">every pixel sits at the</text>
+<text x="482" y="170" font-size="12" text-anchor="start" class="muted">same bit in every plane</text>
+<text x="482" y="218" font-size="12" text-anchor="start" class="hi mono">pixel 0: 5 = 101</text>
+<text x="190" y="262" font-size="14" text-anchor="start" class="fg" font-weight="600">Packed fields: three bits per pixel, side by side</text>
+<rect x="190" y="274" width="22" height="22" class="on cell"/>
+<rect x="212" y="274" width="22" height="22" class="off cell"/>
+<rect x="234" y="274" width="22" height="22" class="on cell"/>
+<rect x="256" y="274" width="22" height="22" class="on cell"/>
+<rect x="278" y="274" width="22" height="22" class="on cell"/>
+<rect x="300" y="274" width="22" height="22" class="off cell"/>
+<rect x="322" y="274" width="22" height="22" class="off cell"/>
+<rect x="344" y="274" width="22" height="22" class="off cell"/>
+<rect x="366" y="274" width="22" height="22" class="off cell"/>
+<rect x="388" y="274" width="22" height="22" class="on cell"/>
+<rect x="410" y="274" width="22" height="22" class="on cell"/>
+<rect x="432" y="274" width="22" height="22" class="on cell"/>
+<rect x="454" y="274" width="22" height="22" class="off cell"/>
+<rect x="476" y="274" width="22" height="22" class="on cell"/>
+<rect x="498" y="274" width="22" height="22" class="off cell"/>
+<rect x="520" y="274" width="22" height="22" class="off cell"/>
+<rect x="542" y="274" width="22" height="22" class="on cell"/>
+<rect x="564" y="274" width="22" height="22" class="on cell"/>
+<rect x="586" y="274" width="22" height="22" class="on cell"/>
+<rect x="608" y="274" width="22" height="22" class="off cell"/>
+<rect x="630" y="274" width="22" height="22" class="off cell"/>
+<rect x="652" y="274" width="22" height="22" class="off cell"/>
+<rect x="674" y="274" width="22" height="22" class="off cell"/>
+<rect x="696" y="274" width="22" height="22" class="on cell"/>
+<line x1="256" y1="269" x2="256" y2="301" class="hiedge"/>
+<line x1="322" y1="269" x2="322" y2="301" class="hiedge"/>
+<line x1="388" y1="269" x2="388" y2="301" class="hiedge"/>
+<line x1="454" y1="269" x2="454" y2="301" class="hiedge"/>
+<line x1="520" y1="269" x2="520" y2="301" class="hiedge"/>
+<line x1="586" y1="269" x2="586" y2="301" class="hiedge"/>
+<line x1="652" y1="269" x2="652" y2="301" class="hiedge"/>
+<rect x="190" y="274" width="176" height="22" class="word"/>
+<rect x="366" y="274" width="176" height="22" class="word"/>
+<rect x="542" y="274" width="176" height="22" class="word"/>
+<text x="223" y="310" font-size="10" text-anchor="middle" class="muted mono">0</text>
+<text x="289" y="310" font-size="10" text-anchor="middle" class="muted mono">1</text>
+<text x="355" y="310" font-size="10" text-anchor="middle" class="muted mono">2</text>
+<text x="421" y="310" font-size="10" text-anchor="middle" class="muted mono">3</text>
+<text x="487" y="310" font-size="10" text-anchor="middle" class="muted mono">4</text>
+<text x="553" y="310" font-size="10" text-anchor="middle" class="muted mono">5</text>
+<text x="619" y="310" font-size="10" text-anchor="middle" class="muted mono">6</text>
+<text x="685" y="310" font-size="10" text-anchor="middle" class="muted mono">7</text>
+<text x="176" y="290" font-size="13" text-anchor="end" class="fg">3 bytes</text>
+<text x="190" y="328" font-size="11" text-anchor="start" class="muted">Orange lines divide the fields. Fields 2 and 5 straddle a word boundary, and adding two images</text>
+<text x="190" y="344" font-size="11" text-anchor="start" class="muted">this way needs a mask and a carry guard for every field.</text>
+</svg>

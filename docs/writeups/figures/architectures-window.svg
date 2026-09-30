@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="250" viewBox="0 0 900 250" role="img" aria-label="A 31-pixel window uses 31 of 32 bits in a uint32_t word and 31 of 64 in a uint64_t; OpenCV processes 16 pixels per AVX2 operation on CV_16S">
+<style>
+.bg{fill:#ffffff}
+.fg{fill:#1f2328}
+.muted{fill:#59636e}
+.on{fill:#2f6fdb}
+.off{fill:#eef1f5}
+.hi{fill:#d4620f}
+.hisoft{fill:#fbe3cf}
+.neg{fill:#d4620f}
+.pad{fill:#d7dbe0}
+.cell{stroke:#aeb6bf;stroke-width:0.75}
+.word{fill:none;stroke:#1f2328;stroke-width:2}
+.box{fill:none;stroke:#59636e;stroke-width:1;stroke-dasharray:3 3}
+.ring{fill:none;stroke:#d4620f;stroke-width:2.5}
+.edge{stroke:#59636e;stroke-width:1.25;fill:none}
+.arrowhead{fill:#59636e}
+.hiedge{stroke:#d4620f;stroke-width:2;fill:none}
+.hiarrowhead{fill:#d4620f}
+.bar1{fill:#aeb6bf}
+.bar2{fill:#2f6fdb}
+.s1{stroke:#2f6fdb;stroke-width:2.5;fill:none}
+.s2{stroke:#d4620f;stroke-width:2.5;fill:none}
+.d1{fill:#2f6fdb}
+.d2{fill:#d4620f}
+.gridline{stroke:#d7dbe0;stroke-width:1}
+.refline{stroke:#1f2328;stroke-width:1.5;stroke-dasharray:5 4}
+.axis{stroke:#59636e;stroke-width:1}
+.halo{paint-order:stroke;stroke:#ffffff;stroke-width:4px;stroke-linejoin:round}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.oninv{fill:#ffffff}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117}
+.fg{fill:#e6edf3}
+.muted{fill:#9198a1}
+.on{fill:#4493f8}
+.off{fill:#1c2129}
+.hi{fill:#f0883e}
+.hisoft{fill:#4a2a12}
+.neg{fill:#f0883e}
+.pad{fill:#3d444d}
+.cell{stroke:#3d444d}
+.word{stroke:#e6edf3}
+.box{stroke:#9198a1}
+.ring{stroke:#f0883e}
+.edge{stroke:#9198a1}
+.arrowhead{fill:#9198a1}
+.hiedge{stroke:#f0883e}
+.hiarrowhead{fill:#f0883e}
+.bar1{fill:#59636e}
+.bar2{fill:#4493f8}
+.s1{stroke:#4493f8}
+.s2{stroke:#f0883e}
+.d1{fill:#4493f8}
+.d2{fill:#f0883e}
+.gridline{stroke:#30363d}
+.refline{stroke:#e6edf3}
+.axis{stroke:#9198a1}
+.halo{stroke:#0d1117}
+.oninv{fill:#0d1117}
+}
+</style>
+<rect width="100%%" height="100%%" class="bg" rx="8"/>
+<text x="230" y="45" font-size="13" text-anchor="end" class="fg">uint32_t word, one bit per pixel</text>
+<rect x="250" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="256.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="263" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="269.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="276" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="282.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="289" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="295.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="302" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="308.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="315" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="321.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="328" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="334.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="341" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="347.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="354" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="360.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="367" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="373.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="380" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="386.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="393" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="399.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="406" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="412.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="419" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="425.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="432" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="438.5" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="445" y="30" width="6.5" height="22" class="on cell"/>
+<rect x="451.5" y="30" width="6.5" height="22" class="pad cell"/>
+<rect x="250" y="30" width="208" height="22" class="word"/>
+<text x="470" y="45" font-size="12" text-anchor="start" class="fg">31 pixels per op, 97% used</text>
+<text x="230" y="97" font-size="13" text-anchor="end" class="fg">uint64_t word, one bit per pixel</text>
+<rect x="250" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="256.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="263" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="269.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="276" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="282.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="289" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="295.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="302" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="308.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="315" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="321.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="328" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="334.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="341" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="347.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="354" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="360.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="367" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="373.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="380" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="386.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="393" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="399.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="406" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="412.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="419" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="425.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="432" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="438.5" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="445" y="82" width="6.5" height="22" class="on cell"/>
+<rect x="451.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="458" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="464.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="471" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="477.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="484" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="490.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="497" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="503.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="510" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="516.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="523" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="529.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="536" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="542.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="549" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="555.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="562" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="568.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="575" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="581.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="588" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="594.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="601" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="607.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="614" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="620.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="627" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="633.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="640" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="646.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="653" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="659.5" y="82" width="6.5" height="22" class="pad cell"/>
+<rect x="250" y="82" width="416" height="22" class="word"/>
+<text x="678" y="97" font-size="12" text-anchor="start" class="fg">31 pixels per op, 48% used</text>
+<text x="230" y="149" font-size="13" text-anchor="end" class="fg">AVX2 register, CV_16S lanes</text>
+<rect x="250" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="256.5" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="263" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="269.5" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="276" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="282.5" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="289" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="295.5" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="302" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="308.5" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="315" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="321.5" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="328" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="334.5" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="341" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="347.5" y="134" width="6.5" height="22" class="on cell"/>
+<rect x="250" y="134" width="104" height="22" class="word"/>
+<text x="366" y="149" font-size="12" text-anchor="start" class="fg">16 pixels per op</text>
+<text x="30" y="194" font-size="11" text-anchor="start" class="muted">The 31-pixel window row is the unit of work in the tracker. Matched to a 32-bit word it runs 31 pixels per operation against</text>
+<text x="30" y="210" font-size="11" text-anchor="start" class="muted">OpenCV's 16: a 1.94× packing advantage, capped by the window size. A wider word lowers the utilisation instead of raising the cap.</text>
+</svg>

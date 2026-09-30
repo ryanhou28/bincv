@@ -6,6 +6,8 @@
 | [../GETTING_STARTED.md](../GETTING_STARTED.md) | a user | build it, use it, conventions |
 | [API.md](API.md) | a user | **the API reference** — every public entry point, its brief and its tier |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | a contributor | how the library is put together, and why |
+| [writeups/premise.md](writeups/premise.md) | anyone new to it | **the idea, illustrated** — why one bit per pixel, bit-planes, arithmetic as a circuit, and where it stops paying |
+| [writeups/architectures.md](writeups/architectures.md) | anyone new to it | **the idea on real machines** — word width, where the population count lives, the byte-vector competitor, a microcontroller and a GPU, on the four machines binCV has been measured on |
 | [reports/](reports/README.md) | anyone weighing it up | **what it costs and what it saves** — every operation measured against its OpenCV equivalent, on x86-64, aarch64 and a GPU, wins and losses in the same tables |
 
 Deciding whether to adopt binCV: start at [reports/README.md](reports/README.md) — its *At a

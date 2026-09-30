@@ -172,6 +172,7 @@ jobs:
       - run: python3 scripts/check_links.py
       - run: python3 scripts/check_report_figures.py
       - run: python3 scripts/check_figure_staleness.py
+      - run: python3 scripts/gen_writeup_figures.py --check
 
   count-parity:
     name: check counts agree across architectures

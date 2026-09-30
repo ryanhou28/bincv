@@ -1,0 +1,256 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="422" viewBox="0 0 900 422" role="img" aria-label="A bit-sliced adder adding two 2-bit images, eight pixels at once, in seven word operations">
+<style>
+.bg{fill:#ffffff}
+.fg{fill:#1f2328}
+.muted{fill:#59636e}
+.on{fill:#2f6fdb}
+.off{fill:#eef1f5}
+.hi{fill:#d4620f}
+.hisoft{fill:#fbe3cf}
+.neg{fill:#d4620f}
+.pad{fill:#d7dbe0}
+.cell{stroke:#aeb6bf;stroke-width:0.75}
+.word{fill:none;stroke:#1f2328;stroke-width:2}
+.box{fill:none;stroke:#59636e;stroke-width:1;stroke-dasharray:3 3}
+.ring{fill:none;stroke:#d4620f;stroke-width:2.5}
+.edge{stroke:#59636e;stroke-width:1.25;fill:none}
+.arrowhead{fill:#59636e}
+.hiedge{stroke:#d4620f;stroke-width:2;fill:none}
+.hiarrowhead{fill:#d4620f}
+.bar1{fill:#aeb6bf}
+.bar2{fill:#2f6fdb}
+.s1{stroke:#2f6fdb;stroke-width:2.5;fill:none}
+.s2{stroke:#d4620f;stroke-width:2.5;fill:none}
+.d1{fill:#2f6fdb}
+.d2{fill:#d4620f}
+.gridline{stroke:#d7dbe0;stroke-width:1}
+.refline{stroke:#1f2328;stroke-width:1.5;stroke-dasharray:5 4}
+.axis{stroke:#59636e;stroke-width:1}
+.halo{paint-order:stroke;stroke:#ffffff;stroke-width:4px;stroke-linejoin:round}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.oninv{fill:#ffffff}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117}
+.fg{fill:#e6edf3}
+.muted{fill:#9198a1}
+.on{fill:#4493f8}
+.off{fill:#1c2129}
+.hi{fill:#f0883e}
+.hisoft{fill:#4a2a12}
+.neg{fill:#f0883e}
+.pad{fill:#3d444d}
+.cell{stroke:#3d444d}
+.word{stroke:#e6edf3}
+.box{stroke:#9198a1}
+.ring{stroke:#f0883e}
+.edge{stroke:#9198a1}
+.arrowhead{fill:#9198a1}
+.hiedge{stroke:#f0883e}
+.hiarrowhead{fill:#f0883e}
+.bar1{fill:#59636e}
+.bar2{fill:#4493f8}
+.s1{stroke:#4493f8}
+.s2{stroke:#f0883e}
+.d1{fill:#4493f8}
+.d2{fill:#f0883e}
+.gridline{stroke:#30363d}
+.refline{stroke:#e6edf3}
+.axis{stroke:#9198a1}
+.halo{stroke:#0d1117}
+.oninv{fill:#0d1117}
+}
+</style>
+<rect width="100%%" height="100%%" class="bg" rx="8"/>
+<text x="180" y="22" font-size="14" text-anchor="start" class="fg" font-weight="600">Adding two 2-bit images, all eight pixels at once</text>
+<text x="193" y="38" font-size="10" text-anchor="middle" class="muted mono">A=3</text>
+<text x="193" y="51" font-size="10" text-anchor="middle" class="muted mono">B=2</text>
+<text x="219" y="38" font-size="10" text-anchor="middle" class="muted mono">A=1</text>
+<text x="219" y="51" font-size="10" text-anchor="middle" class="muted mono">B=3</text>
+<text x="245" y="38" font-size="10" text-anchor="middle" class="muted mono">A=2</text>
+<text x="245" y="51" font-size="10" text-anchor="middle" class="muted mono">B=1</text>
+<text x="271" y="38" font-size="10" text-anchor="middle" class="muted mono">A=0</text>
+<text x="271" y="51" font-size="10" text-anchor="middle" class="muted mono">B=0</text>
+<text x="297" y="38" font-size="10" text-anchor="middle" class="muted mono">A=3</text>
+<text x="297" y="51" font-size="10" text-anchor="middle" class="muted mono">B=3</text>
+<text x="323" y="38" font-size="10" text-anchor="middle" class="muted mono">A=2</text>
+<text x="323" y="51" font-size="10" text-anchor="middle" class="muted mono">B=0</text>
+<text x="349" y="38" font-size="10" text-anchor="middle" class="muted mono">A=1</text>
+<text x="349" y="51" font-size="10" text-anchor="middle" class="muted mono">B=1</text>
+<text x="375" y="38" font-size="10" text-anchor="middle" class="muted mono">A=3</text>
+<text x="375" y="51" font-size="10" text-anchor="middle" class="muted mono">B=1</text>
+<text x="166" y="78" font-size="13" text-anchor="end" class="fg">A, plane 0</text>
+<rect x="180" y="60" width="26" height="26" class="on cell"/>
+<text x="193" y="77.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="206" y="60" width="26" height="26" class="on cell"/>
+<text x="219" y="77.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="232" y="60" width="26" height="26" class="off cell"/>
+<text x="245" y="77.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="258" y="60" width="26" height="26" class="off cell"/>
+<text x="271" y="77.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="284" y="60" width="26" height="26" class="on cell"/>
+<text x="297" y="77.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="310" y="60" width="26" height="26" class="off cell"/>
+<text x="323" y="77.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="336" y="60" width="26" height="26" class="on cell"/>
+<text x="349" y="77.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="362" y="60" width="26" height="26" class="on cell"/>
+<text x="375" y="77.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="180" y="60" width="208" height="26" class="word"/>
+<text x="166" y="110" font-size="13" text-anchor="end" class="fg">A, plane 1</text>
+<rect x="180" y="92" width="26" height="26" class="on cell"/>
+<text x="193" y="109.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="206" y="92" width="26" height="26" class="off cell"/>
+<text x="219" y="109.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="232" y="92" width="26" height="26" class="on cell"/>
+<text x="245" y="109.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="258" y="92" width="26" height="26" class="off cell"/>
+<text x="271" y="109.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="284" y="92" width="26" height="26" class="on cell"/>
+<text x="297" y="109.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="310" y="92" width="26" height="26" class="on cell"/>
+<text x="323" y="109.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="336" y="92" width="26" height="26" class="off cell"/>
+<text x="349" y="109.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="362" y="92" width="26" height="26" class="on cell"/>
+<text x="375" y="109.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="180" y="92" width="208" height="26" class="word"/>
+<text x="166" y="142" font-size="13" text-anchor="end" class="fg">B, plane 0</text>
+<rect x="180" y="124" width="26" height="26" class="off cell"/>
+<text x="193" y="141.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="206" y="124" width="26" height="26" class="on cell"/>
+<text x="219" y="141.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="232" y="124" width="26" height="26" class="on cell"/>
+<text x="245" y="141.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="258" y="124" width="26" height="26" class="off cell"/>
+<text x="271" y="141.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="284" y="124" width="26" height="26" class="on cell"/>
+<text x="297" y="141.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="310" y="124" width="26" height="26" class="off cell"/>
+<text x="323" y="141.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="336" y="124" width="26" height="26" class="on cell"/>
+<text x="349" y="141.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="362" y="124" width="26" height="26" class="on cell"/>
+<text x="375" y="141.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="180" y="124" width="208" height="26" class="word"/>
+<text x="166" y="174" font-size="13" text-anchor="end" class="fg">B, plane 1</text>
+<rect x="180" y="156" width="26" height="26" class="on cell"/>
+<text x="193" y="173.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="206" y="156" width="26" height="26" class="on cell"/>
+<text x="219" y="173.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="232" y="156" width="26" height="26" class="off cell"/>
+<text x="245" y="173.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="258" y="156" width="26" height="26" class="off cell"/>
+<text x="271" y="173.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="284" y="156" width="26" height="26" class="on cell"/>
+<text x="297" y="173.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="310" y="156" width="26" height="26" class="off cell"/>
+<text x="323" y="173.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="336" y="156" width="26" height="26" class="off cell"/>
+<text x="349" y="173.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="362" y="156" width="26" height="26" class="off cell"/>
+<text x="375" y="173.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="180" y="156" width="208" height="26" class="word"/>
+<text x="166" y="220" font-size="13" text-anchor="end" class="fg">sum, plane 0</text>
+<rect x="180" y="202" width="26" height="26" class="on cell"/>
+<text x="193" y="219.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="206" y="202" width="26" height="26" class="off cell"/>
+<text x="219" y="219.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="232" y="202" width="26" height="26" class="on cell"/>
+<text x="245" y="219.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="258" y="202" width="26" height="26" class="off cell"/>
+<text x="271" y="219.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="284" y="202" width="26" height="26" class="off cell"/>
+<text x="297" y="219.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="310" y="202" width="26" height="26" class="off cell"/>
+<text x="323" y="219.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="336" y="202" width="26" height="26" class="off cell"/>
+<text x="349" y="219.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="362" y="202" width="26" height="26" class="off cell"/>
+<text x="375" y="219.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="180" y="202" width="208" height="26" class="word"/>
+<text x="408" y="220" font-size="13" text-anchor="start" class="fg mono">s0 = a0 ^ b0</text>
+<text x="880" y="220" font-size="11" text-anchor="end" class="muted">1 op</text>
+<text x="166" y="252" font-size="13" text-anchor="end" class="fg">carry</text>
+<rect x="180" y="234" width="26" height="26" class="off cell"/>
+<text x="193" y="251.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="206" y="234" width="26" height="26" class="on cell"/>
+<text x="219" y="251.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="232" y="234" width="26" height="26" class="off cell"/>
+<text x="245" y="251.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="258" y="234" width="26" height="26" class="off cell"/>
+<text x="271" y="251.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="284" y="234" width="26" height="26" class="on cell"/>
+<text x="297" y="251.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="310" y="234" width="26" height="26" class="off cell"/>
+<text x="323" y="251.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="336" y="234" width="26" height="26" class="on cell"/>
+<text x="349" y="251.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="362" y="234" width="26" height="26" class="on cell"/>
+<text x="375" y="251.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="180" y="234" width="208" height="26" class="word"/>
+<text x="408" y="252" font-size="13" text-anchor="start" class="fg mono">c0 = a0 &amp; b0</text>
+<text x="880" y="252" font-size="11" text-anchor="end" class="muted">1 op</text>
+<text x="166" y="284" font-size="13" text-anchor="end" class="fg">sum, plane 1</text>
+<rect x="180" y="266" width="26" height="26" class="off cell"/>
+<text x="193" y="283.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="206" y="266" width="26" height="26" class="off cell"/>
+<text x="219" y="283.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="232" y="266" width="26" height="26" class="on cell"/>
+<text x="245" y="283.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="258" y="266" width="26" height="26" class="off cell"/>
+<text x="271" y="283.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="284" y="266" width="26" height="26" class="on cell"/>
+<text x="297" y="283.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="310" y="266" width="26" height="26" class="on cell"/>
+<text x="323" y="283.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="336" y="266" width="26" height="26" class="on cell"/>
+<text x="349" y="283.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="362" y="266" width="26" height="26" class="off cell"/>
+<text x="375" y="283.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="180" y="266" width="208" height="26" class="word"/>
+<text x="408" y="284" font-size="13" text-anchor="start" class="fg mono">s1 = a1 ^ b1 ^ c0</text>
+<text x="880" y="284" font-size="11" text-anchor="end" class="muted">2 ops</text>
+<text x="166" y="316" font-size="13" text-anchor="end" class="fg">sum, plane 2</text>
+<rect x="180" y="298" width="26" height="26" class="on cell"/>
+<text x="193" y="315.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="206" y="298" width="26" height="26" class="on cell"/>
+<text x="219" y="315.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="232" y="298" width="26" height="26" class="off cell"/>
+<text x="245" y="315.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="258" y="298" width="26" height="26" class="off cell"/>
+<text x="271" y="315.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="284" y="298" width="26" height="26" class="on cell"/>
+<text x="297" y="315.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="310" y="298" width="26" height="26" class="off cell"/>
+<text x="323" y="315.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="336" y="298" width="26" height="26" class="off cell"/>
+<text x="349" y="315.5" font-size="12" text-anchor="middle" class="fg mono">0</text>
+<rect x="362" y="298" width="26" height="26" class="on cell"/>
+<text x="375" y="315.5" font-size="12" text-anchor="middle" class="oninv mono">1</text>
+<rect x="180" y="298" width="208" height="26" class="word"/>
+<text x="408" y="316" font-size="13" text-anchor="start" class="fg mono">s2 = (a1 &amp; b1) | (c0 &amp; (a1 ^ b1))</text>
+<text x="880" y="316" font-size="11" text-anchor="end" class="muted">3 ops, a1 ^ b1 reused</text>
+<line x1="30" y1="193" x2="880" y2="193" class="edge"/>
+<rect x="180" y="60" width="26" height="122" class="ring"/>
+<rect x="180" y="202" width="26" height="122" class="ring"/>
+<text x="166" y="360" font-size="13" text-anchor="end" class="fg">sum</text>
+<rect x="180" y="348" width="26" height="26" class="hisoft cell"/>
+<text x="193" y="366" font-size="13" text-anchor="middle" class="fg mono">5</text>
+<rect x="206" y="348" width="26" height="26" class="off cell"/>
+<text x="219" y="366" font-size="13" text-anchor="middle" class="fg mono">4</text>
+<rect x="232" y="348" width="26" height="26" class="off cell"/>
+<text x="245" y="366" font-size="13" text-anchor="middle" class="fg mono">3</text>
+<rect x="258" y="348" width="26" height="26" class="off cell"/>
+<text x="271" y="366" font-size="13" text-anchor="middle" class="fg mono">0</text>
+<rect x="284" y="348" width="26" height="26" class="off cell"/>
+<text x="297" y="366" font-size="13" text-anchor="middle" class="fg mono">6</text>
+<rect x="310" y="348" width="26" height="26" class="off cell"/>
+<text x="323" y="366" font-size="13" text-anchor="middle" class="fg mono">2</text>
+<rect x="336" y="348" width="26" height="26" class="off cell"/>
+<text x="349" y="366" font-size="13" text-anchor="middle" class="fg mono">2</text>
+<rect x="362" y="348" width="26" height="26" class="off cell"/>
+<text x="375" y="366" font-size="13" text-anchor="middle" class="fg mono">4</text>
+<text x="408" y="366" font-size="12" text-anchor="start" class="hi mono">pixel 0: 3 + 2 = 5 = 101, read down the ringed column</text>
+<text x="30" y="404" font-size="11" text-anchor="start" class="muted">Seven word operations add every pixel in the word: 8 here, 32 in a uint32_t, with the same seven instructions. No carry ever crosses between pixels.</text>
+</svg>

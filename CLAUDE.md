@@ -121,10 +121,11 @@ if that case does not report ~1.00×, the fast path is not running where you thi
 ./scripts/verify_cortex_m.sh  # Cortex-M7 compile gate; skips without arm-none-eabi
 python3 scripts/check_links.py
 python3 scripts/check_figure_staleness.py   # a kernel change under a published figure
+python3 scripts/gen_writeup_figures.py --check   # a writeup figure behind its script or its report
 ```
 
 **CI runs on every push** (`.github/workflows/verify.yml`): x86-64 correctness, **aarch64
-correctness on a native arm64 runner**, the Cortex-M7 compile gate, the three documentation
+correctness on a native arm64 runner**, the Cortex-M7 compile gate, the four documentation
 checks, and a job comparing the two architectures' check counts suite by suite. aarch64 is
 native rather than emulated because GitHub's arm64 runners are free for public repositories
 and QEMU took 40 minutes to do it worse.

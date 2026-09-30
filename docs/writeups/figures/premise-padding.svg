@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="214" viewBox="0 0 900 214" role="img" aria-label="A 13-pixel row in two 8-bit words; a word-wise NOT without the tail mask sets the three padding bits, which a later count reads as pixels">
+<style>
+.bg{fill:#ffffff}
+.fg{fill:#1f2328}
+.muted{fill:#59636e}
+.on{fill:#2f6fdb}
+.off{fill:#eef1f5}
+.hi{fill:#d4620f}
+.hisoft{fill:#fbe3cf}
+.neg{fill:#d4620f}
+.pad{fill:#d7dbe0}
+.cell{stroke:#aeb6bf;stroke-width:0.75}
+.word{fill:none;stroke:#1f2328;stroke-width:2}
+.box{fill:none;stroke:#59636e;stroke-width:1;stroke-dasharray:3 3}
+.ring{fill:none;stroke:#d4620f;stroke-width:2.5}
+.edge{stroke:#59636e;stroke-width:1.25;fill:none}
+.arrowhead{fill:#59636e}
+.hiedge{stroke:#d4620f;stroke-width:2;fill:none}
+.hiarrowhead{fill:#d4620f}
+.bar1{fill:#aeb6bf}
+.bar2{fill:#2f6fdb}
+.s1{stroke:#2f6fdb;stroke-width:2.5;fill:none}
+.s2{stroke:#d4620f;stroke-width:2.5;fill:none}
+.d1{fill:#2f6fdb}
+.d2{fill:#d4620f}
+.gridline{stroke:#d7dbe0;stroke-width:1}
+.refline{stroke:#1f2328;stroke-width:1.5;stroke-dasharray:5 4}
+.axis{stroke:#59636e;stroke-width:1}
+.halo{paint-order:stroke;stroke:#ffffff;stroke-width:4px;stroke-linejoin:round}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.oninv{fill:#ffffff}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117}
+.fg{fill:#e6edf3}
+.muted{fill:#9198a1}
+.on{fill:#4493f8}
+.off{fill:#1c2129}
+.hi{fill:#f0883e}
+.hisoft{fill:#4a2a12}
+.neg{fill:#f0883e}
+.pad{fill:#3d444d}
+.cell{stroke:#3d444d}
+.word{stroke:#e6edf3}
+.box{stroke:#9198a1}
+.ring{stroke:#f0883e}
+.edge{stroke:#9198a1}
+.arrowhead{fill:#9198a1}
+.hiedge{stroke:#f0883e}
+.hiarrowhead{fill:#f0883e}
+.bar1{fill:#59636e}
+.bar2{fill:#4493f8}
+.s1{stroke:#4493f8}
+.s2{stroke:#f0883e}
+.d1{fill:#4493f8}
+.d2{fill:#f0883e}
+.gridline{stroke:#30363d}
+.refline{stroke:#e6edf3}
+.axis{stroke:#9198a1}
+.halo{stroke:#0d1117}
+.oninv{fill:#0d1117}
+}
+</style>
+<rect width="100%%" height="100%%" class="bg" rx="8"/>
+<text x="190" y="24" font-size="11" text-anchor="start" class="muted">width = 13, stored in 2 words of 8 bits</text>
+<text x="176" y="56" font-size="13" text-anchor="end" class="fg">source</text>
+<rect x="190" y="40" width="22" height="22" class="on cell"/>
+<rect x="212" y="40" width="22" height="22" class="off cell"/>
+<rect x="234" y="40" width="22" height="22" class="off cell"/>
+<rect x="256" y="40" width="22" height="22" class="on cell"/>
+<rect x="278" y="40" width="22" height="22" class="on cell"/>
+<rect x="300" y="40" width="22" height="22" class="off cell"/>
+<rect x="322" y="40" width="22" height="22" class="on cell"/>
+<rect x="344" y="40" width="22" height="22" class="off cell"/>
+<rect x="366" y="40" width="22" height="22" class="off cell"/>
+<rect x="388" y="40" width="22" height="22" class="off cell"/>
+<rect x="410" y="40" width="22" height="22" class="on cell"/>
+<rect x="432" y="40" width="22" height="22" class="off cell"/>
+<rect x="454" y="40" width="22" height="22" class="on cell"/>
+<rect x="476" y="40" width="22" height="22" class="pad cell"/>
+<rect x="498" y="40" width="22" height="22" class="pad cell"/>
+<rect x="520" y="40" width="22" height="22" class="pad cell"/>
+<rect x="190" y="40" width="176" height="22" class="word"/>
+<rect x="366" y="40" width="176" height="22" class="word"/>
+<text x="176" y="106" font-size="13" text-anchor="end" class="fg">NOT, whole words</text>
+<rect x="190" y="90" width="22" height="22" class="off cell"/>
+<rect x="212" y="90" width="22" height="22" class="on cell"/>
+<rect x="234" y="90" width="22" height="22" class="on cell"/>
+<rect x="256" y="90" width="22" height="22" class="off cell"/>
+<rect x="278" y="90" width="22" height="22" class="off cell"/>
+<rect x="300" y="90" width="22" height="22" class="on cell"/>
+<rect x="322" y="90" width="22" height="22" class="off cell"/>
+<rect x="344" y="90" width="22" height="22" class="on cell"/>
+<rect x="366" y="90" width="22" height="22" class="on cell"/>
+<rect x="388" y="90" width="22" height="22" class="on cell"/>
+<rect x="410" y="90" width="22" height="22" class="off cell"/>
+<rect x="432" y="90" width="22" height="22" class="on cell"/>
+<rect x="454" y="90" width="22" height="22" class="off cell"/>
+<rect x="476" y="90" width="22" height="22" class="hi cell"/>
+<rect x="498" y="90" width="22" height="22" class="hi cell"/>
+<rect x="520" y="90" width="22" height="22" class="hi cell"/>
+<rect x="190" y="90" width="176" height="22" class="word"/>
+<rect x="366" y="90" width="176" height="22" class="word"/>
+<text x="564" y="106" font-size="13" text-anchor="start" class="hi mono">countNonZero = 10, 3 of them padding</text>
+<text x="176" y="156" font-size="13" text-anchor="end" class="fg">NOT, then &amp; tailMask</text>
+<rect x="190" y="140" width="22" height="22" class="off cell"/>
+<rect x="212" y="140" width="22" height="22" class="on cell"/>
+<rect x="234" y="140" width="22" height="22" class="on cell"/>
+<rect x="256" y="140" width="22" height="22" class="off cell"/>
+<rect x="278" y="140" width="22" height="22" class="off cell"/>
+<rect x="300" y="140" width="22" height="22" class="on cell"/>
+<rect x="322" y="140" width="22" height="22" class="off cell"/>
+<rect x="344" y="140" width="22" height="22" class="on cell"/>
+<rect x="366" y="140" width="22" height="22" class="on cell"/>
+<rect x="388" y="140" width="22" height="22" class="on cell"/>
+<rect x="410" y="140" width="22" height="22" class="off cell"/>
+<rect x="432" y="140" width="22" height="22" class="on cell"/>
+<rect x="454" y="140" width="22" height="22" class="off cell"/>
+<rect x="476" y="140" width="22" height="22" class="pad cell"/>
+<rect x="498" y="140" width="22" height="22" class="pad cell"/>
+<rect x="520" y="140" width="22" height="22" class="pad cell"/>
+<rect x="190" y="140" width="176" height="22" class="word"/>
+<rect x="366" y="140" width="176" height="22" class="word"/>
+<text x="564" y="156" font-size="13" text-anchor="start" class="fg mono">countNonZero = 7</text>
+<text x="509" y="34" font-size="11" text-anchor="middle" class="muted">padding</text>
+<text x="190" y="198" font-size="11" text-anchor="start" class="muted">A word-wise operation writes padding bits too. Every kernel that writes whole words masks the last one, so padding stays zero.</text>
+</svg>

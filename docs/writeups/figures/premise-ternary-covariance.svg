@@ -1,0 +1,664 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="834" height="374" viewBox="0 0 834 374" role="img" aria-label="A binary diagonal bar, its ternary x and y derivatives, and their product, with the covariance sums as population counts">
+<style>
+.bg{fill:#ffffff}
+.fg{fill:#1f2328}
+.muted{fill:#59636e}
+.on{fill:#2f6fdb}
+.off{fill:#eef1f5}
+.hi{fill:#d4620f}
+.hisoft{fill:#fbe3cf}
+.neg{fill:#d4620f}
+.pad{fill:#d7dbe0}
+.cell{stroke:#aeb6bf;stroke-width:0.75}
+.word{fill:none;stroke:#1f2328;stroke-width:2}
+.box{fill:none;stroke:#59636e;stroke-width:1;stroke-dasharray:3 3}
+.ring{fill:none;stroke:#d4620f;stroke-width:2.5}
+.edge{stroke:#59636e;stroke-width:1.25;fill:none}
+.arrowhead{fill:#59636e}
+.hiedge{stroke:#d4620f;stroke-width:2;fill:none}
+.hiarrowhead{fill:#d4620f}
+.bar1{fill:#aeb6bf}
+.bar2{fill:#2f6fdb}
+.s1{stroke:#2f6fdb;stroke-width:2.5;fill:none}
+.s2{stroke:#d4620f;stroke-width:2.5;fill:none}
+.d1{fill:#2f6fdb}
+.d2{fill:#d4620f}
+.gridline{stroke:#d7dbe0;stroke-width:1}
+.refline{stroke:#1f2328;stroke-width:1.5;stroke-dasharray:5 4}
+.axis{stroke:#59636e;stroke-width:1}
+.halo{paint-order:stroke;stroke:#ffffff;stroke-width:4px;stroke-linejoin:round}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.oninv{fill:#ffffff}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117}
+.fg{fill:#e6edf3}
+.muted{fill:#9198a1}
+.on{fill:#4493f8}
+.off{fill:#1c2129}
+.hi{fill:#f0883e}
+.hisoft{fill:#4a2a12}
+.neg{fill:#f0883e}
+.pad{fill:#3d444d}
+.cell{stroke:#3d444d}
+.word{stroke:#e6edf3}
+.box{stroke:#9198a1}
+.ring{stroke:#f0883e}
+.edge{stroke:#9198a1}
+.arrowhead{fill:#9198a1}
+.hiedge{stroke:#f0883e}
+.hiarrowhead{fill:#f0883e}
+.bar1{fill:#59636e}
+.bar2{fill:#4493f8}
+.s1{stroke:#4493f8}
+.s2{stroke:#f0883e}
+.d1{fill:#4493f8}
+.d2{fill:#f0883e}
+.gridline{stroke:#30363d}
+.refline{stroke:#e6edf3}
+.axis{stroke:#9198a1}
+.halo{stroke:#0d1117}
+.oninv{fill:#0d1117}
+}
+</style>
+<rect width="100%%" height="100%%" class="bg" rx="8"/>
+<text x="30" y="26" font-size="14" text-anchor="start" class="fg" font-weight="600">image</text>
+<text x="30" y="43" font-size="11" text-anchor="start" class="muted">binary</text>
+<rect x="30" y="56" width="14" height="14" class="off cell"/>
+<rect x="44" y="56" width="14" height="14" class="off cell"/>
+<rect x="58" y="56" width="14" height="14" class="off cell"/>
+<rect x="72" y="56" width="14" height="14" class="off cell"/>
+<rect x="86" y="56" width="14" height="14" class="off cell"/>
+<rect x="100" y="56" width="14" height="14" class="off cell"/>
+<rect x="114" y="56" width="14" height="14" class="off cell"/>
+<rect x="128" y="56" width="14" height="14" class="off cell"/>
+<rect x="142" y="56" width="14" height="14" class="off cell"/>
+<rect x="156" y="56" width="14" height="14" class="off cell"/>
+<rect x="170" y="56" width="14" height="14" class="off cell"/>
+<rect x="184" y="56" width="14" height="14" class="off cell"/>
+<rect x="30" y="70" width="14" height="14" class="off cell"/>
+<rect x="44" y="70" width="14" height="14" class="off cell"/>
+<rect x="58" y="70" width="14" height="14" class="off cell"/>
+<rect x="72" y="70" width="14" height="14" class="off cell"/>
+<rect x="86" y="70" width="14" height="14" class="off cell"/>
+<rect x="100" y="70" width="14" height="14" class="off cell"/>
+<rect x="114" y="70" width="14" height="14" class="off cell"/>
+<rect x="128" y="70" width="14" height="14" class="off cell"/>
+<rect x="142" y="70" width="14" height="14" class="off cell"/>
+<rect x="156" y="70" width="14" height="14" class="off cell"/>
+<rect x="170" y="70" width="14" height="14" class="off cell"/>
+<rect x="184" y="70" width="14" height="14" class="off cell"/>
+<rect x="30" y="84" width="14" height="14" class="off cell"/>
+<rect x="44" y="84" width="14" height="14" class="off cell"/>
+<rect x="58" y="84" width="14" height="14" class="off cell"/>
+<rect x="72" y="84" width="14" height="14" class="on cell"/>
+<rect x="86" y="84" width="14" height="14" class="on cell"/>
+<rect x="100" y="84" width="14" height="14" class="off cell"/>
+<rect x="114" y="84" width="14" height="14" class="off cell"/>
+<rect x="128" y="84" width="14" height="14" class="off cell"/>
+<rect x="142" y="84" width="14" height="14" class="off cell"/>
+<rect x="156" y="84" width="14" height="14" class="off cell"/>
+<rect x="170" y="84" width="14" height="14" class="off cell"/>
+<rect x="184" y="84" width="14" height="14" class="off cell"/>
+<rect x="30" y="98" width="14" height="14" class="off cell"/>
+<rect x="44" y="98" width="14" height="14" class="off cell"/>
+<rect x="58" y="98" width="14" height="14" class="on cell"/>
+<rect x="72" y="98" width="14" height="14" class="on cell"/>
+<rect x="86" y="98" width="14" height="14" class="on cell"/>
+<rect x="100" y="98" width="14" height="14" class="on cell"/>
+<rect x="114" y="98" width="14" height="14" class="on cell"/>
+<rect x="128" y="98" width="14" height="14" class="off cell"/>
+<rect x="142" y="98" width="14" height="14" class="off cell"/>
+<rect x="156" y="98" width="14" height="14" class="off cell"/>
+<rect x="170" y="98" width="14" height="14" class="off cell"/>
+<rect x="184" y="98" width="14" height="14" class="off cell"/>
+<rect x="30" y="112" width="14" height="14" class="off cell"/>
+<rect x="44" y="112" width="14" height="14" class="off cell"/>
+<rect x="58" y="112" width="14" height="14" class="on cell"/>
+<rect x="72" y="112" width="14" height="14" class="on cell"/>
+<rect x="86" y="112" width="14" height="14" class="on cell"/>
+<rect x="100" y="112" width="14" height="14" class="on cell"/>
+<rect x="114" y="112" width="14" height="14" class="on cell"/>
+<rect x="128" y="112" width="14" height="14" class="on cell"/>
+<rect x="142" y="112" width="14" height="14" class="off cell"/>
+<rect x="156" y="112" width="14" height="14" class="off cell"/>
+<rect x="170" y="112" width="14" height="14" class="off cell"/>
+<rect x="184" y="112" width="14" height="14" class="off cell"/>
+<rect x="30" y="126" width="14" height="14" class="off cell"/>
+<rect x="44" y="126" width="14" height="14" class="off cell"/>
+<rect x="58" y="126" width="14" height="14" class="off cell"/>
+<rect x="72" y="126" width="14" height="14" class="on cell"/>
+<rect x="86" y="126" width="14" height="14" class="on cell"/>
+<rect x="100" y="126" width="14" height="14" class="on cell"/>
+<rect x="114" y="126" width="14" height="14" class="on cell"/>
+<rect x="128" y="126" width="14" height="14" class="on cell"/>
+<rect x="142" y="126" width="14" height="14" class="on cell"/>
+<rect x="156" y="126" width="14" height="14" class="off cell"/>
+<rect x="170" y="126" width="14" height="14" class="off cell"/>
+<rect x="184" y="126" width="14" height="14" class="off cell"/>
+<rect x="30" y="140" width="14" height="14" class="off cell"/>
+<rect x="44" y="140" width="14" height="14" class="off cell"/>
+<rect x="58" y="140" width="14" height="14" class="off cell"/>
+<rect x="72" y="140" width="14" height="14" class="on cell"/>
+<rect x="86" y="140" width="14" height="14" class="on cell"/>
+<rect x="100" y="140" width="14" height="14" class="on cell"/>
+<rect x="114" y="140" width="14" height="14" class="on cell"/>
+<rect x="128" y="140" width="14" height="14" class="on cell"/>
+<rect x="142" y="140" width="14" height="14" class="on cell"/>
+<rect x="156" y="140" width="14" height="14" class="off cell"/>
+<rect x="170" y="140" width="14" height="14" class="off cell"/>
+<rect x="184" y="140" width="14" height="14" class="off cell"/>
+<rect x="30" y="154" width="14" height="14" class="off cell"/>
+<rect x="44" y="154" width="14" height="14" class="off cell"/>
+<rect x="58" y="154" width="14" height="14" class="off cell"/>
+<rect x="72" y="154" width="14" height="14" class="off cell"/>
+<rect x="86" y="154" width="14" height="14" class="on cell"/>
+<rect x="100" y="154" width="14" height="14" class="on cell"/>
+<rect x="114" y="154" width="14" height="14" class="on cell"/>
+<rect x="128" y="154" width="14" height="14" class="on cell"/>
+<rect x="142" y="154" width="14" height="14" class="on cell"/>
+<rect x="156" y="154" width="14" height="14" class="on cell"/>
+<rect x="170" y="154" width="14" height="14" class="off cell"/>
+<rect x="184" y="154" width="14" height="14" class="off cell"/>
+<rect x="30" y="168" width="14" height="14" class="off cell"/>
+<rect x="44" y="168" width="14" height="14" class="off cell"/>
+<rect x="58" y="168" width="14" height="14" class="off cell"/>
+<rect x="72" y="168" width="14" height="14" class="off cell"/>
+<rect x="86" y="168" width="14" height="14" class="off cell"/>
+<rect x="100" y="168" width="14" height="14" class="on cell"/>
+<rect x="114" y="168" width="14" height="14" class="on cell"/>
+<rect x="128" y="168" width="14" height="14" class="on cell"/>
+<rect x="142" y="168" width="14" height="14" class="on cell"/>
+<rect x="156" y="168" width="14" height="14" class="on cell"/>
+<rect x="170" y="168" width="14" height="14" class="off cell"/>
+<rect x="184" y="168" width="14" height="14" class="off cell"/>
+<rect x="30" y="182" width="14" height="14" class="off cell"/>
+<rect x="44" y="182" width="14" height="14" class="off cell"/>
+<rect x="58" y="182" width="14" height="14" class="off cell"/>
+<rect x="72" y="182" width="14" height="14" class="off cell"/>
+<rect x="86" y="182" width="14" height="14" class="off cell"/>
+<rect x="100" y="182" width="14" height="14" class="off cell"/>
+<rect x="114" y="182" width="14" height="14" class="off cell"/>
+<rect x="128" y="182" width="14" height="14" class="on cell"/>
+<rect x="142" y="182" width="14" height="14" class="on cell"/>
+<rect x="156" y="182" width="14" height="14" class="off cell"/>
+<rect x="170" y="182" width="14" height="14" class="off cell"/>
+<rect x="184" y="182" width="14" height="14" class="off cell"/>
+<rect x="30" y="196" width="14" height="14" class="off cell"/>
+<rect x="44" y="196" width="14" height="14" class="off cell"/>
+<rect x="58" y="196" width="14" height="14" class="off cell"/>
+<rect x="72" y="196" width="14" height="14" class="off cell"/>
+<rect x="86" y="196" width="14" height="14" class="off cell"/>
+<rect x="100" y="196" width="14" height="14" class="off cell"/>
+<rect x="114" y="196" width="14" height="14" class="off cell"/>
+<rect x="128" y="196" width="14" height="14" class="off cell"/>
+<rect x="142" y="196" width="14" height="14" class="off cell"/>
+<rect x="156" y="196" width="14" height="14" class="off cell"/>
+<rect x="170" y="196" width="14" height="14" class="off cell"/>
+<rect x="184" y="196" width="14" height="14" class="off cell"/>
+<rect x="30" y="210" width="14" height="14" class="off cell"/>
+<rect x="44" y="210" width="14" height="14" class="off cell"/>
+<rect x="58" y="210" width="14" height="14" class="off cell"/>
+<rect x="72" y="210" width="14" height="14" class="off cell"/>
+<rect x="86" y="210" width="14" height="14" class="off cell"/>
+<rect x="100" y="210" width="14" height="14" class="off cell"/>
+<rect x="114" y="210" width="14" height="14" class="off cell"/>
+<rect x="128" y="210" width="14" height="14" class="off cell"/>
+<rect x="142" y="210" width="14" height="14" class="off cell"/>
+<rect x="156" y="210" width="14" height="14" class="off cell"/>
+<rect x="170" y="210" width="14" height="14" class="off cell"/>
+<rect x="184" y="210" width="14" height="14" class="off cell"/>
+<text x="232" y="26" font-size="14" text-anchor="start" class="fg" font-weight="600">Ix</text>
+<text x="232" y="43" font-size="11" text-anchor="start" class="muted">right − left</text>
+<rect x="232" y="56" width="14" height="14" class="off cell"/>
+<rect x="246" y="56" width="14" height="14" class="off cell"/>
+<rect x="260" y="56" width="14" height="14" class="off cell"/>
+<rect x="274" y="56" width="14" height="14" class="off cell"/>
+<rect x="288" y="56" width="14" height="14" class="off cell"/>
+<rect x="302" y="56" width="14" height="14" class="off cell"/>
+<rect x="316" y="56" width="14" height="14" class="off cell"/>
+<rect x="330" y="56" width="14" height="14" class="off cell"/>
+<rect x="344" y="56" width="14" height="14" class="off cell"/>
+<rect x="358" y="56" width="14" height="14" class="off cell"/>
+<rect x="372" y="56" width="14" height="14" class="off cell"/>
+<rect x="386" y="56" width="14" height="14" class="off cell"/>
+<rect x="232" y="70" width="14" height="14" class="off cell"/>
+<rect x="246" y="70" width="14" height="14" class="off cell"/>
+<rect x="260" y="70" width="14" height="14" class="off cell"/>
+<rect x="274" y="70" width="14" height="14" class="off cell"/>
+<rect x="288" y="70" width="14" height="14" class="off cell"/>
+<rect x="302" y="70" width="14" height="14" class="off cell"/>
+<rect x="316" y="70" width="14" height="14" class="off cell"/>
+<rect x="330" y="70" width="14" height="14" class="off cell"/>
+<rect x="344" y="70" width="14" height="14" class="off cell"/>
+<rect x="358" y="70" width="14" height="14" class="off cell"/>
+<rect x="372" y="70" width="14" height="14" class="off cell"/>
+<rect x="386" y="70" width="14" height="14" class="off cell"/>
+<rect x="232" y="84" width="14" height="14" class="off cell"/>
+<rect x="246" y="84" width="14" height="14" class="off cell"/>
+<rect x="260" y="84" width="14" height="14" class="on cell"/>
+<rect x="274" y="84" width="14" height="14" class="on cell"/>
+<rect x="288" y="84" width="14" height="14" class="neg cell"/>
+<rect x="302" y="84" width="14" height="14" class="neg cell"/>
+<rect x="316" y="84" width="14" height="14" class="off cell"/>
+<rect x="330" y="84" width="14" height="14" class="off cell"/>
+<rect x="344" y="84" width="14" height="14" class="off cell"/>
+<rect x="358" y="84" width="14" height="14" class="off cell"/>
+<rect x="372" y="84" width="14" height="14" class="off cell"/>
+<rect x="386" y="84" width="14" height="14" class="off cell"/>
+<rect x="232" y="98" width="14" height="14" class="off cell"/>
+<rect x="246" y="98" width="14" height="14" class="on cell"/>
+<rect x="260" y="98" width="14" height="14" class="on cell"/>
+<rect x="274" y="98" width="14" height="14" class="off cell"/>
+<rect x="288" y="98" width="14" height="14" class="off cell"/>
+<rect x="302" y="98" width="14" height="14" class="off cell"/>
+<rect x="316" y="98" width="14" height="14" class="neg cell"/>
+<rect x="330" y="98" width="14" height="14" class="neg cell"/>
+<rect x="344" y="98" width="14" height="14" class="off cell"/>
+<rect x="358" y="98" width="14" height="14" class="off cell"/>
+<rect x="372" y="98" width="14" height="14" class="off cell"/>
+<rect x="386" y="98" width="14" height="14" class="off cell"/>
+<rect x="232" y="112" width="14" height="14" class="off cell"/>
+<rect x="246" y="112" width="14" height="14" class="on cell"/>
+<rect x="260" y="112" width="14" height="14" class="on cell"/>
+<rect x="274" y="112" width="14" height="14" class="off cell"/>
+<rect x="288" y="112" width="14" height="14" class="off cell"/>
+<rect x="302" y="112" width="14" height="14" class="off cell"/>
+<rect x="316" y="112" width="14" height="14" class="off cell"/>
+<rect x="330" y="112" width="14" height="14" class="neg cell"/>
+<rect x="344" y="112" width="14" height="14" class="neg cell"/>
+<rect x="358" y="112" width="14" height="14" class="off cell"/>
+<rect x="372" y="112" width="14" height="14" class="off cell"/>
+<rect x="386" y="112" width="14" height="14" class="off cell"/>
+<rect x="232" y="126" width="14" height="14" class="off cell"/>
+<rect x="246" y="126" width="14" height="14" class="off cell"/>
+<rect x="260" y="126" width="14" height="14" class="on cell"/>
+<rect x="274" y="126" width="14" height="14" class="on cell"/>
+<rect x="288" y="126" width="14" height="14" class="off cell"/>
+<rect x="302" y="126" width="14" height="14" class="off cell"/>
+<rect x="316" y="126" width="14" height="14" class="off cell"/>
+<rect x="330" y="126" width="14" height="14" class="off cell"/>
+<rect x="344" y="126" width="14" height="14" class="neg cell"/>
+<rect x="358" y="126" width="14" height="14" class="neg cell"/>
+<rect x="372" y="126" width="14" height="14" class="off cell"/>
+<rect x="386" y="126" width="14" height="14" class="off cell"/>
+<rect x="232" y="140" width="14" height="14" class="off cell"/>
+<rect x="246" y="140" width="14" height="14" class="off cell"/>
+<rect x="260" y="140" width="14" height="14" class="on cell"/>
+<rect x="274" y="140" width="14" height="14" class="on cell"/>
+<rect x="288" y="140" width="14" height="14" class="off cell"/>
+<rect x="302" y="140" width="14" height="14" class="off cell"/>
+<rect x="316" y="140" width="14" height="14" class="off cell"/>
+<rect x="330" y="140" width="14" height="14" class="off cell"/>
+<rect x="344" y="140" width="14" height="14" class="neg cell"/>
+<rect x="358" y="140" width="14" height="14" class="neg cell"/>
+<rect x="372" y="140" width="14" height="14" class="off cell"/>
+<rect x="386" y="140" width="14" height="14" class="off cell"/>
+<rect x="232" y="154" width="14" height="14" class="off cell"/>
+<rect x="246" y="154" width="14" height="14" class="off cell"/>
+<rect x="260" y="154" width="14" height="14" class="off cell"/>
+<rect x="274" y="154" width="14" height="14" class="on cell"/>
+<rect x="288" y="154" width="14" height="14" class="on cell"/>
+<rect x="302" y="154" width="14" height="14" class="off cell"/>
+<rect x="316" y="154" width="14" height="14" class="off cell"/>
+<rect x="330" y="154" width="14" height="14" class="off cell"/>
+<rect x="344" y="154" width="14" height="14" class="off cell"/>
+<rect x="358" y="154" width="14" height="14" class="neg cell"/>
+<rect x="372" y="154" width="14" height="14" class="neg cell"/>
+<rect x="386" y="154" width="14" height="14" class="off cell"/>
+<rect x="232" y="168" width="14" height="14" class="off cell"/>
+<rect x="246" y="168" width="14" height="14" class="off cell"/>
+<rect x="260" y="168" width="14" height="14" class="off cell"/>
+<rect x="274" y="168" width="14" height="14" class="off cell"/>
+<rect x="288" y="168" width="14" height="14" class="on cell"/>
+<rect x="302" y="168" width="14" height="14" class="on cell"/>
+<rect x="316" y="168" width="14" height="14" class="off cell"/>
+<rect x="330" y="168" width="14" height="14" class="off cell"/>
+<rect x="344" y="168" width="14" height="14" class="off cell"/>
+<rect x="358" y="168" width="14" height="14" class="neg cell"/>
+<rect x="372" y="168" width="14" height="14" class="neg cell"/>
+<rect x="386" y="168" width="14" height="14" class="off cell"/>
+<rect x="232" y="182" width="14" height="14" class="off cell"/>
+<rect x="246" y="182" width="14" height="14" class="off cell"/>
+<rect x="260" y="182" width="14" height="14" class="off cell"/>
+<rect x="274" y="182" width="14" height="14" class="off cell"/>
+<rect x="288" y="182" width="14" height="14" class="off cell"/>
+<rect x="302" y="182" width="14" height="14" class="off cell"/>
+<rect x="316" y="182" width="14" height="14" class="on cell"/>
+<rect x="330" y="182" width="14" height="14" class="on cell"/>
+<rect x="344" y="182" width="14" height="14" class="neg cell"/>
+<rect x="358" y="182" width="14" height="14" class="neg cell"/>
+<rect x="372" y="182" width="14" height="14" class="off cell"/>
+<rect x="386" y="182" width="14" height="14" class="off cell"/>
+<rect x="232" y="196" width="14" height="14" class="off cell"/>
+<rect x="246" y="196" width="14" height="14" class="off cell"/>
+<rect x="260" y="196" width="14" height="14" class="off cell"/>
+<rect x="274" y="196" width="14" height="14" class="off cell"/>
+<rect x="288" y="196" width="14" height="14" class="off cell"/>
+<rect x="302" y="196" width="14" height="14" class="off cell"/>
+<rect x="316" y="196" width="14" height="14" class="off cell"/>
+<rect x="330" y="196" width="14" height="14" class="off cell"/>
+<rect x="344" y="196" width="14" height="14" class="off cell"/>
+<rect x="358" y="196" width="14" height="14" class="off cell"/>
+<rect x="372" y="196" width="14" height="14" class="off cell"/>
+<rect x="386" y="196" width="14" height="14" class="off cell"/>
+<rect x="232" y="210" width="14" height="14" class="off cell"/>
+<rect x="246" y="210" width="14" height="14" class="off cell"/>
+<rect x="260" y="210" width="14" height="14" class="off cell"/>
+<rect x="274" y="210" width="14" height="14" class="off cell"/>
+<rect x="288" y="210" width="14" height="14" class="off cell"/>
+<rect x="302" y="210" width="14" height="14" class="off cell"/>
+<rect x="316" y="210" width="14" height="14" class="off cell"/>
+<rect x="330" y="210" width="14" height="14" class="off cell"/>
+<rect x="344" y="210" width="14" height="14" class="off cell"/>
+<rect x="358" y="210" width="14" height="14" class="off cell"/>
+<rect x="372" y="210" width="14" height="14" class="off cell"/>
+<rect x="386" y="210" width="14" height="14" class="off cell"/>
+<text x="434" y="26" font-size="14" text-anchor="start" class="fg" font-weight="600">Iy</text>
+<text x="434" y="43" font-size="11" text-anchor="start" class="muted">below − above</text>
+<rect x="434" y="56" width="14" height="14" class="off cell"/>
+<rect x="448" y="56" width="14" height="14" class="off cell"/>
+<rect x="462" y="56" width="14" height="14" class="off cell"/>
+<rect x="476" y="56" width="14" height="14" class="off cell"/>
+<rect x="490" y="56" width="14" height="14" class="off cell"/>
+<rect x="504" y="56" width="14" height="14" class="off cell"/>
+<rect x="518" y="56" width="14" height="14" class="off cell"/>
+<rect x="532" y="56" width="14" height="14" class="off cell"/>
+<rect x="546" y="56" width="14" height="14" class="off cell"/>
+<rect x="560" y="56" width="14" height="14" class="off cell"/>
+<rect x="574" y="56" width="14" height="14" class="off cell"/>
+<rect x="588" y="56" width="14" height="14" class="off cell"/>
+<rect x="434" y="70" width="14" height="14" class="off cell"/>
+<rect x="448" y="70" width="14" height="14" class="off cell"/>
+<rect x="462" y="70" width="14" height="14" class="off cell"/>
+<rect x="476" y="70" width="14" height="14" class="on cell"/>
+<rect x="490" y="70" width="14" height="14" class="on cell"/>
+<rect x="504" y="70" width="14" height="14" class="off cell"/>
+<rect x="518" y="70" width="14" height="14" class="off cell"/>
+<rect x="532" y="70" width="14" height="14" class="off cell"/>
+<rect x="546" y="70" width="14" height="14" class="off cell"/>
+<rect x="560" y="70" width="14" height="14" class="off cell"/>
+<rect x="574" y="70" width="14" height="14" class="off cell"/>
+<rect x="588" y="70" width="14" height="14" class="off cell"/>
+<rect x="434" y="84" width="14" height="14" class="off cell"/>
+<rect x="448" y="84" width="14" height="14" class="off cell"/>
+<rect x="462" y="84" width="14" height="14" class="on cell"/>
+<rect x="476" y="84" width="14" height="14" class="on cell"/>
+<rect x="490" y="84" width="14" height="14" class="on cell"/>
+<rect x="504" y="84" width="14" height="14" class="on cell"/>
+<rect x="518" y="84" width="14" height="14" class="on cell"/>
+<rect x="532" y="84" width="14" height="14" class="off cell"/>
+<rect x="546" y="84" width="14" height="14" class="off cell"/>
+<rect x="560" y="84" width="14" height="14" class="off cell"/>
+<rect x="574" y="84" width="14" height="14" class="off cell"/>
+<rect x="588" y="84" width="14" height="14" class="off cell"/>
+<rect x="434" y="98" width="14" height="14" class="off cell"/>
+<rect x="448" y="98" width="14" height="14" class="off cell"/>
+<rect x="462" y="98" width="14" height="14" class="on cell"/>
+<rect x="476" y="98" width="14" height="14" class="off cell"/>
+<rect x="490" y="98" width="14" height="14" class="off cell"/>
+<rect x="504" y="98" width="14" height="14" class="on cell"/>
+<rect x="518" y="98" width="14" height="14" class="on cell"/>
+<rect x="532" y="98" width="14" height="14" class="on cell"/>
+<rect x="546" y="98" width="14" height="14" class="off cell"/>
+<rect x="560" y="98" width="14" height="14" class="off cell"/>
+<rect x="574" y="98" width="14" height="14" class="off cell"/>
+<rect x="588" y="98" width="14" height="14" class="off cell"/>
+<rect x="434" y="112" width="14" height="14" class="off cell"/>
+<rect x="448" y="112" width="14" height="14" class="off cell"/>
+<rect x="462" y="112" width="14" height="14" class="neg cell"/>
+<rect x="476" y="112" width="14" height="14" class="off cell"/>
+<rect x="490" y="112" width="14" height="14" class="off cell"/>
+<rect x="504" y="112" width="14" height="14" class="off cell"/>
+<rect x="518" y="112" width="14" height="14" class="off cell"/>
+<rect x="532" y="112" width="14" height="14" class="on cell"/>
+<rect x="546" y="112" width="14" height="14" class="on cell"/>
+<rect x="560" y="112" width="14" height="14" class="off cell"/>
+<rect x="574" y="112" width="14" height="14" class="off cell"/>
+<rect x="588" y="112" width="14" height="14" class="off cell"/>
+<rect x="434" y="126" width="14" height="14" class="off cell"/>
+<rect x="448" y="126" width="14" height="14" class="off cell"/>
+<rect x="462" y="126" width="14" height="14" class="neg cell"/>
+<rect x="476" y="126" width="14" height="14" class="off cell"/>
+<rect x="490" y="126" width="14" height="14" class="off cell"/>
+<rect x="504" y="126" width="14" height="14" class="off cell"/>
+<rect x="518" y="126" width="14" height="14" class="off cell"/>
+<rect x="532" y="126" width="14" height="14" class="off cell"/>
+<rect x="546" y="126" width="14" height="14" class="on cell"/>
+<rect x="560" y="126" width="14" height="14" class="off cell"/>
+<rect x="574" y="126" width="14" height="14" class="off cell"/>
+<rect x="588" y="126" width="14" height="14" class="off cell"/>
+<rect x="434" y="140" width="14" height="14" class="off cell"/>
+<rect x="448" y="140" width="14" height="14" class="off cell"/>
+<rect x="462" y="140" width="14" height="14" class="off cell"/>
+<rect x="476" y="140" width="14" height="14" class="neg cell"/>
+<rect x="490" y="140" width="14" height="14" class="off cell"/>
+<rect x="504" y="140" width="14" height="14" class="off cell"/>
+<rect x="518" y="140" width="14" height="14" class="off cell"/>
+<rect x="532" y="140" width="14" height="14" class="off cell"/>
+<rect x="546" y="140" width="14" height="14" class="off cell"/>
+<rect x="560" y="140" width="14" height="14" class="on cell"/>
+<rect x="574" y="140" width="14" height="14" class="off cell"/>
+<rect x="588" y="140" width="14" height="14" class="off cell"/>
+<rect x="434" y="154" width="14" height="14" class="off cell"/>
+<rect x="448" y="154" width="14" height="14" class="off cell"/>
+<rect x="462" y="154" width="14" height="14" class="off cell"/>
+<rect x="476" y="154" width="14" height="14" class="neg cell"/>
+<rect x="490" y="154" width="14" height="14" class="neg cell"/>
+<rect x="504" y="154" width="14" height="14" class="off cell"/>
+<rect x="518" y="154" width="14" height="14" class="off cell"/>
+<rect x="532" y="154" width="14" height="14" class="off cell"/>
+<rect x="546" y="154" width="14" height="14" class="off cell"/>
+<rect x="560" y="154" width="14" height="14" class="on cell"/>
+<rect x="574" y="154" width="14" height="14" class="off cell"/>
+<rect x="588" y="154" width="14" height="14" class="off cell"/>
+<rect x="434" y="168" width="14" height="14" class="off cell"/>
+<rect x="448" y="168" width="14" height="14" class="off cell"/>
+<rect x="462" y="168" width="14" height="14" class="off cell"/>
+<rect x="476" y="168" width="14" height="14" class="off cell"/>
+<rect x="490" y="168" width="14" height="14" class="neg cell"/>
+<rect x="504" y="168" width="14" height="14" class="neg cell"/>
+<rect x="518" y="168" width="14" height="14" class="neg cell"/>
+<rect x="532" y="168" width="14" height="14" class="off cell"/>
+<rect x="546" y="168" width="14" height="14" class="off cell"/>
+<rect x="560" y="168" width="14" height="14" class="neg cell"/>
+<rect x="574" y="168" width="14" height="14" class="off cell"/>
+<rect x="588" y="168" width="14" height="14" class="off cell"/>
+<rect x="434" y="182" width="14" height="14" class="off cell"/>
+<rect x="448" y="182" width="14" height="14" class="off cell"/>
+<rect x="462" y="182" width="14" height="14" class="off cell"/>
+<rect x="476" y="182" width="14" height="14" class="off cell"/>
+<rect x="490" y="182" width="14" height="14" class="off cell"/>
+<rect x="504" y="182" width="14" height="14" class="neg cell"/>
+<rect x="518" y="182" width="14" height="14" class="neg cell"/>
+<rect x="532" y="182" width="14" height="14" class="neg cell"/>
+<rect x="546" y="182" width="14" height="14" class="neg cell"/>
+<rect x="560" y="182" width="14" height="14" class="neg cell"/>
+<rect x="574" y="182" width="14" height="14" class="off cell"/>
+<rect x="588" y="182" width="14" height="14" class="off cell"/>
+<rect x="434" y="196" width="14" height="14" class="off cell"/>
+<rect x="448" y="196" width="14" height="14" class="off cell"/>
+<rect x="462" y="196" width="14" height="14" class="off cell"/>
+<rect x="476" y="196" width="14" height="14" class="off cell"/>
+<rect x="490" y="196" width="14" height="14" class="off cell"/>
+<rect x="504" y="196" width="14" height="14" class="off cell"/>
+<rect x="518" y="196" width="14" height="14" class="off cell"/>
+<rect x="532" y="196" width="14" height="14" class="neg cell"/>
+<rect x="546" y="196" width="14" height="14" class="neg cell"/>
+<rect x="560" y="196" width="14" height="14" class="off cell"/>
+<rect x="574" y="196" width="14" height="14" class="off cell"/>
+<rect x="588" y="196" width="14" height="14" class="off cell"/>
+<rect x="434" y="210" width="14" height="14" class="off cell"/>
+<rect x="448" y="210" width="14" height="14" class="off cell"/>
+<rect x="462" y="210" width="14" height="14" class="off cell"/>
+<rect x="476" y="210" width="14" height="14" class="off cell"/>
+<rect x="490" y="210" width="14" height="14" class="off cell"/>
+<rect x="504" y="210" width="14" height="14" class="off cell"/>
+<rect x="518" y="210" width="14" height="14" class="off cell"/>
+<rect x="532" y="210" width="14" height="14" class="off cell"/>
+<rect x="546" y="210" width="14" height="14" class="off cell"/>
+<rect x="560" y="210" width="14" height="14" class="off cell"/>
+<rect x="574" y="210" width="14" height="14" class="off cell"/>
+<rect x="588" y="210" width="14" height="14" class="off cell"/>
+<text x="636" y="26" font-size="14" text-anchor="start" class="fg" font-weight="600">Ix·Iy</text>
+<text x="636" y="43" font-size="11" text-anchor="start" class="muted">product</text>
+<rect x="636" y="56" width="14" height="14" class="off cell"/>
+<rect x="650" y="56" width="14" height="14" class="off cell"/>
+<rect x="664" y="56" width="14" height="14" class="off cell"/>
+<rect x="678" y="56" width="14" height="14" class="off cell"/>
+<rect x="692" y="56" width="14" height="14" class="off cell"/>
+<rect x="706" y="56" width="14" height="14" class="off cell"/>
+<rect x="720" y="56" width="14" height="14" class="off cell"/>
+<rect x="734" y="56" width="14" height="14" class="off cell"/>
+<rect x="748" y="56" width="14" height="14" class="off cell"/>
+<rect x="762" y="56" width="14" height="14" class="off cell"/>
+<rect x="776" y="56" width="14" height="14" class="off cell"/>
+<rect x="790" y="56" width="14" height="14" class="off cell"/>
+<rect x="636" y="70" width="14" height="14" class="off cell"/>
+<rect x="650" y="70" width="14" height="14" class="off cell"/>
+<rect x="664" y="70" width="14" height="14" class="off cell"/>
+<rect x="678" y="70" width="14" height="14" class="off cell"/>
+<rect x="692" y="70" width="14" height="14" class="off cell"/>
+<rect x="706" y="70" width="14" height="14" class="off cell"/>
+<rect x="720" y="70" width="14" height="14" class="off cell"/>
+<rect x="734" y="70" width="14" height="14" class="off cell"/>
+<rect x="748" y="70" width="14" height="14" class="off cell"/>
+<rect x="762" y="70" width="14" height="14" class="off cell"/>
+<rect x="776" y="70" width="14" height="14" class="off cell"/>
+<rect x="790" y="70" width="14" height="14" class="off cell"/>
+<rect x="636" y="84" width="14" height="14" class="off cell"/>
+<rect x="650" y="84" width="14" height="14" class="off cell"/>
+<rect x="664" y="84" width="14" height="14" class="on cell"/>
+<rect x="678" y="84" width="14" height="14" class="on cell"/>
+<rect x="692" y="84" width="14" height="14" class="neg cell"/>
+<rect x="706" y="84" width="14" height="14" class="neg cell"/>
+<rect x="720" y="84" width="14" height="14" class="off cell"/>
+<rect x="734" y="84" width="14" height="14" class="off cell"/>
+<rect x="748" y="84" width="14" height="14" class="off cell"/>
+<rect x="762" y="84" width="14" height="14" class="off cell"/>
+<rect x="776" y="84" width="14" height="14" class="off cell"/>
+<rect x="790" y="84" width="14" height="14" class="off cell"/>
+<rect x="636" y="98" width="14" height="14" class="off cell"/>
+<rect x="650" y="98" width="14" height="14" class="off cell"/>
+<rect x="664" y="98" width="14" height="14" class="on cell"/>
+<rect x="678" y="98" width="14" height="14" class="off cell"/>
+<rect x="692" y="98" width="14" height="14" class="off cell"/>
+<rect x="706" y="98" width="14" height="14" class="off cell"/>
+<rect x="720" y="98" width="14" height="14" class="neg cell"/>
+<rect x="734" y="98" width="14" height="14" class="neg cell"/>
+<rect x="748" y="98" width="14" height="14" class="off cell"/>
+<rect x="762" y="98" width="14" height="14" class="off cell"/>
+<rect x="776" y="98" width="14" height="14" class="off cell"/>
+<rect x="790" y="98" width="14" height="14" class="off cell"/>
+<rect x="636" y="112" width="14" height="14" class="off cell"/>
+<rect x="650" y="112" width="14" height="14" class="off cell"/>
+<rect x="664" y="112" width="14" height="14" class="neg cell"/>
+<rect x="678" y="112" width="14" height="14" class="off cell"/>
+<rect x="692" y="112" width="14" height="14" class="off cell"/>
+<rect x="706" y="112" width="14" height="14" class="off cell"/>
+<rect x="720" y="112" width="14" height="14" class="off cell"/>
+<rect x="734" y="112" width="14" height="14" class="neg cell"/>
+<rect x="748" y="112" width="14" height="14" class="neg cell"/>
+<rect x="762" y="112" width="14" height="14" class="off cell"/>
+<rect x="776" y="112" width="14" height="14" class="off cell"/>
+<rect x="790" y="112" width="14" height="14" class="off cell"/>
+<rect x="636" y="126" width="14" height="14" class="off cell"/>
+<rect x="650" y="126" width="14" height="14" class="off cell"/>
+<rect x="664" y="126" width="14" height="14" class="neg cell"/>
+<rect x="678" y="126" width="14" height="14" class="off cell"/>
+<rect x="692" y="126" width="14" height="14" class="off cell"/>
+<rect x="706" y="126" width="14" height="14" class="off cell"/>
+<rect x="720" y="126" width="14" height="14" class="off cell"/>
+<rect x="734" y="126" width="14" height="14" class="off cell"/>
+<rect x="748" y="126" width="14" height="14" class="neg cell"/>
+<rect x="762" y="126" width="14" height="14" class="off cell"/>
+<rect x="776" y="126" width="14" height="14" class="off cell"/>
+<rect x="790" y="126" width="14" height="14" class="off cell"/>
+<rect x="636" y="140" width="14" height="14" class="off cell"/>
+<rect x="650" y="140" width="14" height="14" class="off cell"/>
+<rect x="664" y="140" width="14" height="14" class="off cell"/>
+<rect x="678" y="140" width="14" height="14" class="neg cell"/>
+<rect x="692" y="140" width="14" height="14" class="off cell"/>
+<rect x="706" y="140" width="14" height="14" class="off cell"/>
+<rect x="720" y="140" width="14" height="14" class="off cell"/>
+<rect x="734" y="140" width="14" height="14" class="off cell"/>
+<rect x="748" y="140" width="14" height="14" class="off cell"/>
+<rect x="762" y="140" width="14" height="14" class="neg cell"/>
+<rect x="776" y="140" width="14" height="14" class="off cell"/>
+<rect x="790" y="140" width="14" height="14" class="off cell"/>
+<rect x="636" y="154" width="14" height="14" class="off cell"/>
+<rect x="650" y="154" width="14" height="14" class="off cell"/>
+<rect x="664" y="154" width="14" height="14" class="off cell"/>
+<rect x="678" y="154" width="14" height="14" class="neg cell"/>
+<rect x="692" y="154" width="14" height="14" class="neg cell"/>
+<rect x="706" y="154" width="14" height="14" class="off cell"/>
+<rect x="720" y="154" width="14" height="14" class="off cell"/>
+<rect x="734" y="154" width="14" height="14" class="off cell"/>
+<rect x="748" y="154" width="14" height="14" class="off cell"/>
+<rect x="762" y="154" width="14" height="14" class="neg cell"/>
+<rect x="776" y="154" width="14" height="14" class="off cell"/>
+<rect x="790" y="154" width="14" height="14" class="off cell"/>
+<rect x="636" y="168" width="14" height="14" class="off cell"/>
+<rect x="650" y="168" width="14" height="14" class="off cell"/>
+<rect x="664" y="168" width="14" height="14" class="off cell"/>
+<rect x="678" y="168" width="14" height="14" class="off cell"/>
+<rect x="692" y="168" width="14" height="14" class="neg cell"/>
+<rect x="706" y="168" width="14" height="14" class="neg cell"/>
+<rect x="720" y="168" width="14" height="14" class="off cell"/>
+<rect x="734" y="168" width="14" height="14" class="off cell"/>
+<rect x="748" y="168" width="14" height="14" class="off cell"/>
+<rect x="762" y="168" width="14" height="14" class="on cell"/>
+<rect x="776" y="168" width="14" height="14" class="off cell"/>
+<rect x="790" y="168" width="14" height="14" class="off cell"/>
+<rect x="636" y="182" width="14" height="14" class="off cell"/>
+<rect x="650" y="182" width="14" height="14" class="off cell"/>
+<rect x="664" y="182" width="14" height="14" class="off cell"/>
+<rect x="678" y="182" width="14" height="14" class="off cell"/>
+<rect x="692" y="182" width="14" height="14" class="off cell"/>
+<rect x="706" y="182" width="14" height="14" class="off cell"/>
+<rect x="720" y="182" width="14" height="14" class="neg cell"/>
+<rect x="734" y="182" width="14" height="14" class="neg cell"/>
+<rect x="748" y="182" width="14" height="14" class="on cell"/>
+<rect x="762" y="182" width="14" height="14" class="on cell"/>
+<rect x="776" y="182" width="14" height="14" class="off cell"/>
+<rect x="790" y="182" width="14" height="14" class="off cell"/>
+<rect x="636" y="196" width="14" height="14" class="off cell"/>
+<rect x="650" y="196" width="14" height="14" class="off cell"/>
+<rect x="664" y="196" width="14" height="14" class="off cell"/>
+<rect x="678" y="196" width="14" height="14" class="off cell"/>
+<rect x="692" y="196" width="14" height="14" class="off cell"/>
+<rect x="706" y="196" width="14" height="14" class="off cell"/>
+<rect x="720" y="196" width="14" height="14" class="off cell"/>
+<rect x="734" y="196" width="14" height="14" class="off cell"/>
+<rect x="748" y="196" width="14" height="14" class="off cell"/>
+<rect x="762" y="196" width="14" height="14" class="off cell"/>
+<rect x="776" y="196" width="14" height="14" class="off cell"/>
+<rect x="790" y="196" width="14" height="14" class="off cell"/>
+<rect x="636" y="210" width="14" height="14" class="off cell"/>
+<rect x="650" y="210" width="14" height="14" class="off cell"/>
+<rect x="664" y="210" width="14" height="14" class="off cell"/>
+<rect x="678" y="210" width="14" height="14" class="off cell"/>
+<rect x="692" y="210" width="14" height="14" class="off cell"/>
+<rect x="706" y="210" width="14" height="14" class="off cell"/>
+<rect x="720" y="210" width="14" height="14" class="off cell"/>
+<rect x="734" y="210" width="14" height="14" class="off cell"/>
+<rect x="748" y="210" width="14" height="14" class="off cell"/>
+<rect x="762" y="210" width="14" height="14" class="off cell"/>
+<rect x="776" y="210" width="14" height="14" class="off cell"/>
+<rect x="790" y="210" width="14" height="14" class="off cell"/>
+<rect x="232" y="236" width="12" height="12" class="on cell"/>
+<text x="250" y="246" font-size="12" text-anchor="start" class="fg">+1</text>
+<rect x="282" y="236" width="12" height="12" class="neg cell"/>
+<text x="300" y="246" font-size="12" text-anchor="start" class="fg">−1</text>
+<rect x="332" y="236" width="12" height="12" class="off cell"/>
+<text x="350" y="246" font-size="12" text-anchor="start" class="fg">0</text>
+<text x="372" y="246" font-size="11" text-anchor="start" class="muted">each stored as a magnitude bit and a sign bit (set = negative)</text>
+<text x="30" y="276" font-size="13" text-anchor="start" class="fg mono">Σ Ix² = popcount(magX) = 32</text>
+<text x="394" y="276" font-size="13" text-anchor="start" class="fg mono">Σ Iy² = popcount(magY) = 32</text>
+<text x="30" y="298" font-size="13" text-anchor="start" class="fg mono" xml:space="preserve">Σ IxIy =   popcount(magX &amp; magY &amp; ~(signX ^ signY))</text>
+<text x="514" y="298" font-size="13" text-anchor="start" class="muted mono" xml:space="preserve">signs agree:  6</text>
+<text x="30" y="318" font-size="13" text-anchor="start" class="fg mono" xml:space="preserve">        − popcount(magX &amp; magY &amp;  (signX ^ signY))</text>
+<text x="514" y="318" font-size="13" text-anchor="start" class="muted mono">signs oppose: 18</text>
+<text x="30" y="338" font-size="13" text-anchor="start" class="fg mono" xml:space="preserve">        = 6 − 18 = -12</text>
+<text x="30" y="364" font-size="11" text-anchor="start" class="muted">No multiply anywhere: the whole 2×2 gradient covariance is four population counts over masks.</text>
+</svg>
